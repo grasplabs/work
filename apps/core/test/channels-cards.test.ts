@@ -9,6 +9,7 @@ import { z } from "zod";
 import {
   answerCards,
   draftCard,
+  emojiPlaceholders,
   cancelAction,
   confirmAction,
   heldWritesCard,
@@ -633,6 +634,16 @@ const wrongWith = (
 
 const allRight = { joinedBack: true, empty: 0, tooLarge: 0 };
 
+/** Whether `sample` is one emoji placeholder, whole, by cards.tsx's copy. */
+const ours = (sample: string): boolean =>
+  [...sample.matchAll(emojiPlaceholders)].some(([found]) => found === sample);
+
+/** Whether the Chat SDK turns `sample` into something else, all of it. */
+const theirs = (sample: string): boolean => {
+  const sent = convertEmojiPlaceholders(sample, "slack");
+  return sent !== sample && !/[{}]/u.test(sent);
+};
+
 describe("an answer in pieces", () => {
   it("keeps every character where it was, indentation and blank lines too, when it fits one message", () => {
     const text =
@@ -740,6 +751,31 @@ describe("Stephen's cards in Slack", () => {
     expect(shown).toStrictEqual({
       blankLines: { onlyWhiteSpace: 0, whole: true },
       spaces: { onlyWhiteSpace: 0, whole: true },
+    });
+  });
+
+  it("knows an emoji placeholder exactly as the Chat SDK converts one, near-misses too", () => {
+    const samples = [
+      "{{emoji:thumbs_up}}",
+      "{{emoji:chart_up}}",
+      "{{EMOJI:Thumbs_Up}}",
+      "{{emoji:x_1}}",
+      "{{emoji:no_such_emoji}}",
+      "{{emoji:}}",
+      "{{emoji:thumbs-up}}",
+      "{{emoji:thumbs up}}",
+      "{{emoji:ñ}}",
+      "{emoji:thumbs_up}",
+      "{{emoji:thumbs_up}",
+      "{{ emoji:thumbs_up }}",
+      "{{emoji:thumbs_up}}}",
+    ];
+    expect({
+      flags: emojiPlaceholders.flags,
+      verdicts: samples.map((sample) => [sample, ours(sample)]),
+    }).toStrictEqual({
+      flags: "gi",
+      verdicts: samples.map((sample) => [sample, theirs(sample)]),
     });
   });
 

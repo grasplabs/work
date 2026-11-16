@@ -207,11 +207,13 @@ const partsPair = (text: string, at: number): boolean => {
 };
 
 /**
- * An emoji placeholder, as the Chat SDK writes and converts one (its
- * `EMOJI_PLACEHOLDER_REGEX`, which it doesn't export): never cut inside,
- * or both halves show as text.
+ * An emoji placeholder, as the Chat SDK writes and converts one: a copy of
+ * its `EMOJI_PLACEHOLDER_REGEX`, which it doesn't export, flags and all
+ * (channels-cards.test.ts holds it to the SDK's own conversion). Never cut
+ * inside, or both halves show as text.
  */
-const emojiPlaceholders = /\{\{emoji:[a-z0-9_]+\}\}/giu;
+// oxlint-disable-next-line require-unicode-regexp -- the SDK's own flags, exactly
+export const emojiPlaceholders = /\{\{emoji:[a-z0-9_]+\}\}/gi;
 
 /** For each position of `text`, whether a cut there would part a placeholder. */
 const insidePlaceholders = (text: string): Uint8Array => {

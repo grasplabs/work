@@ -509,7 +509,7 @@ const answerOne = async (
       })
     );
   });
-  // Whole and inert, in as many cards as it takes (\`answerCards\`): the
+  // Whole and inert, in as many cards as it takes (`answerCards`): the
   // first as the card it was written into, where there is one, the rest
   // posted after it in order, the thumbs under the last. A part the
   // platform refuses ends it with the line that something went wrong,
@@ -526,7 +526,7 @@ const answerOne = async (
     }
   } catch (error) {
     try {
-      // Not counted again: the answer's own failure is (\`postIn\`).
+      // Not counted again: the answer's own failure is (`postIn`).
       await quietly("failed_line", async () => {
         await thread.post(say("failed", locale));
       })();
