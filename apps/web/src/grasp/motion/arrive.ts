@@ -6,7 +6,8 @@
 //   {loading ? <Skeleton /> : <span {...stylex.props(arrive.in)}>{name}</span>}
 //
 // Give it to what replaces a placeholder, never to what was there on the first paint, so a page does
-// not fade in as it opens.
+// not fade in as it opens. The words of an answer still being written fade in another way, with no
+// element round them: arrive-highlight.ts.
 import * as stylex from "@stylexjs/stylex";
 
 import { grasp, media } from "../tokens/tokens.stylex";

@@ -28,7 +28,7 @@ export interface ComposerMentionItem {
   kind: string;
   /** One quiet line ("Design lead"). */
   description?: string;
-  /** Its mark. Import it from src/icons; without it, the kind's mark. */
+  /** Its mark. Import it from the icons entry (`@/components/grasp/icons`); without it, the kind's mark. */
   icon?: IconData;
 }
 

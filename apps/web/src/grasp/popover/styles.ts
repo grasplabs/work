@@ -4,6 +4,7 @@ import * as stylex from "@stylexjs/stylex";
 
 import { simply } from "../motion/simply.stylex";
 import { grasp, media } from "../tokens/tokens.stylex";
+import { popoverMarker } from "./popover.stylex";
 
 const PHONE = media.belowPhone;
 
@@ -26,6 +27,22 @@ const ROW = grasp.space4;
 // from `--transform-origin`, the point on the trigger UI SDK placed it against, so it comes from
 // whichever side it landed on, in either reading direction.
 const moving = ":is([data-starting-style], [data-ending-style])";
+
+// The body's ends fade while there is more past them: the bottom one at the top, both in between,
+// the top one at the end, so a line cut on the panel's edge reads as more to come. The panel's own
+// edge is round, so a fade, not a hairline that would bend with its corners. Where there is more,
+// the body's padding stays an empty inset and the fade stands inside it, so no line is sliced on
+// the panel's edge (A2-popover-01); at an end with nothing past it the padding shows as it is.
+const FADE = grasp.space6;
+const INSET = grasp.popoverPadding;
+const fadeBelow = `linear-gradient(to bottom, black calc(100% - ${INSET} - ${FADE}), transparent calc(100% - ${INSET}))`;
+const fadeBoth = `linear-gradient(to bottom, transparent ${INSET}, black calc(${INSET} + ${FADE}), black calc(100% - ${INSET} - ${FADE}), transparent calc(100% - ${INSET}))`;
+const fadeAbove = `linear-gradient(to bottom, transparent ${INSET}, black calc(${INSET} + ${FADE}))`;
+const ends = stylex.keyframes({
+  "0%": { maskImage: fadeBelow },
+  "1%, 99%": { maskImage: fadeBoth },
+  "100%": { maskImage: fadeAbove },
+});
 
 export const popoverStyles = stylex.create({
   // The panel: raised, lifted, the one corner. It holds the body (below), which scrolls only when
@@ -76,11 +93,41 @@ export const popoverStyles = stylex.create({
     rowGap: ROW,
     minHeight: 0,
     padding: surface.padding,
+    // Scrolled by the keys, what comes into view keeps the same inset from the end as the words at rest.
+    scrollPaddingBlock: surface.padding,
     overflowX: "hidden",
     overflowY: "auto",
     overscrollBehavior: "contain",
     borderRadius: "inherit",
     cornerShape: "inherit",
+    // Only where the browser drives an animation by scroll, and never while the panel leaves: a
+    // scroll-driven animation does not end, and the close may wait for its animations to end.
+    animationName: {
+      default: null,
+      "@supports (animation-timeline: scroll())": {
+        default: ends,
+        [stylex.when.ancestor(
+          ":is([data-ending-style], [data-closed])",
+          popoverMarker
+        )]: "none",
+      },
+    },
+    animationDuration: {
+      default: null,
+      "@supports (animation-timeline: scroll())": "auto",
+    },
+    animationTimingFunction: {
+      default: null,
+      "@supports (animation-timeline: scroll())": "linear",
+    },
+    animationFillMode: {
+      default: null,
+      "@supports (animation-timeline: scroll())": "both",
+    },
+    animationTimeline: {
+      default: null,
+      "@supports (animation-timeline: scroll())": "scroll(self)",
+    },
   },
 
   // In and out from the trigger's side. Leaving is faster than arriving. With reduced motion it is
@@ -90,7 +137,7 @@ export const popoverStyles = stylex.create({
     transform: { default: "none", [moving]: `scale(${grasp.popupFromScale})` },
     transitionProperty: "opacity, transform",
     transitionDuration: {
-      default: simply.ui,
+      default: simply.popup,
       ":is([data-ending-style])": simply.leave,
     },
     transitionTimingFunction: grasp.ease,

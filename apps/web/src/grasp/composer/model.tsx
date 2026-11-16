@@ -1,11 +1,17 @@
 // ComposerModel: the model picker in a composer's footer (composer.tsx), after Capy's. A quiet
 // control shows the current model's maker mark and name. It opens a menu with a search field, a
 // narrow rail of makers down its start side (a star for favourites first), and the chosen maker's
-// models as plain rows, so a long list stays short and easy to scan. Typing searches every maker.
+// models as plain rows under its name, so a long list stays short and easy to scan. Typing searches
+// every maker.
+//
+// The rail and the list share one step (a 28px row, touching as the rows do), so each row stands level
+// with a mark, and the maker's name heads the list in the mark's place: the panel is as tall as the
+// taller column, and with as many rows as marks the two end together, with no empty band under the
+// rows.
 //
 //   <ComposerModel models={models} makers={makers} value={model} onValueChange={setModel} />
 //
-// Maker marks are other companies' logos: the caller passes each as an `icon` (src/icons has the
+// Maker marks are other companies' logos: the caller passes each as an `icon` (the icons entry (`@/components/grasp/icons`) has the
 // brand marks); nothing is drawn here. Every value is a token (src/tokens).
 "use client";
 
@@ -18,7 +24,7 @@ import {
   CommandList,
 } from "@ui-sdk/react/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@ui-sdk/react/popover";
-import { useMemo, useState } from "react";
+import { useId, useState } from "react";
 import type { ReactNode } from "react";
 
 import { focus } from "../focus/focus";
@@ -53,7 +59,7 @@ export interface ComposerModelMaker {
   value: string;
   /** Its name ("Anthropic"). */
   label: string;
-  /** Its mark, from src/icons (the brand marks). */
+  /** Its mark, from the icons entry (`@/components/grasp/icons`) (the brand marks). */
   icon?: IconData;
 }
 
@@ -79,6 +85,11 @@ export interface ComposerModelProps {
    * @default "Search models"
    */
   searchLabel?: string;
+  /**
+   * The name of the rail of makers, for a screen reader.
+   * @default "Makers"
+   */
+  makersLabel?: string;
   /**
    * The rail's name for favourites.
    * @default "Favourites"
@@ -140,10 +151,11 @@ const styles = stylex.create({
     gridTemplateColumns: "auto minmax(0, 1fr)",
     minHeight: 0,
   },
+  // The same step as the list's rows (28px, touching as the rows do), so each mark stands level with a row.
   rail: {
     display: "grid",
     alignContent: "start",
-    gap: grasp.space1,
+    gap: 0,
     padding: grasp.space1,
     borderInlineEndWidth: grasp.hairline,
     borderInlineEndStyle: "solid",
@@ -172,10 +184,22 @@ const styles = stylex.create({
   list: {
     display: "grid",
     alignContent: "start",
-    gap: grasp.hairline,
+    gap: 0,
     padding: grasp.space1,
     overflowY: "auto",
     overscrollBehavior: "contain",
+  },
+  // The chosen maker's name, quiet, at the top of the list in the first mark's row.
+  heading: {
+    display: "flex",
+    alignItems: "center",
+    boxSizing: "border-box",
+    minHeight: grasp.controlXs,
+    paddingInline: grasp.space2,
+    color: grasp.muted,
+    fontSize: grasp.textXs,
+    lineHeight: grasp.textXsLine,
+    userSelect: "none",
   },
   row: {
     display: "flex",
@@ -240,6 +264,45 @@ const styles = stylex.create({
 const noFavourites: string[] = [];
 
 /** The model picker: a quiet control in the footer and a menu with a rail of makers. */
+/** What the list shows: searching looks through every maker; otherwise the rail's choice shows. */
+const shownModels = (
+  models: ComposerModelOption[],
+  favourites: string[],
+  rail: string,
+  query: string
+): ComposerModelOption[] => {
+  if (query.trim()) {
+    return models;
+  }
+  if (rail === FAVOURITES) {
+    return models.filter((model) => favourites.includes(model.value));
+  }
+  return models.filter((model) => model.maker === rail);
+};
+
+/**
+ * The top of the list: the rail's choice by name, and a maker's connect row under it. While
+ * searching every maker shows, so neither; under favourites, no connect row.
+ */
+const listTop = (
+  makers: ComposerModelMaker[],
+  rail: string,
+  query: string,
+  favouritesLabel: string,
+  connect: Record<string, ReactNode> | undefined
+): { heading: string; connectRow: ReactNode } => {
+  if (query.trim()) {
+    return { heading: "", connectRow: undefined };
+  }
+  if (rail === FAVOURITES) {
+    return { heading: favouritesLabel, connectRow: undefined };
+  }
+  return {
+    heading: makers.find((maker) => maker.value === rail)?.label ?? "",
+    connectRow: connect?.[rail],
+  };
+};
+
 export const ComposerModel = ({
   models,
   makers,
@@ -248,6 +311,7 @@ export const ComposerModel = ({
   favourites = noFavourites,
   label = "Model",
   searchLabel = "Search models",
+  makersLabel = "Makers",
   favouritesLabel = "Favourites",
   emptyLabel = "No models found",
   connect,
@@ -262,18 +326,19 @@ export const ComposerModel = ({
   );
 
   // Searching looks through every maker; otherwise the rail's choice shows.
-  const shown = useMemo(() => {
-    if (query.trim()) {
-      return models;
-    }
-    if (rail === FAVOURITES) {
-      return models.filter((model) => favourites.includes(model.value));
-    }
-    return models.filter((model) => model.maker === rail);
-  }, [models, favourites, rail, query]);
+  const shown = shownModels(models, favourites, rail, query);
 
   const markOf = (maker: string) =>
     makers.find((entry) => entry.value === maker)?.icon;
+  // The list's heading: the rail's choice by name. Searching looks through every maker, so none.
+  const headingId = useId();
+  const { heading, connectRow } = listTop(
+    makers,
+    rail,
+    query,
+    favouritesLabel,
+    connect
+  );
 
   return (
     <Popover
@@ -345,9 +410,10 @@ export const ComposerModel = ({
           </div>
           <div {...stylex.props(styles.body)}>
             <div
+              // The comment stands on the line above the role, between the attributes, so a formatter cannot part them.
               // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- a <fieldset> brings its own border, padding and min-width
               role="group"
-              aria-label="Makers"
+              aria-label={makersLabel}
               {...stylex.props(styles.rail)}
             >
               {favourites.length > 0 && (
@@ -386,15 +452,24 @@ export const ComposerModel = ({
               ))}
             </div>
             <div {...stylex.props(styles.list)}>
-              {!query.trim() &&
-                rail !== FAVOURITES &&
-                connect?.[rail] !== undefined && (
-                  <div {...stylex.props(styles.connect)}>{connect[rail]}</div>
-                )}
+              {heading !== "" && (
+                <div
+                  id={headingId}
+                  data-slot="composer-model-heading"
+                  {...stylex.props(styles.heading)}
+                >
+                  {heading}
+                </div>
+              )}
+              {connectRow !== undefined && (
+                <div {...stylex.props(styles.connect)}>{connectRow}</div>
+              )}
               <CommandEmpty {...stylex.props(styles.empty)}>
                 {emptyLabel}
               </CommandEmpty>
-              <CommandList>
+              <CommandList
+                aria-labelledby={heading === "" ? undefined : headingId}
+              >
                 {shown.map((model) => {
                   const mark = markOf(model.maker);
                   return (

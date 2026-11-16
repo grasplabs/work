@@ -29,6 +29,20 @@ export interface ComposerQueueProps {
    * @default count + " queued"
    */
   title?: string;
+  /**
+   * The words on the fold when no `title` is given, from how many wait.
+   * @default (count) => `${count} queued`
+   */
+  queuedLabel?: (count: number) => string;
+  /**
+   * The names of a row's buttons, each from the message it acts on.
+   * @default (text) => `Edit: ${text}`, `Send now: ${text}`, `Remove: ${text}`
+   */
+  editLabel?: (text: string) => string;
+  /** The name of a message's button that sends it now, ahead of the queue, from the message's words. */
+  sendNowLabel?: (text: string) => string;
+  /** The name of a message's button that takes it out of the queue, from the message's words. */
+  removeLabel?: (text: string) => string;
   /** Sends this one now, ahead of the rest. Without it, there is no send button on the rows. */
   onSendNow?: (id: string) => unknown;
   /** Puts this one back into the composer to change it. */
@@ -44,10 +58,13 @@ export interface ComposerQueueProps {
 
 const styles = stylex.create({
   panel: {
-    // As wide as the card, and its words start where the card's do: the header, each row and the
-    // composer's text share one left edge; the row actions end where send ends.
-    paddingInlineStart: grasp.space4,
-    paddingInlineEnd: grasp.space3,
+    // In from the card's sides by space-2, as the band under the card, so its side lies inside the
+    // card's rounded corner and never runs beside it. Its words still start where the card's do:
+    // the header, each row and the composer's text share one left edge; the row actions end where
+    // send ends.
+    marginInline: grasp.space2,
+    paddingInlineStart: `calc(${grasp.space4} - ${grasp.space2})`,
+    paddingInlineEnd: `calc(${grasp.space3} - ${grasp.space2})`,
     paddingBlockStart: grasp.space1,
     // The card overlaps the panel's foot, so the queue reads as tucked behind it.
     marginBlockEnd: `calc(-1 * ${grasp.corner})`,
@@ -100,10 +117,20 @@ const RowAction = ({
   />
 );
 
+// The default words, in English; each is a prop, so a product can translate it.
+const queued = (count: number) => `${count} queued`;
+const edit = (text: string) => `Edit: ${text}`;
+const sendNow = (text: string) => `Send now: ${text}`;
+const remove = (text: string) => `Remove: ${text}`;
+
 /** Messages waiting their turn, above the card. */
 export const ComposerQueue = ({
   items,
   title,
+  queuedLabel = queued,
+  editLabel = edit,
+  sendNowLabel = sendNow,
+  removeLabel = remove,
   onSendNow,
   onEdit,
   onRemove,
@@ -115,7 +142,7 @@ export const ComposerQueue = ({
   return (
     <div data-slot="composer-queue" {...stylex.props(styles.panel)}>
       <Collapsible
-        title={title ?? `${items.length} queued`}
+        title={title ?? queuedLabel(items.length)}
         defaultOpen={defaultOpen}
       >
         <ul {...stylex.props(styles.list)}>
@@ -125,21 +152,21 @@ export const ComposerQueue = ({
               {onEdit && (
                 <RowAction
                   icon={Edit}
-                  label={`Edit: ${item.text}`}
+                  label={editLabel(item.text)}
                   onPress={() => onEdit(item.id)}
                 />
               )}
               {onSendNow && (
                 <RowAction
                   icon={ArrowUp}
-                  label={`Send now: ${item.text}`}
+                  label={sendNowLabel(item.text)}
                   onPress={() => onSendNow(item.id)}
                 />
               )}
               {onRemove && (
                 <RowAction
                   icon={Trash}
-                  label={`Remove: ${item.text}`}
+                  label={removeLabel(item.text)}
                   onPress={() => onRemove(item.id)}
                 />
               )}

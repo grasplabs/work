@@ -13,10 +13,13 @@ const REDUCED = media.reduced;
 const FORCED = media.forced;
 
 const styles = stylex.create({
-  // Always on a hold button: a long press selects no text and opens no callout.
+  // Always on a hold button: a long press selects no text and opens no callout, and it never
+  // shrinks under the press: the fill shows the press. (The press scale was turned off only while
+  // holding; once the hold fired Firefox kept :active until the release, at 97%.)
   button: {
     WebkitTouchCallout: "none",
     WebkitUserSelect: "none",
+    transform: "none",
   },
   // While held, the button keeps its size and its rest fill: the fill shows the press instead.
   held: {

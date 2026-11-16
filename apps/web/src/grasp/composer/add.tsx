@@ -29,7 +29,7 @@ export interface ComposerKind {
   value: string;
   /** Its name ("People"). */
   label: string;
-  /** Its mark. Import it from src/icons. */
+  /** Its mark. Import it from the icons entry (`@/components/grasp/icons`). */
   icon?: IconData;
   /** One line on what it is, shown in the mention menu ("Tag someone in the team"). */
   description?: string;

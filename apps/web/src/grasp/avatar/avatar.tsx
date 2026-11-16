@@ -7,6 +7,7 @@
 //   <Avatar name="Anna de Vries" />                              initials: AV
 //   <Avatar name="Anna de Vries" src="/people/anna.jpg" />
 //   <Avatar name="Anna de Vries" decorative />                   her name is written beside it
+//   <Avatar name="Anna de Vries" src="…" eager />                on the first screen: loads at once
 //
 // Every value is a token (src/tokens).
 "use client";
@@ -40,6 +41,12 @@ export interface AvatarProps {
    * @default false
    */
   decorative?: boolean;
+  /**
+   * Load the picture at once, for an avatar known to be on the first screen. Otherwise it loads
+   * only as it nears the window, so portraits far down a page cost nothing on the first visit.
+   * @default false
+   */
+  eager?: boolean;
 }
 
 const styles = stylex.create({
@@ -62,7 +69,13 @@ const styles = stylex.create({
     userSelect: "none",
   },
   // The initials stand at about half the avatar's size, never under 13px.
-  xs: { width: grasp.avatarXs, height: grasp.avatarXs, fontSize: grasp.textXs },
+  // The initials keep the same share of the circle as at sm: three quarters of sm's letters, as 24px
+  // is of 32. The extra-small words step was larger than that and filled the circle.
+  xs: {
+    width: grasp.avatarXs,
+    height: grasp.avatarXs,
+    fontSize: `calc(${grasp.textMd} * 0.75)`,
+  },
   sm: { width: grasp.avatarSm, height: grasp.avatarSm, fontSize: grasp.textMd },
   md: {
     width: grasp.avatarMd,
@@ -125,6 +138,7 @@ export const Avatar = ({
   src,
   size = "md",
   decorative = false,
+  eager = false,
 }: AvatarProps) => {
   // A blank name names nothing: then the avatar stands aside, as if decorative.
   const named = name.trim().length > 0;
@@ -144,6 +158,8 @@ export const Avatar = ({
         <AvatarImage
           src={src}
           alt=""
+          loading={eager ? "eager" : "lazy"}
+          decoding="async"
           data-no-zoom=""
           className={stylex.props(styles.image, arrive.whenLoaded).className}
         />

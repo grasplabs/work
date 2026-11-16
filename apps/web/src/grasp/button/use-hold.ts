@@ -26,6 +26,27 @@ import { ms } from "../tokens/tokens.values";
 /** `true` for the hold-duration token, or `{ ms }` for a hold of another length. */
 export type HoldSetting = boolean | { ms: number };
 
+/** The words a hold says, so the product can say them in its own language. */
+export interface ButtonHoldLabels {
+  /** The button's name while it holds: "Hold to delete draft", from its own words. */
+  holdTo: (words: string) => string;
+  /** The confirmation's title, from the button's words: "Delete draft?". */
+  ask: (words: string) => string;
+  /** The confirmation's title when the button has no words. */
+  confirm: string;
+  /** The confirmation's way out. */
+  cancel: string;
+}
+
+/** A hold's words in English: replace any of them through Button's `holdLabels`. */
+export const englishHoldLabels: ButtonHoldLabels = {
+  holdTo: (words) =>
+    `Hold to ${words.charAt(0).toLowerCase()}${words.slice(1)}`,
+  ask: (words) => `${words}?`,
+  confirm: "Confirm",
+  cancel: "Cancel",
+};
+
 /** What the Button inside a hold draws from: whether it is held now, for how long, and its name. */
 export interface HoldLook {
   holding: boolean;
@@ -43,6 +64,22 @@ export const holdTime = (setting: HoldSetting | undefined): number =>
 // A press let go within this share of the hold is a tap, from someone who may not be able to hold:
 // it asks. A longer press let go early was a hold that was given up: it does nothing.
 const TAP_SHARE = 0.25;
+
+/**
+ * Waits on what the hold's own press started. A failed action rejects to tell UI SDK it failed;
+ * this press is the hold's, not UI SDK's, so nothing else would catch it. The failure is shown on
+ * the button by its own state.
+ */
+const settled = async (result: unknown) => {
+  try {
+    await result;
+  } catch {
+    // Shown by the button: nothing more to do here.
+  }
+};
+
+/** What a plain click says it was, when it comes with no details of its own. */
+const pointerPress: ButtonActionDetails = { source: "mouse" };
 
 type Click = (
   event: MouseEvent<HTMLElement>,
@@ -331,13 +368,16 @@ export const useHold = ({ ms: time, pressable, act, onStart }: HoldOptions) => {
         }
         call("onContextMenu", event);
       },
+      // The hold's own click (it clicks the button once when held long enough) comes with no
+      // details: a person's pointer.
       onClick: (
         event: MouseEvent<HTMLElement>,
-        details: ButtonActionDetails
+        passed?: ButtonActionDetails
       ) => {
+        const details = passed ?? pointerPress;
         element.current = event.currentTarget;
         if (firing.current) {
-          latest.current.act?.(event, details);
+          void settled(latest.current.act?.(event, details));
           return;
         }
         if (swallow.current) {

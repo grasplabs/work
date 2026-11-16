@@ -43,11 +43,12 @@ import type { IconData } from "../icons";
 import { iconVars } from "../icons/icon.stylex";
 import { simply } from "../motion/simply.stylex";
 import { Spinner } from "../spinner";
+import { spinnerVars } from "../spinner/spinner.stylex";
 import { grasp, media } from "../tokens/tokens.stylex";
 import { buttonMarker, layerMarker } from "./button.stylex";
 import { HoldFill, holdLook } from "./hold-fill";
-import { HoldContext, assignRef } from "./use-hold";
-import type { HoldLook, HoldSetting } from "./use-hold";
+import { HoldContext, assignRef, englishHoldLabels } from "./use-hold";
+import type { ButtonHoldLabels, HoldLook, HoldSetting } from "./use-hold";
 
 export type ButtonVariant = "ink" | "quiet" | "ghost" | "danger" | "approve";
 export type ButtonSize = "xs" | "sm" | "md" | "lg";
@@ -56,8 +57,21 @@ export type ActionState = "idle" | "working" | "done" | "failed";
 
 type Layout = string | number | null;
 
+/**
+ * A floor that follows the words, never a fixed width: `fit-content` keeps a growing button from
+ * wrapping its words while they fit the line, so a row of equal buttons wraps before a label does.
+ */
+type ContentFloor =
+  | "fit-content"
+  | "max-content"
+  | "min-content"
+  | "auto"
+  | 0
+  | null;
+
 /** What a caller may style: where the button sits. Never its look, and never a fixed width. */
 export type ButtonLayoutStyle = stylex.StyleXStyles<{
+  minWidth?: ContentFloor;
   alignSelf?: Layout;
   justifySelf?: Layout;
   flexGrow?: Layout;
@@ -95,7 +109,7 @@ export type ButtonWords =
 interface WithWords {
   /** The words on the button: a verb first, in sentence case ("Save changes"). */
   children: ButtonWords;
-  /** An icon before the words, or the whole button with `label`. Import it from src/icons. */
+  /** An icon before the words, or the whole button with `label`. Import it from the icons entry (`@/components/grasp/icons`). */
   icon?: IconData;
   /** An icon after the words: an arrow that leads on. */
   iconEnd?: IconData;
@@ -149,7 +163,7 @@ interface ButtonBase {
    * @default false
    */
   disabled?: boolean;
-  /** Layout only: margins and alignment. Colours, sizes, corners and widths belong to the button. */
+  /** Layout only: margins, alignment, and a floor that follows the words (`minWidth: "fit-content"`). Colours, sizes, corners and widths belong to the button. */
   style?: ButtonLayoutStyle;
   /** The same as `style`, by a name a style lint does not take for an inline style attribute. */
   layout?: ButtonLayoutStyle;
@@ -159,6 +173,11 @@ interface ButtonBase {
    * @default false
    */
   hold?: HoldSetting;
+  /**
+   * What a hold says, any of it replaced: the name while held, the confirmation's title and Cancel.
+   * @default { holdTo: (words) => `Hold to ${words}`, ask: (words) => `${words}?`, confirm: "Confirm", cancel: "Cancel" }
+   */
+  holdLabels?: Partial<ButtonHoldLabels>;
 }
 
 /** A plain button: it does its work and the page shows the result. */
@@ -223,7 +242,7 @@ const shake = stylex.keyframes({
 
 const styles = stylex.create({
   base: {
-    // The icon inside follows these (src/icons/icon.stylex.ts).
+    // The icon inside follows these (the icons entry (`@/components/grasp/icons`)/icon.stylex.ts).
     [iconVars.size]: grasp.iconSm,
     [iconVars.stroke]: grasp.iconStroke,
     position: "relative",
@@ -290,6 +309,9 @@ const styles = stylex.create({
     borderRadius: `min(${grasp.corner}, calc(${grasp.controlMd} / 2))`,
   },
   lg: {
+    // The large size's icon is the medium one (eyes-a, A-actions-11: an icon-only large button kept
+    // the small icon in a larger square). With words too, so the two sizes read as one family.
+    [iconVars.size]: grasp.iconMd,
     minHeight: grasp.controlLg,
     minWidth: grasp.controlLg,
     paddingBlock: `calc((${grasp.controlLg} - ${grasp.textSmLine}) / 2)`,
@@ -308,6 +330,8 @@ const styles = stylex.create({
   // Variants, at rest. `live` adds hover and press; a button that is disabled, working or
   // showing a result gets only the rest.
   ink: {
+    // On the fill a working spinner's last bars stay seen (Spinner's floor).
+    [spinnerVars.floor]: grasp.spinnerFadeOnFill,
     color: grasp.actionText,
     backgroundColor: grasp.actionFill,
     boxShadow: grasp.bevelInk,
@@ -338,17 +362,29 @@ const styles = stylex.create({
   },
   ghost: {
     color: grasp.ink,
-    backgroundColor: "transparent",
+    // Held on (aria-pressed, a Button group's chosen view or a format toggle): the press's fill stays,
+    // so a held choice is seen on the button itself, not only in what it changes.
+    backgroundColor: {
+      default: "transparent",
+      ":is([aria-pressed=true])": grasp.ghostFillPress,
+    },
     boxShadow: "none",
   },
   ghostLive: {
     backgroundColor: {
       default: "transparent",
-      ":hover": { default: null, [HOVER]: grasp.ghostFillHover },
+      ":is([aria-pressed=true])": grasp.ghostFillPress,
+      ":hover": {
+        default: null,
+        [HOVER]: grasp.ghostFillHover,
+        ":is([aria-pressed=true])": grasp.ghostFillPress,
+      },
       ":active": grasp.ghostFillPress,
     },
   },
   danger: {
+    // On the fill a working spinner's last bars stay seen (Spinner's floor).
+    [spinnerVars.floor]: grasp.spinnerFadeOnFill,
     color: grasp.dangerText,
     backgroundColor: grasp.dangerFill,
     boxShadow: grasp.bevelDanger,
@@ -369,6 +405,8 @@ const styles = stylex.create({
   // into mint. The light is wider than the button, so it can move: under a pointer it leans in,
   // pressed it draws back. Its fill is under it, for forced colours and a failed action.
   approve: {
+    // On the fill a working spinner's last bars stay seen (Spinner's floor).
+    [spinnerVars.floor]: grasp.spinnerFadeOnFill,
     color: grasp.approveText,
     backgroundColor: grasp.approveFill,
     backgroundImage: grasp.approveLight,
@@ -686,7 +724,9 @@ const Content = ({
         <>
           {/* The one spinner (src/components/spinner): it turns, or with reduced motion breathes. */}
           <Layer on={spinner.alone}>
-            <Spinner />
+            {/* Mounted only while it shows: an unseen spinner would turn for ever, costing frames
+                and moving under reduced motion. The layer still fades it in as it arrives. */}
+            {spinner.alone && <Spinner />}
           </Layer>
           {/* Done: the tick is drawn in where the spinner was, then the words slide in beside it,
               as one centred group, the tick always first. A button that
@@ -744,9 +784,13 @@ const saidFor = (
 ) => (state === undefined || state === "idle" ? undefined : labels[state]);
 
 /** The click a Button gives UI SDK: the caller's, unless the button cannot be pressed now. */
+// A plain click (a hold released over the button) brings no details.
+/** What a plain click says it was, when it comes with no details of its own. */
+const pointerPress: ButtonActionDetails = { source: "mouse" };
+
 type GuardedClick = (
   event: MouseEvent<HTMLElement>,
-  details: ButtonActionDetails
+  details?: ButtonActionDetails
 ) => unknown;
 
 /** The props of a Button, out of its union: each the type it has in any member. */
@@ -973,6 +1017,7 @@ const ownOf = ({
 const Pressable = ({
   held,
   hold: _hold,
+  holdLabels: _holdLabels,
   ...allProps
 }: ButtonProps & { held: HoldLook | null }) => {
   const read: Read = allProps;
@@ -1032,7 +1077,9 @@ const Pressable = ({
   // reporting a press that did nothing. While it works, UI SDK already holds presses: the Promise
   // onClick returns (useAction's) keeps it pending.
   const shown = state === "done" ? doneLabel : failedLabel;
-  const guardedClick: GuardedClick = (event, details) => {
+  const guardedClick: GuardedClick = (event, given) => {
+    // A plain click (a hold released over it) comes with no details: a person's pointer.
+    const details = given ?? pointerPress;
     if (pressable) {
       return onClick?.(event, details);
     }
@@ -1132,10 +1179,8 @@ const LazyHold = (allProps: ButtonProps) => {
   const early = useRef(false);
   const words =
     typeof allProps.children === "string" ? allProps.children : allProps.label;
-  const name =
-    words === undefined || words === ""
-      ? undefined
-      : `Hold to ${words.charAt(0).toLowerCase()}${words.slice(1)}`;
+  const { holdTo } = { ...englishHoldLabels, ...allProps.holdLabels };
+  const name = words === undefined || words === "" ? undefined : holdTo(words);
   const waiting = { holding: false, ms: 0, name };
   const keep = (event: MouseEvent<HTMLElement>) => {
     event.preventDefault();

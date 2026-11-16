@@ -31,10 +31,12 @@ import type {
   SetStateAction,
   SubmitEvent,
 } from "react";
+import { flushSync } from "react-dom";
 
 import { Alert, Icon } from "../icons";
 import { iconVars } from "../icons/icon.stylex";
 import { scroll } from "../scroll/scroll";
+import { TextShimmer } from "../text-shimmer";
 import { grasp, media } from "../tokens/tokens.stylex";
 import { WorkingMark } from "../working-mark";
 import type { ComposerKind } from "./add";
@@ -142,7 +144,8 @@ export interface ComposerProps {
   controls?: ReactNode;
   /**
    * Voice input, at the end beside send: a ComposerAction (Dictate). With nothing written it stands
-   * alone, filled, in send's place; once there is text it goes quiet and send appears.
+   * alone, filled, in send's place; once there is text it goes quiet and send appears. While it
+   * listens, give it `pressed` and the Listening icon, so the press shows even when it stands alone.
    */
   voice?: ReactNode;
   /** Anything else inside the card above the text. Files go in `attachments`. */
@@ -160,8 +163,13 @@ export interface ComposerProps {
   onRetryAttachment?: (id: string) => void;
   /** Opens a file: a press on its card. */
   onOpenAttachment?: (id: string) => void;
-  /** The attachment words, shared with File upload: Uploading, Uploaded, Could not upload, Retry, Remove. */
+  /** The attachment words, shared with File upload: Uploading, Uploaded, Could not upload, Try again, Remove. */
   attachmentWords?: Partial<ComposerAttachmentWords>;
+  /**
+   * The name of the list of files on the card, for a screen reader.
+   * @default "Files to send"
+   */
+  attachmentsLabel?: string;
   /**
    * The kinds of thing that can be mentioned with @, in the menu's first level, each with its one
    * line of help (People: "Tag someone in the team").
@@ -240,9 +248,10 @@ type MenuPlace = { x: number; top: number } | { x: number; bottom: number };
 const placeAt = (element: HTMLTextAreaElement, start: number): MenuPlace => {
   const point = caretPoint(element, start);
   const box = element.getBoundingClientRect();
-  const lineHeight =
-    // oxlint-disable-next-line unicorn/prefer-number-coercion -- a line height reads "24px", which Number() makes NaN
-    Number.parseFloat(getComputedStyle(element).lineHeight) || 24;
+  const computed = getComputedStyle(element);
+  // A short line on purpose: a formatter that wraps it would leave the comment above the wrong line.
+  // oxlint-disable-next-line unicorn/prefer-number-coercion -- a line height reads "24px", which Number() makes NaN
+  const lineHeight = Number.parseFloat(computed.lineHeight) || 24;
   const room = window.innerHeight - (box.top + point.y);
   const x = Math.min(point.x, box.width - 160);
   return room > 280
@@ -749,27 +758,33 @@ const useTakeoverFocus = (
   // takeover changes, the button that changed it may already be gone and focus with it.
   const focusInside = useRef(false);
   useEffect(() => {
-    const inside =
+    // Only focus that was in this composer moves: focus on the page's body belongs to no composer,
+    // and taking it would pull a page of several composers to this one (and scroll it there).
+    const here =
       focusInside.current ||
       (card.current?.contains(document.activeElement) ?? false);
-    const here = inside || document.activeElement === document.body;
     if (taken && !hadTakeover.current && here) {
       card.current
         ?.querySelector<HTMLElement>(
           "[data-slot=composer-takeover-room] button, [data-slot=composer-takeover-room] input"
         )
-        ?.focus();
+        ?.focus({ preventScroll: true });
     }
     if (!taken && hadTakeover.current && here) {
-      area.current?.focus();
+      area.current?.focus({ preventScroll: true });
     }
     hadTakeover.current = taken;
   }, [taken, card, area]);
   const onFocus = () => {
     focusInside.current = true;
   };
+  // Focus leaves the composer only when it goes to something outside it. Falling to the page's
+  // body from inside (Safari never focuses a pressed button) it is still this composer's.
   const onBlur = (event: FocusEvent<HTMLFormElement>) => {
-    if (!event.currentTarget.contains(event.relatedTarget)) {
+    if (
+      event.relatedTarget !== null &&
+      !event.currentTarget.contains(event.relatedTarget)
+    ) {
       focusInside.current = false;
     }
   };
@@ -1368,6 +1383,7 @@ interface InsideProps {
   onRetryAttachment: ComposerProps["onRetryAttachment"];
   onOpenAttachment: ComposerProps["onOpenAttachment"];
   attachmentWords: ComposerProps["attachmentWords"];
+  attachmentsLabel: string;
   focusText: (event: PointerEvent<HTMLElement>) => void;
 }
 
@@ -1387,6 +1403,7 @@ const ComposerInside = ({
   onRetryAttachment,
   onOpenAttachment,
   attachmentWords,
+  attachmentsLabel,
   focusText,
 }: InsideProps) => {
   const taken = Boolean(takeover);
@@ -1414,7 +1431,7 @@ const ComposerInside = ({
           onRetry={onRetryAttachment}
           onOpen={onOpenAttachment}
           words={attachmentWords}
-          label="Files to send"
+          label={attachmentsLabel}
         />
       ) : null}
       {Boolean(above) && <div {...stylex.props(styles.above)}>{above}</div>}
@@ -1478,7 +1495,7 @@ const ComposerUnder = ({
           {...stylex.props(styles.line)}
         >
           <WorkingMark />
-          {workingLabel}
+          <TextShimmer>{workingLabel}</TextShimmer>
         </p>
       )}
       {failed && (
@@ -1533,6 +1550,7 @@ const wordDefaults = (props: ComposerProps) => ({
   commandsLabel: props.commandsLabel ?? "Commands",
   uploadingLabel:
     props.uploadingLabel ?? "Sending waits for the files to upload",
+  attachmentsLabel: props.attachmentsLabel ?? "Files to send",
 });
 
 type Resolved = ComposerProps &
@@ -1594,13 +1612,32 @@ const ComposerForm = (props: Resolved) => {
     },
   });
 
+  // Drawn now, in the same task as the change, not in a render React schedules for later: an
+  // agent's plan writes and then presses Send, and between the two it waits only two frames, which
+  // Firefox can run back to back before that render (Send was still off in 2 of 10 plans).
   const change: TextareaProps["onValueChange"] = (next, details) => {
-    if (value === undefined) {
-      setOwn(next);
+    flushSync(() => {
+      if (value === undefined) {
+        setOwn(next);
+      }
+      mentions.watch(next, area.current?.selectionStart ?? next.length);
+      sending.setFailed(false);
+      onValueChange?.(next, details);
+    });
+  };
+
+  // Send pressed: the field takes the focus first, since Send gives way to Stop (or turns off) as
+  // the message goes, and the focus would fall to the page's body. Safari never focuses a pressed
+  // button, so there the focus is on the body already: this composer's own Send was pressed, so it
+  // is this composer's. Nothing scrolls.
+  const sendHere = async () => {
+    const mine =
+      document.activeElement === document.body ||
+      (card.current?.contains(document.activeElement) ?? false);
+    if (mine && document.activeElement !== area.current) {
+      area.current?.focus({ preventScroll: true });
     }
-    mentions.watch(next, area.current?.selectionStart ?? next.length);
-    sending.setFailed(false);
-    onValueChange?.(next, details);
+    await sending.handleSend();
   };
 
   const sendByKey = () => {
@@ -1674,7 +1711,7 @@ const ComposerForm = (props: Resolved) => {
       empty={empty}
       working={working}
       disabled={disabled}
-      onSend={sending.handleSend}
+      onSend={sendHere}
       onStop={props.onStop}
       sendLabel={props.sendLabel}
       stopLabel={props.stopLabel}
@@ -1748,6 +1785,7 @@ const ComposerForm = (props: Resolved) => {
                   onRetryAttachment={props.onRetryAttachment}
                   onOpenAttachment={props.onOpenAttachment}
                   attachmentWords={props.attachmentWords}
+                  attachmentsLabel={props.attachmentsLabel}
                   focusText={focusText}
                 />
               </MentionContext.Provider>

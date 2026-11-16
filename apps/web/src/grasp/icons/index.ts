@@ -13,7 +13,6 @@ import {
   Alert02Icon,
   AlertCircleIcon,
   Analytics01Icon,
-  AppleIcon,
   AppWindowIcon,
   Archive02Icon,
   ArrowDown01Icon,
@@ -29,6 +28,7 @@ import {
   ArrowUpDownIcon,
   ArrowUpRight01Icon,
   Attachment01Icon,
+  AudioWave01Icon,
   BubbleChatAddIcon,
   BubbleChatIcon,
   Building03Icon,
@@ -38,42 +38,31 @@ import {
   ChartDecreaseIcon,
   ChartIncreaseIcon,
   ChartLineData01Icon,
-  ChatGptIcon,
   CheckListIcon,
   CheckmarkCircle02Icon,
   CheckmarkSquare02Icon,
   CircleIcon,
-  ClaudeIcon,
   Clock01Icon,
   Coins01Icon,
   ComputerIcon,
   ContrastIcon,
   Copy01Icon,
+  Cursor02Icon,
   DashboardSquare01Icon,
   Database01Icon,
   Delete02Icon,
-  DiscordIcon,
   Doc01Icon,
   Dollar01Icon,
   Download01Icon,
-  DropboxIcon,
-  FacebookIcon,
-  FigmaIcon,
   File01Icon,
   FileEditIcon,
   FitToScreenIcon,
   Folder01Icon,
   FolderKanbanIcon,
-  GithubIcon,
   Globe02Icon,
   GlobeIcon,
   GoBackward10SecIcon,
   GoForward10SecIcon,
-  GoogleDocIcon,
-  GoogleDriveIcon,
-  GoogleGeminiIcon,
-  GoogleIcon,
-  GoogleSheetIcon,
   GridViewIcon,
   HashtagIcon,
   HelpCircleIcon,
@@ -83,34 +72,28 @@ import {
   InboxIcon,
   InformationCircleIcon,
   InputTextIcon,
-  InstagramIcon,
   Invoice01Icon,
   KeyboardIcon,
+  LaptopIcon,
   LeftToRightListBulletIcon,
   LeftToRightListDashIcon,
   Link04Icon,
-  LinkedinIcon,
   Loading03Icon,
   Logout03Icon,
   Mail01Icon,
   Menu02Icon,
   Message01Icon,
   Mic01Icon,
-  MicrosoftIcon,
-  MicrosoftTeamsIcon,
   MinusSignCircleIcon,
   MinusSignIcon,
   Moon02Icon,
   MoreHorizontalIcon,
-  NewTwitterIcon,
   Note01Icon,
   Notification03Icon,
-  NotionIcon,
   PauseIcon,
   Pdf01Icon,
   PencilEdit02Icon,
   PercentIcon,
-  PerplexityAiIcon,
   PlayIcon,
   Redo02Icon,
   RefreshIcon,
@@ -122,17 +105,17 @@ import {
   ServerStack01Icon,
   Settings01Icon,
   Share08Icon,
-  ShopifyIcon,
   SidebarLeftIcon,
-  SlackIcon,
+  SidebarRightIcon,
   SlidersHorizontalIcon,
+  SmartPhone01Icon,
   SourceCodeIcon,
   SquareLock02Icon,
   StarIcon,
   StopIcon,
-  StripeIcon,
   Sun03Icon,
   Table01Icon,
+  Tablet01Icon,
   Tag01Icon,
   Task01Icon,
   TextAlignCenterIcon,
@@ -146,7 +129,6 @@ import {
   ThumbsDownIcon,
   ThumbsUpIcon,
   Tick02Icon,
-  TrelloIcon,
   Undo02Icon,
   UnfoldMoreIcon,
   Upload01Icon,
@@ -157,18 +139,17 @@ import {
   ViewOffSlashIcon,
   VolumeHighIcon,
   VolumeMute01Icon,
-  WhatsappIcon,
   WorkflowSquare03Icon,
   Wrench01Icon,
-  YoutubeIcon,
   ZapIcon,
-  ZoomIcon,
 } from "@hugeicons/core-free-icons";
 
 import type { IconData } from "./icon";
 import { pointing } from "./icon";
 
 export { Icon, type IconData, type IconProps } from "./icon";
+// Brand icons: other companies' own marks, filled and in their colours (brands.ts).
+export * from "./brands";
 // The size and stroke variables live in ./icon.stylex.ts and are imported from there: StyleX
 // only resolves variables imported straight from a .stylex.ts file.
 
@@ -316,6 +297,8 @@ export const Forward10: IconData = GoForward10SecIcon;
 // Sidebar (cloud builder 6).
 /** Fold or unfold a sidebar. SidebarLeftIcon. */
 export const SidebarToggle: IconData = pointing(SidebarLeftIcon);
+/** Show or set aside a panel at the end, such as App shell's panels on a phone. SidebarRightIcon. */
+export const PanelToggle: IconData = pointing(SidebarRightIcon);
 /** The first page, a workspace's home. Home01Icon. */
 export const Home: IconData = Home01Icon;
 /** Reports and figures. Analytics01Icon. */
@@ -332,6 +315,8 @@ export const ArrowUp: IconData = ArrowUp02Icon;
 export const Stop: IconData = StopIcon;
 /** Speak instead of typing. Mic01Icon. */
 export const Mic: IconData = Mic01Icon;
+/** Listening: dictation is on and hearing you. AudioWave01Icon. */
+export const Listening: IconData = AudioWave01Icon;
 /** Attach a file. Attachment01Icon. */
 export const Attach: IconData = Attachment01Icon;
 /** A file. File01Icon. */
@@ -354,63 +339,6 @@ export const Words: IconData = TextFontIcon;
 // Button group and Item (cloud builder 6).
 // Restored (cloud builder 8): the cloud builders' icons, dropped from this file in a showcase merge
 // while their components still use them. Archive is above, with the dropdown menu's icons.
-
-// Brand icons (cloud/pickers): other companies' marks, for integrations, sources and sign-in.
-// Hugeicons draws each as a line mark in the text colour; a mark is never recoloured or redrawn.
-/** Google. GoogleIcon. */
-export const BrandGoogle: IconData = GoogleIcon;
-/** Google Drive. GoogleDriveIcon. */
-export const BrandGoogleDrive: IconData = GoogleDriveIcon;
-/** Google Docs. GoogleDocIcon. */
-export const BrandGoogleDocs: IconData = GoogleDocIcon;
-/** Google Sheets. GoogleSheetIcon. */
-export const BrandGoogleSheets: IconData = GoogleSheetIcon;
-/** Gemini. GoogleGeminiIcon. */
-export const BrandGemini: IconData = GoogleGeminiIcon;
-/** Slack. SlackIcon. */
-export const BrandSlack: IconData = SlackIcon;
-/** LinkedIn. LinkedinIcon. */
-export const BrandLinkedIn: IconData = LinkedinIcon;
-/** GitHub. GithubIcon. */
-export const BrandGitHub: IconData = GithubIcon;
-/** Figma. FigmaIcon. */
-export const BrandFigma: IconData = FigmaIcon;
-/** Notion. NotionIcon. */
-export const BrandNotion: IconData = NotionIcon;
-/** Microsoft. MicrosoftIcon. */
-export const BrandMicrosoft: IconData = MicrosoftIcon;
-/** Microsoft Teams. MicrosoftTeamsIcon. */
-export const BrandTeams: IconData = MicrosoftTeamsIcon;
-/** Zoom. ZoomIcon. */
-export const BrandZoom: IconData = ZoomIcon;
-/** WhatsApp. WhatsappIcon. */
-export const BrandWhatsApp: IconData = WhatsappIcon;
-/** ChatGPT. ChatGptIcon. */
-export const BrandChatGpt: IconData = ChatGptIcon;
-/** Perplexity. PerplexityAiIcon. */
-export const BrandPerplexity: IconData = PerplexityAiIcon;
-/** Claude. ClaudeIcon. */
-export const BrandClaude: IconData = ClaudeIcon;
-/** Apple. AppleIcon. */
-export const BrandApple: IconData = AppleIcon;
-/** Dropbox. DropboxIcon. */
-export const BrandDropbox: IconData = DropboxIcon;
-/** Trello. TrelloIcon. */
-export const BrandTrello: IconData = TrelloIcon;
-/** Stripe. StripeIcon. */
-export const BrandStripe: IconData = StripeIcon;
-/** Discord. DiscordIcon. */
-export const BrandDiscord: IconData = DiscordIcon;
-/** YouTube. YoutubeIcon. */
-export const BrandYouTube: IconData = YoutubeIcon;
-/** X, formerly Twitter. NewTwitterIcon. */
-export const BrandX: IconData = NewTwitterIcon;
-/** Instagram. InstagramIcon. */
-export const BrandInstagram: IconData = InstagramIcon;
-/** Facebook. FacebookIcon. */
-export const BrandFacebook: IconData = FacebookIcon;
-/** Shopify. ShopifyIcon. */
-export const BrandShopify: IconData = ShopifyIcon;
 
 // Agent activity and Sources (cloud/pickers).
 /** A thought: the agent reasoning. Idea01Icon. */
@@ -555,3 +483,16 @@ export const AppRecord: IconData = Invoice01Icon;
 export const Mail: IconData = Mail01Icon;
 /** Locked: there, but the person cannot open it. SquareLock02Icon. */
 export const Lock: IconData = SquareLock02Icon;
+/**
+ * Someone's pointer, as another person's cursor is drawn on a shared canvas. Cursor02Icon. It
+ * points along the line: right to left it turns round, as the pointer does in a right-to-left
+ * system, so its tip still leads the name tag that follows it.
+ */
+export const Pointer: IconData = pointing(Cursor02Icon);
+// App preview: the widths a running app is shown at.
+/** A phone's width: an app shown as on a phone. SmartPhone01Icon. */
+export const Phone: IconData = SmartPhone01Icon;
+/** A tablet's width: an app shown as on a tablet. Tablet01Icon. */
+export const Tablet: IconData = Tablet01Icon;
+/** A desktop's width: an app shown as on a laptop or a desktop. LaptopIcon. */
+export const Desktop: IconData = LaptopIcon;

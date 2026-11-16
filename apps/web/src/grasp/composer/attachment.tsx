@@ -1,11 +1,11 @@
 // ComposerAttachment: one file waiting to be sent with a composer's message (composer.tsx), as a
 // small card in the strip above the text. A real thumbnail for an image, else a mark by kind; the
-// name cut in the middle so its extension stays; its size or pages. While it uploads, a thin bar
-// shows how far; if it failed, it says so with Retry; if it was refused, it says why. Remove shows
+// name whole when there is room, else cut in the middle so its extension stays; its size or pages. While it uploads, a thin bar
+// shows how far; if it failed, it says so with Try again; if it was refused, it says why. Remove shows
 // under a pointer or focus, and always on a touch screen.
 //
 // The words are shared with the File upload component: Uploading, Uploaded, Could not upload,
-// Retry, Remove.
+// Try again, Remove.
 "use client";
 
 import * as stylex from "@stylexjs/stylex";
@@ -15,6 +15,7 @@ import { useState } from "react";
 import { focus } from "../focus/focus";
 import { Cross, File, Icon, Image } from "../icons";
 import { iconVars } from "../icons/icon.stylex";
+import { simply } from "../motion/simply.stylex";
 import { grasp, media } from "../tokens/tokens.stylex";
 
 /** Where a file is. */
@@ -46,7 +47,7 @@ export interface ComposerAttachmentProps {
   /** A picture of it: for an image, its own address. */
   preview?: string;
   /**
-   * Where it is: `uploading` with `progress`, `done`, `failed` (Retry), or `refused` with `reason`.
+   * Where it is: `uploading` with `progress`, `done`, `failed` (Try again), or `refused` with `reason`.
    * @default "done"
    */
   status?: ComposerAttachmentStatus;
@@ -68,7 +69,7 @@ const defaultWords: ComposerAttachmentWords = {
   uploading: "Uploading",
   done: "Uploaded",
   failed: "Could not upload",
-  retry: "Retry",
+  retry: "Try again",
   remove: "Remove",
 };
 
@@ -103,7 +104,9 @@ const styles = stylex.create({
     gap: grasp.space2,
     flexShrink: 0,
     boxSizing: "border-box",
-    width: grasp.attachmentWidth,
+    // As wide as its name, up to a sensible most or the strip's own width (the strip is the
+    // container): only a name that truly does not fit is cut, in the middle.
+    maxWidth: `min(${grasp.attachmentMaxWidth}, 100cqi)`,
     padding: grasp.space1,
     paddingInlineEnd: grasp.space2,
     overflow: "hidden",
@@ -196,7 +199,7 @@ const styles = stylex.create({
     backgroundColor: grasp.progressFill,
     transformOrigin: "left center",
     transitionProperty: "transform",
-    transitionDuration: grasp.durationUi,
+    transitionDuration: simply.ui,
     transitionTimingFunction: grasp.ease,
   },
   barScale: (scale: number) => ({ transform: `scaleX(${scale})` }),
@@ -223,7 +226,7 @@ const styles = stylex.create({
     cursor: "pointer",
     opacity: { default: 1, [media.hover]: 0 },
     transitionProperty: "opacity, background-color",
-    transitionDuration: { default: grasp.durationHover, [media.reduced]: "0s" },
+    transitionDuration: simply.hover,
     transitionTimingFunction: grasp.ease,
   },
   shown: {
@@ -349,12 +352,15 @@ export const ComposerAttachment = ({
         )}
       </span>
       <span {...stylex.props(styles.words)}>
-        <span title={name} {...stylex.props(styles.name)}>
+        {/* A name and its line read in their own direction, so in a right-to-left page a Latin
+            name still runs from its start to its extension, the cut between them. */}
+        <span title={name} dir="auto" {...stylex.props(styles.name)}>
           <span {...stylex.props(styles.nameStart)}>{start}</span>
           {end !== "" && <span {...stylex.props(styles.nameEnd)}>{end}</span>}
         </span>
         <span
           role={wrong ? "alert" : undefined}
+          dir="auto"
           {...stylex.props(styles.meta, wrong && styles.metaWrong)}
         >
           {meta}

@@ -27,10 +27,7 @@ import {
 } from "../popover";
 import { Button } from "./button";
 import type { ButtonProps } from "./button";
-import { HoldContext, holdTime, useHold } from "./use-hold";
-
-/** "Delete draft" becomes "delete draft", for "Hold to delete draft". */
-const lower = (words: string) => words.charAt(0).toLowerCase() + words.slice(1);
+import { HoldContext, englishHoldLabels, holdTime, useHold } from "./use-hold";
 
 /** The words of a button, however they are written: `Delete {name}` reads "Delete Weekly notes". */
 const textOf = (node: ReactNode): string => {
@@ -57,7 +54,8 @@ const wordsOf = (children: ReactNode, label: string | undefined) => {
 
 /** A Button with `hold`: the trigger of its confirmation, holding the Button that is pressed. */
 export const HoldButton = (props: ButtonProps) => {
-  const { hold, onClick, ref: callerRef, ...rest } = props;
+  const { hold, holdLabels, onClick, ref: callerRef, ...rest } = props;
+  const labels = { ...englishHoldLabels, ...holdLabels };
   const { variant = "quiet", disabled = false } = rest;
   const words = wordsOf(rest.children, rest.label);
   const busy = rest.state !== undefined && rest.state !== "idle";
@@ -77,7 +75,7 @@ export const HoldButton = (props: ButtonProps) => {
   const look = {
     holding: pressing.holding,
     ms: pressing.ms,
-    name: words === undefined ? undefined : `Hold to ${lower(words)}`,
+    name: words === undefined ? undefined : labels.holdTo(words),
   };
   // The confirmation's action says the button's own words, in danger for a danger button and in
   // ink otherwise, and an agent always needs the person's yes to press it.
@@ -107,10 +105,10 @@ export const HoldButton = (props: ButtonProps) => {
       </HoldContext.Provider>
       <PopoverPanel>
         <PopoverTitle>
-          {words === undefined ? "Confirm" : `${words}?`}
+          {words === undefined ? labels.confirm : labels.ask(words)}
         </PopoverTitle>
         <PopoverFooter>
-          <PopoverAction>Cancel</PopoverAction>
+          <PopoverAction>{labels.cancel}</PopoverAction>
           {/* It only says yes: the work and its result show on the button, where focus returns. */}
           <ClosePrimitive
             onClick={pressing.handleYes}

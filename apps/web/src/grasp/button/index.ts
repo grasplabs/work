@@ -7,7 +7,7 @@ export type {
   ButtonVariant,
   ButtonWords,
 } from "./button";
-export type { HoldSetting } from "./use-hold";
+export type { ButtonHoldLabels, HoldSetting } from "./use-hold";
 export { useAction } from "./use-action";
 export type {
   Action,

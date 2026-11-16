@@ -32,6 +32,8 @@ export const simply = stylex.defineVars({
   ui: { default: grasp.durationUi, [REDUCED]: "0s" },
   /** Something leaving, faster than it came: duration-leave, 0s with reduced motion. */
   leave: { default: grasp.durationLeave, [REDUCED]: "0s" },
+  /** A beat to wait before something follows what moved first: duration-stagger, 0s with reduced motion. */
+  stagger: { default: grasp.durationStagger, [REDUCED]: "0s" },
   /** A tooltip leaving: tooltip-leave, 0s with reduced motion. */
   tooltipLeave: { default: grasp.tooltipLeave, [REDUCED]: "0s" },
   /** Words following their mark: result-follow, 0s with reduced motion. */
@@ -54,4 +56,6 @@ export const simply = stylex.defineVars({
   searchOpen: { default: grasp.durationSearchOpen, [REDUCED]: "0s" },
   /** The command palette fading out: duration-search-close, 0s with reduced motion. */
   searchClose: { default: grasp.durationSearchClose, [REDUCED]: "0s" },
+  /** A popup opening (a menu, a list, a popover): duration-popup, 0s with reduced motion. */
+  popup: { default: grasp.durationPopup, [REDUCED]: "0s" },
 });

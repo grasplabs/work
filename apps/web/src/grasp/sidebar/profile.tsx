@@ -44,7 +44,7 @@ export interface SidebarChoice {
 export interface SidebarMenuAction {
   /** Its words: a verb or a place ("Settings", "Sign out"). Typing its first letters finds it. */
   label: string;
-  /** An icon before the words. From src/icons. */
+  /** An icon before the words. From the icons entry (`@/components/grasp/icons`). */
   icon?: IconData;
   /** Runs when it is chosen, by pointer, Enter or Space. The menu closes. */
   onSelect?: () => void;
@@ -63,7 +63,7 @@ export interface SidebarMenuAction {
 export interface SidebarMenuChoices {
   /** Its words ("Switch organisation"). */
   label: string;
-  /** An icon before the words. From src/icons. */
+  /** An icon before the words. From the icons entry (`@/components/grasp/icons`). */
   icon?: IconData;
   /** The choices, in order. */
   choices: readonly SidebarChoice[];
@@ -196,6 +196,8 @@ const styles = stylex.create({
     color: grasp.shellTextSecondary,
   },
   chevrons: { display: "flex", flexShrink: 0, color: grasp.shellTextTertiary },
+  // The person with no menu: the same place and words, no hover, no pointer.
+  still: { cursor: "default", backgroundColor: "transparent" },
 
   // The menu: as wide as the button, on the popup's fill at a menu's lift.
   panel: {
@@ -419,6 +421,21 @@ export const SidebarProfile = ({
     };
     entries.splice(at === -1 ? entries.length : at, 0, themeEntry);
   }
+  const who = (
+    <>
+      <Avatar decorative name={name} src={picture} size="sm" />
+      <span {...stylex.props(styles.who)}>
+        <span {...stylex.props(styles.name)}>{name}</span>
+        {organisation !== undefined && (
+          <span {...stylex.props(styles.organisation)}>{organisation}</span>
+        )}
+      </span>
+    </>
+  );
+  // Nothing to choose: the person, said plainly, not a button that opens nothing.
+  if (entries.length === 0) {
+    return <div {...stylex.props(styles.button, styles.still)}>{who}</div>;
+  }
   return (
     <DropdownMenu>
       <MenuTrigger
@@ -427,38 +444,30 @@ export const SidebarProfile = ({
         )}
         {...stylex.props(styles.button, styles.buttonForced, focus.ring)}
       >
-        <Avatar decorative name={name} src={picture} size="sm" />
-        <span {...stylex.props(styles.who)}>
-          <span {...stylex.props(styles.name)}>{name}</span>
-          {organisation !== undefined && (
-            <span {...stylex.props(styles.organisation)}>{organisation}</span>
-          )}
-        </span>
+        {who}
         <span aria-hidden="true" {...stylex.props(styles.chevrons)}>
           <Icon icon={UpDown} />
         </span>
       </MenuTrigger>
-      {entries.length > 0 && (
-        <MenuContent
-          side="top"
-          align="start"
-          sideOffset={MENU_GAP}
-          collisionPadding={popup.gutter}
-          {...stylex.props(menuStyles.panel, menuStyles.motion, styles.panel)}
-        >
-          {entries.map((entry, index) => (
-            <Fragment
-              key={
-                typeof entry === "string"
-                  ? `${entry}-${index}`
-                  : `${entry.label}-${index}`
-              }
-            >
-              <Entry entry={entry} />
-            </Fragment>
-          ))}
-        </MenuContent>
-      )}
+      <MenuContent
+        side="top"
+        align="start"
+        sideOffset={MENU_GAP}
+        collisionPadding={popup.gutter}
+        {...stylex.props(menuStyles.panel, menuStyles.motion, styles.panel)}
+      >
+        {entries.map((entry, index) => (
+          <Fragment
+            key={
+              typeof entry === "string"
+                ? `${entry}-${index}`
+                : `${entry.label}-${index}`
+            }
+          >
+            <Entry entry={entry} />
+          </Fragment>
+        ))}
+      </MenuContent>
     </DropdownMenu>
   );
 };

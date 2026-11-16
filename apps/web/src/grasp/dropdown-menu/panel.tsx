@@ -11,6 +11,7 @@ import type { ComponentProps, ReactNode } from "react";
 
 import { scroll } from "../scroll/scroll";
 import { popup } from "../tokens/tokens.values";
+import { menuMarker } from "./menu.stylex";
 import { menuStyles as styles } from "./styles";
 
 type ContentPrimitiveProps = ComponentProps<typeof ContentPrimitive>;
@@ -64,7 +65,7 @@ export const DropdownMenuPanel = ({
     align={align}
     sideOffset={popup.menuGap}
     collisionPadding={popup.gutter}
-    {...stylex.props(styles.panel, styles.motion, scroll.bar)}
+    {...stylex.props(menuMarker, styles.panel, styles.motion, scroll.bar)}
   >
     {children}
   </ContentPrimitive>

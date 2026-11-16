@@ -11,7 +11,7 @@ import { useComposerDisabled, useVoiceAlone } from "./context";
 
 /** Every prop a ComposerAction takes. */
 export interface ComposerActionProps {
-  /** The icon. Import it from src/icons. */
+  /** The icon. Import it from the icons entry (`@/components/grasp/icons`). */
   icon: IconData;
   /** Its name, for a screen reader and an agent ("Add a file"). */
   label: string;
@@ -22,6 +22,11 @@ export interface ComposerActionProps {
    * @default false
    */
   disabled?: boolean;
+  /**
+   * On: a choice that stays, such as dictation listening. Said as pressed.
+   * @default false
+   */
+  pressed?: boolean;
 }
 
 /** A round icon button for a composer's `start` or `end`. */
@@ -30,19 +35,21 @@ export const ComposerAction = ({
   label,
   onClick,
   disabled: own = false,
+  pressed,
 }: ComposerActionProps) => {
   const disabled = useComposerDisabled() || own;
-  // Voice input standing alone in send's place is filled, as send is.
+  // Voice input standing alone in send's place is filled, as send is; so is an action pressed on.
   const alone = useVoiceAlone();
   return (
     <PressPrimitive
       onClick={onClick}
       disabled={disabled}
       pendingAnnouncement=""
+      aria-pressed={pressed}
       render={(props: Record<string, unknown>) => (
         <Button
           {...props}
-          variant={alone ? "ink" : "quiet"}
+          variant={alone || pressed === true ? "ink" : "quiet"}
           size="sm"
           icon={icon}
           label={label}

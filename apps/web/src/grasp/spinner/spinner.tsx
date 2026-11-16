@@ -1,6 +1,6 @@
 // Spinner: says that something is working, from shadcn's (registry/bases/base/ui/spinner.tsx),
 // converted from Tailwind to StyleX and made Grasp's after Palermo: Hugeicons' loader (the one
-// icon set, through src/icons), turning in the colour of the words around it. With reduced motion
+// icon set, through the icons entry (`@/components/grasp/icons`)), turning in the colour of the words around it. With reduced motion
 // it stands still and breathes.
 //
 //   <Spinner label="Loading the report" />                 alone: a status that says its label
@@ -13,6 +13,7 @@ import * as stylex from "@stylexjs/stylex";
 import { Icon, Spinner as SpinnerIcon } from "../icons";
 import { iconVars } from "../icons/icon.stylex";
 import { grasp, media } from "../tokens/tokens.stylex";
+import { spinnerVars } from "./spinner.stylex";
 
 export type SpinnerSize = "sm" | "md" | "lg";
 
@@ -71,7 +72,7 @@ const styles = stylex.create({
     color: "inherit",
     // The fade: each bar a step fainter than the one ahead of it, down to spinner-fade, so the
     // turn reads as a chase. A mask over the icon: no bar is drawn by hand.
-    maskImage: `conic-gradient(oklch(0 0 none / ${grasp.spinnerFade}), oklch(0 0 none))`,
+    maskImage: `conic-gradient(oklch(0 0 none / ${spinnerVars.floor}), oklch(0 0 none))`,
     animationName: { default: spin, [media.reduced]: breathe },
     animationDuration: {
       default: grasp.durationSpin,

@@ -44,7 +44,7 @@ interface ItemBase extends Omit<
 > {
   /** The words on the item: a verb first ("Duplicate"). Typing its first letters finds it, and an agent presses it by them. */
   children: string;
-  /** An icon before the words. Import it from src/icons. */
+  /** An icon before the words. Import it from the icons entry (`@/components/grasp/icons`). */
   icon?: IconData;
   /**
    * The keys that do the same elsewhere on the page, like `"mod+d"`: shown at the end as ⌘D on a
@@ -169,11 +169,22 @@ const Inside = ({
 }) => (
   <>
     {look.icon && (
-      <MenuItemIcon mirror={look.mirrorIcon} {...stylex.props(styles.icon)}>
+      <MenuItemIcon
+        mirror={look.mirrorIcon}
+        data-menu-icon=""
+        {...stylex.props(styles.icon)}
+      >
         <Icon icon={look.icon} />
       </MenuItemIcon>
     )}
-    <span {...stylex.props(styles.words)}>{look.children}</span>
+    <span
+      {...stylex.props(
+        styles.words,
+        look.icon === undefined && styles.wordsBare
+      )}
+    >
+      {look.children}
+    </span>
     <End look={look} pending={pending} failed={failed} />
   </>
 );

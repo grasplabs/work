@@ -1,5 +1,6 @@
-export { Sidebar } from "./sidebar";
+export { SearchButton as SidebarSearchButton, Sidebar } from "./sidebar";
 export type {
+  SidebarFilter,
   SidebarGroup,
   SidebarLayoutStyle,
   SidebarProps,
@@ -14,3 +15,4 @@ export type {
   SidebarMenuEntry,
   SidebarProfileProps,
 } from "./profile";
+export { sidebarFoldScript } from "./fold-script";

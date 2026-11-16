@@ -16,6 +16,10 @@ import { PopoverStillContext } from "./still-context";
 import type { PopoverStillPhase, PopoverStillValue } from "./still-context";
 import { stillStyles as styles } from "./still.styles";
 
+// A picture, not a control: inert, and no pointer over it or hover on it, so nothing in it reads as
+// pressable (Ruben pressed a still's buttons, 15 November).
+const picture = stylex.create({ still: { pointerEvents: "none" } });
+
 export type { PopoverStillPhase } from "./still-context";
 
 export interface PopoverStillProps {
@@ -54,7 +58,12 @@ export const PopoverStill = ({
         inert
         data-force=""
         data-popover-still={phase}
-        {...stylex.props(styles.frame, phone && styles.phoneFrame, style)}
+        {...stylex.props(
+          styles.frame,
+          phone && styles.phoneFrame,
+          style,
+          picture.still
+        )}
       >
         {children}
       </div>

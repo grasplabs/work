@@ -33,7 +33,7 @@ interface ActionBase extends Omit<
    * @default "quiet"
    */
   variant?: ButtonVariant;
-  /** An icon before the words. Import it from src/icons. */
+  /** An icon before the words. Import it from the icons entry (`@/components/grasp/icons`). */
   icon?: IconData;
   /**
    * What the action does, for the person an agent must ask first ("Removes the person"). A

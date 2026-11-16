@@ -1,5 +1,5 @@
 // DropdownMenuRadioItem: one option in a DropdownMenuRadioGroup, UI SDK's MenuRadioItem in the look
-// of an item, with a tick at the end while it is the chosen one. Choosing it leaves the menu open.
+// of an item, with a dot at the end while it is the chosen one. Choosing it leaves the menu open.
 "use client";
 
 import * as stylex from "@stylexjs/stylex";
@@ -10,7 +10,6 @@ import {
 import type { MenuRadioItemState } from "@ui-sdk/react/menu";
 import type { ComponentProps } from "react";
 
-import { Icon, Tick } from "../icons";
 import { menuStyles as styles } from "./styles";
 
 type RadioPrimitiveProps = ComponentProps<typeof RadioPrimitive>;
@@ -42,7 +41,7 @@ export interface DropdownMenuRadioItemProps extends Omit<
 const className = (...parts: (stylex.StyleXStyles | false)[]) =>
   stylex.props(...parts).className;
 
-/** One option of a radio group, with a tick while it is chosen. */
+/** One option of a radio group, with a dot while it is chosen. */
 export const DropdownMenuRadioItem = ({
   children,
   ...rest
@@ -58,9 +57,7 @@ export const DropdownMenuRadioItem = ({
       )
     }
   >
-    <span {...stylex.props(styles.words)}>{children}</span>
-    <MenuItemIndicator {...stylex.props(styles.tick)}>
-      <Icon icon={Tick} />
-    </MenuItemIndicator>
+    <span {...stylex.props(styles.words, styles.wordsBare)}>{children}</span>
+    <MenuItemIndicator {...stylex.props(styles.dot)} />
   </RadioPrimitive>
 );

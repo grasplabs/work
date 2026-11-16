@@ -8,6 +8,7 @@ export const ms = {
   durationMark: 200,
   durationUi: 250,
   durationLeave: 160,
+  durationPopup: 200,
   durationSearchOpen: 150,
   durationSearchClose: 100,
   durationOpen: 300,
@@ -34,6 +35,7 @@ export const ms = {
   workingMarkOrbit: 1700,
   workingMarkBreath: 1600,
   workingMarkGlide: 2200,
+  appBuildingBeat: 760,
   toastDuration: 3500,
   toastDurationAction: 8000,
   activeBarMove: 200,
@@ -60,4 +62,5 @@ export const popup = {
   popoverGap: 8,
   tooltipGap: 8,
   menuGap: 10,
+  dateFieldInset: 12,
 } as const;

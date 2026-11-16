@@ -42,6 +42,8 @@ import type { IconData } from "../icons";
 import { iconVars } from "../icons/icon.stylex";
 import { simply } from "../motion/simply.stylex";
 import { grasp, media } from "../tokens/tokens.stylex";
+import { SidebarNav } from "./nav";
+import type { SidebarFilter } from "./nav";
 import { SidebarProfile } from "./profile";
 import type { SidebarProfileProps } from "./profile";
 
@@ -62,7 +64,7 @@ export interface SidebarSubRow {
 
 /** One row: a link to a page, with its icon, and a count where something waits. */
 export interface SidebarRow extends SidebarSubRow {
-  /** An icon before the name. From src/icons. */
+  /** An icon before the name. From the icons entry (`@/components/grasp/icons`). */
   icon?: IconData;
   /** How many things wait there: a small pill at the row's end. None at 0. */
   count?: number;
@@ -75,14 +77,38 @@ export interface SidebarRow extends SidebarSubRow {
   onClick?: (event: MouseEvent<HTMLElement>) => void;
   /** Its own rows, under its name: the pages within it. */
   rows?: readonly SidebarSubRow[];
+  /** More words the filter finds it by, beside its name ("dropdown" for Select). */
+  keywords?: readonly string[];
 }
 
 /** A run of rows, with a label over it when it is not the main one. */
 export interface SidebarGroup {
+  /**
+   * The name of a part this group starts, over its label: a level above the group labels, for a
+   * long list in a few parts ("Docs", "Components"). The groups after it belong to it until the
+   * next group with a part.
+   */
+  part?: string;
+  /** Where the part's name leads, its own page (an overview): the name is then a link. */
+  partHref?: string;
+  /** The part's own page is the one open: its name takes the current look. */
+  partCurrent?: boolean;
   /** A small label over the rows ("From your Apps"). Leave it out for the first, main run. */
   label?: string;
   /** Its rows, in order. */
   rows: readonly SidebarRow[];
+  /** What its fold is kept under in `storageKey`. @default its label */
+  id?: string;
+  /** Its label is a button that folds the rows away and opens them again. Needs a `label`. */
+  collapsible?: boolean;
+  /** Folded at first, when nothing is kept and you do not keep it in state. @default false */
+  defaultCollapsed?: boolean;
+  /** Folded or open, when you keep it in state. Pair it with `onCollapsedChange`. */
+  collapsed?: boolean;
+  /** Called with the new state when its label folds or opens it. */
+  onCollapsedChange?: (collapsed: boolean) => void;
+  /** A number beside its label (how many rows). While filtering, the number that match instead. */
+  count?: number;
 }
 
 type Layout = string | number | null;
@@ -106,11 +132,17 @@ export interface SidebarProps {
   /** The rows, in runs, top to bottom. */
   groups: readonly SidebarGroup[];
   /**
-   * What stands at the top start: the product's mark. It is not a control. The head gives it a
-   * 20px box (shell-mark), and an svg or img passed here fills that box, even one with no width or
-   * height of its own.
+   * What stands at the top start: the product's mark, or a link home holding it. The head gives it
+   * a 20px box (shell-mark), and an svg or img passed here fills that box, even one with no width or
+   * height of its own. For the mark with the product's name beside it, use App shell's `brand`.
    */
   head?: ReactNode;
+  /**
+   * The product's mark and name, as a link home, at the start of the head (wider than `head`'s 20px
+   * mark box). Shown while the sidebar is open or peeking; folded away it is left out, as the host's
+   * bar holds it then on a narrow shell (App shell's `brandIn="sidebar"` passes it here).
+   */
+  brand?: ReactNode;
   /** Shows a search button at the top, and runs when it is pressed (to open the search). */
   onSearch?: () => void;
   /**
@@ -120,6 +152,21 @@ export interface SidebarProps {
   searchLabel?: string;
   /** The keys that open the search elsewhere, shown in the button's title ("⌘K"). */
   searchShortcut?: string;
+  /**
+   * The same keys as a screen reader hears them, in aria-keyshortcuts' form ("Meta+K Control+K"),
+   * set on the search button.
+   */
+  searchKeyShortcuts?: string;
+  /**
+   * At the head's end, after search: what the host closes the sidebar's layer with (App shell's
+   * menu puts its sheet's close button here, so the menu has one head). Shown only while it fills.
+   */
+  headEnd?: ReactNode;
+  /**
+   * Under the head, before the rows: what the host puts there while it fills its layer (App shell's
+   * menu puts the bar's section switch here on a phone, so the head stays first).
+   */
+  headBelow?: ReactNode;
   /** The person signed in, at the foot, with their menu. */
   profile?: SidebarProfileProps;
   /** Open at first, when you do not keep it in state. @default true */
@@ -161,9 +208,32 @@ export interface SidebarProps {
    * @default "raised"
    */
   reopenLook?: "raised" | "quiet";
+  /**
+   * A field at the top of the rows that filters them by name and `keywords`: groups with no match
+   * hide, the rest open. Escape clears it and ↓ moves into the rows.
+   */
+  filter?: SidebarFilter;
+  /** The filter field, so the page can focus it from a key of its own. */
+  filterRef?: RefObject<HTMLInputElement | null>;
+  /** Where the groups' folds are kept in localStorage, so they stay as the person left them. */
+  storageKey?: string;
+  /**
+   * `tab`: every row is a tab stop, as links on any page. `list`: the rows are one tab stop, and
+   * ↑/↓, Home and End move among the rows and group labels, → opens a group and ← folds it.
+   * @default "tab"
+   */
+  keys?: "tab" | "list";
+  /**
+   * On a narrow window (under 48rem), open, it covers the page as a card of its own, and its fold
+   * closes it. `false` for a host that keeps it in a column of its own there (App shell does).
+   * @default true
+   */
+  cover?: boolean;
   /** Layout only: where it sits and how tall it is. */
   style?: SidebarLayoutStyle;
 }
+
+export type { SidebarFilter } from "./nav";
 
 /** How long the pointer rests on the edge before the sidebar peeks in, in ms. */
 const PEEK_AFTER = 120;
@@ -223,13 +293,17 @@ const styles = stylex.create({
       default: `translateX(calc(-100% - 2 * ${grasp.shellInset}))`,
       ":dir(rtl)": `translateX(calc(100% + 2 * ${grasp.shellInset}))`,
     },
-    transitionProperty: "transform, box-shadow",
+    // Hidden once it has slid away (visibility turns at the end of its time), so nothing in it can
+    // be pressed or seen where it waits, past the start edge: not by a pointer, a tool or a reader.
+    visibility: "hidden",
+    transitionProperty: "transform, box-shadow, visibility",
     transitionDuration: simply.ui,
     transitionTimingFunction: grasp.ease,
   },
   panelPeeking: {
     transform: { default: "none", ":dir(rtl)": "none" },
     boxShadow: grasp.shellCardShadow,
+    visibility: "visible",
   },
   // The start edge, where resting the pointer brings it back.
   edge: {
@@ -252,6 +326,15 @@ const styles = stylex.create({
     color: grasp.shellText,
   },
   // The head: the mark at the start, search and the fold at the end.
+  // The brand at the head's start, cut short before the icon buttons; gone while folded, back while it peeks.
+  brand: {
+    display: "flex",
+    alignItems: "center",
+    gap: grasp.space2,
+    minWidth: 0,
+    paddingInlineStart: grasp.shellRowInline,
+  },
+  brandFolded: { display: "none" },
   head: {
     display: "flex",
     flexShrink: 0,
@@ -292,6 +375,15 @@ const styles = stylex.create({
     gap: grasp.shellRowGap,
     marginInlineStart: "auto",
   },
+  // The host's control at the head's end (headEnd): on a finger, a tap-sized box of its own, so its
+  // press area and search's sit side by side and never overlap.
+  headEnd: {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    minWidth: { default: null, [COARSE]: grasp.tap },
+    minHeight: { default: null, [COARSE]: grasp.tap },
+  },
   iconButton: {
     display: "inline-flex",
     alignItems: "center",
@@ -301,8 +393,14 @@ const styles = stylex.create({
     width: { default: grasp.shellIconButton, [COARSE]: grasp.tap },
     height: { default: grasp.shellIconButton, [COARSE]: grasp.tap },
     padding: 0,
-    borderWidth: 0,
-    borderRadius: grasp.shellCorner,
+    // A control keeps an edge in forced colours, where its hover fill is dropped.
+    borderWidth: { default: 0, [FORCED]: grasp.hairline },
+    borderStyle: "solid",
+    borderColor: "ButtonText",
+    // The system's one button corner, as a Button xs has it: the same shape as the bar's Menu
+    // button and the sheet's close beside these (App shell FLAWS.md F35).
+    borderRadius: `min(${grasp.corner}, calc(${grasp.shellIconButton} / 2))`,
+    cornerShape: grasp.cornerShape,
     color: {
       default: grasp.shellTextSecondary,
       [HOVER]: { default: grasp.shellTextSecondary, ":hover": grasp.shellText },
@@ -317,7 +415,22 @@ const styles = stylex.create({
     transitionTimingFunction: grasp.ease,
   },
   // On a phone the sidebar is in a sheet, which closes as any sheet does: no fold there.
-  fold: { display: { default: "inline-flex", [media.belowTablet]: "none" } },
+  // In a sheet, which closes as any sheet does: no fold there.
+  foldGone: { display: "none" },
+  // On a narrow window the open sidebar covers the page as a card of its own, rather than leaving
+  // the page a sliver beside it; its fold closes it again.
+  asideCovers: {
+    width: { default: grasp.shellSidebar, [media.belowTablet]: 0 },
+  },
+  panelCovers: {
+    position: { default: null, [media.belowTablet]: "absolute" },
+    insetBlock: { default: null, [media.belowTablet]: grasp.shellInset },
+    insetInlineStart: { default: null, [media.belowTablet]: grasp.shellInset },
+    zIndex: { default: null, [media.belowTablet]: grasp.shellLayer },
+    height: { default: "100%", [media.belowTablet]: "auto" },
+    borderRadius: { default: null, [media.belowTablet]: grasp.shellCardCorner },
+    boxShadow: { default: null, [media.belowTablet]: grasp.shellCardShadow },
+  },
   // Folded, the button that opens it again stands at the top start corner, level with the head's
   // row, as Ruben's page bar has it (an App shell keeps its top bar clear of it).
   reveal: {
@@ -334,28 +447,6 @@ const styles = stylex.create({
     borderWidth: { default: 0, [FORCED]: grasp.hairline },
     borderStyle: "solid",
     borderColor: "CanvasText",
-  },
-  body: {
-    display: "flex",
-    flexDirection: "column",
-    flexGrow: 1,
-    gap: grasp.shellGutter,
-    minHeight: 0,
-    margin: 0,
-    padding: grasp.shellGutter,
-    overflowX: "hidden",
-    overflowY: "auto",
-  },
-  group: { display: "flex", flexDirection: "column", gap: grasp.shellRowGap },
-  groupLabel: {
-    margin: 0,
-    paddingInline: grasp.shellRowInline,
-    paddingBlockStart: grasp.space2,
-    paddingBlockEnd: grasp.space1,
-    fontSize: grasp.textXs,
-    lineHeight: grasp.textXsLine,
-    fontWeight: grasp.weightMedium,
-    color: grasp.shellTextTertiary,
   },
   list: {
     display: "flex",
@@ -460,6 +551,42 @@ const styles = stylex.create({
   },
 });
 
+// The brand's place in the head: there while the sidebar is open or peeking, folded away otherwise.
+const brandLook = (open: boolean, peeking: boolean) =>
+  open || peeking ? null : styles.brandFolded;
+
+// The host's control at the head's end, only while the sidebar fills its layer and there is one.
+const HeadEnd = ({
+  shown,
+  children,
+}: {
+  shown: boolean;
+  children: ReactNode;
+}) => {
+  if (!shown || children === undefined) {
+    return null;
+  }
+  return (
+    <span data-slot="sidebar-head-end" {...stylex.props(styles.headEnd)}>
+      {children}
+    </span>
+  );
+};
+
+// The host's row under the head, only while the sidebar fills its layer and there is one.
+const HeadBelow = ({
+  shown,
+  children,
+}: {
+  shown: boolean;
+  children: ReactNode;
+}) => {
+  if (!shown || children === undefined) {
+    return null;
+  }
+  return <div data-slot="sidebar-head-below">{children}</div>;
+};
+
 /** Words only a screen reader reads. */
 const Unseen = ({ children }: { children: ReactNode }) => (
   <span {...stylex.props(styles.unseen)}>{children}</span>
@@ -472,22 +599,26 @@ interface LinkProps {
   style?: ReturnType<typeof stylex.props>["style"];
   children?: ReactNode;
   "aria-current"?: "page";
+  "data-sidebar-item"?: string;
   onClick?: (event: MouseEvent<HTMLElement>) => void;
 }
 
 const Linked = ({
   row,
+  item,
   look,
   children,
   onClick,
 }: {
   row: SidebarSubRow;
+  item: boolean;
   look: ReturnType<typeof stylex.props>;
   children: ReactNode;
   onClick?: (event: MouseEvent<HTMLElement>) => void;
 }) => {
   const shared = {
     "aria-current": row.current === true ? ("page" as const) : undefined,
+    "data-sidebar-item": item ? "" : undefined,
     onClick,
   };
   if (row.render !== undefined && isValidElement<LinkProps>(row.render)) {
@@ -517,13 +648,14 @@ const Linked = ({
   );
 };
 
-const Row = ({ row }: { row: SidebarRow }) => {
+const Row = ({ row, item }: { row: SidebarRow; item: boolean }) => {
   const counted = row.count !== undefined && row.count > 0;
   const { onClick: handleClick } = row;
   return (
     <li>
       <Linked
         row={row}
+        item={item}
         onClick={handleClick}
         look={stylex.props(
           styles.row,
@@ -548,6 +680,7 @@ const Row = ({ row }: { row: SidebarRow }) => {
             <li key={`${sub.label}-${sub.href ?? ""}`}>
               <Linked
                 row={sub}
+                item={item}
                 look={stylex.props(
                   styles.row,
                   styles.subRow,
@@ -582,18 +715,73 @@ const watchPeek = (
       on.close();
     }
   };
+  // Sliding in, the panel passes under a pointer resting on the edge and leaves it there: leaving
+  // for the edge is not leaving.
+  const left = (event: PointerEvent) => {
+    const to = event.relatedTarget;
+    if (
+      to instanceof Element &&
+      to.closest("[data-slot=sidebar-edge]") !== null
+    ) {
+      on.stay();
+      return;
+    }
+    on.leave();
+  };
   element.addEventListener("pointerenter", on.stay);
-  element.addEventListener("pointerleave", on.leave);
+  element.addEventListener("pointerleave", left);
   element.addEventListener("focusin", on.stay);
   element.addEventListener("focusout", blur);
   element.addEventListener("keydown", escape);
   return () => {
     element.removeEventListener("pointerenter", on.stay);
-    element.removeEventListener("pointerleave", on.leave);
+    element.removeEventListener("pointerleave", left);
     element.removeEventListener("focusin", on.stay);
     element.removeEventListener("focusout", blur);
     element.removeEventListener("keydown", escape);
   };
+};
+
+/** Whether a key was pressed in a layer open inside the panel (the person's menu, a popover, a
+ * dialog): its own Escape closes it first, and the panel waits for the next (App shell F42). */
+const inLayer = (
+  panel: HTMLElement | null,
+  target: EventTarget | null
+): boolean => {
+  const layer =
+    target instanceof Element
+      ? target.closest(
+          '[role="menu"], [role="listbox"], [role="dialog"], [role="alertdialog"], [popover]'
+        )
+      : null;
+  return layer !== null && layer !== panel && panel?.contains(layer) === true;
+};
+
+/** While the open sidebar covers the page (a narrow window), Escape closes it, as any covering
+ * panel closes; beside the page, Escape is left to what has focus. */
+const useCoverEscape = (
+  panel: RefObject<HTMLDivElement | null>,
+  covering: boolean,
+  close: () => void
+) => {
+  useEffect(() => {
+    const element = covering ? panel.current : null;
+    const escape = (event: KeyboardEvent) => {
+      if (
+        event.key === "Escape" &&
+        !event.defaultPrevented &&
+        !inLayer(element, event.target) &&
+        window.matchMedia("(width < 48rem)").matches
+      ) {
+        event.preventDefault();
+        close();
+      }
+    };
+    element?.addEventListener("keydown", escape);
+    return () => {
+      element?.removeEventListener("keydown", escape);
+    };
+  });
 };
 
 /** The caller's mark, made to fill its box: an svg or img with no size of its own fills it too. */
@@ -619,15 +807,18 @@ const HeadMark = ({ head }: { head: ReactNode }) =>
     </div>
   );
 
-/** Search, at the head's end, with the keys that open it elsewhere in its title. */
-const SearchButton = ({
+/** Search, at the head's end, with the keys that open it elsewhere in its title. App shell stands
+ * the same button in its bar while the sidebar is folded (`brandIn="sidebar"`). */
+export const SearchButton = ({
   onSearch,
   label,
   shortcut,
+  keys,
 }: {
   onSearch?: () => void;
   label: string;
   shortcut?: string;
+  keys?: string;
 }) => {
   if (onSearch === undefined) {
     return null;
@@ -640,6 +831,7 @@ const SearchButton = ({
     <button
       type="button"
       aria-label={label}
+      aria-keyshortcuts={keys}
       title={title}
       onClick={() => {
         onSearch();
@@ -691,13 +883,52 @@ const Reopen = ({
     </button>
   ) : null;
 
+/** Where the sidebar stands and how wide: beside the page, filling a sheet, or folded away. */
+const asideLook = ({
+  open,
+  fill,
+  cover,
+}: {
+  open: boolean;
+  fill: boolean;
+  cover: boolean;
+}) => [
+  styles.aside,
+  cover && !fill && styles.asideCovers,
+  fill && styles.filled,
+  !open && styles.asideFolded,
+];
+
+/** The panel: in its column, covering the page on a narrow window, folded away, or peeking. */
+const panelLook = ({
+  open,
+  fill,
+  cover,
+  peeking,
+}: {
+  open: boolean;
+  fill: boolean;
+  cover: boolean;
+  peeking: boolean;
+}) => [
+  styles.panel,
+  fill && styles.filled,
+  open && cover && !fill && styles.panelCovers,
+  !open && styles.panelFolded,
+  !open && peeking && styles.panelPeeking,
+];
+
 /** A product's main navigation down the start, that folds away and peeks back in. */
 export const Sidebar = ({
   groups,
   head,
+  brand,
+  headEnd,
+  headBelow,
   onSearch,
   searchLabel = "Search",
   searchShortcut,
+  searchKeyShortcuts,
   profile,
   defaultOpen = true,
   open: given,
@@ -708,6 +939,11 @@ export const Sidebar = ({
   reopen = true,
   reopenLook = "raised",
   fill = false,
+  filter,
+  filterRef,
+  storageKey,
+  keys,
+  cover = true,
   style,
 }: SidebarProps) => {
   const [own, setOwn] = useState(defaultOpen);
@@ -743,9 +979,12 @@ export const Sidebar = ({
     window.clearTimeout(timer.current);
     timer.current = window.setTimeout(() => {
       // A menu open from the sidebar (the person's) stands outside it: the sidebar stays meanwhile.
+      // Only a control that opens a popup counts: an open group's disclosure is expanded too, and
+      // a folded sidebar with an open group would never go.
       const menuOpen =
-        (panel.current?.querySelector('[aria-expanded="true"]') ?? null) !==
-        null;
+        (panel.current?.querySelector(
+          '[aria-haspopup]:not([aria-haspopup="false"])[aria-expanded="true"]'
+        ) ?? null) !== null;
       if (next || !menuOpen) {
         setPeeking(next);
       }
@@ -788,6 +1027,10 @@ export const Sidebar = ({
     change(!open, event.detail === 0);
   };
 
+  useCoverEscape(panel, open && cover && !fill, () => {
+    change(false, true);
+  });
+
   const shown = open || peeking;
 
   return (
@@ -795,12 +1038,7 @@ export const Sidebar = ({
       aria-label={label}
       data-slot="sidebar"
       data-folded={open ? undefined : ""}
-      {...stylex.props(
-        styles.aside,
-        fill && styles.filled,
-        !open && styles.asideFolded,
-        style
-      )}
+      {...stylex.props(...asideLook({ open, fill, cover }), style)}
     >
       {!open && (
         <>
@@ -811,11 +1049,18 @@ export const Sidebar = ({
                 peekAfter(true, PEEK_AFTER);
               }
             }}
-            onPointerLeave={() => {
+            onPointerLeave={(event) => {
+              const to = event.relatedTarget;
               if (!peeking) {
                 window.clearTimeout(timer.current);
+              } else if (
+                !(to instanceof Node && panel.current?.contains(to) === true)
+              ) {
+                // Off the edge and not onto the panel: it goes, as when the pointer leaves the panel.
+                peekAfter(false, LEAVE_AFTER);
               }
             }}
+            data-slot="sidebar-edge"
             {...stylex.props(styles.edge)}
           />
           <Reopen
@@ -837,22 +1082,27 @@ export const Sidebar = ({
         // Off the window and out of reach while it is folded and not peeking: no tab stop lands on
         // what cannot be seen.
         inert={!shown}
-        {...stylex.props(
-          styles.panel,
-          fill && styles.filled,
-          !open && styles.panelFolded,
-          !open && peeking && styles.panelPeeking
-        )}
+        {...stylex.props(...panelLook({ open, fill, cover, peeking }))}
       >
         <div {...stylex.props(styles.inner)}>
           <div {...stylex.props(styles.head)}>
             <HeadMark head={head} />
+            {brand !== undefined && (
+              <div
+                data-slot="sidebar-brand"
+                {...stylex.props(styles.brand, brandLook(open, peeking))}
+              >
+                {brand}
+              </div>
+            )}
             <div {...stylex.props(styles.tools)}>
               <SearchButton
                 onSearch={onSearch}
                 label={searchLabel}
                 shortcut={searchShortcut}
+                keys={searchKeyShortcuts}
               />
+              <HeadEnd shown={fill}>{headEnd}</HeadEnd>
               <button
                 ref={foldButton}
                 type="button"
@@ -861,34 +1111,33 @@ export const Sidebar = ({
                 aria-expanded={open}
                 aria-controls={`${id}-panel`}
                 onClick={fold}
-                {...stylex.props(styles.iconButton, styles.fold, focus.ring)}
+                {...stylex.props(
+                  styles.iconButton,
+                  fill && styles.foldGone,
+                  focus.ring
+                )}
               >
                 <Icon icon={SidebarToggle} />
               </button>
             </div>
           </div>
-          <nav aria-label={navLabel} {...stylex.props(styles.body)}>
-            {groups.map((group, index) => {
-              const heading =
-                group.label !== undefined && group.label !== ""
-                  ? `${id}-group-${index}`
-                  : undefined;
-              return (
-                <div key={group.label ?? index} {...stylex.props(styles.group)}>
-                  {heading !== undefined && (
-                    <p id={heading} {...stylex.props(styles.groupLabel)}>
-                      {group.label}
-                    </p>
-                  )}
-                  <ul aria-labelledby={heading} {...stylex.props(styles.list)}>
-                    {group.rows.map((row) => (
-                      <Row key={`${row.label}-${row.href ?? ""}`} row={row} />
-                    ))}
-                  </ul>
-                </div>
-              );
-            })}
-          </nav>
+          <HeadBelow shown={fill}>{headBelow}</HeadBelow>
+          <SidebarNav
+            groups={groups}
+            label={navLabel}
+            id={id}
+            filter={filter}
+            filterRef={filterRef}
+            storageKey={storageKey}
+            keys={keys}
+            renderRow={(row, item) => (
+              <Row
+                key={`${row.label}-${row.href ?? ""}`}
+                row={row}
+                item={item}
+              />
+            )}
+          />
           {profile !== undefined && (
             <div {...stylex.props(styles.foot)}>
               <SidebarProfile {...profile} />

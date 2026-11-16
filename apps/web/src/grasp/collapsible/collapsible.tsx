@@ -15,6 +15,7 @@ import {
   CollapsiblePanel,
   CollapsibleTrigger,
 } from "@ui-sdk/react/collapsible";
+import type { CollapsibleState } from "@ui-sdk/react/collapsible";
 import type { ReactNode } from "react";
 
 import { focus } from "../focus/focus";
@@ -59,6 +60,12 @@ export interface CollapsibleProps {
    */
   variant?: "ghost" | "raised";
   /**
+   * The trigger is only as wide as its words and its chevron, which then stands beside them: for
+   * one quiet line among words. Without it the trigger runs the whole width, chevron at the end.
+   * @default false
+   */
+  fit?: boolean;
+  /**
    * The trigger does nothing; it stays focusable.
    * @default false
    */
@@ -71,7 +78,7 @@ const HOVER = media.hover;
 const COARSE = media.coarse;
 const OFF = ":is([data-disabled])";
 // Without script nothing opens a panel, so every panel shows open.
-const NO_SCRIPT = "@media (scripting: none)";
+const NO_SCRIPT = media.noScript;
 
 const styles = stylex.create({
   root: {
@@ -100,7 +107,7 @@ const styles = stylex.create({
     cornerShape: grasp.cornerShape,
     fontFamily: "inherit",
     fontSize: grasp.textSm,
-    lineHeight: "18px",
+    lineHeight: "1.125rem",
     fontWeight: grasp.weightMedium,
     textAlign: "start",
     color: {
@@ -119,19 +126,27 @@ const styles = stylex.create({
     touchAction: "manipulation",
     WebkitTapHighlightColor: "transparent",
   },
+  // A disabled trigger takes no hover and no press: its rest wins under the pointer. Said inside
+  // :hover and :active, since a bare [data-disabled] sorts before them and lost (B-collapsible-01).
   ghost: {
     backgroundColor: {
       default: "transparent",
-      ":hover": { default: null, [HOVER]: grasp.ghostFillHover },
-      ":active": grasp.ghostFillPress,
+      ":hover": {
+        default: null,
+        [HOVER]: { default: grasp.ghostFillHover, [OFF]: "transparent" },
+      },
+      ":active": { default: grasp.ghostFillPress, [OFF]: "transparent" },
       [OFF]: "transparent",
     },
   },
   raised: {
     backgroundColor: {
       default: grasp.quietFill,
-      ":hover": { default: null, [HOVER]: grasp.quietFillHover },
-      ":active": grasp.quietFillPress,
+      ":hover": {
+        default: null,
+        [HOVER]: { default: grasp.quietFillHover, [OFF]: grasp.soft },
+      },
+      ":active": { default: grasp.quietFillPress, [OFF]: grasp.soft },
       [OFF]: grasp.soft,
     },
     boxShadow: { default: grasp.liftLow, [OFF]: "none" },
@@ -150,9 +165,25 @@ const styles = stylex.create({
     minWidth: 0,
     overflowWrap: "anywhere",
   },
+  // Points down while closed and turns up as it opens.
   chevron: {
     display: "inline-flex",
     flexShrink: 0,
+    transitionProperty: "transform",
+    transitionDuration: simply.ui,
+    transitionTimingFunction: grasp.ease,
+  },
+  chevronOpen: {
+    transform: "rotate(0.5turn)",
+  },
+  // Only as wide as its words and chevron: at the start, the chevron a step after the words.
+  fit: {
+    justifySelf: "start",
+    maxWidth: "100%",
+    columnGap: grasp.space1,
+  },
+  fitWords: {
+    flexGrow: 0,
   },
   panel: {
     // A base stylesheet that hides [hidden] with !important (the docs' own) still wins over this.
@@ -160,11 +191,17 @@ const styles = stylex.create({
     height: { default: "var(--collapsible-panel-height)", [NO_SCRIPT]: "auto" },
     overflow: "hidden",
     fontSize: grasp.textXs,
-    lineHeight: "18px",
+    lineHeight: "1.125rem",
     color: grasp.muted,
     transitionProperty: "height",
     transitionDuration: simply.open,
     transitionTimingFunction: "ease-out",
+  },
+  // The words in an open panel stand a step off the trigger above and the next thing below, as
+  // Accordion's do, so they read with their own trigger, not stuck under it (B-collapsible-02). On
+  // a part inside the panel: padding on the panel itself would show while it is closed.
+  body: {
+    paddingBlock: grasp.space2,
   },
   panelMoving: {
     height: {
@@ -193,6 +230,7 @@ export const Collapsible = ({
   defaultOpen,
   onOpenChange,
   variant = "ghost",
+  fit = false,
   disabled,
   style,
 }: CollapsibleProps) => (
@@ -211,20 +249,34 @@ export const Collapsible = ({
     {...stylex.props(styles.root, style)}
   >
     <CollapsibleTrigger
-      {...stylex.props(styles.trigger, styles[variant], focus.ring)}
+      {...stylex.props(
+        styles.trigger,
+        styles[variant],
+        fit && styles.fit,
+        focus.ring
+      )}
     >
-      <span aria-hidden="true" {...stylex.props(styles.target)} />
-      <span {...stylex.props(styles.words)}>{title}</span>
-      <span aria-hidden="true" {...stylex.props(styles.chevron)}>
-        <Icon icon={ChevronDown} />
-      </span>
+      {(state: CollapsibleState) => (
+        <>
+          <span aria-hidden="true" {...stylex.props(styles.target)} />
+          <span {...stylex.props(styles.words, fit && styles.fitWords)}>
+            {title}
+          </span>
+          <span
+            aria-hidden="true"
+            {...stylex.props(styles.chevron, state.open && styles.chevronOpen)}
+          >
+            <Icon icon={ChevronDown} />
+          </span>
+        </>
+      )}
     </CollapsibleTrigger>
     {/* The class only: UI SDK writes the panel's measured height as its own inline style. */}
     <CollapsiblePanel
       hiddenUntilFound
       className={stylex.props(styles.panel, styles.panelMoving).className}
     >
-      {children}
+      <div {...stylex.props(styles.body)}>{children}</div>
     </CollapsiblePanel>
   </CollapsiblePrimitive>
 );

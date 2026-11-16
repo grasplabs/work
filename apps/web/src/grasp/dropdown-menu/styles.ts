@@ -7,6 +7,7 @@ import * as stylex from "@stylexjs/stylex";
 import { iconVars } from "../icons/icon.stylex";
 import { simply } from "../motion/simply.stylex";
 import { grasp, media } from "../tokens/tokens.stylex";
+import { menuMarker } from "./menu.stylex";
 
 const COARSE = media.coarse;
 const FORCED = media.forced;
@@ -70,7 +71,7 @@ export const menuStyles = stylex.create({
     },
     transitionProperty: { default: "opacity, transform", [REDUCED]: "opacity" },
     transitionDuration: {
-      default: simply.ui,
+      default: simply.popup,
       ":is([data-ending-style])": simply.leave,
     },
     transitionTimingFunction: grasp.ease,
@@ -135,6 +136,15 @@ export const menuStyles = stylex.create({
     flexGrow: 1,
     minWidth: 0,
   },
+  // The words of an item with no icon, in a panel where other items have one: they start where
+  // the others' words do, past an empty icon slot, so the column of words stays one edge.
+  wordsBare: {
+    paddingInlineStart: {
+      default: 0,
+      [stylex.when.ancestor(":has([data-menu-icon])", menuMarker)]:
+        `calc(${grasp.iconSm} + ${grasp.space2})`,
+    },
+  },
   // The end of an item: the keys of its shortcut, quieter and smaller than its words.
   end: {
     display: "inline-flex",
@@ -163,6 +173,25 @@ export const menuStyles = stylex.create({
     flexShrink: 0,
     marginInlineStart: "auto",
     color: "inherit",
+  },
+
+  // The chosen one of a radio group: a dot in the tick's place, so one of many reads apart from
+  // the tick of an option that is on or off. As wide as an icon, so the words keep their room.
+  dot: {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+    width: grasp.iconSm,
+    height: grasp.iconSm,
+    marginInlineStart: "auto",
+    "::before": {
+      content: '""',
+      width: `calc(${grasp.iconSm} * 0.375)`,
+      height: `calc(${grasp.iconSm} * 0.375)`,
+      borderRadius: grasp.cornerCircle,
+      backgroundColor: { default: "currentColor", [FORCED]: "CanvasText" },
+    },
   },
 
   // A group's name: small and quiet, above its items, as tall as a small control.

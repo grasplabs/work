@@ -7,6 +7,7 @@
 import * as stylex from "@stylexjs/stylex";
 import { useEffect, useRef, useState } from "react";
 
+import { simply } from "../motion/simply.stylex";
 import { scroll } from "../scroll/scroll";
 import { grasp, media } from "../tokens/tokens.stylex";
 import { ms } from "../tokens/tokens.values";
@@ -15,6 +16,7 @@ import type {
   ComposerAttachmentStatus,
   ComposerAttachmentWords,
 } from "./attachment";
+import { stripVars } from "./strip.stylex";
 
 /** One file in a composer's strip. */
 export interface ComposerFile {
@@ -55,11 +57,15 @@ const arrive = stylex.keyframes({
 });
 
 const leave = stylex.keyframes({
-  from: { opacity: 1, transform: "none", width: grasp.attachmentWidth },
+  from: {
+    opacity: 1,
+    transform: "none",
+    gridTemplateColumns: "minmax(0, 1fr)",
+  },
   to: {
     opacity: 0,
     transform: `scale(${grasp.attachmentFromScale})`,
-    width: 0,
+    gridTemplateColumns: "minmax(0, 0fr)",
     marginInlineEnd: `calc(-1 * ${grasp.space2})`,
   },
 });
@@ -70,7 +76,7 @@ const styles = stylex.create({
     display: "grid",
     gridTemplateRows: "0fr",
     transitionProperty: "grid-template-rows",
-    transitionDuration: { default: grasp.durationUi, [REDUCED]: "0s" },
+    transitionDuration: simply.ui,
     transitionTimingFunction: grasp.ease,
   },
   shellOpen: {
@@ -91,10 +97,32 @@ const styles = stylex.create({
     listStyle: "none",
     overflowX: "auto",
     overflowY: "hidden",
-    overscrollBehaviorX: "contain",
+    // A card's widest is the strip's own width (attachment.tsx), so a long name never runs past it.
+    containerType: "inline-size",
     scrollPaddingInline: grasp.space4,
+    // More files than room: the side with more beyond it fades out to the ground, so a card is
+    // never cut off in silence and the strip says it scrolls without a bar. The fade is wide, and
+    // its last band shows only the ground, so a card's border dissolves before the composer's edge
+    // (watchEdges sets how far each side reaches).
+    maskImage: `linear-gradient(to right, transparent ${stripVars.leftClear}, black ${stripVars.left}, black calc(100% - ${stripVars.right}), transparent calc(100% - ${stripVars.rightClear}))`,
   },
+  // How far each side's fade reaches, from the cards past it.
+  fades: (
+    left: string,
+    leftClear: string,
+    right: string,
+    rightClear: string
+  ) => ({
+    [stripVars.left]: left,
+    [stripVars.leftClear]: leftClear,
+    [stripVars.right]: right,
+    [stripVars.rightClear]: rightClear,
+  }),
+  // Each card is as wide as its name; a one-column grid lets one that leaves close its width from
+  // whatever it is down to nothing.
   item: {
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr)",
     flexShrink: 0,
     // It grows from the start side, where the plus button is.
     transformOrigin: "left center",
@@ -114,6 +142,78 @@ const styles = stylex.create({
 });
 
 type Shown = ComposerFile & { leaving?: boolean };
+
+/**
+ * How far into the strip from its `edge` (a physical side, in pixels from the left) the card cut by
+ * that edge reaches. A card that would show less than half of itself is given wholly to the fade,
+ * with the gap before it; one that shows half or more fades out over the usual width.
+ */
+const cutCard = (element: HTMLElement, edge: "left" | "right") => {
+  const box = element.getBoundingClientRect();
+  const cards = [...element.children].map((card) =>
+    card.getBoundingClientRect()
+  );
+  // The gap between two cards, as they stand.
+  const [first, second] = cards.toSorted((a, b) => a.left - b.left);
+  const gap =
+    first !== undefined && second !== undefined
+      ? Math.max(0, second.left - first.right)
+      : 0;
+  for (const own of cards) {
+    const shown =
+      edge === "right" ? box.right - own.left : own.right - box.left;
+    const cut =
+      edge === "right"
+        ? own.left < box.right && own.right > box.right
+        : own.right > box.left && own.left < box.left;
+    if (cut && shown < own.width / 2) {
+      return shown + gap;
+    }
+  }
+  return 0;
+};
+
+/** One side's fade: none, or the usual width (more when a card shows less than half of itself). */
+const fadeOf = (under: boolean, cut: number) =>
+  under ? `max(${grasp.space10}, ${cut}px)` : "0px";
+const clearOf = (under: boolean) => (under ? grasp.space2 : "0px");
+
+// Marks which sides of the strip have cards scrolled past them, and sets how far each side fades,
+// straight on the strip, so a scroll never renders. Right to left the scroll runs negative, so its
+// distance is taken whole, and the start is the right-hand side.
+const watchEdges = (element: HTMLElement) => {
+  const mark = () => {
+    const along = Math.abs(element.scrollLeft);
+    const underStart = along > 1;
+    const underEnd = along < element.scrollWidth - element.clientWidth - 1;
+    element.toggleAttribute("data-under-start", underStart);
+    element.toggleAttribute("data-under-end", underEnd);
+    const rtl = getComputedStyle(element).direction === "rtl";
+    const underLeft = rtl ? underEnd : underStart;
+    const underRight = rtl ? underStart : underEnd;
+    const { style } = stylex.props(
+      styles.fades(
+        fadeOf(underLeft, underLeft ? cutCard(element, "left") : 0),
+        clearOf(underLeft),
+        fadeOf(underRight, underRight ? cutCard(element, "right") : 0),
+        clearOf(underRight)
+      )
+    );
+    for (const [name, value] of Object.entries(style ?? {})) {
+      element.style.setProperty(name, String(value));
+    }
+  };
+  const observer = new ResizeObserver(mark);
+  observer.observe(element);
+  const watchCards = new MutationObserver(mark);
+  watchCards.observe(element, { childList: true });
+  element.addEventListener("scroll", mark, { passive: true });
+  return () => {
+    observer.disconnect();
+    watchCards.disconnect();
+    element.removeEventListener("scroll", mark);
+  };
+};
 
 /** The files as shown: those kept, in place, those taken off marked leaving, and the new at the end. */
 const mergeFiles = (before: Shown[], files: ComposerFile[]): Shown[] => {
@@ -146,6 +246,11 @@ export const ComposerAttachments = ({
     setSeen(files);
     setShown(mergeFiles(shown, files));
   }
+  const strip = useRef<HTMLUListElement | null>(null);
+  useEffect(() => {
+    const element = strip.current;
+    return element === null ? undefined : watchEdges(element);
+  }, []);
   const timers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   useEffect(() => {
     for (const file of shown) {
@@ -177,7 +282,16 @@ export const ComposerAttachments = ({
   return (
     <div {...stylex.props(styles.shell, files.length > 0 && styles.shellOpen)}>
       <div {...stylex.props(styles.clip)}>
-        <ul aria-label={label} {...stylex.props(styles.strip, scroll.bar)}>
+        {/* The fades start at none; watchEdges sets them straight on the strip as it scrolls. */}
+        <ul
+          ref={strip}
+          aria-label={label}
+          {...stylex.props(
+            styles.strip,
+            scroll.bar,
+            styles.fades("0px", "0px", "0px", "0px")
+          )}
+        >
           {shown.map((file) => (
             <li
               key={file.id}

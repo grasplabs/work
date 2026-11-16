@@ -67,7 +67,7 @@ export const DropdownMenuCheckboxItem = ({
       )
     }
   >
-    <span {...stylex.props(styles.words)}>{children}</span>
+    <span {...stylex.props(styles.words, styles.wordsBare)}>{children}</span>
     <MenuItemIndicator {...stylex.props(styles.tick)}>
       <Icon icon={Tick} />
     </MenuItemIndicator>

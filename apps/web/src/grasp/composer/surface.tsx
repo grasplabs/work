@@ -15,7 +15,7 @@ import { grasp } from "../tokens/tokens.stylex";
 export interface ComposerSurfaceProps {
   /** The notice, in one short line ("You have used this month's questions"). */
   children: ReactNode;
-  /** An icon before the words. Import it from src/icons. */
+  /** An icon before the words. Import it from the icons entry (`@/components/grasp/icons`). */
   icon?: IconData;
   /**
    * The colour of the icon: `muted` for a plain note, `attention` or `danger` when it stops work.
@@ -34,7 +34,10 @@ const styles = stylex.create({
     alignItems: "center",
     gap: grasp.space2,
     minWidth: 0,
-    paddingInline: grasp.space4,
+    // In from the card's sides by space-2, as the band under the card, so its side lies inside the
+    // card's rounded corner and never runs beside it; its words still start where the card's do.
+    marginInline: grasp.space2,
+    paddingInline: `calc(${grasp.space4} - ${grasp.space2})`,
     paddingBlockStart: grasp.space3,
     // Room for the card's corner to sit over its foot.
     paddingBlockEnd: `calc(${grasp.space3} + ${grasp.corner})`,

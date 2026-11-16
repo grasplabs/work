@@ -77,6 +77,8 @@ export interface WorkingMarkProps {
   label?: string;
   /** Layout only: margins and alignment. The look belongs to the mark. */
   style?: WorkingMarkLayoutStyle;
+  /** The same as `style`, under a name the product's lint lets a component take; it wins over `style`. */
+  layout?: WorkingMarkLayoutStyle;
 }
 
 const REDUCED = media.reduced;
@@ -401,6 +403,7 @@ export const WorkingMark = ({
   done = false,
   label,
   style,
+  layout,
 }: WorkingMarkProps) => {
   const { ref, seen } = useSeen();
   const mark = (
@@ -409,7 +412,7 @@ export const WorkingMark = ({
       aria-hidden="true"
       data-slot="working-mark"
       data-variant={variant}
-      {...stylex.props(styles.mark, !seen && styles.paused, style)}
+      {...stylex.props(styles.mark, !seen && styles.paused, layout ?? style)}
     >
       {done ? (
         <span data-slot="working-mark-done" {...stylex.props(styles.tick)}>

@@ -6,6 +6,7 @@
 // and there is no halo.
 import * as stylex from "@stylexjs/stylex";
 
+import { simply } from "../motion/simply.stylex";
 import { grasp, media } from "../tokens/tokens.stylex";
 import { useStill } from "./still-context";
 
@@ -49,7 +50,7 @@ const styles = stylex.create({
     opacity: 0,
     transitionProperty: "opacity",
     // With reduced motion the light is there or not: no fade.
-    transitionDuration: { default: grasp.composerLightIn, [REDUCED]: "0s" },
+    transitionDuration: simply.lightIn,
     transitionTimingFunction: grasp.ease,
     // In forced colours there is no light: the state is said in words.
     display: { default: "block", [media.forced]: "none" },

@@ -28,7 +28,7 @@
   --grasp-soft: light-dark(oklch(0.973 0.006 137.77), oklch(0.205 0.03 168));
   /* A surface above the page: a card, a menu, a dialog. */
   --grasp-raised: light-dark(oklch(1 0 none), oklch(0.235 0.032 168));
-  /* The ground of a stage's Paper: a soft off-white, as Palermo's #fafafa, so white controls read by their fill. In dark, raised's step, apart from soft and night, so soft fills still show on it. */
+  /* The ground of a stage's Paper: a soft off-white, so white controls read by their fill. In dark, raised's step, apart from soft and night, so soft fills still show on it. */
   --grasp-stage-ground: light-dark(
     oklch(0.985 0.003 165),
     oklch(0.235 0.032 168)
@@ -141,7 +141,7 @@
     oklch(0.52 0.175 28 / 0.1),
     oklch(0.52 0.175 28 / 0.2)
   );
-  /* Low lift for something wrong: the same shadow, tinted red, as Palermo's. */
+  /* Low lift for something wrong: the same shadow, tinted red. */
   --grasp-lift-low-danger:
     0 1px 2px var(--grasp-danger-shade), 0 2px 4px var(--grasp-danger-shade),
     0 0 0 1px var(--grasp-danger-edge);
@@ -166,43 +166,43 @@
   --grasp-font-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
   /* Type: sizes. */
   /* The smallest text there is: tags, labels, chips, code. */
-  --grasp-text-xs: 13px;
+  --grasp-text-xs: 0.8125rem;
   /* The line height of text-xs. */
-  --grasp-text-xs-line: 20px;
+  --grasp-text-xs-line: 1.25rem;
   /* Controls, menus, navigation, dense tables. */
-  --grasp-text-sm: 14px;
+  --grasp-text-sm: 0.875rem;
   /* The line height of text-sm. */
-  --grasp-text-sm-line: 20px;
+  --grasp-text-sm-line: 1.25rem;
   /* Body text in the product: descriptions, forms, messages. */
-  --grasp-text-md: 15px;
+  --grasp-text-md: 0.9375rem;
   /* The line height of text-md. */
-  --grasp-text-md-line: 24px;
+  --grasp-text-md-line: 1.5rem;
   /* A lead: the sentence under a page title. */
-  --grasp-text-lg: 17px;
-  /* A component's own title in the sans (a card's), at Palermo's size. */
-  --grasp-title-ui: 18px;
+  --grasp-text-lg: 1.0625rem;
+  /* A component's own title in the sans (a card's). */
+  --grasp-title-ui: 1.125rem;
   /* The line height of title-ui. */
-  --grasp-title-ui-line: 24px;
-  /* text-md set tight, under a component's title, as Palermo's. */
-  --grasp-text-md-tight-line: 20px;
+  --grasp-title-ui-line: 1.5rem;
+  /* text-md set tight, under a component's title. */
+  --grasp-text-md-tight-line: 1.25rem;
   /* The line height of text-lg. */
-  --grasp-text-lg-line: 28px;
+  --grasp-text-lg-line: 1.75rem;
   /* A card or panel title, in the serif. */
-  --grasp-title-sm: 20px;
+  --grasp-title-sm: 1.25rem;
   /* The line height of title-sm. */
-  --grasp-title-sm-line: 28px;
+  --grasp-title-sm-line: 1.75rem;
   /* A section title, a figure, a name in a list, in the serif. */
-  --grasp-title-md: 24px;
+  --grasp-title-md: 1.5rem;
   /* The line height of title-md. */
-  --grasp-title-md-line: 32px;
+  --grasp-title-md-line: 2rem;
   /* A page title in the product, and every page title on a phone, in the serif. */
-  --grasp-title-lg: 32px;
+  --grasp-title-lg: 2rem;
   /* The line height of title-lg. */
-  --grasp-title-lg-line: 40px;
+  --grasp-title-lg-line: 2.5rem;
   /* An opening title on a page that introduces something, in the serif. */
-  --grasp-title-xl: 44px;
+  --grasp-title-xl: 2.75rem;
   /* The line height of title-xl. */
-  --grasp-title-xl-line: 48px;
+  --grasp-title-xl-line: 3rem;
   /* Type: weights and tracking. */
   /* Every serif title and all running text. */
   --grasp-weight-regular: 400;
@@ -212,7 +212,7 @@
   --grasp-tracking-title: -0.02em;
   /* A component's own words, its small titles included: set here, never inherited from the page around it. */
   --grasp-tracking-ui: normal;
-  /* A component's title at title-ui, drawn a touch closer, as Palermo's. */
+  /* A component's title at title-ui, drawn a touch closer. */
   --grasp-tracking-ui-title: -0.25px;
   /* A tag: 13px capitals that name a section, never a page. */
   --grasp-tracking-tag: 0.09em;
@@ -255,7 +255,7 @@
   /* A circle: an avatar, a dot. */
   --grasp-corner-circle: 50%;
   /* Elevation: edge and lifts. */
-  /* The colour of every edge: night at 6%, as faint as Palermo's 5% black. A control reads by its fill and lift, not by a line. */
+  /* The colour of every edge: night at 6%. A control reads by its fill and lift, not by a line. */
   --grasp-edge-tone: light-dark(
     oklch(0.173 0.028 169.36 / 0.06),
     oklch(0.96 0.02 150 / 0.1)
@@ -293,7 +293,7 @@
   /* Sizes: targets and controls. */
   /* The smallest thing a finger can hit. */
   --grasp-tap: 44px;
-  /* A compact control inside a card's footer or a composer, as Palermo's 28px. */
+  /* A compact control inside a card's footer or a composer. */
   --grasp-control-xs: 28px;
   /* A small control in a dense toolbar or table. */
   --grasp-control-sm: 32px;
@@ -309,6 +309,8 @@
   --grasp-ring-width: 1.5px;
   /* Where the focus ring sits on a control: on its edge, following its shape, never a second frame. */
   --grasp-ring-offset: 0px;
+  /* How far the focus ring stands off a small mark whose own edge is a line (a checkbox, a radio, a switch), so focus is told from rest at a glance. */
+  --grasp-ring-offset-mark: 2px;
   /* How far the focus ring stands off words (a link, a row's name), so it never touches the letters. */
   --grasp-ring-offset-words: 2px;
   /* The least height of a stage that shows a part. */
@@ -521,11 +523,13 @@
   --grasp-duration-lean: 500ms;
   /* A mark that moves to what is chosen: the sidebar's bar, a tab's line, a plus turning. */
   --grasp-duration-mark: 200ms;
-  /* Swaps, panels and menus opening. */
+  /* Swaps, panels and dialogs opening. A menu or another popup takes duration-popup. */
   --grasp-duration-ui: 250ms;
   /* Something leaving: faster than it came. */
   --grasp-duration-leave: 160ms;
-  /* The command palette coming up: a fade at most this long, as QUALITY.md asks of search. */
+  /* A popup opening: a menu, a select's list, a popover, a date picker, a hover card. Quicker than a dialog, as menus are opened all day. */
+  --grasp-duration-popup: 200ms;
+  /* The command palette coming up: a fade at most this long. */
   --grasp-duration-search-open: 150ms;
   /* The command palette going: faster than it came. */
   --grasp-duration-search-close: 100ms;
@@ -555,7 +559,7 @@
   --grasp-duration-work: 1200ms;
   /* How long a result (Saved, Could not save) stays on a control before it returns. */
   --grasp-duration-hold: 1600ms;
-  /* One turn of a spinner, as Palermo's: slow enough to read as calm. Constant motion, so linear. */
+  /* One turn of a spinner: slow enough to read as calm. Constant motion, so linear. */
   --grasp-duration-spin: 1500ms;
   /* How long a hold-to-confirm button is held before it acts: the fill crosses it in this time. */
   --grasp-hold-duration: 1000ms;
@@ -613,10 +617,23 @@
   /* Fields: fields. */
   /* The ground of a field you type in: the quiet button's fill, so a field and a button in one row match. */
   --grasp-field-fill: var(--grasp-quiet-fill);
-  /* The ground of a read-only field, quieter than field-fill: a faint tint on light, none on dark. It does not invite typing. */
+  /* The ground of a read-only field: the soft ground (in dark a thinner veil than field-fill's, still above a disabled field's), a hairline and no lift. Settled, not greyed: quieter than a field open for typing, never as faint as a disabled one. */
   --grasp-field-fill-read: light-dark(
-    oklch(0.29 0.05 162 / 0.04),
-    oklch(0.96 0.02 150 / 0)
+    var(--grasp-soft),
+    oklch(0.96 0.02 150 / 0.05)
+  );
+  /* The words of a read-only field: the muted step, still easy to read and copy. Disabled fields are weaker again (dim). */
+  --grasp-field-ink-read: var(--grasp-muted);
+  /* A field at rest: its hairline drawn inside, which adds no size, and its lift. A field focused by the keyboard keeps it, and the focus ring stands round it. */
+  --grasp-field-rest:
+    inset 0 0 0 1px var(--grasp-field-edge), var(--grasp-field-lift);
+  /* A wrong field: its hairline tinted red, drawn inside like field-rest, so it is exactly as big as the fields beside it. */
+  --grasp-field-invalid:
+    inset 0 0 0 1px var(--grasp-field-edge-invalid), var(--grasp-field-lift);
+  /* Words selected in a field: a mint tint in the palette's own tone, never the browser's blue. Ink on it reads 4.5:1. */
+  --grasp-field-selection: light-dark(
+    oklch(0.9 0.06 165),
+    oklch(0.42 0.07 165)
   );
   /* The hairline round a field, drawn inside it: the system's edge, so a field reads by its white fill and its lift. */
   --grasp-field-edge: var(--grasp-edge-tone);
@@ -625,9 +642,9 @@
     oklch(0.173 0.028 169.36 / 0.12),
     oklch(0.96 0.02 150 / 0.18)
   );
-  /* The hairline of a field whose value is wrong: the edge tinted red. Its message says what is wrong, never the colour alone. */
-  --grasp-field-edge-invalid: var(--grasp-danger-edge);
-  /* A field in focus: its hairline and lift stay, and a soft shadow fades out round it. No line, no colour, no ring. */
+  /* The hairline of a field whose value is wrong: the danger tone itself, 3:1 or more on every ground, drawn inside so the field is no bigger. Its message says what is wrong, never the colour alone. */
+  --grasp-field-edge-invalid: var(--grasp-danger);
+  /* A field focused by a pointer press: its hairline and lift stay, and a soft shadow fades out round it. Focused by the keyboard it keeps field-rest and takes the focus ring (focus.field). */
   --grasp-field-focus:
     inset 0 0 0 1px var(--grasp-field-edge), var(--grasp-field-lift),
     0 0 10px 1px var(--grasp-ring-halo), 0 2px 6px var(--grasp-ring-halo);
@@ -723,11 +740,11 @@
   --grasp-tooltip-rise: 4px;
   /* A tooltip fading out: faster than it came. */
   --grasp-tooltip-leave: 100ms;
-  /* How far a dropdown menu stands off its trigger, as Palermo's. */
+  /* How far a dropdown menu stands off its trigger. */
   --grasp-menu-gap: 10px;
-  /* The narrowest a dropdown menu is, as Palermo's, so a short list still reads as a menu. */
+  /* The narrowest a dropdown menu is, so a short list still reads as a menu. */
   --grasp-menu-width: 249px;
-  /* The edge and shadow of a menu: high lift, as Palermo's menus. */
+  /* The edge and shadow of a menu: high lift. */
   --grasp-menu-lift: var(--grasp-lift-high);
   /* Room inside a menu item, round its icon, words and keys. */
   --grasp-menu-item-padding: var(--grasp-space-2);
@@ -755,12 +772,12 @@
       0 2px 3px
         light-dark(oklch(0.173 0.028 169.36 / 0.08), oklch(0 0 none / 0.3))
     );
-  /* The light inside a switch that is on: it rests behind the thumb and leans after it, as Approve's light leans. */
+  /* The light inside a switch that is on: it rests behind the thumb and leans after it, as Approve's light leans. It ends near the thumb's own edge, so only a rim of it shows beside the thumb, not a pale band. */
   --grasp-switch-light: radial-gradient(
     closest-side,
     var(--grasp-light-lime) 0%,
-    color-mix(in oklch, var(--grasp-light-sea) 70%, transparent) 45%,
-    transparent 100%
+    color-mix(in oklch, var(--grasp-light-sea) 70%, transparent) 35%,
+    transparent 62%
   );
   /* The thumb's spring: a damping ratio of 0.6 in 20 steps. It passes its end by a tenth and settles. */
   --grasp-switch-spring: linear(
@@ -792,7 +809,7 @@
   --grasp-switch-trail: 300ms;
   /* A switch that is off, under a pointer or pressed: field-edge one small step stronger, so it never looks on. */
   --grasp-switch-track-hover: light-dark(
-    oklch(0.29 0.05 162 / 0.2),
+    oklch(0.29 0.05 162 / 0.28),
     oklch(0.96 0.02 150 / 0.26)
   );
   /* Radio: radio. */
@@ -801,7 +818,7 @@
   /* The dot inside a chosen radio. */
   --grasp-radio-dot: 6px;
   /* Choice: checkbox, radio and switch. */
-  /* The edge of an empty box or circle: as Palermo's, soft, so it reads by its shape. */
+  /* The edge of an empty box or circle: soft, so it reads by its shape. */
   --grasp-choice-edge: light-dark(
     oklch(0.173 0.028 169.36 / 0.17),
     oklch(0.96 0.02 150 / 0.22)
@@ -811,9 +828,15 @@
     oklch(0.173 0.028 169.36 / 0.28),
     oklch(0.96 0.02 150 / 0.34)
   );
-  /* The track of a switch that is off: a soft fill, no edge, so the white thumb stands out. */
+  /* The edge of a checkbox or radio whose answer is wrong: danger itself, a little softened. A field's red hairline (field-edge-invalid) sits on a white fill and a lift; a box has only its edge, so it takes a stronger red to be seen beside its message. */
+  --grasp-choice-edge-invalid: color-mix(
+    in oklch,
+    var(--grasp-danger) 72%,
+    transparent
+  );
+  /* The track of a switch that is off: a soft fill, no edge, so the white thumb stands out. On a light page deep enough to be found (at 0.12 it was 1.25:1 to the page and the off switch all but vanished). */
   --grasp-switch-track: light-dark(
-    oklch(0.29 0.05 162 / 0.12),
+    oklch(0.29 0.05 162 / 0.2),
     oklch(0.96 0.02 150 / 0.16)
   );
   /* Textarea: textarea. */
@@ -873,8 +896,16 @@
   --grasp-progress-md: 8px;
   /* A bar that is the point of its panel. */
   --grasp-progress-lg: 12px;
-  /* The ground of a bar or a ring: what is still to do. */
-  --grasp-progress-track: var(--grasp-switch-track);
+  /* The ground of a bar or a ring: what is still to do. Its own value: a bar is long and reads by its length, so it stays as soft as the off switch was. */
+  --grasp-progress-track: light-dark(
+    oklch(0.29 0.05 162 / 0.12),
+    oklch(0.96 0.02 150 / 0.16)
+  );
+  /* The ground of a ring: what is still to do. A ring is small and reads by its whole round, so in dark its track reads at 3:1 against the page (at progress-track it all but vanished and only the arc showed). Light as progress-track. */
+  --grasp-progress-ring-track: light-dark(
+    oklch(0.29 0.05 162 / 0.12),
+    oklch(0.96 0.02 150 / 0.42)
+  );
   /* What is done: the first action's colour. */
   --grasp-progress-fill: var(--grasp-action-fill);
   /* A ring beside words. */
@@ -890,29 +921,29 @@
   /* One sweep of an unknown bar across its track. */
   --grasp-progress-sweep: 1400ms;
   /* Collapsible: collapsible. */
-  /* The height of a collapsible's trigger, as Palermo's. */
+  /* The height of a collapsible's trigger. */
   --grasp-collapsible-trigger: 28px;
   /* How long a collapsible's panel takes to open or close. */
   --grasp-collapsible-open: var(--grasp-duration-mark);
   /* A trigger's padding at the sides, and how far it bleeds out, so its title lines up with the panel. */
   --grasp-collapsible-inset: 8px;
   /* Filter builder: filter builder. */
-  /* The height of a filter's field, operator and value segments, as Palermo's. */
-  --grasp-filter-segment: 28px;
+  /* The height of a filter's field, operator and value segments: a field's own, so a filter stands level with the search beside it. */
+  --grasp-filter-segment: var(--grasp-control-md);
   /* The line between a filter's segments: the gap that shows the ground. */
   --grasp-filter-divider: 1px;
   /* Severity: severity. */
   /* The mark of a severity: a dot beside neutral words, so the colour never paints the whole line. */
   --grasp-severity-dot: 6px;
   /* Skeleton: skeleton. */
-  /* A placeholder's fill while content loads: a soft grey with no edge, as Palermo's. */
+  /* A placeholder's fill while content loads: a soft grey with no edge. */
   --grasp-skeleton-fill: light-dark(
     oklch(0.173 0.028 169.36 / 0.14),
     oklch(0.96 0.02 150 / 0.08)
   );
   /* One breath of a placeholder, from full to faint and back. Still with reduced motion. */
   --grasp-skeleton-pulse: 2s;
-  /* The curve of a placeholder's breath: slow at both ends, as Palermo's. */
+  /* The curve of a placeholder's breath: slow at both ends. */
   --grasp-skeleton-ease: cubic-bezier(0.4, 0, 0.6, 1);
   /* How faint a placeholder goes at the middle of its breath. */
   --grasp-skeleton-low: 0.5;
@@ -923,8 +954,10 @@
   --grasp-spinner-breath: var(--grasp-skeleton-pulse);
   /* How faint a still spinner goes at the middle of its breath. */
   --grasp-spinner-faint: var(--grasp-skeleton-low);
-  /* How faint a spinner's last bar is: its bars fade from full to this round the turn, as Palermo's. */
-  --grasp-spinner-fade: 0.3;
+  /* How faint a spinner's last bar is: its bars fade from full to this round the turn. At 0.3 the last bars sank into a dark ground and the spinner read weaker than its words. */
+  --grasp-spinner-fade: 0.4;
+  /* How faint a spinner's last bar is on a filled control (a working ink, approve or danger button): high enough that the whole ring reads turning on the fill. */
+  --grasp-spinner-fade-on-fill: 0.62;
   /* The curve of a still spinner's breath. */
   --grasp-spinner-ease: var(--grasp-skeleton-ease);
   /* Working mark: working mark. */
@@ -936,11 +969,10 @@
   --grasp-working-mark-core: 2px;
   /* The orbit's arc and the breath's ring: as fine as an icon's line. */
   --grasp-working-mark-stroke: 1.5px;
-  /* A dot the light is not on: pine, faint, as the loading dot field rests. */
-  --grasp-working-mark-rest: color-mix(
-    in oklch,
-    var(--grasp-pine) 28%,
-    transparent
+  /* A dot the light is not on: pine, faint, as the loading dot field rests. On dark, pine's own dark value at 60%: at 28% the resting glyph all but vanished on the night ground (1.4:1); now 3:1 and more. */
+  --grasp-working-mark-rest: light-dark(
+    color-mix(in oklch, var(--grasp-pine) 28%, transparent),
+    color-mix(in oklch, var(--grasp-pine) 60%, transparent)
   );
   /* Where the light is: pine, so the mark is calm on light and dark. */
   --grasp-working-mark-lit: var(--grasp-pine);
@@ -964,13 +996,179 @@
   --grasp-working-mark-breath: 1600ms;
   /* The glint once across the bead, and its rest. */
   --grasp-working-mark-glide: 2200ms;
+  /* App building: app building. */
+  /* The least room the build takes: an app's frame, at its smallest. */
+  --grasp-app-building-min-height: 320px;
+  /* One step of the build: a cursor's travel, its press and a piece coming in. A continuous sign of life made of moves of 300ms at most. */
+  --grasp-app-building-beat: 760ms;
+  /* The grid of the dither on a block: one dot in every 4px square. */
+  --grasp-app-building-dither: 4px;
+  /* A block of the interface being built: pine, faint. */
+  --grasp-app-building-block: color-mix(
+    in oklch,
+    var(--grasp-pine) 9%,
+    transparent
+  );
+  /* The lines and bars inside a block. */
+  --grasp-app-building-detail: color-mix(
+    in oklch,
+    var(--grasp-pine) 22%,
+    transparent
+  );
+  /* A dot of the dither on a block or a bar. */
+  --grasp-app-building-dot: color-mix(
+    in oklch,
+    var(--grasp-pine) 30%,
+    transparent
+  );
+  /* The blueprint's grid lines. */
+  --grasp-app-building-grid: color-mix(
+    in oklch,
+    var(--grasp-mint-deep) 13%,
+    transparent
+  );
+  /* A piece drawn on the blueprint: its outline. */
+  --grasp-app-building-outline: color-mix(
+    in oklch,
+    var(--grasp-mint-deep) 70%,
+    transparent
+  );
+  /* A cursor's name on its tag: light on the cursor's colour, dark on its lifted colour in dark. */
+  --grasp-app-building-on-cursor: light-dark(
+    var(--grasp-light-paper),
+    var(--grasp-light-night)
+  );
+  /* App preview: app preview. */
+  /* The frame at phone width: as wide as a common phone's viewport. */
+  --grasp-app-preview-phone: 390px;
+  /* The frame at tablet width: a small tablet held upright. */
+  --grasp-app-preview-tablet: 768px;
+  /* The frame's height when its container gives it none. */
+  --grasp-app-preview-height: 560px;
+  /* The device look's outline round the frame at phone and tablet widths. */
+  --grasp-app-preview-bezel: 10px;
+  /* The device look's outer corner. */
+  --grasp-app-preview-device-corner: 28px;
+  /* App card: app card tones. */
+  /* Sea's first stop: a cool blue grey. */
+  --grasp-app-card-sea-from: light-dark(
+    oklch(0.82 0.032 222),
+    oklch(0.33 0.03 222)
+  );
+  /* Sea's last stop: sand. */
+  --grasp-app-card-sea-to: light-dark(
+    oklch(0.91 0.03 88),
+    oklch(0.36 0.028 88)
+  );
+  /* Sand's first stop: warm sand. */
+  --grasp-app-card-sand-from: light-dark(
+    oklch(0.9 0.035 88),
+    oklch(0.36 0.03 88)
+  );
+  /* Sand's last stop: olive. */
+  --grasp-app-card-sand-to: light-dark(
+    oklch(0.8 0.045 112),
+    oklch(0.32 0.035 112)
+  );
+  /* Moss's first stop: sea, greyed. */
+  --grasp-app-card-moss-from: light-dark(
+    oklch(0.84 0.045 168),
+    oklch(0.32 0.04 168)
+  );
+  /* Moss's last stop: a pale lime. */
+  --grasp-app-card-moss-to: light-dark(
+    oklch(0.92 0.045 128),
+    oklch(0.35 0.035 128)
+  );
+  /* Dusk's first stop: a grey lilac. */
+  --grasp-app-card-dusk-from: light-dark(
+    oklch(0.83 0.028 292),
+    oklch(0.32 0.03 292)
+  );
+  /* Dusk's last stop: a pale peach. */
+  --grasp-app-card-dusk-to: light-dark(
+    oklch(0.91 0.035 58),
+    oklch(0.36 0.03 58)
+  );
+  /* The sea ground: blue grey running to sand. */
+  --grasp-app-card-sea: linear-gradient(
+    155deg,
+    var(--grasp-app-card-sea-from) 8%,
+    var(--grasp-app-card-sea-to) 92%
+  );
+  /* The sand ground: sand running to olive. */
+  --grasp-app-card-sand: linear-gradient(
+    200deg,
+    var(--grasp-app-card-sand-from) 10%,
+    var(--grasp-app-card-sand-to) 95%
+  );
+  /* The moss ground: Grasp's sea running to lime, greyed. */
+  --grasp-app-card-moss: linear-gradient(
+    160deg,
+    var(--grasp-app-card-moss-from) 5%,
+    var(--grasp-app-card-moss-to) 95%
+  );
+  /* The dusk ground: lilac running to peach. */
+  --grasp-app-card-dusk: linear-gradient(
+    190deg,
+    var(--grasp-app-card-dusk-from) 5%,
+    var(--grasp-app-card-dusk-to) 95%
+  );
+  /* A soft light over each ground, from its top corner. */
+  --grasp-app-card-glow: radial-gradient(
+    90% 70% at 18% 0%,
+    light-dark(oklch(1 0 0 / 0.32), oklch(1 0 0 / 0.06)),
+    transparent 70%
+  );
+  /* The paper grain over a ground: fine noise, a tile that repeats without a seam. */
+  --grasp-app-card-grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 0 0 0 0 1'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url%28%23g%29'/%3E%3C/svg%3E");
+  /* How strongly the grain shows over a ground. */
+  --grasp-app-card-grain-strength: 0.32;
+  /* App card: app card. */
+  /* The frame: as wide as a laptop's screen, so a window of app fits with its crop. */
+  --grasp-app-card-ratio: 16 / 10;
+  /* The frame's corner, a squircle: larger than a card's, the frame is the picture. */
+  --grasp-app-card-corner: 28px;
+  /* The app window's top corners inside the frame. */
+  --grasp-app-card-window-corner: 14px;
+  /* How far the window stands in from the frame's top and sides: a share of the frame's width. */
+  --grasp-app-card-inset: 6cqi;
+  /* The width the app lays out at before its window is measured, at the canvas's first scale (0.4): exactly the window's width (the frame less its two insets), so nothing runs past the window before the card measures it and lays the app out at a desktop's width, down to a tablet's. */
+  --grasp-app-card-app-width: calc(
+    (100cqi - 2 * var(--grasp-app-card-inset)) / 0.4
+  );
+  /* The window standing on its ground. */
+  --grasp-app-card-window-lift:
+    0 0 0 1px var(--grasp-edge-tone), 0 1px 2px var(--grasp-shade-faint),
+    0 14px 36px -10px var(--grasp-shade-soft);
+  /* The frame's own edge, inside it, so a pale ground keeps its rim on paper. */
+  --grasp-app-card-frame-edge: inset 0 0 0 1px var(--grasp-edge-tone);
+  /* The frame lifted under the pointer. */
+  --grasp-app-card-frame-lift:
+    inset 0 0 0 1px var(--grasp-edge-tone),
+    0 12px 28px -14px var(--grasp-shade-soft);
+  /* How far the frame rises under the pointer. */
+  --grasp-app-card-rise: -2px;
+  /* Text shimmer: text shimmer. */
+  /* The light crossing a line of what an agent is doing, at its quietest: pine. */
+  --grasp-text-shimmer-soft: var(--grasp-pine);
+  /* The light, as it is by default: deep mint on paper, mint on night, twice the muted words' contrast so the band reads as light moving, not as green words. */
+  --grasp-text-shimmer-clear: light-dark(
+    oklch(0.33 0.1 167),
+    oklch(0.88 0.15 165)
+  );
+  /* The light at its strongest, in a wider band. */
+  --grasp-text-shimmer-bright: light-dark(
+    oklch(0.27 0.09 168),
+    oklch(0.93 0.12 165)
+  );
   /* Slider: slider. */
   /* How thick a slider's track is: a soft line the thumb rides on. */
   --grasp-slider-track: 4px;
   /* The thumb of a slider: a white circle with the low lift. */
   --grasp-slider-thumb: 16px;
   /* Table: table. */
-  /* The height of a table's head row, as Palermo's. */
+  /* The height of a table's head row. */
   --grasp-table-head-height: 48px;
   /* Room above and below the words in a table's cell. */
   --grasp-table-cell-block: var(--grasp-space-3);
@@ -980,10 +1178,10 @@
   --grasp-table-row-fill-hover: var(--grasp-ghost-fill-hover);
   /* The fill of a chosen row in a table. */
   --grasp-table-row-fill-chosen: var(--grasp-ghost-fill-press);
-  /* The words in a table's cells: a step under text-sm, as Palermo's. */
-  --grasp-table-text: 13px;
+  /* The words in a table's cells: a step under text-sm. */
+  --grasp-table-text: 0.8125rem;
   /* The line height of table-text. */
-  --grasp-table-text-line: 18px;
+  --grasp-table-text-line: 1.125rem;
   /* Room above and below a compact table's words: a 32px row. */
   --grasp-table-cell-block-compact: 7px;
   /* Room above and below a roomy table's words: a 50px row. */
@@ -994,12 +1192,10 @@
   --grasp-table-resize-step: 16px;
   /* The narrowest a column can be made. */
   --grasp-table-column-min: 64px;
-  /* A chosen row's band in the mint look: a very soft mint wash. */
-  --grasp-table-row-fill-chosen-mint: color-mix(
-    in oklch,
-    var(--grasp-mint) 12%,
-    transparent
-  );
+  /* The least width of a row's lead cell, so what the row is reads in whole phrases while a narrow table scrolls sideways. */
+  --grasp-table-lead-min: 11rem;
+  /* A chosen row's band in the mint look: the Data grid's wash over a range, so the two read as one family. */
+  --grasp-table-row-fill-chosen-mint: var(--grasp-grid-range-wash);
   /* The head's ground in the soft look. */
   --grasp-table-head-fill-soft: var(--grasp-soft);
   /* The chip a sorted head's place stands in, in the quiet look. */
@@ -1024,16 +1220,16 @@
   );
   /* The width of a sheet along a side of the window: room for a form's fields. */
   --grasp-sheet-width: 26rem;
-  /* A wide sheet: room for a layout of its own, as Palermo's wide drawer. */
+  /* A wide sheet: room for a layout of its own. */
   --grasp-sheet-width-wide: 37.5rem;
-  /* How far a sheet floats off the window's edges, as Palermo's drawer. */
+  /* How far a sheet floats off the window's edges. */
   --grasp-sheet-inset: 6px;
   /* The height of a sheet's head: its title and its close button, over a hairline. */
   --grasp-sheet-head-height: 48px;
   /* Toast: toast. */
-  /* The width of a toast, as Palermo's: a title and a sentence on a line or two. */
+  /* The width of a toast: a title and a sentence on a line or two. */
   --grasp-toast-width: 24rem;
-  /* How long a toast shows while nothing pauses it, as Palermo's normal toast. */
+  /* How long a toast shows while nothing pauses it. */
   --grasp-toast-duration: 3500ms;
   /* How long a toast with an action shows: long enough to read it and reach the action, as there is no close. */
   --grasp-toast-duration-action: 8000ms;
@@ -1057,16 +1253,32 @@
   /* Today, when it is not chosen: a quiet fill that finds it. */
   --grasp-calendar-fill-today: var(--grasp-ghost-fill-press);
   /* Toggle: toggle. */
-  /* The height of a toggle, as Palermo's toggle group. */
+  /* The height of a toggle. */
   --grasp-toggle-height: 28px;
   /* The height of a small toggle, in a dense toolbar. */
   --grasp-toggle-height-sm: 24px;
   /* Room at each end of a toggle's words. */
   --grasp-toggle-inset: 6px;
-  /* Room round the toggles inside a group's track. */
+  /* Room between the toggles inside a group's track. */
   --grasp-toggle-gap: 2px;
+  /* Room round the pressed toggle inside a group's track, the same on every side, as segmented Tabs'. */
+  --grasp-toggle-track-inset: var(--grasp-space-1);
+  /* A toggle's icon. */
+  --grasp-toggle-icon: var(--grasp-icon-sm);
+  /* A small toggle's icon, so it keeps its room in the shorter toggle. */
+  --grasp-toggle-icon-sm: 14px;
+  /* A pressed toggle alone: a veil of ink clearly deeper than a hovered one's, so pressed reads strongest. */
+  --grasp-toggle-fill-pressed: light-dark(
+    oklch(0.29 0.05 162 / 0.14),
+    oklch(0.96 0.02 150 / 0.2)
+  );
+  /* A pressed toggle alone under a pointer: one step past pressed. */
+  --grasp-toggle-fill-pressed-hover: light-dark(
+    oklch(0.29 0.05 162 / 0.19),
+    oklch(0.96 0.02 150 / 0.26)
+  );
   /* Scroll area: scroll area. */
-  /* The width of a scroll area's bar, as Palermo's. */
+  /* The width of a scroll area's bar. */
   --grasp-scrollbar-size: 10px;
   /* Room round the thumb inside its bar. */
   --grasp-scrollbar-inset: 1px;
@@ -1098,32 +1310,45 @@
   /* The system's edge, drawn inside a flag and over it, so a white flag keeps its rim on a white ground. */
   --grasp-flag-edge: var(--grasp-avatar-edge);
   /* Tag: tag. */
-  /* The height of a tag, as Palermo's pill. */
+  /* The height of a tag. */
   --grasp-tag-height: 24px;
   /* The height of a small tag, in a dense row. */
   --grasp-tag-height-sm: 20px;
-  /* Room at each end of a tag's words, as Palermo's. */
+  /* Room at each end of a tag's words. */
   --grasp-tag-inset: var(--grasp-space-2);
   /* The size of an icon in a tag, and of its remove cross. */
   --grasp-tag-icon: var(--grasp-badge-icon);
   /* A soft tag's fill: a veil of ink, so it shows on paper and on soft. */
   --grasp-tag-fill: var(--grasp-ghost-fill-press);
   /* Section header: section header. */
-  /* Room between a section's header and each part under it, as Palermo's. */
+  /* Room between a section's header and each part under it. */
   --grasp-section-gap: var(--grasp-space-6);
   /* The width of a section title's placeholder while it loads. */
   --grasp-section-title-wait: 180px;
-  /* The width of a section description's placeholder while it loads. */
-  --grasp-section-description-wait: 240px;
   /* Active bar: active bar. */
-  /* The height of each item an active bar slides between, as Palermo's. */
+  /* The height of each item an active bar slides between. */
   --grasp-active-bar-item: 32px;
   /* The fill behind the item you are on. */
   --grasp-active-bar-fill: var(--grasp-ghost-fill-hover);
-  /* How long the bar takes to slide to another item, as Palermo's. */
+  /* How long the bar takes to slide to another item. */
   --grasp-active-bar-move: 200ms;
+  /* Outline: outline. */
+  /* How thick the mark beside the section being read is, and the measure of how much of the page is read. */
+  --grasp-outline-mark: 2px;
+  /* What is read: the measure's fill, and the compact form's tick for the section being read. */
+  --grasp-outline-read: var(--grasp-mint-deep);
+  /* How long a section's tick is in the compact form. */
+  --grasp-outline-tick: var(--grasp-space-3);
+  /* How long a sub-section's tick is in the compact form. */
+  --grasp-outline-tick-short: var(--grasp-space-2);
+  /* How long the tick of the section being read is. */
+  --grasp-outline-tick-current: var(--grasp-space-5);
+  /* The room between two ticks in the compact form. */
+  --grasp-outline-tick-gap: var(--grasp-space-2);
+  /* The widest the compact form's list opens: less on a window narrower than it and its gutters. */
+  --grasp-outline-width: 16rem;
   /* Composer: composer. */
-  /* The widest a composer grows, as Palermo's card. */
+  /* The widest a composer grows. */
   --grasp-composer-width: 36rem;
   /* The tallest a composer's text grows before it scrolls inside. */
   --grasp-composer-height: 12rem;
@@ -1160,13 +1385,13 @@
     0 3px 18px 3px color-mix(in oklch, currentColor 25%, transparent);
   /* How strongly the working light shows round the card: soft, never a hard ring. */
   --grasp-composer-light-strength: 0.9;
-  /* How long the working light takes to come up or go, as Palermo's. */
+  /* How long the working light takes to come up or go. */
   --grasp-composer-light-in: 280ms;
   /* The slowest beam of the working light: it breathes, it does not race. */
   --grasp-composer-beam-slow: 7s;
-  /* The widest beam of the working light, as Palermo's. */
+  /* The widest beam of the working light. */
   --grasp-composer-beam: 6s;
-  /* The quickest beam of the working light, as Palermo's. */
+  /* The quickest beam of the working light. */
   --grasp-composer-beam-fast: 4.4s;
   /* How long the success halo lasts, once, from nothing to its glow and back. */
   --grasp-composer-halo-time: 1.2s;
@@ -1176,21 +1401,21 @@
   --grasp-composer-dot: 0.75px;
   /* The model menu's width, rail and list together, as Capy's. */
   --grasp-model-menu-width: 20rem;
-  /* The width of a file waiting to be sent, in the strip above a composer's text. */
-  --grasp-attachment-width: 13rem;
+  /* The widest a file waiting to be sent grows, in the strip above a composer's text: its width is its name's, up to this or the strip's width, and only a name longer than that is cut. */
+  --grasp-attachment-max-width: 20rem;
   /* The square of a file's picture or mark at the start of its card. */
   --grasp-attachment-thumb: var(--grasp-control-md);
   /* How small a file's card starts and ends when it arrives or leaves, from the plus side. */
   --grasp-attachment-from-scale: 0.85;
   /* The width of the menu that opens at the caret when @ or / is typed. */
   --grasp-mention-menu-width: 18rem;
-  /* The tallest a question's list of choices grows before it scrolls, as Palermo's. */
+  /* The tallest a question's list of choices grows before it scrolls. */
   --grasp-question-height: 18rem;
   /* Chat message: chat message. */
   /* The widest a person's message grows across the conversation, so it reads as theirs. */
   --grasp-chat-bubble-width: 80%;
   /* Audio player: audio player. */
-  /* The widest an audio player's bar grows, as Palermo's. */
+  /* The widest an audio player's bar grows. */
   --grasp-audio-width: 40rem;
   /* Sidebar: sidebar. */
   /* The width of an open sidebar. */
@@ -1201,7 +1426,7 @@
   --grasp-sidebar-fill: var(--grasp-soft);
   /* The height of a row, as Button's small one. */
   --grasp-sidebar-item-height: var(--grasp-control-sm);
-  /* The row of the page you are on, raised with the edge, as Palermo's chosen segment. */
+  /* The row of the page you are on, raised with the edge. */
   --grasp-sidebar-item-fill-current: var(--grasp-raised);
   /* App frame: app frame colours. */
   /* The window's ground, which the sidebar stands on. */
@@ -1256,9 +1481,9 @@
   /* How fast what is pointed at answers. */
   --grasp-shell-answer: 100ms;
   /* The line height of the person's name at the sidebar's foot. */
-  --grasp-shell-name-line: 18px;
+  --grasp-shell-name-line: 1.125rem;
   /* The line height of the organisation under the person's name. */
-  --grasp-shell-note-line: 16px;
+  --grasp-shell-note-line: 1rem;
   /* A row's count: its padding at the sides. */
   --grasp-shell-count-inline: 5px;
   /* The corner of the profile menu's panel. */
@@ -1269,6 +1494,10 @@
   --grasp-shell-layer: 40;
   /* The least height of the page bar across the top of the page's card. */
   --grasp-shell-bar: 48px;
+  /* The room between the page card's sides and the page's words; the page bar's first and last ink keep it too. */
+  --grasp-shell-page-inline: var(--grasp-space-6);
+  /* The layer a page's own bar and the dock stand on, above what scrolls in the page's card. */
+  --grasp-shell-page-layer: 30;
   /* The room under the last thing on a page. */
   --grasp-shell-page-room-below: 32px;
   /* The room under a page with a chat box floating over its foot, so its last row scrolls clear. */
@@ -1303,19 +1532,25 @@
   /* How long a decided request takes to settle into its one quiet line. */
   --grasp-approval-settle: var(--grasp-duration-ui);
   /* Diff: diff. */
-  /* The ground of a line that was added. */
-  --grasp-diff-added-fill: var(--grasp-success-soft);
-  /* The ground of a line that was removed. */
-  --grasp-diff-removed-fill: var(--grasp-danger-soft);
+  /* The ground of a line that was added. In dark it stands as far from the panel as a removed line does (OKLab step 0.069 against 0.079). */
+  --grasp-diff-added-fill: light-dark(
+    var(--grasp-success-soft),
+    oklch(0.29 0.07 150)
+  );
+  /* The ground of a line that was removed. In dark it is quieter than a danger message, to match an added line's step from the panel. */
+  --grasp-diff-removed-fill: light-dark(
+    var(--grasp-danger-soft),
+    oklch(0.265 0.045 28)
+  );
   /* The words that changed within an added line: a step deeper than the line. */
   --grasp-diff-added-word: light-dark(
     oklch(0.885 0.085 152),
-    oklch(0.37 0.085 152)
+    oklch(0.37 0.1 150)
   );
   /* The words that changed within a removed line: a step deeper than the line. */
   --grasp-diff-removed-word: light-dark(
     oklch(0.895 0.065 28),
-    oklch(0.39 0.1 28)
+    oklch(0.355 0.085 28)
   );
   /* The ground of a folded run of unchanged lines, and of a change's head. */
   --grasp-diff-fold-fill: var(--grasp-soft);
@@ -1337,6 +1572,8 @@
   /* The words and numbers along an axis. */
   --grasp-chart-tick: var(--grasp-muted);
   /* Date range picker: date range picker. */
+  /* Room inside a date field before its first date; its calendar opens moved back by it, so the popup's edge meets the field's. */
+  --grasp-date-field-inset: var(--grasp-space-3);
   /* The widest a date range picker's field grows: two dates and the calendar button. */
   --grasp-date-range-width: 24rem;
   /* The column of presets beside the calendar: Today, Last 7 days, This month. */
@@ -1354,8 +1591,13 @@
   --grasp-tree-row-corner: 8px;
   /* A tree's row under a pointer. */
   --grasp-tree-fill-hover: var(--grasp-ghost-fill-hover);
-  /* A chosen row in a tree, and the current page in a tree of pages. */
-  --grasp-tree-fill-chosen: var(--grasp-item-fill-highlight);
+  /* A chosen row in a tree: the mint wash of a chosen row in a Table, so it is told from a row under a pointer. */
+  --grasp-tree-fill-chosen: var(--grasp-grid-range-wash);
+  /* The current page in a tree of pages: the pointer's fill, nearly twice as strong, under words a step heavier. */
+  --grasp-tree-fill-current: light-dark(
+    oklch(0.29 0.05 162 / 0.11),
+    oklch(0.96 0.02 150 / 0.15)
+  );
   /* Link: link. */
   /* A link's underline at rest: ink at 30%, so the words stay the thing you read. Under the pointer it takes the words' own colour. */
   --grasp-link-underline: light-dark(
@@ -1421,7 +1663,7 @@
   --grasp-code-block-fill: var(--grasp-soft);
   /* The row over a block of code: its file name, its language and the copy button. */
   --grasp-code-block-head: 36px;
-  /* The height of a line of code: 24px, as Palermo's, so code has room to breathe. */
+  /* The height of a line of code: 1.5rem (24px at the usual size), so code has room to breathe. */
   --grasp-code-block-line: var(--grasp-text-md-line);
   /* Line numbers: quieter than the code, never copied. */
   --grasp-code-block-gutter: var(--grasp-quiet);
@@ -1461,6 +1703,18 @@
   --grasp-viewer-min-width: 280px;
   /* The ground behind the document. */
   --grasp-viewer-ground: var(--grasp-soft);
+  /* Behind an image: light in both themes, so a dark logo or a transparent picture reads on it. */
+  --grasp-viewer-image-ground: light-dark(
+    oklch(0.992 0.002 165.08),
+    oklch(0.992 0.002 165.08)
+  );
+  /* The checker's second square behind an image: where the picture is see-through, it shows. */
+  --grasp-viewer-image-check: light-dark(
+    oklch(0.945 0.006 150),
+    oklch(0.945 0.006 150)
+  );
+  /* One square of the checker behind an image. */
+  --grasp-viewer-image-check-size: 8px;
   /* The widest a document's page of words gets: a comfortable line. */
   --grasp-viewer-page-width: 720px;
   /* Room inside a document's page, round its words. */
@@ -1472,7 +1726,7 @@
   /* The height of the viewer's toolbar. */
   --grasp-viewer-toolbar-height: var(--grasp-control-lg);
   /* The height of a line of code or text at 100%. */
-  --grasp-viewer-line: 20px;
+  --grasp-viewer-line: 1.25rem;
   /* A word search found: a soft tint, never a border. */
   --grasp-viewer-match: var(--grasp-attention-soft);
   /* The match search is on now: a stronger tint. */
@@ -1521,10 +1775,10 @@
   --grasp-grid-head-height: 40px;
   /* The column of row numbers at a data grid's start. */
   --grasp-grid-number-width: 40px;
-  /* The hairline round the active cell: pine on a light ground, mint on a dark one. */
+  /* The hairline round the active cell: pine on a light ground, the ink on a dark one. Never the range's mint: in dark the two were one colour and the active cell was lost in its range. */
   --grasp-grid-active-edge: light-dark(
     var(--grasp-light-pine),
-    var(--grasp-light-mint)
+    var(--grasp-ink)
   );
   /* The soft mint shadow that fades out round the active cell, our focus language, never a hard box. */
   --grasp-grid-active-halo: light-dark(
@@ -1533,8 +1787,8 @@
   );
   /* The very soft mint wash over a selected range of cells. */
   --grasp-grid-range-wash: light-dark(
-    oklch(0.8005 0.1625 165.25 / 0.12),
-    oklch(0.8005 0.1625 165.25 / 0.1)
+    oklch(0.8005 0.1625 165.25 / 0.14),
+    oklch(0.8005 0.1625 165.25 / 0.18)
   );
   /* The fine dots of a range drawn in dither, one of the looks on trial. */
   --grasp-grid-range-dot: light-dark(
@@ -1575,7 +1829,7 @@
   /* Glass over a backdrop: the card's colour most of the way, over a blur of what is behind. */
   --grasp-backdrop-glass: color-mix(
     in oklch,
-    var(--grasp-shell-card) 62%,
+    var(--grasp-raised) 86%,
     transparent
   );
   /* Backdrop: backdrop sizes. */
@@ -1618,9 +1872,9 @@
   /* The height of every row in an inspector's card, as Profound's 44px. */
   --grasp-inspector-row: var(--grasp-tap);
   /* A row's name, a label and a view: a step under text-sm, as Profound's. */
-  --grasp-inspector-text: 13px;
+  --grasp-inspector-text: 0.8125rem;
   /* The line height of inspector-text. */
-  --grasp-inspector-text-line: 18px;
+  --grasp-inspector-text-line: 1.125rem;
   /* The one accent: the small icons that say what kind of thing a row is. Everything else stays neutral. */
   --grasp-inspector-kind: var(--grasp-mint-deep);
   /* How far a label's dashed underline sits under its words: it says the label explains itself on hover. */
@@ -1649,9 +1903,9 @@
   --grasp-source-mark-inline: 14px;
   /* One mark in the pile under an answer. */
   --grasp-source-pile-mark: 26px;
-  /* How far each mark in the pile slides under the one before it. */
-  --grasp-source-pile-overlap: 10px;
-  /* How far apart the pile's marks fan under a pointer, each from the middle one. */
+  /* How far each mark in the pile slides under the one before it: no further than the room round its icon, so every icon shows whole. */
+  --grasp-source-pile-overlap: 6px;
+  /* How far apart the pile's marks fan under a pointer, opening from the first mark. */
   --grasp-source-pile-fan: 4px;
   /* The soft mint behind the words a lit marker backs. */
   --grasp-source-claim-wash: color-mix(
@@ -1689,4 +1943,20 @@
   --grasp-bp-sidebar: 64rem;
   /* From 1344px the outline stands in its own rail at the right. */
   --grasp-bp-rail: 84rem;
+}
+
+/* Where a browser draws no squircle, each squircle corner as the plain radius that reads like it:
+   see tokens/corner-fallbacks.ts. */
+@supports not (corner-shape: squircle) {
+  :root {
+    --grasp-corner: 9px;
+    --grasp-corner-mark: 4px;
+    --grasp-tree-row-corner: 4px;
+    --grasp-shell-menu-corner: 4px;
+    --grasp-inspector-tile-corner: 7px;
+    --grasp-backdrop-glass-corner: 7px;
+    --grasp-app-card-window-corner: 7px;
+    --grasp-app-card-corner: 13px;
+    --grasp-app-preview-device-corner: 13px;
+  }
 }

@@ -51,6 +51,12 @@ export interface PageHeaderProps {
    * @default "all"
    */
   descriptionLines?: 1 | 2 | "all";
+  /**
+   * While `loading`: how many lines the description's placeholder reserves, when you know the
+   * description wraps (a phone, a long line), so nothing moves when it arrives. Without it, the
+   * clamp you set with `descriptionLines`, or one line.
+   */
+  loadingLines?: number;
   /** Above the title: where the page sits, a Breadcrumb, for a page without an App shell (whose page bar holds the crumbs). */
   breadcrumb?: ReactNode;
   /** Beside the title: a badge that says its status. */
@@ -132,7 +138,15 @@ const styles = stylex.create({
     minWidth: 0,
     marginTop: grasp.space3,
   },
-  titleWait: { width: grasp.pageTitleWait, height: grasp.titleLgLine },
+  // Never wider than its room: a phone is narrower than a title is long.
+  // As tall as the title's letters, in the middle of its line, as a text placeholder is: the line
+  // keeps its room, so nothing moves when the title arrives.
+  titleWait: {
+    width: "100%",
+    maxWidth: grasp.pageTitleWait,
+    height: grasp.titleLg,
+    marginBlock: `calc((${grasp.titleLgLine} - ${grasp.titleLg}) / 2)`,
+  },
   // A description cut short at its line, with an ellipsis. Its height never changes.
   clamp: {
     display: "-webkit-box",
@@ -141,13 +155,37 @@ const styles = stylex.create({
   },
   clampOne: { WebkitLineClamp: 1 },
   clampTwo: { WebkitLineClamp: 2 },
-  descriptionWait: { width: grasp.sectionDescriptionWait },
+  // A description runs to its line's end: its placeholder does too.
+  descriptionWait: { width: "100%" },
+  // Its lines stacked as the description's own lines stand: no gap between them.
+  descriptionWaitLines: { display: "grid", minWidth: 0 },
 });
+
+/** The description's placeholder: one Skeleton line per line it will take (the hint, else the clamp, else one). */
+const DescriptionWait = ({
+  lines,
+  clamp,
+}: {
+  lines: number | undefined;
+  clamp: 1 | 2 | "all";
+}) => (
+  <div {...stylex.props(styles.descriptionWaitLines)}>
+    {Array.from(
+      {
+        length: Math.max(1, Math.round(lines ?? (clamp === "all" ? 1 : clamp))),
+      },
+      (_, index) => (
+        <Skeleton key={index} text="lg" layout={styles.descriptionWait} />
+      )
+    )}
+  </div>
+);
 
 export const PageHeader = ({
   title,
   description,
   descriptionLines = "all",
+  loadingLines,
   breadcrumb,
   aside,
   actions,
@@ -174,7 +212,10 @@ export const PageHeader = ({
             <>
               <Skeleton shape="block" layout={styles.titleWait} />
               {description !== undefined && (
-                <Skeleton text="lg" layout={styles.descriptionWait} />
+                <DescriptionWait
+                  lines={loadingLines}
+                  clamp={descriptionLines}
+                />
               )}
             </>
           ) : (

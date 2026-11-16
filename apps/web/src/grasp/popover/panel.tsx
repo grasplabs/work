@@ -11,6 +11,7 @@ import type { ComponentProps, ReactNode } from "react";
 import { focus } from "../focus/focus";
 import { scroll } from "../scroll/scroll";
 import { popup } from "../tokens/tokens.values";
+import { popoverMarker } from "./popover.stylex";
 import { useStill } from "./still-context";
 import { popoverStyles as styles } from "./styles";
 
@@ -109,7 +110,13 @@ export const PopoverPanel = ({ children, ...rest }: PopoverPanelProps) => {
       {...rest}
       sideOffset={popup.popoverGap}
       collisionPadding={popup.gutter}
-      {...stylex.props(styles.panel, styles.placed, styles.motion, focus.ring)}
+      {...stylex.props(
+        popoverMarker,
+        styles.panel,
+        styles.placed,
+        styles.motion,
+        focus.ring
+      )}
     >
       <div
         ref={box}

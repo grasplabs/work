@@ -29,7 +29,7 @@ type TriggerPrimitiveProps = ComponentProps<typeof TriggerPrimitive>;
 interface TriggerWithWords {
   /** The words on the trigger: what the popover is for ("Share", "Filters"). */
   children: ButtonWords;
-  /** An icon before the words, or the whole trigger with `label`. Import it from src/icons. */
+  /** An icon before the words, or the whole trigger with `label`. Import it from the icons entry (`@/components/grasp/icons`). */
   icon?: IconData;
   label?: never;
 }
