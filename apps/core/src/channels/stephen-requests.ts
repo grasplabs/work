@@ -16,7 +16,10 @@ import { activeMember } from "../auth/auth.ts";
 import type { ToolCall } from "../chat-tool-events.ts";
 import {
   stephenRequestCards,
+  stephenRequestNeeds,
+  stephenRequestProposals,
   stephenRequestQuestions,
+  stephenRequestTopics,
   stephenRequests,
   stephenSummaries,
   teamMembers,
@@ -528,9 +531,10 @@ export const rateRequest = async (
 };
 
 /**
- * Deletes requests past their thirteen months, and the questions no
- * request points at any more that are older than a day (a question just
- * named waits for the request that named it).
+ * Deletes requests past their thirteen months, the questions and topics
+ * nothing points at any more that are older than a day (a name just made
+ * waits for the request that made it), and Grasp's proposals for, and
+ * owners' statuses of, a question that is gone.
  */
 export const sweepStephenRequests = async (
   env: Env,
@@ -546,6 +550,36 @@ export const sweepStephenRequests = async (
         AND NOT EXISTS (SELECT 1 FROM ${stephenRequests}
           WHERE ${stephenRequests.questionId} = ${stephenRequestQuestions.id})`
   );
+  // The topics, likewise, once no question points at them either: a name
+  // rests on one person's message, so it goes with the last request that
+  // points at it, swept or erased (GRA-1923). An older topic that just lost
+  // its last request and is sorted into again within the same quarter
+  // hour can go before the new request is kept with its id: that one
+  // request then points at a topic that is gone, which no page names, so
+  // it is counted under "Other topics". Harmless, and never a name shown.
+  await db.delete(stephenRequestTopics).where(
+    sql`${stephenRequestTopics.createdAt} < ${now.getTime() - 86_400_000}
+        AND NOT EXISTS (SELECT 1 FROM ${stephenRequests}
+          WHERE ${stephenRequests.topicId} = ${stephenRequestTopics.id})
+        AND NOT EXISTS (SELECT 1 FROM ${stephenRequestQuestions}
+          WHERE ${stephenRequestQuestions.topicId} = ${stephenRequestTopics.id})`
+  );
+  // Grasp's proposals for a question that is gone: what the model wrote
+  // from its wording (and its topic's name) goes with it; and what an
+  // owner set about it, which would otherwise keep Needs you reading
+  // requests back to its day. A quiet team's rests on no one's words. A
+  // need under five whose question is still kept keeps its status.
+  for (const [table, key] of [
+    [stephenRequestProposals, stephenRequestProposals.key],
+    [stephenRequestNeeds, stephenRequestNeeds.key],
+  ] as const) {
+    // oxlint-disable-next-line no-await-in-loop -- one table after the other
+    await db.delete(table).where(
+      sql`${key} NOT LIKE 'quietTeam:%'
+          AND NOT EXISTS (SELECT 1 FROM ${stephenRequestQuestions}
+            WHERE ${stephenRequestQuestions.id} = substr(${key}, instr(${key}, ':') + 1))`
+    );
+  }
   // Cards whose request is gone (swept or erased), a day on.
   await db.delete(stephenRequestCards).where(
     sql`${stephenRequestCards.createdAt} < ${now.getTime() - 86_400_000}
