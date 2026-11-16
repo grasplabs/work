@@ -584,7 +584,10 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
     kept: "what an older release's erasure hid, by SHA-256 of a source's key",
   },
   "brainStore.person_erasure_subjects": {
-    kept: "SHA-256 of what a person's erasure closed, so nothing makes it again",
+    kept: "what a person's erasure closed: their address by SHA-256, their card by its id, until the address is released",
+  },
+  "brainStore.person_erasure_reopens": {
+    kept: "ledger keys of addresses opened again once released, no address",
   },
   "brainStore.person_erasure_memories": {
     kept: "the memories a person's erasure hides until the tick deletes them, by row",
@@ -599,8 +602,10 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   },
   "brainStore.export_sweep": noPerson,
   "brainStore.restores": noPerson,
-  // The entity that is them (by the address they signed in with), the
-  // memories about it or in their word, and the names those gave.
+  // The person entity that is them alone (by the address they signed in
+  // with), the memories about it or in their word, and the names those
+  // gave; on anyone else's entity (a team, a project, a shared desk) their
+  // address alone.
   "brainStore.entities": { erased: "brain_shared" },
   "brainStore.memories": { erased: "brain_shared" },
   "brainStore.entity_names": { erased: "brain_shared" },
