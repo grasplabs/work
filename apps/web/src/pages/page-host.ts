@@ -974,12 +974,29 @@ export const previewTarget = (
       async (frame) => await frame.watchQuery(watch.request, forCore(relay))
     );
   };
+  /**
+   * Follows `watch`'s query again, in place of its subscription. One that
+   * fails (its connection dropped on the way, or the frame stopped) ends
+   * the watch, so the frame follows its query anew, unless another took
+   * its place meanwhile.
+   */
+  const followAgain = async (watch: PreviewWatch): Promise<void> => {
+    const subscription = subscribe(watch);
+    watch.subscription = subscription;
+    try {
+      await subscription;
+    } catch {
+      if (watch.subscription === subscription) {
+        endWatch(watch);
+      }
+    }
+  };
   return {
     moved: (next) => {
       shows = next;
       for (const watch of watches) {
         const before = watch.subscription;
-        watch.subscription = subscribe(watch);
+        void followAgain(watch);
         if (before !== undefined) {
           void releaseWatch(before);
         }
@@ -1523,29 +1540,27 @@ export interface DraftRevisions {
   onTestDataStale?: (() => void) | undefined;
 }
 
+/** What a preview opens: the draft as it is, its checkpoint `point`, or the App's `version`. */
+export interface PreviewOpening {
+  app: string;
+  point?: number;
+  version?: number;
+}
+
 /**
- * Runs the pages of the draft of `app` in `frame`, as a preview
- * (`runFrame`), at `location`: of the draft's checkpoint `point`, or of
- * the App's version `version`, read-only. The draft as it is now takes each newer revision `revisions` names in the frame it has
- * open (preview-updates.ts); one that can't come in that way starts the
- * frame afresh, as a new version of an App does (`updated`).
+ * What the page runs for a preview of the draft of `app`, for one frame
+ * (`runPreview`), and `stateOf`, which says the frame's state to
+ * `onState` with whether a problem is being fixed over it.
  */
-export const runPreview = (
-  frame: HTMLIFrameElement,
-  {
-    app,
-    point,
-    version,
-  }: {
-    app: string;
-    point?: number;
-    version?: number;
-  },
+export const previewPage = (
+  { app, point, version }: PreviewOpening,
   location: FrameLocation,
   onState: (state: PageState) => void,
-  onOpened: (appName: string) => void,
   revisions?: DraftRevisions
-): (() => void) => {
+): {
+  source: Omit<FrameSource<PreviewBundle>, "join">;
+  stateOf: (state: PageState) => void;
+} => {
   // Shown over `running` while it lasts: the frame shows the last version
   // that worked.
   let health: PreviewHealth = "working";
@@ -1558,17 +1573,12 @@ export const runPreview = (
         : state
     );
   };
-  return runFrame(
-    frame,
-    {
+  return {
+    stateOf,
+    source: {
       open: async (session) =>
         await session.apps.preview.open(app, point, version),
       openMs: pageLimits.previewOpenMs,
-      // A connection of its own: core keeps a preview's callbacks (its
-      // server calls') per connection, with no way of the frame's own to
-      // let go of them, so only closing the connection when the preview
-      // stops releases them (GRA-623).
-      join: ownLink,
       // A preview reads no real data.
       connect: (link, bundle, _refused, cleanups) => {
         const opened = bundle.refresh;
@@ -1586,10 +1596,12 @@ export const runPreview = (
           bundle.app,
           opened,
           {
-            // What the frame shows: the App's version, if one.
+            // What the frame shows: the App's version, if one. Asked
+            // again on the connection made after one that dropped:
+            // nothing may name this revision again, as when it was
+            // Grasp's last write.
             fetch: async (revision, appVersion) =>
-              await on(
-                link,
+              await link.retrying(
                 async ({ apps }) =>
                   await apps.preview.update(
                     bundle.app,
@@ -1647,6 +1659,40 @@ export const runPreview = (
         });
         return { target };
       },
+    },
+  };
+};
+
+/**
+ * Runs the pages of the draft of `app` in `frame`, as a preview
+ * (`runFrame`), at `location`: of the draft's checkpoint `point`, or of
+ * the App's version `version`, read-only. The draft as it is now takes each newer revision `revisions` names in the frame it has
+ * open (preview-updates.ts); one that can't come in that way starts the
+ * frame afresh, as a new version of an App does (`updated`).
+ */
+export const runPreview = (
+  frame: HTMLIFrameElement,
+  opening: PreviewOpening,
+  location: FrameLocation,
+  onState: (state: PageState) => void,
+  onOpened: (appName: string) => void,
+  revisions?: DraftRevisions
+): (() => void) => {
+  const { source, stateOf } = previewPage(
+    opening,
+    location,
+    onState,
+    revisions
+  );
+  return runFrame(
+    frame,
+    {
+      ...source,
+      // A connection of its own: core keeps a preview's callbacks (its
+      // server calls') per connection, with no way of the frame's own to
+      // let go of them, so only closing the connection when the preview
+      // stops releases them (GRA-623).
+      join: ownLink,
     },
     stateOf,
     onOpened

@@ -243,8 +243,8 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     period: "quarterHour",
     run: sweepChannelSignals,
   },
-  // Stephen's requests past their thirteen months, and the questions
-  // nothing points at (src/channels/stephen-requests.ts).
+  // Stephen's requests past their thirteen months, and the questions,
+  // topics and proposals nothing points at (src/channels/stephen-requests.ts).
   {
     name: "channels.requests",
     period: "quarterHour",
