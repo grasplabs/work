@@ -12995,6 +12995,10 @@ msgstr "Gestopt schema"
 msgid "Stopped someone visiting an App"
 msgstr "Iemand niet langer een app laten bezoeken"
 
+#: src/activity/audit-words.ts
+msgid "Stopped the Brain using someone's workflow results, as they lost the workflow"
+msgstr "Gestopt met het gebruik van iemands workflowresultaten in het Brain, omdat diegene de workflow kwijt is"
+
 #: src/chat/chat-markdown.ts
 #: src/chat/thread.tsx
 msgid "Stopped."

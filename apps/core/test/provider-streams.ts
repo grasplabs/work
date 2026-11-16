@@ -46,9 +46,10 @@ export type ProviderReply =
        * Streams the text's first `at` characters, then waits for `until`
        * before the rest (Anthropic and chat completions): an answer caught
        * mid-stream. `reached` is called when the stream gets there, its
-       * first characters delivered.
+       * first characters delivered. Several, in order of `at`, stop it at
+       * each.
        */
-      pause?: { at: number; until: Promise<unknown>; reached?: () => void };
+      pause?: TextPause | readonly TextPause[];
       /**
        * Streams the text's first `cut` characters, then closes the stream
        * with nothing after them, neither an end nor a count (Anthropic and
@@ -89,6 +90,13 @@ interface StreamEvent {
   data: unknown;
 }
 
+/** Where an answer's text stops until `until` settles (`Answer.pause`). */
+interface TextPause {
+  at: number;
+  until: Promise<unknown>;
+  reached?: () => void;
+}
+
 /** Where a stream stops until the promise settles (`pause`). */
 interface StreamPause {
   until: Promise<unknown>;
@@ -119,24 +127,37 @@ const stopOf = (
   return (toolCalls ?? []).length > 0 ? toolUse : stop;
 };
 
-/** A text block's deltas: the text, or its two parts either side of a pause. */
+/** `text` in its parts between its pauses, each part as `part` makes it. */
+const piecesOf = (
+  text: string,
+  pause: Answer["pause"],
+  part: (piece: string) => StreamEvent
+): (StreamEvent | StreamPause)[] => {
+  const pauses = pause === undefined ? [] : [pause].flat();
+  const pieces: (StreamEvent | StreamPause)[] = [];
+  let from = 0;
+  for (const each of pauses) {
+    pieces.push(part(text.slice(from, each.at)), each);
+    from = each.at;
+  }
+  pieces.push(part(text.slice(from)));
+  return pieces;
+};
+
+/** A text block's deltas: the text, in its parts either side of each pause. */
 const textDeltas = (
   index: number,
   text: string,
   pause: Answer["pause"]
-): (StreamEvent | StreamPause)[] => {
-  const delta = (part: string): StreamEvent => ({
+): (StreamEvent | StreamPause)[] =>
+  piecesOf(text, pause, (part) => ({
     event: "content_block_delta",
     data: {
       type: "content_block_delta",
       index,
       delta: { type: "text_delta", text: part },
     },
-  });
-  return pause === undefined
-    ? [delta(text)]
-    : [delta(text.slice(0, pause.at)), pause, delta(text.slice(pause.at))];
-};
+  }));
 
 /** A content block of Anthropic's, as its stream opens it. */
 type AnthropicBlock =
@@ -324,13 +345,7 @@ const chatCompletionEvents = (
             ],
           }),
         ]),
-    ...(pause === undefined
-      ? [content(text)]
-      : [
-          content(text.slice(0, pause.at)),
-          pause,
-          content(text.slice(pause.at)),
-        ]),
+    ...piecesOf(text, pause, content),
     ...(answer.toolCalls ?? []).map((call, index) =>
       chunk({
         choices: [

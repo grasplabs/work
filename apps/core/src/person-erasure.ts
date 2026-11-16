@@ -1,4 +1,5 @@
-import { preparePurge, purge } from "@grasp-os/brain/purge";
+import type { PurgeResult } from "@grasp-os/brain/knowledge";
+import { purgePerson } from "@grasp-os/brain/purge";
 import { actorOf } from "@grasp-os/shared/audit";
 import type { AuditEntry } from "@grasp-os/shared/audit";
 import {
@@ -32,6 +33,7 @@ import {
   organizationId,
 } from "./auth/auth.ts";
 import { directoryProviderId } from "./auth/config.ts";
+import { eraseGapAnswerer } from "./brain-gaps.ts";
 import {
   erasePerson as eraseFromBrain,
   stillDeletingTooLong,
@@ -82,7 +84,7 @@ import {
 } from "./erased-people.ts";
 import { dropHeldStarts } from "./held-starts.ts";
 import { brainOf } from "./knowledge/ports.ts";
-import { coreErasure } from "./knowledge/rpc.ts";
+import { uploadErasure } from "./knowledge/uploads.ts";
 import { eraseOnboardingInterview } from "./onboarding/new-brain.ts";
 import { onboardingStore } from "./onboarding/store.ts";
 import type { ErasureAreaName } from "./person-erasure-inventory.ts";
@@ -256,16 +258,43 @@ const identity: ErasureStep = {
 };
 
 /**
- * What the Brain and Knowledge hold of them (GRA-1185), through the
- * Brain's own personal purge, the one way it erases a person (purge.ts),
- * which core lets run only while their erasure is unfinished (rpc.ts
- * `requireErasing`), for the admin who asked: their memories, their outcomes with the Brain's tombstone that
- * keeps them from coming back, every collection only they read (their
- * own, `access` "me"; collections they made for others stay) with every
- * version, section, transcript and payload, core's copies of what they
- * gave (`coreErasure`), and the search index. It is one batch, safe to run
- * again, so a failure leaves the area pending and the clock runs it again.
- * Derived projections are GRA-309's, which the purge reaches as it grows.
+ * Purges `userId` from today's Brain and Knowledge (GRA-1185), as the
+ * admin `requestedBy` asked, through the package's personal purge
+ * (purge.ts `purgePerson`), the one way it erases a person: their
+ * memories, receipts, lessons and outcomes with the tombstone that keeps
+ * them from coming back, every collection only they read (their own,
+ * `access` "me"; collections they made for others stay) with every
+ * version, section, transcript and payload, their uploads' originals in R2
+ * (`uploadErasure`), and the search index; then who answered a gap, if it
+ * was them (the answers stay, as the company's, said by no one). Nothing
+ * writes Knowledge any more, but what it holds stays on a deployment until
+ * the cutover's last step deletes it, so this runs until then. Recorded
+ * and resumable: it throws when a step fails, and running it again
+ * finishes it. Only the `brain` area calls it.
+ */
+export const purgeFromKnowledge = async (
+  env: Env,
+  requestedBy: string,
+  userId: string
+): Promise<PurgeResult> => {
+  const actor = { type: "person" as const, userId: requestedBy };
+  return await purgePerson(
+    brainOf(env),
+    { actor, userId: requestedBy },
+    { userId, reason: "erasure_request" },
+    {
+      ...uploadErasure(env),
+      forgetActor: async () => {
+        await eraseGapAnswerer(env, actor, userId);
+      },
+    }
+  );
+};
+
+/**
+ * What today's Brain and Knowledge hold of them, and their skill shares
+ * (`purgeFromKnowledge`). Complete only once the purge returned: a
+ * failure leaves the area pending, and the clock runs it again.
  */
 const brain: ErasureStep = {
   area: "brain",
@@ -278,15 +307,6 @@ const brain: ErasureStep = {
     if (erasure === undefined) {
       return;
     }
-    const by = {
-      actor: { type: "person" as const, userId: erasure.requestedBy },
-      userId: erasure.requestedBy,
-    };
-    const input = {
-      type: "personal" as const,
-      userId,
-      reason: "erasure_request" as const,
-    };
     // Their asks to share a skill, with the text a waiting one holds, and
     // the names of the skills they deleted. A decision on an ask of theirs
     // is the company's (or its team's), and keeps its text: the Brain follows it all the
@@ -304,9 +324,7 @@ const brain: ErasureStep = {
         .set({ decidedBy: null })
         .where(eq(skillDecisions.decidedBy, userId)),
     ]);
-    const onErase = coreErasure(env);
-    const plan = await preparePurge(brainOf(env), by, input, onErase);
-    await purge(brainOf(env), by, input, plan.token, onErase);
+    await purgeFromKnowledge(env, erasure.requestedBy, userId);
     await completed(db, userId, "brain");
   },
 };

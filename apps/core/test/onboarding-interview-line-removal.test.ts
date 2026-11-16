@@ -2,6 +2,7 @@ import { addDays } from "@grasp-os/shared/admin/org-record";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import {
   erasedFact,
+  interviewProgressSchema,
   nextFactId,
   removedLine,
 } from "@grasp-os/shared/interview-links";
@@ -123,9 +124,37 @@ const speak = async ({
     body: JSON.stringify({ ...body, link: { secret: link.secret } }),
   });
 
-/** Their interview as kept. */
-const keptOf = async (person: string) =>
-  await onboardingStore(env).interviewStored(person);
+/**
+ * Their interview as the store keeps it: read as an interview, or as
+ * stored when it no longer reads as one; null when none is kept.
+ */
+const keptOf = async (
+  person: string
+): Promise<{ progress: InterviewProgress } | { unreadable: string } | null> => {
+  const [row] = await runInDurableObject(
+    onboardingStore(env),
+    (_instance, state) =>
+      state.storage.sql
+        .exec<{ progress: string }>(
+          "SELECT progress FROM interviews WHERE person = ?",
+          person
+        )
+        .toArray()
+  );
+  if (row === undefined) {
+    return null;
+  }
+  let json: unknown;
+  try {
+    json = JSON.parse(row.progress);
+  } catch {
+    return { unreadable: row.progress };
+  }
+  const parsed = interviewProgressSchema.safeParse(json);
+  return parsed.success
+    ? { progress: parsed.data }
+    : { unreadable: row.progress };
+};
 
 /** What the onboarding's own log noted about `person`. */
 const notedAbout = async (person: string): Promise<string[]> =>

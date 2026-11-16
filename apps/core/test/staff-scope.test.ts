@@ -161,7 +161,7 @@ describe("a Grasp staff session, whatever its scope", () => {
     }).toStrictEqual({ full: reached, onboarding: reached });
   });
 
-  it("starts no run, asks no chat, calls no App function, creates no App and writes no Knowledge or Brain", async () => {
+  it("starts no run, asks no chat, calls no App function, creates no App and writes no Brain", async () => {
     const { builder, app, workflow } = await reportWorkflow();
     const { session, api } = await staffOn(env);
     const { userId } = await api.whoami();
@@ -174,9 +174,6 @@ describe("a Grasp staff session, whatever its scope", () => {
         api.chats.send(crypto.randomUUID(), { text: "Hi", model: "any" })
       ),
       createApp: await outcome(api.apps.create({ name: "Staff's" })),
-      collection: await outcome(
-        api.knowledge.createCollection({ name: "Staff's", access: "everyone" })
-      ),
       brain: await outcome(api.brain.addRecords([])),
       page: await outcome(api.pages.open(app)),
       functions: await postedAs(`${appFunctionPath}/${app}`, session, asPage),
@@ -191,7 +188,6 @@ describe("a Grasp staff session, whatever its scope", () => {
       chat: "role.forbidden",
       send: "role.forbidden",
       createApp: "role.forbidden",
-      collection: "role.forbidden",
       brain: "role.forbidden",
       page: "role.forbidden",
       functions: 401,

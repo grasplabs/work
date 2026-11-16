@@ -14,6 +14,7 @@ import { sweepAppVisitors } from "./app-visitors.ts";
 import { drainWebhookDeliveries } from "./app-webhooks.ts";
 import { auditLog } from "./audit-log.ts";
 import { workBrain } from "./brain-next.ts";
+import { removeLostRunSources } from "./brain-run-sources.ts";
 import { producersOf, relayHandOvers } from "./brain-sources.ts";
 import { completeOwedRemovals } from "./brain-uploads.ts";
 import { sweepChannelLinks } from "./channels/accounts.ts";
@@ -89,6 +90,15 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     period: "minute",
     run: async (env) => {
       await settleOnboardingBrain(env);
+    },
+  },
+  // Run results of people who lost their workflow, taken out of use in the
+  // new Brain (src/brain-run-sources.ts).
+  {
+    name: "brain.run_sources",
+    period: "minute",
+    run: async (env) => {
+      await removeLostRunSources(env);
     },
   },
   { name: "members.disconnects", period: "minute", run: retryDisconnects },

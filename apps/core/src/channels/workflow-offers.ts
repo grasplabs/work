@@ -19,6 +19,7 @@ import { requireWorkflowRole } from "../workflow-resources.ts";
 import { acceptedInput, pinned, startWorkflow } from "../workflow-starts.ts";
 import { startOfferCard } from "./cards.tsx";
 import type { Conversation } from "./connect-own.ts";
+import { inertOn } from "./inert.ts";
 import { keepCardsOf, pressedStart } from "./stephen-requests.ts";
 import type { ChannelLocale, LineName } from "./words.ts";
 
@@ -98,8 +99,9 @@ export const shownValues = (
  * agent acts for, as `scope` says, for the chat's answer to put on a card.
  * Only in a chat app's chat, never a restricted one; only a workflow they
  * could start themselves whose owner lets people ask for it, with input
- * its live version's contract takes, few and short enough to show whole.
- * Starts nothing.
+ * its live version's contract takes, few and short enough for a card;
+ * the card itself offers Start only where it shows every value whole
+ * (cards.tsx `startOfferCard`). Starts nothing.
  */
 export const offerStart = async (
   env: Env,
@@ -178,9 +180,17 @@ export const postOffers = async (
     chatId,
     userId,
     requestId,
-  }: { chatId: string; userId: string; requestId: string | null },
+    platform,
+  }: {
+    chatId: string;
+    userId: string;
+    requestId: string | null;
+    /** Where it is posted, whose link and mention syntax is made inert. */
+    platform: string;
+  },
   locale: ChannelLocale
 ): Promise<void> => {
+  const inert = inertOn(platform);
   const now = new Date();
   const offers = await drizzle(env.DB)
     .update(chatWorkflowOffers)
@@ -205,11 +215,15 @@ export const postOffers = async (
   )) {
     // oxlint-disable-next-line no-await-in-loop -- in the order offered
     await thread.post(
+      // Each value as the start will take it, what the model wrote inert
+      // (`inertOn`).
       startOfferCard({
         locale,
         offerId: offer.id,
-        workflow: offer.workflowName,
-        values: shownValues(JSON.parse(offer.input)),
+        workflow: inert(offer.workflowName),
+        values: shownValues(JSON.parse(offer.input)).map(
+          ({ label, value }) => ({ label: inert(label), value: inert(value) })
+        ),
       })
     );
   }

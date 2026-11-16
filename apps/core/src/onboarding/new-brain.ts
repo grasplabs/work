@@ -28,7 +28,7 @@ import type { OwedErasure } from "./store.ts";
 //
 // What no longer stands is erased with `eraseSource`, directly: at once
 // after anything that takes an interview out (links.ts, admin-command.ts,
-// interview-erasure.ts, person-erasure.ts), and on core's clock until done
+// person-erasure.ts), and on core's clock until done
 // (`settleOnboardingBrain`). An add that lands after the erasure is
 // refused by the closed key.
 
@@ -161,7 +161,7 @@ export const settleOnboardingBrain = async (env: Env): Promise<void> => {
 
 /**
  * `eraseOwedOnboardingSources`, then throws while the Brain may still hold
- * `person`'s interview: for core's erasures and purges, which let go only
+ * `person`'s interview: for core's erasure of a person, which lets go only
  * once it doesn't.
  */
 export const eraseOnboardingInterview = async (

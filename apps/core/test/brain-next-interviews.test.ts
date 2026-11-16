@@ -19,7 +19,6 @@ import {
 } from "../src/brain-next.ts";
 import { producersOf, relayHandOvers } from "../src/brain-sources.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
-import { interviewErasure } from "../src/onboarding/interview-erasure.ts";
 import {
   addOwedInterviews,
   eraseOwedOnboardingSources,
@@ -74,8 +73,8 @@ import {
 //   out, signs in with it, and reads their interview.
 // - Anyone but the person (a team-mate, an admin) recalls a word of it.
 // - The company's audit log telling the moment someone finished or changed
-//   their interview: a source is noted only once the day turned.
-// - A withdrawal, an edit, a new start, a purge or core's erasure leaving
+//   their interview: nothing of it is in that log.
+// - A withdrawal, an edit, a new start or core's erasure leaving
 //   their words in the Brain.
 // - The same interview handed over twice, as two sources, also when a
 //   drain is cut off and runs again.
@@ -642,46 +641,21 @@ describe("interviews in the new Brain", { timeout: 120_000 }, () => {
     await ageOwnErasure(lea);
     await retryErasures(env);
     expect({
-      interview: await store.interviewStored(ids.lea),
+      interview: await runInDurableObject(
+        store,
+        (_, state) =>
+          state.storage.sql
+            .exec("SELECT person FROM interviews WHERE person = ?", ids.lea)
+            .toArray().length
+      ),
       backs: await store.sentFor(ids.lea),
       team: await store.interviewTeamOf(lea),
       kept: await keptIn(key, lea),
     }).toStrictEqual({
-      interview: null,
+      interview: 0,
       backs: [],
       team: null,
       kept: { shared: "erased", own: "free" },
-    });
-  });
-
-  it("are replaced in the Brain when a content purge rewrites them", async () => {
-    const marker = `marker${unique()}`;
-    const ids = await team();
-    await mapped(ids, {
-      facts: [fact("l9", "rule", `Every refund needs ${marker} first.`)],
-    });
-    const lea = await accountOfPerson(ids.lea);
-    await settled();
-    const before = await interviewKeyOf(lea);
-    // The purge rewrites her interview, and lets go only once the Brain's
-    // copy with the purged word is erased.
-    await interviewErasure(env).rewrite(
-      { actor: { type: "system" }, userId: "system" },
-      (text) => text.replaceAll(marker, "(removed)")
-    );
-    await settled();
-    expect({
-      purged: await recalled(lea, marker),
-      rewritten: await recalled(lea, "(removed)", "interview"),
-      old: await keptIn(before, lea),
-      owed: await onboardingStore(env).owedErasures({ person: ids.lea }),
-    }).toStrictEqual({
-      purged: [],
-      rewritten: [
-        expect.stringContaining("Every refund needs (removed) first."),
-      ],
-      old: { shared: "erased", own: "erased" },
-      owed: [],
     });
   });
 
@@ -693,24 +667,25 @@ describe("interviews in the new Brain", { timeout: 120_000 }, () => {
     });
     const lea = await accountOfPerson(ids.lea);
     await settled();
-    // A content purge rewrites her interview: its new copy waits for the
-    // clock's add, which is held in flight.
-    await interviewErasure(env).rewrite(
-      { actor: { type: "system" }, userId: "system" },
-      (text) => text.replaceAll(marker, "(removed)")
-    );
+    // The directory made her another member, adopted at her next sign-in
+    // (auth.ts): her interview moves to that account, and its copy there
+    // waits for the clock's add, which is held in flight.
+    const cookie = await signedInAs(`moved-${unique()}@acme.test`);
+    const moved = await accountOf({ secret: "", cookie });
+    await onboardingStore(env).accountMoved(lea, moved);
     const held = holdingAdds((source) => source.startsWith("interview:"));
     const adding = addOwedInterviews(held.env);
     const key = await held.arrived;
     // She withdraws while that add is in flight, before her own store was
     // written with it: the withdrawal erases it, and the add lands after.
-    await onLink({ action: "withdraw", ...(await openLink(ids.lea)) });
+    const { secret } = await openLink(ids.lea);
+    await onLink({ action: "withdraw", secret, cookie });
     held.release();
     await adding;
     await settled();
-    const { own } = await keptIn(key, lea);
+    const { own } = await keptIn(key, moved);
     expect({
-      recalled: await recalled(lea, "(removed)"),
+      recalled: await recalled(moved, marker),
       owed: await onboardingStore(env).owedErasures({ person: ids.lea }),
       toAdd: await onboardingStore(env).interviewsToAdd(ids.lea),
       held: own === "held",
@@ -1302,31 +1277,6 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
     });
   });
 
-  it("are hidden at once and erased when a content purge rewrites the interview of one who backs them, and never come back with the purged word", async () => {
-    const { ids, max } = await drawnTeam();
-    await intakeOf(ids, [zendeskClaim]);
-    await handOverNow();
-    const before = await recalled(max, "Zendesk", "claim");
-    // The purge takes "Zendesk" out of every interview.
-    await interviewErasure(env).rewrite(
-      { actor: { type: "system" }, userId: "system" },
-      (text) => text.replaceAll("Zendesk", "(removed)")
-    );
-    await handOverNow();
-    const owedAfter = await onboardingStore(env).owedErasures();
-    expect({
-      before,
-      now: await readableBy(max),
-      owed: owedAfter.filter(
-        (each) => each.kind === "claim" && each.team === ids.team
-      ),
-    }).toStrictEqual({
-      before: [zendeskClaim.text],
-      now: { group: ids.team, recalled: [], listed: [] },
-      owed: [],
-    });
-  });
-
   it("are not noted from an intake during which a backer moved to another team, leaving four of its people behind the claim", async () => {
     const { ids, max } = await drawnTeam({ eight: true, drained: true });
     let moved = false;
@@ -1354,33 +1304,6 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
       gave: `brain:${ids.team}`,
       moved: true,
       now: { group: ids.team, recalled: [], listed: [] },
-    });
-  });
-
-  it("are erased by a content purge whose term is in their own sentence, from one who backs none of them, before the purge reports done", async () => {
-    const { ids, max } = await drawnTeam();
-    // The model puts Rik's "noon" into the claim, though Rik backs none.
-    const noonClaim = {
-      kind: "tool",
-      text: "Tickets come in through Zendesk by noon.",
-      cites: zendeskSaid,
-    };
-    await intakeOf(ids, [noonClaim]);
-    await handOverNow();
-    const before = await recalled(max, "noon", "claim");
-    await interviewErasure(env).rewrite(
-      { actor: { type: "system" }, userId: "system" },
-      (text) => text.replaceAll("noon", "(removed)")
-    );
-    const owedAfter = await onboardingStore(env).owedErasures({ claims: true });
-    expect({
-      before,
-      now: await readableBy(max),
-      owed: owedAfter,
-    }).toStrictEqual({
-      before: [noonClaim.text],
-      now: { group: ids.team, recalled: [], listed: [] },
-      owed: [],
     });
   });
 });

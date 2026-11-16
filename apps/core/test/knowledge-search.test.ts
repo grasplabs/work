@@ -7,7 +7,7 @@ import { dutchHandbook } from "./fixtures/dutch-knowledge.ts";
 import { mockIdp } from "./idp.ts";
 import { collectionWith, knowledgePersonOf } from "./knowledge-searches.ts";
 import type { Person } from "./knowledge-searches.ts";
-import { newTeam } from "./knowledge.ts";
+import { newTeam, seed } from "./knowledge.ts";
 import { auditedDuring, outcome, unique } from "./sign-in.ts";
 
 // Search as people use it: Dutch words find their sections with or without
@@ -160,34 +160,21 @@ describe("searching Dutch documents", () => {
     if (!verlof) {
       throw new Error("Expected the leave policy");
     }
-    await person.knowledge.saveDocument({
+    await seed(person).saveDocument({
       collectionId,
       path: verlof.path,
       text: "# Verlof\n## Snipperdagen\nDagen vrij heten nu snipperdagen.",
       ifVersion: 1,
     });
-    const restored = async () =>
-      await person.knowledge.restoreVersion({
-        documentId: verlof.documentId,
-        version: 1,
-        ifVersion: 2,
-      });
     const search = async (query: string) =>
       places(await person.knowledge.search(query, { collectionId }));
     const saved = {
       old: await search("vakantiedagen"),
       new: await search("snipperdagen"),
     };
-    await restored();
-    expect({
-      saved,
-      restored: {
-        old: await search("vakantiedagen"),
-        new: await search("snipperdagen"),
-      },
-    }).toStrictEqual({
-      saved: { old: [], new: ["handboek/verlof.md#Snipperdagen"] },
-      restored: { old: ["handboek/verlof.md#Vakantiedagen"], new: [] },
+    expect(saved).toStrictEqual({
+      old: [],
+      new: ["handboek/verlof.md#Snipperdagen"],
     });
   });
 });

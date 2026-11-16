@@ -50,6 +50,7 @@ import type {
   SourceReaders,
   SourceRef,
 } from "../src/brain-next.ts";
+import { removeLostRunSources } from "../src/brain-run-sources.ts";
 import { selectSkillsFor } from "../src/brain-skills.ts";
 import { producersOf, relayHandOvers } from "../src/brain-sources.ts";
 import { chatAgentId, personalWorkspaceId } from "../src/chats-rpc.ts";
@@ -59,6 +60,10 @@ import { teamMembers, teams } from "../src/db/core/schema.ts";
 import { inJurisdiction, workspace } from "../src/durable-objects.ts";
 import { instructionFilesFor } from "../src/instruction-files.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
+import {
+  shareWorkflowResource,
+  unshareWorkflowResource,
+} from "../src/workflow-members.ts";
 import { codeStep, says } from "./agent-chat.ts";
 import { published, requestGranted } from "./apps.ts";
 import { brainModules } from "./brain-next-modules.ts";
@@ -3341,6 +3346,75 @@ describe(
           await readsOfTeamSource(shared, shared.teamMate)
         ),
       }).toStrictEqual({ findings: [], teamMate: [] });
+    });
+
+    it("gives a person who lost a workflow nothing of their earlier run's result through any surface", async () => {
+      const [{ userId: ownerId }, { userId: personId }] = await Promise.all([
+        signedInWithRole(idp, "builder"),
+        signedInWithRole(idp, "user"),
+      ]);
+      const [owner, person] = await Promise.all([
+        memberOf(env.DB, ownerId),
+        memberOf(env.DB, personId),
+      ]);
+      if (owner === undefined || person === undefined) {
+        throw new Error("Not members");
+      }
+      const sharedWord = `s${unique()}`;
+      const markers = { "what their run returned": markerWord() };
+      const returned = markers["what their run returned"];
+      const workflow = await publishedWorkflow(
+        owner,
+        definitionOf([], { value: { status: `${sharedWord} ${returned}` } })
+      );
+      await shareWorkflowResource(env, owner, workflow.id, {
+        type: "person",
+        id: personId,
+        role: "user",
+      });
+      const { runId } = await start(person, workflow.id);
+      await ended(person, workflow.id, runId);
+      const source: SourceRef = { producer: "run", id: runId ?? "" };
+      // In their own store, theirs to recall while they hold the workflow.
+      await vi.waitFor(
+        async () => {
+          await drainAuditOutboxes(env);
+          await relayHandOvers(env);
+          await workBrain(env, new Date(), producersOf(env));
+          await expect(
+            textsFor(personId, returned),
+            "the run was never handed over"
+          ).resolves.toHaveLength(1);
+        },
+        { timeout: 15_000, interval: 200 }
+      );
+
+      await unshareWorkflowResource(env, owner, workflow.id, {
+        type: "person",
+        id: personId,
+      });
+      await removeLostRunSources(env);
+      const findings = await findingsOf(
+        "a person who lost the workflow",
+        {
+          personId,
+          reader: { person: personId, groups: [] },
+          personal: true,
+          sharedWord,
+          markers: Object.values(markers),
+          hiddenVersions: everyVersionOf(source),
+          hiddenUploads: [],
+          hiddenInstructionFiles: [],
+          instructionGroups: ["company"],
+        },
+        markers
+      );
+      const carried = await Promise.all(Object.values(markers).map(carrying));
+
+      expect({ findings, prompted: carried.flat() }).toStrictEqual({
+        findings: [],
+        prompted: [],
+      });
     });
 
     it("never wakes or addresses one person's own store for another's activity, their store's own work or staff's report", async () => {

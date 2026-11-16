@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "5abbeae0-2fa4-40ff-866a-6ee5586e0888",
+  "id": "02cde8dc-5230-40e8-ac22-3688a0e9aed5",
   "prevId": "64b5cff2-4d76-410b-86fd-624fa01f8613",
   "tables": {
     "access_revocations": {
@@ -4372,6 +4372,108 @@
       },
       "foreignKeys": {},
       "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "brain_run_sources": {
+      "name": "brain_run_sources",
+      "columns": {
+        "person_id": {
+          "name": "person_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "workflow_id": {
+          "name": "workflow_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "in_use": {
+          "name": "in_use",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": true
+        },
+        "revoked_at": {
+          "name": "revoked_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "runs": {
+          "name": "runs",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "removal_owed": {
+          "name": "removal_owed",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
+        },
+        "removed_through_at": {
+          "name": "removed_through_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "removed_through": {
+          "name": "removed_through",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "tried_at": {
+          "name": "tried_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "brain_run_sources_in_use_idx": {
+          "name": "brain_run_sources_in_use_idx",
+          "columns": [
+            "person_id",
+            "workflow_id"
+          ],
+          "isUnique": false,
+          "where": "in_use = 1"
+        },
+        "brain_run_sources_owed_idx": {
+          "name": "brain_run_sources_owed_idx",
+          "columns": [
+            "tried_at",
+            "revoked_at"
+          ],
+          "isUnique": false,
+          "where": "removal_owed = 1"
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "brain_run_sources_person_id_workflow_id_pk": {
+          "columns": [
+            "person_id",
+            "workflow_id"
+          ],
+          "name": "brain_run_sources_person_id_workflow_id_pk"
+        }
+      },
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
@@ -10826,14 +10928,6 @@
         },
         "staff": {
           "name": "staff",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": false
-        },
-        "interview": {
-          "name": "interview",
           "type": "integer",
           "primaryKey": false,
           "notNull": true,

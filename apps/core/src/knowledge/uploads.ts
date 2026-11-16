@@ -1,16 +1,16 @@
 import type { ErasedFiles, OnErase } from "@grasp-os/brain/purge";
-import { and, asc, count, eq, inArray, lt, or, sql } from "drizzle-orm";
-import type { SQL } from "drizzle-orm";
+import { and, asc, eq, inArray, lt, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { uploadCleanups, uploads } from "../db/core/schema.ts";
 import { inList } from "../db/d1.ts";
 
-// What is left of the files once uploaded into Knowledge: the uploads a
-// Knowledge purge reaches (`uploadErasure`), which it forgets, deleting
-// their originals from R2, and those left unended, which the clock forgets
-// (`sweepLeftUploads`). Nothing uploads into Knowledge any more: the purge
-// forgets an upload whatever state it was left in. An original's delete is
+// What is left of the files once uploaded into Knowledge: the uploads of
+// the collections a person's erasure purges (`uploadErasure`), which it
+// forgets, deleting their originals from R2, and those left unended,
+// which the clock forgets (`sweepLeftUploads`). Nothing uploads into
+// Knowledge any more: the purge forgets an upload whatever state it was
+// left in. An original's delete is
 // recorded (`upload_cleanups`) in the batch that forgets its upload, then
 // done, every one due, page after page; an R2 refusal fails the purge's
 // step, or the clock's run, and its rerun deletes what is left. Nothing
@@ -62,22 +62,13 @@ const cleanUpOriginals = async (env: Env): Promise<void> => {
   }
 };
 
-/** The uploads of `scope`: a collection's, or those under a document's name. */
-const uploadsOf = (scope: ErasedFiles): SQL =>
-  ("path" in scope
-    ? and(
-        eq(uploads.collectionId, scope.collectionId),
-        eq(uploads.path, scope.path)
-      )
-    : eq(uploads.collectionId, scope.collectionId)) ?? sql`0`;
-
 /**
- * Forgets the uploads of `scope` and records their originals for deleting,
+ * Forgets the uploads of the collection `scope` and records their originals for deleting,
  * in one batch, then deletes every original due (`cleanUpOriginals`).
  */
 const forgetUploads = async (env: Env, scope: ErasedFiles): Promise<void> => {
   const db = drizzle(env.DB);
-  const where = uploadsOf(scope);
+  const where = eq(uploads.collectionId, scope.collectionId);
   await db.batch([
     db
       .insert(uploadCleanups)
@@ -134,30 +125,14 @@ export const sweepLeftUploads = async (env: Env): Promise<void> => {
   await cleanUpOriginals(env);
 };
 
-/** Scopes one count of a purge's uploads names (`uploadErasure`). */
-const scopesPerCount = 40;
-
 /**
- * The uploads as a Knowledge purge reaches them (purge.ts `OnErase`): the
- * originals of the files uploaded as the documents it purges hold the data
- * too, so it forgets the uploads and deletes their originals.
+ * The uploads as a person's purge reaches them (purge.ts `OnErase`): the
+ * originals of the files uploaded into the collections it purges hold the
+ * data too, so it forgets the uploads and deletes their originals before
+ * it deletes anything of the collections. Until the cutover's last step
+ * removes Knowledge.
  */
-export const uploadErasure = (
-  env: Env
-): Pick<OnErase, "countFiles" | "forgetFiles"> => ({
-  countFiles: async (scopes) => {
-    let total = 0;
-    // D1 binds at most 100 values a statement: two a scope.
-    for (let at = 0; at < scopes.length; at += scopesPerCount) {
-      // oxlint-disable-next-line no-await-in-loop -- one bounded count after another
-      const [found] = await drizzle(env.DB)
-        .select({ count: count() })
-        .from(uploads)
-        .where(or(...scopes.slice(at, at + scopesPerCount).map(uploadsOf)));
-      total += found?.count ?? 0;
-    }
-    return total;
-  },
+export const uploadErasure = (env: Env): Pick<OnErase, "forgetFiles"> => ({
   forgetFiles: async (_person, scope) => {
     await forgetUploads(env, scope);
   },
