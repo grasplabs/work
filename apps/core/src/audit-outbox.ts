@@ -1,7 +1,5 @@
-import type { BrainEvent } from "@grasp-os/brain/events";
 import { appErrors } from "@grasp-os/shared/apps";
 import {
-  auditEntrySchema,
   auditEventSchema,
   auditOutboxTakeMax,
   auditRejectReasons,
@@ -31,9 +29,9 @@ import { handOverNotes } from "./brain-hand-overs.ts";
 import { auditOutbox } from "./db/core/schema.ts";
 import { isRemovedAppRefusal } from "./db/d1.ts";
 
-// A change to the core or Knowledge database that must be audited stores
-// its event in that database's outbox (each has an `audit_outbox` table) in
-// the same batch as the change: both are kept, or neither. Connect keeps an
+// A change to core's database that must be audited stores its event in
+// that database's outbox (its `audit_outbox` table) in the same batch as
+// the change: both are kept, or neither. Connect keeps an
 // outbox of its own the same way. Draining an outbox appends its oldest
 // events to the AuditLog object, in the order they were stored, and only
 // then removes them: a drain cut short leaves them to append again, and the
@@ -42,7 +40,7 @@ import { isRemovedAppRefusal } from "./db/d1.ts";
 // same step as the removals, so every row leaves the outbox and every drain
 // reads its head. Right after a change, core drains the
 // outbox it wrote in the background (`waitUntil`), so the change doesn't
-// wait on the log; the clock drains all three every minute,
+// wait on the log; the clock drains core's and connect's every minute,
 // connect's over RPC, which is how connect's events reach the log at all
 // (connect can't reach core).
 //
@@ -56,7 +54,7 @@ export const drainMaxBatches = 50;
 /** One outbox, as a drain reads it: its oldest events, and settling them. */
 export interface Outbox {
   /** Named in logs. */
-  name: "core" | "knowledge" | "connect" | "workspace";
+  name: "core" | "connect" | "workspace";
   /**
    * Its oldest events but those this drain holds (`held`, by their IDs),
    * at most {@link auditOutboxTakeMax}, in order.
@@ -531,10 +529,10 @@ export const drainObjectOutbox = async (
   return left?.count ?? 0;
 };
 
-/** What draining core's own outboxes needs. */
-export type OutboxEnv = AuditLogEnv & Pick<Env, "DB" | "KNOWLEDGE">;
+/** What draining core's own outbox needs. */
+export type OutboxEnv = AuditLogEnv & Pick<Env, "DB">;
 
-/** Core's or Knowledge's database, as `drizzle` gives it: with its binding. */
+/** Core's database, as `drizzle` gives it: with its binding. */
 type AuditedDatabase = DrizzleD1Database & { $client: D1Database };
 
 /**
@@ -547,32 +545,8 @@ type AuditedDatabase = DrizzleD1Database & { $client: D1Database };
  * most (take, note, settle); a batch whose note fails is held for the
  * clock's drain, which tries each alone.
  */
-const drainSoon = (env: OutboxEnv, db: AuditedDatabase): void => {
-  const name = db.$client === env.KNOWLEDGE ? "knowledge" : "core";
-  waitUntil(
-    drainLogged(
-      env,
-      name === "core" ? coreOutbox(env, 0) : databaseOutbox(name, db.$client),
-      1
-    )
-  );
-};
-
-/** Drains Knowledge's outbox soon, as `drainSoon` does: its `audit` port. */
-export const drainKnowledgeOutboxSoon = (env: OutboxEnv): void => {
-  waitUntil(drainLogged(env, databaseOutbox("knowledge", env.KNOWLEDGE), 1));
-};
-
-/**
- * The audit event for an entry the Brain records (knowledge/ports.ts
- * `audit.eventOf`), checked as every event is, with its ID: what the
- * Brain stores in Knowledge's outbox.
- */
-export const brainEventOf = (
-  entry: BrainEvent
-): { id: string; event: string } => {
-  const event = createAuditEvent(auditEntrySchema.parse(entry), "core");
-  return { id: event.id, event: JSON.stringify(event) };
+const drainSoon = (env: OutboxEnv): void => {
+  waitUntil(drainLogged(env, coreOutbox(env, 0), 1));
 };
 
 /** Stores the event for `entry`; run it in one batch with the change. */
@@ -623,15 +597,6 @@ export const storedEvent = (id: string): SQL =>
  * Stores the event for `entry` only if the batch's previous statement
  * changed a row, so a conditional update that changed nothing records
  * nothing.
- *
- * Not in a Knowledge batch that writes sections earlier (a save, restore,
- * purge, or anything in `writeVersion`'s `also`): FTS5 flushes its index
- * when the next statement opens a savepoint, and that flush sets
- * `changes()` to 1, so this would record an event for a change that
- * didn't happen. There, use `outboxedWhere` with a condition on what the
- * change left behind: `EXISTS` on the row's new state after an insert or
- * update, `NOT EXISTS` on the row after a delete, or no condition when
- * the batch always makes the change.
  */
 export const outboxedIfChanged = (db: DrizzleD1Database, entry: AuditEntry) =>
   outboxedWhere(db, entry, sql`changes() > 0`);
@@ -688,7 +653,7 @@ export const keepEvent = async (
     }
     return;
   }
-  drainSoon(env, db);
+  drainSoon(env);
 };
 
 /**
@@ -719,7 +684,7 @@ export const keepAuditEvent = async (
 
 /**
  * Runs an audited change: `statements` (the change and its `outboxed`
- * events) in one batch on `db`, core's or Knowledge's database, then drains
+ * events) in one batch on `db`, core's database, then drains
  * its outbox in the background. A batch that fails stores and drains
  * nothing.
  */
@@ -742,6 +707,6 @@ export const auditedBatch = async <
     }
     throw error;
   }
-  drainSoon(env, db);
+  drainSoon(env);
   return results;
 };

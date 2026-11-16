@@ -2,8 +2,8 @@ import type { BrainRecordInput } from "@grasp-os/shared/brain-records";
 import {
   brainRecordsMaxPerCall,
   brainRecordsMaxPerType,
+  purgedMarker,
 } from "@grasp-os/shared/brain-records";
-import { purgedMarker } from "@grasp-os/shared/knowledge";
 import type { RosterInput } from "@grasp-os/shared/onboarding";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";

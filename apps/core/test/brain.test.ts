@@ -1,7 +1,7 @@
 import type { BrainRecordInput } from "@grasp-os/shared/brain-records";
+import { purgedMarker } from "@grasp-os/shared/brain-records";
 import { visionFields } from "@grasp-os/shared/kickoff";
 import type { VisionField } from "@grasp-os/shared/kickoff";
-import { purgedMarker } from "@grasp-os/shared/knowledge";
 import type { RosterInput } from "@grasp-os/shared/onboarding";
 import { env } from "cloudflare:workers";
 import { zipSync } from "fflate";

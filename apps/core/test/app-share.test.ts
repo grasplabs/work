@@ -5,9 +5,9 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { appKind } from "../src/apps.ts";
 import { readDraft, saveDraft } from "../src/drafts.ts";
+import { newTeam } from "./admin-teams.ts";
 import { agentWriting } from "./draft-writers.ts";
 import { mockIdp } from "./idp.ts";
-import { newTeam } from "./knowledge.ts";
 import { outcome, signedInApi, unique } from "./sign-in.ts";
 
 // Share with your team, as the App's workspace does it (the web's

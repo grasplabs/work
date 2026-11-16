@@ -44,6 +44,14 @@ import { workflowResourceIdSchema } from "./ids.ts";
 // their ids start with `onb-` (or are a roster team's), and nobody else
 // adds a workflow or a vision, or takes such an id.
 
+/**
+ * What the term purge, gone since GRA-1911, wrote in place of what it
+ * removed. Rows it rewrote before then may still hold it, so a team named
+ * with it is never joined by name (core's brain-rpc.ts); S7 of GRA-1735
+ * removes the guard with those rows.
+ */
+export const purgedMarker = "(removed)";
+
 /** Most records one `brain.addRecords` call adds, each named in its audit event. */
 export const brainRecordsMaxPerCall = 50;
 
