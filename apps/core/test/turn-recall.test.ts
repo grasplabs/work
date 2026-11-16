@@ -34,6 +34,7 @@ import { brainMemoryRead } from "../src/history-access.ts";
 import {
   analysisPurpose,
   recallTimeoutReason,
+  turnRecallDeadlineMs,
   turnRecallMethod,
 } from "../src/turn-recall.ts";
 import type { ChatPlace } from "../src/workspace.ts";
@@ -502,20 +503,23 @@ const connectOwnersAnswering = async (
 
 /**
  * The Brain's store, whose recalls end only once the chat's provider got
- * more than `seen` analyses (bounded, as the test's own wait is): its
- * request goes the long way, through core's gateway and connect, so a
- * quick first pass otherwise ends, and lets go of it, before it is sent.
+ * more than `seen` analyses: its request goes the long way, through core's
+ * gateway and connect, so a quick first pass otherwise ends, and lets go
+ * of it, before it is sent. Within the recall's own time, past which the
+ * recall gives up anyway; one that never arrives fails the find, saying so.
  */
 const findingAfterAnalysis = (
   chat: { provider: { analyses: readonly unknown[] } },
   seen: number
 ): object =>
   answering(env.BRAIN_STORE, "find", async (own, request) => {
-    for (
-      let waits = 0;
-      chat.provider.analyses.length <= seen && waits < 500;
-      waits += 1
-    ) {
+    const giveUpAt = Date.now() + turnRecallDeadlineMs;
+    while (chat.provider.analyses.length <= seen) {
+      if (Date.now() > giveUpAt) {
+        throw new Error(
+          "The analysis never reached the provider within the recall's time"
+        );
+      }
       // oxlint-disable-next-line no-await-in-loop -- until it is there
       await scheduler.wait(20);
     }
