@@ -37,7 +37,10 @@ import { countRowsRead } from "./rows-read.ts";
 // more a hidden chunk, ranking hidden chunks under the exact way's cap
 // 26 % more, dropping the reader's check 50 to 66 % more, and scanning other
 // groups' codes makes the vector scan read the hidden codes too (about
-// one row a hidden chunk, against none).
+// one row a hidden chunk, against none). The date way (GRA-1798, a date
+// written otherwise than the chunks write it, found by its day) is held to
+// its own first measurement, 20 rows, with the same margin: ranking the
+// hidden chunks that mention the day under its cap reads 25.7.
 
 /** The shared store, from empty storage, its SQL's reads counted. */
 const countedStore = async () => {
@@ -58,8 +61,8 @@ const hiddenSources = 6;
 const hiddenPassages = 200;
 const hiddenChunks = hiddenSources * hiddenPassages;
 
-/** What every chunk holds: telling words, stop words and an ID. */
-const words = "The invoice of the warehouse INV-2024-0042 and the";
+/** What every chunk holds: telling words, stop words, an ID and a date. */
+const words = "The invoice of the warehouse INV-2024-0042 and the, 14/03/2026";
 
 /** `count` passages, each a paragraph of its own, each holding `words`. */
 const passagesOf = (count: number): string =>
@@ -110,6 +113,8 @@ const waysOf = (stub: Store) => {
     stopWords: recall("zebra of the"),
     // An ID: the exact way, its cap.
     exact: recall("INV-2024-0042"),
+    // A date written otherwise: the exact way by its day, its cap.
+    date: recall("14 maart 2026"),
     vectors: async () =>
       await stub.searchVectors({
         model: model.name,
@@ -122,11 +127,15 @@ const waysOf = (stub: Store) => {
 
 type Way = keyof ReturnType<typeof waysOf>;
 
-/** Rows per hidden chunk each way may read: main's own, with 3 % margin. */
+/**
+ * Rows per hidden chunk each way may read: main's own (the date way's, its
+ * first), with 3 % margin.
+ */
 const budgets: Record<Way, number> = {
   words: 37.1,
   stopWords: 10.3,
   exact: 30.9,
+  date: 20.6,
   vectors: 0.05,
 };
 
@@ -147,7 +156,13 @@ describe("what a recall reads of what the reader may not read", () => {
     }
     await putVectorsOf(stub, ownChunks);
     const ways = waysOf(stub);
-    const names: readonly Way[] = ["words", "stopWords", "exact", "vectors"];
+    const names: readonly Way[] = [
+      "words",
+      "stopWords",
+      "exact",
+      "date",
+      "vectors",
+    ];
     const alone = new Map<Way, number>();
     for (const name of names) {
       // oxlint-disable-next-line no-await-in-loop -- one way at a time
