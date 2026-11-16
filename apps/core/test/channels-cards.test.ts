@@ -797,6 +797,18 @@ describe("Stephen's cards in Slack", () => {
     });
   });
 
+  it("starts a new card before a card would pass the blocks Slack takes in one message", () => {
+    // One-character paragraphs padded with vertical tabs, which cost a card
+    // six bytes each as JSON: many small sections in a card's bytes.
+    const text = `a\n${"\v".repeat(2735)}\n`.repeat(60);
+    const cards = answerCards({ locale: "en", text, platform: "slack" });
+    const sections = cards.flatMap((card) => sectionTexts(card));
+    expect({
+      blocks: cards.map((card) => cardToBlockKit(card.card).length <= 50),
+      whole: ink(sections.join("")) === ink(text),
+    }).toStrictEqual({ blocks: cards.map(() => true), whole: true });
+  });
+
   it("knows an emoji placeholder exactly as the Chat SDK converts one, near-misses too", () => {
     const samples = [
       "{{emoji:thumbs_up}}",
@@ -812,14 +824,14 @@ describe("Stephen's cards in Slack", () => {
       "{{emoji:thumbs_up}",
       "{{ emoji:thumbs_up }}",
       "{{emoji:thumbs_up}}}",
+      // Case-fold to `s` and `k` only with the `u` flag, which the SDK's
+      // pattern lacks: they tell its flags apart from `giu`.
+      "{{emoji:\u017F}}",
+      "{{emoji:\u212A}}",
     ];
-    expect({
-      flags: emojiPlaceholders.flags,
-      verdicts: samples.map((sample) => [sample, ours(sample)]),
-    }).toStrictEqual({
-      flags: "gi",
-      verdicts: samples.map((sample) => [sample, theirs(sample)]),
-    });
+    expect(samples.map((sample) => [sample, ours(sample)])).toStrictEqual(
+      samples.map((sample) => [sample, theirs(sample)])
+    );
   });
 
   it("measures an answer as Slack is sent it, emoji names and all, so none of it is cut", () => {
