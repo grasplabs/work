@@ -92,7 +92,7 @@ const readingBack: InterviewProgress = {
       record: "Check the invoice in Exact.",
     },
   ],
-  phase: "readback",
+  phase: "result",
   wants: "readback",
 };
 
@@ -130,8 +130,13 @@ const sentSchema = z.object({
   action: z.string().optional(),
   version: z.int().optional(),
   progress: interviewProgressSchema.optional(),
-  facts: z.array(z.object({ id: z.string(), revision: z.string() })).optional(),
+  facts: z.unknown().optional(),
 });
+
+/** The facts an approval names: each at its revision. */
+const approvedSchema = z.array(
+  z.object({ id: z.string(), revision: z.string() })
+);
 
 /** Core's refusal, with its code. */
 const refusal = (
@@ -228,7 +233,7 @@ const onLink = (
       if (core.approveFailing) {
         return Response.json({}, { status: 503 });
       }
-      core.approvals.push((body.facts ?? []).map(({ id }) => id));
+      core.approvals.push(approvedSchema.parse(body.facts).map(({ id }) => id));
       return Response.json({
         approved: true,
         receipt: "receipt",
