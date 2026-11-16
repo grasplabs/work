@@ -110,6 +110,12 @@ const fakeCore = (connected: { current: boolean }) => {
   const made: AgentDraftMake[] = [];
   const session = {
     connections: {
+      catalog: async () =>
+        await Promise.resolve({
+          entries: [
+            { source: "native", id: "google", name: "Google Workspace" },
+          ],
+        }),
       list: async () =>
         await Promise.resolve(
           connected.current
@@ -405,7 +411,7 @@ describe("making something in a chat's thread", () => {
           "Checks HR's mail.",
           "One of the company's agents",
           "Everyone in the company",
-          "Gmail",
+          "Google Workspace (Gmail)",
           "Read their own",
           "0 8 * * 1 · the company's time zone · Sum up HR's new mail.",
           "Every Monday, sum up HR's new mail.",
