@@ -253,6 +253,17 @@ const recallPartOf = (html: string): string =>
 const spendPartOf = (html: string): string =>
   html.slice(html.indexOf(">Model spend<"), html.indexOf(">Erasures<"));
 
+/** The erasure ledger's tile of a page's HTML: from its label to the end of the tiles. */
+const ledgerTileOf = (html: string): string =>
+  html.slice(
+    html.indexOf(">Erasure ledger<"),
+    html.indexOf("</section>", html.indexOf(">Erasure ledger<"))
+  );
+
+/** The Erasures section of a page's HTML. */
+const erasuresPartOf = (html: string): string =>
+  html.slice(html.indexOf(">Erasures<"), html.indexOf(">Upkeep<"));
+
 /** The Upkeep section of a page's HTML. */
 const upkeepPartOf = (html: string): string =>
   html.slice(
@@ -663,6 +674,140 @@ describe("how an organization's Brain is doing", () => {
     });
   });
 
+  it("shows the report of a core of a newer release, which sends names this admin doesn't know: a reason, a way, a step's failure, a state of its words and of its ledger, each as written or left out", async () => {
+    const newer = await liveClient();
+    newer.core.admin = heardSnapshot("Newer");
+    const report = brainReport(1_000_000);
+    const withoutMeaning = {
+      ...report.recall.withoutMeaning,
+      timed_out: 3,
+      later: 5,
+    };
+    const ways = { ...report.recall.ways, later: { recalls: 9, failed: 0 } };
+    const byReason = { ...report.ledger.byReason, later: 2 };
+    const stepsFailed = {
+      ...report.stepsFailed,
+      embedding: { at: "2026-11-12T09:55:00.000Z", reason: "throttled" },
+    };
+    newer.core.brain = {
+      ...report,
+      words: "compacting",
+      ledger: { ...report.ledger, replay: "verifying", byReason },
+      stepsFailed,
+      recall: { ...report.recall, ways, withoutMeaning },
+    };
+
+    const { status, html } = await page(
+      `/organizations/${newer.clientId}/brain`
+    );
+    const text = textOf(recallPartOf(html));
+    const whole = textOf(html);
+
+    expect({
+      status,
+      ways: text.includes("Words 40 0"),
+      without: text.includes(
+        "3 timed out, 0 failed, 0 refused, and 0 unusable"
+      ),
+      step: textOf(upkeepPartOf(html)).includes(
+        "Putting passages on the queue to embed throttled 5 min ago"
+      ),
+      words: whole.includes("recall goes on meanwhile. compacting Rebuild"),
+      // Never read as fine: marked, and said to be unknown.
+      ledger: whole.includes(
+        "Erasure ledger verifying A state this admin doesn't know: the Brain may answer nothing until it is read through"
+      ),
+      ledgerMarked: ledgerTileOf(html).includes("bg-status-attention"),
+    }).toStrictEqual({
+      status: 200,
+      ways: true,
+      without: true,
+      step: true,
+      words: true,
+      ledger: true,
+      ledgerMarked: true,
+    });
+  });
+
+  it("shows a name a core sends that is a property of every object, such as constructor or toString, as written", async () => {
+    const odd = await liveClient();
+    odd.core.admin = heardSnapshot("Odd");
+    const report = brainReport(1_000_000);
+    const stepsFailed = {
+      ...report.stepsFailed,
+      embedding: { at: "2026-11-12T09:55:00.000Z", reason: "constructor" },
+    };
+    odd.core.brain = {
+      ...report,
+      ledger: { ...report.ledger, replay: "toString" },
+      stepsFailed,
+    };
+
+    const { status, html } = await page(`/organizations/${odd.clientId}/brain`);
+    const whole = textOf(html);
+
+    expect({
+      status,
+      step: textOf(upkeepPartOf(html)).includes(
+        "Putting passages on the queue to embed constructor 5 min ago"
+      ),
+      ledger: whole.includes("Erasure ledger toString A state"),
+      native: whole.includes("native code"),
+    }).toStrictEqual({ status: 200, step: true, ledger: true, native: false });
+  });
+
+  it("says nothing of its upkeep was reported, and shows no reasons of erasures, when a core reports none of those this admin knows", async () => {
+    const bare = await liveClient();
+    bare.core.admin = heardSnapshot("Bare");
+    const report = brainReport(1_000_000);
+    const stepsFailed: Record<string, null> = { later: null };
+    const byReason: Record<string, number> = { later: 2 };
+    bare.core.brain = {
+      ...report,
+      stepsFailed,
+      ledger: { ...report.ledger, byReason },
+    };
+
+    const { status, html } = await page(
+      `/organizations/${bare.clientId}/brain`
+    );
+    const upkeep = textOf(upkeepPartOf(html));
+
+    expect({
+      status,
+      notReported: upkeep.includes("Its upkeep's steps Not reported"),
+      fine: upkeep.includes("Fine"),
+      byReason: textOf(erasuresPartOf(html)).includes("By reason"),
+    }).toStrictEqual({
+      status: 200,
+      notReported: true,
+      fine: false,
+      byReason: false,
+    });
+  });
+
+  it("leaves out the row of recalls without meaning when a core reports none of the reasons this admin knows", async () => {
+    const other = await liveClient();
+    other.core.admin = heardSnapshot("Other");
+    const report = brainReport(1_000_000);
+    const withoutMeaning: Record<string, number> = { later: 5 };
+    other.core.brain = {
+      ...report,
+      recall: { ...report.recall, withoutMeaning },
+    };
+
+    const { status, html } = await page(
+      `/organizations/${other.clientId}/brain`
+    );
+    const text = textOf(recallPartOf(html));
+
+    expect({
+      status,
+      ways: text.includes("Words 40 0"),
+      row: text.includes("Without meaning"),
+    }).toStrictEqual({ status: 200, ways: true, row: false });
+  });
+
   it("asks its core whether a source or a person was erased as the staff member, says what it answered, and sends nothing for a caller Access doesn't vouch for", async () => {
     const acme = await liveClient();
     acme.core.brain = brainReport(1_000_000);
@@ -900,7 +1045,7 @@ describe("how an organization's Brain is doing", () => {
     });
   });
 
-  it("shows the rest of the report of a core on an older release, which sends no totals of people's own stores, model spend, recall by entities nor the step judging memories, and says they aren't available yet", async () => {
+  it("shows the rest of the report of a core on an older release, which sends no totals of people's own stores, model spend, recall by entities or exact parts, a reason without meaning or of erasures, nor the step judging memories, and says they aren't available yet", async () => {
     const older = await liveClient();
     older.core.admin = heardSnapshot("Older");
     const {
@@ -908,11 +1053,17 @@ describe("how an organization's Brain is doing", () => {
       modelSpend: _spend,
       ...report
     } = brainReport(1_000_000);
-    const { entities: _entities, ...ways } = report.recall.ways;
+    const { entities: _entities, exact: _exact, ...ways } = report.recall.ways;
     const { quotes: _quotes, ...steps } = report.stepsFailed;
+    const { unusable: _unusable, ...withoutMeaning } = {
+      ...report.recall.withoutMeaning,
+      timed_out: 3,
+    };
+    const { withdrawn: _withdrawn, ...byReason } = report.ledger.byReason;
     older.core.brain = {
       ...report,
-      recall: { ...report.recall, ways },
+      ledger: { ...report.ledger, byReason },
+      recall: { ...report.recall, ways, withoutMeaning },
       stepsFailed: {
         ...steps,
         embedding: { at: "2026-11-12T09:55:00.000Z", reason: "failed" },
@@ -926,10 +1077,19 @@ describe("how an organization's Brain is doing", () => {
     const spend = textOf(spendPartOf(html));
 
     const upkeep = textOf(upkeepPartOf(html));
+    const recall = textOf(recallPartOf(html));
+    const erasures = textOf(erasuresPartOf(html));
 
     expect({
       status,
-      rest: textOf(recallPartOf(html)).includes("Words 40 0"),
+      rest: recall.includes("Words 40 0"),
+      exactNotYet: recall.includes("Exact parts Not available yet"),
+      // A reason the core doesn't report shows as nothing.
+      without: recall.includes("3 timed out, 0 failed, and 0 refused"),
+      byReason: erasures.includes(
+        "3 deleted for good, 0 past their retention, and 0 people erased"
+      ),
+
       failedStep: upkeep.includes(
         "Putting passages on the queue to embed Failed 5 min ago"
       ),
@@ -948,6 +1108,9 @@ describe("how an organization's Brain is doing", () => {
     }).toStrictEqual({
       status: 200,
       rest: true,
+      exactNotYet: true,
+      without: true,
+      byReason: true,
       failedStep: true,
       judging: false,
       entitiesNotYet: true,

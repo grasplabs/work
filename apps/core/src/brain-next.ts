@@ -101,6 +101,7 @@ import type {
   BrainMemoryAttribute,
 } from "@grasp-os/shared/brain-memories";
 import {
+  brainErasureReasons,
   brainReportSchema,
   brainSearchWays,
   brainSteps,
@@ -111,6 +112,7 @@ import type {
   BrainAction,
   BrainActionOutcome,
   BrainErasureAnswer,
+  BrainErasureReason,
   BrainReport,
   BrainSearchWay,
   BrainStep,
@@ -3990,6 +3992,12 @@ const reportedReasons = brainWithoutMeaningReasons satisfies SameNames<
   BrainWithoutMeaningReason
 >;
 
+/** Every reason the store counts erasures by. */
+const reportedErasureReasons = brainErasureReasons satisfies SameNames<
+  keyof WorkOverview["erasures"]["byReason"],
+  BrainErasureReason
+>;
+
 /** A step's last failure as the staff report says it. */
 const failureOf = (
   failure: StepFailure | null
@@ -4086,7 +4094,12 @@ export const brainStaffReport = async (
       erasing: overview.erasing,
       sourcesWithoutCurrent: overview.sourcesWithoutCurrent,
       source: overview.erasures.source,
-      byReason: overview.erasures.byReason,
+      byReason: Object.fromEntries(
+        reportedErasureReasons.map((reason) => [
+          reason,
+          overview.erasures.byReason[reason],
+        ])
+      ),
     },
     stepsFailed: stepsFailedOf(overview.stepsFailed),
     recall: recallOf(overview.recall),

@@ -167,9 +167,13 @@ const count = z.int().min(0);
 /** A kind of work, an error code or a reason: a name in code. */
 const codeName = z.string().min(1).max(128);
 
-/** A step of the store's tick that last failed: when, and the store's own code for why. */
+/**
+ * A step of the store's tick that last failed: when, and the store's own
+ * code for why (`timed_out` or `failed` in this release; a core of a newer
+ * release may send another, shown as written).
+ */
 const stepFailureSchema = z
-  .object({ at: isoTime, reason: z.enum(["timed_out", "failed"]) })
+  .object({ at: isoTime, reason: codeName })
   .nullable();
 
 /**
@@ -197,33 +201,67 @@ export const brainSteps = stepsFailedSchema.keyof().options;
 export type BrainStep = (typeof brainSteps)[number];
 
 /**
- * The ways recall searches by, in the order staff read them: every one
- * the store's overview names (core's brain-next.ts holds the two to the
- * same keys, as the steps).
+ * How many recalls went without the question's vector though a model
+ * runs, by why: every reason the store counts (held to its keys as the
+ * ways are). Core always sends every reason. Each is optional only so the
+ * admin reads the report of a core of an older release (one on a slower
+ * channel), which lacks a reason added since; a reason of a newer
+ * release's core that this list lacks is left out. A reason not reported
+ * shows as nothing.
  */
-export const brainSearchWays = [
-  "words",
-  "exact",
-  "entities",
-  "meaning",
-] as const;
-export type BrainSearchWay = (typeof brainSearchWays)[number];
+const withoutMeaningSchema = z.object({
+  timed_out: count.optional(),
+  failed: count.optional(),
+  refused: count.optional(),
+  unusable: count.optional(),
+});
 
-/**
- * Why a recall went without the question's vector though a model runs:
- * every reason the store counts (held to its keys as the ways are).
- */
-export const brainWithoutMeaningReasons = [
-  "timed_out",
-  "failed",
-  "refused",
-  "unusable",
-] as const;
+/** Why a recall went without the question's vector (`withoutMeaningSchema`). */
+export const brainWithoutMeaningReasons = withoutMeaningSchema.keyof().options;
 export type BrainWithoutMeaningReason =
   (typeof brainWithoutMeaningReasons)[number];
 
 /** How many recalls searched by a way, and how many it failed. */
 const wayCountSchema = z.object({ recalls: count, failed: count });
+
+/**
+ * Recall by each way it searches, in the order staff read them: every
+ * one the store's overview names (core's brain-next.ts holds the two to
+ * the same keys, as the steps). Core always sends every way; each is
+ * optional only so the admin reads a core of an older release (one on a
+ * slower channel), which lacks a way added since, and shows the rest of
+ * its report. A way of a newer release's core that this list lacks is
+ * left out.
+ */
+const waysSchema = z.object({
+  words: wayCountSchema.optional(),
+  exact: wayCountSchema.optional(),
+  entities: wayCountSchema.optional(),
+  meaning: wayCountSchema.optional(),
+});
+
+/** The ways recall searches by, in the order staff read them (`waysSchema`). */
+export const brainSearchWays = waysSchema.keyof().options;
+export type BrainSearchWay = (typeof brainSearchWays)[number];
+
+/**
+ * How many erasures there are of each reason, in all: every reason the
+ * store counts (held to its keys as the ways are). Core always sends every
+ * reason. Each is optional only so the admin reads the report of a core of
+ * an older release, which lacks a reason added since; a reason of a newer
+ * release's core that this list lacks is left out. A reason not reported
+ * shows as nothing.
+ */
+const erasureReasonsSchema = z.object({
+  deleted: count.optional(),
+  retention: count.optional(),
+  person_erased: count.optional(),
+  withdrawn: count.optional(),
+});
+
+/** Why erasures were made, in the order staff read them (`erasureReasonsSchema`). */
+export const brainErasureReasons = erasureReasonsSchema.keyof().options;
+export type BrainErasureReason = (typeof brainErasureReasons)[number];
 
 /** How many erasures are in the ledger, and how many not yet. */
 const erasureCountSchema = z.object({ written: count, unwritten: count });
@@ -295,8 +333,12 @@ export const brainReportSchema = z.object({
     /** What one Durable Object holds at most: every write fails at it. */
     limitBytes: count,
   }),
-  /** Whether every chunk's words are indexed by the current rules. */
-  words: z.enum(["current", "rebuilding"]),
+  /**
+   * Whether every chunk's words are indexed by the current rules:
+   * `current` or `rebuilding` in this release; a core of a newer release
+   * may send another, shown as written.
+   */
+  words: codeName,
   /** How far the embedding model has come over the current passages: counts only. */
   embedding: z.object({
     /** The model and its build the store embeds for; null while none ships. */
@@ -313,10 +355,11 @@ export const brainReportSchema = z.object({
   ledger: z.object({
     /**
      * `through` once the store read its erasure ledger through; while it
-     * replays it after a restore, or can't read it, it answers nothing but
-     * this report.
+     * replays it after a restore (`replaying`), or can't read it
+     * (`unreadable`), it answers nothing but this report. A core of a
+     * newer release may send another, shown as written.
      */
-    replay: z.enum(["through", "replaying", "unreadable"]),
+    replay: codeName,
     /** Erasures recorded and hidden, still being deleted. */
     erasing: count,
     /** Sources that keep versions but have none current, which nobody can read. */
@@ -326,12 +369,7 @@ export const brainReportSchema = z.object({
      */
     source: erasureCountSchema,
     /** How many erasures there are of each reason, in all. */
-    byReason: z.object({
-      deleted: count,
-      retention: count,
-      person_erased: count,
-      withdrawn: count,
-    }),
+    byReason: erasureReasonsSchema,
   }),
   /** The tick's own steps, each with its last failure since the store started. */
   stepsFailed: stepsFailedSchema,
@@ -344,18 +382,8 @@ export const brainReportSchema = z.object({
    */
   recall: z.object({
     since: isoTime,
-    ways: z.object({
-      words: wayCountSchema,
-      exact: wayCountSchema,
-      /**
-       * Core always sends it; optional only so the admin reads a core of
-       * an older release (one on a slower channel) and shows the rest of
-       * its report.
-       */
-      entities: wayCountSchema.optional(),
-      meaning: wayCountSchema,
-    }),
-    withoutMeaning: z.record(z.enum(brainWithoutMeaningReasons), count),
+    ways: waysSchema,
+    withoutMeaning: withoutMeaningSchema,
   }),
   /**
    * People's own stores (what one person alone may read), as each last

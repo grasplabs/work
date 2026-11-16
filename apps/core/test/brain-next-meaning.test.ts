@@ -103,7 +103,8 @@ const recallCounts = async (): Promise<{
 }> => {
   const { recall } = await brainStaffReport(env);
   return {
-    meaning: recall.ways.meaning.recalls,
+    // Core reports every way: a missing one fails as NaN.
+    meaning: recall.ways.meaning?.recalls ?? Number.NaN,
     without: Object.values(recall.withoutMeaning).reduce(
       (sum, count) => sum + count,
       0
@@ -275,13 +276,14 @@ describe("recall by meaning, through core", () => {
         counted: Object.fromEntries(
           brainWithoutMeaningReasons.map((each) => [
             each,
-            after.recall.withoutMeaning[each] -
-              before.recall.withoutMeaning[each],
+            // Core reports every reason: a missing one fails as NaN.
+            (after.recall.withoutMeaning[each] ?? Number.NaN) -
+              (before.recall.withoutMeaning[each] ?? Number.NaN),
           ])
         ),
         meaning:
-          after.recall.ways.meaning.recalls -
-          before.recall.ways.meaning.recalls,
+          (after.recall.ways.meaning?.recalls ?? Number.NaN) -
+          (before.recall.ways.meaning?.recalls ?? Number.NaN),
       }).toStrictEqual({
         pack: byWords,
         byWords: [{ text: dutch, found: "words" }],
