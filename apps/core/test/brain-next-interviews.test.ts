@@ -57,6 +57,7 @@ import type { Key } from "./onboarding-team.ts";
 import { acmeTenant } from "./sign-in-config.ts";
 import {
   entraPerson,
+  openRpc,
   signedInApi,
   signedIn,
   unique,
@@ -657,6 +658,59 @@ describe("interviews in the new Brain", { timeout: 120_000 }, () => {
       team: null,
       kept: { shared: "erased", own: "free" },
     });
+  });
+
+  it("go with core's erasure of their person tried again, after a first try that unbound the account and failed on the Brain, though the list's address was corrected", async () => {
+    const marker = `marker${unique()}`;
+    const ids = await team();
+    await mapped(ids, {
+      facts: [fact("l9", "rule", `Every refund needs ${marker} first.`)],
+    });
+    const store = onboardingStore(env);
+    const lea = await accountOfPerson(ids.lea);
+    await settled();
+    // The admin corrects her address on the list after her link opened.
+    const { roster } = await store.view();
+    await store.saveRoster(
+      {
+        teams: roster?.teams ?? [],
+        people: (roster?.people ?? []).map((person) =>
+          person.id === ids.lea
+            ? { ...person, email: `corrected-${unique()}@acme.test` }
+            : person
+        ),
+      },
+      { type: "system" }
+    );
+    const admin = await signedInApi(idp, "admin");
+    await admin.api.members.remove(lea);
+    const name = await env.DB.prepare("SELECT name FROM users WHERE id = ?")
+      .bind(lea)
+      .first<string>("name");
+    // The first try closes her link, which unbinds her account, and fails
+    // on the Brain's erasure of her interview.
+    const { core } = await openRpc(admin.session, {
+      coreEnv: erasuresFailing(),
+    });
+    await core
+      .authenticate()
+      .members.erase(lea, name ?? "")
+      .catch(() => null);
+    const area = async () =>
+      await env.DB.prepare(
+        "SELECT state FROM person_erasure_areas WHERE user_id = ? AND area = 'interview'"
+      )
+        .bind(lea)
+        .first<string>("state");
+    const first = await area();
+    // The clock tries again, the Brain in reach.
+    await ageOwnErasure(lea);
+    await retryErasures(env);
+    expect({
+      first,
+      retried: await area(),
+      owed: await store.owedErasures({ person: ids.lea }),
+    }).toStrictEqual({ first: "pending", retried: "complete", owed: [] });
   });
 
   it("stay erased when the clock's add of them lands after a withdrawal erased them", async () => {

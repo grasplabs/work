@@ -85,6 +85,50 @@ const membershipsOf = async (address: string): Promise<number> => {
   return row?.count ?? 0;
 };
 
+/**
+ * `namespace`, whose objects fail their first call of `method` and answer
+ * every other as they would.
+ */
+const failingOnce = <T extends object>(namespace: T, method: string): T => {
+  const failed = { once: false };
+  const stubOf = (stub: object): object =>
+    new Proxy(stub, {
+      get: (target, name): unknown => {
+        const member: unknown = Reflect.get(target, name);
+        if (typeof member !== "function") {
+          return member;
+        }
+        return async (...given: unknown[]): Promise<unknown> => {
+          if (name === method && !failed.once) {
+            failed.once = true;
+            throw new Error("The onboarding is out of reach.");
+          }
+          return await Reflect.apply(member, target, given);
+        };
+      },
+    });
+  const namespaceOf = <U extends object>(of: U): U =>
+    new Proxy(of, {
+      get: (target, name): unknown => {
+        const member: unknown = Reflect.get(target, name);
+        if (typeof member !== "function") {
+          return member;
+        }
+        return (...given: unknown[]): unknown => {
+          const made: unknown = Reflect.apply(member, target, given);
+          if (typeof made !== "object" || made === null) {
+            return made;
+          }
+          if (name === "jurisdiction") {
+            return namespaceOf(made);
+          }
+          return name === "get" || name === "getByName" ? stubOf(made) : made;
+        };
+      },
+    });
+  return namespaceOf(namespace);
+};
+
 describe("signing in for an interview while the gate is closed", () => {
   // Every test leaves the deployment open, as it found it.
   afterEach(async () => {
@@ -211,6 +255,35 @@ describe("signing in for an interview while the gate is closed", () => {
       member: true,
       reopened: 200,
     });
+  });
+
+  it("keeps their interview theirs when moving it to the member the directory made fails at their first sign-in once the gate opens: signed in again, they are that member, and it opens", async () => {
+    const { address, secret } = await invited();
+    const oid = `entra-oid-${address}`;
+    const member = await memberFromDirectory(env, oid, {
+      id: oid,
+      name: "Oli Olsen",
+      email: address,
+      department: "",
+      title: "",
+      manager: null,
+    });
+    await openLinkAs(secret, await signedInAs(address));
+    await adminCommands().open();
+    // The onboarding's object fails the move, once, as they sign in.
+    const failing = {
+      ...env,
+      ONBOARDING: failingOnce(env.ONBOARDING, "accountMoved"),
+    };
+    const first = await signedInAs(address, failing).catch(() => null);
+    const again = await signedInAs(address);
+    const { userId } = await whoami(again);
+    const { response: reopened } = await openLinkAs(secret, again);
+    expect({
+      first,
+      member: userId === member,
+      reopened: reopened.status,
+    }).toStrictEqual({ first: null, member: true, reopened: 200 });
   });
 
   it("records nothing of who signed in for an interview, or opened one, in the company's audit log", async () => {

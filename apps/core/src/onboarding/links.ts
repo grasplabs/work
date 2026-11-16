@@ -13,7 +13,7 @@ import { interviewCaller } from "./interview-caller.ts";
 import type { NoCaller } from "./interview-caller.ts";
 import { eraseOwedOfPersonQuietly } from "./new-brain.ts";
 import { onboardingStore } from "./store.ts";
-import type { LinkAnswer, LinkRefusal } from "./store.ts";
+import type { LinkActed, LinkAnswer, LinkRefusal } from "./store.ts";
 
 // Everyone's own interview link (`@grasp-os/shared/interview-links`): the
 // page's calls, `POST /api/interview`, with the link's secret in the body
@@ -173,15 +173,19 @@ export const interviewResponse = async (
   const body = parsed.data;
   const store = onboardingStore(env);
   const secretMark = await sha256Hex(body.secret);
-  // Whose link it is, and the teams whose claims they back, read before
-  // a request that may drop them: what it takes out leaves the new Brain
-  // in the same request (onboarding/new-brain.ts).
-  const ownBrainWork = async () => {
-    const person = await store.personOfLink(secretMark);
-    return {
-      person,
-      backed: person === null ? [] : await store.claimTeamsOf(person),
-    };
+  // What a request of their own took out of their interview leaves the
+  // new Brain in the same request, and what it added goes in: the store
+  // says whose link it is, and the teams whose claims they backed before
+  // it (`LinkWork`), only to whoever holds the link, so anyone else's
+  // request on a real link does no more than on a made-up one.
+  const settle = async (result: LinkActed<unknown>) => {
+    if (result.work !== undefined) {
+      await eraseOwedOfPersonQuietly(
+        env,
+        result.work.person,
+        result.work.backed
+      );
+    }
   };
   const done = (result: LinkAnswer<unknown>) => {
     if (!result.ok && result.code === "interview.link_invalid") {
@@ -196,7 +200,6 @@ export const interviewResponse = async (
       return answer(result, requestId, (value) => json(value));
     }
     case "save": {
-      const { person, backed } = await ownBrainWork();
       const result = await store.saveInterview(
         secretMark,
         account,
@@ -204,20 +207,15 @@ export const interviewResponse = async (
         body.progress
       );
       done(result);
-      // What it took out of their interview leaves the new Brain now
-      // (onboarding/new-brain.ts); what it added is handed over.
-      await eraseOwedOfPersonQuietly(env, person, backed);
+      await settle(result);
       return answer(result, requestId, (value) =>
         json(value, value.saved ? 200 : 409)
       );
     }
     case "delete": {
-      const { person, backed } = await ownBrainWork();
       const result = await store.deleteInterview(secretMark, account);
       done(result);
-      // What it took out of their interview leaves the new Brain now
-      // (onboarding/new-brain.ts); what it added is handed over.
-      await eraseOwedOfPersonQuietly(env, person, backed);
+      await settle(result);
       return answer(result, requestId, (value) => json(value));
     }
     case "participate": {
@@ -226,23 +224,17 @@ export const interviewResponse = async (
       return answer(result, requestId, (value) => json(value));
     }
     case "approve": {
-      const { person, backed } = await ownBrainWork();
       const result = await store.approve(secretMark, account, body.facts);
       done(result);
-      // What it took out of their interview leaves the new Brain now
-      // (onboarding/new-brain.ts); what it added is handed over.
-      await eraseOwedOfPersonQuietly(env, person, backed);
+      await settle(result);
       return answer(result, requestId, (value) =>
         json(value, value.approved ? 200 : 409)
       );
     }
     case "withdraw": {
-      const { person, backed } = await ownBrainWork();
       const result = await store.withdraw(secretMark, account);
       done(result);
-      // What it took out of their interview leaves the new Brain now
-      // (onboarding/new-brain.ts); what it added is handed over.
-      await eraseOwedOfPersonQuietly(env, person, backed);
+      await settle(result);
       return answer(result, requestId, (value) => json(value));
     }
     default: {

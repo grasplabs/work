@@ -161,18 +161,73 @@ const running = async () => {
 const post = async (
   body: unknown,
   cookie: string,
-  headers: Record<string, string> = {}
+  headers: Record<string, string> = {},
+  coreEnv: Env = env
 ): Promise<Response> =>
-  await routed(interviewApiPath, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "sec-fetch-site": "same-origin",
-      cookie,
-      ...headers,
+  await routed(
+    interviewApiPath,
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "sec-fetch-site": "same-origin",
+        cookie,
+        ...headers,
+      },
+      body: JSON.stringify(body),
     },
-    body: JSON.stringify(body),
-  });
+    coreEnv
+  );
+
+/**
+ * Core's bindings, with every call to the onboarding's object and to the
+ * Brain's stores noted, by binding and method, in `calls`.
+ */
+const watchedEnv = (): { env: Env; calls: string[] } => {
+  const calls: string[] = [];
+  const stubOf = (binding: string, stub: object): object =>
+    new Proxy(stub, {
+      get: (target, name): unknown => {
+        const member: unknown = Reflect.get(target, name);
+        if (typeof member !== "function") {
+          return member;
+        }
+        return (...given: unknown[]): unknown => {
+          calls.push(`${binding}.${String(name)}`);
+          return Reflect.apply(member, target, given);
+        };
+      },
+    });
+  const namespaceOf = <T extends object>(binding: string, namespace: T): T =>
+    new Proxy(namespace, {
+      get: (target, name): unknown => {
+        const member: unknown = Reflect.get(target, name);
+        if (typeof member !== "function") {
+          return member;
+        }
+        return (...given: unknown[]): unknown => {
+          const made: unknown = Reflect.apply(member, target, given);
+          if (typeof made !== "object" || made === null) {
+            return made;
+          }
+          if (name === "jurisdiction") {
+            return namespaceOf(binding, made);
+          }
+          return name === "get" || name === "getByName"
+            ? stubOf(binding, made)
+            : made;
+        };
+      },
+    });
+  return {
+    env: {
+      ...env,
+      ONBOARDING: namespaceOf("onboarding", env.ONBOARDING),
+      BRAIN_STORE: namespaceOf("brain", env.BRAIN_STORE),
+    },
+    calls,
+  };
+};
 
 /** A refusal's code, or the answer when it wasn't one. */
 const codeOf = async (response: Response): Promise<string> => {
@@ -715,6 +770,51 @@ describe("when a link opens", () => {
       last: lastMadeUp === undefined ? null : await shape(lastMadeUp),
       mine: 200,
     });
+  });
+
+  it("does no more for someone else on a real link than on a made-up one: the same calls to the onboarding, none to the Brain, whatever they ask (L3)", async () => {
+    const { secrets, me } = await running();
+    // Oli's interview is under way, approved, and so in the Brain.
+    await opened(secrets.oli, me);
+    await takePart(secrets.oli, me);
+    await save(secrets.oli, me, 0);
+    await approveFact(secrets.oli, me);
+    const admin = await signedInAs("ada@acme.test");
+    const made = randomSecret();
+    const asks = [
+      { action: "save", version: 1, progress: progress() },
+      { action: "delete" },
+      {
+        action: "approve",
+        facts: [
+          {
+            id: "f1",
+            revision: await factRevision({
+              id: "f1",
+              tag: "step",
+              text: sentinel,
+              record: sentinel,
+            }),
+          },
+        ],
+      },
+      { action: "withdraw" },
+    ];
+    const callsOn = async (secret: string) => {
+      const answers: string[][] = [];
+      for (const ask of asks) {
+        const watched = watchedEnv();
+        // oxlint-disable-next-line no-await-in-loop -- one ask after another
+        await post({ ...ask, secret }, admin, {}, watched.env);
+        answers.push(watched.calls);
+      }
+      return answers;
+    };
+    const real = await callsOn(secrets.oli);
+    expect({
+      real,
+      brain: real.flat().filter((call) => call.startsWith("brain.")),
+    }).toStrictEqual({ real: await callsOn(made), brain: [] });
   });
 });
 

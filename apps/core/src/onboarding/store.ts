@@ -360,7 +360,28 @@ export type LinkAnswer<T> =
   | { ok: true; value: T }
   | { ok: false; code: LinkRefusal };
 
+/**
+ * What core settles with the new Brain after a request on someone's link
+ * (links.ts, onboarding/new-brain.ts): whose link it is, and the teams
+ * whose claims they backed before it. Only for whoever holds the link, so
+ * anyone else's request does nothing more on a real link than on one that
+ * never was.
+ */
+export interface LinkWork {
+  person: string;
+  backed: string[];
+}
+
+/** A request on a link that may change what the new Brain holds. */
+export type LinkActed<T> = LinkAnswer<T> & { work?: LinkWork };
+
 const refused = (code: LinkRefusal) => ({ ok: false, code }) as const;
+
+/** `answer`, with the work core settles after it (`LinkActed`). */
+const acted = <T>(work: LinkWork, answer: LinkAnswer<T>): LinkActed<T> => ({
+  ...answer,
+  work,
+});
 
 /** Each fact's revision as saved, by its id (`interviews.revisions`). */
 const revisionsSchema = z.record(z.string(), z.string());
@@ -1695,33 +1716,40 @@ export class Onboarding extends DurableObject<Env> {
     version: number,
     progress: InterviewProgress,
     now: string = new Date().toISOString()
-  ): Promise<LinkAnswer<InterviewSaved>> {
+  ): Promise<LinkActed<InterviewSaved>> {
     const found = this.#onLink(secretMark, { account }, now, "save");
     if (!found.ok) {
       return found;
     }
     const { person, link, roster } = found.value;
+    const work = this.#linkWork(person.id);
     if (version !== link.version) {
       const held = this.#held(person.id);
       if (held === null && link.deletedAt !== null) {
-        return refused("interview.deleted");
+        return acted(work, refused("interview.deleted"));
       }
-      return answered({
-        saved: false,
-        version: link.version,
-        progress: this.#forSpeaker(person.id, held),
-      });
+      return acted(
+        work,
+        answered({
+          saved: false,
+          version: link.version,
+          progress: this.#forSpeaker(person.id, held),
+        })
+      );
     }
     const erasing = await this.#erasing(person.id, progress);
     // A copy that brings back a line they removed is an older one, whichever
     // tab sends it; and hashing let another save land: an older copy now.
     const current = this.#versionOf(person.id);
     if (erasing === "unremoved" || current !== version) {
-      return answered({
-        saved: false,
-        version: current ?? version,
-        progress: this.#forSpeaker(person.id, this.#held(person.id)),
-      });
+      return acted(
+        work,
+        answered({
+          saved: false,
+          version: current ?? version,
+          progress: this.#forSpeaker(person.id, this.#held(person.id)),
+        })
+      );
     }
     const { progress: keeping, revisions } = erasing;
     const next = link.version + 1;
@@ -1787,7 +1815,7 @@ export class Onboarding extends DurableObject<Env> {
     } else if (changed) {
       this.ctx.waitUntil(this.#alarmBy(Date.parse(now) + drawAfterMs));
     }
-    return answered({ saved: true, version: next });
+    return acted(work, answered({ saved: true, version: next }));
   }
 
   /**
@@ -1850,7 +1878,7 @@ export class Onboarding extends DurableObject<Env> {
     account: string,
     facts: readonly ApprovedFact[],
     now: string = new Date().toISOString()
-  ): Promise<LinkAnswer<InterviewApproval>> {
+  ): Promise<LinkActed<InterviewApproval>> {
     // From the request alone, before anything here is read.
     const receipt = await receiptOf(facts);
     const found = this.#onLink(secretMark, { account }, now, "save");
@@ -1858,9 +1886,10 @@ export class Onboarding extends DurableObject<Env> {
       return found;
     }
     const { person, link } = found.value;
+    const work = this.#linkWork(person.id);
     const taking = this.#participating(person.id);
     if (taking !== null) {
-      return refused(taking);
+      return acted(work, refused(taking));
     }
     const progress = this.#held(person.id);
     const revisions = this.#revisionsOf(person.id);
@@ -1873,11 +1902,14 @@ export class Onboarding extends DurableObject<Env> {
       ({ id, revision }) => !standing.has(id) || revisions.get(id) !== revision
     );
     if (progress === null || stale) {
-      return answered({
-        approved: false,
-        version: link.version,
-        progress: this.#forSpeaker(person.id, progress),
-      });
+      return acted(
+        work,
+        answered({
+          approved: false,
+          version: link.version,
+          progress: this.#forSpeaker(person.id, progress),
+        })
+      );
     }
     const [kept] = this.#db
       .select({ at: readbacks.at })
@@ -1887,7 +1919,7 @@ export class Onboarding extends DurableObject<Env> {
       )
       .all();
     if (kept !== undefined) {
-      return answered({ approved: true, receipt, at: kept.at });
+      return acted(work, answered({ approved: true, receipt, at: kept.at }));
     }
     const changed = this.ctx.storage.transactionSync(() => {
       const before = admissionKey(this.#admittedKeys(person.id));
@@ -1914,7 +1946,7 @@ export class Onboarding extends DurableObject<Env> {
       await this.#alarmBy(Date.parse(now) + drawAfterMs);
       this.#decideInterviews();
     }
-    return answered({ approved: true, receipt, at: now });
+    return acted(work, answered({ approved: true, receipt, at: now }));
   }
 
   /**
@@ -1930,22 +1962,23 @@ export class Onboarding extends DurableObject<Env> {
     secretMark: string,
     account: string,
     now: string = new Date().toISOString()
-  ): Promise<LinkAnswer<InterviewWithdrawal>> {
+  ): Promise<LinkActed<InterviewWithdrawal>> {
     const found = this.#onLink(secretMark, { account }, now, "delete");
     if (!found.ok) {
       return found;
     }
     const { person } = found.value;
+    const work = this.#linkWork(person.id);
     const [held] = this.#db
       .select({ withdrawnAt: participations.withdrawnAt })
       .from(participations)
       .where(eq(participations.person, person.id))
       .all();
     if (held === undefined) {
-      return refused("interview.not_participating");
+      return acted(work, refused("interview.not_participating"));
     }
     if (held.withdrawnAt !== null) {
-      return answered({ withdrawn: true, at: held.withdrawnAt });
+      return acted(work, answered({ withdrawn: true, at: held.withdrawnAt }));
     }
     this.ctx.storage.transactionSync(() => {
       this.#queueSpokenOf(person.id);
@@ -1961,7 +1994,7 @@ export class Onboarding extends DurableObject<Env> {
     // brain's records now or from the alarm until they are, and everything
     // the interviewer's voice said in it.
     await this.#afterForget();
-    return answered({ withdrawn: true, at: now });
+    return acted(work, answered({ withdrawn: true, at: now }));
   }
 
   /**
@@ -2824,12 +2857,13 @@ export class Onboarding extends DurableObject<Env> {
     secretMark: string,
     account: string,
     now: string = new Date().toISOString()
-  ): Promise<LinkAnswer<{ deleted: true }>> {
+  ): Promise<LinkActed<{ deleted: true }>> {
     const found = this.#onLink(secretMark, { account }, now, "delete");
     if (!found.ok) {
       return found;
     }
     const { person, link } = found.value;
+    const work = this.#linkWork(person.id);
     this.ctx.storage.transactionSync(() => {
       this.#forget(person.id, now, "interview.deleted", interviewee);
       this.#db
@@ -2839,7 +2873,7 @@ export class Onboarding extends DurableObject<Env> {
         .run();
     });
     await this.#afterForget();
-    return answered({ deleted: true });
+    return acted(work, answered({ deleted: true }));
   }
 
   /**
@@ -4385,7 +4419,10 @@ export class Onboarding extends DurableObject<Env> {
   /**
    * Whose interview belongs to `account` (`links.account`, GRA-1790): for
    * core's erasure of that account, which finds it so whatever address the
-   * list has for them now. Null when none does.
+   * list has for them now. Also once its link no longer names the account
+   * (an erasure that closed it, then failed), while the Brain's copy of it
+   * under that account is still owed an erasure: the erasure tried again
+   * finds it there. Null when neither does.
    */
   personOfAccount(account: string): string | null {
     const [link] = this.#db
@@ -4393,7 +4430,20 @@ export class Onboarding extends DurableObject<Env> {
       .from(links)
       .where(eq(links.account, account))
       .all();
-    return link?.person ?? null;
+    if (link !== undefined) {
+      return link.person;
+    }
+    const [owed] = this.#db
+      .select({ person: brainInterviews.person })
+      .from(brainInterviews)
+      .where(
+        and(
+          eq(brainInterviews.account, account),
+          eq(brainInterviews.erase, true)
+        )
+      )
+      .all();
+    return owed?.person ?? null;
   }
 
   /**
@@ -6381,17 +6431,11 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /**
-   * The person a link's secret (`secretMark`) is theirs, for core's own
-   * use after a request on that link (onboarding/links.ts): never answered
-   * to the link's holder. Null for an unknown link.
+   * What core settles with the new Brain once `person`'s own request on
+   * their link is done (`LinkWork`), read before it changes anything.
    */
-  personOfLink(secretMark: string): string | null {
-    const [code] = this.#db
-      .select({ person: linkCodes.person })
-      .from(linkCodes)
-      .where(eq(linkCodes.mark, secretMark))
-      .all();
-    return code?.person ?? null;
+  #linkWork(person: string): LinkWork {
+    return { person, backed: this.claimTeamsOf(person) };
   }
 
   /** Forgets the owed erasure of `source` of `kind`: core's `eraseSource` of it returned. */

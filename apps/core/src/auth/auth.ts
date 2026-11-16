@@ -396,10 +396,17 @@ const interviewInvites = async (
  * member, who takes their name and address, and the new user goes.
  * Answers the user id the session is for: the directory's member, or
  * `userId` when there is none, or `userId` isn't new.
+ *
+ * What else belongs to the new user (`moving`, from one user to another:
+ * an interview of theirs) moves first, before the new user goes, so a
+ * failure leaves it and the user as they were, adopted at the next sign-in;
+ * moving again is harmless. Moved back if the member wasn't adopted after
+ * all.
  */
 export const adoptDirectoryMember = async (
   env: Env,
   userId: string,
+  moving: (from: string, to: string) => Promise<void>,
   now = new Date()
 ): Promise<string> => {
   const db = drizzle(env.DB);
@@ -444,6 +451,7 @@ export const adoptDirectoryMember = async (
     return userId;
   }
   const memberId = held.userId;
+  await moving(userId, memberId);
   const notYetMember = sql`NOT EXISTS (
     SELECT 1 FROM ${members} WHERE ${members.userId} = ${userId}
   )`;
@@ -501,7 +509,11 @@ export const adoptDirectoryMember = async (
     .select({ userId: accounts.userId })
     .from(accounts)
     .where(eq(accounts.id, signedIn.id));
-  return account?.userId ?? userId;
+  const adopted = account?.userId ?? userId;
+  if (adopted !== memberId) {
+    await moving(memberId, adopted);
+  }
+  return adopted;
 };
 
 /** A claim of an IdP's verified profile, if it is a string. */
@@ -586,11 +598,10 @@ const startSession = async <T extends { expiresAt: Date; userId: string }>(
     // (the store's `accountMoved`).
     const userId =
       providerId === providerIds.entra
-        ? await adoptDirectoryMember(env, session.userId)
+        ? await adoptDirectoryMember(env, session.userId, async (from, to) => {
+            await onboardingStore(env).accountMoved(from, to);
+          })
         : session.userId;
-    if (userId !== session.userId) {
-      await onboardingStore(env).accountMoved(session.userId, userId);
-    }
     // For members.
     return (await ensureMember(env, config, userId))
       ? {
