@@ -30,6 +30,7 @@ import { teamMayClaim } from "../src/onboarding/team-claims.ts";
 import { retryErasures } from "../src/person-erasure.ts";
 import { adminCommands } from "./admin-command.ts";
 import { ageOwnErasure } from "./brain-next-own-store.ts";
+import { copyOfStore, restoreStore } from "./brain-next-store-copy.ts";
 import { mockIdp } from "./idp.ts";
 import {
   accountOf,
@@ -210,6 +211,18 @@ const holdingFinds = () => {
     const now = first;
     first = false;
     return now ? "find" : undefined;
+  });
+};
+
+/** Most calls a link takes a minute (the store's `linkCallsPerMinute`). */
+const linkCallsPerMinute = 60;
+
+/** Restarts the onboarding's object, as a deploy does: what it held in memory is gone. */
+const restartOnboarding = async (): Promise<void> => {
+  await runInDurableObject(onboardingStore(env), (_, state) => {
+    state.abort("Restarted by the test");
+  }).catch(() => {
+    // Aborting fails the call that aborted: that is the restart.
   });
 };
 
@@ -995,9 +1008,13 @@ describe("interviews in the new Brain", { timeout: 120_000 }, () => {
 /**
  * The team's intake running again and held at its model call, inside the
  * store's Brain work (`#withBrain`), until `release`: Ada says more, so
- * the team is due, and its drawing is done first.
+ * the team is due, and its drawing is done first. The model then puts
+ * `claims` together.
  */
-const heldIntake = async (ids: Ids) => {
+const heldIntake = async (
+  ids: Ids,
+  claims: Parameters<typeof claimsReply>[0] = [zendeskClaim]
+) => {
   const store = onboardingStore(env);
   await agree(
     ids.ada,
@@ -1010,7 +1027,7 @@ const heldIntake = async (ids: Ids) => {
   await answering([ticketsReply(ids)], async () => await store.drawNext());
   const arrived = Promise.withResolvers<null>();
   const released = Promise.withResolvers<null>();
-  const reply = claimsReply([zendeskClaim]);
+  const reply = claimsReply(claims);
   const intaking = answeringWith(
     async (requests) => {
       arrived.resolve(null);
@@ -1050,6 +1067,22 @@ const landed = async (done: (sql: SqlStorage) => boolean): Promise<void> => {
 const interviewGone = (person: string) => (sql: SqlStorage) =>
   sql.exec("SELECT person FROM interviews WHERE person = ?", person).toArray()
     .length === 0;
+
+/** Sam says more and approves it, and the team's work is drawn again: the team is due for another intake. */
+const dueAgain = async (ids: Ids): Promise<void> => {
+  await agree(
+    ids.sam,
+    [
+      fact("s1", "step", "Answers the phone."),
+      fact("s2", "step", "Logs the call."),
+    ],
+    1
+  );
+  await answering(
+    [ticketsReply(ids)],
+    async () => await onboardingStore(env).drawNext()
+  );
+};
 
 describe("team claims in the new Brain", { timeout: 120_000 }, () => {
   beforeEach(holdAlarm);
@@ -1271,6 +1304,10 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
       ),
     };
   };
+
+  /** Ops' eight, Sam and Ada with them, but for `left`. */
+  const eightBut = (left?: Key): Key[] =>
+    [...everyone, "sam" as const, "ada" as const].filter((key) => key !== left);
 
   it("are erased when someone moving to another team leaves six interviewed, and form anew under a new key when seven are back", async () => {
     const { ids, max } = await drawnTeam();
@@ -1617,6 +1654,194 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
     });
   });
 
+  it.each([
+    [
+      "backs one by four",
+      () => {
+        const [, ...rest] = zendeskSaid;
+        return [
+          {
+            ...zendeskClaim,
+            cites: ["Tickets arrive in Zendesk.", ...rest.slice(0, 1)],
+          },
+        ];
+      },
+    ],
+    ["no longer makes one", () => []],
+  ] as const)(
+    "are unreadable the moment a later intake %s, before core's clock",
+    async (_, claims) => {
+      const { ids, max } = await drawnTeam();
+      await intakeOf(ids, [zendeskClaim]);
+      await handOverNow();
+      const before = await recalled(max, "Zendesk", "claim");
+      await dueAgain(ids);
+      await intakeOf(ids, claims());
+      expect({
+        before,
+        afterIntake: await recalled(max, "Zendesk", "claim"),
+        listed: await claimsOf(max),
+      }).toStrictEqual({
+        before: [zendeskClaim.text],
+        afterIntake: [],
+        listed: [],
+      });
+    }
+  );
+
+  it("are unreadable the moment an intake returns that backs one by four while someone's interview moved under it, before core's clock", async () => {
+    const { ids, max } = await drawnTeam({ eight: true });
+    await intakeOf(ids, [zendeskClaim]);
+    await handOverNow();
+    const before = await recalled(max, "Zendesk", "claim");
+    // The intake puts the claim together from four of its five backers.
+    const [, ...rest] = zendeskSaid;
+    const held = await heldIntake(ids, [
+      {
+        ...zendeskClaim,
+        cites: ["Tickets arrive in Zendesk.", ...rest.slice(0, 1)],
+      },
+    ]);
+    // Rik, who backs none of it, takes back what he approved while it runs:
+    // his interview moved under the intake, so it notes no claims.
+    await agree(
+      ids.rik,
+      [{ ...fact("r1", "step", "Checks the queue at noon."), out: true }],
+      1
+    );
+    const during = await recalled(max, "Zendesk", "claim");
+    await held.release();
+    expect({
+      before,
+      during,
+      afterIntake: await recalled(max, "Zendesk", "claim"),
+    }).toStrictEqual({
+      before: [zendeskClaim.text],
+      during: [zendeskClaim.text],
+      afterIntake: [],
+    });
+  });
+
+  it.each([
+    ["is taken off the list", "off"],
+    ["moves to another team", "moved"],
+    ["is given a new start", "new_start"],
+  ] as const)(
+    "are unreadable to one who %s from the moment the change returns, while the claim stands for the team",
+    async (_, change) => {
+      const { ids, max } = await drawnTeam({ eight: true });
+      await intakeOf(ids, [zendeskClaim]);
+      await handOverNow();
+      // Rik backs none of the claims: seven stay interviewed whatever
+      // happens to him, so the claim stands.
+      const rik = await accountOfPerson(ids.rik);
+      const before = await recalled(rik, "Zendesk", "claim");
+      const store = onboardingStore(env);
+      if (change === "off") {
+        await store.saveRoster(rosterWith(ids, { keys: eightBut("rik") }), {
+          type: "system",
+        });
+      } else if (change === "moved") {
+        await store.saveRoster(
+          rosterWith(ids, { keys: eightBut(), moved: ["rik"] }),
+          { type: "system" }
+        );
+      } else {
+        await store.newStart(ids.rik, { type: "system" });
+      }
+      expect({
+        before,
+        rik: await recalled(rik, "Zendesk", "claim"),
+        max: await recalled(max, "Zendesk", "claim"),
+      }).toStrictEqual({
+        before: [zendeskClaim.text],
+        rik: [],
+        max: [zendeskClaim.text],
+      });
+    }
+  );
+
+  it("keep a claim a refused withdrawal would drop owed its erasure, and take it out at the next try, also after the object restarted", async () => {
+    const { ids, max } = await drawnTeam({ eight: true });
+    await intakeOf(ids, [zendeskClaim]);
+    await handOverNow();
+    const device = await openLink(ids.pim);
+    const shared = inJurisdiction(env, env.BRAIN_STORE).getByName("brain");
+    const restore = `restore-${unique()}`;
+    await runInDurableObject(shared, (_, state) => {
+      state.storage.sql.exec(
+        "INSERT INTO restores (export, checked, part, restored, state, started_at) VALUES (?, 0, 0, 0, 'running', ?)",
+        restore,
+        Date.now()
+      );
+    });
+    const refused = await onLink({ action: "withdraw", ...device });
+    const owed = await onboardingStore(env).owedErasures({ claims: true });
+    const whileRestoring = {
+      ok: refused.ok,
+      owed: owed.some(
+        (each) => each.kind === "claim" && each.team === ids.team
+      ),
+      read: await recalled(max, "Zendesk", "claim"),
+    };
+    await restartOnboarding();
+    await runInDurableObject(shared, (_, state) => {
+      state.storage.sql.exec("DELETE FROM restores WHERE export = ?", restore);
+    });
+    const answer = await onLink({ action: "withdraw", ...device });
+    expect({
+      whileRestoring,
+      withdrew: answer.ok,
+      after: await recalled(max, "Zendesk", "claim"),
+    }).toStrictEqual({
+      whileRestoring: { ok: false, owed: true, read: [zendeskClaim.text] },
+      withdrew: true,
+      after: [],
+    });
+  });
+
+  it("let a withdrawal that drops a claim through on the link's last call of the minute", async () => {
+    const { ids, max } = await drawnTeam({ eight: true });
+    await intakeOf(ids, [zendeskClaim]);
+    await handOverNow();
+    const device = await openLink(ids.pim);
+    // Its calls counted from nothing, then all but the last of a minute's.
+    await restartOnboarding();
+    for (let call = 1; call < linkCallsPerMinute; call += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one call after another
+      await onLink({ action: "session", ...device });
+    }
+    const answer = await onLink({ action: "withdraw", ...device });
+    expect({
+      withdrew: z
+        .object({ withdrawn: z.literal(true) })
+        .safeParse(await answer.json()).success,
+      after: await recalled(max, "Zendesk", "claim"),
+    }).toStrictEqual({ withdrew: true, after: [] });
+  });
+
+  it("stay unreadable after the Brain's store comes back from a copy taken before a withdrawal dropped one, the request's own erasures failing", async () => {
+    const { ids, max } = await drawnTeam({ eight: true });
+    await intakeOf(ids, [zendeskClaim]);
+    await handOverNow();
+    const before = await recalled(max, "Zendesk", "claim");
+    const copy = await copyOfStore();
+    const answer = await onLink(
+      { action: "withdraw", ...(await openLink(ids.pim)) },
+      erasuresFailing()
+    );
+    await restoreStore(copy);
+    expect({
+      before,
+      withdrew: answer.ok,
+      afterRestore: await recalled(max, "Zendesk", "claim"),
+    }).toStrictEqual({
+      before: [zendeskClaim.text],
+      withdrew: true,
+      afterRestore: [],
+    });
+  });
+
   it("are read without asking the onboarding: a person's recall makes no call to it, out of reach, and finds their team's claim", async () => {
     const { ids, max } = await drawnTeam();
     await intakeOf(ids, [zendeskClaim]);
@@ -1697,8 +1922,9 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
     await handOverNow();
     const pim = await accountOfPerson(ids.pim);
     const key = await interviewKeyOf(pim);
-    // Pim backs the claim, and withdraws while the Brain fails every
-    // erasure: four are left behind it.
+    // Pim backs the claim, and withdraws while the request's own erasures
+    // all fail: four are left behind it. The claim was erased by the
+    // withdrawal itself, before it committed; their interview is owed.
     const answer = await onLink(
       { action: "withdraw", ...(await openLink(ids.pim)) },
       erasuresFailing()
@@ -1737,7 +1963,7 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
       removing: true,
       reopened: true,
       reopenedAfter: false,
-      owedThen: ["claim", "interview"],
+      owedThen: ["interview"],
       owed: [],
       kept: "erased",
       claims: [],
@@ -1770,17 +1996,15 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
     });
   });
 
-  /** Ops' eight, Sam and Ada with them, but for `left`. */
-  const eightBut = (left?: Key): Key[] =>
-    [...everyone, "sam" as const, "ada" as const].filter((key) => key !== left);
-
-  it("stay unreadable while their erasure is owed, the Brain failing, in a team still of seven", async () => {
+  it("are erased by the roster save itself that takes a backer off, in a team still of seven, though core's clock fails every erasure", async () => {
     const { ids, max } = await drawnTeam({ eight: true });
     await intakeOf(ids, [zendeskClaim]);
     await handOverNow();
     const before = await recalled(max, "Zendesk", "claim");
+    const [claim] = await claimsOf(max);
     // Pim, who backs the claim, is taken off the list: four left behind it,
-    // seven still interviewed. The Brain fails every erasure.
+    // seven still interviewed. Core's clock fails every erasure: the save
+    // took it out of the Brain and erased it itself, before it committed.
     await onboardingStore(env).saveRoster(
       rosterWith(ids, { keys: eightBut("pim") }),
       {
@@ -1789,15 +2013,18 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
     );
     await eraseOwedOnboardingSources(erasuresFailing());
     const owed = await onboardingStore(env).owedErasures();
+    const { shared } = await keptIn(`claim:${claim?.source.id ?? ""}`, max);
     expect({
       before,
       owed: owed.some(
         (each) => each.kind === "claim" && each.team === ids.team
       ),
+      shared,
       now: await readableBy(max),
     }).toStrictEqual({
       before: [zendeskClaim.text],
-      owed: true,
+      owed: false,
+      shared: "erased",
       now: { group: ids.team, recalled: [], listed: [] },
     });
   });
@@ -1826,10 +2053,11 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
     });
   });
 
-  it("no longer count one moved to another team among their backers: the move owes their erasure in the same save", async () => {
+  it("no longer count one moved to another team among their backers: the move erases them in the same save", async () => {
     const { ids, max } = await drawnTeam({ eight: true });
     await intakeOf(ids, [zendeskClaim]);
     await handOverNow();
+    const [claim] = await claimsOf(max);
     // Pim, who backs the claim, moves to Billing: Ops still has seven
     // interviewed, but four of its people now back the claim.
     await onboardingStore(env).saveRoster(
@@ -1839,13 +2067,16 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
       }
     );
     const owed = await onboardingStore(env).owedErasures();
+    const { shared } = await keptIn(`claim:${claim?.source.id ?? ""}`, max);
     expect({
       owed: owed.some(
         (each) => each.kind === "claim" && each.team === ids.team
       ),
+      shared,
       now: await readableBy(max),
     }).toStrictEqual({
-      owed: true,
+      owed: false,
+      shared: "erased",
       now: { group: ids.team, recalled: [], listed: [] },
     });
   });
