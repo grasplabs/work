@@ -79,6 +79,7 @@ import {
   asIfOlderVersion,
   caughtUp,
   companyMemorySurfaces,
+  contestedInRecall,
   currentIn,
   inStoreOf,
   judged,
@@ -4475,6 +4476,8 @@ describe(
           planted.map((name) => [name, currentIn(both, marked(name))])
         ),
         history: shownIn(ours, marked("out")),
+        // What recall itself groups as contested, beside the page's.
+        contestedInRecall: contestedInRecall(ours),
       };
     };
 
@@ -4635,6 +4638,7 @@ describe(
         "hidden keep": memorySurfaces,
       },
       history: historySurfaces,
+      contestedInRecall: [],
     };
 
     it("gives no reader a memory current once its source's current version drops its quote, not as a contested value or a relation either, and every reader it again once a later one says it, whatever they may not read", async () => {
@@ -4759,6 +4763,10 @@ describe(
           },
           // Current again, and so where every current memory shows.
           history: contestedToo,
+          // Said again, the out memory contests its rival once more.
+          contestedInRecall: [
+            { attribute: "status", memories: ["out", "rival"] },
+          ],
         },
       });
     });

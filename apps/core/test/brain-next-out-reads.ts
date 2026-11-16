@@ -333,14 +333,55 @@ const ofWorld = (world: OutWorld, value: unknown): boolean => {
   );
 };
 
-/** What a pack holds of `world`, and what it says wasn't found. */
+/**
+ * The contested facts of a pack about `world`'s customer, each with its
+ * memories named as the world names them, in the order of their names.
+ */
+export const packContestedOf = (
+  world: OutWorld,
+  contested: readonly {
+    about: string;
+    attribute: string;
+    memories: readonly string[];
+  }[]
+) =>
+  contested
+    .filter(({ about }) => about === world.entity)
+    .map(({ attribute, memories }) => ({
+      attribute,
+      memories: memories
+        .map(
+          (id) =>
+            Object.entries(world.memories).find(
+              ([, each]) => each === id
+            )?.[0] ?? id
+        )
+        .toSorted(),
+    }));
+
+/**
+ * What a pack holds of `world`: its passages and memories, its contested
+ * facts, what it says wasn't found, and whether the budget cut it short.
+ */
 const packOf = (
   world: OutWorld,
-  pack: { items: unknown[]; memories?: unknown[]; notFound: unknown }
+  pack: {
+    items: unknown[];
+    memories?: unknown[];
+    contested?: readonly {
+      about: string;
+      attribute: string;
+      memories: readonly string[];
+    }[];
+    notFound: unknown;
+    truncated: boolean;
+  }
 ) => ({
   items: pack.items.filter((item) => ofWorld(world, item)),
   memories: (pack.memories ?? []).filter((memory) => ofWorld(world, memory)),
+  contested: packContestedOf(world, pack.contested ?? []),
   notFound: pack.notFound,
+  truncated: pack.truncated,
 });
 
 /** What a read answered: its value, or its error's message. */
@@ -961,4 +1002,12 @@ export const writesOf = async (
     };
   }
   return writes;
+};
+
+/** The contested facts of the reader's recall in their own chat (`outReadsOf`), as `packContestedOf` names them. */
+export const contestedInRecall = (reads: Reads): unknown => {
+  const pack = reads["recall in their own chat"];
+  return typeof pack === "object" && pack !== null && "contested" in pack
+    ? pack.contested
+    : undefined;
 };
