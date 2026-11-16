@@ -68,7 +68,13 @@ import type { ChannelLocale } from "./words.ts";
 // decision path for held writes and unknown outcomes.
 
 /** How long a card is remembered as pressed: past any write's life. */
-const pressedTtlMs = 30 * 24 * 60 * 60 * 1000;
+export const pressedTtlMs = 30 * 24 * 60 * 60 * 1000;
+
+/** What marks a card pressed, by its message: one press runs, once. */
+export const pressedKey = (
+  platform: string,
+  { threadId, messageId }: Pick<ActionEvent, "threadId" | "messageId">
+): string => `press:${platform}:${threadId}:${messageId}`;
 
 /** A press on a card, as the door hands it on, from a verified member. */
 export interface CardPress {
@@ -96,9 +102,9 @@ const editCard = async (
 };
 
 /** Says one line where the card was pressed. */
-const sayThere = async (
+export const sayThere = async (
   event: ActionEvent,
-  line: "alreadyAnswered" | "changedSince" | "removed",
+  line: "alreadyAnswered" | "changedSince" | "removed" | "undoFailed",
   locale: ChannelLocale
 ): Promise<void> => {
   try {
@@ -160,7 +166,7 @@ export const pressCard = async (
   }
   const locale = appLocale(event.raw);
   const first = await state.setIfNotExists(
-    `press:${platform}:${event.threadId}:${event.messageId}`,
+    pressedKey(platform, event),
     true,
     pressedTtlMs
   );
