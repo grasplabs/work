@@ -6,8 +6,14 @@ import { defineProject } from "vite-plus";
 // the embedders it is given, as core gives its own (core's tests reach the
 // store through core, where no model ships).
 export default defineProject({
-  // Fails the suite when it isn't running in workerd.
-  test: { setupFiles: ["../../scripts/assert-workerd.ts"] },
+  // Fails the suite when it isn't running in workerd, then starts the
+  // store before each file's tests (test/warm-store.ts).
+  test: {
+    setupFiles: ["../../scripts/assert-workerd.ts", "./test/warm-store.ts"],
+    // One after another, as listed: the runtime's check reports before
+    // warm-store.ts fails on its `cloudflare:` import.
+    sequence: { setupFiles: "list" },
+  },
   plugins: [
     cloudflareTest({
       main: "./test/worker.ts",
