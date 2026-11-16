@@ -37,11 +37,11 @@ import { buildPages } from "../src/pages.ts";
 import { appOf } from "./app-definitions.ts";
 import { commitApp, grantReviewed, racingDb } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
-import { storedGrant } from "./knowledge.ts";
 import { fakeProvider, testModel } from "./model-provider.ts";
 import { configuredLimits } from "./quota-limits.ts";
 import { calledAs } from "./sealed-apps.ts";
 import { auditedDuring, outcome, signedInApi, unique } from "./sign-in.ts";
+import { storedGrant } from "./stored-grants.ts";
 import { testBinding } from "./test-env.ts";
 
 // The built-in blueprints: blueprints that ship with each release,
