@@ -313,6 +313,13 @@ export const interviewRequestSchema = z.discriminatedUnion("action", [
     /** The version this copy was saved as, 0 before it ever was. */
     version: z.int().min(0),
     progress: interviewProgressSchema,
+    /**
+     * The page that sends it, and how many saves it sent with this one:
+     * a later save of the page that made the version kept goes on from
+     * it, though the version it made never reached the page (its answer
+     * lost, or still on its way as the page closed).
+     */
+    page: z.strictObject({ id: z.uuid(), save: z.int().min(1) }).optional(),
   }),
   z.strictObject({
     action: z.literal("delete"),

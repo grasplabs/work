@@ -9,7 +9,12 @@ import type {
   ErasureReason,
   VectorModel,
 } from "@grasp-os/brain-next/contract";
-import { defineWork, enqueueWork, WorkError } from "@grasp-os/brain-next/work";
+import {
+  defineWork,
+  enqueueWork,
+  tickLookMs,
+  WorkError,
+} from "@grasp-os/brain-next/work";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { drizzle } from "drizzle-orm/d1";
@@ -1604,9 +1609,14 @@ describe(
       await eraseShared(erased, "deleted");
       // Added after the erasure deleted the first one's row.
       await queueRecorded(next);
-      await vi.waitFor(() => {
-        expect(second.reached).toBeTruthy();
-      });
+      // Claimed at the tick's next look for what was added meanwhile, as
+      // much as a look's interval from now: waited for past it.
+      await vi.waitFor(
+        () => {
+          expect(second.reached).toBeTruthy();
+        },
+        { timeout: 2 * tickLookMs }
+      );
       first.released = true;
       await vi.waitFor(() => {
         expect(handled.get(keyOf(erased))?.abortedAfter).toBe("erased");

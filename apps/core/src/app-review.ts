@@ -592,14 +592,16 @@ export const defineDraft = async (
     found,
     operation,
     async (draft, files, changes, definition) => {
-      if (!preview) {
-        await saveDraftChanges(
-          env,
-          { by, detail: operationDetail(operation) },
-          found,
-          { draft, files, changes, definition }
-        );
+      if (preview) {
+        return draft.revision;
       }
+      const { revision: left } = await saveDraftChanges(
+        env,
+        { by, detail: operationDetail(operation) },
+        found,
+        { draft, files, changes, definition }
+      );
+      return left;
     },
     { revision: read }
   );
@@ -609,6 +611,7 @@ export const defineDraft = async (
         model: dataModelOf(defined.definition),
         plan: defined.plan,
         change: defined.change,
+        revision: defined.saved,
       }
     : defined;
 };

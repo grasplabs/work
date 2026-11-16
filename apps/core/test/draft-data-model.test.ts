@@ -259,6 +259,8 @@ describe(
         ),
         answered: answered.ok && answered.plan.checks,
         revisions: written.map(({ revision }) => revision),
+        // Where each leaves the draft, which the next change goes over.
+        left: [previewed, answered].map((each) => each.ok && each.revision),
       }).toStrictEqual({
         // The note the App holds lacks the category: checked, unanswered.
         previewed: [{ table: "notes", field: "category", answer: null }],
@@ -267,6 +269,7 @@ describe(
         answered: [{ table: "notes", field: "category", answer: "general" }],
         // Only the change made was saved.
         revisions: [start + 1],
+        left: [start, start + 1],
       });
     });
 
