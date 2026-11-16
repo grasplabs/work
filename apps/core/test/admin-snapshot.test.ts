@@ -191,9 +191,10 @@ const running = async () => {
   const link = (await store.linkOf(ids.lea)) ?? "";
   const secret = link.split("#")[1] ?? "";
   const mark = await sha256Hex(secret);
-  const key = await sha256Hex("lea's device");
-  await store.openLink(mark, null, key);
-  await store.saveInterview(mark, key, 0, progress());
+  // Opened as Lea's account, signed in as the address her link went to.
+  const account = "lea's account";
+  await store.openLink(mark, { account, address: "lea@acme.test" });
+  await store.saveInterview(mark, account, 0, progress());
   await store.meter({
     purpose: "interviews",
     model: `claude-opus-${id}`,
@@ -501,7 +502,7 @@ describe("the admin snapshot", () => {
       people: leads.map((lead, at) => ({
         id: lead,
         name: `Lead ${at}`,
-        email: "",
+        email: `${lead}@acme.test`,
         team: `team-${at}`,
         title: "",
         away: false,
@@ -519,9 +520,9 @@ describe("the admin snapshot", () => {
       leads.map(async (lead) => {
         const secret = ((await store.linkOf(lead)) ?? "").split("#")[1] ?? "";
         const mark = await sha256Hex(secret);
-        const key = await sha256Hex(`${lead}'s device`);
-        await store.openLink(mark, null, key);
-        await store.saveInterview(mark, key, 0, progress());
+        const account = `${lead}'s account`;
+        await store.openLink(mark, { account, address: `${lead}@acme.test` });
+        await store.saveInterview(mark, account, 0, progress());
       })
     );
 

@@ -18,7 +18,7 @@ import { z } from "zod";
 
 import { adminCommand, adminSnapshot } from "./admin-steering.ts";
 import { interviewLinkOf } from "./interview-link.ts";
-import { apiOf } from "./people.ts";
+import { apiOf, signInAs, signInTo } from "./people.ts";
 import type { Person } from "./people.ts";
 
 /** A WAV of 16-bit mono samples at `rate`, each from -1 to 1. */
@@ -154,6 +154,19 @@ export const personIn = async (person: string): Promise<string | undefined> => {
   return links.find((link) => link.person === person)?.state;
 };
 
+/** The address `person`'s link goes to on the list: the one they sign in with. */
+export const addressOf = (person: string): string => `${person}@acme.test`;
+
+/**
+ * Gives `page` the session of `email` signed in with the company's sign-in,
+ * as someone opening their link after signing in once (GRA-1790); the one
+ * journey that signs in on the interview's own page does it there.
+ */
+export const signedInFor = async (page: Page, email: string): Promise<void> => {
+  const cookie = await signInAs(email);
+  await signInTo(page.context(), { userId: "", email, role: "user", cookie });
+};
+
 /** Someone in a team of their own, with their interview link out; their link's path. */
 export const invited = async (
   staff: Person,
@@ -164,7 +177,9 @@ export const invited = async (
   try {
     await api.onboarding.confirmRoster({
       teams: [{ id: `team-${person}`, name: "Finance", lead: null }],
-      people: [{ id: person, name, team: `team-${person}` }],
+      people: [
+        { id: person, name, team: `team-${person}`, email: addressOf(person) },
+      ],
     });
     await api.onboarding.savePlan({ start: today() });
     await adminCommand({

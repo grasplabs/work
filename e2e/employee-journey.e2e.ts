@@ -3,11 +3,13 @@ import type { Page } from "@playwright/test";
 
 import { test } from "./csp.ts";
 import {
+  addressOf,
   answered,
   first,
   invited,
   personIn,
   readBack,
+  signedInFor,
 } from "./interview-turns.ts";
 import { signInStaff } from "./people.ts";
 
@@ -50,6 +52,7 @@ test("an employee has their interview by typing on a phone, agrees to it, and de
   const asked = await answered(page);
 
   // The screens before it: their language, who they talk with, what this is.
+  await signedInFor(page, addressOf(person));
   await page.goto(link);
   await page.getByRole("button", { name: "Continue" }).click();
   await page.getByRole("button", { name: "Stephen", exact: true }).click();

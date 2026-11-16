@@ -110,7 +110,10 @@ export type RosterTeam = z.output<typeof rosterTeamSchema>;
 export const rosterPersonSchema = z.strictObject({
   id: idSchema,
   name: nameSchema,
-  /** Empty when they have none: their link is handed to them on paper. */
+  /**
+   * Empty when they have none: their link can be handed to them on paper,
+   * and opens once the list has an address they sign in with (GRA-1790).
+   */
   email: z.union([z.literal(""), z.email().max(120)]).default(""),
   team: idSchema,
   title: z.string().trim().max(80).default(""),

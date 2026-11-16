@@ -1,4 +1,3 @@
-import { interviewApiPath } from "@grasp-os/shared/interview-links";
 import type {
   InterviewFact,
   InterviewLine,
@@ -10,17 +9,21 @@ import type { Roster } from "@grasp-os/shared/onboarding";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
-import { z } from "zod";
 
 import { onboardingStore } from "../src/onboarding/store.ts";
 import {
   answering,
   approveAgreed,
+  onLink,
   openedFor,
+  openLinkAs,
+  postedOnLink,
   quick,
+  signedInAs,
 } from "./interview-link.ts";
+import type { Device } from "./interview-link.ts";
 import type { ProviderReply } from "./model-provider.ts";
-import { routed, unique } from "./sign-in.ts";
+import { unique } from "./sign-in.ts";
 
 // The onboarding's durability (GRA-339): its Worker restarted in the middle
 // of an interview's turn, and in the middle of a team's drawing, as a
@@ -40,7 +43,6 @@ import { routed, unique } from "./sign-in.ts";
 
 const dayMs = 24 * 60 * 60 * 1000;
 const isoDay = (ms: number) => new Date(ms).toISOString().slice(0, 10);
-const sessionKey = z.object({ key: z.string().optional() });
 
 /** Waits, from the test's own context, until `done` holds. */
 const until = async (done: () => boolean): Promise<void> => {
@@ -90,15 +92,11 @@ const noNotes: ProviderReply = {
 
 /** Saves the page's progress on the link, from the version it holds. */
 const save = async (
-  link: { secret: string; key: string },
+  link: Device,
   version: number,
   progress: InterviewProgress
 ): Promise<InterviewSaved> => {
-  const response = await routed(interviewApiPath, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ action: "save", ...link, version, progress }),
-  });
+  const response = await onLink({ action: "save", ...link, version, progress });
   return await response.json();
 };
 
@@ -123,21 +121,17 @@ const progressOf = (
 
 /** A turn asked for, as the page asks it after `lines`. */
 const askTurn = async (
-  link: { secret: string; key: string },
+  link: Device,
   lines: InterviewLine[]
 ): Promise<Response> =>
-  await routed(interviewTurnPath, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      ...link,
-      event: "answer",
-      locale: "en",
-      lines,
-      facts: [],
-      phase: "steps",
-      minutes: 4,
-    }),
+  await postedOnLink(interviewTurnPath, {
+    ...link,
+    event: "answer",
+    locale: "en",
+    lines,
+    facts: [],
+    phase: "steps",
+    minutes: 4,
   });
 
 /** Stephen's line in a whole turn's answer. */
@@ -245,7 +239,7 @@ describe("the onboarding after a restart", { timeout: 60_000 }, () => {
       id: person,
       name,
       team: ids.team,
-      email: "",
+      email: `${person}@acme.test`,
       title: "",
       away: false,
     });
@@ -272,12 +266,10 @@ describe("the onboarding after a restart", { timeout: 60_000 }, () => {
     // Lea agrees to her interview.
     const leasLink = await store.linkOf(ids.lea);
     const secret = leasLink?.split("#")[1] ?? "";
-    const session = await routed(interviewApiPath, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ action: "session", secret }),
-    });
-    const { key = "" } = sessionKey.parse(await session.json());
+    const { link: lea } = await openLinkAs(
+      secret,
+      await signedInAs(`${ids.lea}@acme.test`)
+    );
     const agreed = progressOf(
       [{ from: "stephen", text: "What does your team do?" }],
       [
@@ -291,8 +283,8 @@ describe("the onboarding after a restart", { timeout: 60_000 }, () => {
       ],
       "completed"
     );
-    await save({ secret, key }, 0, agreed);
-    await approveAgreed({ secret, key }, agreed.facts);
+    await save(lea, 0, agreed);
+    await approveAgreed(lea, agreed.facts);
     const map: ProviderReply = {
       text: JSON.stringify({
         does: "Answers customers' questions",

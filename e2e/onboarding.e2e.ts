@@ -11,6 +11,7 @@ import { test } from "./csp.ts";
 import { interviewLinkOf } from "./interview-link.ts";
 import {
   apiOf,
+  sessionCookie,
   signInAs,
   signInConfiguredAdmin,
   signInStaff,
@@ -62,7 +63,12 @@ test("staff put the agreements in place, and the links that waited go out", asyn
         { id: `ops-${run}`, name: "Ops", lead: null },
       ],
       people: [
-        { id: lead, name: "Lea", team: `sales-${run}` },
+        {
+          id: lead,
+          name: "Lea",
+          team: `sales-${run}`,
+          email: `${lead}@acme.test`,
+        },
         { id: `sam-${run}`, name: "Sam", team: `sales-${run}` },
         { id: `ona-${run}`, name: "Ona", team: `ops-${run}` },
       ],
@@ -142,31 +148,37 @@ const leasInterview = (): InterviewProgress => ({
 });
 
 /** One call of the interview page to core. */
-const interviewCall = async (body: object): Promise<unknown> => {
+const interviewCall = async (
+  body: object,
+  cookie: string
+): Promise<unknown> => {
   const response = await fetch(new URL(interviewApiPath, origin), {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: {
+      origin,
+      "content-type": "application/json",
+      "sec-fetch-site": "same-origin",
+      cookie: `${sessionCookie}=${encodeURIComponent(cookie)}`,
+    },
     body: JSON.stringify(body),
   });
   expect(response.ok).toBe(true);
   return await response.json();
 };
 
-/** Keeps `progress` on a person's link, from a device that opens it as their page does. */
+/**
+ * Keeps `progress` on a person's link, as their page does once they signed
+ * in with the company's sign-in at `email`, the address it went to.
+ */
 const interviewOn = async (
   link: string,
+  email: string,
   progress: InterviewProgress
 ): Promise<void> => {
   const secret = link.split("#")[1] ?? "";
-  const session = await interviewCall({ action: "session", secret });
-  const key =
-    typeof session === "object" &&
-    session !== null &&
-    "key" in session &&
-    typeof session.key === "string"
-      ? session.key
-      : "";
-  await interviewCall({ action: "save", secret, key, version: 0, progress });
+  const cookie = await signInAs(email);
+  await interviewCall({ action: "session", secret }, cookie);
+  await interviewCall({ action: "save", secret, version: 0, progress }, cookie);
 };
 
 test("staff read where someone's interview stands from the admin, never a word of it", async ({
@@ -174,15 +186,19 @@ test("staff read where someone's interview stands from the admin, never a word o
 }) => {
   // Lea, the lead whose link the test before sent out, talks with Claire.
   const before = await adminSnapshot();
-  const lea =
-    before.roster?.people.find(
-      (person) =>
-        person.name === "Lea" &&
-        before.links.some(
-          (link) => link.person === person.id && link.sentAt !== null
-        )
-    )?.id ?? "";
-  await interviewOn(await interviewLinkOf(lea), leasInterview());
+  const leas = before.roster?.people.find(
+    (person) =>
+      person.name === "Lea" &&
+      before.links.some(
+        (link) => link.person === person.id && link.sentAt !== null
+      )
+  );
+  const lea = leas?.id ?? "";
+  await interviewOn(
+    await interviewLinkOf(lea),
+    leas?.email ?? "",
+    leasInterview()
+  );
 
   // Where it stands, who held it and its numbers; nothing she said, and
   // nothing written down from it (GRA-329).

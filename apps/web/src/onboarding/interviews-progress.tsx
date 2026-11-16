@@ -271,7 +271,7 @@ const LinksToSend = ({ links }: { links: LinkToSend[] }) => {
       </PopoverTrigger>
       <PopoverContent align="end" className="w-md">
         <div className="flex flex-col gap-3">
-          <p className="text-muted-foreground">{t`Everyone has a link of their own: whoever has it is them, so send each only to its owner. Links that are not out yet open on their day, or once their lead has talked.`}</p>
+          <p className="text-muted-foreground">{t`Everyone has a link of their own. It opens only once they sign in with your company's sign-in, at the address on the list. Links that are not out yet open on their day, or once their lead has talked.`}</p>
           <Button
             disabled={list.length === 0}
             onClick={() => {

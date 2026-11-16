@@ -11,14 +11,16 @@ import { adminSnapshot } from "./admin-steering.ts";
 import { test } from "./csp.ts";
 import {
   adding,
-  answered,
+  addressOf,
   answerTo,
+  answered,
   back,
   changed,
   first,
   invited,
   personIn,
   readBack,
+  signedInFor,
   speechSchema,
   streamed,
   turnOf,
@@ -26,8 +28,9 @@ import {
 } from "./interview-turns.ts";
 import { signInStaff } from "./people.ts";
 
-// Someone's own interview, end to end (GRA-345, GRA-346, GRA-382): they
-// open their link, choose their language and who they talk with, read what
+// Someone's own interview, end to end (GRA-345, GRA-346, GRA-382,
+// GRA-1790): they open their link, sign in with the company's sign-in and
+// are back on it, choose their language and who they talk with, read what
 // this is, answer by typing, stop for now and carry on, put a line of the
 // read-back right, agree to it, and the interview is agreed in the store.
 // Another goes through the screens before it in Dutch and chooses Claire,
@@ -80,7 +83,23 @@ test("someone has their interview by typing, carries on after stopping, and agre
   // Every turn the page asks for must be one core takes.
   const asked = await answered(page);
 
+  // They sign in with the company's sign-in, told first that it records
+  // it, and come back to their interview (GRA-1790).
   await page.goto(link);
+  await expect(
+    page.getByRole("heading", { name: "Sign in to open your interview" })
+  ).toBeVisible();
+  await expect(
+    page.getByText(
+      "Signing in is recorded by your company's sign-in, as every sign-in is."
+    )
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: /^Sign in with /u })
+    .first()
+    .click();
+  await page.getByLabel("Email").fill(addressOf(person));
+  await page.getByRole("button", { name: "Sign in" }).click();
   await page.getByRole("button", { name: "Continue" }).click();
   await page.getByRole("button", { name: "Stephen", exact: true }).click();
   await expect(
@@ -186,6 +205,7 @@ test("someone removes a line of theirs and takes out what was written from it, a
     }
   });
 
+  await signedInFor(page, addressOf(person));
   await page.goto(link);
   await page.getByRole("button", { name: "Continue" }).click();
   await page.getByRole("button", { name: "Stephen", exact: true }).click();
@@ -264,6 +284,7 @@ test("someone goes through the screens before the interview in Dutch, chooses Cl
   const asked = await answered(page);
 
   // The device's language is marked; another is one press away, and the question is asked in it.
+  await signedInFor(page, addressOf(person));
   await page.goto(link);
   await expect(
     page.getByRole("button", { name: "English", exact: true })
@@ -414,6 +435,7 @@ test("Stephen says his line a sentence at a time, without a gap, its words light
   await watchWords(page);
 
   // They hear him, he hears them, and they start talking.
+  await signedInFor(page, addressOf(person));
   await page.goto(link);
   await page.getByRole("button", { name: "Continue" }).click();
   await page.getByRole("button", { name: "Stephen", exact: true }).click();

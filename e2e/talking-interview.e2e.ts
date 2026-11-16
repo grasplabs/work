@@ -17,7 +17,7 @@ import type { Page, Route, WebSocketRoute } from "@playwright/test";
 import { z } from "zod";
 
 import { test } from "./csp.ts";
-import { invited } from "./interview-turns.ts";
+import { addressOf, invited, signedInFor } from "./interview-turns.ts";
 import { signInStaff } from "./people.ts";
 
 // Stephen's ears, end to end (GRA-381): someone who chose to talk is heard
@@ -283,8 +283,13 @@ const watchTimes = async (page: Page, words: string): Promise<void> => {
   }, words);
 };
 
-/** Opens the link and starts the interview by talking, through the sound check. */
-const startTalking = async (page: Page, link: string): Promise<void> => {
+/** Opens `person`'s link signed in as them, and starts the interview by talking, through the sound check. */
+const startTalking = async (
+  page: Page,
+  link: string,
+  person: string
+): Promise<void> => {
+  await signedInFor(page, addressOf(person));
   await page.goto(link);
   await page.getByRole("button", { name: "Continue" }).click();
   await page.getByRole("button", { name: "Stephen", exact: true }).click();
@@ -309,7 +314,7 @@ test("their words show while they talk, and all of them a moment after they stop
   const line = await liveLine(page);
   await watchTimes(page, said);
 
-  await startTalking(page, link);
+  await startTalking(page, link, person);
 
   // While they talk, what is heard so far shows over the bar.
   await expect(page.getByText("Listening", { exact: true })).toBeVisible({
@@ -350,9 +355,8 @@ test("their words show while they talk, and all of them a moment after they stop
 });
 
 /** What a recording sent to be written down carried. */
-const recordingSchema = z.object({
+const recordingSchema = z.strictObject({
   secret: z.string().min(1),
-  key: z.string().min(1),
   locale: z.literal("en"),
   audio: z.number().positive(),
 });
@@ -382,7 +386,6 @@ test("with the live line blocked, what they said is written down from its record
     const audio = form.get("audio");
     recordings.push({
       secret: form.get("secret"),
-      key: form.get("key"),
       locale: form.get("locale"),
       audio: audio instanceof Blob ? audio.size : 0,
     });
@@ -393,7 +396,7 @@ test("with the live line blocked, what they said is written down from its record
     });
   });
 
-  await startTalking(page, link);
+  await startTalking(page, link, person);
 
   await expect(page.getByText(thanks)).toBeVisible({ timeout: 30_000 });
   const answer = asked.find(({ event }) => event === "answer");

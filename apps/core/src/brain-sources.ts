@@ -37,6 +37,7 @@ import {
 } from "./brain-run-sources.ts";
 import { brainHandOvers, workflowStartReceipts } from "./db/core/schema.ts";
 import { workspace } from "./durable-objects.ts";
+import { claimOf, claimSource } from "./onboarding/new-brain.ts";
 import { personalWorkspaceId } from "./personal-workspace.ts";
 import { resultOf, runOf } from "./workflows/resource-runs.ts";
 import { detailsRemoved } from "./workflows/retention.ts";
@@ -241,6 +242,11 @@ const producers: Record<
     read: chatTurnOfId,
     ofPerson: chatsOf,
   },
+  // A team claim's id is minted by the onboarding and names nobody. A
+  // person's interview is no producer here: core adds it itself
+  // (onboarding/new-brain.ts), as the hand-over's audit events would tell
+  // the company about it.
+  claim: { source: claimSource, read: claimOf, ofPerson: null },
 };
 
 /** Whether `kind` is a producer's: a source of any other has nothing to hand over. */
