@@ -16,26 +16,29 @@ import {
 import { producersOf, relayHandOvers } from "../src/brain-sources.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { allEvents } from "./audit-events.ts";
+import { copyOfStore, restoreStore } from "./brain-next-store-copy.ts";
 import { mockIdp } from "./idp.ts";
 import { answering, onLink } from "./interview-link.ts";
 import { agree, fact, openLink, team } from "./onboarding-team.ts";
 import { auditedDuring, signedInApi, unique } from "./sign-in.ts";
 
 // The company's teams in the new Brain (GRA-1748): each team taking part on
-// the staff list the admin confirmed, with how many people it has, as one
-// source the company's admins read, a new version at each confirmed
-// change. The ways it can fail, from the threat model on the issue and
-// review round 1 of #2344:
+// the staff list the admin confirmed, as the admin described it, with its
+// head count on the roster, as one source everyone in the company reads
+// (the owner, 17 November), a new version at each confirmed change; the
+// admin may erase it. The ways it can fail, from the threat model on the
+// issue and review round 1 of #2344:
 //
-// - What a team does reaching the Brain: a lead's map writes it, a model's
-//   answer from that one person's interview, so a fact of theirs would
-//   reach whoever reads the source, and outlive their delete or withdrawal.
+// - What a lead's map says a team does reaching anyone: a model's answer
+//   from that one person's interview, so a fact of theirs would reach
+//   everyone, and outlive their delete or withdrawal.
 // - A map drawing timing one person's interview in the admin's audit log.
 // - A person on the list reaching the source: their name, address or title.
-// - Anyone but the company's admins reading it.
 // - A list the admin saved without confirming, a team switched off, or one
-//   still waiting for the admin's confirmation, reaching the Brain.
+//   still waiting for the admin's confirmation, reaching members.
 // - A save that changes nothing writing a version or an audit event.
+// - An erase leaving any version readable, coming back after a restore, or
+//   closing the key the next confirmed save needs.
 
 const idp = mockIdp();
 
@@ -53,19 +56,35 @@ const handOverNow = async (): Promise<void> => {
   await workBrain(env, new Date(clock.at), producersOf(env));
 };
 
-/** The company's teams' source in the Brain. */
-const roster: SourceRef = { producer: "roster", id: "teams" };
+/** The company's teams' source in the Brain now. */
+const rosterNow = async (): Promise<SourceRef> => ({
+  producer: "roster",
+  id: await onboardingStore(env).rosterBrainId(),
+});
 
-/** Every version of the company's teams `userId` may read, as text. */
-const versionsOf = async (userId: string): Promise<string[]> => {
-  const { versions } = await listVersionsAs(env, userId, { source: roster });
+/** Every version of `source` `userId` may read, as text. */
+const versionsIn = async (
+  userId: string,
+  source: SourceRef
+): Promise<string[]> => {
+  const { versions } = await listVersionsAs(env, userId, { source });
   const read = await Promise.all(
     versions.map(
       async ({ version }) =>
-        await readSourceVersionAs(env, userId, { source: roster, version })
+        await readSourceVersionAs(env, userId, { source, version })
     )
   );
   return read.flatMap((each) => (each === null ? [] : [each.text]));
+};
+
+/** Every version `userId` may read of every source of the company's teams they list. */
+const versionsOf = async (userId: string): Promise<string[]> => {
+  const { sources } = await listSourcesAs(env, userId);
+  const rosters = sources.filter(({ source }) => source.producer === "roster");
+  const texts = await Promise.all(
+    rosters.map(async ({ source }) => await versionsIn(userId, source))
+  );
+  return texts.flat();
 };
 
 /** Everything `userId` reads that could hold `word`: recall by it, the Sources listing and every version of the teams, as one lower-case text. */
@@ -148,7 +167,7 @@ const markers = () => ({
 });
 
 describe("the company's teams in the new Brain", { timeout: 180_000 }, () => {
-  it("never hands over what a lead's map says a team does, nor times a drawing in the audit log, before or after the lead deletes their interview", async () => {
+  it("never gives anyone what a lead's map says a team does, nor times a drawing in the audit log, before or after the lead deletes their interview", async () => {
     const [admin, member] = await Promise.all([
       signedInApi(idp, "admin"),
       signedInApi(idp, "user"),
@@ -180,90 +199,118 @@ describe("the company's teams in the new Brain", { timeout: 180_000 }, () => {
         async () => await store.drawNext()
       );
     });
+    // A confirmed save after the drawing hands the teams over again.
+    const { roster } = await store.view();
+    if (roster === null) {
+      throw new Error("No roster.");
+    }
+    await admin.api.onboarding.confirmRoster(roster);
     await handOverNow();
-    const before = {
+    const readNow = async () => ({
       member: await readOf(member.userId, marker),
       admin: await readOf(admin.userId, marker),
       page: JSON.stringify(await member.api.brain.read()).toLowerCase(),
       exported: await exported(),
-    };
+    });
+    const before = await readNow();
+    // Grasp's staff still read the map's words, as before (admin-snapshot.ts);
+    // the company's admin's own roster never holds them as theirs.
+    const asMapped = JSON.stringify(await store.rosterAsMapped());
+    const adminView = JSON.stringify(await admin.api.onboarding.view());
 
     // She deletes her interview.
     await onLink({ action: "delete", ...(await openLink(ids.lea)) });
     await store.releaseDue();
     await handOverNow();
-    const after = {
-      member: await readOf(member.userId, marker),
-      admin: await readOf(admin.userId, marker),
-      page: JSON.stringify(await member.api.brain.read()).toLowerCase(),
-      exported: await exported(),
-    };
+    const after = await readNow();
     const held = (read: Record<string, string>) =>
       Object.entries(read).flatMap(([where, text]) =>
         text.includes(marker) || text.includes("lea lind") ? [where] : []
       );
 
     expect({
+      staff: asMapped.includes(marker),
+      adminRoster: adminView.includes(marker),
       before: held(before),
       after: held(after),
       drawingHandedOver: drawing.filter(
         ({ action }) => action === "onboarding.roster.brain_source"
       ).length,
-    }).toStrictEqual({ before: [], after: [], drawingHandedOver: 0 });
+    }).toStrictEqual({
+      staff: true,
+      adminRoster: false,
+      before: [],
+      after: [],
+      drawingHandedOver: 0,
+    });
   });
 
-  it("gives the company's admins the confirmed teams taking part and their sizes, never who is in them, and nobody else anything of them", async () => {
+  it("gives every member the confirmed teams taking part, as the admin described them, with their head counts, never who is in them", async () => {
     const [admin, member] = await Promise.all([
       signedInApi(idp, "admin"),
       signedInApi(idp, "user"),
     ]);
     const words = markers();
-    // Saved, not confirmed: nothing is handed over.
+    // Saved, not confirmed: nothing reaches a member.
     await admin.api.onboarding.saveRoster(rosterWith(words));
     await handOverNow();
-    const unconfirmed = await readOf(admin.userId, words.team);
+    const unconfirmed = {
+      read: await readOf(member.userId, words.team),
+      page: JSON.stringify(await member.api.brain.read()).toLowerCase(),
+    };
 
     // Confirmed, the other team switched off.
     await admin.api.onboarding.confirmRoster(rosterWith(words, { off: true }));
     await handOverNow();
-    const confirmed = await readOf(admin.userId, words.team);
-    const asMember = {
-      versions: await versionsOf(member.userId),
-      read: await readOf(member.userId, words.team),
-    };
+    const read = await readOf(member.userId, words.team);
+    const page = await member.api.brain.read();
+    const bakery = page.teams.find(({ id }) => id === "team-bakery");
     const events = JSON.stringify(await allEvents()).toLowerCase();
-    const found = (read: string) =>
-      kinds.filter((kind) => read.includes(words[kind]));
+    const found = (text: string) =>
+      kinds.filter((kind) => text.includes(words[kind]));
 
     expect({
-      unconfirmed: found(unconfirmed),
-      confirmed: found(confirmed),
-      sized: confirmed.includes(`${words.team}: 2 people`),
-      member: { versions: asMember.versions, found: found(asMember.read) },
+      unconfirmed: [...found(unconfirmed.read), ...found(unconfirmed.page)],
+      read: found(read),
+      sized: read.includes(`${words.team}: 2 people. bakes bread`),
+      page: {
+        shown: found(JSON.stringify(page).toLowerCase()),
+        bakery: {
+          does: bakery?.does,
+          people: bakery?.counts.map(({ people }) => people),
+          stakeholders: bakery?.stakeholders,
+        },
+      },
       logged: found(events),
     }).toStrictEqual({
       unconfirmed: [],
       // Not the switched-off team, nor anyone on the list.
-      confirmed: ["team"],
+      read: ["team"],
       sized: true,
-      member: { versions: [], found: [] },
+      page: {
+        shown: ["team"],
+        bakery: { does: "Bakes bread", people: [2], stakeholders: [] },
+      },
       logged: [],
     });
   });
 
   it("keeps each confirmed change a version, and a confirmed save that changes nothing writes none and notes nothing", async () => {
-    const admin = await signedInApi(idp, "admin");
+    const [admin, member] = await Promise.all([
+      signedInApi(idp, "admin"),
+      signedInApi(idp, "user"),
+    ]);
     const words = markers();
     await admin.api.onboarding.confirmRoster(rosterWith(words));
     await handOverNow();
-    const first = await versionsOf(admin.userId);
+    const first = await versionsOf(member.userId);
 
     // The same list confirmed again.
     const again = await auditedDuring(async () => {
       await admin.api.onboarding.confirmRoster(rosterWith(words));
     });
     await handOverNow();
-    const unchanged = await versionsOf(admin.userId);
+    const unchanged = await versionsOf(member.userId);
 
     // Renamed, and one more person in it.
     const renamed = markerOf("renamed");
@@ -276,9 +323,8 @@ describe("the company's teams in the new Brain", { timeout: 180_000 }, () => {
       ],
     });
     await handOverNow();
-    const last = await versionsOf(admin.userId);
-    const read = await readOf(admin.userId, renamed);
-    const current = read.includes(`${renamed}: 3 people`);
+    const last = await versionsOf(member.userId);
+    const read = await readOf(member.userId, renamed);
 
     expect({
       againNoted: again.filter(
@@ -288,13 +334,92 @@ describe("the company's teams in the new Brain", { timeout: 180_000 }, () => {
       added: last.length - unchanged.length,
       // The earlier name stays as history.
       history: last.some((text) => text.toLowerCase().includes(words.team)),
-      current,
+      current: read.includes(`${renamed}: 3 people`),
     }).toStrictEqual({
       againNoted: 0,
       unchanged: 0,
       added: 1,
       history: true,
       current: true,
+    });
+  });
+
+  it("erases every version when the admin erases the teams, also after a restore, keeps the roster, and gives them afresh at the next confirmed save", async () => {
+    const [admin, member] = await Promise.all([
+      signedInApi(idp, "admin"),
+      signedInApi(idp, "user"),
+    ]);
+    const words = markers();
+    await admin.api.onboarding.confirmRoster(rosterWith(words));
+    await handOverNow();
+    const renamed = markerOf("renamed");
+    await admin.api.onboarding.confirmRoster(
+      rosterWith({ ...words, team: renamed })
+    );
+    await handOverNow();
+    const erased = await rosterNow();
+    const before = await readOf(member.userId, words.team);
+    const copy = await copyOfStore();
+
+    const events = await auditedDuring(async () => {
+      await admin.api.onboarding.eraseTeamsFromBrain();
+    });
+    const holds = async (word: string): Promise<boolean> => {
+      const read = await readOf(member.userId, word);
+      return read.includes(word);
+    };
+    const view = await admin.api.onboarding.view();
+    const page = await member.api.brain.read();
+    const afterErase = {
+      read: await holds(words.team),
+      renamed: await holds(renamed),
+      versions: await versionsIn(member.userId, erased),
+      // The roster itself stays, and what members read on the page.
+      roster: view.roster?.teams.map(({ name }) => name),
+      page: page.teams.some(({ name }) => name === renamed),
+      inBrain: view.teamsInBrain,
+    };
+    await restoreStore(copy);
+    const afterRestore = {
+      read: await holds(renamed),
+      versions: await versionsIn(member.userId, erased),
+    };
+    // The next confirmed save, the same list: given afresh, under a new id.
+    await admin.api.onboarding.confirmRoster(
+      rosterWith({ ...words, team: renamed })
+    );
+    await handOverNow();
+    const fresh = await rosterNow();
+    const freshVersions = await versionsIn(member.userId, fresh);
+    const logged = JSON.stringify(events).toLowerCase();
+
+    expect({
+      before: before.includes(words.team),
+      afterErase,
+      afterRestore,
+      fresh: {
+        own: fresh.id !== erased.id,
+        versions: freshVersions.length,
+        read: await holds(renamed),
+      },
+      audited: events
+        .filter(({ action }) => action === "onboarding.roster.brain_erased")
+        .map(({ actor }) => actor.type),
+      logged: logged.includes(words.team) || logged.includes(renamed),
+    }).toStrictEqual({
+      before: true,
+      afterErase: {
+        read: false,
+        renamed: false,
+        versions: [],
+        roster: [renamed, words.other],
+        page: true,
+        inBrain: null,
+      },
+      afterRestore: { read: false, versions: [] },
+      fresh: { own: true, versions: 1, read: true },
+      audited: ["person"],
+      logged: false,
     });
   });
 });

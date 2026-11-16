@@ -3381,6 +3381,7 @@ msgstr "Impossible de proposer Exécuter : {unread}"
 #: src/link-confirmation.tsx
 #: src/onboarding/document-drop.tsx
 #: src/onboarding/forget-kickoff.tsx
+#: src/onboarding/forget-teams.tsx
 #: src/onboarding/place-picker.tsx
 #: src/projects/file-item-dialog.tsx
 #: src/projects/project-dialog.tsx
@@ -5229,6 +5230,10 @@ msgstr "Effacer {who}"
 msgid "Erase for good"
 msgstr "Effacer définitivement"
 
+#: src/onboarding/forget-teams.tsx
+msgid "Erase them"
+msgstr "Les effacer"
+
 #: src/brain/sources-page.tsx
 msgid "Erase this upload for good"
 msgstr "Effacer ce fichier importé définitivement"
@@ -5236,6 +5241,14 @@ msgstr "Effacer ce fichier importé définitivement"
 #: src/brain/sources-page.tsx
 msgid "Erase this upload for good?"
 msgstr "Effacer ce fichier importé définitivement ?"
+
+#: src/onboarding/forget-teams.tsx
+msgid "Erase your teams from your Brain"
+msgstr "Effacer vos équipes de votre Brain"
+
+#: src/onboarding/forget-teams.tsx
+msgid "Erase your teams from your Brain?"
+msgstr "Effacer vos équipes de votre Brain ?"
 
 #: src/settings/erasures.tsx
 msgid "Erase…"
@@ -5256,6 +5269,10 @@ msgstr "A effacé définitivement un fichier importé du Brain"
 #: src/activity/audit-words.ts
 msgid "Erased what the Brain kept from a connection, as it was disconnected"
 msgstr "A effacé ce que le Brain avait conservé d’une connexion, lors de sa déconnexion"
+
+#: src/onboarding/forget-teams.tsx
+msgid "Erased. Your Brain keeps nothing of your teams until you confirm them again."
+msgstr "Effacées. Votre Brain ne garde rien de vos équipes jusqu’à ce que vous les confirmiez à nouveau."
 
 #: src/settings/erasures.tsx
 msgid "Erasing, {done} of {total}"
@@ -6849,6 +6866,10 @@ msgstr "Je supprime ce qui a été dit et tout ce que j’en ai tiré : ce que j
 msgid "I do every interview myself. Here’s what that sounds like."
 msgstr "Je mène chaque entretien moi-même. Voici ce que cela donne."
 
+#: src/onboarding/forget-teams.tsx
+msgid "I erase everything your Brain keeps of your teams, every earlier version too, for everyone. Your list of teams and people stays as it is, and the next time you confirm it, your Brain gets it again. This can’t be undone."
+msgstr "J’efface tout ce que votre Brain garde de vos équipes, chaque version antérieure aussi, pour tout le monde. Votre liste d’équipes et de personnes reste telle quelle, et la prochaine fois que vous la confirmerez, votre Brain la recevra à nouveau. C’est irréversible."
+
 #: src/onboarding/document-drop.tsx
 msgid "I forget what I read in it, and draw again what I drew with it. If you shared it, its file in your Brain, if there is one, is deleted too; if another admin did, the file stays in theirs until they delete it. This can’t be undone."
 msgstr "J’oublie ce que j’y ai lu, et je redessine ce que j’ai dessiné avec. Si vous l’avez partagé, son fichier dans votre Brain, s’il y en a un, est aussi supprimé ; si un autre administrateur l’a partagé, le fichier reste dans son Brain jusqu’à ce qu’il y soit supprimé. Cette action est irréversible."
@@ -6888,6 +6909,10 @@ msgstr "Je note ce que vous me dites. À la fin, je vous le relis, et vous dites
 #: src/interview/before.tsx
 msgid "I’m {firstName}."
 msgstr "Je suis {firstName}."
+
+#: src/onboarding/forget-teams.tsx
+msgid "I’m erasing your teams from your Brain. It isn’t finished yet, and I finish it by myself."
+msgstr "J’efface vos équipes de votre Brain. Ce n’est pas encore fini, et je le termine moi-même."
 
 #: src/tour/tour-script.ts
 msgid "I’m ready"
@@ -15813,6 +15838,11 @@ msgstr "Ce qui est partagé avec cette équipe cesse de l’être avec ses membr
 #: src/workflows/traces.tsx
 msgid "What it did"
 msgstr "Ce qu’elle a fait"
+
+#: src/brain/brain.ts
+msgctxt "a team, as the company's admin described it"
+msgid "What it does"
+msgstr "Ce qu’elle fait"
 
 #: src/agents/new-agent.tsx
 #: src/workflows/requests/request-table.tsx

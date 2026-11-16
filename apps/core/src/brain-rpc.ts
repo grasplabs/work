@@ -60,6 +60,7 @@ import { keepsReadsOf } from "./connection-capture-key.ts";
 import { catalogEntries, personOf } from "./connections.ts";
 import { organizations } from "./db/core/schema.ts";
 import { intakeIds, ownId } from "./onboarding/brain-intake.ts";
+import type { CompanyTeam } from "./onboarding/company-teams.ts";
 import { kickoffSaid, teamNameKey } from "./onboarding/kickoff-company.ts";
 import type { CompanyKickoff } from "./onboarding/kickoff-company.ts";
 import { mondayOf } from "./onboarding/rules.ts";
@@ -534,6 +535,25 @@ const sourcesForRecords = async (
 };
 
 /**
+ * The roster's teams as every member reads them (onboarding/company-teams.ts):
+ * each confirmed team taking part, the admin's own description, and its head
+ * count on the roster, never who is in it, their titles or its lead.
+ */
+const confirmedTeams = (
+  confirmed: { at: string; teams: readonly CompanyTeam[] } | null
+): Team[] =>
+  (confirmed?.teams ?? []).map(({ id, name, does, people }) => ({
+    id: ids.rosterTeam(id),
+    name,
+    ...(does === "" ? {} : { does }),
+    sourceId: rosterSourceId,
+    counts: [
+      { sourceId: rosterSourceId, date: dayOf(confirmed?.at ?? ""), people },
+    ],
+    stakeholders: [],
+  }));
+
+/**
  * The roster's teams. Each one's size is its people, its roles their
  * titles counted (how many, never who), and its stakeholder its lead, as
  * their title.
@@ -575,6 +595,7 @@ const onboardingTeams = (facts: OnboardingFacts | null): Team[] => {
     return {
       id: ids.rosterTeam(team.id),
       name: team.name,
+      ...(team.does === "" ? {} : { does: team.does }),
       sourceId: rosterSourceId,
       counts:
         rosterDay === null
@@ -964,12 +985,18 @@ const readBrainCore = async (
   env: Env,
   person: Pick<Identity, "role">
 ): Promise<BrainCore> => {
-  const [facts, kickoff, held] = await Promise.all([
+  const store = onboardingStore(env);
+  const [facts, kickoff, companyTeams, held] = await Promise.all([
     onboardingFacts(env, person),
-    onboardingStore(env).companyKickoff(),
+    store.companyKickoff(),
+    store.companyTeams(),
     readBrainRecords(env),
   ]);
-  const roster = onboardingTeams(facts);
+  // An admin reads the roster whole: every team, roles counted and its
+  // leads' roles. Everyone else reads the teams as the admin confirmed
+  // them, which are the company's (GRA-1748, the owner on 17 November).
+  const roster =
+    facts === null ? confirmedTeams(companyTeams) : onboardingTeams(facts);
   const kickoffTeams = await kickoffTeamsOf(kickoff);
   const records = withSuccessors(roster, kickoffTeams, held);
   return {

@@ -263,6 +263,13 @@ export interface OnboardingView {
    */
   kickoff: "in" | "erasing" | null;
   /**
+   * The company's teams in the Brain (GRA-1748): `in` while it holds them,
+   * which the admin can erase (`eraseTeamsFromBrain`); `erasing` once
+   * erased while that is still under way, which finishes by itself; null
+   * while it holds none.
+   */
+  teamsInBrain: "in" | "erasing" | null;
+  /**
    * The sponsor's first name, when the kickoff named them; null before it
    * is in, or when it did not. The one word of the kickoff the admin sees.
    */
@@ -467,6 +474,13 @@ export interface OnboardingApi
    * finishes what a failed delete left.
    */
   deleteKickoff: () => Promise<void>;
+  /**
+   * The admin erases the company's teams from the Brain (GRA-1748): every
+   * version of what it was given of them, for everyone. The roster stays
+   * as it is, and the next confirmed save gives the Brain the teams afresh.
+   * Asked again, it finishes what a failed erase left.
+   */
+  eraseTeamsFromBrain: () => Promise<void>;
 }
 
 /** Why the onboarding refused something. */
@@ -476,6 +490,8 @@ export const onboardingErrors = defineErrorFamily({
   "onboarding.no_roster": "Add who works where first.",
   "onboarding.kickoff_unfinished":
     "The kickoff is deleted. What was drawn from it is still being erased, and that finishes by itself.",
+  "onboarding.teams_unfinished":
+    "The teams are being erased from the Brain. That isn't finished yet, and it finishes by itself.",
   "onboarding.past": "The interviews can't start in the past.",
   "onboarding.no_link": "That person has no link out yet.",
   "onboarding.not_found": "Nobody on the list by that id.",

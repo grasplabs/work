@@ -127,7 +127,6 @@ import { log } from "@grasp-os/shared/log";
 import { modelErrors } from "@grasp-os/shared/models";
 import type { ModelErrorCode } from "@grasp-os/shared/models";
 import { permissionErrors } from "@grasp-os/shared/permissions";
-import { isAdmin } from "@grasp-os/shared/roles";
 import { skillErrors } from "@grasp-os/shared/skills";
 import { z } from "zod";
 
@@ -208,15 +207,6 @@ const teamPrefix = "team:";
 const companyGroup = "company";
 
 /**
- * The company's admins, as the Brain's group: every current member whose
- * role is an admin's, read as themselves alone (`readerOf`), never by code
- * or an App acting as their teams or the company. What only those who
- * keep the company's onboarding may read (the staff list's teams,
- * onboarding/new-brain.ts `rosterOf`).
- */
-const adminsGroup = "admins";
-
-/**
  * A team of the onboarding's staff list, as the Brain's group: its people
  * who took part read what five or more of them said in their interviews
  * (GRA-1741). A staff-list team is not one of core's teams, so it is a
@@ -242,7 +232,6 @@ const sourceReadersSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("team"), teamId: idSchema }),
   z.strictObject({ kind: z.literal("everyone") }),
   z.strictObject({ kind: z.literal("interviews"), teamId: rosterTeamIdSchema }),
-  z.strictObject({ kind: z.literal("admins") }),
   z.strictObject({ kind: z.literal("none") }),
 ]);
 
@@ -309,8 +298,9 @@ const kindsWithoutColon = <const K extends string>(
 // readable by that team (onboarding/new-brain.ts, GRA-1790, GRA-1741).
 // `kickoff`: what every member reads of the onboarding's kickoff, readable
 // by everyone (onboarding/new-brain.ts, GRA-1748).
-// `roster`: the company's teams, what each does and its size, readable by
-// everyone (onboarding/new-brain.ts, GRA-1748).
+// `roster`: the company's confirmed teams, as the admin described them,
+// and their head counts, readable by everyone (onboarding/new-brain.ts,
+// GRA-1748).
 const producerKinds = kindsWithoutColon([
   "upload",
   "chat",
@@ -753,9 +743,6 @@ const accessOf = (readers: SourceReaders): Access => {
     case "interviews": {
       return { kind: "audience", group: interviewsGroup(readers.teamId) };
     }
-    case "admins": {
-      return { kind: "audience", group: adminsGroup };
-    }
     case "none": {
       return { kind: "none" };
     }
@@ -812,12 +799,12 @@ const interviewTeamOf = async (
 const personReaderOf = async (
   env: ReaderEnv,
   personId: string,
-  { personal = true }: { personal?: boolean } = {}
+  { interviews = true }: { interviews?: boolean } = {}
 ): Promise<PersonReader> => {
   const id = checked(idSchema, personId);
   const [member, interviewTeam] = await Promise.all([
     memberOf(env.DB, id),
-    personal ? interviewTeamOf(env, id) : null,
+    interviews ? interviewTeamOf(env, id) : null,
   ]);
   if (member === undefined) {
     throw permissionErrors.create("permission.person_inactive");
@@ -827,7 +814,6 @@ const personReaderOf = async (
     groups: [
       ...member.teams.map(({ id: teamId }) => teamGroup(teamId)),
       ...(interviewTeam === null ? [] : [interviewsGroup(interviewTeam)]),
-      ...(personal && isAdmin(member.role) ? [adminsGroup] : []),
       companyGroup,
     ],
   };
@@ -861,11 +847,10 @@ const readerOf = async (
   reach: Reach,
   teams: readonly string[] = []
 ): Promise<Reader> => {
-  // What their interviews' team said (GRA-1741), and what only the
-  // company's admins read (`adminsGroup`), is read as the person alone:
-  // never by code or an App acting as their teams or the company.
+  // What their interviews' team said (GRA-1741) is read as the person
+  // alone: never by code or an App acting as their teams or the company.
   const { person, groups } = await personReaderOf(env, personId, {
-    personal: reach === "person",
+    interviews: reach === "person",
   });
   switch (reach) {
     case "person": {
