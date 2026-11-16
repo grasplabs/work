@@ -1173,30 +1173,15 @@ const handedOver = ({
     truncated,
   ]);
 
-/** Whether `finding` found nothing at all: no passage, part, term or memory. */
-const foundNothing = (finding: Finding): boolean =>
-  [
-    finding.words,
-    finding.stopWords,
-    finding.terms,
-    finding.exact,
-    finding.capped,
-    finding.meaning,
-    finding.memories.words,
-    finding.memories.entities,
-    finding.memories.rivals,
-  ].every((found) => found.length === 0);
-
 /**
  * Whether `pack`, packed from `findings`, hands over anything else than
  * the pack of the shared store's finding alone would: an item or memory
  * of the reader's own store, the same items in another order (an own
  * passage the budget left out still took a rank), or only a word it found
  * that is then not said not found, or a passage of it the budget left
- * out. Built again in memory from what was found, with no other read; at
- * once false when the own store found nothing. An own match that changes
- * nothing handed over (one ranked past what a way lists, say) gives
- * nothing only the person may read.
+ * out. Built again in memory from what was found, with no other read. An
+ * own match that changes nothing handed over (one ranked past what a way
+ * lists, say) gives nothing only the person may read.
  */
 const differsByOwn = (
   { question, budget }: RecallRequest,
@@ -1204,7 +1189,6 @@ const differsByOwn = (
   pack: Pack
 ): boolean =>
   own !== undefined &&
-  !foundNothing(own) &&
   handedOver(pack) !==
     handedOver(packAcross(question, budget.tokens, [shared]));
 
