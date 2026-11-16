@@ -24,7 +24,7 @@ import { modelForRole, modelSettings, models } from "./models.ts";
 // (GRA-1920). Each shows a notice of every memory with a way to undo it:
 // the result's `details`, as `ChatSavedMemory`. In Grasp's app undoing
 // is `session.brainMemories.forget`; in a chat app it is the Undo on the
-// notice's card (channels/remembered.tsx), through the same `forgetFor`.
+// notice's card (channels/remembered.ts), through the same `forgetFor`.
 //
 // From the threat model on GRA-1743, only what the person said is their
 // word, checked twice before anything is saved, by the plan's own rule
@@ -38,8 +38,9 @@ import { modelForRole, modelSettings, models } from "./models.ts";
 //   themselves, as their own statement, not as text they pasted or
 //   forwarded. Not confirmed, or no model to ask: nothing is saved.
 // The harness offers the tool only where the person can see the notice
-// and undo it: their own chat, in a turn they started (chat-harness.ts). The model is told what memory is for and to keep
-// little, not given rules for what to save (the plan's research). A retry
+// and undo it: their own chat, in a turn they started (chat-harness.ts).
+// The model is told what memory is for and to keep little, not given
+// rules for what to save (the plan's research). A retry
 // of the same call (a restart replays it) is the same memory: its change
 // is the chat's and the call's.
 

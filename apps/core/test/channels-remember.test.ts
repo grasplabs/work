@@ -1,16 +1,29 @@
 import { personalBrainOf } from "@grasp-os/brain-next/contract";
+import { chatIdSchema } from "@grasp-os/shared/ids";
+import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import { undoAction } from "../src/channels/cards.tsx";
 import { say } from "../src/channels/words.ts";
 import { chatAgentId, personalWorkspaceId } from "../src/chats-rpc.ts";
-import { inJurisdiction, workspace } from "../src/durable-objects.ts";
-import { model, says, toolResults, toolStep } from "./agent-chat.ts";
+import {
+  chatSession,
+  inJurisdiction,
+  workspace,
+} from "../src/durable-objects.ts";
+import {
+  model,
+  pausedReply,
+  says,
+  toolResults,
+  toolStep,
+} from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { chatIdsOf } from "./code-step-trace.ts";
 import { mockIdp } from "./idp.ts";
+import { connectModels } from "./model-provider.ts";
 import type { FakeProvider } from "./model-provider.ts";
 import { signedInApi, unique } from "./sign-in.ts";
 import {
@@ -23,6 +36,7 @@ import {
   onGroupRoster,
   post,
   reached,
+  uninstalledFor,
   watched,
 } from "./teams-door.ts";
 import type { TeamsPerson } from "./teams-door.ts";
@@ -35,8 +49,10 @@ import type { TeamsPerson } from "./teams-door.ts";
 // door, with the real connect, Brain and audit log; only the model
 // provider and Microsoft's Bot Connector are faked. The ways it can fail,
 // tried here: a memory nobody sees a notice of (a group chat, a woken
-// turn, a notice Teams refused), an Undo by someone else, and an Undo
-// pressed twice.
+// turn, a notice Teams refused, a turn that failed or threw after the
+// save, a Workspace restarted mid-turn), an Undo by someone else, outside
+// the direct message or pressed twice, and the bot's own words quoted in
+// a reply taken for the person's.
 
 const idp = mockIdp();
 
@@ -369,6 +385,242 @@ describe("the agent remembering in a person's Teams direct message", () => {
         ],
         answered: true,
       });
+    }
+  );
+});
+
+/** Whether `memory` was retired, as the audit log has its outcome, waited for. */
+const retiredInLog = async (userId: string): Promise<unknown[]> =>
+  await vi.waitFor(
+    async () => {
+      const forgotten = await forgottenBy(userId);
+      const done = forgotten.filter(({ outcome }) => outcome === "done");
+      expect(done).not.toHaveLength(0);
+      return done.map(({ result }) => result);
+    },
+    { timeout: 20_000 }
+  );
+
+/** The person's Teams direct message's chat, once there is one. */
+const directChatOf = async (userId: string) =>
+  await vi.waitFor(
+    async () => {
+      const [direct] = await chatIdsOf(
+        workspace(env, personalWorkspaceId(userId)),
+        userId,
+        "teams"
+      );
+      expect(direct).toBeDefined();
+      return direct?.id ?? "";
+    },
+    { timeout: 20_000 }
+  );
+
+/** Restarts the durable object `stub` where it is, as a deploy does. */
+const restarted = async (stub: DurableObjectStub): Promise<void> => {
+  await runInDurableObject(stub, (_instance, state) => {
+    state.abort("Restarted by the test");
+  }).catch(() => {
+    // Aborting fails the call that aborted: that is the restart.
+  });
+};
+
+describe("a memory whose notice the person can't see in Teams", () => {
+  it(
+    "is shown with Undo under the failed line when the turn gives no answer after the save",
+    slow,
+    async () => {
+      const depot = `d${unique()}`;
+      const { said, statement, saves } = depotSaid(depot, marker());
+      const ann = await member(idp, saves, checked(true), says(""), says(""));
+
+      await post(messageFrom(ann.teams, { text: said }));
+      const { card } = await noticeIn(ann.teams.conversation);
+      const { lines } = await reached(ann.teams.conversation);
+
+      expect({
+        kept: await keptFor(ann.userId, `Depot ${depot}`),
+        failed: lines.includes(say("failed", "en")),
+        notice: card.includes(statement) && card.includes(undoAction),
+      }).toStrictEqual({ kept: [statement], failed: true, notice: true });
+    }
+  );
+
+  it(
+    "is retired when neither the answer nor its notice can be posted",
+    slow,
+    async () => {
+      const depot = `d${unique()}`;
+      const { said, saves } = depotSaid(depot, marker());
+      const ann = await member(idp, saves, checked(true), says("Noted."));
+      // The app is gone from her chat: Teams refuses every post there.
+      await uninstalledFor(ann.teams);
+
+      await post(messageFrom(ann.teams, { text: said }));
+
+      expect({
+        checks: checksSent(ann.provider),
+        retired: await retiredInLog(ann.userId),
+        kept: await keptFor(ann.userId, `Depot ${depot}`),
+      }).toStrictEqual({ checks: 1, retired: ["done"], kept: [] });
+    }
+  );
+
+  it("is retired when the turn throws after the save", slow, async () => {
+    const depot = `d${unique()}`;
+    const { said, saves } = depotSaid(depot, marker());
+    const next = pausedReply(says("Noted."), 0);
+    const ann = await member(idp, saves, checked(true), next.reply);
+    const posted = post(messageFrom(ann.teams, { text: said }));
+    // Saved, and handed to the turn's asker, before the answer comes.
+    const chatId = await directChatOf(ann.userId);
+    const stub = workspace(env, personalWorkspaceId(ann.userId));
+    await vi.waitFor(
+      async () => {
+        const results = await toolResults(stub, chatId);
+        expect(results.map(({ tool }) => tool)).toContain("remember");
+      },
+      { timeout: 20_000 }
+    );
+    // The model it runs on is no longer allowed, and its chat's object
+    // restarts: the turn is set up again, refused, and throws.
+    await connectModels(`k-${unique()}`, ["mistral/mistral-large-latest"]);
+    await restarted(
+      chatSession(
+        env,
+        personalWorkspaceId(ann.userId),
+        chatIdSchema.parse(chatId)
+      )
+    );
+    await posted;
+    next.release();
+    const { lines } = await reached(ann.teams.conversation);
+
+    expect({
+      retired: await retiredInLog(ann.userId),
+      kept: await keptFor(ann.userId, `Depot ${depot}`),
+      failed: lines.includes(say("failed", "en")),
+    }).toStrictEqual({ retired: ["done"], kept: [], failed: true });
+  });
+
+  it(
+    "is retired when it reaches a Workspace restarted mid-turn, with nobody left to post it",
+    slow,
+    async () => {
+      const depot = `d${unique()}`;
+      const { said, saves } = depotSaid(depot, marker());
+      const first = pausedReply(saves, 0);
+      const ann = await member(idp, first.reply, checked(true), says("Noted."));
+      const posted = post(messageFrom(ann.teams, { text: said }));
+      // The turn's own request, which the model answers by saving.
+      await vi.waitFor(
+        () => {
+          const asked = ann.provider.requests.some(({ body }) => {
+            const sent = JSON.stringify(body);
+            return sent.includes(said) && sent.includes('"remember"');
+          });
+          expect(asked).toBeTruthy();
+        },
+        { timeout: 20_000 }
+      );
+      // The Workspace restarts before the model asks to save: the door's
+      // call to it breaks, and the turn goes on in its chat's object.
+      await restarted(workspace(env, personalWorkspaceId(ann.userId)));
+      await posted;
+      first.release();
+
+      expect({
+        checks: await vi.waitFor(
+          () => {
+            expect(checksSent(ann.provider)).toBe(1);
+            return 1;
+          },
+          { timeout: 20_000 }
+        ),
+        retired: await retiredInLog(ann.userId),
+        kept: await keptFor(ann.userId, `Depot ${depot}`),
+      }).toStrictEqual({ checks: 1, retired: ["done"], kept: [] });
+    }
+  );
+});
+
+describe("Undo pressed where the notice isn't", () => {
+  it(
+    "retires nothing from a group chat, where a press names the bot",
+    slow,
+    async () => {
+      const depot = `d${unique()}`;
+      const { said, statement, saves } = depotSaid(depot, marker());
+      const ann = await member(idp, saves, checked(true), says("Noted."));
+      const ben = await memberAnsweredBy(idp, ann.provider);
+      await post(messageFrom(ann.teams, { text: said }));
+      const { cardId, memory } = await noticeIn(ann.teams.conversation);
+      const group = newGroup();
+      await onGroupRoster(group, [
+        { person: ann.teams },
+        { person: ben.teams },
+      ]);
+
+      await post({
+        ...mentionIn(ann.teams, group, ""),
+        replyToId: cardId,
+        value: { actionId: undoAction, value: memory },
+      });
+
+      expect({
+        kept: await keptFor(ann.userId, `Depot ${depot}`),
+        forgotten: await forgottenBy(ann.userId),
+      }).toStrictEqual({ kept: [statement], forgotten: [] });
+    }
+  );
+});
+
+describe("a Teams reply that quotes the bot", () => {
+  it(
+    "never passes the bot's quoted words off as the person's own",
+    slow,
+    async () => {
+      const depot = `d${unique()}`;
+      const word = marker();
+      const { statement } = depotSaid(depot, word);
+      // The model quotes the middle of the bot's words, as theirs.
+      const ann = await member(
+        idp,
+        toolStep("remember", {
+          about: { kind: "customer", name: `Depot ${depot}` },
+          type: "fact",
+          statement,
+          quote: `opens at ${word}`,
+        }),
+        checked(true),
+        says("Noted.")
+      );
+      // Teams puts the quoted message into the reply's text, as HTML, with
+      // its structure: a blockquote marked as a reply, naming its author.
+      const quoted = `<blockquote itemscope="" itemtype="http://schema.skype.com/Reply" itemid="1729000000001"><strong itemprop="mri" itemid="28:stephen">Stephen</strong><span itemprop="time" itemid="1729000000001"></span><p itemprop="preview">${statement} from now on.</p></blockquote><p>Thanks!</p>`;
+
+      await post(
+        messageFrom(ann.teams, {
+          text: quoted,
+          textFormat: "xml",
+          attachments: [
+            { contentType: "text/html", content: `<div>${quoted}</div>` },
+          ],
+        })
+      );
+      const chatId = await directChatOf(ann.userId);
+      const results = await toolResults(
+        workspace(env, personalWorkspaceId(ann.userId)),
+        chatId
+      );
+
+      expect({
+        outcomes: results.flatMap(({ tool, isError }) =>
+          tool === "remember" ? [isError] : []
+        ),
+        checks: checksSent(ann.provider),
+        kept: await keptFor(ann.userId, `Depot ${depot}`),
+      }).toStrictEqual({ outcomes: [true], checks: 0, kept: [] });
     }
   );
 });

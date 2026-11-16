@@ -1406,7 +1406,7 @@ export class ChatHarness {
       // started (`personal`, workspace.ts `answersAlone`): their own chat
       // in Grasp's app, or their direct message on a chat app (GRA-1920),
       // each of which shows a notice of every memory with its Undo
-      // (agent-remember.ts; channels/remembered.tsx). What they said there
+      // (agent-remember.ts; channels/remembered.ts). What they said there
       // is the only word of theirs it may keep. Never a chat others share,
       // nor a turn nobody started (a wake), which has no word of theirs.
       ...(request.personal

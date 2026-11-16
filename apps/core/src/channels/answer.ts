@@ -63,7 +63,8 @@ import { postOffers } from "./workflow-offers.ts";
 //
 // Each memory the turn saved of what the person said, in their direct
 // message, is shown after its answer on a card of its own, with Undo
-// (remembered.ts), however the turn ended: one nobody sees isn't kept.
+// (remembered.ts), however the turn ended. One whose card can't be posted
+// is retired; remembered.ts says what can still be missed.
 
 /** How often typing is shown again while the turn runs. */
 const typingEveryMs = 3000;

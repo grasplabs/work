@@ -95,6 +95,7 @@ import {
 } from "./cards.tsx";
 import { inertInMessage } from "./inert.ts";
 import { pressCard } from "./press.ts";
+import { withoutQuotedReply } from "./quoted-reply.ts";
 import { isSetUp } from "./set-up.ts";
 import { countSignal } from "./signals.ts";
 import { slackAdapter, verifiedSlackRequest } from "./slack.ts";
@@ -221,6 +222,9 @@ const activitySchema = z.object({
     .optional(),
 });
 type Activity = z.infer<typeof activitySchema>;
+
+/** Every field of an activity the door took, to send on as Teams sent it. */
+const activityFieldsSchema = z.looseObject({});
 
 /** The language `locale` (`nl-NL`, `de`) names, or English. */
 const localeOf = (locale: string | undefined): ChannelLocale => {
@@ -1075,13 +1079,24 @@ export const channelResponse = async (
     ctx.waitUntil(countSignal(env, platform, "refused"));
     return new Response("Unauthorized", { status: 401 });
   }
-  const parsed = activitySchema.safeParse(jsonOf(body));
+  const sent = jsonOf(body);
+  const parsed = activitySchema.safeParse(sent);
   // Verified, but nothing the door takes (a typing indicator has a
   // `from`; an installation update may not): acknowledged, and dropped.
   if (!parsed.success || parsed.data.type !== "message") {
     return new Response(null, { status: 200 });
   }
-  const activity = parsed.data;
+  // What they said, without a message their reply quotes (quoted-reply.ts):
+  // read so by the door and by every handler after it.
+  const text =
+    parsed.data.text === undefined
+      ? undefined
+      : await withoutQuotedReply(parsed.data.text);
+  const activity = { ...parsed.data, text };
+  const theirs =
+    text === parsed.data.text
+      ? body
+      : JSON.stringify({ ...activityFieldsSchema.parse(sent), text });
   const state = durableObjectState(inJurisdiction(env, env.CHAT_STATE));
   const adapter = await teamsAdapter(env, teamsKeys);
   const { line, userId, acts, kept, place } = await gate(
@@ -1186,7 +1201,7 @@ export const channelResponse = async (
       new Request(request.url, {
         method: "POST",
         headers: request.headers,
-        body,
+        body: theirs,
       }),
       { waitUntil: background }
     );

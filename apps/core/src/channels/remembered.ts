@@ -1,10 +1,8 @@
-import { actorOf } from "@grasp-os/shared/audit";
 import type { ChatSavedMemory } from "@grasp-os/shared/brain-memories";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type { PostableCard } from "chat";
 
-import { forgetFor } from "../brain-memories.ts";
-import type { MemoryCaller } from "../brain-memories.ts";
+import { retireUnseen } from "../unseen-memories.ts";
 import { rememberedCard } from "./cards.tsx";
 import type { ChannelLocale } from "./words.ts";
 
@@ -18,7 +16,15 @@ import type { ChannelLocale } from "./words.ts";
 // - A memory kept that the person never sees. The notice goes with the
 //   turn's answer, on every path that has the turn's result, the failed
 //   ones too (answer.ts). One the platform refuses is retired at once,
-//   so nothing they can't see stays in use.
+//   and so is one whose turn threw, or whose result reached a Workspace
+//   with nobody waiting to post it (unseen-memories.ts, workspace.ts).
+//   What is left, in use with no notice (it is still on their Memories
+//   page in Grasp): a memory whose card the Worker died before posting,
+//   once `askThrough` had returned it; one the Workspace held for its
+//   asker when the Workspace restarted mid-turn; one whose retiring
+//   failed twice; and one of a person no longer a member, which can't
+//   be retired as them (`forgetAs` refuses), whose store their erasure
+//   clears.
 // - An Undo by someone else, or forged. A press comes through the door
 //   as a message does, signed by the platform, from a verified member
 //   (door.ts), who is the only one it acts for: `forgetFor` retires only
@@ -27,28 +33,9 @@ import type { ChannelLocale } from "./words.ts";
 // - Undo pressed twice, or the platform sending it again. The door takes
 //   each activity once, and a card is pressed once (`pressedKey`, as a
 //   card of held writes is): a second press says so and does nothing.
-//   An Undo that failed lets the card go, to be pressed again.
+//   The memory is retired before the card is marked pressed, so an Undo
+//   that failed or was cut short leaves the card to be pressed again.
 // - What the model wrote on the card: made inert (cards.tsx).
-
-/** The person acting through `platform`, as `forgetFor` takes them. */
-export const callerOf = (userId: string, platform: string): MemoryCaller => ({
-  person: userId,
-  actor: actorOf({ userId, staff: false }, platform),
-});
-
-/** Retires `memory` of `userId`'s, whose notice nobody saw: logged if it can't be. */
-const retireUnseen = async (
-  env: Env,
-  userId: string,
-  platform: string,
-  memory: string
-): Promise<void> => {
-  try {
-    await forgetFor(env, callerOf(userId, platform), memory);
-  } catch (error) {
-    log.error("channel.notice_unretired", { platform, ...errorFields(error) });
-  }
-};
 
 /**
  * Posts the notice of each of `remembered`, the memories a turn saved for
@@ -78,7 +65,7 @@ export const postRemembered = async (
     } catch (error) {
       log.warn("channel.notice_refused", { platform, ...errorFields(error) });
       // oxlint-disable-next-line no-await-in-loop -- once, for this one
-      await retireUnseen(env, userId, platform, saved.memory);
+      await retireUnseen(env, userId, platform, [saved.memory]);
     }
   }
 };
