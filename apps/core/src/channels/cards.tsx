@@ -50,6 +50,14 @@ const outsideBytes = 16 * 1024;
  */
 const sectionChars = 3000;
 
+/**
+ * The most blocks Slack takes in one message (Block Kit: "You can include
+ * up to 50 blocks in each message"), past which it refuses the message
+ * whole. An answer's card is a section per piece and, under the last, one
+ * actions block of thumbs: a card holds one section fewer than this.
+ */
+const slackBlocksPerMessage = 50;
+
 /** The most held writes one card shows; more can't be confirmed on it. */
 export const maxWritesOnCard = 10;
 
@@ -215,11 +223,21 @@ const partsPair = (text: string, at: number): boolean => {
 // oxlint-disable-next-line require-unicode-regexp -- the SDK's own flags, exactly
 export const emojiPlaceholders = /\{\{emoji:[a-z0-9_]+\}\}/gi;
 
-/** For each position of `text`, whether a cut there would part a placeholder. */
-const insidePlaceholders = (text: string): Uint8Array => {
+/**
+ * For each position of `text`, whether a cut there would part a placeholder
+ * that fits a section in each form it is sent in (`sent`). One too long for
+ * a section is no emoji anyone sees whole: it is cut like any text, so its
+ * pieces are full-size, never a character each.
+ */
+const insidePlaceholders = (
+  text: string,
+  sent: (piece: string) => readonly string[]
+): Uint8Array => {
   const inside = new Uint8Array(text.length + 1);
   for (const match of text.matchAll(emojiPlaceholders)) {
-    inside.fill(1, match.index + 1, match.index + match[0].length);
+    if (fitsSection(sent(match[0]))) {
+      inside.fill(1, match.index + 1, match.index + match[0].length);
+    }
   }
   return inside;
 };
@@ -279,7 +297,7 @@ export const piecesOf = (
   const segmenters = (["sentence", "grapheme"] as const).map(
     (granularity) => new Intl.Segmenter(locale, { granularity })
   );
-  const parts = insidePlaceholders(text);
+  const parts = insidePlaceholders(text, sent);
   const whole = (cut: number) => parts[cut] !== 1;
   const pieces: string[] = [];
   let start = 0;
@@ -368,7 +386,11 @@ export const answerCards = ({
     }
     const cost = costOf(sent(piece));
     const last = cards.at(-1);
-    if (last === undefined || cost > room) {
+    if (
+      last === undefined ||
+      cost > room ||
+      last.length >= slackBlocksPerMessage - 1
+    ) {
       cards.push([inert(piece)]);
       room = outsideBytes - cost;
       continue;

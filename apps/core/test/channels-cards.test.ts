@@ -662,6 +662,15 @@ describe("an answer in pieces", () => {
         )
       )
     ).toStrictEqual(platforms.flatMap(() => answers.map(() => allRight)));
+    // And each Slack card within the blocks a message takes.
+    const blocks = answers.flatMap((text) =>
+      answerCards({ locale: "en", text, platform: "slack" }).map(
+        (card) => cardToBlockKit(card.card).length
+      )
+    );
+    expect(blocks.filter((count) => count > slackLimits.blocks)).toStrictEqual(
+      []
+    );
   });
 
   it("never cuts inside a character cluster, wherever the cluster falls against a section's end", () => {
@@ -707,19 +716,36 @@ describe("an answer in pieces", () => {
       pairs: "😀".repeat(5000),
       // What each platform escapes or breaks, which makes a piece longer.
       escapes: "Tom & Jerry <b>said</b> [x](https://e.test) ".repeat(2000),
+      // A placeholder no section holds: cut like any text.
+      longPlaceholder: `{{emoji:${"a".repeat(5000)}}}`,
     };
     expect(
       platforms.map((platform) =>
         Object.fromEntries(
-          Object.entries(hostile).map(([name, text]) => [
-            name,
-            wrongWith(text, piecesOf(text, "en", platform), platform),
-          ])
+          Object.entries(hostile).map(([name, text]) => {
+            const pieces = piecesOf(text, "en", platform);
+            return [
+              name,
+              {
+                ...wrongWith(text, pieces, platform),
+                // Full-size pieces, never a character or a code point each,
+                // wherever a rule keeps a cut out.
+                fullSize: pieces
+                  .slice(0, -1)
+                  .every((piece) => piece.length >= 1000),
+              },
+            ];
+          })
         )
       )
     ).toStrictEqual(
       platforms.map(() =>
-        Object.fromEntries(Object.keys(hostile).map((name) => [name, allRight]))
+        Object.fromEntries(
+          Object.keys(hostile).map((name) => [
+            name,
+            { ...allRight, fullSize: true },
+          ])
+        )
       )
     );
   });
@@ -751,6 +777,23 @@ describe("Stephen's cards in Slack", () => {
     expect(shown).toStrictEqual({
       blankLines: { onlyWhiteSpace: 0, whole: true },
       spaces: { onlyWhiteSpace: 0, whole: true },
+    });
+  });
+
+  it("cuts a placeholder too long for a section like any text, in full-size pieces, each card within Slack's blocks", () => {
+    const text = `{{emoji:${"a".repeat(5000)}}}`;
+    const cards = answerCards({ locale: "en", text, platform: "slack" });
+    const sections = cards.flatMap((card) => sectionTexts(card));
+    expect({
+      whole: ink(sections.join("")) === ink(text),
+      sections: sections.length,
+      eachWithin: sections.every((section) => section.length <= 3000),
+      blocks: cards.map((card) => cardToBlockKit(card.card).length <= 50),
+    }).toStrictEqual({
+      whole: true,
+      sections: 2,
+      eachWithin: true,
+      blocks: cards.map(() => true),
     });
   });
 
