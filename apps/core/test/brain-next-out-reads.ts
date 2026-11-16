@@ -16,8 +16,8 @@
  * Each time is named by the event of the world it falls at or after (a
  * version's add, or a memory's learning, of those both worlds have) and
  * how long after it: so a hidden memory that moved an end time shows as a
- * difference, as one that moved an order does, lists being compared in
- * order, but for recall's, whose ties break by ids of each world's own.
+ * difference, as one that moved an order does, every list being
+ * compared in its order.
  *
  * Two things the harness deliberately doesn't hold an out memory to:
  * exports carry the store's raw records, every memory with what it rests
@@ -37,7 +37,6 @@ import {
   confirmAs,
   contestedAs,
   correctAs,
-  forgetAs,
   listVersionsAs,
   memoriesAs,
   readableMemoriesAs,
@@ -63,7 +62,11 @@ import { noProducers } from "./no-producers.ts";
 
 /** A word nothing else holds. */
 export const outWord = (prefix: string): string =>
-  `${prefix}${crypto.randomUUID().replaceAll("-", "").slice(0, 16)}`;
+  // Letters alone: no digit, so no run of a marker reads as a time
+  // (`times`) in one world and as a name in its twin.
+  `${prefix}${Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) =>
+    String.fromCodePoint(97 + (byte % 26))
+  ).join("")}`;
 
 /**
  * The quotes a world's versions hold or drop: `out` and `keep`, and
@@ -617,20 +620,12 @@ const times =
   /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z|(?<![\d.])1\d{12}(?![\d.])/gu;
 
 /**
- * The surfaces whose lists are ranked by recall, where a world's memories
- * tie with one another as its twin's do but break the tie by ids of each
- * world's own: compared in the order of their items' text. Every other
- * list is compared in its order (a memory page and a card order by when
- * each was learned, which differs in every world).
+ * Of two events at the same moment, the version's add first, then a
+ * memory's learning (`timeRole` names a moment by the last at or before
+ * it): by kind, never by how the names sort.
  */
-const rankedSurfaces = new Set([
-  "recall in their own chat",
-  "recall as their teams",
-  "recall with the stores it found in",
-  "recall of passages, as code's",
-  "the Brain page's search",
-  "recall ranked by their use",
-]);
+const kindOrder = (event: string): number =>
+  event.startsWith("version ") ? 0 : 1;
 
 /** A world's events, by name, with when each was: what its times are named by. */
 type Events = readonly (readonly [string, number])[];
@@ -664,7 +659,10 @@ const eventsOf = async (
           .toArray()
           .map(({ learned_at }) => [`${name} learned`, learned_at])
       ),
-    ].toSorted(([a, at], [b, bt]) => at - bt || a.localeCompare(b))
+    ].toSorted(
+      ([a, at], [b, bt]) =>
+        at - bt || kindOrder(a) - kindOrder(b) || a.localeCompare(b)
+    )
   );
 
 /**
@@ -679,15 +677,13 @@ const timeRole = (ms: number, events: Events): string => {
 };
 
 /**
- * `value` with each string of it in roles (`role`), each time named by
- * the world's `events` (`timeRole`), and, with `sort`, every list in the
- * order of its items' text.
+ * `value` with each string of it in roles (`role`) and each time named by
+ * the world's `events` (`timeRole`), every list in its order.
  */
 const inRoles = (
   value: unknown,
   role: (text: string) => string,
-  events: Events,
-  sort: boolean
+  events: Events
 ): unknown => {
   if (typeof value === "string") {
     return role(value);
@@ -699,16 +695,13 @@ const inRoles = (
     return timeRole(value, events);
   }
   if (Array.isArray(value)) {
-    const each = value.map((item) => inRoles(item, role, events, sort));
-    return sort
-      ? each.toSorted((one, other) => textOf(one).localeCompare(textOf(other)))
-      : each;
+    return value.map((item) => inRoles(item, role, events));
   }
   if (typeof value === "object" && value !== null) {
     return Object.fromEntries(
       Object.entries(value).map(([key, item]) => [
         key,
-        inRoles(item, role, events, sort),
+        inRoles(item, role, events),
       ])
     );
   }
@@ -738,21 +731,23 @@ const asRoles = (
       `<${name} memory>`,
     ]),
   ];
+  // Names first, then times: a run of a name's characters never reads as
+  // a time.
   const role = (text: string): string => {
-    let roled = text.replaceAll(times, (time) =>
-      timeRole(time.includes("T") ? Date.parse(time) : Number(time), events)
-    );
+    let roled = text;
     for (const [name, each] of names) {
       if (name !== "") {
         roled = roled.replaceAll(name, each);
       }
     }
-    return roled;
+    return roled.replaceAll(times, (time) =>
+      timeRole(time.includes("T") ? Date.parse(time) : Number(time), events)
+    );
   };
   return Object.fromEntries(
     Object.entries(reads).map(([surface, read]) => [
       surface,
-      textOf(inRoles(read, role, events, rankedSurfaces.has(surface))),
+      textOf(inRoles(read, role, events)),
     ])
   );
 };
@@ -926,16 +921,15 @@ export const wordRulesOf = async (): Promise<number> =>
   );
 
 /** What each write a person may make of a memory answers, by the memory's name. */
-export type Writes = Record<
-  string,
-  { confirm: unknown; correct: unknown; forget: unknown }
->;
+export type Writes = Record<string, { confirm: unknown; correct: unknown }>;
 
 /**
- * What `personId` gets confirming, correcting and forgetting each memory
- * of `world` that `names` lists, and a memory nobody holds: a write that
- * answered `done` for an out memory would tell them it is current. Run
- * last in a case: a correction adds a memory of their own.
+ * What `personId` gets confirming and correcting each memory of `world`
+ * that `names` lists, and a memory nobody holds: a write that answered
+ * `done` for an out memory would tell them it is current. Run last in a
+ * case: a correction adds a memory of their own. Forgetting isn't asked:
+ * it takes only a person's own word, which rests on no quote, so it can't
+ * tell an out memory from a current one.
  */
 export const writesOf = async (
   personId: string,
@@ -964,8 +958,6 @@ export const writesOf = async (
         });
         return corrected === null ? null : "corrected";
       }),
-      // oxlint-disable-next-line no-await-in-loop -- one memory at a time
-      forget: await settled(async () => await forgetAs(env, personId, memory)),
     };
   }
   return writes;

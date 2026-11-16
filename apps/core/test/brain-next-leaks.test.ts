@@ -4893,7 +4893,7 @@ describe(
       }).toStrictEqual({ answered: true, out: false, keep: true });
     });
 
-    it("judges a late memory on an earlier version as it is added, for every reader alike, and confirms, corrects or forgets it as a memory nobody holds", async () => {
+    it("judges a late memory on an earlier version as it is added, for every reader alike, and confirms it as a memory nobody holds", async () => {
       const readers = await outReaders();
       const [world, twin] = worldAndTwin();
       await lateWorlds(readers, world, twin);
@@ -4907,17 +4907,46 @@ describe(
         keep: writes.keep,
       }).toStrictEqual({
         outcome: outcomeOnceOut,
-        // Confirmed and forgotten as nobody's memory. A correction takes
-        // any memory the reader may read, an ended one included
-        // (`correctAs`), so it answers for the out one as for a current
-        // one: it tells them nothing a read doesn't.
+        // Confirmed as nobody's memory. A correction takes any memory the
+        // reader may read, an ended one included (`correctAs`), so it
+        // answers for the out one as for a current one: it tells them
+        // nothing a read doesn't.
         out: {
           confirm: writes["nobody's"]?.confirm,
           correct: "corrected",
-          forget: writes["nobody's"]?.forget,
         },
-        keep: { confirm: "done", correct: "corrected", forget: "nothing" },
+        keep: { confirm: "done", correct: "corrected" },
       });
+    });
+
+    it("orders memories learned together alike, whatever a hidden memory of their source adds", async () => {
+      const readers = await outReaders();
+      const world = newWorld("shared", newSource(), outNames);
+      await version(
+        world,
+        textHolding(world.depot, "out", "keep"),
+        readers.teamReaders
+      );
+      // Learned in one add, as an extraction's are: one learning time, so
+      // what orders them after it decides, and ties break by their own ids,
+      // which a twin can't match. So the same world, before and after.
+      await remember(world, `team:${readers.team}`, 1, {
+        out: "out",
+        keep: "keep",
+      });
+      const readAll = async () =>
+        await outReadsOf(readers.reader, readers.readerReads, world, 1);
+      const before = await readAll();
+      await remember(world, `team:${readers.hiddenTeam}`, 1, {
+        "hidden out": "out",
+      });
+      const after = await readAll();
+
+      expect(
+        Object.keys(before).filter(
+          (surface) => textOf(before[surface]) !== textOf(after[surface])
+        )
+      ).toStrictEqual([]);
     });
 
     it("gives no reader a memory current once the catch-up judges what an older release's version and late memory left, an unfinished pass's included, and every reader alike before", async () => {
@@ -5067,6 +5096,9 @@ describe(
         });
       });
       // A release with new word rules: the rebuild starts on the next tick.
+      // The pass pair's outcome doesn't depend on its place being cleared
+      // (its pass ends the same from where it was); brain-next's own test
+      // holds that new rules start an unfinished pass over.
       await inStoreOf("brain", (sql) => {
         sql.exec(
           "UPDATE word_index SET version = 0, target = 0, cursor = 0, memory_cursor = 0 WHERE id = 1"
