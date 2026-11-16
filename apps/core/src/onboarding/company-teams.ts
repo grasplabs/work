@@ -19,19 +19,15 @@ export interface CompanyTeam {
 
 /**
  * `teams` as the new Brain's source text, for recall: written for a model
- * to read, in English like the rest of Grasp's own words to it. With no
- * team, it says so: a version of its own, as an empty vision's is.
+ * to read, in English like the rest of Grasp's own words to it. A staff
+ * list always has a team (`rosterSchema`).
  */
 export const companyTeamsText = (teams: readonly CompanyTeam[]): string =>
-  `The company's teams, from its staff list\n\n${
-    teams.length === 0
-      ? "The staff list has no teams."
-      : teams
-          .map(({ name, does, people }) => {
-            const size = people === 1 ? "1 person" : `${people} people`;
-            return does.trim() === ""
-              ? `- ${name}: ${size}.`
-              : `- ${name}: ${size}. ${does.trim()}`;
-          })
-          .join("\n")
-  }`;
+  `The company's teams, from its staff list\n\n${teams
+    .map(({ name, does, people }) => {
+      const size = people === 1 ? "1 person" : `${people} people`;
+      return does.trim() === ""
+        ? `- ${name}: ${size}.`
+        : `- ${name}: ${size}. ${does.trim()}`;
+    })
+    .join("\n")}`;
