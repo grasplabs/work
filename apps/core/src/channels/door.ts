@@ -52,7 +52,7 @@
  * in it, read from the platform's roster then (`audienceIn`). It is
  * answered in the person's own chat for the platform, or their one chat
  * for that group or channel thread, whose agent reads only what everyone
- * in it may (answer.ts, knowledge/access.ts).
+ * in it may (answer.ts, chat-audiences.ts).
  *
  * Slack (slack.ts) comes in the same way, by its own signature and ids:
  * its people are known only by the Slack account they linked to Grasp, and
