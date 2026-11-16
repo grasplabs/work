@@ -1,6 +1,6 @@
 import { delegateActorOf } from "@grasp-os/shared/audit";
 import { brainSourceErrors } from "@grasp-os/shared/brain-sources";
-import type { ConnectResult, ConnectionOwner } from "@grasp-os/shared/connect";
+import type { ConnectResult } from "@grasp-os/shared/connect";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { redact } from "@grasp-os/shared/redact";
 import { drizzle } from "drizzle-orm/d1";
@@ -19,7 +19,7 @@ import {
 } from "./connection-capture-key.ts";
 import { connectionOwnersOf } from "./connections.ts";
 import { nativeItemReads } from "./native-tool-classes.gen.ts";
-import { nativeClasses } from "./tool-classes.ts";
+import { classOf } from "./tool-classes.ts";
 
 // Capture (GRA-1730): what a chat's agent reads through its person's own
 // connection is kept in the Brain, an item a source, so every connected
@@ -262,16 +262,6 @@ const answerCaptured = async (
   const [event, detail] = ended;
   return [event, { ...detail, ...counted }];
 };
-
-/**
- * The class connect and the release give the tool `action` of `owner`'s
- * connection: a Composio tool's from its review, a native one's from its
- * manifest. Undefined for one neither knows (an HTTP connection's).
- */
-const classOf = (owner: ConnectionOwner, action: string) =>
-  owner.source === "composio"
-    ? owner.toolClasses?.[action]
-    : nativeClasses.get(owner.provider)?.get(action);
 
 /** What capturing `result` of `action` ended in. */
 const captured = async (

@@ -46,6 +46,7 @@ import { endOfCompanyDay } from "./organization.ts";
 import { grantedPermissions } from "./permissions.ts";
 import { markPrivateRead } from "./private-reads.ts";
 import { mailboxesFor } from "./shared-mailboxes.ts";
+import { readsOnly } from "./tool-classes.ts";
 
 // Connections for a chat's code: `await env.connections.call("OUTLOOK",
 // "mail.search", { query })`. The agent's connection permissions, each
@@ -154,6 +155,51 @@ export const connectionGrants = async (
     return grant === undefined
       ? []
       : [{ ...grant, name: permission.binding, actions: permission.actions }];
+  });
+};
+
+/**
+ * The connections the chat's agent may use for its person now: its grants
+ * in this chat (`connectionGrants`) for a connection that is shared or the
+ * person's own, by connect's registry, each with whether it takes calls
+ * now (`active`) and whether any action granted only reads (`reads`, by
+ * its class: tool-classes.ts `readsOnly`). What `env.connections.list()`
+ * lists, and what the recall before a question names as where else to
+ * look (turn-recall.ts).
+ */
+export const usableConnections = async (
+  env: Env,
+  scope: Omit<AgentScope, "runId">
+): Promise<
+  { connection: AgentConnection; active: boolean; reads: boolean }[]
+> => {
+  const grants = await connectionGrants(env, scope);
+  const owners = await connectionOwnersOf(env, [
+    ...new Set(grants.map(({ connection }) => connection.connectionId)),
+  ]);
+  const usable = new Map(
+    owners.flatMap((owner) =>
+      owner.ownerUserId === null || owner.ownerUserId === scope.personId
+        ? [[owner.id, owner] as const]
+        : []
+    )
+  );
+  return grants.flatMap(({ name, connection, actions }) => {
+    const owner = usable.get(connection.connectionId);
+    return owner === undefined
+      ? []
+      : [
+          {
+            connection: {
+              name,
+              connectionId: connection.connectionId,
+              resource: connection.resource ?? null,
+              actions,
+            },
+            active: owner.status === "active",
+            reads: actions.some((action) => readsOnly(owner, action)),
+          },
+        ];
   });
 };
 
@@ -328,23 +374,8 @@ export class ConnectionsApi extends WorkerEntrypoint<Env, AgentScope> {
           }),
         },
         async () => {
-          const grants = await connectionGrants(this.env, scope);
-          const owners = await connectionOwnersOf(this.env, [
-            ...new Set(grants.map(({ connection }) => connection.connectionId)),
-          ]);
-          const usable = new Set(
-            owners.flatMap(({ id, ownerUserId }) =>
-              ownerUserId === null || ownerUserId === scope.personId ? [id] : []
-            )
-          );
-          return grants
-            .filter(({ connection }) => usable.has(connection.connectionId))
-            .map(({ name, connection, actions }) => ({
-              name,
-              connectionId: connection.connectionId,
-              resource: connection.resource ?? null,
-              actions,
-            }));
+          const usable = await usableConnections(this.env, scope);
+          return usable.map(({ connection }) => connection);
         }
       );
     } catch (error) {
