@@ -163,32 +163,74 @@ const clientD1 = (slot: number): D1Database => {
   return database;
 };
 
-/** The order to drop things in: triggers and views, virtual tables, tables. */
-const dropRank = ({ type, sql }: { type: string; sql: string | null }) => {
-  if (type !== "table") {
-    return 0;
-  }
-  return sql?.startsWith("CREATE VIRTUAL TABLE") === true ? 1 : 2;
-};
+/** What `emptied` drops: a trigger, view or table, by its name. */
+interface Dropped {
+  type: string;
+  name: string;
+  sql: string | null;
+}
 
 /**
- * Drops everything in `database`: triggers, views, virtual and plain
- * tables, each kind newest first, so a table goes before the tables its
- * foreign keys name (SQLite refuses to drop a table whose parent is gone).
+ * `tables` ordered so each comes before the tables its foreign keys name
+ * (SQLite refuses to drop a table whose parent is gone), each table's
+ * parents read from SQLite itself (`pragma_foreign_key_list`).
+ */
+const childrenFirst = async (
+  database: D1Database,
+  tables: readonly Dropped[]
+): Promise<Dropped[]> => {
+  const { results } = await database
+    .prepare(
+      "SELECT m.name AS child, f.\"table\" AS parent FROM sqlite_master m, pragma_foreign_key_list(m.name) f WHERE m.type = 'table'"
+    )
+    .all<{ child: string; parent: string }>();
+  const ordered: Dropped[] = [];
+  let left = [...tables];
+  while (left.length > 0) {
+    const names = new Set(left.map(({ name }) => name));
+    // A table no table still left names as its parent goes next.
+    const free = left.filter(
+      ({ name }) =>
+        !results.some(
+          ({ child, parent }) =>
+            parent === name && child !== name && names.has(child)
+        )
+    );
+    // A cycle of foreign keys: whatever is left goes as it is.
+    const next = free.length > 0 ? free : left;
+    ordered.push(...next);
+    left = left.filter((table) => !next.includes(table));
+  }
+  return ordered;
+};
+
+/** Whether `entry` is a virtual table (an FTS5 index, say). */
+const isVirtual = ({ sql }: Dropped): boolean =>
+  sql?.startsWith("CREATE VIRTUAL TABLE") === true;
+
+/**
+ * Drops everything in `database`: triggers and views first, then virtual
+ * tables, then plain tables, each before the tables its foreign keys name
+ * (`childrenFirst`).
  */
 const emptied = async (database: D1Database): Promise<void> => {
   const { results } = await database
     .prepare(
-      "SELECT rowid, type, name, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND type IN ('table', 'view', 'trigger')"
+      "SELECT type, name, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND type IN ('table', 'view', 'trigger')"
     )
-    .all<{ rowid: number; type: string; name: string; sql: string | null }>();
-  const drops = results
-    .toSorted((a, b) => dropRank(a) - dropRank(b) || b.rowid - a.rowid)
-    .map(({ type, name }) =>
-      database.prepare(
-        `DROP ${type.toUpperCase()} IF EXISTS "${name.replaceAll('"', '""')}"`
-      )
-    );
+    .all<Dropped>();
+  const tables = results.filter(
+    (entry) => entry.type === "table" && !isVirtual(entry)
+  );
+  const drops = [
+    ...results.filter(({ type }) => type !== "table"),
+    ...results.filter((entry) => entry.type === "table" && isVirtual(entry)),
+    ...(await childrenFirst(database, tables)),
+  ].map(({ type, name }) =>
+    database.prepare(
+      `DROP ${type.toUpperCase()} IF EXISTS "${name.replaceAll('"', '""')}"`
+    )
+  );
   if (drops.length > 0) {
     await database.batch([
       database.prepare("PRAGMA defer_foreign_keys = true"),

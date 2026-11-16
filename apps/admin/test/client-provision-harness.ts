@@ -576,7 +576,7 @@ export const once = (clientId: string) => ({
   claims: [],
   route: { clientId, generation: 1 },
   coreMigrations: 1,
-  applied: [1, 1, 1],
+  applied: [1, 1],
   missingSecrets: [],
 });
 
