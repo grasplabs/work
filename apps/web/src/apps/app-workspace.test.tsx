@@ -343,6 +343,7 @@ const opened = async (
     watch,
     worked: async () => await Promise.resolve([]),
     connectionRequests: async () => await Promise.resolve([]),
+    heldCalls: async () => await Promise.resolve([]),
     models: async () => await Promise.resolve(["openai/gpt-5"]),
     send: async (chatId: string, question: ChatQuestion) => {
       sent.push({ chatId, question });
