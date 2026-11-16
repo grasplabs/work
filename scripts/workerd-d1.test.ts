@@ -247,7 +247,11 @@ describe("the on-prem D1 service", () => {
     });
   });
 
-  it("searches full text with FTS5, as core's knowledge search does", async () => {
+  // FTS5, as D1 offers it on Cloudflare: core's D1 database uses none
+  // since Knowledge went (GRA-1941; an App's store searches with it in its
+  // own Durable Object), but a migration may, and on-prem runs it as D1
+  // does.
+  it("searches full text with FTS5, as D1 does", async () => {
     const served = await serve(
       [
         {

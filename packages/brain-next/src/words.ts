@@ -1,3 +1,4 @@
+import { indexDays } from "./dates.ts";
 import DutchStemmer from "./snowball/dutch-stemmer.js";
 import EnglishStemmer from "./snowball/english-stemmer.js";
 import FrenchStemmer from "./snowball/french-stemmer.js";
@@ -387,8 +388,9 @@ export const allOf = (words: readonly string[]): string =>
   [...new Set(words)].map((word) => `"${word}"`).join(" AND ");
 
 /**
- * Indexes the words of the chunk at `row`, in the caller's transaction.
- * `memo` keeps the words of the add's other chunks.
+ * Indexes the words of the chunk at `row`, in the caller's transaction,
+ * and the days it mentions (dates.ts `indexDays`). `memo` keeps the words
+ * of the add's other chunks.
  */
 export const indexWords = (
   sql: SqlStorage,
@@ -399,6 +401,7 @@ export const indexWords = (
   const { words, stems } = indexedOf(text, memo);
   sql.exec("INSERT INTO chunk_words (rowid, text) VALUES (?, ?)", row, words);
   sql.exec("INSERT INTO chunk_stems (rowid, stems) VALUES (?, ?)", row, stems);
+  indexDays(sql, row, text);
 };
 
 /**
@@ -407,7 +410,13 @@ export const indexWords = (
  * indexes hold of a chunk change, and every store rebuilds its word
  * indexes from its chunks' text (`reindexWords`). The stop words are read
  * from the question alone, so changing them needs no bump. 1: words folded
- * without the primary letters, no stems; 2: stems (GRA-1725). A store's
+ * without the primary letters, no stems; 2: stems (GRA-1725). The days a
+ * chunk mentions (`chunk_days`, dates.ts) are rebuilt with them, so a
+ * change to how dates are read bumps it too; their arrival did not
+ * (GRA-1798): a bump clears every source's judged quotes for the catch-up
+ * to judge again (catch-up.ts), a cost a new index beside the others need
+ * not pay, so chunks added before it mention no day until the next
+ * rebuild and are found by their words alone, as before. A store's
  * number is 0 when its indexes were made anew and empty (migration 0006,
  * GRA-1729), so it rebuilds them whatever the rules. A store marked
  * current stays so: rolled back to a release with older rules, it indexes
@@ -548,6 +557,7 @@ export const reindexWords = (
     for (const { row, text } of batch) {
       sql.exec("DELETE FROM chunk_words WHERE rowid = ?", row);
       sql.exec("DELETE FROM chunk_stems WHERE rowid = ?", row);
+      sql.exec("DELETE FROM chunk_days WHERE chunk = ?", row);
       indexWords(sql, row, text, memo);
     }
     const last = batch.at(-1);

@@ -509,7 +509,7 @@ describe("provisioning a placed client", () => {
         deleted: cloudflare.calls
           .filter((call) => call.method === "DELETE")
           .map(({ path }) => path),
-      }).toStrictEqual({ d1: 3, buckets: 2, scripts: 2, deleted: [] });
+      }).toStrictEqual({ d1: 2, buckets: 2, scripts: 2, deleted: [] });
     }
   );
 

@@ -22,6 +22,11 @@ import path from "node:path";
 
 import { z } from "zod";
 
+import {
+  buildSteps,
+  frontendDist,
+  lastBuildStep,
+} from "../apps/core/build-steps.ts";
 import { connectConfig, migratedStateDir } from "./stack.ts";
 
 const root = path.join(import.meta.dirname, "..");
@@ -76,9 +81,6 @@ const stepsOf = (script: string): string[] => {
   return command.split("&&").map((step) => step.trim());
 };
 
-/** The built frontend, which core serves, and which its build empties first. */
-const frontendDist = "../web/dist";
-
 /**
  * Where what core's build writes into the built frontend (the App
  * compiler, the extractor) is built meanwhile, to be copied in once the
@@ -95,7 +97,7 @@ if (import.meta.main) {
   if (devBuild.length === afterFrontend.length) {
     throw new Error("core's dev:build no longer runs `vp run build`");
   }
-  const coreBuild = stepsOf("build");
+  const coreBuild = [...Object.values(buildSteps), lastBuildStep];
   rmSync(migratedStateDir, { recursive: true, force: true });
   rmSync(besideFrontend, { recursive: true, force: true });
   // From core's folder, as every step of core's scripts runs.

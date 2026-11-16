@@ -5,9 +5,9 @@ import { canonicalJson } from "@grasp-os/shared/json";
 import { execute, quoted } from "./connections-seed.ts";
 
 // An App's draft written straight into core's database, as a chat's
-// agent's `env.build.write` leaves it, through wrangler on the stack's
-// local state (as connections-seed.ts writes into connect's): the local
-// stack reaches no model.
+// agent's `env.build.write` leaves it, through the dev server's own D1
+// API (`execute`, connections-seed.ts, as it writes into connect's): the
+// local stack reaches no model.
 
 /** The SHA-256 of `text`'s UTF-8 bytes, as hex, as core hashes them. */
 const sha256 = (text: string): string =>

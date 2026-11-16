@@ -5,8 +5,12 @@
 /** An App's AGENTS.md's size limit, in tokens. */
 export const appAgentsMaxTokens = 2000;
 
-// How the Brain counts tokens (@grasp-os/brain/tokens).
-export {
-  charactersPerToken as memoryCharactersPerToken,
-  tokensOf as memoryTokens,
-} from "@grasp-os/brain/tokens";
+// How the Brain counts tokens, without a tokenizer: a recall's budget,
+// and the limits on what an agent keeps in its context.
+
+/** Characters per token, as estimated. */
+export const memoryCharactersPerToken = 4;
+
+/** Tokens `text` takes, as estimated. */
+export const memoryTokens = (text: string): number =>
+  Math.ceil(text.length / memoryCharactersPerToken);
