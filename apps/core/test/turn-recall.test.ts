@@ -2774,9 +2774,6 @@ const mergedHolds = (
     // excerpt of a passage is held by a copy kept of it, and a memory's
     // kept copy is at least as full (it holds all the other does), so the
     // second's `notFound` stays true.
-    // Of the person's own store when either pass handed over anything
-    // of it: the merged pack marks its chat as either would.
-    fromOwn: merged.fromOwn === (first.fromOwn || second.fromOwn),
     noLess: [first, second].every(
       (pack) =>
         pack.items.every((item) =>
@@ -2856,14 +2853,12 @@ const cutPack = (items: RecalledItem[]): RecalledPack => ({
   contested: [],
   notFound: [],
   truncated: true,
-  fromOwn: false,
 });
 
 /** Every property `mergedHolds` checks, holding. */
 const holding = {
   within: true,
   order: true,
-  fromOwn: true,
   noLess: true,
   noRepeat: true,
   notFound: true,
@@ -3004,7 +2999,6 @@ describe("two recalls merged into one pack", setUpTime, () => {
           contested: [],
           notFound: random() < 0.5 ? ["missing"] : [],
           truncated: random() < 0.2,
-          fromOwn: random() < 0.3,
         },
         tokens
       );

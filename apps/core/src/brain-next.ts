@@ -551,11 +551,6 @@ const saidOf = ({ speaker }: PackMemory, personId: string): MemorySaid => {
 export interface RecalledPack extends Omit<Pack, "items" | "memories"> {
   items: RecalledItem[];
   memories: RecalledMemory[];
-  /**
-   * Whether a passage or a memory it holds is of the person's own store,
-   * where everything only they may read is kept (private-reads.ts).
-   */
-  fromOwn: boolean;
 }
 
 /**
@@ -1122,29 +1117,18 @@ const usedOf = async (
 };
 
 /**
- * A pack of what the member `personId` may read for `question`, as core
- * counts them now, within `budget.tokens` (the Brain's estimate,
- * `tokensOf`), and, with `asOf`, of each source as it was then: the
- * Brain's `recall`, by words, exact parts, the entities the question
- * names and, once a model ships, by meaning: passages and memories, each
- * citing its source, version and place, and the contested facts among
- * them; what was not found and whether the budget cut it short, all from
- * what they may read alone. With `personal`, from the shared store and
- * their own together, packed as one store holding both would pack them
- * (`packAcross`); without, from the shared store alone, as their teams
- * may read it, or with `company` as the company and, of `teams`, those they
- * are in. Refused once they are no longer a member, or when `personId`
- * isn't an ID. Each memory names the store it is in. What the chat hands
- * its model before a question (turn-recall.ts, each memory pinned and
- * checked again before every later request: `readableMemoriesAs`) and the
- * Brain page's search show. Code (`recallFor`) takes passages alone
- * (`recallPassagesAs`).
+ * `recallAs`'s pack, and beside it whether a passage or a memory in it is
+ * of the person's own store, where everything only they may read is kept
+ * (`fromOwn`): core's own bookkeeping for marking the chat it goes to
+ * (private-reads.ts, turn-recall.ts), never part of what recall answers.
+ * Read off what the pack holds, so it is the same for every store that
+ * hands over the same pack.
  */
-export const recallAs = async (
+export const recallOwnedAs = async (
   env: BrainEnv & Pick<Env, "DB" | "EMBEDDER" | "WORKSPACES">,
   personId: string,
   recall: Recall
-): Promise<RecalledPack> => {
+): Promise<{ pack: RecalledPack; fromOwn: boolean }> => {
   // Ranked by their use only where the answer reaches them alone: a
   // recall as their teams or the company (a channel, a thread, a turn
   // they didn't start, code) is ordered as for anyone, and
@@ -1177,15 +1161,45 @@ export const recallAs = async (
   });
   const own = ownSourcesOf(findings);
   return {
-    items: recalledItems(items),
-    memories: recalledMemories,
-    contested,
-    notFound,
-    truncated,
+    pack: {
+      items: recalledItems(items),
+      memories: recalledMemories,
+      contested,
+      notFound,
+      truncated,
+    },
     fromOwn:
       items.some(({ source }) => own.has(source)) ||
       recalledMemories.some(({ store }) => store === "own"),
   };
+};
+
+/**
+ * A pack of what the member `personId` may read for `question`, as core
+ * counts them now, within `budget.tokens` (the Brain's estimate,
+ * `tokensOf`), and, with `asOf`, of each source as it was then: the
+ * Brain's `recall`, by words, exact parts, the entities the question
+ * names and, once a model ships, by meaning: passages and memories, each
+ * citing its source, version and place, and the contested facts among
+ * them; what was not found and whether the budget cut it short, all from
+ * what they may read alone. With `personal`, from the shared store and
+ * their own together, packed as one store holding both would pack them
+ * (`packAcross`); without, from the shared store alone, as their teams
+ * may read it, or with `company` as the company and, of `teams`, those they
+ * are in. Refused once they are no longer a member, or when `personId`
+ * isn't an ID. Each memory names the store it is in. What the chat hands
+ * its model before a question (turn-recall.ts, each memory pinned and
+ * checked again before every later request: `readableMemoriesAs`) and the
+ * Brain page's search show. Code (`recallFor`) takes passages alone
+ * (`recallPassagesAs`).
+ */
+export const recallAs = async (
+  env: BrainEnv & Pick<Env, "DB" | "EMBEDDER" | "WORKSPACES">,
+  personId: string,
+  recall: Recall
+): Promise<RecalledPack> => {
+  const { pack } = await recallOwnedAs(env, personId, recall);
+  return pack;
 };
 
 /**
@@ -1333,7 +1347,6 @@ export const mergeRecalled = (
     contested: [...facts.values()],
     notFound: second.notFound,
     truncated: first.truncated || second.truncated,
-    fromOwn: first.fromOwn || second.fromOwn,
   };
 };
 

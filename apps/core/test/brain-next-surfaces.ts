@@ -1594,11 +1594,18 @@ const erasedBefore = async (personId: string): Promise<string> => {
 };
 
 /**
- * The probe of a recall of core's (`recallAs`, `recallPassagesAs`): the
- * markers, their twins and every way it can refuse, as the reader asks.
+ * The probe of a recall of core's (`recallAs`, `recallOwnedAs`,
+ * `recallPassagesAs`): the markers, their twins and every way it can
+ * refuse, as the reader asks. `recallOwnedAs`'s `fromOwn` is held to its
+ * twin's too.
  */
 const recallProbe =
-  (recall: typeof coreBrain.recallAs | typeof coreBrain.recallPassagesAs) =>
+  (
+    recall:
+      | typeof coreBrain.recallAs
+      | typeof coreBrain.recallOwnedAs
+      | typeof coreBrain.recallPassagesAs
+  ) =>
   async (probing: Probing): Promise<Answer[]> => {
     await recallFixture(probing);
     const asked = async (asking: PackAsk) =>
@@ -2236,6 +2243,7 @@ export const coreProbes = {
     ];
   },
   recallAs: recallProbe(coreBrain.recallAs),
+  recallOwnedAs: recallProbe(coreBrain.recallOwnedAs),
   recallPassagesAs: recallProbe(coreBrain.recallPassagesAs),
   // Adds without a check of who writes (instruction-files.ts checks
   // first): only to files no reader is, and its refusals.
