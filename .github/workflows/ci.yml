@@ -16,11 +16,11 @@
 # an admin makes outside the queue lands without it. A pull request's run,
 # draft or not, is fast feedback for review: the fast checks (static,
 # generated, wasm), the release build, the admin's build and core on
-# plain workerd, a few minutes on seven runners. Marking a draft ready
+# plain workerd, a few minutes on nine runners. Marking a draft ready
 # runs them again, so its title and description, which become the commit
 # on main, are checked as they stood then (an edit after that isn't). The
 # test shards, the e2e stack and its parts, and the admin's journeys run
-# on the merge queue, a run by hand and the nightly run. A full run is 63
+# on the merge queue, a run by hand and the nightly run. A full run is 65
 # jobs, within the account's 60 concurrent runners because the e2e jobs
 # start only once e2e-build is done, when the quick jobs have ended (at
 # 67 jobs the most running at once was 52 to 56, November 2026). A pull
@@ -72,7 +72,9 @@ jobs:
   # building each TypeScript project (November 2026). `core` checks
   # apps/core, `apps` the other apps named below, and `main` every other
   # path in the tree, worked out from `git ls-files`, so a new folder is
-  # checked without anyone adding it here. The parts' programs barely
+  # checked without anyone adding it here. Unquoted (core.quotePath): a
+  # quoted name would match no file, and a path that matches nothing
+  # beside paths that do is skipped without a word. The parts' programs barely
   # overlap: apart they checked the same 3,793 files as the whole, in
   # about the whole's time added up. A file is reported in one part only,
   # and a type error a change in a package causes in an app is that app's
@@ -105,7 +107,7 @@ jobs:
         run: vp fmt --check
       - if: matrix.part == 'main'
         run: |
-          mapfile -t paths < <(git ls-files | awk -F/ '{ print ($1 == "apps" ? $1 "/" $2 : $1) }' | sort -u | grep -vxF -f <(tr ' ' '\n' <<< "$CORE_PART $APPS_PART"))
+          mapfile -t paths < <(git -c core.quotePath=false ls-files | awk -F/ '{ print ($1 == "apps" ? $1 "/" $2 : $1) }' | sort -u | grep -vxF -f <(tr ' ' '\n' <<< "$CORE_PART $APPS_PART"))
           vp check --no-fmt "${paths[@]}"
       - if: matrix.part == 'core'
         run: vp check --no-fmt "$CORE_PART"
