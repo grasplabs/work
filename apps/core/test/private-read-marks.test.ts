@@ -35,7 +35,7 @@ import { signedInApi } from "./sign-in.ts";
 // a question is marked exactly when what the recall hands over differs
 // from what the shared store alone hands over (a recall as their teams,
 // which reads no own store). The rate itself is reported, not asserted:
-// it moves with the store and, once a model ships, with recall by meaning.
+// it moves with the store and with recall by meaning.
 
 const idp = mockIdp();
 
