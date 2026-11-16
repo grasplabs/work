@@ -56,9 +56,11 @@ import {
   loggedEvents,
 } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
+import { mailConnection } from "./mail-connection.ts";
 import { answeringProvider, fakeProvider } from "./model-provider.ts";
 import type { ProviderReply } from "./model-provider.ts";
 import { outcome, signedInApi, signedInWithRole, unique } from "./sign-in.ts";
+import { connectDb } from "./test-env.ts";
 
 // The recall before a chat's question, from the Brain, with its analysis
 // alongside (GRA-1732), through a chat's turns as a person asks them: the
@@ -83,6 +85,10 @@ const word = () =>
     .randomUUID()
     .replaceAll(/[^a-f]/gu, "")
     .slice(0, 12)}`;
+
+/** A binding name no other test grants, of `kind`: a marker of its own. */
+const bindingOf = (kind: string) =>
+  `${kind}_${crypto.randomUUID().replaceAll("-", "").slice(0, 12).toUpperCase()}`;
 
 /** An upload's source, as its producer names it. */
 const newSource = (): SourceRef => ({
@@ -1084,6 +1090,181 @@ describe("what the recall before a question may reach", setUpTime, () => {
       // Read by others (here only the person is on its roster): the
       // company's, never their team's or their own.
       thread: companyOnly,
+    });
+  });
+
+  it("names where else to look, the connections the agent may use for the person, only where the answer reaches them alone, and goes on without when connect doesn't say", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const [person, other] = await Promise.all([
+      signedInWithRole(idp, "user"),
+      signedInWithRole(idp, "user"),
+    ]);
+    const depot = word();
+    const hours = word();
+    await added(`Depot ${depot} opens at ${hours}`, owner(person.userId));
+    const question = `When does depot ${depot} open?`;
+    const names = {
+      shared: bindingOf("SHARED"),
+      own: bindingOf("OWN"),
+      others: bindingOf("OTHERS"),
+      disconnected: bindingOf("GONE"),
+      otherAgents: bindingOf("ELSEWHERE"),
+    };
+    const [sharedOne, own, others, disconnected, otherAgents] =
+      await Promise.all([
+        mailConnection([], ["mail.search"]),
+        mailConnection([], ["mail.search"], { owner: person.userId }),
+        mailConnection([], ["mail.search"], { owner: other.userId }),
+        mailConnection([], ["mail.search"], { owner: person.userId }),
+        mailConnection([], ["mail.search"]),
+      ]);
+    await connectDb()
+      .prepare("UPDATE connections SET status = 'disconnected' WHERE id = ?")
+      .bind(disconnected.id)
+      .run();
+    /** Grants agent `agentId` its brain and every connection but another agent's. */
+    const granted = async (agentId: string) => {
+      const subject = { type: "agent" as const, agentId };
+      await requestGranted(idp, admin, {
+        subject,
+        object: { type: "platform" },
+        actions: ["brain"],
+        binding: "BRAIN",
+      });
+      for (const { binding, connectionId } of [
+        { binding: names.shared, connectionId: sharedOne.id },
+        { binding: names.own, connectionId: own.id },
+        { binding: names.others, connectionId: others.id },
+        { binding: names.disconnected, connectionId: disconnected.id },
+      ]) {
+        // oxlint-disable-next-line no-await-in-loop -- one grant at a time
+        await requestGranted(idp, admin, {
+          subject,
+          object: { type: "connection", connectionId },
+          actions: ["mail.search"],
+          binding,
+        });
+      }
+      // Another agent's grant: never this one's.
+      await requestGranted(idp, admin, {
+        subject: { type: "agent", agentId: crypto.randomUUID() },
+        object: { type: "connection", connectionId: otherAgents.id },
+        actions: ["mail.search"],
+        binding: names.otherAgents,
+      });
+    };
+    const lookElsewhere = z.object({
+      lookElsewhere: z.array(z.string()).optional(),
+    });
+    /** What the recall in the last of `requests` named, and whether it found the person's own note. */
+    const named = (requests: readonly { body: unknown }[]) => {
+      const recall = recallIn(requests.at(-1)?.body) ?? "";
+      const returned = recall.slice(recall.indexOf("{"));
+      return {
+        found: recall.includes(hours),
+        // Each marker, wherever in the recall it shows.
+        markers: Object.fromEntries(
+          Object.entries(names).map(([kind, name]) => [
+            kind,
+            recall.includes(name),
+          ])
+        ),
+        lookElsewhere: lookElsewhere.parse(JSON.parse(returned)).lookElsewhere,
+      };
+    };
+    const ownChat = await chatOf(
+      person.userId,
+      says("Noted."),
+      says("Noted."),
+      says("Noted.")
+    );
+    await granted(ownChat.agent.agentId);
+    await ownChat.ask(question);
+    const web = named(ownChat.provider.requests);
+    // Connect not saying whose a connection is: the lookup fails.
+    const connect = env.CONNECT;
+    const ownersFail = new Proxy(connect, {
+      get: (target, property) => {
+        if (property === "connectionOwners") {
+          return async () => {
+            await Promise.resolve();
+            throw new Error("Connect isn't answering");
+          };
+        }
+        const value: unknown = Reflect.get(target, property);
+        return typeof value === "function"
+          ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+          : value;
+      },
+    });
+    const warnings = vi.spyOn(console, "warn");
+    let connectSilent: ReturnType<typeof named>;
+    try {
+      await withEnv(ownChat, { CONNECT: ownersFail }, async () => {
+        await ownChat.ask(question);
+      });
+      connectSilent = named(ownChat.provider.requests);
+      expect(
+        warned(warnings.mock.calls, "chat.recall_elsewhere_failed")
+      ).toBeTruthy();
+    } finally {
+      warnings.mockRestore();
+    }
+    await ownChat.stub.askUnattended(ownChat.chat.id, {
+      text: question,
+      model,
+    });
+    const unattended = named(ownChat.provider.requests);
+    const through = async (platform: string, inThread?: boolean) => {
+      const agentId = crypto.randomUUID();
+      await granted(agentId);
+      const provider = await fakeProvider(says("Noted."));
+      await workspace(env, personalWorkspaceId(person.userId)).askThrough(
+        person.userId,
+        agentId,
+        platform,
+        question,
+        undefined,
+        inThread === true
+          ? {
+              thread: `C${unique()}`,
+              kind: "group",
+              audience: { members: [person.userId], outsiders: false },
+            }
+          : { kind: "direct" }
+      );
+      return named(provider.requests);
+    };
+    const direct = await through("slack");
+    const thread = await through("slack", true);
+
+    const none = {
+      shared: false,
+      own: false,
+      others: false,
+      disconnected: false,
+      otherAgents: false,
+    };
+    const theirs = { ...none, shared: true, own: true };
+    expect({ web, connectSilent, unattended, direct, thread }).toStrictEqual({
+      // Their own chat: the shared connection and their own, connected,
+      // by the names the code calls them; never another person's, one
+      // disconnected, or another agent's.
+      web: {
+        found: true,
+        markers: theirs,
+        lookElsewhere: [names.own, names.shared].toSorted(),
+      },
+      // The recall goes on without them.
+      connectSilent: { found: true, markers: none, lookElsewhere: undefined },
+      // Not started by them, or read by others: none named.
+      unattended: { found: false, markers: none, lookElsewhere: undefined },
+      direct: {
+        found: true,
+        markers: theirs,
+        lookElsewhere: [names.own, names.shared].toSorted(),
+      },
+      thread: { found: false, markers: none, lookElsewhere: undefined },
     });
   });
 

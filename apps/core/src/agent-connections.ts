@@ -158,6 +158,46 @@ export const connectionGrants = async (
 };
 
 /**
+ * The connections the chat's agent may use for its person now: its grants
+ * in this chat (`connectionGrants`) for a connection that is shared or the
+ * person's own, by connect's registry, each with whether it takes calls
+ * now (`active`). What `env.connections.list()` lists, and what the recall
+ * before a question names as where else to look (turn-recall.ts).
+ */
+export const usableConnections = async (
+  env: Env,
+  scope: Omit<AgentScope, "runId">
+): Promise<{ connection: AgentConnection; active: boolean }[]> => {
+  const grants = await connectionGrants(env, scope);
+  const owners = await connectionOwnersOf(env, [
+    ...new Set(grants.map(({ connection }) => connection.connectionId)),
+  ]);
+  const usable = new Map(
+    owners.flatMap(({ id, ownerUserId, status }) =>
+      ownerUserId === null || ownerUserId === scope.personId
+        ? [[id, status === "active"] as const]
+        : []
+    )
+  );
+  return grants.flatMap(({ name, connection, actions }) => {
+    const active = usable.get(connection.connectionId);
+    return active === undefined
+      ? []
+      : [
+          {
+            connection: {
+              name,
+              connectionId: connection.connectionId,
+              resource: connection.resource ?? null,
+              actions,
+            },
+            active,
+          },
+        ];
+  });
+};
+
+/**
  * When a write this chat's agent has held ends unconfirmed: in a chat on a
  * chat platform, such as Teams, at midnight of the company's day, for its
  * card scrolls away and its days and values may have moved on, so a press
@@ -328,23 +368,8 @@ export class ConnectionsApi extends WorkerEntrypoint<Env, AgentScope> {
           }),
         },
         async () => {
-          const grants = await connectionGrants(this.env, scope);
-          const owners = await connectionOwnersOf(this.env, [
-            ...new Set(grants.map(({ connection }) => connection.connectionId)),
-          ]);
-          const usable = new Set(
-            owners.flatMap(({ id, ownerUserId }) =>
-              ownerUserId === null || ownerUserId === scope.personId ? [id] : []
-            )
-          );
-          return grants
-            .filter(({ connection }) => usable.has(connection.connectionId))
-            .map(({ name, connection, actions }) => ({
-              name,
-              connectionId: connection.connectionId,
-              resource: connection.resource ?? null,
-              actions,
-            }));
+          const usable = await usableConnections(this.env, scope);
+          return usable.map(({ connection }) => connection);
         }
       );
     } catch (error) {
