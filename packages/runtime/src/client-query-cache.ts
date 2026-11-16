@@ -36,6 +36,8 @@ export class QueryCache {
   readonly #queries = new Map<string, QueryEntry>();
   /** The queries nobody reads now, the one unread longest first. */
   readonly #unread = new Set<QueryEntry>();
+  /** Whether the cap on followed unread queries is due to be held. */
+  #capping = false;
   readonly #follower: QueryFollower;
   readonly #reader: QueryReader;
 
@@ -161,10 +163,35 @@ export class QueryCache {
         this.#drop(entry);
       }
     }, keepMs);
+    // Once the task ends: a component React resubscribes within one commit
+    // is read again by then, and pushes out no query kept for another.
+    if (!this.#capping) {
+      this.#capping = true;
+      queueMicrotask(() => {
+        this.#capping = false;
+        this.#cap();
+      });
+    }
+  }
+
+  /**
+   * Drops the followed queries nobody reads past `maxKeptUnread`, the one
+   * unread longest first. Only those followed count: one made for a render
+   * that hasn't subscribed yet, or one read once, follows nothing.
+   */
+  #cap(): void {
+    let followed = 0;
+    for (const entry of this.#unread) {
+      followed += entry.live === undefined ? 0 : 1;
+    }
     for (const oldest of this.#unread) {
-      if (this.#unread.size <= maxKeptUnread) {
+      if (followed <= maxKeptUnread) {
         break;
       }
+      if (oldest.live === undefined) {
+        continue;
+      }
+      followed -= 1;
       // Read since, imperatively: it is let go of once that read is done.
       if (wanted(oldest)) {
         this.#unread.delete(oldest);

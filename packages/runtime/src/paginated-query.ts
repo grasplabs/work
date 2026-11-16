@@ -125,6 +125,11 @@ export class Pagers {
     const key = canonicalJson([read.name, input, initialPageSize]);
     const known = this.#pagers.get(key);
     if (known !== undefined) {
+      // Idle, it heard none of what core pushed its first page meanwhile:
+      // read afresh from it, so the first render shows it as it is.
+      if (known.listeners.size === 0) {
+        pagerChanged(known);
+      }
       return known;
     }
     // The list its Load More acts on, once it is made just below.

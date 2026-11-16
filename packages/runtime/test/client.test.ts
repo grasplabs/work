@@ -1338,7 +1338,8 @@ describe("the session client reading a query again", () => {
     host.state.titles.push("aa");
     host.reread();
 
-    // Every view the list's reader is shown, from its first render.
+    // Every view the list's reader is shown, from its first render, which
+    // reads the list before it subscribes (`useSyncExternalStore`).
     const internals = clientInternals(host.client);
     const pager = internals.pager(api.notes.list, {}, 2);
     const seen: { titles: unknown[]; isLoading: boolean }[] = [];
@@ -1353,6 +1354,7 @@ describe("the session client reading a query again", () => {
         isLoading,
       });
     };
+    look();
     const stop = internals.subscribePager(pager, look);
     look();
     await vi.waitFor(() => {
@@ -1418,6 +1420,90 @@ describe("the session client keeping queries nobody reads", () => {
       shown: shown.snapshot.error?.code ?? "followed",
       keptAtMost: open.size <= maxKeptUnread + 1,
     }).toStrictEqual({ shown: "followed", keptAtMost: true });
+  });
+
+  it("keeps a query a page comes back to though the same render reads many new ones", async () => {
+    let follows = 0;
+    const transport: ClientTransport = {
+      call: async () => await Promise.resolve(answered(null)),
+      watch: async (request, onSnapshot) => {
+        follows += 1;
+        await Promise.resolve();
+        onSnapshot({ revision: 1, ...answered({ request }) });
+        return { release: unheard };
+      },
+    };
+    const internals = clientInternals(new GraspClient(transport));
+    const kept = internals.entry(api.notes.get, { id: idOf(1) });
+    const stopKept = internals.subscribe(kept, unheard);
+    await vi.waitFor(() => {
+      expect(kept.snapshot.value).toBeDefined();
+    });
+    stopKept();
+    await aTaskLater();
+
+    // The page again: its render reads the kept query and twenty new ones,
+    // then subscribes to each.
+    const rendered = [1, ...Array.from({ length: 20 }, (_, at) => at + 2)].map(
+      (id) => internals.entry(api.notes.get, { id: idOf(id) })
+    );
+    const shownFirst = rendered[0]?.snapshot.value;
+    const stops = rendered.map((entry) => internals.subscribe(entry, unheard));
+    await aTaskLater();
+    for (const stop of stops) {
+      stop();
+    }
+
+    expect({
+      same: rendered[0] === kept,
+      shownFirst: shownFirst !== undefined,
+      follows,
+    }).toStrictEqual({ same: true, shownFirst: true, follows: 21 });
+  });
+
+  it("pushes out no kept query for a component resubscribed within one task, as Strict Mode does", async () => {
+    const open = new Set<string>();
+    const transport: ClientTransport = {
+      call: async () => await Promise.resolve(answered(null)),
+      watch: async (request, onSnapshot) => {
+        await Promise.resolve();
+        open.add(request);
+        onSnapshot({ revision: 1, ...answered({ request }) });
+        return {
+          release: () => {
+            open.delete(request);
+          },
+        };
+      },
+    };
+    const internals = clientInternals(new GraspClient(transport));
+    const readOnce = async (id: number) => {
+      const entry = internals.entry(api.notes.get, { id: idOf(id) });
+      const stop = internals.subscribe(entry, unheard);
+      await vi.waitFor(() => {
+        expect(entry.snapshot.value).toBeDefined();
+      });
+      return { entry, stop };
+    };
+    // As many kept as are kept, nobody reading them.
+    for (let id = 1; id <= maxKeptUnread; id += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one after another
+      const { stop } = await readOnce(id);
+      stop();
+    }
+    await aTaskLater();
+    const before = open.size;
+    // A component shown now, unsubscribed and subscribed again at once.
+    const shown = await readOnce(100);
+    shown.stop();
+    const again = internals.subscribe(shown.entry, unheard);
+    await aTaskLater();
+    again();
+
+    expect({ before, after: open.size - 1 }).toStrictEqual({
+      before: maxKeptUnread,
+      after: maxKeptUnread,
+    });
   });
 
   it("lets go of the pages a Load More added once nobody reads the list, keeping its first followed", async () => {
