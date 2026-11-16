@@ -460,16 +460,16 @@ const recallCountsOf = (report: BrainReport | null) =>
     ? null
     : {
         words: [
-          report.recall.ways.words.recalls,
-          report.recall.ways.words.failed,
+          report.recall.ways.words?.recalls,
+          report.recall.ways.words?.failed,
         ],
         exact: [
-          report.recall.ways.exact.recalls,
-          report.recall.ways.exact.failed,
+          report.recall.ways.exact?.recalls,
+          report.recall.ways.exact?.failed,
         ],
         meaning: [
-          report.recall.ways.meaning.recalls,
-          report.recall.ways.meaning.failed,
+          report.recall.ways.meaning?.recalls,
+          report.recall.ways.meaning?.failed,
         ],
         without: Object.values(report.recall.withoutMeaning).reduce(
           (sum, count) => sum + count,
@@ -543,7 +543,7 @@ describe("recall, as staff see it", () => {
     const { report: after } = await readReport();
 
     expect({
-      counted: (before?.recall.ways.words.recalls ?? 0) > 0,
+      counted: (before?.recall.ways.words?.recalls ?? 0) > 0,
       later:
         Date.parse(after?.recall.since ?? "") >
         Date.parse(before?.recall.since ?? ""),

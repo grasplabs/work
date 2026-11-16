@@ -21,6 +21,7 @@
 import {
   brainSearchWays,
   brainSteps,
+  brainErasureReasons,
   brainWithoutMeaningReasons,
   storeNearLimit,
 } from "@grasp-os/shared/brain-report";
@@ -29,6 +30,7 @@ import type {
   BrainActionOutcome,
   BrainReport,
   BrainSearchWay,
+  BrainErasureReason,
   BrainStep,
   BrainWithoutMeaningReason,
 } from "@grasp-os/shared/brain-report";
@@ -105,10 +107,17 @@ const saidOf = (
     ? { text: doneWords[action.type], wrong: false }
     : { text: notDoneWords[outcome], wrong: outcome !== "nothing" };
 
-const replayWords: Record<BrainReport["ledger"]["replay"], string> = {
+// Each keyed by what a core of this release sends; a core of a newer
+// release may send another, shown as written.
+const replayWords: Record<string, string> = {
   through: "Read through",
   replaying: "Replaying after a restore",
   unreadable: "Can't be read",
+};
+
+const failureWords: Record<string, string> = {
+  timed_out: "Timed out",
+  failed: "Failed",
 };
 
 const stepWords: Record<BrainStep, string> = {
@@ -135,14 +144,7 @@ const withoutMeaningWords: Record<BrainWithoutMeaningReason, string> = {
   unusable: "unusable",
 };
 
-const reasonOrder = [
-  "deleted",
-  "retention",
-  "person_erased",
-  "withdrawn",
-] as const;
-
-const reasonWords: Record<(typeof reasonOrder)[number], string> = {
+const reasonWords: Record<BrainErasureReason, string> = {
   deleted: "deleted for good",
   retention: "past their retention",
   person_erased: "people erased",
@@ -266,11 +268,11 @@ const Figures = ({ report }: { report: BrainReport }) => {
           attention={ledger.replay !== "through"}
           label="Erasure ledger"
           sub={
-            ledger.replay === "through"
-              ? undefined
-              : "The Brain answers nothing until it is read through"
+            ledger.replay === "replaying" || ledger.replay === "unreadable"
+              ? "The Brain answers nothing until it is read through"
+              : undefined
           }
-          value={replayWords[ledger.replay]}
+          value={replayWords[ledger.replay] ?? ledger.replay}
         />
       </div>
     </section>
@@ -464,10 +466,10 @@ const Engine = ({
             label="Word indexes"
           >
             <span className="flex items-center gap-3">
-              {rebuilding ? (
-                <Badge>Rebuilding</Badge>
-              ) : (
+              {report.words === "current" ? (
                 <Badge variant="passed">Current</Badge>
+              ) : (
+                <Badge>{rebuilding ? "Rebuilding" : report.words}</Badge>
               )}
               <Button
                 disabled={busy || rebuilding}
@@ -543,6 +545,14 @@ const Engine = ({
 /** How recall did by each way, and how often it went without meaning. */
 const Recall = ({ report }: { report: BrainReport }) => {
   const { recall } = report;
+  // A reason a core of an older release doesn't send shows as nothing, and
+  // the row with none.
+  const without = brainWithoutMeaningReasons.flatMap((reason) => {
+    const recalls = recall.withoutMeaning[reason];
+    return recalls === undefined
+      ? []
+      : [`${whole(recalls)} ${withoutMeaningWords[reason]}`];
+  });
   return (
     <Section
       description={`Since the store last started, ${agoWords(Date.parse(recall.since), Date.parse(report.now))}. A recall searches by each way the question has something for.`}
@@ -600,22 +610,14 @@ const Recall = ({ report }: { report: BrainReport }) => {
           </TableBody>
         </Table>
       </div>
-      <SectionRow
-        description="Recalls by words and exact parts alone, as the embedding model gave no vector for the question in time or none the Brain could use. Without a model, none is counted."
-        label="Without meaning"
-      >
-        <span className="tabular-nums">
-          {formatList(
-            // Not reported (undefined) by a core of an older release: nothing.
-            brainWithoutMeaningReasons.flatMap((reason) => {
-              const recalls = recall.withoutMeaning[reason];
-              return recalls === undefined
-                ? []
-                : [`${whole(recalls)} ${withoutMeaningWords[reason]}`];
-            })
-          )}
-        </span>
-      </SectionRow>
+      {without.length === 0 ? null : (
+        <SectionRow
+          description="Recalls by words and exact parts alone, as the embedding model gave no vector for the question in time or none the Brain could use. Without a model, none is counted."
+          label="Without meaning"
+        >
+          <span className="tabular-nums">{formatList(without)}</span>
+        </SectionRow>
+      )}
     </Section>
   );
 };
@@ -757,10 +759,13 @@ const Ledger = ({ report }: { report: BrainReport }) => {
           <SectionRow label="By reason">
             <span className="tabular-nums">
               {formatList(
-                reasonOrder.map(
-                  (reason) =>
-                    `${whole(ledger.byReason[reason])} ${reasonWords[reason]}`
-                )
+                // Not reported (undefined) by a core of an older release: nothing.
+                brainErasureReasons.flatMap((reason) => {
+                  const erasures = ledger.byReason[reason];
+                  return erasures === undefined
+                    ? []
+                    : [`${whole(erasures)} ${reasonWords[reason]}`];
+                })
               )}
             </span>
           </SectionRow>
@@ -795,7 +800,7 @@ const Steps = ({ report }: { report: BrainReport }) => {
         failing.map(({ step, failed }) => (
           <SectionRow key={step} label={stepWords[step]}>
             <Badge variant="attention">
-              {`${failed.reason === "timed_out" ? "Timed out" : "Failed"} ${agoWords(Date.parse(failed.at), now)}`}
+              {`${failureWords[failed.reason] ?? failed.reason} ${agoWords(Date.parse(failed.at), now)}`}
             </Badge>
           </SectionRow>
         ))
