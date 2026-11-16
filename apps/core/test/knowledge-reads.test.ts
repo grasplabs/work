@@ -56,6 +56,9 @@ describe("today's Brain, through core", () => {
       recall: await refusal(recall(brain, reader, { query: word })),
     };
 
+    // Refused before reading a row: a read that got past those checks and
+    // queried Knowledge is refused only after, by `onRead`, with another
+    // reason ("Core takes nothing a read of today's Brain returned").
     const none = "Core reads nothing of today's Brain";
     expect(refused).toStrictEqual({
       document: none,

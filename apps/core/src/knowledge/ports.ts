@@ -21,15 +21,27 @@ const noBackgroundWork = (): never => {
   throw new Error("Core does no background work for today's Brain");
 };
 
-/** What core says to a port only a read of today's Brain uses. */
+/**
+ * What core says to a port a read of today's Brain asks before it reads a
+ * row: who may read what, and from where.
+ */
 const noReads = (): never => {
   throw new Error("Core reads nothing of today's Brain");
+};
+
+/**
+ * What core says to `onRead`, which a read calls once it has read its
+ * rows: a refusal apart from `noReads`, so a read that got past every
+ * check before it shows that it did.
+ */
+const nothingRead = (): never => {
+  throw new Error("Core takes nothing a read of today's Brain returned");
 };
 
 /** Core's ports for the Brain, over `env`. */
 export const portsOf = (env: Env): BrainPorts<Reader> => ({
   authorize: noReads,
-  onRead: noReads,
+  onRead: nothingRead,
   actorOf: readerActor,
   skills: { capabilities: noReads, authorityOf: noReads },
   audiences: noReads,
