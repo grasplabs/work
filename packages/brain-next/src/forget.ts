@@ -73,6 +73,8 @@ export const deleteMemories = (
       SELECT touched.value FROM json_each(?1) AS touched
       WHERE NOT EXISTS (SELECT 1 FROM memories WHERE memories.entity = touched.value)
         AND NOT EXISTS (SELECT 1 FROM memories WHERE memories.object = touched.value)
+        -- The store's own entity stays with no memories (own-entity.ts).
+        AND NOT EXISTS (SELECT 1 FROM own_entity WHERE own_entity.entity = touched.value)
     )`,
     JSON.stringify(touched.flatMap(({ entity }) => entity ?? []))
   );
