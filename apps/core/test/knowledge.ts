@@ -1,56 +1,19 @@
 import { ensureCollection } from "@grasp-os/brain/collections";
-import type { CommandReceipt } from "@grasp-os/brain/contract";
 import { writeVersion } from "@grasp-os/brain/documents";
 import { runLinking, sourceKey } from "@grasp-os/brain/entities";
 import type { DocumentSummary } from "@grasp-os/brain/knowledge";
-import {
-  memoriesProposeChange,
-  memoriesPublish,
-} from "@grasp-os/brain/memories";
 import { collections } from "@grasp-os/brain/schema";
 import { actorOf } from "@grasp-os/shared/audit";
-import { sha256Hex } from "@grasp-os/shared/encoding";
 import { collectionIdSchema } from "@grasp-os/shared/ids";
-import type { Collection, KnowledgeApi } from "@grasp-os/shared/knowledge";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { env } from "cloudflare:workers";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { collectionTeams } from "../src/db/core/schema.ts";
-import type { Reader } from "../src/knowledge/access.ts";
 import { brainOf } from "../src/knowledge/ports.ts";
 import { callAuth, unique, whoami } from "./sign-in.ts";
-
-const insertsVersion = /^insert into "versions"/iu;
-
-/**
- * The Knowledge database, but running `first` once, just before the first
- * batch that writes a version: another writer that gets there first.
- */
-export const knowledgeRacing = (first: () => Promise<void>): D1Database => {
-  const real = env.KNOWLEDGE;
-  let writing = false;
-  let raced = false;
-  return {
-    prepare: (query) => {
-      writing ||= insertsVersion.test(query);
-      return real.prepare(query);
-    },
-    batch: async <T>(statements: D1PreparedStatement[]) => {
-      if (writing && !raced) {
-        raced = true;
-        await first();
-      }
-      return await real.batch<T>(statements);
-    },
-    exec: async (query) => await real.exec(query),
-    // oxlint-disable-next-line typescript/no-deprecated -- D1Database still has it
-    dump: async () => await real.dump(),
-    withSession: (constraint) => real.withSession(constraint),
-  };
-};
 
 /** Someone signed in: a session's API, or their session's cookie. */
 type Signed = { whoami: () => Promise<Identity> } | { session: string };
@@ -86,7 +49,7 @@ interface SeededSave {
  */
 export const seed = (signed: Signed) => ({
   /** A collection they own, with its teams in core's database. */
-  createCollection: async (input: CollectionInput): Promise<Collection> => {
+  createCollection: async (input: CollectionInput) => {
     const person = await identityOf(signed);
     const parsed = {
       description: "",
@@ -147,28 +110,6 @@ export const seed = (signed: Signed) => ({
       }
     );
   },
-  /** A record they published into a shared scope, as today's Brain kept one. */
-  memoriesPublish: async (
-    input: unknown,
-    options: unknown
-  ): Promise<CommandReceipt> =>
-    await memoriesPublish(
-      brainOf(env),
-      { type: "person", person: await identityOf(signed) },
-      input,
-      options
-    ),
-  /** A correction of one of their own records, as today's Brain kept one. */
-  memoriesProposeChange: async (
-    input: unknown,
-    options: unknown
-  ): Promise<CommandReceipt> =>
-    await memoriesProposeChange(
-      brainOf(env),
-      { type: "person", person: await identityOf(signed) },
-      input,
-      options
-    ),
 });
 
 /**
@@ -200,18 +141,23 @@ export const linkedNaming = async (
 const ownNotes = "Own notes";
 
 /**
- * A collection only `person` reads, theirs (`seed`): the one named "Own notes" they made before, or a
- * new one. Returns its ID.
+ * A collection only `person` reads, theirs (`seed`): the one named "Own
+ * notes" they made before, or a new one. Returns its ID.
  */
 export const ownCollectionOf = async (person: {
   userId: string;
-  api: Signed & { knowledge: KnowledgeApi };
+  api: Signed;
 }): Promise<string> => {
-  const listed = await person.api.knowledge.listCollections();
-  const made = listed.find(
-    ({ name, owner, access }) =>
-      name === ownNotes && owner === person.userId && access === "me"
-  );
+  const [made] = await drizzle(env.KNOWLEDGE)
+    .select({ id: collections.id })
+    .from(collections)
+    .where(
+      and(
+        eq(collections.name, ownNotes),
+        eq(collections.owner, person.userId),
+        eq(collections.access, "me")
+      )
+    );
   if (made !== undefined) {
     return made.id;
   }
@@ -246,27 +192,6 @@ export const newTeam = async (
     }
   }
   return id;
-};
-
-/** A collection with one document, `note.md`, that links to itself. */
-export const collectionWithNote = async (
-  owner: Signed,
-  input: CollectionInput
-) => {
-  const collection = await seed(owner).createCollection(input);
-  const note = await seed(owner).saveDocument({
-    collectionId: collection.id,
-    path: "note.md",
-    text: "# Note\nSee [[note.md]] and [[other.md]].",
-    ifVersion: 0,
-  });
-  await seed(owner).saveDocument({
-    collectionId: collection.id,
-    path: "other.md",
-    text: "# Other\nBack to [[note.md]].",
-    ifVersion: 0,
-  });
-  return { collectionId: collection.id, noteId: note.id };
 };
 
 /**
@@ -331,54 +256,3 @@ export const storedVersionTexts = async (
     results.map(async ({ key }) => await objectText(key))
   );
 };
-
-/** Each current text of `collectionId`'s documents, by path, as stored. */
-export const storedCurrentTexts = async (
-  collectionId: string
-): Promise<Record<string, string>> => {
-  const { results } = await env.KNOWLEDGE.prepare(
-    "SELECT d.path AS path, v.payload_key AS key FROM documents d JOIN versions v ON v.document_id = d.id AND v.number = d.current_version WHERE d.collection_id = ?"
-  )
-    .bind(collectionId)
-    .all<{ path: string; key: string }>();
-  return Object.fromEntries(
-    await Promise.all(
-      results.map(async ({ path, key }): Promise<[string, string]> => [
-        path,
-        await objectText(key),
-      ])
-    )
-  );
-};
-
-/**
- * Stores `text` as every version of `documentId` holds it, under the
- * platform's back: a text no save of this release would write.
- */
-export const storeTextUnderneath = async (
-  documentId: string,
-  text: string
-): Promise<D1PreparedStatement[]> => {
-  const sha256 = await sha256Hex(text);
-  const key = `payloads/${sha256}/${crypto.randomUUID()}`;
-  await env.BRAIN_OBJECTS.put(key, text);
-  return [
-    env.KNOWLEDGE.prepare(
-      "INSERT INTO brain_payloads (key, collection_id, sha256, bytes, state, created_at) SELECT ?, collection_id, ?, ?, 'committed', ? FROM documents WHERE id = ?"
-    ).bind(
-      key,
-      sha256,
-      new TextEncoder().encode(text).byteLength,
-      Date.now(),
-      documentId
-    ),
-    env.KNOWLEDGE.prepare(
-      "UPDATE versions SET payload_key = ? WHERE document_id = ?"
-    ).bind(key, documentId),
-  ];
-};
-
-/** `person`'s reader of Knowledge, as their own session's calls read it. */
-export const asPerson = async (person: {
-  api: { whoami: () => Promise<Identity> };
-}): Promise<Reader> => ({ type: "person", person: await person.api.whoami() });

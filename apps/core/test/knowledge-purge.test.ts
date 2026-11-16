@@ -4,6 +4,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { mockIdp } from "./idp.ts";
 import {
+  documentsIn,
   erasing,
   holding,
   purged,
@@ -68,7 +69,6 @@ describe("a personal purge", setUpTime, () => {
     const events = await auditedDuring(async () => {
       outcomeOf = await purged(admin, leaver.userId);
     });
-    const listed = await leaver.api.knowledge.listCollections();
 
     expect({
       heldBefore: heldBefore.length > 0,
@@ -76,11 +76,8 @@ describe("a personal purge", setUpTime, () => {
         ...outcomeOf,
         purgeId: typeof outcomeOf?.purgeId,
       },
-      collections: listed
-        .filter(({ id }) => id === notes || id === diary)
-        .map(({ id }) => id),
-      notes: await outcome(leaver.api.knowledge.listDocuments(notes)),
-      diary: await outcome(leaver.api.knowledge.listDocuments(diary)),
+      notes: await documentsIn(notes),
+      diary: await documentsIn(diary),
       held: await holding(secret),
       purged: events
         .filter(({ action }) => action === "knowledge.purged")
@@ -93,9 +90,8 @@ describe("a personal purge", setUpTime, () => {
     }).toStrictEqual({
       heldBefore: true,
       result: { purgeId: "string", documents: 2, versions: 3 },
-      collections: [],
-      notes: "knowledge.not_found",
-      diary: "knowledge.not_found",
+      notes: "no collection",
+      diary: "no collection",
       held: [],
       purged: [{ collections: 2, documents: 2, versions: 3 }],
       carriesText: false,

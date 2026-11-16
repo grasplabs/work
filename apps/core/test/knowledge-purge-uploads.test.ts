@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { cleanupsPerPage } from "../src/knowledge/uploads.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
-import { purged } from "./knowledge-purge.ts";
+import { documentsIn, purged } from "./knowledge-purge.ts";
 import { ownCollectionOf, seed } from "./knowledge.ts";
 import { runMinuteTasks } from "./maintenance.ts";
 import { outcome, signedInApi, unique } from "./sign-in.ts";
@@ -188,14 +188,12 @@ describe("a person's purge of the files they uploaded into Knowledge", () => {
       { timeout: 10_000, interval: 100 }
     );
 
-    const { documents } = await person.api.knowledge.listDocuments(personal);
-
     expect({
       failed: failed !== "ok",
       recorded,
       stored: await originalStored(personal, uploadId),
       // The collection is still there: running the purge again ends it.
-      listed: documents.length,
+      listed: await documentsIn(personal),
     }).toStrictEqual({ failed: true, recorded: 1, stored: false, listed: 1 });
   });
 
