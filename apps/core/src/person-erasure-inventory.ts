@@ -363,7 +363,9 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "core.stephen_request_questions": {
     none: "Grasp's own wording, without names or details",
   },
-  "core.stephen_request_topics": noPerson,
+  "core.stephen_request_topics": {
+    none: "Grasp's own wording, without names or details",
+  },
   "core.workflow_ai_waits": noPerson,
   // Nothing writes it since GRA-1552; dropped in GRA-1613.
   "core.workflow_stores": noPerson,

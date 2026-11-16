@@ -9368,7 +9368,7 @@ export const shareProbes = {
 } satisfies Record<ShareMember, Probe>;
 
 /** The Sources page's RPC for `personId`, signed in as a member. */
-const sourcesAs = (personId: string): BrainSourcesRpc =>
+export const sourcesAs = (personId: string): BrainSourcesRpc =>
   new BrainSourcesRpc(
     env,
     async () => await Promise.resolve(sessionOf(personId))
@@ -9747,7 +9747,7 @@ export const sourcesProbes = {
 >;
 
 /** The memories' RPC for `personId`, signed in as a member. */
-const memoriesAs = (personId: string): BrainMemoriesRpc =>
+export const memoriesAs = (personId: string): BrainMemoriesRpc =>
   new BrainMemoriesRpc(
     env,
     async () => await Promise.resolve(sessionOf(personId))
