@@ -1,5 +1,5 @@
 // Where a set of readers' chunks are kept: blocks of rows (`chunk_blocks`,
-// migration 0025), so recall can ask the word index for a word only
+// migration 0026), so recall can ask the word index for a word only
 // within the reader's own blocks. The index's lookup of a word, bounded
 // to rows from one to another, lists only the chunks between them, and
 // workerd counts only what it lists; unbounded, it lists every chunk that
@@ -13,11 +13,11 @@
 // every statement (recall.ts `searched`), so a chunk in a block it
 // shouldn't be in is still never returned to a reader who may not read
 // it; a chunk outside its set's blocks would only be missed, which the
-// trigger of migration 0025 rules out for every add, by any release.
+// trigger of migration 0026 rules out for every add, by any release.
 
 /**
  * Rows a block holds: block n is rows n × this to (n + 1) × this - 1. Set
- * in migration 0025's trigger too, and fixed with it. A version of the
+ * in migration 0026's trigger too, and fixed with it. A version of the
  * largest source (`sourceTextMaxBytes`, 1 MB) has fewer chunks than this,
  * so one fits in a block; rows stay below 2^53 (exact in JavaScript and
  * as float64s in the vector blocks) for 2^33 blocks.

@@ -180,8 +180,15 @@
     {
       "idx": 25,
       "version": "6",
-      "when": 1794870742496,
-      "tag": "0025_chunk_blocks",
+      "when": 1794857369310,
+      "tag": "0025_own_entity",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "6",
+      "when": 1794872781859,
+      "tag": "0026_chunk_blocks",
       "breakpoints": true
     }
   ]

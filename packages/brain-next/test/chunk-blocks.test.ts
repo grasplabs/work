@@ -16,7 +16,7 @@ import type { Copy } from "./store-copy.ts";
 // chunk in the store must leave it in a block of its set, or recall misses
 // it. An add places it in its set's own block; these hold the two other
 // ways: a release before the blocks, after a rollback, adds a chunk after
-// the last row, wherever that is (the trigger of migration 0025 records
+// the last row, wherever that is (the trigger of migration 0026 records
 // its block); and a restore places its chunks as an add does, so a hidden
 // chunk costs the restored store's recalls nothing either. What recall
 // reads of hidden chunks on a store of adds is recall-cost.test.ts's.

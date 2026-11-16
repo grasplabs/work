@@ -263,7 +263,7 @@ export const chunkDays = sqliteTable(
  * n × `chunkBlockRows`) holding a chunk of a version it reads. Recall asks
  * the word index only within the reader's blocks, so a chunk the reader
  * may not read is never listed. A trigger writes a row for every chunk
- * added, by any release (migration 0025), so every chunk is in a block of
+ * added, by any release (migration 0026), so every chunk is in a block of
  * its set; an add places its chunks in its set's own block (`placeChunks`),
  * so a block holds one set's chunks. Integers alone: kept when chunks go
  * (an empty block lists nothing), and deleted with their set (erasure.ts
@@ -1055,6 +1055,23 @@ export const entityNames = sqliteTable(
     index("entity_names_entity_idx").on(table.entity, table.type, table.folded),
     index("entity_names_memory_idx").on(table.memory),
   ]
+);
+
+/**
+ * The entity a person's own store's person is (contract.ts "The store's
+ * own entity"): one row at most, made by the first add naming it `own`,
+ * never an entity a name or an identifier found. Deleting memories never deletes
+ * it (forget.ts); erasing the store whole does. Empty in the shared store.
+ */
+export const ownEntity = sqliteTable(
+  "own_entity",
+  {
+    id: integer().primaryKey(),
+    entity: integer()
+      .notNull()
+      .references(() => entities.row),
+  },
+  () => [check("own_entity_one", sql.raw("id = 1"))]
 );
 
 /**
