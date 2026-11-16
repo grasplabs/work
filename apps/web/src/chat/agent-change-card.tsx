@@ -13,7 +13,12 @@ import type { ReactNode } from "react";
 
 import { useCoreRead } from "../apps/use-core-read.ts";
 import { classNames } from "../settings/stephen-settings.tsx";
-import { AudienceWords, DraftActions, Line } from "./agent-draft-card.tsx";
+import {
+  AppNames,
+  AudienceWords,
+  DraftActions,
+  Line,
+} from "./agent-draft-card.tsx";
 import type { ThreadBuild } from "./build-progress.tsx";
 
 // A change to one of the person's agents that Grasp's chat drafted
@@ -120,12 +125,12 @@ export const AgentChangeCard = ({
           )}
           {addApps.length === 0 ? null : (
             <Line label={t`Apps it gets`}>
-              {addApps.map((each) => each.name).join(", ")}
+              <AppNames apps={addApps} />
             </Line>
           )}
           {removeApps.length === 0 ? null : (
             <Line label={t`Apps taken off`}>
-              {removeApps.map((each) => each.name).join(", ")}
+              <AppNames apps={removeApps} />
             </Line>
           )}
           {audience === undefined ? null : (

@@ -50,6 +50,7 @@ import {
   listOwnAgents,
   makeAgent,
   makeOwnAgent,
+  setAgentPaused,
   setAgentReach,
   setAgentToolClass,
 } from "./agent-builder.ts";
@@ -644,13 +645,30 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
       // the person lands on its page to finish it there.
       try {
         await this.#setDrafted(person, agent.id, draft);
-        await chats.send(id, person.userId, asked);
       } catch (error) {
         log.warn("agent.drafted_unfinished", errorFields(error));
+        // Never left answering with less narrowed than its card: with no
+        // app saved it would use any app. Paused, it answers nothing until
+        // its page is finished.
+        await this.#pauseQuietly(person, agent.id);
         return { id: agent.id, name: agent.name, unfinished: true };
+      }
+      try {
+        await chats.send(id, person.userId, asked);
+      } catch (error) {
+        log.warn("agent.drafted_unanswered", errorFields(error));
       }
       return { id: agent.id, name: agent.name };
     });
+  }
+
+  /** Pauses an agent whose card couldn't all be set; a failure is only logged. */
+  async #pauseQuietly(person: Identity, agentId: string): Promise<void> {
+    try {
+      await setAgentPaused(this.#env, person, agentId, true);
+    } catch (error) {
+      log.warn("agent.drafted_unpaused", errorFields(error));
+    }
   }
 
   /**
@@ -699,10 +717,17 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
       }
       try {
         await this.#setChanged(person, agent, change);
-        await chats.send(id, person.userId, asked);
       } catch (error) {
         log.warn("agent.change_unfinished", errorFields(error));
+        // An app the card took off may still be on: paused, it answers
+        // nothing until its page is finished.
+        await this.#pauseQuietly(person, agent.id);
         return { id: agent.id, name: agent.name, unfinished: true };
+      }
+      try {
+        await chats.send(id, person.userId, asked);
+      } catch (error) {
+        log.warn("agent.change_unanswered", errorFields(error));
       }
       return { id: agent.id, name: agent.name };
     });
