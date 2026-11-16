@@ -277,7 +277,7 @@ describe("runs started by a restricted App", () => {
     );
     const adaPerson = await personOf(env, ada);
     const heldOf = async (runId: string) => {
-      const waiting = await env.CONNECT.listPendingActions(adaPerson);
+      const waiting = await env.CONNECT.listPendingActions(adaPerson, "grasp");
       return waiting.filter(
         ({ context }) =>
           context.type === "workflowRun" && context.runId === runId

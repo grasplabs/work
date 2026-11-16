@@ -15,12 +15,13 @@ import { channelResponse } from "../src/channels/door.ts";
 import type { ChannelMessage } from "../src/channels/door.ts";
 import { inertOn } from "../src/channels/inert.ts";
 import { say } from "../src/channels/words.ts";
-import { chatAgentId } from "../src/chats-rpc.ts";
+import { chatAgentId, personalWorkspaceId } from "../src/chats-rpc.ts";
 import {
   channelConversations,
   channelAccounts,
   channelLinks,
 } from "../src/db/core/schema.ts";
+import { workspace } from "../src/durable-objects.ts";
 import { shareWorkflowResource } from "../src/workflow-members.ts";
 import {
   createWorkflowResource,
@@ -28,6 +29,7 @@ import {
 } from "../src/workflow-resources.ts";
 import { codeStep, keptAnswersOf, says } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
+import { chatIdsOf } from "./code-step-trace.ts";
 import { slackApp, slackPostedUrl } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import { attacks, ordinary } from "./inert-answers.ts";
@@ -35,7 +37,7 @@ import { saveInstructions } from "./instruction-saves.ts";
 import { anyNamesOf, greetingOf } from "./json-workflow-apps.ts";
 import { mailConnection } from "./mail-connection.ts";
 import { fakeProvider } from "./model-provider.ts";
-import { signedInApi, unique } from "./sign-in.ts";
+import { outcome, signedInApi, unique } from "./sign-in.ts";
 import {
   memberAnsweredBy,
   messageFrom as teamsMessageFrom,
@@ -267,10 +269,12 @@ const refused = { status: 401, text: "Unauthorized", handed: [] };
 /** A word no other text holds. */
 const marker = (): string => `m${unique()}`;
 
-/** Which app each of a person's listed chats came through. */
-const viaOf = async (api: Awaited<ReturnType<typeof linkedPerson>>["api"]) => {
+/** The titles of a person's chats in Grasp, as their list shows them. */
+const listedFor = async (
+  api: Awaited<ReturnType<typeof linkedPerson>>["api"]
+) => {
   const listed = await api.chats.list();
-  return listed.map(({ via }) => via).toSorted();
+  return listed.map(({ title }) => title);
 };
 
 describe("a request Slack didn't sign for the client's app", () => {
@@ -508,7 +512,7 @@ describe("a press on a card in Slack", () => {
 });
 
 describe("a linked person's question in Slack", () => {
-  it("gets the same answer as the same question in Teams, in their own Slack chat, which their list says came through Slack", async () => {
+  it("gets the same answer as the same question in Teams, in a conversation no list in Grasp shows", async () => {
     const answer =
       "Parental leave lasts sixteen weeks, as the leave policy and the HR page say.";
     const { slackUser, api } = await linkedPerson();
@@ -527,9 +531,9 @@ describe("a linked person's question in Slack", () => {
     const teamsAnswer = JSON.stringify(
       activities.filter(({ type }) => type === "message")
     );
-    // Each person's list says which app their chat came through, and a
-    // chat started in Grasp itself is Grasp's own.
-    const inGrasp = await api.chats.create("Leave questions");
+    // A conversation in a chat app is never a chat in Grasp: each
+    // person's list holds only what they started in Grasp itself.
+    await api.chats.create("Leave questions");
     expect({
       // Posted once, whole.
       slack: slackPosts.some(
@@ -539,15 +543,82 @@ describe("a linked person's question in Slack", () => {
           JSON.stringify(fields).includes(answer)
       ),
       teams: teamsAnswer.includes(answer),
-      created: inGrasp.via,
-      listedForSlackPerson: await viaOf(api),
-      listedForTeamsPerson: await viaOf(inTeams.api),
+      listedForSlackPerson: await listedFor(api),
+      listedForTeamsPerson: await listedFor(inTeams.api),
     }).toStrictEqual({
       slack: true,
       teams: true,
-      created: "web",
-      listedForSlackPerson: ["slack", "web"],
-      listedForTeamsPerson: ["teams"],
+      listedForSlackPerson: ["Leave questions"],
+      listedForTeamsPerson: [],
+    });
+  });
+
+  it("posts an answer with its indentation as the model wrote it, after a blank line too", async () => {
+    const answer =
+      "Here:\n\n```python\ndef f():\n    x = 1\n\n    return x\n```\n\n- a\n\n  - nested b";
+    const { slackUser } = await linkedPerson();
+    await fakeProvider(says(answer));
+    const asked = messageFrom(slackUser);
+    asked.event.text = "Show me f.";
+    await post(asked, { caught: false });
+
+    const posted = await slackSawIn(asked.event.channel);
+    const said = JSON.stringify(
+      posted.filter(({ method }) =>
+        ["chat.postMessage", "chat.update"].includes(method)
+      )
+    );
+    expect({
+      returnIndented: said.includes(String.raw`\n    return x`),
+      nestedIndented: said.includes(String.raw`\n  - nested b`),
+    }).toStrictEqual({ returnIndented: true, nestedIndented: true });
+  });
+
+  it("goes on with what was said before, in a conversation whose address answers as a chat that doesn't exist", async () => {
+    const badge = `badge-${unique()}`;
+    const { slackUser, api, userId } = await linkedPerson();
+    const provider = await fakeProvider(says("Noted."), says(`It's ${badge}.`));
+    const channel = `D${unique().toUpperCase()}`;
+    const told = messageFrom(slackUser, { channel });
+    told.event.text = `My badge is ${badge}.`;
+    await post(told, { caught: false });
+    const asked = messageFrom(slackUser, { channel });
+    asked.event.text = `What is my badge? ${unique()}`;
+    await post(asked, { caught: false });
+
+    const [conversation] = await chatIdsOf(
+      workspace(env, personalWorkspaceId(userId)),
+      userId
+    );
+    if (conversation === undefined) {
+      throw new Error("Expected the Slack conversation to be kept");
+    }
+    const answering = provider.requests
+      .map(({ body }) => JSON.stringify(body))
+      .filter(
+        (body) =>
+          body.includes(asked.event.text) &&
+          !body.includes("You sort one message a person sent to Stephen")
+      );
+    expect({
+      remembered:
+        answering.length > 0 && answering.every((body) => body.includes(badge)),
+      listed: await listedFor(api),
+      opened: await outcome(api.chats.summary(conversation.id)),
+      followed: await outcome(
+        api.chats.watch(conversation.id, null, () => {
+          // Nothing is ever pushed for it.
+        })
+      ),
+    }).toStrictEqual({
+      remembered: true,
+      listed: [],
+      opened: await outcome(api.chats.summary(crypto.randomUUID())),
+      followed: await outcome(
+        api.chats.watch(crypto.randomUUID(), null, () => {
+          // Nothing is ever pushed for it either.
+        })
+      ),
     });
   });
 });
@@ -563,7 +634,64 @@ const firstBlockText = (blocks: unknown): string | undefined => {
 /** A `<` or `>`, or an `&` that starts none of Slack's three escapes. */
 const unescapedInSlack = /[<>]|&(?!amp;|lt;|gt;)/u;
 
+/** Every character but the white space between them, in order. */
+const ink = (text: string): string => text.replaceAll(/\s/gu, "");
+
+/** Every section's text in `blocks`, as Slack's API got them, in order. */
+const sectionTextsOf = (blocks: unknown): string[] => {
+  const parsed = z
+    .array(
+      z
+        .object({
+          type: z.string(),
+          text: z.object({ text: z.string() }).optional(),
+        })
+        .loose()
+    )
+    .safeParse(typeof blocks === "string" ? JSON.parse(blocks) : blocks);
+  return (parsed.data ?? []).flatMap(({ type, text }) =>
+    type === "section" && text !== undefined ? [text.text] : []
+  );
+};
+
 describe("a linked person's answer in Slack", () => {
+  it("is posted whole over several messages when too long for one, Slack's own syntax escaped in each, no section cut", async () => {
+    const sentence =
+      "Tom & Jerry's <b>invoices</b> are at [the list](https://e.test). ";
+    const answer = Array.from(
+      { length: 30 },
+      (_, at) => `${at}. ${sentence.repeat(40).trim()}`
+    ).join("\n\n");
+    const { slackUser } = await linkedPerson();
+    await fakeProvider(says(answer));
+    const message = messageFrom(slackUser);
+    message.event.text = "Tell me about the invoices.";
+    await post(message, { caught: false });
+
+    const seen = await slackSawIn(message.event.channel);
+    const posts = seen.filter(
+      ({ method, fields }) =>
+        method === "chat.postMessage" &&
+        // Not the card offering their own Microsoft 365 (connect-own.ts).
+        !JSON.stringify(fields).includes("/connect-microsoft")
+    );
+    const sections = posts.flatMap(({ fields }) =>
+      sectionTextsOf(fields.blocks)
+    );
+    expect({
+      several: posts.length > 1,
+      whole: ink(sections.join("")) === ink(inertOn("slack")(answer)),
+      unescaped: sections.filter((section) => unescapedInSlack.test(section))
+        .length,
+      eachWithin: sections.every((section) => section.length <= 3000),
+    }).toStrictEqual({
+      several: true,
+      whole: true,
+      unescaped: 0,
+      eachWithin: true,
+    });
+  });
+
   it("is posted once, on a card, previews off, never updated, Slack's own syntax escaped, and kept as written", async () => {
     const { userId, slackUser } = await linkedPerson();
     await fakeProvider(says(attacks));

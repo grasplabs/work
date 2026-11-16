@@ -153,6 +153,13 @@ export const capabilityClaimsSchema = z.strictObject({
    */
   heldUntil: z.int().nonnegative().optional(),
   /**
+   * The call comes from a conversation in a chat app (Teams, Slack), which
+   * Grasp never shows as a chat: a side effect held from it is decided on
+   * its card there, and Grasp's own list of what waits leaves it out
+   * (`listPendingActions`). Only the capability says it.
+   */
+  chatApp: z.boolean().default(false),
+  /**
    * Only on the capability core signs once a person decided a call that
    * waits for them, from their own session, after checking its permission
    * and context again (`CapabilityDecision`). Connect decides that call
@@ -205,6 +212,8 @@ export interface CapabilityScope extends CapabilityCall {
   context?: z.input<typeof workContextSchema> | undefined;
   /** When a side effect held from it ends unconfirmed: signed, not compared. */
   heldUntil?: number | undefined;
+  /** It comes from a chat app's conversation: signed, not compared. */
+  chatApp?: boolean | undefined;
   /** What a person decided of the call: signed, not compared. */
   decision?: CapabilityDecision | undefined;
   /** Only for a chat's agent: `CapabilityClaims.mailboxes`. */
@@ -274,6 +283,7 @@ export const signCapability = async (
     origin: scope.origin,
     ...(scope.context === undefined ? {} : { context: scope.context }),
     ...(scope.heldUntil === undefined ? {} : { heldUntil: scope.heldUntil }),
+    ...(scope.chatApp === true ? { chatApp: true } : {}),
     ...(scope.decision === undefined ? {} : { decision: scope.decision }),
     ...(scope.mailboxes === undefined
       ? {}

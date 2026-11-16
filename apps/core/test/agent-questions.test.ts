@@ -173,7 +173,7 @@ describe(
       });
     });
 
-    it("aren't offered in a chat app's chat, which can't show them, nor shown when its model asks anyway", async () => {
+    it("aren't offered in a chat app's chat, which can't show them, and its turn answers in words when its model asks anyway", async () => {
       const personId = await someone();
       const id = workspaceIdSchema.parse(crypto.randomUUID());
       const stub = workspace(env, id);
@@ -190,16 +190,17 @@ describe(
         says("Daily, weekly or monthly?")
       );
 
-      await stub.ask(chat.id, { text: "Set up the sales report.", model });
-      const messages = await messagesOf(stub, chat.id, personId);
+      // No page of Grasp shows a chat app's chat (GRA-1919): what its
+      // person reads is the answer the chat app is sent.
+      const { answer } = await stub.ask(chat.id, {
+        text: "Set up the sales report.",
+        model,
+      });
 
       expect({
         offered: offersAsking(provider.requests[0]?.body),
-        asked: messages.some(
-          (message) =>
-            message.role === "assistant" && message.asked !== undefined
-        ),
-      }).toStrictEqual({ offered: false, asked: false });
+        answer,
+      }).toStrictEqual({ offered: false, answer: "Daily, weekly or monthly?" });
     });
   }
 );

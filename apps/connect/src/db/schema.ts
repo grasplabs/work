@@ -326,6 +326,12 @@ export const pendingActions = sqliteTable(
      * (`CapabilityClaims.unattended`): its person is told so when shown it.
      */
     unattended: integer({ mode: "boolean" }).notNull().default(false),
+    /**
+     * Held in a chat app's conversation (`CapabilityClaims.chatApp`), which
+     * Grasp never shows as a chat: decided on its card there, and left out
+     * of Grasp's own list (`listPendingActions`).
+     */
+    chatApp: integer("chat_app", { mode: "boolean" }).notNull().default(false),
   },
   (table) => [
     uniqueIndex("pending_actions_call_idx").on(

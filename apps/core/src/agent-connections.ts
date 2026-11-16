@@ -415,6 +415,8 @@ export class ConnectionsApi extends WorkerEntrypoint<Env, AgentScope> {
             authority,
             ...(heldUntil === undefined ? {} : { heldUntil }),
             ...(scope.unattended === true ? { unattended: true } : {}),
+            // Decided on its card there, never listed in Grasp (GRA-1919).
+            ...(fromChatApp(scope) ? { chatApp: true } : {}),
           };
         },
         named,

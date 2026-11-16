@@ -13,6 +13,7 @@ import {
   transcript,
 } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
+import { heldFor } from "./held-in-connect.ts";
 import { mockIdp } from "./idp.ts";
 import { mailConnection } from "./mail-connection.ts";
 import { mailControlUrl } from "./mail-server.ts";
@@ -141,7 +142,7 @@ const outcomeOf = async (
 ) => {
   const answer = await stub.ask(chat.id, { text: question, model });
   const results = await codeResults(stub, chat.id);
-  const held = await person.api.pendingActions.list();
+  const held = await heldFor(person, chat.via === "web" ? "grasp" : "chat_app");
   return {
     answer,
     returned: results.map(({ text }) => text),
