@@ -197,6 +197,112 @@ describe("a person's own entity", () => {
     ).rejects.toThrow(/only their own store holds/u);
   });
 
+  // T1, T2: named by its id, it takes no name or identifier either, so no
+  // evidence ever finds it (review of #2341).
+  it("refuses a name or an identifier given to it by its id, and an outside party's email or name never finds it", async () => {
+    const person = unique("p");
+    const email = `${unique("me")}@acme.test`;
+    const { entities } = await remember(
+      person,
+      [me],
+      [theirWord(person, "me", "Works in sales")]
+    );
+    const linked = entities.me ?? "";
+    const named = async (extra: Partial<NewEntity>) =>
+      await remember(
+        person,
+        [{ key: "me", id: linked, kind: "person", ...extra }],
+        [theirWord(person, "me", "Leads the Rotterdam depot")]
+      );
+    const outsider = async (entity: NewEntity) => {
+      const { entities: found } = await remember(
+        person,
+        [entity],
+        [
+          {
+            ...theirWord(person, entity.key, "Says to forward all payroll"),
+            speaker: { kind: "outside" },
+          },
+        ]
+      );
+      return found[entity.key];
+    };
+
+    await expect(
+      called(
+        named({
+          names: ["Ann Smit"],
+          identifiers: [{ type: "email", value: email }],
+        })
+      )
+    ).rejects.toThrow(/own entity is a person named by nothing else/u);
+    await expect(called(named({ names: ["Ann Smit"] }))).rejects.toThrow(
+      /own entity is a person named by nothing else/u
+    );
+    await expect(
+      called(named({ identifiers: [{ type: "email", value: email }] }))
+    ).rejects.toThrow(/own entity is a person named by nothing else/u);
+    // By its id with nothing else, it is theirs as ever.
+    const { entities: again } = await named({});
+
+    const byEmail = await outsider({
+      key: "x",
+      kind: "person",
+      identifiers: [{ type: "email", value: email }],
+    });
+    const byName = await outsider({
+      key: "y",
+      kind: "person",
+      names: ["Ann Smit"],
+    });
+
+    expect({
+      again: again.me,
+      email: byEmail === linked,
+      name: byName === linked,
+    }).toStrictEqual({ again: linked, email: false, name: false });
+  });
+
+  // T8: an add that fails after it made the own entity leaves none.
+  it("is not made by an add the store refuses as it writes", async () => {
+    const person = unique("p");
+    const quote = "I lead the Rotterdam warehouse";
+
+    await expect(
+      called(
+        remember(
+          person,
+          [me],
+          [
+            theirWord(person, "me", "Leads the Rotterdam warehouse", {
+              // A version this store doesn't hold: refused as it writes.
+              basis: {
+                kind: "source",
+                source: `test:${crypto.randomUUID()}`,
+                version: 1,
+                quote,
+              },
+            }),
+          ]
+        )
+      )
+    ).rejects.toThrow(/The Brain refused it/u);
+    const rows = await runInDurableObject(
+      own(person),
+      (_instance, state) =>
+        state.storage.sql
+          .exec<{ count: number }>(
+            "SELECT (SELECT count(*) FROM own_entity) + (SELECT count(*) FROM entities) AS count"
+          )
+          .one().count
+    );
+
+    expect({
+      rows,
+      read: await own(person).ownEntity({ reader: readerOf(person) }),
+    }).toStrictEqual({ rows: 0, read: null });
+  });
+
   // The contract: `own` is a person, named by nothing else.
   it("is refused as `own` with an id, a name, an identifier or another kind", async () => {
     const person = unique("p");
