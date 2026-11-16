@@ -217,6 +217,7 @@ const brainReport = (bytes: number): BrainReport => ({
     sweep: null,
     repack: null,
     reindex: null,
+    quotes: null,
     embedding: null,
   },
   recall: {

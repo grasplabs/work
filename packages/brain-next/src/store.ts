@@ -8,6 +8,7 @@ import { packAcross } from "./across.ts";
 import { bucketUnder, countingWrites, keptUntilSettled } from "./bucket.ts";
 import type { BrainBucket } from "./bucket.ts";
 import { readCard } from "./cards.ts";
+import { catchUpDue, catchUpStep } from "./catch-up.ts";
 import {
   cardRequestSchema,
   attributeRuleOf,
@@ -481,6 +482,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     sweep: null,
     repack: null,
     reindex: null,
+    quotes: null,
     embedding: null,
   };
   #sweepAfter = 0;
@@ -1433,7 +1435,8 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    * deleted, then one batch of the sweep, then up
    * to `repackPerTick` blocks of vector codes repacked, then, while the
    * word indexes are behind their rules, one batch of them rebuilt, then
-   * a step of embedding (embedding.ts), then the queue, asking `ask` for
+   * a step of the catch-up of quotes (catch-up.ts), then a step of
+   * embedding (embedding.ts), then the queue, asking `ask` for
    * its model calls, `embedders` for vectors and `handOvers` for what is
    * handed over (work.ts, handover.ts). Each step is
    * bounded, so
@@ -1500,6 +1503,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     await this.#sweep(tickAt);
     this.#repack(tickAt);
     this.#reindex(tickAt);
+    await this.#catchUp(tickAt);
     this.#embedding(tickAt, embedders.model);
     this.#exports();
     await workTick(
@@ -1633,6 +1637,8 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    *   grace is over, and the sweep's own wait after a failure;
    * - vectors.ts `repackDue`: removed codes to repack;
    * - words.ts `wordsRebuilding`: word indexes behind their rules;
+   * - catch-up.ts `catchUpDue`: a source not judged against its current
+   *   version, or memories above the mark of those judged;
    * - embedding.ts `embeddingDue`: a walk not over, or a replaced build
    *   still to remove;
    * - exports.ts `exportsDue`: an erasure recorded since the step last
@@ -1654,6 +1660,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       erasureDue(sql) ||
       repackDue(sql) ||
       wordsRebuilding(sql) ||
+      catchUpDue(sql) ||
       embeddingDue(storage) ||
       exportsDue(sql)
     ) {
@@ -1841,6 +1848,21 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    * tried again next tick, and the overview shows when it last failed
    * until a batch succeeds.
    */
+  /**
+   * The tick's step of the catch-up of quotes (catch-up.ts): a failure (a
+   * file that can't be read) ends it, its source's turn spent, and the
+   * next tick goes on with the next source.
+   */
+  async #catchUp(at: Date): Promise<void> {
+    try {
+      await catchUpStep(this.ctx.storage, this.#bucket);
+      this.#stepsFailed.quotes = null;
+    } catch {
+      // Nothing of the error is kept: it may name a key.
+      this.#stepsFailed.quotes = { at, reason: "failed" };
+    }
+  }
+
   #reindex(at: Date): void {
     try {
       this.ctx.storage.transactionSync(() => {

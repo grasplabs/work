@@ -179,6 +179,7 @@ export const brainSteps = [
   "sweep",
   "repack",
   "reindex",
+  "quotes",
   "embedding",
 ] as const;
 export type BrainStep = (typeof brainSteps)[number];

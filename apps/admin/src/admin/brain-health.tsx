@@ -117,6 +117,7 @@ const stepWords: Record<BrainStep, string> = {
   sweep: "Sweeping files nothing holds",
   repack: "Repacking vector codes",
   reindex: "Rebuilding the word indexes",
+  quotes: "Judging memories against their sources",
   embedding: "Putting passages on the queue to embed",
 };
 
