@@ -23,7 +23,7 @@ import { erasuresFailing } from "./brain-erasures-failing.ts";
 import { copyOfStore, restoreStore } from "./brain-next-store-copy.ts";
 import { mockIdp } from "./idp.ts";
 import { fakeProvider } from "./model-provider.ts";
-import { outcome, signedInApi, unique } from "./sign-in.ts";
+import { auditedDuring, outcome, signedInApi, unique } from "./sign-in.ts";
 
 // The kickoff in the new Brain (GRA-1748): what every member reads of it,
 // the vision and the teams it named, as one source readable by everyone,
@@ -202,6 +202,82 @@ describe("the kickoff in the new Brain", { timeout: 120_000 }, () => {
       versions: [1, 2],
       firstAnswered: false,
       logged: [],
+    });
+  });
+
+  it("hands over no version for an answer outside the vision, and one saying nothing is known once the only answer is taken back", async () => {
+    const member = await signedInApi(idp, "user");
+    // A kickoff that read nothing of the vision and named no team.
+    await fakeProvider({
+      text: JSON.stringify({ fields: [], teams: [], onboarding: [] }),
+      inputTokens: 900,
+      outputTokens: 300,
+    });
+    await adminKickoff().saveKickoff({
+      locale: "en",
+      transcript: {
+        text: `Anna (CEO): We run bakeries in Utrecht and in the towns around it.
+Jakob (Grasp): What takes the most time?
+Anna (CEO): Counting the flour by hand every morning, and the orders by phone.
+Jakob (Grasp): And who does that?
+Anna (CEO): Whoever opens the shop that day, before the first customers come in.`,
+      },
+    });
+    await handOverNow();
+    const source = await kickoffNow();
+    // An earlier test's kickoff may be the same source: counted from here.
+    const versionsOf = async (): Promise<number> => {
+      const { versions } = await listVersionsAs(env, member.userId, {
+        source,
+      });
+      return versions.length;
+    };
+    const first = await versionsOf();
+
+    // Not the vision: members read nothing of it, so nothing is handed over.
+    const languages = markerOf("lang");
+    const languagesNoted = await auditedDuring(async () => {
+      await adminKickoff().answerKickoff(
+        "languages",
+        `Dutch and ${languages}.`
+      );
+    });
+    await handOverNow();
+    const afterLanguages = await versionsOf();
+
+    const answer = markerOf("pain");
+    await adminKickoff().answerKickoff("pain", `Night shifts at ${answer}.`);
+    await handOverNow();
+    const answeredRead = await readOf(member.userId, answer);
+    const answered = answeredRead.includes(answer);
+    // Taken back: the vision says nothing again, and the Brain follows.
+    await adminKickoff().answerKickoff("pain", "");
+    await handOverNow();
+    const { items } = await recallAs(env, member.userId, {
+      question: answer,
+      budget: { tokens: 2000 },
+      personal: true,
+    });
+
+    const languagesRead = await readOf(member.userId, languages);
+
+    expect({
+      afterLanguages: afterLanguages - first,
+      languagesHandedOver: languagesNoted.filter(
+        ({ action }) => action === "onboarding.kickoff.brain_source"
+      ).length,
+      answered,
+      added: (await versionsOf()) - first,
+      recalled: items.some(({ text }) => text.includes(answer)),
+      languagesRead: languagesRead.includes(languages),
+    }).toStrictEqual({
+      afterLanguages: 0,
+      languagesHandedOver: 0,
+      answered: true,
+      // The answer, then the vision saying nothing again.
+      added: 2,
+      recalled: false,
+      languagesRead: false,
     });
   });
 

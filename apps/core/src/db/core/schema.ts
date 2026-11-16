@@ -5871,9 +5871,10 @@ export const brainRecords = sqliteTable(
      */
     purgedAt: timestamp("purged_at"),
     /**
-     * When the record stopped counting (brain-records.ts
-     * `retireOnboardingRecords`): what a replaced kickoff transcript gave
-     * the brain. Kept, never deleted, and left out of `brain.read`.
+     * When the record stopped counting: what a replaced kickoff transcript
+     * gave the brain, left out of `brain.read`. Nothing sets it any more
+     * (GRA-1748: the kickoff is a source of the new Brain, and its rows
+     * here were removed by migration 0258); dropped in a later release.
      */
     retiredAt: timestamp("retired_at"),
     /**

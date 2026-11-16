@@ -24,13 +24,21 @@ export const kickoffSaid = (
     .filter((each) => each !== "")
     .join("\n");
 
+/**
+ * A team's name as people mean it, whichever way it is written: trimmed,
+ * lower case and in one Unicode form. Two names with the same key are the
+ * same team.
+ */
+export const teamNameKey = (name: string): string =>
+  name.trim().toLowerCase().normalize("NFC");
+
 /** The kickoff as every member may read it. */
 export interface CompanyKickoff {
   /** When its transcript came in (ISO 8601). */
   at: string;
   ambition: string;
   whyNow: string;
-  /** The teams it named, each once by name, in its order, with their size when said. */
+  /** The teams it named, each once (`teamNameKey`), in its order, with their size when said. */
   teams: { name: string; people?: number }[];
 }
 
@@ -43,9 +51,11 @@ export const companyKickoffOf = (
   }
   const teams = new Map<string, { name: string; people?: number }>();
   for (const { name, people } of kickoff.reading?.teams ?? []) {
-    // A team named twice in one reading is one team: its first size counts.
-    if (!teams.has(name)) {
-      teams.set(name, people === undefined ? { name } : { name, people });
+    // A team named twice in one reading, in any case, is one team: its
+    // first name and size count.
+    const key = teamNameKey(name);
+    if (!teams.has(key)) {
+      teams.set(key, people === undefined ? { name } : { name, people });
     }
   }
   return {
@@ -59,7 +69,9 @@ export const companyKickoffOf = (
 /**
  * `company` as the new Brain's source text, for recall: written for a
  * model to read, in English like the rest of Grasp's own words to it.
- * Empty when it says nothing.
+ * When it says nothing (the sponsor took back the only answer, say), it
+ * says so: a version of its own, so the Brain never keeps an earlier one
+ * current.
  */
 export const companyKickoffText = (company: CompanyKickoff): string => {
   const parts = [
@@ -81,7 +93,9 @@ export const companyKickoffText = (company: CompanyKickoff): string => {
             .join("\n")}`,
         ]),
   ];
-  return parts.length === 0
-    ? ""
-    : `# The company's vision, from Grasp's first conversation with it\n\n${parts.join("\n\n")}`;
+  return `# The company's vision, from Grasp's first conversation with it\n\n${
+    parts.length === 0
+      ? "Nothing is known of it yet: no goals, no reason for AI now, no teams."
+      : parts.join("\n\n")
+  }`;
 };

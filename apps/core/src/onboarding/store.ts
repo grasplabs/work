@@ -3963,7 +3963,7 @@ export class Onboarding extends DurableObject<Env> {
    * The kickoff `id` as the hand-over gives the new Brain now: its text
    * for every member (kickoff-company.ts), under the key of the change it
    * is (`kickoffChangesKey`). Null when `id` is not the kickoff kept now
-   * (deleted since), or it says nothing yet.
+   * (deleted since).
    */
   kickoffToHand(id: string): { change: string; text: string } | null {
     const company = this.companyKickoff();
@@ -3971,9 +3971,6 @@ export class Onboarding extends DurableObject<Env> {
       return null;
     }
     const text = companyKickoffText(company);
-    if (text === "") {
-      return null;
-    }
     const changes = this.ctx.storage.kv.get(kickoffChangesKey);
     return { change: String(typeof changes === "number" ? changes : 0), text };
   }

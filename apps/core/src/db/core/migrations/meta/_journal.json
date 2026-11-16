@@ -1807,6 +1807,13 @@
       "when": 1794828221922,
       "tag": "0257_slow_sauron",
       "breakpoints": true
+    },
+    {
+      "idx": 258,
+      "version": "6",
+      "when": 1794837444112,
+      "tag": "0258_kickoff_records_removed",
+      "breakpoints": true
     }
   ]
 }

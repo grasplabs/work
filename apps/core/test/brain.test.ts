@@ -826,6 +826,91 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
     });
   });
 
+  it("keeps a team the kickoff names again in another case one team, with what an admin added for it", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const member = await signedInApi(idp, "user");
+    await bringInKickoff();
+    const before = await member.api.brain.read();
+    const legal = before.teams.find(({ name }) => name === "Legal")?.id ?? "";
+    const source = `src-${unique()}`;
+    await admin.api.brain.addRecords([
+      {
+        type: "source",
+        id: source,
+        kind: "interview",
+        title: "Legal interview",
+        date: today(),
+      },
+      {
+        type: "stakeholder",
+        id: `${source}-lead`,
+        teamId: legal,
+        sourceId: source,
+        date: today(),
+        role: "Head of contracts",
+      },
+    ]);
+
+    // The transcript read again names it twice more, in other cases.
+    await bringInKickoff(
+      {},
+      {
+        ...kickoffReading,
+        teams: [
+          { name: "LEGAL", does: "Contracts", people: 3 },
+          { name: "legal ", does: "Contracts", people: 3 },
+        ],
+      }
+    );
+    const after = await member.api.brain.read();
+    const named = after.teams.filter(
+      ({ name }) => name.trim().toLowerCase() === "legal"
+    );
+
+    expect({
+      named: named.map(({ id, name }) => ({ same: id === legal, name })),
+      role: named[0]?.stakeholders.at(-1)?.role,
+    }).toStrictEqual({
+      named: [{ same: true, name: "LEGAL" }],
+      role: "Head of contracts",
+    });
+  });
+
+  it("shows no team of the kickoff once the admin deletes it, the roster's teams alone", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const member = await signedInApi(idp, "user");
+    await admin.api.onboarding.saveRoster(roster);
+    await bringInKickoff();
+    const before = await member.api.brain.read();
+
+    await admin.api.onboarding.deleteKickoff();
+    const asAdmin = await admin.api.brain.read();
+    const asMember = await member.api.brain.read();
+
+    expect({
+      before: before.teams.map(({ name }) => name),
+      admin: asAdmin.teams.map(({ name, sourceId, counts }) => ({
+        name,
+        sourceId,
+        sources: [...new Set(counts.map((count) => count.sourceId))],
+      })),
+      member: asMember.teams,
+      vision: asMember.vision.sourceId,
+    }).toStrictEqual({
+      before: ["Finance", "Legal"],
+      admin: [
+        { name: "Finance", sourceId: "src-roster", sources: ["src-roster"] },
+        {
+          name: "Operations",
+          sourceId: "src-roster",
+          sources: ["src-roster"],
+        },
+      ],
+      member: [],
+      vision: "",
+    });
+  });
+
   it("names a kickoff team's statement as the roster team it joined, once the roster names it", async () => {
     const admin = await signedInApi(idp, "admin");
     // The kickoff names Legal, as its transcript does; the roster doesn't

@@ -58,7 +58,7 @@ import { keepsReadsOf } from "./connection-capture-key.ts";
 import { catalogEntries, personOf } from "./connections.ts";
 import { organizations } from "./db/core/schema.ts";
 import { intakeIds, ownId } from "./onboarding/brain-intake.ts";
-import { kickoffSaid } from "./onboarding/kickoff-company.ts";
+import { kickoffSaid, teamNameKey } from "./onboarding/kickoff-company.ts";
 import type { CompanyKickoff } from "./onboarding/kickoff-company.ts";
 import { mondayOf } from "./onboarding/rules.ts";
 import { onboardingStore } from "./onboarding/store.ts";
@@ -139,12 +139,6 @@ const rosterSourceId = "src-roster";
 /** The kickoff, as the source of the vision and of the teams it named. */
 const kickoffSourceId = "src-kickoff";
 
-/** What starts the id of each team the kickoff named (`kickoffTeamsOf`). */
-const kickoffTeamPrefix = `${onboardingIdPrefix}kt-`;
-
-/** Whether `id` is a team the kickoff named (`kickoffTeamsOf`). */
-const isKickoffTeam = (id: string): boolean => id.startsWith(kickoffTeamPrefix);
-
 /**
  * Ids by where they come from. A roster team keeps its own id (letters,
  * digits, - and _), so the others take a `.` it can't have, and never
@@ -161,7 +155,7 @@ const ids = {
 const dayOf = (iso: string): string => iso.slice(0, 10);
 
 /** A team's name as two sources can both mean it: trimmed, any case. */
-const nameKey = (name: string): string => name.trim().toLowerCase();
+const nameKey = teamNameKey;
 
 /**
  * Whether teams of `name` may be joined by it: not one a purge rewrote
@@ -629,8 +623,9 @@ const visionOf = (
 /**
  * The teams the kickoff named, each with the size the sponsor gave it,
  * as every member reads them (onboarding/kickoff-company.ts). Each one's
- * id follows from its name alone, so a transcript brought in again that
- * names it keeps it, with what an admin's records added for it.
+ * id follows from its name alone, as people mean it (`teamNameKey`), so a
+ * transcript brought in again that names it, in any case, keeps it, with
+ * what an admin's records added for it.
  */
 const kickoffTeamsOf = async (
   kickoff: CompanyKickoff | null
@@ -641,7 +636,7 @@ const kickoffTeamsOf = async (
   const date = dayOf(kickoff.at);
   return await Promise.all(
     kickoff.teams.map(async ({ name, people }): Promise<Team> => ({
-      id: await ownId("kt", name),
+      id: await ownId("kt", teamNameKey(name)),
       name,
       sourceId: kickoffSourceId,
       counts:
@@ -733,26 +728,29 @@ const connectionsOf = async (
 };
 
 /**
- * `teams` with each team the kickoff named joined to the team of its name
- * (any case): a roster team, or its record, found first in the kickoff,
- * with the size the sponsor gave beside the others. A kickoff team no
- * other team is named as stays a team of its own.
+ * The roster's teams and the records' own (`own`), with each team the
+ * kickoff named (`kickoff`) joined to the first of them of its name (any
+ * case), found first in the kickoff, with the size the sponsor gave
+ * beside the others. A kickoff team no other team is named as stays a
+ * team of its own, after the roster's.
  */
-const withKickoffTeams = (teams: Team[]): Team[] => {
+const withKickoffTeams = (
+  roster: Team[],
+  kickoff: Team[],
+  own: Team[]
+): Team[] => {
   const byName = new Map<string, Team>();
-  for (const team of teams) {
+  for (const team of [...roster, ...own]) {
     const key = nameKey(team.name);
-    if (!isKickoffTeam(team.id) && joinable(team.name) && !byName.has(key)) {
+    if (joinable(team.name) && !byName.has(key)) {
       byName.set(key, team);
     }
   }
-  const joined = teams.filter((team) => {
-    if (!isKickoffTeam(team.id) || !joinable(team.name)) {
-      return true;
-    }
-    const into = byName.get(nameKey(team.name));
+  const alone = kickoff.filter((team) => {
+    const into = joinable(team.name)
+      ? byName.get(nameKey(team.name))
+      : undefined;
     if (into === undefined) {
-      byName.set(nameKey(team.name), team);
       return true;
     }
     // Found first in the kickoff: its values go before the others of
@@ -762,10 +760,11 @@ const withKickoffTeams = (teams: Team[]): Team[] => {
     into.stakeholders = [...team.stakeholders, ...into.stakeholders];
     return false;
   });
-  for (const team of joined) {
+  const teams = [...roster, ...alone, ...own];
+  for (const team of teams) {
     datedInOrder(team);
   }
-  return joined;
+  return teams;
 };
 
 /**
@@ -776,13 +775,17 @@ const withKickoffTeams = (teams: Team[]): Team[] => {
  * roster: for an admin, the roster's team, which is newer, with what was
  * added for it.
  */
-const teamsOf = (onboarding: Team[], records: HeldRecords): Team[] => {
-  const byId = new Map(onboarding.map((team) => [team.id, team]));
+const teamsOf = (
+  roster: Team[],
+  kickoff: Team[],
+  records: HeldRecords
+): Team[] => {
+  const byId = new Map([...roster, ...kickoff].map((team) => [team.id, team]));
   const own = records.teams.filter((team) => {
-    const roster = byId.get(team.id);
-    roster?.counts.push(...team.counts);
-    roster?.stakeholders.push(...team.stakeholders);
-    return roster === undefined;
+    const onboarding = byId.get(team.id);
+    onboarding?.counts.push(...team.counts);
+    onboarding?.stakeholders.push(...team.stakeholders);
+    return onboarding === undefined;
   });
   // Values for a team record were joined to it already; these are for the
   // onboarding's teams.
@@ -795,7 +798,7 @@ const teamsOf = (onboarding: Team[], records: HeldRecords): Team[] => {
   for (const { teamId, value } of records.stakeholders) {
     byId.get(teamId)?.stakeholders.push(value);
   }
-  return withKickoffTeams([...onboarding, ...own]);
+  return withKickoffTeams(roster, kickoff, own);
 };
 
 /**
@@ -804,23 +807,20 @@ const teamsOf = (onboarding: Team[], records: HeldRecords): Team[] => {
  * statement's team, a tool's, a source's, a gap's or a workflow's) is
  * never left behind on a team nobody reads. A joined kickoff team's counts
  * and stakeholders stay its own: the join takes them, ordered as the
- * kickoff found them. `onboarding` is the roster's teams and the
- * kickoff's.
+ * kickoff found them.
  */
 const withSuccessors = (
-  onboarding: Team[],
+  roster: Team[],
+  kickoff: Team[],
   records: HeldRecords
 ): HeldRecords => {
-  const teams = [...onboarding, ...records.teams];
   // A kickoff team joins the first other team of its name, as
   // `withKickoffTeams` joins them.
-  const others = teamsByName(teams.filter(({ id }) => !isKickoffTeam(id)));
+  const others = teamsByName([...roster, ...records.teams]);
   const joined = new Map(
-    teams.flatMap(({ id, name }) => {
+    kickoff.flatMap(({ id, name }) => {
       const to = others.get(nameKey(name));
-      return isKickoffTeam(id) && to !== undefined && to !== id
-        ? [[id, to] as const]
-        : [];
+      return to === undefined || to === id ? [] : [[id, to] as const];
     })
   );
   if (joined.size === 0) {
@@ -967,12 +967,15 @@ const readBrainCore = async (
     onboardingStore(env).companyKickoff(),
     readBrainRecords(env),
   ]);
-  const onboarding = [
-    ...onboardingTeams(facts),
-    ...(await kickoffTeamsOf(kickoff)),
-  ];
-  const records = withSuccessors(onboarding, held);
-  return { facts, kickoff, records, teams: teamsOf(onboarding, records) };
+  const roster = onboardingTeams(facts);
+  const kickoffTeams = await kickoffTeamsOf(kickoff);
+  const records = withSuccessors(roster, kickoffTeams, held);
+  return {
+    facts,
+    kickoff,
+    records,
+    teams: teamsOf(roster, kickoffTeams, records),
+  };
 };
 
 /**
