@@ -188,13 +188,10 @@ import {
 import type { MailState, MailToQueue } from "../mail-outbox.ts";
 import { mailDomain, mailSends, sendMail } from "../mail.ts";
 import { forgetStored } from "../speech-cache.ts";
-import {
-  intakeIds,
-  intakeOf,
-  rosterSource,
-  withoutNames,
-} from "./brain-intake.ts";
+import { intakeIds, intakeOf, withoutNames } from "./brain-intake.ts";
 import type { TeamIntake } from "./brain-intake.ts";
+import { companyTeamsText } from "./company-teams.ts";
+import type { CompanyTeam } from "./company-teams.ts";
 import { storedDocumentReadingSchema } from "./document-reading.ts";
 import { checkedSupport } from "./drawing-support.ts";
 import type { Support } from "./drawing-support.ts";
@@ -305,6 +302,19 @@ const queuedKey = "forget_lines_queued";
  * old one.
  */
 const kickoffChangesKey = "kickoff_changes";
+
+/**
+ * How often the company's teams changed (a roster save, what a team does
+ * drawn from its lead's map), store-wide: the key of each change the new
+ * Brain is given of them (`rosterToHand`), as the kickoff's.
+ */
+const rosterChangesKey = "roster_changes";
+
+/**
+ * The roster's id in the new Brain (`roster:teams`): one for the company,
+ * never erased, as the staff list itself is never deleted, only changed.
+ */
+const rosterBrainId = "teams";
 
 /**
  * What starts the key of each kickoff the admin deleted whose source the
@@ -1333,6 +1343,7 @@ export class Onboarding extends DurableObject<Env> {
     // its team's people now: those claims are owed an erasure at once,
     // which core's clock does within a minute.
     this.#markClaimsThatNoLongerStand();
+    this.#rosterChanged();
     return { removed: gone.length, erased };
   }
 
@@ -3989,6 +4000,54 @@ export class Onboarding extends DurableObject<Env> {
     this.#noteHandOver("kickoff", this.kickoffBrainId());
   }
 
+  /**
+   * The company's teams as every member reads them (GRA-1748): each roster
+   * team's id, name, what it does and how many people it has, in the
+   * admin's order; never who is in it, their titles or its lead. Empty
+   * before the staff list is in.
+   */
+  companyTeams(): CompanyTeam[] {
+    const roster = this.#roster();
+    return (roster?.teams ?? []).map(({ id, name, does }) => ({
+      id,
+      name,
+      does,
+      people: roster?.people.filter(({ team }) => team === id).length ?? 0,
+    }));
+  }
+
+  /**
+   * The company's teams as the hand-over gives the new Brain now
+   * (`rosterBrainId`): their text for every member (`companyTeamsText`),
+   * under the key of the change they are (`rosterChangesKey`). Null for
+   * any other id, or before the staff list is in.
+   */
+  rosterToHand(id: string): { change: string; text: string } | null {
+    if (id !== rosterBrainId || this.rosterSavedAt() === null) {
+      return null;
+    }
+    const changes = this.ctx.storage.kv.get(rosterChangesKey);
+    return {
+      change: String(typeof changes === "number" ? changes : 0),
+      text: companyTeamsText(this.companyTeams()),
+    };
+  }
+
+  /**
+   * In the transaction of a change of the company's teams: counts it
+   * (`rosterChangesKey`) and notes it for the hand-over, which reads them
+   * here when it runs (`rosterToHand`). A change that leaves their text
+   * as it was is no new version: the Brain keeps the one it has.
+   */
+  #rosterChanged(): void {
+    const changes = this.ctx.storage.kv.get(rosterChangesKey);
+    this.ctx.storage.kv.put(
+      rosterChangesKey,
+      (typeof changes === "number" ? changes : 0) + 1
+    );
+    this.#noteHandOver("roster", rosterBrainId);
+  }
+
   /** The ids of the deleted kickoffs whose source the new Brain still holds (`kickoffErasurePrefix`). */
   kickoffErasuresOwed(): string[] {
     return [...this.ctx.storage.kv.list({ prefix: kickoffErasurePrefix })].map(
@@ -5859,7 +5918,7 @@ export class Onboarding extends DurableObject<Env> {
       return since.size > 0;
     });
     await keepOnboardingRecords(this.env, records, {
-      sources: new Set([rosterSource, await intakeIds.interviews(teamId)]),
+      sources: new Set([await intakeIds.interviews(teamId)]),
       teams: new Set([intakeIds.team(teamId)]),
     });
     const gone = this.ctx.storage.transactionSync(() => {
@@ -6184,7 +6243,7 @@ export class Onboarding extends DurableObject<Env> {
    * notes the hand-over (brain-hand-overs.ts). Names the source by its id
    * alone; what it holds is read when the hand-over runs.
    */
-  #noteHandOver(producer: "claim" | "kickoff", id: string): void {
+  #noteHandOver(producer: "claim" | "kickoff" | "roster", id: string): void {
     const at = new Date().toISOString();
     const {
       actions: [action],
@@ -7188,6 +7247,8 @@ export class Onboarding extends DurableObject<Env> {
         })
         .where(eq(teams.id, teamId))
         .run();
+      // What the team does may have changed: the company's teams again.
+      this.#rosterChanged();
       this.#dropOrphanDrawings();
       this.#noted(input.person, "map.drawn", at, "grasp");
     });

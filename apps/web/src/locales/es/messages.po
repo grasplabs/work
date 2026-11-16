@@ -6031,6 +6031,10 @@ msgid "From SharePoint or OneDrive. I read only the files you add."
 msgstr "De SharePoint o OneDrive. Solo leo los archivos que añadas."
 
 #: src/brain/memories-page.tsx
+msgid "From the company's teams, version {version}"
+msgstr "De los equipos de la empresa, versión {version}"
+
+#: src/brain/memories-page.tsx
 msgid "From the company's vision, version {version}"
 msgstr "De la visión de la empresa, versión {version}"
 
@@ -13836,6 +13840,11 @@ msgstr "Las reglas de la empresa para cada agente."
 #: src/brain/skills-page.tsx
 msgid "The company's skills"
 msgstr "Skills de la empresa"
+
+#: src/brain/sources-page.tsx
+msgctxt "a source of the Brain"
+msgid "The company's teams"
+msgstr "Los equipos de la empresa"
 
 #: src/chat/agent-draft-card.tsx
 msgid "the company's time zone"

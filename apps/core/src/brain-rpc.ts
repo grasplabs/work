@@ -58,6 +58,7 @@ import { keepsReadsOf } from "./connection-capture-key.ts";
 import { catalogEntries, personOf } from "./connections.ts";
 import { organizations } from "./db/core/schema.ts";
 import { intakeIds, ownId } from "./onboarding/brain-intake.ts";
+import type { CompanyTeam } from "./onboarding/company-teams.ts";
 import { kickoffSaid, teamNameKey } from "./onboarding/kickoff-company.ts";
 import type { CompanyKickoff } from "./onboarding/kickoff-company.ts";
 import { mondayOf } from "./onboarding/rules.ts";
@@ -78,10 +79,12 @@ import { listWorkflowResources } from "./workflow-resources.ts";
 // | vision             | the kickoff's vision (onboarding/kickoff-company.ts),    |
 // |                    | for everyone signed in; the roster's teams taking part,  |
 // |                    | for admins                                               |
-// | teams              | the roster (admins), the teams the kickoff named (with   |
-// |                    | their sizes, for everyone signed in), then the brain's   |
-// |                    | team records; a team the kickoff named joins the team of |
-// |                    | its name                                                 |
+// | teams              | the roster's teams with their sizes, for everyone signed |
+// |                    | in (onboarding/company-teams.ts), with their roles and   |
+// |                    | leads' roles for admins; the teams the kickoff named,    |
+// |                    | with their sizes, for everyone signed in; then the       |
+// |                    | brain's team records. A team the kickoff named joins the |
+// |                    | team of its name                                         |
 // | sources            | the kickoff, the roster, each team lead's finished       |
 // |                    | interview and the documents shared in the onboarding     |
 // |                    | (admins); each team's interviews, once the brain holds   |
@@ -532,6 +535,24 @@ const sourcesForRecords = async (
 };
 
 /**
+ * The roster's teams as every member reads them: each one's size, never
+ * who is in it, their titles or its lead (onboarding/company-teams.ts).
+ */
+const companyRosterTeams = (
+  teams: readonly CompanyTeam[],
+  savedAt: string | null
+): Team[] =>
+  savedAt === null
+    ? []
+    : teams.map(({ id, name, people }) => ({
+        id: ids.rosterTeam(id),
+        name,
+        sourceId: rosterSourceId,
+        counts: [{ sourceId: rosterSourceId, date: dayOf(savedAt), people }],
+        stakeholders: [],
+      }));
+
+/**
  * The roster's teams. Each one's size is its people, its roles their
  * titles counted (how many, never who), and its stakeholder its lead, as
  * their title.
@@ -962,12 +983,22 @@ const readBrainCore = async (
   env: Env,
   person: Pick<Identity, "role">
 ): Promise<BrainCore> => {
-  const [facts, kickoff, held] = await Promise.all([
-    onboardingFacts(env, person),
-    onboardingStore(env).companyKickoff(),
-    readBrainRecords(env),
-  ]);
-  const roster = onboardingTeams(facts);
+  const store = onboardingStore(env);
+  const [facts, kickoff, companyTeams, rosterSavedAt, held] = await Promise.all(
+    [
+      onboardingFacts(env, person),
+      store.companyKickoff(),
+      store.companyTeams(),
+      store.rosterSavedAt(),
+      readBrainRecords(env),
+    ]
+  );
+  // An admin reads the roster whole: roles counted and its leads' roles.
+  // Everyone else reads its teams as the company's (company-teams.ts).
+  const roster =
+    facts === null
+      ? companyRosterTeams(companyTeams, rosterSavedAt)
+      : onboardingTeams(facts);
   const kickoffTeams = await kickoffTeamsOf(kickoff);
   const records = withSuccessors(roster, kickoffTeams, held);
   return {

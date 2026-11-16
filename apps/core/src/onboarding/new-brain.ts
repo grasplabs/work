@@ -30,6 +30,11 @@ import type { OwedErasure } from "./store.ts";
 //   and answer, under an id minted for each kickoff. Noted for the
 //   hand-over like a claim, and read here when it runs (`kickoffOf`).
 //   The admin's delete erases it (`eraseOwedKickoffs`), every version.
+// - The company's teams (`roster:teams`, GRA-1748): each team on the staff
+//   list, what it does and its size, never who is in it (company-teams.ts),
+//   readable by everyone, a new version at each change. Noted and read
+//   like the kickoff (`rosterOf`). Never erased: the staff list is never
+//   deleted, and names no person.
 //
 // What no longer stands is erased with `eraseSource`, directly: at once
 // after anything that takes an interview out (links.ts, admin-command.ts,
@@ -125,6 +130,26 @@ export const kickoffOf = async (env: Env, id: string): Promise<Handed> => {
         change: held.change,
         text: held.text,
         whenTooLarge: "The company's vision too large to keep.",
+        readers: { kind: "everyone" },
+      };
+};
+
+/** The company's teams' source, by the store's id for it. */
+export const rosterSource = (id: string): SourceRef => ({
+  producer: "roster",
+  id,
+});
+
+/** The company's teams as the onboarding holds them now (`companyTeams`), for every member. */
+export const rosterOf = async (env: Env, id: string): Promise<Handed> => {
+  const held = await onboardingStore(env).rosterToHand(id);
+  return held === null
+    ? gone
+    : {
+        kind: "source",
+        change: held.change,
+        text: held.text,
+        whenTooLarge: "The company's teams too many to keep.",
         readers: { kind: "everyone" },
       };
 };

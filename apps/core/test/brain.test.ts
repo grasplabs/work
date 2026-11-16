@@ -1,3 +1,4 @@
+import type { Team } from "@grasp-os/shared/brain";
 import type { BrainRecordInput } from "@grasp-os/shared/brain-records";
 import { visionFields } from "@grasp-os/shared/kickoff";
 import type { VisionField } from "@grasp-os/shared/kickoff";
@@ -219,6 +220,13 @@ const kickoffAs = <T extends { id: string }>(teams: T[]): T[] =>
     team.id.startsWith("onb-kt-") ? { ...team, id: "kickoff" } : team
   );
 
+/** A team by its name and where it and each of its sizes came from. */
+const sourcedBy = ({ name, sourceId, counts }: Team) => ({
+  name,
+  sourceId,
+  sources: [...new Set(counts.map((count) => count.sourceId))],
+});
+
 /** The names of the teams the kickoff named. */
 const kickoffTeams = (teams: { id: string; name: string }[]) =>
   teams.flatMap(({ id, name }) => (id.startsWith("onb-kt-") ? [name] : []));
@@ -365,11 +373,12 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
       others: true,
     });
 
-    // Someone who isn't an admin gets the connections and the kickoff's
-    // vision and teams, which are the company's, never the rest of the
-    // onboarding: no roster, no business, no head count.
-    const kickoffSource = workspace.sources.filter(
-      ({ id }) => id === "src-kickoff"
+    // Someone who isn't an admin gets the connections, the kickoff's
+    // vision and teams and the roster's teams with their sizes, which are
+    // the company's, never the rest of the onboarding: no one on the
+    // roster, no roles, no lead, no business, no head count.
+    const companySources = workspace.sources.filter(
+      ({ id }) => id === "src-kickoff" || id === "src-roster"
     );
     expect({
       company: asMember.company,
@@ -382,15 +391,25 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
       vision: { ...workspace.vision, inviteTeamIds: [] },
       teams: [
         {
-          id: "kickoff",
+          id: "team-finance",
           name: "Finance",
           sourceId: "src-kickoff",
-          counts: [{ sourceId: "src-kickoff", date: today(), people: 8 }],
+          counts: [
+            { sourceId: "src-kickoff", date: today(), people: 8 },
+            { sourceId: "src-roster", date: today(), people: 3 },
+          ],
+          stakeholders: [],
+        },
+        {
+          id: "team-ops",
+          name: "Operations",
+          sourceId: "src-roster",
+          counts: [{ sourceId: "src-roster", date: today(), people: 1 }],
           stakeholders: [],
         },
         kickoffAs(workspace.teams).find(({ name }) => name === "Legal"),
       ],
-      sources: kickoffSource,
+      sources: companySources,
       mail: workspace.connections.filter(({ name }) => name === "mail"),
     });
   });
@@ -889,15 +908,11 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
 
     expect({
       before: before.teams.map(({ name }) => name),
-      admin: asAdmin.teams.map(({ name, sourceId, counts }) => ({
-        name,
-        sourceId,
-        sources: [...new Set(counts.map((count) => count.sourceId))],
-      })),
-      member: asMember.teams,
+      admin: asAdmin.teams.map(sourcedBy),
+      member: asMember.teams.map(sourcedBy),
       vision: asMember.vision.sourceId,
     }).toStrictEqual({
-      before: ["Finance", "Legal"],
+      before: ["Finance", "Operations", "Legal"],
       admin: [
         { name: "Finance", sourceId: "src-roster", sources: ["src-roster"] },
         {
@@ -906,7 +921,14 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
           sources: ["src-roster"],
         },
       ],
-      member: [],
+      member: [
+        { name: "Finance", sourceId: "src-roster", sources: ["src-roster"] },
+        {
+          name: "Operations",
+          sourceId: "src-roster",
+          sources: ["src-roster"],
+        },
+      ],
       vision: "",
     });
   });

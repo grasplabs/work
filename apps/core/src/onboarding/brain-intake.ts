@@ -22,8 +22,8 @@ import { plainPart } from "./plain-text.ts";
 import type { TeamClaim } from "./team-claims.ts";
 import { inUnitOf } from "./work-drawing.ts";
 
-// What the onboarding learned, as the brain's records (GRA-367): each
-// team as a team record, one source for all its interviews, what five or
+// What the onboarding learned, as the brain's records (GRA-367): one
+// source for all of a team's interviews, what five or
 // more of its people said, put together, as statements (GRA-1084,
 // team-claims.ts), and each piece of work as a workflow
 // with every drawing a new version. Decided in GRA-359: nothing in them
@@ -46,9 +46,6 @@ import { inUnitOf } from "./work-drawing.ts";
 // Who each record rests on is kept apart, in the onboarding's own store
 // (`brain_sent`), so deleting an interview can find what it is in
 // (GRA-368, the store's `purgeBrain`): the brain itself never holds it.
-
-/** The staff list, as the source the brain found each team in. */
-export const rosterSource = "src-roster";
 
 /** An id the onboarding owns, from what it stands for: the same thing is the same id. */
 export const ownId = async (
@@ -397,11 +394,13 @@ export const recordOf = (record: BrainRecordInput): BrainRecord[] => {
 };
 
 /**
- * What a team gives the brain: its team record, its claims (`claims`, each
- * resting on five or more people) as statements, and its drawn workflows,
- * each drawing a version of its own, all naming the one source of its
- * interviews. The same team, claim or drawing is the same id, so giving
- * it again keeps nothing twice; a new drawing is a new version. The team was found in the staff list (`rosterSource`).
+ * What a team gives the brain: its claims (`claims`, each resting on five
+ * or more people) as statements, and its drawn workflows, each drawing a
+ * version of its own, all naming the one source of its interviews and its
+ * roster team (`team-<id>`), which is the onboarding's, never a record of
+ * its own (the roster is a source of the new Brain, GRA-1748). The same
+ * claim or drawing is the same id, so giving it again keeps nothing twice;
+ * a new drawing is a new version.
  */
 export const intakeOf = async (
   intake: TeamIntake,
@@ -411,12 +410,7 @@ export const intakeOf = async (
   const clean = withoutNames(intake.names);
   const teamId = intakeIds.team(intake.team.id);
   const sourceId = await intakeIds.interviews(intake.team.id);
-  const records: BrainRecord[] = recordOf({
-    type: "team",
-    id: teamId,
-    name: intake.team.name,
-    sourceId: rosterSource,
-  });
+  const records: BrainRecord[] = [];
   const rests: Rest[] = [];
   // Only what five or more of its people said, put together
   // (team-claims.ts): never one person's fact as a statement of its own.

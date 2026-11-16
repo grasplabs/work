@@ -35,14 +35,13 @@ import { workflowResourceIdSchema } from "./ids.ts";
 // and each time one of the company's workflows was linked to it or taken
 // off (`goalLink`, the newest for each workflow counting).
 //
-// The onboarding adds records of its own (GRA-367): each roster team as a
-// team record (`team-<id>`), the statements its people agreed to, and each
-// piece of work as drawn (`workflow`, and a `workflowVersion` for each
-// drawing). From the kickoff (GRA-528) it adds the company's vision
-// (`vision`, a new one each time it changes, the newest counting) and the
-// teams the sponsor named, as team records with their sizes. It owns them:
-// their ids start with `onb-` (or are a roster team's), and nobody else
-// adds a workflow or a vision, or takes such an id.
+// The onboarding adds records of its own (GRA-367): the statements its
+// people agreed to, and each piece of work as drawn (`workflow`, and a
+// `workflowVersion` for each drawing). It owns them: their ids start with
+// `onb-`, and nobody else adds a workflow or takes such an id. A roster
+// team is the onboarding's (`team-<id>`): records may name it, but none is
+// its record. The kickoff and the roster are sources of the new Brain
+// (GRA-1748), never records here.
 
 /** Most records one `brain.addRecords` call adds, each named in its audit event. */
 export const brainRecordsMaxPerCall = 50;
@@ -95,8 +94,8 @@ export const brainRecordIdSchema = z
 const ids = z.array(brainRecordIdSchema).max(listMax).default([]);
 
 /**
- * A team's id: a team record's (the kickoff's teams are records too), or a
- * roster team's (`team-<id>`).
+ * A team's id: a team record's, a roster team's (`team-<id>`), or a team
+ * the kickoff named (`onb-kt-…`).
  */
 export const brainTeamIdSchema = z
   .string()
@@ -193,19 +192,11 @@ const statementRecordSchema = z
     path: ["followsUp"],
   });
 
-/**
- * A roster team's id as the brain names it (`team-<id>`): the onboarding's
- * team record for it takes that id, so one id is one team.
- */
-const rosterTeamIdSchema = z
-  .string()
-  .regex(/^team-[A-Za-z0-9_-]{1,60}$/u, "That isn't a roster team's id.");
-
 const teamRecordSchema = z.strictObject({
   type: z.literal("team"),
   // `team-` is the onboarding's (`team-<id>` for a roster team, now or
-  // later): only its own team record takes one (`brainRecordInputSchema`).
-  id: z.union([ownIdSchema, rosterTeamIdSchema]),
+  // later): no record takes one (`brainRecordInputSchema`).
+  id: ownIdSchema,
   name: label,
   /** Where the team was first found. */
   sourceId: brainRecordIdSchema,
