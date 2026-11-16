@@ -18,9 +18,11 @@ import { workspace } from "./durable-objects.ts";
 // What marks a chat is what it handed over that the person may not have
 // in mind, never where it is, nor what they wrote or brought in
 // themselves:
-// - the recall before a question that hands over a passage or a memory
-//   of the person's own store (turn-recall.ts), where everything only
-//   they may read is kept;
+// - the recall before a question, when what it hands over differs from
+//   what the shared store alone would hand over because of the person's
+//   own store, where everything only they may read is kept: a passage or
+//   a memory of it, or only which words it says were not found or that
+//   it was cut short (turn-recall.ts, brain-next.ts `recallOwnedAs`);
 // - an answer read through the person's own personal connection (their
 //   mailbox, their drive: agent-connections.ts), a call's or a confirmed
 //   held call's;

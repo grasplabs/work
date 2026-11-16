@@ -271,8 +271,8 @@ const leftOf = (started: number, ms: number): number =>
 /**
  * The first pass, and a second for the analysis's words, within the
  * budget the first left, when the first is thin and the analysis answered
- * in time with words of its own; and whether either handed over anything
- * of the person's own store (`recallOwnedAs`), which marks the chat.
+ * in time with words of its own; and whether the person's own store made
+ * what either hands over differ (`recallOwnedAs`), which marks the chat.
  */
 const recalled = async (
   recalling: Recalling,
