@@ -1144,6 +1144,7 @@ type CorePersonMember =
   | "forgetAs"
   | "memoryChoices"
   | "ownEntityAs"
+  | "ownEntityIdAs"
   | "entitiesAs"
   | "memoriesAs"
   | "contestedAs"
@@ -1369,6 +1370,31 @@ const othersOwnMemory = async (
     ],
   });
   return { entity: added.entities.c ?? "", memory: added.memories[0] ?? "" };
+};
+
+/**
+ * A stranger whose own entity holds a marked memory about it:
+ * someone else's, as `ownEntity` probes ask of it.
+ */
+const othersOwnEntity = async (markers: readonly string[]): Promise<string> => {
+  const person = stranger();
+  const theirs = personalStore(person);
+  const text = markedText(markers);
+  await theirs.addMemories({
+    change: crypto.randomUUID(),
+    access: { kind: "owner", person },
+    entities: [{ key: "me", kind: "person", own: true }],
+    memories: [
+      {
+        about: "me",
+        type: "fact",
+        statement: text,
+        speaker: { kind: "internal", person },
+        basis: { kind: "writer", writer: person },
+      },
+    ],
+  });
+  return person;
 };
 
 /**
@@ -6496,6 +6522,25 @@ const corePersonMemories = {
       await read("an id of the markers", markers.join("")),
     ];
   },
+  // The reader's own entity (GRA-1836): theirs alone, whatever someone
+  // else's holds; refused for someone who isn't a member.
+  ownEntityIdAs: async ({ personId, markers }) => {
+    await othersOwnEntity(markers);
+    return [
+      await answer(
+        "the reader's own",
+        async () => await coreBrain.ownEntityIdAs(env, personId)
+      ),
+      await answer(
+        "as someone who isn't a member",
+        async () => await coreBrain.ownEntityIdAs(env, stranger())
+      ),
+      await answer(
+        "as a person named by the markers",
+        async () => await coreBrain.ownEntityIdAs(env, markers.join(""))
+      ),
+    ];
+  },
   // The Brain's own lists and bounds, the same for every reader: no reader
   // asks, and no marker can be in them.
   memoryChoices: async () => [
@@ -7220,6 +7265,34 @@ export const memoriesProbes = (() => {
 
 /** The probes of cards. */
 const linkingProbes = {
+  // Someone else's own entity, with marked memories about it, answers the
+  // reader as a store that never made one does (GRA-1836).
+  ownEntity: async ({ markers, reader }) => {
+    // A refusal by its words alone: the object's id it carries is no answer.
+    const read = async (name: string, brain: Brain, about?: Answer["about"]) =>
+      await answer(
+        name,
+        async () =>
+          await refusedWith(async () => {
+            await brain.ownEntity({ reader });
+          }),
+        about
+      );
+    return [
+      await read(
+        "someone else's own store, holding marked memories about their own entity",
+        personalStore(await othersOwnEntity(markers)),
+        "hidden"
+      ),
+      await read(
+        "someone else's own store, never written",
+        personalStore(stranger()),
+        "nothing"
+      ),
+      await read("the shared store", store()),
+      await read("the reader's own store", personalStore(reader.person)),
+    ];
+  },
   readCard: async (probing) => {
     const { reader } = probing;
     const fixture = await recallFixture(probing);
