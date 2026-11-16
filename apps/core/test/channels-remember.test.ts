@@ -509,6 +509,12 @@ describe("a memory whose notice the person can't see in Teams", () => {
       async () => {
         const results = await toolResults(stub, chatId);
         expect(results.map(({ tool }) => tool)).toContain("remember");
+        // And the turn's next request, carrying the save, has reached the
+        // provider, which holds it: the model is refused only after.
+        const holding = ann.provider.requests.some(({ body }) =>
+          JSON.stringify(body).includes("Saved. It is about")
+        );
+        expect(holding).toBeTruthy();
       },
       { timeout: 20_000 }
     );
