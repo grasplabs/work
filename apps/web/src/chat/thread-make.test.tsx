@@ -1,3 +1,4 @@
+import type { AgentDraftMake, AgentDrafted } from "@grasp-os/shared/agents";
 // @vitest-environment happy-dom
 import type {
   ChatBuild,
@@ -106,6 +107,7 @@ const appOnly: ChatPlanned = {
 /** Core's side of the thread: the person's connections, and Build it. */
 const fakeCore = (connected: { current: boolean }) => {
   const built: ChatBuild[] = [];
+  const made: AgentDraftMake[] = [];
   const session = {
     connections: {
       list: async () =>
@@ -122,10 +124,15 @@ const fakeCore = (connected: { current: boolean }) => {
           app: { id: "app-1", name: "Month-end close" },
         });
       },
+      makeDraftedAgent: async (_chat: string, make: AgentDraftMake) => {
+        made.push(make);
+        return await Promise.resolve({ id: "agent-9", name: "HR helper" });
+      },
     },
   };
   return {
     built,
+    made,
     core: {
       withSession: async <T,>(
         action: (given: typeof session) => Promise<T>
@@ -147,7 +154,7 @@ const thread = async (
     connected?: { current: boolean };
   } = {}
 ) => {
-  const { core, built } = fakeCore(connected);
+  const { core, built, made } = fakeCore(connected);
   const page = createRootRoute({
     component: () => (
       <ChatThread
@@ -190,7 +197,7 @@ const thread = async (
   await act(async () => {
     await Promise.resolve();
   });
-  return { built, router };
+  return { built, made, router };
 };
 
 const button = (name: string): HTMLButtonElement | undefined =>
@@ -340,5 +347,70 @@ describe("making something in a chat's thread", () => {
       },
       { question: "When should reminders go out?", answer: "Every Friday" },
     ]);
+  });
+
+  it("shows an agent the chat drafted as its card says it, and makes it only on Make it, landing on its page", async () => {
+    const draft: AgentDrafted = {
+      callId: "call-draft",
+      name: "HR helper",
+      job: "Checks HR's mail.",
+      instructions: "Every Monday, sum up HR's new mail.",
+      whose: "company",
+      audience: { who: "everyone" },
+      classes: ["read-own"],
+      schedule: { cron: "0 8 * * 1", opening: "Sum up HR's new mail." },
+    };
+    const own: AgentDrafted = { ...draft, callId: "call-own", whose: "own" };
+    delete own.audience;
+    delete own.classes;
+    delete own.schedule;
+    const { made, router } = await thread([
+      said(1, 0, "Make me an HR agent."),
+      reply(2, 1, { agentDraft: own }),
+      said(3, 2, "One for the company, please."),
+      reply(4, 3, { agentDraft: draft }),
+    ]);
+    await settle();
+    const cards = [
+      ...document.querySelectorAll('section[aria-label^="An agent to make"]'),
+    ];
+    const shown = cards.map((card) =>
+      [...card.querySelectorAll("dd")].map((each) => each.textContent)
+    );
+    const makes = [...document.querySelectorAll("button")].filter(
+      (each) => each.textContent?.trim() === "Make it"
+    ).length;
+    await act(async () => {
+      button("Make it")?.click();
+      await Promise.resolve();
+    });
+    await settle();
+
+    expect({
+      shown,
+      makes,
+      made,
+      at: router.state.location.pathname,
+    }).toStrictEqual({
+      shown: [
+        [
+          "Checks HR's mail.",
+          "Yours alone: only you ask it",
+          "Every Monday, sum up HR's new mail.",
+        ],
+        [
+          "Checks HR's mail.",
+          "One of the company's agents",
+          "Everyone in the company",
+          "Read their own",
+          "0 8 * * 1 · Sum up HR's new mail.",
+          "Every Monday, sum up HR's new mail.",
+        ],
+      ],
+      // Only the latest draft waits for the person.
+      makes: 1,
+      made: [{ draft: "call-draft", text: "Make it", model: "openai/gpt-5" }],
+      at: "/agents/agent-9",
+    });
   });
 });

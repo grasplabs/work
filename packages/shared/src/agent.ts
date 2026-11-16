@@ -77,6 +77,8 @@ export const agentErrors = defineErrorFamily({
     "The file's text couldn't be read just now. Attach it again in a moment.",
   "agent.plan_not_found":
     "There's no such plan in this chat, or it was built already.",
+  "agent.draft_not_found":
+    "There's no such agent drafted in this chat, or it was made already.",
   "agent.plan_needs_connection":
     "This plan needs a connection that isn't there yet. Connect it, then build it.",
   "agent.file_not_found":

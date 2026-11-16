@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import type { AgentDraftMade, AgentDraftMake, AgentDrafted } from "./agents.ts";
 import type { ChatSavedMemory } from "./brain-memories.ts";
 import type { DependencyRequest } from "./dependencies.ts";
 import type { AppId } from "./ids.ts";
@@ -766,6 +767,11 @@ export type ChatMessage =
        * (`proposePlan`): shown as a card with Build it.
        */
       planned?: ChatPlanned;
+      /**
+       * The agent it drafted, if it ended its response drafting one
+       * (`draftAgent`): shown as a card with Make it.
+       */
+      agentDraft?: AgentDrafted;
       end: ChatReplyEnd;
       /**
        * Why it failed, as one of the model gateway's error codes: the page
@@ -1199,6 +1205,18 @@ export interface ChatsApi {
    * refused (`agent.plan_needs_connection`), with nothing made.
    */
   build: (chatId: string, build: ChatBuild) => Promise<ChatBuilt>;
+  /**
+   * Make it: makes the agent the chat drafted (`make.draft`), as its card
+   * showed it, by the Agents page's own checks: one of the company's for
+   * its admins alone, a person's own for anyone the company lets; each
+   * draft once. Then asks the chat's agent on, in the person's words
+   * (`make.text`). A draft the chat doesn't hold, or made already, is
+   * refused (`agent.draft_not_found`), with nothing made.
+   */
+  makeDraftedAgent: (
+    chatId: string,
+    make: AgentDraftMake
+  ) => Promise<AgentDraftMade>;
   /**
    * What the chat's agent worked on, the most recently written first: each
    * App or workflow whose draft it wrote (`ChatWork`).
