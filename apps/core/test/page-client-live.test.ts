@@ -1,4 +1,4 @@
-import { GraspClient } from "@grasp-os/runtime/host";
+import { GraspClient, keepMs } from "@grasp-os/runtime/host";
 import type { ClientTransport } from "@grasp-os/runtime/host";
 import { storeIdSchema } from "@grasp-os/shared/ids";
 import { querySubscriptionLimits } from "@grasp-os/shared/pages";
@@ -153,7 +153,7 @@ describe("live queries", { timeout: 120_000 }, () => {
       expect(note.now().value).toMatchObject({ title: "First" });
     });
     // Nobody reads the note now, as when another note is opened: it is
-    // kept for a remount, but followed by no one.
+    // kept for a remount, and still followed.
     note.stop();
     await scheduler.wait(0);
     await client.mutation(api.update, {
@@ -195,14 +195,14 @@ describe("live queries", { timeout: 120_000 }, () => {
     await eventually(() => {
       expect(note.now().value).toMatchObject({ title: "Second" });
     });
-    // Nobody follows the note now, so it shows nothing it kept, and the
-    // read sent before the push is still older than what it showed.
+    // Nobody follows the note now: the read sent before the push is still
+    // older than what it shows.
     note.stop();
     await scheduler.wait(0);
     open();
     await late;
 
-    expect(note.now().value).toBeUndefined();
+    expect(note.now().value).toMatchObject({ title: "Second" });
   });
 
   it("clears what a page shows once the person loses access, before anything more reaches it", async () => {
@@ -324,7 +324,15 @@ describe("live queries", { timeout: 120_000 }, () => {
       await eventually(() => {
         expect(shown(list.now())).toStrictEqual([]);
       });
-      list.stop();
+      // Nobody reads the list now, and once nobody has for a while the
+      // client lets go of its watch.
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      try {
+        list.stop();
+        vi.advanceTimersByTime(keepMs);
+      } finally {
+        vi.useRealTimers();
+      }
       await scheduler.wait(500);
 
       // The store's sweep asks each watcher whether it is still there:

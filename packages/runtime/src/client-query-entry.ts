@@ -53,7 +53,7 @@ export interface QueryEntry {
   readonly listeners: Set<() => void>;
   /** Imperative reads waiting on it now. */
   interest: number;
-  /** Its subscription, while components read it (over the frame). */
+  /** Its subscription, from a component's first read until it is dropped (over the frame). */
   live: Live | undefined;
   /** The number of the latest read sent, and of the one shown. */
   sent: number;
@@ -148,5 +148,9 @@ export const settleRead = (
   return settled.value;
 };
 
-/** How long a query no one reads stays cached: across a quick remount. */
+/**
+ * How long a query no one reads stays cached, and followed: a component
+ * that reads it again within this while shows it at once, as core last
+ * pushed it.
+ */
 export const keepMs = 30_000;

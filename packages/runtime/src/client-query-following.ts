@@ -27,7 +27,7 @@ export const stop = (live: Live): void => {
   live.release = undefined;
 };
 
-/** Stops following `entry`'s query: no component reads it any more. */
+/** Stops following `entry`'s query: it is dropped, or fenced. */
 export const unfollow = (entry: QueryEntry): void => {
   const { live } = entry;
   entry.live = undefined;
@@ -178,7 +178,9 @@ export class QueryFollower {
       Date.now() - live.since >= steadyMs ? 0 : live.failures + 1;
     live.retry = setTimeout(
       () => {
-        if (isCurrent(entry, live) && entry.listeners.size > 0) {
+        // Followed again while it is kept, read now or not: one dropped
+        // meanwhile is no longer current.
+        if (isCurrent(entry, live)) {
           this.follow(entry, failures);
         }
       },

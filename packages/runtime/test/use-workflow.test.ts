@@ -10,6 +10,7 @@ import {
 
 import { clientInternals, GraspClient } from "../src/client-core.ts";
 import { GraspError } from "../src/client-error.ts";
+import { keepMs } from "../src/client-query-entry.ts";
 import type { ClientTransport } from "../src/client-transport.ts";
 import type { Id } from "../src/index.ts";
 import type { WorkflowViewOf } from "../src/react.ts";
@@ -831,11 +832,11 @@ describe("useWorkflow", () => {
       });
     });
 
-    it("stops following on unmount, pausing or cancelling nothing", async () => {
+    it("stops following once nothing has read it for a while after unmount, pausing or cancelling nothing", async () => {
       const page = host();
       const hook = await showing(page);
       hook.unmount();
-      await flush();
+      await vi.advanceTimersByTimeAsync(keepMs);
       expect({
         open: page.followed.filter((query) => !query.released).length,
         calls: page.calls.length,

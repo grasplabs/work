@@ -272,8 +272,8 @@ interface Asked {
  * do with a release. What the test controls: `version`, records `hidden`
  * from the person, `broken` (every page with a cursor refused, as when
  * its anchor ranks before its start), and `hold` (answers held until
- * `release`: to pages with a cursor, or to all). `reread` pushes every page followed, as
- * a write would; `asked` is every page followed, in order.
+ * `release`: to pages with a cursor, or to all). `reread` pushes every page followed (or
+ * those it picks), as a write would; `asked` is every page followed, in order.
  */
 /** The title a test host's cursor (`<version>:<title>`) is after. */
 const titleOf = (cursor: string): string =>
@@ -414,10 +414,11 @@ const listHost = (titles: readonly string[]) => {
     state,
     asked,
     client: new GraspClient(transport),
-    reread: () => {
+    /** Pushes every page followed now, or those `which` picks. */
+    reread: (which: (page: Asked) => boolean = () => true) => {
       // Those followed now: a page followed meanwhile is read anew.
       const now = [...followed];
-      for (const page of now) {
+      for (const page of now.filter(({ asked: each }) => which(each))) {
         push(page);
       }
     },
@@ -609,7 +610,10 @@ describe("the session client's paginated list started again", () => {
     await list.pager.loadMore();
     // Records moved into the first page, ended after `b`, until its answer
     // is past what one may carry, though each record fits on its own.
+    // Core pushes the write to every query followed: the first page as
+    // it was, still kept, and the ended page refused.
     host.state.titles.push("a0", "a1", "a2", "a3");
+    host.reread(({ endCursor }) => endCursor === undefined);
     host.refuse(
       ({ endCursor }) => endCursor !== undefined,
       "page.answer_too_large"
@@ -1262,18 +1266,30 @@ describe("the session client following a query", () => {
   });
 });
 
+/** Once the tasks queued now, and the microtasks they start, have run. */
+const aTaskLater = async (): Promise<void> => {
+  const { promise, resolve } = Promise.withResolvers<null>();
+  setTimeout(() => {
+    resolve(null);
+  }, 0);
+  await promise;
+};
+
 describe("the session client reading a query again", () => {
-  it("shows a reader who comes back after nobody followed it nothing kept from before, only what core pushes then", async () => {
-    // Core's note, and the push each following gets: the note as it is.
-    let title = "Call Acme back";
+  it("shows a reader who comes back soon the query as core pushed it meanwhile, at once, following it once", async () => {
+    let follows = 0;
+    let push: ((title: string) => void) | undefined;
     const transport: ClientTransport = {
       call: async () => await Promise.resolve(answered(null)),
       watch: async (_request, onSnapshot) => {
+        follows += 1;
+        let revision = 0;
+        push = (title) => {
+          revision += 1;
+          onSnapshot({ revision, ...answered({ title }) });
+        };
         await Promise.resolve();
-        const now = title;
-        queueMicrotask(() => {
-          onSnapshot({ revision: 1, ...answered({ title: now }) });
-        });
+        push("Call Acme back");
         return { release: unheard };
       },
     };
@@ -1291,17 +1307,62 @@ describe("the session client reading a query again", () => {
       });
     });
     first.stop();
-    // Let go once the task that stopped it ends.
-    await Promise.resolve();
+    // Every task its letting go starts has ended.
+    await aTaskLater();
+    // Saved while nobody here reads it: core still pushes it.
+    push?.("My title");
 
-    // Saved elsewhere while nobody here followed it.
-    title = "My title";
     const again = reader();
-    expect(again.entry.snapshot.value).toBeUndefined();
-    await vi.waitFor(() => {
-      expect(again.entry.snapshot.value).toStrictEqual({ title: "My title" });
-    });
+    const shownFirst = again.entry.snapshot.value;
     again.stop();
+
+    expect({ shownFirst, follows }).toStrictEqual({
+      shownFirst: { title: "My title" },
+      follows: 1,
+    });
+  });
+
+  it("shows a list a reader comes back to as core pushed it meanwhile, never as it was, nor loading", async () => {
+    const host = listHost(["a", "b", "c"]);
+    const first = listOf(host, 2);
+    await vi.waitFor(() => {
+      expect(first.titles()).toStrictEqual(["a", "b"]);
+    });
+    first.stop();
+    // Every task its letting go starts has ended.
+    await aTaskLater();
+    // A note saved while nobody here reads the list.
+    host.state.titles.push("aa");
+    host.reread();
+
+    // Every view the list's reader is shown, from its first render.
+    const internals = clientInternals(host.client);
+    const pager = internals.pager(api.notes.list, {}, 2);
+    const seen: { titles: unknown[]; isLoading: boolean }[] = [];
+    const look = (): void => {
+      const { items, isLoading } = pager.snapshot.view;
+      seen.push({
+        titles: items.map((item) =>
+          typeof item === "object" && item !== null && "title" in item
+            ? item.title
+            : item
+        ),
+        isLoading,
+      });
+    };
+    const stop = internals.subscribePager(pager, look);
+    look();
+    await vi.waitFor(() => {
+      expect(seen.at(-1)?.titles).toStrictEqual(["a", "aa"]);
+    });
+    stop();
+
+    expect(
+      seen.filter(
+        ({ titles, isLoading }) =>
+          isLoading || JSON.stringify(titles) !== '["a","aa"]'
+      )
+    ).toStrictEqual([]);
   });
 });
 

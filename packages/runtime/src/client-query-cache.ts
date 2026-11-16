@@ -19,9 +19,11 @@ import type { ClientTransport } from "./client-transport.ts";
 
 /**
  * The client's queries, by reference and normalized arguments, shared by
- * the components and imperative reads that read them: followed while a
- * component reads one, read from the host otherwise, and dropped once
- * nothing has read one for a while.
+ * the components and imperative reads that read them: followed from when
+ * a component first reads one until nothing has read it for a while
+ * (`keepMs`), then dropped; read from the host otherwise. So what a
+ * component that comes back within that while shows is kept current by
+ * core's pushes, never what the query was when the last one left.
  */
 export class QueryCache {
   readonly #queries = new Map<string, QueryEntry>();
@@ -103,19 +105,7 @@ export class QueryCache {
     }
     return () => {
       entry.listeners.delete(onChange);
-      // Released once the task that let go of it ends without another
-      // reader: React resubscribes a component within one commit, and
-      // that keeps the subscription rather than follow the query anew.
-      // What it showed then is let go too: followed by no one, it may be
-      // old by the time a reader comes back (a form whose defaults come
-      // from it would open on a note saved over since), so that reader
-      // waits for core's first push instead.
-      queueMicrotask(() => {
-        if (entry.listeners.size === 0 && entry.live !== undefined) {
-          unfollow(entry);
-          show(entry, loading);
-        }
-      });
+      // Still followed, until it is dropped (`release`).
       this.release(entry);
     };
   }
@@ -145,7 +135,10 @@ export class QueryCache {
     }
   }
 
-  /** Drops `entry` once nothing has read it for a while. */
+  /**
+   * Drops `entry`, and stops following it, once nothing has read it for a
+   * while.
+   */
   release(entry: QueryEntry): void {
     if (wanted(entry) || entry.evict !== undefined) {
       return;
@@ -153,6 +146,7 @@ export class QueryCache {
     entry.evict = setTimeout(() => {
       entry.evict = undefined;
       if (!wanted(entry)) {
+        unfollow(entry);
         entry.reading?.stop.abort();
         entry.reading = undefined;
         this.#queries.delete(entry.key);
@@ -190,6 +184,7 @@ export class QueryCache {
       if (!wanted(entry)) {
         clearTimeout(entry.evict);
         entry.evict = undefined;
+        unfollow(entry);
         entry.reading?.stop.abort();
         entry.reading = undefined;
         this.#queries.delete(entry.key);
@@ -218,11 +213,13 @@ export class QueryCache {
     for (const entry of this.#queries.values()) {
       entry.stale = true;
       entry.changes += 1;
-      // Read once (`query()`) and followed by no one: core pushes it
-      // nothing, so what it holds may be from before the change. The
-      // next reader waits for it afresh, never starting from that (a
-      // form whose defaults come from it would save an old revision).
-      if (entry.live === undefined && entry.listeners.size === 0) {
+      // Kept but read by no one: what it holds may be from before the
+      // change, as core's push of it may come after the change's own
+      // answer, or never (read once, `query()`, and not followed). The
+      // next reader follows it afresh, never starting from that (a form
+      // whose defaults come from it would save an old revision).
+      if (entry.listeners.size === 0) {
+        unfollow(entry);
         show(entry, loading);
       }
     }
