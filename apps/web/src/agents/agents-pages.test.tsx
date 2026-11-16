@@ -225,11 +225,15 @@ const cards = () =>
       "ul[aria-label='Your agents'] > li, ul[aria-label='Agents'] > li"
     ),
   ].map((card) => {
-    const [name, ...others] = [...card.querySelectorAll("a")];
+    // Its name: a link to its page where the person manages it, else text.
+    const name = card.querySelector(".font-medium");
+    const links = [...card.querySelectorAll("a")];
     return {
       name: name?.textContent,
-      to: name?.getAttribute("href"),
-      chat: others.map((link) => link.getAttribute("href")),
+      to: name instanceof HTMLAnchorElement ? name.getAttribute("href") : null,
+      chat: links
+        .filter((link) => link !== name)
+        .map((link) => link.getAttribute("href")),
       text: card.textContent ?? "",
     };
   });
@@ -272,7 +276,7 @@ describe("the company's agents, on pages of their own", () => {
   });
 
   describe("the Agents page", () => {
-    it("shows someone who isn't an admin only their agents, each opening a chat with it and nothing to change", async () => {
+    it("shows someone who isn't an admin only their agents, each with a way into a chat with it and nothing to open or change", async () => {
       await mounted(
         <AgentsOverview
           makesOwn={false}
@@ -287,12 +291,12 @@ describe("the company's agents, on pages of their own", () => {
       ).toStrictEqual([
         {
           name: "Stephen",
-          to: "/?agent=organization",
+          to: null,
           chat: ["/?agent=organization"],
         },
         {
           name: "Claire",
-          to: "/?agent=agent-claire",
+          to: null,
           chat: ["/?agent=agent-claire"],
         },
       ]);
@@ -338,7 +342,7 @@ describe("the company's agents, on pages of their own", () => {
           // Then the company's, once: never their own again.
           {
             name: "Stephen",
-            to: "/?agent=organization",
+            to: null,
             chat: ["/?agent=organization"],
           },
         ],
