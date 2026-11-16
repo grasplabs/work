@@ -55,7 +55,7 @@ const AgentRoutePage = () => {
     // Never shown: the loader leads such a read to the Agents page.
     return null;
   }
-  const { managed, own, usable, people, models, firstAccess, documents } =
+  const { managed, own, usable, people, models, firstAccess, documents, apps } =
     page.data;
   const agent =
     own.find(({ id }) => id === agentId) ??
@@ -76,6 +76,7 @@ const AgentRoutePage = () => {
       <SiteHeader crumbs={[...crumbs, { label: agent.name }]} />
       <AgentPage
         agent={agent}
+        apps={apps}
         documents={documents}
         editable={mine || isMemberAdmin(identity)}
         first={!mine && agent.id === managed?.agents.at(0)?.id}
@@ -129,8 +130,10 @@ export const Route = createFileRoute("/_shell/agents/$agent")({
       const [listed] = await Promise.allSettled([session.members.list()]);
       // The agent's documents: not shown when core won't say, and the
       // page still shows the agent.
-      const [kept] = await Promise.allSettled([
+      const [kept, apps, catalog] = await Promise.allSettled([
         session.connections.agentDocuments(params.agent),
+        session.connections.agentApps(params.agent),
+        session.connections.catalog(),
       ]);
       return {
         managed,
@@ -139,6 +142,13 @@ export const Route = createFileRoute("/_shell/agents/$agent")({
         people: listed.status === "fulfilled" ? listed.value : [],
         models: chosen.status === "fulfilled" ? chosen.value : [],
         documents: kept.status === "fulfilled" ? kept.value : undefined,
+        apps: {
+          apps: apps.status === "fulfilled" ? apps.value : undefined,
+          offered:
+            catalog.status === "fulfilled"
+              ? catalog.value.entries.filter(({ offered }) => offered)
+              : [],
+        },
         firstAccess:
           managed !== undefined && params.agent === managed.agents.at(0)?.id
             ? await readFirstAccess(session)

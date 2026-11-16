@@ -1035,15 +1035,18 @@ export const UnpublishedChanges = ({
   const summaries = appChanges === null ? [] : changeSummaries(appChanges);
   const problems = review?.passed === false ? review.problems : [];
   return (
+    // One row, whatever comes in later (the summaries, Fix with Grasp): it
+    // stands over the preview, which a taller line would push down under
+    // the person's pointer.
     <section
       aria-label={t`Changes only you see`}
-      className="bg-muted flex flex-none flex-wrap items-center gap-x-3 gap-y-1 border-b px-3 py-1.5"
+      className="bg-muted flex flex-none items-center gap-3 border-b px-3 py-1.5"
     >
-      <p className="font-medium">
+      <p className="shrink-0 font-medium">
         <ChangesCount draft={draft} review={review} />
       </p>
       {/* The page shows them while there are some. */}
-      <p className="text-muted-foreground">
+      <p className="text-muted-foreground truncate">
         <Trans>You’re seeing your version.</Trans>
       </p>
       {summaries.length === 0 ? null : (
