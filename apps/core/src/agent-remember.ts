@@ -17,12 +17,14 @@ import type { Remembered } from "./brain-next.ts";
 import { modelForRole, modelSettings, models } from "./models.ts";
 
 // The agent remembers on its own (GRA-1814, the plan's decision 13): in a
-// person's own chat in Grasp's app, in a turn they started, it may keep
-// what they said that will matter later, without being asked, as a
-// memory in their own word, readable by them alone (brain-memories.ts).
-// The chat shows a notice of each with a way to undo it (the result's
-// `details`, as `ChatSavedMemory`; undoing is
-// `session.brainMemories.forget`).
+// person's own chat, in a turn they started, it may keep what they said
+// that will matter later, without being asked, as a memory in their own
+// word, readable by them alone (brain-memories.ts). Their own chat is
+// the one in Grasp's app, or their direct message on a chat app
+// (GRA-1920). Each shows a notice of every memory with a way to undo it:
+// the result's `details`, as `ChatSavedMemory`. In Grasp's app undoing
+// is `session.brainMemories.forget`; in a chat app it is the Undo on the
+// notice's card (channels/remembered.tsx), through the same `forgetFor`.
 //
 // From the threat model on GRA-1743, only what the person said is their
 // word, checked twice before anything is saved, by the plan's own rule
@@ -36,8 +38,7 @@ import { modelForRole, modelSettings, models } from "./models.ts";
 //   themselves, as their own statement, not as text they pasted or
 //   forwarded. Not confirmed, or no model to ask: nothing is saved.
 // The harness offers the tool only where the person can see the notice
-// and undo it: their own chat in Grasp's app, in a turn they started
-// (chat-harness.ts). The model is told what memory is for and to keep
+// and undo it: their own chat, in a turn they started (chat-harness.ts). The model is told what memory is for and to keep
 // little, not given rules for what to save (the plan's research). A retry
 // of the same call (a restart replays it) is the same memory: its change
 // is the chat's and the call's.
@@ -274,7 +275,8 @@ const notTheirWords =
 
 /**
  * The tool for one turn of `scope`'s chat, which `said` started: only in
- * the person's own chat in Grasp's app, in a turn they started.
+ * the person's own chat, in Grasp's app or their direct message on a chat
+ * app, in a turn they started.
  */
 export const rememberTool = (
   env: Env,

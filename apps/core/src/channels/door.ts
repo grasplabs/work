@@ -91,6 +91,7 @@ import {
   notHelpfulAction,
   signInCard,
   startAction,
+  undoAction,
 } from "./cards.tsx";
 import { inertInMessage } from "./inert.ts";
 import { pressCard } from "./press.ts";
@@ -101,6 +102,7 @@ import { rateRequest } from "./stephen-requests.ts";
 import type { ConnectedTeamsAdapter } from "./teams-adapter.ts";
 import { teamsAdapter, verifiedTeamsRequest } from "./teams.ts";
 import type { TeamsKeys } from "./teams.ts";
+import { pressUndo } from "./undo.ts";
 import { inDirectory, teamsMembers, writerOf } from "./who.ts";
 import { channelLocales, say } from "./words.ts";
 import type { ChannelLocale } from "./words.ts";
@@ -687,8 +689,10 @@ const gate = async (
 /**
  * What a press on a card's button does, on any platform, by the member
  * the door let in, in their own private chat: Confirm or Cancel on a card
- * of held writes (press.ts), or Start on a card offering a workflow
- * (workflow-offers.ts), which starts it if it is theirs.
+ * of held writes (press.ts), Start on a card offering a workflow
+ * (workflow-offers.ts), which starts it if it is theirs, or Undo on the
+ * notice of a memory of theirs, taken only from their direct message
+ * (`inDirect`, undo.ts).
  */
 const onPresses = (
   env: Env,
@@ -698,15 +702,20 @@ const onPresses = (
     userId,
     state,
     locale,
+    inDirect,
   }: {
     platform: "teams" | "slack";
     userId: string;
     state: StateAdapter;
     locale: ChannelLocale;
+    inDirect: boolean;
   }
 ): void => {
   chat.onAction([confirmAction, cancelAction], async (event) => {
     await pressCard(env, { platform, userId, event, state });
+  });
+  chat.onAction(undoAction, async (event) => {
+    await pressUndo(env, { platform, userId, event, state }, inDirect);
   });
   chat.onAction(startAction, async (event) => {
     if (event.thread === null) {
@@ -802,6 +811,8 @@ const slackPressResponse = async (
     userId: writer.userId,
     state,
     locale: "en",
+    // Only a press in their direct message gets this far.
+    inDirect: true,
   });
   return await chat.webhooks.slack(
     new Request(request.url, {
@@ -1124,6 +1135,7 @@ export const channelResponse = async (
     userId,
     state,
     locale: localeOf(activity.locale),
+    inDirect: place?.kind === "direct",
   });
   // A thumb on one of his answers: kept on the request it is for, only
   // when that request is the presser's own (stephen-requests.ts).

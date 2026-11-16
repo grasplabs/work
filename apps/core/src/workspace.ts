@@ -12,6 +12,7 @@ import type {
   AuditDetailValue,
   AuditEntry,
 } from "@grasp-os/shared/audit";
+import type { ChatSavedMemory } from "@grasp-os/shared/brain-memories";
 import {
   chatChannelSchema,
   chatFilesMax,
@@ -140,7 +141,12 @@ import type {
   TurnRequest,
   TurnStop,
 } from "./chat-harness.ts";
-import { chatMessageOf, partialOf, shownBuiltSchema } from "./chat-messages.ts";
+import {
+  chatMessageOf,
+  partialOf,
+  savedOf,
+  shownBuiltSchema,
+} from "./chat-messages.ts";
 import type { ShownBuilt } from "./chat-messages.ts";
 import {
   saidOf,
@@ -233,6 +239,12 @@ interface LiveTurn {
    * and how each ended, never what they read. Only when its asker wants them.
    */
   calls?: ToolCall[];
+  /**
+   * The memories its agent saved for the person (agent-remember.ts), as
+   * their notices show them: for a chat app's asker, who posts each with
+   * its Undo (channels/remembered.tsx). Only when its asker wants them.
+   */
+  remembered?: ChatSavedMemory[];
   /** Tells a chat platform's asker the answer's text so far. */
   onText?: (text: string) => unknown;
   /**
@@ -2202,7 +2214,12 @@ export class Workspace extends DurableObject<Env> {
     text: string,
     onText: ((text: string) => unknown) | undefined,
     place: ChatPlace
-  ): Promise<{ chatId: string; answer: Answer; calls: ToolCall[] }> {
+  ): Promise<{
+    chatId: string;
+    answer: Answer;
+    calls: ToolCall[];
+    remembered: ChatSavedMemory[];
+  }> {
     const platform = chatPlatformSchema.parse(via);
     const parsedPlace = permissionErrors.parse(
       "permission.context_invalid",
@@ -2255,10 +2272,16 @@ export class Workspace extends DurableObject<Env> {
       );
     }
     const calls: ToolCall[] = [];
+    const remembered: ChatSavedMemory[] = [];
     return {
       chatId: chat.id,
-      answer: await this.#turn(chat, { text, model }, false, { onText, calls }),
+      answer: await this.#turn(chat, { text, model }, false, {
+        onText,
+        calls,
+        remembered,
+      }),
       calls,
+      remembered,
     };
   }
 
@@ -2309,7 +2332,8 @@ export class Workspace extends DurableObject<Env> {
    * it there and then: every entry point says which, as what the turn may
    * read depends on it (`answersAlone`). `started` is called once the turn
    * is under way: the model admitted, and nothing kept yet. `calls` gets
-   * each call its code makes, as it ends.
+   * each call its code makes, as it ends; `remembered` each memory its
+   * agent saved, as it is kept.
    */
   async #turn(
     chat: Chat,
@@ -2319,10 +2343,12 @@ export class Workspace extends DurableObject<Env> {
       started,
       onText,
       calls,
+      remembered,
     }: {
       started?: () => void;
       onText?: (text: string) => unknown;
       calls?: ToolCall[];
+      remembered?: ChatSavedMemory[];
     } = {}
   ): Promise<Answer> {
     const parsed = questionSchema.safeParse(question);
@@ -2349,6 +2375,7 @@ export class Workspace extends DurableObject<Env> {
       agentId: chat.agentId,
       reads: [],
       calls,
+      remembered,
       cache: { requests: 0, inputTokens: 0, cacheReadTokens: 0 },
     };
     this.#turns.set(chat.id, live);
@@ -3127,6 +3154,12 @@ export class Workspace extends DurableObject<Env> {
       );
       if (message.role === "assistant") {
         answer = id;
+      }
+      // A memory its agent saved, for the asker who shows its notice.
+      const saved =
+        message.role === "toolResult" ? savedOf(message) : undefined;
+      if (saved !== undefined) {
+        live?.remembered?.push(saved);
       }
     }
     // With the messages: no await between, so they are stored together.
