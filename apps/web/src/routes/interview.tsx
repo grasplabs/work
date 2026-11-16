@@ -165,8 +165,9 @@ const opened = async (secret: string, core: CoreConnection): Promise<Page> => {
 /**
  * Until stopped: once their session ends mid-interview, the conversation
  * stops, what isn't kept yet waits in this tab (kept.ts `setAside`), and
- * `then` is given the page that asks them to sign in again. Once only for
- * the interview held: what the page asks on the way finds it ended too.
+ * `then` is given the page that asks them to sign in again. Every later
+ * call finds it ended too (api.ts `gated`); only a delete or withdrawal
+ * asked for then changes what the sign-in says.
  */
 const onEnded = (
   secret: string,
@@ -175,16 +176,24 @@ const onEnded = (
 ): (() => void) => {
   let current = true;
   let ended = false;
-  const stopListening = onSessionEnded(() => {
-    if (ended) {
+  /** The latest sign-in page asked for: only its answer is shown. */
+  let asked = 0;
+  const stopListening = onSessionEnded((by) => {
+    const first = !ended;
+    if (first) {
+      ended = true;
+      stopLoop();
+    }
+    // A later call changes what waits only when it is a delete or a
+    // withdrawal asked for now: the sign-in then says it didn't happen.
+    if (!setAside(by) && !first) {
       return;
     }
-    ended = true;
-    stopLoop();
-    setAside();
+    asked += 1;
+    const mine = asked;
     const again = async (): Promise<void> => {
       const next = await opened(secret, core);
-      if (current) {
+      if (current && mine === asked) {
         then(next);
       }
     };

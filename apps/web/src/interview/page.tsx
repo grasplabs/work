@@ -31,12 +31,12 @@ import { Composer, SaveNote, SaveTrouble } from "./composer.tsx";
 import { Head, headSizes, useHead } from "./head.tsx";
 import {
   forgetInterview,
-  forgetUnsaved,
   keepNow,
   linkNow,
   onTaken,
   update,
   useInterviewer,
+  useAside,
   useLost,
   useProgress,
   useUndone,
@@ -188,6 +188,7 @@ const InterviewFrame = ({
   right,
   box,
   open = false,
+  frozen = false,
   children,
 }: {
   /**
@@ -196,6 +197,11 @@ const InterviewFrame = ({
    * that can't be opened has kept nothing here.
    */
   open?: boolean;
+  /**
+   * Their session ended (kept.ts `useAside`): the page takes nothing more,
+   * not a key or a press, until the sign-in shows (GRA-1943).
+   */
+  frozen?: boolean;
   /** Where the frame's top and bottom are measured, so the stage takes what is left. */
   top: RefObject<HTMLElement | null>;
   bottom: RefObject<HTMLElement | null>;
@@ -205,7 +211,10 @@ const InterviewFrame = ({
   box?: ReactNode;
   children: ReactNode;
 }) => (
-  <div className="bg-background flex h-svh flex-col overflow-hidden text-sm">
+  <div
+    className="bg-background flex h-svh flex-col overflow-hidden text-sm"
+    inert={frozen}
+  >
     <header
       className="flex h-18 flex-none items-center gap-3 px-4 sm:px-10"
       ref={top}
@@ -540,11 +549,6 @@ const useDeleting = () => {
     setDeleted("deleting");
     const answer = await deleteInterview(link.secret);
     if (isRefused(answer)) {
-      if (answer.status === 401) {
-        // Their session ended as they asked: nothing of it waits to be
-        // kept again once they are back, where they delete it again.
-        forgetUnsaved("delete");
-      }
       setDeleted("no");
       setDeleteFailed(answer.message);
       return;
@@ -638,11 +642,6 @@ const useWithdrawing = (session: OpenSession) => {
     }
     const answer = await withdrawInterview(link.secret);
     if (isRefused(answer)) {
-      if (answer.status === 401) {
-        // Their session ended as they asked: as for a delete, nothing of it
-        // waits to be kept again once they are back, where they ask again.
-        forgetUnsaved("withdraw");
-      }
       setWithdrawFailed(answer.message);
       return;
     }
@@ -665,6 +664,7 @@ const useWordsOnScreen = (): void => {
 /** The interview on the link, held on this device. */
 export const InterviewPage = ({ session }: { session: OpenSession }) => {
   const progress = useProgress();
+  const aside = useAside();
   const [stopped, setStopped] = useState(false);
   const { deleted, removingDeleted, deleteFailed, remove } = useDeleting();
   const { withdrawn, removing, withdrawFailed, withdraw } =
@@ -728,6 +728,7 @@ export const InterviewPage = ({ session }: { session: OpenSession }) => {
 
   return (
     <InterviewFrame
+      frozen={aside}
       bottom={bottom}
       box={talking ? <AnswerBox reading={reading} /> : undefined}
       left={

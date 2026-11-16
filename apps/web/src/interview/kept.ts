@@ -6,11 +6,19 @@ import type {
   InterviewFact,
   InterviewProgress,
 } from "@grasp-os/shared/interview-links";
+import { canonicalJson } from "@grasp-os/shared/json";
 import type { Interviewer } from "@grasp-os/shared/onboarding";
 import { useSyncExternalStore } from "react";
 import { z } from "zod";
 
-import { approveFacts, isRefused, saveProgress } from "./api.ts";
+import {
+  approveFacts,
+  beginCalls,
+  endCalls,
+  isRefused,
+  saveProgress,
+} from "./api.ts";
+import type { CallKind } from "./api.ts";
 import { freshProgress, notYetApproved, resumed } from "./progress.ts";
 
 // Someone's interview as this page holds it, kept in core after every
@@ -27,15 +35,20 @@ import { freshProgress, notYetApproved, resumed } from "./progress.ts";
 // same receipt; when core keeps another copy, that one is read back again.
 //
 // When their session ends mid-interview (the company's gate opens, they
-// signed out in another tab, it expired: GRA-1943), whatever isn't kept
-// yet is set aside (`setAside`): nothing more is sent, not even as the
-// page goes, until core opens the link again for a session. Until then the
-// copy that isn't kept, and what is typed in the box, wait in this tab
-// alone (`sessionStorage`, under the link's draft name, a hash of its
-// secret). This is the one time an interview's words are put in the
-// browser's storage, and only while something isn't kept. From the threat
-// model:
+// signed out in another tab, it expired: GRA-1943), the interview is set
+// aside (`setAside`) and the page takes nothing more. What isn't kept yet,
+// and what is typed in the box, are written once to this tab alone
+// (`sessionStorage`, under the link's draft name, a hash of its secret),
+// as they are at that moment, and wait there until core opens the link
+// again for a session. This is the one time an interview's words are put
+// in the browser's storage, and only while something isn't kept. From the
+// threat model:
 //
+// - Late answers: every call of the session belongs to one epoch (api.ts
+//   `gated`), which ends as the session is found ended. Every call on its
+//   way is aborted then, and whatever it answers is dropped before any
+//   code here or on the page sees it. So nothing that lands later changes
+//   the page or what waits, and nothing is sent until the link opens again.
 // - Sent without a session, or under someone else's: nothing goes out
 //   while set aside, and it is taken up again only as core opens the link,
 //   which it does only for the account the link belongs to. When it opens
@@ -45,15 +58,17 @@ import { freshProgress, notYetApproved, resumed } from "./progress.ts";
 //   withdrawal in another window, another window going on): a kept copy
 //   only ever goes onto the version it was taken at, and onto an interview
 //   that still takes saves. Otherwise core's copy is the interview, what
-//   waited is forgotten, and the page says it couldn't be kept (`useLost`).
+//   waited is forgotten, and the page says it couldn't be kept (`useLost`);
+//   unless core's copy is what waited (their own save landed, its answer
+//   dropped), which is no change at all.
 // - Approving what wasn't read back: an approval that hadn't reached core
 //   is never sent by itself afterwards. They see the read-back again and
 //   agree again. An approval names the facts as they stood when they
 //   agreed (`Approval`), so core refuses it once any of them changed.
 // - Repeating what can't be undone: a delete or a withdrawal that met the
-//   ended session didn't happen and is never repeated by itself; nothing
-//   unsaved is kept back before they can press it again, and the page
-//   says it didn't happen (`useUndone`).
+//   ended session, or was asked for once it had ended, didn't happen and
+//   is never repeated by itself; nothing unsaved is kept back before they
+//   can press it again, and the page says it didn't happen (`useUndone`).
 // - Kept anywhere but this tab: never in `localStorage`, the address, or
 //   what the sign-in keeps. The tab's storage outlives the tab in places:
 //   reopening a closed tab or restoring a session brings it back, and
@@ -167,9 +182,6 @@ const unsavedIn = (mine: Kept): boolean => mine.dirty || mine.typed !== "";
  * the page tells them they are signing in again.
  */
 const keepAside = (mine: Kept): void => {
-  if (!mine.aside) {
-    return;
-  }
   const aside: Aside = {
     version: mine.version,
     progress: mine.dirty ? mine.progress : null,
@@ -229,14 +241,9 @@ const setSaveState = (next: SaveState): void => {
 export const progressNow = (): InterviewProgress =>
   kept?.progress ?? freshProgress;
 
-/**
- * The link this page holds, while it holds one and their session hasn't
- * ended: everything said on the link goes by it (turns, stories, lines
- * said, the ear), so nothing goes out while it is set aside, whatever
- * answer lands meanwhile.
- */
+/** The link this page holds, while it holds one. */
 export const linkNow = (): { secret: string } | null =>
-  kept === null || kept.aside ? null : { secret: kept.secret };
+  kept === null ? null : { secret: kept.secret };
 
 const saveOnce = async (mine: Kept): Promise<void> => {
   mine.dirty = false;
@@ -251,12 +258,6 @@ const saveOnce = async (mine: Kept): Promise<void> => {
     return;
   }
   if (isRefused(answer)) {
-    if (mine.aside) {
-      // Their session ended: it waits for them to sign in again.
-      mine.dirty = true;
-      keepAside(mine);
-      return;
-    }
     const passing =
       answer.status === 0 || answer.status === 429 || answer.status >= 500;
     if (passing) {
@@ -273,19 +274,6 @@ const saveOnce = async (mine: Kept): Promise<void> => {
     return;
   }
   mine.failed = 0;
-  if (mine.aside) {
-    // Landed just before their session ended: what waits goes on from it,
-    // and is only what changed since. Not kept: it waits at the version it
-    // went on from, and core's copy decides once they are back.
-    if (answer.saved) {
-      mine.version = answer.version;
-      mine.dirty = mine.progress !== sent;
-    } else {
-      mine.dirty = true;
-    }
-    keepAside(mine);
-    return;
-  }
   mine.version = answer.version;
   const { restoring } = mine;
   mine.restoring = false;
@@ -343,14 +331,8 @@ const approveOnce = async (mine: Kept): Promise<void> => {
     mine.approval = null;
     return;
   }
-  if (kept !== mine || mine.gone || mine.aside) {
-    // Their session ended while it was made: never sent (`setAside`).
-    return;
-  }
   const answer = await approveFacts(mine.secret, facts);
-  if (kept !== mine || mine.gone || mine.aside) {
-    // Answered after their session ended: it changes nothing, here or in
-    // what waits in this tab, and nothing goes out for it.
+  if (kept !== mine || mine.gone) {
     return;
   }
   if (isRefused(answer)) {
@@ -390,7 +372,7 @@ const approveOnce = async (mine: Kept): Promise<void> => {
 /** Saves now, one at a time; a change made meanwhile is saved right after. */
 const save = async (mine: Kept): Promise<void> => {
   window.clearTimeout(mine.waiting);
-  if (mine.gone || mine.aside) {
+  if (mine.gone) {
     return;
   }
   if (mine.saving) {
@@ -453,12 +435,7 @@ export const approveWhenKept = (before: InterviewProgress): void => {
 const onPageHide = (): void => {
   const mine = kept;
   // A save on its way may be cut off with the page: it goes again, kept alive.
-  if (
-    mine === null ||
-    mine.gone ||
-    mine.aside ||
-    !(mine.dirty || mine.saving)
-  ) {
+  if (mine === null || mine.gone || !(mine.dirty || mine.saving)) {
     return;
   }
   mine.dirty = false;
@@ -473,42 +450,85 @@ const onPageHide = (): void => {
   );
 };
 
-/**
- * The interview core holds for this link, at `version`, from now on held
- * here. Back after their session ended, what waited in this tab under
- * `draft` is held instead and kept at once, but only onto the version it
- * was taken at, and only while the interview takes saves (not `withdrawn`,
- * not `closed`). Otherwise core's copy is the interview, and the page says
- * what waited couldn't be kept. Whatever isn't held is forgotten, also
- * what no longer reads as a kept copy. Back on the link after stopping,
- * either carries on where it was.
- */
-export const holdInterview = ({
-  secret,
-  draft,
-  version,
-  progress,
-  withdrawn,
-  closed,
-}: {
-  secret: string;
-  draft: string;
+/** Core's answer as the link opened: its version and copy, and whether it still takes saves. */
+interface Opened {
   version: number;
   progress: InterviewProgress | null;
   withdrawn: boolean;
   closed: boolean;
-}): void => {
+}
+
+/**
+ * What waited in this tab, weighed against core's copy as the link opened
+ * again: what is kept of it (`unsaved`, `typed`), why what waited couldn't
+ * be kept (`lost`), and a delete or withdrawal that didn't happen
+ * (`undone`, said only while nothing changed since).
+ */
+const takenUp = (
+  aside: Aside | null,
+  { version, progress, withdrawn, closed }: Opened
+): {
+  unsaved: InterviewProgress | null;
+  typed: string;
+  lost: Lost | null;
+  undone: Undone | null;
+} => {
+  if (aside === null) {
+    return { unsaved: null, typed: "", lost: null, undone: null };
+  }
+  // What waited is what core holds now: their own save landed as the
+  // session ended, and only its answer was dropped (api.ts `gated`).
+  const landed =
+    aside.progress !== null &&
+    progress !== null &&
+    canonicalJson(aside.progress) === canonicalJson(progress);
+  const unchanged = aside.version === version || landed;
+  if (unchanged && !withdrawn && !closed) {
+    return {
+      unsaved: landed ? null : aside.progress,
+      typed: aside.typed,
+      lost: null,
+      undone: aside.undone,
+    };
+  }
+  const waited = aside.progress !== null || aside.typed !== "";
+  let lost: Lost | null = null;
+  if (waited) {
+    lost = closed ? "closed" : "changed";
+  }
+  return {
+    unsaved: null,
+    typed: "",
+    lost,
+    undone: unchanged ? aside.undone : null,
+  };
+};
+
+/**
+ * The interview core holds for this link, from now on held here, its
+ * calls a new epoch (api.ts `beginCalls`). Back after their session ended,
+ * what waited in this tab under `draft` is held instead and kept at once,
+ * but only onto the version it was taken at, and only while the interview
+ * takes saves (not withdrawn, not closed). Otherwise core's copy is the
+ * interview, and the page says what waited couldn't be kept, unless that
+ * copy is what waited. Whatever isn't held is forgotten, also what no
+ * longer reads as a kept copy. Back on the link after stopping, either
+ * carries on where it was.
+ */
+export const holdInterview = ({
+  secret,
+  draft,
+  ...opened
+}: Opened & { secret: string; draft: string }): void => {
   if (kept !== null) {
     window.clearTimeout(kept.waiting);
   }
-  const aside = asideAt(draft);
-  const unchanged = aside !== null && aside.version === version;
-  const usable = unchanged && !withdrawn && !closed;
-  const unsaved = usable ? aside.progress : null;
+  beginCalls();
+  const { unsaved, typed, lost, undone } = takenUp(asideAt(draft), opened);
   const mine: Kept = {
     secret,
-    version,
-    progress: resumed(unsaved ?? progress ?? freshProgress),
+    version: opened.version,
+    progress: resumed(unsaved ?? opened.progress ?? freshProgress),
     saving: false,
     again: false,
     dirty: unsaved !== null,
@@ -520,20 +540,12 @@ export const holdInterview = ({
     aside: false,
     unkept: false,
     restoring: unsaved !== null,
-    typed: usable ? aside.typed : "",
+    typed,
     undone: null,
   };
   kept = mine;
-  const dropped =
-    aside !== null &&
-    !usable &&
-    (aside.progress !== null || aside.typed !== "");
-  lostNow = null;
-  if (dropped) {
-    lostNow = closed ? "closed" : "changed";
-  }
-  // What they asked for didn't happen, unless the interview changed since.
-  undoneNow = unchanged ? aside.undone : null;
+  lostNow = lost;
+  undoneNow = undone;
   saveState = { state: "saved" };
   window.removeEventListener("pagehide", onPageHide);
   window.addEventListener("pagehide", onPageHide);
@@ -548,44 +560,42 @@ export const holdInterview = ({
 };
 
 /**
- * Their session ended: nothing more is sent, and whatever isn't kept yet
- * waits in this tab until the link opens again (`holdInterview`). A save
- * on its way may still have landed; it waits all the same, and is kept
- * again as of what core answered. An approval core wasn't told of is
- * never sent by itself afterwards: the read-back as it stood before waits
- * instead, to agree to again.
+ * Their session ended, as a call of `by` found it (api.ts `gated`): the
+ * page takes nothing more, and what isn't kept yet is written to this tab
+ * once, as it is now, to wait for them (`holdInterview`). A save on its
+ * way counts as not kept. An approval core wasn't told of is never sent by
+ * itself afterwards: the read-back as it stood before waits instead, to
+ * agree to again. A delete or withdrawal that met the ended session, then
+ * or later, didn't happen: nothing unsaved waits to be kept again before
+ * they can ask again once back, and the page says so. Whether what waits
+ * changed.
  */
-export const setAside = (): void => {
+export const setAside = (by: CallKind): boolean => {
   const mine = kept;
-  if (mine === null || mine.gone || mine.aside) {
-    return;
+  if (mine === null || mine.gone) {
+    return false;
   }
-  window.clearTimeout(mine.waiting);
-  window.clearTimeout(showingSaving);
-  mine.aside = true;
-  mine.dirty ||= mine.saving || mine.again;
-  if (mine.approval !== null) {
-    mine.progress = notYetApproved(mine.approval.before);
-    mine.dirty = true;
-    mine.approval = null;
+  const asked: Undone | null = by === "delete" || by === "withdraw" ? by : null;
+  if (mine.aside && asked === null) {
+    return false;
+  }
+  if (!mine.aside) {
+    mine.aside = true;
+    mine.dirty ||= mine.saving || mine.again;
+    if (mine.approval !== null) {
+      mine.progress = notYetApproved(mine.approval.before);
+      mine.dirty = true;
+      mine.approval = null;
+    }
+  }
+  if (asked !== null) {
+    mine.dirty = false;
+    mine.typed = "";
+    mine.undone = asked;
   }
   keepAside(mine);
-};
-
-/**
- * They asked to delete their interview, or to withdraw, just as their
- * session ended: it didn't happen, and nothing unsaved waits to be kept
- * again before they can ask again once back, where the page says so.
- */
-export const forgetUnsaved = (asked: Undone): void => {
-  const mine = kept;
-  if (mine === null || !mine.aside) {
-    return;
-  }
-  mine.dirty = false;
-  mine.typed = "";
-  mine.undone = asked;
-  keepAside(mine);
+  notify();
+  return true;
 };
 
 /**
@@ -617,6 +627,7 @@ export const releaseInterview = (): void => {
   if (kept !== null) {
     window.clearTimeout(kept.waiting);
   }
+  endCalls();
   kept = null;
   lostNow = null;
   undoneNow = null;
@@ -639,11 +650,6 @@ export const update = (
   mine.progress = next;
   mine.dirty = true;
   notify();
-  if (mine.aside) {
-    // What they said as the conversation stopped waits with the rest.
-    keepAside(mine);
-    return;
-  }
   window.clearTimeout(mine.waiting);
   mine.waiting = window.setTimeout(() => {
     void save(mine);
@@ -667,7 +673,7 @@ export const forgetInterview = (): void => {
   window.clearTimeout(showingSaving);
 };
 
-/** What is typed in the box and not sent: it outlasts the box, and waits with the rest while set aside. */
+/** What is typed in the box and not sent: it outlasts the box, and waits with the rest once set aside. */
 export const setTyped = (text: string): void => {
   const mine = kept;
   if (mine === null || mine.typed === text) {
@@ -675,7 +681,6 @@ export const setTyped = (text: string): void => {
   }
   mine.typed = text;
   notify();
-  keepAside(mine);
 };
 
 /** Tells `taker` whenever the copy kept elsewhere takes this one's place. */
@@ -693,6 +698,10 @@ export const useProgress = (): InterviewProgress =>
 /** Where saving stands. */
 export const useSaveState = (): SaveState =>
   useSyncExternalStore(subscribe, () => saveState);
+
+/** Their session ended: the page takes nothing more until they sign in again. */
+export const useAside = (): boolean =>
+  useSyncExternalStore(subscribe, () => kept?.aside ?? false);
 
 /** What is typed in the box and not sent. */
 export const useTyped = (): string =>
