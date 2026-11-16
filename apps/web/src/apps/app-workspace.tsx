@@ -394,7 +394,7 @@ const StaleTestData = ({ app }: { app: string }) => (
           team entered isn&apos;t touched.
         </Trans>
       </AlertDescription>
-      <AlertAction>
+      <AlertAction placement="below">
         <Link
           className={buttonVariants({ size: "sm", variant: "outline" })}
           params={{ app }}
