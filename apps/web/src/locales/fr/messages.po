@@ -15937,6 +15937,10 @@ msgstr "Ce que vous avez demandé à partager"
 msgid "What you chose"
 msgstr "Ce que vous avez choisi"
 
+#: src/interview/page.tsx
+msgid "What you hadn't saved when your sign-in ended couldn't be kept, because your interview changed while you were away."
+msgstr "Ce que vous n'aviez pas encore enregistré à la fin de votre connexion n'a pas pu être conservé, car votre entretien a changé pendant votre absence."
+
 #: src/routes/_shell.settings.instructions.tsx
 msgid "What your chats with Grasp start with, and only yours: how you like to work, what you are responsible for."
 msgstr "Ce par quoi commencent vos conversations avec Grasp, et seulement les vôtres : votre façon de travailler, ce dont vous êtes responsable."
@@ -16913,6 +16917,10 @@ msgstr "Votre exécution de la version {version} est terminée : {status}"
 #: src/pages/frame-failure.tsx
 msgid "Your session has ended"
 msgstr "Votre session est terminée"
+
+#: src/routes/interview.tsx
+msgid "Your sign-in ended. Sign in again with your work account to go on where you were. This window couldn't keep what wasn't saved yet, so it is lost."
+msgstr "Votre connexion a pris fin. Reconnectez-vous avec votre compte professionnel pour reprendre là où vous en étiez. Cette fenêtre n'a pas pu conserver ce qui n'était pas encore enregistré, il est donc perdu."
 
 #: src/routes/interview.tsx
 msgid "Your sign-in ended. Sign in again with your work account to go on where you were. What isn't saved yet is kept in this window until then."
