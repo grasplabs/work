@@ -1045,19 +1045,26 @@ describe("taking part, approving and withdrawing", () => {
         }
         return await digest(algorithm, data);
       });
-    const saving = save(secrets.oli, me, version, progress(said));
-    await vi.waitFor(
-      () => {
-        if (!hold.hashing) {
-          throw new Error("Still waiting for the save's facts to be hashed");
-        }
-      },
-      { timeout: 5000, interval: 5 }
-    );
-    const withdrew = await withdraw(secrets.oli, me);
-    hold.released = true;
-    const saved = await saving;
-    held.mockRestore();
+    let withdrew: Response;
+    let saved: Response;
+    try {
+      const saving = save(secrets.oli, me, version, progress(said));
+      await vi.waitFor(
+        () => {
+          if (!hold.hashing) {
+            throw new Error("Still waiting for the save's facts to be hashed");
+          }
+        },
+        { timeout: 5000, interval: 5 }
+      );
+      withdrew = await withdraw(secrets.oli, me);
+      hold.released = true;
+      saved = await saving;
+    } finally {
+      // Let go and restored whatever happened: nothing else waits on it.
+      hold.released = true;
+      held.mockRestore();
+    }
     const read = await opened(secrets.oli, me);
     expect({
       withdrew: withdrew.status,
