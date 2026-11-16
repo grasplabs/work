@@ -119,6 +119,14 @@ export const supervisor = (): Fetcher => {
 const noPlace = "no place";
 
 /**
+ * How often `heldPlace` asks for a place, each ask waiting its while for
+ * one: together far longer than a process takes to go and a new one to
+ * start (scripts/workerd-sandbox.ts, `startupMs`). A place that never
+ * frees fails with its refusal, not at the file's timeout.
+ */
+const placeAsks = 10;
+
+/**
  * Holds one of `owner`'s places in the sandbox with a session that spins,
  * until it's given up on (`signal`). `opened` hears once it holds it: the
  * supervisor opens a session only once it has its place and a process.
@@ -171,18 +179,20 @@ export const heldPlace = async (
   signal: AbortSignal,
   subOwner?: string
 ): Promise<{ ended: Promise<unknown> }> => {
-  for (;;) {
+  let last: unknown = noPlace;
+  for (let ask = 0; ask < placeAsks; ask += 1) {
     const holding = Promise.withResolvers<"holding">();
     const ended = holdPlace(owner, signal, subOwner, () => {
       holding.resolve("holding");
     });
     // oxlint-disable-next-line no-await-in-loop -- one ask at a time
-    const first = await Promise.race([ended, holding.promise]);
-    if (first === "holding") {
+    last = await Promise.race([ended, holding.promise]);
+    if (last === "holding") {
       return { ended };
     }
-    if (first !== noPlace) {
-      throw new Error(`The place wasn't held: ${String(first)}`);
+    if (last !== noPlace) {
+      break;
     }
   }
+  throw new Error(`The place wasn't held: ${String(last)}`);
 };
