@@ -898,7 +898,7 @@ describe("a writer's erasure", () => {
         // The table of memories that failed to delete is the release's own,
         // and so are the quotes' (migration 0022, quotes.ts), the days
         // chunks mention (migration 0024, dates.ts) and a person's
-        // erasure's (migration 0025, people.ts).
+        // erasure's (migration 0026, people.ts).
         tables: now.tables
           .filter(
             ({ name }) =>
@@ -910,6 +910,8 @@ describe("a writer's erasure", () => {
                 "memory_judging",
                 "memory_judging_places",
                 "chunk_days",
+                // A person's own entity (migration 0025, own-entity.ts).
+                "own_entity",
                 "person_erasure_subjects",
                 "person_erasure_memories",
                 "person_erasure_reopens",

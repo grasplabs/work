@@ -11,7 +11,8 @@ CREATE TABLE `person_erasure_reopens` (
 --> statement-breakpoint
 CREATE TABLE `person_erasure_subjects` (
 	`subject` text PRIMARY KEY NOT NULL,
-	`erasure` text NOT NULL
+	`erasure` text NOT NULL,
+	`released` integer DEFAULT false NOT NULL
 );
 --> statement-breakpoint
 CREATE INDEX `person_erasure_subjects_erasure_idx` ON `person_erasure_subjects` (`erasure`);--> statement-breakpoint

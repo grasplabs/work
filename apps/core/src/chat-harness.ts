@@ -1402,13 +1402,14 @@ export class ChatHarness {
           : { ...request.context, make: request.question.make },
       assets: env.ASSETS,
       history: transcript.messages,
-      // Only in a person's own chat in Grasp's app, in a turn they started:
-      // what they said there is the only word of theirs it may keep, and
-      // only Grasp's app shows the notice and its Undo (agent-remember.ts).
-      // Not their direct message on a chat app, though it is their own
-      // chat too (`ownChat`): it shows neither (GRA-1821). A turn nobody
-      // started (a wake) has no word of theirs.
-      ...(!request.shared && scope.unattended !== true && scope.via === "web"
+      // Only where the answer reaches the person alone, in a turn they
+      // started (`personal`, workspace.ts `answersAlone`): their own chat
+      // in Grasp's app, or their direct message on a chat app (GRA-1920),
+      // each of which shows a notice of every memory with its Undo
+      // (agent-remember.ts; channels/remembered.ts). What they said there
+      // is the only word of theirs it may keep. Never a chat others share,
+      // nor a turn nobody started (a wake), which has no word of theirs.
+      ...(request.personal
         ? { remember: rememberTool(env, scope, request.question.text) }
         : {}),
       // Only in a person's own chat, by an agent that may read the brain.

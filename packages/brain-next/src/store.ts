@@ -37,6 +37,7 @@ import {
   newMemoriesSchema,
   newSourceSchema,
   onlyInOwnStore,
+  ownEntityRequestSchema,
   ownExportFileRequestSchema,
   ownExportRequestSchema,
   ownExportStartSchema,
@@ -77,7 +78,9 @@ import type {
   EntityNamesPage,
   EntityNamesRequest,
   EntityPage,
+  EntityId,
   EntityRequest,
+  OwnEntityRequest,
   MemoriesRead,
   MemoriesRequest,
   MemoryChangeOutcome,
@@ -203,6 +206,7 @@ import {
   retireMemory,
   writerErasedAfterSql,
 } from "./memories.ts";
+import { ownEntityId } from "./own-entity.ts";
 import { rebuildMissingSets } from "./reader-sets.ts";
 import {
   countingInto,
@@ -2423,6 +2427,17 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     return (await this.#readable())
       ? readEntity(this.ctx.storage.sql, asked)
       : null;
+  }
+
+  /**
+   * The id of the reader's own entity, in their own store; null until an
+   * add names it (contract.ts "The store's own entity"). Only for this
+   * store's person; the shared store refuses.
+   */
+  async ownEntity(request: OwnEntityRequest): Promise<EntityId | null> {
+    const { reader } = checked(ownEntityRequestSchema, request);
+    this.#ownOnly(reader.person);
+    return (await this.#readable()) ? ownEntityId(this.ctx.storage.sql) : null;
   }
 
   /** An entity's card as the reader sees it, built now (cards.ts). */

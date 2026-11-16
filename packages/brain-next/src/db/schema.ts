@@ -1035,6 +1035,23 @@ export const entityNames = sqliteTable(
 );
 
 /**
+ * The entity a person's own store's person is (contract.ts "The store's
+ * own entity"): one row at most, made by the first add naming it `own`,
+ * never an entity a name or an identifier found. Deleting memories never deletes
+ * it (forget.ts); erasing the store whole does. Empty in the shared store.
+ */
+export const ownEntity = sqliteTable(
+  "own_entity",
+  {
+    id: integer().primaryKey(),
+    entity: integer()
+      .notNull()
+      .references(() => entities.row),
+  },
+  () => [check("own_entity_one", sql.raw("id = 1"))]
+);
+
+/**
  * A person's confirmation of a memory, as their own word, over the
  * memories (`memory_confirmed_over`) that said something else then: seen
  * only by readers who may read the memory and each of those.
@@ -1255,11 +1272,12 @@ export const memoryJudgingPlaces = sqliteTable("memory_judging_places", {
 /**
  * What a person's erasure closed (people.ts): each identifier the host gave
  * as theirs, by the SHA-256 of `identifier:<type>:<folded>`, and each
- * entity that was theirs alone, by `entity:<id>`. An add strips a closed
- * identifier; extraction and a restore leave out what rests on a closed
- * entity or one of kind `person` all of whose identifiers are closed. An
- * identifier is deleted here once the host says it is verified again for a
- * member (`person_erasure_reopens`).
+ * entity that was theirs, by `entity:<id>`. Closed, it is left out of every
+ * write. Released (`released`, once an admin gave the address to someone
+ * else: erasure.ts `reopenIdentifiers`), the host's and Apps' writes keep
+ * it again, so its next holder has a card; extraction and a restore of
+ * what a source said leave it out for good, so no document builds or feeds
+ * a person's card by it again.
  */
 export const personErasureSubjects = sqliteTable(
   "person_erasure_subjects",
@@ -1267,6 +1285,8 @@ export const personErasureSubjects = sqliteTable(
     subject: text().primaryKey(),
     /** The erasure that closed it (`erasures.key`). */
     erasure: text().notNull(),
+    /** Whether an admin released it (above). */
+    released: integer({ mode: "boolean" }).notNull().default(false),
   },
   (table) => [index("person_erasure_subjects_erasure_idx").on(table.erasure)]
 );
@@ -1285,7 +1305,7 @@ export const personErasureMemories = sqliteTable("person_erasure_memories", {
 });
 
 /**
- * An identifier a person's erasure closed, opened again (erasure.ts
+ * An identifier a person's erasure closed, released (erasure.ts
  * `reopenIdentifiers`), by its ledger entry's key and time: so a replay
  * applies each once, and the next erasure's time is past it.
  */

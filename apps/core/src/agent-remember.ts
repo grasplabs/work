@@ -12,17 +12,19 @@ import { rememberName } from "./agent-messages.ts";
 import { chatAuthority, chatContext } from "./agent-scope.ts";
 import type { AgentScope } from "./agent-scope.ts";
 import { rememberFor } from "./brain-memories.ts";
-import { memoryChoices, ownEntityAs } from "./brain-next.ts";
+import { memoryChoices, ownEntityAs, ownEntityIdAs } from "./brain-next.ts";
 import type { Remembered } from "./brain-next.ts";
 import { modelForRole, modelSettings, models } from "./models.ts";
 
 // The agent remembers on its own (GRA-1814, the plan's decision 13): in a
-// person's own chat in Grasp's app, in a turn they started, it may keep
-// what they said that will matter later, without being asked, as a
-// memory in their own word, readable by them alone (brain-memories.ts).
-// The chat shows a notice of each with a way to undo it (the result's
-// `details`, as `ChatSavedMemory`; undoing is
-// `session.brainMemories.forget`).
+// person's own chat, in a turn they started, it may keep what they said
+// that will matter later, without being asked, as a memory in their own
+// word, readable by them alone (brain-memories.ts). Their own chat is
+// the one in Grasp's app, or their direct message on a chat app
+// (GRA-1920). Each shows a notice of every memory with a way to undo it:
+// the result's `details`, as `ChatSavedMemory`. In Grasp's app undoing
+// is `session.brainMemories.forget`; in a chat app it is the Undo on the
+// notice's card (channels/remembered.ts), through the same `forgetFor`.
 //
 // From the threat model on GRA-1743, only what the person said is their
 // word, checked twice before anything is saved, by the plan's own rule
@@ -36,9 +38,9 @@ import { modelForRole, modelSettings, models } from "./models.ts";
 //   themselves, as their own statement, not as text they pasted or
 //   forwarded. Not confirmed, or no model to ask: nothing is saved.
 // The harness offers the tool only where the person can see the notice
-// and undo it: their own chat in Grasp's app, in a turn they started
-// (chat-harness.ts). The model is told what memory is for and to keep
-// little, not given rules for what to save (the plan's research). A retry
+// and undo it: their own chat, in a turn they started (chat-harness.ts).
+// The model is told what memory is for and to keep little, not given
+// rules for what to save (the plan's research). A retry
 // of the same call (a restart replays it) is the same memory: its change
 // is the chat's and the call's.
 
@@ -210,12 +212,19 @@ export const statedByThem = async (
 const unknownEntity =
   "Not saved: no entity of theirs has that id. Name who or what it is about instead.";
 
+/** The person themselves, as the Brain takes it: their own entity alone. */
+const ownSubject = {
+  subject: { self: true },
+  entity: { kind: "person", own: true },
+} as const;
+
 /**
  * What `about` is, as the check and the notice name it, and as the Brain
- * takes it: the person themselves; an entity of theirs by its id, named
- * as their own store holds it (never as the model names it); or another
- * by its kind and name. Null for an id they can't read, or one the store
- * holds no name for.
+ * takes it: the person themselves, their own entity (brain-next.ts
+ * `ownEntityIdAs`: never one a name or an email finds), by "me" or by its
+ * id; an entity of theirs by its id, named as their own store holds it
+ * (never as the model names it); or another by its kind and name. Null
+ * for an id they can't read, or one the store holds no name for.
  */
 const subjectOf = async (
   env: Env,
@@ -225,12 +234,8 @@ const subjectOf = async (
   subject: Subject;
   entity: Remembered["about"];
 } | null> => {
-  const self = { type: "ref" as const, value: `grasp:person:${personId}` };
   if (about === "me") {
-    return {
-      subject: { self: true },
-      entity: { kind: "person", identifiers: [self] },
-    };
+    return ownSubject;
   }
   if (about.id === undefined) {
     return {
@@ -238,23 +243,18 @@ const subjectOf = async (
       entity: { kind: about.kind, names: [about.name] },
     };
   }
-  const held = await ownEntityAs(env, personId, about.id);
-  if (held === null) {
-    return null;
+  const [held, own] = await Promise.all([
+    ownEntityAs(env, personId, about.id),
+    ownEntityIdAs(env, personId),
+  ]);
+  if (about.id === own) {
+    return ownSubject;
   }
-  const entity = { id: about.id, kind: held.kind };
-  if (
-    held.identifiers.some(
-      ({ type, value }) => type === self.type && value === self.value
-    )
-  ) {
-    return { subject: { self: true }, entity };
-  }
-  return held.name === null
+  return held === null || held.name === null
     ? null
     : {
         subject: { kind: held.kind, name: held.name, names: held.names },
-        entity,
+        entity: { id: about.id, kind: held.kind },
       };
 };
 
@@ -274,7 +274,8 @@ const notTheirWords =
 
 /**
  * The tool for one turn of `scope`'s chat, which `said` started: only in
- * the person's own chat in Grasp's app, in a turn they started.
+ * the person's own chat, in Grasp's app or their direct message on a chat
+ * app, in a turn they started.
  */
 export const rememberTool = (
   env: Env,

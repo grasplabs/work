@@ -50,6 +50,7 @@ import {
   signedInApi,
   staffPerson,
   unique,
+  uniqueLetters,
 } from "./sign-in.ts";
 import { sayForAdmin, stillKept } from "./spoken.ts";
 import { connectDb } from "./test-env.ts";
@@ -1360,8 +1361,8 @@ describe("erasing a person", () => {
   it("takes what the voice said for them as an admin out of its cache, and leaves another admin's", async () => {
     const admin = await signedInApi(idp, "admin");
     const person = await signedInApi(idp, "admin");
-    const theirs = `Hello ${unique().replaceAll(/\d/gu, "x")}, I'm Stephen.`;
-    const other = `Hello ${unique().replaceAll(/\d/gu, "x")}, welcome back.`;
+    const theirs = `Hello ${uniqueLetters()}, I'm Stephen.`;
+    const other = `Hello ${uniqueLetters()}, welcome back.`;
     const said = [
       await sayForAdmin(person.session, theirs),
       await sayForAdmin(admin.session, other),
