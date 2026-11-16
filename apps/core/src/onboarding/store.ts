@@ -1804,6 +1804,7 @@ export class Onboarding extends DurableObject<Env> {
           account,
           version,
           progress,
+          page,
           now,
           !again
         )
@@ -1819,6 +1820,7 @@ export class Onboarding extends DurableObject<Env> {
     account: string,
     version: number,
     progress: InterviewProgress,
+    page: SavingPage | undefined,
     now: string,
     asCall: boolean
   ): Promise<LinkActed<InterviewSaved>> {
