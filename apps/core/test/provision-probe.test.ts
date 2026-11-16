@@ -173,7 +173,6 @@ describe("the console's provisioning probe", () => {
         clientId,
         bindings: {
           DB: true,
-          KNOWLEDGE: true,
           FILES: true,
           AUDIT_ARCHIVE: true,
           BRAIN_OBJECTS: true,

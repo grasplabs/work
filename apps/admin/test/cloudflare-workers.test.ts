@@ -531,12 +531,12 @@ describe("D1 migrations", () => {
     });
   });
 
-  it("applies core's real migrations: FTS5 tables, triggers and comments", async () => {
+  it("applies core's real migrations: triggers and comments", async () => {
     const account = cloudflare.addAccount();
-    const { uuid } = await database(account.id, "grasp-os-knowledge");
+    const { uuid } = await database(account.id, "grasp-os-core");
     const files = z
       .array(z.object({ name: z.string(), sql: z.string() }))
-      .parse(Reflect.get(env, "KNOWLEDGE_MIGRATION_FILES"));
+      .parse(Reflect.get(env, "CORE_MIGRATION_FILES"));
     expect(files.length).toBeGreaterThan(0);
 
     await expect(
@@ -547,7 +547,7 @@ describe("D1 migrations", () => {
       api,
       account.id,
       uuid,
-      "SELECT name FROM sqlite_master WHERE type = 'trigger' AND name LIKE 'sections_search_%' ORDER BY name;"
+      "SELECT name FROM sqlite_master WHERE type = 'trigger' AND name LIKE 'workflow_resource_versions_immutable_%' ORDER BY name;"
     );
     expect(triggers?.length).toBeGreaterThan(0);
   });
@@ -555,7 +555,7 @@ describe("D1 migrations", () => {
   it("keeps each database's tables to itself", async () => {
     const account = cloudflare.addAccount();
     const coreDb = await database(account.id, "grasp-os-core");
-    const knowledge = await database(account.id, "grasp-os-knowledge");
+    const connectDb = await database(account.id, "grasp-os-connect");
     await applyD1Migrations(api, account.id, coreDb.uuid, [
       { name: "0000_only_core.sql", sql: "CREATE TABLE only_core (id TEXT);" },
     ]);
@@ -572,7 +572,7 @@ describe("D1 migrations", () => {
       { name: "d1_migrations" },
       { name: "only_core" },
     ]);
-    await expect(tablesOf(knowledge.uuid)).resolves.toStrictEqual([]);
+    await expect(tablesOf(connectDb.uuid)).resolves.toStrictEqual([]);
   });
 
   it("keeps each account's databases apart too", async () => {

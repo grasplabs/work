@@ -3,10 +3,10 @@ import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
+import { newTeam } from "./admin-teams.ts";
 import { testApp, withFiles } from "./app-definitions.ts";
 import { commitApp, outlook, release } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
-import { newTeam } from "./knowledge.ts";
 import { calledAs } from "./sealed-apps.ts";
 import {
   auditedDuring,
