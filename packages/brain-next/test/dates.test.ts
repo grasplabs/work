@@ -112,6 +112,19 @@ describe("the days a chunk mentions, in the store", () => {
       text: "Signed March 14th, 2097; paid 15/03/2097.",
       access,
     });
+    // The chunks' rows, read before the erasure: their days are counted by
+    // them, so a day row left behind its deleted chunk still counts.
+    const chunkRows = await runInDurableObject(store, (_, state) =>
+      state.storage.sql
+        .exec<{ row: number }>(
+          `SELECT chunks.row AS row FROM chunks
+          JOIN source_versions ON source_versions.row = chunks.version_row
+          WHERE source_versions.source = ?`,
+          source
+        )
+        .toArray()
+        .map(({ row }) => row)
+    );
     const rowsOfDays = async () =>
       await runInDurableObject(
         store,
@@ -119,10 +132,8 @@ describe("the days a chunk mentions, in the store", () => {
           state.storage.sql
             .exec<{ rows: number }>(
               `SELECT count(*) AS rows FROM chunk_days
-              JOIN chunks ON chunks.row = chunk_days.chunk
-              JOIN source_versions ON source_versions.row = chunks.version_row
-              WHERE source_versions.source = ?`,
-              source
+              WHERE chunk IN (SELECT value FROM json_each(?))`,
+              JSON.stringify(chunkRows)
             )
             .one().rows
       );

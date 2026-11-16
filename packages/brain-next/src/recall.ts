@@ -254,7 +254,7 @@ found AS (
   CROSS JOIN chunk_days
   JOIN chunks ON chunks.row = chunk_days.chunk${searched(asOf)}
     AND chunk_days.month_day = dated.month_day
-    AND (chunk_days.year = dated.year OR chunk_days.year = 0 OR dated.year = 0)
+    AND (dated.year = 0 OR chunk_days.year IN (dated.year, 0))
 ),
 near AS (
   SELECT asked.key AS part, chunk_words.rowid AS row

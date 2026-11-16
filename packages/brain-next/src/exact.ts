@@ -46,7 +46,8 @@ import { allOf, sequenceOf } from "./words.ts";
 // sentence's first word or a run of German nouns.
 //
 // A phrase is read first and is then no longer there for the dates, nor a
-// date for the IDs.
+// date for the IDs. Of the parts, at most eight count: phrases first, then
+// IDs, then dates.
 //
 // What the word index holds of a chunk is its distinct words, so it finds
 // the chunks holding every word of a part (`query`), and the order is
@@ -143,8 +144,8 @@ const idsOf = (text: string): Written[] =>
   });
 
 /**
- * The parts of `question` to find as written (above), in the order the
- * rules take them, each once, at most `maxExacts`.
+ * The parts of `question` to find as written (above): phrases, IDs, then
+ * dates, each once, at most `maxExacts`.
  */
 export const exactsOf = (question: string): Exact[] => {
   const phrases: Exact[] = [];
@@ -167,9 +168,16 @@ export const exactsOf = (question: string): Exact[] => {
   }
   undated += rest.slice(from);
   const seen = new Set<string>();
-  return [...phrases, ...dates, ...idsOf(undated)]
-    .filter(({ kind, words }) => {
-      const key = `${kind === "date" ? "date" : "words"} ${words.join(" ")}`;
+  // Dates are read before IDs, but listed after them: a question of many
+  // dates keeps its IDs within `maxExacts`, as before dates were read.
+  return [...phrases, ...idsOf(undated), ...dates]
+    .filter((exact) => {
+      // A date once per day: "March 14th March 15th" also reads "14th
+      // March", the same day again.
+      const key =
+        exact.kind === "date"
+          ? `date ${exact.days.map(({ year, month, day }) => `${year}-${month}-${day}`).join(" ")}`
+          : `words ${exact.words.join(" ")}`;
       if (seen.has(key)) {
         return false;
       }

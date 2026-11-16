@@ -15,16 +15,33 @@ const holds = (question: string, text: string): boolean =>
   foundIn(text, exactsOf(question), [0]).length === 1;
 
 describe("the exact parts of a question", () => {
-  it("reads quoted phrases, then dates, then IDs, each once, and leaves names to the words way", () => {
+  it("reads quoted phrases, IDs and dates, each once, and leaves names to the words way", () => {
     expect(
       partsOf(
         `Did Anna Jansen sign "het nieuwe contract" for PO-77812 on 14 maart 2026, and PO-77812 again?`
       )
     ).toStrictEqual([
       { asked: "het nieuwe contract", kind: "phrase" },
-      { asked: "14 maart 2026", kind: "date" },
       { asked: "PO-77812", kind: "id" },
+      { asked: "14 maart 2026", kind: "date" },
     ]);
+  });
+
+  it("reads each day once, however many readings of it a question's words hold", () => {
+    expect(partsOf("March 14th March 15th")).toStrictEqual([
+      { asked: "March 14th", kind: "date" },
+      { asked: "March 15th", kind: "date" },
+    ]);
+  });
+
+  it("keeps a question's IDs among its eight parts, however many dates it asks", () => {
+    const dates = Array.from(
+      { length: 8 },
+      (_, index) => `${index + 1} maart 2026`
+    ).join(", ");
+    expect(
+      partsOf(`${dates} and PO-77812`).map(({ kind }) => kind)
+    ).toStrictEqual(["id", ...Array.from({ length: 7 }, () => "date")]);
   });
 
   it("reads a timestamp as one date, and a date inside an ID as the ID", () => {
