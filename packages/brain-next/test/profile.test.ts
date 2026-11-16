@@ -94,48 +94,62 @@ describe("a person's profile", () => {
     });
   });
 
-  // AC 3: within its budget, whole memories, in the store's order, cut at the first that doesn't fit.
-  it("stays within its budget, the same memories in the same order every time", async () => {
+  // AC 3: within its budget, whole memories, newest first, cut at the
+  // first that doesn't fit: the newest are the ones kept.
+  it("stays within its budget, newest first, keeping the newest when not all fit", async () => {
     const person = unique("p");
-    await remember(
-      person,
-      aboutThem(person, "Leads the Rotterdam depot", {
+    // Oldest first, under attributes in alphabetical order: an order by
+    // attribute would keep the oldest.
+    const kept = [
+      {
+        statement: "Knows the VAT rules",
+        attribute: "expertise",
+        value: "VAT",
+      },
+      {
+        statement: "Runs the month-end close",
+        attribute: "responsibility",
+        value: "month-end close",
+      },
+      {
+        statement: "Leads the Rotterdam depot",
         attribute: "role",
-        value: "depot lead",
-      }),
-      aboutThem(person, "Prefers answers in Dutch", {
-        type: "preference",
-        attribute: "preference",
-        value: "Dutch",
-      }),
-      aboutThem(person, "Works on the warehouse move this quarter")
-    );
+        value: "lead",
+      },
+    ];
+    const said = kept.map(({ statement }) => statement);
+    // One add each, so each is learned after the one before.
+    for (const { statement, ...filed } of kept) {
+      // oxlint-disable-next-line no-await-in-loop -- in order
+      await remember(person, aboutThem(person, statement, filed));
+    }
     const all = await own(person).readProfile({
       reader: readerOf(person),
       budget: whole,
     });
-    const [first] = all.memories;
-    const firstTokens =
-      first === undefined
-        ? 0
-        : packMemoryTokens({
-            ...first,
-            memory: first.id,
-            context: null,
-            confirmed: false,
-            found: "entities",
-          });
+    const tokens = all.memories.slice(0, 2).reduce(
+      (sum, memory) =>
+        sum +
+        packMemoryTokens({
+          ...memory,
+          memory: memory.id,
+          context: null,
+          confirmed: false,
+          found: "entities",
+        }),
+      0
+    );
     const again = await statementsOf(person);
-    const cut = await statementsOf(person, { tokens: firstTokens });
+    const cut = await statementsOf(person, { tokens });
 
     expect({
-      count: all.memories.length,
+      all: all.memories.map(({ statement }) => statement),
       again: again.statements,
       cut,
     }).toStrictEqual({
-      count: 3,
-      again: all.memories.map(({ statement }) => statement),
-      cut: { statements: [first?.statement], truncated: true },
+      all: said.toReversed(),
+      again: said.toReversed(),
+      cut: { statements: said.toReversed().slice(0, 2), truncated: true },
     });
   });
 

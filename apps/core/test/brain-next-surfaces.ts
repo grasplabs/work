@@ -7077,13 +7077,20 @@ const linkingProbes = {
   // answers the reader as a store never written does (GRA-1745).
   readProfile: async ({ markers, reader }) => {
     const budget = { tokens: recallBudgetMax };
+    // The profile it answers, or the refusal's words alone (the object's
+    // id a refusal carries is no answer), so its markers are checked.
     const read = async (name: string, brain: Brain, about?: Answer["about"]) =>
       await answer(
         name,
-        async () =>
-          await refusedWith(async () => {
-            await brain.readProfile({ reader, budget });
-          }),
+        async () => {
+          try {
+            return await brain.readProfile({ reader, budget });
+          } catch (error) {
+            return {
+              refused: error instanceof Error ? error.message : "not an error",
+            };
+          }
+        },
         about
       );
     return [

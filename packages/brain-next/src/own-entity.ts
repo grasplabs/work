@@ -51,10 +51,27 @@ export const ownEntityRow = (sql: SqlStorage): number => {
   return row;
 };
 
+/** The tokens `memory` takes of a pack's budget (`packMemoryTokens`). */
+const tokensOfMemory = (memory: Memory): number =>
+  packMemoryTokens({
+    ...memory,
+    memory: memory.id,
+    context: null,
+    confirmed: memory.confirmed !== null,
+    found: "entities",
+  });
+
+/**
+ * Newest first: by when it was learned, then by id, so the order is the
+ * same at every read while the memories are.
+ */
+const newestFirst = (a: Memory, b: Memory): number =>
+  b.learnedAt.getTime() - a.learnedAt.getTime() || b.id.localeCompare(a.id);
+
 /**
  * The profile of `reader` (contract.ts `readProfile`): the current memories
- * about their own entity in their own word, as `readMemories` orders
- * them, read at one moment, each whole, as many as fit `tokens` in that
+ * about their own entity in their own word, read at one moment, newest
+ * first (`newestFirst`), each whole, as many as fit `tokens` in that
  * order (`packMemoryTokens`); cut short at the first that doesn't fit.
  * Nothing while the store has no own entity. One synchronous read: a
  * snapshot.
@@ -74,11 +91,10 @@ export const readProfile = (
   }
 ): Profile => {
   const entity = ownEntityId(sql);
-  const memories: Memory[] = [];
+  const theirs: Memory[] = [];
   if (entity === null) {
-    return { memories, truncated: false };
+    return { memories: theirs, truncated: false };
   }
-  let left = tokens;
   let after: MemoriesCursor | undefined;
   for (;;) {
     const page = readMemories(sql, {
@@ -89,31 +105,28 @@ export const readProfile = (
       ...(after === undefined ? {} : { after }),
       limit: memoriesReadMax,
     });
-    for (const memory of page.memories) {
-      // Their own word alone: never an outside party's, an agent's or a
-      // system's, whatever is filed under them.
-      if (
-        memory.speaker.kind === "internal" &&
-        memory.speaker.person === reader.person
-      ) {
-        const cost = packMemoryTokens({
-          ...memory,
-          memory: memory.id,
-          context: null,
-          confirmed: memory.confirmed !== null,
-          found: "entities",
-        });
-        if (cost > left) {
-          return { memories, truncated: true };
-        }
-        left -= cost;
-        memories.push(memory);
-      }
-    }
+    // Their own word alone: never an outside party's, an agent's or a
+    // system's, whatever is filed under them.
+    theirs.push(
+      ...page.memories.filter(
+        ({ speaker }) =>
+          speaker.kind === "internal" && speaker.person === reader.person
+      )
+    );
     if (!page.more || page.next === undefined) {
       break;
     }
     after = page.next;
+  }
+  const memories: Memory[] = [];
+  let left = tokens;
+  for (const memory of theirs.toSorted(newestFirst)) {
+    const cost = tokensOfMemory(memory);
+    if (cost > left) {
+      return { memories, truncated: true };
+    }
+    left -= cost;
+    memories.push(memory);
   }
   return { memories, truncated: false };
 };

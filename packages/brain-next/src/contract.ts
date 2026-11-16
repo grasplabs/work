@@ -2558,8 +2558,9 @@ export type ProfileRequest = z.input<typeof profileRequestSchema>;
 /**
  * What a chat starts with about its reader (the plan's profile): the
  * current memories about their own entity in their own word (an
- * `internal` speaker who is the reader), as `readMemories` orders them,
- * each whole, as many as fit the budget; `truncated` when one didn't.
+ * `internal` speaker who is the reader), newest first (by when each was
+ * learned, then by id), each whole, as many as fit the budget; `truncated`
+ * when one didn't.
  * Built when asked, from what the reader may read, never stored, so a
  * changed or retired memory changes the next one.
  */
