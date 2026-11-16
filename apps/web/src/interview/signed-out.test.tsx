@@ -134,8 +134,8 @@ interface FakeCore {
   turnFacts: { tag: string; text: string; record: string; quote: string }[];
   /** The next call of this action (or to this path) is held (`hold`). */
   holding: Partial<Record<string, Held>>;
-  /** Every call, with who was signed in as it came. */
-  calls: { path: string; action: unknown; who: Who }[];
+  /** Every call, with who was signed in as it came, and for a line said its words. */
+  calls: { path: string; action: unknown; who: Who; text?: string }[];
   /** Each save core kept, as it kept it. */
   kept: InterviewProgress[];
   /** Each approval core was told of: the ids of the facts it named. */
@@ -148,6 +148,8 @@ const sentSchema = z.object({
   version: z.int().optional(),
   progress: interviewProgressSchema.optional(),
   facts: z.unknown().optional(),
+  /** A line to be said. */
+  text: z.string().optional(),
 });
 
 /** The facts an approval names: each at its revision. */
@@ -369,7 +371,12 @@ const fakeCore = (progress: InterviewProgress | null): FakeCore => {
     // Whose session it is, as the call was sent: a call held on its way
     // is answered for whoever sent it.
     const { who } = core;
-    core.calls.push({ path, action: body.action, who });
+    core.calls.push({
+      path,
+      action: body.action,
+      who,
+      ...(body.text === undefined ? {} : { text: body.text }),
+    });
     const key = body.action ?? path;
     const held = core.holding[key];
     if (held !== undefined) {
@@ -2108,9 +2115,9 @@ describe("the interview page when its session ends mid-interview", () => {
     await until(
       () =>
         core.calls.some(
-          ({ path, who }) => path === "/api/speech" && who === "them"
+          ({ path, text: line }) => path === "/api/speech" && line === "Three."
         ),
-      "a line asked for again"
+      "the line fetched ahead, asked for"
     );
     setSound(false);
     expect(text()).not.toContain(signInAgain);
@@ -2139,4 +2146,27 @@ describe("the interview page when its session ends mid-interview", () => {
       expect(stored()).not.toContain("Unsent words");
     }
   );
+
+  it("leaves what waits as it was taken when a save tried again goes out after their session ended", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const core = fakeCore(typing);
+    await inConversation();
+    // What they said isn't kept yet: it is tried again in a moment.
+    core.failing = true;
+    await type("Said before it ended.");
+    await press("Send");
+    await untilAsked(core, "save");
+    core.who = "nobody";
+    await heard();
+    await until(() => text().includes(signInAgain), "the sign-in again");
+    const taken = stored();
+    // Past the try again.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+    expect({
+      waited: taken.includes("Said before it ended."),
+      unchanged: stored() === taken,
+    }).toStrictEqual({ waited: true, unchanged: true });
+  });
 });
