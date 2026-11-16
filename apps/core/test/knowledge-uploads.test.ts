@@ -5,7 +5,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { cleanupsPerPage } from "../src/knowledge-uploads.ts";
 import { mockIdp } from "./idp.ts";
 import { runMinuteTasks } from "./maintenance.ts";
-import { openRpc, outcome, signedInApi } from "./sign-in.ts";
+import { auditedDuring, openRpc, outcome, signedInApi } from "./sign-in.ts";
 
 // The files once uploaded into Knowledge, which is gone (GRA-1941): core's
 // rows of them and their originals in R2 (src/knowledge-uploads.ts). A
@@ -122,7 +122,7 @@ const refusingDeletes = (): R2Bucket =>
 const manyUploads = cleanupsPerPage + 1;
 
 describe("the files a person once uploaded into Knowledge, as they are erased", () => {
-  it("are forgotten wherever they uploaded them, their originals deleted, and another's kept", async () => {
+  it("are forgotten wherever they uploaded them, their originals deleted, another's kept, and counted on the erasure's record", async () => {
     const admin = await signedInApi(idp, "admin");
     const person = await signedInApi(idp, "user");
     const other = await signedInApi(idp, "user");
@@ -139,17 +139,29 @@ describe("the files a person once uploaded into Knowledge, as they are erased", 
     });
     await admin.api.members.remove(person.userId);
 
-    const erased = await admin.api.members.erase(
-      person.userId,
-      String(person.person.name)
-    );
+    let erased: Awaited<ReturnType<typeof admin.api.members.erase>> | undefined;
+    const events = await auditedDuring(async () => {
+      erased = await admin.api.members.erase(
+        person.userId,
+        String(person.person.name)
+      );
+    });
 
     expect({
-      done: typeof erased.completedAt,
+      done: typeof erased?.completedAt,
       stored: await storedOf(theirs),
       kept: await keptOf(theirs),
       another: [await storedOf([kept]), await keptOf([kept])],
-    }).toStrictEqual({ done: "string", stored: 0, kept: 0, another: [1, 1] });
+      recorded: events
+        .filter(({ action }) => action === "member.erasure.requested")
+        .map(({ detail }) => detail),
+    }).toStrictEqual({
+      done: "string",
+      stored: 0,
+      kept: 0,
+      another: [1, 1],
+      recorded: [{ userId: person.userId, knowledgeUploads: 3 }],
+    });
   });
 
   it("deletes every original, however many", async () => {
@@ -223,6 +235,54 @@ describe("the files a person once uploaded into Knowledge, as they are erased", 
       area: { state: "complete" },
       stored: 0,
       kept: 0,
+    });
+  });
+});
+
+describe("uploads into Knowledge whose originals were deleted with Knowledge", () => {
+  it("are still forgotten, by a person's erasure and by the clock, without a failure", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const person = await signedInApi(idp, "user");
+    const collectionId = crypto.randomUUID();
+    const anHourAgo = Date.now() - 60 * 60_000;
+    const theirs = await leftUpload(person, collectionId, {
+      path: "Gone.xlsx",
+      status: "ready",
+    });
+    const unended = await leftUpload(admin, collectionId, {
+      path: "Unended.xlsx",
+      status: "pending",
+      at: anHourAgo,
+    });
+    // The account's deletion of `knowledge/` in the files bucket, as the
+    // cutover's last step asks: the rows stay, pointing at nothing.
+    await env.FILES.delete(
+      [theirs, unended].map(({ uploadId }) =>
+        originalKey(collectionId, uploadId)
+      )
+    );
+    await admin.api.members.remove(person.userId);
+
+    const erased = await admin.api.members.erase(
+      person.userId,
+      String(person.person.name)
+    );
+    await runMinuteTasks();
+
+    expect({
+      done: typeof erased.completedAt,
+      area: await brainArea(person.userId),
+      kept: await keptOf([theirs, unended]),
+      cleanups: await env.DB.prepare(
+        "SELECT count(*) AS count FROM upload_cleanups WHERE upload_id IN (?, ?)"
+      )
+        .bind(theirs.uploadId, unended.uploadId)
+        .first<{ count: number }>(),
+    }).toStrictEqual({
+      done: "string",
+      area: { state: "complete" },
+      kept: 0,
+      cleanups: { count: 0 },
     });
   });
 });

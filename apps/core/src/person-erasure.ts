@@ -81,7 +81,7 @@ import {
   subjectsOf,
 } from "./erased-people.ts";
 import { dropHeldStarts } from "./held-starts.ts";
-import { eraseUploadsOf } from "./knowledge-uploads.ts";
+import { eraseUploadsOf, uploadsOf } from "./knowledge-uploads.ts";
 import { onboardingStore } from "./onboarding/store.ts";
 import type { ErasureAreaName } from "./person-erasure-inventory.ts";
 import { stopRunsFor } from "./workflows/resource-runs.ts";
@@ -976,7 +976,15 @@ export const erasePerson = async (
     actor: actorOf(by),
     action: "member.erasure.requested",
     target: { type: "member", id: target },
-    detail: { userId: target },
+    // How many files they once uploaded into Knowledge it forgets (the
+    // `brain` area, knowledge-uploads.ts), counted here, in its one event:
+    // nothing uploads into Knowledge any more, so these are the ones it
+    // erases, and `member.erased` is often written in a later run, once
+    // they are gone.
+    detail: {
+      userId: target,
+      knowledgeUploads: await uploadsOf(env, target),
+    },
   };
   await auditedBatch(env, db, [
     db

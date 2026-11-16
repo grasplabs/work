@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, lt, sql } from "drizzle-orm";
+import { and, asc, count, eq, inArray, lt, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { uploadCleanups, uploads } from "./db/core/schema.ts";
@@ -59,6 +59,15 @@ const cleanUpOriginals = async (env: Env): Promise<void> => {
     // oxlint-disable-next-line no-await-in-loop -- before the next page is read
     await db.delete(uploadCleanups).where(inList(uploadCleanups.key, keys));
   }
+};
+
+/** How many uploads `userId` made into Knowledge that core still holds. */
+export const uploadsOf = async (env: Env, userId: string): Promise<number> => {
+  const [row] = await drizzle(env.DB)
+    .select({ count: count() })
+    .from(uploads)
+    .where(eq(uploads.uploadedBy, userId));
+  return row?.count ?? 0;
 };
 
 /**

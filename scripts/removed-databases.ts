@@ -48,6 +48,12 @@ export const ofRemovedDatabase = (file: string, view: BranchView): boolean => {
     return false;
   }
   const dir = file.slice(0, at);
+  // The database's own folder, as `src/db/<name>/` lays it out. A package
+  // that keeps its migrations at `src/db/migrations` (the old Brain's,
+  // GRA-1941) has none: its name reads `db`, and the config check below
+  // searches `db/db/`, which names nothing. That is harmless: such a folder
+  // counts as removed only through `removedMigrationDirs`, the D1 bindings
+  // every Worker config removed, read across all of them.
   const name = dir.slice(dir.lastIndexOf("/") + 1);
   const storageDeleted =
     view.deletedClasses.has(classOf(name)) ||
