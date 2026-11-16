@@ -117,7 +117,6 @@
     "./ids": "./src/ids.ts",
     "./instruction-files": "./src/instruction-files.ts",
     "./json": "./src/json.ts",
-    "./knowledge": "./src/knowledge.ts",
     "./knowledge-signals": "./src/knowledge-signals.ts",
     "./lab": "./src/lab.ts",
     "./lab-compare": "./src/lab-compare.ts",
@@ -197,7 +196,6 @@
     "./workflows": "./src/workflows.ts"
   },
   "dependencies": {
-    "@grasp-os/brain": "workspace:*",
     "capnweb": "catalog:",
     "croner": "catalog:",
     "entities": "catalog:",

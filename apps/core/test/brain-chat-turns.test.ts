@@ -347,26 +347,27 @@ const failsAfter = (real: D1Database, statements: number): D1Database => {
 };
 
 /**
- * The Workspace object's Knowledge database (today's Brain, which a
- * delete erases its captures from after the new Brain's part) failing
- * every batch until the returned function puts it back.
+ * The Workspace object's connect, which a delete asks to decline the
+ * chat's held actions right after the Brain's part, failing until the
+ * returned function puts it back.
  */
-const knowledgeOutOfReach = async (
+const connectOutOfReach = async (
   stub: ReturnType<typeof workspace>
 ): Promise<() => Promise<void>> => {
   const real: unknown = await runInDurableObject(stub, (instance) => {
     const objectEnv = envOf(instance);
-    const was: unknown = Reflect.get(objectEnv, "KNOWLEDGE");
-    Reflect.set(objectEnv, "KNOWLEDGE", {
-      prepare: outOfReach,
-      batch: outOfReach,
-      exec: outOfReach,
+    const was: unknown = Reflect.get(objectEnv, "CONNECT");
+    Reflect.set(objectEnv, "CONNECT", {
+      declineChatActions: async () => {
+        await Promise.resolve();
+        throw new Error("Connect is out of reach");
+      },
     });
     return was;
   });
   return async () => {
     await runInDurableObject(stub, (instance) => {
-      Reflect.set(envOf(instance), "KNOWLEDGE", real);
+      Reflect.set(envOf(instance), "CONNECT", real);
     });
   };
 };
@@ -945,7 +946,7 @@ describe("a deleted chat", () => {
     );
     await ask(`Keep ${marker}?`);
     await handedTo(person.userId, marker);
-    const putBack = await knowledgeOutOfReach(stub);
+    const putBack = await connectOutOfReach(stub);
 
     const refused = await outcome(person.api.chats.remove(chatId));
     await putBack();

@@ -1,1 +1,0 @@
-ALTER TABLE `brain_purge_steps` ADD `version` integer;

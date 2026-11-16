@@ -38,9 +38,6 @@ process.env.MINIFLARE_WORKERD_V8_FLAGS = withNoBackgroundCompile(
 const coreMigrations = await readD1Migrations(
   `${import.meta.dirname}/src/db/core/migrations`
 );
-const knowledgeMigrations = await readD1Migrations(
-  `${import.meta.dirname}/../../packages/brain/src/db/migrations`
-);
 const connectMigrations = await readD1Migrations(
   `${import.meta.dirname}/../connect/src/db/migrations`
 );
@@ -328,7 +325,6 @@ export const coreProject = (
             // So a run waiting on a held side effect checks again at once.
             WORKFLOW_OFF_WAIT_MS: "250",
             CORE_MIGRATIONS: coreMigrations,
-            KNOWLEDGE_MIGRATIONS: knowledgeMigrations,
             CONNECT_MIGRATIONS: connectMigrations,
             ...bindings,
           },

@@ -144,16 +144,13 @@ export const buildRelease = async (
       async ([name, content]) => await file(name, content, migrationKey, blobs)
     )
   );
-  // The databases core and connect also bind, as in the real release.
-  const [knowledge, connectDb] = await Promise.all([
-    file(
-      "0000_knowledge.sql",
-      "CREATE TABLE k (id TEXT);",
-      migrationKey,
-      blobs
-    ),
-    file("0000_connect.sql", "CREATE TABLE c (id TEXT);", migrationKey, blobs),
-  ]);
+  // The database connect binds, as in the real release.
+  const connectDb = await file(
+    "0000_connect.sql",
+    "CREATE TABLE c (id TEXT);",
+    migrationKey,
+    blobs
+  );
   const assetManifest: Record<string, { hash: string; size: number }> = {};
   const assets: ReleaseManifest["assets"] = {};
   for (const [path, content] of Object.entries(
@@ -228,7 +225,6 @@ export const buildRelease = async (
           { type: "version_metadata", name: "CF_VERSION_METADATA" },
           { type: "assets", name: "ASSETS" },
           { type: "d1", name: "DB", id: "$D1_DB_ID" },
-          { type: "d1", name: "KNOWLEDGE", id: "$D1_KNOWLEDGE_ID" },
           {
             type: "r2_bucket",
             name: "FILES",
@@ -257,11 +253,6 @@ export const buildRelease = async (
         ],
         d1Databases: [
           { binding: "DB", databaseName: "grasp-os-core", migrations },
-          {
-            binding: "KNOWLEDGE",
-            databaseName: "grasp-os-knowledge",
-            migrations: [knowledge],
-          },
         ],
         assets: { config: {}, manifest: assetManifest },
       },

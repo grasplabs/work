@@ -14,10 +14,10 @@ import {
 } from "../src/projects.ts";
 import { shareWorkflowResource } from "../src/workflow-members.ts";
 import { deleteWorkflowResource } from "../src/workflow-resources.ts";
+import { newTeam } from "./admin-teams.ts";
 import { testApp } from "./app-definitions.ts";
 import { racingDb, release } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
-import { newTeam } from "./knowledge.ts";
 import {
   auditedDuring,
   callAuth,

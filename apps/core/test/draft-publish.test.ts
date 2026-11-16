@@ -13,8 +13,8 @@ import { appVersionOf, appVersionsOf, commitApp } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { agentWriting } from "./draft-writers.ts";
 import { mockIdp } from "./idp.ts";
-import { storedGrant } from "./knowledge.ts";
 import { outcome, signedInApi, unique } from "./sign-in.ts";
+import { storedGrant } from "./stored-grants.ts";
 
 // An App's draft published by one of its builders
 // (`drafts.publish`): checked, committed as the App's next version,

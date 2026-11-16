@@ -14,10 +14,8 @@ import type { VttExtraction } from "./vtt.ts";
 // to gigabytes, say) exhausts this isolate, never core's.
 
 /**
- * The most Markdown it hands back, in bytes of UTF-8: a document's limit
- * (knowledge/documents.ts), and a transcript's (packages/brain
- * transcripts.ts). Anything longer couldn't be saved, and isn't sent back
- * to core.
+ * The most Markdown it hands back, in bytes of UTF-8. Anything longer
+ * isn't sent back to core.
  */
 const markdownMaxBytes = 1024 * 1024;
 

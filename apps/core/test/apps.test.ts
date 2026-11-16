@@ -875,7 +875,7 @@ export const Route = createFileRoute("/archive")({ component: Page });
         drafted(api, app.id, { "docs/AGENTS.md": "x".repeat(9000) })
       ),
     }).toStrictEqual({
-      over: "knowledge.memory_too_large",
+      over: "app.agents_too_large",
       atLimit: "ok",
       elsewhere: "ok",
     });

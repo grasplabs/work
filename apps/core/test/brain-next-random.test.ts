@@ -63,13 +63,23 @@ import { withoutEmbedder } from "./without-embedder.ts";
 //   may read that hold it as written, in the words list's order, then the
 //   shorter; at most `recallLimit`.
 //   No question here has a quoted phrase.
-// - The pack (GRA-1728): the ID lists and the words list fused by
-//   reciprocal rank (1 / (60 + rank), summed; ties to the better rank,
+// - Dates (GRA-1798): a passage may mention one of three days, written
+//   "14 maart 2097" or "2097-03-14T09:00:00Z"; a question asks one as
+//   "March 14th", which shares no word with either. For each day asked,
+//   in the question's order, a list after the words list: the chunks of
+//   current versions the reader may read that mention it and that the
+//   words list doesn't hold, the shorter first; at most `recallLimit`.
+//   Its words ("march", "14th") are telling words, held by no chunk, and
+//   said not found only when no readable chunk mentions a day asked that
+//   they belong to.
+// - The pack (GRA-1728): the ID lists, the words list and the date
+//   lists fused by reciprocal rank (1 / (60 + rank), summed; ties to the better rank,
 //   then to the list given first), each chunk whole at the largest budget,
 //   found "exact" when an ID list holds it, else by its words or its
 //   stop words alone. Not found: the IDs no readable current chunk holds,
 //   as written, then the telling words none holds in any form, folded,
-//   but the IDs' own. Never cut short.
+//   but the IDs' own and those of the days a readable chunk mentions.
+//   Never cut short.
 // - By meaning (GRA-1769): half the questions are asked of the store with
 //   a vector of their own too, for the scenario's model. Its list, given
 //   after the words list: the chunks a vector search returns (below), at
@@ -219,9 +229,25 @@ const stopPrefix = "~";
 
 const isStop = (token: Token): boolean => token.startsWith(stopPrefix);
 
+/** A planned date: `@<day><form>`, day 0 to 2, form 0 or 1 (`vocabulary`). */
+const datePrefix = "@";
+
+const isDate = (token: Token): boolean => token.startsWith(datePrefix);
+
+/** The day a date token mentions, 0 to 2. */
+const dayOf = (token: Token): number => Number(token.charAt(1));
+
+/** How many days a scenario's passages may mention. */
+const days = 3;
+
+/** The words a question writes a day in: "March 14th", folded. */
+const askedDayWords = (day: number): string[] => ["march", `${14 + day}th`];
+
 /** Whether a token's word is an ID: roots a and b (`vocabulary`). */
 const isId = (token: Token): boolean =>
-  !isStop(token) && (token.startsWith("a") || token.startsWith("b"));
+  !isStop(token) &&
+  !isDate(token) &&
+  (token.startsWith("a") || token.startsWith("b"));
 
 /** A token's root: its letter, or the stop word itself. */
 const rootOf = (token: Token): string =>
@@ -231,16 +257,26 @@ const rootOf = (token: Token): string =>
 const drawsOf = (seed: number) => {
   const next = seededRandom(seed);
   const below = (bound: number): number => Math.floor(next() * bound);
+  /** A roll from 0 to 1, for a choice among several chances. */
+  const chanceRoll = (): number => next();
   return {
     below,
     chance: (probability: number): boolean => next() < probability,
-    /** 1 to `most` words: mostly forms of roots, a stop word in `stops` of them. */
+    /**
+     * 1 to `most` words: mostly forms of roots, a stop word in `stops` of
+     * them, a date in about a tenth.
+     */
     tokens: (most: number, stops: number): Token[] =>
-      Array.from({ length: 1 + below(most) }, () =>
-        next() < stops
-          ? `${stopPrefix}${stopWords[below(stopWords.length)] ?? "de"}`
-          : `${letters[below(letters.length)] ?? "a"}${below(formEndings.length)}`
-      ),
+      Array.from({ length: 1 + below(most) }, () => {
+        const roll = chanceRoll();
+        if (roll < stops) {
+          return `${stopPrefix}${stopWords[below(stopWords.length)] ?? "de"}`;
+        }
+        if (roll < stops + 0.1) {
+          return `${datePrefix}${below(days)}${below(2)}`;
+        }
+        return `${letters[below(letters.length)] ?? "a"}${below(formEndings.length)}`;
+      }),
   };
 };
 type Draws = ReturnType<typeof drawsOf>;
@@ -299,14 +335,28 @@ const vocabulary = (seed: number) => {
   // c and d of letters alone, each digit a consonant, so they are words.
   const idPrefix = `r11${hex.slice(2)}`;
   const wordPrefix = `r${hex.replaceAll(/\d/gu, (digit) => "ghjklmnpst".charAt(Number(digit)))}`;
-  return (token: Token): string =>
-    isStop(token)
-      ? token.slice(stopPrefix.length)
-      : `${isId(token) ? idPrefix : wordPrefix}${token.slice(0, 1)}${formEndings[Number(token.slice(1))] ?? ""}`;
+  return (token: Token): string => {
+    if (isStop(token)) {
+      return token.slice(stopPrefix.length);
+    }
+    if (isDate(token)) {
+      const day = 14 + dayOf(token);
+      return token.charAt(2) === "0"
+        ? `${day} maart 2097`
+        : `2097-03-${day}T09:00:00Z`;
+    }
+    return `${isId(token) ? idPrefix : wordPrefix}${token.slice(0, 1)}${formEndings[Number(token.slice(1))] ?? ""}`;
+  };
 };
 
-/** Characters of the longest word: "r", eight hex digits, its letter and ending. */
-const wordLength = 10 + Math.max(...formEndings.map(({ length }) => length));
+/**
+ * Characters of the longest word: "r", eight hex digits, its letter and
+ * ending; or a date written as a timestamp.
+ */
+const wordLength = Math.max(
+  10 + Math.max(...formEndings.map(({ length }) => length)),
+  "2097-03-14T09:00:00Z".length
+);
 
 /** Characters the longest list of words takes, with a space after it. */
 const mostWords = mostWordsPerParagraph * (wordLength + 1);
@@ -365,9 +415,16 @@ const isAmong = (
   return false;
 };
 
-/** Whether `words` hold one of the asked words, in any of its forms. */
+/**
+ * Whether `words` hold one of the asked words, in any of its forms. A date
+ * is held by no words: a question writes it in words no passage writes.
+ */
 const holds = (words: readonly Token[], asked: readonly Token[]): boolean =>
-  asked.some((token) => words.some((word) => rootOf(word) === rootOf(token)));
+  asked.some(
+    (token) =>
+      !isDate(token) &&
+      words.some((word) => !isDate(word) && rootOf(word) === rootOf(token))
+  );
 
 /**
  * Draws who may read a later version of a source `before` could read: a
@@ -466,7 +523,8 @@ const expectedOf = (
       length: version.lengths[position] ?? 0,
       telling: telling.filter((token) => holds(words, [token])).length,
       stops: stops.filter((token) => words.includes(token)).length,
-      exact: telling.filter((token) => words.includes(token)).length,
+      exact: telling.filter((token) => !isDate(token) && words.includes(token))
+        .length,
     }));
   });
   const first = readable
@@ -560,6 +618,60 @@ const exactOf = (
   return { lists, held };
 };
 
+/**
+ * For each day the question asks, in its order, a list: the chunks of
+ * current versions `person` may read that mention it and that `byWords`
+ * (the words list) doesn't hold, the shorter first, at most `recallLimit`;
+ * and which days any readable chunk mentions. No two chunks here share a
+ * length, and every day's chunks are far fewer than the store's cap.
+ */
+const datesOf = (
+  planned: readonly Planned[],
+  person: number,
+  membership: Membership,
+  asked: readonly Token[],
+  byWords: readonly ExpectedChunk[]
+): { lists: ExpectedChunk[][]; held: Set<number> } => {
+  const askedDays = [...new Set(asked.filter(isDate).map(dayOf))];
+  const held = new Set<number>();
+  const chunks = planned.flatMap((source) => {
+    const version = currentOf(source);
+    if (!isAmong(version.readers, person, membership)) {
+      return [];
+    }
+    return version.paragraphs.map((words, position) => {
+      const mentions = new Set(words.filter(isDate).map(dayOf));
+      for (const day of askedDays) {
+        if (mentions.has(day)) {
+          held.add(day);
+        }
+      }
+      const chunk: ExpectedChunk = {
+        name: `s${source.index} v${version.version} c${position}`,
+        planned: source,
+        version,
+        position,
+        length: version.lengths[position] ?? 0,
+        telling: 0,
+        stops: 0,
+        exact: 0,
+      };
+      return { chunk, mentions };
+    });
+  });
+  const listed = new Set(byWords.map(({ name }) => name));
+  const lists = askedDays.map((day) =>
+    chunks
+      .filter(
+        ({ chunk, mentions }) => mentions.has(day) && !listed.has(chunk.name)
+      )
+      .map(({ chunk }) => chunk)
+      .toSorted((a, b) => a.length - b.length)
+      .slice(0, recallLimit)
+  );
+  return { lists, held };
+};
+
 /** Reciprocal rank fusion's constant: the store's. */
 const fusionK = 60;
 
@@ -614,6 +726,7 @@ const packOf = (
   const ids = [...new Set(asked.filter(isId))];
   const byWords = expectedOf(planned, person, membership, asked);
   const exact = exactOf(planned, person, membership, ids, byWords);
+  const dated = datesOf(planned, person, membership, asked, byWords);
   const chunks = fused([
     ...exact.lists.map((list) =>
       list.map((chunk) => ({ chunk, found: "exact" as const }))
@@ -622,11 +735,14 @@ const packOf = (
       chunk,
       found: chunk.telling > 0 ? ("words" as const) : ("stop words" as const),
     })),
+    ...dated.lists.map((list) =>
+      list.map((chunk) => ({ chunk, found: "exact" as const }))
+    ),
     meant.map((chunk) => ({ chunk, found: "meaning" as const })),
   ]);
   const missing = ids.filter((id) => !exact.held.has(id));
-  // The telling words, each once, in the question's order; a question of
-  // stop words alone is all telling.
+  // The telling words, each once, in the question's order, a date as the
+  // words it is asked in; a question of stop words alone is all telling.
   const distinct = [...new Set(asked)];
   const telling = distinct.some((token) => !isStop(token))
     ? distinct.filter((token) => !isStop(token) && !isId(token))
@@ -637,13 +753,27 @@ const packOf = (
       ? version.paragraphs
       : [];
   });
+  // A day a readable chunk mentions stands for its words.
+  const standing = new Set(
+    [...dated.held].flatMap((day) => askedDayWords(day))
+  );
+  const tellingWords = [
+    ...new Set(
+      telling.flatMap((token) => {
+        if (isDate(token)) {
+          return askedDayWords(dayOf(token));
+        }
+        return readable.some((words) => holds(words, [token]))
+          ? []
+          : [wordOf(token)];
+      })
+    ),
+  ];
   return {
     chunks,
     notFound: [
       ...missing.map(written),
-      ...telling
-        .filter((token) => !readable.some((words) => holds(words, [token])))
-        .map(wordOf),
+      ...tellingWords.filter((word) => !standing.has(word)),
     ],
   };
 };
@@ -1047,8 +1177,11 @@ const scenario = (people: readonly string[], seed: number) => {
       ? draws.tokens(3, 1)
       : draws.tokens(4, 0.35);
     // Sometimes in capitals: search reads a word whatever its case.
+    // A date as "March 14th", in words no passage writes it in.
+    const askedAs = (token: Token): string =>
+      isDate(token) ? `March ${14 + dayOf(token)}th` : wordOf(token);
     const writtenAs = asked.map((token) =>
-      draws.chance(0.2) ? wordOf(token).toUpperCase() : wordOf(token)
+      draws.chance(0.2) ? askedAs(token).toUpperCase() : askedAs(token)
     );
     const question = writtenAs.join(" ");
     const vector = draws.chance(0.5) ? signs() : undefined;
