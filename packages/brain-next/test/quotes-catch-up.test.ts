@@ -827,6 +827,8 @@ describe("what the catch-up leaves behind it", () => {
       );
     const served = await turn();
     await shared().eraseSource({ source, reason: "deleted" });
+    // Its pointer goes as the erasure hides it: the turn with it.
+    const afterErase = await turn();
     for (let ticks = 0; ticks < 5; ticks += 1) {
       // oxlint-disable-next-line no-await-in-loop -- the tick deletes what the erasure hid
       await tick();
@@ -837,9 +839,15 @@ describe("what the catch-up leaves behind it", () => {
 
     expect({
       served: served === source,
+      afterErase,
       holding: await holding(source),
       left: await turn(),
-    }).toStrictEqual({ served: true, holding: [], left: null });
+    }).toStrictEqual({
+      served: true,
+      afterErase: null,
+      holding: [],
+      left: null,
+    });
   });
 
   it("reads no file of a source with nothing on a version before its current one", async () => {
