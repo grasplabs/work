@@ -406,9 +406,6 @@ const save = async (mine: Kept): Promise<void> => {
   } finally {
     mine.saving = false;
   }
-  if (mine.aside) {
-    return;
-  }
   if (
     kept === mine &&
     !mine.gone &&

@@ -17061,6 +17061,14 @@ msgid "Your session has ended"
 msgstr "Je sessie is beëindigd"
 
 #: src/routes/interview.tsx
+msgid "Your sign-in ended, so you didn't withdraw and what wasn't saved yet wasn't kept: sign in again with your work account to withdraw."
+msgstr "Je inlog is afgelopen, dus je hebt je niet teruggetrokken en wat nog niet was opgeslagen, is niet bewaard: log opnieuw in met je werkaccount om je terug te trekken."
+
+#: src/routes/interview.tsx
+msgid "Your sign-in ended, so your interview wasn't deleted and what wasn't saved yet wasn't kept: sign in again with your work account to delete it."
+msgstr "Je inlog is afgelopen, dus je interview is niet verwijderd en wat nog niet was opgeslagen, is niet bewaard: log opnieuw in met je werkaccount om het te verwijderen."
+
+#: src/routes/interview.tsx
 msgid "Your sign-in ended. Sign in again with your work account to go on where you were. This window couldn't keep what wasn't saved yet, so it is lost."
 msgstr "Je inlog is afgelopen. Log opnieuw in met je werkaccount om verder te gaan waar je was. Dit venster kon niet bewaren wat nog niet was opgeslagen, dus dat is verloren."
 

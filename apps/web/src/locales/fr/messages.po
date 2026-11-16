@@ -17061,6 +17061,14 @@ msgid "Your session has ended"
 msgstr "Votre session est terminée"
 
 #: src/routes/interview.tsx
+msgid "Your sign-in ended, so you didn't withdraw and what wasn't saved yet wasn't kept: sign in again with your work account to withdraw."
+msgstr "Votre connexion a pris fin, vous ne vous êtes donc pas retiré et ce qui n'était pas encore enregistré n'a pas été conservé : reconnectez-vous avec votre compte professionnel pour vous retirer."
+
+#: src/routes/interview.tsx
+msgid "Your sign-in ended, so your interview wasn't deleted and what wasn't saved yet wasn't kept: sign in again with your work account to delete it."
+msgstr "Votre connexion a pris fin, votre entretien n'a donc pas été supprimé et ce qui n'était pas encore enregistré n'a pas été conservé : reconnectez-vous avec votre compte professionnel pour le supprimer."
+
+#: src/routes/interview.tsx
 msgid "Your sign-in ended. Sign in again with your work account to go on where you were. This window couldn't keep what wasn't saved yet, so it is lost."
 msgstr "Votre connexion a pris fin. Reconnectez-vous avec votre compte professionnel pour reprendre là où vous en étiez. Cette fenêtre n'a pas pu conserver ce qui n'était pas encore enregistré, c'est donc perdu."
 
