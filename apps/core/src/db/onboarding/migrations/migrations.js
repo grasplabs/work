@@ -37,7 +37,7 @@ import m0034 from './0034_superb_viper.sql';
 import m0035 from './0035_fine_adam_destine.sql';
 import m0036 from './0036_cuddly_leopardon.sql';
 import m0037 from './0037_late_mongu.sql';
-import m0038 from './0038_square_corsair.sql';
+import m0038 from './0038_lush_eternity.sql';
 
   export default {
     journal,

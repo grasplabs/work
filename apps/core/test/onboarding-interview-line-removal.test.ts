@@ -451,7 +451,7 @@ describe("removing a line of an interview", { timeout: 60_000 }, () => {
       lines: [...progress.lines, { from: "stephen", text: "And then?" }],
     };
     const closing = removing(earlier, 0);
-    const own = crypto.randomUUID();
+    const page = crypto.randomUUID();
     const secretMark = await sha256Hex(link.secret);
     const keyMark = await accountOf(link);
 
@@ -462,11 +462,12 @@ describe("removing a line of an interview", { timeout: 60_000 }, () => {
       async (instance) =>
         await Promise.all([
           instance.saveInterview(secretMark, keyMark, version, earlier, {
-            save: own,
+            id: page,
+            save: 1,
           }),
           instance.saveInterview(secretMark, keyMark, version, closing, {
-            save: crypto.randomUUID(),
-            after: [own],
+            id: page,
+            save: 2,
           }),
         ])
     );

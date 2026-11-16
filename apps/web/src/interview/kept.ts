@@ -1,7 +1,4 @@
-import {
-  factRevision,
-  interviewSavesUnheard,
-} from "@grasp-os/shared/interview-links";
+import { factRevision } from "@grasp-os/shared/interview-links";
 import type { InterviewProgress } from "@grasp-os/shared/interview-links";
 import type { Interviewer } from "@grasp-os/shared/onboarding";
 import { useSyncExternalStore } from "react";
@@ -37,14 +34,12 @@ interface Kept {
   progress: InterviewProgress;
   /** A save on its way, and whether a change came in meanwhile. */
   saving: boolean;
-  /** The save on its way, as this page named it (`save`). */
-  sending: string | undefined;
   /**
-   * This page's saves since its last answered one whose answers were
-   * lost: core may have kept any of them, so the next save goes on from
-   * whichever did (`after`).
+   * This page, as its saves name it, and how many it sent: core takes a
+   * later save of the page over a version an earlier one made that the
+   * page never heard of (its answer lost, or on its way as it closed).
    */
-  unheard: string[];
+  page: { id: string; saves: number };
   again: boolean;
   /** Something changed that isn't kept yet. */
   dirty: boolean;
@@ -99,35 +94,28 @@ export const progressNow = (): InterviewProgress =>
 export const linkNow = (): { secret: string } | null =>
   kept === null ? null : { secret: kept.secret };
 
-/** What a save sends of this page's unheard saves (`after`): the latest. */
-const unheardOf = (saves: readonly string[]): { after?: string[] } =>
-  saves.length === 0 ? {} : { after: saves.slice(-interviewSavesUnheard) };
+/** The page as the next save names it (`page`): its next count. */
+const nextSave = (mine: Kept): { id: string; save: number } => {
+  mine.page.saves += 1;
+  return { id: mine.page.id, save: mine.page.saves };
+};
 
 const saveOnce = async (mine: Kept): Promise<void> => {
   mine.dirty = false;
   const sent = mine.progress;
-  const save = crypto.randomUUID();
-  mine.sending = save;
   const answer = await saveProgress({
     action: "save",
     secret: mine.secret,
     version: mine.version,
     progress: sent,
-    save,
-    ...unheardOf(mine.unheard),
+    page: nextSave(mine),
   });
-  mine.sending = undefined;
   if (kept !== mine || mine.gone) {
     return;
   }
   if (isRefused(answer)) {
     const passing =
       answer.status === 0 || answer.status === 429 || answer.status >= 500;
-    // Out of reach, or core failed: it may have kept this one all the same.
-    // Refused for the request budget, it kept nothing.
-    if (passing && answer.status !== 429) {
-      mine.unheard = [...mine.unheard, save].slice(-interviewSavesUnheard);
-    }
     if (passing) {
       // It waits here and is tried again, and the screen says so.
       mine.dirty = true;
@@ -140,7 +128,6 @@ const saveOnce = async (mine: Kept): Promise<void> => {
     return;
   }
   mine.failed = 0;
-  mine.unheard = [];
   mine.version = answer.version;
   if (answer.saved) {
     if (!mine.dirty) {
@@ -278,22 +265,17 @@ const onPageHide = (): void => {
     return;
   }
   mine.dirty = false;
-  // The save on its way may have landed already, and moved the version on
-  // past this page's: this one goes on from it, as core takes from the
-  // page that sent it (`after`). Cut off before it landed, this one is
-  // the next version itself.
+  // A save of the page's may have landed already, its answer lost or on
+  // its way, and moved the version on past this page's: this one goes on
+  // from it, as core takes the page's later saves (`page`). Counted too,
+  // so a page brought back from the back/forward cache goes on from it.
   void saveProgress(
     {
       action: "save",
       secret: mine.secret,
       version: mine.version,
       progress: mine.progress,
-      save: crypto.randomUUID(),
-      ...unheardOf(
-        mine.sending === undefined
-          ? mine.unheard
-          : [...mine.unheard, mine.sending]
-      ),
+      page: nextSave(mine),
     },
     { keepalive: true }
   );
@@ -317,8 +299,7 @@ export const holdInterview = ({
     version,
     progress: progress ?? freshProgress,
     saving: false,
-    sending: undefined,
-    unheard: [],
+    page: { id: crypto.randomUUID(), saves: 0 },
     again: false,
     dirty: false,
     waiting: undefined,

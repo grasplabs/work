@@ -25,6 +25,14 @@ const bodyOf = (init: RequestInit): Record<string, unknown> => {
     : {};
 };
 
+/** The page a save named, by its id. */
+const pageOf = (sent: Sent | undefined): unknown => {
+  const page = sent?.body.page;
+  return typeof page === "object" && page !== null
+    ? Reflect.get(page, "id")
+    : undefined;
+};
+
 /** An interview with one line of theirs, to remove. */
 const said: InterviewProgress = {
   ...freshProgress,
@@ -65,19 +73,19 @@ describe("what the interview page keeps", () => {
     const [first, last] = sent;
     expect({
       sent: sent.length,
-      first: { version: first?.body.version, named: typeof first?.body.save },
+      first: { version: first?.body.version, page: first?.body.page },
       last: {
         version: last?.body.version,
-        after: last?.body.after,
+        page: last?.body.page,
         keepalive: last?.keepalive,
         removed: JSON.stringify(last?.body.progress).includes('"removed":true'),
       },
     }).toStrictEqual({
       sent: 2,
-      first: { version: 3, named: "string" },
+      first: { version: 3, page: { id: pageOf(first), save: 1 } },
       last: {
         version: 3,
-        after: [first?.body.save],
+        page: { id: pageOf(first), save: 2 },
         keepalive: true,
         removed: true,
       },
@@ -111,22 +119,51 @@ describe("what the interview page keeps", () => {
     const [lost, again, closing] = sent;
     expect({
       sent: sent.length,
-      again: { version: again?.body.version, after: again?.body.after },
+      again: { version: again?.body.version, page: again?.body.page },
       closing: {
         version: closing?.body.version,
-        after: closing?.body.after,
+        page: closing?.body.page,
         removed: JSON.stringify(closing?.body.progress).includes(
           '"removed":true'
         ),
       },
     }).toStrictEqual({
       sent: 3,
-      again: { version: 3, after: [lost?.body.save] },
+      again: { version: 3, page: { id: pageOf(lost), save: 2 } },
       closing: {
         version: 3,
-        after: [lost?.body.save, again?.body.save],
+        page: { id: pageOf(lost), save: 3 },
         removed: true,
       },
+    });
+  });
+
+  it("goes on from the save it sent as it went, once the page is brought back from the back/forward cache", async () => {
+    vi.useFakeTimers();
+    const sent: Sent[] = [];
+    // Nothing core answers reaches the page: the save it sends as it goes
+    // lands, and the page never hears of it.
+    const { promise: never } = Promise.withResolvers<Response>();
+    vi.stubGlobal("fetch", async (_path: string, init: RequestInit) => {
+      sent.push({ body: bodyOf(init), keepalive: init.keepalive === true });
+      return await never;
+    });
+    holdInterview({ secret: "s".repeat(43), version: 3, progress: said });
+
+    update((now) => withoutLine(now, 1));
+    window.dispatchEvent(new Event("pagehide"));
+    // Back from the cache: what they change next is saved after it.
+    window.dispatchEvent(new Event("pageshow"));
+    update((now) => ({ ...now, phase: "readback" }));
+    await vi.advanceTimersByTimeAsync(1000);
+
+    const [went, next] = sent;
+    expect({
+      went: { keepalive: went?.keepalive, page: went?.body.page },
+      next: { version: next?.body.version, page: next?.body.page },
+    }).toStrictEqual({
+      went: { keepalive: true, page: { id: pageOf(went), save: 1 } },
+      next: { version: 3, page: { id: pageOf(went), save: 2 } },
     });
   });
 });

@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "e97357fd-4429-41f2-8177-ad661e395f7a",
+  "id": "75e45f86-c4b8-42bd-b85e-7803dcc8dca3",
   "prevId": "eaf76982-24e1-4d7b-bd14-559463051fc6",
   "tables": {
     "approvals": {
@@ -975,9 +975,16 @@
           "autoincrement": false,
           "default": 0
         },
-        "saved_by": {
-          "name": "saved_by",
+        "saved_by_page": {
+          "name": "saved_by_page",
           "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "saved_page_save": {
+          "name": "saved_page_save",
+          "type": "integer",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false

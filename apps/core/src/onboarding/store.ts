@@ -955,25 +955,34 @@ const countsOf = (progress: InterviewProgress): InterviewCounts => ({
   interviewer: progress.interviewer ?? null,
 });
 
+/** The page a save names: its id, and how many saves it sent with this one. */
+interface SavingPage {
+  id: string;
+  save: number;
+}
+
 /**
  * Whether a save over `version` goes on from the version `link` keeps:
- * it is that version, or one of the page's own saves it never heard the
- * answer to (`after`) made it, and nothing moved it since (a delete,
- * another tab).
+ * it is that version, or an earlier save of the same page made it, which
+ * this one comes after, and nothing moved it since (a delete, another
+ * tab). A page's later save holds all its earlier ones did.
  */
 const goesOnFromKept = (
   link: {
     version: number;
-    savedBy: string | null;
+    savedByPage: string | null;
+    savedPageSave: number | null;
     savedVersion: number | null;
   },
   version: number,
-  after: readonly string[] | undefined
+  page: SavingPage | undefined
 ): boolean =>
   version === link.version ||
-  (link.savedBy !== null &&
-    link.savedVersion === link.version &&
-    (after ?? []).includes(link.savedBy));
+  (page !== undefined &&
+    link.savedByPage === page.id &&
+    link.savedPageSave !== null &&
+    page.save > link.savedPageSave &&
+    link.savedVersion === link.version);
 
 export class Onboarding extends DurableObject<Env> {
   readonly #db = drizzle(this.ctx.storage);
@@ -1755,10 +1764,7 @@ export class Onboarding extends DurableObject<Env> {
     account: string,
     version: number,
     progress: InterviewProgress,
-    {
-      save,
-      after: goesOnFrom,
-    }: { save?: string; after?: readonly string[] } = {},
+    page?: SavingPage,
     now: string = new Date().toISOString()
   ): Promise<LinkActed<InterviewSaved>> {
     const found = this.#onLink(secretMark, { account }, now, "save");
@@ -1773,7 +1779,7 @@ export class Onboarding extends DurableObject<Env> {
     let savable: Savable;
     do {
       // oxlint-disable-next-line no-await-in-loop -- one check after another
-      savable = await this.#savable(person.id, version, goesOnFrom, progress);
+      savable = await this.#savable(person.id, version, page, progress);
     } while (
       !("answer" in savable) &&
       this.#versionOf(person.id) !== savable.next - 1
@@ -1802,7 +1808,12 @@ export class Onboarding extends DurableObject<Env> {
     this.ctx.storage.transactionSync(() => {
       this.#db
         .update(links)
-        .set({ version: next, savedBy: save ?? null, savedVersion: next })
+        .set({
+          version: next,
+          savedByPage: page?.id ?? null,
+          savedPageSave: page?.save ?? null,
+          savedVersion: next,
+        })
         .where(eq(links.person, person.id))
         .run();
       const kept = {
@@ -4586,7 +4597,8 @@ export class Onboarding extends DurableObject<Env> {
       | "account"
       | "sentTo"
       | "brainMark"
-      | "savedBy"
+      | "savedByPage"
+      | "savedPageSave"
       | "savedVersion"
     >[];
     interviews: AdminInterviewFacts[];
@@ -7874,8 +7886,8 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /**
-   * Whether `person`'s save over `version` (going on from their page's own
-   * save `goesOnFrom`, if named) goes on from the link as kept now, and
+   * Whether `person`'s save over `version` (from `page`, if named) goes on
+   * from the link as kept now, and
    * what its erasures are: the version it makes, or the answer that
    * refuses it. Hashing its erasures lets another save land meanwhile, so
    * the caller asks again if one did (`saveInterview`): the closing save
@@ -7885,20 +7897,21 @@ export class Onboarding extends DurableObject<Env> {
   async #savable(
     person: string,
     version: number,
-    goesOnFrom: readonly string[] | undefined,
+    page: SavingPage | undefined,
     progress: InterviewProgress
   ): Promise<Savable> {
     const [link] = this.#db
       .select({
         version: links.version,
-        savedBy: links.savedBy,
+        savedByPage: links.savedByPage,
+        savedPageSave: links.savedPageSave,
         savedVersion: links.savedVersion,
         deletedAt: links.deletedAt,
       })
       .from(links)
       .where(eq(links.person, person))
       .all();
-    if (link === undefined || !goesOnFromKept(link, version, goesOnFrom)) {
+    if (link === undefined || !goesOnFromKept(link, version, page)) {
       const held = this.#held(person);
       if (held === null && (link?.deletedAt ?? null) !== null) {
         return { answer: refused("interview.deleted") };

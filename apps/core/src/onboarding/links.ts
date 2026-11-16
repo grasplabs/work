@@ -204,7 +204,7 @@ export const interviewResponse = async (
         account,
         body.version,
         body.progress,
-        { save: body.save, after: body.after }
+        body.page
       );
       done(result);
       await settle(result);
