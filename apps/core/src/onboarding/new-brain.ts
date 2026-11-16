@@ -179,24 +179,28 @@ export const eraseOnboardingInterview = async (
  * where a failure must not fail what ran before it: erases their interview
  * and their team's claims it took out, then adds their interview as it
  * stands now, so they find it in their Brain as soon as they approve. The
- * rest, and any failure, is core's clock's.
+ * rest, and any failure, is core's clock's. Whether every erasure it owed
+ * landed: nothing of theirs, nor of those teams' claims, is still owed one.
  */
 export const eraseOwedOfPersonQuietly = async (
   env: Env,
   person: string | null,
   /** The teams whose claims they backed before the request (`claimTeamsOf`). */
   teams: readonly string[] = []
-): Promise<void> => {
+): Promise<boolean> => {
   if (person === null) {
-    return;
+    return true;
   }
   try {
     await eraseOwedOnboardingSources(env, { person, teams });
     await addOwedInterviews(env, person);
+    const owed = await onboardingStore(env).owedErasures({ person, teams });
+    return owed.length === 0;
   } catch (error) {
     log.error("onboarding.brain_erasure_failed", {
       error: error instanceof Error ? error.name : "unknown",
     });
+    return false;
   }
 };
 

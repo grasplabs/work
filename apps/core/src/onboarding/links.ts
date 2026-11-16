@@ -178,15 +178,14 @@ export const interviewResponse = async (
   // says whose link it is, and the teams whose claims they backed before
   // it (`LinkWork`), only to whoever holds the link, so anyone else's
   // request on a real link does no more than on a made-up one.
-  const settle = async (result: LinkActed<unknown>) => {
-    if (result.work !== undefined) {
-      await eraseOwedOfPersonQuietly(
-        env,
-        result.work.person,
-        result.work.backed
-      );
-    }
-  };
+  // Whether every erasure it owed landed (`eraseOwedOfPersonQuietly`).
+  const settle = async (result: LinkActed<unknown>): Promise<boolean> =>
+    result.work === undefined ||
+    (await eraseOwedOfPersonQuietly(
+      env,
+      result.work.person,
+      result.work.backed
+    ));
   const done = (result: LinkAnswer<unknown>) => {
     if (!result.ok && result.code === "interview.link_invalid") {
       // Never the secret: only that one opened nothing.
@@ -215,8 +214,12 @@ export const interviewResponse = async (
     case "delete": {
       const result = await store.deleteInterview(secretMark, account);
       done(result);
-      await settle(result);
-      return answer(result, requestId, (value) => json(value));
+      // Done at once in the store; what the Brain kept is still being
+      // removed while any of its erasures didn't land, and the page says so.
+      const removed = await settle(result);
+      return answer(result, requestId, (value) =>
+        json(removed ? value : { ...value, removing: true })
+      );
     }
     case "participate": {
       const result = await store.participate(secretMark, account, body.notice);
@@ -234,8 +237,12 @@ export const interviewResponse = async (
     case "withdraw": {
       const result = await store.withdraw(secretMark, account);
       done(result);
-      await settle(result);
-      return answer(result, requestId, (value) => json(value));
+      // Final at once in the store; what the Brain kept is still being
+      // removed while any of its erasures didn't land, and the page says so.
+      const removed = await settle(result);
+      return answer(result, requestId, (value) =>
+        json(removed ? value : { ...value, removing: true })
+      );
     }
     default: {
       return body satisfies never;

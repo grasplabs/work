@@ -4643,6 +4643,10 @@ msgstr "Deleted entries past their retention"
 msgid "Deleted. Nothing you said is kept."
 msgstr "Deleted. Nothing you said is kept."
 
+#: src/interview/page.tsx
+msgid "Deleted. What the Brain kept of it is being removed."
+msgstr "Deleted. What the Brain kept of it is being removed."
+
 #: src/activity/audit-words.ts
 msgid "Denied packages"
 msgstr "Denied packages"
@@ -16616,6 +16620,10 @@ msgstr "You were asked this as the {owner}. Answer it in the brain: everyone in 
 #: src/interview/page.tsx
 msgid "You withdrew. Nothing you said is used from now on."
 msgstr "You withdrew. Nothing you said is used from now on."
+
+#: src/interview/page.tsx
+msgid "You withdrew. What the Brain kept of it is being removed."
+msgstr "You withdrew. What the Brain kept of it is being removed."
 
 #: src/interview/transcript.tsx
 #: src/routes/guest.tsx

@@ -4643,6 +4643,10 @@ msgstr "A supprimé des entrées après leur durée de conservation"
 msgid "Deleted. Nothing you said is kept."
 msgstr "Supprimé. Rien de ce que vous avez dit n’est conservé."
 
+#: src/interview/page.tsx
+msgid "Deleted. What the Brain kept of it is being removed."
+msgstr "Supprimé. Ce que le Cerveau en a gardé est en cours de suppression."
+
 #: src/activity/audit-words.ts
 msgid "Denied packages"
 msgstr "A refusé des paquets"
@@ -16616,6 +16620,10 @@ msgstr "On vous a posé cette question en tant que {owner}. Répondez-y dans le 
 #: src/interview/page.tsx
 msgid "You withdrew. Nothing you said is used from now on."
 msgstr "Vous vous êtes retiré. Rien de ce que vous avez dit n’est utilisé à partir de maintenant."
+
+#: src/interview/page.tsx
+msgid "You withdrew. What the Brain kept of it is being removed."
+msgstr "Vous vous êtes retiré. Ce que le Cerveau en a gardé est en cours de suppression."
 
 #: src/interview/transcript.tsx
 #: src/routes/guest.tsx

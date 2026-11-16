@@ -3,6 +3,7 @@ import { sha256Hex } from "@grasp-os/shared/encoding";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
+import { z } from "zod";
 
 import { drainAuditOutboxes } from "../src/audit-drains.ts";
 import { drainObjectOutbox } from "../src/audit-outbox.ts";
@@ -713,6 +714,38 @@ describe("interviews in the new Brain", { timeout: 120_000 }, () => {
     }).toStrictEqual({ first: "pending", retried: "complete", owed: [] });
   });
 
+  it("say a deletion is done at once, and that what the Brain kept is still being removed, when its erasure fails in the request; core's clock then erases it", async () => {
+    const marker = `marker${unique()}`;
+    const ids = await team();
+    await mapped(ids, {
+      facts: [fact("l9", "rule", `Every refund needs ${marker} first.`)],
+    });
+    const lea = await accountOfPerson(ids.lea);
+    await settled();
+    const key = await interviewKeyOf(lea);
+    // She deletes her interview while the Brain fails every erasure.
+    const answer = await onLink(
+      { action: "delete", ...(await openLink(ids.lea)) },
+      erasuresFailing()
+    );
+    const said = await answer.json();
+    await settled();
+    const { own } = await keptIn(key, lea);
+    expect({
+      status: answer.status,
+      removing: z.object({ removing: z.literal(true) }).safeParse(said).success,
+      owed: await onboardingStore(env).owedErasures({ person: ids.lea }),
+      kept: own,
+      recalled: await recalled(lea, marker),
+    }).toStrictEqual({
+      status: 200,
+      removing: true,
+      owed: [],
+      kept: "erased",
+      recalled: [],
+    });
+  });
+
   it("stay erased when the clock's add of them lands after a withdrawal erased them", async () => {
     const marker = `marker${unique()}`;
     const ids = await team();
@@ -1151,6 +1184,43 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
     expect({ before, now: await readableBy(max) }).toStrictEqual({
       before: [zendeskClaim.text],
       now: { group: ids.team, recalled: [], listed: [] },
+    });
+  });
+
+  it("say a withdrawal is final at once, and that what the Brain kept is still being removed, when its erasures fail in the request; core's clock then erases them", async () => {
+    const { ids, max } = await drawnTeam({ eight: true });
+    await intakeOf(ids, [zendeskClaim]);
+    await handOverNow();
+    const pim = await accountOfPerson(ids.pim);
+    const key = await interviewKeyOf(pim);
+    // Pim backs the claim, and withdraws while the Brain fails every
+    // erasure: four are left behind it.
+    const answer = await onLink(
+      { action: "withdraw", ...(await openLink(ids.pim)) },
+      erasuresFailing()
+    );
+    const said = await answer.json();
+    const store = onboardingStore(env);
+    const owedThen = await store.owedErasures({
+      person: ids.pim,
+      teams: [ids.team],
+    });
+    await settled();
+    const { own } = await keptIn(key, pim);
+    expect({
+      status: answer.status,
+      removing: z.object({ removing: z.literal(true) }).safeParse(said).success,
+      owedThen: owedThen.map(({ kind }) => kind).toSorted(),
+      owed: await store.owedErasures({ person: ids.pim, teams: [ids.team] }),
+      kept: own,
+      claims: await recalled(max, "Zendesk", "claim"),
+    }).toStrictEqual({
+      status: 200,
+      removing: true,
+      owedThen: ["claim", "interview"],
+      owed: [],
+      kept: "erased",
+      claims: [],
     });
   });
 

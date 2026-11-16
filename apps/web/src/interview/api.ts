@@ -77,7 +77,11 @@ const savedSchema = z.union([
 ]);
 export type SaveAnswer = z.output<typeof savedSchema>;
 
-const deletedSchema = z.object({ deleted: z.literal(true) });
+const deletedSchema = z.object({
+  deleted: z.literal(true),
+  // What the Brain kept of it is still being removed.
+  removing: z.literal(true).optional(),
+});
 
 const participationSchema = z.object({ notice: z.int(), at: z.string() });
 
@@ -98,6 +102,8 @@ export type ApprovalAnswer = z.output<typeof approvalSchema>;
 const withdrawnSchema = z.object({
   withdrawn: z.literal(true),
   at: z.string(),
+  // What the Brain kept of it is still being removed.
+  removing: z.literal(true).optional(),
 });
 
 /** How long a call to keep or open may take. */
@@ -199,7 +205,7 @@ export const saveProgress = async (
 /** Deletes everything said on the link. */
 export const deleteInterview = async (
   secret: string
-): Promise<{ deleted: true } | Refused> =>
+): Promise<z.output<typeof deletedSchema> | Refused> =>
   await posted(
     interviewApiPath,
     { action: "delete", secret } satisfies InterviewRequest,

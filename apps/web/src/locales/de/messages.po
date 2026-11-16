@@ -4643,6 +4643,10 @@ msgstr "Einträge nach Ablauf ihrer Aufbewahrung gelöscht"
 msgid "Deleted. Nothing you said is kept."
 msgstr "Gelöscht. Nichts, was Sie gesagt haben, wird aufbewahrt."
 
+#: src/interview/page.tsx
+msgid "Deleted. What the Brain kept of it is being removed."
+msgstr "Gelöscht. Was das Gehirn davon behalten hat, wird gerade entfernt."
+
 #: src/activity/audit-words.ts
 msgid "Denied packages"
 msgstr "Pakete abgelehnt"
@@ -16616,6 +16620,10 @@ msgstr "Sie wurden dies als {owner} gefragt. Beantworten Sie es im Gehirn: Alle 
 #: src/interview/page.tsx
 msgid "You withdrew. Nothing you said is used from now on."
 msgstr "Sie haben sich zurückgezogen. Nichts von dem, was Sie gesagt haben, wird ab jetzt verwendet."
+
+#: src/interview/page.tsx
+msgid "You withdrew. What the Brain kept of it is being removed."
+msgstr "Sie haben sich zurückgezogen. Was das Gehirn davon behalten hat, wird gerade entfernt."
 
 #: src/interview/transcript.tsx
 #: src/routes/guest.tsx

@@ -388,10 +388,15 @@ export type InterviewApproval =
   | { approved: true; receipt: string; at: string }
   | { approved: false; version: number; progress: InterviewProgress | null };
 
-/** What withdrawing answers: when they withdrew, the first time they did. */
+/**
+ * What withdrawing answers: when they withdrew, the first time they did,
+ * and `removing` while what the Brain kept of it is still being removed
+ * (the request's erasures didn't all land; core's clock finishes them).
+ */
 export interface InterviewWithdrawal {
   withdrawn: true;
   at: string;
+  removing?: true;
 }
 
 /** Why an interview link refused something. */

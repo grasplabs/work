@@ -105,22 +105,28 @@ export const signedInAs = async (
  */
 export const postedOnLink = async (
   path: string,
-  { cookie = "", ...body }: Record<string, unknown> & { cookie?: string }
+  { cookie = "", ...body }: Record<string, unknown> & { cookie?: string },
+  coreEnv: Env = env
 ): Promise<Response> =>
-  await routed(path, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "sec-fetch-site": "same-origin",
-      cookie,
+  await routed(
+    path,
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "sec-fetch-site": "same-origin",
+        cookie,
+      },
+      body: JSON.stringify(body),
     },
-    body: JSON.stringify(body),
-  });
+    coreEnv
+  );
 
 /** One of the link's calls, as the page makes it (`postedOnLink`). */
 export const onLink = async (
-  body: Record<string, unknown> & { cookie?: string }
-): Promise<Response> => await postedOnLink(interviewApiPath, body);
+  body: Record<string, unknown> & { cookie?: string },
+  coreEnv: Env = env
+): Promise<Response> => await postedOnLink(interviewApiPath, body, coreEnv);
 
 /**
  * The address `person`'s link went to, which signs in to open it: as the
