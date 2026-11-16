@@ -66,27 +66,52 @@ jobs:
   # generated files are committed, run beside it (generated, below):
   # static is a pull request's slowest check job, and needs no history of
   # its own. Part of the required `check` (below).
+  #
+  # Lint and types in two parts, a runner each: `vp check` took 55 to 96 s
+  # of the job on the runner's 4 CPUs, most of it the type-aware lint
+  # building each TypeScript project (November 2026). `apps` checks the
+  # apps named below; `main` checks every other path in the tree, worked
+  # out from `git ls-files`, so a new folder is checked without anyone
+  # adding it here. The parts' programs barely overlap: apart they checked
+  # the same 3,793 files as the whole, in about the whole's time added up.
+  # A file is reported in one part only, and a type error a change in a
+  # package causes in an app is that app's file, in `apps`.
   static:
-    name: static
+    name: static (${{ matrix.part }})
     if: github.event_name != 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    strategy:
+      # Each part says what failed in it.
+      fail-fast: false
+      matrix:
+        part: [main, apps]
+    env:
+      APPS_PART: apps/web apps/admin apps/connect apps/docs apps/router
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       # Saves what its setup missed (a changed lockfile, a new Vite+), for
       # this branch's next run: static runs on every event but a push, where
-      # release saves.
+      # release saves. One part saves, so two don't pack the same files.
       - uses: ./.github/actions/setup
         with:
-          save: true
-      - run: vp check
+          save: ${{ matrix.part == 'main' }}
+      - if: matrix.part == 'main'
+        run: vp fmt --check
+      - if: matrix.part == 'main'
+        run: |
+          mapfile -t paths < <(git ls-files | awk -F/ '{ print ($1 == "apps" ? $1 "/" $2 : $1) }' | sort -u | grep -vxF -f <(tr ' ' '\n' <<< "$APPS_PART"))
+          vp check --no-fmt "${paths[@]}"
+      - if: matrix.part == 'apps'
+        # Word-split on purpose: one path each.
+        run: vp check --no-fmt $APPS_PART
       # The merge queue has no branch or title of its own: the pull
       # request's were checked before it joined.
-      - if: github.event_name == 'pull_request'
+      - if: matrix.part == 'main' && github.event_name == 'pull_request'
         run: vp run check:branch
-      - if: github.event_name == 'pull_request'
+      - if: matrix.part == 'main' && github.event_name == 'pull_request'
         run: printf '%s\n' "$PR_TITLE" | vp exec commitlint
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
