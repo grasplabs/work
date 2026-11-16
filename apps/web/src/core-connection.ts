@@ -170,6 +170,8 @@ export class CoreConnection {
   readonly #frames = new Set<(why: SessionEnded) => void>();
   /** Told each time core refuses a call for the person's role. */
   readonly #roleRefusals = new Set<() => void>();
+  /** Told each time a connection answers. */
+  readonly #answered = new Set<() => void>();
 
   constructor({
     onSessionEnded,
@@ -244,6 +246,22 @@ export class CoreConnection {
     this.#roleRefusals.add(onRefused);
     return () => {
       this.#roleRefusals.delete(onRefused);
+    };
+  }
+
+  /** Whether a connection is open now, one that answered and hasn't dropped. */
+  get connected(): boolean {
+    return !this.#closed && this.#live !== undefined;
+  }
+
+  /**
+   * Tells `onAnswered` each time a connection answers from now on: the
+   * first, or one made again after a drop. Returns what stops it listening.
+   */
+  onConnected(onAnswered: () => void): () => void {
+    this.#answered.add(onAnswered);
+    return () => {
+      this.#answered.delete(onAnswered);
     };
   }
 
@@ -424,6 +442,9 @@ export class CoreConnection {
       api.onRpcBroken(() => {
         this.#lost(api);
       });
+      for (const onAnswered of this.#answered) {
+        onAnswered();
+      }
       return connected;
     }
   }
