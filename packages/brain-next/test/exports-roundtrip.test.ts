@@ -523,4 +523,66 @@ describe("a company's export, round trip", () => {
       }).toStrictEqual({ outcomes: [], unmade: [] });
     }
   );
+
+  it("keeps a thread a thread through an export, and judges a document's quotes again at its next version", async () => {
+    await restore(shared(), empty);
+    const access: Access = { kind: "audience", group: "company" };
+    const reader: PersonReader = { person: "reader", groups: ["company"] };
+    const drawnFrom = async (source: string, thread: boolean) => {
+      const line = `${source} pays by card`;
+      const { version } = await shared().addSource({
+        source,
+        change: "1",
+        text: `${line}.`,
+        access,
+        thread,
+      });
+      const added = await shared().addMemories({
+        change: crypto.randomUUID(),
+        access,
+        entities: [{ key: "c", kind: "customer", names: [`${source} Group`] }],
+        memories: [
+          {
+            about: "c",
+            type: "fact",
+            statement: `${line}.`,
+            speaker: { kind: "outside" },
+            basis: { kind: "source", source, version, quote: line },
+          },
+        ],
+      });
+      return { source, thread, entity: added.entities.c ?? "" };
+    };
+    const made = [
+      await drawnFrom("thread-a", true),
+      await drawnFrom("doc-a", false),
+    ];
+    const { id } = await shared().startExport("test");
+    const exported = await exportSettled(shared, id);
+    const restored = await restoredAfterLoss(shared, id, empty);
+    const after = [];
+    for (const { source, thread, entity } of made) {
+      // oxlint-disable-next-line no-await-in-loop -- one source at a time
+      await shared().addSource({
+        source,
+        change: "2",
+        text: "Something else was said.",
+        access,
+        thread,
+      });
+      // oxlint-disable-next-line no-await-in-loop -- one source at a time
+      const { memories } = await shared().readMemories({
+        entity,
+        reader,
+        history: true,
+      });
+      after.push(memories.map(({ endedAt }) => endedAt === null));
+    }
+
+    expect({ exported, restored, current: after }).toStrictEqual({
+      exported: "done",
+      restored: "done",
+      current: [[true], [false]],
+    });
+  });
 });

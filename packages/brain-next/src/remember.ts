@@ -1,6 +1,8 @@
+import { log } from "@grasp-os/shared/log";
 import type { DrizzleSqliteDODatabase } from "drizzle-orm/durable-sqlite";
 import { z } from "zod";
 
+import type { BrainBucket } from "./bucket.ts";
 import { attributeRuleOf, changeReused, restoringNow } from "./contract.ts";
 import type {
   AddedMemories,
@@ -17,7 +19,7 @@ import {
   mayName,
 } from "./entities.ts";
 import { subjectOf, writerSubjectOf } from "./erasure.ts";
-import { hashOf } from "./files.ts";
+import { fileKeyOf, hashOf } from "./files.ts";
 import { linkedByName } from "./linking.ts";
 import {
   entityRowOf,
@@ -25,6 +27,8 @@ import {
   lineageOfWriter,
   stampWrite,
 } from "./memories.ts";
+import { CurrentTextsNeededError, heldIn, judgeLate } from "./quotes.ts";
+import type { CurrentText, CurrentTexts, Written } from "./quotes.ts";
 import { accessOfKey, readerSetKeyOf, readerSetOf } from "./reader-sets.ts";
 import { isRestoring } from "./restoring.ts";
 import { foldForSearch, indexMemoryWords } from "./words.ts";
@@ -36,7 +40,9 @@ import type { WordMemo } from "./words.ts";
 // other: within a lineage the order of its memories decides which is
 // current (memories.ts), never which add came first, so two writers never
 // both win or both lose. The same change again answers what it added,
-// whatever was added since; with other memories, it is refused.
+// whatever was added since; with other memories, it is refused. A memory
+// resting on a version before its source's current one is judged against
+// the current version's text in the add's transaction (quotes.ts).
 
 /** An add as its schema reads it. */
 export type Adding = z.output<typeof newMemoriesSchema>;
@@ -126,6 +132,8 @@ export const planOf = ({ entities, memories }: Adding): Planned[] => {
 export interface RememberStore {
   storage: DurableObjectStorage;
   db: DrizzleSqliteDODatabase;
+  /** Where versions' files are: the current text a late memory is judged against. */
+  bucket: BrainBucket;
   /** Whether it is the shared store, which keeps nothing one person alone may read. */
   shared: boolean;
 }
@@ -431,14 +439,14 @@ const keepMentions = (into: Into, plan: Planned, row: number): void => {
 /**
  * Writes `memory`, the add's `index`th, with its words and stems and the
  * names and identifiers of the entities it mentions, as it gave them.
- * Answers its id.
+ * Answers its id, and its row with what it rests on.
  */
 const writeMemory = (
   into: Into,
   memory: NewMemory,
   plan: Planned | undefined,
   index: number
-): string => {
+): { id: string; written: Written } => {
   const { sql, rows } = into;
   const aboutRow = plan === undefined ? undefined : rows[plan.about];
   if (plan === undefined || aboutRow === undefined) {
@@ -480,7 +488,15 @@ const writeMemory = (
     .one();
   indexMemoryWords(sql, row, memory.statement, into.memo);
   keepMentions(into, plan, row);
-  return id;
+  return {
+    id,
+    written: {
+      row,
+      source: based.source,
+      version: based.version,
+      quote: memory.basis.quote ?? null,
+    },
+  };
 };
 
 /**
@@ -572,14 +588,18 @@ export const hashesOf = async (adding: Adding): Promise<AddHashes> => {
 
 /**
  * Writes `adding` (above), or answers what its change added before, with
- * `hashes` made of it before (`hashesOf`). Synchronous: run it in a
- * transaction, which a caller may share with checks of its own, so what it
- * checks holds as the add writes.
+ * `hashes` made of it before (`hashesOf`), and its memories that rest on a
+ * version before their source's current one judged against `texts`, the
+ * current versions' texts (quotes.ts): `CurrentTextsNeededError` when one is
+ * missing, writing nothing. Synchronous: run it in a transaction, which a
+ * caller may share with checks of its own, so what it checks holds as the
+ * add writes.
  */
 export const writeAdd = (
-  { storage, db, shared }: RememberStore,
+  { storage, db, shared }: Omit<RememberStore, "bucket">,
   adding: Adding,
-  { key, hash, subjects, writers, restatements }: AddHashes
+  { key, hash, subjects, writers, restatements }: AddHashes,
+  texts: CurrentTexts = new Map()
 ): AddedMemories => {
   const planned = planOf(adding);
   const { sql } = storage;
@@ -625,9 +645,12 @@ export const writeAdd = (
       learnedAt: stampWrite(sql),
       memo: new Map(),
     };
-    const memories = adding.memories.map((memory, index) =>
+    const made = adding.memories.map((memory, index) =>
       writeMemory(into, memory, planned[index], index)
     );
+    const written = made.map((memory) => memory.written);
+    judgeLate(sql, written, texts);
+    const memories = made.map((memory) => memory.id);
     if (adding.extracted !== undefined) {
       markExtracted(sql, adding.extracted, into);
     }
@@ -651,9 +674,42 @@ export const writeAdd = (
 };
 
 /**
+ * What `needed` holds of `adding`'s quotes, read from the bucket one
+ * version at a time, each text let go before the next is read: what a late
+ * add's transaction asked for (`CurrentTextsNeededError`). A version whose
+ * file is gone holds none (quotes.ts `heldIn`).
+ */
+const textsOf = async (
+  bucket: BrainBucket,
+  needed: CurrentTextsNeededError["needed"],
+  adding: Adding
+): Promise<Map<string, CurrentText>> => {
+  const read = new Map<string, CurrentText>();
+  for (const { source, row, file } of needed) {
+    const quotes = adding.memories.flatMap(({ basis }) =>
+      basis.kind === "source" && basis.source === source ? [basis.quote] : []
+    );
+    // oxlint-disable-next-line no-await-in-loop -- one text in memory at a time
+    const object = await bucket.get(fileKeyOf(file));
+    if (object === null) {
+      // As a read of a version whose file is gone says it (sources.ts).
+      log.warn("brain.version_file_missing", {});
+    }
+    // oxlint-disable-next-line no-await-in-loop -- one text in memory at a time
+    const text = object === null ? null : await object.text();
+    read.set(source, { row, file, held: heldIn(text, quotes) });
+  }
+  return read;
+};
+
+/**
  * Adds `adding` (above), or answers what its change added before. Its
  * memories are readable by its `access` (and, resting on a version, by
- * that version's readers too: memories.ts).
+ * that version's readers too: memories.ts). A memory resting on a version
+ * before its source's current one needs that current version's text: the
+ * transaction asks for it, the file is read, and the add is made again
+ * with it, again whenever a newer version landed while it read, so it is
+ * judged against the version current as it is written.
  */
 export const addMemories = async (
   store: RememberStore,
@@ -662,5 +718,21 @@ export const addMemories = async (
   // Checked before anything is hashed, as the add always was.
   planOf(adding);
   const hashes = await hashesOf(adding);
-  return store.storage.transactionSync(() => writeAdd(store, adding, hashes));
+  const attempt = (given: CurrentTexts): AddedMemories =>
+    store.storage.transactionSync(() => writeAdd(store, adding, hashes, given));
+  let texts: CurrentTexts = new Map();
+  for (;;) {
+    try {
+      return attempt(texts);
+    } catch (error) {
+      if (!(error instanceof CurrentTextsNeededError)) {
+        throw error;
+      }
+      texts = new Map([
+        ...texts,
+        // oxlint-disable-next-line no-await-in-loop -- read again only when a newer version landed
+        ...(await textsOf(store.bucket, error.needed, adding)),
+      ]);
+    }
+  }
 };
