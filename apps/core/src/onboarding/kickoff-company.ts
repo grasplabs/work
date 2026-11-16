@@ -93,7 +93,7 @@ export const companyKickoffText = (company: CompanyKickoff): string => {
             .join("\n")}`,
         ]),
   ];
-  return `# The company's vision, from Grasp's first conversation with it\n\n${
+  return `The company's vision, from Grasp's first conversation with it\n\n${
     parts.length === 0
       ? "Nothing is known of it yet: no goals, no reason for AI now, no teams."
       : parts.join("\n\n")
