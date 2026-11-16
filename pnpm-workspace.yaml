@@ -70,15 +70,15 @@ catalog:
   # module): the same version as vitest's.
   "@vitest/expect": 4.1.11
   # Same workerd as Wrangler; runs the on-prem smoke test.
-  workerd: 1.20261110.1
-  wrangler: 4.161.0
+  workerd: 1.20261113.1
+  wrangler: 4.162.0
 
   # Workers runtime and data
   "@cloudflare/vite-plugin": 1.66.0
   # Pins its own Wrangler and miniflare: the same as the catalog's
   # Wrangler, so tests run the workerd deploys run with. Bump them together.
-  "@cloudflare/vitest-plugin": 1.8.1
-  "@cloudflare/workers-types": 5.20261110.1
+  "@cloudflare/vitest-plugin": 1.8.2
+  "@cloudflare/workers-types": 5.20261113.1
   capnweb: 0.12.0
   # A mutation's seeded randomness, in its isolate (the SDK's runner):
   # ChaCha20's keystream from the seed its receipt keeps.
@@ -324,4 +324,4 @@ peerDependencyRules:
     "@typescript-eslint/typescript-estree>typescript": "7"
 
 patchedDependencies:
-  miniflare@5.20261110.2-beta: patches/miniflare@5.20261110.2-beta.patch
+  miniflare@5.20261113.0-beta: patches/miniflare@5.20261113.0-beta.patch
