@@ -167,6 +167,7 @@ export const rpcParamNames: ParamNames = {
   },
   "ConnectionsRpc": {
     "addAgentDocument": ["agentId","file"],
+    "agentApps": ["agentId"],
     "agentDocuments": ["agentId"],
     "agentSettings": ["agentId"],
     "agentWakes": ["agentId"],
@@ -194,6 +195,7 @@ export const rpcParamNames: ParamNames = {
     "removeAgentDocument": ["agentId","documentId"],
     "requestApp": ["request"],
     "revocationsByHand": [],
+    "setAgentApp": ["agentId","app","on"],
     "setAgentPaused": ["agentId","paused"],
     "setAgentReach": ["agentId","on","audience"],
     "setAgentToolClass": ["agentId","toolClass","audience"],
@@ -207,6 +209,7 @@ export const rpcParamNames: ParamNames = {
     "start": ["request"],
     "stephenReach": [],
     "toolClasses": [],
+    "workOutAgentApps": ["agentId"],
   },
   "CoreRpc": {
     "authenticate": [],
