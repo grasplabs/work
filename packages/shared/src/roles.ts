@@ -16,7 +16,7 @@ export const isAdmin = (role: string): boolean => role === "admin";
  * One of the organization's own admins: an admin, and not Grasp staff,
  * who are admins too but never decide a client's permissions.
  */
-export const isMemberAdminRenamed = ({
+export const isMemberAdmin = ({
   role,
   staff,
 }: {
