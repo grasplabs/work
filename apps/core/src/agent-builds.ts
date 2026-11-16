@@ -693,7 +693,8 @@ export const buildingAs = async (
  * was read. The draft's config and schema are always its definition's. A
  * draft of an App with no version gets an empty definition with its
  * first write. `admit`, if given, admits the write right before it is
- * saved. Answers every path the draft changes now, sorted.
+ * saved. Answers every path the draft changes now, sorted, and the
+ * revision the write left the draft at.
  */
 export const saveDraftChanges = async (
   env: Env,
@@ -711,7 +712,7 @@ export const saveDraftChanges = async (
     definition?: AppDefinition;
   },
   admit?: () => Promise<void>
-): Promise<string[]> => {
+): Promise<{ changed: string[]; revision: number }> => {
   const definitionAt = async (version: number | null) =>
     await definitionToBuildOn(env, id, version);
   const filesAt = async (version: number | null) =>
@@ -776,7 +777,7 @@ export const saveDraftChanges = async (
     noChange(change) ? [change[0]] : []
   );
   const ownText = definitionText(own);
-  await saveDraft(
+  const saved = await saveDraft(
     env,
     appKind,
     id,
@@ -799,7 +800,7 @@ export const saveDraftChanges = async (
   for (const path of unchanged) {
     changed.delete(path);
   }
-  return [...changed].toSorted();
+  return { changed: [...changed].toSorted(), revision: saved.revision };
 };
 
 /**
@@ -1352,7 +1353,7 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
     // The turn and code step that write it, from the run's own record:
     // never what the run's code says.
     const run = await chats.codeRunOf(chatId, runId);
-    const changed = await saveDraftChanges(
+    const { changed, revision } = await saveDraftChanges(
       env,
       { by, chat: { chatId, ...run } },
       found,
@@ -1383,7 +1384,7 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
     );
     return {
       base: draft.base,
-      revision: draft.revision + 1,
+      revision,
       changed,
       ...writtenDiagnostics({ pages }),
     };

@@ -595,14 +595,13 @@ export const defineDraft = async (
       if (preview) {
         return draft.revision;
       }
-      await saveDraftChanges(
+      const { revision: left } = await saveDraftChanges(
         env,
         { by, detail: operationDetail(operation) },
         found,
         { draft, files, changes, definition }
       );
-      // Each write moves the draft to its next revision (drafts.ts).
-      return draft.revision + 1;
+      return left;
     },
     { revision: read }
   );
