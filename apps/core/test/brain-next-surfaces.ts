@@ -9978,6 +9978,13 @@ const agentAppAnswers = async (
   }
   asked.push(
     await answer(
+      "an agent no one made",
+      async () =>
+        await refusalOf(
+          async () => await call(session, `agent-${crypto.randomUUID()}`)
+        )
+    ),
+    await answer(
       "an agent named by the markers",
       async () => await call(session, probing.markers.join(""))
     )
