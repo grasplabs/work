@@ -55,6 +55,8 @@ import {
 } from "../settings/stephen-settings.tsx";
 import type { AskableWorkflow } from "../settings/stephen-settings.tsx";
 import { useCoreAction } from "../use-core-action.ts";
+import { AgentAppsPanel, workOutQuietly } from "./agent-apps-card.tsx";
+import type { AgentAppsShown } from "./agent-apps-card.tsx";
 import { AgentAvatar } from "./agent-avatar.tsx";
 import { AgentDocuments } from "./agent-documents.tsx";
 import {
@@ -399,6 +401,7 @@ export const AgentPage = ({
   teams,
   wakes,
   documents,
+  apps,
   people,
   editable,
   usable,
@@ -414,6 +417,11 @@ export const AgentPage = ({
   settings: AgentSettings | undefined;
   teams: StephenReach["teams"];
   wakes: readonly AgentWake[];
+  /**
+   * Its apps and the apps the company offers; undefined where core didn't
+   * say them, and for the first agent, which has none of its own.
+   */
+  apps?: AgentAppsShown | undefined;
   /** The documents it answers from; undefined where core didn't say. */
   documents: readonly AgentDocument[] | undefined;
   /** The company's people, whom a wake-up can work for. */
@@ -472,6 +480,10 @@ export const AgentPage = ({
         ...said,
         modelRole: agent.modelRole,
       });
+      // New instructions: the apps they call for, added as it saves.
+      if (said.instructions !== undefined && !first) {
+        await workOutQuietly(session, agent.id);
+      }
     });
   };
   const remove = async (): Promise<void> => {
@@ -681,6 +693,14 @@ export const AgentPage = ({
                 submit={t`Save`}
               />
             </SettingsSection>
+            <AgentAppsPanel
+              agent={agent}
+              apps={apps}
+              can={can}
+              change={change}
+              editable={editable}
+              first={first}
+            />
             <Card variant="panel">
               <ul className="[&>li:first-child]:border-t-0">
                 <AgentDocuments
