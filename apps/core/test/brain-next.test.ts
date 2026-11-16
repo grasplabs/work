@@ -15,7 +15,7 @@ import { addSource, recallAs } from "../src/brain-next.ts";
 import type { SourceReaders, SourceRef } from "../src/brain-next.ts";
 import { teamMembers, teams } from "../src/db/core/schema.ts";
 import { mockIdp } from "./idp.ts";
-import { signedInWithRole, unique } from "./sign-in.ts";
+import { signedInWithRole } from "./sign-in.ts";
 
 // The new Brain's first path (GRA-1720): core adds a source with who may
 // read it and recalls it by words, as a member core resolves from its own
@@ -28,8 +28,16 @@ import { signedInWithRole, unique } from "./sign-in.ts";
 
 const idp = mockIdp();
 
-/** A word no other test's sources hold. */
-const word = () => `w${unique()}`;
+/**
+ * A word no other test's sources hold: letters only. With digits it would
+ * be an ID whenever it held two of them (exact.ts), found as written
+ * rather than as a word, so how it ranks would turn on the draw.
+ */
+const word = () =>
+  `w${crypto
+    .randomUUID()
+    .replaceAll(/[^a-f]/gu, "")
+    .slice(0, 12)}`;
 
 /**
  * What core or the Brain says when it refuses an input: core's own
