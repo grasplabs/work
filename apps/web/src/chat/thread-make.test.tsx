@@ -359,11 +359,13 @@ describe("making something in a chat's thread", () => {
       audience: { who: "everyone" },
       classes: ["read-own"],
       schedule: { cron: "0 8 * * 1", opening: "Sum up HR's new mail." },
+      apps: [{ source: "native", provider: "google", name: "Gmail" }],
     };
     const own: AgentDrafted = { ...draft, callId: "call-own", whose: "own" };
     delete own.audience;
     delete own.classes;
     delete own.schedule;
+    delete own.apps;
     const { made, router } = await thread([
       said(1, 0, "Make me an HR agent."),
       reply(2, 1, { agentDraft: own }),
@@ -396,12 +398,14 @@ describe("making something in a chat's thread", () => {
         [
           "Checks HR's mail.",
           "Yours alone: only you ask it",
+          "Any app its kinds of work allow",
           "Every Monday, sum up HR's new mail.",
         ],
         [
           "Checks HR's mail.",
           "One of the company's agents",
           "Everyone in the company",
+          "Gmail",
           "Read their own",
           "0 8 * * 1 · the company's time zone · Sum up HR's new mail.",
           "Every Monday, sum up HR's new mail.",

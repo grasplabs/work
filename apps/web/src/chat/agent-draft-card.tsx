@@ -86,7 +86,15 @@ export const AgentDraftCard = ({
   actions?: ReactNode;
 }) => {
   const { t, i18n } = useLingui();
-  const { name, job, instructions, whose, classes = [], schedule } = draft;
+  const {
+    name,
+    job,
+    instructions,
+    whose,
+    classes = [],
+    schedule,
+    apps = [],
+  } = draft;
   const company = whose === "company";
   return (
     <Card aria-label={t`An agent to make: ${name}`} render={<section />}>
@@ -116,6 +124,13 @@ export const AgentDraftCard = ({
               <AudienceWords audience={draft.audience} />
             </Line>
           ) : null}
+          <Line label={t`Apps it uses`}>
+            {apps.length === 0 ? (
+              <Trans>Any app its kinds of work allow</Trans>
+            ) : (
+              apps.map((each) => each.name).join(", ")
+            )}
+          </Line>
           {company ? (
             <Line label={t`What it may do`}>
               {classes.length === 0 ? (

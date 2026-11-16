@@ -92,7 +92,9 @@ interface OfferedApp {
 }
 
 /** The apps the company offers now, by key. */
-const offeredApps = async (env: Env): Promise<Map<string, OfferedApp>> => {
+export const offeredApps = async (
+  env: Env
+): Promise<Map<string, OfferedApp>> => {
   const [catalog, hidden] = await Promise.all([
     env.CONNECT.catalog(),
     drizzle(env.DB)

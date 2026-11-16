@@ -1,4 +1,5 @@
 import { agentErrors } from "@grasp-os/shared/agent";
+import { agentAppOf } from "@grasp-os/shared/agents";
 import type {
   Agent,
   AgentDraft,
@@ -41,6 +42,7 @@ import { subjectSchema } from "@grasp-os/shared/subject";
 import type { Subject, SubjectKind } from "@grasp-os/shared/subject";
 import { z } from "zod";
 
+import { offeredApps, setAgentApp } from "./agent-app-access.ts";
 import {
   makeAgent,
   makeOwnAgent,
@@ -626,9 +628,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
       try {
         // What the card says beyond the agent is checked first, so a
         // schedule or teams core won't take make nothing.
-        if (company) {
-          await this.#checkDrafted(draft);
-        }
+        await this.#checkDrafted(draft);
         agent = company
           ? await makeAgent(this.#env, person, said, { from: "chat" })
           : await makeOwnAgent(this.#env, person, said, { from: "chat" });
@@ -639,9 +639,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
       // Made: it stays made and the draft taken, whatever fails next, and
       // the person lands on its page to finish it there.
       try {
-        if (company) {
-          await this.#setDrafted(person, agent.id, draft);
-        }
+        await this.#setDrafted(person, agent.id, draft);
         await chats.send(id, person.userId, asked);
       } catch (error) {
         log.warn("agent.drafted_unfinished", errorFields(error));
@@ -651,8 +649,26 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
     });
   }
 
-  /** Refuses what a company agent's card said that its page would refuse. */
-  async #checkDrafted({ audience, schedule }: AgentDraft): Promise<void> {
+  /**
+   * Refuses what a card said that the agent's page would refuse: an app
+   * the company doesn't offer, and for a company agent teams it doesn't
+   * have or a schedule no wake-up takes.
+   */
+  async #checkDrafted({
+    apps = [],
+    audience,
+    schedule,
+  }: AgentDraft): Promise<void> {
+    if (apps.length > 0) {
+      const offered = await offeredApps(this.#env);
+      if (
+        apps.some(
+          ({ source, provider }) => !offered.has(agentAppOf(source, provider))
+        )
+      ) {
+        throw agentErrors.create("agent.app_unknown");
+      }
+    }
     if (audience?.who === "teams") {
       await requireKnownTeams(this.#env, JSON.stringify(audience.teams));
     }
@@ -661,12 +677,23 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
     }
   }
 
-  /** What a company agent's card said beyond itself, set as on its page. */
+  /** What a card said beyond the agent itself, set as on its page. */
   async #setDrafted(
     person: Identity,
     agentId: string,
-    { audience, classes = [], schedule }: AgentDraft
+    { apps = [], audience, classes = [], schedule }: AgentDraft
   ): Promise<void> {
+    // Exactly the apps the card showed, and no other.
+    for (const { source, provider } of apps) {
+      // oxlint-disable-next-line no-await-in-loop -- one at a time, each audited
+      await setAgentApp(
+        this.#env,
+        person,
+        agentId,
+        agentAppOf(source, provider),
+        true
+      );
+    }
     if (audience !== undefined) {
       await setAgentReach(this.#env, person, agentId, true, audience);
     }
