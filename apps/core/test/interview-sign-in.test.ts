@@ -1,13 +1,27 @@
+import { interviewHearPath } from "@grasp-os/shared/interview-hear";
+import { interviewProgressSchema } from "@grasp-os/shared/interview-links";
+import type { InterviewProgress } from "@grasp-os/shared/interview-links";
+import { interviewStoryPath } from "@grasp-os/shared/interview-story";
+import { interviewTurnPath } from "@grasp-os/shared/interview-turn";
 import type { Roster } from "@grasp-os/shared/onboarding";
+import { speechPath } from "@grasp-os/shared/voice";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it } from "vite-plus/test";
+import { z } from "zod";
 
 import { adoptDirectoryMember } from "../src/auth/auth.ts";
 import { memberFromDirectory } from "../src/auth/directory-members.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { adminCommands } from "./admin-command.ts";
 import { mockIdp } from "./idp.ts";
-import { openLinkAs, signedInAs } from "./interview-link.ts";
+import {
+  codeOf,
+  onLink,
+  openLinkAs,
+  participate,
+  postedOnLink,
+  signedInAs,
+} from "./interview-link.ts";
 import { acmeTenant } from "./sign-in-config.ts";
 import {
   auditedDuring,
@@ -33,6 +47,9 @@ import {
 // - The session outliving the gate: opening it ends every interview's
 //   session; signing in again then makes them a member as anyone.
 // - The company's audit log learning who opened their interview, and when.
+// - The session ending mid-interview (GRA-1943): every one of the
+//   interview's calls on it is refused at once and keeps nothing, and what
+//   the page held goes on, as of its version, once they signed in again.
 
 const idp = mockIdp();
 
@@ -73,6 +90,110 @@ const invited = async () => {
   await adminCommands().close();
   const secret = ((await store.linkOf(person)) ?? "").split("#")[1] ?? "";
   return { person, address, secret };
+};
+
+/** Where someone is in their interview, having said `said`. */
+const saying = (...said: string[]): InterviewProgress => ({
+  person: "progress",
+  told: true,
+  mode: "type",
+  lines: [
+    { from: "stephen", text: "What do you do first with an invoice?" },
+    ...said.map((text) => ({ from: "person" as const, text })),
+  ],
+  facts: [],
+  phase: "steps",
+  wants: "answer",
+  startedAt: 1,
+  confirmed: 0,
+  adding: false,
+  addedAt: 0,
+});
+
+/** The interview as core answers a save or an opened link: its version, and what it holds. */
+const keptSchema = z.object({
+  version: z.int(),
+  progress: interviewProgressSchema.nullable().optional(),
+});
+
+/** What each of the interview's calls answers on `cookie`, as status and code. */
+const everyCallOn = async (secret: string, cookie: string, version: number) => {
+  const link = { secret, cookie };
+  return {
+    save: await codeOf(
+      await onLink({
+        action: "save",
+        ...link,
+        version,
+        progress: saying("I check it in Exact.", "Then I send it to Sam."),
+      })
+    ),
+    session: await codeOf(await onLink({ action: "session", ...link })),
+    turn: await codeOf(await postedOnLink(interviewTurnPath, link)),
+    story: await codeOf(await postedOnLink(interviewStoryPath, link)),
+    hear: await codeOf(await postedOnLink(interviewHearPath, link)),
+    speech: await codeOf(
+      await postedOnLink(speechPath, {
+        cookie,
+        text: "Thanks.",
+        language: "en",
+        speaker: "stephen",
+        link: { secret },
+      })
+    ),
+  };
+};
+
+/** Every call refused for a session that ended: sign in. */
+const signInEverywhere = {
+  save: [401, "interview.sign_in"],
+  session: [401, "interview.sign_in"],
+  turn: [401, "interview.sign_in"],
+  story: [401, "interview.sign_in"],
+  hear: [401, "interview.sign_in"],
+  speech: [401, "interview.sign_in"],
+};
+
+/**
+ * Someone in the middle of their interview, signed in for it while the
+ * gate is closed: their session, the link, and the version the page holds
+ * after its last save, of what they said first.
+ */
+const midInterview = async () => {
+  const { address, secret } = await invited();
+  const cookie = await signedInAs(address);
+  const { response } = await openLinkAs(secret, cookie);
+  const { version } = keptSchema.parse(await response.json());
+  await participate({ secret, cookie });
+  const saved = await onLink({
+    action: "save",
+    secret,
+    cookie,
+    version,
+    progress: saying("I check it in Exact."),
+  });
+  const held = keptSchema.parse(await saved.json());
+  return { address, secret, cookie, version: held.version };
+};
+
+/**
+ * What the page does once they signed in again on `cookie`: saves what it
+ * held as of `version`, then opens the link again. What each answered.
+ */
+const backWith = async (secret: string, cookie: string, version: number) => {
+  const saved = await onLink({
+    action: "save",
+    secret,
+    cookie,
+    version,
+    progress: saying("I check it in Exact.", "Then I send it to Sam."),
+  });
+  const reopened = await openLinkAs(secret, cookie);
+  const open = keptSchema.parse(await reopened.response.json());
+  return {
+    saved: saved.status,
+    said: open.progress?.lines.map(({ text }) => text),
+  };
 };
 
 /** How many memberships the user signed in as `address` has. */
@@ -252,6 +373,57 @@ describe("signing in for an interview while the gate is closed", () => {
       interview: 200,
       member: true,
       memberships: 1,
+    });
+  });
+
+  it("refuses every call of theirs at once as the gate opens mid-interview, keeping nothing of it; signed in again, what the page held is kept as of its version", async () => {
+    const { address, secret, cookie, version } = await midInterview();
+    await adminCommands().open();
+    const ended = await everyCallOn(secret, cookie, version);
+    const again = await signedInAs(address);
+    const reopened = await openLinkAs(secret, again);
+    const before = keptSchema.parse(await reopened.response.json());
+    expect({
+      ended,
+      // Nothing of the save that met the ended session was kept.
+      version: before.version,
+      said: before.progress?.lines.map(({ text }) => text),
+      back: await backWith(secret, again, version),
+    }).toStrictEqual({
+      ended: signInEverywhere,
+      version,
+      said: ["What do you do first with an invoice?", "I check it in Exact."],
+      back: {
+        saved: 200,
+        said: [
+          "What do you do first with an invoice?",
+          "I check it in Exact.",
+          "Then I send it to Sam.",
+        ],
+      },
+    });
+  });
+
+  it("refuses every call of theirs once they signed out elsewhere mid-interview; signed in again, what the page held is kept as of its version", async () => {
+    const { address, secret, cookie, version } = await midInterview();
+    const signedOut = await callAuth("/sign-out", cookie, {});
+    const ended = await everyCallOn(secret, cookie, version);
+    const again = await signedInAs(address);
+    expect({
+      signedOut: signedOut.ok,
+      ended,
+      back: await backWith(secret, again, version),
+    }).toStrictEqual({
+      signedOut: true,
+      ended: signInEverywhere,
+      back: {
+        saved: 200,
+        said: [
+          "What do you do first with an invoice?",
+          "I check it in Exact.",
+          "Then I send it to Sam.",
+        ],
+      },
     });
   });
 

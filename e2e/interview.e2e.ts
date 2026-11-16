@@ -7,7 +7,7 @@ import { expect } from "@playwright/test";
 import type { Page, Route } from "@playwright/test";
 import { z } from "zod";
 
-import { adminSnapshot } from "./admin-steering.ts";
+import { adminCommand, adminSnapshot } from "./admin-steering.ts";
 import { test } from "./csp.ts";
 import {
   adding,
@@ -34,7 +34,9 @@ import { signInStaff } from "./people.ts";
 // this is, answer by typing, stop for now and carry on, put a line of the
 // read-back right, agree to it, and the interview is agreed in the store.
 // Another goes through the screens before it in Dutch and chooses Claire,
-// whose text and voice every turn then uses. A third talks: Stephen says
+// whose text and voice every turn then uses. Another is typing as the
+// company's gate opens, which ends their session: they sign in again and
+// go on with their words still there. A third talks: Stephen says
 // his line a sentence at a time, starting before all of it is written, its
 // words lighting up as he says them.
 // The local stack reaches no model, so Stephen's turns are the browser's
@@ -162,6 +164,72 @@ test("someone has their interview by typing, carries on after stopping, and agre
     refused: [],
     events: ["start", "resume", "answer", "readback"],
   });
+});
+
+test("the company's gate opens while someone types their answer: they sign in again, their words are still there, and saving works", async ({
+  page,
+}) => {
+  const staff = await signInStaff();
+  const run = crypto.randomUUID().slice(0, 8);
+  const person = `sem-${run}`;
+  const link = await invited(staff, person, "Sem");
+  const asked = await answered(page);
+  const signInWithWork = async (): Promise<void> => {
+    await page
+      .getByRole("button", { name: /^Sign in with /u })
+      .first()
+      .click();
+    await page.getByLabel("Email").fill(addressOf(person));
+    await page.getByRole("button", { name: "Sign in" }).click();
+  };
+  // Before go-live: they sign in for their interview alone (GRA-1790).
+  await adminCommand({ type: "onboarding.gate.close", payload: {} });
+  try {
+    await page.goto(link);
+    await signInWithWork();
+    await page.getByRole("button", { name: "Continue" }).click();
+    await page.getByRole("button", { name: "Stephen", exact: true }).click();
+    await page
+      .getByRole("button", { name: "Type instead, without sound" })
+      .click();
+    await expect(page.getByText(first)).toBeVisible();
+    const words = `I check ${run} in Exact, then I send it to Sam.`;
+    await page.getByLabel("Your answer").fill(words);
+
+    // Go-live: opening the gate ends every session for an interview alone.
+    // The next save finds it ended, and the page asks them to sign in
+    // again, keeping what they typed (GRA-1943).
+    await adminCommand({ type: "onboarding.gate.open", payload: {} });
+    await page.getByRole("button", { name: "Stop for now" }).click();
+    await expect(
+      page.getByRole("heading", { name: "Sign in again to go on" })
+    ).toBeVisible();
+    await expect(
+      page.getByText(
+        "Your sign-in ended. Sign in again with your work account to go on where you were. What isn't saved yet is kept in this window until then."
+      )
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: /^Sign in with Grasp/u })
+    ).toHaveCount(0);
+
+    // Signed in again, now as a member: back where they were, their words
+    // still in the box, and what they send is kept.
+    await signInWithWork();
+    await expect(page.getByText(back)).toBeVisible();
+    const answer = page.getByLabel("Your answer");
+    await expect(answer).toHaveValue(words);
+    await answer.press("Enter");
+    await expect(page.getByText(readBack)).toBeVisible();
+    await expect(page.getByText("Saved")).toBeVisible();
+    await page.reload();
+    await expect(
+      page.getByText("You check the invoice in Exact.")
+    ).toBeVisible();
+    expect(asked.refused).toStrictEqual([]);
+  } finally {
+    await adminCommand({ type: "onboarding.gate.open", payload: {} });
+  }
 });
 
 test("someone removes a line of theirs and takes out what was written from it, and neither is said to anyone again", async ({

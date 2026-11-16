@@ -6921,6 +6921,10 @@ msgstr "Als het aanhoudt, stap over op een andere aanbieder."
 msgid "If the rest of the month goes like the days so far"
 msgstr "Als de rest van de maand gaat zoals de dagen tot nu toe"
 
+#: src/routes/interview.tsx
+msgid "If you were saying something as it ended, it wasn't heard. Say it again once you're back."
+msgstr "Als je net iets zei toen die afliep, is dat niet gehoord. Zeg het nog een keer zodra je terug bent."
+
 #: src/apps/app-data.tsx
 msgid "Import"
 msgstr "Importeren"
@@ -12529,6 +12533,10 @@ msgstr "Aanmelden"
 msgid "Sign in again"
 msgstr "Opnieuw aanmelden"
 
+#: src/routes/interview.tsx
+msgid "Sign in again to go on"
+msgstr "Log opnieuw in om verder te gaan"
+
 #: src/pages/frame-failure.tsx
 msgid "Sign in again to go on."
 msgstr "Meld je opnieuw aan om verder te gaan."
@@ -16054,6 +16062,14 @@ msgstr "Wat je wilde delen"
 msgid "What you chose"
 msgstr "Wat je hebt gekozen"
 
+#: src/interview/page.tsx
+msgid "What you hadn't saved when your sign-in ended couldn't be kept, because your interview changed while you were away."
+msgstr "Wat je nog niet had opgeslagen toen je inlog afliep, kon niet worden bewaard, omdat je interview is veranderd terwijl je weg was."
+
+#: src/interview/page.tsx
+msgid "What you hadn't saved when your sign-in ended couldn't be kept, because your interview has closed."
+msgstr "Wat je nog niet had opgeslagen toen je inlog afliep, kon niet worden bewaard, omdat je interview is gesloten."
+
 #: src/routes/_shell.settings.instructions.tsx
 msgid "What your chats with Grasp start with, and only yours: how you like to work, what you are responsible for."
 msgstr "Waar jouw chats met Grasp mee beginnen, en alleen die van jou: hoe je graag werkt, waar je verantwoordelijk voor bent."
@@ -17043,6 +17059,30 @@ msgstr "Je run van versie {version} is afgelopen: {status}"
 #: src/pages/frame-failure.tsx
 msgid "Your session has ended"
 msgstr "Je sessie is beëindigd"
+
+#: src/routes/interview.tsx
+msgid "Your sign-in ended, so you didn't withdraw and what wasn't saved yet wasn't kept: sign in again with your work account to withdraw."
+msgstr "Je inlog is afgelopen, dus je hebt je niet teruggetrokken en wat nog niet was opgeslagen, is niet bewaard: log opnieuw in met je werkaccount om je terug te trekken."
+
+#: src/routes/interview.tsx
+msgid "Your sign-in ended, so your interview wasn't deleted and what wasn't saved yet wasn't kept: sign in again with your work account to delete it."
+msgstr "Je inlog is afgelopen, dus je interview is niet verwijderd en wat nog niet was opgeslagen, is niet bewaard: log opnieuw in met je werkaccount om het te verwijderen."
+
+#: src/routes/interview.tsx
+msgid "Your sign-in ended. Sign in again with your work account to go on where you were. This window couldn't keep what wasn't saved yet, so it is lost."
+msgstr "Je inlog is afgelopen. Log opnieuw in met je werkaccount om verder te gaan waar je was. Dit venster kon niet bewaren wat nog niet was opgeslagen, dus dat is verloren."
+
+#: src/routes/interview.tsx
+msgid "Your sign-in ended. Sign in again with your work account to go on where you were. What isn't saved yet is kept in this window until then."
+msgstr "Je inlog is afgelopen. Log opnieuw in met je werkaccount om verder te gaan waar je was. Wat nog niet is opgeslagen, blijft tot dan bewaard in dit venster."
+
+#: src/interview/page.tsx
+msgid "Your sign-in had ended, so you didn't withdraw: withdraw again if you still want to."
+msgstr "Je inlog was afgelopen, dus je hebt je niet teruggetrokken: trek je opnieuw terug als je dat nog steeds wilt."
+
+#: src/interview/page.tsx
+msgid "Your sign-in had ended, so your interview wasn't deleted: delete it again if you still want to."
+msgstr "Je inlog was afgelopen, dus je interview is niet verwijderd: verwijder het opnieuw als je dat nog steeds wilt."
 
 #: src/brain/skills-page.tsx
 msgid "Your skills"

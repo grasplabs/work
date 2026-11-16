@@ -107,6 +107,105 @@ const withdrawnSchema = z.object({
   removing: z.literal(true).optional(),
 });
 
+/** What a call of the interview's is for. */
+export type CallKind =
+  | "save"
+  | "approve"
+  | "participate"
+  | "delete"
+  | "withdraw"
+  | "turn"
+  | "story"
+  | "speech"
+  | "hear";
+
+// One gate for every answer (GRA-1943). The interview's calls of one
+// session are one epoch: it begins as the page holds the interview
+// (`beginCalls`), which ends the one before, and ends the moment any of
+// its calls finds the session ended (core answers 401 only as
+// `interview.sign_in` on these routes). Ending it aborts every call on its
+// way, and whatever any call of an ended epoch answers, or fails with, is
+// dropped here, before any of the page's code sees it: the call simply
+// never comes back. A call asked for while no epoch runs is never sent; it
+// tells the page as a 401 would, so a delete or withdrawal pressed then is
+// known not to have happened.
+
+/** The current epoch's calls; none while the page holds no live session. */
+let epoch: AbortController | null = null;
+
+/** Told whenever a call finds the session ended, or is asked for without one: which kind of call it was. */
+const endings = new Set<(by: CallKind) => void>();
+
+/** Tells `listener` whenever the session behind the interview is found ended, and by which kind of call. */
+export const onSessionEnded = (
+  listener: (by: CallKind) => void
+): (() => void) => {
+  endings.add(listener);
+  return () => {
+    endings.delete(listener);
+  };
+};
+
+/** The page holds an interview on a live session: its calls begin a new epoch, and the one before ends. */
+export const beginCalls = (): void => {
+  epoch?.abort();
+  epoch = new AbortController();
+};
+
+/** The session is found ended by a call of `by`: the epoch ends, every call on its way aborted, and the page is told. */
+const sessionEnded = (by: CallKind): void => {
+  epoch?.abort();
+  epoch = null;
+  for (const listener of endings) {
+    listener(by);
+  }
+};
+
+/**
+ * Runs one of the interview's calls in the current epoch: `run` sends it
+ * with the epoch's `signal`, and reports each answer's status with
+ * `answered`. Its result reaches the caller only while the epoch lasts.
+ * Dropped, it never comes back; or, for a caller that keeps what calls
+ * bring for later (the lines said, a part's story), it comes back as
+ * `unanswered`, that caller's own "no answer", which keeps nothing, so a
+ * call that never comes back never sits in what it keeps.
+ */
+export const gated = async <T>(
+  by: CallKind,
+  run: (signal: AbortSignal, answered: (status: number) => void) => Promise<T>,
+  unanswered?: () => T
+): Promise<T> => {
+  const dropped = async (): Promise<T> =>
+    unanswered === undefined
+      ? await Promise.withResolvers<T>().promise
+      : unanswered();
+  const mine = epoch;
+  if (mine === null) {
+    sessionEnded(by);
+    return await dropped();
+  }
+  const answered = (status: number): void => {
+    if (status === 401 && epoch === mine) {
+      sessionEnded(by);
+    }
+  };
+  try {
+    const result = await run(mine.signal, answered);
+    if (!mine.signal.aborted) {
+      return result;
+    }
+  } catch (error) {
+    if (!mine.signal.aborted) {
+      throw error;
+    }
+  }
+  return await dropped();
+};
+
+/** The epoch's `signal` with a time limit of `ms`. */
+const within = (signal: AbortSignal, ms: number): AbortSignal =>
+  AbortSignal.any([signal, AbortSignal.timeout(ms)]);
+
 /** How long a call to keep or open may take. */
 const callTimeoutMs = 30_000;
 
@@ -141,11 +240,19 @@ const refusalOf = async (response: Response): Promise<Refused> => {
 };
 
 /** One POST with a JSON body, its answer read with `schema`; a 409 is an answer too. */
-const posted = async <T>(
+const postedOnce = async <T>(
   path: string,
   body: unknown,
   schema: z.ZodType<T>,
-  { keepalive = false }: { keepalive?: boolean } = {}
+  {
+    keepalive = false,
+    signal,
+    answered,
+  }: {
+    keepalive?: boolean;
+    signal: AbortSignal;
+    answered: (status: number) => void;
+  }
 ): Promise<T | Refused> => {
   let response: Response;
   try {
@@ -154,11 +261,12 @@ const posted = async <T>(
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
       keepalive,
-      signal: AbortSignal.timeout(callTimeoutMs),
+      signal: within(signal, callTimeoutMs),
     });
   } catch {
     return unreachable();
   }
+  answered(response.status);
   if (!response.ok && response.status !== 409) {
     return await refusalOf(response);
   }
@@ -186,14 +294,40 @@ const posted = async <T>(
   };
 };
 
-/** Opens the link for whoever is signed in: their interview, or why not. */
+/** One of the interview's POSTs, in the current epoch (`gated`). */
+const posted = async <T>(
+  by: CallKind,
+  body: unknown,
+  schema: z.ZodType<T>,
+  { keepalive = false }: { keepalive?: boolean } = {}
+): Promise<T | Refused> =>
+  await gated(
+    by,
+    async (signal, answered) =>
+      await postedOnce(interviewApiPath, body, schema, {
+        keepalive,
+        signal,
+        answered,
+      })
+  );
+
+/**
+ * Opens the link for whoever is signed in: their interview, or why not.
+ * Outside any epoch: it is what begins one, and a 401 is its answer.
+ */
 export const openSession = async (
   secret: string
 ): Promise<OpenSession | Refused> =>
-  await posted(
+  await postedOnce(
     interviewApiPath,
     { action: "session", secret } satisfies InterviewRequest,
-    sessionSchema
+    sessionSchema,
+    {
+      signal: AbortSignal.timeout(callTimeoutMs),
+      answered: () => {
+        // Asked to sign in is this call's own answer.
+      },
+    }
   );
 
 /** Keeps where the interview stands, as of `version`. */
@@ -201,14 +335,14 @@ export const saveProgress = async (
   request: Extract<InterviewRequest, { action: "save" }>,
   { keepalive = false }: { keepalive?: boolean } = {}
 ): Promise<SaveAnswer | Refused> =>
-  await posted(interviewApiPath, request, savedSchema, { keepalive });
+  await posted("save", request, savedSchema, { keepalive });
 
 /** Deletes everything said on the link. */
 export const deleteInterview = async (
   secret: string
 ): Promise<z.output<typeof deletedSchema> | Refused> =>
   await posted(
-    interviewApiPath,
+    "delete",
     { action: "delete", secret } satisfies InterviewRequest,
     deletedSchema
   );
@@ -218,7 +352,7 @@ export const participate = async (
   secret: string
 ): Promise<z.output<typeof participationSchema> | Refused> =>
   await posted(
-    interviewApiPath,
+    "participate",
     {
       action: "participate",
       secret,
@@ -233,7 +367,7 @@ export const approveFacts = async (
   facts: ApprovedFact[]
 ): Promise<ApprovalAnswer | Refused> =>
   await posted(
-    interviewApiPath,
+    "approve",
     { action: "approve", secret, facts } satisfies InterviewRequest,
     approvalSchema
   );
@@ -243,7 +377,7 @@ export const withdrawInterview = async (
   secret: string
 ): Promise<z.output<typeof withdrawnSchema> | Refused> =>
   await posted(
-    interviewApiPath,
+    "withdraw",
     { action: "withdraw", secret } satisfies InterviewRequest,
     withdrawnSchema
   );
@@ -273,42 +407,47 @@ export const askTurn = async (
   signal: AbortSignal,
   onEvent: (event: EarlyEvent) => void,
   alive: () => void
-): Promise<StephenTurn | TurnFailed> => {
-  const response = await fetch(interviewTurnPath, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(request),
-    signal,
-  });
-  if (!response.ok || response.body === null) {
-    return { failed: true, status: response.status };
-  }
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let turn: StephenTurn | TurnFailed = { failed: true, status: 0 };
-  let arrived = "";
-  for (;;) {
-    // oxlint-disable-next-line no-await-in-loop -- a stream is read a piece at a time
-    const { done, value } = await reader.read();
-    alive();
-    // The last line counts too, whether or not it ends in a new line.
-    const text = `${arrived}${decoder.decode(value, { stream: !done })}${done ? "\n" : ""}`;
-    const { events, rest } = turnEvents(text);
-    arrived = rest;
-    for (const event of events) {
-      if ("turn" in event) {
-        ({ turn } = event);
-      } else if ("error" in event) {
-        turn = { failed: true, status: event.status };
-      } else {
-        onEvent(event);
+): Promise<StephenTurn | TurnFailed> =>
+  await gated("turn", async (calls, answered) => {
+    const response = await fetch(interviewTurnPath, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(request),
+      signal: AbortSignal.any([signal, calls]),
+    });
+    answered(response.status);
+    if (!response.ok || response.body === null) {
+      return { failed: true, status: response.status };
+    }
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let turn: StephenTurn | TurnFailed = { failed: true, status: 0 };
+    let arrived = "";
+    for (;;) {
+      // oxlint-disable-next-line no-await-in-loop -- a stream is read a piece at a time
+      const { done, value } = await reader.read();
+      alive();
+      // The last line counts too, whether or not it ends in a new line.
+      const text = `${arrived}${decoder.decode(value, { stream: !done })}${done ? "\n" : ""}`;
+      const { events, rest } = turnEvents(text);
+      arrived = rest;
+      for (const event of events) {
+        if ("turn" in event) {
+          ({ turn } = event);
+        } else if ("error" in event) {
+          turn = { failed: true, status: event.status };
+        } else {
+          onEvent(event);
+        }
+      }
+      if (done) {
+        return turn;
       }
     }
-    if (done) {
-      return turn;
-    }
-  }
-};
+  });
+
+/** No story: he reads the lines as they stand. */
+const noStory = (): null => null;
 
 /** How long a story of a part is waited for at all. */
 const storyTimeoutMs = 8000;
@@ -320,19 +459,27 @@ const storyTimeoutMs = 8000;
  */
 export const askStory = async (
   request: Omit<InterviewStoryRequest, "lines"> & { lines: StoryLine[] }
-): Promise<StorySentence[] | null> => {
-  try {
-    const response = await fetch(interviewStoryPath, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(request),
-      signal: AbortSignal.timeout(storyTimeoutMs),
-    });
-    return response.ok ? storyOf(await response.json(), request.lines) : null;
-  } catch {
-    return null;
-  }
-};
+): Promise<StorySentence[] | null> =>
+  await gated(
+    "story",
+    async (calls, answered) => {
+      try {
+        const response = await fetch(interviewStoryPath, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(request),
+          signal: within(calls, storyTimeoutMs),
+        });
+        answered(response.status);
+        return response.ok
+          ? storyOf(await response.json(), request.lines)
+          : null;
+      } catch {
+        return null;
+      }
+    },
+    noStory
+  );
 
 /** Where this tab keeps a link's secret while it is away signing in. */
 const signingInSecret = "grasp.interview.signing-in";
@@ -383,7 +530,7 @@ const linkName = async (secret: string): Promise<string> => {
   return `grasp.interview.${hex}`;
 };
 
-/** Where what they typed and did not send is kept, per link. */
+/** Where what isn't kept yet waits in this tab, per link, while their session is ended (kept.ts). */
 export const draftName = async (secret: string): Promise<string> =>
   `${await linkName(secret)}.draft`;
 
@@ -410,20 +557,23 @@ export const hearRecording = async ({
     String(Math.min(hearSecondsMax, Math.max(0, fields.seconds)))
   );
   form.set("audio", audio, "stretch");
-  try {
-    const response = await fetch(interviewHearPath, {
-      method: "POST",
-      body: form,
-      signal: AbortSignal.timeout(hearTimeoutMs),
-    });
-    if (!response.ok) {
-      return { reason: response.status === 429 ? "limited" : "failed" };
+  return await gated("hear", async (calls, answered) => {
+    try {
+      const response = await fetch(interviewHearPath, {
+        method: "POST",
+        body: form,
+        signal: within(calls, hearTimeoutMs),
+      });
+      answered(response.status);
+      if (!response.ok) {
+        return { reason: response.status === 429 ? "limited" : "failed" };
+      }
+      const parsed = hearAnswerSchema.safeParse(await response.json());
+      return parsed.success
+        ? { heard: parsed.data.heard.trim() }
+        : { reason: "failed" };
+    } catch {
+      return { reason: "failed" };
     }
-    const parsed = hearAnswerSchema.safeParse(await response.json());
-    return parsed.success
-      ? { heard: parsed.data.heard.trim() }
-      : { reason: "failed" };
-  } catch {
-    return { reason: "failed" };
-  }
+  });
 };

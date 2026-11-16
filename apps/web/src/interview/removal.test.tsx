@@ -111,7 +111,14 @@ const shown = async (
       }
     )
   );
-  holdInterview({ secret: "s".repeat(43), version: 1, progress: finished });
+  holdInterview({
+    secret: "s".repeat(43),
+    draft: "grasp.interview.test.draft",
+    version: 1,
+    progress: finished,
+    withdrawn: false,
+    closed: false,
+  });
   const rootRoute = createRootRoute({ component: Outlet });
   const page = createRoute({
     getParentRoute: () => rootRoute,

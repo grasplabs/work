@@ -7,6 +7,7 @@ import { z } from "zod";
 
 import { wait } from "../core.ts";
 import { readingSeconds } from "../onboarding/setup.ts";
+import { gated } from "./api.ts";
 import { linkNow } from "./kept.ts";
 import { scheduleOf, wordsOf } from "./spoken.tsx";
 
@@ -169,36 +170,46 @@ const fetchClip = async (text: string, voicing: Voicing): Promise<Clip> => {
   if (!soundOn || link === null || made === null) {
     return reading;
   }
-  try {
-    const response = await fetch(speechPath, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        text,
-        language: languageNow(),
-        speaker: voicing.speaker,
-        ...(voicing.tone === null ? {} : { tone: voicing.tone }),
-        link: { secret: link.secret },
-      }),
-      signal: AbortSignal.timeout(fetchTimeoutMs),
-    });
-    if (!response.ok) {
-      return reading;
-    }
-    const answer = answerSchema.safeParse(await response.json());
-    if (!answer.success) {
-      return reading;
-    }
-    const sound = await made.decodeAudioData(bytesOf(answer.data.audio).buffer);
-    return {
-      audio: sound,
-      schedule: scheduleBy(text, answer.data.words) ?? reading.schedule,
-      length: sound.duration * 1000,
-    };
-  } catch {
-    // No connection, or audio the browser can't play: the words still light up.
-    return reading;
-  }
+  return await gated(
+    "speech",
+    async (calls, answered) => {
+      try {
+        const response = await fetch(speechPath, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            text,
+            language: languageNow(),
+            speaker: voicing.speaker,
+            ...(voicing.tone === null ? {} : { tone: voicing.tone }),
+            link: { secret: link.secret },
+          }),
+          signal: AbortSignal.any([calls, AbortSignal.timeout(fetchTimeoutMs)]),
+        });
+        answered(response.status);
+        if (!response.ok) {
+          return reading;
+        }
+        const answer = answerSchema.safeParse(await response.json());
+        if (!answer.success) {
+          return reading;
+        }
+        const sound = await made.decodeAudioData(
+          bytesOf(answer.data.audio).buffer
+        );
+        return {
+          audio: sound,
+          schedule: scheduleBy(text, answer.data.words) ?? reading.schedule,
+          length: sound.duration * 1000,
+        };
+      } catch {
+        // No connection, or audio the browser can't play: the words still light up.
+        return reading;
+      }
+    },
+    // Read at the pace of speech, never kept: asked for again next time.
+    () => reading
+  );
 };
 
 /** Lines fetched ahead, waiting their turn. */

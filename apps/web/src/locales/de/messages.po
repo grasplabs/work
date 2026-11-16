@@ -6921,6 +6921,10 @@ msgstr "Wenn es anhält, wechseln Sie den Anbieter."
 msgid "If the rest of the month goes like the days so far"
 msgstr "Wenn der Rest des Monats wie die bisherigen Tage verläuft"
 
+#: src/routes/interview.tsx
+msgid "If you were saying something as it ended, it wasn't heard. Say it again once you're back."
+msgstr "Falls Sie gerade etwas gesagt haben, als sie endete, wurde es nicht gehört. Sagen Sie es noch einmal, sobald Sie zurück sind."
+
 #: src/apps/app-data.tsx
 msgid "Import"
 msgstr "Importieren"
@@ -12529,6 +12533,10 @@ msgstr "Anmelden"
 msgid "Sign in again"
 msgstr "Erneut anmelden"
 
+#: src/routes/interview.tsx
+msgid "Sign in again to go on"
+msgstr "Melden Sie sich erneut an, um weiterzumachen"
+
 #: src/pages/frame-failure.tsx
 msgid "Sign in again to go on."
 msgstr "Melde dich erneut an, um fortzufahren."
@@ -16054,6 +16062,14 @@ msgstr "Was du teilen wolltest"
 msgid "What you chose"
 msgstr "Was Sie gewählt haben"
 
+#: src/interview/page.tsx
+msgid "What you hadn't saved when your sign-in ended couldn't be kept, because your interview changed while you were away."
+msgstr "Was Sie beim Ende Ihrer Anmeldung noch nicht gespeichert hatten, konnte nicht behalten werden, weil sich Ihr Interview geändert hat, während Sie weg waren."
+
+#: src/interview/page.tsx
+msgid "What you hadn't saved when your sign-in ended couldn't be kept, because your interview has closed."
+msgstr "Was Sie beim Ende Ihrer Anmeldung noch nicht gespeichert hatten, konnte nicht behalten werden, weil Ihr Interview geschlossen ist."
+
 #: src/routes/_shell.settings.instructions.tsx
 msgid "What your chats with Grasp start with, and only yours: how you like to work, what you are responsible for."
 msgstr "Womit deine Chats mit Grasp beginnen, und nur deine: wie du gern arbeitest, wofür du verantwortlich bist."
@@ -17043,6 +17059,30 @@ msgstr "Dein Lauf von Version {version} ist beendet: {status}"
 #: src/pages/frame-failure.tsx
 msgid "Your session has ended"
 msgstr "Deine Sitzung ist beendet"
+
+#: src/routes/interview.tsx
+msgid "Your sign-in ended, so you didn't withdraw and what wasn't saved yet wasn't kept: sign in again with your work account to withdraw."
+msgstr "Ihre Anmeldung ist beendet, deshalb haben Sie sich nicht zurückgezogen und was noch nicht gespeichert war, wurde nicht behalten: Melden Sie sich erneut mit Ihrem Arbeitskonto an, um sich zurückzuziehen."
+
+#: src/routes/interview.tsx
+msgid "Your sign-in ended, so your interview wasn't deleted and what wasn't saved yet wasn't kept: sign in again with your work account to delete it."
+msgstr "Ihre Anmeldung ist beendet, deshalb wurde Ihr Interview nicht gelöscht und was noch nicht gespeichert war, wurde nicht behalten: Melden Sie sich erneut mit Ihrem Arbeitskonto an, um es zu löschen."
+
+#: src/routes/interview.tsx
+msgid "Your sign-in ended. Sign in again with your work account to go on where you were. This window couldn't keep what wasn't saved yet, so it is lost."
+msgstr "Ihre Anmeldung ist beendet. Melden Sie sich erneut mit Ihrem Arbeitskonto an, um dort weiterzumachen, wo Sie waren. Dieses Fenster konnte nicht behalten, was noch nicht gespeichert war, deshalb ist es verloren."
+
+#: src/routes/interview.tsx
+msgid "Your sign-in ended. Sign in again with your work account to go on where you were. What isn't saved yet is kept in this window until then."
+msgstr "Ihre Anmeldung ist beendet. Melden Sie sich erneut mit Ihrem Arbeitskonto an, um dort weiterzumachen, wo Sie waren. Was noch nicht gespeichert ist, bleibt bis dahin in diesem Fenster erhalten."
+
+#: src/interview/page.tsx
+msgid "Your sign-in had ended, so you didn't withdraw: withdraw again if you still want to."
+msgstr "Ihre Anmeldung war beendet, deshalb haben Sie sich nicht zurückgezogen: Ziehen Sie sich erneut zurück, wenn Sie das weiterhin möchten."
+
+#: src/interview/page.tsx
+msgid "Your sign-in had ended, so your interview wasn't deleted: delete it again if you still want to."
+msgstr "Ihre Anmeldung war beendet, deshalb wurde Ihr Interview nicht gelöscht: Löschen Sie es erneut, wenn Sie das weiterhin möchten."
 
 #: src/brain/skills-page.tsx
 msgid "Your skills"

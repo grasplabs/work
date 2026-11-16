@@ -6921,6 +6921,10 @@ msgstr "Si continúa, cambia de proveedor."
 msgid "If the rest of the month goes like the days so far"
 msgstr "Si el resto del mes va como los días hasta ahora"
 
+#: src/routes/interview.tsx
+msgid "If you were saying something as it ended, it wasn't heard. Say it again once you're back."
+msgstr "Si estabas diciendo algo cuando terminó, no se oyó. Vuelve a decirlo en cuanto regreses."
+
 #: src/apps/app-data.tsx
 msgid "Import"
 msgstr "Importar"
@@ -12529,6 +12533,10 @@ msgstr "Iniciar sesión"
 msgid "Sign in again"
 msgstr "Volver a iniciar sesión"
 
+#: src/routes/interview.tsx
+msgid "Sign in again to go on"
+msgstr "Vuelve a iniciar sesión para continuar"
+
 #: src/pages/frame-failure.tsx
 msgid "Sign in again to go on."
 msgstr "Vuelve a iniciar sesión para continuar."
@@ -16054,6 +16062,14 @@ msgstr "Lo que pediste compartir"
 msgid "What you chose"
 msgstr "Lo que elegiste"
 
+#: src/interview/page.tsx
+msgid "What you hadn't saved when your sign-in ended couldn't be kept, because your interview changed while you were away."
+msgstr "Lo que no habías guardado cuando terminó tu sesión no se pudo conservar, porque tu entrevista cambió mientras no estabas."
+
+#: src/interview/page.tsx
+msgid "What you hadn't saved when your sign-in ended couldn't be kept, because your interview has closed."
+msgstr "Lo que no habías guardado cuando terminó tu sesión no se pudo conservar, porque tu entrevista se ha cerrado."
+
 #: src/routes/_shell.settings.instructions.tsx
 msgid "What your chats with Grasp start with, and only yours: how you like to work, what you are responsible for."
 msgstr "Con lo que empiezan tus chats con Grasp, y solo los tuyos: cómo te gusta trabajar, de qué eres responsable."
@@ -17043,6 +17059,30 @@ msgstr "Tu ejecución de la versión {version} terminó: {status}"
 #: src/pages/frame-failure.tsx
 msgid "Your session has ended"
 msgstr "Tu sesión ha terminado"
+
+#: src/routes/interview.tsx
+msgid "Your sign-in ended, so you didn't withdraw and what wasn't saved yet wasn't kept: sign in again with your work account to withdraw."
+msgstr "Tu sesión terminó, así que no te retiraste y lo que aún no se había guardado no se conservó: vuelve a iniciar sesión con tu cuenta del trabajo para retirarte."
+
+#: src/routes/interview.tsx
+msgid "Your sign-in ended, so your interview wasn't deleted and what wasn't saved yet wasn't kept: sign in again with your work account to delete it."
+msgstr "Tu sesión terminó, así que tu entrevista no se eliminó y lo que aún no se había guardado no se conservó: vuelve a iniciar sesión con tu cuenta del trabajo para eliminarla."
+
+#: src/routes/interview.tsx
+msgid "Your sign-in ended. Sign in again with your work account to go on where you were. This window couldn't keep what wasn't saved yet, so it is lost."
+msgstr "Tu sesión terminó. Vuelve a iniciar sesión con tu cuenta del trabajo para seguir donde estabas. Esta ventana no pudo conservar lo que aún no se había guardado, así que se ha perdido."
+
+#: src/routes/interview.tsx
+msgid "Your sign-in ended. Sign in again with your work account to go on where you were. What isn't saved yet is kept in this window until then."
+msgstr "Tu sesión terminó. Vuelve a iniciar sesión con tu cuenta del trabajo para seguir donde estabas. Lo que aún no se ha guardado se conserva en esta ventana hasta entonces."
+
+#: src/interview/page.tsx
+msgid "Your sign-in had ended, so you didn't withdraw: withdraw again if you still want to."
+msgstr "Tu sesión había terminado, así que no te retiraste: vuelve a retirarte si todavía quieres hacerlo."
+
+#: src/interview/page.tsx
+msgid "Your sign-in had ended, so your interview wasn't deleted: delete it again if you still want to."
+msgstr "Tu sesión había terminado, así que tu entrevista no se eliminó: vuelve a eliminarla si todavía quieres hacerlo."
 
 #: src/brain/skills-page.tsx
 msgid "Your skills"

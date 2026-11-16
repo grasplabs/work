@@ -12,15 +12,24 @@ import { loadCoreStatus, signOut } from "../core-connection.ts";
 import type { CoreConnection } from "../core-connection.ts";
 import { ErrorText } from "../error-text.tsx";
 import {
+  draftName,
   isRefused,
   keepWhileSigningIn,
   linkSecret,
+  onSessionEnded,
   openSession,
 } from "../interview/api.ts";
-import type { OpenSession } from "../interview/api.ts";
-import { holdInterview, releaseInterview } from "../interview/kept.ts";
+import type { OpenSession, Refused } from "../interview/api.ts";
+import {
+  forgetAside,
+  holdInterview,
+  releaseInterview,
+  setAside,
+  waitingAside,
+} from "../interview/kept.ts";
+import type { Undone } from "../interview/kept.ts";
+import { stopLoop } from "../interview/loop.ts";
 import { InterviewPage } from "../interview/page.tsx";
-import { resumed } from "../interview/progress.ts";
 import { signInErrorMessage, signInErrorSearch } from "../sign-in-errors.ts";
 import { SignInOptions } from "../sign-in-options.tsx";
 
@@ -33,6 +42,20 @@ import { SignInOptions } from "../sign-in-options.tsx";
 // calls, names which interview; while they are away signing in, this tab
 // alone keeps it (api.ts `keepWhileSigningIn`). Anyone else is told the
 // link opens nothing, and nothing that was said (core's onboarding/links.ts).
+//
+// When their session ends mid-interview (the company's gate opens, which
+// ends every session for an interview alone; they signed out elsewhere;
+// it expired), the conversation stops, what isn't kept yet waits in this
+// tab (kept.ts `setAside`), and they are asked to sign in again with the
+// company's sign-in; back, they go on where they were (GRA-1943).
+
+/** Their session ended mid-interview (kept.ts `waitingAside`). */
+interface Again {
+  talking: boolean;
+  unkept: boolean;
+  /** A delete or withdrawal asked for as it ended, which didn't happen. */
+  undone: Undone | null;
+}
 
 /** What the page shows, and the secret it was opened with. */
 type Page =
@@ -47,8 +70,42 @@ type Page =
        */
       signedIn: boolean;
     }
-  | { state: "sign_in"; secret: string; options: SignInOption[] }
-  | { state: "open"; secret: string; session: OpenSession };
+  | {
+      state: "sign_in";
+      secret: string;
+      options: SignInOption[];
+      /**
+       * Their session ended mid-interview, and what isn't kept yet waits in
+       * this tab; `talking`: they were talking as it ended; `unkept`: this
+       * tab refused to keep what wasn't saved.
+       */
+      again: Again | null;
+    }
+  | {
+      state: "open";
+      secret: string;
+      session: OpenSession;
+      /**
+       * Which opening of the link on this page: opened again on a new
+       * session (signed in again elsewhere before the sign-in showed), the
+       * interview starts afresh from what core holds, its conversation too.
+       */
+      opening: number;
+    };
+
+/** Refusals of a link that may still open as it is later: what waits in this tab for it stays. */
+const passingRefusals = new Set([
+  "interview.paused",
+  "interview.not_yet",
+  "interview.limited",
+]);
+
+/** Whether the link may still open as it is: core paused it, it isn't open yet, or core was out of reach. */
+const refusalPasses = ({ status, code }: Refused): boolean =>
+  status === 0 || status >= 500 || passingRefusals.has(code ?? "");
+
+/** How often this page opened a link: each opening is held afresh. */
+let openings = 0;
 
 /** Opens the link for whoever is signed in, or asks them to sign in. */
 const opened = async (secret: string, core: CoreConnection): Promise<Page> => {
@@ -60,9 +117,15 @@ const opened = async (secret: string, core: CoreConnection): Promise<Page> => {
       signedIn: false,
     };
   }
+  const draft = await draftName(secret);
   const answer = await openSession(secret);
   if (isRefused(answer)) {
     if (answer.code !== "interview.sign_in") {
+      if (!refusalPasses(answer)) {
+        // The link opens nothing for whoever is signed in (someone else),
+        // or nothing more is kept on it: what waited in this tab goes.
+        forgetAside(draft);
+      }
       return {
         state: "refused",
         secret,
@@ -82,15 +145,61 @@ const opened = async (secret: string, core: CoreConnection): Promise<Page> => {
       state: "sign_in",
       secret,
       options: signInOptions.filter(({ staff }) => !staff),
+      again: waitingAside(draft),
     };
   }
-  // Back on the link after stopping, it carries on where it was.
+  // Back on the link after stopping, it carries on where it was; back after
+  // their session ended, with what waited in this tab.
   holdInterview({
     secret,
+    draft,
     version: answer.version,
-    progress: answer.progress === null ? null : resumed(answer.progress),
+    progress: answer.progress,
+    withdrawn: answer.withdrawn,
+    closed: answer.closed,
   });
-  return { state: "open", secret, session: answer };
+  openings += 1;
+  return { state: "open", secret, session: answer, opening: openings };
+};
+
+/**
+ * Until stopped: once their session ends mid-interview, the conversation
+ * stops, what isn't kept yet waits in this tab (kept.ts `setAside`), and
+ * `then` is given the page that asks them to sign in again. Every later
+ * call finds it ended too (api.ts `gated`); only a delete or withdrawal
+ * asked for then changes what the sign-in says.
+ */
+const onEnded = (
+  secret: string,
+  core: CoreConnection,
+  then: (page: Page) => void
+): (() => void) => {
+  let current = true;
+  let ended = false;
+  const stopListening = onSessionEnded((by) => {
+    const first = !ended;
+    if (first) {
+      ended = true;
+      stopLoop();
+    }
+    // A later call changes what waits only when it is a delete or a
+    // withdrawal asked for now: the sign-in then says it didn't happen.
+    if (!setAside(by) && !first) {
+      return;
+    }
+    // Each reads what waits once core answers it: the last shown is right.
+    const again = async (): Promise<void> => {
+      const next = await opened(secret, core);
+      if (current) {
+        then(next);
+      }
+    };
+    void again();
+  });
+  return () => {
+    current = false;
+    stopListening();
+  };
 };
 
 /**
@@ -170,22 +279,46 @@ const signInRefusal = (error: string, wrongAccount: string): string =>
 
 /**
  * Before the interview: the company's sign-in, and that it is recorded
- * there, said before the button (GRA-1790).
+ * there, said before the button (GRA-1790). After their session ended
+ * mid-interview (`again`), that they sign in again to go on, and that what
+ * isn't saved yet waits here; when they were talking, that what they were
+ * saying as it ended is lost, before they speak again (GRA-1943).
  */
 const SignIn = ({
   options,
   error,
+  again,
 }: {
   options: SignInOption[];
   error: string | undefined;
+  again: Again | null;
 }) => {
   const { t } = useLingui();
+  let message = t`Use your work account, the one your link was sent to.`;
+  if (again?.undone === "delete") {
+    message = t`Your sign-in ended, so your interview wasn't deleted and what wasn't saved yet wasn't kept: sign in again with your work account to delete it.`;
+  } else if (again?.undone === "withdraw") {
+    message = t`Your sign-in ended, so you didn't withdraw and what wasn't saved yet wasn't kept: sign in again with your work account to withdraw.`;
+  } else if (again?.unkept === true) {
+    message = t`Your sign-in ended. Sign in again with your work account to go on where you were. This window couldn't keep what wasn't saved yet, so it is lost.`;
+  } else if (again !== null) {
+    message = t`Your sign-in ended. Sign in again with your work account to go on where you were. What isn't saved yet is kept in this window until then.`;
+  }
   return (
     <Notice
-      message={t`Use your work account, the one your link was sent to.`}
-      title={t`Sign in to open your interview`}
+      message={message}
+      title={
+        again === null
+          ? t`Sign in to open your interview`
+          : t`Sign in again to go on`
+      }
     >
       <div className="flex w-full max-w-sm flex-col items-center gap-4">
+        {again?.talking === true ? (
+          <p className="text-muted-foreground text-balance">
+            {t`If you were saying something as it ended, it wasn't heard. Say it again once you're back.`}
+          </p>
+        ) : null}
         <p className="text-muted-foreground text-balance">
           {t`Signing in is recorded by your company's sign-in, as every sign-in is.`}
         </p>
@@ -239,6 +372,12 @@ const Interview = () => {
       releaseInterview();
     };
   }, [secret, core]);
+  // Their session ends mid-interview: the page asks them to sign in again.
+  const held = page.state === "open" && page.secret === secret ? page : null;
+  useEffect(
+    () => (held === null ? undefined : onEnded(secret, core, setPage)),
+    [held, secret, core]
+  );
   // What was opened with another secret is never shown for this one.
   const shown: Page =
     page.secret === secret ? page : { state: "loading", secret };
@@ -265,10 +404,17 @@ const Interview = () => {
       );
     }
     case "sign_in": {
-      return <SignIn error={error} options={shown.options} />;
+      return (
+        <SignIn again={shown.again} error={error} options={shown.options} />
+      );
     }
     case "open": {
-      return <InterviewPage key={shown.secret} session={shown.session} />;
+      return (
+        <InterviewPage
+          key={`${shown.secret}:${shown.opening}`}
+          session={shown.session}
+        />
+      );
     }
     default: {
       return shown satisfies never;

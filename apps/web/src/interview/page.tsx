@@ -36,7 +36,10 @@ import {
   onTaken,
   update,
   useInterviewer,
+  useAside,
+  useLost,
   useProgress,
+  useUndone,
 } from "./kept.ts";
 import {
   sendTyped,
@@ -185,6 +188,7 @@ const InterviewFrame = ({
   right,
   box,
   open = false,
+  frozen = false,
   children,
 }: {
   /**
@@ -193,6 +197,11 @@ const InterviewFrame = ({
    * that can't be opened has kept nothing here.
    */
   open?: boolean;
+  /**
+   * Their session ended (kept.ts `useAside`): the page takes nothing more,
+   * not a key or a press, until the sign-in shows (GRA-1943).
+   */
+  frozen?: boolean;
   /** Where the frame's top and bottom are measured, so the stage takes what is left. */
   top: RefObject<HTMLElement | null>;
   bottom: RefObject<HTMLElement | null>;
@@ -202,7 +211,10 @@ const InterviewFrame = ({
   box?: ReactNode;
   children: ReactNode;
 }) => (
-  <div className="bg-background flex h-svh flex-col overflow-hidden text-sm">
+  <div
+    className="bg-background flex h-svh flex-col overflow-hidden text-sm"
+    inert={frozen}
+  >
     <header
       className="flex h-18 flex-none items-center gap-3 px-4 sm:px-10"
       ref={top}
@@ -565,6 +577,46 @@ const Failed = ({ message }: { message: string | null }) =>
     </p>
   );
 
+/**
+ * Back after their session ended (GRA-1943): what waited in this tab
+ * couldn't be kept, because the interview changed meanwhile (a new start,
+ * a delete, a withdrawal, another window that went on) or closed; or a
+ * delete or a withdrawal they asked for as it ended didn't happen. Said,
+ * never dropped without a word, and nothing is asked again for them.
+ */
+const SignedOutNotes = () => {
+  const { t } = useLingui();
+  const lost = useLost();
+  const undone = useUndone();
+  const notes: string[] = [];
+  if (lost === "changed") {
+    notes.push(
+      t`What you hadn't saved when your sign-in ended couldn't be kept, because your interview changed while you were away.`
+    );
+  } else if (lost === "closed") {
+    notes.push(
+      t`What you hadn't saved when your sign-in ended couldn't be kept, because your interview has closed.`
+    );
+  }
+  if (undone === "delete") {
+    notes.push(
+      t`Your sign-in had ended, so your interview wasn't deleted: delete it again if you still want to.`
+    );
+  } else if (undone === "withdraw") {
+    notes.push(
+      t`Your sign-in had ended, so you didn't withdraw: withdraw again if you still want to.`
+    );
+  }
+  return notes.map((note) => (
+    <output
+      className="text-status-attention block pt-4 text-sm text-balance"
+      key={note}
+    >
+      {note}
+    </output>
+  ));
+};
+
 /** Withdrawing is offered while they take part and haven't withdrawn. */
 const withdrawOffered = (
   withdrawn: boolean,
@@ -612,6 +664,7 @@ const useWordsOnScreen = (): void => {
 /** The interview on the link, held on this device. */
 export const InterviewPage = ({ session }: { session: OpenSession }) => {
   const progress = useProgress();
+  const aside = useAside();
   const [stopped, setStopped] = useState(false);
   const { deleted, removingDeleted, deleteFailed, remove } = useDeleting();
   const { withdrawn, removing, withdrawFailed, withdraw } =
@@ -675,6 +728,7 @@ export const InterviewPage = ({ session }: { session: OpenSession }) => {
 
   return (
     <InterviewFrame
+      frozen={aside}
       bottom={bottom}
       box={talking ? <AnswerBox reading={reading} /> : undefined}
       left={
@@ -722,6 +776,7 @@ export const InterviewPage = ({ session }: { session: OpenSession }) => {
         />
       </div>
       <Failed message={deleteFailed ?? withdrawFailed} />
+      <SignedOutNotes />
       <Transcript
         alone={away}
         lines={progress.lines}
