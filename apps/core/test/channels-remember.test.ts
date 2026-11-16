@@ -21,6 +21,7 @@ import {
 } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
+import { breakOwnStore } from "./brain-next-own-store.ts";
 import { chatIdsOf } from "./code-step-trace.ts";
 import { mockIdp } from "./idp.ts";
 import { connectModels } from "./model-provider.ts";
@@ -150,14 +151,23 @@ const afterNotice = async (conversation: string, cardId: string) => {
   };
 };
 
-/** The forgetting `userId` did, as the audit log has it, oldest first. */
+/**
+ * Every forgetting of `userId`'s memories, whoever did it, as the audit
+ * log has it, oldest first: who, how it ended, and why when it wasn't
+ * their own act.
+ */
 const forgottenBy = async (userId: string) => {
   const events = await allEvents();
   return events.flatMap(({ action, actor, detail }) =>
-    action === "brain.memory.forgotten" &&
-    "userId" in actor &&
-    actor.userId === userId
-      ? [{ actor, outcome: detail.outcome, result: detail.result }]
+    action === "brain.memory.forgotten" && detail.onBehalfOf === userId
+      ? [
+          {
+            actor,
+            outcome: detail.outcome,
+            result: detail.result,
+            reason: detail.reason,
+          },
+        ]
       : []
   );
 };
@@ -276,11 +286,13 @@ describe("the agent remembering in a person's Teams direct message", () => {
             actor: { type: "person", userId: ann.userId, via: "teams" },
             outcome: "attempted",
             result: undefined,
+            reason: undefined,
           },
           {
             actor: { type: "person", userId: ann.userId, via: "teams" },
             outcome: "done",
             result: "done",
+            reason: undefined,
           },
         ],
       });
@@ -369,7 +381,12 @@ describe("the agent remembering in a person's Teams direct message", () => {
         checks: checksSent(ann.provider),
         kept: await keptFor(ann.userId, `Depot ${depot}`),
         // Kept first, as the check passed, then retired.
-        forgotten: forgotten.map(({ outcome, result }) => [outcome, result]),
+        forgotten: forgotten.map(({ actor, outcome, result, reason }) => [
+          actor,
+          outcome,
+          result,
+          reason,
+        ]),
         // The answer itself still came.
         answered: sent.some(
           ({ activity }) =>
@@ -379,9 +396,10 @@ describe("the agent remembering in a person's Teams direct message", () => {
       }).toStrictEqual({
         checks: 1,
         kept: [],
+        // By the platform, not by her: she never saw it.
         forgotten: [
-          ["attempted", undefined],
-          ["done", "done"],
+          [{ type: "system" }, "attempted", undefined, "card_refused"],
+          [{ type: "system" }, "done", "done", "card_refused"],
         ],
         answered: true,
       });
@@ -396,7 +414,11 @@ const retiredInLog = async (userId: string): Promise<unknown[]> =>
       const forgotten = await forgottenBy(userId);
       const done = forgotten.filter(({ outcome }) => outcome === "done");
       expect(done).not.toHaveLength(0);
-      return done.map(({ result }) => result);
+      return done.map(({ actor, result, reason }) => ({
+        actor,
+        result,
+        reason,
+      }));
     },
     { timeout: 20_000 }
   );
@@ -462,7 +484,13 @@ describe("a memory whose notice the person can't see in Teams", () => {
         checks: checksSent(ann.provider),
         retired: await retiredInLog(ann.userId),
         kept: await keptFor(ann.userId, `Depot ${depot}`),
-      }).toStrictEqual({ checks: 1, retired: ["done"], kept: [] });
+      }).toStrictEqual({
+        checks: 1,
+        retired: [
+          { actor: { type: "system" }, result: "done", reason: "card_refused" },
+        ],
+        kept: [],
+      });
     }
   );
 
@@ -500,7 +528,13 @@ describe("a memory whose notice the person can't see in Teams", () => {
       retired: await retiredInLog(ann.userId),
       kept: await keptFor(ann.userId, `Depot ${depot}`),
       failed: lines.includes(say("failed", "en")),
-    }).toStrictEqual({ retired: ["done"], kept: [], failed: true });
+    }).toStrictEqual({
+      retired: [
+        { actor: { type: "system" }, result: "done", reason: "turn_threw" },
+      ],
+      kept: [],
+      failed: true,
+    });
   });
 
   it(
@@ -539,7 +573,50 @@ describe("a memory whose notice the person can't see in Teams", () => {
         ),
         retired: await retiredInLog(ann.userId),
         kept: await keptFor(ann.userId, `Depot ${depot}`),
-      }).toStrictEqual({ checks: 1, retired: ["done"], kept: [] });
+      }).toStrictEqual({
+        checks: 1,
+        retired: [
+          { actor: { type: "system" }, result: "done", reason: "no_asker" },
+        ],
+        kept: [],
+      });
+    }
+  );
+});
+
+describe("an Undo that fails", () => {
+  it(
+    "leaves the notice to be pressed again, and the next press retires the memory",
+    slow,
+    async () => {
+      const depot = `d${unique()}`;
+      const { said, statement, saves } = depotSaid(depot, marker());
+      const ann = await member(idp, saves, checked(true), says("Noted."));
+      await post(messageFrom(ann.teams, { text: said }));
+      const { cardId, memory } = await noticeIn(ann.teams.conversation);
+
+      // Her store fails every call while she presses Undo the first time.
+      const broken = await breakOwnStore(ann.userId);
+      await post(undoFrom(ann.teams, cardId, memory));
+      await broken.heal();
+      const afterFailed = await keptFor(ann.userId, `Depot ${depot}`);
+      await post(undoFrom(ann.teams, cardId, memory));
+      const { edits, lines } = await afterNotice(
+        ann.teams.conversation,
+        cardId
+      );
+
+      expect({
+        afterFailed,
+        lines,
+        edits: edits.map((edit) => edit.includes(say("undone", "en"))),
+        after: await keptFor(ann.userId, `Depot ${depot}`),
+      }).toStrictEqual({
+        afterFailed: [statement],
+        lines: [say("undoFailed", "en")],
+        edits: [true],
+        after: [],
+      });
     }
   );
 });
@@ -575,52 +652,91 @@ describe("Undo pressed where the notice isn't", () => {
   );
 });
 
-describe("a Teams reply that quotes the bot", () => {
+describe("a Teams reply that quotes a message", () => {
   it(
-    "never passes the bot's quoted words off as the person's own",
+    "never passes the bot's quoted words off as the person's own in their direct message, however Teams spells the quote's mark",
     slow,
     async () => {
-      const depot = `d${unique()}`;
-      const word = marker();
-      const { statement } = depotSaid(depot, word);
-      // The model quotes the middle of the bot's words, as theirs.
-      const ann = await member(
-        idp,
-        toolStep("remember", {
-          about: { kind: "customer", name: `Depot ${depot}` },
-          type: "fact",
-          statement,
-          quote: `opens at ${word}`,
-        }),
-        checked(true),
-        says("Noted.")
-      );
-      // Teams puts the quoted message into the reply's text, as HTML, with
-      // its structure: a blockquote marked as a reply, naming its author.
-      const quoted = `<blockquote itemscope="" itemtype="http://schema.skype.com/Reply" itemid="1729000000001"><strong itemprop="mri" itemid="28:stephen">Stephen</strong><span itemprop="time" itemid="1729000000001"></span><p itemprop="preview">${statement} from now on.</p></blockquote><p>Thanks!</p>`;
+      /** What a reply quoting the bot, the quote marked `itemtype`, saved. */
+      const repliedWith = async (itemtype: string) => {
+        const depot = `d${unique()}`;
+        const word = marker();
+        const { statement } = depotSaid(depot, word);
+        // The model quotes the middle of the bot's words, as theirs.
+        const ann = await member(
+          idp,
+          toolStep("remember", {
+            about: { kind: "customer", name: `Depot ${depot}` },
+            type: "fact",
+            statement,
+            quote: `opens at ${word}`,
+          }),
+          checked(true),
+          says("Noted.")
+        );
+        // Teams puts the quoted message into the reply's text, as HTML,
+        // with its structure: a blockquote marked as a reply, naming its
+        // author.
+        const quoted = `<blockquote itemscope="" itemtype="${itemtype}" itemid="1729000000001"><strong itemprop="mri" itemid="28:stephen">Stephen</strong><span itemprop="time" itemid="1729000000001"></span><p itemprop="preview">${statement} from now on.</p></blockquote><p>Thanks!</p>`;
+        await post(
+          messageFrom(ann.teams, {
+            text: quoted,
+            textFormat: "xml",
+            attachments: [
+              { contentType: "text/html", content: `<div>${quoted}</div>` },
+            ],
+          })
+        );
+        const chatId = await directChatOf(ann.userId);
+        const results = await toolResults(
+          workspace(env, personalWorkspaceId(ann.userId)),
+          chatId
+        );
+        return {
+          outcomes: results.flatMap(({ tool, isError }) =>
+            tool === "remember" ? [isError] : []
+          ),
+          checks: checksSent(ann.provider),
+          kept: await keptFor(ann.userId, `Depot ${depot}`),
+        };
+      };
 
-      await post(
-        messageFrom(ann.teams, {
-          text: quoted,
-          textFormat: "xml",
-          attachments: [
-            { contentType: "text/html", content: `<div>${quoted}</div>` },
-          ],
-        })
-      );
-      const chatId = await directChatOf(ann.userId);
-      const results = await toolResults(
-        workspace(env, personalWorkspaceId(ann.userId)),
-        chatId
+      const none = { outcomes: [true], checks: 0, kept: [] };
+      expect({
+        asTeamsWrites: await repliedWith("http://schema.skype.com/Reply"),
+        otherwise: await repliedWith("HTTPS://Schema.Skype.com/reply"),
+      }).toStrictEqual({ asTeamsWrites: none, otherwise: none });
+    }
+  );
+
+  it(
+    "hands the turn what a group-chat reply quotes, the only copy of it the agent gets there",
+    slow,
+    async () => {
+      const ann = await member(idp, says("I made the task."));
+      const ben = await memberAnsweredBy(idp, ann.provider);
+      const group = newGroup();
+      await onGroupRoster(group, [
+        { person: ann.teams },
+        { person: ben.teams },
+      ]);
+      const order = `Order ${unique()} ships Friday, invoice to follow`;
+      const quote = `<blockquote itemscope="" itemtype="http://schema.skype.com/Reply" itemid="1729000000002"><strong itemprop="mri" itemid="8:orgid:${ben.teams.aadObjectId}">Ben</strong><span itemprop="time" itemid="1729000000002"></span><p itemprop="preview">${order}</p></blockquote>`;
+      const reply = mentionIn(ann.teams, group, "turn this into a task");
+
+      await post({
+        ...reply,
+        text: `${quote}<p>${reply.text}</p>`,
+        textFormat: "xml",
+      });
+      const sent = JSON.stringify(
+        ann.provider.requests.map(({ body }) => body)
       );
 
       expect({
-        outcomes: results.flatMap(({ tool, isError }) =>
-          tool === "remember" ? [isError] : []
-        ),
-        checks: checksSent(ann.provider),
-        kept: await keptFor(ann.userId, `Depot ${depot}`),
-      }).toStrictEqual({ outcomes: [true], checks: 0, kept: [] });
+        quoted: sent.includes(order),
+        asked: sent.includes("turn this into a task"),
+      }).toStrictEqual({ quoted: true, asked: true });
     }
   );
 });

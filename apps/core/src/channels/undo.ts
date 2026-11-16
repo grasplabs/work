@@ -1,8 +1,9 @@
+import { actorOf } from "@grasp-os/shared/audit";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { z } from "zod";
 
 import { forgetFor } from "../brain-memories.ts";
-import { callerOf } from "../unseen-memories.ts";
+import type { MemoryCaller } from "../brain-memories.ts";
 import { appLocale } from "./answer.ts";
 import { lineCard } from "./cards.tsx";
 import { pressedKey, pressedTtlMs, sayThere } from "./press.ts";
@@ -15,6 +16,12 @@ import { say } from "./words.ts";
 // `forgetFor` as Grasp's own notice, once per card.
 
 const memorySchema = z.uuid();
+
+/** The person pressing, through `platform`: their own act. */
+const presserOf = (userId: string, platform: string): MemoryCaller => ({
+  person: userId,
+  actor: actorOf({ userId, staff: false }, platform),
+});
 
 /**
  * A press on Undo on a memory's notice, by the member the door let in
@@ -43,7 +50,7 @@ export const pressUndo = async (
   // pressed while its memory is still in use.
   let outcome: Awaited<ReturnType<typeof forgetFor>>;
   try {
-    outcome = await forgetFor(env, callerOf(userId, platform), memory.data);
+    outcome = await forgetFor(env, presserOf(userId, platform), memory.data);
   } catch (error) {
     log.warn("channel.undo_failed", { platform, ...errorFields(error) });
     await sayThere(event, "undoFailed", locale);

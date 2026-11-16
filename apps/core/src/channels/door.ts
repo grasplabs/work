@@ -1086,11 +1086,14 @@ export const channelResponse = async (
   if (!parsed.success || parsed.data.type !== "message") {
     return new Response(null, { status: 200 });
   }
-  // What they said, without a message their reply quotes (quoted-reply.ts):
-  // read so by the door and by every handler after it.
+  // In a direct message, what they said, without a message their reply
+  // quotes (quoted-reply.ts): read so by the door and every handler after
+  // it. Only there, where `remember` may keep their words: in a group chat
+  // or channel the quote is the only copy the turn gets of what it answers.
   const text =
-    parsed.data.text === undefined
-      ? undefined
+    parsed.data.text === undefined ||
+    parsed.data.conversation.conversationType !== "personal"
+      ? parsed.data.text
       : await withoutQuotedReply(parsed.data.text);
   const activity = { ...parsed.data, text };
   const theirs =

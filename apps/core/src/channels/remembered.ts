@@ -65,7 +65,7 @@ export const postRemembered = async (
     } catch (error) {
       log.warn("channel.notice_refused", { platform, ...errorFields(error) });
       // oxlint-disable-next-line no-await-in-loop -- once, for this one
-      await retireUnseen(env, userId, platform, [saved.memory]);
+      await retireUnseen(env, userId, "card_refused", [saved.memory]);
     }
   }
 };

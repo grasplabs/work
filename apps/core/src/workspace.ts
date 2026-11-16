@@ -2314,7 +2314,7 @@ export class Workspace extends DurableObject<Env> {
       await retireUnseen(
         this.env,
         personId,
-        platform,
+        "turn_threw",
         remembered.map(({ memory }) => memory)
       );
       throw error;
@@ -3227,7 +3227,9 @@ export class Workspace extends DurableObject<Env> {
     if (live?.remembered !== undefined) {
       live.remembered.push(saved);
     } else if (via !== "web") {
-      this.ctx.waitUntil(retireUnseen(this.env, personId, via, [saved.memory]));
+      this.ctx.waitUntil(
+        retireUnseen(this.env, personId, "no_asker", [saved.memory])
+      );
     }
   }
 
