@@ -675,8 +675,8 @@ export type OwedErasure =
 /**
  * When what the new Brain holds of someone's interview is to be decided
  * again, as SQL over their link `l` (`links.brain_mark`): their account,
- * their link's version (every save, delete, new start and purge rewrite
- * moves it), their withdrawal and their approvals. It says only when to
+ * their link's version (every save, delete and new start moves it), their
+ * withdrawal and their approvals. It says only when to
  * look again: which source stands is keyed on what they approved
  * (`#interviewWanted`), so a save that leaves that alone changes nothing.
  * NULL without an account or once core erased them.
@@ -6464,7 +6464,7 @@ export class Onboarding extends DurableObject<Env> {
 
   /**
    * Whether the new Brain may still hold `person`'s interview otherwise
-   * than the store does now: for core's erasures and purges, which let go
+   * than the store does now: for core's erasure of a person, which lets go
    * only once it doesn't.
    */
   interviewOwed(person: string): boolean {
@@ -7752,7 +7752,7 @@ export class Onboarding extends DurableObject<Env> {
           })
           .where(eq(interviews.person, person))
           .run();
-        // A device's copy, with the words, is older from now on.
+        // A page's copy, with the words, is older from now on.
         this.#db
           .update(links)
           .set({ version: sql`${links.version} + 1` })

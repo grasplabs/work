@@ -185,7 +185,7 @@ export const linkCodes = sqliteTable("link_codes", {
 
 /**
  * What was said in each interview, as the person's page last saved it
- * (its version is the link's). Only the device the link opened on
+ * (its version is the link's). Only the account the link belongs to
  * reads it back, and Grasp's staff.
  */
 export const interviews = sqliteTable("interviews", {
