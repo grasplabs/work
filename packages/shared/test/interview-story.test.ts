@@ -123,7 +123,7 @@ describe("a part of the read-back, told as a story", () => {
   });
 
   it("is asked for with lines that are lines, and refused without any", () => {
-    const link = { secret: "s".repeat(43), key: "k".repeat(43) };
+    const link = { secret: "s".repeat(43) };
     const asked = (more: object) =>
       interviewStoryRequestSchema.safeParse({ ...link, locale: "nl", ...more });
     expect({
