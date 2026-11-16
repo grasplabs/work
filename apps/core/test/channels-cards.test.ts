@@ -445,6 +445,9 @@ const values = {
   pace: 380,
   included: 400,
   url: "https://acme.grasp.test/workflows/requests",
+  statement: "Wants answers in Dutch",
+  about: "Acme",
+  value: "Dutch",
 };
 
 /** Block Kit's limits, as Slack documents them for a message's blocks. */
