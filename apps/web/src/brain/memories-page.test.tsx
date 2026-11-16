@@ -210,7 +210,7 @@ const shown = async (refusal?: string, failedSaves = 0) => {
   const page = createRoute({
     getParentRoute: () => rootRoute,
     path: "/",
-    component: MemoriesPage,
+    component: () => <MemoriesPage teams={[]} />,
   });
   const router = createRouter({
     routeTree: rootRoute.addChildren([page]),

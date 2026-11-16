@@ -43,6 +43,7 @@ import {
   erasePerson,
   listVersionsAs,
   memoriesAs,
+  publishAs,
   readableMemoriesAs,
   readSourceVersionAs,
   recallAs,
@@ -858,6 +859,8 @@ describe(
         "the holder's run": markerWord(),
         "a question in the holder's chat": markerWord(),
         "an answer in the holder's chat": markerWord(),
+        "a memory the holder shared with a team the outsider isn't in":
+          markerWord(),
       };
       // What every member may read, and nobody outside the company.
       const companyMarkers = { "an upload for everyone": markerWord() };
@@ -882,6 +885,8 @@ describe(
         "the holder's run": runMarker,
         "a question in the holder's chat": askedMarker,
         "an answer in the holder's chat": answerMarker,
+        "a memory the holder shared with a team the outsider isn't in":
+          sharedMemoryMarker,
       } = markers;
       // Instruction files the outsider may not get: the holder's own,
       // another agent's than theirs, and an App's they don't build (one no
@@ -1250,6 +1255,37 @@ describe(
         { timeout: 15_000, interval: 200 }
       );
       const turnSource: SourceRef = turn ?? { producer: "chat", id: "" };
+      // A memory of the holder's own, which they share with their team
+      // (GRA-1815): a new memory in the shared store, its entity's name and
+      // its statement marked, readable by that team alone. After the chat's
+      // turn, so no recall of it prompts a model while planting.
+      const sharedName = `Account ${sharedMemoryMarker}`;
+      const sharedStatement = `${sharedWord} ${sharedMemoryMarker} renews`;
+      const kept = await rememberAs(env, holder, {
+        change: crypto.randomUUID(),
+        about: { kind: "customer", names: [sharedName] },
+        type: "fact",
+        statement: sharedStatement,
+        quote: sharedStatement,
+      });
+      const sharedMemory = await publishAs(env, holder, {
+        memory: { entity: kept.entity, memory: kept.memory },
+        shown: { about: sharedName, value: null, statement: sharedStatement },
+        audience: { team: secretTeam },
+        change: crypto.randomUUID(),
+      });
+      /** Whether `personId`'s recall gives the shared memory, as their teams. */
+      const findsShared = async (personId: string): Promise<boolean> => {
+        const { memories } = await recallAs(env, personId, {
+          personal: false,
+          question: sharedMemoryMarker,
+          budget: { tokens: recallBudgetMax },
+        });
+        return memories.some(
+          ({ memory, statement }) =>
+            memory === sharedMemory?.memory && statement === sharedStatement
+        );
+      };
 
       // The markers are there to find for those who may read them.
       await expect(textsFor(holder, teamMarker)).resolves.toStrictEqual([
@@ -1307,6 +1343,7 @@ describe(
           runMarker,
           askedMarker,
           answerMarker,
+          sharedMemoryMarker,
         ],
         hiddenVersions: everyVersionOf(
           ...ownerIds,
@@ -1446,6 +1483,7 @@ describe(
         ownUploadMarker,
         teamUploadMarker,
         teamSkillMarker,
+        sharedMemoryMarker,
         instructionMarkers,
         inRecall,
         instructionGroups,
@@ -1479,6 +1517,10 @@ describe(
           everyoneFinds: {
             holder: await findsEveryone(holder),
             outsider: await findsEveryone(outsider),
+          },
+          sharedFinds: {
+            holder: await findsShared(holder),
+            outsider: await findsShared(outsider),
           },
         },
         findsEveryone,
@@ -1576,6 +1618,7 @@ describe(
         },
         holderAppFile: true,
         outsiderOpens: "opens it",
+        sharedFinds: { holder: true, outsider: false },
         everyoneFinds: {
           holder: true,
           outsider: true,
@@ -1809,6 +1852,8 @@ describe(
         "a team's source the outsider isn't in": _joined,
         "an upload for a team the outsider isn't in": _joinedUpload,
         "a team's skill the outsider isn't in": _joinedSkill,
+        "a memory the holder shared with a team the outsider isn't in":
+          _joinedShared,
         ...notJoined
       } = markers;
       const { findings, addressed } = await watched(
@@ -1997,6 +2042,7 @@ describe(
             world.noneMarker,
             world.claimMarker,
             world.narrowedMarker,
+            world.sharedMemoryMarker,
             ...holdersOwnProduced(world).markers,
           ],
           hiddenVersions: everyVersionOf(
@@ -2014,6 +2060,8 @@ describe(
           "the holder's own source": world.ownerMarker,
           "the holder's interview": world.interviewMarker,
           "a team's source, though the holder is in the team": world.teamMarker,
+          "a memory shared with a team, though the holder is in the team":
+            world.sharedMemoryMarker,
           "a source nobody is known to read": world.noneMarker,
           "a staff-list team's claim": world.claimMarker,
           "a source narrowed away from the outsider": world.narrowedMarker,
@@ -2064,6 +2112,7 @@ describe(
             world.noneMarker,
             world.claimMarker,
             world.narrowedMarker,
+            world.sharedMemoryMarker,
             ...holdersOwnProduced(world).markers,
           ],
           hiddenVersions: everyVersionOf(
@@ -2083,6 +2132,8 @@ describe(
           "the holder's interview": world.interviewMarker,
           "a team's source the grant doesn't name, though the holder is in the team":
             world.teamMarker,
+          "a memory shared with a team the grant doesn't name, though the holder is in it":
+            world.sharedMemoryMarker,
           "a source nobody is known to read": world.noneMarker,
           "a staff-list team's claim": world.claimMarker,
           "a source narrowed away from the outsider": world.narrowedMarker,
@@ -2268,6 +2319,8 @@ describe(
         "a team's source the outsider isn't in": _team,
         "an upload for a team the outsider isn't in": _teamUpload,
         "a team's skill the outsider isn't in": _teamSkill,
+        "a memory the holder shared with a team the outsider isn't in":
+          _teamShared,
         ...notTeams
       } = markers;
       const { findings, addressed } = await watched(
@@ -2347,6 +2400,7 @@ describe(
             ...world.instructionMarkers,
             ...holdersOwnProduced(world).markers,
             world.teamUploadMarker,
+            world.sharedMemoryMarker,
           ],
           hiddenVersions: everyVersionOf(
             ...world.ownerIds,

@@ -70,6 +70,7 @@ import type {
   MemoriesCursor,
   MemoryChangeOutcome,
   MemoryId,
+  MemoryType,
   ExportStatus,
   Finding,
   KeyState,
@@ -4250,14 +4251,16 @@ const erasedAs = (error: unknown): unknown =>
 
 /**
  * Memory `memory` about `entity` in `store`, as `reader` reads it, history
- * included: every page, read at the first page's moment, until it is
- * found. Undefined when none holds it.
+ * included (with `history: false`, only while current: believed and true
+ * now): every page, read at the first page's moment, until it is found.
+ * Undefined when none holds it.
  */
 const keptMemory = async (
   store: Brain,
   reader: Reader,
   entity: EntityId,
-  memory: MemoryId
+  memory: MemoryId,
+  { history = true }: { history?: boolean } = {}
 ): Promise<Memory | undefined> => {
   let after: MemoriesCursor | undefined;
   do {
@@ -4265,7 +4268,7 @@ const keptMemory = async (
     const page = await store.readMemories({
       entity,
       reader,
-      history: true,
+      history,
       ...(after === undefined ? {} : { after }),
     });
     const found = page.memories.find(({ id }) => id === memory);
@@ -4939,6 +4942,203 @@ export const correctAs = async (
     throw erasedAs(error);
   }
   return saved;
+};
+
+// Sharing a memory (GRA-1815, threat model on the issue): a person
+// widens one of their own memories on purpose, as a new memory in the
+// shared store, in their own word, for a team they are in or the
+// company. Their own stays as it is, theirs alone: nothing only one
+// person may read leaves their own store but the text they confirmed.
+// Only the person, on their own session, shares (brain-memories-rpc.ts):
+// no agent, App or workflow reaches this.
+
+/** The types a person may share: what is true, never how Grasp acts for them. */
+const shareableTypes: ReadonlySet<MemoryType> = new Set(["fact", "decision"]);
+
+/**
+ * The attributes a person never shares, whatever its type: how Grasp acts
+ * for them (contract.ts `isPersonsOwnWordOnly`), which would steer
+ * colleagues' agents.
+ */
+const personalAttributes: ReadonlySet<string> = new Set([
+  "instruction",
+  "preference",
+]);
+
+const shareSchema = z.strictObject({
+  memory: z.strictObject({ entity: entityIdSchema, memory: memoryIdSchema }),
+  shown: z.strictObject({
+    about: z.string().nullable(),
+    value: z.string().nullable(),
+    statement: z.string(),
+  }),
+  audience: z.union([z.literal("company"), z.strictObject({ team: idSchema })]),
+  // Minted once by the page when the person opens the share.
+  change: z.uuid(),
+});
+
+/** A share, as `publishAs` takes it. */
+export type Share = z.input<typeof shareSchema>;
+
+/** What `publishAs` shared: the new memory and its entity, in the shared store. */
+export interface Shared {
+  memory: MemoryId;
+  entity: EntityId;
+}
+
+/** Whether `memory` is of a kind a person may share: a fact or decision naming no second entity, never how Grasp acts for them. */
+const isShareable = ({ object, type, attribute }: Memory): boolean =>
+  object === null &&
+  shareableTypes.has(type) &&
+  (attribute === null || !personalAttributes.has(attribute));
+
+/**
+ * Memory `ref` of `reader`'s own store, what a share of it copies: the
+ * memory, its entity's kind and the name the page shows for it
+ * (`liveNamed`), read now. Null alike when there is none current, when it
+ * isn't of a kind shared (`isShareable`), and when it, its value or its
+ * entity's name isn't exactly what `shown` says.
+ */
+const toShare = async (
+  env: BrainEnv,
+  reader: PersonReader,
+  ref: { entity: EntityId; memory: MemoryId },
+  shown: { about: string | null; value: string | null; statement: string }
+): Promise<{ read: Memory; kind: EntityKind; name: string | null } | null> => {
+  const own = ownBrain(env, reader.person);
+  let read: Memory | undefined;
+  let entity: Entity | null;
+  try {
+    [read, entity] = await Promise.all([
+      keptMemory(own, reader, ref.entity, ref.memory, { history: false }),
+      own.readEntity({ entity: ref.entity, reader }),
+    ]);
+  } catch (error) {
+    throw erasedAs(error);
+  }
+  if (read === undefined || entity === null || !isShareable(read)) {
+    return null;
+  }
+  const named = await liveNamed(env, reader, "own", entity);
+  const asShown =
+    !named.unreadable &&
+    named.name === shown.about &&
+    read.value === shown.value &&
+    read.statement === shown.statement;
+  return asShown ? { read, kind: entity.kind, name: named.name } : null;
+};
+
+/**
+ * The member `personId` shares a memory of their own store with a team
+ * they are in now, or the company: a new memory in the shared store, in
+ * their own word (speaker and writer them), readable by that group, with
+ * its own history. Their own memory keeps its readers and its history.
+ *
+ * Only a current fact or decision that names no second entity, and only
+ * while it says exactly what `shown` says they were shown: what it is
+ * about (the name the page shows for its entity, `liveNamed`), its value
+ * and its statement. What is shared is those and the entity's kind, its
+ * attribute and type: never the quote it rests on (their chat's words, a
+ * mail's), its source, the entity's other names or exact identifiers, nor
+ * core's link to a shared entity. So its entity links only on that one
+ * name, within the audience's own readers (the Brain's `coveredSql`).
+ *
+ * Null alike when there is no such memory of theirs (someone else's, a
+ * shared one, one ended, erased or out of use), when it is of a kind
+ * never shared, and when it no longer says what was shown. Refused with
+ * `brain.audience_not_yours` for a team they aren't in, alike whether the
+ * team exists; with `brain.share_reused` for a change shared before with
+ * other content (another audience, say). The same `change` again answers
+ * what it shared, while the memory still says what was shown. Refused
+ * once they are no longer a member.
+ */
+export const publishAs = async (
+  env: BrainEnv & ReaderEnv,
+  personId: string,
+  share: Share | Readonly<Record<string, unknown>>
+): Promise<Shared | null> => {
+  const { memory, shown, audience, change } = checked(shareSchema, share);
+  const reader = await personReaderOf(env, personId);
+  const group =
+    audience === "company" ? companyGroup : teamGroup(audience.team);
+  // Their teams as core counts them now, and the company.
+  if (!reader.groups.includes(group)) {
+    throw brainMemoryErrors.create("brain.audience_not_yours");
+  }
+  const shared = await toShare(env, reader, memory, shown);
+  if (shared === null) {
+    return null;
+  }
+  const { read, kind, name } = shared;
+  const { person } = reader;
+  let added: Awaited<ReturnType<Brain["addMemories"]>>;
+  try {
+    added = await brain(env).addMemories({
+      // One share of one person: another's key can't answer theirs.
+      change: `publish:${person}:${change}`,
+      access: { kind: "audience", group },
+      entities: [
+        {
+          key: "about",
+          kind,
+          names: name === null ? [] : [name],
+        },
+      ],
+      memories: [
+        {
+          about: "about",
+          ...(read.attribute === null
+            ? {}
+            : { attribute: read.attribute, value: read.value ?? undefined }),
+          type: read.type,
+          statement: read.statement,
+          speaker: { kind: "internal", person },
+          basis: { kind: "writer", writer: person },
+        },
+      ],
+    });
+  } catch (error) {
+    if (error instanceof Error && error.message === changeReused) {
+      throw brainMemoryErrors.create("brain.share_reused");
+    }
+    throw erasedAs(error);
+  }
+  const [saved] = added.memories;
+  const { about } = added.entities;
+  if (saved === undefined || about === undefined) {
+    throw new Error("The Brain kept no memory");
+  }
+  return { memory: saved, entity: about };
+};
+
+/**
+ * The member `personId` takes back a memory they shared (`publishAs`),
+ * which they may still read: it is retired in the shared store, current
+ * for nobody from then on, and stays as history for its readers; `done`
+ * again for one taken back before. `nothing` alike when there is no such
+ * memory, when it isn't one they shared, and when they may no longer read
+ * it (out of the team it was shared with). Refused once they are no
+ * longer a member.
+ */
+export const unpublishAs = async (
+  env: BrainEnv & ReaderEnv,
+  personId: string,
+  memory: string
+): Promise<MemoryChangeOutcome> => {
+  const id = checked(memoryIdSchema, memory);
+  const reader = await personReaderOf(env, personId);
+  try {
+    const retired = await brain(env).retireMemory({
+      memory: id,
+      reader,
+      writer: reader.person,
+      // One take-back of one memory of theirs: a retry is the same change.
+      change: `unpublish:${reader.person}:${id}`,
+    });
+    return retired === null ? "nothing" : "done";
+  } catch (error) {
+    throw erasedAs(error);
+  }
 };
 
 // Entities for code (GRA-1837, threat model on the issue): the entities

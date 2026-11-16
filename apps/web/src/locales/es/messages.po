@@ -663,6 +663,10 @@ msgstr "{label}, solo lectura"
 msgid "{label}:"
 msgstr "{label}:"
 
+#: src/brain/memories-page.tsx
+msgid "{label}: {value}"
+msgstr "{label}: {value}"
+
 #: src/onboarding/setup-steps.tsx
 msgid "{leads, plural, one {Thank you. I’ll start with this lead.} other {Thank you. I’ll start with these # leads.}}"
 msgstr "{leads, plural, one {Gracias. Empiezo con este responsable.} other {Gracias. Empiezo con estos # responsables.}}"
@@ -1734,6 +1738,10 @@ msgstr "Tema"
 msgctxt "what a decision is about, as its workflow run passed it"
 msgid "About"
 msgstr "Sobre"
+
+#: src/brain/memories-page.tsx
+msgid "About {about}"
+msgstr "Sobre {about}"
 
 #: src/workflows/requests/request-plan.tsx
 msgid "About {ahead} by {end}"
@@ -5362,6 +5370,7 @@ msgid "Every weekday at {time}"
 msgstr "Todos los días laborables a las {time}"
 
 #: src/agents/agent-facts.tsx
+#: src/brain/memories-page.tsx
 #: src/brain/sources-page.tsx
 #: src/settings/stephen-audience.tsx
 msgid "Everyone"
@@ -12324,6 +12333,7 @@ msgstr "Resuelto: {choice}"
 msgid "Several for one question"
 msgstr "Varias por cada pregunta"
 
+#: src/brain/memories-page.tsx
 #: src/drafts/share-with-team.tsx
 #: src/drafts/sharing.tsx
 msgid "Share"
@@ -12357,6 +12367,10 @@ msgstr "Parte de {name} que preguntó"
 msgid "Share once it's ready"
 msgstr "Compártelo cuando esté listo"
 
+#: src/brain/memories-page.tsx
+msgid "Share this memory?"
+msgstr "¿Compartir este recuerdo?"
+
 #: src/brain/skills-page.tsx
 msgid "Share this version instead"
 msgstr "Compartir esta versión en su lugar"
@@ -12364,6 +12378,10 @@ msgstr "Compartir esta versión en su lugar"
 #: src/brain/skills-page.tsx
 msgid "Share with a team"
 msgstr "Compartir con un equipo"
+
+#: src/brain/memories-page.tsx
+msgid "Share with others: {statement}"
+msgstr "Compartir con otros: {statement}"
 
 #: src/brain/skills-page.tsx
 msgid "Share with the company"
@@ -12377,6 +12395,10 @@ msgstr "Compartir con tu equipo"
 #: src/onboarding/setup-steps.tsx
 msgid "Share your staff list"
 msgstr "Comparte tu lista de personal"
+
+#: src/brain/memories-page.tsx
+msgid "Share…"
+msgstr "Compartir…"
 
 #: src/settings/stephen-settings.tsx
 msgid "Shared mailboxes, colleagues' calendars and the company's files."
@@ -12397,6 +12419,10 @@ msgstr "Compartida con"
 #: src/drafts/share-with-team.tsx
 msgid "Shared with {who}"
 msgstr "Compartido con {who}"
+
+#: src/brain/memories-page.tsx
+msgid "Shared. It shows under the same name for those you shared it with."
+msgstr "Compartido. Quienes pueden leerlo lo ven con el mismo nombre."
 
 #: src/brain/skills-page.tsx
 msgid "Shares waiting for you"
@@ -13243,6 +13269,14 @@ msgstr "Quitar a {name} del proyecto"
 msgid "Take {who} off {name}"
 msgstr "Quitar a {who} de {name}"
 
+#: src/brain/memories-page.tsx
+msgid "Take back"
+msgstr "Retirar"
+
+#: src/brain/memories-page.tsx
+msgid "Take back what you shared: {statement}"
+msgstr "Retirar lo que compartiste: {statement}"
+
 #: src/agents/agent-apps-card.tsx
 msgid "Take off"
 msgstr "Quitar"
@@ -13338,6 +13372,7 @@ msgctxt "what the Brain remembers about something"
 msgid "Team"
 msgstr "Equipo"
 
+#: src/brain/memories-page.tsx
 #: src/brain/sources-page.tsx
 msgid "Team {name}"
 msgstr "Equipo {name}"
@@ -14373,6 +14408,10 @@ msgstr "Nos contaron"
 msgid "They use"
 msgstr "Usan"
 
+#: src/brain/memories-page.tsx
+msgid "They will read exactly what is below, as your own word. Your own memory stays yours alone, and you can take the copy back."
+msgstr "Leerán exactamente lo que aparece abajo, como tu propia palabra. Tu recuerdo sigue siendo solo tuyo, y puedes retirar la copia."
+
 #: src/drafts/share-with-team.tsx
 msgid "They'll find it under Apps, and see it as it is now."
 msgstr "Lo encontrarán en Apps y lo verán tal como está ahora."
@@ -14562,6 +14601,10 @@ msgstr "Esta lista es demasiado grande. Puedo aceptar hasta {peopleMost} persona
 #: src/brain/memories-page.tsx
 msgid "This memory has changed or is no longer yours to read. Look at it again first."
 msgstr "Este recuerdo ha cambiado o ya no puedes leerlo. Vuelve a mirarlo primero."
+
+#: src/brain/memories-page.tsx
+msgid "This memory has changed or is no longer yours to share. Look at it again first."
+msgstr "Este recuerdo ha cambiado o ya no puedes compartirlo. Vuelve a mirarlo primero."
 
 #: src/chat/failure.ts
 msgid "This model can't give an answer that long. Pick another model, or ask for less."
@@ -16302,6 +16345,11 @@ msgstr "Quién puede preguntarle"
 
 #: src/brain/sources-page.tsx
 msgctxt "a file uploaded into the Brain"
+msgid "Who may read it"
+msgstr "Quién puede leerlo"
+
+#: src/brain/memories-page.tsx
+msgctxt "a memory shared with others"
 msgid "Who may read it"
 msgstr "Quién puede leerlo"
 

@@ -663,6 +663,10 @@ msgstr "{label}, read-only"
 msgid "{label}:"
 msgstr "{label}:"
 
+#: src/brain/memories-page.tsx
+msgid "{label}: {value}"
+msgstr "{label}: {value}"
+
 #: src/onboarding/setup-steps.tsx
 msgid "{leads, plural, one {Thank you. I’ll start with this lead.} other {Thank you. I’ll start with these # leads.}}"
 msgstr "{leads, plural, one {Thank you. I’ll start with this lead.} other {Thank you. I’ll start with these # leads.}}"
@@ -1734,6 +1738,10 @@ msgstr "About"
 msgctxt "what a decision is about, as its workflow run passed it"
 msgid "About"
 msgstr "About"
+
+#: src/brain/memories-page.tsx
+msgid "About {about}"
+msgstr "About {about}"
 
 #: src/workflows/requests/request-plan.tsx
 msgid "About {ahead} by {end}"
@@ -5362,6 +5370,7 @@ msgid "Every weekday at {time}"
 msgstr "Every weekday at {time}"
 
 #: src/agents/agent-facts.tsx
+#: src/brain/memories-page.tsx
 #: src/brain/sources-page.tsx
 #: src/settings/stephen-audience.tsx
 msgid "Everyone"
@@ -12324,6 +12333,7 @@ msgstr "Settled: {choice}"
 msgid "Several for one question"
 msgstr "Several for one question"
 
+#: src/brain/memories-page.tsx
 #: src/drafts/share-with-team.tsx
 #: src/drafts/sharing.tsx
 msgid "Share"
@@ -12357,6 +12367,10 @@ msgstr "Share of {name} who asked"
 msgid "Share once it's ready"
 msgstr "Share once it's ready"
 
+#: src/brain/memories-page.tsx
+msgid "Share this memory?"
+msgstr "Share this memory?"
+
 #: src/brain/skills-page.tsx
 msgid "Share this version instead"
 msgstr "Share this version instead"
@@ -12364,6 +12378,10 @@ msgstr "Share this version instead"
 #: src/brain/skills-page.tsx
 msgid "Share with a team"
 msgstr "Share with a team"
+
+#: src/brain/memories-page.tsx
+msgid "Share with others: {statement}"
+msgstr "Share with others: {statement}"
 
 #: src/brain/skills-page.tsx
 msgid "Share with the company"
@@ -12377,6 +12395,10 @@ msgstr "Share with your team"
 #: src/onboarding/setup-steps.tsx
 msgid "Share your staff list"
 msgstr "Share your staff list"
+
+#: src/brain/memories-page.tsx
+msgid "Share…"
+msgstr "Share…"
 
 #: src/settings/stephen-settings.tsx
 msgid "Shared mailboxes, colleagues' calendars and the company's files."
@@ -12397,6 +12419,10 @@ msgstr "Shared with"
 #: src/drafts/share-with-team.tsx
 msgid "Shared with {who}"
 msgstr "Shared with {who}"
+
+#: src/brain/memories-page.tsx
+msgid "Shared. It shows under the same name for those you shared it with."
+msgstr "Shared. It shows under the same name for those you shared it with."
 
 #: src/brain/skills-page.tsx
 msgid "Shares waiting for you"
@@ -13243,6 +13269,14 @@ msgstr "Take {name} out of the project"
 msgid "Take {who} off {name}"
 msgstr "Take {who} off {name}"
 
+#: src/brain/memories-page.tsx
+msgid "Take back"
+msgstr "Take back"
+
+#: src/brain/memories-page.tsx
+msgid "Take back what you shared: {statement}"
+msgstr "Take back what you shared: {statement}"
+
 #: src/agents/agent-apps-card.tsx
 msgid "Take off"
 msgstr "Take off"
@@ -13338,6 +13372,7 @@ msgctxt "what the Brain remembers about something"
 msgid "Team"
 msgstr "Team"
 
+#: src/brain/memories-page.tsx
 #: src/brain/sources-page.tsx
 msgid "Team {name}"
 msgstr "Team {name}"
@@ -14373,6 +14408,10 @@ msgstr "They told us"
 msgid "They use"
 msgstr "They use"
 
+#: src/brain/memories-page.tsx
+msgid "They will read exactly what is below, as your own word. Your own memory stays yours alone, and you can take the copy back."
+msgstr "They will read exactly what is below, as your own word. Your own memory stays yours alone, and you can take the copy back."
+
 #: src/drafts/share-with-team.tsx
 msgid "They'll find it under Apps, and see it as it is now."
 msgstr "They'll find it under Apps, and see it as it is now."
@@ -14562,6 +14601,10 @@ msgstr "This list is too large. I can take up to {peopleMost} people in up to {t
 #: src/brain/memories-page.tsx
 msgid "This memory has changed or is no longer yours to read. Look at it again first."
 msgstr "This memory has changed or is no longer yours to read. Look at it again first."
+
+#: src/brain/memories-page.tsx
+msgid "This memory has changed or is no longer yours to share. Look at it again first."
+msgstr "This memory has changed or is no longer yours to share. Look at it again first."
 
 #: src/chat/failure.ts
 msgid "This model can't give an answer that long. Pick another model, or ask for less."
@@ -16302,6 +16345,11 @@ msgstr "Who may ask it"
 
 #: src/brain/sources-page.tsx
 msgctxt "a file uploaded into the Brain"
+msgid "Who may read it"
+msgstr "Who may read it"
+
+#: src/brain/memories-page.tsx
+msgctxt "a memory shared with others"
 msgid "Who may read it"
 msgstr "Who may read it"
 

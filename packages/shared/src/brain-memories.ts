@@ -254,6 +254,34 @@ export interface BrainCorrection {
  */
 export type BrainCorrected = { memory: string; entity: string } | null;
 
+/**
+ * Whom a person shares one of their own memories with: a team they are
+ * in, by its id, or everyone in the company.
+ */
+export type BrainShareAudience = { team: string } | "company";
+
+/**
+ * A memory of the person's own store to share (GRA-1815): which one, the
+ * texts they were shown of it (what it is about, the value it holds, and
+ * its statement), whom with, and the id of this one share, minted once
+ * when they open it, so a retry shares it once. Core shares it only while
+ * the memory still says exactly what was shown.
+ */
+export interface BrainShare {
+  memory: { entity: string; memory: string };
+  shown: { about: string | null; value: string | null; statement: string };
+  audience: BrainShareAudience;
+  change: string;
+}
+
+/**
+ * What a share made: a new memory in the shared store, the person's own
+ * word, which the audience reads, and the entity it is about there; the
+ * same again for a retry of it. Null alike when the memory isn't one of
+ * theirs they may share, and when it no longer says what they were shown.
+ */
+export type BrainShared = { memory: string; entity: string } | null;
+
 /** The person's memories, over `/rpc` as `session.brainMemories`. */
 export interface BrainMemoriesApi {
   /** Undoes a memory saved for them in their own word: it stops being current, and stays as history. */
@@ -274,10 +302,25 @@ export interface BrainMemoriesApi {
   confirm: (memory: BrainMemoryPlace) => Promise<BrainMemoryOutcome>;
   /** Says a memory is wrong, with what is right: saved as their own word, for them alone, and confirmed. */
   correct: (correction: BrainCorrection) => Promise<BrainCorrected>;
+  /**
+   * Shares a fact or decision of their own store with a team they are in
+   * or the company, as a new memory in their own word: theirs stays as it
+   * is, for them alone.
+   */
+  publish: (share: BrainShare) => Promise<BrainShared>;
+  /**
+   * Takes back a memory they shared: it stops being current for everyone,
+   * and stays as history for those who may read it.
+   */
+  unpublish: (memory: string) => Promise<BrainMemoryOutcome>;
 }
 
 /** What core answers a correction it can't take as it is. */
 export const brainMemoryErrors = defineErrorFamily({
   "brain.correction_reused":
     "This correction was saved before with other words. Start it again.",
+  "brain.audience_not_yours":
+    "You can share only with a team you're in, or with everyone.",
+  "brain.share_reused":
+    "This was shared before with other readers. Start it again.",
 });

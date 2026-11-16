@@ -1148,7 +1148,9 @@ type CorePersonMember =
   | "memoriesAs"
   | "contestedAs"
   | "confirmAs"
-  | "correctAs";
+  | "correctAs"
+  | "publishAs"
+  | "unpublishAs";
 
 /** The exports of core's brain-next.ts for code's entities, probed after them (`coreCodeEntities`). */
 type CoreCodeMember = "codeCardAs" | "codeEntitiesAs" | "isCodeEntitiesRequest";
@@ -6219,6 +6221,227 @@ const corePersonProbes = personMemoryProbes({
     await coreBrain.forgetAs(env, personId, memory),
 });
 
+/**
+ * The calls of sharing a memory (GRA-1815): through core's own functions
+ * (brain-next.ts), its callers' (brain-memories.ts) or the page's RPC
+ * (brain-memories-rpc.ts).
+ */
+interface ShareCalls {
+  publish: (personId: string, share: unknown) => Promise<unknown>;
+  unpublish: (personId: string, memory: unknown) => Promise<unknown>;
+}
+
+/**
+ * A memory of `personId`'s own, holding no marker: what they share, as
+ * the page shows it (its entity's name, its value and statement).
+ */
+const plainOwnMemory = async (personId: string) => {
+  const name = `Plain shared ${crypto.randomUUID().slice(0, 8)}`;
+  const statement = `${name} renews in March`;
+  const { memory, entity } = await coreBrain.rememberAs(env, personId, {
+    change: crypto.randomUUID(),
+    about: { kind: "customer", names: [name] },
+    type: "fact",
+    statement,
+    quote: statement,
+  });
+  return {
+    memory: { entity, memory },
+    shown: { about: name, value: null, statement },
+  };
+};
+
+/** The reader's plain own memory (`plainOwnMemory`), or none for someone who isn't a member. */
+const ownIfMember = async (personId: string) => {
+  try {
+    return await plainOwnMemory(personId);
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * The probes of sharing a memory over `calls`: what isn't the reader's own
+ * to share (a hidden memory, one drawn from a hidden source, someone
+ * else's own, one of another writer they may read) answers as one no one
+ * saved, every marker in what the share says they were shown; their own,
+ * shared and taken back, gives no marker either.
+ */
+const memorySharingProbes = (calls: ShareCalls) => {
+  const scene = async (probing: Probing) =>
+    await Promise.all([
+      memoryFixture(probing),
+      othersOwnMemory(probing.markers),
+    ]);
+  /** A share of `memory` with the company, saying it showed every marker. */
+  const shareOf = (
+    markers: readonly string[],
+    memory: Readonly<Record<string, unknown>>,
+    extra: Readonly<Record<string, unknown>> = {}
+  ) => {
+    const text = markedText(markers);
+    return {
+      memory,
+      shown: { about: text, value: text, statement: text },
+      audience: "company",
+      change: crypto.randomUUID(),
+      ...extra,
+    };
+  };
+  return {
+    publish: async (probing: Probing): Promise<Answer[]> => {
+      const { personId, markers } = probing;
+      const [fixture, others] = await scene(probing);
+      const publish = async (
+        name: string,
+        share: unknown,
+        about?: Answer["about"],
+        as = personId
+      ) =>
+        await answer(name, async () => await calls.publish(as, share), about);
+      const asked = [
+        await publish(
+          "a memory no one saved",
+          shareOf(markers, {
+            entity: crypto.randomUUID(),
+            memory: crypto.randomUUID(),
+          }),
+          "nothing"
+        ),
+        await publish(
+          "a hidden memory",
+          shareOf(markers, {
+            entity: fixture.hidden,
+            memory: fixture.hiddenMemory,
+          }),
+          "hidden"
+        ),
+        await publish(
+          "a memory drawn from a hidden source",
+          shareOf(markers, {
+            entity: fixture.drawn,
+            memory: fixture.drawnMemory,
+          }),
+          "hidden"
+        ),
+        await publish(
+          "a memory in someone else's own store",
+          shareOf(markers, others),
+          "hidden"
+        ),
+        await publish(
+          "the reader's memory of another writer",
+          shareOf(markers, {
+            entity: fixture.seen,
+            memory: fixture.seenMemory,
+          }),
+          "hidden"
+        ),
+        await publish(
+          "as someone who isn't a member",
+          shareOf(markers, others),
+          undefined,
+          stranger()
+        ),
+        await publish(
+          "a team named by the markers",
+          shareOf(markers, others, { audience: { team: markers.join("") } })
+        ),
+        await publish(
+          "a change named by the markers",
+          shareOf(markers, others, { change: markers.join("") })
+        ),
+        await publish(
+          "an id of the markers",
+          shareOf(markers, {
+            entity: markers.join(""),
+            memory: markers.join(""),
+          })
+        ),
+      ];
+      // Their own, as they were shown it: shared with the company. Only a
+      // member has one.
+      const own = await ownIfMember(personId);
+      return own === null
+        ? asked
+        : [
+            ...asked,
+            await publish("the reader's own, as they were shown it", {
+              ...own,
+              audience: "company",
+              change: crypto.randomUUID(),
+            }),
+          ];
+    },
+    unpublish: async (probing: Probing): Promise<Answer[]> => {
+      const { personId, markers } = probing;
+      const [fixture, others] = await scene(probing);
+      const unpublish = async (
+        name: string,
+        memory: unknown,
+        about?: Answer["about"],
+        as = personId
+      ) =>
+        await answer(
+          name,
+          async () => await calls.unpublish(as, memory),
+          about
+        );
+      const asked = [
+        await unpublish(
+          "a memory no one saved",
+          crypto.randomUUID(),
+          "nothing"
+        ),
+        await unpublish("a hidden memory", fixture.hiddenMemory, "hidden"),
+        await unpublish(
+          "a memory drawn from a hidden source",
+          fixture.drawnMemory,
+          "hidden"
+        ),
+        await unpublish(
+          "a memory in someone else's own store",
+          others.memory,
+          "hidden"
+        ),
+        await unpublish(
+          "the reader's memory of another writer",
+          fixture.seenMemory,
+          "hidden"
+        ),
+        await unpublish(
+          "as someone who isn't a member",
+          others.memory,
+          undefined,
+          stranger()
+        ),
+        await unpublish("an id of the markers", markers.join("")),
+      ];
+      // One they shared, taken back.
+      const own = await ownIfMember(personId);
+      const shared =
+        own === null
+          ? null
+          : await coreBrain.publishAs(env, personId, {
+              ...own,
+              audience: "company",
+              change: crypto.randomUUID(),
+            });
+      return shared === null
+        ? asked
+        : [...asked, await unpublish("one the reader shared", shared.memory)];
+    },
+  } satisfies Record<keyof ShareCalls, Probe>;
+};
+
+/** Sharing through core's own functions (brain-next.ts). */
+const coreShareProbes = memorySharingProbes({
+  publish: async (personId, share) =>
+    await coreBrain.publishAs(env, personId, unchecked(share)),
+  unpublish: async (personId, memory) =>
+    await coreBrain.unpublishAs(env, personId, unchecked(memory)),
+});
+
 /** One probe per export of core's brain-next.ts for a person's memories. */
 const corePersonMemories = {
   rememberAs: corePersonProbes.remember,
@@ -6238,6 +6461,8 @@ const corePersonMemories = {
   contestedAs: corePageProbes.contested,
   confirmAs: corePageProbes.confirm,
   correctAs: corePageProbes.correct,
+  publishAs: coreShareProbes.publish,
+  unpublishAs: coreShareProbes.unpublish,
   // An entity of the reader's own store: one in the shared store, one in
   // someone else's own store and one no one added answer alike.
   ownEntityAs: async (probing) => {
@@ -6969,11 +7194,27 @@ export const memoriesProbes = (() => {
     correct: async (personId, correction) =>
       await brainMemories.correctFor(env, personCaller(personId), correction),
   });
+  const shares = memorySharingProbes({
+    publish: async (personId, share) =>
+      await brainMemories.publishFor(
+        env,
+        personCaller(personId),
+        unchecked(share)
+      ),
+    unpublish: async (personId, memory) =>
+      await brainMemories.unpublishFor(
+        env,
+        personCaller(personId),
+        unchecked(memory)
+      ),
+  });
   return {
     rememberFor: probes.remember,
     forgetFor: probes.forget,
     confirmFor: page.confirm,
     correctFor: page.correct,
+    publishFor: shares.publish,
+    unpublishFor: shares.unpublish,
   };
 })() satisfies Record<keyof typeof brainMemories, Probe>;
 
@@ -9875,8 +10116,21 @@ export const memoriesRpcProbes = {
         await memoriesAs(personId).correct(unchecked(correction)),
     })
   ),
+  ...memorySharingProbes({
+    publish: async (personId, share) =>
+      await memoriesAs(personId).publish(unchecked(share)),
+    unpublish: async (personId, memory) =>
+      await memoriesAs(personId).unpublish(unchecked(memory)),
+  }),
 } satisfies Record<
-  "forget" | "entities" | "memories" | "contested" | "confirm" | "correct",
+  | "forget"
+  | "entities"
+  | "memories"
+  | "contested"
+  | "confirm"
+  | "correct"
+  | "publish"
+  | "unpublish",
   Probe
 >;
 

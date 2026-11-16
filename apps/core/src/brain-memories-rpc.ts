@@ -14,10 +14,18 @@ import type {
   BrainMemoryPageNext,
   BrainMemoryPlace,
   BrainMemoryShown,
+  BrainShare,
+  BrainShared,
   BrainStoreCursor,
 } from "@grasp-os/shared/brain-memories";
 
-import { confirmFor, correctFor, forgetFor } from "./brain-memories.ts";
+import {
+  confirmFor,
+  correctFor,
+  forgetFor,
+  publishFor,
+  unpublishFor,
+} from "./brain-memories.ts";
 import type { MemoryCaller } from "./brain-memories.ts";
 import { contestedAs, entitiesAs, memoriesAs } from "./brain-next.ts";
 import type { StoredEntity, StoredMemory, StorePlace } from "./brain-next.ts";
@@ -29,11 +37,14 @@ import type { SessionCheck } from "./session-check.ts";
 // notice undoes one the agent saved for them (`forget`), and the Brain's
 // Memories page (GRA-1746) lists the entities they may see, what the
 // Brain remembers about one, history included, and the facts sources
-// disagree on, and takes their confirmation or correction. Each call acts
+// disagree on, and takes their confirmation or correction, and their
+// share of a memory of their own with a team or the company, or its
+// take-back (GRA-1815): the one way a memory widens, the person's own
+// act on what they were shown. Each call acts
 // as the signed-in person, from what they may read alone (brain-next.ts,
 // brain-memories.ts): what they may not read answers as what doesn't
-// exist. Reads aren't audited per read, as the Sources page's aren't; a
-// confirmation and a correction are (brain-memories.ts). Like the rest of
+// exist. Reads aren't audited per read, as the Sources page's aren't;
+// every change is (brain-memories.ts). Like the rest of
 // the workspace it refuses a Grasp staff session.
 
 /** The fields of the Brain's cursors that hold a moment. */
@@ -234,5 +245,20 @@ export class BrainMemoriesRpc
         ? null
         : { memory: saved.memory, entity: saved.entity };
     });
+  }
+
+  async publish(share: BrainShare): Promise<BrainShared> {
+    return await this.#asCaller(async (caller) => {
+      const shared = await publishFor(this.#env, caller, share);
+      return shared === null
+        ? null
+        : { memory: shared.memory, entity: shared.entity };
+    });
+  }
+
+  async unpublish(memory: string): Promise<BrainMemoryOutcome> {
+    return await this.#asCaller(
+      async (caller) => await unpublishFor(this.#env, caller, memory)
+    );
   }
 }

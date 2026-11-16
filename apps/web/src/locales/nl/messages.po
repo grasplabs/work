@@ -663,6 +663,10 @@ msgstr "{label}, alleen-lezen"
 msgid "{label}:"
 msgstr "{label}:"
 
+#: src/brain/memories-page.tsx
+msgid "{label}: {value}"
+msgstr "{label}: {value}"
+
 #: src/onboarding/setup-steps.tsx
 msgid "{leads, plural, one {Thank you. I’ll start with this lead.} other {Thank you. I’ll start with these # leads.}}"
 msgstr "{leads, plural, one {Dank je. Ik begin met deze teamleider.} other {Dank je. Ik begin met deze # teamleiders.}}"
@@ -1734,6 +1738,10 @@ msgstr "Over"
 msgctxt "what a decision is about, as its workflow run passed it"
 msgid "About"
 msgstr "Waarover"
+
+#: src/brain/memories-page.tsx
+msgid "About {about}"
+msgstr "Over {about}"
 
 #: src/workflows/requests/request-plan.tsx
 msgid "About {ahead} by {end}"
@@ -5362,6 +5370,7 @@ msgid "Every weekday at {time}"
 msgstr "Elke werkdag om {time}"
 
 #: src/agents/agent-facts.tsx
+#: src/brain/memories-page.tsx
 #: src/brain/sources-page.tsx
 #: src/settings/stephen-audience.tsx
 msgid "Everyone"
@@ -12324,6 +12333,7 @@ msgstr "Geregeld: {choice}"
 msgid "Several for one question"
 msgstr "Meerdere voor één vraag"
 
+#: src/brain/memories-page.tsx
 #: src/drafts/share-with-team.tsx
 #: src/drafts/sharing.tsx
 msgid "Share"
@@ -12357,6 +12367,10 @@ msgstr "Aandeel van {name} dat iets vroeg"
 msgid "Share once it's ready"
 msgstr "Delen zodra het klaar is"
 
+#: src/brain/memories-page.tsx
+msgid "Share this memory?"
+msgstr "Deze herinnering delen?"
+
 #: src/brain/skills-page.tsx
 msgid "Share this version instead"
 msgstr "Deel in plaats daarvan deze versie"
@@ -12364,6 +12378,10 @@ msgstr "Deel in plaats daarvan deze versie"
 #: src/brain/skills-page.tsx
 msgid "Share with a team"
 msgstr "Met een team delen"
+
+#: src/brain/memories-page.tsx
+msgid "Share with others: {statement}"
+msgstr "Delen met anderen: {statement}"
 
 #: src/brain/skills-page.tsx
 msgid "Share with the company"
@@ -12377,6 +12395,10 @@ msgstr "Delen met je team"
 #: src/onboarding/setup-steps.tsx
 msgid "Share your staff list"
 msgstr "Deel je personeelslijst"
+
+#: src/brain/memories-page.tsx
+msgid "Share…"
+msgstr "Delen…"
 
 #: src/settings/stephen-settings.tsx
 msgid "Shared mailboxes, colleagues' calendars and the company's files."
@@ -12397,6 +12419,10 @@ msgstr "Gedeeld met"
 #: src/drafts/share-with-team.tsx
 msgid "Shared with {who}"
 msgstr "Gedeeld met {who}"
+
+#: src/brain/memories-page.tsx
+msgid "Shared. It shows under the same name for those you shared it with."
+msgstr "Gedeeld. Wie het mag lezen, ziet het onder dezelfde naam."
 
 #: src/brain/skills-page.tsx
 msgid "Shares waiting for you"
@@ -13243,6 +13269,14 @@ msgstr "{name} uit het project halen"
 msgid "Take {who} off {name}"
 msgstr "{who} uit {name} halen"
 
+#: src/brain/memories-page.tsx
+msgid "Take back"
+msgstr "Terugnemen"
+
+#: src/brain/memories-page.tsx
+msgid "Take back what you shared: {statement}"
+msgstr "Gedeelde terugnemen: {statement}"
+
 #: src/agents/agent-apps-card.tsx
 msgid "Take off"
 msgstr "Weghalen"
@@ -13338,6 +13372,7 @@ msgctxt "what the Brain remembers about something"
 msgid "Team"
 msgstr "Team"
 
+#: src/brain/memories-page.tsx
 #: src/brain/sources-page.tsx
 msgid "Team {name}"
 msgstr "Team {name}"
@@ -14373,6 +14408,10 @@ msgstr "Wat ze ons vertelden"
 msgid "They use"
 msgstr "Ze gebruiken"
 
+#: src/brain/memories-page.tsx
+msgid "They will read exactly what is below, as your own word. Your own memory stays yours alone, and you can take the copy back."
+msgstr "Zij lezen precies wat hieronder staat, als jouw eigen woord. Je eigen herinnering blijft van jou alleen, en je kunt de kopie terugnemen."
+
 #: src/drafts/share-with-team.tsx
 msgid "They'll find it under Apps, and see it as it is now."
 msgstr "Ze vinden het onder Apps en zien het zoals het nu is."
@@ -14562,6 +14601,10 @@ msgstr "Deze lijst is te groot. Ik kan tot {peopleMost} mensen in maximaal {team
 #: src/brain/memories-page.tsx
 msgid "This memory has changed or is no longer yours to read. Look at it again first."
 msgstr "Deze herinnering is veranderd of je mag hem niet meer lezen. Bekijk hem eerst opnieuw."
+
+#: src/brain/memories-page.tsx
+msgid "This memory has changed or is no longer yours to share. Look at it again first."
+msgstr "Deze herinnering is veranderd of je mag hem niet meer delen. Bekijk hem eerst opnieuw."
 
 #: src/chat/failure.ts
 msgid "This model can't give an answer that long. Pick another model, or ask for less."
@@ -16302,6 +16345,11 @@ msgstr "Wie het mag vragen"
 
 #: src/brain/sources-page.tsx
 msgctxt "a file uploaded into the Brain"
+msgid "Who may read it"
+msgstr "Wie het mag lezen"
+
+#: src/brain/memories-page.tsx
+msgctxt "a memory shared with others"
 msgid "Who may read it"
 msgstr "Wie het mag lezen"
 
