@@ -670,6 +670,7 @@ describe("erasing a person", () => {
         erasure: null,
         // Exactly what this erasure runs: nothing more is promised.
         areas: [
+          "brain_shared",
           "identity",
           "channels",
           "connect",
@@ -685,6 +686,7 @@ describe("erasing a person", () => {
         requestedAt: "string",
         completedAt: "string",
         areas: [
+          { area: "brain_shared", state: "complete" },
           { area: "identity", state: "complete" },
           { area: "channels", state: "complete" },
           { area: "connect", state: "complete" },
@@ -1080,6 +1082,7 @@ describe("erasing a person", () => {
       pending: {
         completedAt: null,
         areas: [
+          { area: "brain_shared", state: "complete" },
           { area: "identity", state: "pending" },
           { area: "channels", state: "complete" },
           { area: "connect", state: "complete" },
@@ -1097,6 +1100,7 @@ describe("erasing a person", () => {
         email: null,
         completed: "string",
         areas: [
+          { area: "brain_shared", state: "complete" },
           { area: "identity", state: "complete" },
           { area: "channels", state: "complete" },
           { area: "connect", state: "complete" },

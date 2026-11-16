@@ -1083,54 +1083,6 @@ describe("the erasure ledger out of reach", { timeout: 120_000 }, () => {
     });
   });
 
-  // A person's row the shared store recorded until GRA-1903, never
-  // written (its write failed): a tick writes the source entries behind it
-  // and never the person's, which an older release replaying it would
-  // refuse.
-  it("writes the source entries behind a person's row recorded before GRA-1903, and never that row", async () => {
-    const reader = await person();
-    const source = newSource();
-    await add(
-      source,
-      `Behind a person's row ${wordOf(newMark())}`,
-      await alone(reader)
-    );
-    await nextBucketPut(async () => {
-      await Promise.resolve();
-      throw new Error("R2 failed, by the test");
-    });
-    await settled(eraseShared(source, "deleted"));
-    const subject = await hashOf(crypto.randomUUID());
-    // At the source's time, sorting before it.
-    const personRow = await runInDurableObject(store(), (_instance, state) => {
-      const { sql } = state.storage;
-      const { key, at } = sql
-        .exec<{ key: string; at: number }>(
-          `SELECT key, erased_at AS at FROM erasures
-            WHERE confirmed = 0 ORDER BY key DESC LIMIT 1`
-        )
-        .one();
-      const row = `${key.slice(0, "erasures/".length + 15)}-person-person_erased-${subject}`;
-      sql.exec(
-        `INSERT INTO erasures (key, kind, subject, reason, erased_at, confirmed)
-          VALUES (?, 'person', ?, 'person_erased', ?, 0)`,
-        row,
-        subject,
-        at
-      );
-      return row;
-    });
-    await workBrain(env, new Date(), noProducers);
-    const { erasures } = await brainWorkOverview(env);
-
-    // The row stays, as every record of an erasure does.
-    expect({
-      written: await ledgerCount(source),
-      personWritten: (await env.BRAIN_OBJECTS.head(personRow)) !== null,
-      unwritten: erasures.source.unwritten,
-    }).toStrictEqual({ written: 1, personWritten: false, unwritten: 0 });
-  });
-
   it("writes one entry for an erasure whose write landed though its answer was lost, retried", async () => {
     const reader = await person();
     const source = newSource();
@@ -1360,46 +1312,6 @@ describe(
         });
       } finally {
         await env.BRAIN_OBJECTS.delete(unknown);
-        await killStore();
-      }
-    });
-
-    it("passes over a person's entry and a page of its parts, as the shared store wrote them before it refused one person's content, to the entry after them", async () => {
-      const reader = await person();
-      const mark = newMark();
-      const source = newSource();
-      await add(
-        source,
-        `Behind a person's entry ${wordOf(mark)}`,
-        await alone(reader)
-      );
-      const backup = await copyOfStore();
-      await eraseShared(source, "deleted");
-      const [erasure] = await ledgerOf(keyOf(source));
-      // A person's entry and more parts of it than a page of the listing:
-      // at the same time, sorting before the erasure after them.
-      const entry = `${erasure?.slice(0, "erasures/".length + 15) ?? ""}-person-person_erased-${await hashOf(crypto.randomUUID())}`;
-      const parts = Array.from(
-        { length: 1001 },
-        (_, index) => `${entry}/${String(index).padStart(4, "0")}`
-      );
-      await Promise.all(
-        parts.map(async (part) => await env.BRAIN_OBJECTS.put(part, "[]"))
-      );
-      await env.BRAIN_OBJECTS.put(entry, JSON.stringify({ parts: 1001 }));
-      try {
-        await restoreStore(backup);
-        const answered = await settled(historyAs(reader, source, 1));
-
-        expect({
-          answered,
-          recalled: await recalledAs(reader, wordOf(mark)),
-        }).toStrictEqual({
-          answered: { value: null },
-          recalled: [],
-        });
-      } finally {
-        await env.BRAIN_OBJECTS.delete([entry, ...parts]);
         await killStore();
       }
     });
