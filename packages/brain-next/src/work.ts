@@ -186,7 +186,7 @@ const tickClaimMs = 4 * 60_000;
 export const repackPerTick = 16;
 
 /** How often a tick looks for items added while its slots have room. */
-const tickLookMs = 1000;
+export const tickLookMs = 1000;
 
 /** The queue's model calls: a burst, then a steady pace. A guess to be set by measuring. */
 export const workModelRate: BucketRate = { burst: 10, perMinute: 30 };

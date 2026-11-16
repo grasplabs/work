@@ -37,6 +37,7 @@ import {
   signedInApi,
   signedInWithRole,
   unique,
+  uniqueWord,
   whoami,
 } from "./sign-in.ts";
 import { connectDb } from "./test-env.ts";
@@ -660,7 +661,7 @@ describe("instruction files", setUpTime, () => {
 
   it("never lets recall return an instruction file, shared or a person's", async () => {
     const admin = await member("admin");
-    const word = `w${unique()}`;
+    const word = uniqueWord();
     await save(admin, { scope: "person", personId: admin.userId }, word);
     await save(admin, { scope: "company", name: "facts" }, `${word} company`);
     await save(

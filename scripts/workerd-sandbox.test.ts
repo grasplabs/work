@@ -233,6 +233,44 @@ setInterval(() => {}, 1 << 30);
   return script;
 };
 
+/**
+ * workerd behind a shell that ends it, with `kill <signal>`, when the shell
+ * gets SIGUSR1, then exits with `status`: the host's trouble, sent mid-call
+ * by `endedMidCall`. Never on a clock, which a slow start outruns.
+ */
+const endedByTheHost = (signal: string, status: string): string => {
+  const script = path.join(tempDir(), "ended-by-the-host.sh");
+  writeFileSync(
+    script,
+    `#!/bin/sh\ntrap 'kill ${signal} $child' USR1\n"${nativeWorkerd}" "$@" &\nchild=$!\n# The first wait ends as the trap runs, the second as workerd does.\nwait $child\nwait $child\nexit ${status}\n`
+  );
+  chmodSync(script, 0o755);
+  return script;
+};
+
+/**
+ * Calls an endless loop on a pool of one behind `endedByTheHost`, and has
+ * its process ended once the call holds it: the pool starts the call's
+ * successor only then, so a second process is the sign.
+ */
+const endedMidCall = async (supervisor: SandboxSupervisor) => {
+  const [held] = supervisor.pids();
+  if (held === undefined) {
+    // Never pid 0: that signals the test runner's whole process group.
+    throw new Error("The pool has no process to end mid-call");
+  }
+  const call = callSupervisor(supervisor.socket, {
+    body: "for (;;) {}",
+    deadlineMs: 20_000,
+  });
+  // As long as the successor may take to start (the supervisor's startupMs).
+  await expect
+    .poll(() => supervisor.pids().length, { timeout: 10_000 })
+    .toBe(2);
+  process.kill(held, "SIGUSR1");
+  return await call;
+};
+
 /** A supervisor for one test, stopped after it. */
 const withSupervisor = async (
   options: Partial<SandboxSupervisorOptions>,
@@ -402,63 +440,51 @@ describe("the sandbox supervisor", () => {
   }, 30_000);
 
   it("says a call whose process was killed from outside crashed, as the kernel's OOM killer kills one", async () => {
-    // workerd behind a shell that SIGKILLs it three seconds in, mid-call:
-    // what a full cgroup does to whichever process it picks.
-    const killed = path.join(tempDir(), "killed-from-outside.sh");
-    writeFileSync(
-      killed,
-      `#!/bin/sh\n"${nativeWorkerd}" "$@" &\nchild=$!\nsleep 3\nkill -9 $child\nwait $child\nexit $?\n`
+    // What a full cgroup does to whichever process it picks.
+    await withSupervisor(
+      { workerd: endedByTheHost("-9", "$?") },
+      async (supervisor) => {
+        const result = await endedMidCall(supervisor);
+        expect(result).toMatchObject({
+          status: 200,
+          verdict: "crashed",
+          answer: { ok: false },
+        });
+        expect(supervisor.stats().crashed).toBe(1);
+      }
     );
-    chmodSync(killed, 0o755);
-    await withSupervisor({ workerd: killed }, async (supervisor) => {
-      const result = await callSupervisor(supervisor.socket, {
-        body: "for (;;) {}",
-        deadlineMs: 20_000,
-      });
-      expect(result).toMatchObject({
-        status: 200,
-        verdict: "crashed",
-        answer: { ok: false },
-      });
-      expect(supervisor.stats().crashed).toBe(1);
-    });
   }, 30_000);
 
   it.each([
     [
       "aborts without V8's heap limit line, as one refused memory under strict overcommit does",
-      "kill -ABRT $child\nwait $child\nexit $?",
+      "-ABRT",
+      "$?",
     ],
     [
       "exits with a status of its own without V8's heap limit line, as one out of file descriptors does",
-      "kill -9 $child\nwait $child\nexit 1",
+      "-9",
+      "1",
     ],
   ])(
     "says a call crashed, never its memory, when its process %s",
-    async (_how, end) => {
-      // workerd behind a shell that ends it three seconds in, mid-call, as
-      // the host's own trouble would: never through the call's heap.
-      const ended = path.join(tempDir(), "ended-by-the-host.sh");
-      writeFileSync(
-        ended,
-        `#!/bin/sh\n"${nativeWorkerd}" "$@" &\nchild=$!\nsleep 3\n${end}\n`
+    async (_how, signal, status) => {
+      // The host's own trouble: never through the call's heap.
+      await withSupervisor(
+        { workerd: endedByTheHost(signal, status) },
+        async (supervisor) => {
+          const result = await endedMidCall(supervisor);
+          expect({
+            result: { status: result.status, verdict: result.verdict },
+            crashed: supervisor.stats().crashed,
+            memory: supervisor.stats().memory,
+          }).toStrictEqual({
+            result: { status: 200, verdict: "crashed" },
+            crashed: 1,
+            memory: 0,
+          });
+        }
       );
-      chmodSync(ended, 0o755);
-      await withSupervisor({ workerd: ended }, async (supervisor) => {
-        const result = await callSupervisor(supervisor.socket, {
-          body: "for (;;) {}",
-          deadlineMs: 20_000,
-        });
-        expect({
-          result: { status: result.status, verdict: result.verdict },
-          crashed: supervisor.stats().crashed,
-          memory: supervisor.stats().memory,
-        }).toStrictEqual({
-          result: { status: 200, verdict: "crashed" },
-          crashed: 1,
-          memory: 0,
-        });
-      });
     },
     30_000
   );
