@@ -1,8 +1,11 @@
+import { agentErrors } from "@grasp-os/shared/agent";
 import { connectErrors } from "@grasp-os/shared/connect";
 import type { ConnectionPerson, PendingAction } from "@grasp-os/shared/connect";
 import { errorFields, log } from "@grasp-os/shared/log";
+import type { Identity } from "@grasp-os/shared/rpc";
 import type { ActionEvent, StateAdapter } from "chat";
 
+import { confirmHeldAppCall, declineHeldAppCall } from "../held-app-calls.ts";
 import {
   confirmPendingAction,
   declinePendingAction,
@@ -20,7 +23,13 @@ import type {
   PressOutcome,
   WriteState,
 } from "./cards.tsx";
-import { inertView, memberOf, viewOf } from "./held.ts";
+import {
+  appViewOf,
+  heldAppCallsIn,
+  inertView,
+  memberOf,
+  viewOf,
+} from "./held.ts";
 import { pressedChanges } from "./stephen-requests.ts";
 import { say } from "./words.ts";
 import type { ChannelLocale } from "./words.ts";
@@ -62,8 +71,17 @@ import type { ChannelLocale } from "./words.ts";
 //   once; the writes run after, as the request's background work, and the
 //   card is edited in place as each ends.
 //
-// Every decision is connect's to record, by the person, `via` the
-// platform. Still to settle before merge, with Nick: D2 itself (GRA-699),
+// A write to an App held in the chat (held-app-calls.ts, GRA-1929; its
+// threat model is on the issue) is on the same card and decided by the
+// same press, through the functions Grasp's own chat decides one by: the
+// press names its chat, which must be the presser's own, come through this
+// platform, and hold it still waiting with the hash the card showed; it is
+// decided once, in the Workspace's write that takes it, with its person's
+// authority checked again as it runs.
+//
+// Every decision on a connection's write is connect's to record, by the
+// person, `via` the platform; one on a write to an App the chat's
+// Workspace's, as in Grasp. Still to settle before merge, with Nick: D2 itself (GRA-699),
 // the threat model's ids (GRA-700), and the seam with GRA-620's one
 // decision path for held writes and unknown outcomes.
 
@@ -108,24 +126,44 @@ const sayThere = async (
   }
 };
 
+/** A write the card showed, as it is still held: connect's, or one to an App. */
+type StillHeld =
+  | { held: PendingAction; view: HeldWriteView }
+  | { chatId: string; view: HeldWriteView };
+
 /**
- * The card's writes as connect still holds them for the person, each with
- * the hash the card showed, in the card's order; null when any isn't:
- * gone, decided, another's, or changed.
+ * The card's writes as they are still held for the person, each with the
+ * hash the card showed, in the card's order, as the card shows them on
+ * `platform` in `locale`; null when any isn't: gone, decided, lapsed,
+ * another's, from another channel, or changed.
  */
 const stillAsShown = async (
   env: Env,
-  person: ConnectionPerson,
-  press: Press
-): Promise<PendingAction[] | null> => {
-  const held: PendingAction[] = [];
-  for (const { id, inputHash } of press) {
+  { userId, person }: { userId: string; person: ConnectionPerson },
+  press: Press,
+  { platform, locale }: { platform: string; locale: ChannelLocale }
+): Promise<StillHeld[] | null> => {
+  const held: StillHeld[] = [];
+  for (const { id, inputHash, chatId } of press) {
+    if (chatId === undefined) {
+      // oxlint-disable-next-line no-await-in-loop -- in the card's order
+      const found = await env.CONNECT.pendingAction({ person, id });
+      if (found?.inputHash !== inputHash) {
+        return null;
+      }
+      held.push({ held: found, view: inertView(platform, viewOf(found)) });
+      continue;
+    }
     // oxlint-disable-next-line no-await-in-loop -- in the card's order
-    const found = await env.CONNECT.pendingAction({ person, id });
-    if (found?.inputHash !== inputHash) {
+    const calls = await heldAppCallsIn(env, userId, chatId, platform);
+    const call = calls.find((each) => each.id === id);
+    if (call?.requestHash !== inputHash) {
       return null;
     }
-    held.push(found);
+    held.push({
+      chatId,
+      view: inertView(platform, appViewOf(chatId, call, locale)),
+    });
   }
   return held;
 };
@@ -138,10 +176,34 @@ const failedAs = (
   if (code === "connect.outcome_unknown") {
     return { state: "unknown", outcome: "unknownOutcome" };
   }
-  if (code === "connect.pending_changed") {
+  if (
+    code === "connect.pending_changed" ||
+    agentErrors.codeOf(error) === "agent.held_call_not_found"
+  ) {
     return { state: "skipped", outcome: "changedSince" };
   }
   return { state: "failed", outcome: "stopped" };
+};
+
+/** Confirms, or with `confirm` false declines, one write of the card, as `identity`, `via` `platform`. */
+const decide = async (
+  env: Env,
+  identity: Identity,
+  platform: string,
+  write: StillHeld,
+  confirm: boolean
+): Promise<void> => {
+  const { id, inputHash } = write.view;
+  if ("chatId" in write) {
+    const where = { chatId: write.chatId, via: platform };
+    await (confirm
+      ? confirmHeldAppCall(env, identity, where, id, inputHash)
+      : declineHeldAppCall(env, identity, where, id));
+    return;
+  }
+  await (confirm
+    ? confirmPendingAction(env, identity, id, inputHash, platform)
+    : declinePendingAction(env, identity, id, platform));
 };
 
 /**
@@ -174,47 +236,47 @@ export const pressCard = async (
     return;
   }
   const { identity, person } = member;
-  const held = await stillAsShown(env, person, press);
+  const held = await stillAsShown(env, { userId, person }, press, {
+    platform,
+    locale,
+  });
   if (held === null) {
     log.info("channel.press_refused", { platform, reason: "changed" });
     await sayThere(event, "changedSince", locale);
     return;
   }
   // As the card showed them, what the model wrote inert (held.ts).
-  const writes: HeldWriteView[] = held
-    .map(viewOf)
-    .map((write) => inertView(platform, write));
+  const writes: HeldWriteView[] = held.map(({ view }) => view);
   const shown = (outcome?: PressOutcome) => ({
     locale,
+    platform,
     writes,
     ...(outcome === undefined ? {} : { outcome }),
   });
   if (!confirming) {
-    for (const write of writes) {
+    for (const write of held) {
       try {
         // oxlint-disable-next-line no-await-in-loop -- one at a time, each recorded
-        await declinePendingAction(env, identity, write.id, platform);
+        await decide(env, identity, platform, write, false);
       } catch (error) {
         log.warn("channel.decline_failed", errorFields(error));
       }
-      write.state = "skipped";
+      write.view.state = "skipped";
     }
     await editCard(event, shown("cancelled"));
     return;
   }
   for (const [index, write] of writes.entries()) {
+    const still = held[index];
+    if (still === undefined) {
+      break;
+    }
     write.state = "running";
     // oxlint-disable-next-line no-await-in-loop -- the card ticks as each runs
     await editCard(event, shown());
     try {
       // oxlint-disable-next-line no-await-in-loop -- in order, stopping at a failure
-      await confirmPendingAction(
-        env,
-        identity,
-        write.id,
-        write.inputHash,
-        platform
-      );
+      await decide(env, identity, platform, still, true);
       write.state = "done";
     } catch (error) {
       const { state: ended, outcome } = failedAs(error);
@@ -228,13 +290,17 @@ export const pressCard = async (
         ...errorFields(error),
       });
       // The request the card is for keeps that its change didn't work: one
-      // request with the answer that showed it, never a second.
-      // oxlint-disable-next-line no-await-in-loop -- once, then out
-      await pressedChanges(env, {
-        userId,
-        writeId: write.id,
-        action: held[index]?.action ?? "",
-      });
+      // request with the answer that showed it, never a second. A
+      // connection's change, which its tools name by action; a write to an
+      // App is counted as the App's look-up (stephen-requests.ts).
+      if ("held" in still) {
+        // oxlint-disable-next-line no-await-in-loop -- once, then out
+        await pressedChanges(env, {
+          userId,
+          writeId: write.id,
+          action: still.held.action,
+        });
+      }
       // oxlint-disable-next-line no-await-in-loop -- once, then out
       await editCard(event, shown(outcome));
       return;

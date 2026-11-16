@@ -303,6 +303,33 @@ const lines = {
     fr: "Pour préparer cela, j’ai lu {where}, où d’autres personnes peuvent aussi faire des modifications. Vérifiez chaque valeur avant de confirmer.",
     es: "Para preparar esto, he leído {where}, donde otras personas también pueden hacer cambios. Revisa cada valor antes de confirmar.",
   },
+  /**
+   * A write to an App, held because the chat used something only the
+   * person can read (held-app-calls.ts): what it calls, in which App.
+   */
+  heldAppWrite: {
+    en: "{function} in {app}",
+    nl: "{function} in {app}",
+    de: "{function} in {app}",
+    fr: "{function} dans {app}",
+    es: "{function} en {app}",
+  },
+  /** Why a write to an App waits for them, under its title. */
+  heldPrivate: {
+    en: "This uses something only you can read.",
+    nl: "Dit gebruikt iets wat alleen jij kunt lezen.",
+    de: "Hierfür wird etwas verwendet, das nur Sie lesen können.",
+    fr: "Cela utilise quelque chose que vous seul pouvez lire.",
+    es: "Esto usa algo que solo tú puedes leer.",
+  },
+  /** The label of a write to an App's exact request, as it will be sent. */
+  heldAppRequest: {
+    en: "Exactly what will be sent",
+    nl: "Precies wat er wordt verstuurd",
+    de: "Genau das, was gesendet wird",
+    fr: "Exactement ce qui sera envoyé",
+    es: "Exactamente lo que se enviará",
+  },
   /** What would change doesn't fit the card, so it can't be confirmed on it. */
   cardTooLong: {
     en: "This card can't show everything that would change, so it can't be confirmed. Ask me again with fewer changes at a time.",

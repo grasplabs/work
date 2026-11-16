@@ -672,10 +672,14 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
     });
   }
 
+  // Grasp's own chats' held App calls alone: a chat app's are shown and
+  // decided on its card there (channels/held.ts), and its conversation is
+  // no chat here (GRA-1919).
   async heldCalls(chatId: string, after?: string): Promise<HeldAppCall[]> {
     return await withPerson(
       this.#check,
-      async (person) => await heldAppCallsOf(this.#env, person, chatId, after)
+      async (person) =>
+        await heldAppCallsOf(this.#env, person, chatId, "web", after)
     );
   }
 
@@ -685,13 +689,19 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
     requestHash: string
   ): Promise<void> {
     await withPerson(this.#check, async (person) => {
-      await confirmHeldAppCall(this.#env, person, chatId, id, requestHash);
+      await confirmHeldAppCall(
+        this.#env,
+        person,
+        { chatId, via: "web" },
+        id,
+        requestHash
+      );
     });
   }
 
   async declineHeldCall(chatId: string, id: string): Promise<void> {
     await withPerson(this.#check, async (person) => {
-      await declineHeldAppCall(this.#env, person, chatId, id);
+      await declineHeldAppCall(this.#env, person, { chatId, via: "web" }, id);
     });
   }
 

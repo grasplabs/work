@@ -58,6 +58,14 @@ const sectionChars = 3000;
  */
 const slackBlocksPerMessage = 50;
 
+/**
+ * The most characters of a field's label and value together on Slack, as
+ * its adapter measures them before it cuts one (`FIELD_TEXT_MAX_CHARS`,
+ * 2,000, less the 3 its `*label*` and line break take): Block Kit's limit
+ * for a section's field.
+ */
+const slackFieldChars = 2000 - 3;
+
 /** The most held writes one card shows; more can't be confirmed on it. */
 export const maxWritesOnCard = 10;
 
@@ -451,10 +459,17 @@ export type WriteState =
 
 /** A held write, as the person sees it before it runs. */
 export interface HeldWriteView {
-  /** Its id in connect's held writes. */
+  /** Its id in connect's held writes, or in the chat's held App calls. */
   id: string;
   /** The hash of its exact input, which a press confirms. */
   inputHash: string;
+  /**
+   * For a write to an App (held-app-calls.ts): the chat it is held in,
+   * which a press decides it in. It is held because the chat used
+   * something only its person can read, which its card says. None for
+   * connect's.
+   */
+  chatId?: string;
   /** What it does, in the person's words. */
   title: string;
   /** Its exact values, as its connector describes them. */
@@ -482,6 +497,8 @@ export type PressOutcome = Extract<
 /** A turn's held writes on one card. */
 export interface HeldWritesCard {
   locale: ChannelLocale;
+  /** The platform it goes to, whose limits say what it shows whole. */
+  platform: string;
   /** In the order they run. */
   writes: readonly HeldWriteView[];
   check?: ReadCheck;
@@ -493,10 +510,19 @@ export interface HeldWritesCard {
 export const confirmAction = "held-writes.confirm";
 export const cancelAction = "held-writes.cancel";
 
-/** What a press on the card's buttons carries: exactly the writes it showed. */
+/**
+ * What a press on the card's buttons carries: exactly the writes it
+ * showed, a write to an App with the chat it is held in.
+ */
 const pressSchema = z
   .array(
-    z.object({ id: z.string().min(1), inputHash: z.string().min(1) }).strict()
+    z
+      .object({
+        id: z.string().min(1),
+        inputHash: z.string().min(1),
+        chatId: z.string().min(1).optional(),
+      })
+      .strict()
   )
   .min(1)
   .max(maxWritesOnCard);
@@ -526,6 +552,18 @@ const stateLines = {
   skipped: "stepSkipped",
 } as const satisfies Record<Exclude<WriteState, "held">, LineName>;
 
+/**
+ * Whether a field of `label` and `value` shows whole on `platform`: on
+ * Slack within a field's characters, measured as its adapter is sent them
+ * (emoji named in full, which lengthens a text; its bold only shortens
+ * one). Teams cuts no field; the card's own budget holds there.
+ */
+const fieldWhole = (platform: string, label: string, value: string) =>
+  platform !== "slack" ||
+  convertEmojiPlaceholders(label, "slack").length +
+    convertEmojiPlaceholders(value, "slack").length <=
+    slackFieldChars;
+
 /** The card's warning about what the turn read, in the person's language. */
 const checkLine = (check: ReadCheck, locale: ChannelLocale, room: Room) =>
   check.read === "mail"
@@ -537,13 +575,15 @@ const checkLine = (check: ReadCheck, locale: ChannelLocale, room: Room) =>
 /**
  * A turn's held writes on one card, in the order they run, each with its
  * exact values; nothing runs until the person presses Confirm. Confirm and
- * Cancel carry the writes' ids and input hashes, so a press confirms
- * exactly what the card showed. They are on the card only while every
- * write is held and every value is on it whole: otherwise the card says
- * it can't be confirmed, and to ask for fewer changes at a time.
+ * Cancel carry the writes' ids and input hashes (a write to an App's with
+ * its chat), so a press confirms exactly what the card showed. They are on
+ * the card only while every write is held and every value is on it whole,
+ * as `platform` shows it: otherwise the card says it can't be confirmed,
+ * and to ask for fewer changes at a time.
  */
 export const heldWritesCard = ({
   locale,
+  platform,
   writes,
   check,
   outcome,
@@ -554,7 +594,9 @@ export const heldWritesCard = ({
   const room: Room = { left: outsideBytes };
   const shown = writes.slice(0, maxWritesOnCard);
   const press = JSON.stringify(
-    shown.map(({ id, inputHash }) => ({ id, inputHash }))
+    shown.map(({ id, inputHash, chatId }) =>
+      chatId === undefined ? { id, inputHash } : { id, inputHash, chatId }
+    )
   );
   room.left -= sizeOf(press);
   const warning = check === undefined ? null : checkLine(check, locale, room);
@@ -564,7 +606,10 @@ export const heldWritesCard = ({
     const values = write.values.slice(0, maxValuesPerWrite).map((each) => {
       const label = fit(each.label, maxLabelChars, room);
       const value = fit(each.value, Number.POSITIVE_INFINITY, room);
-      whole &&= label.whole && value.whole;
+      whole &&=
+        label.whole &&
+        value.whole &&
+        fieldWhole(platform, label.text, value.text);
       return { label: label.text, value: value.text };
     });
     whole &&= title.whole && values.length === write.values.length;
@@ -585,6 +630,9 @@ export const heldWritesCard = ({
       {steps.map(({ write, number, title, values }) => (
         <Section key={write.id}>
           <CardText style="bold">{`${number}. ${title}`}</CardText>
+          {write.chatId === undefined ? null : (
+            <CardText>{say("heldPrivate", locale)}</CardText>
+          )}
           {values.length === 0 ? null : (
             <Fields>
               {values.map(({ label, value }, at) => (

@@ -287,20 +287,33 @@ const everyCard = channelLocales.flatMap((locale) => [
   },
   {
     name: `one held write (${locale})`,
-    card: heldWritesCard({ locale, writes: [write(1)] }),
+    card: heldWritesCard({ locale, platform: "teams", writes: [write(1)] }),
   },
   {
     name: `largest held writes (${locale})`,
     card: heldWritesCard({
       locale,
+      platform: "teams",
       writes: largest(),
       check: { read: "record", where: heavy(5000) },
+    }),
+  },
+  {
+    name: `largest held writes to an App (${locale})`,
+    card: heldWritesCard({
+      locale,
+      platform: "teams",
+      writes: largest().map((each) => ({
+        ...each,
+        chatId: crypto.randomUUID(),
+      })),
     }),
   },
   ...outcomes.map((outcome) => ({
     name: `largest held writes, ${outcome} (${locale})`,
     card: heldWritesCard({
       locale,
+      platform: "teams",
       writes: largest("unknown"),
       check: { read: "mail" },
       outcome,
@@ -326,7 +339,7 @@ describe("Stephen's cards in Teams", () => {
   it("asks for a press on held writes with exactly the writes it shows", () => {
     const writes = [write(1), write(2)];
     const { actions, texts, facts } = inTeams(
-      heldWritesCard({ locale: "nl", writes })
+      heldWritesCard({ locale: "nl", platform: "teams", writes })
     );
 
     expect({
@@ -381,12 +394,14 @@ describe("Stephen's cards in Teams", () => {
       tooLong: pressesOf(
         heldWritesCard({
           locale: "de",
+          platform: "teams",
           writes: [write(1, { value: "x".repeat(20_000) })],
         })
       ),
       tooMany: pressesOf(
         heldWritesCard({
           locale: "de",
+          platform: "teams",
           writes: Array.from({ length: maxWritesOnCard + 1 }, (_, index) =>
             write(index)
           ),
@@ -395,12 +410,14 @@ describe("Stephen's cards in Teams", () => {
       running: pressesOf(
         heldWritesCard({
           locale: "de",
+          platform: "teams",
           writes: [write(1, { state: "done" }), write(2, { state: "running" })],
         })
       ),
       ended: pressesOf(
         heldWritesCard({
           locale: "de",
+          platform: "teams",
           writes: [write(1)],
           outcome: "expired",
         })
@@ -445,6 +462,8 @@ const values = {
   pace: 380,
   included: 400,
   url: "https://acme.grasp.test/workflows/requests",
+  function: "tasks.add",
+  app: "Tasks",
 };
 
 /** Block Kit's limits, as Slack documents them for a message's blocks. */

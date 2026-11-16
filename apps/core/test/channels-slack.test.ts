@@ -37,6 +37,13 @@ import { saveInstructions } from "./instruction-saves.ts";
 import { anyNamesOf, greetingOf } from "./json-workflow-apps.ts";
 import { mailConnection } from "./mail-connection.ts";
 import { fakeProvider } from "./model-provider.ts";
+import {
+  callOf,
+  liveNotes,
+  noteTitles,
+  ownSource,
+  writesNote,
+} from "./notes-app.ts";
 import { outcome, signedInApi, unique } from "./sign-in.ts";
 import {
   memberAnsweredBy,
@@ -918,6 +925,19 @@ describe("a linked person's held write in Slack", () => {
     }).toStrictEqual({ shown: true, raw: false, previews: true });
   });
 
+  it("is on a card without Confirm where a value fits the card but not one of Slack's fields, which its adapter cuts", async () => {
+    const sent = await heldInSlack("y".repeat(2500));
+    const card = JSON.stringify(
+      sent.find(({ fields }) =>
+        JSON.stringify(fields).includes(say("heldOne", "en"))
+      )?.fields ?? {}
+    );
+    expect({
+      confirm: card.includes(confirmAction),
+      said: card.includes(say("cardTooLong", "en")),
+    }).toStrictEqual({ confirm: false, said: true });
+  });
+
   it("is on a card without Confirm where a value fits as written but not once escaped", async () => {
     // 3,500 bytes as written, 17,500 as `&amp;`: past what one card takes.
     const sent = await heldInSlack("&".repeat(3500));
@@ -930,6 +950,128 @@ describe("a linked person's held write in Slack", () => {
       confirm: card.includes(confirmAction),
       said: card.includes(say("cardTooLong", "en")),
     }).toStrictEqual({ confirm: false, said: true });
+  });
+});
+
+/** The value Confirm carries on a card Slack was sent, and its fields' texts. */
+const slackCardOf = (fields: Record<string, unknown>) => {
+  const blocks: unknown =
+    typeof fields.blocks === "string"
+      ? JSON.parse(fields.blocks)
+      : fields.blocks;
+  let confirm: string | undefined;
+  const texts: string[] = [];
+  JSON.stringify(blocks, (key, value: unknown) => {
+    const button = z
+      .object({ action_id: z.literal(confirmAction), value: z.string() })
+      .safeParse(value);
+    if (button.success) {
+      confirm = button.data.value;
+    }
+    if (key === "text" && typeof value === "string") {
+      texts.push(value);
+    }
+    return value;
+  });
+  return { confirm, texts };
+};
+
+/** A binding name no other test in the file grants. */
+const bindingOf = (name: string): string =>
+  `${name}${unique().toUpperCase().replaceAll("-", "_")}`;
+
+/**
+ * A linked person, a user of a live Notes App the agent may write to,
+ * whose direct message, asked about a depot only their own store knows,
+ * writes a note titled `title`, which the model wrote (GRA-1929): the card
+ * of held writes Slack was sent.
+ */
+const heldAppWriteInSlack = async (title: string) => {
+  const builder = await signedInApi(idp, "builder");
+  const admin = await signedInApi(idp, "admin");
+  const { app, release } = await liveNotes(builder);
+  const { slackUser, userId } = await linkedPerson();
+  await builder.api.apps.members.add(app, {
+    type: "person",
+    id: userId,
+    role: "user",
+  });
+  await requestGranted(idp, builder, {
+    subject: { type: "agent", agentId: chatAgentId },
+    object: { type: "app", appId: app },
+    actions: ["read", "write"],
+    binding: bindingOf("NOTES"),
+  });
+  await requestGranted(idp, admin, {
+    subject: { type: "agent", agentId: chatAgentId },
+    object: { type: "platform" },
+    actions: ["brain"],
+    binding: bindingOf("BRAIN"),
+  });
+  const depot = marker();
+  await ownSource(userId, `Depot ${depot} opens at seven.`);
+  await fakeProvider(
+    writesNote(app, release, title),
+    says("It waits for you to confirm it.")
+  );
+  const message = messageFrom(slackUser);
+  message.event.text = `When does depot ${depot} open? Note it.`;
+  await post(message, { caught: false });
+  const sent = await slackSawIn(message.event.channel);
+  const card = sent.find(({ fields }) =>
+    JSON.stringify(fields).includes(say("heldOne", "en"))
+  );
+  if (card === undefined) {
+    throw new Error("Expected a card of held writes");
+  }
+  return {
+    slackUser,
+    channel: message.event.channel,
+    request: callOf(release, "notes.create", { title }),
+    card: slackCardOf(card.fields),
+    titles: async () => await noteTitles(builder.userId, app, release),
+  };
+};
+
+describe("a linked person's held write to an App in Slack", () => {
+  it("shows on its card why it waits and the exact request, Slack's own syntax escaped, and Confirm writes it as asked for, once", async () => {
+    // What the person's own content led the model to write had a link and
+    // a broadcast in it.
+    const hostile = "<https://evil.example/?d=salary|Agenda> <!here> & co";
+    const held = await heldAppWriteInSlack(hostile);
+    const press = pressFrom(held.slackUser, {
+      channel: held.channel,
+      value: held.card.confirm ?? "",
+    });
+    await post(press, { form: true });
+    await post(press, { form: true });
+
+    expect({
+      why: held.card.texts.includes(say("heldPrivate", "en")),
+      request: held.card.texts.includes(
+        `*${say("heldAppRequest", "en")}*\n${inertOn("slack")(held.request)}`
+      ),
+      raw: held.card.texts.some(
+        (text) => text.includes("<https://evil") || text.includes("<!here>")
+      ),
+      titles: await held.titles(),
+    }).toStrictEqual({
+      why: true,
+      request: true,
+      raw: false,
+      titles: [hostile],
+    });
+  });
+
+  it("is on a card without Confirm where its request fits the card but not one of Slack's fields", async () => {
+    // Slack's adapter cuts a field past 2,000 characters: Confirm would
+    // stand under a request shown in part.
+    const held = await heldAppWriteInSlack("y".repeat(2500));
+
+    expect({
+      confirm: held.card.confirm,
+      said: held.card.texts.includes(say("cardTooLong", "en")),
+    }).toStrictEqual({ confirm: undefined, said: true });
   });
 });
 

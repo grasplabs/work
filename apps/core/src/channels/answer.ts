@@ -56,9 +56,10 @@ import { postOffers } from "./workflow-offers.ts";
 // words, which name models and budgets the person has no part in.
 //
 // A turn that had writes held (a meeting to put in the calendar, a row to
-// change) shows them after its answer on one card, in the order they run,
-// each with its exact values, and nothing changes until the person
-// presses Confirm on it (cards.tsx `heldWritesCard`, held.ts).
+// change, a write to an App from a chat that used something only its
+// person can read) shows them after its answer on one card, in the order
+// they run, each with its exact values, and nothing changes until the
+// person presses Confirm on it (cards.tsx `heldWritesCard`, held.ts).
 
 /** How often typing is shown again while the turn runs. */
 const typingEveryMs = 3000;
@@ -491,7 +492,11 @@ const answerOne = async (
   // until the person presses Confirm on it (held.ts). Each is kept with
   // this request, so a press on it is this request's.
   const held = quietly("held", async () => {
-    const writes = await turnHeldWrites(env, userId, chatId, since);
+    const writes = await turnHeldWrites(
+      env,
+      { userId, chatId, platform, locale },
+      since
+    );
     if (writes.length === 0) {
       return;
     }
@@ -504,6 +509,7 @@ const answerOne = async (
     await thread.post(
       heldWritesCard({
         locale,
+        platform,
         writes: writes.map((write) => inertView(platform, write)),
         ...(check === undefined ? {} : { check }),
       })

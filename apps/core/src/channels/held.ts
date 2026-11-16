@@ -1,3 +1,6 @@
+import { agentErrors } from "@grasp-os/shared/agent";
+import { heldAppCallsPage } from "@grasp-os/shared/chat";
+import type { ChatChannel, HeldAppCall } from "@grasp-os/shared/chat";
 import type { ConnectionPerson, PendingAction } from "@grasp-os/shared/connect";
 import { roleSchema } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
@@ -8,14 +11,20 @@ import { connectionReadOf } from "../agent-scope.ts";
 import { activeMember, organizationId } from "../auth/auth.ts";
 import { personOf } from "../connections.ts";
 import { members, users } from "../db/core/schema.ts";
+import { heldAppCallsOf } from "../held-app-calls.ts";
 import type { HeldWriteView, ReadCheck } from "./cards.tsx";
 import { inertOn } from "./inert.ts";
+import { say } from "./words.ts";
+import type { ChannelLocale } from "./words.ts";
 
 // A turn's held writes, as its chat platform's card shows them (cards.tsx
-// `heldWritesCard`): the writes the chat's agent had connect hold in this
-// chat during the turn, in the order it asked for them, each with its
-// exact values. Connect keeps them (its src/pending.ts), with their input
-// hashes, which the card carries so a press confirms exactly these.
+// `heldWritesCard`): the writes the chat's agent had held in this chat
+// during the turn, in the order it asked for them, each with its exact
+// values. Connect keeps a connection's (its src/pending.ts), with their
+// input hashes; the chat's Workspace keeps a write to an App its chat held
+// once it used something only its person can read (held-app-calls.ts,
+// GRA-1929), with its exact request's hash. The card carries the hashes,
+// so a press confirms exactly these.
 
 /**
  * The member `userId` as core's decisions take them (`identity`, as a
@@ -108,14 +117,78 @@ export const viewOf = (held: PendingAction): HeldWriteView => {
 };
 
 /**
- * The writes the agent of chat `chatId` had held for `userId` since
- * `since` (milliseconds since the epoch), oldest first: none for someone
- * no longer a member, whose writes connect drops.
+ * A write to an App held in chat `chatId` as the card shows it, in
+ * `locale`: what it calls in which App (by its ID once removed), and the
+ * exact request it would send, the text its hash is of, as it is.
  */
-export const turnHeldWrites = async (
+export const appViewOf = (
+  chatId: string,
+  call: HeldAppCall,
+  locale: ChannelLocale
+): HeldWriteView => ({
+  id: call.id,
+  inputHash: call.requestHash,
+  chatId,
+  title: say("heldAppWrite", locale, {
+    function: call.function,
+    app: call.appName ?? call.appId,
+  }),
+  values: [{ label: say("heldAppRequest", locale), value: call.request }],
+  state: "held",
+});
+
+/**
+ * The writes to an App held for `userId` in their chat `chatId`, which
+ * came through `via`, that still wait, oldest first, every page; none for
+ * a chat that isn't theirs through `via`.
+ */
+export const heldAppCallsIn = async (
   env: Env,
   userId: string,
   chatId: string,
+  via: ChatChannel
+): Promise<HeldAppCall[]> => {
+  const all: HeldAppCall[] = [];
+  let after: string | undefined;
+  for (;;) {
+    let page: HeldAppCall[];
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- each page goes on from the last
+      page = await heldAppCallsOf(env, { userId }, chatId, via, after);
+    } catch (error) {
+      if (agentErrors.codeOf(error) === "agent.chat_not_found") {
+        return [];
+      }
+      throw error;
+    }
+    all.push(...page);
+    after = page.at(-1)?.id;
+    if (page.length < heldAppCallsPage || after === undefined) {
+      return all;
+    }
+  }
+};
+
+/**
+ * The writes the agent of chat `chatId`, which came through `platform`,
+ * had held for `userId` since `since` (milliseconds since the epoch):
+ * connect's and those to an App, oldest first, in `locale`. None for
+ * someone no longer a member, whose writes connect drops, and whose App
+ * writes could no longer run.
+ */
+export const turnHeldWrites = async (
+  env: Env,
+  {
+    userId,
+    chatId,
+    platform,
+    locale,
+  }: {
+    userId: string;
+    chatId: string;
+    platform: ChatChannel;
+    locale: ChannelLocale;
+  },
   since: number
 ): Promise<HeldWriteView[]> => {
   const member = await memberOf(env, userId);
@@ -126,15 +199,24 @@ export const turnHeldWrites = async (
     member.person,
     "chat_app"
   );
-  return waiting
+  const writes = waiting
     .filter(
       ({ context, requestedAt }) =>
         context.type === "chat" &&
         context.chatId === chatId &&
         Date.parse(requestedAt) >= since
     )
-    .toSorted((a, b) => Date.parse(a.requestedAt) - Date.parse(b.requestedAt))
-    .map(viewOf);
+    .map((held) => ({ at: Date.parse(held.requestedAt), view: viewOf(held) }));
+  const calls = await heldAppCallsIn(env, userId, chatId, platform);
+  const toApps = calls
+    .filter(({ heldAt }) => Date.parse(heldAt) >= since)
+    .map((call) => ({
+      at: Date.parse(call.heldAt),
+      view: appViewOf(chatId, call, locale),
+    }));
+  return [...writes, ...toApps]
+    .toSorted((a, b) => a.at - b.at)
+    .map(({ view }) => view);
 };
 
 /**

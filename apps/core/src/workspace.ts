@@ -1942,18 +1942,20 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /**
-   * The App writes held for `personId` in their chat `chatId` that still
-   * wait, oldest first, a page of at most `heldAppCallsPage`: none past
-   * their day. A full page goes on `after` its last one's ID; an ID that
-   * names no hold of the chat starts from the first.
+   * The App writes held for `personId` in their chat `chatId`, which came
+   * through `via` (`#chatThrough`), that still wait, oldest first, a page
+   * of at most `heldAppCallsPage`: none past their day. A full page goes
+   * on `after` its last one's ID; an ID that names no hold of the chat
+   * starts from the first.
    */
   async heldAppCalls(
     chatId: unknown,
     personId: string,
+    via: ChatChannel,
     now: number,
     after?: string
   ): Promise<HeldAppCallRow[]> {
-    const chat = this.#ownChat(chatId, personId);
+    const chat = this.#chatThrough(chatId, personId, via);
     await this.#lapseHeldAppCalls(chat.id, now);
     const from =
       after === undefined
@@ -1991,21 +1993,23 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /**
-   * Decides held App call `id` of `personId`'s chat `chatId`, once: only
-   * while it waits, within its day, and, to confirm it, only for the
-   * request whose SHA-256 is `requestHash`, the one the person was shown.
-   * Its request is emptied in the same write, and handed back to run once
-   * confirmed. Anything else (another's, decided already, lapsed, another
-   * request) answers as none: `agent.held_call_not_found`.
+   * Decides held App call `id` of `personId`'s chat `chatId`, which came
+   * through `via` (`#chatThrough`), once: only while it waits, within its
+   * day, and, to confirm it, only for the request whose SHA-256 is
+   * `requestHash`, the one the person was shown. Its request is emptied in
+   * the same write, and handed back to run once confirmed. Anything else
+   * (another's, decided already, lapsed, another request) answers as none:
+   * `agent.held_call_not_found`.
    */
   async decideHeldAppCall(
     chatId: unknown,
     personId: string,
+    via: ChatChannel,
     id: string,
     decision: { confirm: true; requestHash: string } | { confirm: false },
     now: number
   ): Promise<HeldAppCallRow> {
-    const chat = this.#ownChat(chatId, personId);
+    const chat = this.#chatThrough(chatId, personId, via);
     await this.#lapseHeldAppCalls(chat.id, now);
     const decided = this.ctx.storage.transactionSync(() => {
       const row = this.#db
@@ -5107,6 +5111,21 @@ export class Workspace extends DurableObject<Env> {
   #ownChat(chatId: unknown, personId: string): Chat {
     const chat = this.#chat(chatId);
     if (chat.personId !== personId) {
+      throw agentErrors.create("agent.chat_not_found");
+    }
+    return chat;
+  }
+
+  /**
+   * The chat, if it is `personId`'s and came through `via`: where its held
+   * App calls are shown, so the only place they are listed and decided
+   * (GRA-1929). Grasp's own app (`web`) never finds a chat app's, as
+   * `#graspChat`; a chat app's card finds only its own platform's. Anything
+   * else is refused as if there were none.
+   */
+  #chatThrough(chatId: unknown, personId: string, via: ChatChannel): Chat {
+    const chat = this.#ownChat(chatId, personId);
+    if (chat.via !== via) {
       throw agentErrors.create("agent.chat_not_found");
     }
     return chat;
