@@ -165,3 +165,30 @@ describe("the days a chunk mentions, in the store", () => {
     expect(before.pack.items[0]).toMatchObject({ source, version });
   });
 });
+
+describe("a date said not found", () => {
+  it("names none of a date's words when a readable passage mentions its day, however many ways the question writes it", async () => {
+    const store = env.BRAIN_STORE.getByName("brain");
+    const group = `team:${crypto.randomUUID()}`;
+    const reader: Reader = { person: crypto.randomUUID(), groups: [group] };
+    await store.addSource({
+      source: `upload:${crypto.randomUUID()}`,
+      change: crypto.randomUUID(),
+      text: "Contract signed March 14th, 2026.",
+      access: { kind: "audience", group },
+    });
+    const notFound = async (question: string): Promise<string[]> => {
+      const pack = await store.recall({
+        question,
+        reader,
+        budget: { tokens: recallBudgetMax },
+      });
+      return pack.notFound;
+    };
+
+    expect([
+      await notFound("Signed on 14 March 2026, i.e. 2026-03-14?"),
+      await notFound("14 March 2026 or 14/03/2026"),
+    ]).toStrictEqual([[], []]);
+  });
+});

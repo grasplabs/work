@@ -27,10 +27,16 @@ describe("the exact parts of a question", () => {
     ]);
   });
 
-  it("reads each day once, however many readings of it a question's words hold", () => {
-    expect(partsOf("March 14th March 15th")).toStrictEqual([
-      { asked: "March 14th", kind: "date" },
-      { asked: "March 15th", kind: "date" },
+  it("reads each day once, however many readings of it a question's words hold, in either order", () => {
+    expect([
+      partsOf("March 14th March 15th"),
+      partsOf("03/04/2026 and 04/03/2026"),
+    ]).toStrictEqual([
+      [
+        { asked: "March 14th", kind: "date" },
+        { asked: "March 15th", kind: "date" },
+      ],
+      [{ asked: "03/04/2026", kind: "date" }],
     ]);
   });
 

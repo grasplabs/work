@@ -81,7 +81,10 @@ export interface Written {
 export interface Dated {
   /** The date as the question wrote it. */
   asked: string;
-  /** Its words in order (`sequenceOf`): what it stands for once found. */
+  /**
+   * Its words (`sequenceOf`), and those of every other writing of the same
+   * day in the question: what it stands for once found.
+   */
   words: string[];
   /** The days it may be: two when it reads both ways. */
   days: Day[];
@@ -157,12 +160,25 @@ export const exactsOf = (question: string): Exact[] => {
     phrases.push(exact);
     return " ";
   });
-  const dates: Dated[] = [];
+  // A date once per day, its days in any order: "March 14th March 15th"
+  // also reads "14th March", the same day again. A repeat's words join the
+  // first's, so the date stands for every writing of it once it is found.
+  const dates = new Map<string, Dated>();
   let undated = "";
   let from = 0;
   for (const { start, end, days } of datesIn(rest)) {
     const asked = rest.slice(start, end);
-    dates.push({ asked, words: sequenceOf(asked), days, kind: "date" });
+    const words = sequenceOf(asked);
+    const key = days
+      .map(({ year, month, day }) => `${year}-${month}-${day}`)
+      .toSorted()
+      .join(" ");
+    const known = dates.get(key);
+    if (known === undefined) {
+      dates.set(key, { asked, words, days, kind: "date" });
+    } else {
+      known.words = [...new Set([...known.words, ...words])];
+    }
     undated += `${rest.slice(from, start)} `;
     from = end;
   }
@@ -170,21 +186,17 @@ export const exactsOf = (question: string): Exact[] => {
   const seen = new Set<string>();
   // Dates are read before IDs, but listed after them: a question of many
   // dates keeps its IDs within `maxExacts`, as before dates were read.
-  return [...phrases, ...idsOf(undated), ...dates]
-    .filter((exact) => {
-      // A date once per day: "March 14th March 15th" also reads "14th
-      // March", the same day again.
-      const key =
-        exact.kind === "date"
-          ? `date ${exact.days.map(({ year, month, day }) => `${year}-${month}-${day}`).join(" ")}`
-          : `words ${exact.words.join(" ")}`;
+  return [
+    ...[...phrases, ...idsOf(undated)].filter(({ words }) => {
+      const key = words.join(" ");
       if (seen.has(key)) {
         return false;
       }
       seen.add(key);
       return true;
-    })
-    .slice(0, maxExacts);
+    }),
+    ...dates.values(),
+  ].slice(0, maxExacts);
 };
 
 /** Whether `words` hold `part`'s words in a row, in its order. */
