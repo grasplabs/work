@@ -1639,13 +1639,11 @@ const recallProbe =
         )),
         byMeaning: true,
       },
-      {
-        ...(await answer(
-          "the reader's own entity, which hidden relations name",
-          async () => await asked({ question: "Plain", budget: whole })
-        )),
-        byMeaning: true,
-      },
+      // Not held to before: the fixture adds a readable "Plain" each time.
+      await answer(
+        "the reader's own entity, which hidden relations name",
+        async () => await asked({ question: "Plain", budget: whole })
+      ),
       await answer(
         "nothing",
         async () => await asked({ question: "", budget: whole })
@@ -9660,13 +9658,10 @@ export const sourcesProbes = {
   search: async (probing) => {
     await recallFixture(probing);
     return [
-      {
-        ...(await answer(
-          "the reader's own entity, which hidden relations name",
-          async () => await sourcesAs(probing.personId).search("Plain")
-        )),
-        byMeaning: true,
-      },
+      await answer(
+        "the reader's own entity, which hidden relations name",
+        async () => await sourcesAs(probing.personId).search("Plain")
+      ),
       ...(await askedOfMarkers(
         probing,
         [],

@@ -143,7 +143,8 @@ const versionKey = (id: string, version: number): string =>
 
 /**
  * The versions everyone in the company may read now, of every test in this
- * file, by their source's id: each `forEveryone` adds, until core adds
+ * file, by their source's id: each `forEveryone` and upload for everyone
+ * adds, until core adds
  * the source again for other readers (narrowed: no version of it is the
  * company's then) or erases it (`addSourceNoLongerEveryones`,
  * `eraseSourceNoLongerEveryones` below). What
@@ -627,6 +628,7 @@ describe("recall, as an App, a workflow and a chat reach it", setUpTime, () => {
       crypto.randomUUID(),
     ];
     // Uploaded as the Sources page uploads, through the producer itself.
+    everyonesVersions.set(everyoneUpload, versionKey(everyoneUpload, 1));
     await uploadToBrain(
       env,
       ada,

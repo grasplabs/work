@@ -969,7 +969,13 @@ const holdersOwnProduced = (world: HoldersProduced) => {
   };
 };
 
-/** What `personId` recalls for `question`: each chunk's text. */
+/**
+ * What `personId` recalls for `question` by its words and exact parts:
+ * each chunk's text. What also comes back by meaning is whatever else
+ * they may read nearest the question; that none of it is hidden from them
+ * is the passes' to show (`findingsOf`), as every hidden passage holds a
+ * marker.
+ */
 const textsFor = async (
   personId: string,
   question: string
@@ -979,7 +985,9 @@ const textsFor = async (
     question,
     budget: { tokens: recallBudgetMax },
   });
-  return items.map(({ text }) => text);
+  return items.flatMap(({ text, found }) =>
+    found === "meaning" ? [] : [text]
+  );
 };
 
 describe(
@@ -1821,7 +1829,11 @@ describe(
             question: askedMarker,
             budget: { tokens: recallBudgetMax },
           });
-          const [found] = items;
+          // The turn, by its words: what else they may read comes by meaning.
+          const found = items.find(
+            ({ source, found: way }) =>
+              source.producer === "chat" && way !== "meaning"
+          );
           expect(found, "the chat's turn was never handed over").toBeDefined();
           await expect(
             textsFor(holder, runMarker),
@@ -1862,10 +1874,10 @@ describe(
         question: capId,
         budget: { tokens: recallBudgetMax },
       });
-      const cappedFinds = cappedItems.map(({ text, found }) => ({
-        text,
-        found,
-      }));
+      // By meaning, whatever else they may read: never a hidden copy.
+      const cappedFinds = cappedItems.flatMap(({ text, found }) =>
+        found === "meaning" && !text.includes(capId) ? [] : [{ text, found }]
+      );
 
       const asOutsider = (groups: string[]): Probing => ({
         personId: outsider,
@@ -3983,16 +3995,10 @@ describe(
           await drainAuditOutboxes(env);
           await relayHandOvers(env);
           await workBrain(env, new Date(), producersOf(env));
-          // The run, whatever else they may read comes back too.
-          const { items } = await recallAs(env, personId, {
-            personal: true,
-            question: returned,
-            budget: { tokens: recallBudgetMax },
-          });
-          expect(
-            items.filter(({ source: from }) => from.id === source.id),
+          await expect(
+            textsFor(personId, returned),
             "the run was never handed over"
-          ).toHaveLength(1);
+          ).resolves.toHaveLength(1);
         },
         { timeout: 15_000, interval: 200 }
       );
