@@ -281,7 +281,7 @@ describe("an agent made from the chat", { timeout: 120_000 }, () => {
       admin.userId,
       // Its code reaches for anything that makes or changes an agent.
       codeStep(
-        `export default async (self, env) => { const tries = [() => env.agents?.make?.({ name: "${name}" }), () => env.connections?.makeAgent?.({ name: "${name}" }), () => env.chat?.makeAgent?.({ name: "${name}" }), () => env.chat?.makeDraftedAgent?.("call_any")]; for (const attempt of tries) { try { if ((await attempt()) !== undefined) { return "made"; } } catch { } } return "nothing"; };`
+        `export default async (self, env) => { const input = ${JSON.stringify({ ...hr(name), face: "pen", modelRole: null })}; const tries = [() => env.agents?.make?.(input), () => env.agents?.makeAgent?.(input), () => env.connections?.makeAgent?.(input), () => env.connections?.makeOwnAgent?.(input), () => env.chat?.makeAgent?.(input), () => env.chat?.makeDraftedAgent?.("call_any")]; for (const attempt of tries) { try { if ((await attempt()) !== undefined) { return "made"; } } catch { } } return "nothing"; };`
       ),
       // Then drafts what the planted words asked for.
       draftStep({
