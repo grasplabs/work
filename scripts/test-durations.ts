@@ -7,7 +7,9 @@
 //   vp run test:durations runs/*/test-progress.log
 //
 // Several runs make it steadier: each file takes the median of the runs
-// it ran in. Files the logs don't name keep the time they had. Rewrites
+// it passed in. A run where a file failed a test gives it no time: a test
+// cut at its timeout, and again on its retry, is two timeouts, not the
+// file's time. Files the logs don't name keep the time they had. Rewrites
 // scripts/test-durations.json.
 import { readFileSync, renameSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -25,7 +27,7 @@ const projectPattern = String.raw`(?<project>\S+(?: \([^)\s]+\))?)`;
 
 /** A finished test in a progress log: when, how it ended, how long it took, and its file and name. */
 const progressLine = new RegExp(
-  String.raw`^(?<at>\S+) \S+(?: (?<ms>\d+)ms)? ${projectPattern} (?<file>\S+) > `,
+  String.raw`^(?<at>\S+) (?<state>\S+)(?: (?<ms>\d+)ms)? ${projectPattern} (?<file>\S+) > `,
   "u"
 );
 
@@ -43,10 +45,13 @@ const fileLine = new RegExp(
  * own time when it has one, whichever is most. Only the file's own time
  * counts its `beforeAll` and `afterAll`: the compiler's build tests spend
  * half their time there, which the rest put at about half what they took.
+ * A file that failed a test in the log is left out: what it took there is
+ * no measure of what it takes.
  */
 export const fileSecondsIn = (log: string): Map<string, number> => {
   const files = new Map<string, { sum: number; from: number; to: number }>();
   const fileMs = new Map<string, number>();
+  const failed = new Set<string>();
   for (const line of log.split("\n")) {
     const own = fileLine.exec(line)?.groups;
     if (own !== undefined) {
@@ -58,8 +63,11 @@ export const fileSecondsIn = (log: string): Map<string, number> => {
     if (match?.groups === undefined) {
       continue;
     }
-    const { at, ms, project, file } = match.groups;
+    const { at, state, ms, project, file } = match.groups;
     const key = `${project} ${file}`;
+    if (state === "failed") {
+      failed.add(key);
+    }
     const took = Number(ms ?? 0);
     const finished = Date.parse(at ?? "");
     const seen = files.get(key) ?? {
@@ -74,7 +82,9 @@ export const fileSecondsIn = (log: string): Map<string, number> => {
     }
     files.set(key, seen);
   }
-  const keys = new Set([...files.keys(), ...fileMs.keys()]);
+  const keys = new Set(
+    [...files.keys(), ...fileMs.keys()].filter((key) => !failed.has(key))
+  );
   return new Map(
     [...keys].map((key) => {
       const { sum = 0, from = 0, to = 0 } = files.get(key) ?? {};

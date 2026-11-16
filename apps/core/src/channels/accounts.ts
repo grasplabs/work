@@ -26,7 +26,10 @@ import { drizzle } from "drizzle-orm/d1";
 
 import { auditedBatch, outboxedIfChanged } from "../audit-outbox.ts";
 import { activeMember } from "../auth/auth.ts";
+import { personOf } from "../connections.ts";
 import { channelAccounts, channelLinks } from "../db/core/schema.ts";
+import { workspace } from "../durable-objects.ts";
+import { personalWorkspaceId } from "../personal-workspace.ts";
 import { CoreRpcTarget } from "../rpc-target.ts";
 import { withPerson } from "../session-check.ts";
 import type { SessionCheck } from "../session-check.ts";
@@ -223,6 +226,20 @@ export class ChannelAccountsRpc
         .orderBy(desc(channelAccounts.linkedAt), desc(channelAccounts.id));
       return rows.map(accountOf);
     });
+  }
+
+  async forgetConversations(): Promise<number> {
+    return await this.#asMember(
+      async (person) =>
+        await workspace(
+          this.#env,
+          personalWorkspaceId(person.userId)
+        ).forgetChatApps(
+          person.userId,
+          await personOf(this.#env, person),
+          actorOf(person)
+        )
+    );
   }
 
   async reach(): Promise<ChannelReach[]> {

@@ -65,6 +65,12 @@ export const sessions = sqliteTable(
     activeTeamId: text("active_team_id"),
     /** A Grasp staff session: time-bound, and not a member of the organization. */
     staff: integer({ mode: "boolean" }).notNull().default(false),
+    /**
+     * A session for someone's own interview alone, made while the gate is
+     * closed (onboarding/gate.ts, GRA-1790): it opens their interview and
+     * nothing else of Grasp, and the gate's opening ends it.
+     */
+    interview: integer({ mode: "boolean" }).notNull().default(false),
   },
   (table) => [index("sessions_user_id_idx").on(table.userId)]
 );
@@ -3533,6 +3539,27 @@ export const agentDocuments = sqliteTable(
 );
 
 /**
+ * The apps an agent may use (agent-apps.ts), by catalog entry
+ * (`<source>:<id>`). An agent with no row uses any app its classes allow,
+ * as before agents had apps; one with rows, only those `on`. A `removed`
+ * row keeps an app someone took off from coming back when its apps are
+ * worked out again. Gone with the agent.
+ */
+export const agentApps = sqliteTable(
+  "agent_apps",
+  {
+    agentId: text("agent_id").notNull(),
+    app: text().notNull(),
+    name: text().notNull(),
+    state: text({ enum: ["on", "removed"] }).notNull(),
+    source: text({ enum: ["instructions", "person"] }).notNull(),
+    changedBy: text("changed_by").notNull(),
+    changedAt: timestamp("changed_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.agentId, table.app] })]
+);
+
+/**
  * How an agent narrows a class of tools the company turned on
  * (agent-reach.ts): one row per agent and class an admin changed.
  * `asClass`: as the company has the class. It only narrows: the class
@@ -5837,10 +5864,10 @@ export const brainRecords = sqliteTable(
     body: text().notNull(),
     addedAt: timestamp("added_at").notNull(),
     /**
-     * When a Knowledge content purge last rewrote `body` (brain-records.ts
-     * `brainRecordErasure`): the record is the company's as purged from
-     * then on, and the same id sent again is left as it is, never its
-     * words put back.
+     * When an earlier release's Knowledge term purge last rewrote `body`:
+     * the record is the company's as purged from then on, and the same id
+     * sent again is left as it is, never its words put back
+     * (brain-records.ts `keepRecords`). Nothing sets it any more.
      */
     purgedAt: timestamp("purged_at"),
     /**
@@ -6145,6 +6172,7 @@ export const stephenRequests = sqliteTable(
     index("stephen_requests_day_idx").on(table.day),
     index("stephen_requests_person_idx").on(table.personId, table.chatId),
     index("stephen_requests_question_idx").on(table.questionId),
+    index("stephen_requests_topic_idx").on(table.topicId),
   ]
 );
 
@@ -6497,6 +6525,59 @@ export const brainHandOvers = sqliteTable(
     index("brain_hand_overs_unrelayed_idx")
       .on(table.notedAt)
       .where(sql`${table.relayedAt} IS NULL`),
+  ]
+);
+
+/**
+ * Whose run results the new Brain holds, by workflow (src/brain-run-sources.ts):
+ * one row per person and workflow a run of theirs was handed over for, in
+ * their own store (not one an App started). When they lose the workflow's
+ * role, the clock marks the row revoked and owed, then the Brain takes those
+ * runs' sources out of use a page at a time (history kept), then the
+ * removal is no longer owed and its one event is stored. A work record for the clock alone: no read of the Brain reads it.
+ */
+export const brainRunSources = sqliteTable(
+  "brain_run_sources",
+  {
+    personId: text("person_id").notNull(),
+    workflowId: text("workflow_id").notNull(),
+    /** Whether a run of theirs was handed over since the last revocation. */
+    inUse: integer("in_use", { mode: "boolean" }).notNull().default(true),
+    /** When the last revocation was marked: the runs created by then are its. */
+    revokedAt: timestamp("revoked_at"),
+    /** How many runs that revocation covers, counted when it was marked. */
+    runs: integer(),
+    /** Whether that revocation's removal or its event is still owed. */
+    removalOwed: integer("removal_owed", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    /**
+     * Where the owed removal's next page starts, in the order of the index
+     * its runs are read by: after the run created at `removedThroughAt`
+     * with ID `removedThrough`, the last it took out of use. Before its
+     * first page, the last revocation's moment and no run (after every run
+     * that one covered), or both null for a first revocation.
+     */
+    removedThroughAt: timestamp("removed_through_at"),
+    removedThrough: text("removed_through"),
+    /**
+     * When a tick last took the owed removal for a page, whether the page
+     * went through or failed: the clock gives the one tried longest ago
+     * its turn first, those never tried before all. Null until then.
+     */
+    triedAt: timestamp("tried_at"),
+  },
+  (table) => [
+    primaryKey({ columns: [table.personId, table.workflowId] }),
+    // What the clock checks each minute: the rows in use alone, and the
+    // removals still owed, those tried longest ago (or never) first. Each
+    // condition a literal, as the queries write it, so SQLite uses it.
+    index("brain_run_sources_in_use_idx")
+      .on(table.personId, table.workflowId)
+      .where(sql.raw("in_use = 1")),
+    index("brain_run_sources_owed_idx")
+      .on(table.triedAt, table.revokedAt)
+      .where(sql.raw("removal_owed = 1")),
   ]
 );
 

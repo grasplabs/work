@@ -217,11 +217,10 @@ export const botConnectorMembersUrl =
   "https://bot-connector-control.test/members";
 
 /**
- * Where tests have Teams refuse streamed messages in a conversation: POST
- * `{ refuse }`, the conversation's id.
+ * Where tests have Teams refuse a conversation's next edits as too many
+ * requests: POST `{ conversation, count }`.
  */
-export const botConnectorStreamsUrl =
-  "https://bot-connector-control.test/streams";
+export const botConnectorEditsUrl = "https://bot-connector-control.test/edits";
 
 /**
  * Where tests read what reached the Bot Connector, in order: `{ posted,
@@ -284,6 +283,14 @@ export const httpApiReceivedUrl = "https://http-api-control.test/received";
  */
 export const botConnectorUninstallUrl =
   "https://bot-connector-control.test/uninstall";
+
+/**
+ * Where tests make Teams fail one post: POST `{ conversation, holding }`;
+ * the Bot Connector answers 502, once, to the next post in that
+ * conversation whose body holds `holding`.
+ */
+export const botConnectorFailOnceUrl =
+  "https://bot-connector-control.test/fail-once";
 
 /** Where tests read the paths the fake npm registry was asked for, in order. */
 export const npmAskedUrl = "https://npm-control.test/asked";
@@ -704,14 +711,19 @@ export default {
       botConnector.setMembers(members);
       return new Response(null, { status: 204 });
     }
-    if (request.method === "POST" && url.href === ${JSON.stringify(botConnectorStreamsUrl)}) {
-      const { refuse } = await request.json();
-      botConnector.refuseStreams(refuse);
+    if (request.method === "POST" && url.href === ${JSON.stringify(botConnectorEditsUrl)}) {
+      const { conversation, count } = await request.json();
+      botConnector.refuseEdits(conversation, count);
       return new Response(null, { status: 204 });
     }
     if (request.method === "POST" && url.href === ${JSON.stringify(botConnectorUninstallUrl)}) {
       const { conversation } = await request.json();
       botConnector.uninstall(conversation);
+      return new Response(null, { status: 204 });
+    }
+    if (request.method === "POST" && url.href === ${JSON.stringify(botConnectorFailOnceUrl)}) {
+      const { conversation, holding } = await request.json();
+      botConnector.failOnce(conversation, holding);
       return new Response(null, { status: 204 });
     }
     if (url.href === ${JSON.stringify(botConnectorPostedUrl)}) {

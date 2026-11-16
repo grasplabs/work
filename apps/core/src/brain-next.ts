@@ -12,6 +12,7 @@ import {
   isSourceText,
   erasedSource,
   removedSource,
+  removalsMax,
   changeReused,
   listPageMax,
   erasureReasons,
@@ -58,6 +59,7 @@ import type {
   ContestedCursor,
   Entity,
   EntitiesCursor,
+  ErasedMemory,
   ErasureReason,
   Embedders,
   EntityKind,
@@ -83,6 +85,7 @@ import type {
   Reader,
   RecallRequest,
   RestoreStatus,
+  RetiredMemory,
   SourceErasure,
   SourceId,
   Speaker,
@@ -116,6 +119,8 @@ import type {
 import { brainSourceErrors, firstLineOf } from "@grasp-os/shared/brain-sources";
 import { withinTime } from "@grasp-os/shared/deadline";
 import { isExpectedError } from "@grasp-os/shared/errors";
+import { appIdSchema } from "@grasp-os/shared/ids";
+import type { AppId } from "@grasp-os/shared/ids";
 import { instructionFileErrors } from "@grasp-os/shared/instruction-files";
 import type { InstructionFileRef } from "@grasp-os/shared/instruction-files";
 import { log } from "@grasp-os/shared/log";
@@ -144,6 +149,7 @@ import { promptTextOf } from "./instructions-text.ts";
 import { parseModelRef } from "./model-catalog.ts";
 import { brainSpendByPurpose, spendMonth } from "./model-spend.ts";
 import { modelForRole, modelSettings, models } from "./models.ts";
+import { onboardingStoreName } from "./onboarding/store-name.ts";
 import { organizationTimeZone } from "./organization.ts";
 import { personalWorkspaceId } from "./personal-workspace.ts";
 import { shippedSkills } from "./shipped-skills.ts";
@@ -200,6 +206,22 @@ const teamPrefix = "team:";
  */
 const companyGroup = "company";
 
+/**
+ * A team of the onboarding's staff list, as the Brain's group: its people
+ * who took part read what five or more of them said in their interviews
+ * (GRA-1741). A staff-list team is not one of core's teams, so it is a
+ * group of its own kind.
+ */
+const interviewsPrefix = "interviews:";
+
+/** A staff-list team's ID, as core passes it: never empty. */
+const rosterTeamIdSchema = wellFormedString()
+  .min(1)
+  .max(principalMaxLength - interviewsPrefix.length);
+
+/** What reading as a member needs: core's records and the onboarding's. */
+type ReaderEnv = Pick<Env, "DB" | "ONBOARDING" | "DURABLE_OBJECT_JURISDICTION">;
+
 /** A person's or a team's ID, as core passes it: never empty. */
 const idSchema = wellFormedString()
   .min(1)
@@ -209,6 +231,7 @@ const sourceReadersSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("owner"), personId: idSchema }),
   z.strictObject({ kind: z.literal("team"), teamId: idSchema }),
   z.strictObject({ kind: z.literal("everyone") }),
+  z.strictObject({ kind: z.literal("interviews"), teamId: rosterTeamIdSchema }),
   z.strictObject({ kind: z.literal("none") }),
 ]);
 
@@ -270,7 +293,17 @@ const kindsWithoutColon = <const K extends string>(
 // chat's group (brain-next-origins.ts `chatTurnSource`, GRA-1805).
 // `capture`: what a chat's agent read through its person's own connection
 // (connection-capture.ts, GRA-1730), in their own store alone.
-const producerKinds = kindsWithoutColon(["upload", "chat", "run", "capture"]);
+// `interview`: a person's interview, theirs alone, in their own store;
+// `claim`: what five or more people of a staff-list team said in theirs,
+// readable by that team (onboarding/new-brain.ts, GRA-1790, GRA-1741).
+const producerKinds = kindsWithoutColon([
+  "upload",
+  "chat",
+  "run",
+  "capture",
+  "interview",
+  "claim",
+]);
 
 /**
  * The kinds the Sources page lists (`listSourcesAs`): not a chat's turns,
@@ -398,6 +431,7 @@ const newSourceSchema = z.strictObject({
 
 /** The most characters of a question `recallAs` takes, as the Brain's contract says. */
 export { questionMaxLength as recallQuestionMaxLength } from "@grasp-os/brain-next/contract";
+export { removalsMax } from "@grasp-os/brain-next/contract";
 
 /** A question as the Brain takes one (`recallRequestSchema`). */
 const questionSchema = wellFormedString().max(questionMaxLength);
@@ -684,6 +718,10 @@ const keptIn = async <T>(
 const teamGroup = (teamId: string): string =>
   `${teamPrefix}${checked(idSchema, teamId)}`;
 
+/** A staff-list team, as the Brain's group (`interviewsPrefix`). */
+const interviewsGroup = (teamId: string): string =>
+  `${interviewsPrefix}${checked(rosterTeamIdSchema, teamId)}`;
+
 const accessOf = (readers: SourceReaders): Access => {
   switch (readers.kind) {
     case "owner": {
@@ -694,6 +732,9 @@ const accessOf = (readers: SourceReaders): Access => {
     }
     case "everyone": {
       return { kind: "audience", group: companyGroup };
+    }
+    case "interviews": {
+      return { kind: "audience", group: interviewsGroup(readers.teamId) };
     }
     case "none": {
       return { kind: "none" };
@@ -715,21 +756,59 @@ const accessOf = (readers: SourceReaders): Access => {
 export type Reach = "person" | "teams" | "company";
 
 /**
+ * The staff-list team whose claims `personId` reads (GRA-1741): that of
+ * the interview they took part in under their own account, while they are
+ * on the list in it (the store's `interviewTeamOf`). Asked of the
+ * onboarding's object at every read, beside core's own records, so a move
+ * or a removal holds from the next question on. A failure there drops only
+ * that group, so the onboarding can't take the Brain down with it: the
+ * reader then reads less, never more. It has no timeout of its own: a slow
+ * onboarding object holds the read up to the platform's own RPC limits,
+ * and a throw fails closed as above.
+ */
+const interviewTeamOf = async (
+  env: ReaderEnv,
+  personId: string
+): Promise<string | null> => {
+  try {
+    return await inJurisdiction(env, env.ONBOARDING)
+      .getByName(onboardingStoreName)
+      .interviewTeamOf(personId);
+  } catch (error) {
+    log.error("brain.interview_team_failed", {
+      error: error instanceof Error ? error.name : "unknown",
+    });
+    return null;
+  }
+};
+
+/**
  * The member `personId` as the Brain's reader: the person, their teams as
- * core counts them now, and the company. Refused once they have no
- * current membership.
+ * core counts them now, the staff-list team whose claims they read
+ * (`interviewTeamOf`), and the company. Refused once they have no current
+ * membership. Without `interviews`, never the staff-list team: the
+ * onboarding's object isn't asked.
  */
 const personReaderOf = async (
-  env: Pick<Env, "DB">,
-  personId: string
+  env: ReaderEnv,
+  personId: string,
+  { interviews = true }: { interviews?: boolean } = {}
 ): Promise<PersonReader> => {
-  const member = await memberOf(env.DB, checked(idSchema, personId));
+  const id = checked(idSchema, personId);
+  const [member, interviewTeam] = await Promise.all([
+    memberOf(env.DB, id),
+    interviews ? interviewTeamOf(env, id) : null,
+  ]);
   if (member === undefined) {
     throw permissionErrors.create("permission.person_inactive");
   }
   return {
     person: member.userId,
-    groups: [...member.teams.map(({ id }) => teamGroup(id)), companyGroup],
+    groups: [
+      ...member.teams.map(({ id: teamId }) => teamGroup(teamId)),
+      ...(interviewTeam === null ? [] : [interviewsGroup(interviewTeam)]),
+      companyGroup,
+    ],
   };
 };
 
@@ -756,12 +835,16 @@ export const sourceTextProblem = (
  * Refused once they have no current membership, whatever the reach.
  */
 const readerOf = async (
-  env: Pick<Env, "DB">,
+  env: ReaderEnv,
   personId: string,
   reach: Reach,
   teams: readonly string[] = []
 ): Promise<Reader> => {
-  const { person, groups } = await personReaderOf(env, personId);
+  // What their interviews' team said (GRA-1741) is read as the person
+  // alone: never by code or an App acting as their teams or the company.
+  const { person, groups } = await personReaderOf(env, personId, {
+    interviews: reach === "person",
+  });
   switch (reach) {
     case "person": {
       return { person, groups };
@@ -829,7 +912,7 @@ const readerOf = async (
  * version is kept and found, and nothing is drawn from it.
  */
 export const addSource = async (
-  env: BrainEnv & Pick<Env, "DB">,
+  env: BrainEnv & ReaderEnv,
   added: {
     source: SourceRef;
     change: string;
@@ -981,7 +1064,7 @@ const reachOf = ({ personal, company = false }: Recall): Reach => {
  * `company`, as the company and, of `teams`, those they are in now.
  */
 const recallRequestAs = async (
-  env: BrainEnv & Pick<Env, "DB" | "EMBEDDER">,
+  env: BrainEnv & ReaderEnv & Pick<Env, "EMBEDDER">,
   personId: string,
   recall: Recall
 ): Promise<RecallRequest> => {
@@ -1003,6 +1086,14 @@ const recallRequestAs = async (
 };
 
 /**
+ * What a recall's stores found (`findingsOf`): the shared store's, then
+ * the reader's own when the reader names them.
+ */
+type Findings =
+  | readonly [shared: Finding]
+  | readonly [shared: Finding, own: Finding];
+
+/**
  * What every store `request`'s reader may read from finds for it, by
  * `finding` (`find`, or `findPassages` for passages alone): the shared
  * store, and their own when the reader names them (`ownBrainOf`), the
@@ -1014,20 +1105,15 @@ const findingsOf = async (
   request: RecallRequest,
   finding: "find" | "findPassages",
   used?: Used
-): Promise<Finding[]> => {
+): Promise<Findings> => {
   const own = ownBrainOf(env, request.reader);
-  return await Promise.all([
-    brain(env)[finding](
-      used === undefined ? request : { ...request, used: used.shared }
-    ),
-    ...(own === undefined
-      ? []
-      : [
-          own[finding](
-            used === undefined ? request : { ...request, used: used.own }
-          ),
-        ]),
+  const asked = (store: MemoryStore): RecallRequest =>
+    used === undefined ? request : { ...request, used: used[store] };
+  const [shared, ownFinding] = await Promise.all([
+    brain(env)[finding](asked("shared")),
+    own?.[finding](asked("own")),
   ]);
+  return ownFinding === undefined ? [shared] : [shared, ownFinding];
 };
 
 /** `items` of a pack, each citing its source as its producer named it. */
@@ -1053,6 +1139,58 @@ const storesOf = (findings: readonly Finding[]): Map<string, MemoryStore> =>
       )
     )
   );
+
+/**
+ * What a pack hands over, as one comparable value: each item's citation,
+ * text and how it was found, the memories by id, the contested facts, the
+ * words it says were not found and whether it was cut short. A memory's
+ * way of being found is left out: the model is never told it (turn-recall.ts
+ * `forModel`), and `isThin` reads a memory found by words or by entities
+ * alike.
+ */
+const handedOver = ({
+  items,
+  memories,
+  contested,
+  notFound,
+  truncated,
+}: Pack): string =>
+  JSON.stringify([
+    items.map(({ source, version, position, text, found }) => [
+      source,
+      version,
+      position,
+      text,
+      found,
+    ]),
+    memories.map(({ memory }) => memory),
+    contested.map(({ about, attribute, memories: sides }) => [
+      about,
+      attribute,
+      sides,
+    ]),
+    notFound,
+    truncated,
+  ]);
+
+/**
+ * Whether `pack`, packed from `findings`, hands over anything else than
+ * the pack of the shared store's finding alone would: an item or memory
+ * of the reader's own store, the same items in another order (an own
+ * passage the budget left out still took a rank), or only a word it found
+ * that is then not said not found, or a passage of it the budget left
+ * out. Built again in memory from what was found, with no other read. An
+ * own match that changes nothing handed over (one ranked past what a way
+ * lists, say) gives nothing only the person may read.
+ */
+const differsByOwn = (
+  { question, budget }: RecallRequest,
+  [shared, own]: Findings,
+  pack: Pack
+): boolean =>
+  own !== undefined &&
+  handedOver(pack) !==
+    handedOver(packAcross(question, budget.tokens, [shared]));
 
 /** A person's use of memories, per store (`usedOf`), for its requests. */
 type Used = Record<MemoryStore, NonNullable<RecallRequest["used"]>>;
@@ -1095,6 +1233,83 @@ const usedOf = async (
 };
 
 /**
+ * `recallAs`'s pack, with what it was packed from: the request, what each
+ * store found and the pack as the stores' contract gives it.
+ */
+const packedAs = async (
+  env: BrainEnv & ReaderEnv & Pick<Env, "EMBEDDER" | "WORKSPACES">,
+  personId: string,
+  recall: Recall
+): Promise<{
+  pack: RecalledPack;
+  request: RecallRequest;
+  findings: Findings;
+  packed: Pack;
+}> => {
+  // Ranked by their use only where the answer reaches them alone: a
+  // recall as their teams or the company (a channel, a thread, a turn
+  // they didn't start, code) is ordered as for anyone, and
+  // their Workspace isn't asked.
+  const [request, used] = await Promise.all([
+    recallRequestAs(env, personId, recall),
+    reachOf(recall) === "person"
+      ? usedOf(env, personId, recall.asOf ?? new Date())
+      : undefined,
+  ]);
+  const findings = await findingsOf(env, request, "find", used);
+  const packed = packAcross(request.question, request.budget.tokens, findings);
+  const { items, memories, contested, notFound, truncated } = packed;
+  const stores = storesOf(findings);
+  const recalledMemories = memories.map((memory) => {
+    const store = stores.get(memory.memory);
+    // A packed memory is one a store found: never one of none.
+    if (store === undefined) {
+      throw new Error("A packed memory no store found");
+    }
+    return {
+      ...memory,
+      store,
+      source: versionRefOf(memory.source),
+      said: saidOf(memory, personId),
+    };
+  });
+  return {
+    pack: {
+      items: recalledItems(items),
+      memories: recalledMemories,
+      contested,
+      notFound,
+      truncated,
+    },
+    request,
+    findings,
+    packed,
+  };
+};
+
+/**
+ * `recallAs`'s pack, and beside it whether the person's own store, where
+ * everything only they may read is kept, made it differ from what the
+ * shared store alone would hand over (`fromOwn`, `differsByOwn`): an item
+ * or a memory of it, or only which words it says were not found or that
+ * it was cut short. Core's own bookkeeping for marking the chat it goes to
+ * (private-reads.ts, turn-recall.ts), never part of what recall answers,
+ * nor handed to the model, code or a page.
+ */
+export const recallOwnedAs = async (
+  env: BrainEnv & ReaderEnv & Pick<Env, "EMBEDDER" | "WORKSPACES">,
+  personId: string,
+  recall: Recall
+): Promise<{ pack: RecalledPack; fromOwn: boolean }> => {
+  const { pack, request, findings, packed } = await packedAs(
+    env,
+    personId,
+    recall
+  );
+  return { pack, fromOwn: differsByOwn(request, findings, packed) };
+};
+
+/**
  * A pack of what the member `personId` may read for `question`, as core
  * counts them now, within `budget.tokens` (the Brain's estimate,
  * `tokensOf`), and, with `asOf`, of each source as it was then: the
@@ -1114,46 +1329,12 @@ const usedOf = async (
  * (`recallPassagesAs`).
  */
 export const recallAs = async (
-  env: BrainEnv & Pick<Env, "DB" | "EMBEDDER" | "WORKSPACES">,
+  env: BrainEnv & ReaderEnv & Pick<Env, "EMBEDDER" | "WORKSPACES">,
   personId: string,
   recall: Recall
 ): Promise<RecalledPack> => {
-  // Ranked by their use only where the answer reaches them alone: a
-  // recall as their teams or the company (a channel, a thread, a turn
-  // they didn't start, code) is ordered as for anyone, and
-  // their Workspace isn't asked.
-  const [request, used] = await Promise.all([
-    recallRequestAs(env, personId, recall),
-    reachOf(recall) === "person"
-      ? usedOf(env, personId, recall.asOf ?? new Date())
-      : undefined,
-  ]);
-  const findings = await findingsOf(env, request, "find", used);
-  const { items, memories, contested, notFound, truncated } = packAcross(
-    request.question,
-    request.budget.tokens,
-    findings
-  );
-  const stores = storesOf(findings);
-  return {
-    items: recalledItems(items),
-    memories: memories.map((memory) => {
-      const store = stores.get(memory.memory);
-      // A packed memory is one a store found: never one of none.
-      if (store === undefined) {
-        throw new Error("A packed memory no store found");
-      }
-      return {
-        ...memory,
-        store,
-        source: versionRefOf(memory.source),
-        said: saidOf(memory, personId),
-      };
-    }),
-    contested,
-    notFound,
-    truncated,
-  };
+  const { pack } = await packedAs(env, personId, recall);
+  return pack;
 };
 
 /**
@@ -1165,7 +1346,7 @@ export const recallAs = async (
  * SDK's `BrainPack`).
  */
 export const recallPassagesAs = async (
-  env: BrainEnv & Pick<Env, "DB" | "EMBEDDER">,
+  env: BrainEnv & ReaderEnv & Pick<Env, "EMBEDDER">,
   personId: string,
   recall: Recall
 ): Promise<RecalledPassages> => {
@@ -1183,7 +1364,7 @@ const placeOf = ({ source, version, position }: RecalledItem): string =>
   JSON.stringify([sourceKeyOf(source), version, position]);
 
 /** A memory, by its store and id, as one string. */
-const memoryKeyOf = ({ store, memory }: StoredMemoryPlace): string =>
+export const memoryKeyOf = ({ store, memory }: StoredMemoryPlace): string =>
   JSON.stringify([store, memory]);
 
 /** A passage of a pack as the Brain counts it (`packItemTokens`). */
@@ -1318,7 +1499,7 @@ export const mergeRecalled = (
  * only, as `addSource`.
  */
 export const readSourceVersionAs = async (
-  env: BrainEnv & Pick<Env, "DB">,
+  env: BrainEnv & ReaderEnv,
   personId: string,
   wanted: { source: SourceRef; version: number }
 ): Promise<SourceVersion | null> => {
@@ -1377,7 +1558,7 @@ export interface SourcePage {
  * are no longer a member.
  */
 export const listSourcesAs = async (
-  env: BrainEnv & Pick<Env, "DB">,
+  env: BrainEnv & ReaderEnv,
   personId: string,
   { after }: { after?: SourcesAfter } = {}
 ): Promise<SourcePage> => {
@@ -1461,7 +1642,7 @@ const versionsWantedSchema = z.strictObject({
  * Refused once they are no longer a member.
  */
 export const listVersionsAs = async (
-  env: BrainEnv & Pick<Env, "DB">,
+  env: BrainEnv & ReaderEnv,
   personId: string,
   wanted: { source: SourceRef; before?: number }
 ): Promise<VersionPage> => {
@@ -1620,7 +1801,7 @@ const sourceRemovalSchema = z.strictObject({
 
 /**
  * Takes `source` out of use for good and keeps its history (the Brain's
- * `removeSource`): from when it returns, nothing of it is found, listed
+ * `removeSources`): from when it returns, nothing of it is found, listed
  * or read by anyone, what was drawn from it included, and nothing new is
  * drawn from it; its key is closed, so an add to it is refused
  * (`brain.source_removed`), and nothing puts it back in use. An export
@@ -1636,7 +1817,27 @@ export const removeSource = async (
   const { source, readers } = checked(sourceRemovalSchema, removed);
   const store =
     readers.kind === "owner" ? ownBrain(env, readers.personId) : brain(env);
-  await store.removeSource({ source: sourceKeyOf(source) });
+  await store.removeSources({ sources: [sourceKeyOf(source)] });
+};
+
+const ownRemovalSchema = z.strictObject({
+  personId: idSchema,
+  sources: z.array(sourceRefSchema).min(1).max(removalsMax),
+});
+
+/**
+ * Takes `sources`, each one `personId`'s alone, out of use in their own
+ * store, as `removeSource` takes one, all in one call and one transaction
+ * of the store (up to `removalsMax`). Safe to repeat.
+ */
+export const removeOwnSources = async (
+  env: BrainEnv,
+  removed: { personId: string; sources: readonly SourceRef[] }
+): Promise<void> => {
+  const { personId, sources } = checked(ownRemovalSchema, removed);
+  await ownBrain(env, personId).removeSources({
+    sources: sources.map((source) => sourceKeyOf(source)),
+  });
 };
 
 const ownGroupErasureSchema = z.strictObject({
@@ -1695,7 +1896,7 @@ export const eraseOwnGroup = async (
  * the Brain's store can bring what it covers back.
  */
 export const erasePerson = async (
-  env: BrainEnv & Pick<Env, "DB">,
+  env: BrainEnv & ReaderEnv,
   erased: { personId: string; reason: "person_erased" }
 ): Promise<"erased" | "still_deleting"> => {
   const { personId, reason } = checked(personErasureSchema, erased);
@@ -2087,7 +2288,7 @@ const instructionFilesSchema = z
  * file alone.)
  */
 export const readInstructionFilesAs = async (
-  env: BrainEnv & Pick<Env, "DB">,
+  env: BrainEnv & ReaderEnv,
   personId: string,
   wanted: InstructionFile[],
   builtApp?: string
@@ -2330,7 +2531,7 @@ const pinnedVersionRefsSchema = z.array(
  * only, as `addSource`.
  */
 export const readableVersionsAs = async <Ref extends PinnedVersionRef>(
-  env: BrainEnv & Pick<Env, "DB">,
+  env: BrainEnv & ReaderEnv,
   personId: string,
   versions: readonly Ref[],
   { reach = "person" }: { reach?: Reach } = {}
@@ -2402,7 +2603,7 @@ const readableMemoriesIn = async (
  * once they are no longer a member. For the server only, as `addSource`.
  */
 export const readableMemoriesAs = async (
-  env: BrainEnv & Pick<Env, "DB">,
+  env: BrainEnv & ReaderEnv,
   personId: string,
   memories: readonly StoredMemoryPlace[],
   { reach = "person" }: { reach?: Reach } = {}
@@ -2439,6 +2640,143 @@ export const readableMemoriesAs = async (
     seen.add(key);
     return true;
   });
+};
+
+/**
+ * What a memory rests on, as a chat pinned it when a recall handed it
+ * over: the source it was drawn from, its writer, and when the store
+ * learned it (ms). What the erasure ledger names, so an erasure of it is
+ * told by them alone (`erasedForGoodAs`), never by whether the store
+ * holds the memory now.
+ */
+export interface MemoryBasis {
+  source: SourceRef | null;
+  writer: string | null;
+  learnedAt: number;
+}
+
+/** A memory a chat was handed, with what it rests on (`MemoryBasis`). */
+export interface PinnedMemory extends StoredMemoryPlace {
+  basis: MemoryBasis;
+}
+
+const pinnedMemoriesSchema = z.array(
+  z.strictObject({
+    store: memoryStoreSchema,
+    memory: memoryIdSchema,
+    basis: z.strictObject({
+      source: sourceRefSchema.nullable(),
+      writer: z.string().min(1).nullable(),
+      learnedAt: z.int().nonnegative(),
+    }),
+  })
+);
+
+/**
+ * Of `keys` and `memories`, those an erasure took for good in `store`
+ * (`erasedOf`): one call for as many of both as a check takes, one more
+ * for each part past that (`checkedInParts`).
+ */
+const erasedIn = async (
+  store: Brain,
+  keys: readonly string[],
+  memories: readonly ErasedMemory[]
+): Promise<{ sources: string[]; memories: string[] }> => {
+  const asked: ({ source: string } | { memory: ErasedMemory })[] = [
+    ...keys.map((source) => ({ source })),
+    ...memories.map((memory) => ({ memory })),
+  ];
+  const erased = await checkedInParts(asked, async (part) => {
+    const answer = await store.erasedOf({
+      sources: part.flatMap((item) => ("source" in item ? [item.source] : [])),
+      memories: part.flatMap((item) => ("memory" in item ? [item.memory] : [])),
+    });
+    return [
+      ...answer.sources.map((source) => ({ source })),
+      ...answer.memories.map((memory) => ({ memory })),
+    ];
+  });
+  return {
+    sources: erased.flatMap((item) => ("source" in item ? [item.source] : [])),
+    memories: erased.flatMap((item) => ("memory" in item ? [item.memory] : [])),
+  };
+};
+
+const sourceRefsSchema = z.array(sourceRefSchema);
+
+/**
+ * Of `sources` and `memories` a chat of the member `personId`'s once
+ * read, those an erasure took for good, as the erasure ledger says it
+ * (`erasedOf`), whoever may read them now, in the order given: for core
+ * to replace what the chat shows of them (history-access.ts
+ * `erasedSources`). Never one whose readers only changed, a retired
+ * memory, an older version, nor a memory a lost storage lacks: the chat
+ * keeps showing those. Sources and the shared memories are asked of the
+ * shared store, whose ledger an erasure from a person's own store closes
+ * too, in one call; then, in one more, their own store: the sources it
+ * didn't call erased (a key under an erased group of theirs: a deleted
+ * chat's turns) and the memories of their own. Refused once they are no
+ * longer a member, as their own store is named for them alone. Throws
+ * what a store throws (one restoring an export refuses): the caller then
+ * shows none of what it would replace. For the server only, as
+ * `addSource`.
+ */
+export const erasedForGoodAs = async (
+  env: BrainEnv & ReaderEnv,
+  personId: string,
+  {
+    sources,
+    memories,
+  }: {
+    sources: readonly SourceRef[];
+    memories: readonly PinnedMemory[];
+  }
+): Promise<{ sources: SourceRef[]; memories: StoredMemoryPlace[] }> => {
+  const refs = checked(sourceRefsSchema, sources);
+  const pins = checked(pinnedMemoriesSchema, memories);
+  if (refs.length === 0 && pins.length === 0) {
+    return { sources: [], memories: [] };
+  }
+  const own = ownBrainOf(env, await readerOf(env, personId, "person"));
+  if (own === undefined) {
+    throw new Error("A member reads as a person");
+  }
+  const keys = [...new Set(refs.map((ref) => sourceKeyOf(ref)))];
+  const askedIn = (store: MemoryStore): ErasedMemory[] =>
+    pins.flatMap(({ store: kind, memory, basis }) =>
+      kind === store
+        ? [
+            {
+              memory,
+              source: basis.source === null ? null : sourceKeyOf(basis.source),
+              writer: basis.writer,
+              learnedAt: basis.learnedAt,
+            },
+          ]
+        : []
+    );
+  const shared = await erasedIn(brain(env), keys, askedIn("shared"));
+  const closed = new Set(shared.sources);
+  const inOwn = await erasedIn(
+    own,
+    keys.filter((key) => !closed.has(key)),
+    askedIn("own")
+  );
+  for (const key of inOwn.sources) {
+    closed.add(key);
+  }
+  const gone = new Set([
+    ...shared.memories.map((memory) =>
+      memoryKeyOf({ store: "shared", memory })
+    ),
+    ...inOwn.memories.map((memory) => memoryKeyOf({ store: "own", memory })),
+  ]);
+  return {
+    sources: refs.filter((ref) => closed.has(sourceKeyOf(ref))),
+    memories: pins.flatMap(({ store, memory }) =>
+      gone.has(memoryKeyOf({ store, memory })) ? [{ store, memory }] : []
+    ),
+  };
 };
 
 /** Who may read Grasp's skills: every current member. */
@@ -2771,7 +3109,7 @@ const ownSkillsAs = async (
  * `permission.person_inactive` once they are no longer a member.
  */
 export const listSkillsAs = async (
-  env: BrainEnv & Pick<Env, "DB">,
+  env: BrainEnv & ReaderEnv,
   personId: string,
   shipped: ReadonlySet<string>,
   { reach }: { reach: Reach }
@@ -2832,7 +3170,7 @@ const skillStoreOf = (
  * longer a member, whatever is asked.
  */
 export const readSkillAs = async (
-  env: BrainEnv & Pick<Env, "DB">,
+  env: BrainEnv & ReaderEnv,
   personId: string,
   wanted: SkillAt,
   { reach }: { reach: Reach }
@@ -2860,7 +3198,7 @@ export const readSkillAs = async (
  * reads it at the person's reach: `null` when there is none they may read.
  */
 export const readCurrentSkillAs = async (
-  env: BrainEnv & Pick<Env, "DB">,
+  env: BrainEnv & ReaderEnv,
   personId: string,
   wanted: Skill
 ): Promise<SkillVersion | null> => {
@@ -3030,7 +3368,7 @@ export const writeSharedSkill = async (
  * `permission.person_inactive` once they are no longer a member.
  */
 export const addOwnSkill = async (
-  env: BrainEnv & Pick<Env, "DB">,
+  env: BrainEnv & ReaderEnv,
   personId: string,
   added: { change: string; text: string }
 ): Promise<SkillAt> => {
@@ -3082,7 +3420,7 @@ export const addOwnSkill = async (
  * erased" for it, with its hedge.
  */
 export const eraseOwnSkill = async (
-  env: BrainEnv & Pick<Env, "DB">,
+  env: BrainEnv & ReaderEnv,
   personId: string,
   name: string
 ): Promise<void> => {
@@ -3280,14 +3618,16 @@ export type Handed =
 /**
  * Why a noted source is not handed over after all, one of a fixed set:
  * its record restricted since, deleted or gone, its details past their
- * retention, its reader no longer a member, or nothing of it to keep (a
- * question of no words).
+ * retention, its reader no longer a member, its reader no longer holding
+ * the role it was read under (a run's person, its workflow), or nothing of
+ * it to keep (a question of no words).
  */
 export type HandOverSkip =
   | "restricted"
   | "deleted"
   | "past_retention"
   | "not_a_member"
+  | "no_role"
   | "no_text";
 
 /** How a hand-over that did something ended: added, or refused for good. */
@@ -3347,9 +3687,18 @@ const closeKey = async (
   });
 };
 
-/** Whether `error` is core's refusal of an add an erasure closed (`addSource`). */
-const isErasedRefusal = (error: unknown): boolean =>
-  brainSourceErrors.codeOf(error) === "brain.source_erased";
+/**
+ * How a hand-over is refused for good when its add was refused for a
+ * closed key (`addSource`): `erased` when an erasure closed it, `removed`
+ * when a removal did (`removeSource`); undefined for any other error.
+ */
+const closedRefusalOf = (error: unknown): "erased" | "removed" | undefined => {
+  const code = brainSourceErrors.codeOf(error);
+  if (code === "brain.source_erased") {
+    return "erased";
+  }
+  return code === "brain.source_removed" ? "removed" : undefined;
+};
 
 /**
  * Refuses the hand-over `attempt` is at for `reason`: recorded first,
@@ -3385,7 +3734,8 @@ const refuse = async (
  * - its text, or its `whenTooLarge` when the text is past a source's
  *   bound as given or as indexed (`fitsSourceText`); refused as
  *   `too_large` when neither fits;
- * - refused as `erased` when what it adds was erased: final.
+ * - refused as `erased` when what it adds was erased, and as `removed`
+ *   when it was removed (`removeSource`): final.
  *
  * Each records its outcome, which ends the noted hand-over: once, as a
  * repeat of an attempt that ended it records nothing (`HandOverAttempt`).
@@ -3443,10 +3793,11 @@ const handOver = async (
       ...(handed.group === undefined ? {} : { group: handed.group }),
     }));
   } catch (error) {
-    if (!isErasedRefusal(error)) {
+    const closed = closedRefusalOf(error);
+    if (closed === undefined) {
       throw error;
     }
-    return await refused("erased");
+    return await refused(closed);
   }
   if (
     readers.data.kind === "owner" &&
@@ -3938,7 +4289,7 @@ const keptMemory = async (
  * doesn't have, say).
  */
 export const rememberAs = async (
-  env: BrainEnv & Pick<Env, "DB">,
+  env: BrainEnv & ReaderEnv,
   personId: string,
   remembered: Remembered
 ): Promise<RememberedMemory> => {
@@ -4053,7 +4404,7 @@ export interface OwnEntity {
  * member.
  */
 export const ownEntityAs = async (
-  env: BrainEnv & Pick<Env, "DB">,
+  env: BrainEnv & ReaderEnv,
   personId: string,
   entity: string
 ): Promise<OwnEntity | null> => {
@@ -4083,7 +4434,7 @@ export const ownEntityAs = async (
  * has expired. Refused once they are no longer a member.
  */
 export const forgetAs = async (
-  env: BrainEnv & Pick<Env, "DB">,
+  env: BrainEnv & ReaderEnv,
   personId: string,
   memory: string
 ): Promise<MemoryChangeOutcome> => {
@@ -4267,7 +4618,7 @@ const entitiesWantedSchema = z.strictObject({
  * finds them, from `from`. Refused once they are no longer a member.
  */
 export const entitiesAs = async (
-  env: BrainEnv & Pick<Env, "DB">,
+  env: BrainEnv & ReaderEnv,
   personId: string,
   wanted:
     | { kind: EntityKind; from?: StorePlace<EntitiesCursor> }
@@ -4366,7 +4717,7 @@ export interface StoredMemoryPage {
  * Refused once they are no longer a member.
  */
 export const memoriesAs = async (
-  env: BrainEnv & Pick<Env, "DB">,
+  env: BrainEnv & ReaderEnv,
   personId: string,
   wanted:
     | { entity: { store: MemoryStoreName; id: string }; after?: MemoriesCursor }
@@ -4417,7 +4768,7 @@ const contestedWantedSchema = z.strictObject({
  * them. Refused once they are no longer a member.
  */
 export const contestedAs = async (
-  env: BrainEnv & Pick<Env, "DB">,
+  env: BrainEnv & ReaderEnv,
   personId: string,
   wanted:
     | { from?: StorePlace<ContestedCursor> }
@@ -4476,7 +4827,7 @@ export type StoredMemoryPlace = z.infer<typeof memoryPlaceSchema>;
  * they are no longer a member.
  */
 export const confirmAs = async (
-  env: BrainEnv & Pick<Env, "DB">,
+  env: BrainEnv & ReaderEnv,
   personId: string,
   memory: StoredMemoryPlace | Readonly<Record<string, unknown>>
 ): Promise<MemoryChangeOutcome> => {
@@ -4532,7 +4883,7 @@ export type Correction = z.input<typeof correctionSchema>;
  * once they are no longer a member.
  */
 export const correctAs = async (
-  env: BrainEnv & Pick<Env, "DB">,
+  env: BrainEnv & ReaderEnv,
   personId: string,
   correction: Correction | Readonly<Record<string, unknown>>
 ): Promise<RememberedMemory | null> => {
@@ -4652,6 +5003,37 @@ const cursorOfText = <T>(schema: z.ZodType<T>, text: string): T => {
   return checked(schema, cursor);
 };
 
+/**
+ * An App's users, as the Brain's group (GRA-1883): what App `appId`'s
+ * code remembers is read by it (`rememberForAppAs`). Core puts it in a
+ * reader only for that App's own code, and only once core admitted the
+ * person the call acts for to the App now (brain-app-writes.ts): who is
+ * in it is decided as each call reads, never stored, so someone taken
+ * off the App reads none of it, history included, from their next call
+ * on. Apart from `appGroup` (`app:<id>`), the App's builders' group for
+ * its instruction file: neither ever reads the other's.
+ */
+const appUsersGroup = (appId: AppId): string =>
+  `app-users:${checked(appIdSchema, appId)}`;
+
+/**
+ * Code's reader at `reach` (`CodeReach`), for the member `personId`, and
+ * with `appUsers` that App's users' group too (`appUsersGroup`): given
+ * only for that App's own code, by a caller that admitted the person to
+ * it now.
+ */
+const codeReaderOf = async (
+  env: ReaderEnv,
+  personId: string,
+  reach: CodeReach,
+  appUsers: AppId | undefined
+): Promise<Reader> => {
+  const reader = await readerOf(env, personId, reach);
+  return appUsers === undefined
+    ? reader
+    : { ...reader, groups: [...reader.groups, appUsersGroup(appUsers)] };
+};
+
 /** A moment code reads as of: ISO 8601, with its offset. */
 const codeMomentSchema = z.iso
   .datetime({ offset: true })
@@ -4745,6 +5127,7 @@ const cardMemoryOf = ({ source, ...memory }: Memory): CardMemory => ({
 
 /**
  * A page of entity `entity`'s card as `reach` may read it (`CodeReach`),
+ * and with `appUsers` what that App's code remembered (`codeReaderOf`),
  * for the member `personId`, from the shared store alone, as now or as of
  * `asOf`, after `after` (a page's `next`): null alike when they may see no
  * such entity and when nobody holds one. Refused once `personId` is no
@@ -4752,13 +5135,14 @@ const cardMemoryOf = ({ source, ...memory }: Memory): CardMemory => ({
  * that isn't one.
  */
 export const codeCardAs = async (
-  env: BrainEnv & Pick<Env, "DB">,
+  env: BrainEnv & ReaderEnv,
   personId: string,
   reach: CodeReach,
-  request: unknown
+  request: unknown,
+  appUsers?: AppId
 ): Promise<CodeCard | null> => {
   const { entity, asOf, after } = checked(codeCardSchema, request);
-  const reader = await readerOf(env, personId, reach);
+  const reader = await codeReaderOf(env, personId, reach, appUsers);
   let card: Awaited<ReturnType<Brain["readCard"]>>;
   try {
     card = await brain(env).readCard({
@@ -4812,7 +5196,8 @@ interface CodeEntities {
 }
 
 /**
- * A page of the entities `reach` may see (`CodeReach`) that match
+ * A page of the entities `reach` may see (`CodeReach`), and with
+ * `appUsers` what that App's code remembered (`codeReaderOf`), that match
  * `request`'s kind, name (whole, folded) or exact identifier, for the
  * member `personId`, from the shared store alone, after `after` (a page's
  * `next`), in the order of the first memory the reader may read that
@@ -4820,13 +5205,14 @@ interface CodeEntities {
  * `brain.request_invalid` for a request or cursor that isn't one.
  */
 export const codeEntitiesAs = async (
-  env: BrainEnv & Pick<Env, "DB">,
+  env: BrainEnv & ReaderEnv,
   personId: string,
   reach: CodeReach,
-  request: unknown
+  request: unknown,
+  appUsers?: AppId
 ): Promise<CodeEntities> => {
   const { after, ...asked } = checked(codeFindSchema, request);
-  const reader = await readerOf(env, personId, reach);
+  const reader = await codeReaderOf(env, personId, reach, appUsers);
   let page: Awaited<ReturnType<Brain["findEntities"]>>;
   try {
     page = await brain(env).findEntities({
@@ -4866,3 +5252,140 @@ export const isCodeEntitiesRequest = (
 ): boolean =>
   Object.hasOwn(codeEntitiesRequests, operation) &&
   codeEntitiesRequests[operation].safeParse(input).success;
+
+// What an App's code remembers and forgets (GRA-1883, threat model on the
+// issue): in the shared store, in the App's own word (`app:<id>`), read
+// by the App's users alone (`appUsersGroup`), through its own code. Who
+// may call these, for which App, and whether its code may write at all
+// (where the call comes from, the person a user of the App now, its
+// tables and everything it reaches) is brain-app-writes.ts's to decide
+// first: these only ever write under that App's users' group.
+
+/** Who writes for App `app`'s code, as the Brain names a writer. */
+const appWriterOf = (app: AppId): string => `app:${checked(appIdSchema, app)}`;
+
+/**
+ * The attributes App code may file a memory under: all but a person's
+ * preference and instruction, which are only ever that person's own word.
+ */
+const codeAttributes = attributeNames.filter(
+  (name) => name !== "preference" && name !== "instruction"
+);
+
+/** A fact App code remembers (`rememberForAppAs`). */
+const codeRememberSchema = z.strictObject({
+  about: memoryAboutSchema,
+  attribute: z.enum(codeAttributes).optional(),
+  value: memoryText(valueMaxLength).optional(),
+  statement: memoryText(statementMaxLength),
+});
+
+/** One of its own memories App code forgets (`forgetForAppAs`). */
+const codeForgetSchema = z.strictObject({ memory: memoryIdSchema });
+
+/** What App code writes to the Brain, by operation. */
+const codeWriteRequests = {
+  remember: codeRememberSchema,
+  forget: codeForgetSchema,
+} as const;
+
+/** What App code writes to the Brain: `ctx.brain.<operation>`. */
+export type CodeWriteOperation = keyof typeof codeWriteRequests;
+
+/**
+ * Whether `input` is a write App code may ask for as `operation`: for
+ * core to refuse it before anything else is looked at, as a recall's.
+ */
+export const isCodeWriteRequest = (
+  operation: CodeWriteOperation,
+  input: unknown
+): boolean =>
+  Object.hasOwn(codeWriteRequests, operation) &&
+  codeWriteRequests[operation].safeParse(input).success;
+
+/**
+ * Remembers a fact App `app`'s code says, in the App's word, for the
+ * member `personId` (admitted to the App by the caller), in the shared
+ * store, read by the App's users alone: about an entity the App's code
+ * may see (by id), or one an exact identifier finds there, or a new one;
+ * never a preference or an instruction. Its new word on the same entity
+ * and one-value attribute ends its earlier one, which stays as history.
+ * `change` names this one write, from the call's own key: the same change
+ * again answers what it wrote, with the time the store learned it, the
+ * same on every repeat. Refused once `personId` is no longer a member,
+ * and as `brain.request_invalid` for what the Brain's rules refuse (an id
+ * the App's code may not see among them, as one nobody holds).
+ */
+export const rememberForAppAs = async (
+  env: BrainEnv & ReaderEnv,
+  personId: string,
+  { app, change }: { app: AppId; change: string },
+  request: unknown
+): Promise<{ memory: MemoryId; entity: EntityId; learnedAt: Date }> => {
+  const { about, statement, ...memory } = checked(codeRememberSchema, request);
+  const writer = appWriterOf(app);
+  const reader = await codeReaderOf(env, personId, "company", app);
+  let added: Awaited<ReturnType<Brain["addMemories"]>>;
+  try {
+    added = await brain(env).addMemories({
+      change: checked(changeSchema, change),
+      access: { kind: "audience", group: appUsersGroup(app) },
+      // An entity's id is taken only as the App's code may see it.
+      reader,
+      entities: [{ key: "about", ...about }],
+      memories: [
+        {
+          about: "about",
+          ...memory,
+          type: "fact",
+          statement,
+          speaker: { kind: "agent", agent: writer },
+          basis: { kind: "writer", writer },
+        },
+      ],
+    });
+  } catch (error) {
+    throw refusedAs(error);
+  }
+  const [saved] = added.memories;
+  const entity = added.entities.about;
+  // When the store learned it, read back as the App's code reads it.
+  const kept =
+    saved === undefined || entity === undefined
+      ? undefined
+      : await keptMemory(brain(env), reader, entity, saved);
+  if (saved === undefined || entity === undefined || kept === undefined) {
+    throw new Error("The Brain kept no memory");
+  }
+  return { memory: saved, entity, learnedAt: kept.learnedAt };
+};
+
+/**
+ * Retires one of App `app`'s own memories (`{ memory }`), as its code
+ * reads, for the member `personId` (admitted to the App by the caller),
+ * under `change`, this one call's: when the store retired it and the
+ * change that did (`change`, the stored one: this call's when it was this
+ * call, another's for one retired before), the same on every repeat;
+ * null alike for none, another writer's (a person's, a source's, another
+ * App's), one its code may not read and an expired one. Refused once
+ * `personId` is no longer a member.
+ */
+export const forgetForAppAs = async (
+  env: BrainEnv & ReaderEnv,
+  personId: string,
+  { app, change }: { app: AppId; change: string },
+  request: unknown
+): Promise<RetiredMemory | null> => {
+  const { memory } = checked(codeForgetSchema, request);
+  const reader = await codeReaderOf(env, personId, "company", app);
+  try {
+    return await brain(env).retireMemory({
+      memory,
+      reader,
+      writer: appWriterOf(app),
+      change: checked(changeSchema, change),
+    });
+  } catch (error) {
+    throw refusedAs(error);
+  }
+};

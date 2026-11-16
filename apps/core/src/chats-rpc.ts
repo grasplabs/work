@@ -1,4 +1,10 @@
 import { agentErrors } from "@grasp-os/shared/agent";
+import type {
+  Agent,
+  AgentDraft,
+  AgentDraftMade,
+  AgentDraftMake,
+} from "@grasp-os/shared/agents";
 import { actorOf } from "@grasp-os/shared/audit";
 import {
   chatMakeSchema,
@@ -21,6 +27,7 @@ import type {
   ChatSummary,
   ChatUpdate,
   ChatWork,
+  HeldAppCall,
   MentionablePerson,
 } from "@grasp-os/shared/chat";
 import type { DependencyRequest } from "@grasp-os/shared/dependencies";
@@ -34,6 +41,13 @@ import { subjectSchema } from "@grasp-os/shared/subject";
 import type { Subject, SubjectKind } from "@grasp-os/shared/subject";
 import { z } from "zod";
 
+import {
+  makeAgent,
+  makeOwnAgent,
+  setAgentReach,
+  setAgentToolClass,
+} from "./agent-builder.ts";
+import { makeAgentWake, wakeScheduleOf } from "./agent-wakes.ts";
 import { turnAgent } from "./agents.ts";
 import { createFromBlueprint } from "./app-blueprints.ts";
 import { appKind, createApp, editableApp } from "./apps.ts";
@@ -44,6 +58,11 @@ import { mentionablePeople, mentionsOf } from "./chat-mentions.ts";
 import { personOf } from "./connections.ts";
 import { chatWork, chatsWorkedOn, keepMadeInChat } from "./drafts.ts";
 import { workspace } from "./durable-objects.ts";
+import {
+  confirmHeldAppCall,
+  declineHeldAppCall,
+  heldAppCallsOf,
+} from "./held-app-calls.ts";
 import { modelSettings, modelEffortsOf } from "./models.ts";
 import { chatPackageRequests } from "./packages/requests.ts";
 import { callbackFor, isStub } from "./page-callbacks.ts";
@@ -55,6 +74,7 @@ import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 import { requireNotStaff } from "./sharing.ts";
+import { requireKnownTeams } from "./stephen-reach.ts";
 import { Subscription } from "./subscription.ts";
 import {
   workflowKind,
@@ -78,6 +98,10 @@ const askedSchema = questionSchema.omit({ built: true }).extend({
 const buildSchema = questionSchema
   .pick({ text: true, model: true, effort: true })
   .extend({ plan: z.string().min(1).max(256) });
+
+const draftMakeSchema = questionSchema
+  .pick({ text: true, model: true, effort: true })
+  .extend({ draft: z.string().min(1).max(256) });
 
 /** The longest part of a new workflow's name taken from its plan. */
 const wordsAtMost = 40;
@@ -168,7 +192,6 @@ const summaryOfMade = (chat: Chat): ChatSummary => ({
   createdAt: chat.createdAt.toISOString(),
   lastAt: chat.lastAt.toISOString(),
   running: false,
-  via: chat.via,
   make: makeOf(chat),
 });
 
@@ -569,6 +592,99 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
   }
 
   /**
+   * Make it: the agent the chat drafted, as its card showed it, by the
+   * Agents page's own checks (`makeAgent` for an admin, `makeOwnAgent`
+   * for anyone the company lets), recorded as made from a chat. A first
+   * refusal leaves the draft to make again; once the agent is made, the
+   * draft stays taken, so no retry makes it twice, and what the card said
+   * of whom it reaches, what it may do and when it wakes is set by the
+   * same checks, each refused as on its page. Then the chat's agent goes
+   * on, in the person's words.
+   */
+  async makeDraftedAgent(
+    chatId: string,
+    make: AgentDraftMake
+  ): Promise<AgentDraftMade> {
+    return await withPerson(this.#check, async (person) => {
+      const id = chatIdOf(chatId);
+      const parsed = draftMakeSchema.safeParse(make);
+      if (!parsed.success) {
+        throw agentErrors.create("agent.invalid_request");
+      }
+      const { draft: callId, ...asked } = parsed.data;
+      const chats = this.#chatsOf(person.userId);
+      const draft = await chats.takeAgentDraft(id, person.userId, callId);
+      const said = {
+        name: draft.name,
+        face: "pen",
+        job: draft.job,
+        instructions: draft.instructions,
+        modelRole: null,
+      };
+      const company = draft.whose === "company";
+      let agent: Agent;
+      try {
+        // What the card says beyond the agent is checked first, so a
+        // schedule or teams core won't take make nothing.
+        if (company) {
+          await this.#checkDrafted(draft);
+        }
+        agent = company
+          ? await makeAgent(this.#env, person, said, { from: "chat" })
+          : await makeOwnAgent(this.#env, person, said, { from: "chat" });
+      } catch (error) {
+        await chats.releaseAgentDraft(id, callId);
+        throw error;
+      }
+      // Made: it stays made and the draft taken, whatever fails next, and
+      // the person lands on its page to finish it there.
+      try {
+        if (company) {
+          await this.#setDrafted(person, agent.id, draft);
+        }
+        await chats.send(id, person.userId, asked);
+      } catch (error) {
+        log.warn("agent.drafted_unfinished", errorFields(error));
+        return { id: agent.id, name: agent.name, unfinished: true };
+      }
+      return { id: agent.id, name: agent.name };
+    });
+  }
+
+  /** Refuses what a company agent's card said that its page would refuse. */
+  async #checkDrafted({ audience, schedule }: AgentDraft): Promise<void> {
+    if (audience?.who === "teams") {
+      await requireKnownTeams(this.#env, JSON.stringify(audience.teams));
+    }
+    if (schedule !== undefined) {
+      await wakeScheduleOf(this.#env, schedule);
+    }
+  }
+
+  /** What a company agent's card said beyond itself, set as on its page. */
+  async #setDrafted(
+    person: Identity,
+    agentId: string,
+    { audience, classes = [], schedule }: AgentDraft
+  ): Promise<void> {
+    if (audience !== undefined) {
+      await setAgentReach(this.#env, person, agentId, true, audience);
+    }
+    for (const toolClass of classes) {
+      // oxlint-disable-next-line no-await-in-loop -- one at a time, each audited
+      await setAgentToolClass(this.#env, person, agentId, toolClass, {
+        who: "asClass",
+      });
+    }
+    if (schedule !== undefined) {
+      await makeAgentWake(this.#env, person, agentId, {
+        ...schedule,
+        personId: person.userId,
+      });
+    }
+  }
+
+  /**
    * Refuses `plan` while a connection a part of it needs isn't one of the
    * person's to use: active, and shared or their own, as connect lists
    * them.
@@ -664,6 +780,29 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
         id,
         "denied"
       );
+    });
+  }
+
+  async heldCalls(chatId: string, after?: string): Promise<HeldAppCall[]> {
+    return await withPerson(
+      this.#check,
+      async (person) => await heldAppCallsOf(this.#env, person, chatId, after)
+    );
+  }
+
+  async confirmHeldCall(
+    chatId: string,
+    id: string,
+    requestHash: string
+  ): Promise<void> {
+    await withPerson(this.#check, async (person) => {
+      await confirmHeldAppCall(this.#env, person, chatId, id, requestHash);
+    });
+  }
+
+  async declineHeldCall(chatId: string, id: string): Promise<void> {
+    await withPerson(this.#check, async (person) => {
+      await declineHeldAppCall(this.#env, person, chatId, id);
     });
   }
 

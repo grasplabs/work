@@ -1,13 +1,9 @@
 import { stillDeletingAtMostMs } from "@grasp-os/brain-next/contract";
+import { recordOutcome } from "@grasp-os/brain/outcomes";
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import { sha256Hex } from "@grasp-os/shared/encoding";
-import { errorPayloadSchema } from "@grasp-os/shared/errors";
 import { storeIdSchema } from "@grasp-os/shared/ids";
-import type { InterviewSession } from "@grasp-os/shared/interview-links";
-import {
-  interviewApiPath,
-  interviewProgressSchema,
-} from "@grasp-os/shared/interview-links";
+import { interviewProgressSchema } from "@grasp-os/shared/interview-links";
 import type { ErasureArea } from "@grasp-os/shared/members";
 import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { runInDurableObject } from "cloudflare:test";
@@ -20,6 +16,7 @@ import { organizationId } from "../src/auth/auth.ts";
 import { addSource } from "../src/brain-next.ts";
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import { workspace, inJurisdiction } from "../src/durable-objects.ts";
+import { brainOf } from "../src/knowledge/ports.ts";
 import type { Onboarding } from "../src/onboarding/store.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import {
@@ -29,12 +26,13 @@ import {
 import { rollback } from "../src/publish.ts";
 import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { testApp } from "./app-definitions.ts";
-import { allEvents } from "./audit-events.ts";
+import { allEvents, eventsAfter, logHead } from "./audit-events.ts";
 import { finishedByTheClock } from "./brain-next-own-store.ts";
 import { consentCode } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import { answering, answeringWith, holdAlarm } from "./interview-link.ts";
-import { ownCollectionOf } from "./knowledge.ts";
+import { holding, rememberAs } from "./knowledge-purge.ts";
+import { linkedNaming, ownCollectionOf, seed } from "./knowledge.ts";
 import { runMinuteTasks } from "./maintenance.ts";
 import { onboardingLog } from "./onboarding-log.ts";
 import {
@@ -105,7 +103,7 @@ const emailOf = async (userId: string): Promise<string | undefined> => {
 /** A note `who` keeps in a collection only they read. */
 const noteOf = async (who: Person, text: string) => {
   const personal = await ownCollectionOf(who);
-  return await who.api.knowledge.saveDocument({
+  return await seed(who.api).saveDocument({
     collectionId: personal,
     path: `notes/${crypto.randomUUID().slice(0, 8)}.md`,
     text,
@@ -121,6 +119,40 @@ const inKnowledge = async (documentId: string): Promise<number> => {
     .bind(documentId)
     .first<{ count: number }>();
   return row?.count ?? 0;
+};
+
+/** How many entity matches `userId` decided, as Knowledge keeps them. */
+const matchesDecidedBy = async (userId: string) => {
+  const row = await env.KNOWLEDGE.prepare(
+    "SELECT count(*) AS n FROM brain_entity_matches WHERE decided_by = ?"
+  )
+    .bind(userId)
+    .first<{ n: number }>();
+  return row?.n;
+};
+
+/**
+ * Decides `name`'s pair `same` as `userId`, as today's Brain kept a
+ * decision resting on document `proof`: core decides none any more
+ * (GRA-1911) and reads none (GRA-1938), so the row is planted as its
+ * write left one, between the entities `name`'s mentions were linked to.
+ */
+const decidedSame = async (
+  userId: string,
+  name: string,
+  proof: string
+): Promise<void> => {
+  const { results } = await env.KNOWLEDGE.prepare(
+    "SELECT DISTINCT entity_id AS id FROM brain_mentions WHERE name = ? AND entity_id IS NOT NULL ORDER BY entity_id"
+  )
+    .bind(name)
+    .all<{ id: string }>();
+  const [a = "", b = ""] = results.map(({ id }) => id);
+  await env.KNOWLEDGE.prepare(
+    "INSERT INTO brain_entity_matches (entity_a, entity_b, decision, evidence_document_id, evidence_version, decided_by, decided_at) VALUES (?, ?, 'same', ?, 1, ?, ?)"
+  )
+    .bind(a, b, proof, userId, Date.now())
+    .run();
 };
 
 /** WebVTT captions saying `text`: a file the extractor reads. */
@@ -237,18 +269,30 @@ const onList = async (sql: string, ...values: unknown[]) =>
 const byPeople = (events: readonly AuditEvent[]): AuditEvent[] =>
   events.filter(({ actor }) => actor.type !== "system");
 
-/** What a link's page gets opening it with `secret`: open, or the refusal. */
-const sessionWith = async (secret: string): Promise<string> => {
-  const response = await routed(interviewApiPath, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ action: "session", secret }),
+/**
+ * The account that signs in as `address`, as the store is told of it: the
+ * user core has with that address, as their sign-in would be, or one of
+ * its own for an address no user has.
+ */
+const accountFor = async (address: string): Promise<string> =>
+  (await env.DB.prepare("SELECT id FROM users WHERE lower(email) = lower(?)")
+    .bind(address)
+    .first<string>("id")) ?? `account-${address.toLowerCase()}`;
+
+/**
+ * What a link's page gets opening it with `secret`, signed in as the
+ * account of `address`, the one it was sent to: open, or the refusal. Asked
+ * of the store, as the link's endpoint asks it (onboarding/links.ts).
+ */
+const sessionWith = async (
+  secret: string,
+  address: string
+): Promise<string> => {
+  const answer = await onboardingStore(env).openLink(await sha256Hex(secret), {
+    account: await accountFor(address),
+    address,
   });
-  if (response.ok) {
-    return "open";
-  }
-  const payload = errorPayloadSchema.safeParse(await response.json());
-  return payload.success ? payload.data.code : String(response.status);
+  return answer.ok ? "open" : answer.code;
 };
 
 /**
@@ -326,17 +370,6 @@ const progress = {
 
 /** Most saves a test's page tries while their interview is erased. */
 const savesWhileErasing = 200;
-
-/** Opens a link's page with `secret` on a new device: the key it is given. */
-const keyFor = async (secret: string): Promise<string> => {
-  const response = await routed(interviewApiPath, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ action: "session", secret }),
-  });
-  const session = await response.json<InterviewSession>();
-  return session.key ?? "";
-};
 
 /** A link's path in `rows`, as the admin lists them, for `id`. */
 const pathOf = (
@@ -517,6 +550,12 @@ const referralWhileErased = async (erased: "max" | "pim") => {
     fact("x1", "who", "Pim handles the new tickets, not Max."),
     fact("x2", "work", "Max plans the rota with Lea."),
   ]);
+  // Their link is held by their account, as their sign-in opened it.
+  await onList(
+    "UPDATE links SET user_id = ? WHERE person = ?",
+    person.userId,
+    ids[erased]
+  );
   let asked = 0;
   await answeringWith(
     async () => {
@@ -1161,15 +1200,26 @@ describe("erasing a person", () => {
     });
   });
 
-  it("purges what the Brain and Knowledge hold of them, every collection only they read with it, and leaves everyone else's", async () => {
+  it("erases what today's Brain and Knowledge still hold of them, of every kind, before it answers, and leaves everyone else's", async () => {
     const admin = await signedInApi(idp, "admin");
     const person = await signedInApi(idp, "builder");
     const other = await signedInApi(idp, "user");
-    const theirs = await noteOf(person, "# Mine\nWhat only I wrote down.");
+    // A word only what is planted for them holds, in every kind of content
+    // the cutover leaves in Knowledge on a deployment until it is deleted.
+    const marker = `planted${unique().replaceAll("-", "")}`;
+    // A document of theirs, in a collection only they read, saved twice:
+    // two versions, each a payload in R2, with sections in the index.
+    const theirs = await noteOf(person, `# Mine\n${marker} wrote this.`);
+    await seed(person.api).saveDocument({
+      collectionId: theirs.collectionId,
+      path: theirs.path,
+      text: `# Mine\n${marker} wrote this, and more.`,
+      ifVersion: 1,
+    });
     const others = await noteOf(other, "# Theirs\nWhat someone else wrote.");
     // A file they once uploaded into that collection, its original in R2.
     const original = `knowledge/${theirs.collectionId}/${crypto.randomUUID()}`;
-    await env.FILES.put(original, "What only I uploaded.");
+    await env.FILES.put(original, `${marker} uploaded this.`);
     await env.DB.prepare(
       `INSERT INTO uploads (id, collection_id, path, media_type, bytes, sha256,
          uploaded_by, actor, status, document_id, version, created_at, updated_at)
@@ -1187,6 +1237,62 @@ describe("erasing a person", () => {
         Date.now()
       )
       .run();
+    // A memory of theirs, an outcome captured from a chat of theirs and a
+    // lesson drawn for them, as today's Brain left them.
+    await rememberAs(person, `${marker} likes the morning stand-up.`);
+    await recordOutcome(brainOf(env), {
+      eventId: `chat.turn:${marker}:${crypto.randomUUID()}`,
+      // A source names a chat by its ID alone (its capture cursor stays).
+      source: `chat.turn:${crypto.randomUUID()}`,
+      sourceSeq: 1,
+      purpose: "production",
+      ownerId: person.userId,
+      scope: "person",
+      taskType: "chat.turn",
+      execution: "failed",
+      result: "failure",
+      evidenceId: `chat-${marker}`,
+      evidenceRefs: [{ kind: "chat_turn", id: crypto.randomUUID() }],
+      versionRefs: [],
+      occurredAt: new Date().toISOString(),
+    });
+    const now = Date.now();
+    await env.KNOWLEDGE.prepare(
+      `INSERT INTO brain_lessons (id, revision, scope, scope_id, group_key,
+         kind, applicability, exclusions, instruction, evidence_status, state,
+         retired_by, created_at, updated_at)
+       VALUES (?, 1, 'person', ?, ?, 'avoid', '[]', '[]', ?, 'supported',
+         'active', NULL, ?, ?)`
+    )
+      .bind(
+        `lesson-${marker}`,
+        person.userId,
+        `group-${marker}`,
+        `Ask ${marker} first.`,
+        now,
+        now
+      )
+      .run();
+    // A gap they answered: the answer is the company's, who gave it theirs.
+    const gap = `gap-${marker}`;
+    await admin.api.brain.addRecords([
+      {
+        type: "source",
+        id: `src-${marker}`,
+        kind: "interview",
+        title: "Finance interview",
+        date: "2026-10-20",
+      },
+      {
+        type: "gap",
+        id: gap,
+        question: "How many invoices come in a month?",
+        owner: "Head of finance",
+        sourceId: `src-${marker}`,
+      },
+    ]);
+    await person.api.brain.answerGap(gap, "About two hundred.");
+    const before = await holding(marker);
     await admin.api.members.remove(person.userId);
 
     const erased = await admin.api.members.erase(
@@ -1194,18 +1300,88 @@ describe("erasing a person", () => {
       String(person.person.name)
     );
 
-    // Done when the erasure answers, without the clock.
+    // Gone when the erasure answers, without the clock: from Knowledge's
+    // tables, its search index and its payloads in R2, from the uploads'
+    // originals in R2, and as a gap's answerer. The other person's
+    // document stays.
+    const answered = await env.DB.prepare(
+      "SELECT answer, answered_by AS answeredBy FROM brain_gap_states WHERE gap_id = ?"
+    )
+      .bind(gap)
+      .first<{ answer: string | null; answeredBy: string | null }>();
     expect({
+      before: before.length > 0,
       done: typeof erased.completedAt,
+      brain: erased.areas.find(({ area }) => area === "brain")?.state,
       theirs: await inKnowledge(theirs.id),
       others: await inKnowledge(others.id),
+      held: await holding(marker),
       original: (await env.FILES.head(original)) !== null,
+      uploads: await rowsOf("uploads", "uploaded_by", person.userId),
+      answered,
     }).toStrictEqual({
+      before: true,
       done: "string",
+      brain: "complete",
       theirs: 0,
       others: 1,
+      held: [],
       original: false,
+      uploads: 0,
+      answered: { answer: "About two hundred.", answeredBy: null },
     });
+  });
+
+  it("erases every entity match they decided, though its evidence is in documents everyone reads, and keeps another's", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const person = await signedInApi(idp, "builder");
+    const other = await signedInApi(idp, "user");
+    /** A pair of one name in two everyone collections, linked, with a proof: what a decision rests on. */
+    const pairOf = async (name: string) => {
+      const ids: string[] = [];
+      for (const label of ["Sales", "Support"]) {
+        // oxlint-disable-next-line no-await-in-loop -- one collection at a time
+        const { id: collectionId } = await seed(admin.api).createCollection({
+          name: `${label} ${unique()}`,
+          access: "everyone",
+        });
+        // oxlint-disable-next-line no-await-in-loop -- one save at a time
+        const saved = await seed(admin.api).saveDocument({
+          collectionId,
+          path: "note.md",
+          text: `# Calls\n${name} called.`,
+          ifVersion: 0,
+        });
+        // oxlint-disable-next-line no-await-in-loop -- one link at a time
+        await linkedNaming(saved.id, name);
+        ids.push(collectionId);
+      }
+      const proof = await seed(admin.api).saveDocument({
+        collectionId: ids[0] ?? "",
+        path: "proof.md",
+        text: "# Proof\nBoth calls were one person.",
+        ifVersion: 0,
+      });
+      return proof.id;
+    };
+    const theirs = `Rosa ${unique()}`;
+    const kept = `Mila ${unique()}`;
+    await decidedSame(person.userId, theirs, await pairOf(theirs));
+    await decidedSame(other.userId, kept, await pairOf(kept));
+    const before = await matchesDecidedBy(person.userId);
+    await admin.api.members.remove(person.userId);
+
+    const erased = await admin.api.members.erase(
+      person.userId,
+      String(person.person.name)
+    );
+
+    expect({
+      before,
+      done: typeof erased.completedAt,
+      theirs: await matchesDecidedBy(person.userId),
+      others: await matchesDecidedBy(other.userId),
+    }).toStrictEqual({ before: 1, done: "string", theirs: 0, others: 1 });
   });
 
   it("forgets their uploads into the Brain for themselves alone once the Brain erased them, and keeps what they uploaded for a team", async () => {
@@ -1398,10 +1574,9 @@ describe("erasing a person", () => {
       vi.restoreAllMocks();
     });
     const { admin, person } = await removedPerson();
-    const { theirs, others, theirSecret, otherSecret } = await onTheList(
-      String(person.person.email)
-    );
-    const before = await sessionWith(theirSecret);
+    const { theirs, others, theirSecret, otherSecret, roster } =
+      await onTheList(String(person.person.email));
+    const before = await sessionWith(theirSecret, String(person.person.email));
     await onList(
       "INSERT INTO interview_settings (person, mark, interviewer, locale) VALUES (?, 'what they heard', 'stephen', 'en')",
       theirs
@@ -1460,8 +1635,8 @@ describe("erasing a person", () => {
     expect({
       before,
       // Their old link opens nothing any more, so nothing new is saved.
-      after: await sessionWith(theirSecret),
-      other: await sessionWith(otherSecret),
+      after: await sessionWith(theirSecret, String(person.person.email)),
+      other: await sessionWith(otherSecret, roster.people[1]?.email ?? ""),
       theirSettings: await settingsOf(theirs),
       theirEntry: await listed(theirs),
       otherEntry: await listed(others),
@@ -1504,7 +1679,7 @@ describe("erasing a person", () => {
       again: pathOf(again, theirs),
       other: typeof pathOf(again, others),
       codes: codes.length,
-      link: await sessionWith(theirSecret),
+      link: await sessionWith(theirSecret, String(person.person.email)),
     }).toStrictEqual({
       listed: null,
       again: null,
@@ -1519,7 +1694,8 @@ describe("erasing a person", () => {
     const { theirs, theirSecret } = await onTheList(
       String(person.person.email)
     );
-    const key = await keyFor(theirSecret);
+    const address = String(person.person.email);
+    await sessionWith(theirSecret, address);
     // A record the Brain was given from their interview: deleting the
     // interview takes it out of the Brain after, as the voice's lines.
     await onList(
@@ -1528,7 +1704,7 @@ describe("erasing a person", () => {
       theirs
     );
     const secretMark = await sha256Hex(theirSecret);
-    const keyMark = await sha256Hex(key);
+    const keyMark = await accountFor(address);
 
     // Their page keeps saving for as long as core erases their interview
     // (`eraseInterviewOf`, as person-erasure.ts asks it), the cleanup
@@ -1538,7 +1714,7 @@ describe("erasing a person", () => {
       async (store: Onboarding) => {
         const erasure = { running: true };
         const erased = store
-          .eraseInterviewOf(theirs, new Date().toISOString())
+          .eraseInterviewOf(theirs, keyMark, new Date().toISOString())
           .finally(() => {
             erasure.running = false;
           });
@@ -1551,9 +1727,11 @@ describe("erasing a person", () => {
           save += 1
         ) {
           // The page reads its version anew, then saves on it.
-          const read = store.openLink(secretMark, keyMark, keyMark);
-          const version =
-            read.ok && read.value.state === "open" ? read.value.version : 0;
+          const read = store.openLink(secretMark, {
+            account: keyMark,
+            address,
+          });
+          const version = read.ok ? read.value.version : 0;
           // oxlint-disable-next-line no-await-in-loop -- one save after another
           const answer = await store.saveInterview(
             secretMark,
@@ -1575,7 +1753,7 @@ describe("erasing a person", () => {
     expect({
       kept: kept.length,
       saves: [...new Set(saves)],
-      link: await sessionWith(theirSecret),
+      link: await sessionWith(theirSecret, String(person.person.email)),
     }).toStrictEqual({
       kept: 0,
       // Every one of them, from the first.
@@ -1659,6 +1837,51 @@ describe("erasing a person", () => {
     });
   });
 
+  it("records one deletion of their interview when both their account and the list's address find it", async () => {
+    const { admin, person } = await removedPerson();
+    const email = String(person.person.email);
+    const { theirSecret } = await onTheList(email);
+    // Their link held by their account, the list still has their address.
+    const opened = await sessionWith(theirSecret, email);
+    const head = await logHead();
+    await admin.api.members.erase(person.userId, String(person.person.name));
+    const events = await eventsAfter(head);
+    const deleted = events.filter(
+      ({ action }) => action === "onboarding.interview.deleted"
+    );
+    expect({ opened, deleted: deleted.length }).toStrictEqual({
+      opened: "open",
+      deleted: 1,
+    });
+  });
+
+  it("leaves the interview of whoever holds the link when the list's address was corrected to theirs after it opened", async () => {
+    const { admin, person } = await removedPerson();
+    const email = String(person.person.email);
+    // The entry had someone else's address, who opened the link with it.
+    const { theirs, theirSecret } = await onTheList(
+      `holder-${crypto.randomUUID().slice(0, 8)}@acme.test`
+    );
+    const holder = `account-holder-${crypto.randomUUID().slice(0, 8)}`;
+    const { roster } = await onboardingStore(env).view();
+    const listed = roster?.people.find(({ id }) => id === theirs)?.email ?? "";
+    const openAs = async () => {
+      const answer = await onboardingStore(env).openLink(
+        await sha256Hex(theirSecret),
+        { account: holder, address: listed }
+      );
+      return answer.ok ? "open" : answer.code;
+    };
+    const before = await openAs();
+    // Then the list's address is corrected to the erased person's.
+    await onList("UPDATE people SET email = ? WHERE id = ?", email, theirs);
+    await admin.api.members.erase(person.userId, String(person.person.name));
+    expect({ before, after: await openAs() }).toStrictEqual({
+      before: "open",
+      after: "open",
+    });
+  });
+
   it("leaves nothing of a referral that named them before their erasure but the company's records of it", async () => {
     // The test draws the referral itself, inside its faked provider (holdAlarm).
     await holdAlarm();
@@ -1669,10 +1892,16 @@ describe("erasing a person", () => {
     const store = onboardingStore(env);
     const ids = await onboardingTeam(["lea", "max", "mia", "mo", "pim"]);
     await mapped(ids);
-    // Pim is them: the list has them by the address that is theirs.
+    // Pim is them: the list has them by the address that is theirs, and
+    // their link is held by their account, as their sign-in opened it.
     await onList(
       "UPDATE people SET email = ? WHERE id = ?",
       String(person.person.email),
+      ids.pim
+    );
+    await onList(
+      "UPDATE links SET user_id = ? WHERE person = ?",
+      person.userId,
       ids.pim
     );
     const works = await store.teamWorks(ids.team);
@@ -1704,6 +1933,8 @@ describe("erasing a person", () => {
       return row?.work ?? null;
     };
     const pimLink = await store.linkOf(ids.pim);
+    // As whoever holds Pim's link: them.
+    const pimAddress = String(person.person.email);
     const pimSecret = pimLink?.split("#")[1] ?? "";
     const queuedToPim = async () => {
       const rows = await onList(
@@ -1717,7 +1948,7 @@ describe("erasing a person", () => {
       const after = await store.teamWorks(ids.team);
       return {
         pimAsked: await askedOf(ids.pim),
-        pimLink: await sessionWith(pimSecret),
+        pimLink: await sessionWith(pimSecret, pimAddress),
         pimMail: await queuedToPim(),
         maxAsked: await askedOf(ids.max),
         maxOnRota: after
@@ -1838,7 +2069,7 @@ describe("erasing a person", () => {
     expect({
       interview: erased.areas.find(({ area }) => area === "interview")?.state,
       settings: settings.length,
-      link: await sessionWith(theirSecret),
+      link: await sessionWith(theirSecret, String(person.person.email)),
     }).toStrictEqual({ interview: "complete", settings: 1, link: "open" });
   });
 

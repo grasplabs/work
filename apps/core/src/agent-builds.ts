@@ -1890,7 +1890,10 @@ build: {
    * (\`ctx.brain.skills.select\` and \`.read\`, operations \`"skills.select"\`
    * and \`"skills.read"\`), or to read its entities (\`ctx.brain.entities.get\`
    * and \`.find\`, operations \`"entities.get"\` and \`"entities.find"\`, as
-   * everyone in the company may read them), it asks for
+   * everyone in the company may read them), or to remember and forget in
+   * the App's own name (\`ctx.brain.remember\` and \`.forget\`, operations
+   * \`"remember"\` and \`"forget"\`, read back only through the App's own
+   * entity reads, by whoever uses the App), it asks for
    * \`{ type: "platform" }\` with actions \`["brain"]\`. A recall answers what everyone in the company may read,
    * never anyone's own content. To recall teams' content too, name those
    * teams by ID (\`{ type: "platform", teams: ["<team id>"] }\`): a recall
@@ -1900,7 +1903,13 @@ build: {
    * guest. Today everything in the Brain is one person's own: nothing
    * readable by the whole company or by a team, so a recall returns an
    * empty pack, with teams named or not: say so, and never build a feature
-   * that depends on it finding something.
+   * that depends on it finding something. A write is refused, saying
+   * why, unless a person calls from the App's page (never an agent or a
+   * workflow), every table is read by everyone who uses the App (no
+   * owner's, person's or team's rows; builders' alone refuse a builder),
+   * and nothing it can reach is narrower than the company (a personal
+   * connection, a team's part of the Brain, another App): design an App
+   * that remembers that way.
    */
   requestPermission(app: string, request: {
     object:

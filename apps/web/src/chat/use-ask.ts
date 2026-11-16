@@ -188,11 +188,18 @@ export const useAsk = (
     }
     sending.current = true;
     const named = chatMentionsOf(mentioned);
+    // A new chat starts with the agent picked, else the first one the
+    // question mentions: the first agent, paused, never stops it.
+    const startWith = agentId ?? named.find(({ kind }) => kind === "agent")?.id;
     let created: string | undefined;
     const sent = await run(async (session) => {
-      let id = chatId ?? unsentChatFor(unsent.current, question, agentId);
+      let id = chatId ?? unsentChatFor(unsent.current, question, startWith);
       if (id === undefined) {
-        ({ id } = await session.chats.create(titleOf(question), agentId, make));
+        ({ id } = await session.chats.create(
+          titleOf(question),
+          startWith,
+          make
+        ));
         created = id;
       }
       const askedIn = id;
@@ -228,7 +235,7 @@ export const useAsk = (
       // The box keeps the question and says why it wasn't sent; a new chat
       // made for it waits to be asked in again.
       if (created !== undefined) {
-        unsent.current = { id: created, question, agentId };
+        unsent.current = { id: created, question, agentId: startWith };
       }
       return;
     }

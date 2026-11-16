@@ -8,6 +8,7 @@ import { packAcross } from "./across.ts";
 import { bucketUnder, countingWrites, keptUntilSettled } from "./bucket.ts";
 import type { BrainBucket } from "./bucket.ts";
 import { readCard } from "./cards.ts";
+import { catchUpDue, catchUpStep } from "./catch-up.ts";
 import {
   cardRequestSchema,
   attributeRuleOf,
@@ -42,6 +43,7 @@ import {
   personErasureSchema,
   writerErasureSchema,
   readableMemoriesRequestSchema,
+  erasedRequestSchema,
   readableRequestSchema,
   recallRequestSchema,
   restoringNow,
@@ -80,6 +82,8 @@ import type {
   MemoryId,
   NewMemories,
   ReadableMemoriesRequest,
+  Erased,
+  ErasedRequest,
   RetireRequest,
   RetiredMemory,
   AskModel,
@@ -156,6 +160,7 @@ import {
   storeErasedKey,
   subjectOf,
   subjectsOver,
+  writerSubjectOf,
   keepMissingSubjects,
   replayMemoryErasures,
   ledgerPrefix,
@@ -190,6 +195,7 @@ import {
   readableMemories,
   readMemories,
   retireMemory,
+  writerErasedAfterSql,
 } from "./memories.ts";
 import { rebuildMissingSets } from "./reader-sets.ts";
 import {
@@ -200,7 +206,7 @@ import {
 } from "./recall-counts.ts";
 import { find, findPassages, recall } from "./recall.ts";
 import { addMemories } from "./remember.ts";
-import { isRemoved, removeSource } from "./removal.ts";
+import { isRemoved, removeSources } from "./removal.ts";
 import { checkRestore, restoreStatus, startRestore } from "./restore.ts";
 import { isRestoring } from "./restoring.ts";
 import {
@@ -476,6 +482,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     sweep: null,
     repack: null,
     reindex: null,
+    quotes: null,
     embedding: null,
   };
   #sweepAfter = 0;
@@ -1063,15 +1070,10 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     if (!this.#schema) {
       return "free";
     }
-    const { sql } = this.ctx.storage;
-    // The shared store holds no group: nothing under one to look up.
-    if (
-      isErased(sql, await subjectOf(key)) ||
-      (this.#kind.kind === "person" &&
-        isUnderErasedGroup(sql, await subjectsOver(key)))
-    ) {
+    if (await this.#keyErased(key)) {
       return "erased";
     }
+    const { sql } = this.ctx.storage;
     // A removed key is held: closed, though it may hold no version.
     const held =
       isRemoved(sql, key) ||
@@ -1079,6 +1081,97 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
         .exec("SELECT 1 FROM source_versions WHERE source = ? LIMIT 1", key)
         .toArray().length > 0;
     return held ? "held" : "free";
+  }
+
+  /**
+   * Whether an erasure closed `key` here: its own, or, in a person's own
+   * store, a group's it lies under. The shared store holds no group:
+   * nothing under one to look up.
+   */
+  async #keyErased(key: string): Promise<boolean> {
+    const { sql } = this.ctx.storage;
+    return (
+      isErased(sql, await subjectOf(key)) ||
+      (this.#kind.kind === "person" &&
+        isUnderErasedGroup(sql, await subjectsOver(key)))
+    );
+  }
+
+  /**
+   * What an erasure took for good of the keys and memories asked
+   * (contract.ts), from the erasure ledger alone: what this store has
+   * applied of it (`erasures`), which a lost storage reads again before
+   * it answers (`#ready`). Never from whether it holds a memory: a
+   * storage lost or brought back from an older copy lacks memories nobody
+   * erased, which a restore puts back by their own ids. A person's own
+   * store without storage (never written, or lost) has replayed no ledger
+   * yet, so until it is written again it answers nothing erased: every
+   * memory of its own kept (GRA-1934).
+   */
+  async erasedOf(request: ErasedRequest): Promise<Erased> {
+    const asked = checked(erasedRequestSchema, request);
+    const sources = [...new Set(asked.sources)];
+    const seen = new Set<string>();
+    const memories = asked.memories.filter(({ memory }) => {
+      if (seen.has(memory)) {
+        return false;
+      }
+      seen.add(memory);
+      return true;
+    });
+    if (await this.#erasedWhole()) {
+      return { sources, memories: memories.map(({ memory }) => memory) };
+    }
+    await this.#ready();
+    if (!this.#schema) {
+      return { sources: [], memories: [] };
+    }
+    const { sql } = this.ctx.storage;
+    // What a restore brings back isn't in place yet: asked again later.
+    if (isRestoring(sql)) {
+      throw new Error(restoringNow);
+    }
+    const keys = [
+      ...new Set([
+        ...sources,
+        ...memories.flatMap(({ source }) => source ?? []),
+      ]),
+    ];
+    const writers = [
+      ...new Set(memories.flatMap(({ writer }) => writer ?? [])),
+    ];
+    const [found, subjects] = await Promise.all([
+      Promise.all(
+        keys.map(async (key) => ((await this.#keyErased(key)) ? [key] : []))
+      ),
+      Promise.all(
+        writers.map(
+          async (writer) => [writer, await writerSubjectOf(writer)] as const
+        )
+      ),
+    ]);
+    const closed = new Set(found.flat());
+    const subjectOfWriter = new Map(subjects);
+    /** Whether an erasure of `writer` came after the store learned a memory of it at `at`. */
+    const writerErased = (writer: string, at: number): boolean =>
+      sql
+        .exec(
+          `SELECT 1 FROM erasures AS gone
+          WHERE ${writerErasedAfterSql("gone", "?1", "?2")} LIMIT 1`,
+          subjectOfWriter.get(writer) ?? "",
+          at
+        )
+        .toArray().length > 0;
+    return {
+      sources: sources.filter((key) => closed.has(key)),
+      memories: memories
+        .filter(
+          ({ source, writer, learnedAt }) =>
+            (source !== null && closed.has(source)) ||
+            (writer !== null && writerErased(writer, learnedAt))
+        )
+        .map(({ memory }) => memory),
+    };
   }
 
   /**
@@ -1150,19 +1243,21 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
   }
 
   /**
-   * Takes a source out of use for good, keeping its history (removal.ts):
-   * work under way on it is stopped (work.ts `stopWorkOn`). A person's own
-   * store erased whole holds nothing to remove: done.
+   * Takes sources out of use for good, keeping their history, in one
+   * transaction (removal.ts): work under way on them is stopped (work.ts
+   * `stopWorkOn`). A person's own store erased whole holds nothing to
+   * remove: done.
    */
-  async removeSource(request: SourceRemoval): Promise<void> {
-    const { source } = checked(sourceRemovalSchema, request);
+  async removeSources(request: SourceRemoval): Promise<void> {
+    const { sources } = checked(sourceRemovalSchema, request);
     if (await this.#erasedWhole()) {
       return;
     }
     await this.#changing(async () => {
       await this.#readyToWrite();
-      if (await removeSource(this.ctx.storage, source)) {
-        stopWorkOn(this.#work, [source]);
+      const removed = await removeSources(this.ctx.storage, sources);
+      if (removed.length > 0) {
+        stopWorkOn(this.#work, removed);
       }
     });
   }
@@ -1340,7 +1435,8 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    * deleted, then one batch of the sweep, then up
    * to `repackPerTick` blocks of vector codes repacked, then, while the
    * word indexes are behind their rules, one batch of them rebuilt, then
-   * a step of embedding (embedding.ts), then the queue, asking `ask` for
+   * a step of the catch-up of quotes (catch-up.ts), then a step of
+   * embedding (embedding.ts), then the queue, asking `ask` for
    * its model calls, `embedders` for vectors and `handOvers` for what is
    * handed over (work.ts, handover.ts). Each step is
    * bounded, so
@@ -1407,6 +1503,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     await this.#sweep(tickAt);
     this.#repack(tickAt);
     this.#reindex(tickAt);
+    await this.#catchUp(tickAt);
     this.#embedding(tickAt, embedders.model);
     this.#exports();
     await workTick(
@@ -1540,6 +1637,8 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    *   grace is over, and the sweep's own wait after a failure;
    * - vectors.ts `repackDue`: removed codes to repack;
    * - words.ts `wordsRebuilding`: word indexes behind their rules;
+   * - catch-up.ts `catchUpDue`: a source not judged against its current
+   *   version, or memories above the mark of those judged;
    * - embedding.ts `embeddingDue`: a walk not over, or a replaced build
    *   still to remove;
    * - exports.ts `exportsDue`: an erasure recorded since the step last
@@ -1561,6 +1660,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       erasureDue(sql) ||
       repackDue(sql) ||
       wordsRebuilding(sql) ||
+      catchUpDue(sql) ||
       embeddingDue(storage) ||
       exportsDue(sql)
     ) {
@@ -1736,6 +1836,21 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     } catch {
       // Nothing of the error is kept: the block stays marked.
       this.#stepsFailed.repack = { at, reason: "failed" };
+    }
+  }
+
+  /**
+   * The tick's step of the catch-up of quotes (catch-up.ts): a failure (a
+   * file that can't be read) ends it, its source's turn spent, and the
+   * next tick goes on with the next source.
+   */
+  async #catchUp(at: Date): Promise<void> {
+    try {
+      await catchUpStep(this.ctx.storage, this.#bucket);
+      this.#stepsFailed.quotes = null;
+    } catch {
+      // Nothing of the error is kept: it may name a key.
+      this.#stepsFailed.quotes = { at, reason: "failed" };
     }
   }
 
@@ -2090,6 +2205,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
             {
               storage: this.ctx.storage,
               db: this.#db,
+              bucket: this.#bucket,
               shared: this.#kind.kind === "shared",
             },
             adding

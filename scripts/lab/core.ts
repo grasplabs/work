@@ -49,7 +49,7 @@ import { interviewKindSchema } from "@grasp-os/shared/onboarding";
 import { z } from "zod";
 
 import { localStaff } from "../../apps/core/test/sign-in-config.ts";
-import { cookieHeader, origin, sessionOf } from "../seed/local.ts";
+import { cookieHeader, origin, sessionOf, signInAs } from "../seed/local.ts";
 import type { Session } from "../seed/local.ts";
 
 /** Why the local core refused or failed something the lab asked. */
@@ -213,11 +213,19 @@ export const ask = async <T>(core: Core, call: Ask<T>): Promise<T> =>
 /** A link's secret: what comes after the `#`. */
 export const secretOf = (link: string): string => link.split("#")[1] ?? "";
 
-/** Posts to the interview page's endpoint, as the page does. */
-const interviewCall = async (body: unknown): Promise<unknown> => {
+/** Posts to the interview page's endpoint, as the page does, signed in with `cookie`. */
+const interviewCall = async (
+  cookie: string,
+  body: unknown
+): Promise<unknown> => {
   const response = await fetch(new URL(interviewApiPath, origin), {
     method: "POST",
-    headers: { origin, "content-type": "application/json" },
+    headers: {
+      origin,
+      "content-type": "application/json",
+      "sec-fetch-site": "same-origin",
+      cookie: cookieHeader(cookie),
+    },
     body: JSON.stringify(body),
   });
   if (!response.ok) {
@@ -230,38 +238,30 @@ const savedSchema = z.object({ saved: z.boolean(), version: z.int() });
 const approvedSchema = z.object({ approved: z.boolean() });
 
 /** What a link opens, read as far as the lab needs it. */
-const sessionSchema = z.discriminatedUnion("state", [
-  z.object({ state: z.literal("elsewhere") }),
-  z.object({
-    state: z.literal("open"),
-    key: z.string().optional(),
-    name: z.string(),
-    kind: interviewKindSchema,
-    progress: interviewProgressSchema.nullable(),
-    version: z.int(),
-  }),
-]);
+const sessionSchema = z.object({
+  state: z.literal("open"),
+  name: z.string(),
+  kind: interviewKindSchema,
+  progress: interviewProgressSchema.nullable(),
+  version: z.int(),
+});
 export type LinkSession = z.output<typeof sessionSchema>;
 
-/** Someone's interview, on their own link, as their page holds it. */
+/**
+ * Someone's interview, on their own link, as their page holds it: signed
+ * in with the company's sign-in as them (GRA-1790), once, on first use.
+ */
 export interface Link {
-  /** Opens the link on this device: its key the first time, and what was said. */
-  open: (key?: string) => Promise<LinkSession>;
+  /** Opens the link: what was said. */
+  open: () => Promise<LinkSession>;
   /** Agrees to take part, as their page asks before anything they say is recorded (GRA-329). */
-  participate: (key: string) => Promise<void>;
+  participate: () => Promise<void>;
   /** Approves the facts read back, each at the revision they saw: only then do they count (GRA-329). */
-  approve: (key: string, facts: readonly ApprovedFact[]) => Promise<void>;
+  approve: (facts: readonly ApprovedFact[]) => Promise<void>;
   /** Keeps where the interview is; the version it was kept as. */
-  save: (
-    key: string,
-    version: number,
-    progress: InterviewProgress
-  ) => Promise<number>;
+  save: (version: number, progress: InterviewProgress) => Promise<number>;
   /** One turn of Stephen's. */
-  turn: (
-    request: Omit<InterviewTurnRequest, "secret" | "key">,
-    key: string
-  ) => Promise<StephenTurn>;
+  turn: (request: Omit<InterviewTurnRequest, "secret">) => Promise<StephenTurn>;
 }
 
 /**
@@ -330,29 +330,30 @@ const turnOf = async (
   }
 };
 
-/** Someone's link on the local core. */
-export const linkOn = (link: string): Link => {
+/**
+ * Someone's link on the local core, for the person at `email`, the address
+ * it was sent to: signed in as them through the stack's fake IdP.
+ */
+export const linkOn = (link: string, email: string): Link => {
   const secret = secretOf(link);
+  let signedIn: Promise<string> | undefined;
+  const cookie = async (): Promise<string> => {
+    signedIn ??= signInAs(email);
+    return await signedIn;
+  };
+  const call = async (body: Record<string, unknown>) =>
+    await interviewCall(await cookie(), { ...body, secret });
   return {
-    open: async (key) =>
-      sessionSchema.parse(
-        await interviewCall({
-          action: "session",
-          secret,
-          ...(key === undefined ? {} : { key }),
-        })
-      ),
-    participate: async (key) => {
-      await interviewCall({
+    open: async () => sessionSchema.parse(await call({ action: "session" })),
+    participate: async () => {
+      await call({
         action: "participate",
-        secret,
-        key,
         notice: participationNotice.version,
       });
     },
-    approve: async (key, facts) => {
+    approve: async (facts) => {
       const { approved } = approvedSchema.parse(
-        await interviewCall({ action: "approve", secret, key, facts })
+        await call({ action: "approve", facts })
       );
       if (!approved) {
         throw new CoreCallError(
@@ -361,9 +362,9 @@ export const linkOn = (link: string): Link => {
         );
       }
     },
-    save: async (key, version, progress) => {
+    save: async (version, progress) => {
       const saved = savedSchema.parse(
-        await interviewCall({ action: "save", secret, key, version, progress })
+        await call({ action: "save", version, progress })
       );
       if (!saved.saved) {
         throw new CoreCallError(
@@ -373,17 +374,24 @@ export const linkOn = (link: string): Link => {
       }
       return saved.version;
     },
-    turn: async (request, key) =>
-      await whileBusy(
+    turn: async (request) => {
+      const signedInAs = cookieHeader(await cookie());
+      return await whileBusy(
         async () =>
           await turnOf(
             await fetch(new URL(interviewTurnPath, origin), {
               method: "POST",
-              headers: { origin, "content-type": "application/json" },
-              body: JSON.stringify({ ...request, secret, key }),
+              headers: {
+                origin,
+                "content-type": "application/json",
+                "sec-fetch-site": "same-origin",
+                cookie: signedInAs,
+              },
+              body: JSON.stringify({ ...request, secret }),
             })
           )
-      ),
+      );
+    },
   };
 };
 
@@ -395,7 +403,7 @@ export const linkOn = (link: string): Link => {
 export const turnOn = async (
   core: Core,
   who: LabWho,
-  turn: Omit<InterviewTurnRequest, "secret" | "key">,
+  turn: Omit<InterviewTurnRequest, "secret">,
   { lineOnly = false }: { lineOnly?: boolean } = {}
 ): Promise<StephenTurn> => {
   const taken = await whileBusy(

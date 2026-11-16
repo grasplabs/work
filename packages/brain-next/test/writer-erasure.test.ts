@@ -326,6 +326,86 @@ describe("a writer's erasure", () => {
     });
   });
 
+  // GRA-1807: what a chat showed of a memory goes once its writer's
+  // erasure covers it, by the ledger alone: hidden, deleted, or after an
+  // older copy of the store comes back.
+  it("answers the host each memory it covers as erased, hidden, deleted or replayed into an older copy, and another writer's or a later one as kept", async () => {
+    const group = unique("g");
+    const reader: Reader = { person: unique("p"), groups: [group] };
+    const writer = app();
+    const entity: NewEntity = {
+      key: "c",
+      kind: "customer",
+      names: [`${word()} Co`],
+    };
+    const written = await remember(
+      group,
+      [entity],
+      [
+        said("c", `${word()} by the writer`, { kind: "writer", writer }),
+        said("c", `${word()} by another`, { kind: "writer", writer: app() }),
+      ]
+    );
+    const [mine = "", others = ""] = written.memories;
+    const copy = await copyOf(shared());
+    /** Each of `ids`, as a host pinned it when it was handed over. */
+    const pinned = async (ids: readonly string[]) => {
+      const { memories } = await shared().readMemories({
+        entity: written.entities.c ?? "",
+        reader,
+      });
+      return ids.flatMap((id) =>
+        memories.flatMap((held) =>
+          held.id === id
+            ? [
+                {
+                  memory: id,
+                  source: null,
+                  writer: held.writer,
+                  learnedAt: held.learnedAt.getTime(),
+                },
+              ]
+            : []
+        )
+      );
+    };
+    const before = await pinned([mine, others]);
+    await holdDeletes(true);
+    await shared().eraseWriter({
+      writer,
+      reason: "deleted",
+      change: "reset-1",
+    });
+    // The writer remembers anew after its erasure: not covered.
+    const anew = await remember(
+      group,
+      [{ ...entity, id: written.entities.c ?? "" }],
+      [said("c", `${word()} by the writer again`, { kind: "writer", writer })]
+    );
+    const asked = {
+      sources: [],
+      memories: [...before, ...(await pinned(anew.memories))],
+    };
+    const hidden = await shared().erasedOf(asked);
+    await holdDeletes(false);
+    await tick(shared());
+    const deleted = await shared().erasedOf(asked);
+    // An older copy, from before the erasure, comes back: replayed.
+    await restore(shared(), copy);
+
+    expect({
+      asked: asked.memories.length,
+      hidden,
+      deleted,
+      replayed: await shared().erasedOf(asked),
+    }).toStrictEqual({
+      asked: 3,
+      hidden: { sources: [], memories: [mine] },
+      deleted: { sources: [], memories: [mine] },
+      replayed: { sources: [], memories: [mine] },
+    });
+  });
+
   it("answers its change again, also after a restart and an add in between, with the first erasure and nothing more erased; another change erases anew", async () => {
     const group = unique("g");
     const reader: Reader = { person: unique("p"), groups: [group] };
@@ -815,11 +895,19 @@ describe("a writer's erasure", () => {
       // every migration after the release before's not yet run, and a row
       // that points at the erasure.
       const before: Copy = {
-        // The table of memories that failed to delete is the release's own.
+        // The table of memories that failed to delete is the release's own,
+        // and so are the quotes' (migration 0022, quotes.ts).
         tables: now.tables
           .filter(
             ({ name }) =>
-              name !== "memory_erase_failures" && name !== "removed_sources"
+              ![
+                "memory_erase_failures",
+                "removed_sources",
+                "memory_outs",
+                "memory_ins",
+                "memory_judging",
+                "memory_judging_places",
+              ].includes(name)
           )
           .map((table) => {
             switch (table.name) {
@@ -857,6 +945,26 @@ describe("a writer's erasure", () => {
                   ),
                 };
               }
+              case "current_versions": {
+                return {
+                  ...table,
+                  created: table.created.replace(
+                    /,\s*`judged_row` integer/u,
+                    ""
+                  ),
+                  rows: table.rows.map((row) => without(row, "judged_row")),
+                };
+              }
+              case "source_subjects": {
+                return {
+                  ...table,
+                  created: table.created.replace(
+                    /,\s*`thread` integer DEFAULT false NOT NULL/u,
+                    ""
+                  ),
+                  rows: table.rows.map((row) => without(row, "thread")),
+                };
+              }
               case "erased_versions": {
                 return {
                   ...table,
@@ -891,7 +999,10 @@ describe("a writer's erasure", () => {
             !made.includes("removed_sources") &&
             // Made by a migration after the release before's, as those are.
             !made.includes("unembeddable_hash_idx") &&
-            !made.includes("work_items_key_idx")
+            !made.includes("work_items_key_idx") &&
+            !made.includes("memory_outs") &&
+            !made.includes("memory_ins") &&
+            !made.includes("current_versions_unjudged_idx")
         ),
       };
       expect(

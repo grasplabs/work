@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import type { AgentDraftMade, AgentDraftMake, AgentDrafted } from "./agents.ts";
 import type { ChatSavedMemory } from "./brain-memories.ts";
 import type { DependencyRequest } from "./dependencies.ts";
 import type { AppId } from "./ids.ts";
@@ -140,11 +141,6 @@ export interface ChatSummary {
   lastAt: string;
   /** Whether its agent is working on a question now. */
   running: boolean;
-  /**
-   * Which channel it came through: Grasp's own app (`web`), or a chat
-   * platform by its adapter's name (`teams`, `slack`), for good.
-   */
-  via: ChatChannel;
   /** What "Make something" started it to make, for good; null for any other chat. */
   make: ChatMake | null;
 }
@@ -771,6 +767,11 @@ export type ChatMessage =
        * (`proposePlan`): shown as a card with Build it.
        */
       planned?: ChatPlanned;
+      /**
+       * The agent it drafted, if it ended its response drafting one
+       * (`draftAgent`): shown as a card with Make it.
+       */
+      agentDraft?: AgentDrafted;
       end: ChatReplyEnd;
       /**
        * Why it failed, as one of the model gateway's error codes: the page
@@ -1087,6 +1088,31 @@ export interface ChatSubscriptionApi {
   release: () => Promise<void>;
 }
 
+/** The most held App calls one page of `ChatsApi.heldCalls` lists. */
+export const heldAppCallsPage = 50;
+
+/**
+ * A write to an App the chat's agent asked for after the chat used
+ * something only its person may read, held until that person confirms
+ * or declines it (`ChatsApi.heldCalls`). `request` is the call exactly as
+ * it would run; confirming names its `requestHash`.
+ */
+export interface HeldAppCall {
+  id: string;
+  appId: string;
+  /** The App's name now; null once it was removed. */
+  appName: string | null;
+  /** The function's path in the App, as the request names it. */
+  function: string;
+  /** `mutation` or `action`. */
+  kind: string;
+  request: string;
+  requestHash: string;
+  heldAt: string;
+  /** When it lapses, never run, unless confirmed before. */
+  expiresAt: string;
+}
+
 /** The signed-in person's chats with the organization's agent. */
 export interface ChatsApi {
   /** The models a question may name, the default first. */
@@ -1180,6 +1206,18 @@ export interface ChatsApi {
    */
   build: (chatId: string, build: ChatBuild) => Promise<ChatBuilt>;
   /**
+   * Make it: makes the agent the chat drafted (`make.draft`), as its card
+   * showed it, by the Agents page's own checks: one of the company's for
+   * its admins alone, a person's own for anyone the company lets; each
+   * draft once. Then asks the chat's agent on, in the person's words
+   * (`make.text`). A draft the chat doesn't hold, or made already, is
+   * refused (`agent.draft_not_found`), with nothing made.
+   */
+  makeDraftedAgent: (
+    chatId: string,
+    make: AgentDraftMake
+  ) => Promise<AgentDraftMade>;
+  /**
    * What the chat's agent worked on, the most recently written first: each
    * App or workflow whose draft it wrote (`ChatWork`).
    */
@@ -1201,6 +1239,25 @@ export interface ChatsApi {
    * `id`. Audited; the agent is told.
    */
   denyConnection: (chatId: string, id: string) => Promise<void>;
+  /**
+   * The writes to Apps the chat's agent asked for after the chat used
+   * something only the person can read, which wait for them, oldest
+   * first, at most {@link heldAppCallsPage} a page: a full page goes on
+   * `after` its last one's `id`.
+   */
+  heldCalls: (chatId: string, after?: string) => Promise<HeldAppCall[]>;
+  /**
+   * Confirms the chat's held App call `id` for exactly the request whose
+   * SHA-256 is `requestHash`, and runs it once, as the agent acting for
+   * the person. Audited; the agent is told how it ended.
+   */
+  confirmHeldCall: (
+    chatId: string,
+    id: string,
+    requestHash: string
+  ) => Promise<void>;
+  /** Declines the chat's held App call `id`: it never runs. Audited; the agent is told. */
+  declineHeldCall: (chatId: string, id: string) => Promise<void>;
   /**
    * Follows the chat: `onUpdate` gets the messages after the one with ID
    * `after` (all of them for `null`) and what the agent is writing, then

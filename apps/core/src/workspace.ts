@@ -1,5 +1,7 @@
 import type { AssistantMessage, Message } from "@earendil-works/pi-ai";
 import { agentErrors } from "@grasp-os/shared/agent";
+import { agentDraftSchema } from "@grasp-os/shared/agents";
+import type { AgentDraft } from "@grasp-os/shared/agents";
 import {
   actorOf,
   auditEventSchema,
@@ -21,6 +23,7 @@ import {
   chatPlanSchema,
   chatPlatformSchema,
   chatToolEventsKept,
+  heldAppCallsPage,
 } from "@grasp-os/shared/chat";
 import type {
   ChatChannel,
@@ -69,6 +72,7 @@ import {
 } from "@grasp-os/shared/permissions";
 import type { Authority } from "@grasp-os/shared/permissions";
 import { redact } from "@grasp-os/shared/redact";
+import type { Role } from "@grasp-os/shared/roles";
 import { canBuild, roleSchema } from "@grasp-os/shared/roles";
 import { subjectSchema } from "@grasp-os/shared/subject";
 import type { Subject } from "@grasp-os/shared/subject";
@@ -88,6 +92,7 @@ import {
   isNotNull,
   isNull,
   ne,
+  or,
   sql,
 } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/durable-sqlite";
@@ -109,7 +114,7 @@ import type {
   CodeRunCall,
 } from "./agent-scope.ts";
 import { heldIn } from "./agent-skills.ts";
-import { builtNoteText, inOwnWords } from "./agent.ts";
+import { builtNoteText, resultRunId, withheldResult } from "./agent.ts";
 import type { QuestionBuilt, TurnContext, TurnResult } from "./agent.ts";
 import { turnAgent } from "./agents.ts";
 import { drainObjectOutbox, uuidFromHash } from "./audit-outbox.ts";
@@ -122,7 +127,6 @@ import {
   channelText,
   heldWriteRefusal,
   turnCheckOf,
-  withoutLinks,
 } from "./channels/stephen-rules.ts";
 import type { HeldWriteRefusal, TurnCheck } from "./channels/stephen-rules.ts";
 import { questionText } from "./chat-agent.ts";
@@ -186,15 +190,17 @@ import {
   customWidgets,
   dashboardWidgets,
   dashboards,
+  heldAppCalls,
   memoryUses,
 } from "./db/workspace/schema.ts";
 import { chatWork } from "./drafts.ts";
 import { callObject, chatSession } from "./durable-objects.ts";
-import { dropHeldStarts } from "./held-starts.ts";
+import { dropHeldStarts, heldStartMs } from "./held-starts.ts";
 import {
   brainMemoryOf,
   brainMemoryPrefix,
   brainMemorySchema,
+  erasedSources,
   readableSources,
   withheldDetail,
 } from "./history-access.ts";
@@ -527,6 +533,17 @@ const storedMessageSchema = z.custom<Message>(
 );
 
 /**
+ * A step's result as the chat shows it once what its run read was erased
+ * (`#replaceErased`): the line the model gets in its place
+ * (`withheldResult`), which names no cause, its call, run and how it
+ * ended kept; any other message as it is.
+ */
+const withheldCopy = (message: Message): Message =>
+  message.role === "toolResult"
+    ? { ...message, content: [{ type: "text", text: withheldResult }] }
+    : message;
+
+/**
  * `shown` with the files its question carried, by its ID in `carried`;
  * as it is for any other message, or a question that carried none.
  */
@@ -731,6 +748,31 @@ const traceKeyPrefix = "trace:";
  */
 const builtKeyPrefix = "built:";
 
+/**
+ * Which agents a turn may draft for its person (`TurnContext.drafts`):
+ * only one they asked for, in their own chat in Grasp; one of the
+ * company's for its admins, else one of their own.
+ */
+const draftsOf = ({
+  shared,
+  unattended,
+  via,
+  role,
+}: {
+  shared: boolean;
+  unattended: boolean;
+  via: ChatChannel;
+  role: Role | undefined;
+}): TurnContext["drafts"] => {
+  if (shared || unattended || via !== "web" || role === undefined) {
+    return undefined;
+  }
+  return role === "admin" ? "company" : "own";
+};
+
+/** Where a chat keeps the agents it drafted that Make it took, by call. */
+const draftedKeyPrefix = "drafted:";
+
 const builtSchema = z.array(z.string());
 
 /**
@@ -764,6 +806,47 @@ export type HeldOutcome =
   | "expired"
   | "unknown"
   | "failed";
+
+/** Most characters of a function's path a held App call keeps. */
+const maxHeldFunctionChars = 256;
+
+/** What holding a write to an App keeps (held-app-calls.ts). */
+export interface HeldAppCallInput {
+  agentId: string;
+  appId: string;
+  function: string;
+  kind: string;
+  request: string;
+  requestHash: string;
+}
+
+/** A held App call, as its Workspace keeps it, with when it lapses. */
+export interface HeldAppCallRow extends HeldAppCallInput {
+  id: string;
+  chatId: string;
+  personId: string;
+  heldAt: number;
+  expiresAt: number;
+}
+
+/** `row` as its callers read it: its request as it was held. */
+const heldAppCallRowOf = (
+  row: typeof heldAppCalls.$inferSelect
+): HeldAppCallRow => ({
+  id: row.id,
+  chatId: row.chatId,
+  personId: row.personId,
+  agentId: row.agentId,
+  appId: row.appId,
+  function: row.function,
+  kind: row.kind,
+  // Kept while it waits; decided in the write that empties it, and handed
+  // back from the read before it.
+  request: row.request ?? "",
+  requestHash: row.requestHash,
+  heldAt: row.heldAt.getTime(),
+  expiresAt: row.heldAt.getTime() + heldStartMs,
+});
 
 /** A held write, as its chat's agent knows it: the ID its call answered with. */
 const heldSchema = z.strictObject({
@@ -889,6 +972,20 @@ const handsTurnsOver = ({
   restricted,
 }: Pick<Chat, "thread" | "restricted">): boolean =>
   answersAlone({ thread }, false) && !restricted;
+
+/**
+ * The one rule for which of `personId`'s chats Grasp's own surfaces show
+ * (GRA-1919): only one that came through Grasp's own app. A conversation
+ * with the agent in a chat app (Teams, Slack, any other) is never a chat
+ * in Grasp: no list, search or address shows or opens it, and asked for
+ * by its ID it answers exactly as one that doesn't exist. It is kept here
+ * all the same, for its agent and the Brain (`askThrough`,
+ * `turnForBrain`), and its person deletes it from Settings
+ * (`forgetChatApps`). Every read a person's surface makes has it in its
+ * own statement, so a hidden chat takes no slot and leaves no trace.
+ */
+const shownInGrasp = (personId: string) =>
+  and(eq(chats.personId, personId), eq(chats.via, "web"));
 
 /** A person's or team's workspace: chats and the Code Mode agent on Pi. */
 export class Workspace extends DurableObject<Env> {
@@ -1064,9 +1161,7 @@ export class Workspace extends DurableObject<Env> {
       .from(chatMessages)
       .innerJoin(chats, eq(chats.id, chatMessages.chatId))
       .leftJoin(chatSearchText, eq(chatSearchText.messageId, chatMessages.id))
-      .where(
-        and(eq(chats.personId, personId), isNull(chatSearchText.messageId))
-      )
+      .where(and(shownInGrasp(personId), isNull(chatSearchText.messageId)))
       .all();
     for (const { id, chatId, message } of unread) {
       this.#keepSaid(
@@ -1139,14 +1234,13 @@ export class Workspace extends DurableObject<Env> {
         title: chats.title,
         createdAt: chats.createdAt,
         lastAt: chats.lastAt,
-        via: chats.via,
         makeKind: chats.makeKind,
         makeProject: chats.makeProject,
         agentId: chats.agentId,
         said: sql<string>`'' || ${saidWords}`,
       })
       .from(chats)
-      .where(eq(chats.personId, personId))
+      .where(shownInGrasp(personId))
       .orderBy(desc(chats.lastAt))
       .all();
     const found = rows
@@ -1251,12 +1345,17 @@ export class Workspace extends DurableObject<Env> {
     return id;
   }
 
-  /** Refuses `personId` a new chat once they keep {@link maxChatsPerPerson}. */
+  /**
+   * Refuses `personId` a new chat once they keep {@link maxChatsPerPerson}
+   * in Grasp (`shownInGrasp`). A chat app's conversations count toward no
+   * cap: the person deletes them (`forgetChatApps`), and a chat app's
+   * message is never refused for them.
+   */
   requireRoomForChat(personId: string): void {
     const [kept] = this.#db
       .select({ count: count() })
       .from(chats)
-      .where(eq(chats.personId, personId))
+      .where(shownInGrasp(personId))
       .all();
     if ((kept?.count ?? 0) >= maxChatsPerPerson) {
       throw agentErrors.create("agent.too_many_chats");
@@ -1265,7 +1364,8 @@ export class Workspace extends DurableObject<Env> {
 
   /**
    * A new chat, which belongs to `personId`: agent `agentId` answers in it,
-   * acting for them. Refused past {@link maxChatsPerPerson}. Made `by`
+   * acting for them. Refused past {@link maxChatsPerPerson} in Grasp; a
+   * chat app's conversation never is (`requireRoomForChat`). Made `by`
    * someone (the person, through the chat API), it is audited with it, in
    * the same transaction; core's own chats (tests) pass nobody.
    *
@@ -1295,7 +1395,9 @@ export class Workspace extends DurableObject<Env> {
       throw permissionErrors.create("permission.context_invalid");
     }
     const channel = chatChannelSchema.parse(via);
-    this.requireRoomForChat(personId);
+    if (channel === "web") {
+      this.requireRoomForChat(personId);
+    }
     const id = chatIdSchema.parse(crypto.randomUUID());
     const chat = this.ctx.storage.transactionSync(() => {
       if (by !== undefined) {
@@ -1336,7 +1438,7 @@ export class Workspace extends DurableObject<Env> {
     file: { name: string; type: ChatFileType; bytes: number; text: string },
     by: AuditActor
   ): ChatFile {
-    const { id } = this.#ownChat(chatId, personId);
+    const { id } = this.#graspChat(chatId, personId);
     if (this.#deleting.has(id)) {
       throw agentErrors.create("agent.chat_not_found");
     }
@@ -1385,7 +1487,7 @@ export class Workspace extends DurableObject<Env> {
     fileId: string,
     by: AuditActor
   ): void {
-    const { id } = this.#ownChat(chatId, personId);
+    const { id } = this.#graspChat(chatId, personId);
     // A question starting in the chat may have chosen it already, and
     // binds it only once it is kept, after awaits (`#turn`): no file of
     // the chat is removed while it has a turn, which is taken before its
@@ -1777,6 +1879,319 @@ export class Workspace extends DurableObject<Env> {
     return chat?.restricted;
   }
 
+  /**
+   * Whether the chat has handed its model or code something only its
+   * person may read (private-reads.ts); `undefined`: no such chat.
+   */
+  isChatPrivateRead(chatId: ChatId): boolean | undefined {
+    return this.#db
+      .select({ privateRead: chats.privateRead })
+      .from(chats)
+      .where(eq(chats.id, chatId))
+      .get()?.privateRead;
+  }
+
+  /**
+   * Marks the chat as having handed its model or code something only its
+   * person may read, for good (private-reads.ts), with `entry` in the
+   * audit outbox in the same write the first time: `true` then, `false`
+   * when it was marked already, `undefined` for no such chat.
+   */
+  markChatPrivateRead(chatId: ChatId, entry: AuditEntry): boolean | undefined {
+    const marked = this.ctx.storage.transactionSync(() => {
+      const chat = this.#db
+        .select({ privateRead: chats.privateRead })
+        .from(chats)
+        .where(eq(chats.id, chatId))
+        .get();
+      if (chat === undefined || chat.privateRead) {
+        return chat === undefined ? undefined : false;
+      }
+      this.#outboxEntry(entry);
+      this.#db
+        .update(chats)
+        .set({ privateRead: true })
+        .where(eq(chats.id, chatId))
+        .run();
+      return true;
+    });
+    if (marked === true) {
+      this.#deliverAudit();
+    }
+    return marked;
+  }
+
+  /**
+   * Holds a write to an App the chat's agent asked for (held-app-calls.ts)
+   * for the chat's person: the same request still waiting in the chat is
+   * the same hold, so a call made again (a step a restart ran again) is
+   * held once. The call that holds it records it (`agent.call`, with the
+   * hold's ID). Refused for a chat that isn't `personId`'s.
+   */
+  async holdAppCall(
+    chatId: unknown,
+    personId: string,
+    held: HeldAppCallInput,
+    now: number
+  ): Promise<HeldAppCallRow> {
+    const chat = this.#ownChat(chatId, personId);
+    await this.#lapseHeldAppCalls(chat.id, now);
+    const kept = this.ctx.storage.transactionSync(() => {
+      const waiting = this.#db
+        .select()
+        .from(heldAppCalls)
+        .where(
+          and(
+            eq(heldAppCalls.chatId, chat.id),
+            eq(heldAppCalls.status, "waiting"),
+            eq(heldAppCalls.appId, held.appId),
+            eq(heldAppCalls.requestHash, held.requestHash)
+          )
+        )
+        .get();
+      if (waiting !== undefined) {
+        return waiting;
+      }
+      return this.#db
+        .insert(heldAppCalls)
+        .values({
+          id: crypto.randomUUID(),
+          chatId: chat.id,
+          personId,
+          ...held,
+          heldAt: new Date(now),
+          status: "waiting",
+        })
+        .returning()
+        .get();
+    });
+    this.heldChanged(chat.id);
+    return heldAppCallRowOf(kept);
+  }
+
+  /**
+   * The App writes held for `personId` in their chat `chatId` that still
+   * wait, oldest first, a page of at most `heldAppCallsPage`: none past
+   * their day. A full page goes on `after` its last one's ID; an ID that
+   * names no hold of the chat starts from the first.
+   */
+  async heldAppCalls(
+    chatId: unknown,
+    personId: string,
+    now: number,
+    after?: string
+  ): Promise<HeldAppCallRow[]> {
+    const chat = this.#ownChat(chatId, personId);
+    await this.#lapseHeldAppCalls(chat.id, now);
+    const from =
+      after === undefined
+        ? undefined
+        : this.#db
+            .select({ id: heldAppCalls.id, heldAt: heldAppCalls.heldAt })
+            .from(heldAppCalls)
+            .where(
+              and(eq(heldAppCalls.id, after), eq(heldAppCalls.chatId, chat.id))
+            )
+            .get();
+    return this.#db
+      .select()
+      .from(heldAppCalls)
+      .where(
+        and(
+          eq(heldAppCalls.chatId, chat.id),
+          eq(heldAppCalls.personId, personId),
+          eq(heldAppCalls.status, "waiting"),
+          from === undefined
+            ? undefined
+            : or(
+                gt(heldAppCalls.heldAt, from.heldAt),
+                and(
+                  eq(heldAppCalls.heldAt, from.heldAt),
+                  gt(heldAppCalls.id, from.id)
+                )
+              )
+        )
+      )
+      .orderBy(asc(heldAppCalls.heldAt), asc(heldAppCalls.id))
+      .limit(heldAppCallsPage)
+      .all()
+      .map((row) => heldAppCallRowOf(row));
+  }
+
+  /**
+   * Decides held App call `id` of `personId`'s chat `chatId`, once: only
+   * while it waits, within its day, and, to confirm it, only for the
+   * request whose SHA-256 is `requestHash`, the one the person was shown.
+   * Its request is emptied in the same write, and handed back to run once
+   * confirmed. Anything else (another's, decided already, lapsed, another
+   * request) answers as none: `agent.held_call_not_found`.
+   */
+  async decideHeldAppCall(
+    chatId: unknown,
+    personId: string,
+    id: string,
+    decision: { confirm: true; requestHash: string } | { confirm: false },
+    now: number
+  ): Promise<HeldAppCallRow> {
+    const chat = this.#ownChat(chatId, personId);
+    await this.#lapseHeldAppCalls(chat.id, now);
+    const decided = this.ctx.storage.transactionSync(() => {
+      const row = this.#db
+        .select()
+        .from(heldAppCalls)
+        .where(
+          and(
+            eq(heldAppCalls.id, id),
+            eq(heldAppCalls.chatId, chat.id),
+            eq(heldAppCalls.personId, personId),
+            eq(heldAppCalls.status, "waiting")
+          )
+        )
+        .get();
+      const taken =
+        row !== undefined &&
+        (!decision.confirm || row.requestHash === decision.requestHash)
+          ? row
+          : undefined;
+      if (taken !== undefined) {
+        this.#db
+          .update(heldAppCalls)
+          .set({
+            status: decision.confirm ? "confirmed" : "declined",
+            request: null,
+          })
+          .where(eq(heldAppCalls.id, taken.id))
+          .run();
+        // The person's decision, recorded before anything runs of it.
+        this.#outboxEntry({
+          actor: { type: "person", userId: personId },
+          action: decision.confirm
+            ? "chat.app_call.confirmed"
+            : "chat.app_call.declined",
+          target: { type: "app", id: taken.appId },
+          detail: {
+            workspace: this.ctx.id.name ?? null,
+            chat: chat.id,
+            held: taken.id,
+            kind: taken.kind,
+          },
+        });
+      }
+      return taken;
+    });
+    if (decided === undefined) {
+      throw agentErrors.create("agent.held_call_not_found");
+    }
+    this.#deliverAudit();
+    this.heldChanged(chat.id);
+    return heldAppCallRowOf(decided);
+  }
+
+  /**
+   * Ends the App writes held in chat `chatId` that waited past their day
+   * (`heldStartMs`, as a held start's) at `now`, never run: each is
+   * `lapsed`, its request emptied and its end recorded
+   * (`chat.app_call.lapsed`) in one write, then its agent told. Done
+   * whenever the chat's held calls are next read, held or decided, so a
+   * lapsed one is never listed, confirmed or kept with its request past
+   * that read.
+   */
+  async #lapseHeldAppCalls(chatId: ChatId, now: number): Promise<void> {
+    const lapsed = this.ctx.storage.transactionSync(() => {
+      const rows = this.#db
+        .select()
+        .from(heldAppCalls)
+        .where(
+          and(
+            eq(heldAppCalls.chatId, chatId),
+            eq(heldAppCalls.status, "waiting"),
+            lte(heldAppCalls.heldAt, new Date(now - heldStartMs))
+          )
+        )
+        .all();
+      for (const row of rows) {
+        this.#db
+          .update(heldAppCalls)
+          .set({ status: "lapsed", request: null })
+          .where(eq(heldAppCalls.id, row.id))
+          .run();
+        this.#outboxEntry({
+          actor: { type: "system" },
+          action: "chat.app_call.lapsed",
+          target: { type: "app", id: row.appId },
+          detail: {
+            workspace: this.ctx.id.name ?? null,
+            chat: chatId,
+            held: row.id,
+            kind: row.kind,
+          },
+        });
+      }
+      return rows;
+    });
+    if (lapsed.length === 0) {
+      return;
+    }
+    this.#deliverAudit();
+    this.heldChanged(chatId);
+    for (const { id, function: name } of lapsed) {
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- one note each, in order
+        await this.#note(
+          chatId,
+          `The write to an App you asked for, "${name}" (held ID ${id}), waited a day without the person confirming it, so it ended and was not carried out. If they still want it, ask for it afresh.`
+        );
+      } catch (error) {
+        // Ended either way: the agent finds it no longer waits.
+        log.warn("chat.held_app_call_lapse_note_failed", errorFields(error));
+      }
+    }
+  }
+
+  /**
+   * Tells the agent of `personId`'s own chat how a write to an App it had
+   * held for them ended, as `heldDecided` does a connection's: a notice
+   * for its turn under way or its next. Nothing of the App's answer: the
+   * agent reads the App again if it needs to. A confirmed one's outcome
+   * (`chat.app_call.ended`, as the agent's for them: it ran, or failed or
+   * was refused) is recorded first, so the person's confirmation never
+   * stands alone for a write that was not done.
+   */
+  async heldAppCallDecided(
+    chatId: unknown,
+    personId: string,
+    held: { id: string; function: string; appId: string; agentId: string },
+    outcome: Exclude<HeldOutcome, "expired" | "unknown">
+  ): Promise<void> {
+    const chat = this.#ownChat(chatId, personId);
+    const { id } = z.strictObject({ id: z.uuid() }).parse({ id: held.id });
+    const name = z
+      .string()
+      .min(1)
+      .max(maxHeldFunctionChars)
+      .parse(held.function);
+    if (outcome !== "declined") {
+      this.#outboxEntry({
+        actor: delegateActorOf(
+          chatAuthority({ agentId: held.agentId, personId })
+        ),
+        action: "chat.app_call.ended",
+        target: { type: "app", id: held.appId },
+        detail: {
+          workspace: this.ctx.id.name ?? null,
+          chat: chat.id,
+          held: id,
+          outcome: outcome === "confirmed" ? "ok" : "failed",
+        },
+      });
+      this.#deliverAudit();
+    }
+    await this.#note(
+      chat.id,
+      `The write to an App you asked for, "${name}" (held ID ${id}), was decided. ${heldOutcomes[outcome]}`
+    );
+  }
+
   /** Puts the chat in restricted mode, for good; `false`: no such chat. */
   restrictChat(chatId: ChatId): boolean {
     const changed = this.#db
@@ -2020,7 +2435,7 @@ export class Workspace extends DurableObject<Env> {
         scope,
         authority,
         work,
-        { shared, personal },
+        { shared, personal, unattended },
         agent
       );
       // Refuses a model the deployment or its rules don't allow before
@@ -2072,7 +2487,7 @@ export class Workspace extends DurableObject<Env> {
       }
       const result: TurnResult = {
         outcome: end.outcome,
-        answer: via === "web" ? end.answer : withoutLinks(end.answer),
+        answer: end.answer,
         ...(end.error === undefined ? {} : { error: end.error }),
       };
       return {
@@ -2188,7 +2603,7 @@ export class Workspace extends DurableObject<Env> {
     personId: string,
     question: Question
   ): Promise<void> {
-    const chat = this.#ownChat(chatId, personId);
+    const chat = this.#graspChat(chatId, personId);
     const started = Promise.withResolvers<boolean>();
     const ended = this.#sentTurns(chat, question, started);
     this.#sent.add(ended);
@@ -2357,7 +2772,11 @@ export class Workspace extends DurableObject<Env> {
     scope: Parameters<typeof auditAgentCall>[1],
     authority: Authority,
     work: Extract<WorkContext, { type: "chat" }>,
-    { shared, personal }: { shared: boolean; personal: boolean },
+    {
+      shared,
+      personal,
+      unattended,
+    }: { shared: boolean; personal: boolean; unattended: boolean },
     agent: Awaited<ReturnType<typeof turnAgent>>
   ): Promise<TurnContext> {
     const chat = this.#chat(work.chatId);
@@ -2427,6 +2846,8 @@ export class Workspace extends DurableObject<Env> {
     // included, needs a role that builds (app-access.ts).
     const role = await memberRole(this.env.DB, scope.personId);
     const builds = !shared && role !== undefined && canBuild(role);
+    // Who drafts an agent for its person to make (`draftAgent`).
+    const drafts = draftsOf({ shared, unattended, via, role });
     // The documents an admin gave the chat's agent, by name.
     const kept =
       agent === undefined ? [] : await documentsOf(this.env, agent.id);
@@ -2436,6 +2857,7 @@ export class Workspace extends DurableObject<Env> {
       skills,
       channel,
       builds,
+      ...(drafts === undefined ? {} : { drafts }),
       // The first agent as Grasp ships it, with no document, is told
       // nothing more.
       ...(agent === undefined ||
@@ -2686,8 +3108,8 @@ export class Workspace extends DurableObject<Env> {
 
   /**
    * Keeps what the chat's turn committed, in order, as the chat shows it:
-   * a question with the files it carries; in a chat platform's chat, the
-   * agent's words without links (`withoutLinks`). Each entry once
+   * a question with the files it carries, and the agent's words as the
+   * model wrote them. Each entry once
    * (`copiedKeyPrefix`): a copy its object sends again is passed over.
    * Answers the last answer kept of them, a response or a stopped turn's
    * end, for the turn's capture: as the first copy did, for one sent again.
@@ -2699,7 +3121,7 @@ export class Workspace extends DurableObject<Env> {
     if (this.chatState(chatId) === undefined || this.#deleting.has(chatId)) {
       return undefined;
     }
-    const { via, agentId: chatAgent } = this.#chat(chatId);
+    const { agentId: chatAgent } = this.#chat(chatId);
     const live = this.#turns.get(chatId);
     // What the model said is its turn's agent's: the live turn's, or, for
     // a turn a restart cut short, the chat's, which the turn set as it
@@ -2735,7 +3157,7 @@ export class Workspace extends DurableObject<Env> {
       }
       const id = this.#keep(
         chatId,
-        via === "web" ? message : inOwnWords(message),
+        message,
         keptWith(message, turnAgentId, { files, thinkingMs, built })
       );
       if (message.role === "assistant") {
@@ -3083,7 +3505,7 @@ export class Workspace extends DurableObject<Env> {
    * a stop that can't reach it fails, for its person to try again.
    */
   async cancel(chatId: unknown, personId: string): Promise<boolean> {
-    const { id } = this.#ownChat(chatId, personId);
+    const { id } = this.#graspChat(chatId, personId);
     // The ChatSession's turn; or the question this object is preparing,
     // whose stop is kept for it as it is claimed.
     const turnId = (await this.#activeTurn(id)) ?? this.#turns.get(id)?.id;
@@ -3476,12 +3898,100 @@ export class Workspace extends DurableObject<Env> {
     if (audited) {
       this.#deliverAudit();
     }
+    // Whatever is unreadable now, newly or not (narrowed first, erased
+    // since; a check that failed before): if erased, what the chat shows of
+    // it goes too. A repeat replaces nothing more, and nothing is asked of
+    // the Brain for a chat whose unreadable sources hold none of its pins.
+    if (unreadable.length > 0) {
+      await this.#replaceErased(scope, unreadable);
+    }
     const withheld = new Set(unreadable);
     return new Set(
       rows.flatMap(({ runId, sourceId }) =>
         withheld.has(sourceId) ? [runId] : []
       )
     );
+  }
+
+  /**
+   * Replaces what the chat shows of each run resting on what an erasure
+   * took for good (history-access.ts `erasedSources`), of `sources` (all
+   * the chat's runs read when none are given): its result, in the chat's
+   * own copy, by the line the model gets in its place, so no read of the
+   * copy (the chat as its person opens it, core's reads of its
+   * transcript) holds it again (GRA-1807). A run only no longer readable
+   * keeps what it showed: its person saw it while they could. Answers the
+   * runs the chat may not show as stored: none once replaced; every run
+   * that read anything when the Brain can't be asked, shown withheld
+   * (`#shownAfter`) and rewritten by a later check. Asked again each
+   * time: an erasure is never undone, so a repeat replaces nothing more.
+   */
+  async #replaceErased(
+    scope: Omit<AgentScope, "runId">,
+    sources?: readonly string[]
+  ): Promise<ReadonlySet<string>> {
+    const { chatId } = scope;
+    const rows = this.#db
+      .select({
+        runId: chatRunSources.runId,
+        sourceId: chatRunSources.sourceId,
+      })
+      .from(chatRunSources)
+      .where(eq(chatRunSources.chatId, chatId))
+      .all();
+    let erased: Set<string>;
+    try {
+      erased = await erasedSources(
+        this.env,
+        scope.personId,
+        sources ?? [...new Set(rows.map(({ sourceId }) => sourceId))]
+      );
+    } catch (error) {
+      log.warn("agent.erased_check_failed", { chatId, ...errorFields(error) });
+      return new Set(rows.map(({ runId }) => runId));
+    }
+    const runs = [
+      ...new Set(
+        rows.flatMap(({ runId, sourceId }) =>
+          erased.has(sourceId) ? [runId] : []
+        )
+      ),
+    ];
+    if (runs.length > 0 && !this.#deleting.has(chatId)) {
+      this.#replaceResults(chatId, runs);
+    }
+    return new Set();
+  }
+
+  /**
+   * Replaces the stored result of each run in `runs` by `withheldCopy`,
+   * read again in the same transaction: one copied in since is replaced
+   * too, and one replaced already is left as it is.
+   */
+  #replaceResults(chatId: ChatId, runs: readonly string[]): void {
+    this.ctx.storage.transactionSync(() => {
+      const rows = this.#db
+        .select({ id: chatMessages.id, message: chatMessages.message })
+        .from(chatMessages)
+        .where(
+          and(
+            eq(chatMessages.chatId, chatId),
+            sql`json_extract(${chatMessages.message}, '$.details.runId') IN (SELECT value FROM json_each(${JSON.stringify(runs)}))`
+          )
+        )
+        .all();
+      for (const row of rows) {
+        const stored = storedMessageSchema.parse(JSON.parse(row.message));
+        const replaced = JSON.stringify(withheldCopy(stored));
+        if (stored.role === "toolResult" && replaced !== row.message) {
+          this.#db
+            .update(chatMessages)
+            .set({ message: replaced })
+            .where(eq(chatMessages.id, row.id))
+            .run();
+        }
+      }
+    });
   }
 
   /**
@@ -3524,8 +4034,8 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /**
-   * `personId`'s chats, the most recently active first: at most
-   * {@link listedChats}.
+   * `personId`'s chats in Grasp (`shownInGrasp`), the most recently active
+   * first: at most {@link listedChats}.
    */
   chats(personId: string): ChatSummary[] {
     return this.#db
@@ -3535,12 +4045,11 @@ export class Workspace extends DurableObject<Env> {
         agentId: chats.agentId,
         createdAt: chats.createdAt,
         lastAt: chats.lastAt,
-        via: chats.via,
         makeKind: chats.makeKind,
         makeProject: chats.makeProject,
       })
       .from(chats)
-      .where(eq(chats.personId, personId))
+      .where(shownInGrasp(personId))
       .orderBy(desc(chats.lastAt))
       .limit(listedChats)
       .all()
@@ -3556,7 +4065,6 @@ export class Workspace extends DurableObject<Env> {
       | "agentId"
       | "createdAt"
       | "lastAt"
-      | "via"
       | "makeKind"
       | "makeProject"
     >
@@ -3568,7 +4076,6 @@ export class Workspace extends DurableObject<Env> {
       createdAt: chat.createdAt.toISOString(),
       lastAt: chat.lastAt.toISOString(),
       running: this.#isRunning(chat.id),
-      via: chat.via,
       make: makeOf(chat),
     };
   }
@@ -3579,7 +4086,8 @@ export class Workspace extends DurableObject<Env> {
    * draft, or whose Build it made it), the one active last, as their list
    * shows it, so its page carries on where they left it, with all it
    * knows; `null` while they have none, when the next question there
-   * starts one. A chat others share on a chat platform is never one.
+   * starts one. Only a chat Grasp shows them (`shownInGrasp`): never a
+   * chat app's conversation, theirs alone or shared.
    */
   subjectChat(
     personId: string,
@@ -3591,9 +4099,8 @@ export class Workspace extends DurableObject<Env> {
       .from(chats)
       .where(
         and(
-          eq(chats.personId, personId),
-          sql`${chats.id} IN (SELECT value FROM json_each(${JSON.stringify(drafted)}))`,
-          isNull(chats.thread)
+          shownInGrasp(personId),
+          sql`${chats.id} IN (SELECT value FROM json_each(${JSON.stringify(drafted)}))`
         )
       )
       .orderBy(desc(chats.lastAt))
@@ -3603,7 +4110,7 @@ export class Workspace extends DurableObject<Env> {
 
   /** `personId`'s chat `chatId`, as their list shows it, listed or not. */
   chatSummary(chatId: unknown, personId: string): ChatSummary {
-    return this.#summaryOf(this.#ownChat(chatId, personId));
+    return this.#summaryOf(this.#graspChat(chatId, personId));
   }
 
   /**
@@ -3620,15 +4127,71 @@ export class Workspace extends DurableObject<Env> {
     personId: string,
     callId: unknown
   ): { plan: ChatPlan; make: ChatMake | null } {
-    const chat = this.#ownChat(chatId, personId);
+    const { chat, args } = this.#takeCall(chatId, personId, callId, {
+      tool: "proposePlan",
+      keyPrefix: builtKeyPrefix,
+      notFound: "agent.plan_not_found",
+    });
+    const plan = chatPlanSchema.parse(args);
+    return { plan, make: makeOf(chat) };
+  }
+
+  /**
+   * Takes the agent `personId`'s chat `chatId` drafted with the call
+   * `callId` (`draftAgent`), as the call kept it, to make it once: a
+   * chat they don't hold, a draft the tool refused or none, or one taken
+   * already is `agent.draft_not_found`; while its agent works,
+   * `agent.busy`. `releaseAgentDraft` gives it back when Make it made
+   * nothing.
+   */
+  takeAgentDraft(
+    chatId: unknown,
+    personId: string,
+    callId: unknown
+  ): AgentDraft {
+    const { args } = this.#takeCall(chatId, personId, callId, {
+      tool: "draftAgent",
+      keyPrefix: draftedKeyPrefix,
+      notFound: "agent.draft_not_found",
+    });
+    return agentDraftSchema.parse(args);
+  }
+
+  /** Gives back a draft `takeAgentDraft` took, of which Make it made nothing. */
+  releaseAgentDraft(chatId: ChatId, callId: string): void {
+    this.#releaseCall(`${draftedKeyPrefix}${chatId}`, callId);
+  }
+
+  /**
+   * The arguments of the call `callId` to `tool` in `personId`'s chat
+   * `chatId`, as the tool took them, marked taken under `keyPrefix` so
+   * none is taken twice; `notFound` for a chat they don't hold, a call
+   * the tool refused, none, or one taken already, and `agent.busy` while
+   * the chat's agent works.
+   */
+  #takeCall(
+    chatId: unknown,
+    personId: string,
+    callId: unknown,
+    {
+      tool,
+      keyPrefix,
+      notFound,
+    }: {
+      tool: "proposePlan" | "draftAgent";
+      keyPrefix: string;
+      notFound: "agent.plan_not_found" | "agent.draft_not_found";
+    }
+  ): { chat: Chat; args: unknown } {
+    const chat = this.#graspChat(chatId, personId);
     const { id } = chat;
     // Its question would be refused: nothing is made for it.
     if (this.#turns.has(id) || this.#isRunning(id)) {
       throw agentErrors.create("agent.busy");
     }
-    const key = `${builtKeyPrefix}${id}`;
+    const key = `${keyPrefix}${id}`;
     const kept = builtSchema.safeParse(this.ctx.storage.kv.get(key));
-    const built = kept.success ? kept.data : [];
+    const taken = kept.success ? kept.data : [];
     const transcript = this.#transcript(id);
     const refused = new Set(
       transcript.flatMap((message) =>
@@ -3643,28 +4206,26 @@ export class Workspace extends DurableObject<Env> {
       )
       .find(
         (part) =>
-          part.type === "toolCall" &&
-          part.name === "proposePlan" &&
-          part.id === callId
+          part.type === "toolCall" && part.name === tool && part.id === callId
       );
-    const plan =
+    const schema = tool === "proposePlan" ? chatPlanSchema : agentDraftSchema;
+    const args =
       call?.type === "toolCall" && !refused.has(call.id)
-        ? chatPlanSchema.safeParse(call.arguments)
+        ? schema.safeParse(call.arguments)
         : undefined;
     if (
       typeof callId !== "string" ||
-      plan?.success !== true ||
-      built.includes(callId)
+      args?.success !== true ||
+      taken.includes(callId)
     ) {
-      throw agentErrors.create("agent.plan_not_found");
+      throw agentErrors.create(notFound);
     }
-    this.ctx.storage.kv.put(key, [...built, callId]);
-    return { plan: plan.data, make: makeOf(chat) };
+    this.ctx.storage.kv.put(key, [...taken, callId]);
+    return { chat, args: args.data };
   }
 
-  /** Gives back a plan `takePlan` took, of which Build it made nothing. */
-  releasePlan(chatId: ChatId, callId: string): void {
-    const key = `${builtKeyPrefix}${chatId}`;
+  /** Gives back the call `callId` taken under `key`. */
+  #releaseCall(key: string, callId: string): void {
     const kept = builtSchema.safeParse(this.ctx.storage.kv.get(key));
     if (kept.success) {
       this.ctx.storage.kv.put(
@@ -3672,6 +4233,11 @@ export class Workspace extends DurableObject<Env> {
         kept.data.filter((each) => each !== callId)
       );
     }
+  }
+
+  /** Gives back a plan `takePlan` took, of which Build it made nothing. */
+  releasePlan(chatId: ChatId, callId: string): void {
+    this.#releaseCall(`${builtKeyPrefix}${chatId}`, callId);
   }
 
   /**
@@ -3691,7 +4257,7 @@ export class Workspace extends DurableObject<Env> {
       stopped,
     }: { text: string; built: QuestionBuilt; stopped: string }
   ): Promise<void> {
-    const chat = this.#ownChat(chatId, personId);
+    const chat = this.#graspChat(chatId, personId);
     const { plan, app, workflow } = built;
     this.#keep(
       chat.id,
@@ -3984,7 +4550,7 @@ export class Workspace extends DurableObject<Env> {
     title: string,
     by: AuditActor
   ): void {
-    const { id } = this.#ownChat(chatId, personId);
+    const { id } = this.#graspChat(chatId, personId);
     this.ctx.storage.transactionSync(() => {
       this.#db.update(chats).set({ title }).where(eq(chats.id, id)).run();
       this.#outboxed(by, "chat.renamed", id);
@@ -4010,10 +4576,93 @@ export class Workspace extends DurableObject<Env> {
     person: ConnectionPerson,
     by: AuditActor
   ): Promise<number> {
-    const { id } = this.#ownChat(chatId, personId);
+    const { id } = this.#graspChat(chatId, personId);
     if (person.userId !== personId) {
       throw agentErrors.create("agent.chat_not_found");
     }
+    return await this.#deleteChat(id, personId, person, by, true);
+  }
+
+  /**
+   * Deletes every conversation `personId` had with an agent in a chat app
+   * (Teams, Slack), which Grasp never shows them as a chat
+   * (`shownInGrasp`), each as `deleteChat` deletes a chat: what their
+   * Brain kept of it, the writes held in it, the connections granted in
+   * it, the transcript its agent replays, its rows. Their next message
+   * there starts a conversation anew. What the chat app itself keeps of
+   * it is the chat app's. Each goes on its own: one that can't go yet
+   * (its agent at work, `agent.conversation_answering`) or whose deletion
+   * failed part-way stays, and fails the call; asked again, it deletes
+   * what is left, as each step of a deletion is safe to repeat. Audited
+   * once for the action, after every deletion settled, as `by`'s, with
+   * how many went and how many didn't: never one event per conversation,
+   * nor anything they said. How many it deleted.
+   */
+  async forgetChatApps(
+    personId: string,
+    person: ConnectionPerson,
+    by: AuditActor
+  ): Promise<number> {
+    if (person.userId !== personId) {
+      throw agentErrors.create("agent.chat_not_found");
+    }
+    const conversations = this.#db
+      .select({ id: chats.id })
+      .from(chats)
+      .where(and(eq(chats.personId, personId), ne(chats.via, "web")))
+      .all();
+    // A click while an earlier one deletes them: that one answers, and
+    // audits, for both.
+    if (conversations.some(({ id }) => this.#deleting.has(id))) {
+      throw agentErrors.create("agent.delete_under_way");
+    }
+    const settled = await Promise.allSettled(
+      conversations.map(
+        async ({ id }) =>
+          await this.#deleteChat(id, personId, person, by, false)
+      )
+    );
+    const failures: unknown[] = [];
+    for (const each of settled) {
+      if (each.status === "rejected") {
+        const reason: unknown = each.reason;
+        failures.push(reason);
+      }
+    }
+    const deleted = settled.length - failures.length;
+    this.#outboxEntry({
+      actor: by,
+      action: "chat.apps_deleted",
+      target: { type: "person", id: personId },
+      detail: {
+        workspace: this.ctx.id.name ?? null,
+        deleted,
+        failed: failures.length,
+      },
+    });
+    this.#deliverAudit();
+    const [failure] = failures;
+    if (agentErrors.codeOf(failure) === "agent.busy") {
+      throw agentErrors.create("agent.conversation_answering");
+    }
+    if (failure instanceof Error) {
+      throw failure;
+    }
+    return deleted;
+  }
+
+  /**
+   * Deletes chat `id`, as `deleteChat` says; recorded as `chat.deleted`
+   * unless `audited` is false, for an action that records itself once
+   * (`forgetChatApps`).
+   */
+  async #deleteChat(
+    id: ChatId,
+    personId: string,
+    person: ConnectionPerson,
+    by: AuditActor,
+    audited = true
+  ): Promise<number> {
     if (this.#turns.has(id) || this.#deleting.has(id)) {
       throw agentErrors.create("agent.busy");
     }
@@ -4055,6 +4704,7 @@ export class Workspace extends DurableObject<Env> {
           .delete(brainCaptureIntents)
           .where(eq(brainCaptureIntents.evidenceId, id))
           .run();
+        this.#db.delete(heldAppCalls).where(eq(heldAppCalls.chatId, id)).run();
         // Before its messages: a file names the question that carried it.
         this.#db.delete(chatFiles).where(eq(chatFiles.chatId, id)).run();
         this.#db
@@ -4089,7 +4739,9 @@ export class Workspace extends DurableObject<Env> {
         this.ctx.storage.kv.delete(`${builtKeyPrefix}${id}`);
         this.ctx.storage.kv.delete(`${runningKeyPrefix}${id}`);
         this.ctx.storage.kv.delete(`${copiedKeyPrefix}${id}`);
-        this.#outboxed(by, "chat.deleted", id, { declined });
+        if (audited) {
+          this.#outboxed(by, "chat.deleted", id, { declined });
+        }
       });
       this.#deliverAudit();
       this.#stopped.delete(id);
@@ -4195,17 +4847,22 @@ export class Workspace extends DurableObject<Env> {
    * it is now, then an update on every change (chat-watch.ts). Returns the
    * ID `unwatch` drops it by; one that can't be reached drops itself.
    */
-  watch(
+  async watch(
     chatId: unknown,
     personId: string,
     after: unknown,
     listener: ChatListener
-  ): string {
-    const { id } = this.#ownChat(chatId, personId);
+  ): Promise<string> {
     const since = afterSchema.safeParse(after);
     if (!since.success) {
       throw agentErrors.create("agent.invalid_request");
     }
+    // What an erasure took is replaced before anything of the chat is shown.
+    const masked = await this.#replaceErased(
+      this.#scopeOf(this.#graspChat(chatId, personId))
+    );
+    // Read again after the await: the chat may have gone meanwhile.
+    const { id } = this.#graspChat(chatId, personId);
     let watching = 0;
     for (const watchers of this.#watchers.values()) {
       watching += watchers.size;
@@ -4225,7 +4882,10 @@ export class Workspace extends DurableObject<Env> {
     const watchers = this.#watchers.get(id) ?? new Map<string, ChatWatch>();
     watchers.set(watchId, watch);
     this.#watchers.set(id, watchers);
-    watch.push(this.#shownAfter(id, since.data ?? 0), this.#toolEvents(id));
+    watch.push(
+      this.#shownAfter(id, since.data ?? 0, masked),
+      this.#toolEvents(id)
+    );
     return watchId;
   }
 
@@ -4345,7 +5005,7 @@ export class Workspace extends DurableObject<Env> {
    * requests).
    */
   requireChat(chatId: unknown, personId: string): ChatId {
-    return this.#ownChat(chatId, personId).id;
+    return this.#graspChat(chatId, personId).id;
   }
 
   // What a chat's agent writes of Apps' drafts (agent-builds.ts), which
@@ -4471,8 +5131,16 @@ export class Workspace extends DurableObject<Env> {
     this.#changed(chatId);
   }
 
-  /** The chat's messages stored after the one with ID `after`, as shown. */
-  #shownAfter(chatId: ChatId, after: number): ChatMessage[] {
+  /**
+   * The chat's messages stored after the one with ID `after`, as shown:
+   * the result of each run in `masked` as its replacement would read
+   * (`#replaceErased`).
+   */
+  #shownAfter(
+    chatId: ChatId,
+    after: number,
+    masked: ReadonlySet<string> = new Set()
+  ): ChatMessage[] {
     const asking = this.#asksIn(chatId);
     const carried = this.#filesAfter(chatId, after);
     return this.#db
@@ -4482,10 +5150,14 @@ export class Workspace extends DurableObject<Env> {
       .orderBy(asc(chatMessages.id))
       .all()
       .flatMap(({ id, message, createdAt, thinkingMs, built, agentId }) => {
+        const stored = storedMessageSchema.parse(JSON.parse(message));
+        const run = resultRunId(stored);
         const shown = withFiles(
           chatMessageOf(
             id,
-            storedMessageSchema.parse(JSON.parse(message)),
+            run !== undefined && masked.has(run)
+              ? withheldCopy(stored)
+              : stored,
             createdAt,
             thinkingMs,
             asking,
@@ -4499,9 +5171,32 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /**
-   * The chat, if it is `personId`'s: the one person its agent acts for,
-   * and the only one who reaches it. Anyone else's is refused as if there
-   * were none.
+   * The chat, if it is `personId`'s and one Grasp shows them
+   * (`shownInGrasp`): what every by-ID read of a person's surface goes
+   * through. Anything else, anyone else's or a chat app's conversation,
+   * is refused in the same statement, as if there were none.
+   */
+  #graspChat(chatId: unknown, personId: string): Chat {
+    const id = chatIdSchema.safeParse(chatId);
+    const chat = id.success
+      ? this.#db
+          .select()
+          .from(chats)
+          .where(and(eq(chats.id, id.data), shownInGrasp(personId)))
+          .get()
+      : undefined;
+    if (chat === undefined) {
+      throw agentErrors.create("agent.chat_not_found");
+    }
+    return chat;
+  }
+
+  /**
+   * The chat, if it is `personId`'s, whichever channel it came through:
+   * for core's own calls on a decision made for it (`heldDecided`,
+   * `connectionDecided`, `packagesDecided`), a chat app's included, never
+   * for what a person's surface reads (`#graspChat`). Anyone else's is
+   * refused as if there were none.
    */
   #ownChat(chatId: unknown, personId: string): Chat {
     const chat = this.#chat(chatId);

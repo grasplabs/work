@@ -1,13 +1,10 @@
 import type { BrainRecordInput } from "@grasp-os/shared/brain-records";
-import { purgedMarker } from "@grasp-os/shared/knowledge";
-import type { PurgeInput } from "@grasp-os/shared/knowledge";
 import type { RosterInput } from "@grasp-os/shared/onboarding";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { mockIdp } from "./idp.ts";
-import { erasing } from "./knowledge-purge.ts";
-import { ownCollectionOf } from "./knowledge.ts";
+import { purged } from "./knowledge-purge.ts";
 import {
   auditedDuring,
   openRpc,
@@ -76,20 +73,6 @@ const staff = async () => {
   const session = await signedIn(idp, "grasp-staff", staffPerson());
   const { core } = await openRpc(session);
   return await core.authenticate();
-};
-
-/** Saves `text` as a note in `person`'s Personal collection. */
-const noteOf = async (
-  person: Awaited<ReturnType<typeof signedInApi>>,
-  text: string
-) => {
-  const personal = await ownCollectionOf(person);
-  return await person.api.knowledge.saveDocument({
-    collectionId: personal,
-    path: `notes/${unique()}.md`,
-    text,
-    ifVersion: 0,
-  });
 };
 
 /** A source, and a gap noticed in it, about a candidate. */
@@ -788,99 +771,28 @@ describe("the brain's gap answers", { timeout: 120_000 }, () => {
     });
   });
 
-  it("lose a purged term, and who gave them once that person is purged", async () => {
+  it("keep their answer, said by no one, once the person who gave it is erased", async () => {
     const admin = await signedInApi(idp, "admin");
     const leaver = await signedInApi(idp, "user");
     const tag = unique();
-    const name = `Visser${tag}`;
     const { ids, records } = gapRecords(tag);
     await admin.api.brain.addRecords(records);
-    await leaver.api.brain.answerGap(ids.gap, `Ask ${name}, she knows.`);
-    // In the admin's own collection: another person's is the owner's alone.
-    const note = await noteOf(admin, `# Leaving\n${name} hands over.`);
+    await leaver.api.brain.answerGap(ids.gap, `Ask the office, ${tag}.`);
+    const readBefore = await admin.api.brain.read();
+    const before = readBefore.gaps.find(({ id }) => id === ids.gap);
 
-    const content: PurgeInput = {
-      type: "content",
-      documentIds: [note.id],
-      terms: [name],
-      reason: "erasure_request",
-    };
-    const contentPlan = await admin.api.knowledge.preparePurge(content);
-    await admin.api.knowledge.purge(content, contentPlan.token);
-    const readAfterContent = await admin.api.brain.read();
-    const afterContent = readAfterContent.gaps.find(({ id }) => id === ids.gap);
-    const personal: PurgeInput = {
-      type: "personal",
-      userId: leaver.userId,
-      reason: "offboarding",
-    };
-    await erasing(admin, leaver.userId);
-    const personalPlan = await admin.api.knowledge.preparePurge(personal);
-    await admin.api.knowledge.purge(personal, personalPlan.token);
-    const readAfterPersonal = await admin.api.brain.read();
-    const afterPersonal = readAfterPersonal.gaps.find(
-      ({ id }) => id === ids.gap
-    );
+    await purged(admin, leaver.userId);
+    const readAfter = await admin.api.brain.read();
+    const after = readAfter.gaps.find(({ id }) => id === ids.gap);
 
     expect({
-      contentAnswer: afterContent?.answer,
-      answeredBy: afterPersonal?.answeredBy,
-      answer: afterPersonal?.answer,
+      before: typeof before?.answeredBy,
+      answeredBy: after?.answeredBy,
+      answer: after?.answer,
     }).toStrictEqual({
-      contentAnswer: `Ask ${purgedMarker}, she knows.`,
+      before: "string",
       answeredBy: undefined,
-      answer: `Ask ${purgedMarker}, she knows.`,
-    });
-  });
-
-  it("lose a purged term though a document's purge fails", async () => {
-    const admin = await signedInApi(idp, "admin");
-    const tag = unique();
-    const name = `Visser${tag}`;
-    const { ids, records } = gapRecords(tag);
-    await admin.api.brain.addRecords(records);
-    await admin.api.brain.answerGap(ids.gap, `Ask ${name}, she knows.`);
-    const note = await noteOf(admin, `# Handover\n${name} hands over.`);
-    const input: PurgeInput = {
-      type: "content",
-      documentIds: [note.id],
-      terms: [name],
-      reason: "erasure_request",
-    };
-    const plan = await admin.api.knowledge.preparePurge(input);
-    // The Knowledge database records the purge, then refuses the batch
-    // that rewrites the document's versions.
-    const real = env.KNOWLEDGE;
-    let rewriting = false;
-    const knowledge: D1Database = {
-      prepare: (query) => {
-        rewriting ||= query.startsWith('update "versions"');
-        return real.prepare(query);
-      },
-      batch: async <T>(statements: D1PreparedStatement[]) => {
-        if (rewriting) {
-          throw new Error("D1 is unavailable");
-        }
-        return await real.batch<T>(statements);
-      },
-      exec: async (query) => await real.exec(query),
-      // oxlint-disable-next-line typescript/no-deprecated -- D1Database still has it
-      dump: async () => await real.dump(),
-      withSession: (constraint) => real.withSession(constraint),
-    };
-    const { core } = await openRpc(admin.session, {
-      coreEnv: { ...env, KNOWLEDGE: knowledge },
-    });
-    const failing = await core.authenticate();
-    const purged = await outcome(failing.knowledge.purge(input, plan.token));
-    const read = await admin.api.brain.read();
-
-    expect({
-      purged: purged === "ok",
-      answer: read.gaps.find(({ id }) => id === ids.gap)?.answer,
-    }).toStrictEqual({
-      purged: false,
-      answer: `Ask ${purgedMarker}, she knows.`,
+      answer: `Ask the office, ${tag}.`,
     });
   });
 });

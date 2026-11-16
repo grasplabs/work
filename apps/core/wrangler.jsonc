@@ -15,7 +15,7 @@
   "workers_dev": true,
   "preview_urls": false,
   // Durable Objects bundle their Drizzle migrations as text, and the Grasp
-  // skills (skills/, src/knowledge/grasp-skills.ts) ship as text too.
+  // skills (skills/) ship as text too.
   "rules": [
     {
       "type": "Text",

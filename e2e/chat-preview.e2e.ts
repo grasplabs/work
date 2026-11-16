@@ -263,7 +263,9 @@ test("an App's own chat writes its page and server code, and its workspace previ
     // Server code that doesn't build, with a write of the page: the page
     // still takes the write, built against the references the draft last
     // generated, and its calls show the server code's error, while the
-    // problem is being fixed.
+    // problem is being fixed, said over the preview's corner: nothing
+    // comes in above it, which would move the page under the person.
+    const shownAt = await preview.locator("iframe").boundingBox();
     await askOnceIdle(chat, "Take more.");
     await expect(chat.getByText("It takes more.")).toBeVisible({
       timeout: 30_000,
@@ -273,6 +275,9 @@ test("an App's own chat writes its page and server code, and its workspace previ
       { timeout: 10_000 }
     );
     await expect(preview.getByText("Fixing a problem…")).toBeVisible();
+    expect(await preview.locator("iframe").boundingBox()).toStrictEqual(
+      shownAt
+    );
 
     // Once it builds, the frame takes it: started afresh, as the error the
     // page showed can't be taken back in place, its data kept.

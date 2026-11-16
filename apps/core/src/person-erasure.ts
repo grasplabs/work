@@ -1,4 +1,5 @@
-import { preparePurge, purge } from "@grasp-os/brain/purge";
+import type { PurgeResult } from "@grasp-os/brain/knowledge";
+import { purgePerson } from "@grasp-os/brain/purge";
 import { actorOf } from "@grasp-os/shared/audit";
 import type { AuditEntry } from "@grasp-os/shared/audit";
 import {
@@ -32,6 +33,7 @@ import {
   organizationId,
 } from "./auth/auth.ts";
 import { directoryProviderId } from "./auth/config.ts";
+import { eraseGapAnswerer } from "./brain-gaps.ts";
 import {
   erasePerson as eraseFromBrain,
   stillDeletingTooLong,
@@ -82,7 +84,8 @@ import {
 } from "./erased-people.ts";
 import { dropHeldStarts } from "./held-starts.ts";
 import { brainOf } from "./knowledge/ports.ts";
-import { coreErasure } from "./knowledge/rpc.ts";
+import { uploadErasure } from "./knowledge/uploads.ts";
+import { eraseOnboardingAccount } from "./onboarding/new-brain.ts";
 import { onboardingStore } from "./onboarding/store.ts";
 import type { ErasureAreaName } from "./person-erasure-inventory.ts";
 import { stopRunsFor } from "./workflows/resource-runs.ts";
@@ -255,16 +258,43 @@ const identity: ErasureStep = {
 };
 
 /**
- * What the Brain and Knowledge hold of them (GRA-1185), through the
- * Brain's own personal purge, the one way it erases a person (purge.ts),
- * which core lets run only while their erasure is unfinished (rpc.ts
- * `requireErasing`), for the admin who asked: their memories, their outcomes with the Brain's tombstone that
- * keeps them from coming back, every collection only they read (their
- * own, `access` "me"; collections they made for others stay) with every
- * version, section, transcript and payload, core's copies of what they
- * gave (`coreErasure`), and the search index. It is one batch, safe to run
- * again, so a failure leaves the area pending and the clock runs it again.
- * Derived projections are GRA-309's, which the purge reaches as it grows.
+ * Purges `userId` from today's Brain and Knowledge (GRA-1185), as the
+ * admin `requestedBy` asked, through the package's personal purge
+ * (purge.ts `purgePerson`), the one way it erases a person: their
+ * memories, receipts, lessons and outcomes with the tombstone that keeps
+ * them from coming back, every collection only they read (their own,
+ * `access` "me"; collections they made for others stay) with every
+ * version, section, transcript and payload, their uploads' originals in R2
+ * (`uploadErasure`), and the search index; then who answered a gap, if it
+ * was them (the answers stay, as the company's, said by no one). Nothing
+ * writes Knowledge any more, but what it holds stays on a deployment until
+ * the cutover's last step deletes it, so this runs until then. Recorded
+ * and resumable: it throws when a step fails, and running it again
+ * finishes it. Only the `brain` area calls it.
+ */
+export const purgeFromKnowledge = async (
+  env: Env,
+  requestedBy: string,
+  userId: string
+): Promise<PurgeResult> => {
+  const actor = { type: "person" as const, userId: requestedBy };
+  return await purgePerson(
+    brainOf(env),
+    { actor, userId: requestedBy },
+    { userId, reason: "erasure_request" },
+    {
+      ...uploadErasure(env),
+      forgetActor: async () => {
+        await eraseGapAnswerer(env, actor, userId);
+      },
+    }
+  );
+};
+
+/**
+ * What today's Brain and Knowledge hold of them, and their skill shares
+ * (`purgeFromKnowledge`). Complete only once the purge returned: a
+ * failure leaves the area pending, and the clock runs it again.
  */
 const brain: ErasureStep = {
   area: "brain",
@@ -277,15 +307,6 @@ const brain: ErasureStep = {
     if (erasure === undefined) {
       return;
     }
-    const by = {
-      actor: { type: "person" as const, userId: erasure.requestedBy },
-      userId: erasure.requestedBy,
-    };
-    const input = {
-      type: "personal" as const,
-      userId,
-      reason: "erasure_request" as const,
-    };
     // Their asks to share a skill, with the text a waiting one holds, and
     // the names of the skills they deleted. A decision on an ask of theirs
     // is the company's (or its team's), and keeps its text: the Brain follows it all the
@@ -303,9 +324,7 @@ const brain: ErasureStep = {
         .set({ decidedBy: null })
         .where(eq(skillDecisions.decidedBy, userId)),
     ]);
-    const onErase = coreErasure(env);
-    const plan = await preparePurge(brainOf(env), by, input, onErase);
-    await purge(brainOf(env), by, input, plan.token, onErase);
+    await purgeFromKnowledge(env, erasure.requestedBy, userId);
     await completed(db, userId, "brain");
   },
 };
@@ -357,9 +376,11 @@ const runs: ErasureStep = {
  * its person's own request (`deleteOnRequest`): what they said and agreed
  * to, every drawing it was in, the Brain's records resting on it, and
  * everything the voice said in it; and everything the voice said for them
- * as an admin, on their onboarding. Found on the list by the address that was
- * theirs, through its keyed hash, so whichever area ran first; once an
- * admin released the address, or under an older key, it is found no more.
+ * as an admin, on their onboarding. Found by the account their interview
+ * belongs to (GRA-1790), whatever the list says now; and on the list by
+ * the address that was theirs, through its keyed hash, so whichever area
+ * ran first; once an admin released the address, or under an older key, it
+ * is found by address no more.
  * Their entry on the list is the company's (Nick's D5): it stays, removed
  * only by an admin.
  */
@@ -381,6 +402,22 @@ const interview: ErasureStep = {
     // What the voice said for them as an admin, on their onboarding, goes
     // from its cache, whoever they were on the list (GRA-1897).
     await onboardingStore(env).forgetSpokenForAdmin(userId);
+    // The interview that belongs to their account now (GRA-1790),
+    // whatever address the list has for them: found by the account it
+    // opened under, and deleted, its link closed, only while that account
+    // holds it (`eraseInterviewOf`).
+    const store = onboardingStore(env);
+    const sentBy = erasure.requestedAt.toISOString();
+    const owned = await store.personOfAccount(userId);
+    if (owned !== null) {
+      await store.eraseInterviewOf(owned, userId, sentBy);
+    }
+    // Whatever the Brain holds under their account, from any link, also
+    // one it no longer holds (a new start gave it to someone else), goes
+    // before this area is done: keyed by the account alone, so the link's
+    // next holder keeps theirs. Until it has, this throws and the erasure
+    // is tried again.
+    await eraseOnboardingAccount(env, userId);
     // Their address released, or hashed under an older key: they can't be
     // found on the list by it, and whatever interview they have is left.
     // Recorded as skipped, never as done.
@@ -388,16 +425,17 @@ const interview: ErasureStep = {
       await marked(db, userId, "interview", "skipped");
       return;
     }
-    const store = onboardingStore(env);
     let found = 0;
     for (const { id, email } of await store.rosterEmails()) {
       // oxlint-disable-next-line no-await-in-loop -- one entry at a time
       if ((await emailHashOf(env, email)) === erasure.emailHash) {
         // Only an interview from a link sent before the erasure was asked
-        // for: the address may have been released, and a link sent to
-        // the entry since, as this ran (`eraseInterviewOf`).
+        // for (the address may have been released, and a link sent to the
+        // entry since, as this ran), and held by them or by nobody: never
+        // the interview of whoever holds that link now (`eraseInterviewOf`).
+        // A link nobody holds has nothing in the Brain; theirs went above.
         // oxlint-disable-next-line no-await-in-loop -- one entry at a time
-        await store.eraseInterviewOf(id, erasure.requestedAt.toISOString());
+        await store.eraseInterviewOf(id, userId, sentBy);
         found += 1;
       }
     }

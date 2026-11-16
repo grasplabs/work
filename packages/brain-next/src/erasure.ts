@@ -358,15 +358,35 @@ export const keepSubject = (
   sql: SqlStorage,
   source: string,
   subject: string,
-  group: string | null = null
+  group: string | null = null,
+  thread = false
 ): void => {
   sql.exec(
-    `INSERT OR IGNORE INTO source_subjects (source, subject, group_subject)
-    VALUES (?, ?, ?)`,
+    `INSERT OR IGNORE INTO source_subjects (source, subject, group_subject, thread)
+    VALUES (?, ?, ?, ?)`,
     source,
     subject,
-    group
+    group,
+    thread ? 1 : 0
   );
+};
+
+/**
+ * Whether `source` is a thread (`NewSource.thread`), as its first version
+ * said: undefined before it has one.
+ */
+export const isThread = (
+  sql: SqlStorage,
+  source: string
+): boolean | undefined => {
+  const found = sql
+    .exec<{ thread: number }>(
+      "SELECT thread FROM source_subjects WHERE source = ?",
+      source
+    )
+    .toArray()
+    .at(0);
+  return found === undefined ? undefined : found.thread === 1;
 };
 
 /**

@@ -85,6 +85,10 @@ const typeRules: readonly {
   { action: "agent.changed", type: "config" },
   { action: "agent.paused", type: "config" },
   { action: "agent.deleted", type: "config" },
+  // An agent's apps: one added or taken off by hand, and those worked out
+  // from its instructions (core's src/agent-apps.ts).
+  { action: "agent.app.changed", type: "config" },
+  { action: "agent.apps.worked_out", type: "config" },
   { action: "agent.reach.changed", type: "config" },
   { action: "agent.class.changed", type: "config" },
   // An admin giving an agent a document to answer from, or taking one
@@ -183,6 +187,10 @@ const typeRules: readonly {
   // uploads to erase one, with how many.
   { action: "brain.upload.listed", type: "read" },
   { action: "brain.upload", type: "action" },
+  // A person's run results taken out of use in the Brain once they lost
+  // the workflow (core's brain-run-sources.ts): one event a loss, with the
+  // person and how many runs it covered, by IDs and a count alone.
+  { action: "brain.run_sources", type: "action" },
   // A Grasp staff member reading the client's Brain report, and asking for
   // an action on it and its outcome (core's brain-report.ts).
   { action: "admin.brain.read", type: "read" },
@@ -222,6 +230,16 @@ const typeRules: readonly {
   // question of their own chat noted to keep in their own Brain
   // (`chat.turn_noted`, GRA-1805), whose hand-over records how it ended
   // (`brain.source.*`).
+  // A chat that handed its model or code something only its person may
+  // read, so what it writes for others waits for them (core's
+  // private-reads.ts); and a write to an App held for them since (held
+  // by the agent's own `agent.call`, which names the hold), confirmed or
+  // declined by them, how a confirmed one ended, or that it waited past
+  // its day unconfirmed (core's held-app-calls.ts).
+  { action: "chat.private_read", type: "permission" },
+  { action: "chat.app_call.ended", type: "action" },
+  { action: "chat.app_call.lapsed", type: "action" },
+  { action: "chat.app_call", type: "decision" },
   { action: "chat", type: "action" },
   // A call of the chat agent's code that nothing else records: a listing,
   // a catalog or a run's status, or a call refused before it did anything.

@@ -580,7 +580,7 @@ describe("HTTP connections", () => {
       idempotencyKey: "run-5:moved",
     };
     const held = await outcome(callAs(run, keyedMove, signed));
-    const [waiting] = await exports.default.listPendingActions(anna);
+    const [waiting] = await exports.default.listPendingActions(anna, "grasp");
     const confirmed = await outcome(
       exports.default.confirmAction({
         person: anna,

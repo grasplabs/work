@@ -77,7 +77,7 @@ const hold = async (
   await callAs(authority, call, { origin: chatOrigin, ...signed });
 
 const waitingFor = async (person: ConnectionPerson): Promise<PendingAction[]> =>
-  await exports.default.listPendingActions(person);
+  await exports.default.listPendingActions(person, "grasp");
 
 /** The one held action waiting for `person`. */
 const heldFor = async (person: ConnectionPerson): Promise<PendingAction> => {
@@ -1072,6 +1072,49 @@ describe("a side effect from chat", () => {
       left: { held: [], answers: [] },
       dropped: 121,
       once: 121,
+    });
+  });
+
+  it("is listed apart by where it was held: in Grasp, or in a chat app's conversation, each list as long as its own, however many the other holds", async () => {
+    const anna = someone();
+    const connectionId = await addConnection();
+    // Held in Grasp first, then more in a chat app than a list answers.
+    const inGrasp = await hold(inChat(anna), mail(connectionId));
+    const { pending } = await hold(inChat(anna), mail(connectionId), {
+      chatApp: true,
+    });
+    const db = drizzle(env.DB);
+    const held = await db
+      .select()
+      .from(pendingActions)
+      .where(eq(pendingActions.id, pending?.id ?? ""))
+      .get();
+    if (held === undefined) {
+      throw new Error("Nothing held");
+    }
+    const [one, ...more] = Array.from({ length: 220 }, (_, index) =>
+      db.insert(pendingActions).values({
+        ...held,
+        id: crypto.randomUUID(),
+        idempotencyKey: `chat-1:${crypto.randomUUID()}`,
+        createdAt: new Date(held.createdAt.getTime() + index + 1),
+      })
+    );
+    if (one === undefined) {
+      throw new Error("Nothing to insert");
+    }
+    await db.batch([one, ...more]);
+    const listed = async (heldIn: "grasp" | "chat_app") =>
+      await exports.default.listPendingActions(anna, heldIn);
+    const [grasp, chatApp] = [await listed("grasp"), await listed("chat_app")];
+    expect({
+      grasp: grasp.map(({ id }) => id),
+      chatApp: chatApp.length,
+      chatAppHoldsGrasps: chatApp.some(({ id }) => id === inGrasp.pending?.id),
+    }).toStrictEqual({
+      grasp: [inGrasp.pending?.id],
+      chatApp: 200,
+      chatAppHoldsGrasps: false,
     });
   });
 

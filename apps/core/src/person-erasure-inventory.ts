@@ -146,6 +146,8 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   // company's agents, and what an admin gave them, stay the company's.
   "core.agents": { erased: "workspace" },
   "core.agent_documents": { erased: "workspace" },
+  // Their own agents' apps; a company agent's, which a person set, stay.
+  "core.agent_apps": { erased: "workspace" },
   "core.agent_reach": { company: "settings an admin changed" },
   "core.agent_wakes": { erased: "workspace" },
   "core.agent_places": { company: "settings an admin changed" },
@@ -292,6 +294,12 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   // (person-erasure.ts, brain-sources.ts `endHandOversOf`), also one whose
   // item the queue parked for good.
   "core.brain_hand_overs": { erased: "brain_sources" },
+  // Whose run results the Brain holds by workflow, and when each was taken
+  // out of use as they lost it (brain-run-sources.ts): IDs and a count, as
+  // the runs themselves are the company's.
+  "core.brain_run_sources": {
+    company: "whose run results it took out of use, by workflow (D3)",
+  },
   // A person's own Brain store's health, keyed by the SHA-256 of their ID:
   // removed once the Brain's erasure erased their store (brain-next.ts
   // `erasePerson`).
@@ -355,7 +363,9 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "core.stephen_request_questions": {
     none: "Grasp's own wording, without names or details",
   },
-  "core.stephen_request_topics": noPerson,
+  "core.stephen_request_topics": {
+    none: "Grasp's own wording, without names or details",
+  },
   "core.workflow_ai_waits": noPerson,
   // Nothing writes it since GRA-1552; dropped in GRA-1613.
   "core.workflow_stores": noPerson,
@@ -402,6 +412,7 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "workspace.chat_search_text": { erased: "workspace" },
   "workspace.chat_sources": { erased: "workspace" },
   "workspace.chat_tool_events": { erased: "workspace" },
+  "workspace.held_app_calls": { erased: "workspace" },
   "workspace.memory_uses": { erased: "workspace" },
   "workspace.preview_release_artifacts": { erased: "workspace" },
   "workspace.preview_releases": { erased: "workspace" },
@@ -423,6 +434,9 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   // (`admin:<user>`), hashes of what the voice said for them, go with
   // the interview area too (person-erasure.ts).
   "onboarding.spoken_keys": { erased: "interview" },
+  // What the new Brain holds of their interview, until its erasure there
+  // returned.
+  "onboarding.brain_interviews": { erased: "interview" },
   // The roster's and the onboarding's own: who did what, by ID (D5).
   "onboarding.teams": { company: "the company's roster: a team's lead (D5)" },
   "onboarding.works": { company: "the company's roster: who does what (D5)" },
@@ -438,6 +452,9 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
     kept: "audit events on their way to the log (D2)",
   },
   "onboarding.brain_teams": noPerson,
+  "onboarding.brain_claims": {
+    company: "a team's claims seven or more told and five back, names out",
+  },
   "onboarding.checked_differences": {
     company: "a team's difference five or more told each way, names out",
   },
@@ -588,6 +605,7 @@ export const reviewedPersonColumns: Readonly<
   "core.agent_held_starts": ["person_id"],
   "core.agents": ["changed_by", "made_by", "owner_id"],
   "core.agent_documents": ["added_by"],
+  "core.agent_apps": ["changed_by"],
   "core.agent_places": ["changed_by"],
   "core.agent_reach": ["changed_by"],
   "core.agent_wakes": ["changed_by", "made_by", "person_id"],
@@ -616,6 +634,7 @@ export const reviewedPersonColumns: Readonly<
   "core.blueprints": ["marked_by"],
   "core.brain_gap_states": ["answered_by"],
   "core.business_store_members": ["added_by", "member_id", "member_type"],
+  "core.brain_run_sources": ["person_id"],
   "core.brain_uploads": ["uploaded_by"],
   "core.business_stores": ["closing_owner", "owner_id"],
   "core.channel_accounts": ["platform_user_id", "user_id"],
@@ -737,13 +756,14 @@ export const reviewedPersonColumns: Readonly<
   "dataStore.sdk_store": ["deleted_by"],
   "onboarding.approvals": ["person"],
   "onboarding.asked_about": ["person"],
+  "onboarding.brain_interviews": ["person", "user_id"],
   "onboarding.brain_sent": ["person"],
   "onboarding.counted": ["person"],
   "onboarding.interview_settings": ["person"],
   "onboarding.interview_states": ["person"],
   "onboarding.interviews": ["person"],
   "onboarding.link_codes": ["person"],
-  "onboarding.links": ["person"],
+  "onboarding.links": ["person", "sent_to_email", "user_id"],
   "onboarding.participations": ["person"],
   "onboarding.people": ["email"],
   "onboarding.readbacks": ["person"],
@@ -752,4 +772,5 @@ export const reviewedPersonColumns: Readonly<
   "workspace.custom_widgets": ["person_id"],
   "workspace.dashboard_widgets": ["person_id"],
   "workspace.dashboards": ["person_id"],
+  "workspace.held_app_calls": ["person_id"],
 };

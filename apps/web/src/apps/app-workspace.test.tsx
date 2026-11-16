@@ -343,6 +343,7 @@ const opened = async (
     watch,
     worked: async () => await Promise.resolve([]),
     connectionRequests: async () => await Promise.resolve([]),
+    heldCalls: async () => await Promise.resolve([]),
     models: async () => await Promise.resolve(["openai/gpt-5"]),
     send: async (chatId: string, question: ChatQuestion) => {
       sent.push({ chatId, question });
@@ -2354,5 +2355,140 @@ describe(AppWorkspace, () => {
       dismissed: false,
       again: false,
     });
+  });
+
+  it("says what to do next over a newly made App as soon as it shows, while Grasp still works on it, so Grasp finishing moves nothing under the person", async () => {
+    markMade("invoice-desk");
+    const tip = "This is your new App, with example data.";
+    const core = new PreviewingCore();
+    socketsTo(core);
+    let send: ((update: ChatUpdate) => void) | undefined;
+    const turn = { messages: [], partial: null, stopped: null, held: 0 };
+    await opened(
+      fakeApps().apps,
+      identityOf(false),
+      "chat-finishing",
+      // The preview shows while Grasp's turn still runs: the person can
+      // use it then.
+      async (_chat, _after, received) => {
+        send = received;
+        received({ ...turn, running: true, worked: 1 });
+        return await Promise.resolve(watching());
+      }
+    );
+    await act(async () => {
+      await core.reached;
+    });
+    await settled();
+    const frame = document.querySelector("iframe");
+    // What is drawn over the preview, in the order it stands: something
+    // put there later pushes the page down under the person's pointer.
+    const over = (): string[] =>
+      [...document.querySelectorAll("body *")]
+        .filter(
+          (each) =>
+            frame !== null &&
+            each.childElementCount === 0 &&
+            each.closest('[aria-label="Chat"]') === null &&
+            // oxlint-disable-next-line no-bitwise -- a DOM position mask
+            (each.compareDocumentPosition(frame) &
+              Node.DOCUMENT_POSITION_FOLLOWING) !==
+              0
+        )
+        .map((each) => each.textContent)
+        .filter((text) => text !== "");
+    const whileWorking = { tip: says(tip), over: over() };
+    await act(async () => {
+      send?.({ ...turn, running: false, worked: 2 });
+      await Promise.resolve();
+    });
+    await settled();
+
+    expect({
+      whileWorking: whileWorking.tip,
+      sameFrame: document.querySelector("iframe") === frame,
+      overWhenDone: over(),
+    }).toStrictEqual({
+      whileWorking: true,
+      sameFrame: true,
+      overWhenDone: whileWorking.over,
+    });
+  });
+
+  it("says what changes only you see over the preview before the preview shows, however late who uses the App is read, so the line never comes in over a preview in use", async () => {
+    const core = new PreviewingCore(undefined, deskOfVersion1);
+    socketsTo(core);
+    const fake = fakeApps({ sharedWith: [memberOf("team", "t-fin")] });
+    // Who uses it is read apart from the draft, and answers last.
+    const membersRead = Promise.withResolvers<boolean>();
+    const { list } = fake.apps.members;
+    fake.apps.members.list = async () => {
+      await membersRead.promise;
+      return await list();
+    };
+    await opened(
+      fake.apps,
+      identityOf(false),
+      "chat-members-late",
+      async () => await Promise.resolve(watching())
+    );
+    await settled();
+    const whileRead = {
+      preview: document.querySelector("iframe") !== null,
+      line: changesLine() !== null,
+    };
+    await act(async () => {
+      membersRead.resolve(true);
+      await Promise.resolve();
+    });
+    await act(async () => {
+      await core.reached;
+    });
+    await settled();
+    const frame = document.querySelector("iframe");
+    const line = changesLine();
+
+    expect({
+      whileRead,
+      // Both at once, the line over the preview from the start.
+      shown: {
+        preview: frame !== null,
+        lineOver:
+          frame !== null &&
+          line !== null &&
+          // oxlint-disable-next-line no-bitwise -- a DOM position mask
+          (line.compareDocumentPosition(frame) &
+            Node.DOCUMENT_POSITION_FOLLOWING) !==
+            0,
+      },
+    }).toStrictEqual({
+      whileRead: { preview: false, line: false },
+      shown: { preview: true, lineOver: true },
+    });
+  });
+
+  it("shows the preview without the line under the bar when who uses the App can't be read", async () => {
+    const core = new PreviewingCore(undefined, deskOfVersion1);
+    socketsTo(core);
+    const fake = fakeApps({ sharedWith: [memberOf("team", "t-fin")] });
+    // Who uses it is lost on the way, as a dropped connection loses it.
+    fake.apps.members.list = async () => {
+      await Promise.resolve();
+      throw new Error("Peer closed WebSocket: 1006");
+    };
+    await opened(
+      fake.apps,
+      identityOf(false),
+      "chat-members-lost",
+      async () => await Promise.resolve(watching())
+    );
+    await act(async () => {
+      await core.reached;
+    });
+    await settled();
+    expect({
+      preview: document.querySelector("iframe") !== null,
+      line: changesLine() !== null,
+    }).toStrictEqual({ preview: true, line: false });
   });
 });

@@ -9,6 +9,14 @@ import { defineErrorFamily } from "./errors.ts";
 /** Why a chat's agent refused a question. */
 export const agentErrors = defineErrorFamily({
   "agent.chat_not_found": "There's no such chat.",
+  "agent.held_call_not_found":
+    "Nothing like this waits for you in this chat: it was decided already, or waited past its day.",
+  "agent.held_call_in_chat_app":
+    "This chat used something only its person can read, so a write to an App waits for them to confirm it, and this chat app can't show them that yet. Nothing was written: tell them they can do it from a chat in Grasp.",
+  "agent.held_call_failed":
+    "The App refused or failed this write, so it may not have been done. It no longer waits for you.",
+  "agent.private_shared_request":
+    "This chat used something only its person can read, and admins read why a shared connection is asked for, so it wasn't asked for. Ask the person to ask for it in a new chat, or an admin to grant it.",
   "agent.paused":
     "This agent is paused, so it doesn't answer now. An admin can turn it back on.",
   "agent.not_for_you":
@@ -20,6 +28,9 @@ export const agentErrors = defineErrorFamily({
   "agent.too_many_own": `You have ${ownAgentsMax} agents of your own, the most a person keeps. Delete one to make another.`,
   "agent.own_off":
     "Your company has turned off agents of people's own. An admin can turn them back on.",
+  "agent.app_unknown": "That isn't an app your company offers.",
+  "agent.apps_unread":
+    "The apps it needs couldn't be worked out just now: no AI model answered. Add them by hand, or try again.",
   "agent.first_stays":
     "The company's first agent can't be deleted. Pause it to stop it answering.",
   "agent.model_unknown":
@@ -44,6 +55,10 @@ export const agentErrors = defineErrorFamily({
     "Nobody asked for this just now, so the agent can only read. What it wants to change waits for its person.",
   "agent.busy":
     "The agent is still working in this chat. Wait for it, or stop it.",
+  "agent.conversation_answering":
+    "One of your conversations in a chat app is still being answered. Try again in a moment.",
+  "agent.delete_under_way":
+    "Your conversations in chat apps are being deleted. If any remain, try again in a moment.",
   "agent.invalid_question": "That isn't a question the agent can take.",
   "agent.invalid_request": "That isn't a valid request for a chat.",
   "agent.invalid_title": "A chat's title is 1 to 200 characters.",
@@ -65,6 +80,8 @@ export const agentErrors = defineErrorFamily({
     "The file's text couldn't be read just now. Attach it again in a moment.",
   "agent.plan_not_found":
     "There's no such plan in this chat, or it was built already.",
+  "agent.draft_not_found":
+    "There's no such agent drafted in this chat, or it was made already.",
   "agent.plan_needs_connection":
     "This plan needs a connection that isn't there yet. Connect it, then build it.",
   "agent.file_not_found":

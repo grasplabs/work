@@ -525,7 +525,8 @@ export const heldFor = async (
   await vi.waitFor(
     async () => {
       const waiting = await env.CONNECT.listPendingActions(
-        await personOf(env, by)
+        await personOf(env, by),
+        "grasp"
       );
       const ours = waiting.filter(
         ({ context }) =>

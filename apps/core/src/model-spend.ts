@@ -54,10 +54,10 @@ export interface SpendInput {
         platform:
           | "brain_upkeep"
           | "dashboard_widgets"
-          | "brain_recall"
           | "stephen_requests"
           | "provider_test"
-          | "document_conversion";
+          | "document_conversion"
+          | "agent_builder";
       };
   /** The App's model binding the call is made through. */
   binding?: { app: string; alias: string };

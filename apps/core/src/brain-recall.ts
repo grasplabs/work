@@ -9,16 +9,17 @@ import type {
 import type { AuditActor, AuditEntry } from "@grasp-os/shared/audit";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { functionErrors } from "@grasp-os/shared/functions";
-import type { PermissionId } from "@grasp-os/shared/ids";
+import type { AppId, PermissionId } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import type { Authority, WorkContext } from "@grasp-os/shared/permissions";
 import { skillErrors } from "@grasp-os/shared/skills";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
-import { z } from "zod";
+import type { z } from "zod";
 
-import { appendAuditEvent } from "./audit-outbox.ts";
+import { appendAuditEvent, auditedIdOf } from "./audit-outbox.ts";
+import { inHostBrainWords, inHostWords } from "./brain-audited.ts";
 import { storedTeamsOf } from "./brain-grant-teams.ts";
 import {
   codeCardAs,
@@ -153,14 +154,6 @@ const grantTeamsOf = async (
   return teams;
 };
 
-/** `error` in the function host's words, which carry nothing of the call. */
-const inHostWords = (error: unknown): unknown => {
-  if (isExpectedError(error) && error.code === "permission.person_inactive") {
-    return functionErrors.create("permission.unavailable");
-  }
-  return error;
-};
-
 /**
  * A pack of what `caller`'s person may read for `input`'s question, within
  * its budget, as of its moment when given. Refused as
@@ -218,14 +211,18 @@ export const recallFor = async (
           ? await grantTeamsOf(env, caller.permissionId)
           : [],
     });
-    // A capture is one person's own, kept only in their own store (core's
-    // addSource refuses it anywhere else), which this recall never reads:
-    // none can be here. Narrowed for the SDK's type, never thrown over.
+    // A capture and an interview are one person's own, kept only in their
+    // own store (core's addSource refuses them anywhere else), which this
+    // recall never reads; a team's claims from its interviews are read as
+    // the person alone (brain-next.ts `readerOf`): none can be here.
+    // Narrowed for the SDK's type, never thrown over.
     const pack: BrainPack = {
       ...recalled,
       items: recalled.items.flatMap((item) => {
         const { producer, id } = item.source;
-        return producer === "capture"
+        return producer === "capture" ||
+          producer === "interview" ||
+          producer === "claim"
           ? []
           : [{ ...item, source: { producer, id } }];
       }),
@@ -394,7 +391,9 @@ export const skillsCallFor = async (
 //   a reader.
 // - The caller's grant to read the Brain, now (`authorize`).
 // - Whom it reads as (brain-next.ts `CodeReach`), as a recall's: an App
-//   and a workflow as the company alone, whatever teams their grant names;
+//   and a workflow as the company alone, whatever teams their grant names,
+//   and an App's code, in a person's call on its page while they use it
+//   now, what that App's code remembered too (brain-app-writes.ts);
 //   a chat's code as its person's teams too, only in their own chat in
 //   Grasp in a turn they started (`RecallCaller.reach`), and as the
 //   company alone anywhere else. Never what only a person may read: code
@@ -426,27 +425,21 @@ export interface EntitiesCaller extends Omit<RecallCaller, "keep"> {
    * before it gets it: a run's pins, a chat's reads, as a recall's.
    */
   readonly keep?: (restsOn: CodeRestsOn) => Promise<void>;
+  /**
+   * For an App's code alone (resource-brain.ts): the App whose own
+   * memories it reads too, decided as it reads (brain-app-writes.ts
+   * `appUsersReadBy`); none reads the company's alone.
+   */
+  readonly appUsers?: () => Promise<AppId | undefined>;
 }
-
-/** An id as the audit log may name it: a well-formed one, never what code sent instead. */
-const idOf = (value: unknown): string | null => {
-  const id = z.uuid().safeParse(value);
-  return id.success ? id.data : null;
-};
 
 /** The entity `input` asks for, as the audit log may name it. */
 const askedEntityOf = (input: unknown): string | null =>
-  idOf(
+  auditedIdOf(
     typeof input === "object" && input !== null
       ? Reflect.get(input, "entity")
       : undefined
   );
-
-/** `error` in the function host's words: a request the Brain refused as one it isn't. */
-const inHostEntityWords = (error: unknown): unknown =>
-  isExpectedError(error) && error.code === "brain.request_invalid"
-    ? functionErrors.create("permission.invalid_args")
-    : inHostWords(error);
 
 /** A memory as code is handed it (`BrainMemory`): what it says, never who wrote or confirmed it. */
 const codeMemoryOf = (memory: CardMemory) =>
@@ -523,8 +516,10 @@ const readFor = async (
     caller.authority.subject.type === "agent" && caller.reach === "teams"
       ? "teams"
       : "company";
+  // Decided now, as it reads: never the call's own roles.
+  const appUsers = await caller.appUsers?.();
   if (operation === "entities.get") {
-    const card = await codeCardAs(env, person, reach, input);
+    const card = await codeCardAs(env, person, reach, input, appUsers);
     if (card === null) {
       return { answer: null, detail: { found: false, memories: 0 } };
     }
@@ -534,7 +529,7 @@ const readFor = async (
     await caller.keep?.(card.restsOn);
     return { answer, detail: { found: true, memories: memoriesOn(card) } };
   }
-  const page = await codeEntitiesAs(env, person, reach, input);
+  const page = await codeEntitiesAs(env, person, reach, input, appUsers);
   const answer = handedAs(brainEntitiesSchema, {
     entities: page.entities.map((entity) => codeEntityOf(entity)),
     next: page.next,
@@ -592,7 +587,7 @@ export const entitiesCallFor = async (
     );
     read = await readFor(env, caller, operation, input);
   } catch (error) {
-    const refused = inHostEntityWords(error);
+    const refused = inHostBrainWords(error);
     await audit({
       refused: isExpectedError(refused) ? refused.code : "internal.unexpected",
     });

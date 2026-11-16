@@ -75,8 +75,9 @@ export const RemoveApp = ({
             <AlertDialogDescription>
               <Trans>
                 It is gone for good: its pages, versions and members, and what
-                it was allowed. Its stores and their records stay, and so do the
-                workflows it doesn’t own.
+                it was allowed. Its stores and their records stay, and so do
+                what its code remembered in the Brain and the workflows it
+                doesn’t own.
               </Trans>
             </AlertDialogDescription>
           </AlertDialogHeader>

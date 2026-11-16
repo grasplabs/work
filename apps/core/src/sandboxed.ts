@@ -124,15 +124,17 @@ export const callStub = async (
   const call: unknown = Reflect.apply(fn, stub, [...args]);
   try {
     return await call;
-  } catch (error) {
-    // A call that rejected (the App's code threw, which is routine here)
-    // is released at once rather than when its promise is collected. Before
-    // workerd 1.20261010.1 (cloudflare/workerd#7637) it held the isolate's
-    // session until then, and workerd aborted the isolate as hung while
-    // this request went on; the runtime is past that now, and disposing a
-    // settled call still frees its pipeline sooner.
+  } finally {
+    // Released once it settled, however it settled, not when its promise
+    // is collected: the answer is data, which outlives the call, and a
+    // callee that answered with a disposer of its own (or a stub) is held
+    // until then. No caller keeps a stub from an answer: the platform's
+    // programs and App code answer data. A result collected unreleased
+    // makes workerd warn from inside the collection, which crashed
+    // workerd 1.20261104.1 with a debugger attached; a call that rejected
+    // held the isolate's session before 1.20261010.1
+    // (cloudflare/workerd#7637), which then aborted the isolate as hung.
     disposeOf(call);
-    throw error;
   }
 };
 

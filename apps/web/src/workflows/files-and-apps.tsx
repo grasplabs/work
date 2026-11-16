@@ -357,12 +357,17 @@ const Approved = ({
   );
 };
 
-/** A part of the tab: loading until read, then its content or why not. */
+/**
+ * A part of the tab: loading until read, then its content or why not,
+ * read again with `again` when it is the tab's own read.
+ */
 const Part = <T,>({
   loaded,
+  again,
   children,
 }: {
   loaded: Loaded<T> | undefined;
+  again?: () => void;
   children: (data: T) => ReactNode;
 }): ReactNode => {
   if (loaded === undefined) {
@@ -371,7 +376,7 @@ const Part = <T,>({
   return loaded.state === "ready" ? (
     children(loaded.data)
   ) : (
-    <NotLoadedState page={loaded} />
+    <NotLoadedState again={again} page={loaded} />
   );
 };
 
@@ -590,6 +595,19 @@ export const FilesAndApps = ({
     }
   };
 
+  // A part read again (Try again, or core back after a blip): every part
+  // the tab reads, what was read staying until it lands.
+  const again = (): void => {
+    void (async () => {
+      const filesRead = loadFromCore(
+        core,
+        async (session) => await session.workflowResources.files(workflow)
+      );
+      await changed();
+      setFiles(await filesRead);
+    })();
+  };
+
   return (
     <div className="flex flex-col gap-8">
       {pending === undefined ||
@@ -598,7 +616,7 @@ export const FilesAndApps = ({
           id="workflow-waiting"
           title={<Trans>Waiting for your approval</Trans>}
         >
-          <Part loaded={pending}>
+          <Part again={again} loaded={pending}>
             {(data) => (
               <Waiting
                 onApproved={(alias) => {
@@ -619,7 +637,10 @@ export const FilesAndApps = ({
       {runningBindings?.state === "ready" &&
       runningBindings.data === null ? null : (
         <Section id="workflow-bindings" title={<Trans>Its bindings</Trans>}>
-          <Part loaded={runningBindings}>
+          <Part
+            again={versionsRead ? again : undefined}
+            loaded={runningBindings}
+          >
             {(data) =>
               data === null ? null : (
                 <Approved
@@ -641,10 +662,15 @@ export const FilesAndApps = ({
         </Section>
       )}
       <Section id="workflow-apps" title={<Trans>Apps it works in</Trans>}>
-        <Part loaded={appsOf}>{(data) => <Apps apps={data} />}</Part>
+        {/* Without the versions, the page's own read failed: its loaders. */}
+        <Part again={versionsRead ? again : undefined} loaded={appsOf}>
+          {(data) => <Apps apps={data} />}
+        </Part>
       </Section>
       <Section id="workflow-files" title={<Trans>Files its runs wrote</Trans>}>
-        <Part loaded={files}>{(data) => <Files files={data} />}</Part>
+        <Part again={again} loaded={files}>
+          {(data) => <Files files={data} />}
+        </Part>
       </Section>
     </div>
   );

@@ -329,14 +329,6 @@ const sessionShape = {
        */
       z.strictObject({ platform: z.literal("dashboard_widgets") }),
       /**
-       * Core's own reranking of a person's recall (knowledge/rerank.ts),
-       * only when the recall asks for it: it carries the company's own
-       * words, and is made for them, counted as theirs, by the trigger that names them. A delegate's recall reranks
-       * under its own authority and context instead. Only core's own code
-       * makes such a call.
-       */
-      z.strictObject({ platform: z.literal("brain_recall") }),
-      /**
        * Core's own sorting of a request someone made of Stephen in a chat
        * app (channels/request-sorting.ts), from their words and his
        * answer, into the company's topics; and its proposals for what an
@@ -357,6 +349,13 @@ const sessionShape = {
        * counted as theirs. Only core's own code makes such a call.
        */
       z.strictObject({ platform: z.literal("document_conversion") }),
+      /**
+       * Core's own reading of an agent's instructions for the apps it
+       * needs (agent-apps.ts), on the organization's models: the words of
+       * whoever manages the agent, made for them, counted as theirs. Only
+       * core's own code makes such a call.
+       */
+      z.strictObject({ platform: z.literal("agent_builder") }),
     ])
     .optional(),
   requestId: auditEventSchema.shape.requestId,

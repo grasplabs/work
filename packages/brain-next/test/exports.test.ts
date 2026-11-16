@@ -10,6 +10,7 @@ import type {
   Embedders,
   HandOvers,
   NewEntity,
+  ErasedRequest,
   NewMemory,
   PersonReader,
   Reader,
@@ -19,10 +20,12 @@ import { env } from "cloudflare:workers";
 import { beforeAll, describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
+import { catchUpDue } from "../src/catch-up.ts";
 import {
   exportFileNameSchema,
   instructionsMaxLength,
   removedSource,
+  restoringNow,
 } from "../src/contract.ts";
 import {
   exportFormat,
@@ -443,6 +446,22 @@ const restoreSettled = async (id: string) => {
   throw new Error("The restore was still running after 10 ticks");
 };
 
+/** Ticks the shared store until its catch-up of quotes is done (catch-up.ts): at most 10 ticks. */
+const caughtUp = async (): Promise<void> => {
+  for (let ticks = 0; ticks < 10; ticks += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- a tick at a time
+    const due = await runInDurableObject(shared(), (_instance, state) =>
+      catchUpDue(state.storage.sql)
+    );
+    if (!due) {
+      return;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- a tick at a time
+    await tick(shared());
+  }
+  throw new Error("The catch-up of quotes was still due after 10 ticks");
+};
+
 /** How many versions the shared store holds. */
 const versionsHeld = async (): Promise<number> =>
   await runInDurableObject(
@@ -530,6 +549,15 @@ const drawn = (source: string, statement: string): NewMemory => ({
   basis: { kind: "source", source, version: 1, quote: "words" },
 });
 
+/** A memory about `c`, a system's fact, written by `writer`. */
+const writtenBy = (writer: string, statement: string): NewMemory => ({
+  about: "c",
+  type: "fact",
+  statement,
+  speaker: { kind: "system" },
+  basis: { kind: "writer", writer },
+});
+
 /** The text of the object at `key` in the bucket: empty when there is none. */
 const textAt = async (key: string): Promise<string> => {
   const object = await env.BRAIN_OBJECTS.get(key);
@@ -586,7 +614,7 @@ describe("exports and restores", () => {
       // marked removed, as its history.
       await add(shared(), removedKey, "kept words", team(group), "1");
       await add(shared(), removedKey, "removed words", team(group), "2");
-      await shared().removeSource({ source: removedKey });
+      await shared().removeSources({ sources: [removedKey] });
       await shared().addInstructions({
         source: instructions,
         change: "1",
@@ -1294,12 +1322,12 @@ describe("exports and restores", () => {
         `test:${unique()}`,
       ];
       // Removed before its first add landed: a mark with no version.
-      await shared().removeSource({ source: before });
+      await shared().removeSources({ sources: [before] });
       // Removed with its history: a version marked removed.
       await add(shared(), after, "kept words", team(group));
-      await shared().removeSource({ source: after });
+      await shared().removeSources({ sources: [after] });
       // Removed before any add, then erased: the erasure closes it alone.
-      await shared().removeSource({ source: erased });
+      await shared().removeSources({ sources: [erased] });
       await shared().eraseSource({ source: erased, reason: "deleted" });
       const { id } = await shared().startExport("test");
       await settled(shared(), id);
@@ -1362,7 +1390,7 @@ describe("exports and restores", () => {
     it("is erased once the ledger erases a key it holds as removed before any version, its files deleted", async () => {
       await putBack(shared(), emptyShared);
       const removed = `test:${unique()}`;
-      await shared().removeSource({ source: removed });
+      await shared().removeSources({ sources: [removed] });
       const { id } = await shared().startExport("test");
       const written = await settled(shared(), id);
       await shared().eraseSource({ source: removed, reason: "deleted" });
@@ -2148,6 +2176,100 @@ describe("exports and restores", () => {
             .one().latest
       );
 
+    // GRA-1807: what a chat showed of a memory is replaced only for what
+    // the ledger erased, which outlives a lost storage; never because the
+    // storage lacks it until the restore puts it back.
+    it("answers a memory a host once read as kept while the storage is lost, refuses while it restores, and keeps it after; one whose source or writer was erased answers erased throughout", async () => {
+      await putBack(shared(), emptyShared);
+      const group = `team:${unique()}`;
+      const reader = readerOf(`person:${unique()}`, [group]);
+      const kept = `test:${unique()}`;
+      const erased = `test:${unique()}`;
+      await add(shared(), kept, "words kept", team(group));
+      await add(shared(), erased, "words erased", team(group));
+      const keptWriter = `app:${unique()}`;
+      const erasedWriter = `app:${unique()}`;
+      const added = await shared().addMemories({
+        change: unique(),
+        access: team(group),
+        entities: [customer()],
+        memories: [
+          drawn(kept, "Acme keeps its words"),
+          drawn(erased, "Acme erases its words"),
+          writtenBy(keptWriter, "Acme keeps its writer"),
+          writtenBy(erasedWriter, "Acme erases its writer"),
+        ],
+      });
+      const [onKept = "", onErased = "", byKept = "", byErased = ""] =
+        added.memories;
+      // What a host pinned as each was handed over: what it rests on.
+      const { memories } = await shared().readMemories({
+        entity: added.entities.c ?? "",
+        reader,
+      });
+      const asked: ErasedRequest = {
+        sources: [kept, erased],
+        memories: [onKept, onErased, byKept, byErased].flatMap((id) =>
+          memories.flatMap(({ id: held, source, writer, learnedAt }) =>
+            held === id
+              ? [
+                  {
+                    memory: id,
+                    source: source?.source ?? null,
+                    writer,
+                    learnedAt: learnedAt.getTime(),
+                  },
+                ]
+              : []
+          )
+        ),
+      };
+      await shared().eraseSource({ source: erased, reason: "deleted" });
+      await shared().eraseWriter({
+        writer: erasedWriter,
+        reason: "deleted",
+        change: unique(),
+      });
+      const erasedOnly = {
+        sources: [erased],
+        memories: [onErased, byErased],
+      };
+      const before = await shared().erasedOf(asked);
+
+      const { id } = await shared().startExport("test");
+      await expect(settled(shared(), id)).resolves.toMatchObject({
+        state: "done",
+      });
+      // Its storage lost, its bucket kept: the ledger is read again.
+      await putBack(shared(), emptyShared);
+      const lost = await shared().erasedOf(asked);
+      const started = await shared().startRestore(id, "test");
+      const restoring = await called(shared().erasedOf(asked)).then(
+        () => "answered",
+        (error: unknown) => (error instanceof Error ? error.message : "")
+      );
+      await expect(restoreSettled(id)).resolves.toMatchObject({
+        state: "done",
+      });
+      const after = await shared().erasedOf(asked);
+
+      expect({
+        asked: asked.memories.map(({ memory }) => memory),
+        before,
+        lost,
+        started: started.state,
+        restoring,
+        after,
+      }).toStrictEqual({
+        asked: [onKept, onErased, byKept, byErased],
+        before: erasedOnly,
+        lost: erasedOnly,
+        started: "running",
+        restoring: restoringNow,
+        after: erasedOnly,
+      });
+    });
+
     it("brings back what each reader read of memories, contested facts, confirmations, entities and their names, and recall, and never lowers the write stamp (threats 1, 4, 7)", async () => {
       await putBack(shared(), emptyShared);
       const group = `team:${unique()}`;
@@ -2313,6 +2435,9 @@ describe("exports and restores", () => {
       const stampBefore = await latestStamp();
 
       await exportedAndRestored();
+      // Restored sources are judged by the catch-up's next ticks
+      // (catch-up.ts): the first memory's quote left the second version.
+      await caughtUp();
       const after = await readsOf();
       // A producer's retry of an add made before answers as it did.
       const again = await shared().addMemories({

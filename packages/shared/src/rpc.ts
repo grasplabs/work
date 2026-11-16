@@ -18,7 +18,6 @@ import type { DependenciesApi } from "./dependencies.ts";
 import type { DraftsApi, VersionsApi } from "./drafts.ts";
 import type { HeldStartsApi } from "./held-starts.ts";
 import type { InstructionsApi } from "./instruction-files.ts";
-import type { KnowledgeApi } from "./knowledge.ts";
 import type { MembersApi } from "./members.ts";
 import type { ModelsApi } from "./models.ts";
 import type { NotificationsApi } from "./notifications.ts";
@@ -44,6 +43,8 @@ export interface SignInOption {
   /** Passed to Better Auth's `POST /api/auth/sign-in/sso` as `providerId`. */
   providerId: string;
   label: string;
+  /** Grasp's staff's own sign-in: never for anyone's interview (GRA-1790). */
+  staff: boolean;
 }
 
 /** The signed-in person, as the server sees them right now. */
@@ -105,8 +106,6 @@ export interface SessionApi {
   readonly drafts: DraftsApi;
   /** The versions of Apps and workflows: compared, and rolled back to. */
   readonly versions: VersionsApi;
-  /** Knowledge: collections, documents and their versions. */
-  readonly knowledge: KnowledgeApi;
   /**
    * What the company brain is built from, assembled from the onboarding,
    * the brain's records and the connections, each as the person may

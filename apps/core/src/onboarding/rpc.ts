@@ -86,6 +86,7 @@ import {
 import { removeDocument, shareDocument } from "./documents.ts";
 import { gateView, openAsFlowSays } from "./gate.ts";
 import { connectHr, onboardingHr, readOnboardingHr } from "./hr.ts";
+import { eraseOwedClaimsQuietly } from "./new-brain.ts";
 import { mondayOf } from "./rules.ts";
 import { onboardingStore } from "./store.ts";
 import { summaryOf } from "./summary.ts";
@@ -94,7 +95,8 @@ import { summaryOf } from "./summary.ts";
 // whose access is the admin role) gives the store who works where and the
 // plan, and reads back numbers per team, never anyone's words; and takes
 // everyone's own link, to send themselves as well (the threat model's L3:
-// a link opens on the first device only, whoever holds it). At the end it
+// a link opens only for the account whose address it was sent to, signed
+// in with the company's sign-in, whoever holds it; GRA-1790). At the end it
 // settles the steps people told two ways and nobody could explain, never
 // told who said which. What only Grasp's staff do is a command from
 // Grasp's admin (admin-command.ts). The admin also shares documents,
@@ -179,11 +181,15 @@ export class OnboardingRpc extends CoreRpcTarget implements OnboardingApi {
         rosterSchema,
         roster
       );
-      return await onboardingStore(this.#env).saveRoster(
+      const view = await onboardingStore(this.#env).saveRoster(
         parsed,
         actorOf(person),
         { confirmed }
       );
+      // A team the save took under seven loses its claims in the Brain now,
+      // not only by core's clock (onboarding/new-brain.ts).
+      await eraseOwedClaimsQuietly(this.#env);
+      return view;
     });
   }
 

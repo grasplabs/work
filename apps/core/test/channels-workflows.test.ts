@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import { memberOf } from "../src/auth/identity.ts";
 import type { Acting } from "../src/auth/identity.ts";
+import { say } from "../src/channels/words.ts";
 import { shareWorkflowResource } from "../src/workflow-members.ts";
 import {
   createWorkflowResource,
@@ -12,7 +13,7 @@ import {
 } from "../src/workflow-resources.ts";
 import { codeStep, says } from "./agent-chat.ts";
 import { mockIdp } from "./idp.ts";
-import { greetingOf } from "./json-workflow-apps.ts";
+import { anyNamesOf, greetingOf } from "./json-workflow-apps.ts";
 import { answeringProvider } from "./model-provider.ts";
 import type { ProviderReply } from "./model-provider.ts";
 import { outcome, signedInApi, unique } from "./sign-in.ts";
@@ -56,9 +57,14 @@ const owner = async (): Promise<Acting> => {
  * A workflow `by` published once and shared with `userId`, open to asking
  * Stephen when `askable`.
  */
-const sharedWorkflow = async (by: Acting, userId: string, askable: boolean) => {
+const sharedWorkflow = async (
+  by: Acting,
+  userId: string,
+  askable: boolean,
+  definition = greetingOf()
+) => {
   const workflow = await createWorkflowResource(env, by, `ask-${unique()}`);
-  await publishDefinition(env, by, workflow.id, greetingOf());
+  await publishDefinition(env, by, workflow.id, definition);
   await shareWorkflowResource(env, by, workflow.id, {
     type: "person",
     id: userId,
@@ -129,6 +135,77 @@ const runsOf = async (id: string) => {
 };
 
 describe("a workflow its owner lets people ask for", setUpTime, () => {
+  it("is offered with each value as it will start, link syntax and all, inert", async () => {
+    // An injected text had the model put a link in what it would start with.
+    const who = "[Ada](https://evil.example/?d=salary)";
+    const ann = await member(
+      idp,
+      codeStep(
+        `export default async (self, env) => {
+  const [first] = await env.workflows.askable();
+  if (first === undefined) return "none";
+  return await env.workflows.offer(first.id, { who: ${JSON.stringify(who)} });
+};`
+      ),
+      says("There's a card for it.")
+    );
+    await sharedWorkflow(await owner(), ann.userId, true);
+
+    await post(messageFrom(ann.teams, { text: "Run the greeting for Ada" }));
+    const { activities } = await reached(ann.teams.conversation);
+    const card = JSON.stringify(
+      activities.find((activity) =>
+        JSON.stringify(activity).includes("workflow.start")
+      ) ?? {}
+    );
+    // On Teams a card's facts read `[words](address)` as a link: broken,
+    // so the address shows whole and leads nowhere from the card.
+    expect([
+      card.includes("[Ada] (https://evil.example/?d=salary)"),
+      card.includes("]("),
+    ]).toStrictEqual([true, false]);
+  });
+
+  it("is offered without Start where the card can't show a field in full once it is made inert, and with it where it can", async () => {
+    // Keys of `](` pairs: 80 characters as written, 120 on the card once
+    // each `](` is broken (inert.ts), past the 100 a label takes; and 60,
+    // 90 on the card, which fit.
+    const cut = "](".repeat(40);
+    const fits = "](".repeat(30);
+    const ann = await member(
+      idp,
+      codeStep(
+        `export default async (self, env) => {
+  const [first] = await env.workflows.askable();
+  if (first === undefined) return "none";
+  await env.workflows.offer(first.id, { ${JSON.stringify(cut)}: "Ada" });
+  return await env.workflows.offer(first.id, { ${JSON.stringify(fits)}: "Ada" });
+};`
+      ),
+      says("There are cards for it.")
+    );
+    await sharedWorkflow(await owner(), ann.userId, true, anyNamesOf());
+
+    await post(messageFrom(ann.teams, { text: "Run the greeting for Ada" }));
+    const { activities } = await reached(ann.teams.conversation);
+    // Each offer's card, as offered: what it says first is its own.
+    const [offerLine = ""] = say("startOffer", "en", { workflow: "|" }).split(
+      "|"
+    );
+    const cards = activities
+      .map((activity) => JSON.stringify(activity))
+      .filter((card) => card.includes(offerLine));
+    expect(
+      cards.map((card) => ({
+        start: card.includes("workflow.start"),
+        line: card.includes(say("startTooLong", "en")),
+      }))
+    ).toStrictEqual([
+      { start: false, line: true },
+      { start: true, line: false },
+    ]);
+  });
+
   it("is offered on a card, started once as the person who pressed Start, and its end told", async () => {
     const ann = await member(idp, offersFirst, says("There's a card for it."));
     const workflow = await sharedWorkflow(await owner(), ann.userId, true);

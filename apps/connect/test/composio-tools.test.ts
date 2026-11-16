@@ -367,7 +367,10 @@ describe("a Composio tool the admin marked as a read", () => {
     };
     const withKey = await outcome(callAs(run, call, signed));
     const ranBefore = [...composio.state.mcp.ran];
-    const [held, ...others] = await exports.default.listPendingActions(anna);
+    const [held, ...others] = await exports.default.listPendingActions(
+      anna,
+      "grasp"
+    );
     if (held === undefined || others.length > 0) {
       throw new Error("Expected one held action");
     }
@@ -418,7 +421,10 @@ describe("a Composio tool the admin marked as a read", () => {
       idempotencyKey: "run-1:list-broken",
     };
     const withKey = await outcome(callAs(run, call, signed));
-    const [held, ...others] = await exports.default.listPendingActions(anna);
+    const [held, ...others] = await exports.default.listPendingActions(
+      anna,
+      "grasp"
+    );
     if (held === undefined || others.length > 0) {
       throw new Error("Expected one held action");
     }
@@ -515,7 +521,7 @@ describe("a Composio tool the admin didn't mark as a read", () => {
       idempotencyKey: crypto.randomUUID(),
     };
     const answer = await callAs(inChat, call, { origin: chatOrigin });
-    const [pending] = await exports.default.listPendingActions(anna);
+    const [pending] = await exports.default.listPendingActions(anna, "grasp");
     expect(answer.pending?.id).toBe(pending?.id);
     expect(pending?.action).toBe("HUBSPOT_GET_CONTACT");
     const [held] = await events();
@@ -597,7 +603,7 @@ describe("a call core signs for work that may only read", () => {
     expect({
       ranOnce,
       outcomes,
-      pending: await exports.default.listPendingActions(anna),
+      pending: await exports.default.listPendingActions(anna, "grasp"),
       ran: composio.state.mcp.ran.map(({ tool }) => tool),
       audited: recorded
         .filter(({ action }) => action === "connection.call")

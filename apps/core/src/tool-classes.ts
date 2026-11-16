@@ -1,3 +1,4 @@
+import { agentAppOf } from "@grasp-os/shared/agents";
 import { actorOf } from "@grasp-os/shared/audit";
 import {
   companyToolClassSchema,
@@ -22,6 +23,7 @@ import { and, eq, ne, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
+import { requireAgentHasApp } from "./agent-app-gate.ts";
 import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
 import { organizationId } from "./auth/membership-sql.ts";
 import {
@@ -73,6 +75,35 @@ export const nativeClasses: ReadonlyMap<
     ),
   ])
 );
+
+/**
+ * The class connect and the release give the tool `action` of `owner`'s
+ * connection: a Composio tool's from its review, a native one's from its
+ * manifest. Undefined for one neither knows (an HTTP connection's).
+ */
+export const classOf = (
+  owner: Pick<ConnectionOwner, "source" | "provider" | "toolClasses">,
+  action: string
+): ToolClass | undefined =>
+  owner.source === "composio"
+    ? owner.toolClasses?.[action]
+    : nativeClasses.get(owner.provider)?.get(action);
+
+/** The classes of tools that only read, as connect counts reads. */
+const readClasses: ReadonlySet<ToolClass> = new Set([
+  "read-own",
+  "read-company",
+  "read-others",
+]);
+
+/** Whether the tool `action` of `owner`'s connection only reads (`classOf`). */
+export const readsOnly = (
+  owner: Pick<ConnectionOwner, "source" | "provider" | "toolClasses">,
+  action: string
+): boolean => {
+  const toolClass = classOf(owner, action);
+  return toolClass !== undefined && readClasses.has(toolClass);
+};
 
 /** A stored row's teams: a JSON array of team IDs, or nothing it can read. */
 export const storedTeamsSchema = z.array(z.string());
@@ -511,6 +542,13 @@ export const requireToolClassOn = async (
   if (owner === undefined) {
     throw connectErrors.create("connect.connection_not_found");
   }
+  // The agent's own apps first: one it doesn't have takes no call,
+  // whatever its classes (agent-app-access.ts).
+  await requireAgentHasApp(
+    env,
+    authority,
+    agentAppOf(owner.source, owner.provider)
+  );
   if (owner.source === "composio") {
     return await requireAppClassOn(env, authority, owner, action, unattended);
   }

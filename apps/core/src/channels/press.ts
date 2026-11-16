@@ -3,7 +3,6 @@ import type { ConnectionPerson, PendingAction } from "@grasp-os/shared/connect";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type { ActionEvent, StateAdapter } from "chat";
 
-import { signInConfig } from "../auth/config.ts";
 import {
   confirmPendingAction,
   declinePendingAction,
@@ -21,7 +20,7 @@ import type {
   PressOutcome,
   WriteState,
 } from "./cards.tsx";
-import { memberOf, viewOf } from "./held.ts";
+import { inertView, memberOf, viewOf } from "./held.ts";
 import { pressedChanges } from "./stephen-requests.ts";
 import { say } from "./words.ts";
 import type { ChannelLocale } from "./words.ts";
@@ -176,21 +175,18 @@ export const pressCard = async (
   }
   const { identity, person } = member;
   const held = await stillAsShown(env, person, press);
-  const origin = signInConfig(env)?.origin ?? "";
   if (held === null) {
     log.info("channel.press_refused", { platform, reason: "changed" });
     await sayThere(event, "changedSince", locale);
     return;
   }
-  const [firstWrite] = held;
-  const chatId =
-    firstWrite?.context.type === "chat" ? firstWrite.context.chatId : "";
-  const openUrl = `${origin}/?chat=${encodeURIComponent(chatId)}`;
-  const writes: HeldWriteView[] = held.map(viewOf);
+  // As the card showed them, what the model wrote inert (held.ts).
+  const writes: HeldWriteView[] = held
+    .map(viewOf)
+    .map((write) => inertView(platform, write));
   const shown = (outcome?: PressOutcome) => ({
     locale,
     writes,
-    openUrl,
     ...(outcome === undefined ? {} : { outcome }),
   });
   if (!confirming) {

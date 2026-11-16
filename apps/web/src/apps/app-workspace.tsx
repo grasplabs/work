@@ -56,7 +56,7 @@ import {
   showsUnpublishedChanges,
   UnpublishedChanges,
 } from "../drafts/share-with-team.tsx";
-import { memberNames, useMembers } from "../drafts/sharing.tsx";
+import { memberNames, useMembersRead } from "../drafts/sharing.tsx";
 import { StatusBadge } from "../drafts/status-badge.tsx";
 import { hasChanges, useDraft } from "../drafts/use-draft.ts";
 import { ErrorText } from "../error-text.tsx";
@@ -70,6 +70,7 @@ import { LoadingLines } from "../frame/page-states.tsx";
 import { SettingUp, SettingUpBar, Updating } from "../frame/setting-up.tsx";
 import type { SetUp } from "../frame/setting-up.tsx";
 import type { Crumb } from "../frame/site-header.tsx";
+import type { Loaded } from "../load-from-core.tsx";
 import { PageFrame } from "../pages/page-frame.tsx";
 import type { FrameFix } from "../pages/page-frame.tsx";
 import { useVersionPushes } from "../pages/use-version-pushes.ts";
@@ -374,9 +375,13 @@ const PreviewState = ({
  * Over the preview, once a call of it was refused as its test data
  * doesn't fit the draft's data model: core applies the change to the
  * test data only once it is reset (core's sealed-previews.ts), in Data.
+ * Over its bottom corner, never in a row above it: it comes with a call
+ * the person made, or a write of Grasp's, and goes at the draft's next
+ * write, so a row would move the page under their pointer each time; a
+ * corner leaves the rest of the page's foot to use.
  */
 const StaleTestData = ({ app }: { app: string }) => (
-  <div className="flex-none border-b p-3">
+  <div className="animate-in fade-in-0 absolute right-3 bottom-3 max-w-sm motion-reduce:animate-none">
     <Alert variant="attention">
       <TriangleAlertIcon />
       <AlertTitle>
@@ -389,7 +394,7 @@ const StaleTestData = ({ app }: { app: string }) => (
           team entered isn&apos;t touched.
         </Trans>
       </AlertDescription>
-      <AlertAction>
+      <AlertAction placement="below">
         <Link
           className={buttonVariants({ size: "sm", variant: "outline" })}
           params={{ app }}
@@ -676,13 +681,11 @@ const PreviewArea = ({
       {shown === undefined ? null : (
         <ReadOnlyBar draft={draft} onChanged={onChanged} shown={shown} />
       )}
-      {/* Once Grasp is done: the example data it speaks of is there then. */}
-      {shown === undefined && ready && !running ? (
-        <MadeTip app={app.id} />
-      ) : null}
-      {staleAt === revision && shown === undefined && ready ? (
-        <StaleTestData app={app.id} />
-      ) : null}
+      {/* As the preview first shows, in the same step that fades it in,
+        never later: the person may use it while Grasp still works, and
+        a tip put over it then would push the page down under their
+        pointer, a click meant for the page landing on the tip. */}
+      {shown === undefined && ready ? <MadeTip app={app.id} /> : null}
       {/* Running unseen while Grasp sets it up, so it is there to fade
         in once its first version runs; nothing of it reached before. */}
       <div
@@ -711,6 +714,9 @@ const PreviewArea = ({
           shown={shown}
         />
       </div>
+      {staleAt === revision && shown === undefined && ready ? (
+        <StaleTestData app={app.id} />
+      ) : null}
       {ready ? null : (
         <div className="absolute inset-0 flex flex-col">
           <SettingUp failed={setUp === "failed"} name={name} />
@@ -1009,6 +1015,43 @@ const useReadAgainOnNewBase = (app: App, base: number | null | undefined) => {
 };
 
 /**
+ * Whether the line of changes only its builders see shows under the bar
+ * (`changesLine`), over the builders' own version (`mine`), and the draft
+ * the preview shows (`previewed`): none until whether the line shows is
+ * known, the first time. That waits on who uses the App (`members`),
+ * read apart from the draft, while that read is on its way: a line coming
+ * in once the preview shows would push the page down under the person's
+ * pointer. A read that failed shows the preview without the line.
+ */
+const useChangesLine = ({
+  app,
+  draft,
+  members,
+  mine,
+}: {
+  app: App;
+  draft: Draft | undefined;
+  members: Loaded<SubjectMember[]> | undefined;
+  mine: boolean;
+}): { changesLine: boolean; previewed: Draft | undefined } => {
+  const waits =
+    mine &&
+    members === undefined &&
+    app.currentVersion !== null &&
+    hasChanges(draft);
+  const [known, setKnown] = useState(false);
+  if (!known && draft !== undefined && !waits) {
+    setKnown(true);
+  }
+  const shared = members?.state === "ready" ? members.data : [];
+  return {
+    changesLine:
+      mine && showsUnpublishedChanges(app.currentVersion, draft, shared),
+    previewed: known ? draft : undefined,
+  };
+};
+
+/**
  * The workspace with the App's chat (`chatId`, once found) beside it, and
  * the App's draft previewed.
  */
@@ -1043,7 +1086,8 @@ const Building = ({
   // Whom it is shared with: who uses it, and whom Share adds to, read
   // again each time it is shared from here.
   const [shares, setShares] = useState(0);
-  const members = useMembers({ kind: "app", id: app.id }, shares);
+  const membersRead = useMembersRead({ kind: "app", id: app.id }, shares);
+  const members = membersRead?.state === "ready" ? membersRead.data : undefined;
   const { setUp, onFrame } = useSetUp({
     app,
     shown,
@@ -1054,10 +1098,12 @@ const Building = ({
   const settingUp = setUp !== "ready";
   const theirs = showsTeams({ app, draft, env, shown });
   const showing: WorkspaceEnv = theirs ? "live" : "draft";
-  const changesLine =
-    !theirs &&
-    sharesApp(app, identity) &&
-    showsUnpublishedChanges(app.currentVersion, draft, members ?? []);
+  const { changesLine, previewed } = useChangesLine({
+    app,
+    draft,
+    members: membersRead,
+    mine: !theirs && sharesApp(app, identity),
+  });
   return (
     <ItemShell
       bar={
@@ -1102,7 +1148,7 @@ const Building = ({
           ) : (
             <PreviewArea
               app={app}
-              draft={draft}
+              draft={previewed}
               key={`${shownKey(shown)}/${resets}`}
               onChanged={reread}
               onFrame={onFrame}

@@ -118,6 +118,30 @@ const words: readonly { action: string; text: MessageDescriptor }[] = [
     action: "chat.turn_noted",
     text: msg`Noted a question asked in a chat, to keep in its person's own Brain`,
   },
+  {
+    action: "chat.private_read",
+    text: msg`Used something only its person can read, so what it writes for others waits for them`,
+  },
+  {
+    action: "chat.app_call.confirmed",
+    text: msg`Confirmed a write to an App`,
+  },
+  {
+    action: "chat.app_call.ended",
+    text: msg`Carried out a confirmed write to an App, or failed to`,
+  },
+  {
+    action: "chat.app_call.lapsed",
+    text: msg`Ended a held write to an App nobody confirmed within a day`,
+  },
+  {
+    action: "chat.app_call.declined",
+    text: msg`Declined a write to an App`,
+  },
+  {
+    action: "chat.apps_deleted",
+    text: msg`Deleted their conversations in chat apps`,
+  },
   { action: "chat", text: msg`Changed a chat` },
   {
     action: "brain.source.handover_skipped",
@@ -126,6 +150,10 @@ const words: readonly { action: string; text: MessageDescriptor }[] = [
   {
     action: "brain.capture.erased",
     text: msg`Erased what the Brain kept from a connection, as it was disconnected`,
+  },
+  {
+    action: "brain.run_sources.removed",
+    text: msg`Stopped the Brain using someone's workflow results, as they lost the workflow`,
   },
   { action: "agent.call", text: msg`The agent looked something up` },
   { action: "model.refused", text: msg`A model call was refused` },

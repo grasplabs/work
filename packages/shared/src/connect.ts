@@ -1274,6 +1274,14 @@ export interface ActionDescription {
   complete: boolean;
 }
 
+/**
+ * Where a held action was held: in Grasp (a chat in Grasp, an App, a
+ * run), or in a chat app's conversation, which Grasp never shows as a
+ * chat and whose held actions are decided on their card there.
+ */
+export const heldInSchema = z.enum(["grasp", "chat_app"]);
+export type HeldIn = z.infer<typeof heldInSchema>;
+
 /** A held action, as the person it waits for sees it. */
 export interface PendingAction {
   id: string;
@@ -1995,10 +2003,15 @@ export interface ConnectApi
     request: NativeOperationRequest
   ) => Promise<NativeOperation>;
   /**
-   * The held actions waiting for `person`, newest first (at most 200):
-   * none for Grasp staff.
+   * The held actions waiting for `person` that were held where `heldIn`
+   * says, newest first (at most 200, of those alone): in Grasp, or in a
+   * chat app's conversation (`chatApp` on the capability). None for Grasp
+   * staff.
    */
-  listPendingActions: (person: ConnectionPerson) => Promise<PendingAction[]>;
+  listPendingActions: (
+    person: ConnectionPerson,
+    heldIn: HeldIn
+  ) => Promise<PendingAction[]>;
   /** One held action waiting for the person, or `null`. */
   pendingAction: (request: HeldRequest) => Promise<PendingAction | null>;
   /**
@@ -2370,6 +2383,8 @@ export const connectErrors = defineErrorFamily({
   "connect.catalog_entry_not_found": "There's no such entry in the catalog.",
   "connect.catalog_unavailable":
     "Composio's toolkits can't be listed right now. Try again shortly.",
+  "connect.agent_app_off":
+    "This agent doesn't have this app. Whoever manages it can add the app on its page.",
   "connect.class_off":
     "Your company hasn't turned this kind of action on for you, so it wasn't done. An admin can turn it on.",
   "connect.class_unknown":

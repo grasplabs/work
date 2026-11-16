@@ -4,16 +4,24 @@ import type {
   InterviewProgress,
   InterviewSaved,
 } from "@grasp-os/shared/interview-links";
-import { interviewApiPath } from "@grasp-os/shared/interview-links";
 import type { FactTag } from "@grasp-os/shared/interview-turn";
 import type { Roster } from "@grasp-os/shared/onboarding";
 import { env } from "cloudflare:workers";
 import { z } from "zod";
 
 import { onboardingStore } from "../src/onboarding/store.ts";
-import { answering, answeringWith, approveAgreed } from "./interview-link.ts";
+import {
+  answering,
+  answeringWith,
+  approveAgreed,
+  onLink,
+  openLinkAs,
+  sentToOf,
+  signedInAs,
+} from "./interview-link.ts";
+import type { Device } from "./interview-link.ts";
 import type { ProviderReply, SentRequest } from "./model-provider.ts";
-import { routed, unique } from "./sign-in.ts";
+import { unique } from "./sign-in.ts";
 
 // A team on its way through the onboarding into the brain, as the tests
 // of the brain's intake (brain-intake*.test.ts) and of deleting an
@@ -23,10 +31,18 @@ import { routed, unique } from "./sign-in.ts";
 
 const dayMs = 24 * 60 * 60 * 1000;
 const isoDay = (ms: number) => new Date(ms).toISOString().slice(0, 10);
-const sessionKey = z.object({ key: z.string().optional() });
 
 /** The people of a team, by key. */
-export type Key = "lea" | "max" | "mia" | "mo" | "noor" | "pim" | "rik";
+export type Key =
+  | "lea"
+  | "max"
+  | "mia"
+  | "mo"
+  | "noor"
+  | "pim"
+  | "rik"
+  | "sam"
+  | "ada";
 
 const names: Record<Key, [string, string]> = {
   lea: ["Lea Lind", "Team lead"],
@@ -36,6 +52,8 @@ const names: Record<Key, [string, string]> = {
   noor: ["Noor Nijs", "Agent"],
   pim: ["Pim Peeters", "Agent"],
   rik: ["Rik Rooms", "Agent"],
+  sam: ["Sam Smit", "Agent"],
+  ada: ["Ada Aerts", "Agent"],
 };
 
 /** Each person's and the team's id, by key. */
@@ -48,19 +66,22 @@ const idsOf = (id: string) => ({
   noor: `noor-${id}`,
   pim: `pim-${id}`,
   rik: `rik-${id}`,
+  sam: `sam-${id}`,
+  ada: `ada-${id}`,
 });
 
 /** The staff list of Ops, led by Lea, with the people `keys`. */
 export const rosterOf = (
   ids: ReturnType<typeof idsOf>,
-  keys: readonly Key[]
+  keys: readonly Key[],
+  emails: Partial<Record<Key, string>> = {}
 ): Roster => ({
   teams: [{ id: ids.team, name: "Ops", lead: ids.lea, does: "", off: false }],
   people: keys.map((key) => ({
     id: ids[key],
     name: names[key][0],
     team: ids.team,
-    email: "",
+    email: emails[key] ?? "",
     title: names[key][1],
     away: false,
   })),
@@ -71,13 +92,23 @@ export const rosterOf = (
  * a fresh onboarding that started yesterday.
  */
 export const team = async (
-  keys: readonly Key[] = ["lea", "max", "mia", "mo", "noor", "pim", "rik"]
+  keys: readonly Key[] = ["lea", "max", "mia", "mo", "noor", "pim", "rik"],
+  /**
+   * Each person's address on the list, from their id: one of their own at
+   * the company's domain by default, which holds nothing of their id (the
+   * tests look for that where it must not be), and which they sign in with
+   * to open their link (`openLink`).
+   */
+  emailOf: (person: string) => string = () => `person-${unique()}@acme.test`
 ) => {
   const store = onboardingStore(env);
   const ids = idsOf(unique());
   const by = { type: "system" } as const;
+  const emails = Object.fromEntries(
+    keys.map((key) => [key, emailOf(ids[key])])
+  );
   await store.setPaused(false, by);
-  await store.saveRoster(rosterOf(ids, keys), by);
+  await store.saveRoster(rosterOf(ids, keys, emails), by);
   await store.savePlan({ start: isoDay(Date.now() - dayMs), days: 14 }, by);
   await store.setAgreements(
     { processing: true, assessment: true, council: "none" },
@@ -88,24 +119,25 @@ export const team = async (
 
 export type Ids = Awaited<ReturnType<typeof team>>;
 
-/** The links opened so far, by person: a link opens for one device only. */
-const opened = new Map<string, { secret: string; key: string }>();
+/** The links opened so far, by person: signed in once, as the page stays. */
+const opened = new Map<string, Device>();
 
-/** Someone's link opened on a device: their secret and key. */
-export const openLink = async (person: string) => {
+/**
+ * Someone's link opened as the page opens it: signed in with the company's
+ * sign-in as the address the list has for them, their link's secret and
+ * that session.
+ */
+export const openLink = async (person: string): Promise<Device> => {
   const open = opened.get(person);
   if (open !== undefined) {
     return open;
   }
   const link = await onboardingStore(env).linkOf(person);
   const secret = link?.split("#")[1] ?? "";
-  const session = await routed(interviewApiPath, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ action: "session", secret }),
-  });
-  const { key } = sessionKey.parse(await session.json());
-  const device = { secret, key: key ?? "" };
+  const { link: device } = await openLinkAs(
+    secret,
+    await signedInAs(await sentToOf(person))
+  );
   opened.set(person, device);
   return device;
 };
@@ -148,11 +180,7 @@ export const agree = async (
     adding: false,
     addedAt: 0,
   };
-  const response = await routed(interviewApiPath, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ action: "save", ...link, version, progress }),
-  });
+  const response = await onLink({ action: "save", ...link, version, progress });
   const saved: InterviewSaved = await response.json();
   await approveAgreed(link, facts);
   return saved.version;

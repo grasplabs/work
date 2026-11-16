@@ -59,11 +59,18 @@ export const brainModules = {
   // Checks with core's readableVersionsAs that a run may still read what
   // it recalled, and hands on only a refusal.
   "apps/core/src/workflows/resource-reads.ts": "core",
+  // Gives the new Brain each interview (readable by its person) and each
+  // team claim enough people back (readable by that staff-list team), as
+  // sources, with core's addSource and eraseSource, and answers nothing of
+  // them.
+  "apps/core/src/onboarding/new-brain.ts": "core",
   // A chat's recall before its question: hands the model what core's
   // recallAs gave the chat's own person, passages and memories, two of its
   // packs merged at most (mergeRecalled, which only drops what both hold
   // and orders them), as data; what an analysis says only ever becomes
-  // that same person's question.
+  // that same person's question. Beside them, in the person's own chat
+  // alone, the names of the connections their agent may use (GRA-1873):
+  // its grants, nothing of the Brain's, probed in turn-recall.test.ts.
   "apps/core/src/turn-recall.ts": "core",
   // Checks what a chat once handed over with core's readableVersionsAs and
   // readableMemoriesAs, and hands on only which of those it may still
@@ -79,6 +86,13 @@ export const brainModules = {
   // memoryChoices, and hands on nothing it returns beyond what
   // brain-memories.ts's probes hold.
   "apps/core/src/agent-remember.ts": "core",
+  // Erases what an App's code remembered, with core's eraseWriter, as its
+  // store is deleted or its data reset (GRA-1883), and hands on only the
+  // count it answers, in that erasure's audit event.
+  "apps/core/src/app-memory-erasure.ts": "core",
+  // An App's code remembering and forgetting (GRA-1883): its own
+  // surface, each export probed through real Apps that remember.
+  "apps/core/src/brain-app-writes.ts": "appWrites",
   // Core's subclass of the store: its alarm's host, from core's
   // alarmHostOf, given to the store inside its own object; it adds no
   // method, so the store's probes are its own.

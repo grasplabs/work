@@ -44,7 +44,9 @@ import { connectionOwnersOf } from "./connections.ts";
 import { callObject, workspace } from "./durable-objects.ts";
 import { endOfCompanyDay } from "./organization.ts";
 import { grantedPermissions } from "./permissions.ts";
+import { markPrivateRead } from "./private-reads.ts";
 import { mailboxesFor } from "./shared-mailboxes.ts";
+import { readsOnly } from "./tool-classes.ts";
 
 // Connections for a chat's code: `await env.connections.call("OUTLOOK",
 // "mail.search", { query })`. The agent's connection permissions, each
@@ -153,6 +155,51 @@ export const connectionGrants = async (
     return grant === undefined
       ? []
       : [{ ...grant, name: permission.binding, actions: permission.actions }];
+  });
+};
+
+/**
+ * The connections the chat's agent may use for its person now: its grants
+ * in this chat (`connectionGrants`) for a connection that is shared or the
+ * person's own, by connect's registry, each with whether it takes calls
+ * now (`active`) and whether any action granted only reads (`reads`, by
+ * its class: tool-classes.ts `readsOnly`). What `env.connections.list()`
+ * lists, and what the recall before a question names as where else to
+ * look (turn-recall.ts).
+ */
+export const usableConnections = async (
+  env: Env,
+  scope: Omit<AgentScope, "runId">
+): Promise<
+  { connection: AgentConnection; active: boolean; reads: boolean }[]
+> => {
+  const grants = await connectionGrants(env, scope);
+  const owners = await connectionOwnersOf(env, [
+    ...new Set(grants.map(({ connection }) => connection.connectionId)),
+  ]);
+  const usable = new Map(
+    owners.flatMap((owner) =>
+      owner.ownerUserId === null || owner.ownerUserId === scope.personId
+        ? [[owner.id, owner] as const]
+        : []
+    )
+  );
+  return grants.flatMap(({ name, connection, actions }) => {
+    const owner = usable.get(connection.connectionId);
+    return owner === undefined
+      ? []
+      : [
+          {
+            connection: {
+              name,
+              connectionId: connection.connectionId,
+              resource: connection.resource ?? null,
+              actions,
+            },
+            active: owner.status === "active",
+            reads: actions.some((action) => readsOnly(owner, action)),
+          },
+        ];
   });
 };
 
@@ -276,6 +323,24 @@ const keptForChatApp = async (
   }
 };
 
+/**
+ * Marks the chat of `scope` before an answer read through connection
+ * `connectionId` is handed over, when it is a personal connection (its
+ * person's mailbox or drive: connect refuses anyone else's), whose answer
+ * only they may read (private-reads.ts). One connect no longer names
+ * marks it too, failing closed.
+ */
+const markIfPersonal = async (
+  env: Env,
+  scope: AgentScope,
+  connectionId: string
+): Promise<void> => {
+  const [owner] = await connectionOwnersOf(env, [connectionId]);
+  if (owner?.ownerUserId !== null) {
+    await markPrivateRead(env, scope, "connection");
+  }
+};
+
 /** Connections, as a chat's code calls them. */
 export class ConnectionsApi extends WorkerEntrypoint<Env, AgentScope> {
   /** The agent's grant under `name`, read now, or why there is none. */
@@ -309,23 +374,8 @@ export class ConnectionsApi extends WorkerEntrypoint<Env, AgentScope> {
           }),
         },
         async () => {
-          const grants = await connectionGrants(this.env, scope);
-          const owners = await connectionOwnersOf(this.env, [
-            ...new Set(grants.map(({ connection }) => connection.connectionId)),
-          ]);
-          const usable = new Set(
-            owners.flatMap(({ id, ownerUserId }) =>
-              ownerUserId === null || ownerUserId === scope.personId ? [id] : []
-            )
-          );
-          return grants
-            .filter(({ connection }) => usable.has(connection.connectionId))
-            .map(({ name, connection, actions }) => ({
-              name,
-              connectionId: connection.connectionId,
-              resource: connection.resource ?? null,
-              actions,
-            }));
+          const usable = await usableConnections(this.env, scope);
+          return usable.map(({ connection }) => connection);
         }
       );
     } catch (error) {
@@ -415,6 +465,8 @@ export class ConnectionsApi extends WorkerEntrypoint<Env, AgentScope> {
             authority,
             ...(heldUntil === undefined ? {} : { heldUntil }),
             ...(scope.unattended === true ? { unattended: true } : {}),
+            // Decided on its card there, never listed in Grasp (GRA-1919).
+            ...(fromChatApp(scope) ? { chatApp: true } : {}),
           };
         },
         named,
@@ -483,6 +535,9 @@ export class ConnectionsApi extends WorkerEntrypoint<Env, AgentScope> {
       return { output: null, pending: result.pending };
     }
     const output: unknown = JSON.parse(result.output);
+    // The chat marked first, as nothing that holds the answer runs
+    // unmarked: before it is kept or recorded, and before it is handed over.
+    await markIfPersonal(this.env, scope, grant.connection.connectionId);
     if (shape !== undefined) {
       await keptForChatApp(this.env, scope, request.action, shape, output);
     }
@@ -590,6 +645,7 @@ export class ConnectionsApi extends WorkerEntrypoint<Env, AgentScope> {
       throw forSandbox(error);
     }
     if (outcome.state === "done" || outcome.state === "failed") {
+      await markIfPersonal(this.env, scope, request.connectionId);
       await recordSources(this.env, scope, [request.connectionId], [read]);
     }
     await recordToolCall(

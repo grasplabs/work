@@ -77,6 +77,7 @@ export const pageTests = [
   "test/brain-recall-code.test.ts",
   "test/brain-skills-code.test.ts",
   "test/brain-entities-code.test.ts",
+  "test/brain-writes-code.test.ts",
   "test/resource-connectors*.test.ts",
   "test/http-connections.test.ts",
   "test/sealed-workflow-starts*.test.ts",
@@ -425,11 +426,6 @@ export default coreProject({
     // How fast the Brain's store scans vector codes, on request only:
     // vite.brain-vectors.config.ts.
     "test/brain-next-vector-timings.test.ts",
-    // Experiment E02 against a real reranking model, likewise:
-    // vite.brain-recall-model.config.ts.
-    "test/brain-recall-real-model.test.ts",
-    // Experiment E02, in a group of its own: vite.brain.config.ts.
-    "test/brain-recall-e02.test.ts",
     // The Brain evaluation, on request only: vite.brain-eval.config.ts.
     "test/brain-eval.test.ts",
     // The Brain evaluation against a real model, which costs money, on

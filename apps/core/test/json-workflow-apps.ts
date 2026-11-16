@@ -114,6 +114,20 @@ export const greetingOf = (hold?: string, label?: string): string =>
   definitionOf(greetingTasks(hold, label));
 
 /**
+ * A definition whose args are a record of strings, keyed by any name up
+ * to a record key's length: what it starts with is named by whoever
+ * starts it, or offers it.
+ */
+export const anyNamesOf = (): string =>
+  JSON.stringify({
+    $schema: workflowSchemaUrl,
+    args: { kind: "record", value: { kind: "string" } },
+    returns: objectSchema({ status: { kind: "string" } }),
+    result: { status: "Done" },
+    steps: greetingTasks(),
+  });
+
+/**
  * A workflow of `by`'s, created and published as version 1 through their
  * session: running `tasks`, or the definition `definition` makes of its
  * name.

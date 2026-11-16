@@ -14,6 +14,7 @@ import { sweepAppVisitors } from "./app-visitors.ts";
 import { drainWebhookDeliveries } from "./app-webhooks.ts";
 import { auditLog } from "./audit-log.ts";
 import { workBrain } from "./brain-next.ts";
+import { removeLostRunSources } from "./brain-run-sources.ts";
 import { producersOf, relayHandOvers } from "./brain-sources.ts";
 import { completeOwedRemovals } from "./brain-uploads.ts";
 import { sweepChannelLinks } from "./channels/accounts.ts";
@@ -30,6 +31,7 @@ import { brainOf } from "./knowledge/ports.ts";
 import { sweepLeftUploads } from "./knowledge/uploads.ts";
 import { retryDisconnects } from "./members.ts";
 import { sweepModelUsage } from "./model-usage.ts";
+import { settleOnboardingBrain } from "./onboarding/new-brain.ts";
 import { rescanPackages } from "./packages/rescan.ts";
 import { sweepPageFrames } from "./page-frame.ts";
 import { sweepBuilds } from "./pages.ts";
@@ -79,6 +81,26 @@ export const clockTasks: readonly ClockTask<Env>[] = [
   // What core noted to hand over to the new Brain, put on its work queue
   // (src/brain-hand-overs.ts, src/brain-sources.ts).
   { name: "brain.hand_overs", period: "minute", run: relayHandOvers },
+  // What the onboarding still owes the new Brain: interviews and team
+  // claims that no longer stand, each erased until it is, then each
+  // interview to add, added until it is (src/onboarding/new-brain.ts).
+  // A team claim is added by the hand-over.
+  {
+    name: "onboarding.brain_erasures",
+    period: "minute",
+    run: async (env) => {
+      await settleOnboardingBrain(env);
+    },
+  },
+  // Run results of people who lost their workflow, taken out of use in the
+  // new Brain (src/brain-run-sources.ts).
+  {
+    name: "brain.run_sources",
+    period: "minute",
+    run: async (env) => {
+      await removeLostRunSources(env);
+    },
+  },
   { name: "members.disconnects", period: "minute", run: retryDisconnects },
   { name: "members.erasures", period: "minute", run: retryErasures },
   // Shared uploads their uploaders removed, whose removal from the Brain,
@@ -221,8 +243,8 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     period: "quarterHour",
     run: sweepChannelSignals,
   },
-  // Stephen's requests past their thirteen months, and the questions
-  // nothing points at (src/channels/stephen-requests.ts).
+  // Stephen's requests past their thirteen months, and the questions,
+  // topics and proposals nothing points at (src/channels/stephen-requests.ts).
   {
     name: "channels.requests",
     period: "quarterHour",

@@ -30,8 +30,14 @@ import type {
   Producers,
   SourceRef,
 } from "./brain-next.ts";
+import {
+  appStarted,
+  holdsWorkflowSql,
+  runSourceInUse,
+} from "./brain-run-sources.ts";
 import { brainHandOvers, workflowStartReceipts } from "./db/core/schema.ts";
 import { workspace } from "./durable-objects.ts";
+import { claimOf, claimSource } from "./onboarding/new-brain.ts";
 import { personalWorkspaceId } from "./personal-workspace.ts";
 import { resultOf, runOf } from "./workflows/resource-runs.ts";
 import { detailsRemoved } from "./workflows/retention.ts";
@@ -50,9 +56,13 @@ import { evidenceOf } from "./workflows/run-evidence.ts";
 //   restricted mode, or whose details are past their retention. A run
 //   reads only what its person may read, so its person never reads more
 //   through the Brain than the run read for them. Core shows a run's raw
-//   result only while that person still holds the workflow's user role;
-//   the Brain's copy has no such check, so they keep recalling it after
-//   they lose the workflow (accepted for now: GRA-1829). A run that
+//   result only while that person still holds the workflow's role, and so
+//   does the Brain: nothing is handed over for a person who no longer
+//   holds it (skipped `no_role`), and what was is taken out of use once
+//   they lose it (brain-run-sources.ts, GRA-1829). A run an App started
+//   for its person is shown on the App's page to whoever uses the App, so
+//   the workflow's role decides nothing of it: it is handed over as on its
+//   own, and its App's rule for taking it out of use is GRA-1926. A run that
 //   recalled from the Brain (its recall evidence, run-evidence.ts) hands
 //   over only how it ended, never what it returned: the Brain never holds
 //   a second copy of what it recalled, which would outlive that source
@@ -118,6 +128,19 @@ const runOfId = async (env: Env, id: string): Promise<Handed> => {
   const readers = { kind: "owner", personId: row.principalId } as const;
   if (await erasureBegun(env, row.principalId)) {
     return { kind: "erased", readers };
+  }
+  // Only while its person still holds the workflow, as the run page shows
+  // its result: a hand-over that read the role before they lost it is of a
+  // run their revocation covers (brain-run-sources.ts). Not for a run an
+  // App started for them, whose result its App shows them whether or not
+  // they hold the workflow.
+  if (!(await appStarted(env, row.id))) {
+    const [held] = await drizzle(env.DB).all<{ held: number }>(
+      sql`SELECT ${holdsWorkflowSql(row.principalId, row.workflowResourceId)} AS held`
+    );
+    if (held?.held !== 1) {
+      return { kind: "gone", skipped: "no_role" };
+    }
   }
   const receipt = await drizzle(env.DB)
     .select({ detailsRemovedAt: workflowStartReceipts.detailsRemovedAt })
@@ -219,6 +242,11 @@ const producers: Record<
     read: chatTurnOfId,
     ofPerson: chatsOf,
   },
+  // A team claim's id is minted by the onboarding and names nobody. A
+  // person's interview is no producer here: core adds it itself
+  // (onboarding/new-brain.ts), as the hand-over's audit events would tell
+  // the company about it.
+  claim: { source: claimSource, read: claimOf, ofPerson: null },
 };
 
 /** Whether `kind` is a producer's: a source of any other has nothing to hand over. */
@@ -254,7 +282,11 @@ const outcomeEntry = (
       : { producer: source.producer, reason: outcome.reason },
 });
 
-/** The ending statements of `taken`, as `outcome`, as an attempt writes them. */
+/**
+ * The ending statements of `taken`, as `outcome`, as an attempt writes
+ * them; for a run added, also that its person holds a run source of its
+ * workflow in use (brain-run-sources.ts), while it is still open.
+ */
 const ending = (
   db: DrizzleD1Database,
   taken: TakenHandOver & { producer: HandOverProducer },
@@ -266,6 +298,9 @@ const ending = (
       outcomeEntry({ producer: taken.producer, id: taken.sourceId }, outcome),
       stillOpen(taken)
     ),
+    ...(taken.producer === "run" && outcome.kind === "added"
+      ? [runSourceInUse(db, taken.sourceId, stillOpen(taken))]
+      : []),
     endedHandOver(db, taken),
   ] as const;
 
