@@ -154,6 +154,7 @@ export type Signed = Partial<
     | "origin"
     | "decision"
     | "heldUntil"
+    | "chatApp"
     | "mailboxes"
     | "resources"
   >

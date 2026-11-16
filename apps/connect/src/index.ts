@@ -41,6 +41,7 @@ import type {
   ErasePersonal,
   FinishConnection,
   HeldCall,
+  HeldIn,
   HeldOutcome,
   OutboxedConnectorEvent,
   PendingAction,
@@ -641,8 +642,11 @@ export default class Connect
   // Held actions (src/pending.ts). Core names the person from their
   // session; only they see and decide what waits for them.
 
-  async listPendingActions(person: ConnectionPerson): Promise<PendingAction[]> {
-    return await listPendingActions(this.env, person);
+  async listPendingActions(
+    person: ConnectionPerson,
+    heldIn: HeldIn
+  ): Promise<PendingAction[]> {
+    return await listPendingActions(this.env, person, heldIn);
   }
 
   async refuseConfirmation(request: unknown): Promise<void> {

@@ -2,6 +2,7 @@ import { confirmAction } from "../src/channels/cards.tsx";
 import { chatAgentId } from "../src/chats-rpc.ts";
 import { codeStep, says } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
+import { heldFor } from "./held-in-connect.ts";
 import type { Idp } from "./idp.ts";
 import { mailConnection } from "./mail-connection.ts";
 import type { MailAnswer } from "./mail-server.ts";
@@ -54,7 +55,7 @@ export const heldTurn = async (
   if (card?.id === undefined) {
     throw new Error("Expected a card of held writes");
   }
-  const writes = await person.api.pendingActions.list();
+  const writes = await heldFor(person, "chat_app");
   // The card's order: the order they were asked for.
   const ordered = writes.toSorted(
     (a, b) => Date.parse(a.requestedAt) - Date.parse(b.requestedAt)
@@ -85,7 +86,7 @@ export const mailOf = async (mail: Turn["mail"]) => {
 
 /** The held writes still waiting for `person`, by id. */
 export const waitingOf = async (person: Turn["person"]): Promise<string[]> => {
-  const waiting = await person.api.pendingActions.list();
+  const waiting = await heldFor(person, "chat_app");
   return waiting.map(({ id }) => id);
 };
 

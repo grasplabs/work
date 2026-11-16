@@ -72,7 +72,7 @@ import { copyOfStore, restoreStore } from "./brain-next-store-copy.ts";
 import type { StoreCopy } from "./brain-next-store-copy.ts";
 import { brainSurfaces, membersOf, textOf } from "./brain-next-surfaces.ts";
 import type { Answer, Probe, Probing } from "./brain-next-surfaces.ts";
-import { codeStepTrace } from "./code-step-trace.ts";
+import { chatIdsOf, codeStepTrace } from "./code-step-trace.ts";
 import { mockIdp } from "./idp.ts";
 import { addedSharedFile, saveInstructions } from "./instruction-saves.ts";
 import {
@@ -3540,7 +3540,7 @@ describe(
        */
       const sentFor = async (ask: () => Promise<unknown>) => {
         const before = ann.provider.requests.length;
-        const listed = await annsWorkspace.chats(ann.userId);
+        const listed = await chatIdsOf(annsWorkspace, ann.userId);
         const chatsBefore = new Set(listed.map(({ id }) => id));
         const since = Date.now();
         await ask();
@@ -4009,8 +4009,9 @@ describe(
         };
       };
       await post(messageFrom(ann.teams, { text: "Hi." }));
-      const [direct] = await annsWorkspace.chats(ann.userId);
-      if (direct?.via !== "teams") {
+      // Her direct message in Teams, which no list in Grasp shows.
+      const [direct] = await chatIdsOf(annsWorkspace, ann.userId, "teams");
+      if (direct === undefined) {
         throw new TypeError("Expected her direct message's chat");
       }
 

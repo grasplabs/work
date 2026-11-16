@@ -107,7 +107,7 @@ describe("each Composio toolkit this release reviewed", () => {
         change === undefined ? undefined : await call(change, place);
       const listed = await exports.default.listConnections(anna);
       const connection = listed.find(({ id }) => id === connectionId);
-      const pending = await exports.default.listPendingActions(anna);
+      const pending = await exports.default.listPendingActions(anna, "grasp");
       const [owned] = await exports.default.connectionOwners([connectionId]);
       const reviewed = shipped[toolkit] ?? {};
       expect({
