@@ -2972,6 +2972,10 @@ msgstr "Le preguntaron, o trabaja para ellas con horario"
 msgid "Asked the agent to fix a run"
 msgstr "Pidió al agente que arreglara una ejecución"
 
+#: src/activity/audit-words.ts
+msgid "Asked the Brain who knows about something"
+msgstr "Preguntó al Cerebro quién sabe de algo"
+
 #: src/chat/thread.tsx
 msgid "Asked to connect {binding}"
 msgstr "Se pidió conectar {binding}"

@@ -46,7 +46,9 @@ export const brainModules = {
   // own record of that erasure stands, nothing the Brain answered.
   "apps/core/src/person-erasure.ts": "core",
   // Uploads straight into the Brain, reached only through the Sources
-  // page's methods (brain-sources-rpc.ts), whose probes call each of them.
+  // page's methods (brain-sources-rpc.ts), whose probes call each of them;
+  // and who uploaded what, from core's own records, read only by recall's
+  // `whoKnowsFor`, whose probe holds what it hands on.
   "apps/core/src/brain-uploads.ts": "sources",
   // Adds what a chat's agent read through a connection with core's
   // addSource, for the chat's person alone, and hands nothing on.
@@ -54,7 +56,8 @@ export const brainModules = {
   // Writing and sharing skills (GRA-1754): its own surface, each export
   // probed as the signed-in person.
   "apps/core/src/skill-shares.ts": "shares",
-  // Code's recall: an App's action, a workflow's step and a chat's code.
+  // Code's recall: an App's action, a workflow's step and a chat's code;
+  // and who knows about a topic, for a chat's code.
   "apps/core/src/brain-recall.ts": "recall",
   // Checks with core's readableVersionsAs that a run may still read what
   // it recalled, and hands on only a refusal.

@@ -1338,6 +1338,32 @@ export const recallAs = async (
 };
 
 /**
+ * `recallPassagesAs`, with the teams it read as: those of the reader's
+ * groups this read held (none as the company alone), resolved once for
+ * both. So what the caller checks again of a passage's source in its own
+ * records (who-knows, brain-who-knows.ts) is checked as this read's
+ * reader, never as a second resolution of their teams.
+ */
+export const passagesReadAs = async (
+  env: BrainEnv & ReaderEnv & Pick<Env, "EMBEDDER">,
+  personId: string,
+  recall: Recall
+): Promise<{ passages: RecalledPassages; teams: string[] }> => {
+  const request = await recallRequestAs(env, personId, recall);
+  const { items, notFound, truncated } = packAcross(
+    request.question,
+    request.budget.tokens,
+    await findingsOf(env, request, "findPassages")
+  );
+  return {
+    passages: { items: recalledItems(items), notFound, truncated },
+    teams: request.reader.groups.flatMap((group) =>
+      group.startsWith(teamPrefix) ? [group.slice(teamPrefix.length)] : []
+    ),
+  };
+};
+
+/**
  * A pack of the passages alone that the member `personId` may read for
  * `question`, as `recallAs` finds them, the whole budget theirs: the
  * stores find passages alone (`findPassages`), so no memory is read,
@@ -1350,13 +1376,8 @@ export const recallPassagesAs = async (
   personId: string,
   recall: Recall
 ): Promise<RecalledPassages> => {
-  const request = await recallRequestAs(env, personId, recall);
-  const { items, notFound, truncated } = packAcross(
-    request.question,
-    request.budget.tokens,
-    await findingsOf(env, request, "findPassages")
-  );
-  return { items: recalledItems(items), notFound, truncated };
+  const { passages } = await passagesReadAs(env, personId, recall);
+  return passages;
 };
 
 /** Where an item of a pack is: its source, version and place. */

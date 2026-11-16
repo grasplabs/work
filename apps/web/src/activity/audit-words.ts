@@ -373,6 +373,10 @@ const words: readonly { action: string; text: MessageDescriptor }[] = [
   },
   { action: "statistics.read", text: msg`Read an App's statistics` },
   { action: "brain.recall", text: msg`Recalled from the Brain` },
+  {
+    action: "brain.who_knows",
+    text: msg`Asked the Brain who knows about something`,
+  },
   { action: "brain.upload", text: msg`Uploaded a file into the Brain` },
   { action: "brain.upload.added", text: msg`Uploaded a file into the Brain` },
   {

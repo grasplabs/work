@@ -2972,6 +2972,10 @@ msgstr "Vroegen hem iets, of hij werkt volgens schema voor hen"
 msgid "Asked the agent to fix a run"
 msgstr "De agent gevraagd een run te herstellen"
 
+#: src/activity/audit-words.ts
+msgid "Asked the Brain who knows about something"
+msgstr "Het Brein gevraagd wie ergens iets van weet"
+
 #: src/chat/thread.tsx
 msgid "Asked to connect {binding}"
 msgstr "Gevraagd om {binding} te koppelen"

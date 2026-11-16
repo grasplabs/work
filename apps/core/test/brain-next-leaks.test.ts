@@ -353,6 +353,8 @@ const readingSurfaces = new Set([
   "store readableVersions",
   "store changeVersion",
   "core recallPassagesAs",
+  "core passagesReadAs",
+  "recall whoKnowsFor",
   "core readableVersionsAs",
   "core readableMemoriesAs",
 ]);
@@ -365,9 +367,11 @@ const recallSurfaces = new Set([
   "core recallAs",
   "core recallOwnedAs",
   "core recallPassagesAs",
+  "core passagesReadAs",
   "store recall",
   "store findPassages",
   "recall recallFor",
+  "recall whoKnowsFor",
 ]);
 
 /**

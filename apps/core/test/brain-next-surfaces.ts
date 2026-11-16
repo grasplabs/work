@@ -2285,6 +2285,12 @@ export const coreProbes = {
     return { ...pack, fromOwn };
   }),
   recallPassagesAs: recallProbe(coreBrain.recallPassagesAs),
+  // `recallPassagesAs`'s passages, with the teams it read as: the
+  // reader's own, alike whatever they ask.
+  passagesReadAs: recallProbe(async (...args) => {
+    const { passages, teams } = await coreBrain.passagesReadAs(...args);
+    return { ...passages, teams };
+  }),
   // Adds without a check of who writes (instruction-files.ts checks
   // first): only to files no reader is, and its refusals.
   addInstructionFile: async ({ markers }) => {
@@ -5310,6 +5316,77 @@ export const recallProbes = {
         budget: { tokens: 1 },
         asOf: hidden,
       }),
+    ];
+  },
+  // Who knows (GRA-1744), as a chat's code asks anywhere but its person's
+  // own chat: under an agent's grant, acting for the reader, as the
+  // company, as code's recall is probed (its teams' reach is recall's,
+  // probed through `passagesReadAs`, and the uploads it names are held in
+  // agent-brain-who-knows.test.ts). Asked of the markers and of their
+  // twins, whose answers must match: an upload the reader may not read
+  // names nobody. Then every way it refuses, the markers in what is
+  // refused.
+  whoKnowsFor: async (probing) => {
+    const { authority, permissionId } = await agentWithBrain(probing.personId);
+    const ask = async (input: unknown, as = authority, grant = permissionId) =>
+      await codeRecall.whoKnowsFor(
+        env,
+        {
+          ...entitiesCallerOf(as, grant),
+          keep: async () => {
+            await Promise.resolve();
+          },
+        },
+        input
+      );
+    const hidden = probing.markers.join(" ");
+    const whole = { tokens: recallBudgetMax };
+    return [
+      // Never as of a moment: each asks as of now.
+      ...(await askedOfMarkers(
+        probing,
+        momentsOf(probing),
+        async ({ question, budget }) => await ask({ question, budget })
+      )),
+      await answer(
+        "the shared word",
+        async () => await ask({ question: probing.sharedWord, budget: whole })
+      ),
+      await answer(
+        "no tokens",
+        async () => await ask({ question: hidden, budget: { tokens: 0 } })
+      ),
+      await answer(
+        "a moment",
+        async () =>
+          await ask({
+            question: hidden,
+            budget: whole,
+            asOf: new Date().toISOString(),
+          })
+      ),
+      await answer(
+        "a reader named by the markers",
+        async () =>
+          await ask({ question: hidden, budget: whole, reader: hidden })
+      ),
+      await answer(
+        "the markers, under a grant the agent doesn't hold",
+        async () =>
+          await ask(
+            { question: hidden, budget: whole },
+            authority,
+            crypto.randomUUID()
+          )
+      ),
+      await answer(
+        "the markers, for someone who isn't a member",
+        async () =>
+          await ask(
+            { question: hidden, budget: whole },
+            readersAgent(stranger())
+          )
+      ),
     ];
   },
 } satisfies Record<RecallMember, Probe>;
