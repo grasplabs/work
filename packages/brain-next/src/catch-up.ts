@@ -37,14 +37,20 @@ import type { CurrentVersion, QuoteIndex } from "./quotes.ts";
 // is tried, so a source that keeps failing (its file unreachable) holds no
 // one else up.
 //
-// Each tick does a bounded amount (`catchUpLimits`), so after a restore an
-// out memory reads current for about (the unjudged sources' memories on
-// earlier versions) / `memories` ticks: measured in the pull request.
+// Each tick does a bounded amount (`catchUpLimits`). A source with no
+// memory on a version before its current one (most, after a restore) is
+// marked judged without reading its file. So after a restore an out
+// memory reads current for about the largest of (unjudged sources) /
+// `looked`, (sources with memories on earlier versions) / `reads` and
+// (their memories on earlier versions) / `memories` ticks: measured in the
+// pull request.
 
 /** What one tick of the catch-up may do. */
 export interface CatchUpLimits {
-  /** Turns: sources served, each a read of its current version's file. */
-  turns: number;
+  /** Unjudged sources looked at. */
+  looked: number;
+  /** Files read: a source with memories on a version before its current one. */
+  reads: number;
   /** Memories judged. */
   memories: number;
   /** Steps of the matcher (quotes.ts `QuoteIndex.steps`): the work of judging them. */
@@ -54,14 +60,22 @@ export interface CatchUpLimits {
 }
 
 /**
- * What one tick of the catch-up may do, a share of the tick's CPU: judging
- * an ordinary memory takes about 20 µs (part 1's full passes), so 10,000
- * memories take about 0.2 s; a step of the matcher about 10 ns, so 30
- * million steps take about 0.3 s, which bounds a tick of long quotes of
- * frequent words (GRA-1939) as well; ten turns read ten files at most.
+ * What one tick of the catch-up may do, a share of the tick's CPU and of
+ * its invocation's subrequests:
+ * - a source with nothing on an earlier version is marked judged without
+ *   a read, at about a row read a source, so 10,000 take a few ms;
+ * - a file read is a subrequest, of the 1,000 an invocation may make (on
+ *   Workers' paid plan) that the tick's other steps share: the catch-up
+ *   takes a tenth;
+ * - judging an ordinary memory takes about 20 µs (part 1's full passes),
+ *   so 10,000 take about 0.2 s; a step of the matcher about 10 ns, so 30
+ *   million take about 0.3 s, which bounds a tick of long quotes of
+ *   frequent words (GRA-1939) as well;
+ * - the mark's scan reads 10,000 memory rows at most.
  */
 export const catchUpLimits: CatchUpLimits = {
-  turns: 10,
+  looked: 10_000,
+  reads: 100,
   memories: 10_000,
   steps: 30_000_000,
   marked: 10_000,
@@ -125,27 +139,43 @@ const unjudge = (sql: SqlStorage, source: string): void => {
  */
 const scanMark = (sql: SqlStorage, limit: number): void => {
   const through = throughOf(sql);
-  const last = sql
-    .exec<{ row: number }>(
-      "SELECT row FROM memories WHERE row > ? ORDER BY row LIMIT ?",
-      through,
-      limit
-    )
-    .toArray()
-    .at(-1)?.row;
-  if (last === undefined) {
+  const last =
+    sql
+      .exec<{ row: number }>(
+        "SELECT row FROM memories WHERE row > ? ORDER BY row LIMIT 1 OFFSET ?",
+        through,
+        limit - 1
+      )
+      .toArray()
+      .at(0)?.row ??
+    sql
+      .exec<{ row: number | null }>(
+        "SELECT max(row) AS row FROM memories WHERE row > ?",
+        through
+      )
+      .one().row;
+  if (last === null) {
     return;
   }
+  // A memory the pass of its source would not reach: its source judged,
+  // or the memory at or before the place of its source's pass under way
+  // (passes go in (version, row) order). One ahead of the place is judged
+  // by the pass, which is left to go on.
   const unjudged = sql
     .exec<{ source: string }>(
       `SELECT DISTINCT m.source AS source FROM memories AS m
       CROSS JOIN current_versions AS pointer ON pointer.source = m.source
       CROSS JOIN source_versions AS current ON current.row = pointer.version_row
       WHERE m.row > ?1 AND m.row <= ?2
-        AND pointer.judged_row = pointer.version_row
         AND m.version < current.version
         AND NOT EXISTS (SELECT 1 FROM memory_ins WHERE memory = m.row)
-        AND NOT EXISTS (SELECT 1 FROM memory_outs WHERE memory = m.row)`,
+        AND NOT EXISTS (SELECT 1 FROM memory_outs WHERE memory = m.row)
+        AND (pointer.judged_row = pointer.version_row OR EXISTS (
+          SELECT 1 FROM memory_judging_places AS place
+          WHERE place.source = m.source AND place.version_row = pointer.version_row
+            AND (m.version < place.after_version
+              OR (m.version = place.after_version AND m.row <= place.after_row))
+        ))`,
       through,
       last
     )
@@ -186,7 +216,10 @@ const takeTurn = (sql: SqlStorage): string | undefined => {
       .toArray()
       .at(0)?.source;
   const source = firstAfter(turn) ?? firstAfter(null);
-  if (source !== undefined) {
+  if (source === undefined) {
+    // Nothing left: no key kept.
+    sql.exec("UPDATE memory_judging SET turn = NULL WHERE id = 1");
+  } else {
     sql.exec(
       `INSERT INTO memory_judging (id, through, turn) VALUES (1, 0, ?1)
       ON CONFLICT (id) DO UPDATE SET turn = ?1`,
@@ -309,6 +342,37 @@ const judgePage = (
   sql.exec("DELETE FROM memory_judging_places WHERE source = ?", source);
 };
 
+/**
+ * Whether `source`, at `current`, needs no file read: kept whole, a
+ * thread, or holding no memory on a version before its current one. Then
+ * it is marked judged here, with nothing to judge, in one statement that
+ * asks for its pointer again (no await lies between).
+ */
+const nothingToJudge = (
+  sql: SqlStorage,
+  source: string,
+  current: CurrentVersion
+): boolean => {
+  const none =
+    neverJudged(sql, source) ||
+    sql
+      .exec(
+        "SELECT 1 FROM memories WHERE source = ? AND version < ? LIMIT 1",
+        source,
+        current.version
+      )
+      .toArray().length === 0;
+  if (none) {
+    sql.exec(
+      "UPDATE current_versions SET judged_row = version_row WHERE source = ? AND version_row = ?",
+      source,
+      current.row
+    );
+    sql.exec("DELETE FROM memory_judging_places WHERE source = ?", source);
+  }
+  return none;
+};
+
 /** The text of the file `file`, or null when it is gone, within the bucket's time. */
 const textOf = async (
   bucket: BrainBucket,
@@ -335,9 +399,14 @@ export const catchUpStep = async (
     scanMark(sql, limits.marked);
   });
   const spent: Spent = { memories: 0, steps: 0 };
+  let reads = 0;
   let read: { file: string; index: QuoteIndex | null } | undefined;
-  for (let turns = 0; turns < limits.turns; turns += 1) {
-    if (spent.memories >= limits.memories || spent.steps >= limits.steps) {
+  for (let looked = 0; looked < limits.looked; looked += 1) {
+    if (
+      reads >= limits.reads ||
+      spent.memories >= limits.memories ||
+      spent.steps >= limits.steps
+    ) {
       return;
     }
     const source = storage.transactionSync(() => takeTurn(sql));
@@ -348,15 +417,11 @@ export const catchUpStep = async (
     if (current === undefined) {
       continue;
     }
-    if (neverJudged(sql, source)) {
-      // Kept whole, or a thread: nothing to judge (quotes.ts).
-      sql.exec(
-        "UPDATE current_versions SET judged_row = version_row WHERE source = ?",
-        source
-      );
+    if (nothingToJudge(sql, source, current)) {
       continue;
     }
     if (read?.file !== current.file) {
+      reads += 1;
       // oxlint-disable-next-line no-await-in-loop -- one file at a time, a turn after another
       const text = await textOf(bucket, current.file);
       read = {

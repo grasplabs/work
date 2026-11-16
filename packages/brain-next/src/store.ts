@@ -1840,15 +1840,6 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
   }
 
   /**
-   * One batch of the rebuild of the word indexes, while they are behind
-   * the rules words are indexed by (words.ts `reindexWords`: at most
-   * `reindexPerTick` chunks), in one transaction with the place it
-   * reached, so a failure or a stop leaves every chunk whole and the next
-   * tick goes on from there. A failure never reaches the queue: it is
-   * tried again next tick, and the overview shows when it last failed
-   * until a batch succeeds.
-   */
-  /**
    * The tick's step of the catch-up of quotes (catch-up.ts): a failure (a
    * file that can't be read) ends it, its source's turn spent, and the
    * next tick goes on with the next source.
@@ -1863,6 +1854,15 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     }
   }
 
+  /**
+   * One batch of the rebuild of the word indexes, while they are behind
+   * the rules words are indexed by (words.ts `reindexWords`: at most
+   * `reindexPerTick` chunks), in one transaction with the place it
+   * reached, so a failure or a stop leaves every chunk whole and the next
+   * tick goes on from there. A failure never reaches the queue: it is
+   * tried again next tick, and the overview shows when it last failed
+   * until a batch succeeds.
+   */
   #reindex(at: Date): void {
     try {
       this.ctx.storage.transactionSync(() => {

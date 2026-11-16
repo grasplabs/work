@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "6f37bda7-c8fe-46e8-ad7d-a48d521100e7",
+  "id": "b3c5aea7-73b6-4be1-8491-f206df92e38f",
   "prevId": "4471a10c-5e8e-4404-a5a4-9893d8f1d072",
   "tables": {
     "chunks": {
@@ -1624,7 +1624,21 @@
         }
       },
       "indexes": {},
-      "foreignKeys": {},
+      "foreignKeys": {
+        "memory_judging_turn_current_versions_source_fk": {
+          "name": "memory_judging_turn_current_versions_source_fk",
+          "tableFrom": "memory_judging",
+          "tableTo": "current_versions",
+          "columnsFrom": [
+            "turn"
+          ],
+          "columnsTo": [
+            "source"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "checkConstraints": {

@@ -2,6 +2,7 @@ CREATE TABLE `memory_judging` (
 	`id` integer PRIMARY KEY NOT NULL,
 	`through` integer NOT NULL,
 	`turn` text,
+	FOREIGN KEY (`turn`) REFERENCES `current_versions`(`source`) ON UPDATE no action ON DELETE set null,
 	CONSTRAINT "memory_judging_one" CHECK(id = 1)
 );
 --> statement-breakpoint

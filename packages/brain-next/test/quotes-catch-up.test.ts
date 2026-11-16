@@ -12,7 +12,7 @@ import { env } from "cloudflare:workers";
 import { beforeAll, describe, expect, it } from "vite-plus/test";
 
 import type { BrainBucket } from "../src/bucket.ts";
-import { catchUpDue, catchUpStep } from "../src/catch-up.ts";
+import { catchUpDue, catchUpLimits, catchUpStep } from "../src/catch-up.ts";
 import type { CatchUpLimits } from "../src/catch-up.ts";
 import { reindexWords } from "../src/words.ts";
 import { exportSettled, restoredAfterLoss } from "./export-reads.ts";
@@ -118,6 +118,44 @@ const putBackJudging = (
   );
 };
 
+/** One step of the catch-up, as the tick runs it, with `limits` and `bucket` (the store's when not given). */
+const step = async (
+  tickLimits: CatchUpLimits,
+  bucket: (real: BrainBucket, sql: SqlStorage) => BrainBucket = (real) => real
+) => {
+  await runInDurableObject(shared(), async (_instance, state) => {
+    // The shared store's part of the bucket is the whole of it.
+    await catchUpStep(
+      state.storage,
+      bucket(env.BRAIN_OBJECTS, state.storage.sql),
+      tickLimits
+    );
+  });
+};
+
+/** A tick's limits of one file read and `memories` memories, its other work unbounded. */
+const limits = (memories: number): CatchUpLimits => ({
+  looked: 1_000_000,
+  reads: 1,
+  memories,
+  steps: 1_000_000_000,
+  marked: 1_000_000,
+});
+
+/** `real` with its reads of objects going through `get`. */
+const reading = (
+  real: BrainBucket,
+  get: (key: string) => Promise<Awaited<ReturnType<BrainBucket["get"]>>>
+): BrainBucket => ({
+  get,
+  head: async (key) => await real.head(key),
+  put: async (key, value, options) => await real.put(key, value, options),
+  delete: async (keys) => {
+    await real.delete(keys);
+  },
+  list: async (options) => await real.list(options),
+});
+
 type Disrupt = Parameters<typeof runAround>[2]["disrupt"];
 
 /** The cases, each a change to the whole store after a series. */
@@ -183,6 +221,36 @@ const cases: Record<string, (groups: readonly string[]) => Disrupt> = {
     }
     return at + 1;
   },
+  // An older release's late memory while a pass is under way: every
+  // source unjudged, a page of two memories judged of each, then the late
+  // memory on the first version (behind the place when the pass is past
+  // that version).
+  "an older release's late memory during an unfinished pass":
+    (groups) => async (real, readings, at) => {
+      const sides = sidesOf(real, readings);
+      await inStore((sql) => {
+        for (const { side } of sides) {
+          sql.exec("DELETE FROM memory_ins WHERE source = ?", side.source);
+          sql.exec("DELETE FROM memory_outs WHERE source = ?", side.source);
+          sql.exec(
+            "UPDATE current_versions SET judged_row = NULL WHERE source = ?",
+            side.source
+          );
+        }
+        sql.exec("UPDATE memory_judging SET turn = NULL WHERE id = 1");
+      });
+      for (const _side of sides) {
+        // oxlint-disable-next-line no-await-in-loop -- a page of each side, by turn
+        await step(limits(2));
+      }
+      return (
+        (await cases["an older release's late memory"]?.(groups)(
+          real,
+          readings,
+          at
+        )) ?? at
+      );
+    },
   // A release with new word rules: its rebuild's first batch.
   "new word rules": () => async (_real, _readings, at) => {
     await inStore((sql, storage) => {
@@ -240,8 +308,12 @@ describe("the catch-up against twins and the oracle", () => {
           const found = await runAround(groups, seriesFor(name, random), {
             disrupt,
             settle: caughtUp,
-            // A restore's own ticks catch up some sources before others.
-            compareBefore: name !== "restore",
+            // A restore's own ticks, and the pages a pass under way took,
+            // catch up some sources before others.
+            compareBefore:
+              name !== "restore" &&
+              name !==
+                "an older release's late memory during an unfinished pass",
           });
           before.push(...found.before);
           after.push(...found.after);
@@ -252,6 +324,37 @@ describe("the catch-up against twins and the oracle", () => {
     },
     300_000
   );
+
+  it("answers as the twins and the oracle when an older release adds a late memory behind an unfinished pass", async () => {
+    // One memory on the first version, two on the second: a page of two
+    // leaves the place on the second, behind it the late memory on the first.
+    const groups = [unique("ga"), unique("gb"), unique("gc")];
+    const { before, after } = await runAround(
+      groups,
+      [
+        { kind: "version", group: 0, line: true },
+        { kind: "version", group: 0, line: true },
+        { kind: "late", on: 1 },
+        { kind: "late", on: 1 },
+        { kind: "version", group: 0, line: false },
+      ],
+      {
+        disrupt:
+          cases["an older release's late memory during an unfinished pass"]?.(
+            groups
+          ) ??
+          (async (_real, _readings, at) => {
+            await Promise.resolve();
+            return at;
+          }),
+        settle: caughtUp,
+        // The pass took its pages of each side at a turn of its own.
+        compareBefore: false,
+      }
+    );
+
+    expect({ before, after }).toStrictEqual({ before: [], after: [] });
+  }, 120_000);
 
   it("fails the oracle in every case when its catch-up is skipped, and when the mark is set past a late memory", async () => {
     const groups = [unique("ga")];
@@ -379,43 +482,6 @@ const unjudge = async (...sources: string[]): Promise<void> => {
     }
   });
 };
-
-/** One step of the catch-up, as the tick runs it, with `limits` and `bucket` (the store's when not given). */
-const step = async (
-  tickLimits: CatchUpLimits,
-  bucket: (real: BrainBucket, sql: SqlStorage) => BrainBucket = (real) => real
-) => {
-  await runInDurableObject(shared(), async (_instance, state) => {
-    // The shared store's part of the bucket is the whole of it.
-    await catchUpStep(
-      state.storage,
-      bucket(env.BRAIN_OBJECTS, state.storage.sql),
-      tickLimits
-    );
-  });
-};
-
-/** A tick's limits of one turn and `memories` memories, its other work unbounded. */
-const limits = (memories: number): CatchUpLimits => ({
-  turns: 1,
-  memories,
-  steps: 1_000_000_000,
-  marked: 1_000_000,
-});
-
-/** `real` with its reads of objects going through `get`. */
-const reading = (
-  real: BrainBucket,
-  get: (key: string) => Promise<Awaited<ReturnType<BrainBucket["get"]>>>
-): BrainBucket => ({
-  get,
-  head: async (key) => await real.head(key),
-  put: async (key, value, options) => await real.put(key, value, options),
-  delete: async (keys) => {
-    await real.delete(keys);
-  },
-  list: async (options) => await real.list(options),
-});
 
 describe("the catch-up's pages", () => {
   it("judges a source a page at a time, each memory once, and shows nothing judged until its last page", async () => {
@@ -621,5 +687,229 @@ describe("the catch-up's pages", () => {
       atLast: scanned.through === scanned.last,
       behind: behind.through < behind.last,
     }).toStrictEqual({ none: 0, atLast: true, behind: true });
+  });
+});
+
+/** A source with `texts` as its versions, and memories quoting `quotes` on the version of each index: its key, readers and version numbers. */
+const versioned = async (
+  texts: readonly string[],
+  quotesOn: ReadonlyMap<number, readonly string[]>
+) => {
+  const group = unique("g");
+  const access: Access = { kind: "audience", group };
+  const source = unique("doc");
+  const versions: number[] = [];
+  for (const [at, text] of texts.entries()) {
+    // oxlint-disable-next-line no-await-in-loop -- a version at a time
+    const { version } = await shared().addSource({
+      source,
+      change: crypto.randomUUID(),
+      text,
+      access,
+    });
+    versions.push(version);
+    const quotes = quotesOn.get(at) ?? [];
+    if (quotes.length > 0) {
+      // oxlint-disable-next-line no-await-in-loop -- a version at a time
+      await shared().addMemories({
+        change: crypto.randomUUID(),
+        access,
+        entities: [{ key: "c", kind: "customer", names: [`${source} Group`] }],
+        memories: quotes.map((quote, index) => ({
+          about: "c",
+          type: "fact" as const,
+          statement: `${source} says ${at} ${index}.`,
+          speaker: { kind: "outside" as const },
+          basis: { kind: "source" as const, source, version, quote },
+        })),
+      });
+    }
+  }
+  const reader: PersonReader = { person: unique("p"), groups: [group] };
+  return { source, reader, versions };
+};
+
+/** An older release's late memory on `version` of `source`: a copy of one there, no in or out row, the mark not moved. */
+const olderLateMemory = async (source: string, version: number) =>
+  await inStore((sql) => {
+    const id = crypto.randomUUID();
+    sql.exec(
+      `INSERT INTO memories (id, entity, type, statement, quote, source, version,
+        subject, lineage, lineage_order, speaker, learned_at, readers, one_value)
+      SELECT ?, entity, type, statement || ' late', quote, source, version, subject,
+        lineage, lineage_order, speaker, learned_at, readers, one_value
+      FROM memories WHERE source = ? AND version = ? ORDER BY row LIMIT 1`,
+      id,
+      source,
+      version
+    );
+    return sql
+      .exec<{ row: number }>("SELECT row FROM memories WHERE id = ?", id)
+      .one().row;
+  });
+
+/** Every table and text column in the shared store holding `key` as a value. */
+const holding = async (key: string): Promise<string[]> =>
+  await inStore((sql) =>
+    sql
+      .exec<{ name: string }>(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '%_fts%'"
+      )
+      .toArray()
+      .flatMap(({ name }) =>
+        sql
+          .exec<{ name: string; type: string }>(`PRAGMA table_info("${name}")`)
+          .toArray()
+          .filter(({ type }) => type.toLowerCase() === "text")
+          .filter(
+            (column) =>
+              sql
+                .exec(
+                  `SELECT 1 FROM "${name}" WHERE "${column.name}" = ? LIMIT 1`,
+                  key
+                )
+                .toArray().length > 0
+          )
+          .map((column) => `${name}.${column.name}`)
+      )
+  );
+
+const lines = [
+  "Alpha one two",
+  "Bravo three four",
+  "Charlie five six",
+  "Delta seven eight",
+];
+
+describe("what the catch-up leaves behind it", () => {
+  it("judges a late memory an older release added behind an unfinished pass's place", async () => {
+    const { source, reader, versions } = await versioned(
+      [lines.join(". "), `${lines.join(". ")}. More.`, "Nothing of it."],
+      new Map([
+        [0, lines],
+        [1, lines],
+      ])
+    );
+    await unjudge(source);
+    await inStore((sql) => {
+      sql.exec("UPDATE memory_judging SET turn = NULL WHERE id = 1");
+    });
+    // A page of five: four on the first version, one on the second.
+    await step(limits(5));
+    const late = await olderLateMemory(source, versions[0] ?? 0);
+    await caughtUp();
+
+    expect({
+      ended: await endedOf(source, reader),
+      lateOut: await inStore(
+        (sql) =>
+          sql.exec("SELECT 1 FROM memory_outs WHERE memory = ?", late).toArray()
+            .length
+      ),
+    }).toStrictEqual({ ended: 9, lateOut: 1 });
+  });
+
+  it("holds no source's key once the source whose turn it was is erased, nor a turn once nothing is left", async () => {
+    const { source } = await outSource(2);
+    await unjudge(source);
+    await inStore((sql) => {
+      sql.exec("UPDATE memory_judging SET turn = NULL WHERE id = 1");
+    });
+    await step(limits(1));
+    const turn = async () =>
+      await inStore(
+        (sql) =>
+          sql
+            .exec<{ turn: string | null }>(
+              "SELECT turn FROM memory_judging WHERE id = 1"
+            )
+            .one().turn
+      );
+    const served = await turn();
+    await shared().eraseSource({ source, reason: "deleted" });
+    for (let ticks = 0; ticks < 5; ticks += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- the tick deletes what the erasure hid
+      await tick();
+    }
+    const other = await outSource(1);
+    await unjudge(other.source);
+    await caughtUp();
+
+    expect({
+      served: served === source,
+      holding: await holding(source),
+      left: await turn(),
+    }).toStrictEqual({ served: true, holding: [], left: null });
+  });
+
+  it("reads no file of a source with nothing on a version before its current one", async () => {
+    await caughtUp();
+    const group = unique("g");
+    const singles: string[] = [];
+    for (let index = 0; index < 45; index += 1) {
+      const source = unique(`aaa${String(index).padStart(3, "0")}`);
+      // oxlint-disable-next-line no-await-in-loop -- a source at a time
+      await shared().addSource({
+        source,
+        change: crypto.randomUUID(),
+        text: `Single version ${index}.`,
+        access: { kind: "audience", group },
+      });
+      singles.push(source);
+    }
+    const out = await outSource(4, "zzz");
+    await unjudge(...singles, out.source);
+    await inStore((sql) => {
+      sql.exec("UPDATE memory_judging SET turn = NULL WHERE id = 1");
+    });
+    const reads: string[] = [];
+    await step(catchUpLimits, (real) =>
+      reading(real, async (key) => {
+        reads.push(key);
+        return await real.get(key);
+      })
+    );
+
+    expect({
+      reads: reads.length,
+      ended: await endedOf(out.source, out.reader),
+      due: await inStore((sql) => catchUpDue(sql)),
+    }).toStrictEqual({ reads: 1, ended: 4, due: false });
+  });
+
+  it("starts an unfinished pass over when the word rules change", async () => {
+    const { source, reader } = await outSource(4);
+    await unjudge(source);
+    await inStore((sql) => {
+      sql.exec("UPDATE memory_judging SET turn = NULL WHERE id = 1");
+    });
+    await step(limits(2));
+    const places = async () =>
+      await inStore(
+        (sql) =>
+          sql
+            .exec<{ count: number }>(
+              "SELECT count(*) AS count FROM memory_judging_places WHERE source = ?",
+              source
+            )
+            .one().count
+      );
+    const before = await places();
+    await inStore((sql, storage) => {
+      sql.exec(
+        "UPDATE word_index SET version = 0, target = 0, cursor = 0, memory_cursor = 0 WHERE id = 1"
+      );
+      storage.transactionSync(() => {
+        reindexWords(sql);
+      });
+    });
+    const after = await places();
+    await caughtUp();
+
+    expect({
+      before,
+      after,
+      ended: await endedOf(source, reader),
+    }).toStrictEqual({ before: 1, after: 0, ended: 4 });
   });
 });
