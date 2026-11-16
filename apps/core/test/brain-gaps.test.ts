@@ -190,8 +190,9 @@ describe("the brain's teams and gaps", { timeout: 120_000 }, () => {
         { sourceId: `src-${tag}`, people: 2 },
         { sourceId: "src-roster", people: 1 },
       ],
-      // The onboarding's team is the admin's to see; the records' isn't.
-      memberTeams: [team],
+      // The roster's teams are every member's (GRA-1748), with the
+      // records' own.
+      memberTeams: ["team-finance", team],
       // A roster team's id, now or later, is never a team record's.
       roster: "brain.record_invalid",
     });
@@ -440,7 +441,8 @@ describe("the brain's teams and gaps", { timeout: 120_000 }, () => {
         ?.counts.map(({ sourceId }) => sourceId)
         .filter((id) => id === source || id === "src-roster"),
     }).toStrictEqual({
-      before: [],
+      // The roster's teams name it for every member already (GRA-1748).
+      before: ["src-roster"],
       withGap: ["src-roster"],
       counts: [
         { date: "2026-10-20", people: 4 },

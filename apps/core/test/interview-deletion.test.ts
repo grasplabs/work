@@ -309,7 +309,12 @@ const ways: {
         { type: "system" }
       );
     },
-    audited: ["brain.records.purged", "onboarding.roster.saved"],
+    // The company's teams changed: handed to the new Brain (GRA-1748).
+    audited: [
+      "brain.records.purged",
+      "onboarding.roster.brain_source",
+      "onboarding.roster.saved",
+    ],
   },
 ];
 
@@ -551,9 +556,10 @@ describe("deleting an interview", { timeout: 180_000 }, () => {
       // Max's drawing waits for the team, here alone.
       restsOn: await store.sentFor(ids.max),
     }).toStrictEqual({
-      // Nothing five of them said alike: no statement, before or after.
-      before: ["team", "workflow", "workflowVersion"],
-      after: ["team"],
+      // Nothing five of them said alike: no statement, before or after. The
+      // team is the roster's, never a record (GRA-1748).
+      before: ["workflow", "workflowVersion"],
+      after: [],
       brain: { statements: [], sources: [], drawings: null },
       restsOn: [],
     });

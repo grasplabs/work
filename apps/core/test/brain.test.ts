@@ -227,9 +227,14 @@ const sourcedBy = ({ name, sourceId, counts }: Team) => ({
   sources: [...new Set(counts.map((count) => count.sourceId))],
 });
 
-/** The names of the teams the kickoff named. */
-const kickoffTeams = (teams: { id: string; name: string }[]) =>
-  teams.flatMap(({ id, name }) => (id.startsWith("onb-kt-") ? [name] : []));
+/**
+ * The names of the teams the kickoff named: found in it first, alone or
+ * joined to the roster's team of their name, which every member reads.
+ */
+const kickoffTeams = (teams: { sourceId: string; name: string }[]) =>
+  teams.flatMap(({ sourceId, name }) =>
+    sourceId === "src-kickoff" ? [name] : []
+  );
 
 describe("the brain's workspace", { timeout: 120_000 }, () => {
   it("is a valid empty workspace while the deployment holds nothing for it", async () => {
