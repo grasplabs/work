@@ -504,6 +504,11 @@ export interface HeldWritesCard {
   check?: ReadCheck;
   /** Set once the press has ended; the card is edited in place. */
   outcome?: PressOutcome;
+  /**
+   * Writes that can't be confirmed on this turn's cards (`heldWritesCards`):
+   * Cancel alone, so none runs out of the order they were asked in.
+   */
+  cancelOnly?: boolean;
 }
 
 /** The buttons' action ids, for the channel layer's `onAction`. */
@@ -573,24 +578,17 @@ const checkLine = (check: ReadCheck, locale: ChannelLocale, room: Room) =>
       });
 
 /**
- * A turn's held writes on one card, in the order they run, each with its
- * exact values; nothing runs until the person presses Confirm. Confirm and
- * Cancel carry the writes' ids and input hashes (a write to an App's with
- * its chat), so a press confirms exactly what the card showed. They are on
- * the card only while every write is held and every value is on it whole,
- * as `platform` shows it: otherwise the card says it can't be confirmed,
- * and to ask for fewer changes at a time.
+ * `writes` as a card on `platform` lays them out, in `locale`, within the
+ * card's room: what it shows of each, what a press carries (the writes it
+ * shows, a write to an App's with its chat), and whether every write is on
+ * it with every value whole, as `platform` shows it (`whole`).
  */
-export const heldWritesCard = ({
+const laidOut = ({
   locale,
   platform,
   writes,
   check,
-  outcome,
-}: HeldWritesCard): PostableCard => {
-  if (writes.length === 0) {
-    throw new Error("A card of held writes needs at least one write");
-  }
+}: Pick<HeldWritesCard, "locale" | "platform" | "writes" | "check">) => {
   const room: Room = { left: outsideBytes };
   const shown = writes.slice(0, maxWritesOnCard);
   const press = JSON.stringify(
@@ -615,10 +613,48 @@ export const heldWritesCard = ({
     whole &&= title.whole && values.length === write.values.length;
     return { write, number: index + 1, title: title.text, values };
   });
-  const pressable =
-    whole &&
-    outcome === undefined &&
-    writes.every((write) => write.state === "held");
+  return { shown, press, warning, steps, whole };
+};
+
+/**
+ * Whether `writes` can be confirmed on one card on `platform`: every one
+ * on it, every value whole (`laidOut`). A press checks it again, so no
+ * press confirms what its card couldn't show (press.ts).
+ */
+export const confirmableOn = (
+  card: Pick<HeldWritesCard, "locale" | "platform" | "writes" | "check">
+): boolean => laidOut(card).whole;
+
+/**
+ * A turn's held writes on one card, in the order they run, each with its
+ * exact values; nothing runs until the person presses Confirm. Confirm and
+ * Cancel carry the writes' ids and input hashes (a write to an App's with
+ * its chat), so a press decides exactly what the card showed. Cancel is on
+ * the card while every write it carries is held, whether or not they fit:
+ * cancelling runs nothing. Confirm only while, besides, every write is on
+ * the card and every value whole, as `platform` shows it: otherwise the
+ * card says it can't be confirmed, and to ask for fewer changes at a time.
+ */
+export const heldWritesCard = ({
+  locale,
+  platform,
+  writes,
+  check,
+  outcome,
+  cancelOnly = false,
+}: HeldWritesCard): PostableCard => {
+  if (writes.length === 0) {
+    throw new Error("A card of held writes needs at least one write");
+  }
+  const { shown, press, warning, steps, whole } = laidOut({
+    locale,
+    platform,
+    writes,
+    check,
+  });
+  const cancellable =
+    outcome === undefined && shown.every((write) => write.state === "held");
+  const pressable = whole && cancellable && !cancelOnly;
   const card = (
     <Card>
       <CardText>
@@ -647,15 +683,19 @@ export const heldWritesCard = ({
           )}
         </Section>
       ))}
-      {whole ? null : <CardText>{say("cardTooLong", locale)}</CardText>}
+      {whole && !cancelOnly ? null : (
+        <CardText>{say("cardTooLong", locale)}</CardText>
+      )}
       {outcome === undefined ? null : (
         <CardText style="bold">{say(outcome, locale)}</CardText>
       )}
-      {pressable ? (
+      {cancellable ? (
         <Actions>
-          <Button id={confirmAction} style="primary" value={press}>
-            {say("confirm", locale)}
-          </Button>
+          {pressable ? (
+            <Button id={confirmAction} style="primary" value={press}>
+              {say("confirm", locale)}
+            </Button>
+          ) : null}
           <Button id={cancelAction} value={press}>
             {say("cancel", locale)}
           </Button>
@@ -664,6 +704,59 @@ export const heldWritesCard = ({
     </Card>
   );
   return { card: cardOf(card) };
+};
+
+/**
+ * A turn's held writes on as few cards as it takes for each to be decided
+ * there, in the order they run: first one card of those that can be
+ * confirmed together (at most `maxWritesOnCard`, each whole: `laidOut`),
+ * then the rest, `maxWritesOnCard` a card, with Cancel alone. So a write no
+ * card can show whole, or one past the first card's ten, never takes
+ * Confirm from the others, and every one has a Cancel. How many cards that
+ * is is bounded by what waits: a write held for an App lapses after a day,
+ * a connection's at the company's midnight. What the turn read is warned of
+ * on the card to confirm.
+ */
+export const heldWritesCards = ({
+  locale,
+  platform,
+  writes,
+  check,
+}: Omit<HeldWritesCard, "outcome">): PostableCard[] => {
+  const confirmable: HeldWriteView[] = [];
+  const rest: HeldWriteView[] = [];
+  for (const write of writes) {
+    const together = [...confirmable, write];
+    if (
+      together.length <= maxWritesOnCard &&
+      laidOut({ locale, platform, writes: together, check }).whole
+    ) {
+      confirmable.push(write);
+    } else {
+      rest.push(write);
+    }
+  }
+  const cancelOnly = Array.from(
+    { length: Math.ceil(rest.length / maxWritesOnCard) },
+    (_, at) => rest.slice(at * maxWritesOnCard, (at + 1) * maxWritesOnCard)
+  );
+  const first =
+    confirmable.length === 0
+      ? []
+      : [
+          heldWritesCard({
+            locale,
+            platform,
+            writes: confirmable,
+            ...(check === undefined ? {} : { check }),
+          }),
+        ];
+  return [
+    ...first,
+    ...cancelOnly.map((group) =>
+      heldWritesCard({ locale, platform, writes: group, cancelOnly: true })
+    ),
+  ];
 };
 
 /**

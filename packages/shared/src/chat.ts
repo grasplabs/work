@@ -488,22 +488,35 @@ export const chatAskLimits = {
 const unpadded = /^\S(?:.*\S)?$/su;
 
 /**
- * What a question or an option never holds: controls (line breaks among
- * them), invisible formatting (bidi overrides, zero-width characters) and
- * the line and paragraph separators, so it shows as the one line it reads
- * as, and can't pass for something the page itself shows.
+ * The characters nobody sees as text, one class for every rule that reads
+ * them: controls (line breaks among them), invisible formatting (bidi
+ * overrides, zero-width characters, tag characters: Cf), private-use and
+ * unassigned code points (Co, Cn), half a surrogate pair alone (Cs), and
+ * what Unicode lists as drawn as nothing though it is no format character
+ * (`Default_Ignorable_Code_Point`: variation selectors, which can carry a
+ * byte each after a visible letter, Hangul fillers, the grapheme joiner).
+ * Written once, as a regular expression's class, so the rules below can't
+ * drift apart.
  */
-const notInAskLine = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u;
+const unseenClass = String.raw`\p{Cc}\p{Cf}\p{Co}\p{Cn}\p{Cs}\p{Default_Ignorable_Code_Point}`;
+
+/**
+ * What a question or an option never holds: anything nobody sees as text
+ * (`unseenClass`) and the line and paragraph separators, so it shows as
+ * the one line it reads as, and can't pass for something the page itself
+ * shows.
+ */
+const notInAskLine = new RegExp(`[${unseenClass}\\p{Zl}\\p{Zp}]`, "u");
 
 /**
  * What a person sees of text that is sent as it is, which they confirm
  * before it goes (a held write's exact request or values, on a card in
- * Grasp or a chat app): the characters nobody sees as text, by the same
- * Unicode categories as `notInAskLine`, plus private-use and unassigned
- * ones (Co, Cn) and half a surrogate pair alone (Cs), each shown as an
- * escape of its code point, `\u{200D}`; a tab and a line break are text.
- * So a title the model was steered to hide something in shows what it
- * holds, and is sent unchanged: only what is shown is escaped.
+ * Grasp or a chat app): every character nobody sees as text
+ * (`unseenClass`) shown as an escape of its code point, `\u{200D}`; a tab
+ * and a line break are text. So a title the model was steered to hide
+ * something in shows what it holds, and is sent unchanged: only what is
+ * shown is escaped. An ordinary emoji keeps its picture, its variation
+ * selector shown beside it (`❤\u{FE0F}`).
  *
  * Every `\u{` in what is shown is such an escape: a backslash the text
  * itself has before `u{` is escaped too (`\u{5C}`), so a written escape
@@ -511,8 +524,10 @@ const notInAskLine = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u;
  * JSON's own escapes (`\\`, `\"`, `\n`) never start `u{`, and stay as
  * they are.
  */
-const unseenOrEscape =
-  /\\(?=u\{)|(?![\t\n\r])[\p{Cc}\p{Cf}\p{Co}\p{Cn}\p{Cs}]/gu;
+const unseenOrEscape = new RegExp(
+  String.raw`\\(?=u\{)|(?![\t\n\r])[${unseenClass}]`,
+  "gu"
+);
 
 /** `text` as a person is shown it before it is sent as it is: see `unseenOrEscape`. */
 export const shownVisibly = (text: string): string =>

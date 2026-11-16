@@ -3,6 +3,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
+import type { Release } from "../src/app-releases.ts";
 import { cancelAction, confirmAction } from "../src/channels/cards.tsx";
 import { inTeams } from "../src/channels/inert.ts";
 import { say } from "../src/channels/words.ts";
@@ -10,13 +11,16 @@ import { chatAgentId } from "../src/chats-rpc.ts";
 import { workspace } from "../src/durable-objects.ts";
 import { heldStartMs } from "../src/held-starts.ts";
 import { personalWorkspaceId } from "../src/personal-workspace.ts";
-import { model, says } from "./agent-chat.ts";
+import { codeStep, model, says } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { fakeProvider } from "./model-provider.ts";
+import type { ProviderReply } from "./model-provider.ts";
 import {
   callOf,
+  hiddenTitle,
+  hiddenTitleShown,
   liveNotes,
   noteTitles,
   ownSource,
@@ -81,36 +85,84 @@ const cardOf = (activity: unknown) => {
   return { presses, facts, texts };
 };
 
-/** The last card of held writes posted in Teams' `conversation`, and what it shows. */
-const lastCardIn = async (conversation: string) => {
+/** The words a card of held writes opens with, for one write or several. */
+const [manyBefore = "", manyAfter = ""] = say("heldMany", "en", {
+  count: "COUNT",
+}).split("COUNT");
+const opensHeldCard = (text: string): boolean =>
+  text === say("heldOne", "en") ||
+  (text.startsWith(manyBefore) && text.endsWith(manyAfter));
+
+/** A card of held writes as posted, what it shows, and what its buttons carry. */
+interface PostedCard {
+  cardId: string;
+  shown: ReturnType<typeof cardOf>;
+  /** What Confirm carries: none where the card has no Confirm. */
+  value: string | undefined;
+  /** What Cancel carries: none where the card has no Cancel. */
+  cancel: string | undefined;
+}
+
+/** The cards of held writes posted in Teams' `conversation` after its first `from` posts, in order. */
+const cardsIn = async (
+  conversation: string,
+  from = 0
+): Promise<PostedCard[]> => {
   const { sent } = await reached(conversation);
-  const card = sent.findLast(
-    ({ activity, editOf }) =>
-      editOf === undefined &&
-      JSON.stringify(activity).includes(say("heldOne", "en"))
-  );
-  if (card?.id === undefined) {
-    throw new Error("Expected a card of held writes");
-  }
-  const shown = cardOf(card.activity);
-  return {
-    cardId: card.id,
-    shown,
-    /** What the card's Confirm carries: none where it has none. */
-    value: shown.presses.find(({ actionId }) => actionId === confirmAction)
-      ?.value,
-  };
+  return sent.slice(from).flatMap(({ id, activity, editOf }) => {
+    const shown = cardOf(activity);
+    if (
+      id === undefined ||
+      editOf !== undefined ||
+      !shown.texts.some(opensHeldCard)
+    ) {
+      return [];
+    }
+    const carried = (action: string) =>
+      shown.presses.find(({ actionId }) => actionId === action)?.value;
+    return [
+      {
+        cardId: id,
+        shown,
+        value: carried(confirmAction),
+        cancel: carried(cancelAction),
+      },
+    ];
+  });
 };
+
+/** What a turn's code step does with the App, given it and its release. */
+type Step = (app: string, release: Release) => ProviderReply;
+
+/** A code step holding a note for each of `titles`, in order, in one run. */
+const writesNotes =
+  (titles: readonly string[]): Step =>
+  (app, release) =>
+    codeStep(
+      `export default async (self, env) => {
+        const answered = [];
+        for (const call of ${JSON.stringify(
+          titles.map((title) => callOf(release, "notes.create", { title }))
+        )}) {
+          answered.push(await env.apps.call(${JSON.stringify(app)}, new Blob([call]).stream()));
+        }
+        return answered;
+      };`
+    );
 
 /**
  * A builder on Teams with a live Notes App the Teams agent may write to,
  * whose direct message, asked about a depot only their own store knows,
- * writes a note titled `title`, as many times as they ask (`turns`): the
- * card the first turn sent, and what to read of what followed.
+ * writes a note titled `title` (or does `first`), and on each later
+ * question what `later` says in turn: the cards the first turn sent, the
+ * first of them as `cardId`, and what to read of what followed.
  */
 const heldInTeams = async (
   title = `teams-${unique()}`,
-  { turns = 1 }: { turns?: number } = {}
+  {
+    first = (app, release) => writesNote(app, release, title),
+    later = [],
+  }: { first?: Step; later?: readonly Step[] } = {}
 ) => {
   const builder = await signedInApi(idp, "builder");
   const admin = await signedInApi(idp, "admin");
@@ -128,10 +180,10 @@ const heldInTeams = async (
     binding: bindingOf("BRAIN"),
   });
   await fakeProvider(
-    ...Array.from({ length: turns }, () => [
-      writesNote(app, release, title),
+    ...[first, ...later].flatMap((step) => [
+      step(app, release),
       says("It waits for you to confirm it."),
-    ]).flat()
+    ])
   );
   const { oid } = builder.person;
   if (typeof oid !== "string") {
@@ -141,8 +193,17 @@ const heldInTeams = async (
   const depot = word();
   await ownSource(person.userId, `Depot ${depot} opens at seven.`);
   const question = `When does depot ${depot} open? Note it.`;
-  await post(messageFrom(person.teams, { text: question }));
-  const { cardId, shown, value } = await lastCardIn(person.teams.conversation);
+  /** Asks in the direct message: the cards of held writes that turn sent. */
+  const ask = async (): Promise<PostedCard[]> => {
+    const { sent } = await reached(person.teams.conversation);
+    await post(messageFrom(person.teams, { text: question }));
+    return await cardsIn(person.teams.conversation, sent.length);
+  };
+  const cards = await ask();
+  const [card] = cards;
+  if (card === undefined) {
+    throw new Error("Expected a card of held writes");
+  }
   const ownWorkspace = workspace(env, personalWorkspaceId(person.userId));
   return {
     person,
@@ -150,15 +211,10 @@ const heldInTeams = async (
     release,
     title,
     request: callOf(release, "notes.create", { title }),
-    cardId,
-    shown,
-    /** What the card's Confirm carries: none where it has none. */
-    value,
-    /** Asks the same again in the same direct message: the card that turn sent. */
-    askAgain: async () => {
-      await post(messageFrom(person.teams, { text: question }));
-      return await lastCardIn(person.teams.conversation);
-    },
+    cards,
+    ...card,
+    /** Asks the same again in the same direct message: the cards that turn sent. */
+    askAgain: ask,
     /** The App's notes, as its builder reads them. */
     titles: async () => await noteTitles(builder.userId, app, release),
     /** The person's own Workspace, which keeps the hold. */
@@ -307,17 +363,120 @@ describe("a press on a held write to an App in Teams that mustn't run anything",
   );
 
   it(
-    "is on a card without Confirm or Cancel when its request is too long to show whole, and the card says so",
+    "is on a card of its own with only Cancel when too long to show whole, and never takes Confirm from a later write: each is decided once, and once cancelled it frees the cards after",
     slow,
     async () => {
-      const held = await heldInTeams("x".repeat(20_000));
-      const waiting = await held.waiting();
+      const short = `short-${unique()}`;
+      const after = `after-${unique()}`;
+      const held = await heldInTeams("x".repeat(20_000), {
+        later: [
+          (app, release) => writesNote(app, release, short),
+          (app, release) => writesNote(app, release, after),
+        ],
+      });
+      const first = held.cards.map(({ value, cancel, shown }) => ({
+        confirm: value !== undefined,
+        cancel: cancel !== undefined,
+        tooLong: shown.texts.includes(say("cardTooLong", "en")),
+      }));
+      const [confirmable, cancelOnly] = await held.askAgain();
+      const second = [confirmable, cancelOnly].map((card) => ({
+        confirm: card?.value !== undefined,
+        cancel: card?.cancel !== undefined,
+      }));
+      /** A press on `card`'s `action`, carrying what its button does, sent twice. */
+      const pressTwice = async (
+        card: PostedCard | undefined,
+        action: string
+      ) => {
+        const press = {
+          ...messageFrom(held.person.teams, { text: undefined }),
+          replyToId: card?.cardId,
+          value: {
+            actionId: action,
+            value: action === confirmAction ? card?.value : card?.cancel,
+          },
+        };
+        await post(press);
+        await post({ ...press, id: `1729${unique()}` });
+      };
+      await pressTwice(confirmable, confirmAction);
+      await pressTwice(cancelOnly, cancelAction);
+      const decided = {
+        titles: await held.titles(),
+        waiting: await held.waiting(),
+        decisions: await decisionsOn(held.app, 3),
+      };
+      const third = await held.askAgain();
 
       expect({
-        presses: held.shown.presses,
-        said: held.shown.texts.includes(say("cardTooLong", "en")),
-        waiting: waiting.length,
-      }).toStrictEqual({ presses: [], said: true, waiting: 1 });
+        first,
+        second,
+        decided,
+        third: third.map(({ value, cancel, shown }) => ({
+          confirm: value !== undefined,
+          cancel: cancel !== undefined,
+          writes: shown.facts.length,
+        })),
+      }).toStrictEqual({
+        first: [{ confirm: false, cancel: true, tooLong: true }],
+        second: [
+          { confirm: true, cancel: true },
+          { confirm: false, cancel: true },
+        ],
+        decided: {
+          titles: [short],
+          waiting: [],
+          decisions: [
+            "chat.app_call.confirmed",
+            "chat.app_call.declined",
+            "chat.app_call.ended",
+          ],
+        },
+        third: [{ confirm: true, cancel: true, writes: 1 }],
+      });
+    }
+  );
+
+  it(
+    "puts ten waiting writes on the card to confirm and the eleventh on a card to cancel, so every one can be decided",
+    slow,
+    async () => {
+      const titles = Array.from(
+        { length: 11 },
+        (_, at) => `n${at}-${unique()}`
+      );
+      const held = await heldInTeams(undefined, { first: writesNotes(titles) });
+      const [confirmable, rest] = held.cards;
+      const shown = held.cards.map(({ value, cancel, shown: card }) => ({
+        confirm: value !== undefined,
+        cancel: cancel !== undefined,
+        writes: card.facts.length,
+      }));
+      await post({
+        ...messageFrom(held.person.teams, { text: undefined }),
+        replyToId: rest?.cardId,
+        value: { actionId: cancelAction, value: rest?.cancel },
+      });
+      await post({
+        ...messageFrom(held.person.teams, { text: undefined }),
+        replyToId: confirmable?.cardId,
+        value: { actionId: confirmAction, value: confirmable?.value },
+      });
+      const written = await held.titles();
+
+      expect({
+        shown,
+        written: written.toSorted(),
+        waiting: await held.waiting(),
+      }).toStrictEqual({
+        shown: [
+          { confirm: true, cancel: true, writes: 10 },
+          { confirm: false, cancel: true, writes: 1 },
+        ],
+        written: titles.slice(0, 10).toSorted(),
+        waiting: [],
+      });
     }
   );
 
@@ -418,6 +577,62 @@ describe("a press on a held write to an App in Teams that mustn't run anything",
       });
     }
   );
+
+  it(
+    "after a lapse, sets the alarm for the next hold's end, and that hold lapses at its own time",
+    slow,
+    async () => {
+      const later = `later-${unique()}`;
+      const held = await heldInTeams(undefined, {
+        later: [(app, release) => writesNote(app, release, later)],
+      });
+      await held.askAgain();
+      const [first, second] = await held.waiting();
+      const now = Date.now();
+      const hourMs = 60 * 60 * 1000;
+      /** Sets when hold `id` was held, in the person's Workspace. */
+      const heldAt = async (id: string | undefined, at: number) => {
+        await runInDurableObject(held.ownWorkspace, (_instance, state) => {
+          state.storage.sql.exec(
+            "UPDATE held_app_calls SET held_at = ? WHERE id = ?",
+            at,
+            id
+          );
+        });
+      };
+      // The first's day is over; the second's ends in three hours.
+      const secondAt = now - heldStartMs + 3 * hourMs;
+      await heldAt(first, now - heldStartMs - 1);
+      await heldAt(second, secondAt);
+      await runDurableObjectAlarm(held.ownWorkspace);
+      const afterFirst = await runInDurableObject(
+        held.ownWorkspace,
+        async (_instance, state) => ({
+          waiting: state.storage.sql
+            .exec<{
+              id: string;
+            }>("SELECT id FROM held_app_calls WHERE status = 'waiting'")
+            .toArray()
+            .map(({ id }) => id),
+          // Set again inside the alarm, for the second hold's end.
+          alarm: await state.storage.getAlarm(),
+        })
+      );
+      // Its three hours later.
+      await heldAt(second, now - heldStartMs - 1);
+      await runDurableObjectAlarm(held.ownWorkspace);
+
+      expect({
+        afterFirst,
+        waiting: await held.waiting(),
+        decisions: await decisionsOn(held.app, 2),
+      }).toStrictEqual({
+        afterFirst: { waiting: [second], alarm: secondAt + heldStartMs },
+        waiting: [],
+        decisions: ["chat.app_call.lapsed", "chat.app_call.lapsed"],
+      });
+    }
+  );
 });
 
 describe("a held write to an App in Teams", () => {
@@ -510,21 +725,24 @@ describe("a held write to an App in Teams", () => {
     "is on the next turn's card when asked for again before it was decided, and Confirm there writes it once",
     slow,
     async () => {
-      const held = await heldInTeams(`again-${unique()}`, { turns: 2 });
+      const title = `again-${unique()}`;
+      const held = await heldInTeams(title, {
+        later: [(app, release) => writesNote(app, release, title)],
+      });
       // Not pressed: the person asks again, and the agent makes the same call,
       // which is the same hold.
-      const next = await held.askAgain();
+      const [next] = await held.askAgain();
       await post({
         ...messageFrom(held.person.teams, { text: undefined }),
-        replyToId: next.cardId,
-        value: { actionId: confirmAction, value: next.value },
+        replyToId: next?.cardId,
+        value: { actionId: confirmAction, value: next?.value },
       });
       // The first card, pressed after: nothing more runs.
       await post(pressOn(held));
 
       expect({
-        newCard: next.cardId !== held.cardId,
-        sameHold: next.value === held.value,
+        newCard: next !== undefined && next.cardId !== held.cardId,
+        sameHold: next?.value === held.value,
         titles: await held.titles(),
         waiting: await held.waiting(),
       }).toStrictEqual({
@@ -540,25 +758,18 @@ describe("a held write to an App in Teams", () => {
     "shows every character nobody sees in the request as an escape, and Confirm writes the request as it was asked for",
     slow,
     async () => {
-      // Tag characters, a bidi override and a zero-width joiner: drawn as
-      // nothing in Teams.
-      const hidden = "Agenda\u{E0041}\u{E0042}\u202Eevil\u200D!";
-      const held = await heldInTeams(hidden);
+      const held = await heldInTeams(hiddenTitle);
       const [shown = ""] = held.shown.facts.map(({ value }) => value);
       await post(pressOn(held));
 
       expect({
-        escapes: ["\\u{E0041}", "\\u{E0042}", "\\u{202E}", "\\u{200D}"].map(
-          (escape) => shown.includes(escape)
-        ),
-        unseen: /[\p{Cf}\p{Co}\p{Cn}]/u.test(shown),
+        shown,
         confirm: held.value !== undefined,
         titles: await held.titles(),
       }).toStrictEqual({
-        escapes: [true, true, true, true],
-        unseen: false,
+        shown: held.request.replace(hiddenTitle, hiddenTitleShown),
         confirm: true,
-        titles: [hidden],
+        titles: [hiddenTitle],
       });
     }
   );

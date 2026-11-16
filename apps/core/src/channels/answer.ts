@@ -7,7 +7,7 @@ import { z } from "zod";
 
 import { chatAgentId, personalWorkspaceId } from "../chats-rpc.ts";
 import { workspace } from "../durable-objects.ts";
-import { answerCards, draftCard, heldWritesCard, lineCard } from "./cards.tsx";
+import { answerCards, draftCard, heldWritesCards, lineCard } from "./cards.tsx";
 import {
   offerConnectOwn,
   ownMicrosoftNeed,
@@ -57,9 +57,11 @@ import { postOffers } from "./workflow-offers.ts";
 //
 // A turn that had writes held (a meeting to put in the calendar, a row to
 // change, a write to an App from a chat that used something only its
-// person can read) shows them after its answer on one card, in the order
-// they run, each with its exact values, and nothing changes until the
-// person presses Confirm on it (cards.tsx `heldWritesCard`, held.ts).
+// person can read) shows them after its answer, in the order they run,
+// each with its exact values, and nothing changes until the person
+// presses Confirm: on one card those that can be confirmed together, and
+// the rest, which only Cancel can decide, on cards after it (cards.tsx
+// `heldWritesCards`, held.ts).
 
 /** How often typing is shown again while the turn runs. */
 const typingEveryMs = 3000;
@@ -506,14 +508,16 @@ const answerOne = async (
       writes.map(({ id }) => `write:${id}`)
     );
     const check = checkOf(answer.provenance.sources);
-    await thread.post(
-      heldWritesCard({
-        locale,
-        platform,
-        writes: writes.map((write) => inertView(platform, write)),
-        ...(check === undefined ? {} : { check }),
-      })
-    );
+    const heldCards = heldWritesCards({
+      locale,
+      platform,
+      writes: writes.map((write) => inertView(platform, write)),
+      ...(check === undefined ? {} : { check }),
+    });
+    for (const heldCard of heldCards) {
+      // oxlint-disable-next-line no-await-in-loop -- in order: the card to confirm first
+      await thread.post(heldCard);
+    }
   });
   // Whole and inert, in as many cards as it takes (`answerCards`): the
   // first as the card it was written into, where there is one, the rest

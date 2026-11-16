@@ -532,8 +532,10 @@ const HeldAppCallCard = ({
   const { busy, run } = useCoreAction();
   const router = useRouter();
   const { t } = useLingui();
-  const app = call.appName ?? call.appId;
-  const fn = call.function;
+  // Named by the App's builder and the agent's code: every character nobody
+  // sees shown as an escape, as the request is (`shownVisibly`).
+  const app = shownVisibly(call.appName ?? call.appId);
+  const fn = shownVisibly(call.function);
   const title = t`${fn} in ${app}`;
   const what = title;
   const where = app;
@@ -647,8 +649,8 @@ const RejectAll = ({
       return t`${title} on ${connection}`;
     }),
     ...calls.map((call) => {
-      const fn = call.function;
-      const app = call.appName ?? call.appId;
+      const fn = shownVisibly(call.function);
+      const app = shownVisibly(call.appName ?? call.appId);
       return t`${fn} in ${app}`;
     }),
   ];

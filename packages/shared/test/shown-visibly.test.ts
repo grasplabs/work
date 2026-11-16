@@ -31,6 +31,24 @@ describe("text shown before it is sent", () => {
     });
   });
 
+  it("shows what Unicode lists as drawn as nothing though no format character: variation selectors, fillers, the grapheme joiner", () => {
+    expect({
+      // A payload of a byte a variation selector, after a visible letter.
+      payload: shownVisibly("A\u{E0101}\u{E0142}\uFE00"),
+      fillers: shownVisibly("a\u115F\u1160\u3164\uFFA0b"),
+      graphemeJoiner: shownVisibly("a\u034Fb"),
+      khmerMongolian: shownVisibly("a\u17B4\u17B5\u180B\u180Fb"),
+      // An ordinary emoji keeps its picture; its selector shows as an escape.
+      heart: shownVisibly("I \u2764\uFE0F it"),
+    }).toStrictEqual({
+      payload: String.raw`A\u{E0101}\u{E0142}\u{FE00}`,
+      fillers: String.raw`a\u{115F}\u{1160}\u{3164}\u{FFA0}b`,
+      graphemeJoiner: String.raw`a\u{34F}b`,
+      khmerMongolian: String.raw`a\u{17B4}\u{17B5}\u{180B}\u{180F}b`,
+      heart: String.raw`I ❤\u{FE0F} it`,
+    });
+  });
+
   it("never shows a written escape like a hidden character: a backslash that would start one is escaped too", () => {
     const hidden = shownVisibly("a​b");
     const written = shownVisibly(String.raw`a\u{200B}b`);

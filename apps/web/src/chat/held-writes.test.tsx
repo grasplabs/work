@@ -277,22 +277,72 @@ describe("a write to an App held for the person", () => {
     });
   });
 
-  it("shows every character nobody sees in the exact request as an escape", async () => {
-    // Tag characters, a bidi override and a zero-width joiner: drawn as
-    // nothing on the page.
-    const hidden = JSON.stringify({
+  it("shows every character nobody sees as an escape: in the request, the App's name and the function", async () => {
+    // A payload of a byte a variation selector, a Hangul filler, the
+    // grapheme joiner, tag characters, a bidi override, a zero-width
+    // joiner; and an ordinary emoji with its variation selector.
+    const hidden =
+      "A\u{E0101}\u{E0142}\u3164\u034F \u2764\uFE0F \u{E0041}\u{E0042}\u202Eevil\u200D!";
+    const shownTitle = String.raw`A\u{E0101}\u{E0142}\u{3164}\u{34F} ❤\u{FE0F} \u{E0041}\u{E0042}\u{202E}evil\u{200D}!`;
+    const sent = JSON.stringify({
       reference: { name: "notes.create", kind: "mutation" },
-      args: { title: "Agenda\u{E0041}\u{E0042}\u202Eevil\u200D!" },
+      args: { title: hidden },
     });
-    await shown({ calls: { "chat-1": [{ ...held, request: hidden }] } });
-    const exact = document.querySelector("pre code")?.textContent ?? "";
+    await shown({
+      calls: {
+        "chat-1": [
+          {
+            ...held,
+            appName: "No\u200Btes",
+            function: "notes.cre\u202Eate",
+            request: sent,
+          },
+        ],
+      },
+    });
 
     expect({
-      escapes: ["\\u{E0041}", "\\u{E0042}", "\\u{202E}", "\\u{200D}"].map(
-        (escape) => exact.includes(escape)
+      exact: document.querySelector("pre code")?.textContent,
+      named: document.body.textContent?.includes(
+        String.raw`Waiting for you: notes.cre\u{202E}ate in No\u{200B}tes`
       ),
-      unseen: /[\p{Cf}\p{Co}\p{Cn}]/u.test(exact),
-    }).toStrictEqual({ escapes: [true, true, true, true], unseen: false });
+    }).toStrictEqual({
+      exact: JSON.stringify(JSON.parse(sent), null, 2).replace(
+        hidden,
+        shownTitle
+      ),
+      named: true,
+    });
+  });
+
+  it("shows every character nobody sees in a connection write's described values as an escape, a list's items too", async () => {
+    await shown({
+      calls: {},
+      actions: [
+        {
+          ...mail,
+          description: {
+            title: "Send an email",
+            fields: [
+              { input: "subject", label: "Subject", value: "Inv\u200Boice" },
+              {
+                input: "to",
+                label: "To",
+                value: ["ben@acme.test", "c\u202Eleo@acme.test"],
+              },
+            ],
+            complete: true,
+          },
+        },
+      ],
+    });
+    const text = document.body.textContent ?? "";
+
+    expect({
+      value: text.includes(String.raw`Inv\u{200B}oice`),
+      item: text.includes(String.raw`c\u{202E}leo@acme.test`),
+      unseen: /[\u200B\u202E]/u.test(text),
+    }).toStrictEqual({ value: true, item: true, unseen: false });
   });
 
   it("runs nothing once it is rejected", async () => {

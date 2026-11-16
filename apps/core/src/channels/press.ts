@@ -14,6 +14,7 @@ import { appLocale } from "./answer.ts";
 import {
   cancelAction,
   confirmAction,
+  confirmableOn,
   heldWritesCard,
   pressOf,
 } from "./cards.tsx";
@@ -116,7 +117,7 @@ const editCard = async (
 /** Says one line where the card was pressed. */
 const sayThere = async (
   event: ActionEvent,
-  line: "alreadyAnswered" | "changedSince" | "removed",
+  line: "alreadyAnswered" | "cardTooLong" | "changedSince" | "removed",
   locale: ChannelLocale
 ): Promise<void> => {
   try {
@@ -247,6 +248,13 @@ export const pressCard = async (
   }
   // As the card showed them, what the model wrote inert (held.ts).
   const writes: HeldWriteView[] = held.map(({ view }) => view);
+  // Confirm only what a card could show whole: a press carrying writes
+  // from a card with Cancel alone runs nothing (cards.tsx).
+  if (confirming && !confirmableOn({ locale, platform, writes })) {
+    log.info("channel.press_refused", { platform, reason: "not_whole" });
+    await sayThere(event, "cardTooLong", locale);
+    return;
+  }
   const shown = (outcome?: PressOutcome) => ({
     locale,
     platform,

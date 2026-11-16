@@ -141,3 +141,15 @@ export const noteTitles = async (
     .object({ ok: z.literal(true), value: z.array(z.string()) })
     .parse(result).value;
 };
+
+/**
+ * A note's title holding what Teams, Slack and a page draw as nothing: a
+ * payload of a byte a variation selector after a visible letter, a Hangul
+ * filler, the grapheme joiner, tag characters, a bidi override and a
+ * zero-width joiner; and an ordinary emoji with its variation selector.
+ */
+export const hiddenTitle =
+  "A\u{E0101}\u{E0142}\u3164\u034F \u2764\uFE0F \u{E0041}\u{E0042}\u202Eevil\u200D!";
+
+/** `hiddenTitle` as a person is shown it: every one an escape, the emoji's picture kept. */
+export const hiddenTitleShown = String.raw`A\u{E0101}\u{E0142}\u{3164}\u{34F} ❤\u{FE0F} \u{E0041}\u{E0042}\u{202E}evil\u{200D}!`;

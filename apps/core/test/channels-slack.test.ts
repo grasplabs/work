@@ -39,6 +39,8 @@ import { mailConnection } from "./mail-connection.ts";
 import { fakeProvider } from "./model-provider.ts";
 import {
   callOf,
+  hiddenTitle,
+  hiddenTitleShown,
   liveNotes,
   noteTitles,
   ownSource,
@@ -1064,25 +1066,16 @@ describe("a linked person's held write to an App in Slack", () => {
   });
 
   it("shows every character nobody sees in its request as an escape, with Confirm", async () => {
-    // Tag characters, a bidi override and a zero-width joiner: drawn as
-    // nothing in Slack.
-    const held = await heldAppWriteInSlack(
-      "Agenda\u{E0041}\u{E0042}\u202Eevil\u200D!"
+    const held = await heldAppWriteInSlack(hiddenTitle);
+    const request = held.card.texts.find((text) =>
+      text.startsWith(`*${say("heldAppRequest", "en")}*`)
     );
-    const request =
-      held.card.texts.find((text) =>
-        text.startsWith(`*${say("heldAppRequest", "en")}*`)
-      ) ?? "";
 
     expect({
-      escapes: ["\\u{E0041}", "\\u{E0042}", "\\u{202E}", "\\u{200D}"].map(
-        (escape) => request.includes(escape)
-      ),
-      unseen: /[\p{Cf}\p{Co}\p{Cn}]/u.test(request),
+      request,
       confirm: held.card.confirm !== undefined,
     }).toStrictEqual({
-      escapes: [true, true, true, true],
-      unseen: false,
+      request: `*${say("heldAppRequest", "en")}*\n${held.request.replace(hiddenTitle, hiddenTitleShown)}`,
       confirm: true,
     });
   });
