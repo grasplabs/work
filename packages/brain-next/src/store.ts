@@ -38,6 +38,7 @@ import {
   newSourceSchema,
   onlyInOwnStore,
   ownEntityRequestSchema,
+  profileRequestSchema,
   ownExportFileRequestSchema,
   ownExportRequestSchema,
   ownExportStartSchema,
@@ -79,6 +80,8 @@ import type {
   EntityId,
   EntityRequest,
   OwnEntityRequest,
+  Profile,
+  ProfileRequest,
   MemoriesRead,
   MemoriesRequest,
   MemoryChangeOutcome,
@@ -200,7 +203,7 @@ import {
   retireMemory,
   writerErasedAfterSql,
 } from "./memories.ts";
-import { ownEntityId } from "./own-entity.ts";
+import { ownEntityId, readProfile } from "./own-entity.ts";
 import { rebuildMissingSets } from "./reader-sets.ts";
 import {
   countingInto,
@@ -660,7 +663,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    * at `at`.
    */
   #pageMoments(
-    after: { at: Date; learned?: Date } | undefined,
+    after?: { at: Date; learned?: Date },
     asOf?: Date
   ): { at: number; cursorAt: number; learned: number } {
     if (after !== undefined) {
@@ -2391,6 +2394,19 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     const { reader } = checked(ownEntityRequestSchema, request);
     this.#ownOnly(reader.person);
     return (await this.#readable()) ? ownEntityId(this.ctx.storage.sql) : null;
+  }
+
+  /** The reader's profile, in their own store, built now (own-entity.ts). */
+  async readProfile(request: ProfileRequest): Promise<Profile> {
+    const { reader, budget } = checked(profileRequestSchema, request);
+    this.#ownOnly(reader.person);
+    return (await this.#readable())
+      ? readProfile(this.ctx.storage.sql, {
+          reader,
+          tokens: budget.tokens,
+          ...this.#pageMoments(),
+        })
+      : { memories: [], truncated: false };
   }
 
   /** An entity's card as the reader sees it, built now (cards.ts). */

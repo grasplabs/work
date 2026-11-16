@@ -1,4 +1,12 @@
-import type { EntityId } from "./contract.ts";
+import { memoriesReadMax, packMemoryTokens } from "./contract.ts";
+import type {
+  EntityId,
+  MemoriesCursor,
+  Memory,
+  Profile,
+  Reader,
+} from "./contract.ts";
+import { readMemories } from "./memories.ts";
 
 // The store's own entity (contract.ts "The store's own entity"): the
 // entity a person's own store's person is, one row at most, made fresh by
@@ -35,4 +43,71 @@ export const ownEntityRow = (sql: SqlStorage): number => {
     .one();
   sql.exec("INSERT INTO own_entity (id, entity) VALUES (1, ?)", row);
   return row;
+};
+
+/**
+ * The profile of `reader` (contract.ts `readProfile`): the current memories
+ * about their own entity in their own word, as `readMemories` orders
+ * them, read at one moment, each whole, as many as fit `tokens` in that
+ * order (`packMemoryTokens`); cut short at the first that doesn't fit.
+ * Nothing while the store has no own entity. One synchronous read: a
+ * snapshot.
+ */
+export const readProfile = (
+  sql: SqlStorage,
+  {
+    reader,
+    tokens,
+    ...moments
+  }: {
+    reader: Reader & { person: string };
+    tokens: number;
+    at: number;
+    cursorAt: number;
+    learned: number;
+  }
+): Profile => {
+  const entity = ownEntityId(sql);
+  const memories: Memory[] = [];
+  if (entity === null) {
+    return { memories, truncated: false };
+  }
+  let left = tokens;
+  let after: MemoriesCursor | undefined;
+  for (;;) {
+    const page = readMemories(sql, {
+      entity,
+      reader,
+      ...moments,
+      history: false,
+      ...(after === undefined ? {} : { after }),
+      limit: memoriesReadMax,
+    });
+    for (const memory of page.memories) {
+      // Their own word alone: never an outside party's, an agent's or a
+      // system's, whatever is filed under them.
+      if (
+        memory.speaker.kind === "internal" &&
+        memory.speaker.person === reader.person
+      ) {
+        const cost = packMemoryTokens({
+          ...memory,
+          memory: memory.id,
+          context: null,
+          confirmed: memory.confirmed !== null,
+          found: "entities",
+        });
+        if (cost > left) {
+          return { memories, truncated: true };
+        }
+        left -= cost;
+        memories.push(memory);
+      }
+    }
+    if (!page.more || page.next === undefined) {
+      break;
+    }
+    after = page.next;
+  }
+  return { memories, truncated: false };
 };
