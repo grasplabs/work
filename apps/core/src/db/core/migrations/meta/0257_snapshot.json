@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "279bdc0b-c6cf-4470-a256-2cec7a23a9fb",
+  "id": "6aa86e84-3836-46b7-8a9d-12cd28bbd41e",
   "prevId": "132d924f-ba0f-4238-a1bc-96d9f053bd2a",
   "tables": {
     "access_revocations": {
@@ -7270,44 +7270,6 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
-    "interview_teams": {
-      "name": "interview_teams",
-      "columns": {
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "team": {
-          "name": "team",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "interview_teams_user_id_users_id_fk": {
-          "name": "interview_teams_user_id_users_id_fk",
-          "tableFrom": "interview_teams",
-          "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
     "invitations": {
       "name": "invitations",
       "columns": {
@@ -11867,6 +11829,13 @@
           "name": "stephen_requests_question_idx",
           "columns": [
             "question_id"
+          ],
+          "isUnique": false
+        },
+        "stephen_requests_topic_idx": {
+          "name": "stephen_requests_topic_idx",
+          "columns": [
+            "topic_id"
           ],
           "isUnique": false
         }
