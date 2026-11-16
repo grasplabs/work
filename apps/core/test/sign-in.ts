@@ -37,11 +37,16 @@ export const withSignIn = (changes: Record<string, unknown>): Env => ({
   SIGN_IN: { ...signInConfig, ...changes },
 });
 
-/** A request to the client's hostname, as core receives it from the router. */
+/**
+ * A request to the client's hostname, as core receives it from the router.
+ * What it leaves running after answering (`waitUntil`) goes on in `ctx`,
+ * for a test that waits for it.
+ */
 export const routed = async (
   path: string,
   init: RequestInit = {},
-  coreEnv: Env = env
+  coreEnv: Env = env,
+  ctx: ExecutionContext = createExecutionContext()
 ): Promise<Response> => {
   const headers = new Headers(init.headers);
   headers.set(routerSecretHeader, env.ROUTER_SECRET);
@@ -53,7 +58,7 @@ export const routed = async (
   });
   return await untilAnswered(
     `${request.method} ${path}`,
-    worker.fetch(request, coreEnv, createExecutionContext())
+    worker.fetch(request, coreEnv, ctx)
   );
 };
 
