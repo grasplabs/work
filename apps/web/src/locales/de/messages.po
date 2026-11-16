@@ -6867,6 +6867,10 @@ msgstr "Wenn es anhält, wechseln Sie den Anbieter."
 msgid "If the rest of the month goes like the days so far"
 msgstr "Wenn der Rest des Monats wie die bisherigen Tage verläuft"
 
+#: src/routes/interview.tsx
+msgid "If you were saying something as it ended, it wasn't heard. Say it again once you're back."
+msgstr "Falls Sie gerade etwas gesagt haben, als sie endete, wurde es nicht gehört. Sagen Sie es noch einmal, sobald Sie zurück sind."
+
 #: src/apps/app-data.tsx
 msgid "Import"
 msgstr "Importieren"
@@ -12431,6 +12435,10 @@ msgstr "Anmelden"
 msgid "Sign in again"
 msgstr "Erneut anmelden"
 
+#: src/routes/interview.tsx
+msgid "Sign in again to go on"
+msgstr "Melden Sie sich erneut an, um weiterzumachen"
+
 #: src/pages/frame-failure.tsx
 msgid "Sign in again to go on."
 msgstr "Melde dich erneut an, um fortzufahren."
@@ -16913,6 +16921,10 @@ msgstr "Dein Lauf von Version {version} ist beendet: {status}"
 #: src/pages/frame-failure.tsx
 msgid "Your session has ended"
 msgstr "Deine Sitzung ist beendet"
+
+#: src/routes/interview.tsx
+msgid "Your sign-in ended. Sign in again with your work account to go on where you were. What isn't saved yet is kept in this window until then."
+msgstr "Ihre Anmeldung ist beendet. Melden Sie sich erneut mit Ihrem Arbeitskonto an, um dort weiterzumachen, wo Sie waren. Was noch nicht gespeichert ist, bleibt bis dahin in diesem Fenster erhalten."
 
 #: src/brain/skills-page.tsx
 msgid "Your skills"

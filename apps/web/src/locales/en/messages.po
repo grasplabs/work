@@ -6867,6 +6867,10 @@ msgstr "If it lasts, switch provider."
 msgid "If the rest of the month goes like the days so far"
 msgstr "If the rest of the month goes like the days so far"
 
+#: src/routes/interview.tsx
+msgid "If you were saying something as it ended, it wasn't heard. Say it again once you're back."
+msgstr "If you were saying something as it ended, it wasn't heard. Say it again once you're back."
+
 #: src/apps/app-data.tsx
 msgid "Import"
 msgstr "Import"
@@ -12431,6 +12435,10 @@ msgstr "Sign in"
 msgid "Sign in again"
 msgstr "Sign in again"
 
+#: src/routes/interview.tsx
+msgid "Sign in again to go on"
+msgstr "Sign in again to go on"
+
 #: src/pages/frame-failure.tsx
 msgid "Sign in again to go on."
 msgstr "Sign in again to go on."
@@ -16913,6 +16921,10 @@ msgstr "Your run of version {version} ended: {status}"
 #: src/pages/frame-failure.tsx
 msgid "Your session has ended"
 msgstr "Your session has ended"
+
+#: src/routes/interview.tsx
+msgid "Your sign-in ended. Sign in again with your work account to go on where you were. What isn't saved yet is kept in this window until then."
+msgstr "Your sign-in ended. Sign in again with your work account to go on where you were. What isn't saved yet is kept in this window until then."
 
 #: src/brain/skills-page.tsx
 msgid "Your skills"

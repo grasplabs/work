@@ -7,6 +7,7 @@ import { z } from "zod";
 
 import { wait } from "../core.ts";
 import { readingSeconds } from "../onboarding/setup.ts";
+import { noteSession } from "./api.ts";
 import { linkNow } from "./kept.ts";
 import { scheduleOf, wordsOf } from "./spoken.tsx";
 
@@ -182,6 +183,7 @@ const fetchClip = async (text: string, voicing: Voicing): Promise<Clip> => {
       }),
       signal: AbortSignal.timeout(fetchTimeoutMs),
     });
+    noteSession(response.status);
     if (!response.ok) {
       return reading;
     }

@@ -12,7 +12,7 @@ import { useLingui } from "@lingui/react/macro";
 import { ArrowUpIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
-import { useSaveState } from "./kept.ts";
+import { setTyped, useSaveState, useTyped } from "./kept.ts";
 import type { LoopState, Said } from "./loop.ts";
 import { Marked, Own } from "./talk.tsx";
 import { VoiceBar } from "./voice-bar.tsx";
@@ -131,7 +131,9 @@ export const Composer = ({
   onSend: (text: string) => void;
 }) => {
   const { t } = useLingui();
-  const [text, setText] = useState("");
+  // Kept with the interview, so it outlasts the box, and a sign-in again
+  // when their session ended (kept.ts `setAside`).
+  const text = useTyped();
   // The line during which they asked to type instead: the box stays until his next.
   const [typing, setTyping] = useState<number | null>(null);
   const bar = talking && text === "" && typing !== line && doing !== "idle";
@@ -182,7 +184,7 @@ export const Composer = ({
           <ChatBox
             onSend={onSend}
             placeholder={placeholder}
-            setText={setText}
+            setText={setTyped}
             text={text}
             thinking={doing === "thinking"}
           />

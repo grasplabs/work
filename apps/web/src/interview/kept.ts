@@ -1,10 +1,14 @@
-import { factRevision } from "@grasp-os/shared/interview-links";
+import {
+  factRevision,
+  interviewProgressSchema,
+} from "@grasp-os/shared/interview-links";
 import type { InterviewProgress } from "@grasp-os/shared/interview-links";
 import type { Interviewer } from "@grasp-os/shared/onboarding";
 import { useSyncExternalStore } from "react";
+import { z } from "zod";
 
 import { approveFacts, isRefused, saveProgress } from "./api.ts";
-import { freshProgress } from "./progress.ts";
+import { freshProgress, resumed } from "./progress.ts";
 
 // Someone's interview as this page holds it, kept in core after every
 // change (`/api/interview`, action `save`): shortly after it, one save at a
@@ -18,6 +22,26 @@ import { freshProgress } from "./progress.ts";
 // was read back is kept: it names each fact at the revision they saw, so
 // only exactly that counts. Asked again until core answers, it answers the
 // same receipt; when core keeps another copy, that one is read back again.
+//
+// When their session ends mid-interview (the company's gate opens, they
+// signed out in another tab, it expired: GRA-1943), whatever isn't kept
+// yet is set aside (`setAside`): nothing more is sent, not even as the
+// page goes, until core opens the link again for a session. Until then it
+// waits in this tab alone (`sessionStorage`, under the link's draft name,
+// a hash of its secret), and once the link opens again it is held, and
+// kept, as it was: at the version it went on from, so a copy that went on
+// elsewhere meanwhile is the interview, as ever. It is forgotten as soon
+// as core answers a save of it. From the threat model:
+//
+// - Sent without a session, or under someone else's: nothing goes out
+//   while set aside, and it is taken up again only as core opens the link,
+//   which it does only for the account the link belongs to. Anyone else
+//   is told the link opens nothing, and never sees it.
+// - Kept anywhere but this tab: never in `localStorage`, the address, or
+//   what the sign-in keeps; the tab's storage goes with the tab.
+// - Audio: none is ever kept (ear.ts). What was written down of what they
+//   said is in the interview already; a stretch said as it ended is lost,
+//   and the sign-in says so before they speak again (`talking`).
 
 /**
  * Where what they said stands: kept, on its way, not kept yet and tried
@@ -43,7 +67,88 @@ interface Kept {
   gone: boolean;
   /** They agreed to the read-back, and core is to be told once it is kept. */
   approving: boolean;
+  /** Where it waits in this tab while it is set aside (api.ts `draftName`). */
+  draft: string;
+  /** Their session ended: nothing more is sent until the link opens again. */
+  aside: boolean;
+  /** What is typed in the box and not sent. */
+  typed: string;
 }
+
+/** What waits in this tab while their session is ended, until the link opens again. */
+const asideSchema = z.object({
+  version: z.int().min(0),
+  /** What isn't kept yet; none when all of it is. */
+  progress: interviewProgressSchema.nullable(),
+  typed: z.string(),
+  approving: z.boolean(),
+  /** They were talking: a stretch said as it ended is lost. */
+  talking: z.boolean(),
+});
+type Aside = z.output<typeof asideSchema>;
+
+/** What waits under `draft`, if anything. */
+const asideAt = (draft: string): Aside | null => {
+  try {
+    const raw = sessionStorage.getItem(draft);
+    if (raw === null) {
+      return null;
+    }
+    const parsed = asideSchema.safeParse(JSON.parse(raw));
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+};
+
+/** Whether something waits under `draft`, and whether they were talking as it ended. */
+export const waitingAside = (draft: string): { talking: boolean } | null => {
+  const aside = asideAt(draft);
+  return aside === null ? null : { talking: aside.talking };
+};
+
+/** Forgets what waited under `draft`: core answered a save of it, or it is deleted. */
+const forgetAside = (draft: string): void => {
+  try {
+    sessionStorage.removeItem(draft);
+  } catch {
+    // Nothing was kept.
+  }
+};
+
+/**
+ * Writes down what waits while set aside: also when all of it is kept, so
+ * the page tells them they are signing in again.
+ */
+const keepAside = (mine: Kept): void => {
+  if (!mine.aside) {
+    return;
+  }
+  const aside: Aside = {
+    version: mine.version,
+    progress: mine.dirty ? mine.progress : null,
+    typed: mine.typed,
+    approving: mine.approving,
+    talking: mine.progress.mode === "talk",
+  };
+  try {
+    sessionStorage.setItem(mine.draft, JSON.stringify(aside));
+  } catch {
+    // Storage refused (a private window may): it lasts while this page does.
+  }
+};
+
+/**
+ * Core answered: what waited in this tab is forgotten, or, while their
+ * session is ended, written down again as it now stands.
+ */
+const answeredAside = (mine: Kept): void => {
+  if (mine.aside) {
+    keepAside(mine);
+  } else {
+    forgetAside(mine.draft);
+  }
+};
 
 /** How soon after a change it is kept: changes close together are kept together. */
 const keepAfterMs = 400;
@@ -101,6 +206,12 @@ const saveOnce = async (mine: Kept): Promise<void> => {
     return;
   }
   if (isRefused(answer)) {
+    if (mine.aside) {
+      // Their session ended: it waits for them to sign in again.
+      mine.dirty = true;
+      keepAside(mine);
+      return;
+    }
     const passing =
       answer.status === 0 || answer.status === 429 || answer.status >= 500;
     if (passing) {
@@ -116,6 +227,20 @@ const saveOnce = async (mine: Kept): Promise<void> => {
   }
   mine.failed = 0;
   mine.version = answer.version;
+  if (mine.aside) {
+    // Landed just before their session ended: what waits goes on from it,
+    // and is only what changed since; a copy kept elsewhere takes its place.
+    if (answer.saved) {
+      mine.dirty = mine.progress !== sent;
+    } else if (answer.progress !== null) {
+      mine.progress = answer.progress;
+      mine.dirty = false;
+    }
+    keepAside(mine);
+    return;
+  }
+  // Core answered for what waited in this tab, if anything did.
+  forgetAside(mine.draft);
   if (answer.saved) {
     if (!mine.dirty) {
       setSaveState({ state: "saved" });
@@ -154,6 +279,11 @@ const approveOnce = async (mine: Kept): Promise<void> => {
   if (kept !== mine || mine.gone) {
     return;
   }
+  if (isRefused(answer) && mine.aside) {
+    // Their session ended: core is told once they are back.
+    keepAside(mine);
+    return;
+  }
   if (isRefused(answer)) {
     const passing =
       answer.status === 0 || answer.status === 429 || answer.status >= 500;
@@ -172,6 +302,7 @@ const approveOnce = async (mine: Kept): Promise<void> => {
   }
   mine.approving = false;
   mine.failed = 0;
+  answeredAside(mine);
   if (answer.approved) {
     setSaveState({ state: "saved" });
     return;
@@ -181,6 +312,7 @@ const approveOnce = async (mine: Kept): Promise<void> => {
   mine.version = answer.version;
   if (answer.progress !== null) {
     mine.progress = answer.progress;
+    answeredAside(mine);
     setSaveState({ state: "elsewhere" });
     for (const taker of takers) {
       taker();
@@ -191,7 +323,7 @@ const approveOnce = async (mine: Kept): Promise<void> => {
 /** Saves now, one at a time; a change made meanwhile is saved right after. */
 const save = async (mine: Kept): Promise<void> => {
   window.clearTimeout(mine.waiting);
-  if (mine.gone) {
+  if (mine.gone || mine.aside) {
     return;
   }
   if (mine.saving) {
@@ -206,6 +338,9 @@ const save = async (mine: Kept): Promise<void> => {
       : saveOnce(mine));
   } finally {
     mine.saving = false;
+  }
+  if (mine.aside) {
+    return;
   }
   if (
     kept === mine &&
@@ -248,7 +383,12 @@ export const approveWhenKept = (): void => {
 const onPageHide = (): void => {
   const mine = kept;
   // A save on its way may be cut off with the page: it goes again, kept alive.
-  if (mine === null || mine.gone || !(mine.dirty || mine.saving)) {
+  if (
+    mine === null ||
+    mine.gone ||
+    mine.aside ||
+    !(mine.dirty || mine.saving)
+  ) {
     return;
   }
   mine.dirty = false;
@@ -263,35 +403,72 @@ const onPageHide = (): void => {
   );
 };
 
-/** The interview core holds for this link, from now on held here. */
+/**
+ * The interview core holds for this link, from now on held here; or, back
+ * after their session ended, what waited in this tab under `draft`, kept
+ * at once as of the version it went on from. Back on the link after
+ * stopping, either carries on where it was.
+ */
 export const holdInterview = ({
   secret,
+  draft,
   version,
   progress,
 }: {
   secret: string;
+  draft: string;
   version: number;
   progress: InterviewProgress | null;
 }): void => {
   if (kept !== null) {
     window.clearTimeout(kept.waiting);
   }
-  kept = {
+  const aside = asideAt(draft);
+  const unsaved = aside?.progress ?? null;
+  const mine: Kept = {
     secret,
-    version,
-    progress: progress ?? freshProgress,
+    version: unsaved === null ? version : (aside?.version ?? version),
+    progress: resumed(unsaved ?? progress ?? freshProgress),
     saving: false,
     again: false,
-    dirty: false,
+    dirty: unsaved !== null,
     waiting: undefined,
     failed: 0,
     gone: false,
-    approving: false,
+    approving: aside?.approving ?? false,
+    draft,
+    aside: false,
+    typed: aside?.typed ?? "",
   };
+  kept = mine;
   saveState = { state: "saved" };
   window.removeEventListener("pagehide", onPageHide);
   window.addEventListener("pagehide", onPageHide);
   notify();
+  if (mine.dirty || mine.approving) {
+    void save(mine);
+  } else if (aside !== null) {
+    // Nothing waited to be kept: what was typed is in the box again.
+    forgetAside(draft);
+  }
+};
+
+/**
+ * Their session ended: nothing more is sent, and whatever isn't kept yet
+ * waits in this tab until the link opens again (`holdInterview`). A save
+ * on its way may still have landed; it waits all the same, and is kept
+ * again as of what core answered.
+ */
+export const setAside = (): void => {
+  const mine = kept;
+  if (mine === null || mine.gone || mine.aside) {
+    return;
+  }
+  window.clearTimeout(mine.waiting);
+  window.clearTimeout(showingSaving);
+  mine.aside = true;
+  mine.dirty ||= mine.saving || mine.again;
+  keepAside(mine);
 };
 
 /** The page lets the interview go: nothing more is saved from it. */
@@ -319,6 +496,11 @@ export const update = (
   mine.progress = next;
   mine.dirty = true;
   notify();
+  if (mine.aside) {
+    // What they said as the conversation stopped waits with the rest.
+    keepAside(mine);
+    return;
+  }
   window.clearTimeout(mine.waiting);
   mine.waiting = window.setTimeout(() => {
     void save(mine);
@@ -337,8 +519,20 @@ export const forgetInterview = (): void => {
   if (kept !== null) {
     kept.gone = true;
     window.clearTimeout(kept.waiting);
+    forgetAside(kept.draft);
   }
   window.clearTimeout(showingSaving);
+};
+
+/** What is typed in the box and not sent: it outlasts the box, and waits with the rest while set aside. */
+export const setTyped = (text: string): void => {
+  const mine = kept;
+  if (mine === null || mine.typed === text) {
+    return;
+  }
+  mine.typed = text;
+  notify();
+  keepAside(mine);
 };
 
 /** Tells `taker` whenever the copy kept elsewhere takes this one's place. */
@@ -356,6 +550,10 @@ export const useProgress = (): InterviewProgress =>
 /** Where saving stands. */
 export const useSaveState = (): SaveState =>
   useSyncExternalStore(subscribe, () => saveState);
+
+/** What is typed in the box and not sent. */
+export const useTyped = (): string =>
+  useSyncExternalStore(subscribe, () => kept?.typed ?? "");
 
 /** Who holds the interview: whoever they chose, Stephen while nobody was chosen. */
 export const useInterviewer = (): Interviewer =>

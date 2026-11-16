@@ -107,6 +107,36 @@ const withdrawnSchema = z.object({
   removing: z.literal(true).optional(),
 });
 
+/** Told when one of the interview's calls finds that its session ended. */
+const endings = new Set<() => void>();
+
+/**
+ * Tells `listener` whenever a call of the interview's finds its session
+ * ended (GRA-1943): the company's gate opened, they signed out elsewhere,
+ * or it expired. Gives back how to stop telling it.
+ */
+export const onSessionEnded = (listener: () => void): (() => void) => {
+  endings.add(listener);
+  return () => {
+    endings.delete(listener);
+  };
+};
+
+/**
+ * Looks at the status of one of the interview's answers: on these routes
+ * core answers 401 only when no session of the company's sign-in names
+ * whoever asks (`interview.sign_in`), and that is told at once, before
+ * anything else is done with the answer.
+ */
+export const noteSession = (status: number): void => {
+  if (status !== 401) {
+    return;
+  }
+  for (const listener of endings) {
+    listener();
+  }
+};
+
 /** How long a call to keep or open may take. */
 const callTimeoutMs = 30_000;
 
@@ -159,6 +189,7 @@ const posted = async <T>(
   } catch {
     return unreachable();
   }
+  noteSession(response.status);
   if (!response.ok && response.status !== 409) {
     return await refusalOf(response);
   }
@@ -280,6 +311,7 @@ export const askTurn = async (
     body: JSON.stringify(request),
     signal,
   });
+  noteSession(response.status);
   if (!response.ok || response.body === null) {
     return { failed: true, status: response.status };
   }
@@ -328,6 +360,7 @@ export const askStory = async (
       body: JSON.stringify(request),
       signal: AbortSignal.timeout(storyTimeoutMs),
     });
+    noteSession(response.status);
     return response.ok ? storyOf(await response.json(), request.lines) : null;
   } catch {
     return null;
@@ -383,7 +416,7 @@ const linkName = async (secret: string): Promise<string> => {
   return `grasp.interview.${hex}`;
 };
 
-/** Where what they typed and did not send is kept, per link. */
+/** Where what isn't kept yet waits in this tab, per link, while their session is ended (kept.ts). */
 export const draftName = async (secret: string): Promise<string> =>
   `${await linkName(secret)}.draft`;
 
@@ -416,6 +449,7 @@ export const hearRecording = async ({
       body: form,
       signal: AbortSignal.timeout(hearTimeoutMs),
     });
+    noteSession(response.status);
     if (!response.ok) {
       return { reason: response.status === 429 ? "limited" : "failed" };
     }

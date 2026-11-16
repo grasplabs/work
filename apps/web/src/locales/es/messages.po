@@ -6867,6 +6867,10 @@ msgstr "Si continúa, cambia de proveedor."
 msgid "If the rest of the month goes like the days so far"
 msgstr "Si el resto del mes va como los días hasta ahora"
 
+#: src/routes/interview.tsx
+msgid "If you were saying something as it ended, it wasn't heard. Say it again once you're back."
+msgstr "Si estabas diciendo algo cuando terminó, no se oyó. Vuelve a decirlo en cuanto regreses."
+
 #: src/apps/app-data.tsx
 msgid "Import"
 msgstr "Importar"
@@ -12431,6 +12435,10 @@ msgstr "Iniciar sesión"
 msgid "Sign in again"
 msgstr "Volver a iniciar sesión"
 
+#: src/routes/interview.tsx
+msgid "Sign in again to go on"
+msgstr "Vuelve a iniciar sesión para continuar"
+
 #: src/pages/frame-failure.tsx
 msgid "Sign in again to go on."
 msgstr "Vuelve a iniciar sesión para continuar."
@@ -16913,6 +16921,10 @@ msgstr "Tu ejecución de la versión {version} terminó: {status}"
 #: src/pages/frame-failure.tsx
 msgid "Your session has ended"
 msgstr "Tu sesión ha terminado"
+
+#: src/routes/interview.tsx
+msgid "Your sign-in ended. Sign in again with your work account to go on where you were. What isn't saved yet is kept in this window until then."
+msgstr "Tu sesión terminó. Vuelve a iniciar sesión con tu cuenta de trabajo para seguir donde estabas. Lo que aún no se ha guardado se conserva en esta ventana hasta entonces."
 
 #: src/brain/skills-page.tsx
 msgid "Your skills"
