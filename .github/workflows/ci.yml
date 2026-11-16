@@ -230,12 +230,11 @@ jobs:
       # (scripts/test-durations.ts): of the brain's two shards, balanced on
       # paper, one ran 161 s of files and the other 134 s on durations a
       # month old (November 2026).
-      # A failed test is tried once more: a third of pull request runs
-      # failed, most often on a few flaky files, each a whole re-run of CI
-      # (October 2026). The flaky
-      # reporter (scripts/flaky-reporter.ts) names every test that passed
-      # only when tried again, as a warning and in the step summary, so it
-      # is fixed, not retried for ever.
+      # A failed test is never tried again: one that passes only on a second
+      # try has a bug, in the test or the code, to fix. With one retry, 24
+      # of 100 merge queue runs still failed and many more tests passed
+      # only when tried again, and the logs never said why their first try
+      # failed (November 2026).
       # Vitest's default runs a worker per CPU but one, which left a third
       # of the runner's CPU idle; a worker per CPU measured about 6% faster.
       # Even then the CPUs were idle a third of the time, tests waiting on
@@ -276,7 +275,7 @@ jobs:
           node scripts/memory-log.ts &
           sampler=$!
           trap 'kill "$sampler"' EXIT
-          vp test --shard=${{ matrix.shard }}/${{ strategy.job-total }} --maxWorkers=150% --retry=1 --reporter=default --reporter=github-actions --reporter=./scripts/stall-reporter.ts --reporter=./scripts/flaky-reporter.ts
+          vp test --shard=${{ matrix.shard }}/${{ strategy.job-total }} --maxWorkers=150% --reporter=default --reporter=github-actions --reporter=./scripts/stall-reporter.ts
         timeout-minutes: 10
         env:
           # Below the step's timeout, so the reporter says what still runs
@@ -650,10 +649,8 @@ jobs:
           path: ${{ runner.temp }}/e2e-results.json
           if-no-files-found: ignore
           retention-days: 14
-      # A failing test is retried with a trace (playwright.config.ts): keep it,
-      # for a test that passed only when retried too, which passes the job:
-      # kept only on failure, a flaky test's trace was lost with the runner.
-      - if: always()
+      # A failing test keeps its trace (playwright.config.ts).
+      - if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           # One per part: a run's artifact names are unique.

@@ -3,7 +3,6 @@ import { once } from "node:events";
 import { readFileSync } from "node:fs";
 import { request as httpRequest } from "node:http";
 import { text } from "node:stream/consumers";
-import { setTimeout as sleep } from "node:timers/promises";
 
 import { mapConcurrently } from "@grasp-os/shared/release";
 import type { Role } from "@grasp-os/shared/roles";
@@ -28,8 +27,7 @@ import type { TestSource } from "../apps/core/test/app-definitions.ts";
  * the local stack is the fake IdP (apps/core/test/idp-worker.ts), and the
  * IdP sends them back signed in. The configured admin then gives each the
  * role the tests need, through the members API. Everyone is signed in up
- * front, before any test runs, and again for a retry, before it runs;
- * tests only look theirs up.
+ * front, before any test runs; tests only look theirs up.
  */
 import { localAdmin, localStaff } from "../apps/core/test/sign-in-config.ts";
 import { expectModelRequestsHere } from "./model-fake.ts";
@@ -79,71 +77,11 @@ const locationOf = (response: Response, step: string): string => {
 
 /**
  * What wrangler's dev server says when it drops a request between its
- * proxy and a Worker (core, or the fake IdP behind core's callback). The
- * request never reached the code under test, so it's tried again. Core
+ * proxy and a Worker (core, or the fake IdP behind core's callback): the
+ * request never reached the code under test, so the error says so. Core
  * passes it on in its error redirect's query, where spaces are `+`.
  */
 const droppedByDevServer = /Network[ +]connection[ +]lost/u;
-
-/**
- * How many times a sign-in, or a connection to `/rpc`, that got no answer
- * is tried in all. Each try after the first waits until core answers
- * again (`coreAnswering`).
- */
-const attemptsWhenDropped = 3;
-
-/**
- * How long a retry waits for core to answer again: miniflare restarts a
- * crashed runtime on the same ports in a few seconds. Tried again at once,
- * every try fell in the same outage, and so did the test's next attempt
- * (merge queue, November 2026).
- */
-const coreBackWithinMs = 30_000;
-
-/** How often core's health check is asked while it doesn't answer. */
-const coreAskedEveryMs = 250;
-
-/**
- * Resolves once core answers its health check (`/health`, which the stack
- * serves without the router's secret) through the dev server again; throws,
- * with what it last met and `why` the retry was needed, when it hasn't
- * within `coreBackWithinMs`. A dropped request is tried again only after
- * this, so the retry doesn't fall in the same outage.
- */
-const coreAnswering = async (
-  why: unknown,
-  deadline: AbortSignal = AbortSignal.timeout(coreBackWithinMs),
-  lastMet = "no answer yet"
-): Promise<void> => {
-  let met = lastMet;
-  try {
-    const response = await fetch(new URL("/health", origin), {
-      signal: deadline,
-    });
-    if (response.ok) {
-      return;
-    }
-    const said = await response.text();
-    met = `${response.status}: ${said.trim()}`;
-  } catch (error) {
-    // The deadline's own abort says nothing of core: what came before does.
-    if (!deadline.aborted) {
-      met = String(error);
-    }
-  }
-  if (deadline.aborted) {
-    throw new Error(
-      `Core did not answer /health within ${coreBackWithinMs / 1000} s (last: ${met})`,
-      { cause: why }
-    );
-  }
-  try {
-    await sleep(coreAskedEveryMs, undefined, { signal: deadline });
-  } catch {
-    // The deadline passed while waiting: asked once more, which fails.
-  }
-  await coreAnswering(why, deadline, met);
-};
 
 /**
  * `response`, unless the dev server dropped the request it answers: then
@@ -161,10 +99,17 @@ const unlessDropped = async (
   return response;
 };
 
-/** One attempt at `signInAs`. */
-const signInOnce = async (
+/**
+ * Signs in as `email` the way a browser does: core starts the sign-in, the
+ * IdP (told who by `loginHint`) sends the browser back, and core's callback
+ * sets the session cookie. Returns that cookie's value; throws, with where
+ * core sent the browser, when core refuses the sign-in, and says so when
+ * the dev server dropped a request (`unlessDropped`). Never tried again: a
+ * dropped request is a bug in the stack, to fix, not to hide.
+ */
+export const signInAs = async (
   email: string,
-  providerId: "microsoft" | "grasp-staff"
+  providerId: "microsoft" | "grasp-staff" = "microsoft"
 ): Promise<string> => {
   const startedAt = await fetch(new URL("/api/auth/sign-in/sso", origin), {
     method: "POST",
@@ -208,60 +153,6 @@ const signInOnce = async (
   }
   return decodeURIComponent(session.slice(sessionCookie.length + 1));
 };
-
-/**
- * What Node's fetch (undici) throws when a request got no answer: no
- * response at all (a connection refused or reset), or a response whose
- * body was cut off. Other `TypeError`s it throws, such as a URL it can't
- * parse, are not.
- */
-const fetchNetworkErrors = new Set(["fetch failed", "terminated"]);
-
-/**
- * Whether a sign-in failed for want of an answer: the dev server dropped a
- * request (`droppedByDevServer`), or fetch met a network error
- * (`fetchNetworkErrors`). Whatever core answers, a refusal among them, is
- * not.
- */
-const unanswered = (error: unknown): boolean =>
-  (error instanceof Error && droppedByDevServer.test(error.message)) ||
-  (error instanceof TypeError && fetchNetworkErrors.has(error.message));
-
-/**
- * `signInOnce`, tried again while it gets no answer (`unanswered`),
- * `attemptsLeft` times in all, each time once core answers again. A
- * sign-in core refuses fails at once.
- */
-const signInTrying = async (
-  email: string,
-  providerId: "microsoft" | "grasp-staff",
-  attemptsLeft: number
-): Promise<string> => {
-  try {
-    return await signInOnce(email, providerId);
-  } catch (error) {
-    if (!unanswered(error) || attemptsLeft <= 1) {
-      throw error;
-    }
-    await coreAnswering(error);
-    return await signInTrying(email, providerId, attemptsLeft - 1);
-  }
-};
-
-/**
- * Signs in as `email` the way a browser does: core starts the sign-in, the
- * IdP (told who by `loginHint`) sends the browser back, and core's callback
- * sets the session cookie. Returns that cookie's value; throws, with where
- * core sent the browser, when core refuses the sign-in. A sign-in that got
- * no answer (`unanswered`) is tried again once core answers: the serial
- * journeys start on a fresh stack with no retries of their own, and there a
- * single dropped request failed the whole part.
- */
-export const signInAs = async (
-  email: string,
-  providerId: "microsoft" | "grasp-staff" = "microsoft"
-): Promise<string> =>
-  await signInTrying(email, providerId, attemptsWhenDropped);
 
 export interface Person {
   userId: string;
@@ -379,15 +270,13 @@ const upgradeAnswer = async (
 };
 
 /**
- * A connection to `/rpc` that has opened. One that fails before it opens is
- * tried again, `attemptsLeft` times in all, once core answers again, while
- * that's the dev server dropping it or nobody answering for a moment:
- * nothing has been sent on it yet. An upgrade core refuses (403) fails at once, with core's answer;
- * the last attempt fails with what it met.
+ * A connection to `/rpc` that has opened. One that fails before it opens
+ * fails the test, with what core answers when asked again (an upgrade it
+ * refuses says 403 and why) or why nobody answered: never tried again, as a
+ * dropped connection is a bug in the stack, to fix, not to hide.
  */
 const openRpcSocket = async (
-  person: Pick<Person, "cookie">,
-  attemptsLeft: number = attemptsWhenDropped
+  person: Pick<Person, "cookie">
 ): Promise<WebSocket> => {
   const socket = rpcSocket(person);
   const settled = async (event: string, opened: boolean) => {
@@ -407,27 +296,16 @@ const openRpcSocket = async (
   try {
     answer = await upgradeAnswer(person);
   } catch (error) {
-    // Nobody listening, or the connection reset: core down, or the
-    // moment it restarts. Tried again; the last attempt says which.
-    if (attemptsLeft <= 1) {
-      // Node tries each of localhost's addresses: one error for each.
-      const why =
-        error instanceof AggregateError
-          ? error.errors.map(String).join("; ")
-          : String(error);
-      throw new Error(`${failed}: ${why}`, { cause: error });
-    }
-    await coreAnswering(error);
-    return await openRpcSocket(person, attemptsLeft - 1);
+    // Node tries each of localhost's addresses: one error for each.
+    const why =
+      error instanceof AggregateError
+        ? error.errors.map(String).join("; ")
+        : String(error);
+    throw new Error(`${failed}: ${why}`, { cause: error });
   }
-  const passed = answer.status === 101;
-  const dropped = droppedByDevServer.test(answer.said);
-  const said = `${failed}; asked again, it answers ${answer.status}: ${answer.said.trim()}`;
-  if ((!passed && !dropped) || attemptsLeft <= 1) {
-    throw new Error(said);
-  }
-  await coreAnswering(said);
-  return await openRpcSocket(person, attemptsLeft - 1);
+  throw new Error(
+    `${failed}; asked again, it answers ${answer.status}: ${answer.said.trim()}`
+  );
 };
 
 /**

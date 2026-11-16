@@ -149,39 +149,31 @@ const parallelProjects: Project[] = [
 const serialProjects = (before: string[]): Project[] => [
   {
     name: "onboarding-flow",
-    use: { ...devices["Desktop Chrome"], trace: "retain-on-failure" },
+    use: devices["Desktop Chrome"],
     testMatch: onboardingFlowTests,
     dependencies: before,
     workers: 1,
   },
   {
     name: "onboarding",
-    // Never tried again (below), so a trace is kept of the run that failed.
-    use: { ...devices["Desktop Chrome"], trace: "retain-on-failure" },
+    use: devices["Desktop Chrome"],
     testMatch: onboardingTests,
     dependencies: ["onboarding-flow"],
     workers: 1,
-    // Not tried again: once a link is out the team is told, and nothing
-    // undoes that (the agreements stay as they were), so a second try
-    // would only fail on what the first one did. A failure shows as itself.
-    retries: 0,
   },
   {
     name: "interview",
-    use: { ...devices["Desktop Chrome"], trace: "retain-on-failure" },
+    use: devices["Desktop Chrome"],
     testMatch: interviewTests,
     dependencies: ["onboarding"],
     workers: 1,
   },
   {
     name: "journeys",
-    // Never tried again: a flaky journey shows as itself, with the trace
-    // of the run that failed.
-    use: { ...devices["Desktop Chrome"], trace: "retain-on-failure" },
+    use: devices["Desktop Chrome"],
     testMatch: journeyTests,
     dependencies: ["interview"],
     workers: 1,
-    retries: 0,
   },
 ];
 
@@ -226,21 +218,26 @@ const e2eProjects = (): Project[] => {
 export default defineConfig({
   testDir: "e2e",
   testMatch: "**/*.e2e.ts",
-  // Twice the longest test, so a test that hangs fails and is tried again
-  // soon. In 40 merge queue runs (November 2026, about 4,600 tests run)
+  // Twice the longest test, so a test that hangs fails soon. In 40 merge queue runs (November 2026, about 4,600 tests run)
   // none passed after more than 46 s, the onboarding's longest; a hang
-  // spent the 180 s this was before every retry. A test that waits longer
+  // spent the 180 s this was before. A test that waits longer
   // on purpose says so (`test.setTimeout`), and a file's sign-ins have
   // their own time (e2e/contexts.ts).
   timeout: 100_000,
   forbidOnly: ci,
-  retries: ci ? 2 : 0,
+  // Never tried again: a test that passes only on a second try has a bug,
+  // in the test or the code, to fix. Retries hid them: 24 of 100 merge
+  // queue runs failed, and many more passed only when tried again
+  // (November 2026).
+  retries: 0,
   workers: workersPerStack,
   globalSetup: "./e2e/setup.ts",
   reporter: ci ? "github" : "list",
   use: {
     baseURL: origin,
-    trace: "on-first-retry",
+    // The failed test's own trace: with no retry, there's no second try to
+    // record.
+    trace: "retain-on-failure",
   },
   projects: e2eProjects(),
   // Never a server already running: on this checkout's ports (e2e/stack.ts)

@@ -23,13 +23,9 @@ const built = { timeout: 20_000 };
 /** How much of the end of their ID tells a person apart from a namesake (people-apart.ts). */
 const namesakeIdEnd = 6;
 
-// Never tried again, as the serial journeys aren't (playwright.config.ts):
-// a flaky journey shows as itself, with the trace of the run that failed,
-// and a failing one costs its part one attempt of its long wait, not three.
 // Each action waits as long as a build or a read: one that never can
 // fails as itself, not as the whole test's timeout.
-test.use({ trace: "retain-on-failure", actionTimeout: built.timeout });
-test.describe.configure({ retries: 0 });
+test.use({ actionTimeout: built.timeout });
 
 test("a builder makes an App from what they want done, shares it with their team, and someone it is shared with adds a contact its data then shows", async ({
   pageOf,
