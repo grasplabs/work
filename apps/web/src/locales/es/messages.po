@@ -1987,6 +1987,10 @@ msgstr "Añadir la fuente"
 msgid "Add the trigger"
 msgstr "Añadir el disparador"
 
+#: src/agents/agent-apps-card.tsx
+msgid "Add this schedule"
+msgstr "Añadir esta programación"
+
 #: src/projects/file-item-dialog.tsx
 msgid "Add to {projectName}"
 msgstr "Añadir a {projectName}"
@@ -1998,6 +2002,10 @@ msgstr "Añadir webhook"
 #: src/workflows/binding-approvals.tsx
 msgid "Add who answers"
 msgstr "Añadir quién responde"
+
+#: src/agents/agent-apps-card.tsx
+msgid "Added"
+msgstr "Añadido"
 
 #: src/apps/draft-changes.tsx
 msgctxt "a file a change adds"
@@ -2874,6 +2882,10 @@ msgstr "Pedir a un administrador"
 msgid "Ask anything, or describe a process"
 msgstr "Pregunta lo que quieras o describe un proceso"
 
+#: src/agents/agent-apps-card.tsx
+msgid "Ask for {app}"
+msgstr "Pedir {app}"
+
 #: src/chat/chat-subject.ts
 msgid "Ask for a change"
 msgstr "Pide un cambio"
@@ -2886,6 +2898,7 @@ msgstr "Pedir acceso"
 msgid "Ask for access for this App"
 msgstr "Pedir acceso para esta aplicación"
 
+#: src/agents/agent-apps-card.tsx
 #: src/onboarding/connect-steps.tsx
 msgid "Ask for it"
 msgstr "Solicitar"
@@ -2947,6 +2960,7 @@ msgstr "Solicitado por {requester} el {date}"
 msgid "Asked by a former member"
 msgstr "Solicitado por un antiguo miembro"
 
+#: src/agents/agent-apps-card.tsx
 #: src/apps/app-access-requests.tsx
 #: src/onboarding/connect-steps.tsx
 msgid "Asked for"
@@ -5929,6 +5943,10 @@ msgstr "Para las solicitudes de Stephen, sobre «{label}» ({why}), haz esto: {p
 msgid "For the {role}"
 msgstr "Para: {role}"
 
+#: src/agents/agent-apps-card.tsx
+msgid "For the agent {agentName}."
+msgstr "Para el agente {agentName}."
+
 #: src/agents/new-agent.tsx
 msgid "For the company"
 msgstr "Para la empresa"
@@ -7429,6 +7447,10 @@ msgstr "Sus instrucciones"
 #: src/agents/agent-apps-card.tsx
 msgid "Its instructions name apps your company doesn't offer: {missing}."
 msgstr "Sus instrucciones nombran apps que tu empresa no ofrece: {missing}."
+
+#: src/agents/agent-apps-card.tsx
+msgid "Its instructions say it works on its own: {cron} · {opening}"
+msgstr "Según sus instrucciones, trabaja por su cuenta: {cron} · {opening}"
 
 #: src/settings/ai-providers.tsx
 msgid "Its key is deleted, and calls stop using it at once. Models of this provider are no longer used, even as a fallback."

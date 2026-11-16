@@ -30,6 +30,8 @@ import { useCoreAction } from "../use-core-action.ts";
 export interface AgentAppsShown {
   apps: readonly AgentApp[] | undefined;
   offered: readonly Offered[];
+  /** Who looks: a schedule it proposes works for them, once they make it. */
+  userId?: string;
 }
 
 /**
@@ -53,17 +55,109 @@ type Change = (action: (session: Session) => Promise<unknown>) => Promise<void>;
 /** An app the company offers, as the catalog has it. */
 type Offered = Pick<CatalogEntry, "source" | "id" | "name">;
 
+/** Apps its instructions name that the company doesn't offer, each to ask an admin for. */
+const MissingApps = ({
+  missing,
+  agent,
+  change,
+  can,
+}: {
+  missing: readonly string[];
+  agent: Agent;
+  change: Change;
+  can: boolean;
+}) => {
+  const { t } = useLingui();
+  const [asked, setAsked] = useState<readonly string[]>([]);
+  const { name: agentName } = agent;
+  return missing.map((app) => (
+    <span className="flex items-center justify-between gap-3" key={app}>
+      <span>{app}</span>
+      {asked.includes(app) ? (
+        <span className="text-muted-foreground">{t`Asked for`}</span>
+      ) : (
+        <Button
+          aria-label={t`Ask for ${app}`}
+          disabled={!can}
+          onClick={() => {
+            void change(async (session) => {
+              await session.connections.requestApp({
+                name: app,
+                why: t`For the agent ${agentName}.`,
+              });
+              setAsked((before) => [...before, app]);
+            });
+          }}
+          size="sm"
+          variant="outline"
+        >
+          <Trans>Ask for it</Trans>
+        </Button>
+      )}
+    </span>
+  ));
+};
+
+/** When its instructions say it works on its own: the schedule proposed, made only on a press. */
+const ProposedSchedule = ({
+  schedule,
+  agent,
+  change,
+  can,
+  userId,
+}: {
+  schedule: { cron: string; opening: string };
+  agent: Agent;
+  change: Change;
+  can: boolean;
+  userId: string;
+}) => {
+  const { t } = useLingui();
+  const [made, setMade] = useState(false);
+  const { cron, opening } = schedule;
+  return (
+    <span className="flex items-center justify-between gap-3">
+      <span>
+        {t`Its instructions say it works on its own: ${cron} · ${opening}`}
+      </span>
+      {made ? (
+        <span className="text-muted-foreground">{t`Added`}</span>
+      ) : (
+        <Button
+          disabled={!can}
+          onClick={() => {
+            void change(async (session) => {
+              await session.connections.makeAgentWake(agent.id, {
+                cron,
+                opening,
+                personId: userId,
+              });
+              setMade(true);
+            });
+          }}
+          size="sm"
+          variant="outline"
+        >
+          <Trans>Add this schedule</Trans>
+        </Button>
+      )}
+    </span>
+  );
+};
+
 /** What working the apps out said, under the card. */
 const WorkedOut = ({
   worked,
   agent,
   change,
   can,
+  userId,
 }: {
   worked: AgentAppsWorkedOut;
   agent: Agent;
   change: Change;
   can: boolean;
+  userId: string | undefined;
 }) => {
   const { t, i18n } = useLingui();
   const { name } = agent;
@@ -86,6 +180,21 @@ const WorkedOut = ({
         <span className="text-muted-foreground">
           {t`Its instructions name apps your company doesn't offer: ${missing}.`}
         </span>
+      )}
+      <MissingApps
+        agent={agent}
+        can={can}
+        change={change}
+        missing={worked.missing}
+      />
+      {worked.schedule === undefined || userId === undefined ? null : (
+        <ProposedSchedule
+          agent={agent}
+          can={can}
+          change={change}
+          schedule={worked.schedule}
+          userId={userId}
+        />
       )}
       {worked.suggested.map((toolClass) => {
         const kind = i18n._(classNames[toolClass]);
@@ -128,6 +237,7 @@ export const AgentApps = ({
   editable,
   can,
   change,
+  userId,
 }: {
   agent: Agent;
   /** Its apps; undefined where core didn't say. */
@@ -139,6 +249,7 @@ export const AgentApps = ({
   /** Whether they may now: not while a change is on its way to core. */
   can: boolean;
   change: Change;
+  userId?: string | undefined;
 }) => {
   const { t } = useLingui();
   const whereFrom = (each: AgentApp): string => {
@@ -272,7 +383,13 @@ export const AgentApps = ({
         </li>
       ) : null}
       {worked === undefined ? null : (
-        <WorkedOut agent={agent} can={can} change={change} worked={worked} />
+        <WorkedOut
+          agent={agent}
+          can={can}
+          change={change}
+          userId={userId}
+          worked={worked}
+        />
       )}
       {failure === undefined ? null : (
         <li className="text-destructive border-t px-5 py-4 text-sm">
@@ -312,6 +429,7 @@ export const AgentAppsPanel = ({
           change={change}
           editable={editable}
           offered={apps?.offered ?? []}
+          userId={apps?.userId}
         />
       </ul>
     </Card>

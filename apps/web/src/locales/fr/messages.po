@@ -1987,6 +1987,10 @@ msgstr "Ajouter la source"
 msgid "Add the trigger"
 msgstr "Ajouter le déclencheur"
 
+#: src/agents/agent-apps-card.tsx
+msgid "Add this schedule"
+msgstr "Ajouter ce planning"
+
 #: src/projects/file-item-dialog.tsx
 msgid "Add to {projectName}"
 msgstr "Ajouter à {projectName}"
@@ -1998,6 +2002,10 @@ msgstr "Ajouter un webhook"
 #: src/workflows/binding-approvals.tsx
 msgid "Add who answers"
 msgstr "Ajouter qui répond"
+
+#: src/agents/agent-apps-card.tsx
+msgid "Added"
+msgstr "Ajouté"
 
 #: src/apps/draft-changes.tsx
 msgctxt "a file a change adds"
@@ -2874,6 +2882,10 @@ msgstr "Demander à un administrateur"
 msgid "Ask anything, or describe a process"
 msgstr "Posez une question ou décrivez un processus"
 
+#: src/agents/agent-apps-card.tsx
+msgid "Ask for {app}"
+msgstr "Demander {app}"
+
 #: src/chat/chat-subject.ts
 msgid "Ask for a change"
 msgstr "Demander une modification"
@@ -2886,6 +2898,7 @@ msgstr "Demander un accès"
 msgid "Ask for access for this App"
 msgstr "Demander un accès pour cette application"
 
+#: src/agents/agent-apps-card.tsx
 #: src/onboarding/connect-steps.tsx
 msgid "Ask for it"
 msgstr "Demander"
@@ -2947,6 +2960,7 @@ msgstr "Demandé par {requester} le {date}"
 msgid "Asked by a former member"
 msgstr "Demandée par un ancien membre"
 
+#: src/agents/agent-apps-card.tsx
 #: src/apps/app-access-requests.tsx
 #: src/onboarding/connect-steps.tsx
 msgid "Asked for"
@@ -5929,6 +5943,10 @@ msgstr "Pour les demandes de Stephen, à propos de « {label} » ({why}), fais c
 msgid "For the {role}"
 msgstr "Pour : {role}"
 
+#: src/agents/agent-apps-card.tsx
+msgid "For the agent {agentName}."
+msgstr "Pour l’agent {agentName}."
+
 #: src/agents/new-agent.tsx
 msgid "For the company"
 msgstr "Pour l'entreprise"
@@ -7429,6 +7447,10 @@ msgstr "Ses instructions"
 #: src/agents/agent-apps-card.tsx
 msgid "Its instructions name apps your company doesn't offer: {missing}."
 msgstr "Ses instructions citent des apps que votre entreprise ne propose pas : {missing}."
+
+#: src/agents/agent-apps-card.tsx
+msgid "Its instructions say it works on its own: {cron} · {opening}"
+msgstr "D’après ses instructions, il travaille de lui-même : {cron} · {opening}"
 
 #: src/settings/ai-providers.tsx
 msgid "Its key is deleted, and calls stop using it at once. Models of this provider are no longer used, even as a fallback."
