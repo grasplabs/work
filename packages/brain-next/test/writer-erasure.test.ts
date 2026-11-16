@@ -895,11 +895,17 @@ describe("a writer's erasure", () => {
       // every migration after the release before's not yet run, and a row
       // that points at the erasure.
       const before: Copy = {
-        // The table of memories that failed to delete is the release's own.
+        // The table of memories that failed to delete is the release's own,
+        // and so are the quotes' (migration 0022, quotes.ts).
         tables: now.tables
           .filter(
             ({ name }) =>
-              name !== "memory_erase_failures" && name !== "removed_sources"
+              ![
+                "memory_erase_failures",
+                "removed_sources",
+                "memory_outs",
+                "memory_ins",
+              ].includes(name)
           )
           .map((table) => {
             switch (table.name) {
@@ -937,6 +943,26 @@ describe("a writer's erasure", () => {
                   ),
                 };
               }
+              case "current_versions": {
+                return {
+                  ...table,
+                  created: table.created.replace(
+                    /,\s*`judged_row` integer/u,
+                    ""
+                  ),
+                  rows: table.rows.map((row) => without(row, "judged_row")),
+                };
+              }
+              case "source_subjects": {
+                return {
+                  ...table,
+                  created: table.created.replace(
+                    /,\s*`thread` integer DEFAULT false NOT NULL/u,
+                    ""
+                  ),
+                  rows: table.rows.map((row) => without(row, "thread")),
+                };
+              }
               case "erased_versions": {
                 return {
                   ...table,
@@ -971,7 +997,9 @@ describe("a writer's erasure", () => {
             !made.includes("removed_sources") &&
             // Made by a migration after the release before's, as those are.
             !made.includes("unembeddable_hash_idx") &&
-            !made.includes("work_items_key_idx")
+            !made.includes("work_items_key_idx") &&
+            !made.includes("memory_outs") &&
+            !made.includes("memory_ins")
         ),
       };
       expect(

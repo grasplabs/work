@@ -31,6 +31,7 @@ import { enqueueEmbedding } from "./embedding.ts";
 import {
   groupOfSource,
   isErased,
+  isThread,
   isUnderErasedGroup,
   keepGroup,
   keepSubject,
@@ -47,6 +48,7 @@ import {
   isInDoubt,
   noteWrite,
 } from "./files.ts";
+import { judgeVersion } from "./quotes.ts";
 import { readableSql, readerSetKeyOf, readerSetOf } from "./reader-sets.ts";
 import { refuseRemoved } from "./removal.ts";
 import { isRestoring } from "./restoring.ts";
@@ -110,6 +112,10 @@ interface Adding {
 const otherGroup =
   "The Brain refused it: a source keeps the group it was first added in";
 
+/** What an add answers that says otherwise than its source's first whether it is a thread. */
+const otherThread =
+  "The Brain refused it: a source keeps whether it is a thread, as its first version said";
+
 /**
  * Refuses `adding` when its group's key was erased, or a group its key
  * lies under was (`isUnderErasedGroup`, named or not: as an erased key's
@@ -127,6 +133,10 @@ const refuseByGroup = (sql: SqlStorage, adding: Adding): void => {
   const held = groupOfSource(sql, adding.added.source);
   if (held !== undefined && held !== adding.group) {
     throw new Error(otherGroup);
+  }
+  const thread = isThread(sql, adding.added.source);
+  if (thread !== undefined && thread !== (adding.added.thread === true)) {
+    throw new Error(otherThread);
   }
 };
 
@@ -366,27 +376,55 @@ const record = (
       ...readAtOf(added),
     })
     .run();
-  keepSubject(storage.sql, added.source, adding.subject, adding.group);
+  keepSubject(
+    storage.sql,
+    added.source,
+    adding.subject,
+    adding.group,
+    added.thread === true
+  );
   if (adding.group !== null) {
     keepGroup(storage.sql, adding.group);
   }
   // The version before stops being found by meaning as it stops being
   // current: its chunks' vector codes go with the pointer.
   const replaced = db
-    .select({ versionRow: currentVersions.versionRow })
+    .select({
+      versionRow: currentVersions.versionRow,
+      judgedRow: currentVersions.judgedRow,
+      version: sourceVersions.version,
+    })
     .from(currentVersions)
+    .innerJoin(
+      sourceVersions,
+      eq(sourceVersions.row, currentVersions.versionRow)
+    )
     .where(eq(currentVersions.source, added.source))
     .get();
   if (replaced !== undefined) {
     removeVectorsOf(storage.sql, replaced.versionRow);
   }
+  // Its memories judged against it as it becomes current, the text in
+  // hand, and marked judged with the pointer (quotes.ts).
   db.insert(currentVersions)
-    .values({ source: added.source, versionRow: row })
+    .values({ source: added.source, versionRow: row, judgedRow: row })
     .onConflictDoUpdate({
       target: currentVersions.source,
-      set: { versionRow: row },
+      set: { versionRow: row, judgedRow: row },
     })
     .run();
+  judgeVersion(storage.sql, {
+    source: added.source,
+    version,
+    text: added.text,
+    replaced:
+      replaced === undefined
+        ? undefined
+        : {
+            version: replaced.version,
+            judged: replaced.judgedRow === replaced.versionRow,
+          },
+  });
   if (replaced !== undefined) {
     // Their full vectors too, once no current chunk holds their text: the
     // sweep checks and deletes (files.ts).

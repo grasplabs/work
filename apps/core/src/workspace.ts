@@ -111,12 +111,7 @@ import type {
   CodeRunCall,
 } from "./agent-scope.ts";
 import { heldIn } from "./agent-skills.ts";
-import {
-  builtNoteText,
-  inOwnWords,
-  resultRunId,
-  withheldResult,
-} from "./agent.ts";
+import { builtNoteText, resultRunId, withheldResult } from "./agent.ts";
 import type { QuestionBuilt, TurnContext, TurnResult } from "./agent.ts";
 import { turnAgent } from "./agents.ts";
 import { drainObjectOutbox, uuidFromHash } from "./audit-outbox.ts";
@@ -129,7 +124,6 @@ import {
   channelText,
   heldWriteRefusal,
   turnCheckOf,
-  withoutLinks,
 } from "./channels/stephen-rules.ts";
 import type { HeldWriteRefusal, TurnCheck } from "./channels/stephen-rules.ts";
 import { questionText } from "./chat-agent.ts";
@@ -2446,7 +2440,7 @@ export class Workspace extends DurableObject<Env> {
       }
       const result: TurnResult = {
         outcome: end.outcome,
-        answer: via === "web" ? end.answer : withoutLinks(end.answer),
+        answer: end.answer,
         ...(end.error === undefined ? {} : { error: end.error }),
       };
       return {
@@ -3060,8 +3054,8 @@ export class Workspace extends DurableObject<Env> {
 
   /**
    * Keeps what the chat's turn committed, in order, as the chat shows it:
-   * a question with the files it carries; in a chat platform's chat, the
-   * agent's words without links (`withoutLinks`). Each entry once
+   * a question with the files it carries, and the agent's words as the
+   * model wrote them. Each entry once
    * (`copiedKeyPrefix`): a copy its object sends again is passed over.
    * Answers the last answer kept of them, a response or a stopped turn's
    * end, for the turn's capture: as the first copy did, for one sent again.
@@ -3073,7 +3067,7 @@ export class Workspace extends DurableObject<Env> {
     if (this.chatState(chatId) === undefined || this.#deleting.has(chatId)) {
       return undefined;
     }
-    const { via, agentId: chatAgent } = this.#chat(chatId);
+    const { agentId: chatAgent } = this.#chat(chatId);
     const live = this.#turns.get(chatId);
     // What the model said is its turn's agent's: the live turn's, or, for
     // a turn a restart cut short, the chat's, which the turn set as it
@@ -3109,7 +3103,7 @@ export class Workspace extends DurableObject<Env> {
       }
       const id = this.#keep(
         chatId,
-        via === "web" ? message : inOwnWords(message),
+        message,
         keptWith(message, turnAgentId, { files, thinkingMs, built })
       );
       if (message.role === "assistant") {
