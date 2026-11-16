@@ -655,6 +655,34 @@ describe("how an organization's Brain is doing", () => {
     });
   });
 
+  it("shows recall without meaning by each reason it knows from a core of a newer release, which counts a reason this admin doesn't", async () => {
+    const newer = await liveClient();
+    newer.core.admin = heardSnapshot("Newer");
+    const report = brainReport(1_000_000);
+    const withoutMeaning = {
+      ...report.recall.withoutMeaning,
+      timed_out: 3,
+      later: 5,
+    };
+    newer.core.brain = {
+      ...report,
+      recall: { ...report.recall, withoutMeaning },
+    };
+
+    const { status, html } = await page(
+      `/organizations/${newer.clientId}/brain`
+    );
+    const text = textOf(recallPartOf(html));
+
+    expect({
+      status,
+      ways: text.includes("Words 40 0"),
+      without: text.includes(
+        "3 timed out, 0 failed, 0 refused, and 0 unusable"
+      ),
+    }).toStrictEqual({ status: 200, ways: true, without: true });
+  });
+
   it("asks its core whether a source or a person was erased as the staff member, says what it answered, and sends nothing for a caller Access doesn't vouch for", async () => {
     const acme = await liveClient();
     acme.core.brain = brainReport(1_000_000);

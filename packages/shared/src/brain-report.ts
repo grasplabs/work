@@ -197,15 +197,23 @@ export const brainSearchWays = [
 export type BrainSearchWay = (typeof brainSearchWays)[number];
 
 /**
- * Why a recall went without the question's vector though a model runs:
- * every reason the store counts (held to its keys as the ways are).
+ * How many recalls went without the question's vector though a model
+ * runs, by why: every reason the store counts (held to its keys as the
+ * ways are). Core always sends every reason. Each is optional only so the
+ * admin reads the report of a core of an older release (one on a slower
+ * channel), which lacks a reason added since; a reason of a newer
+ * release's core that this list lacks is left out. A reason not reported
+ * shows as nothing.
  */
-export const brainWithoutMeaningReasons = [
-  "timed_out",
-  "failed",
-  "refused",
-  "unusable",
-] as const;
+const withoutMeaningSchema = z.object({
+  timed_out: z.int().min(0).optional(),
+  failed: z.int().min(0).optional(),
+  refused: z.int().min(0).optional(),
+  unusable: z.int().min(0).optional(),
+});
+
+/** Why a recall went without the question's vector (`withoutMeaningSchema`). */
+export const brainWithoutMeaningReasons = withoutMeaningSchema.keyof().options;
 export type BrainWithoutMeaningReason =
   (typeof brainWithoutMeaningReasons)[number];
 
@@ -347,7 +355,7 @@ export const brainReportSchema = z.object({
       entities: wayCountSchema.optional(),
       meaning: wayCountSchema,
     }),
-    withoutMeaning: z.record(z.enum(brainWithoutMeaningReasons), count),
+    withoutMeaning: withoutMeaningSchema,
   }),
   /**
    * People's own stores (what one person alone may read), as each last

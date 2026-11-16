@@ -275,8 +275,9 @@ describe("recall by meaning, through core", () => {
         counted: Object.fromEntries(
           brainWithoutMeaningReasons.map((each) => [
             each,
-            after.recall.withoutMeaning[each] -
-              before.recall.withoutMeaning[each],
+            // Core reports every reason: a missing one fails as NaN.
+            (after.recall.withoutMeaning[each] ?? Number.NaN) -
+              (before.recall.withoutMeaning[each] ?? Number.NaN),
           ])
         ),
         meaning:

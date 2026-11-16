@@ -605,10 +605,13 @@ const Recall = ({ report }: { report: BrainReport }) => {
       >
         <span className="tabular-nums">
           {formatList(
-            brainWithoutMeaningReasons.map(
-              (reason) =>
-                `${whole(recall.withoutMeaning[reason])} ${withoutMeaningWords[reason]}`
-            )
+            // Not reported (undefined) by a core of an older release: nothing.
+            brainWithoutMeaningReasons.flatMap((reason) => {
+              const recalls = recall.withoutMeaning[reason];
+              return recalls === undefined
+                ? []
+                : [`${whole(recalls)} ${withoutMeaningWords[reason]}`];
+            })
           )}
         </span>
       </SectionRow>
