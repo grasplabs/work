@@ -64,6 +64,7 @@ const sessionSchema = z.object({
   progress: interviewProgressSchema.nullable(),
   version: z.int().min(0),
   withdrawn: z.boolean(),
+  removing: z.boolean(),
 });
 export type OpenSession = z.output<typeof sessionSchema>;
 

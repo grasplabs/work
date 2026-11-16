@@ -580,7 +580,8 @@ const withdrawOffered = (
 /** Withdrawing: whether they did, and why it didn't work when it didn't. */
 const useWithdrawing = (session: OpenSession) => {
   const [withdrawn, setWithdrawn] = useState(session.withdrawn);
-  const [removing, setRemoving] = useState(false);
+  // Still being removed, as core said when the page opened, until it isn't.
+  const [removing, setRemoving] = useState(session.removing);
   const [withdrawFailed, setWithdrawFailed] = useState<string | null>(null);
   const withdraw = async (): Promise<void> => {
     const link = linkNow();

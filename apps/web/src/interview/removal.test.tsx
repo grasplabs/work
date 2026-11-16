@@ -58,6 +58,7 @@ const session: OpenSession = {
   progress: finished,
   version: 1,
   withdrawn: false,
+  removing: false,
 };
 
 /**
@@ -85,8 +86,14 @@ const buttonNamed = (label: string): HTMLButtonElement | undefined =>
 
 const text = (): string => document.body.textContent ?? "";
 
-/** The page, on a faked core whose delete or withdrawal answers `removed`. */
-const shown = async (removed: object): Promise<void> => {
+/**
+ * The page, on a faked core whose delete or withdrawal answers `removed`,
+ * opened as `opened` says (the link's session, as core answered it).
+ */
+const shown = async (
+  removed: object,
+  opened: OpenSession = session
+): Promise<void> => {
   vi.stubGlobal(
     "fetch",
     vi.fn<(input: string, init?: RequestInit) => Promise<Response>>(
@@ -109,7 +116,7 @@ const shown = async (removed: object): Promise<void> => {
   const page = createRoute({
     getParentRoute: () => rootRoute,
     path: "/",
-    component: () => <InterviewPage session={session} />,
+    component: () => <InterviewPage session={opened} />,
   });
   const router = createRouter({
     routeTree: rootRoute.addChildren([page]),
@@ -130,6 +137,11 @@ const shown = async (removed: object): Promise<void> => {
     () => buttonNamed("Delete my interview") !== undefined,
     "the delete button"
   );
+};
+
+/** Opened again, as a reload does, after they withdrew: as core says now. */
+const reopened = async (removing: boolean): Promise<void> => {
+  await shown({}, { ...session, withdrawn: true, removing });
 };
 
 /** Holds the delete button for its four seconds, then presses `choice`. */
@@ -214,5 +226,25 @@ describe("deleting and withdrawing on the interview page", () => {
       removing: text().includes("What the Brain kept of it is being removed."),
       nothingKept: text().includes("Deleted. Nothing you said is kept."),
     }).toStrictEqual({ removing: false, nothingKept: true });
+  });
+
+  it("still says what the Brain kept is being removed when the page opens again while core says it is", async () => {
+    await reopened(true);
+    expect({
+      removing: text().includes(
+        "You withdrew. What the Brain kept of it is being removed."
+      ),
+      nothingUsed: text().includes("Nothing you said is used from now on."),
+    }).toStrictEqual({ removing: true, nothingUsed: false });
+  });
+
+  it("says nothing they said is used when the page opens again once core removed it all", async () => {
+    await reopened(false);
+    expect({
+      removing: text().includes("What the Brain kept of it is being removed."),
+      nothingUsed: text().includes(
+        "You withdrew. Nothing you said is used from now on."
+      ),
+    }).toStrictEqual({ removing: false, nothingUsed: true });
   });
 });

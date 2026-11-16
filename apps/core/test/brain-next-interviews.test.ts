@@ -1304,11 +1304,25 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
       person: ids.pim,
       teams: [ids.team],
     });
+    // Opened again, as a reload does: still being removed, until it is.
+    const removingOf = async () => {
+      const opened = await onLink({
+        action: "session",
+        ...(await openLink(ids.pim)),
+      });
+      const { removing } = z
+        .object({ removing: z.boolean() })
+        .parse(await opened.json());
+      return removing;
+    };
+    const reopened = await removingOf();
     await settled();
     const { own } = await keptIn(key, pim);
     expect({
       status: answer.status,
       removing: z.object({ removing: z.literal(true) }).safeParse(said).success,
+      reopened,
+      reopenedAfter: await removingOf(),
       owedThen: owedThen.map(({ kind }) => kind).toSorted(),
       owed: await store.owedErasures({ person: ids.pim, teams: [ids.team] }),
       kept: own,
@@ -1316,6 +1330,8 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
     }).toStrictEqual({
       status: 200,
       removing: true,
+      reopened: true,
+      reopenedAfter: false,
       owedThen: ["claim", "interview"],
       owed: [],
       kept: "erased",

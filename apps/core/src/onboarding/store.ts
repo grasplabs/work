@@ -1671,6 +1671,10 @@ export class Onboarding extends DurableObject<Env> {
       progress: this.#forSpeaker(person.id, this.#held(person.id)),
       version: link.version,
       withdrawn: this.#withdrawnAt(person.id) !== null,
+      // What the Brain kept of theirs, or of their team's claims, is still
+      // owed its erasure (a withdrawal's or a delete's that didn't land
+      // yet): the page says so until it lands.
+      removing: this.owedErasures({ person: person.id }).length > 0,
     });
   }
 

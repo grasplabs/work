@@ -366,6 +366,12 @@ export interface InterviewSession {
   version: number;
   /** They withdrew: what they said is theirs to read and delete, and nothing more is taken. */
   withdrawn: boolean;
+  /**
+   * What the Brain kept of their interview, or of their team's claims, is
+   * still being removed: a withdrawal's or a delete's erasure that hasn't
+   * landed yet, which core's clock finishes.
+   */
+  removing: boolean;
 }
 
 /** What saving answers: the version kept, or the newer copy that was. */
