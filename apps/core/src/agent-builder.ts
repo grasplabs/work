@@ -24,6 +24,7 @@ import {
 import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
 import { activeMember } from "./auth/membership-sql.ts";
 import {
+  agentApps,
   agentDocuments,
   agentPlaces,
   agentReach,
@@ -576,6 +577,7 @@ export const deleteAgent = async (
     db.delete(agentPlaces).where(eq(agentPlaces.agentId, agent.id)),
     db.delete(agentWakes).where(eq(agentWakes.agentId, agent.id)),
     db.delete(agentDocuments).where(eq(agentDocuments.agentId, agent.id)),
+    db.delete(agentApps).where(eq(agentApps.agentId, agent.id)),
     // Last before the event, which is recorded only if this changed a
     // row: an agent deleted twice at once is recorded once.
     db
@@ -762,6 +764,7 @@ export const dropOwnAgentsOf = async (
     .where(eq(agents.ownerId, personId));
   await db.batch([
     db.delete(agentDocuments).where(inArray(agentDocuments.agentId, own)),
+    db.delete(agentApps).where(inArray(agentApps.agentId, own)),
     db.delete(agents).where(eq(agents.ownerId, personId)),
   ]);
 };

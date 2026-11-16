@@ -3,7 +3,7 @@ import type { ChatMake } from "@grasp-os/shared/chat";
 import { canBuild } from "@grasp-os/shared/roles";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Await, useRouteContext } from "@tanstack/react-router";
-import { useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 
 import { GraspBuddy } from "../buddy/grasp-buddy.tsx";
 import type { Session } from "../core.ts";
@@ -15,7 +15,7 @@ import { BlueprintIdeas, WorkflowIdeas } from "../make/make-ideas.tsx";
 import { MakeSomethingLink } from "../make/make-link.tsx";
 import { TourOffer } from "../tour/tour-layer.tsx";
 import { useTour } from "../tour/tour-state.ts";
-import { AgentPicker, agentModelOf, startingAgent } from "./agent-choice.tsx";
+import { agentModelOf } from "./agent-choice.tsx";
 import { openChat } from "./chat-layout.ts";
 import { ChatSwitcherButton } from "./chat-switcher.tsx";
 import { Composer } from "./composer.tsx";
@@ -101,8 +101,9 @@ export const ideasOf = async (
 /**
  * Asks in a new chat, which opens full screen over the page; from Make
  * something (`make`), with `ideas` to start from, the chat made with what
- * to make. The chat is with the agent `agent` names (the Agents page's
- * "Chat"), else the company's first, until the person picks another.
+ * to make. The agent `agent` names (the Agents page's "Chat") is mentioned
+ * in the box as it opens, so the question goes to it (`@`, mentions.tsx);
+ * taken out, the question goes to the company's first agent.
  */
 export const ChatStart = ({
   make,
@@ -117,8 +118,7 @@ export const ChatStart = ({
   const { offered } = useGlobalChat();
   const { identity } = useRouteContext({ from: "/_shell" });
   const agents = offered?.agents ?? [];
-  const [picked, setPicked] = useState<string | undefined>(agent);
-  const agentId = startingAgent(agents, picked)?.id;
+  const named = agents.find(({ id }) => id === agent);
   const { composer, ask } = useAsk(
     undefined,
     offered?.models,
@@ -129,9 +129,26 @@ export const ChatStart = ({
         openChat("fullscreen");
       },
       ...(make === undefined ? {} : { make }),
-      ...(agentId === undefined ? {} : { agentId }),
     }
   );
+  // The agent the address names, mentioned in the box once the person's
+  // agents are read: only one they may ask, and only into an empty box.
+  const mentioned = useRef(false);
+  const { text: typed, onText, onMentions, mentions } = composer;
+  // The agents the box mentions now: who a starting question goes to, and
+  // whose model the box shows (the first one's, else the first agent's).
+  const agentsMentioned = mentions.filter(({ kind }) => kind === "agent");
+  const answering = agentsMentioned.at(0)?.id ?? agents.at(0)?.id;
+  useEffect(() => {
+    if (named === undefined || mentioned.current || typed !== "") {
+      return;
+    }
+    mentioned.current = true;
+    onText(`@${named.name} `);
+    onMentions([
+      { kind: "agent", id: named.id, label: named.name, trigger: "@" },
+    ]);
+  }, [named, typed, onText, onMentions]);
   // Offered the tour, his question stands in the greeting's place, and
   // nothing to start from under the box until it is answered. Never to
   // who came to make something: they came for that, not a tour.
@@ -179,14 +196,7 @@ export const ChatStart = ({
             </div>
             <Composer
               actions={<RecentsButton />}
-              agent={
-                <AgentPicker
-                  agentId={agentId}
-                  agents={agents}
-                  onAgent={setPicked}
-                />
-              }
-              agentModel={agentModelOf(agents, agentId)}
+              agentModel={agentModelOf(agents, answering)}
               running={false}
               {...composer}
             />
@@ -202,7 +212,10 @@ export const ChatStart = ({
               <StartingQuestions
                 disabled={composer.busy || (composer.models?.length ?? 0) === 0}
                 onPick={(question) => {
-                  void ask(question);
+                  const prefix = agentsMentioned
+                    .map(({ label }) => `@${label} `)
+                    .join("");
+                  void ask(`${prefix}${question}`, [], agentsMentioned);
                 }}
               />
             )}

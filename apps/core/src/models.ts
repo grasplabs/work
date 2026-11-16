@@ -349,6 +349,13 @@ const sessionShape = {
        * counted as theirs. Only core's own code makes such a call.
        */
       z.strictObject({ platform: z.literal("document_conversion") }),
+      /**
+       * Core's own reading of an agent's instructions for the apps it
+       * needs (agent-apps.ts), on the organization's models: the words of
+       * whoever manages the agent, made for them, counted as theirs. Only
+       * core's own code makes such a call.
+       */
+      z.strictObject({ platform: z.literal("agent_builder") }),
     ])
     .optional(),
   requestId: auditEventSchema.shape.requestId,

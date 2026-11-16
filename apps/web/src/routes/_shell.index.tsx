@@ -14,7 +14,8 @@ import { loadFromCore } from "../load-from-core.tsx";
 // (`?make=app` or `?make=workflow`, and `&project=`): the ideas to start
 // from are read for who builds, never waited for. The first question
 // starts the chat with what to make, which the chat keeps. `?agent=` (the
-// Agents page's "Chat") starts it with that agent. The person's other chats are in
+// Agents page's "Chat") mentions that agent in the box, so the question
+// goes to it. The person's other chats are in
 // Recents and one ⌘K window away (chat/chat-switcher.tsx), and a link to
 // one (`?chat=`) opens it there.
 

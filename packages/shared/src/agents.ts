@@ -123,6 +123,42 @@ export interface AgentDocument {
   addedAt: string;
 }
 
+/**
+ * An app an agent may use, by its catalog entry: `<source>:<id>`, such as
+ * `native:google` or `composio:hubspot` ({@link agentAppOf}).
+ */
+export interface AgentApp {
+  app: string;
+  /** Its name in the catalog when it was added. */
+  name: string;
+  /**
+   * `on`: the agent may use it. `removed`: someone took it off, and
+   * working the apps out from its instructions never adds it back.
+   */
+  state: "on" | "removed";
+  /** Who added it: worked out from its instructions, or a person by hand. */
+  source: "instructions" | "person";
+}
+
+/** An agent's app by a catalog entry's source and ID. */
+export const agentAppOf = (source: string, id: string): string =>
+  `${source}:${id}`;
+
+/** What working an agent's apps out from its instructions did. */
+export interface AgentAppsWorkedOut {
+  /** The apps it added, now on. */
+  added: AgentApp[];
+  /**
+   * Kinds of work its instructions call for that change or send things,
+   * which it doesn't have: never turned on by this, for a person to.
+   */
+  suggested: CompanyToolClass[];
+  /** Kinds of work that only read, turned on by this. */
+  turnedOn: CompanyToolClass[];
+  /** Apps its instructions name that the company doesn't offer. */
+  missing: string[];
+}
+
 /** Most characters a wake-up's opening line holds. */
 export const agentWakeOpeningMax = 2000;
 
@@ -216,6 +252,23 @@ export interface AgentsApi {
    * agent do for them. Up to {@link ownAgentsMax} a person.
    */
   makeOwnAgent: (input: AgentInput) => Promise<Agent>;
+  /**
+   * The apps an agent may use, by name. An agent with none listed uses any
+   * app its kinds of work allow, as before agents had apps.
+   */
+  agentApps: (agentId: string) => Promise<AgentApp[]>;
+  /**
+   * Gives an agent an app the company offers (`app`, `<source>:<id>`), or
+   * takes it off, for good: working its apps out never adds it back.
+   */
+  setAgentApp: (agentId: string, app: string, on: boolean) => Promise<void>;
+  /**
+   * Works out from an agent's name, job and instructions which of the
+   * company's apps it needs and adds them, and turns on the kinds of work
+   * that only read that they call for. What changes or sends things is
+   * only suggested. Never an app someone took off.
+   */
+  workOutAgentApps: (agentId: string) => Promise<AgentAppsWorkedOut>;
   /** Changes an agent's name, face, job, instructions or model role. */
   changeAgent: (agentId: string, input: AgentInput) => Promise<void>;
   /** Pauses an agent, which then takes no turn, or turns it back on. */
