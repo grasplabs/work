@@ -56,16 +56,16 @@ const checksSent = (provider: FakeProvider): string[] =>
 const keptFor = async (personId: string, name?: string) => {
   const store = personalBrainOf(inJurisdiction(env, env.BRAIN_STORE), personId);
   const reader = { person: personId, groups: [] };
-  const found = await store.findEntities(
+  const named = async () => {
+    const { entities } = await store.findEntities({ reader, name });
+    return entities.map(({ id }) => id);
+  };
+  const found =
     name === undefined
-      ? {
-          reader,
-          identifier: { type: "ref", value: `grasp:person:${personId}` },
-        }
-      : { reader, name }
-  );
+      ? [await store.ownEntity({ reader })].filter((id) => id !== null)
+      : await named();
   return await Promise.all(
-    found.entities.map(async ({ id }) => {
+    found.map(async (id) => {
       const { memories } = await store.readMemories({ entity: id, reader });
       return memories.map(({ statement }) => statement);
     })

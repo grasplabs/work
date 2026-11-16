@@ -476,6 +476,13 @@ export const uniqueWord = () =>
     (byte) => String.fromCodePoint(97 + (byte % 26))
   ).join("")}`;
 
+/**
+ * `unique()` in letters alone, for words a voice says: each digit a letter
+ * of its own, so two never become the same.
+ */
+export const uniqueLetters = (): string =>
+  unique().replaceAll(/\d/gu, (digit) => "ghijklmnop".charAt(Number(digit)));
+
 /** Someone in the client's Entra tenant. */
 export const entraPerson = (
   tenantId: string,
