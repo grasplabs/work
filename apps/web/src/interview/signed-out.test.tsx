@@ -2157,16 +2157,20 @@ describe("the interview page when its session ends mid-interview", () => {
     await press("Send");
     await untilAsked(core, "save");
     core.who = "nobody";
+    // The sign-in shows once core answers the link again: not yet.
+    const showSignIn = hold(core, "session");
     await heard();
-    await until(() => text().includes(signInAgain), "the sign-in again");
     const taken = stored();
-    // Past the try again.
+    // Past the try again, before the sign-in shows.
     await act(async () => {
       await vi.advanceTimersByTimeAsync(5000);
     });
+    const after = stored();
+    showSignIn();
+    await until(() => text().includes(signInAgain), "the sign-in again");
     expect({
       waited: taken.includes("Said before it ended."),
-      unchanged: stored() === taken,
+      unchanged: after === taken,
     }).toStrictEqual({ waited: true, unchanged: true });
   });
 });
