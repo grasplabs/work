@@ -2544,6 +2544,7 @@ describe("the Brain's work queue", { timeout: 60_000 }, () => {
           sweep: null,
           repack: null,
           reindex: null,
+          quotes: null,
           embedding: null,
         },
       });

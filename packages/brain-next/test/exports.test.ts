@@ -20,6 +20,7 @@ import { env } from "cloudflare:workers";
 import { beforeAll, describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
+import { catchUpDue } from "../src/catch-up.ts";
 import {
   exportFileNameSchema,
   instructionsMaxLength,
@@ -443,6 +444,22 @@ const restoreSettled = async (id: string) => {
     }
   }
   throw new Error("The restore was still running after 10 ticks");
+};
+
+/** Ticks the shared store until its catch-up of quotes is done (catch-up.ts): at most 10 ticks. */
+const caughtUp = async (): Promise<void> => {
+  for (let ticks = 0; ticks < 10; ticks += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- a tick at a time
+    const due = await runInDurableObject(shared(), (_instance, state) =>
+      catchUpDue(state.storage.sql)
+    );
+    if (!due) {
+      return;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- a tick at a time
+    await tick(shared());
+  }
+  throw new Error("The catch-up of quotes was still due after 10 ticks");
 };
 
 /** How many versions the shared store holds. */
@@ -2261,13 +2278,10 @@ describe("exports and restores", () => {
       const source = `test:${unique()}`;
       const word = `w${unique().replaceAll("-", "")}`;
       await add(shared(), source, `Acme renews in March ${word}`, team(group));
-      // Still quoting the first, so only the extraction mark ends its
-      // memory: a restore judges no quote yet (quotes.ts), so an out
-      // memory would read current after it until its next version.
       await add(
         shared(),
         source,
-        `Acme renews in April ${word}. It renews in March no more.`,
+        `Acme renews in April ${word}`,
         team(group),
         "2"
       );
@@ -2421,6 +2435,9 @@ describe("exports and restores", () => {
       const stampBefore = await latestStamp();
 
       await exportedAndRestored();
+      // Restored sources are judged by the catch-up's next ticks
+      // (catch-up.ts): the first memory's quote left the second version.
+      await caughtUp();
       const after = await readsOf();
       // A producer's retry of an add made before answers as it did.
       const again = await shared().addMemories({

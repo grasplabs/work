@@ -217,6 +217,7 @@ const brainReport = (bytes: number): BrainReport => ({
     sweep: null,
     repack: null,
     reindex: null,
+    quotes: null,
     embedding: null,
   },
   recall: {
@@ -251,6 +252,13 @@ const recallPartOf = (html: string): string =>
 /** The Model spend section of a page's HTML. */
 const spendPartOf = (html: string): string =>
   html.slice(html.indexOf(">Model spend<"), html.indexOf(">Erasures<"));
+
+/** The Upkeep section of a page's HTML. */
+const upkeepPartOf = (html: string): string =>
+  html.slice(
+    html.indexOf(">Upkeep<"),
+    html.indexOf(">People&#x27;s own stores<")
+  );
 
 /** The part of `html` that shows people's own stores. */
 const ownStoresPartOf = (html: string): string =>
@@ -920,7 +928,7 @@ describe("how an organization's Brain is doing", () => {
     });
   });
 
-  it("shows the rest of the report of a core on an older release, which sends no totals of people's own stores, model spend nor recall by entities, and says they aren't available yet", async () => {
+  it("shows the rest of the report of a core on an older release, which sends no totals of people's own stores, model spend, recall by entities nor the step judging memories, and says they aren't available yet", async () => {
     const older = await liveClient();
     older.core.admin = heardSnapshot("Older");
     const {
@@ -929,7 +937,15 @@ describe("how an organization's Brain is doing", () => {
       ...report
     } = brainReport(1_000_000);
     const { entities: _entities, ...ways } = report.recall.ways;
-    older.core.brain = { ...report, recall: { ...report.recall, ways } };
+    const { quotes: _quotes, ...steps } = report.stepsFailed;
+    older.core.brain = {
+      ...report,
+      recall: { ...report.recall, ways },
+      stepsFailed: {
+        ...steps,
+        embedding: { at: "2026-11-12T09:55:00.000Z", reason: "failed" },
+      },
+    };
 
     const { status, html } = await page(
       `/organizations/${older.clientId}/brain`
@@ -937,9 +953,16 @@ describe("how an organization's Brain is doing", () => {
     const own = textOf(ownStoresPartOf(html));
     const spend = textOf(spendPartOf(html));
 
+    const upkeep = textOf(upkeepPartOf(html));
+
     expect({
       status,
       rest: textOf(recallPartOf(html)).includes("Words 40 0"),
+      failedStep: upkeep.includes(
+        "Putting passages on the queue to embed Failed 5 min ago"
+      ),
+      // A step the core doesn't report shows as neither failed nor fine.
+      judging: upkeep.includes("Judging memories against their sources"),
       entitiesNotYet: textOf(recallPartOf(html)).includes(
         "Entities Not available yet"
       ),
@@ -953,10 +976,36 @@ describe("how an organization's Brain is doing", () => {
     }).toStrictEqual({
       status: 200,
       rest: true,
+      failedStep: true,
+      judging: false,
       entitiesNotYet: true,
       notYet: true,
       totals: false,
       spendNotYet: true,
     });
+  });
+
+  it("shows the report of a core on a newer release, which reports a step this admin doesn't know, with the steps it knows", async () => {
+    const newer = await liveClient();
+    newer.core.admin = heardSnapshot("Newer");
+    const report = brainReport(1_000_000);
+    const stepsFailed = {
+      ...report.stepsFailed,
+      later: { at: "2026-11-12T09:55:00.000Z", reason: "failed" } as const,
+      quotes: { at: "2026-11-12T09:55:00.000Z", reason: "timed_out" } as const,
+    };
+    newer.core.brain = { ...report, stepsFailed };
+
+    const { status, html } = await page(
+      `/organizations/${newer.clientId}/brain`
+    );
+
+    expect({
+      status,
+      rest: textOf(recallPartOf(html)).includes("Words 40 0"),
+      upkeep: textOf(upkeepPartOf(html)).includes(
+        "Judging memories against their sources Timed out 5 min ago"
+      ),
+    }).toStrictEqual({ status: 200, rest: true, upkeep: true });
   });
 });

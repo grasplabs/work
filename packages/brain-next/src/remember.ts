@@ -3,6 +3,7 @@ import type { DrizzleSqliteDODatabase } from "drizzle-orm/durable-sqlite";
 import { z } from "zod";
 
 import type { BrainBucket } from "./bucket.ts";
+import { markJudged } from "./catch-up.ts";
 import { attributeRuleOf, changeReused, restoringNow } from "./contract.ts";
 import type {
   AddedMemories,
@@ -650,6 +651,11 @@ export const writeAdd = (
     );
     const written = made.map((memory) => memory.written);
     judgeLate(sql, written, texts);
+    const first = written.at(0);
+    const last = written.at(-1);
+    if (first !== undefined && last !== undefined) {
+      markJudged(sql, first.row, last.row);
+    }
     const memories = made.map((memory) => memory.id);
     if (adding.extracted !== undefined) {
       markExtracted(sql, adding.extracted, into);

@@ -167,20 +167,33 @@ const count = z.int().min(0);
 /** A kind of work, an error code or a reason: a name in code. */
 const codeName = z.string().min(1).max(128);
 
+/** A step of the store's tick that last failed: when, and the store's own code for why. */
+const stepFailureSchema = z
+  .object({ at: isoTime, reason: z.enum(["timed_out", "failed"]) })
+  .nullable();
+
 /**
- * The steps of the store's tick, in the tick's order: every one the
- * store's overview names (core's brain-next.ts holds the two to the same
- * keys, so one the store adds and the report doesn't carry fails to
- * compile).
+ * The tick's own steps, each with its last failure since the store
+ * started, in the tick's order: every one the store's overview names
+ * (core's brain-next.ts holds the two to the same keys, so one the store
+ * adds and the report doesn't carry fails to compile). Core always sends
+ * every step. Each is optional only so the admin reads the report of a
+ * core of an older release (one on a slower channel), which lacks a step
+ * added since; a step of a newer release's core that this list lacks is
+ * left out. A step not reported shows as nothing, neither failed nor fine.
  */
-export const brainSteps = [
-  "ledger",
-  "erase",
-  "sweep",
-  "repack",
-  "reindex",
-  "embedding",
-] as const;
+const stepsFailedSchema = z.object({
+  ledger: stepFailureSchema.optional(),
+  erase: stepFailureSchema.optional(),
+  sweep: stepFailureSchema.optional(),
+  repack: stepFailureSchema.optional(),
+  reindex: stepFailureSchema.optional(),
+  quotes: stepFailureSchema.optional(),
+  embedding: stepFailureSchema.optional(),
+});
+
+/** The steps of the store's tick, in the tick's order (`stepsFailedSchema`). */
+export const brainSteps = stepsFailedSchema.keyof().options;
 export type BrainStep = (typeof brainSteps)[number];
 
 /**
@@ -216,11 +229,6 @@ const withoutMeaningSchema = z.object({
 export const brainWithoutMeaningReasons = withoutMeaningSchema.keyof().options;
 export type BrainWithoutMeaningReason =
   (typeof brainWithoutMeaningReasons)[number];
-
-/** A step of the store's tick that last failed: when, and the store's own code for why. */
-const stepFailureSchema = z
-  .object({ at: isoTime, reason: z.enum(["timed_out", "failed"]) })
-  .nullable();
 
 /** How many recalls searched by a way, and how many it failed. */
 const wayCountSchema = z.object({ recalls: count, failed: count });
@@ -334,7 +342,7 @@ export const brainReportSchema = z.object({
     }),
   }),
   /** The tick's own steps, each with its last failure since the store started. */
-  stepsFailed: z.record(z.enum(brainSteps), stepFailureSchema),
+  stepsFailed: stepsFailedSchema,
   /**
    * Recall since the store started (`since`), counts alone: per way, how
    * many recalls searched by it and how many it failed; and how many

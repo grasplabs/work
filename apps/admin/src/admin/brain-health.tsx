@@ -117,6 +117,7 @@ const stepWords: Record<BrainStep, string> = {
   sweep: "Sweeping files nothing holds",
   repack: "Repacking vector codes",
   reindex: "Rebuilding the word indexes",
+  quotes: "Judging memories against their sources",
   embedding: "Putting passages on the queue to embed",
 };
 
@@ -773,8 +774,9 @@ const Ledger = ({ report }: { report: BrainReport }) => {
 const Steps = ({ report }: { report: BrainReport }) => {
   const now = Date.parse(report.now);
   const failing = brainSteps.flatMap((step) => {
+    // Not reported (undefined) by a core of an older release: nothing.
     const failed = report.stepsFailed[step];
-    return failed === null ? [] : [{ step, failed }];
+    return failed === null || failed === undefined ? [] : [{ step, failed }];
   });
   return (
     <Section
