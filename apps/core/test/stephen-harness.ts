@@ -35,6 +35,7 @@ import { env } from "cloudflare:workers";
 import { z } from "zod";
 
 import { inJurisdiction, workspace } from "../src/durable-objects.ts";
+import { newTeam } from "./admin-teams.ts";
 import { model, setObjectEnv } from "./agent-chat.ts";
 import { grantReviewed } from "./apps.ts";
 import { eventsAfterWithHead, logHead } from "./audit-events.ts";
@@ -89,7 +90,6 @@ import type {
 } from "./fixtures/stephen-world.ts";
 import type { Idp } from "./idp.ts";
 import { saveInstructions } from "./instruction-saves.ts";
-import { newTeam } from "./knowledge.ts";
 import { mailControlUrl, mailServerUrl } from "./mail-server.ts";
 import { answeringProvider } from "./model-provider.ts";
 import { acmeTenant, signInConfig } from "./sign-in-config.ts";

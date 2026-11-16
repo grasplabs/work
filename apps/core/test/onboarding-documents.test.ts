@@ -159,7 +159,7 @@ const bucketsNow = async () => ({
 
 /**
  * Where `word` is kept outside the Brain's own stores since `before`: the
- * onboarding's store, core's and Knowledge's databases, the files bucket
+ * onboarding's store, core's database, the files bucket
  * and the audit log and its archive; and in the Brain's bucket.
  */
 const keptOf = async (
@@ -168,7 +168,6 @@ const keptOf = async (
 ) => ({
   store: await onboardingTablesWith(word),
   core: await d1ColumnsWith(env.DB, word),
-  knowledge: await d1ColumnsWith(env.KNOWLEDGE, word),
   files: await newObjectsWith(env.FILES, before.files, word),
   archive: await newObjectsWith(env.AUDIT_ARCHIVE, before.archive, word),
   audit: JSON.stringify(await allEvents())
@@ -181,7 +180,6 @@ const keptOf = async (
 const keptNowhere = {
   store: [],
   core: [],
-  knowledge: [],
   files: [],
   archive: [],
   audit: false,

@@ -55,6 +55,7 @@ import {
   stillBuiltBy,
 } from "./app-access.ts";
 import type { Person } from "./app-access.ts";
+import { appMemoryPath, requireWithinLimit } from "./app-agents-file.ts";
 import {
   generatedPaths,
   functionIdsOf,
@@ -82,7 +83,6 @@ import {
 import { isUniqueViolation, retriedBatch } from "./db/d1.ts";
 import { nextLabel, subjectEntry } from "./drafts.ts";
 import type { DraftKind, DraftState } from "./drafts.ts";
-import { appMemoryPath, requireWithinLimit } from "./knowledge/memory-files.ts";
 import type { SchemaIds } from "./schema-changes.ts";
 import { liveStoreSql } from "./store-deletion.ts";
 
@@ -489,7 +489,7 @@ const checkLimits = (
 };
 
 /**
- * `knowledge.memory_too_large` if the App's AGENTS.md is over its limit,
+ * `app.agents_too_large` if the App's AGENTS.md is over its limit,
  * and only if it also grew, as with `checkLimits`. No chat reads it any
  * more (instruction-files.ts holds an App's file); it goes from the code
  * with GRA-1834.

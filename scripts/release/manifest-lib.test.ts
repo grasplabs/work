@@ -54,11 +54,7 @@ describe("the release manifest", () => {
     const tokens = Object.values(workers)
       .flatMap((worker) => stringsIn(worker.bindings))
       .filter((value) => value.includes("$"));
-    expect(tokens).toStrictEqual([
-      "$D1_DB_ID",
-      "$D1_DB_ID",
-      "$D1_KNOWLEDGE_ID",
-    ]);
+    expect(tokens).toStrictEqual(["$D1_DB_ID", "$D1_DB_ID"]);
   });
 
   it("fails the build on a wrangler.jsonc key it doesn't handle", () => {
@@ -176,10 +172,7 @@ describe("the release manifest", () => {
       generateManifest(info, [connect, { ...core, d1Migrations: {} }])
     ).toThrow(/no migrations collected for DB/u);
     expect(() =>
-      generateManifest(info, [
-        connect,
-        { ...core, d1Migrations: { DB: [], KNOWLEDGE: [] } },
-      ])
+      generateManifest(info, [connect, { ...core, d1Migrations: { DB: [] } }])
     ).toThrow(/no migrations collected for DB/u);
     const { assets: _assets, ...coreWithoutAssets } = core;
     expect(() => generateManifest(info, [connect, coreWithoutAssets])).toThrow(

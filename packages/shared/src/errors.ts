@@ -1,5 +1,3 @@
-import { brainErrors } from "@grasp-os/brain/contract";
-import { knowledgeErrors } from "@grasp-os/brain/knowledge";
 import { z } from "zod";
 
 /**
@@ -67,11 +65,6 @@ const expect = (messages: Readonly<Record<string, string>>): void => {
     expectedMessages.set(code, message);
   }
 };
-
-// The Brain's errors are expected errors too: the Brain defines them
-// (@grasp-os/brain) and keeps no registry of its own.
-expect(brainErrors.messages);
-expect(knowledgeErrors.messages);
 
 /**
  * A family of expected errors (`defineErrorFamily`). Named, so a package

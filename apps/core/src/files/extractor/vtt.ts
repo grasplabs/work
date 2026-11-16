@@ -13,7 +13,7 @@ import { TooLargeError } from "./too-large.ts";
 // to the last one's end. Markup is dropped: a
 // turn is the cue's words. Captions carry no chapters.
 
-/** A turn as the Brain keeps it (packages/brain transcripts.ts). */
+/** A turn of a transcript: who spoke, what they said, and when. */
 export interface VttTurn {
   speaker: string;
   text: string;

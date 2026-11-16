@@ -119,7 +119,6 @@ import type { QuestionBuilt, TurnContext, TurnResult } from "./agent.ts";
 import { turnAgent } from "./agents.ts";
 import { drainObjectOutbox, uuidFromHash } from "./audit-outbox.ts";
 import { memberRole } from "./auth/identity.ts";
-import { eraseCaptured } from "./brain-capture.ts";
 import { loneNotesPerDrain } from "./brain-hand-overs.ts";
 import { chatTurnSource, eraseChat } from "./brain-next-origins.ts";
 import { skillsFor, skillsReachOf } from "./brain-skills.ts";
@@ -4734,9 +4733,6 @@ export class Workspace extends DurableObject<Env> {
       );
       // Nor any workflow start its agent asked its person to confirm.
       await dropHeldStarts(this.env, { chatId: id });
-      // What today's Brain captured of its turns goes before it does:
-      // should that fail, the chat stays (brain-capture.ts).
-      await eraseCaptured(this.env, [id]);
       // And what its agent kept, the transcript the model reads with it:
       // erased for good, so nothing told it meanwhile is kept.
       await this.#toSession(id, async (session) => {
@@ -4807,9 +4803,8 @@ export class Workspace extends DurableObject<Env> {
    * the person it is for (GRA-903, GRA-1181; core's person-erasure.ts):
    * it is theirs alone (`personalWorkspaceId`), and nobody else's data is
    * ever in it. Actions held for them in connect are connect's erasure
-   * step's (`erasePersonal` drops every one made for them), not this. First what lives outside it: what the Brain captured of
-   * their chats' turns, any connection granted in those chats, and the
-   * stores their drafts' previews wrote to. Then its own storage, all of
+   * step's (`erasePersonal` drops every one made for them), not this. First what lives outside it: any connection granted in
+   * their chats, and the stores their drafts' previews wrote to. Then its own storage, all of
    * it, once its audit outbox is delivered (an event never goes with it),
    * and the object restarts empty. Refused (`agent.busy`) while a turn
    * runs; asking again finishes what a failure left. Answers how many
@@ -4832,9 +4827,6 @@ export class Workspace extends DurableObject<Env> {
     await Promise.allSettled(this.#sent);
     const held = this.#db.select({ id: chats.id }).from(chats).all();
     const ids = held.map(({ id }) => id);
-    if (ids.length > 0) {
-      await eraseCaptured(this.env, ids);
-    }
     for (const id of ids) {
       // oxlint-disable-next-line no-await-in-loop -- one chat at a time
       await this.#toSession(id, async (session) => {

@@ -21,8 +21,8 @@ const through = (target: object, key: PropertyKey): unknown => {
  */
 export const fullScan = /^SCAN (?!\(|run$|.* (?:USING|VIRTUAL TABLE))/u;
 
-/** A database of core's: its own, or Knowledge's. */
-type Database = "DB" | "KNOWLEDGE";
+/** Core's database. */
+type Database = "DB";
 
 /** A statement sent to a database, and the values bound to it. */
 export interface Recorded {
