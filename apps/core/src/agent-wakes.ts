@@ -112,6 +112,29 @@ const firesRarely = (
   return true;
 };
 
+/**
+ * The schedule `said` names, in the company's time zone when it names
+ * none, and when it next fires; `agent.wake_invalid` for one that names
+ * no time to come or fires more often than hourly. What a wake-up is
+ * checked for before anything is made of it.
+ */
+export const wakeScheduleOf = async (
+  env: Env,
+  said: { cron: string; timeZone?: string | undefined },
+  now = new Date()
+): Promise<{ schedule: { cron: string; timeZone: string }; nextAt: Date }> => {
+  const organization = await readOrganization(env);
+  const schedule = {
+    cron: said.cron,
+    timeZone: said.timeZone ?? organization.timeZone,
+  };
+  const nextAt = nextOf(schedule, now);
+  if (nextAt === undefined || !firesRarely(schedule, now)) {
+    throw agentErrors.create("agent.wake_invalid");
+  }
+  return { schedule, nextAt };
+};
+
 /** The wake-up `wakeId`, or `agent.wake_unknown`. */
 const requireWake = async (env: Env, wakeId: unknown): Promise<WakeRow> => {
   const row =
@@ -168,20 +191,11 @@ export const makeAgentWake = async (
     throw agentErrors.create("agent.wake_invalid");
   }
   const db = drizzle(env.DB);
-  const [organization, person] = await Promise.all([
-    readOrganization(env),
+  const [{ schedule, nextAt }, person] = await Promise.all([
+    wakeScheduleOf(env, parsed.data, now),
     memberOf(env.DB, parsed.data.personId),
   ]);
-  const schedule = {
-    cron: parsed.data.cron,
-    timeZone: parsed.data.timeZone ?? organization.timeZone,
-  };
-  const nextAt = nextOf(schedule, now);
-  if (
-    person === undefined ||
-    nextAt === undefined ||
-    !firesRarely(schedule, now)
-  ) {
+  if (person === undefined) {
     throw agentErrors.create("agent.wake_invalid");
   }
   const row: WakeRow = {

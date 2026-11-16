@@ -1,9 +1,11 @@
 import { z } from "zod";
 
 import type { ChatFileInput, ChatFileType } from "./chat.ts";
+import { companyToolClasses, toolClassAudienceSchema } from "./connect.ts";
 import type { CompanyToolClass, ToolClassAudience } from "./connect.ts";
 import { modelRoles } from "./deployment-config.ts";
 import type { ModelRole } from "./deployment-config.ts";
+import type { ModelEffort } from "./models.ts";
 import type { AppClassAudience } from "./stephen-reach.ts";
 
 // The company's agents, as its admins make and change them: each has its
@@ -329,4 +331,69 @@ export interface AgentsApi {
   setAgentWakePaused: (wakeId: string, paused: boolean) => Promise<void>;
   /** Deletes a wake-up. The chat its turns were in stays its person's. */
   deleteAgentWake: (wakeId: string) => Promise<void>;
+}
+
+/**
+ * An agent Grasp's chat drafted for the person (`draftAgent`), shown as a
+ * card: nothing is made until they press Make it on it
+ * (`ChatsApi.makeDraftedAgent`), and then only what the card shows, by the
+ * same checks as the Agents page. One of the company's (`whose:
+ * "company"`) is for its admins alone, and only one of those says who may
+ * ask it (`audience`), what it may do (`classes`, each turned on as the
+ * company has it) and when it works on its own (`schedule`, for the
+ * person who made it); a person's own reaches only them and never wakes.
+ */
+export const agentDraftSchema = z
+  .strictObject({
+    name: agentInputSchema.shape.name,
+    job: agentInputSchema.shape.job,
+    instructions: z.string().trim().min(1).max(agentInstructionsMax),
+    whose: z.enum(["company", "own"]),
+    audience: toolClassAudienceSchema.optional(),
+    classes: z
+      .array(z.enum(companyToolClasses))
+      .max(companyToolClasses.length)
+      .optional(),
+    schedule: agentWakeInputSchema
+      .pick({ cron: true, timeZone: true, opening: true })
+      .optional(),
+  })
+  .refine(
+    ({ whose, audience, classes = [], schedule }) =>
+      whose === "company" ||
+      (audience === undefined &&
+        classes.length === 0 &&
+        schedule === undefined),
+    {
+      message:
+        "An agent of the person's own has no audience, classes or schedule: it reaches only them and never wakes.",
+    }
+  );
+export type AgentDraft = z.infer<typeof agentDraftSchema>;
+
+/** A drafted agent as the thread shows it, by the call that drafted it. */
+export interface AgentDrafted extends AgentDraft {
+  callId: string;
+}
+
+/** Make it, for an agent the chat drafted (`ChatsApi.makeDraftedAgent`). */
+export interface AgentDraftMake {
+  /** The draft, by the call that drafted it (`AgentDrafted.callId`). */
+  draft: string;
+  /** What the person said, in their words: their message in the chat. */
+  text: string;
+  /** One of `ChatsApi.models()`, as a question names it. */
+  model: string;
+  effort?: ModelEffort;
+}
+
+/** What Make it made: the agent, by its ID and name. */
+export interface AgentDraftMade {
+  id: string;
+  name: string;
+  /**
+   * Made, but what the card said beyond it (who may ask it, what it may
+   * do, when it wakes) couldn't all be set: its page says what it has.
+   */
+  unfinished?: true;
 }
