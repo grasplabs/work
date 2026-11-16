@@ -338,4 +338,9 @@ export interface AgentDraftMake {
 export interface AgentDraftMade {
   id: string;
   name: string;
+  /**
+   * Made, but what the card said beyond it (who may ask it, what it may
+   * do, when it wakes) couldn't all be set: its page says what it has.
+   */
+  unfinished?: true;
 }

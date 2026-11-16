@@ -47,7 +47,7 @@ import {
   setAgentReach,
   setAgentToolClass,
 } from "./agent-builder.ts";
-import { makeAgentWake } from "./agent-wakes.ts";
+import { makeAgentWake, wakeScheduleOf } from "./agent-wakes.ts";
 import { turnAgent } from "./agents.ts";
 import { createFromBlueprint } from "./app-blueprints.ts";
 import { appKind, createApp, editableApp } from "./apps.ts";
@@ -74,6 +74,7 @@ import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 import { requireNotStaff } from "./sharing.ts";
+import { requireKnownTeams } from "./stephen-reach.ts";
 import { Subscription } from "./subscription.ts";
 import {
   workflowKind,
@@ -623,6 +624,11 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
       const company = draft.whose === "company";
       let agent: Agent;
       try {
+        // What the card says beyond the agent is checked first, so a
+        // schedule or teams core won't take make nothing.
+        if (company) {
+          await this.#checkDrafted(draft);
+        }
         agent = company
           ? await makeAgent(this.#env, person, said, { from: "chat" })
           : await makeOwnAgent(this.#env, person, said, { from: "chat" });
@@ -630,12 +636,29 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
         await chats.releaseAgentDraft(id, callId);
         throw error;
       }
-      if (company) {
-        await this.#setDrafted(person, agent.id, draft);
+      // Made: it stays made and the draft taken, whatever fails next, and
+      // the person lands on its page to finish it there.
+      try {
+        if (company) {
+          await this.#setDrafted(person, agent.id, draft);
+        }
+        await chats.send(id, person.userId, asked);
+      } catch (error) {
+        log.warn("agent.drafted_unfinished", errorFields(error));
+        return { id: agent.id, name: agent.name, unfinished: true };
       }
-      await chats.send(id, person.userId, asked);
       return { id: agent.id, name: agent.name };
     });
+  }
+
+  /** Refuses what a company agent's card said that its page would refuse. */
+  async #checkDrafted({ audience, schedule }: AgentDraft): Promise<void> {
+    if (audience?.who === "teams") {
+      await requireKnownTeams(this.#env, JSON.stringify(audience.teams));
+    }
+    if (schedule !== undefined) {
+      await wakeScheduleOf(this.#env, schedule);
+    }
   }
 
   /** What a company agent's card said beyond itself, set as on its page. */

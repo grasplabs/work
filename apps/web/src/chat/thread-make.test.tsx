@@ -403,7 +403,7 @@ describe("making something in a chat's thread", () => {
           "One of the company's agents",
           "Everyone in the company",
           "Read their own",
-          "0 8 * * 1 · Sum up HR's new mail.",
+          "0 8 * * 1 · the company's time zone · Sum up HR's new mail.",
           "Every Monday, sum up HR's new mail.",
         ],
       ],

@@ -10319,8 +10319,8 @@ msgid "People heard"
 msgstr "Personas escuchadas"
 
 #: src/chat/agent-draft-card.tsx
-msgid "People in {count} chosen teams"
-msgstr "Personas de {count} equipos elegidos"
+msgid "People in these teams: {named}"
+msgstr "Personas de estos equipos: {named}"
 
 #: src/agents/agent-page.tsx
 msgid "People it worked for"
@@ -13762,6 +13762,10 @@ msgstr "Las reglas de la empresa para cada agente."
 #: src/brain/skills-page.tsx
 msgid "The company's skills"
 msgstr "Skills de la empresa"
+
+#: src/chat/agent-draft-card.tsx
+msgid "the company's time zone"
+msgstr "zona horaria de la empresa"
 
 #: src/inbox/items.ts
 msgid "The connection stopped working. Workflows that use it wait until someone signs in again."

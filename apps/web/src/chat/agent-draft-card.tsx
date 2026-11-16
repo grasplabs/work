@@ -14,6 +14,7 @@ import { Trans, useLingui } from "@lingui/react/macro";
 import { useNavigate } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 
+import { useCoreRead } from "../apps/use-core-read.ts";
 import { ErrorText } from "../error-text.tsx";
 import { classNames } from "../settings/stephen-settings.tsx";
 import { useCoreAction } from "../use-core-action.ts";
@@ -38,6 +39,21 @@ export const pendingAgentDraft = (
   return last?.role === "assistant" ? last.agentDraft : undefined;
 };
 
+/** The teams a draft names, by name where the company's list is read; else by ID. */
+const TeamsWords = ({ teams }: { teams: readonly string[] }) => {
+  const key = teams.join(",");
+  const read = useCoreRead(
+    key,
+    async (session) => await session.organization.teams(),
+    key
+  );
+  const names = new Map(
+    read?.state === "ready" ? read.data.map(({ id, name }) => [id, name]) : []
+  );
+  const named = teams.map((id) => names.get(id) ?? id).join(", ");
+  return <Trans>People in these teams: {named}</Trans>;
+};
+
 /** Who may ask it, as the card says it. */
 const AudienceWords = ({
   audience,
@@ -50,8 +66,7 @@ const AudienceWords = ({
   if (audience.who === "everyone") {
     return <Trans>Everyone in the company</Trans>;
   }
-  const count = audience.teams.length;
-  return <Trans>People in {count} chosen teams</Trans>;
+  return <TeamsWords teams={audience.teams} />;
 };
 
 /** One line of the card: what it says, and of what. */
@@ -114,11 +129,14 @@ export const AgentDraftCard = ({
             <Line label={t`When it works on its own`}>
               <span className="font-mono text-xs">{schedule.cron}</span>
               {" · "}
+              {schedule.timeZone ?? t`the company's time zone`}
+              {" · "}
               {schedule.opening}
             </Line>
           )}
           <Line label={t`Its instructions`}>
-            <span className="line-clamp-6 whitespace-pre-wrap">
+            {/* All of it, as it will be kept: long ones scroll. */}
+            <span className="block max-h-64 overflow-y-auto whitespace-pre-wrap">
               {instructions}
             </span>
           </Line>

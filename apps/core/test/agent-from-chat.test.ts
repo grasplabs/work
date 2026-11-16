@@ -186,6 +186,43 @@ describe("an agent made from the chat", { timeout: 120_000 }, () => {
     });
   });
 
+  it("makes nothing of a draft whose schedule or teams its page would refuse, leaving it to make again", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const name = `Too often ${unique()}`;
+    const { chat, callId } = await draftedChat(admin, {
+      ...hr(name),
+      whose: "company",
+      schedule: { cron: "* * * * *", opening: "Check again." },
+    });
+
+    const tried = await outcome(
+      admin.api.chats.makeDraftedAgent(chat.id, {
+        draft: callId ?? "",
+        text: "Make it",
+        model,
+      })
+    );
+    const listed = await admin.api.connections.agents();
+    const again = await outcome(
+      admin.api.chats.makeDraftedAgent(chat.id, {
+        draft: callId ?? "",
+        text: "Make it",
+        model,
+      })
+    );
+
+    expect({
+      tried,
+      made: listed.some((agent) => agent.name === name),
+      // Still the chat's to make: refused as before, never "made already".
+      again,
+    }).toStrictEqual({
+      tried: "agent.wake_invalid",
+      made: false,
+      again: "agent.wake_invalid",
+    });
+  });
+
   it("is never drafted in a turn nobody asked for", async () => {
     const admin = await signedInApi(idp, "admin");
     const { stub, provider, newChat } = await personalChatsOf(
