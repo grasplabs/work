@@ -10,6 +10,7 @@ import { z } from "zod";
 import { callAppFunction } from "../src/app-functions.ts";
 import { loadRelease } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
+import type { RecalledItem } from "../src/brain-next.ts";
 import {
   addSource,
   recallAs,
@@ -214,6 +215,14 @@ const sharedSource = async (text: string): Promise<void> => {
     readers: { kind: "everyone" },
   });
 };
+
+/** An item's citation and text. */
+const keyOf = ({ source, version, position, text }: RecalledItem): string =>
+  JSON.stringify([source, version, position, text]);
+
+/** `items`' citations and texts in any order. */
+const inAnyOrder = (items: readonly RecalledItem[]): string[] =>
+  items.map((item) => keyOf(item)).toSorted();
 
 /** A code step writing a note titled `title` to `app` (with `path`): what the call answered. */
 const writesNote = (
@@ -1341,6 +1350,75 @@ describe("what a chat writes for others once it used something only its person m
         sameNotFound: shared.notFound,
         truncated: true,
         sharedTruncated: false,
+        fromOwn: true,
+      });
+    }
+  );
+
+  it(
+    "marks when the person's own store changes only the order of the same items: an own passage the budget leaves out still takes a rank",
+    slow,
+    async () => {
+      const person = await signedInApi(idp, "user");
+      const [one, two, three, first, second] = [
+        word(),
+        word(),
+        word(),
+        word(),
+        word(),
+      ];
+      const telling = `${one} ${two} ${three}`;
+      // By words: the shortest passage holding the three words first, then
+      // more of them, as many as a way lists, so the quoted phrase's
+      // passages, holding fewer words, are listed only by the phrase:
+      // the shorter first, the longer second.
+      await sharedSource(telling);
+      for (let copy = 1; copy < recallLimit; copy += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- added one after another
+        await sharedSource(`${telling} ${word()} ${word()}`);
+      }
+      await sharedSource(`${first} ${second}`);
+      await sharedSource(`${first} ${second} ${word()}`);
+      // Holds the three words and the question's stop word: first by
+      // words, and too long for what the budget leaves when its turn comes.
+      await ownSource(
+        person.userId,
+        `The ${telling} ${Array.from({ length: 40 }, () => word()).join(" ")}`
+      );
+      const question = `The ${telling} "${first} ${second}"`;
+      const alone = await recallAs(env, person.userId, {
+        question,
+        budget: { tokens: turnRecallBudget.tokens },
+        personal: false,
+      });
+      // Room for the phrase's shorter passage, the shortest by words and
+      // the phrase's longer passage, the first three alone would hand over.
+      const budget = {
+        tokens: recalledTokens({ ...alone, items: alone.items.slice(0, 3) }),
+      };
+      const { pack, fromOwn } = await recallOwnedAs(env, person.userId, {
+        question,
+        budget,
+        personal: true,
+      });
+      const shared = await recallAs(env, person.userId, {
+        question,
+        budget,
+        personal: false,
+      });
+      expect({
+        sameItems: inAnyOrder(pack.items),
+        sameNotFound: pack.notFound,
+        sameCut: pack.truncated,
+        otherOrder:
+          JSON.stringify(pack.items.map((item) => keyOf(item))) !==
+          JSON.stringify(shared.items.map((item) => keyOf(item))),
+        fromOwn,
+      }).toStrictEqual({
+        sameItems: inAnyOrder(shared.items),
+        sameNotFound: shared.notFound,
+        sameCut: shared.truncated,
+        otherOrder: true,
         fromOwn: true,
       });
     }
