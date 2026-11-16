@@ -108,7 +108,7 @@ const saidOf = (
     : { text: notDoneWords[outcome], wrong: outcome !== "nothing" };
 
 // Each keyed by what a core of this release sends; a core of a newer
-// release may send another, shown as written.
+// release may send another, shown as written (`wordsFor`).
 const replayWords: Record<string, string> = {
   through: "Read through",
   replaying: "Replaying after a restore",
@@ -155,6 +155,28 @@ const pauseWords: Record<string, string> = {
   rate_limited: "the model is limiting its calls",
   unavailable: "the model doesn't answer",
   account: "the model's account refuses calls",
+};
+
+/**
+ * The words for `name`, a value a client's core sent, of `words`'s own:
+ * the name as written for one this release doesn't know, so none from
+ * `Object.prototype` (`constructor`, `toString`) ever stands in for it.
+ */
+const wordsFor = (words: Record<string, string>, name: string): string =>
+  (Object.hasOwn(words, name) ? words[name] : undefined) ?? name;
+
+/**
+ * What the erasure ledger's tile says under its state: nothing once it is
+ * read through; for any other state, the attention it needs, a state a
+ * core of a newer release sends included, which never reads as fine.
+ */
+const replaySub = (replay: string): string | undefined => {
+  if (replay === "through") {
+    return undefined;
+  }
+  return replay === "replaying" || replay === "unreadable"
+    ? "The Brain answers nothing until it is read through"
+    : "A state this admin doesn't know: the Brain may answer nothing until it is read through";
 };
 
 const oneDecimal = new Intl.NumberFormat("en", {
@@ -267,12 +289,8 @@ const Figures = ({ report }: { report: BrainReport }) => {
         <Figure
           attention={ledger.replay !== "through"}
           label="Erasure ledger"
-          sub={
-            ledger.replay === "replaying" || ledger.replay === "unreadable"
-              ? "The Brain answers nothing until it is read through"
-              : undefined
-          }
-          value={replayWords[ledger.replay] ?? ledger.replay}
+          sub={replaySub(ledger.replay)}
+          value={wordsFor(replayWords, ledger.replay)}
         />
       </div>
     </section>
@@ -295,7 +313,7 @@ const Waiting = ({ report }: { report: BrainReport }) => {
     <Section title="Queue">
       {pause === null ? null : (
         <SectionRow
-          description={`Since ${agoWords(Date.parse(pause.since), now)}: ${pauseWords[pause.reason] ?? pause.reason}. It tries again ${inWords(Date.parse(pause.until), now)}.`}
+          description={`Since ${agoWords(Date.parse(pause.since), now)}: ${wordsFor(pauseWords, pause.reason)}. It tries again ${inWords(Date.parse(pause.until), now)}.`}
           label="Waiting for the model"
         >
           <Badge variant="attention">Paused</Badge>
@@ -449,7 +467,9 @@ const Engine = ({
   const { embedding } = report;
   const rebuilding = report.words === "rebuilding";
   return (
-    <Collapsible defaultOpen={rebuilding || embedding.rebuilding}>
+    <Collapsible
+      defaultOpen={report.words !== "current" || embedding.rebuilding}
+    >
       <Section
         action={
           <CollapsibleTrigger render={<Button size="sm" variant="outline" />}>
@@ -709,6 +729,14 @@ const ModelSpend = ({ report }: { report: BrainReport }) => {
 const Ledger = ({ report }: { report: BrainReport }) => {
   const { ledger } = report;
   const { unwritten } = ledger.source;
+  // A reason a core of an older release doesn't send shows as nothing, and
+  // the row with none.
+  const byReason = brainErasureReasons.flatMap((reason) => {
+    const erasures = ledger.byReason[reason];
+    return erasures === undefined
+      ? []
+      : [`${whole(erasures)} ${reasonWords[reason]}`];
+  });
   return (
     <Collapsible defaultOpen={unwritten > 0}>
       <Section
@@ -756,19 +784,11 @@ const Ledger = ({ report }: { report: BrainReport }) => {
               {whole(ledger.sourcesWithoutCurrent)}
             </span>
           </SectionRow>
-          <SectionRow label="By reason">
-            <span className="tabular-nums">
-              {formatList(
-                // Not reported (undefined) by a core of an older release: nothing.
-                brainErasureReasons.flatMap((reason) => {
-                  const erasures = ledger.byReason[reason];
-                  return erasures === undefined
-                    ? []
-                    : [`${whole(erasures)} ${reasonWords[reason]}`];
-                })
-              )}
-            </span>
-          </SectionRow>
+          {byReason.length === 0 ? null : (
+            <SectionRow label="By reason">
+              <span className="tabular-nums">{formatList(byReason)}</span>
+            </SectionRow>
+          )}
         </CollapsibleContent>
       </Section>
     </Collapsible>
@@ -778,8 +798,11 @@ const Ledger = ({ report }: { report: BrainReport }) => {
 /** The tick's own steps that failed since the store started, or one line when none did. */
 const Steps = ({ report }: { report: BrainReport }) => {
   const now = Date.parse(report.now);
-  const failing = brainSteps.flatMap((step) => {
-    // Not reported (undefined) by a core of an older release: nothing.
+  // A step not reported (undefined), by a core of another release: nothing.
+  const reported = brainSteps.filter(
+    (step) => report.stepsFailed[step] !== undefined
+  );
+  const failing = reported.flatMap((step) => {
     const failed = report.stepsFailed[step];
     return failed === null || failed === undefined ? [] : [{ step, failed }];
   });
@@ -792,19 +815,25 @@ const Steps = ({ report }: { report: BrainReport }) => {
       }
       title="Upkeep"
     >
-      {failing.length === 0 ? (
+      {reported.length === 0 ? (
+        <SectionRow label="Its upkeep's steps">
+          <span className="text-muted-foreground">Not reported</span>
+        </SectionRow>
+      ) : null}
+      {reported.length > 0 && failing.length === 0 ? (
         <SectionRow label="Every step of its upkeep got through">
           <Badge variant="passed">Fine</Badge>
         </SectionRow>
-      ) : (
-        failing.map(({ step, failed }) => (
-          <SectionRow key={step} label={stepWords[step]}>
-            <Badge variant="attention">
-              {`${failureWords[failed.reason] ?? failed.reason} ${agoWords(Date.parse(failed.at), now)}`}
-            </Badge>
-          </SectionRow>
-        ))
-      )}
+      ) : null}
+      {failing.length === 0
+        ? null
+        : failing.map(({ step, failed }) => (
+            <SectionRow key={step} label={stepWords[step]}>
+              <Badge variant="attention">
+                {`${wordsFor(failureWords, failed.reason)} ${agoWords(Date.parse(failed.at), now)}`}
+              </Badge>
+            </SectionRow>
+          ))}
     </Section>
   );
 };

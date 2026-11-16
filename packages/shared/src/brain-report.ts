@@ -201,19 +201,6 @@ export const brainSteps = stepsFailedSchema.keyof().options;
 export type BrainStep = (typeof brainSteps)[number];
 
 /**
- * The ways recall searches by, in the order staff read them: every one
- * the store's overview names (core's brain-next.ts holds the two to the
- * same keys, as the steps).
- */
-export const brainSearchWays = [
-  "words",
-  "exact",
-  "entities",
-  "meaning",
-] as const;
-export type BrainSearchWay = (typeof brainSearchWays)[number];
-
-/**
  * How many recalls went without the question's vector though a model
  * runs, by why: every reason the store counts (held to its keys as the
  * ways are). Core always sends every reason. Each is optional only so the
@@ -223,10 +210,10 @@ export type BrainSearchWay = (typeof brainSearchWays)[number];
  * shows as nothing.
  */
 const withoutMeaningSchema = z.object({
-  timed_out: z.int().min(0).optional(),
-  failed: z.int().min(0).optional(),
-  refused: z.int().min(0).optional(),
-  unusable: z.int().min(0).optional(),
+  timed_out: count.optional(),
+  failed: count.optional(),
+  refused: count.optional(),
+  unusable: count.optional(),
 });
 
 /** Why a recall went without the question's vector (`withoutMeaningSchema`). */
@@ -236,6 +223,26 @@ export type BrainWithoutMeaningReason =
 
 /** How many recalls searched by a way, and how many it failed. */
 const wayCountSchema = z.object({ recalls: count, failed: count });
+
+/**
+ * Recall by each way it searches, in the order staff read them: every
+ * one the store's overview names (core's brain-next.ts holds the two to
+ * the same keys, as the steps). Core always sends every way; each is
+ * optional only so the admin reads a core of an older release (one on a
+ * slower channel), which lacks a way added since, and shows the rest of
+ * its report. A way of a newer release's core that this list lacks is
+ * left out.
+ */
+const waysSchema = z.object({
+  words: wayCountSchema.optional(),
+  exact: wayCountSchema.optional(),
+  entities: wayCountSchema.optional(),
+  meaning: wayCountSchema.optional(),
+});
+
+/** The ways recall searches by, in the order staff read them (`waysSchema`). */
+export const brainSearchWays = waysSchema.keyof().options;
+export type BrainSearchWay = (typeof brainSearchWays)[number];
 
 /**
  * How many erasures there are of each reason, in all: every reason the
@@ -375,18 +382,7 @@ export const brainReportSchema = z.object({
    */
   recall: z.object({
     since: isoTime,
-    /**
-     * Core always sends every way; each is optional only so the admin
-     * reads a core of an older release (one on a slower channel), which
-     * lacks a way added since, and shows the rest of its report. A way of
-     * a newer release's core that this list lacks is left out.
-     */
-    ways: z.object({
-      words: wayCountSchema.optional(),
-      exact: wayCountSchema.optional(),
-      entities: wayCountSchema.optional(),
-      meaning: wayCountSchema.optional(),
-    }),
+    ways: waysSchema,
     withoutMeaning: withoutMeaningSchema,
   }),
   /**

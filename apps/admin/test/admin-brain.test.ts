@@ -253,6 +253,13 @@ const recallPartOf = (html: string): string =>
 const spendPartOf = (html: string): string =>
   html.slice(html.indexOf(">Model spend<"), html.indexOf(">Erasures<"));
 
+/** The erasure ledger's tile of a page's HTML: from its label to the end of the tiles. */
+const ledgerTileOf = (html: string): string =>
+  html.slice(
+    html.indexOf(">Erasure ledger<"),
+    html.indexOf("</section>", html.indexOf(">Erasure ledger<"))
+  );
+
 /** The Erasures section of a page's HTML. */
 const erasuresPartOf = (html: string): string =>
   html.slice(html.indexOf(">Erasures<"), html.indexOf(">Upkeep<"));
@@ -706,7 +713,11 @@ describe("how an organization's Brain is doing", () => {
         "Putting passages on the queue to embed throttled 5 min ago"
       ),
       words: whole.includes("recall goes on meanwhile. compacting Rebuild"),
-      ledger: whole.includes("Erasure ledger verifying"),
+      // Never read as fine: marked, and said to be unknown.
+      ledger: whole.includes(
+        "Erasure ledger verifying A state this admin doesn't know: the Brain may answer nothing until it is read through"
+      ),
+      ledgerMarked: ledgerTileOf(html).includes("bg-status-attention"),
     }).toStrictEqual({
       status: 200,
       ways: true,
@@ -714,6 +725,64 @@ describe("how an organization's Brain is doing", () => {
       step: true,
       words: true,
       ledger: true,
+      ledgerMarked: true,
+    });
+  });
+
+  it("shows a name a core sends that is a property of every object, such as constructor or toString, as written", async () => {
+    const odd = await liveClient();
+    odd.core.admin = heardSnapshot("Odd");
+    const report = brainReport(1_000_000);
+    const stepsFailed = {
+      ...report.stepsFailed,
+      embedding: { at: "2026-11-12T09:55:00.000Z", reason: "constructor" },
+    };
+    odd.core.brain = {
+      ...report,
+      ledger: { ...report.ledger, replay: "toString" },
+      stepsFailed,
+    };
+
+    const { status, html } = await page(`/organizations/${odd.clientId}/brain`);
+    const whole = textOf(html);
+
+    expect({
+      status,
+      step: textOf(upkeepPartOf(html)).includes(
+        "Putting passages on the queue to embed constructor 5 min ago"
+      ),
+      ledger: whole.includes("Erasure ledger toString A state"),
+      native: whole.includes("native code"),
+    }).toStrictEqual({ status: 200, step: true, ledger: true, native: false });
+  });
+
+  it("says nothing of its upkeep was reported, and shows no reasons of erasures, when a core reports none of those this admin knows", async () => {
+    const bare = await liveClient();
+    bare.core.admin = heardSnapshot("Bare");
+    const report = brainReport(1_000_000);
+    const stepsFailed: Record<string, null> = { later: null };
+    const byReason: Record<string, number> = { later: 2 };
+    bare.core.brain = {
+      ...report,
+      stepsFailed,
+      ledger: { ...report.ledger, byReason },
+    };
+
+    const { status, html } = await page(
+      `/organizations/${bare.clientId}/brain`
+    );
+    const upkeep = textOf(upkeepPartOf(html));
+
+    expect({
+      status,
+      notReported: upkeep.includes("Its upkeep's steps Not reported"),
+      fine: upkeep.includes("Fine"),
+      byReason: textOf(erasuresPartOf(html)).includes("By reason"),
+    }).toStrictEqual({
+      status: 200,
+      notReported: true,
+      fine: false,
+      byReason: false,
     });
   });
 
@@ -1017,11 +1086,10 @@ describe("how an organization's Brain is doing", () => {
       exactNotYet: recall.includes("Exact parts Not available yet"),
       // A reason the core doesn't report shows as nothing.
       without: recall.includes("3 timed out, 0 failed, and 0 refused"),
-      unusable: recall.includes("unusable"),
       byReason: erasures.includes(
         "3 deleted for good, 0 past their retention, and 0 people erased"
       ),
-      withdrawn: erasures.includes("withdrawn"),
+
       failedStep: upkeep.includes(
         "Putting passages on the queue to embed Failed 5 min ago"
       ),
@@ -1042,9 +1110,7 @@ describe("how an organization's Brain is doing", () => {
       rest: true,
       exactNotYet: true,
       without: true,
-      unusable: false,
       byReason: true,
-      withdrawn: false,
       failedStep: true,
       judging: false,
       entitiesNotYet: true,
