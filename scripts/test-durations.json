@@ -377,6 +377,7 @@
   "@grasp-os/core test/preview-hot-updates.test.ts": 11.1,
   "@grasp-os/core test/preview-modules.test.ts": 15.8,
   "@grasp-os/core test/preview-refresh-build.test.ts": 2.6,
+  "@grasp-os/core test/private-read-marks.test.ts": 1.5,
   "@grasp-os/core test/programme-cadence.test.ts": 0.2,
   "@grasp-os/core test/projects.test.ts": 8.2,
   "@grasp-os/core test/provision-probe.test.ts": 0.4,
