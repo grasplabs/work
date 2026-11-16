@@ -535,8 +535,11 @@ export class PendingActionsRpc
       if (person.staff) {
         return [];
       }
+      // Only what was held in Grasp: a chat app's conversation is no chat
+      // here, and its writes are decided on their card there (GRA-1919).
       const waiting = await this.#env.CONNECT.listPendingActions(
-        await personOf(this.#env, person)
+        await personOf(this.#env, person),
+        "grasp"
       );
       return await withRestricted(this.#env, person.userId, waiting);
     });

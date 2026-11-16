@@ -110,7 +110,8 @@ const heldSend = async (
   );
   expect(refused).toBe("connect.held");
   const waitingFor = await env.CONNECT.listPendingActions(
-    await personOf(env, by)
+    await personOf(env, by),
+    "grasp"
   );
   const held = waitingFor.find(
     ({ idempotencyKey }) =>

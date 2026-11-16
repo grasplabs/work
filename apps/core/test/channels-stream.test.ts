@@ -3,7 +3,6 @@ import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { inTeams } from "../src/channels/inert.ts";
-import { say } from "../src/channels/words.ts";
 import { chatAgentId, personalWorkspaceId } from "../src/chats-rpc.ts";
 import { workspace } from "../src/durable-objects.ts";
 import { keptAnswersOf, pausedReply, says } from "./agent-chat.ts";
@@ -97,6 +96,17 @@ const messagesIn = async (conversation: string) => {
     ];
   });
 };
+
+/** Every text a Teams activity's card shows, in order. */
+const textsOf = (activity: unknown): string[] =>
+  activitySchema
+    .parse(activity)
+    .attachments?.flatMap(
+      ({ content }) =>
+        content?.body?.flatMap(({ text }) =>
+          text === undefined ? [] : [text]
+        ) ?? []
+    ) ?? [];
 
 /** Waits, within a bound, for the card in `conversation` to show `words`. */
 const cardShows = async (conversation: string, words: string) => {
@@ -194,7 +204,7 @@ describe("an answer written into its card", setUpTime, () => {
     });
   });
 
-  it("shows no more than a card takes, chunk after chunk past it, then only the answer's own card", async () => {
+  it("shows no more than a card takes while written, then ends as the answer's first card, the rest posted after it in order, nothing twice", async () => {
     const answer = "Leave lasts sixteen weeks. ".repeat(800);
     // Past what one card takes (cards.tsx), then chunk after chunk that
     // changes nothing it shows. That an update showing what the card
@@ -227,18 +237,35 @@ describe("an answer written into its card", setUpTime, () => {
     const messages = await messagesIn(teams.conversation);
     const [card] = messages;
     const { sent } = await reached(teams.conversation);
+    // The answer as it ended: the card's last update, then what was posted
+    // after it, each card's every text.
+    const last = sent.findLastIndex(({ editOf }) => editOf === card?.id);
+    const ended = sent
+      .slice(last)
+      .filter(({ editOf }, at) => at === 0 || editOf === undefined)
+      // Not the card offering their own Microsoft 365 (connect-own.ts).
+      .filter(
+        ({ activity }) =>
+          !JSON.stringify(activity).includes("/connect-microsoft")
+      )
+      .map(({ activity }) => textsOf(activity).join(""));
     expect({
-      // The card as cut while written, then only the answer's own card,
-      // which says where the rest is: no update in between.
-      sends: messages.map(({ editOf }) => editOf),
+      // The card as cut while written, then the answer's first card in its
+      // place, then the rest posted: no update in between.
+      sends: messages.slice(0, 2).map(({ editOf }) => editOf),
+      postedAfter: messages.slice(2).map(({ editOf }) => editOf ?? "posted"),
       cut: card?.words.endsWith("…"),
-      tooLong: JSON.stringify(
-        sent.findLast(({ editOf }) => editOf === card?.id)?.activity
-      ).includes(say("answerTooLong", "en")),
+      several: ended.length > 1,
+      whole:
+        ended.join("").replaceAll(/\s/gu, "") === answer.replaceAll(/\s/gu, ""),
+      postedOnce: new Set(ended).size === ended.length,
     }).toStrictEqual({
       sends: [undefined, card?.id],
+      postedAfter: ended.slice(1).map(() => "posted"),
       cut: true,
-      tooLong: true,
+      several: true,
+      whole: true,
+      postedOnce: true,
     });
   });
 
