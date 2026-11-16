@@ -226,15 +226,21 @@ const judgePage = (
   { limits, spent }: { limits: CatchUpLimits; spent: Spent }
 ): void => {
   const pointer = sql
-    .exec<{ version_row: number; judged_row: number | null }>(
-      "SELECT version_row, judged_row FROM current_versions WHERE source = ?",
+    .exec<{ version_row: number; judged_row: number | null; file: string }>(
+      `SELECT pointer.version_row AS version_row, pointer.judged_row AS judged_row,
+        version.file AS file
+      FROM current_versions AS pointer
+      JOIN source_versions AS version ON version.row = pointer.version_row
+      WHERE pointer.source = ?`,
       source
     )
     .toArray()
     .at(0);
+  // Still the version whose file was read, by its row and its file.
   if (
     pointer === undefined ||
     pointer.version_row !== current.row ||
+    pointer.file !== current.file ||
     pointer.judged_row === pointer.version_row
   ) {
     return;
