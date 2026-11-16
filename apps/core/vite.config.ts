@@ -8,6 +8,7 @@ import type { UserWorkspaceConfig } from "vite-plus";
 import { oxcParseTestConfig } from "../../packages/runtime/oxc-parse-test-config.ts";
 import { testComposioKey } from "../connect/test/provider-config.ts";
 import { digestModuleOf, testBlueprintsModule } from "./build-blueprints.ts";
+import { buildSteps, lastBuildStep } from "./build-steps.ts";
 import { connectBundle } from "./test/build-connect.ts";
 import { testVersionModule } from "./test/compiler-version.ts";
 import {
@@ -416,37 +417,20 @@ export const coreProject = (
   });
 
 /**
- * Core's build: the App compiler, the extractor and the SDK docs, each
- * into its own place in the frontend's static files (`../web/dist`, so
- * after the frontend's build, which empties it), and the blueprints and
- * the agent's docs into dist/. Each reads only sources, so Vite+ runs the
- * four slow ones at once and the agent's docs after: one after another
- * they took 39 s of the release build on CI, 19 s of it the compiler's
- * and 17 s the docs' (November 2026). Not cached: the frontend's build
- * empties what they write.
+ * Core's build (build-steps.ts): Vite+ runs the steps at once, and
+ * `build` last. Not cached: the frontend's build empties what three of
+ * them write.
  */
 const build = {
-  "build:compiler": {
-    command: "node ../../packages/compiler/build.ts ../web/dist",
-    cache: false,
-  },
-  "build:extractor": {
-    command: "node build-extractor.ts ../web/dist",
-    cache: false,
-  },
-  "build:docs": {
-    command: "node ../docs/build.ts ../web/dist/docs",
-    cache: false,
-  },
-  "build:blueprints": { command: "node build-blueprints.ts", cache: false },
+  ...Object.fromEntries(
+    Object.entries(buildSteps).map(([name, command]) => [
+      `build:${name}`,
+      { command, cache: false },
+    ])
+  ),
   build: {
-    command: "node build-agent-docs.ts",
-    dependsOn: [
-      "build:compiler",
-      "build:extractor",
-      "build:docs",
-      "build:blueprints",
-    ],
+    command: lastBuildStep,
+    dependsOn: Object.keys(buildSteps).map((name) => `build:${name}`),
     cache: false,
   },
 };
