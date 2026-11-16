@@ -134,21 +134,36 @@ const cardsIn = async (
 /** What a turn's code step does with the App, given it and its release. */
 type Step = (app: string, release: Release) => ProviderReply;
 
-/** A code step holding a note for each of `titles`, in order, in one run. */
-const writesNotes =
-  (titles: readonly string[]): Step =>
+/** A code step making each of `calls` to the App, in order, in one run. */
+const holdsCalls =
+  (calls: readonly { path: string; args: unknown }[]): Step =>
   (app, release) =>
     codeStep(
       `export default async (self, env) => {
         const answered = [];
         for (const call of ${JSON.stringify(
-          titles.map((title) => callOf(release, "notes.create", { title }))
+          calls.map(({ path, args }) => callOf(release, path, args))
         )}) {
           answered.push(await env.apps.call(${JSON.stringify(app)}, new Blob([call]).stream()));
         }
         return answered;
       };`
     );
+
+/** A code step holding a note for each of `titles`, in order, in one run. */
+const writesNotes = (titles: readonly string[]): Step =>
+  holdsCalls(
+    titles.map((title) => ({ path: "notes.create", args: { title } }))
+  );
+
+/** A code step that asks nothing of the App. */
+const holdsNothing: Step = () => codeStep("export default async () => null;");
+
+/** What a card of held writes says it is, of the lines that tell them apart. */
+const kindOf = ({ shown }: PostedCard) => ({
+  later: shown.texts.includes(say("heldLater", "en")),
+  tooLong: shown.texts.includes(say("cardTooLong", "en")),
+});
 
 /**
  * A builder on Teams with a live Notes App the Teams agent may write to,
@@ -448,10 +463,11 @@ describe("a press on a held write to an App in Teams that mustn't run anything",
       );
       const held = await heldInTeams(undefined, { first: writesNotes(titles) });
       const [confirmable, rest] = held.cards;
-      const shown = held.cards.map(({ value, cancel, shown: card }) => ({
-        confirm: value !== undefined,
-        cancel: cancel !== undefined,
-        writes: card.facts.length,
+      const shown = held.cards.map((card) => ({
+        confirm: card.value !== undefined,
+        cancel: card.cancel !== undefined,
+        writes: card.shown.facts.length,
+        ...kindOf(card),
       }));
       await post({
         ...messageFrom(held.person.teams, { text: undefined }),
@@ -467,15 +483,111 @@ describe("a press on a held write to an App in Teams that mustn't run anything",
 
       expect({
         shown,
-        written: written.toSorted(),
+        written,
         waiting: await held.waiting(),
       }).toStrictEqual({
         shown: [
-          { confirm: true, cancel: true, writes: 10 },
-          { confirm: false, cancel: true, writes: 1 },
+          {
+            confirm: true,
+            cancel: true,
+            writes: 10,
+            later: false,
+            tooLong: false,
+          },
+          // Shown whole: it can only be cancelled here, and says so.
+          {
+            confirm: false,
+            cancel: true,
+            writes: 1,
+            later: true,
+            tooLong: false,
+          },
         ],
-        written: titles.slice(0, 10).toSorted(),
+        // In the order they were asked for.
+        written: titles.slice(0, 10),
         waiting: [],
+      });
+    }
+  );
+
+  it(
+    "keeps the order asked: once a write can't join the card to confirm, every later one waits too, on a card to cancel that says so, and a Confirm sent with that card's writes runs nothing",
+    slow,
+    async () => {
+      const [x, a, b] = ["x", "a", "b"].map((name) => `${name}-${unique()}`);
+      const held = await heldInTeams(undefined, {
+        first: holdsCalls(
+          (
+            [
+              [x, 9000],
+              [a, 8000],
+              [b, 100],
+            ] as const
+          ).map(([title, chars]) => ({
+            path: "notes.createWith",
+            args: { title, body: "w".repeat(chars) },
+          }))
+        ),
+        later: [holdsNothing],
+      });
+      const [first, rest] = held.cards;
+      const turnOne = held.cards.map((card) => ({
+        confirm: card.value !== undefined,
+        cancel: card.cancel !== undefined,
+        writes: card.shown.facts.length,
+        ...kindOf(card),
+      }));
+      // Confirm sent with the second card's writes, A and B: they can't run
+      // ahead of X, which still waits.
+      const linesBefore = await linesAfterCard(held);
+      await post({
+        ...messageFrom(held.person.teams, { text: undefined }),
+        replyToId: rest?.cardId,
+        value: { actionId: confirmAction, value: rest?.cancel },
+      });
+      const linesAfter = await linesAfterCard(held);
+      const forged = {
+        titles: await held.titles(),
+        said: linesAfter.slice(linesBefore.length),
+      };
+      await post({
+        ...messageFrom(held.person.teams, { text: undefined }),
+        replyToId: first?.cardId,
+        value: { actionId: confirmAction, value: first?.value },
+      });
+      // Next turn: A and B, in order, on the card to confirm.
+      const [next] = await held.askAgain();
+      await post({
+        ...messageFrom(held.person.teams, { text: undefined }),
+        replyToId: next?.cardId,
+        value: { actionId: confirmAction, value: next?.value },
+      });
+
+      expect({
+        turnOne,
+        forged,
+        next: next?.shown.facts.length,
+        written: await held.titles(),
+      }).toStrictEqual({
+        turnOne: [
+          {
+            confirm: true,
+            cancel: true,
+            writes: 1,
+            later: false,
+            tooLong: false,
+          },
+          {
+            confirm: false,
+            cancel: true,
+            writes: 2,
+            later: true,
+            tooLong: false,
+          },
+        ],
+        forged: { titles: [], said: [say("heldLater", "en")] },
+        next: 2,
+        written: [x, a, b],
       });
     }
   );

@@ -446,6 +446,37 @@ describe("Stephen's cards in Teams", () => {
     });
   });
 
+  it("says on each card to cancel why it can't be confirmed: after the card to confirm, a connection's write not coming back, or too long to show", () => {
+    /** Write `index` with a value of `chars` characters, an App's when held in `chatId`. */
+    const sized = (index: number, chars: number, chatId?: string) => ({
+      ...write(index, { value: "v".repeat(chars) }),
+      ...(chatId === undefined ? {} : { chatId }),
+    });
+    /** Which line each card says, of those that tell cards apart. */
+    const linesOf = (cards: PostableCard[]) =>
+      cards.map((card) => {
+        const { texts } = inTeams(card);
+        return {
+          later: texts.includes(say("heldLater", "en")),
+          laterConnections: texts.includes(say("heldLaterConnections", "en")),
+          tooLong: texts.includes(say("cardTooLong", "en")),
+        };
+      });
+    const none = { later: false, laterConnections: false, tooLong: false };
+    const of = (writes: HeldWriteView[]) =>
+      linesOf(heldWritesCards({ locale: "en", platform: "teams", writes }));
+
+    expect({
+      apps: of([sized(1, 9000, "c"), sized(2, 8000, "c"), sized(3, 100, "c")]),
+      connection: of([sized(1, 9000, "c"), sized(2, 8000)]),
+      tooLong: of([sized(1, 100, "c"), sized(2, 20_000, "c")]),
+    }).toStrictEqual({
+      apps: [none, { ...none, later: true }],
+      connection: [none, { ...none, laterConnections: true }],
+      tooLong: [none, { ...none, tooLong: true }],
+    });
+  });
+
   it("presses only what a card of held writes carries", () => {
     expect({
       none: pressOf(),

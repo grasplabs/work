@@ -17,6 +17,7 @@ import {
   confirmableOn,
   heldWritesCard,
   pressOf,
+  wholeAlone,
 } from "./cards.tsx";
 import type {
   HeldWriteView,
@@ -117,7 +118,12 @@ const editCard = async (
 /** Says one line where the card was pressed. */
 const sayThere = async (
   event: ActionEvent,
-  line: "alreadyAnswered" | "cardTooLong" | "changedSince" | "removed",
+  line:
+    | "alreadyAnswered"
+    | "cardTooLong"
+    | "changedSince"
+    | "heldLater"
+    | "removed",
   locale: ChannelLocale
 ): Promise<void> => {
   try {
@@ -128,9 +134,10 @@ const sayThere = async (
 };
 
 /** A write the card showed, as it is still held: connect's, or one to an App. */
-type StillHeld =
-  | { held: PendingAction; view: HeldWriteView }
-  | { chatId: string; view: HeldWriteView };
+type StillHeld = { view: HeldWriteView; at: number } & (
+  | { held: PendingAction }
+  | { chatId: string }
+);
 
 /**
  * The card's writes as they are still held for the person, each with the
@@ -152,7 +159,11 @@ const stillAsShown = async (
       if (found?.inputHash !== inputHash) {
         return null;
       }
-      held.push({ held: found, view: inertView(platform, viewOf(found)) });
+      held.push({
+        held: found,
+        view: inertView(platform, viewOf(found)),
+        at: Date.parse(found.requestedAt),
+      });
       continue;
     }
     // oxlint-disable-next-line no-await-in-loop -- in the card's order
@@ -164,9 +175,63 @@ const stillAsShown = async (
     held.push({
       chatId,
       view: inertView(platform, appViewOf(chatId, call, locale)),
+      at: Date.parse(call.heldAt),
     });
   }
   return held;
+};
+
+/**
+ * Why a Confirm on `held` (a press's writes, as held now) can't run, or
+ * null when it can. A card to confirm carries the prefix, in the order
+ * asked, of its turn's writes that lay out whole together
+ * (cards.tsx `heldWritesCards`); a press can't name the turn it is of, so
+ * its writes are held to what such a prefix guarantees:
+ * - they lay out whole together on one card, measured as a card to
+ *   confirm is (`confirmableOn`), else `cardTooLong`;
+ * - they are of one chat, and no write to an App of that chat that still
+ *   waits, asked before the last of them, is left out, unless no card can
+ *   show it whole (it can never be confirmed): else `heldLater`. So no
+ *   write runs ahead of a write to an App asked before it that could still
+ *   be confirmed. A connection's write is listed only by the turn that
+ *   held it, so a later turn's press can't leave one out.
+ */
+const notConfirmable = async (
+  env: Env,
+  userId: string,
+  held: readonly StillHeld[],
+  card: { platform: string; locale: ChannelLocale }
+): Promise<"cardTooLong" | "heldLater" | null> => {
+  const writes = held.map(({ view }) => view);
+  if (!confirmableOn({ ...card, writes })) {
+    return "cardTooLong";
+  }
+  const chats = new Set(
+    held.map((write) => {
+      if ("chatId" in write) {
+        return write.chatId;
+      }
+      const { context } = write.held;
+      return context.type === "chat" ? context.chatId : null;
+    })
+  );
+  const [chatId] = chats;
+  if (chats.size !== 1 || chatId === undefined || chatId === null) {
+    return "heldLater";
+  }
+  const last = Math.max(...held.map(({ at }) => at));
+  const named = new Set(writes.map(({ id }) => id));
+  const waiting = await heldAppCallsIn(env, userId, chatId, card.platform);
+  const leftOut = waiting.some(
+    (call) =>
+      Date.parse(call.heldAt) < last &&
+      !named.has(call.id) &&
+      wholeAlone(
+        card,
+        inertView(card.platform, appViewOf(chatId, call, card.locale))
+      )
+  );
+  return leftOut ? "heldLater" : null;
 };
 
 /** How a confirmed write that failed ended, as its card shows it. */
@@ -248,11 +313,14 @@ export const pressCard = async (
   }
   // As the card showed them, what the model wrote inert (held.ts).
   const writes: HeldWriteView[] = held.map(({ view }) => view);
-  // Confirm only what a card could show whole: a press carrying writes
-  // from a card with Cancel alone runs nothing (cards.tsx).
-  if (confirming && !confirmableOn({ locale, platform, writes })) {
-    log.info("channel.press_refused", { platform, reason: "not_whole" });
-    await sayThere(event, "cardTooLong", locale);
+  // Confirm only what a card to confirm could carry (`notConfirmable`): a
+  // press sent with a card's writes that has Cancel alone runs nothing.
+  const refused = confirming
+    ? await notConfirmable(env, userId, held, { platform, locale })
+    : null;
+  if (refused !== null) {
+    log.info("channel.press_refused", { platform, reason: refused });
+    await sayThere(event, refused, locale);
     return;
   }
   const shown = (outcome?: PressOutcome) => ({

@@ -501,12 +501,25 @@ const unpadded = /^\S(?:.*\S)?$/su;
 const unseenClass = String.raw`\p{Cc}\p{Cf}\p{Co}\p{Cn}\p{Cs}\p{Default_Ignorable_Code_Point}`;
 
 /**
- * What a question or an option never holds: anything nobody sees as text
- * (`unseenClass`) and the line and paragraph separators, so it shows as
- * the one line it reads as, and can't pass for something the page itself
- * shows.
+ * What a question or an option never holds outside a standard emoji
+ * (`standardEmoji`): anything nobody sees as text (`unseenClass`) and the
+ * line and paragraph separators, so it shows as the one line it reads as,
+ * and can't pass for something the page itself shows.
  */
 const notInAskLine = new RegExp(`[${unseenClass}\\p{Zl}\\p{Zp}]`, "u");
+
+/**
+ * A standard emoji (Unicode's recommended sequences: `RGI_Emoji`), its
+ * selectors, skin tones, joiners and tags included: text people read, so a
+ * line that asks something may hold one. Only ask lines read it; what a
+ * person confirms before it is sent (`shownVisibly`) shows every character
+ * nobody sees, inside an emoji too.
+ */
+// Built from a string: the `v` flag that `RGI_Emoji` needs is newer than
+// the language level the App compiler type-checks this file at (es2024);
+// every runtime that reads it (workerd, the browsers Grasp supports) has it.
+// oxlint-disable-next-line prefer-regex-literals -- see above
+const standardEmoji = new RegExp(String.raw`\p{RGI_Emoji}`, "gv");
 
 /**
  * What a person sees of text that is sent as it is, which they confirm
@@ -546,10 +559,15 @@ const askLine = (max: number) =>
     .string()
     .max(max)
     .regex(unpadded)
-    .refine((line) => !notInAskLine.test(line) && line.isWellFormed(), {
-      message:
-        "One line of well-formed text, with no control or invisible formatting characters",
-    });
+    .refine(
+      (line) =>
+        !notInAskLine.test(line.replaceAll(standardEmoji, "")) &&
+        line.isWellFormed(),
+      {
+        message:
+          "One line of well-formed text, with no control or invisible formatting characters outside a standard emoji",
+      }
+    );
 
 /** An option to pick: a few words, and a line saying what it means. */
 const askOptionSchema = z.strictObject({

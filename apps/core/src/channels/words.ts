@@ -338,6 +338,28 @@ const lines = {
     fr: "Cette carte ne peut pas montrer tout ce qui changerait, donc cela ne peut pas être confirmé. Redemandez-moi avec moins de modifications à la fois.",
     es: "Esta tarjeta no puede mostrar todo lo que cambiaría, así que no se puede confirmar. Pídemelo de nuevo con menos cambios a la vez.",
   },
+  /**
+   * A card of changes it shows whole that wait behind the card to confirm
+   * (cards.tsx `heldWritesCards`): they can only be cancelled on it.
+   */
+  heldLater: {
+    en: "These changes can only be cancelled here. Decide the first card, then ask me again for the rest.",
+    nl: "Deze wijzigingen kun je hier alleen annuleren. Beslis eerst over de eerste kaart en vraag me daarna opnieuw om de rest.",
+    de: "Diese Änderungen können Sie hier nur abbrechen. Entscheiden Sie zuerst über die erste Karte und fragen Sie mich dann noch einmal nach dem Rest.",
+    fr: "Ces modifications ne peuvent qu’être annulées ici. Décidez d’abord de la première carte, puis redemandez-moi le reste.",
+    es: "Estos cambios solo se pueden cancelar aquí. Decide primero sobre la primera tarjeta y luego vuelve a pedirme el resto.",
+  },
+  /**
+   * `heldLater`, on a card that also holds a change through a connection,
+   * which is shown only in the turn that held it, never on a later card.
+   */
+  heldLaterConnections: {
+    en: "These changes can only be cancelled here. Decide the first card, then ask me again for the rest. A change through a connection, such as an email, won't come back on a later card, so ask me for it again.",
+    nl: "Deze wijzigingen kun je hier alleen annuleren. Beslis eerst over de eerste kaart en vraag me daarna opnieuw om de rest. Een wijziging via een koppeling, zoals een e-mail, komt niet terug op een latere kaart, dus vraag me er opnieuw om.",
+    de: "Diese Änderungen können Sie hier nur abbrechen. Entscheiden Sie zuerst über die erste Karte und fragen Sie mich dann noch einmal nach dem Rest. Eine Änderung über eine Verbindung, etwa eine E-Mail, erscheint auf keiner späteren Karte wieder, fragen Sie mich also noch einmal danach.",
+    fr: "Ces modifications ne peuvent qu’être annulées ici. Décidez d’abord de la première carte, puis redemandez-moi le reste. Une modification passant par une connexion, comme un e-mail, ne reviendra pas sur une carte suivante : redemandez-la-moi.",
+    es: "Estos cambios solo se pueden cancelar aquí. Decide primero sobre la primera tarjeta y luego vuelve a pedirme el resto. Un cambio a través de una conexión, como un correo, no volverá a aparecer en una tarjeta posterior, así que vuelve a pedírmelo.",
+  },
   confirm: {
     en: "Confirm",
     nl: "Bevestigen",

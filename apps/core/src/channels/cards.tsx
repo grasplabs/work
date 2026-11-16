@@ -513,10 +513,12 @@ export interface HeldWritesCard {
   /** Set once the press has ended; the card is edited in place. */
   outcome?: PressOutcome;
   /**
-   * Writes that can't be confirmed on this turn's cards (`heldWritesCards`):
-   * Cancel alone, so none runs out of the order they were asked in.
+   * Writes this turn's cards can't confirm (`heldWritesCards`), so Cancel
+   * alone: `later`, each shown whole but asked after one the card to
+   * confirm couldn't take, so none runs ahead of the order asked; `tooLong`,
+   * each too long for any card to show whole.
    */
-  cancelOnly?: boolean;
+  cancelOnly?: "later" | "tooLong";
 }
 
 /** The buttons' action ids, for the channel layer's `onAction`. */
@@ -631,13 +633,30 @@ const laidOut = ({
 };
 
 /**
- * Whether `writes` can be confirmed on one card on `platform`: every one
- * on it, every value whole (`laidOut`). A press checks it again, so no
- * press confirms what its card couldn't show (press.ts).
+ * The warning a card to confirm is measured with, whether or not it shows
+ * one (`heldWritesCards`, `confirmableOn`): the longest it can show, so a
+ * write never fits only because a turn had no warning, and a press, which
+ * can't tell whether its card had one, measures it the same.
+ */
+const measuredCheck: ReadCheck = { read: "mail" };
+
+/**
+ * Whether `writes` lay out whole on one card to confirm on `platform`:
+ * every one on it (at most `maxWritesOnCard`, named in one press) and
+ * every value whole, measured with a warning line (`measuredCheck`).
  */
 export const confirmableOn = (
-  card: Pick<HeldWritesCard, "locale" | "platform" | "writes" | "check">
-): boolean => laidOut(card).whole;
+  card: Pick<HeldWritesCard, "locale" | "platform" | "writes">
+): boolean => laidOut({ ...card, check: measuredCheck }).whole;
+
+/**
+ * Whether `write` can be shown whole on a card of its own on `platform`,
+ * with no warning line: one that can't is never confirmed on any card.
+ */
+export const wholeAlone = (
+  card: Pick<HeldWritesCard, "locale" | "platform">,
+  write: HeldWriteView
+): boolean => laidOut({ ...card, writes: [write] }).whole;
 
 /**
  * A turn's held writes on one card, in the order they run, each with its
@@ -655,7 +674,7 @@ export const heldWritesCard = ({
   writes,
   check,
   outcome,
-  cancelOnly = false,
+  cancelOnly,
 }: HeldWritesCard): PostableCard => {
   if (writes.length === 0) {
     throw new Error("A card of held writes needs at least one write");
@@ -670,7 +689,16 @@ export const heldWritesCard = ({
     pressFits &&
     outcome === undefined &&
     shown.every((write) => write.state === "held");
-  const pressable = whole && cancellable && !cancelOnly;
+  const pressable = whole && cancellable && cancelOnly === undefined;
+  // Why a card to cancel can't be confirmed, said truly: written after the
+  // card to confirm (and, for a connection's write, which only the turn
+  // that held it lists, that it won't come back), or too long to show.
+  let why: LineName | null = whole ? null : "cardTooLong";
+  if (cancelOnly === "later" && whole) {
+    why = writes.some(({ chatId }) => chatId === undefined)
+      ? "heldLaterConnections"
+      : "heldLater";
+  }
   const card = (
     <Card>
       <CardText>
@@ -699,9 +727,7 @@ export const heldWritesCard = ({
           )}
         </Section>
       ))}
-      {whole && !cancelOnly ? null : (
-        <CardText>{say("cardTooLong", locale)}</CardText>
-      )}
+      {why === null ? null : <CardText>{say(why, locale)}</CardText>}
       {outcome === undefined ? null : (
         <CardText style="bold">{say(outcome, locale)}</CardText>
       )}
@@ -722,49 +748,57 @@ export const heldWritesCard = ({
   return { card: cardOf(card) };
 };
 
+/** `writes` in groups, in order, each as large as `fits` takes it, one at least. */
+const groupsOf = (
+  writes: readonly HeldWriteView[],
+  fits: (group: readonly HeldWriteView[]) => boolean
+): HeldWriteView[][] => {
+  const groups: HeldWriteView[][] = [];
+  for (const write of writes) {
+    const last = groups.at(-1);
+    if (last !== undefined && fits([...last, write])) {
+      last.push(write);
+    } else {
+      groups.push([write]);
+    }
+  }
+  return groups;
+};
+
 /**
  * A turn's held writes on as few cards as it takes for each to be decided
- * there, in the order they run: first one card of those that can be
- * confirmed together (at most `maxWritesOnCard`, each whole: `laidOut`),
- * then the rest, with Cancel alone, as many a card as a press can name
- * (`maxWritesOnCard`, `buttonValueChars`). So a write no
- * card can show whole, or one past the first card's ten, never takes
- * Confirm from the others, and every one has a Cancel. How many cards that
- * is is bounded by what waits: a write held for an App lapses after a day,
- * a connection's at the company's midnight. What the turn read is warned of
- * on the card to confirm.
+ * there, in the order asked. The card to confirm carries the longest
+ * prefix, in the order asked, of the writes that lay out whole together
+ * (`confirmableOn`: at most `maxWritesOnCard`, measured with a warning
+ * line, whether or not the turn has one). Once one write can't join it,
+ * every write after it waits too, so none is confirmed ahead of one asked
+ * before it: those go on cards with Cancel alone (`later`), each card shown
+ * whole. The only write the prefix steps over is one no card can show
+ * whole, even alone: it can never be confirmed, so it is on cards of its
+ * own, with Cancel alone (`tooLong`). Every waiting write has a Cancel.
+ * How many cards that is is bounded by what waits: a write held for an
+ * App lapses after a day, a connection's at the company's midnight. What
+ * the turn read is warned of on the card to confirm.
  */
 export const heldWritesCards = ({
   locale,
   platform,
   writes,
   check,
-}: Omit<HeldWritesCard, "outcome">): PostableCard[] => {
+}: Omit<HeldWritesCard, "outcome" | "cancelOnly">): PostableCard[] => {
   const confirmable: HeldWriteView[] = [];
-  const rest: HeldWriteView[] = [];
+  const later: HeldWriteView[] = [];
+  const tooLong: HeldWriteView[] = [];
   for (const write of writes) {
-    const together = [...confirmable, write];
-    if (
-      together.length <= maxWritesOnCard &&
-      laidOut({ locale, platform, writes: together, check }).whole
+    if (!wholeAlone({ locale, platform }, write)) {
+      tooLong.push(write);
+    } else if (
+      later.length === 0 &&
+      confirmableOn({ locale, platform, writes: [...confirmable, write] })
     ) {
       confirmable.push(write);
     } else {
-      rest.push(write);
-    }
-  }
-  // As many a card as one card names in a press: one write always fits.
-  const cancelOnly: HeldWriteView[][] = [];
-  for (const write of rest) {
-    const last = cancelOnly.at(-1);
-    if (
-      last !== undefined &&
-      last.length < maxWritesOnCard &&
-      pressOfWrites([...last, write]).length <= buttonValueChars
-    ) {
-      last.push(write);
-    } else {
-      cancelOnly.push([write]);
+      later.push(write);
     }
   }
   const first =
@@ -778,12 +812,23 @@ export const heldWritesCards = ({
             ...(check === undefined ? {} : { check }),
           }),
         ];
-  return [
-    ...first,
-    ...cancelOnly.map((group) =>
-      heldWritesCard({ locale, platform, writes: group, cancelOnly: true })
-    ),
-  ];
+  // Each card of later writes shown whole; each of those too long named in
+  // one press (one always fits).
+  const laterCards = groupsOf(
+    later,
+    (group) => laidOut({ locale, platform, writes: group }).whole
+  ).map((group) =>
+    heldWritesCard({ locale, platform, writes: group, cancelOnly: "later" })
+  );
+  const tooLongCards = groupsOf(
+    tooLong,
+    (group) =>
+      group.length <= maxWritesOnCard &&
+      pressOfWrites(group).length <= buttonValueChars
+  ).map((group) =>
+    heldWritesCard({ locale, platform, writes: group, cancelOnly: "tooLong" })
+  );
+  return [...first, ...laterCards, ...tooLongCards];
 };
 
 /**

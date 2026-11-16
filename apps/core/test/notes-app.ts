@@ -35,6 +35,13 @@ export const create = mutation({
   handler: async (ctx, args) => await ctx.db.insert("notes", args),
 });
 
+/** A note with a body it doesn't keep: a request as long as a test needs. */
+export const createWith = mutation({
+  args: { title: v.string().min(1).max(200), body: v.string().max(20000) },
+  returns: v.id("notes"),
+  handler: async (ctx, args) => await ctx.db.insert("notes", { title: args.title }),
+});
+
 export const titles = query({
   args: {},
   returns: v.array(v.string()),

@@ -1951,6 +1951,17 @@ export class Workspace extends DurableObject<Env> {
       if (waiting !== undefined) {
         return waiting;
       }
+      // Later than every hold of the chat before it, by a millisecond if it
+      // must: holds asked for in the same millisecond keep the order asked,
+      // which their cards keep (channels/cards.tsx `heldWritesCards`).
+      const latest = this.#db
+        .select({ heldAt: heldAppCalls.heldAt })
+        .from(heldAppCalls)
+        .where(eq(heldAppCalls.chatId, chat.id))
+        .orderBy(desc(heldAppCalls.heldAt))
+        .limit(1)
+        .get();
+      const heldAt = Math.max(now, (latest?.heldAt.getTime() ?? 0) + 1);
       return this.#db
         .insert(heldAppCalls)
         .values({
@@ -1958,7 +1969,7 @@ export class Workspace extends DurableObject<Env> {
           chatId: chat.id,
           personId,
           ...held,
-          heldAt: new Date(now),
+          heldAt: new Date(heldAt),
           status: "waiting",
         })
         .returning()
