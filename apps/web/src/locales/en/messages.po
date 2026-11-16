@@ -537,6 +537,10 @@ msgstr "{file} couldn’t be removed"
 msgid "{file} removed"
 msgstr "{file} removed"
 
+#: src/chat/held-writes.tsx
+msgid "{fn} in {app}"
+msgstr "{fn} in {app}"
+
 #. Earlier events on a timeline, folded away
 #: src/routes/_shell.brain.$noteId.tsx
 msgid "{folded, plural, one {# earlier} other {# earlier}}"
@@ -1300,6 +1304,10 @@ msgstr "{waiting, plural, one {# workflow needs you} other {# workflows need you
 #: src/drafts/share-with-team.tsx
 msgid "{waiting, plural, one {It uses # new kind of access. An admin approves that once.} other {It uses # new kinds of access. An admin approves those once.}}"
 msgstr "{waiting, plural, one {It uses # new kind of access. An admin approves that once.} other {It uses # new kinds of access. An admin approves those once.}}"
+
+#: src/chat/held-writes.tsx
+msgid "{what} didn't go through."
+msgstr "{what} didn't go through."
 
 #: src/apps/draft-changes.tsx
 msgid "{what}, as {binding} in its code: {actions}"
@@ -3382,6 +3390,10 @@ msgstr "Capital letters, digits and underscores, starting with a letter, such as
 msgid "Card"
 msgstr "Card"
 
+#: src/activity/audit-words.ts
+msgid "Carried out a confirmed write to an App, or failed to"
+msgstr "Carried out a confirmed write to an App, or failed to"
+
 #: src/interview/page.tsx
 msgid "Carry on now"
 msgstr "Carry on now"
@@ -3983,6 +3995,10 @@ msgctxt "a memory a person confirmed"
 msgid "Confirmed"
 msgstr "Confirmed"
 
+#: src/activity/audit-words.ts
+msgid "Confirmed a write to an App"
+msgstr "Confirmed a write to an App"
+
 #: src/brain/brain.ts
 msgid "Confirmed by {person}"
 msgstr "Confirmed by {person}"
@@ -4505,6 +4521,10 @@ msgstr "Decline starting {name}"
 #: src/brain/skills-page.tsx
 msgid "Declined"
 msgstr "Declined"
+
+#: src/activity/audit-words.ts
+msgid "Declined a write to an App"
+msgstr "Declined a write to an App"
 
 #: src/inbox/item-detail.tsx
 msgid "Declined: {name}."
@@ -5130,6 +5150,10 @@ msgstr "End the tour"
 #: src/workflows/run-detail.tsx
 msgid "Ended"
 msgstr "Ended"
+
+#: src/activity/audit-words.ts
+msgid "Ended a held write to an App nobody confirmed within a day"
+msgstr "Ended a held write to an App nobody confirmed within a day"
 
 #: src/workflows/workflow-diagram.tsx
 msgid "Ends the workflow"
@@ -14514,6 +14538,10 @@ msgstr "This page's stored code no longer matches the code that was published, s
 msgid "This upload was already made with another file, which is kept as it was. Choose the file again to upload it as a new upload, or add it as a new version."
 msgstr "This upload was already made with another file, which is kept as it was. Choose the file again to upload it as a new upload, or add it as a new version."
 
+#: src/chat/held-writes.tsx
+msgid "This uses something only you can read"
+msgstr "This uses something only you can read"
+
 #: src/pages/frame-failure.tsx
 msgid "This version can't open"
 msgstr "This version can't open"
@@ -15100,6 +15128,10 @@ msgstr "Used by"
 #: src/apps/indexes-view.tsx
 msgid "Used by {queries}"
 msgstr "Used by {queries}"
+
+#: src/activity/audit-words.ts
+msgid "Used something only its person can read, so what it writes for others waits for them"
+msgstr "Used something only its person can read, so what it writes for others waits for them"
 
 #: src/labels.ts
 msgid "User"

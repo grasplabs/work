@@ -119,6 +119,26 @@ const words: readonly { action: string; text: MessageDescriptor }[] = [
     text: msg`Noted a question asked in a chat, to keep in its person's own Brain`,
   },
   {
+    action: "chat.private_read",
+    text: msg`Used something only its person can read, so what it writes for others waits for them`,
+  },
+  {
+    action: "chat.app_call.confirmed",
+    text: msg`Confirmed a write to an App`,
+  },
+  {
+    action: "chat.app_call.ended",
+    text: msg`Carried out a confirmed write to an App, or failed to`,
+  },
+  {
+    action: "chat.app_call.lapsed",
+    text: msg`Ended a held write to an App nobody confirmed within a day`,
+  },
+  {
+    action: "chat.app_call.declined",
+    text: msg`Declined a write to an App`,
+  },
+  {
     action: "chat.apps_deleted",
     text: msg`Deleted their conversations in chat apps`,
   },

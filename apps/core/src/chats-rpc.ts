@@ -21,6 +21,7 @@ import type {
   ChatSummary,
   ChatUpdate,
   ChatWork,
+  HeldAppCall,
   MentionablePerson,
 } from "@grasp-os/shared/chat";
 import type { DependencyRequest } from "@grasp-os/shared/dependencies";
@@ -44,6 +45,11 @@ import { mentionablePeople, mentionsOf } from "./chat-mentions.ts";
 import { personOf } from "./connections.ts";
 import { chatWork, chatsWorkedOn, keepMadeInChat } from "./drafts.ts";
 import { workspace } from "./durable-objects.ts";
+import {
+  confirmHeldAppCall,
+  declineHeldAppCall,
+  heldAppCallsOf,
+} from "./held-app-calls.ts";
 import { modelSettings, modelEffortsOf } from "./models.ts";
 import { chatPackageRequests } from "./packages/requests.ts";
 import { callbackFor, isStub } from "./page-callbacks.ts";
@@ -663,6 +669,29 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
         id,
         "denied"
       );
+    });
+  }
+
+  async heldCalls(chatId: string, after?: string): Promise<HeldAppCall[]> {
+    return await withPerson(
+      this.#check,
+      async (person) => await heldAppCallsOf(this.#env, person, chatId, after)
+    );
+  }
+
+  async confirmHeldCall(
+    chatId: string,
+    id: string,
+    requestHash: string
+  ): Promise<void> {
+    await withPerson(this.#check, async (person) => {
+      await confirmHeldAppCall(this.#env, person, chatId, id, requestHash);
+    });
+  }
+
+  async declineHeldCall(chatId: string, id: string): Promise<void> {
+    await withPerson(this.#check, async (person) => {
+      await declineHeldAppCall(this.#env, person, chatId, id);
     });
   }
 
