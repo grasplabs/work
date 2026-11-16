@@ -269,6 +269,8 @@ const Known = ({
 export const WorkKnowledgeTab = ({ work }: { work: string }) => {
   const core = useCore();
   const [loaded, setLoaded] = useState<Loaded<WorkKnowledge>>();
+  const readWork = async (): Promise<Loaded<WorkKnowledge>> =>
+    await loadFromCore(core, async (session) => await session.brain.work(work));
   useEffect(() => {
     let left = false;
     void (async () => {
@@ -288,7 +290,17 @@ export const WorkKnowledgeTab = ({ work }: { work: string }) => {
     return <LoadingLines />;
   }
   if (loaded.state !== "ready") {
-    return <NotLoadedState page={loaded} />;
+    return (
+      <NotLoadedState
+        again={() => {
+          // What was read stays until the new read lands.
+          void (async () => {
+            setLoaded(await readWork());
+          })();
+        }}
+        page={loaded}
+      />
+    );
   }
   return (
     <Known

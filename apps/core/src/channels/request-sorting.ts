@@ -24,8 +24,9 @@ import { modelForRole, modelSettings, models } from "../models.ts";
 //   model is told to name a topic in two to four words and to word a
 //   question as anyone in the company might ask it, without names,
 //   numbers, dates or other details; the lengths are capped. A question
-//   is shown only once five or more people asked it (stephen-requests.ts),
-//   and goes with the last request that points at it (retention, erasure).
+//   and a topic are shown only once five or more people asked them
+//   (stephen-requests.ts), and go with the last request that points at
+//   them (retention, erasure).
 // - Content only the person may read reaching those names: his answer can
 //   quote it (their own store, in their direct message, which is their own
 //   chat: GRA-1821), so the call that names never sees the answer, for any
