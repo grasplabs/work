@@ -455,6 +455,22 @@ export const auditedDuring = async (
 /** A short random name part, so tests don't share people or things. */
 export const unique = () => crypto.randomUUID().slice(0, 8);
 
+/** How many random letters a `uniqueWord` holds after its "w". */
+const uniqueWordLetters = 10;
+
+/**
+ * A word no other test's text holds, for the Brain to find: "w" and a
+ * fixed number of random letters, a to z (26^10 of them). With digits it
+ * would be an ID whenever it held a letter and two of them (brain-next
+ * exact.ts), found as written rather than as a word, so how it is found
+ * and ranked would turn on the draw.
+ */
+export const uniqueWord = () =>
+  `w${Array.from(
+    crypto.getRandomValues(new Uint8Array(uniqueWordLetters)),
+    (byte) => String.fromCodePoint(97 + (byte % 26))
+  ).join("")}`;
+
 /** Someone in the client's Entra tenant. */
 export const entraPerson = (
   tenantId: string,
