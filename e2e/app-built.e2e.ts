@@ -1,4 +1,5 @@
 import { expect } from "@playwright/test";
+import type { WebSocketRoute } from "@playwright/test";
 
 import { test } from "./csp.ts";
 import { appPlanned, appReady, modelScripts } from "./model-scripts.ts";
@@ -40,6 +41,41 @@ test("a builder makes an App from what they want done, shares it with their team
   const { builder, user } = peopleIn("appBuilt");
   const { opener } = modelScripts.buildsApp;
   const page = await pageOf(builder);
+  // The builder's connections to core (the tab's, and the preview's own),
+  // dropped once, as a blip does, the moment the page reads the App again
+  // after sharing it, and refused until the page says Grasp can't be
+  // reached; the page then reads the App again by itself.
+  const sockets = new Set<WebSocketRoute>();
+  const blip = { armed: false, down: false };
+  await page.routeWebSocket("**/rpc", (socket) => {
+    if (blip.down) {
+      void socket.close();
+      return;
+    }
+    const core = socket.connectToServer();
+    sockets.add(socket);
+    socket.onClose(() => {
+      sockets.delete(socket);
+    });
+    socket.onMessage((message) => {
+      // The App's page reads its contents only as it loads.
+      if (blip.armed && String(message).includes('"contents"')) {
+        blip.armed = false;
+        blip.down = true;
+        for (const open of sockets) {
+          void open.close();
+        }
+        return;
+      }
+      core.send(message);
+    });
+  });
+  // Nothing the page does as its connections drop and its preview goes
+  // fails unhandled.
+  const uncaught: string[] = [];
+  page.on("pageerror", (error) => {
+    uncaught.push(error.message);
+  });
 
   // Make something: Chat's page, what they want done, and Grasp's plan
   // for it in the chat. Nothing is made until Build it; then Grasp builds
@@ -103,8 +139,23 @@ test("a builder makes an App from what they want done, shares it with their team
       name: `Person (ID …${user.userId.slice(-namesakeIdEnd)})`,
     })
     .check();
+  blip.armed = true;
   await sharing.getByRole("button", { name: "Share", exact: true }).click();
   await expect(page.getByText("Shared with Person")).toBeVisible(built);
+  // Its read again after sharing lost its connection: Grasp can't be
+  // reached, until a connection answers again, when the page reads the
+  // App by itself, with no Try again.
+  await expect(
+    page.getByText("Grasp can't be reached right now. Try again in a moment.")
+  ).toBeVisible(built);
+  blip.down = false;
+  await expect(
+    page.getByRole("heading", { level: 1, name: appPlanned })
+  ).toBeAttached(built);
+  await expect(
+    page.getByText("Grasp can't be reached right now. Try again in a moment.")
+  ).toHaveCount(0);
+  expect(uncaught).toStrictEqual([]);
 
   // They use the live App: none of the preview's contacts, then theirs.
   const used = await pageOf(user);

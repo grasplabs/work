@@ -2414,4 +2414,56 @@ describe(AppWorkspace, () => {
       overWhenDone: whileWorking.over,
     });
   });
+
+  it("says what changes only you see over the preview before the preview shows, however late who uses the App is read, so the line never comes in over a preview in use", async () => {
+    const core = new PreviewingCore(undefined, deskOfVersion1);
+    socketsTo(core);
+    const fake = fakeApps({ sharedWith: [memberOf("team", "t-fin")] });
+    // Who uses it is read apart from the draft, and answers last.
+    const membersRead = Promise.withResolvers<boolean>();
+    const { list } = fake.apps.members;
+    fake.apps.members.list = async () => {
+      await membersRead.promise;
+      return await list();
+    };
+    await opened(
+      fake.apps,
+      identityOf(false),
+      "chat-members-late",
+      async () => await Promise.resolve(watching())
+    );
+    await settled();
+    const whileRead = {
+      preview: document.querySelector("iframe") !== null,
+      line: changesLine() !== null,
+    };
+    await act(async () => {
+      membersRead.resolve(true);
+      await Promise.resolve();
+    });
+    await act(async () => {
+      await core.reached;
+    });
+    await settled();
+    const frame = document.querySelector("iframe");
+    const line = changesLine();
+
+    expect({
+      whileRead,
+      // Both at once, the line over the preview from the start.
+      shown: {
+        preview: frame !== null,
+        lineOver:
+          frame !== null &&
+          line !== null &&
+          // oxlint-disable-next-line no-bitwise -- a DOM position mask
+          (line.compareDocumentPosition(frame) &
+            Node.DOCUMENT_POSITION_FOLLOWING) !==
+            0,
+      },
+    }).toStrictEqual({
+      whileRead: { preview: false, line: false },
+      shown: { preview: true, lineOver: true },
+    });
+  });
 });

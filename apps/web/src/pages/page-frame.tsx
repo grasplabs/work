@@ -1,5 +1,6 @@
 import { linkErrors } from "@grasp-os/shared/app-links";
 import { decisionErrors } from "@grasp-os/shared/decisions";
+import { Alert, AlertTitle } from "@grasp-os/ui/components/alert";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -16,6 +17,7 @@ import { i18n as pageI18n } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { useBlocker } from "@tanstack/react-router";
+import { InfoIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
@@ -59,32 +61,37 @@ const pausedFor = (question: FrameQuestion): Error => {
 };
 
 /**
- * What the frame's bar says of a page that runs: that
- * its preview is fixing a problem, or that a new version waits for its
- * unsaved edits.
+ * What a frame says of a page that runs: that its preview is fixing a
+ * problem, or that a new version waits for its unsaved edits.
  */
-const RunningStatus = ({ state }: { state: PageState }) => {
+const StatusWords = ({ state }: { state: PageState }) => {
   if (state.status === "fixing") {
     // Calm, and never what went wrong: the agent hears that.
-    return (
-      <output className="text-muted-foreground flex items-center gap-2 text-xs">
-        <Spinner />
-        <Trans>Fixing a problem…</Trans>
-      </output>
-    );
+    return <Trans>Fixing a problem…</Trans>;
   }
   if (state.status === "updated") {
     // Only a page holding unsaved edits shows this: one with nothing
     // to lose switches at once.
     return (
-      <output className="text-muted-foreground text-xs">
-        <Trans>
-          A new version is ready: it opens once your changes are saved.
-        </Trans>
-      </output>
+      <Trans>
+        A new version is ready: it opens once your changes are saved.
+      </Trans>
     );
   }
   return null;
+};
+
+/** What the page's own bar says of a page that runs (`StatusWords`). */
+const RunningStatus = ({ state }: { state: PageState }) => {
+  if (state.status !== "fixing" && state.status !== "updated") {
+    return null;
+  }
+  return (
+    <output className="text-muted-foreground flex items-center gap-2 text-xs">
+      {state.status === "fixing" ? <Spinner /> : null}
+      <StatusWords state={state} />
+    </output>
+  );
 };
 
 /**
@@ -344,7 +351,8 @@ type Update = "none" | "asking" | "saving";
  * The bar over a frame: the page's own chrome, `label` and the App's
  * name, which say an App drew what's below (`chrome`); or none, in the
  * App's workspace, whose own bar names the App already (`bare`): there
- * only what the page is doing shows, while it does (`RunningStatus`).
+ * only what the page is doing shows, while it does, over the frame's
+ * corner (`FrameNotice`).
  */
 export type FrameBar = { kind: "chrome"; label: string } | { kind: "bare" };
 
@@ -378,11 +386,7 @@ const FrameTop = ({
 }) => {
   const Title = embedded ? "h2" : "h1";
   if (bar.kind === "bare") {
-    return saysSomething(state) ? (
-      <div className="flex flex-none items-center border-b px-3 py-1 print:hidden">
-        <RunningStatus state={state} />
-      </div>
-    ) : null;
+    return null;
   }
   return (
     <header className="flex items-center gap-2 border-b p-3 print:hidden">
@@ -392,6 +396,28 @@ const FrameTop = ({
         <RunningStatus state={state} />
       </span>
     </header>
+  );
+};
+
+/**
+ * What a frame with no bar of its own (`bare`) is doing, while it does:
+ * over its corner, never in a row above it, which would come and go as
+ * the page works and move the page under the person's pointer while they
+ * use it.
+ */
+const FrameNotice = ({ state }: { state: PageState }) => {
+  if (!saysSomething(state)) {
+    return null;
+  }
+  return (
+    <div className="animate-in fade-in-0 absolute top-3 right-3 max-w-sm motion-reduce:animate-none print:hidden">
+      <Alert live="polite">
+        {state.status === "fixing" ? <Spinner /> : <InfoIcon />}
+        <AlertTitle>
+          <StatusWords state={state} />
+        </AlertTitle>
+      </Alert>
+    </div>
   );
 };
 
@@ -580,7 +606,7 @@ const FramedPage = ({
       ? state
       : undefined;
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="relative flex min-h-0 flex-1 flex-col">
       <FrameTop appName={appName} bar={bar} embedded={embedded} state={state} />
       {ended === undefined ? null : (
         <div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto p-6">
@@ -651,6 +677,7 @@ const FramedPage = ({
         {...(revision === undefined ? {} : { revision })}
         {...(onTestDataStale === undefined ? {} : { onTestDataStale })}
       />
+      {bar.kind === "bare" ? <FrameNotice state={state} /> : null}
     </div>
   );
 };

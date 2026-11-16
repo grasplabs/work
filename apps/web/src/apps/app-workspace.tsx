@@ -374,9 +374,12 @@ const PreviewState = ({
  * Over the preview, once a call of it was refused as its test data
  * doesn't fit the draft's data model: core applies the change to the
  * test data only once it is reset (core's sealed-previews.ts), in Data.
+ * Over its foot, never in a row above it: it comes with a call the
+ * person made, or a write of Grasp's, and goes at the draft's next write,
+ * so a row would move the page under their pointer each time.
  */
 const StaleTestData = ({ app }: { app: string }) => (
-  <div className="flex-none border-b p-3">
+  <div className="animate-in fade-in-0 absolute inset-x-3 bottom-3 motion-reduce:animate-none">
     <Alert variant="attention">
       <TriangleAlertIcon />
       <AlertTitle>
@@ -681,9 +684,6 @@ const PreviewArea = ({
         a tip put over it then would push the page down under their
         pointer, a click meant for the page landing on the tip. */}
       {shown === undefined && ready ? <MadeTip app={app.id} /> : null}
-      {staleAt === revision && shown === undefined && ready ? (
-        <StaleTestData app={app.id} />
-      ) : null}
       {/* Running unseen while Grasp sets it up, so it is there to fade
         in once its first version runs; nothing of it reached before. */}
       <div
@@ -712,6 +712,9 @@ const PreviewArea = ({
           shown={shown}
         />
       </div>
+      {staleAt === revision && shown === undefined && ready ? (
+        <StaleTestData app={app.id} />
+      ) : null}
       {ready ? null : (
         <div className="absolute inset-0 flex flex-col">
           <SettingUp failed={setUp === "failed"} name={name} />
@@ -1010,6 +1013,41 @@ const useReadAgainOnNewBase = (app: App, base: number | null | undefined) => {
 };
 
 /**
+ * Whether the line of changes only its builders see shows under the bar
+ * (`changesLine`), over the builders' own version (`mine`), and the draft
+ * the preview shows (`previewed`): none until whether the line shows is
+ * known, the first time. That waits on who uses the App, read apart from
+ * the draft, and a line coming in once the preview shows would push the
+ * page down under the person's pointer.
+ */
+const useChangesLine = ({
+  app,
+  draft,
+  members,
+  mine,
+}: {
+  app: App;
+  draft: Draft | undefined;
+  members: readonly SubjectMember[] | undefined;
+  mine: boolean;
+}): { changesLine: boolean; previewed: Draft | undefined } => {
+  const waits =
+    mine &&
+    members === undefined &&
+    app.currentVersion !== null &&
+    hasChanges(draft);
+  const [known, setKnown] = useState(false);
+  if (!known && draft !== undefined && !waits) {
+    setKnown(true);
+  }
+  return {
+    changesLine:
+      mine && showsUnpublishedChanges(app.currentVersion, draft, members ?? []),
+    previewed: known ? draft : undefined,
+  };
+};
+
+/**
  * The workspace with the App's chat (`chatId`, once found) beside it, and
  * the App's draft previewed.
  */
@@ -1055,10 +1093,12 @@ const Building = ({
   const settingUp = setUp !== "ready";
   const theirs = showsTeams({ app, draft, env, shown });
   const showing: WorkspaceEnv = theirs ? "live" : "draft";
-  const changesLine =
-    !theirs &&
-    sharesApp(app, identity) &&
-    showsUnpublishedChanges(app.currentVersion, draft, members ?? []);
+  const { changesLine, previewed } = useChangesLine({
+    app,
+    draft,
+    members,
+    mine: !theirs && sharesApp(app, identity),
+  });
   return (
     <ItemShell
       bar={
@@ -1103,7 +1143,7 @@ const Building = ({
           ) : (
             <PreviewArea
               app={app}
-              draft={draft}
+              draft={previewed}
               key={`${shownKey(shown)}/${resets}`}
               onChanged={reread}
               onFrame={onFrame}

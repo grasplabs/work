@@ -1,3 +1,4 @@
+import type { CoreApi } from "@grasp-os/shared/rpc";
 // @vitest-environment happy-dom
 import { SidebarProvider } from "@grasp-os/ui/components/sidebar";
 import { i18n } from "@lingui/core";
@@ -9,18 +10,24 @@ import {
   createRouter,
   Outlet,
   RouterProvider,
+  useRouterState,
 } from "@tanstack/react-router";
+import type { RpcStub } from "capnweb";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
+import { CoreConnection } from "../core-connection.ts";
+import { loadFromCore } from "../load-from-core.tsx";
+import type { Loaded } from "../load-from-core.tsx";
 import { InFrame } from "./in-frame.ts";
 import {
   ErrorState,
   NotFound,
   NotFoundState,
   PageError,
+  PageNotLoaded,
 } from "./page-states.tsx";
 
 // The pages that stand where a page can't, as the router shows them: an
@@ -175,6 +182,166 @@ describe("where a page can't stand", () => {
       await opened("/section");
       expect(control("Try again")).toBeDefined();
       expect(control("Go to Chat")).toBeUndefined();
+    });
+  });
+});
+
+// A page whose read found Grasp out of reach, as after a blip: it reads
+// again by itself once a connection to core answers, and says it can't be
+// reached only while none does. Core stands in as the tab's connections,
+// each scripted: the first drops under the page's read, as a socket does,
+// and the next ones answer, or fail, as the test says. The page coming
+// back online cuts the pause before each attempt short, so the test, not
+// a clock, says when the tab tries again.
+
+/** How each connection after the first does: answers, or fails as core down does. */
+type Attempt = "answers" | "down";
+
+/** A tab on a stand-in core, its connections after the first doing as `attempts` says. */
+const tabOnCore = (attempts: Attempt[]) => {
+  const breaks: (() => void)[] = [];
+  const reads = { apps: 0 };
+  let connections = 0;
+  let back: (() => void) | undefined;
+  const core = new CoreConnection({
+    onSessionEnded: () => {
+      // Nobody signs out here.
+    },
+    watchPage: (onBack) => {
+      back = onBack;
+    },
+    connect: () => {
+      connections += 1;
+      const connection = connections;
+      const attempt = connection === 1 ? "answers" : attempts[connection - 2];
+      const session = {
+        whoami: async () => await Promise.resolve({ userId: "ada" }),
+        apps: {
+          list: async () => {
+            reads.apps += 1;
+            await Promise.resolve();
+            if (connection === 1) {
+              // The socket drops: what was on its way fails without a code.
+              breaks[0]?.();
+              throw new Error("Peer closed WebSocket: 1006");
+            }
+            return [{ name: "Invoices" }];
+          },
+        },
+      };
+      const stub = {
+        authenticate: async () => {
+          await Promise.resolve();
+          if (attempt !== "answers") {
+            throw new Error("The socket closed.");
+          }
+          return session;
+        },
+        onRpcBroken: (onBroken: () => void) => {
+          breaks.push(onBroken);
+        },
+        [Symbol.dispose]: () => {
+          // Nothing to let go of.
+        },
+      };
+      // SAFETY: the tab reaches only `authenticate`, `whoami`,
+      // `apps.list`, `onRpcBroken` and disposal, which this stand-in has.
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion, anti-slop/no-chained-type-assertions -- see SAFETY
+      return stub as unknown as RpcStub<CoreApi>;
+    },
+  });
+  /** The page comes back online: the tab tries at once, then settles. */
+  const online = async (): Promise<void> => {
+    await act(async () => {
+      back?.();
+      await Promise.resolve();
+    });
+    await settled();
+    await settled();
+  };
+  return { core, reads, online };
+};
+
+/** Whether `data`, a route's loader data, is what the Apps page read. */
+const isRead = (data: unknown): data is Loaded<{ name: string }[]> =>
+  typeof data === "object" && data !== null && "state" in data;
+
+/** The page listing Ada's Apps, read over `core`, shown with what it read. */
+const appsPage = async (core: CoreConnection) => {
+  const rootRoute = createRootRoute({ component: Outlet });
+  const Apps = () => {
+    const page: unknown = useRouterState({
+      select: ({ matches }) => matches.at(-1)?.loaderData,
+    });
+    if (!isRead(page)) {
+      return null;
+    }
+    return page.state === "ready" ? (
+      <h1>{page.data.map(({ name }) => name).join(",")}</h1>
+    ) : (
+      <PageNotLoaded crumbs={[{ label: "Apps" }]} page={page} />
+    );
+  };
+  const router = createRouter({
+    routeTree: rootRoute.addChildren([
+      createRoute({
+        getParentRoute: () => rootRoute,
+        path: "/",
+        loader: async () =>
+          await loadFromCore(
+            core,
+            async (session) => await session.apps.list()
+          ),
+        component: Apps,
+      }),
+    ]),
+    history: createMemoryHistory({ initialEntries: ["/"] }),
+    context: { core },
+  });
+  const host = document.createElement("div");
+  document.body.append(host);
+  await act(async () => {
+    root = createRoot(host);
+    root.render(
+      <I18nProvider i18n={i18n}>
+        <SidebarProvider>
+          <InFrame value>
+            <RouterProvider router={router} />
+          </InFrame>
+        </SidebarProvider>
+      </I18nProvider>
+    );
+    await router.load();
+  });
+  await settled();
+};
+
+describe("a page that found Grasp out of reach", () => {
+  afterEach(() => {
+    act(() => {
+      root?.unmount();
+    });
+    root = undefined;
+    document.body.replaceChildren();
+  });
+
+  it("reads again by itself once Grasp answers, and says it can't be reached only until then", async () => {
+    const { core, reads, online } = tabOnCore(["down", "answers"]);
+    await appsPage(core);
+    const dropped = { heading: heading(), reads: reads.apps };
+    // The next connection fails: still out of reach, and nothing is read.
+    await online();
+    const stillDown = { heading: heading(), reads: reads.apps };
+    // The one after answers: the page reads again, without Try again.
+    await online();
+    expect({
+      dropped,
+      stillDown,
+      back: { heading: heading(), reads: reads.apps },
+    }).toStrictEqual({
+      dropped: { heading: "This page didn't load", reads: 1 },
+      stillDown: { heading: "This page didn't load", reads: 1 },
+      back: { heading: "Invoices", reads: 2 },
     });
   });
 });

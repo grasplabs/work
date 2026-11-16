@@ -11,12 +11,13 @@ import { Skeleton } from "@grasp-os/ui/components/skeleton";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Link, useRouter, useRouterState } from "@tanstack/react-router";
 import { RotateCcwIcon, SearchXIcon, TriangleAlertIcon } from "lucide-react";
-import { use } from "react";
+import { use, useEffect } from "react";
 import type { ComponentType, ReactNode, SVGProps } from "react";
 
 import { ErrorText } from "../error-text.tsx";
 import { notLoadedText } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
+import { useCore } from "../use-core.ts";
 import { InFrame } from "./in-frame.ts";
 import { SiteHeader } from "./site-header.tsx";
 import type { Crumb } from "./site-header.tsx";
@@ -230,9 +231,33 @@ export const PageError = ({
 };
 
 /**
+ * Reads the page again once core can be reached, while `page` says its read
+ * found core out of reach: at once when a connection is open already (it
+ * answered since the read failed, or the read alone hung), otherwise as
+ * soon as the next one answers. So "can't be reached" stays only while core
+ * can't be; a read that fails again waits for the connection after.
+ */
+const useReadAgainWhenBack = (page: Loaded<unknown>): void => {
+  const router = useRouter();
+  const core = useCore();
+  const offline = page.state === "offline";
+  useEffect(() => {
+    const again = (): void => {
+      void router.invalidate();
+    };
+    const stop = offline ? core.onConnected(again) : undefined;
+    if (offline && core.connected) {
+      again();
+    }
+    return stop;
+  }, [core, offline, router]);
+};
+
+/**
  * A page whose own read from core came back without its data: not found
  * when core has no such thing (`notFound` says what), otherwise the error.
- * `crumbs` lead to the page, ending in it.
+ * `crumbs` lead to the page, ending in it. Out of reach, it reads again by
+ * itself once core is back (`useReadAgainWhenBack`).
  */
 export const PageNotLoaded = ({
   page,
@@ -247,6 +272,7 @@ export const PageNotLoaded = ({
   icon?: StateIcon;
 }) => {
   const { i18n, t } = useLingui();
+  useReadAgainWhenBack(page);
   if (page.state === "missing") {
     return (
       <NotFound
@@ -272,6 +298,7 @@ export const NotLoadedState = ({
   heading?: StateHeading;
 }) => {
   const { i18n } = useLingui();
+  useReadAgainWhenBack(page);
   return page.state === "missing" ? (
     <NotFoundState heading={heading} icon={icon} title={notFound} />
   ) : (
