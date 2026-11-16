@@ -142,21 +142,19 @@ export const setAgentApp = async (
   const state = on ? ("on" as const) : ("removed" as const);
   const db = drizzle(env.DB);
   const by = { changedBy: identity.userId, changedAt: new Date() };
+  // Only while the agent is still there, and still whose it was when
+  // checked: nothing of one deleted, or erased with its owner, meanwhile.
+  const stillThere = sql`EXISTS (SELECT 1 FROM ${agents} WHERE ${agents.id} = ${agent.id} AND ${agents.state} IS NOT 'deleted' AND ${agents.ownerId} IS ${agent.ownerId})`;
   await auditedBatch(env, db, [
     db
       .insert(agentApps)
-      .values({
-        agentId: agent.id,
-        app,
-        name: offered?.name ?? app,
-        state,
-        source: "person",
-        ...by,
-      })
+      .select(
+        sql`SELECT ${agent.id}, ${app}, ${offered?.name ?? app}, ${state}, 'person', ${identity.userId}, ${by.changedAt.getTime()} WHERE ${stillThere}`
+      )
       .onConflictDoUpdate({
         target: [agentApps.agentId, agentApps.app],
         set: { state, source: "person", ...by },
-        setWhere: sql`${agentApps.state} IS NOT ${state}`,
+        setWhere: sql`${agentApps.state} IS NOT ${state} AND ${stillThere}`,
       }),
     outboxedIfChanged(db, {
       actor: actorOf(identity),
@@ -276,27 +274,34 @@ export const workOutAgentApps = async (
   const stillThere = sql`EXISTS (SELECT 1 FROM ${agents} WHERE ${agents.id} = ${agent.id} AND ${agents.state} IS NOT 'deleted')`;
   await auditedBatch(env, db, [
     // Recorded whatever was added: someone asked, and the model read the
-    // agent for them.
+    // agent for them. What it proposed; each change it made is recorded
+    // below, only if it made it.
     outboxed(db, {
       actor: actorOf(identity),
       action: "agent.apps.worked_out",
       target: { type: "agent", id: agent.id },
       detail: {
-        added: added.map(({ app }) => app).join(","),
-        turnedOn: turnedOn.join(","),
+        proposed: added.map(({ app }) => app).join(","),
+        reading: turnedOn.join(","),
         suggested: suggested.join(","),
       },
     }),
-    ...added.map(({ app, name }) =>
+    ...added.flatMap(({ app, name }) => [
       db
         .insert(agentApps)
         .select(
           sql`SELECT ${agent.id}, ${app}, ${name}, 'on', 'instructions', ${identity.userId}, ${now.getTime()} WHERE ${stillThere}`
         )
         // Never one someone took off, or set, meanwhile.
-        .onConflictDoNothing()
-    ),
-    ...turnedOn.map((toolClass) =>
+        .onConflictDoNothing(),
+      outboxedIfChanged(db, {
+        actor: actorOf(identity),
+        action: "agent.app.changed",
+        target: { type: "agent", id: agent.id },
+        detail: { app, on: "true", source: "instructions" },
+      }),
+    ]),
+    ...turnedOn.flatMap((toolClass) => [
       db
         .update(agentToolClasses)
         .set({ who: "asClass", ...by })
@@ -306,18 +311,47 @@ export const workOutAgentApps = async (
             eq(agentToolClasses.toolClass, toolClass),
             eq(agentToolClasses.who, "nobody")
           )
-        )
-    ),
+        ),
+      outboxedIfChanged(db, {
+        actor: actorOf(identity),
+        action: "agent.class.changed",
+        target: { type: "tool_class", id: `${agent.id}/${toolClass}` },
+        detail: { agent: agent.id, toolClass, who: "asClass" },
+      }),
+    ]),
   ]);
+  // What this call changed, as it is now: none that someone took off or
+  // set meanwhile, which the writes above left as it was.
+  const [rows, classesNow] = await Promise.all([
+    rowsOf(env, agent.id),
+    own ? Promise.resolve([]) : classRows,
+  ]);
+  const madeNow = (changedAt: Date | null) =>
+    changedAt !== null && changedAt.getTime() === now.getTime();
+  const addedNow = new Set(
+    rows
+      .filter(
+        ({ source, state, changedAt }) =>
+          source === "instructions" && state === "on" && madeNow(changedAt)
+      )
+      .map(({ app }) => app)
+  );
+  const onNow = new Set(
+    classesNow
+      .filter(({ who }) => who === "asClass")
+      .map(({ toolClass }) => toolClass)
+  );
   return {
-    added: added.map(({ app, name }) => ({
-      app,
-      name,
-      state: "on",
-      source: "instructions",
-    })),
+    added: added
+      .filter(({ app }) => addedNow.has(app))
+      .map(({ app, name }) => ({
+        app,
+        name,
+        state: "on",
+        source: "instructions",
+      })),
     suggested,
-    turnedOn,
+    turnedOn: turnedOn.filter((toolClass) => onNow.has(toolClass)),
     missing: said.missing,
   };
 };

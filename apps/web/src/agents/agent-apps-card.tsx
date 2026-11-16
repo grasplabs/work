@@ -14,6 +14,7 @@ import {
 import { Trans, useLingui } from "@lingui/react/macro";
 import { useState } from "react";
 
+import { changeThenRefresh } from "../change-then-refresh.ts";
 import type { Session } from "../core.ts";
 import { classNames, Row } from "../settings/stephen-settings.tsx";
 import { useCoreAction } from "../use-core-action.ts";
@@ -155,6 +156,15 @@ export const AgentApps = ({
   const on = new Set(
     (apps ?? []).filter(({ state }) => state === "on").map(({ app }) => app)
   );
+  // Core limits it once it has any row, one taken off included.
+  const limitWords = (): string => {
+    if ((apps ?? []).length === 0) {
+      return t`${name} may use any app its kinds of work allow. Give it apps, and it uses only those.`;
+    }
+    return on.size === 0
+      ? t`${name} may use no app: each was taken off. Give one back, or add one.`
+      : t`${name} uses only these apps, as far as its kinds of work allow.`;
+  };
   const addable = offered.filter(
     ({ source, id }) => !on.has(agentAppOf(source, id))
   );
@@ -169,11 +179,7 @@ export const AgentApps = ({
         <span className="font-medium">
           <Trans>Apps</Trans>
         </span>
-        <span className="text-muted-foreground">
-          {on.size === 0
-            ? t`${name} may use any app its kinds of work allow. Give it apps, and it uses only those.`
-            : t`${name} uses only these apps, as far as its kinds of work allow.`}
-        </span>
+        <span className="text-muted-foreground">{limitWords()}</span>
       </li>
       {apps === undefined ? (
         <li className="text-muted-foreground border-t px-5 py-4">
@@ -242,10 +248,19 @@ export const AgentApps = ({
             disabled={!can || busy}
             onClick={() => {
               void run(async (session) => {
-                setWorked(await session.connections.workOutAgentApps(agent.id));
-                await change(async () => {
-                  // Read again with what it added.
-                });
+                // Read again however it ends: core may have added some.
+                await changeThenRefresh(
+                  async () => {
+                    setWorked(
+                      await session.connections.workOutAgentApps(agent.id)
+                    );
+                  },
+                  async () => {
+                    await change(async () => {
+                      // Only the page read again.
+                    });
+                  }
+                );
               });
             }}
             size="sm"

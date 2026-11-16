@@ -161,9 +161,22 @@ describe("an agent's apps", slow, () => {
     const worked = await connections.workOutAgentApps(hr.id);
     const settings = await connections.agentSettings(hr.id);
     const listed = await connections.agentApps(hr.id);
+    const events = await allEvents();
+    const recorded = events
+      .filter(
+        ({ action, detail }) =>
+          (action === "agent.app.changed" &&
+            detail?.source === "instructions") ||
+          (action === "agent.class.changed" && detail?.agent === hr.id)
+      )
+      .filter(
+        ({ target, detail }) => target?.id === hr.id || detail?.agent === hr.id
+      )
+      .map(({ action, detail }) => [action, detail?.app ?? detail?.toolClass]);
 
     expect({
       byUser,
+      recorded,
       worked,
       listed: listed.map(({ app, state, source }) => [app, state, source]),
       classes: settings.classes
@@ -171,6 +184,11 @@ describe("an agent's apps", slow, () => {
         .map(({ toolClass }) => toolClass),
     }).toStrictEqual({
       byUser: "role.forbidden",
+      // Each change it made, and none it didn't.
+      recorded: [
+        ["agent.app.changed", "native:google"],
+        ["agent.class.changed", "read-own"],
+      ],
       worked: {
         added: [
           {

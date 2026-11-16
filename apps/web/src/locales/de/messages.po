@@ -834,6 +834,10 @@ msgstr "Logo von {name}"
 msgid "{name} may use any app its kinds of work allow. Give it apps, and it uses only those."
 msgstr "{name} darf jede App nutzen, die seine Arten von Arbeit erlauben. Gib ihm Apps, und es nutzt nur diese."
 
+#: src/agents/agent-apps-card.tsx
+msgid "{name} may use no app: each was taken off. Give one back, or add one."
+msgstr "{name} darf keine App nutzen: Jede wurde weggenommen. Gib eine zurück oder füge eine hinzu."
+
 #: src/connections/tool-choice.tsx
 msgid "{name} may write. Change to Read"
 msgstr "{name} darf schreiben. Auf Lesen ändern"
