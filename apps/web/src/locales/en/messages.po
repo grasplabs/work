@@ -16066,6 +16066,10 @@ msgstr "What you chose"
 msgid "What you hadn't saved when your sign-in ended couldn't be kept, because your interview changed while you were away."
 msgstr "What you hadn't saved when your sign-in ended couldn't be kept, because your interview changed while you were away."
 
+#: src/interview/page.tsx
+msgid "What you hadn't saved when your sign-in ended couldn't be kept, because your interview has closed."
+msgstr "What you hadn't saved when your sign-in ended couldn't be kept, because your interview has closed."
+
 #: src/routes/_shell.settings.instructions.tsx
 msgid "What your chats with Grasp start with, and only yours: how you like to work, what you are responsible for."
 msgstr "What your chats with Grasp start with, and only yours: how you like to work, what you are responsible for."
@@ -17063,6 +17067,14 @@ msgstr "Your sign-in ended. Sign in again with your work account to go on where 
 #: src/routes/interview.tsx
 msgid "Your sign-in ended. Sign in again with your work account to go on where you were. What isn't saved yet is kept in this window until then."
 msgstr "Your sign-in ended. Sign in again with your work account to go on where you were. What isn't saved yet is kept in this window until then."
+
+#: src/interview/page.tsx
+msgid "Your sign-in had ended, so you didn't withdraw: withdraw again if you still want to."
+msgstr "Your sign-in had ended, so you didn't withdraw: withdraw again if you still want to."
+
+#: src/interview/page.tsx
+msgid "Your sign-in had ended, so your interview wasn't deleted: delete it again if you still want to."
+msgstr "Your sign-in had ended, so your interview wasn't deleted: delete it again if you still want to."
 
 #: src/brain/skills-page.tsx
 msgid "Your skills"

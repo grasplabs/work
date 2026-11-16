@@ -16066,6 +16066,10 @@ msgstr "Was Sie gewählt haben"
 msgid "What you hadn't saved when your sign-in ended couldn't be kept, because your interview changed while you were away."
 msgstr "Was Sie beim Ende Ihrer Anmeldung noch nicht gespeichert hatten, konnte nicht behalten werden, weil sich Ihr Interview geändert hat, während Sie weg waren."
 
+#: src/interview/page.tsx
+msgid "What you hadn't saved when your sign-in ended couldn't be kept, because your interview has closed."
+msgstr "Was Sie beim Ende Ihrer Anmeldung noch nicht gespeichert hatten, konnte nicht behalten werden, weil Ihr Interview geschlossen ist."
+
 #: src/routes/_shell.settings.instructions.tsx
 msgid "What your chats with Grasp start with, and only yours: how you like to work, what you are responsible for."
 msgstr "Womit deine Chats mit Grasp beginnen, und nur deine: wie du gern arbeitest, wofür du verantwortlich bist."
@@ -17063,6 +17067,14 @@ msgstr "Ihre Anmeldung ist beendet. Melden Sie sich erneut mit Ihrem Arbeitskont
 #: src/routes/interview.tsx
 msgid "Your sign-in ended. Sign in again with your work account to go on where you were. What isn't saved yet is kept in this window until then."
 msgstr "Ihre Anmeldung ist beendet. Melden Sie sich erneut mit Ihrem Arbeitskonto an, um dort weiterzumachen, wo Sie waren. Was noch nicht gespeichert ist, bleibt bis dahin in diesem Fenster erhalten."
+
+#: src/interview/page.tsx
+msgid "Your sign-in had ended, so you didn't withdraw: withdraw again if you still want to."
+msgstr "Ihre Anmeldung war beendet, deshalb haben Sie sich nicht zurückgezogen: Ziehen Sie sich erneut zurück, wenn Sie das weiterhin möchten."
+
+#: src/interview/page.tsx
+msgid "Your sign-in had ended, so your interview wasn't deleted: delete it again if you still want to."
+msgstr "Ihre Anmeldung war beendet, deshalb wurde Ihr Interview nicht gelöscht: Löschen Sie es erneut, wenn Sie das weiterhin möchten."
 
 #: src/brain/skills-page.tsx
 msgid "Your skills"
