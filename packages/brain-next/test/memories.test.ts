@@ -1895,7 +1895,12 @@ describe("what a reader sees of a retire and of an extraction", () => {
         ),
       ]
     );
-    const second = await addSource("Acme status", audience(group), source);
+    // Still holding the quote, so only the mark ends it (quotes.ts).
+    const second = await addSource(
+      "Acme is Active. Acme status",
+      audience(group),
+      source
+    );
     await shared().addMemories({
       change: crypto.randomUUID(),
       access: audience(narrower),
