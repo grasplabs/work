@@ -17,7 +17,7 @@ import { chunksOf } from "../src/chunks.ts";
 import { fileKeyOf } from "../src/files.ts";
 import { quoteIndexOf } from "../src/quotes.ts";
 import type { BrainStore } from "../src/store.ts";
-import { sequenceOf } from "../src/words.ts";
+import { reindexWords, sequenceOf } from "../src/words.ts";
 
 type Store = DurableObjectStub<BrainStore>;
 
@@ -531,7 +531,7 @@ describe("what the store keeps of it", () => {
     });
   });
 
-  it("counts no source's out memories once the word rules change, until a version judges it by the new ones", async () => {
+  it("counts no source's out memories once the word rules change, until the catch-up judges it again by the new ones", async () => {
     const group = unique("g");
     const reader = readerOf(group);
     const source = unique("doc");
@@ -542,27 +542,29 @@ describe("what the store keeps of it", () => {
       { source, version: first, quote: line, group },
       { name }
     );
-    await version(source, "Paid in cash.", group);
+    const second = await version(source, "Paid in cash.", group);
     const out = await endOf(entity, memory, reader);
-    // A rebuild to other rules than the store's (words.ts `reindexWords`),
-    // as a release with new rules starts one.
+    // A rebuild to other rules than the store's, as a release with new
+    // rules starts one: its first batch (words.ts `reindexWords`), alone.
     await runInDurableObject(shared(), (_instance, state) => {
       state.storage.sql.exec(
         "UPDATE word_index SET version = 0, target = 0, cursor = 0, memory_cursor = 0 WHERE id = 1"
       );
+      state.storage.transactionSync(() => {
+        reindexWords(state.storage.sql);
+      });
     });
-    await tick();
     const afterRules = await endOf(entity, memory, reader);
-    const third = await version(source, "Paid in cash, still.", group);
+    await tick();
 
     expect({
-      out: typeof out === "number",
+      out: out === (await addedAt(source, second, reader)),
       afterRules,
-      judgedAgain: await endOf(entity, memory, reader),
+      caughtUp: await endOf(entity, memory, reader),
     }).toStrictEqual({
       out: true,
       afterRules: null,
-      judgedAgain: await addedAt(source, third, reader),
+      caughtUp: await addedAt(source, second, reader),
     });
   });
 });

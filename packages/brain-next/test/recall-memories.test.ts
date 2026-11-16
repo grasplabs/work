@@ -400,13 +400,24 @@ describe("recall through memories", () => {
   });
 
   // GRA-1742's third criterion: a hub counts current relations only.
-  it("counts a hub by its current relations alone, not those ended", async () => {
+  it("counts a hub by its current relations alone, not those ended or out of use", async () => {
     const group = unique("team");
     const reader = readerOf(unique("ann"), group);
     const tool = word();
     const owners = Array.from({ length: hubRelationsMax }, () => word());
     const users = Array.from({ length: hubRelationsMax - 1 }, () => word());
-    const people = [...owners, ...users];
+    // One more user, resting on a roster that a later version no longer
+    // says it of: out of use (GRA-1915), so no current relation either.
+    const outUser = word();
+    const people = [...owners, ...users, outUser];
+    const roster = unique("roster");
+    const said = `${outUser} uses the tool.`;
+    const first = await shared().addSource({
+      source: roster,
+      change: crypto.randomUUID(),
+      text: `Roster. ${said}`,
+      access: audience(group),
+    });
     // One writer names each owner in turn: each new owner ends the one
     // before, so of the owners one is current; with the users, the tool has
     // exactly `hubRelationsMax` current relations.
@@ -438,10 +449,22 @@ describe("recall through memories", () => {
             object: "t",
           })
         ),
+        fact(`p${owners.length + users.length}`, `${outUser} uses the tool`, {
+          attribute: "owns",
+          object: "t",
+          basis: { kind: "source", ...first, quote: said },
+        }),
       ]
     );
+    await shared().addSource({
+      source: roster,
+      change: crypto.randomUUID(),
+      text: "Roster.",
+      access: audience(group),
+    });
     // Not a hub: the list is filled with the tool's current relations
-    // alone (a hub's relations are never found), none of an owner ended.
+    // alone (a hub's relations are never found), none of an owner ended
+    // nor the one out of use.
     const current = new Set([
       `${owners.at(-1) ?? ""} owns the tool`,
       ...users.map((one) => `${one} uses the tool`),

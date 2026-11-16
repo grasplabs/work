@@ -1,4 +1,3 @@
-import { interviewApiPath } from "@grasp-os/shared/interview-links";
 import type {
   InterviewFact,
   InterviewProgress,
@@ -9,11 +8,18 @@ import type { Roster } from "@grasp-os/shared/onboarding";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
-import { z } from "zod";
 
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { mockIdp } from "./idp.ts";
-import { answering, approveAgreed, holdAlarm } from "./interview-link.ts";
+import {
+  answering,
+  approveAgreed,
+  holdAlarm,
+  onLink,
+  openLinkAs,
+  signedInAs,
+} from "./interview-link.ts";
+import type { Device } from "./interview-link.ts";
 import type { ProviderReply } from "./model-provider.ts";
 import { intake } from "./onboarding-team.ts";
 import type { PartJudge } from "./onboarding-team.ts";
@@ -21,7 +27,6 @@ import {
   auditedDuring,
   openRpc,
   outcome,
-  routed,
   signedIn,
   signedInApi,
   staffPerson,
@@ -49,7 +54,6 @@ const idp = mockIdp();
 
 const dayMs = 24 * 60 * 60 * 1000;
 const isoDay = (ms: number) => new Date(ms).toISOString().slice(0, 10);
-const sessionKey = z.object({ key: z.string().optional() });
 
 /** The people of Ops besides Lea, its lead: ten who do its tickets. */
 const doers = [
@@ -78,7 +82,7 @@ const team = async () => {
     id: personId,
     name,
     team: ids.team,
-    email: "",
+    email: `${personId}@acme.test`,
     title,
     away: false,
   });
@@ -104,24 +108,21 @@ const team = async () => {
 
 type Ids = Awaited<ReturnType<typeof team>>;
 
-/** The device each person's link was opened on: a link opens for one device only. */
-const devices = new Map<string, { secret: string; key: string | undefined }>();
+/** Each person's link as their page holds it, once opened: signed in once. */
+const devices = new Map<string, Device>();
 
-/** Someone's link, opened on a device of their own the first time. */
-const deviceOf = async (person: string) => {
+/** Someone's link, opened signed in as them the first time. */
+const deviceOf = async (person: string): Promise<Device> => {
   const known = devices.get(person);
   if (known !== undefined) {
     return known;
   }
   const link = await onboardingStore(env).linkOf(person);
   const secret = link?.split("#")[1] ?? "";
-  const opened = await routed(interviewApiPath, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ action: "session", secret }),
-  });
-  const { key } = sessionKey.parse(await opened.json());
-  const device = { secret, key };
+  const { link: device } = await openLinkAs(
+    secret,
+    await signedInAs(`${person}@acme.test`)
+  );
   devices.set(person, device);
   return device;
 };
@@ -133,7 +134,7 @@ const agree = async (
   facts: string[],
   version = 0
 ) => {
-  const { secret, key } = await deviceOf(person);
+  const device = await deviceOf(person);
   const agreed: InterviewFact[] = facts.map((record, index) => ({
     id: `f${index}`,
     tag,
@@ -154,13 +155,9 @@ const agree = async (
     adding: false,
     addedAt: 0,
   };
-  const saved = await routed(interviewApiPath, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ action: "save", secret, key, version, progress }),
-  });
+  const saved = await onLink({ action: "save", ...device, version, progress });
   const { version: savedVersion }: InterviewSaved = await saved.json();
-  await approveAgreed({ secret, key: key ?? "" }, agreed);
+  await approveAgreed(device, agreed);
   return savedVersion;
 };
 
@@ -266,12 +263,7 @@ const checkedOf = async (work: string) =>
 
 /** Someone's `action` on their own link (`withdraw`, `delete`). */
 const onLinkOf = async (person: string, action: string) => {
-  const { secret, key } = await deviceOf(person);
-  await routed(interviewApiPath, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ action, secret, key }),
-  });
+  await onLink({ action, ...(await deviceOf(person)) });
 };
 
 describe("what needs the admin", { timeout: 120_000 }, () => {

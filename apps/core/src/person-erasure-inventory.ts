@@ -146,6 +146,8 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   // company's agents, and what an admin gave them, stay the company's.
   "core.agents": { erased: "workspace" },
   "core.agent_documents": { erased: "workspace" },
+  // Their own agents' apps; a company agent's, which a person set, stay.
+  "core.agent_apps": { erased: "workspace" },
   "core.agent_reach": { company: "settings an admin changed" },
   "core.agent_wakes": { erased: "workspace" },
   "core.agent_places": { company: "settings an admin changed" },
@@ -430,6 +432,9 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   // (`admin:<user>`), hashes of what the voice said for them, go with
   // the interview area too (person-erasure.ts).
   "onboarding.spoken_keys": { erased: "interview" },
+  // What the new Brain holds of their interview, until its erasure there
+  // returned.
+  "onboarding.brain_interviews": { erased: "interview" },
   // The roster's and the onboarding's own: who did what, by ID (D5).
   "onboarding.teams": { company: "the company's roster: a team's lead (D5)" },
   "onboarding.works": { company: "the company's roster: who does what (D5)" },
@@ -445,6 +450,9 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
     kept: "audit events on their way to the log (D2)",
   },
   "onboarding.brain_teams": noPerson,
+  "onboarding.brain_claims": {
+    company: "a team's claims seven or more told and five back, names out",
+  },
   "onboarding.checked_differences": {
     company: "a team's difference five or more told each way, names out",
   },
@@ -530,6 +538,7 @@ export const reviewedPersonColumns: Readonly<
   "core.agent_held_starts": ["person_id"],
   "core.agents": ["changed_by", "made_by", "owner_id"],
   "core.agent_documents": ["added_by"],
+  "core.agent_apps": ["changed_by"],
   "core.agent_places": ["changed_by"],
   "core.agent_reach": ["changed_by"],
   "core.agent_wakes": ["changed_by", "made_by", "person_id"],
@@ -680,13 +689,14 @@ export const reviewedPersonColumns: Readonly<
   "dataStore.sdk_store": ["deleted_by"],
   "onboarding.approvals": ["person"],
   "onboarding.asked_about": ["person"],
+  "onboarding.brain_interviews": ["person", "user_id"],
   "onboarding.brain_sent": ["person"],
   "onboarding.counted": ["person"],
   "onboarding.interview_settings": ["person"],
   "onboarding.interview_states": ["person"],
   "onboarding.interviews": ["person"],
   "onboarding.link_codes": ["person"],
-  "onboarding.links": ["person"],
+  "onboarding.links": ["person", "sent_to_email", "user_id"],
   "onboarding.participations": ["person"],
   "onboarding.people": ["email"],
   "onboarding.readbacks": ["person"],

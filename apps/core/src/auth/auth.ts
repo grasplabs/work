@@ -47,6 +47,7 @@ import {
   subjectsOf,
 } from "../erased-people.ts";
 import { mayComeIn, staffMayStay } from "../onboarding/gate.ts";
+import { onboardingStore } from "../onboarding/store.ts";
 import { checkClaims } from "./claims.ts";
 import {
   devIdpOrigin,
@@ -343,6 +344,18 @@ const ensureMember = async (
   return !(await isRemoved(env, userId));
 };
 
+/** `userId`'s address, as their sign-in gave it. */
+const emailOf = async (
+  env: Env,
+  userId: string
+): Promise<string | undefined> => {
+  const [user] = await drizzle(env.DB)
+    .select({ email: users.email })
+    .from(users)
+    .where(eq(users.id, userId));
+  return user?.email;
+};
+
 /**
  * Whether the gate lets `userId` in: checked again as their session is
  * made, beside the check of their claims (`validateUserInfo`).
@@ -351,12 +364,29 @@ const gateLetsIn = async (
   env: Env,
   config: SignInConfig,
   userId: string
+): Promise<boolean> => await mayComeIn(env, config, await emailOf(env, userId));
+
+/**
+ * Whether `email`, verified by the company's sign-in, opens someone's
+ * interview link while the gate is closed (GRA-1790, the store's
+ * `interviewInvites`). Fails closed: an onboarding that can't be asked
+ * lets nobody in for an interview.
+ */
+const interviewInvites = async (
+  env: Env,
+  email: string | undefined
 ): Promise<boolean> => {
-  const [user] = await drizzle(env.DB)
-    .select({ email: users.email })
-    .from(users)
-    .where(eq(users.id, userId));
-  return await mayComeIn(env, config, user?.email);
+  if (email === undefined) {
+    return false;
+  }
+  try {
+    return await onboardingStore(env).interviewInvites(email);
+  } catch (error) {
+    log.error("auth.interview_check_failed", {
+      error: error instanceof Error ? error.name : "unknown",
+    });
+    return false;
+  }
 };
 
 /**
@@ -366,10 +396,18 @@ const gateLetsIn = async (
  * member, who takes their name and address, and the new user goes.
  * Answers the user id the session is for: the directory's member, or
  * `userId` when there is none, or `userId` isn't new.
+ *
+ * What else belongs to the new user (`moving`, from one user to another:
+ * an interview of theirs) moves first, before the new user goes, so a
+ * failure to move leaves it and the user as they were, adopted at the next
+ * sign-in; moving again is harmless. Moved back whenever the member wasn't
+ * adopted after all, the batch's failure among it: the batch is one
+ * transaction, so whose the account is says whether it landed.
  */
 export const adoptDirectoryMember = async (
   env: Env,
   userId: string,
+  moving: (from: string, to: string) => Promise<void>,
   now = new Date()
 ): Promise<string> => {
   const db = drizzle(env.DB);
@@ -414,6 +452,7 @@ export const adoptDirectoryMember = async (
     return userId;
   }
   const memberId = held.userId;
+  await moving(userId, memberId);
   const notYetMember = sql`NOT EXISTS (
     SELECT 1 FROM ${members} WHERE ${members.userId} = ${userId}
   )`;
@@ -421,10 +460,24 @@ export const adoptDirectoryMember = async (
     SELECT 1 FROM ${accounts}
     WHERE ${accounts.id} = ${signedIn.id} AND ${accounts.userId} = ${memberId}
   )`;
+  /** Whose the account is now: the member's once the batch landed. */
+  const adoptedNow = async (): Promise<string> => {
+    const [account] = await db
+      .select({ userId: accounts.userId })
+      .from(accounts)
+      .where(eq(accounts.id, signedIn.id));
+    return account?.userId ?? userId;
+  };
+  /** Moves back what moved, unless the member was adopted. */
+  const unlessAdopted = async (adopted: string): Promise<void> => {
+    if (adopted !== memberId) {
+      await moving(memberId, adopted);
+    }
+  };
   // One batch, in order: the account moves, the user made for it goes
   // (freeing their address), the member takes their name and address, and
   // the directory's account goes, as their sign-in names them from now on.
-  await auditedBatch(env, db, [
+  const adopting = auditedBatch(env, db, [
     db
       .update(accounts)
       .set({ userId: memberId, updatedAt: now })
@@ -467,11 +520,15 @@ export const adoptDirectoryMember = async (
       target: { type: "user", id: memberId },
     }),
   ]);
-  const [account] = await db
-    .select({ userId: accounts.userId })
-    .from(accounts)
-    .where(eq(accounts.id, signedIn.id));
-  return account?.userId ?? userId;
+  try {
+    await adopting;
+  } catch (error) {
+    await unlessAdopted(await adoptedNow());
+    throw error;
+  }
+  const adopted = await adoptedNow();
+  await unlessAdopted(adopted);
+  return adopted;
 };
 
 /** A claim of an IdP's verified profile, if it is a string. */
@@ -545,31 +602,45 @@ const startSession = async <T extends { expiresAt: Date; userId: string }>(
   }
   const fromClient =
     providerId === providerIds.entra || providerId === providerIds.google;
-  // Someone the directory made a member before they ever signed in is
-  // that member from their first Microsoft sign-in on, by the object id
-  // their verified ID token names.
-  const userId =
-    providerId === providerIds.entra
-      ? await adoptDirectoryMember(env, session.userId)
-      : session.userId;
-  if (
-    !(
-      fromClient &&
-      (await gateLetsIn(env, config, userId)) &&
-      (await ensureMember(env, config, userId))
-    )
-  ) {
-    // Sessions come only from an SSO callback, for members.
+  if (!fromClient) {
+    // Sessions come only from an SSO callback.
     return false;
   }
-  return {
-    data: {
-      ...session,
-      userId,
-      staff: false,
-      activeOrganizationId: organizationId,
-    },
-  };
+  if (await gateLetsIn(env, config, session.userId)) {
+    // Someone the directory made a member before they ever signed in is
+    // that member from their first Microsoft sign-in on, by the object id
+    // their verified ID token names; an interview of theirs goes with them
+    // (the store's `accountMoved`).
+    const userId =
+      providerId === providerIds.entra
+        ? await adoptDirectoryMember(env, session.userId, async (from, to) => {
+            await onboardingStore(env).accountMoved(from, to);
+          })
+        : session.userId;
+    // For members.
+    return (await ensureMember(env, config, userId))
+      ? {
+          data: {
+            ...session,
+            userId,
+            staff: false,
+            interview: false,
+            activeOrganizationId: organizationId,
+          },
+        }
+      : false;
+  }
+  // The gate is closed to them: a session for their own interview alone,
+  // if a link of one went to their address (GRA-1790). They join nothing:
+  // no membership is made, a member the directory made is not adopted (and
+  // nothing of it reaches the company's audit log), and the session reaches
+  // no route but the interview's (identity.ts `sessionIdentity`, the
+  // `/organization/` hook). Nobody an admin removed comes in for one either.
+  const { userId } = session;
+  return (await interviewInvites(env, await emailOf(env, userId))) &&
+    !(await isRemoved(env, userId))
+    ? { data: { ...session, userId, staff: false, interview: true } }
+    : false;
 };
 
 const idTokenClaimsSchema = z.looseObject({ oid: z.string().optional() });
@@ -695,6 +766,7 @@ const createAuth = (
       disableSessionRefresh: true,
       additionalFields: {
         staff: { type: "boolean", defaultValue: false, input: false },
+        interview: { type: "boolean", defaultValue: false, input: false },
       },
     },
     // Never link an IdP account to an existing user by email.
@@ -739,11 +811,13 @@ const createAuth = (
               )
             : "method_not_allowed";
         // While the company is onboarding, only its admins come in through
-        // its IdP, before any user or membership is made (onboarding/gate.ts).
+        // its IdP, and those an interview link went to, for their interview
+        // alone, before any user or membership is made (onboarding/gate.ts).
         if (
           refusal === undefined &&
           provider !== providerIds.staff &&
-          !(await mayComeIn(env, config, user.email))
+          !(await mayComeIn(env, config, user.email)) &&
+          !(await interviewInvites(env, user.email))
         ) {
           refusal = "not_open_yet";
         }
@@ -802,8 +876,12 @@ const createAuth = (
             }
             // The gate again, now the session is stored: one the gate
             // closed on after `startSession` looked is gone either way, by
-            // this or by the close, which ends every stored session.
-            if (!(await gateLetsIn(env, config, session.userId))) {
+            // this or by the close, which ends every stored session; and an
+            // interview's that the gate opened on is gone, by this or by the
+            // opening, which ends every interview's session, so they sign
+            // in again as a member.
+            const open = await gateLetsIn(env, config, session.userId);
+            if (session.interview === true ? open : !open) {
               await drizzle(env.DB)
                 .delete(sessions)
                 .where(eq(sessions.id, session.id));
@@ -819,8 +897,14 @@ const createAuth = (
         }
         // A removed person's membership row may outlive the removal if
         // deleting it failed; the organization plugin would still trust it.
+        // An interview's session reaches nothing of the organization, though
+        // the directory may have made them a member already (GRA-1790).
         const caller = await getSessionFromCtx(context);
-        if (caller && (await isRemoved(env, caller.user.id))) {
+        if (
+          caller &&
+          (caller.session.interview === true ||
+            (await isRemoved(env, caller.user.id)))
+        ) {
           throw new APIError("FORBIDDEN", { message: "Not a member." });
         }
       }),

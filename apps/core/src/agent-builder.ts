@@ -24,6 +24,7 @@ import {
 import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
 import { activeMember } from "./auth/membership-sql.ts";
 import {
+  agentApps,
   agentDocuments,
   agentPlaces,
   agentReach,
@@ -175,6 +176,11 @@ const ownDetailOf = ({ instructions }: AgentSaid): Record<string, string> => ({
   instructionsLength: String(instructions.length),
 });
 
+/** Where an agent was made, when not on the Agents page: a chat's draft. */
+interface MadeFrom {
+  from?: "chat";
+}
+
 /** What an audit event says of an agent: never its instructions. */
 const detailOf = ({
   name,
@@ -217,7 +223,8 @@ export const listAgents = async (env: Env): Promise<Agent[]> => {
 export const makeAgent = async (
   env: Env,
   identity: Identity,
-  input: unknown
+  input: unknown,
+  { from }: MadeFrom = {}
 ): Promise<Agent> => {
   requireCompanyAdmin(identity);
   const made = inputOf(input);
@@ -258,7 +265,10 @@ export const makeAgent = async (
           actor: actorOf(identity),
           action: "agent.made",
           target: { type: "agent", id },
-          detail: detailOf(made),
+          detail: {
+            ...detailOf(made),
+            ...(from === undefined ? {} : { from }),
+          },
         }),
       ])
   );
@@ -320,7 +330,8 @@ const requireOwnNameFree = async (
 export const makeOwnAgent = async (
   env: Env,
   identity: Identity,
-  input: unknown
+  input: unknown,
+  { from }: MadeFrom = {}
 ): Promise<Agent> => {
   if (identity.staff) {
     throw roleErrors.create("role.forbidden");
@@ -357,7 +368,7 @@ export const makeOwnAgent = async (
       actor: actorOf(identity),
       action: "agent.made",
       target: { type: "agent", id },
-      detail: ownDetailOf(made),
+      detail: { ...ownDetailOf(made), ...(from === undefined ? {} : { from }) },
     }),
   ]);
   const kept = await readAgent(env, id);
@@ -566,6 +577,7 @@ export const deleteAgent = async (
     db.delete(agentPlaces).where(eq(agentPlaces.agentId, agent.id)),
     db.delete(agentWakes).where(eq(agentWakes.agentId, agent.id)),
     db.delete(agentDocuments).where(eq(agentDocuments.agentId, agent.id)),
+    db.delete(agentApps).where(eq(agentApps.agentId, agent.id)),
     // Last before the event, which is recorded only if this changed a
     // row: an agent deleted twice at once is recorded once.
     db
@@ -752,6 +764,7 @@ export const dropOwnAgentsOf = async (
     .where(eq(agents.ownerId, personId));
   await db.batch([
     db.delete(agentDocuments).where(inArray(agentDocuments.agentId, own)),
+    db.delete(agentApps).where(inArray(agentApps.agentId, own)),
     db.delete(agents).where(eq(agents.ownerId, personId)),
   ]);
 };

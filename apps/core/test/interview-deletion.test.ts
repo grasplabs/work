@@ -1,5 +1,4 @@
 import type { Workspace } from "@grasp-os/shared/brain";
-import { interviewApiPath } from "@grasp-os/shared/interview-links";
 import type {
   InterviewFact,
   InterviewLine,
@@ -40,7 +39,7 @@ import {
   ticketsReply,
 } from "./onboarding-team.ts";
 import type { Ids } from "./onboarding-team.ts";
-import { auditedDuring, routed, signedInApi, unique } from "./sign-in.ts";
+import { auditedDuring, signedInApi, unique } from "./sign-in.ts";
 import { sayOnLink, stillKept } from "./spoken.ts";
 
 // Deleting an interview (GRA-368, the store's `#forget` and `purgeBrain`):
@@ -272,13 +271,11 @@ const brainOf = async (ids: Ids) => {
   };
 };
 
-/** Deletes Max's interview from his link, on the device it is on. */
+/** Deletes Max's interview from his link, signed in as him. */
 const deleteOnLink = async (person: string): Promise<number> => {
-  const { secret, key } = await openLink(person);
-  const response = await routed(interviewApiPath, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ action: "delete", secret, key }),
+  const response = await onLink({
+    action: "delete",
+    ...(await openLink(person)),
   });
   return response.status;
 };

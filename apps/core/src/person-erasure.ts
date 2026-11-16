@@ -82,6 +82,7 @@ import {
 } from "./erased-people.ts";
 import { dropHeldStarts } from "./held-starts.ts";
 import { eraseUploadsOf, uploadsOf } from "./knowledge-uploads.ts";
+import { eraseOnboardingAccount } from "./onboarding/new-brain.ts";
 import { onboardingStore } from "./onboarding/store.ts";
 import type { ErasureAreaName } from "./person-erasure-inventory.ts";
 import { stopRunsFor } from "./workflows/resource-runs.ts";
@@ -348,9 +349,11 @@ const runs: ErasureStep = {
  * its person's own request (`deleteOnRequest`): what they said and agreed
  * to, every drawing it was in, the Brain's records resting on it, and
  * everything the voice said in it; and everything the voice said for them
- * as an admin, on their onboarding. Found on the list by the address that was
- * theirs, through its keyed hash, so whichever area ran first; once an
- * admin released the address, or under an older key, it is found no more.
+ * as an admin, on their onboarding. Found by the account their interview
+ * belongs to (GRA-1790), whatever the list says now; and on the list by
+ * the address that was theirs, through its keyed hash, so whichever area
+ * ran first; once an admin released the address, or under an older key, it
+ * is found by address no more.
  * Their entry on the list is the company's (Nick's D5): it stays, removed
  * only by an admin.
  */
@@ -372,6 +375,22 @@ const interview: ErasureStep = {
     // What the voice said for them as an admin, on their onboarding, goes
     // from its cache, whoever they were on the list (GRA-1897).
     await onboardingStore(env).forgetSpokenForAdmin(userId);
+    // The interview that belongs to their account now (GRA-1790),
+    // whatever address the list has for them: found by the account it
+    // opened under, and deleted, its link closed, only while that account
+    // holds it (`eraseInterviewOf`).
+    const store = onboardingStore(env);
+    const sentBy = erasure.requestedAt.toISOString();
+    const owned = await store.personOfAccount(userId);
+    if (owned !== null) {
+      await store.eraseInterviewOf(owned, userId, sentBy);
+    }
+    // Whatever the Brain holds under their account, from any link, also
+    // one it no longer holds (a new start gave it to someone else), goes
+    // before this area is done: keyed by the account alone, so the link's
+    // next holder keeps theirs. Until it has, this throws and the erasure
+    // is tried again.
+    await eraseOnboardingAccount(env, userId);
     // Their address released, or hashed under an older key: they can't be
     // found on the list by it, and whatever interview they have is left.
     // Recorded as skipped, never as done.
@@ -379,16 +398,17 @@ const interview: ErasureStep = {
       await marked(db, userId, "interview", "skipped");
       return;
     }
-    const store = onboardingStore(env);
     let found = 0;
     for (const { id, email } of await store.rosterEmails()) {
       // oxlint-disable-next-line no-await-in-loop -- one entry at a time
       if ((await emailHashOf(env, email)) === erasure.emailHash) {
         // Only an interview from a link sent before the erasure was asked
-        // for: the address may have been released, and a link sent to
-        // the entry since, as this ran (`eraseInterviewOf`).
+        // for (the address may have been released, and a link sent to the
+        // entry since, as this ran), and held by them or by nobody: never
+        // the interview of whoever holds that link now (`eraseInterviewOf`).
+        // A link nobody holds has nothing in the Brain; theirs went above.
         // oxlint-disable-next-line no-await-in-loop -- one entry at a time
-        await store.eraseInterviewOf(id, erasure.requestedAt.toISOString());
+        await store.eraseInterviewOf(id, userId, sentBy);
         found += 1;
       }
     }

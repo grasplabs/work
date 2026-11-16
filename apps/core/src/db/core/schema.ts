@@ -65,6 +65,12 @@ export const sessions = sqliteTable(
     activeTeamId: text("active_team_id"),
     /** A Grasp staff session: time-bound, and not a member of the organization. */
     staff: integer({ mode: "boolean" }).notNull().default(false),
+    /**
+     * A session for someone's own interview alone, made while the gate is
+     * closed (onboarding/gate.ts, GRA-1790): it opens their interview and
+     * nothing else of Grasp, and the gate's opening ends it.
+     */
+    interview: integer({ mode: "boolean" }).notNull().default(false),
   },
   (table) => [index("sessions_user_id_idx").on(table.userId)]
 );
@@ -3530,6 +3536,27 @@ export const agentDocuments = sqliteTable(
     // them by name.
     uniqueIndex("agent_documents_name_idx").on(table.agentId, table.name),
   ]
+);
+
+/**
+ * The apps an agent may use (agent-apps.ts), by catalog entry
+ * (`<source>:<id>`). An agent with no row uses any app its classes allow,
+ * as before agents had apps; one with rows, only those `on`. A `removed`
+ * row keeps an app someone took off from coming back when its apps are
+ * worked out again. Gone with the agent.
+ */
+export const agentApps = sqliteTable(
+  "agent_apps",
+  {
+    agentId: text("agent_id").notNull(),
+    app: text().notNull(),
+    name: text().notNull(),
+    state: text({ enum: ["on", "removed"] }).notNull(),
+    source: text({ enum: ["instructions", "person"] }).notNull(),
+    changedBy: text("changed_by").notNull(),
+    changedAt: timestamp("changed_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.agentId, table.app] })]
 );
 
 /**

@@ -738,6 +738,10 @@ msgstr "{name} (opcional)"
 msgid "{name} (team)"
 msgstr "{name} (equipo)"
 
+#: src/agents/agent-apps-card.tsx
+msgid "{name} also needs “{kind}”, which changes or sends things."
+msgstr "{name} también necesita «{kind}», que cambia o envía cosas."
+
 #: src/brain/skills-page.tsx
 msgid "{name} and every version of it are deleted for good, with a share of it that waits. You can't use its name again."
 msgstr "{name} y todas sus versiones se eliminan para siempre, junto con una solicitud pendiente para compartirla. No podrás volver a usar su nombre."
@@ -749,10 +753,6 @@ msgstr "{name} responde a"
 #: src/chat/agent-choice.tsx
 msgid "{name} answers in this chat"
 msgstr "{name} responde en este chat"
-
-#: src/chat/agent-choice.tsx
-msgid "{name} answers. Change agent"
-msgstr "{name} responde. Cambiar de agente"
 
 #: src/settings/teams.tsx
 msgid "{name} couldn't be deleted. Try again."
@@ -826,6 +826,14 @@ msgstr "{name} aún no está listo"
 msgid "{name} logo"
 msgstr "Logotipo de {name}"
 
+#: src/agents/agent-apps-card.tsx
+msgid "{name} may use any app its kinds of work allow. Give it apps, and it uses only those."
+msgstr "{name} puede usar cualquier app que permitan sus tipos de trabajo. Dale apps y usará solo esas."
+
+#: src/agents/agent-apps-card.tsx
+msgid "{name} may use no app: each was taken off. Give one back, or add one."
+msgstr "{name} no puede usar ninguna app: se quitaron todas. Devuelve una o añade otra."
+
 #: src/connections/tool-choice.tsx
 msgid "{name} may write. Change to Read"
 msgstr "{name} puede escribir. Cambiar a Lectura"
@@ -845,6 +853,10 @@ msgstr "{name} restauró un estado anterior"
 #: src/onboarding/setup-steps.tsx
 msgid "{name} takes part"
 msgstr "{name} participa"
+
+#: src/agents/agent-apps-card.tsx
+msgid "{name} uses only these apps, as far as its kinds of work allow."
+msgstr "{name} usa solo estas apps, en la medida en que lo permitan sus tipos de trabajo."
 
 #: src/apps/app-workspace.tsx
 msgid "{name}, as your team sees it"
@@ -1852,6 +1864,7 @@ msgstr "Actividad: verla entera en Trazas"
 msgid "Actor ID"
 msgstr "ID del autor"
 
+#: src/agents/agent-apps-card.tsx
 #: src/apps/indexes-view.tsx
 #: src/chat/chat-bar.tsx
 #: src/chat/composer-menu.tsx
@@ -2010,10 +2023,22 @@ msgstr "Añadió un miembro a una aplicación"
 msgid "Added a webhook to an App"
 msgstr "Añadió un webhook a una aplicación"
 
+#: src/agents/agent-apps-card.tsx
+msgid "Added by hand"
+msgstr "Añadida a mano"
+
 #: src/apps/app-integrations.tsx
 msgctxt "why an integration is one of an App's"
 msgid "Added by hand"
 msgstr "Añadida a mano"
+
+#: src/agents/agent-apps-card.tsx
+msgid "Added from its instructions"
+msgstr "Añadida desde sus instrucciones"
+
+#: src/agents/agent-apps-card.tsx
+msgid "Added from its instructions: {added}."
+msgstr "Añadidas desde sus instrucciones: {added}."
 
 #: src/connections/http-connections.tsx
 msgid "Added on"
@@ -2301,6 +2326,10 @@ msgstr "Un agente para la empresa o uno que solo usas tú."
 msgid "An agent of your own, for a job you do often. Only you see and ask it, in Grasp's chat."
 msgstr "Un agente propio, para una tarea que haces a menudo. Solo tú lo ves y le preguntas, en el chat de Grasp."
 
+#: src/chat/agent-draft-card.tsx
+msgid "An agent to make: {name}"
+msgstr "Un agente por crear: {name}"
+
 #: src/chat/thread.tsx
 msgid "An agent you can no longer ask"
 msgstr "Un agente al que ya no puedes preguntar"
@@ -2324,6 +2353,10 @@ msgstr "Una App"
 #: src/apps/app-start.tsx
 msgid "An App that… (what it shows, and for whom)"
 msgstr "Una App que… (qué muestra y para quién)"
+
+#: src/agents/agent-apps-card.tsx
+msgid "An app to give {name}"
+msgstr "Una app para dar a {name}"
 
 #: src/apps/app-status.tsx
 msgid "An archived App is kept as it is and goes offline: nobody opens its pages, its triggers stop and its unfinished runs are cancelled. A builder can restore it later."
@@ -2696,6 +2729,7 @@ msgstr "Al aprobarla, sustituye la skill {name} de la empresa para los miembros 
 msgid "Approving it replaces the team {team}'s own skill {name} for its members."
 msgstr "Al aprobarla, sustituye la skill {name} del equipo {team} para sus miembros."
 
+#: src/agents/agent-apps-card.tsx
 #: src/apps/apps-overview.tsx
 #: src/chat/mentions.tsx
 #: src/dashboard/widget-board.tsx
@@ -3398,10 +3432,6 @@ msgstr "Llevó a cabo un cambio confirmado en una aplicación, o no lo logró"
 msgid "Carry on now"
 msgstr "Seguir ahora"
 
-#: src/routes/interview.tsx
-msgid "Carry on there. Lost that device? Ask whoever sent you the link for a new start."
-msgstr "Sigue allí. ¿Ya no tienes ese dispositivo? Pide a quien te envió el enlace que lo vuelva a abrir para ti."
-
 #: src/settings/audit-chain.tsx
 msgid "Chain check"
 msgstr "Comprobación de la cadena"
@@ -3450,6 +3480,10 @@ msgstr "Cambiar plan"
 #: src/projects/project-dialog.tsx
 msgid "Change project"
 msgstr "Cambiar proyecto"
+
+#: src/chat/agent-draft-card.tsx
+msgid "Change something"
+msgstr "Cambiar algo"
 
 #: src/chat/chat-panel.tsx
 msgid "Change something about the plan"
@@ -3745,6 +3779,10 @@ msgstr "Elige una fuente."
 #: src/apps/app-workflows.tsx
 msgid "Choose a workflow"
 msgstr "Elija un flujo de trabajo"
+
+#: src/agents/agent-apps-card.tsx
+msgid "Choose an app"
+msgstr "Elige una app"
 
 #: src/onboarding/place-picker.tsx
 msgid "Choose documents"
@@ -4685,6 +4723,10 @@ msgstr "Eliminó sus conversaciones en aplicaciones de chat"
 msgid "Deleted. Nothing you said is kept."
 msgstr "Eliminada. No se guarda nada de lo que has dicho."
 
+#: src/interview/page.tsx
+msgid "Deleted. What the Brain kept of it is being removed."
+msgstr "Eliminada. Lo que el Cerebro guardó de ella se está eliminando."
+
 #: src/activity/audit-words.ts
 msgid "Denied packages"
 msgstr "Denegó paquetes"
@@ -5338,8 +5380,8 @@ msgid "Everyone from Grasp is signed out at once, and nobody from Grasp can sign
 msgstr "Todas las personas de Grasp cierran sesión de inmediato, y nadie de Grasp puede volver a iniciar sesión hasta que se abra un nuevo periodo."
 
 #: src/onboarding/interviews-progress.tsx
-msgid "Everyone has a link of their own: whoever has it is them, so send each only to its owner. Links that are not out yet open on their day, or once their lead has talked."
-msgstr "Cada persona tiene su propio enlace: quien lo tiene es esa persona, así que envía cada uno solo a su dueño. Los enlaces que aún no están disponibles se abren en su día, o en cuanto su responsable haya hablado."
+msgid "Everyone has a link of their own. It opens only once they sign in with your company's sign-in, at the address on the list. Links that are not out yet open on their day, or once their lead has talked."
+msgstr "Cada persona tiene su propio enlace. Solo se abre cuando inicia sesión con el inicio de sesión de tu empresa, con la dirección de la lista. Los enlaces que aún no se han enviado se abren en su día, o en cuanto su responsable haya hablado."
 
 #: src/drafts/sharing.tsx
 #: src/people/share-picker.tsx
@@ -5353,6 +5395,10 @@ msgstr "Todos en un proyecto del que no formas parte"
 #: src/projects/project-view.tsx
 msgid "Everyone in it · {shownRole}"
 msgstr "Todos en él · {shownRole}"
+
+#: src/chat/agent-draft-card.tsx
+msgid "Everyone in the company"
+msgstr "Todos en la empresa"
 
 #: src/settings/team-members-dialog.tsx
 msgid "Everyone in the organization is in this team."
@@ -5984,6 +6030,10 @@ msgstr "De Google Drive. Solo leo los archivos que añadas."
 msgid "From SharePoint or OneDrive. I read only the files you add."
 msgstr "De SharePoint o OneDrive. Solo leo los archivos que añadas."
 
+#: src/brain/memories-page.tsx
+msgid "From what your team said, version {version}"
+msgstr "De lo que dijo tu equipo, versión {version}"
+
 #: src/settings/audit-archive.tsx
 msgid "From when each event was recorded, archive included. After this, archived events are deleted."
 msgstr "Desde que se registró cada evento, archivo incluido. Pasado ese tiempo, los eventos archivados se eliminan."
@@ -5995,6 +6045,10 @@ msgstr "De tus aplicaciones"
 #: src/onboarding/setup-steps.tsx
 msgid "From your HR or payroll system. Microsoft 365 or Google can be connected later, with us."
 msgstr "De tu sistema de RR. HH. o de nóminas. Microsoft 365 o Google se pueden conectar más adelante, con nosotros."
+
+#: src/brain/memories-page.tsx
+msgid "From your interview, version {version}"
+msgstr "De tu entrevista, versión {version}"
 
 #: src/settings/staff-access.tsx
 msgid "Full access"
@@ -6048,9 +6102,17 @@ msgctxt "programme stage"
 msgid "Getting ready"
 msgstr "En preparación"
 
+#: src/agents/agent-apps-card.tsx
+msgid "Give {app} back"
+msgstr "Devolver {app}"
+
 #: src/apps/data-model-changes.tsx
 msgid "Give a value"
 msgstr "Dar un valor"
+
+#: src/agents/agent-apps-card.tsx
+msgid "Give back"
+msgstr "Devolver"
 
 #: src/connections/http-connections.tsx
 msgid "Give it a name of at most {longest} characters."
@@ -6996,6 +7058,11 @@ msgstr "Integración"
 msgid "Integrations"
 msgstr "Integraciones"
 
+#: src/brain/sources-page.tsx
+msgctxt "a source of the Brain"
+msgid "Interview"
+msgstr "Entrevista"
+
 #. Something that has not happened yet, on a timeline
 #: src/brain/brain.ts
 msgid "Interviewed"
@@ -7321,6 +7388,10 @@ msgstr "Sus apps y flujos de trabajo no se eliminan, y nada en él está compart
 msgid "Its apps and workflows aren’t deleted, but they stop being shared with everyone in it: {who} lose access to them, unless they are shared with them another way."
 msgstr "Sus apps y flujos de trabajo no se eliminan, pero dejan de compartirse con todos sus miembros: {who} pierden el acceso, salvo que se compartan con ellos de otra forma."
 
+#: src/agents/agent-apps-card.tsx
+msgid "Its apps couldn't be loaded. Reload the page."
+msgstr "No se pudieron cargar sus apps. Recarga la página."
+
 #: src/workflows/binding-approvals.tsx
 #: src/workflows/files-and-apps.tsx
 msgid "Its bindings"
@@ -7350,6 +7421,14 @@ msgstr "Sus datos"
 #: src/apps/app-settings.tsx
 msgid "Its definition to keep or move, and a blueprint others can start from."
 msgstr "Su definición para guardarla o moverla, y una plantilla desde la que otros pueden empezar."
+
+#: src/chat/agent-draft-card.tsx
+msgid "Its instructions"
+msgstr "Sus instrucciones"
+
+#: src/agents/agent-apps-card.tsx
+msgid "Its instructions name apps your company doesn't offer: {missing}."
+msgstr "Sus instrucciones nombran apps que tu empresa no ofrece: {missing}."
 
 #: src/settings/ai-providers.tsx
 msgid "Its key is deleted, and calls stop using it at once. Models of this provider are no longer used, even as a fallback."
@@ -8008,6 +8087,10 @@ msgstr "Crea una App a partir del blueprint {name}: {description}"
 #: src/make/make-ideas.tsx
 msgid "Make an App from the {name} blueprint."
 msgstr "Crea una App a partir del blueprint {name}."
+
+#: src/chat/agent-draft-card.tsx
+msgid "Make it"
+msgstr "Crearlo"
 
 #: src/agents/agents-overview.tsx
 msgid "Make one for a job, such as chasing unpaid invoices, and say who may ask it."
@@ -8743,6 +8826,10 @@ msgstr "Aún no se ha elegido ningún modelo."
 msgid "No model is set up for this deployment yet."
 msgstr "Aún no hay ningún modelo configurado en este despliegue."
 
+#: src/agents/agent-apps-card.tsx
+msgid "No new app from its instructions."
+msgstr "Ninguna app nueva desde sus instrucciones."
+
 #: src/people/person-picker.tsx
 msgid "No owner yet"
 msgstr "Aún sin responsable"
@@ -8965,6 +9052,10 @@ msgstr "Nadie todavía"
 #: src/agents/agent-page.tsx
 msgid "Nobody yet, until you choose."
 msgstr "A nadie todavía, hasta que usted elija."
+
+#: src/chat/agent-draft-card.tsx
+msgid "Nobody yet: you say who on its page"
+msgstr "Nadie aún: decides quién en su página"
 
 #: src/brain/skills-page.tsx
 msgid "Nobody's agents use {name} from then on. Its versions stay as history, and a new approved share of its name brings it back."
@@ -9277,6 +9368,10 @@ msgstr "Todavía no se guarda nada."
 msgid "Nothing is made until you say Build it. You can change any of it first."
 msgstr "No se hace nada hasta que pulses Constrúyelo. Antes puedes cambiar cualquier parte."
 
+#: src/chat/agent-draft-card.tsx
+msgid "Nothing is made until you say Make it. You can change any of it first."
+msgstr "No se crea nada hasta que pulses Crearlo. Antes puedes cambiar cualquier cosa."
+
 #: src/inbox/items.ts
 msgid "Nothing is sent or changed on {connection} until you approve it, with exactly what is shown."
 msgstr "No se envía ni se cambia nada en {connection} hasta que lo apruebes, con exactamente lo que se muestra."
@@ -9362,6 +9457,10 @@ msgstr "No se ha añadido nada. Corrige estas filas e inténtalo de nuevo."
 #: src/brain/brain.ts
 msgid "Nothing yet"
 msgstr "Nada aún"
+
+#: src/chat/agent-draft-card.tsx
+msgid "Nothing yet: you turn it on on its page"
+msgstr "Nada aún: lo activas en su página"
 
 #: src/brain/memories-page.tsx
 msgid "Nothing you can read"
@@ -9584,6 +9683,10 @@ msgstr "Un momento"
 #: src/apps/field-kinds.tsx
 msgid "One of a list of options"
 msgstr "Una de una lista de opciones"
+
+#: src/chat/agent-draft-card.tsx
+msgid "One of the company's agents"
+msgstr "Uno de los agentes de la empresa"
 
 #: src/interview/words.ts
 msgid "One real case"
@@ -10269,6 +10372,10 @@ msgstr "La gente hace “{name}” de dos maneras"
 msgid "People heard"
 msgstr "Personas escuchadas"
 
+#: src/chat/agent-draft-card.tsx
+msgid "People in these teams: {named}"
+msgstr "Personas de estos equipos: {named}"
+
 #: src/agents/agent-page.tsx
 msgid "People it worked for"
 msgstr "Personas para las que trabajó"
@@ -10773,6 +10880,10 @@ msgstr "Repaso"
 #: src/inbox/items.ts
 msgid "Reading it kept failing, so your triggers there start nothing new for now. Grasp keeps trying; if it doesn't come back, check the connection."
 msgstr "La lectura ha fallado una y otra vez, así que tus disparadores ahí no inician nada nuevo por ahora. Grasp sigue intentándolo; si no vuelve, revisa la conexión."
+
+#: src/agents/agent-apps-card.tsx
+msgid "Reading its instructions…"
+msgstr "Leyendo sus instrucciones…"
 
 #: src/people/people-teams-picker.tsx
 #: src/people/share-picker.tsx
@@ -12449,6 +12560,10 @@ msgstr "Inicia sesión para conectar {name} ahora"
 msgid "Sign in to Grasp"
 msgstr "Inicia sesión en Grasp"
 
+#: src/routes/interview.tsx
+msgid "Sign in to open your interview"
+msgstr "Inicia sesión para abrir tu entrevista"
+
 #: src/sign-in-options.tsx
 msgid "Sign in with {label}"
 msgstr "Iniciar sesión con {label}"
@@ -12459,6 +12574,7 @@ msgstr "Inicia sesión con la cuenta de tu organización."
 
 #: src/frame/person-menu.tsx
 #: src/routes/_shell.settings.security.tsx
+#: src/routes/interview.tsx
 #: src/routes/staff.tsx
 msgid "Sign out"
 msgstr "Cerrar sesión"
@@ -12533,6 +12649,10 @@ msgstr "Firma electrónica"
 #: src/connections/connect-dialog.tsx
 msgid "Signing in happens at {app}. It takes about a minute."
 msgstr "El inicio de sesión se hace en {app}. Tarda alrededor de un minuto."
+
+#: src/routes/interview.tsx
+msgid "Signing in is recorded by your company's sign-in, as every sign-in is."
+msgstr "El inicio de sesión queda registrado en el inicio de sesión de tu empresa, como cualquier inicio de sesión."
 
 #: src/frame/person-menu.tsx
 msgid "Signing out didn't work"
@@ -13095,6 +13215,10 @@ msgstr "Nombre de la tabla"
 msgid "Tables"
 msgstr "Tablas"
 
+#: src/agents/agent-apps-card.tsx
+msgid "Take {app} off"
+msgstr "Quitar {app}"
+
 #: src/apps/app-integrations.tsx
 msgid "Take {integrationName} off {appName}"
 msgstr "Quitar {integrationName} de {appName}"
@@ -13118,6 +13242,10 @@ msgstr "Quitar a {name} del proyecto"
 #: src/settings/team-members-dialog.tsx
 msgid "Take {who} off {name}"
 msgstr "Quitar a {who} de {name}"
+
+#: src/agents/agent-apps-card.tsx
+msgid "Take off"
+msgstr "Quitar"
 
 #: src/dashboard/widget-board.tsx
 msgid "Take off the dashboard"
@@ -13147,6 +13275,10 @@ msgstr "Repetir el recorrido"
 #: src/workflows/definition-editor.tsx
 msgid "Take theirs"
 msgstr "Quedarme con la suya"
+
+#: src/agents/agent-apps-card.tsx
+msgid "Taken off: never added back from its instructions"
+msgstr "Quitada: nunca se vuelve a añadir desde sus instrucciones"
 
 #: src/chat/package-requests.tsx
 msgid "Takes out"
@@ -13356,6 +13488,10 @@ msgstr "Gracias. He pedido a nuestro equipo que añada {asked}. Por ahora, añad
 #: src/onboarding/connect-steps.tsx
 msgid "Thank you. I’ve asked our team to connect {name}. For now, check who leads which team."
 msgstr "Gracias. He pedido a nuestro equipo que conecte {name}. Por ahora, comprueba quién dirige cada equipo."
+
+#: src/routes/interview.tsx
+msgid "That account can't open this interview. Sign in with the work account your link was sent to."
+msgstr "Esa cuenta no puede abrir esta entrevista. Inicia sesión con la cuenta del trabajo a la que se envió tu enlace."
 
 #: src/sign-in-errors.ts
 msgid "That account isn't part of your organization."
@@ -13696,6 +13832,10 @@ msgstr "Las reglas de la empresa para cada agente."
 #: src/brain/skills-page.tsx
 msgid "The company's skills"
 msgstr "Skills de la empresa"
+
+#: src/chat/agent-draft-card.tsx
+msgid "the company's time zone"
+msgstr "zona horaria de la empresa"
 
 #: src/inbox/items.ts
 msgid "The connection stopped working. Workflows that use it wait until someone signs in again."
@@ -14354,10 +14494,6 @@ msgstr "El texto de este archivo es demasiado largo para que el Brain lo guarde.
 msgid "This interview can't be opened"
 msgstr "Esta entrevista no se puede abrir"
 
-#: src/routes/interview.tsx
-msgid "This interview is open on another device"
-msgstr "Esta entrevista está abierta en otro dispositivo"
-
 #: src/interview/composer.tsx
 msgid "This interview went on in another window. You now see that one."
 msgstr "Esta entrevista siguió en otra ventana. Ahora ves esa."
@@ -14808,6 +14944,7 @@ msgctxt "turn a trigger off"
 msgid "Turn off"
 msgstr "Desactivar"
 
+#: src/agents/agent-apps-card.tsx
 #: src/workflows/workflow-triggers.tsx
 msgid "Turn on"
 msgstr "Activar"
@@ -14823,6 +14960,10 @@ msgstr "Desactivar el sonido"
 #: src/voice/sound-controls.tsx
 msgid "Turn sound on"
 msgstr "Activar el sonido"
+
+#: src/agents/agent-apps-card.tsx
+msgid "Turned on, as it only reads: {turned}."
+msgstr "Activado, ya que solo lee: {turned}."
 
 #: src/onboarding/about-story.tsx
 msgid "Twenty minutes each, easily. About fifteen a week."
@@ -15081,6 +15222,10 @@ msgstr "Usa la cuenta de tu organización para continuar."
 #: src/onboarding/ai-step.tsx
 msgid "Use your own key"
 msgstr "Usar tu propia clave"
+
+#: src/routes/interview.tsx
+msgid "Use your work account, the one your link was sent to."
+msgstr "Usa tu cuenta del trabajo, la cuenta a la que se envió tu enlace."
 
 #: src/chat/thread.tsx
 msgid "Used {tool}"
@@ -15669,6 +15814,7 @@ msgid "What it is bound to has changed since the binding was approved. Bind it a
 msgstr "Aquello a lo que está vinculado ha cambiado desde que se aprobó la vinculación. Vincúlalo de nuevo cuando hayas comprobado que sigue encajando."
 
 #: src/agents/agent-form.tsx
+#: src/chat/agent-draft-card.tsx
 msgid "What it is for"
 msgstr "Para qué sirve"
 
@@ -15678,6 +15824,7 @@ msgid "What it is for"
 msgstr "Para qué sirve"
 
 #: src/agents/agent-page.tsx
+#: src/chat/agent-draft-card.tsx
 msgid "What it may do"
 msgstr "Qué puede hacer"
 
@@ -15911,6 +16058,11 @@ msgstr "Lo que elegiste"
 msgid "What your chats with Grasp start with, and only yours: how you like to work, what you are responsible for."
 msgstr "Con lo que empiezan tus chats con Grasp, y solo los tuyos: cómo te gusta trabajar, de qué eres responsable."
 
+#: src/brain/sources-page.tsx
+msgctxt "a source of the Brain"
+msgid "What your team said"
+msgstr "Lo que dijo tu equipo"
+
 #: src/apps/app-workspace.tsx
 msgid "What your team sees"
 msgstr "Lo que ve tu equipo"
@@ -15949,6 +16101,7 @@ msgid "When it was added"
 msgstr "Cuándo se añadió"
 
 #: src/agents/agent-wakes.tsx
+#: src/chat/agent-draft-card.tsx
 msgid "When it works on its own"
 msgstr "Cuándo trabaja por su cuenta"
 
@@ -16094,10 +16247,6 @@ msgstr "Mientras Stephen habla con tu equipo: cómo van las entrevistas, equipo 
 msgid "Who"
 msgstr "Quién"
 
-#: src/chat/agent-choice.tsx
-msgid "Who answers"
-msgstr "Quién responde"
-
 #: src/workflows/binding-approvals.tsx
 msgid "Who answers {alias}"
 msgstr "Quién responde {alias}"
@@ -16147,6 +16296,10 @@ msgstr "Para quién es"
 msgid "Who leads it?"
 msgstr "¿Quién lo dirige?"
 
+#: src/chat/agent-draft-card.tsx
+msgid "Who may ask it"
+msgstr "Quién puede preguntarle"
+
 #: src/brain/sources-page.tsx
 msgctxt "a file uploaded into the Brain"
 msgid "Who may read it"
@@ -16195,6 +16348,10 @@ msgstr "¿Quién es quién en tu empresa?"
 #: src/apps/draft-changes.tsx
 msgid "whoever added the row"
 msgstr "quien añadió la fila"
+
+#: src/chat/agent-draft-card.tsx
+msgid "Whose it is"
+msgstr "De quién es"
 
 #: src/apps/release-controls.tsx
 #: src/workflows/requests/request-table.tsx
@@ -16283,6 +16440,10 @@ msgstr "Palabras y frases"
 #: src/interview/words.ts
 msgid "Work of the team"
 msgstr "Trabajo del equipo"
+
+#: src/agents/agent-apps-card.tsx
+msgid "Work out from its instructions"
+msgstr "Deducir de sus instrucciones"
 
 #: src/chat/thread.tsx
 msgid "Worked for {time}"
@@ -16648,6 +16809,10 @@ msgstr "Te lo preguntaron como {owner}. Respóndelo en el cerebro: todos en la e
 msgid "You withdrew. Nothing you said is used from now on."
 msgstr "Te retiraste. Nada de lo que dijiste se usa a partir de ahora."
 
+#: src/interview/page.tsx
+msgid "You withdrew. What the Brain kept of it is being removed."
+msgstr "Te retiraste. Lo que el Cerebro guardó de ello se está eliminando."
+
 #: src/interview/transcript.tsx
 #: src/routes/guest.tsx
 msgid "You:"
@@ -16955,6 +17120,10 @@ msgstr "Tuyos"
 #: src/agents/agent-page.tsx
 msgid "Yours alone: nobody else sees or asks it"
 msgstr "Solo tuyo: nadie más lo ve ni le pregunta"
+
+#: src/chat/agent-draft-card.tsx
+msgid "Yours alone: only you ask it"
+msgstr "Solo tuyo: solo tú le preguntas"
 
 #: src/brain/atlas-overlays.tsx
 #: src/workflows/workflow-flow.tsx

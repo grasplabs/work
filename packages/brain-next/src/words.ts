@@ -529,10 +529,12 @@ export const reindexWords = (
   const memoryCursor = again ? state.memory_cursor : 0;
   if (!again) {
     // Quotes were judged by the rules before (quotes.ts): no source's
-    // judgment counts until it is judged by these.
+    // judgment counts until it is judged by these, from its first memory
+    // (a pass of the catch-up under way starts over: catch-up.ts).
     sql.exec(
       "UPDATE current_versions SET judged_row = NULL WHERE judged_row IS NOT NULL"
     );
+    sql.exec("DELETE FROM memory_judging_places");
   }
   if (cursor >= 0) {
     const batch = sql
