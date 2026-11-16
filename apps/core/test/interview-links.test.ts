@@ -631,6 +631,105 @@ describe("someone's own link", () => {
     );
   });
 
+  it("keeps a page's later save over a version its earlier save made that it never heard of, and nobody else's (L4)", async () => {
+    const { secrets, me } = await running();
+    await opened(secrets.oli, me);
+    const page = crypto.randomUUID();
+    const saved = async (
+      version: number,
+      text: string,
+      from?: { id: string; save: number }
+    ) =>
+      await post(
+        {
+          action: "save",
+          secret: secrets.oli,
+          version,
+          progress: progress(text),
+          ...(from === undefined ? {} : { page: from }),
+        },
+        me
+      );
+    // The page's first save lands; its answer, version 1, never reaches it.
+    await saved(0, "First", { id: page, save: 1 });
+    // Another tab of theirs at version 0, one naming no page, and the
+    // page's first save again, as a replay.
+    const elsewhere = await saved(0, "Elsewhere", {
+      id: crypto.randomUUID(),
+      save: 2,
+    });
+    const unnamed = await saved(0, "Unnamed");
+    const replayed = await saved(0, "Replayed", { id: page, save: 1 });
+    // The page closes with a line removed since: it goes on from its own.
+    const closing = await saved(0, "Closing", { id: page, save: 2 });
+    // Its first save, arriving late, after the closing one.
+    const late = await saved(0, "Late", { id: page, save: 1 });
+    // Brought back from the back/forward cache, it saves on from version 0.
+    const restored = await saved(0, "Restored", { id: page, save: 3 });
+    const kept = await opened(secrets.oli, me);
+    expect({
+      elsewhere: elsewhere.status,
+      unnamed: unnamed.status,
+      replayed: replayed.status,
+      closing: await closing.json(),
+      late: late.status,
+      restored: await restored.json(),
+      kept: kept.progress?.lines[1]?.text,
+    }).toStrictEqual({
+      elsewhere: 409,
+      unnamed: 409,
+      replayed: 409,
+      closing: { saved: true, version: 2 },
+      late: 409,
+      restored: { saved: true, version: 3 },
+      kept: "Restored",
+    });
+  });
+
+  it("never lets a page's later save go on over another tab's save (L4)", async () => {
+    const { secrets, me } = await running();
+    await opened(secrets.oli, me);
+    const page = crypto.randomUUID();
+    const saved = async (version: number, from: { id: string; save: number }) =>
+      await post(
+        {
+          action: "save",
+          secret: secrets.oli,
+          version,
+          progress: progress(),
+          page: from,
+        },
+        me
+      );
+    await saved(0, { id: page, save: 1 });
+    // Another tab saves over the version the page's save made.
+    await saved(1, { id: crypto.randomUUID(), save: 1 });
+    const overOther = await saved(0, { id: page, save: 2 });
+    expect(overOther.status).toBe(409);
+  });
+
+  it("never lets a page's later save save it back over a delete after its own save (L4, D3)", async () => {
+    const { secrets, me } = await running();
+    await opened(secrets.oli, me);
+    const page = crypto.randomUUID();
+    const saved = async (version: number, from: { id: string; save: number }) =>
+      await post(
+        {
+          action: "save",
+          secret: secrets.oli,
+          version,
+          progress: progress(),
+          page: from,
+        },
+        me
+      );
+    await saved(0, { id: page, save: 1 });
+    await remove(secrets.oli, me);
+    const overDelete = await saved(0, { id: page, save: 2 });
+    await expect(codeOf(overDelete)).resolves.toBe("interview.deleted");
+    await expect(storeText()).resolves.not.toContain(sentinel);
+  });
+
   it("refuses a save with anything but an interview in it (P3)", async () => {
     const { secrets, me } = await running();
     await opened(secrets.oli, me);

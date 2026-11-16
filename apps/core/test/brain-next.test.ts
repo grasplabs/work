@@ -15,7 +15,7 @@ import { addSource, recallAs } from "../src/brain-next.ts";
 import type { SourceReaders, SourceRef } from "../src/brain-next.ts";
 import { teamMembers, teams } from "../src/db/core/schema.ts";
 import { mockIdp } from "./idp.ts";
-import { signedInWithRole, unique } from "./sign-in.ts";
+import { signedInWithRole, uniqueWord } from "./sign-in.ts";
 
 // The new Brain's first path (GRA-1720): core adds a source with who may
 // read it and recalls it by words, as a member core resolves from its own
@@ -29,7 +29,7 @@ import { signedInWithRole, unique } from "./sign-in.ts";
 const idp = mockIdp();
 
 /** A word no other test's sources hold. */
-const word = () => `w${unique()}`;
+const word = uniqueWord;
 
 /**
  * What core or the Brain says when it refuses an input: core's own
