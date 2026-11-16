@@ -1,5 +1,6 @@
-import { authErrors } from "@grasp-os/shared/errors";
 // @vitest-environment happy-dom
+
+import { authErrors } from "@grasp-os/shared/errors";
 import {
   interviewErrors,
   interviewProgressSchema,
@@ -23,6 +24,7 @@ import { z } from "zod";
 
 import { Route as interviewRoute } from "../routes/interview.tsx";
 import { releaseInterview } from "./kept.ts";
+import { loopEventName } from "./loop.ts";
 
 // The interview page when the session behind it ends mid-interview
 // (GRA-1943): the company's gate opens, they signed out in another tab,
@@ -31,13 +33,19 @@ import { releaseInterview } from "./kept.ts";
 // else, or nobody. From the threat model, tried here:
 //
 // - They are asked to sign in again, with the company's sign-in alone,
-//   and told that what isn't saved yet waits in this window; when they
-//   were talking, that what they said as it ended is lost.
+//   and told that what isn't saved yet waits in this window, or that this
+//   window couldn't keep it; when they were talking, that what they said
+//   as it ended is lost.
 // - Nothing is sent while nobody is signed in, and what waited is sent
-//   only once core opens the link for them again: kept at the version it
-//   went on from, so a copy that went on elsewhere is the interview.
+//   only once core opens the link for them again, and only onto the
+//   version it was taken at: a new start, a delete, a withdrawal or
+//   another window going on meanwhile is never undone, and the page says
+//   what waited couldn't be kept.
 // - Someone else signing in in that tab gets the answer of a link that
-//   never was, and nothing that waited is shown to them or sent.
+//   never was, and what waited is gone from the tab.
+// - An approval that hadn't reached core is never sent by itself: they
+//   see the read-back again and agree again.
+// - A delete pressed as it ended: nothing of it is saved back.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -67,6 +75,26 @@ const finishedTalking: InterviewProgress = {
   wants: "end",
 };
 
+/** At the read-back, its one part to agree to. */
+const readingBack: InterviewProgress = {
+  ...typing,
+  lines: [
+    ...typing.lines,
+    { from: "person", text: "I check it in Exact." },
+    { from: "stephen", text: "Thank you. Let me read back what I wrote down." },
+  ],
+  facts: [
+    {
+      id: "f1",
+      tag: "system",
+      text: "You check the invoice in Exact.",
+      record: "Check the invoice in Exact.",
+    },
+  ],
+  phase: "readback",
+  wants: "readback",
+};
+
 /** Who the faked core finds signed in on the browser's cookie. */
 type Who = "them" | "someone else" | "nobody";
 
@@ -74,11 +102,18 @@ type Who = "them" | "someone else" | "nobody";
 interface FakeCore {
   who: Who;
   version: number;
-  progress: InterviewProgress;
+  progress: InterviewProgress | null;
+  withdrawn: boolean;
+  /** Deleted, and no copy opened since: a save from before is refused. */
+  deleted: boolean;
+  /** Saves fail on core's side, and are tried again. */
+  failing: boolean;
   /** Every call, with who was signed in as it came. */
   calls: { path: string; action: unknown; who: Who }[];
   /** Each save core kept, as it kept it. */
   kept: InterviewProgress[];
+  /** Each approval core was told of: the ids of the facts it named. */
+  approvals: string[][];
 }
 
 /** What the page sends: its action, and for a save the version and what it holds. */
@@ -86,6 +121,7 @@ const sentSchema = z.object({
   action: z.string().optional(),
   version: z.int().optional(),
   progress: interviewProgressSchema.optional(),
+  facts: z.array(z.object({ id: z.string(), revision: z.string() })).optional(),
 });
 
 /** Core's refusal, with its code. */
@@ -98,14 +134,115 @@ const refusal = (
     { status }
   );
 
+/** His turn, as core streams it. */
+const turnStream = (): Response => {
+  const turn = {
+    say: "Thanks. And then?",
+    tone: null,
+    phase: "steps",
+    facts: [],
+    changes: [],
+    wants: "answer",
+    more: false,
+    approved: false,
+  };
+  return new Response(
+    [
+      { line: { say: turn.say, tone: null } },
+      { next: { phase: "steps", wants: "answer" } },
+      { turn },
+    ]
+      .map((event) => JSON.stringify(event))
+      .join("\n"),
+    { headers: { "content-type": "application/x-ndjson" } }
+  );
+};
+
+/** A save, as core answers it: versioned, and refused once withdrawn or deleted. */
+const saved = (
+  core: FakeCore,
+  body: z.output<typeof sentSchema>,
+  progress: InterviewProgress
+): Response => {
+  if (core.failing) {
+    return Response.json({}, { status: 503 });
+  }
+  if (core.withdrawn) {
+    return refusal(410, "interview.withdrawn");
+  }
+  if (body.version !== core.version) {
+    return core.deleted && core.progress === null
+      ? refusal(410, "interview.deleted")
+      : Response.json(
+          { saved: false, version: core.version, progress: core.progress },
+          { status: 409 }
+        );
+  }
+  core.deleted = false;
+  core.progress = progress;
+  core.version += 1;
+  core.kept.push(progress);
+  return Response.json({ saved: true, version: core.version });
+};
+
+/** `/api/interview` as core answers whoever the link belongs to. */
+const onLink = (
+  core: FakeCore,
+  body: z.output<typeof sentSchema>
+): Response => {
+  switch (body.action ?? "") {
+    case "session": {
+      return Response.json({
+        state: "open",
+        name: "Oli",
+        team: "Ops",
+        lead: null,
+        kind: "own",
+        closes: "2026-12-31",
+        closed: false,
+        progress: core.progress,
+        version: core.version,
+        withdrawn: core.withdrawn,
+        removing: false,
+      });
+    }
+    case "save": {
+      return body.progress === undefined
+        ? refusal(400, "interview.invalid")
+        : saved(core, body, body.progress);
+    }
+    case "approve": {
+      core.approvals.push((body.facts ?? []).map(({ id }) => id));
+      return Response.json({
+        approved: true,
+        receipt: "receipt",
+        at: "2026-11-16T10:00:00.000Z",
+      });
+    }
+    case "delete": {
+      core.progress = null;
+      core.version += 1;
+      core.deleted = true;
+      return Response.json({ deleted: true });
+    }
+    default: {
+      return Response.json({}, { status: 503 });
+    }
+  }
+};
+
 /** Core's interview routes, faked: what they keep and every call made of them. */
 const fakeCore = (progress: InterviewProgress): FakeCore => {
   const core: FakeCore = {
     who: "them",
     version: 1,
     progress,
+    withdrawn: false,
+    deleted: false,
+    failing: false,
     calls: [],
     kept: [],
+    approvals: [],
   };
   const fetched = async (
     input: string,
@@ -126,58 +263,11 @@ const fakeCore = (progress: InterviewProgress): FakeCore => {
       return refusal(404, "interview.link_invalid");
     }
     if (path === "/api/interview/turn") {
-      const turn = {
-        say: "Thanks. And then?",
-        tone: null,
-        phase: "steps",
-        facts: [],
-        changes: [],
-        wants: "answer",
-        more: false,
-        approved: false,
-      };
-      return new Response(
-        [
-          { line: { say: turn.say, tone: null } },
-          { next: { phase: "steps", wants: "answer" } },
-          { turn },
-        ]
-          .map((event) => JSON.stringify(event))
-          .join("\n"),
-        { headers: { "content-type": "application/x-ndjson" } }
-      );
+      return turnStream();
     }
-    if (path !== "/api/interview") {
-      return Response.json({}, { status: 503 });
-    }
-    if (body.action === "session") {
-      return Response.json({
-        state: "open",
-        name: "Oli",
-        team: "Ops",
-        lead: null,
-        kind: "own",
-        closes: "2026-12-31",
-        closed: false,
-        progress: core.progress,
-        version: core.version,
-        withdrawn: false,
-        removing: false,
-      });
-    }
-    if (body.action === "save" && body.progress !== undefined) {
-      if (body.version !== core.version) {
-        return Response.json(
-          { saved: false, version: core.version, progress: core.progress },
-          { status: 409 }
-        );
-      }
-      core.progress = body.progress;
-      core.version += 1;
-      core.kept.push(core.progress);
-      return Response.json({ saved: true, version: core.version });
-    }
-    return Response.json({}, { status: 503 });
+    return path === "/api/interview"
+      ? onLink(core, body)
+      : Response.json({}, { status: 503 });
   };
   vi.stubGlobal("fetch", vi.fn(fetched));
   return core;
@@ -229,6 +319,14 @@ const buttonNamed = (label: string): HTMLButtonElement | undefined =>
     (each) =>
       each.textContent === label || each.getAttribute("aria-label") === label
   );
+
+/** Presses the button named `label`. */
+const press = async (label: string): Promise<void> => {
+  await act(async () => {
+    buttonNamed(label)?.click();
+    await Promise.resolve();
+  });
+};
 
 const answerBox = (): HTMLTextAreaElement | null =>
   document.querySelector('textarea[aria-label="Your answer"]');
@@ -298,40 +396,54 @@ const inConversation = async (): Promise<void> => {
   await until(() => text().includes("Thanks. And then?"), "his line");
 };
 
+const signInAgain = "Sign in again to go on";
+
+/** In the conversation, the session ends as they send `words`: the page asks them to sign in again. */
+const endedSending = async (core: FakeCore, words: string): Promise<void> => {
+  await inConversation();
+  core.who = "nobody";
+  await type(words);
+  await press("Send");
+  await until(() => text().includes(signInAgain), "the sign-in again");
+};
+
 /** Back from signing in: the tab comes back to the page, its link without the secret. */
 const backSignedIn = async (): Promise<void> => {
   leave();
   await load("");
 };
 
-const signInAgain = "Sign in again to go on";
+/** Everything this tab's storage holds, as text. */
+const stored = (): string =>
+  Array.from({ length: sessionStorage.length }, (_, at) => {
+    const key = sessionStorage.key(at) ?? "";
+    return `${key}=${sessionStorage.getItem(key) ?? ""}`;
+  }).join("\n");
+
+/** What each save core kept holds of what was said. */
+const linesKept = (core: FakeCore): string[][] =>
+  core.kept.map(({ lines }) => lines.map((line) => line.text));
+
+const lost =
+  "What you hadn't saved when your sign-in ended couldn't be kept, because your interview changed while you were away.";
 
 describe("the interview page when its session ends mid-interview", () => {
   afterEach(() => {
     leave();
     sessionStorage.clear();
+    vi.restoreAllMocks();
     vi.unstubAllGlobals();
     vi.useRealTimers();
   });
 
   it("asks them to sign in again with the company's sign-in alone, says what they typed waits here, and sends nothing while nobody is signed in", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
     const core = fakeCore(typing);
-    await inConversation();
-    core.who = "nobody";
-    await type("I check it in Exact.");
-    await act(async () => {
-      buttonNamed("Send")?.click();
-      await Promise.resolve();
-    });
-    await until(() => text().includes(signInAgain), "the sign-in again");
+    await endedSending(core, "I check it in Exact.");
     const sentSince = core.calls.length;
-    // Longer than a change waits to be kept, and than a first retry.
+    // Past the wait before a change is kept, and past a first retry.
     await act(async () => {
-      const { promise, resolve } = Promise.withResolvers<boolean>();
-      setTimeout(() => {
-        resolve(true);
-      }, 1200);
-      await promise;
+      await vi.advanceTimersByTimeAsync(5000);
     });
     expect({
       told: text().includes(
@@ -344,9 +456,7 @@ describe("the interview page when its session ends mid-interview", () => {
         interviewErrors.create("interview.sign_in").message
       ),
       sentSince: core.calls.slice(sentSince),
-      keptByCore: core.kept.flatMap(({ lines }) =>
-        lines.map((line) => line.text)
-      ),
+      keptByCore: linesKept(core),
     }).toStrictEqual({
       told: true,
       company: true,
@@ -360,32 +470,23 @@ describe("the interview page when its session ends mid-interview", () => {
 
   it("takes them back to their interview once signed in again, with what they said kept at the version it went on from", async () => {
     const core = fakeCore(typing);
-    await inConversation();
-    core.who = "nobody";
-    await type("I check it in Exact.");
-    await act(async () => {
-      buttonNamed("Send")?.click();
-      await Promise.resolve();
-    });
-    await until(() => text().includes(signInAgain), "the sign-in again");
+    await endedSending(core, "I check it in Exact.");
     core.who = "them";
     await backSignedIn();
     await until(
       () =>
-        core.kept.some(({ lines }) =>
-          lines.some(({ text: said }) => said === "I check it in Exact.")
-        ),
+        linesKept(core).some((said) => said.includes("I check it in Exact.")),
       "what they said, kept"
     );
     await until(() => answerBox() !== null, "the answer box again");
     expect({
       inTheInterview: !text().includes(signInAgain),
       address: window.location.hash,
-      waiting: sessionStorage.length,
+      stored: stored(),
     }).toStrictEqual({
       inTheInterview: true,
       address: `#${secret}`,
-      waiting: 0,
+      stored: "",
     });
   });
 
@@ -395,58 +496,92 @@ describe("the interview page when its session ends mid-interview", () => {
     core.who = "nobody";
     await type("Half an answer");
     // Something of theirs is saved meanwhile: it finds the session ended.
-    await act(async () => {
-      buttonNamed("Stop for now")?.click();
-      await Promise.resolve();
-    });
+    await press("Stop for now");
     await until(() => text().includes(signInAgain), "the sign-in again");
     core.who = "them";
     await backSignedIn();
     // Back on the link after stopping, it carries on where it was.
     await until(() => answerBox() !== null, "the answer box again");
-    await until(() => sessionStorage.length === 0, "what waited, kept");
+    await until(() => stored() === "", "what waited, kept");
     expect({
       box: answerBox()?.value,
       keptSinceBack: core.kept.length > 0,
     }).toStrictEqual({ box: "Half an answer", keptSinceBack: true });
   });
 
-  it("shows the copy kept elsewhere once they are back when another window went on meanwhile, and says so", async () => {
+  it("keeps nothing of this window once another window went on meanwhile, and says what waited couldn't be kept", async () => {
     const core = fakeCore(typing);
-    await inConversation();
-    core.who = "nobody";
-    await type("Mine, from this window.");
-    await act(async () => {
-      buttonNamed("Send")?.click();
-      await Promise.resolve();
-    });
-    await until(() => text().includes(signInAgain), "the sign-in again");
+    await endedSending(core, "Mine, from this window.");
     // Another window went on, signed in, meanwhile.
-    const elsewhere: InterviewProgress = {
+    core.progress = {
       ...typing,
       lines: [
         ...typing.lines,
         { from: "person", text: "From the other window." },
       ],
     };
-    core.progress = elsewhere;
     core.version += 1;
     core.who = "them";
     await backSignedIn();
-    await until(
-      () =>
-        text().includes(
-          "This interview went on in another window. You now see that one."
-        ),
-      "the copy kept elsewhere"
-    );
+    await until(() => text().includes(lost), "what couldn't be kept, said");
     expect({
-      kept: core.progress.lines.map(({ text: said }) => said),
-      waiting: sessionStorage.length,
+      keptByCore: linesKept(core),
+      held: core.progress.lines.map(({ text: said }) => said),
+      stored: stored(),
     }).toStrictEqual({
-      kept: ["What do you do first with an invoice?", "From the other window."],
-      waiting: 0,
+      keptByCore: [],
+      held: ["What do you do first with an invoice?", "From the other window."],
+      stored: "",
     });
+  });
+
+  it("saves nothing of the old interview back after staff gave a new start while they were away, and says what waited couldn't be kept", async () => {
+    const core = fakeCore(typing);
+    await endedSending(core, "Something only I said.");
+    // Staff began it anew on their request: nothing of it is held.
+    core.progress = null;
+    core.version += 1;
+    core.who = "them";
+    await backSignedIn();
+    await until(() => text().includes(lost), "what couldn't be kept, said");
+    expect({
+      keptOld: core.kept.some(({ lines }) =>
+        lines.some(({ text: said }) => said === "Something only I said.")
+      ),
+      held: core.progress,
+      stored: stored(),
+    }).toStrictEqual({ keptOld: false, held: null, stored: "" });
+  });
+
+  it("saves nothing back after they deleted the interview in another window while away, and says what waited couldn't be kept", async () => {
+    const core = fakeCore(typing);
+    await endedSending(core, "Something only I said.");
+    core.progress = null;
+    core.version += 1;
+    core.deleted = true;
+    core.who = "them";
+    await backSignedIn();
+    await until(() => text().includes(lost), "what couldn't be kept, said");
+    expect({
+      keptByCore: linesKept(core),
+      held: core.progress,
+      stored: stored(),
+    }).toStrictEqual({ keptByCore: [], held: null, stored: "" });
+  });
+
+  it("changes nothing of an interview they withdrew in another window while away, and says what waited couldn't be kept", async () => {
+    const core = fakeCore(typing);
+    await endedSending(core, "Something only I said.");
+    core.withdrawn = true;
+    core.who = "them";
+    const before = core.calls.length;
+    await backSignedIn();
+    await until(() => text().includes(lost), "what couldn't be kept, said");
+    expect({
+      saves: core.calls.slice(before).filter(({ action }) => action === "save")
+        .length,
+      stored: stored(),
+    }).toStrictEqual({ saves: 0, stored: "" });
   });
 
   it("tells someone who was talking that what they said as it ended wasn't heard, before they speak again", async () => {
@@ -454,26 +589,38 @@ describe("the interview page when its session ends mid-interview", () => {
     await load(`#${secret}`);
     await until(() => buttonNamed("4 of 5") !== undefined, "the rating");
     core.who = "nobody";
-    await act(async () => {
-      buttonNamed("4 of 5")?.click();
-      await Promise.resolve();
-    });
+    await press("4 of 5");
     await until(() => text().includes(signInAgain), "the sign-in again");
     expect(text()).toContain(
       "If you were saying something as it ended, it wasn't heard. Say it again once you're back."
     );
   });
 
-  it("answers someone else who signs in in that tab as for a link that never was, and shows or sends them nothing that waited", async () => {
+  it("says the unsaved words are lost when this window can't keep them, rather than that they are kept", async () => {
     const core = fakeCore(typing);
     await inConversation();
+    const refusing = vi
+      .spyOn(sessionStorage, "setItem")
+      .mockImplementation(() => {
+        throw new Error("The storage is full.");
+      });
     core.who = "nobody";
-    await type("Only mine.");
-    await act(async () => {
-      buttonNamed("Send")?.click();
-      await Promise.resolve();
-    });
+    await type("Words this window can't keep.");
+    await press("Send");
     await until(() => text().includes(signInAgain), "the sign-in again");
+    expect({
+      lost: text().includes(
+        "Your sign-in ended. Sign in again with your work account to go on where you were. This window couldn't keep what wasn't saved yet, so it is lost."
+      ),
+      keptHere: text().includes("is kept in this window"),
+    }).toStrictEqual({ lost: true, keptHere: false });
+    refusing.mockRestore();
+  });
+
+  it("answers someone else who signs in in that tab as for a link that never was, and leaves nothing that waited in the tab", async () => {
+    const core = fakeCore(typing);
+    await endedSending(core, "Only mine.");
+    const waited = stored().includes("Only mine.");
     core.who = "someone else";
     const before = core.calls.length;
     await backSignedIn();
@@ -482,15 +629,102 @@ describe("the interview page when its session ends mid-interview", () => {
       "the refusal"
     );
     expect({
+      waited,
       shown: text().includes("Only mine."),
       sent: core.calls
         .slice(before)
         .map(({ path, action }) => ({ path, action })),
       kept: core.kept.length,
+      stored: stored(),
     }).toStrictEqual({
+      waited: true,
       shown: false,
       sent: [{ path: "/api/interview", action: "session" }],
       kept: 0,
+      stored: "",
     });
+  });
+
+  it("sends no approval by itself once they are back: they see the read-back again and agree again", async () => {
+    const core = fakeCore(readingBack);
+    // The conversation starts a moment after the page shows: they agree once it has.
+    let loopsStarted = 0;
+    const started = (event: Event): void => {
+      if (
+        event instanceof CustomEvent &&
+        JSON.stringify(event.detail).includes('"type":"voice"')
+      ) {
+        loopsStarted += 1;
+      }
+    };
+    window.addEventListener(loopEventName, started);
+    await load(`#${secret}`);
+    await until(
+      () => buttonNamed("Yes, that’s correct") !== undefined,
+      "the read-back"
+    );
+    await until(() => loopsStarted > 0, "the conversation");
+    core.who = "nobody";
+    await press("Yes, that’s correct");
+    await until(() => text().includes(signInAgain), "the sign-in again");
+    core.who = "them";
+    await backSignedIn();
+    await until(
+      () => buttonNamed("Yes, that’s correct") !== undefined,
+      "the read-back again"
+    );
+    await until(() => loopsStarted > 1, "the conversation again");
+    const unasked = core.approvals.length;
+    await press("Yes, that’s correct");
+    await until(() => core.approvals.length > 0, "their approval");
+    window.removeEventListener(loopEventName, started);
+    expect({
+      unasked,
+      approved: core.approvals,
+    }).toStrictEqual({
+      unasked: 0,
+      approved: [["f1"]],
+    });
+  });
+
+  it("saves nothing of their interview back once they are back after asking to delete it as it ended", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const core = fakeCore(finishedTalking);
+    await load(`#${secret}`);
+    await until(() => buttonNamed("4 of 5") !== undefined, "the rating");
+    // A change core couldn't keep yet: it waits here, and is tried again.
+    core.failing = true;
+    await press("4 of 5");
+    await until(
+      () => core.calls.some(({ action }) => action === "save"),
+      "the rating's save"
+    );
+    await act(async () => {
+      buttonNamed("Delete my interview")?.dispatchEvent(
+        new PointerEvent("pointerdown", { bubbles: true })
+      );
+      await vi.advanceTimersByTimeAsync(4000);
+    });
+    await until(() => buttonNamed("Delete it") !== undefined, "Delete it");
+    // Their session ends as they press it.
+    core.failing = false;
+    core.who = "nobody";
+    await press("Delete it");
+    await until(() => text().includes(signInAgain), "the sign-in again");
+    core.who = "them";
+    const before = core.calls.length;
+    await backSignedIn();
+    await until(
+      () => buttonNamed("Delete my interview") !== undefined,
+      "their interview, to delete again"
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+    expect({
+      saves: core.calls.slice(before).filter(({ action }) => action === "save")
+        .length,
+      stored: stored(),
+    }).toStrictEqual({ saves: 0, stored: "" });
   });
 });

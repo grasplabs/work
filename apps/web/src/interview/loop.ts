@@ -681,8 +681,9 @@ const within = async <T>(
 const finish = (): void => {
   rest();
   show("idle", { line: "", said: null, sign: null });
+  const before = progressNow();
   update(approved);
-  approveWhenKept();
+  approveWhenKept(before);
 };
 
 /** He tells the lines of a part, each lighting up as he gets to it; false when something else happened meanwhile. */

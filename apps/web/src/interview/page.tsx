@@ -31,11 +31,13 @@ import { Composer, SaveNote, SaveTrouble } from "./composer.tsx";
 import { Head, headSizes, useHead } from "./head.tsx";
 import {
   forgetInterview,
+  forgetUnsaved,
   keepNow,
   linkNow,
   onTaken,
   update,
   useInterviewer,
+  useLost,
   useProgress,
 } from "./kept.ts";
 import {
@@ -537,6 +539,11 @@ const useDeleting = () => {
     setDeleted("deleting");
     const answer = await deleteInterview(link.secret);
     if (isRefused(answer)) {
+      if (answer.status === 401) {
+        // Their session ended as they asked: nothing of it waits to be
+        // kept again once they are back, where they delete it again.
+        forgetUnsaved();
+      }
       setDeleted("no");
       setDeleteFailed(answer.message);
       return;
@@ -564,6 +571,20 @@ const Failed = ({ message }: { message: string | null }) =>
       {message}
     </p>
   );
+
+/**
+ * What waited in this tab while their session was ended couldn't be kept:
+ * the interview changed meanwhile (a new start, a delete, a withdrawal, or
+ * another window that went on). Said, never dropped without a word.
+ */
+const Lost = () => {
+  const { t } = useLingui();
+  return useLost() ? (
+    <output className="text-status-attention block pt-4 text-sm text-balance">
+      {t`What you hadn't saved when your sign-in ended couldn't be kept, because your interview changed while you were away.`}
+    </output>
+  ) : null;
+};
 
 /** Withdrawing is offered while they take part and haven't withdrawn. */
 const withdrawOffered = (
@@ -722,6 +743,7 @@ export const InterviewPage = ({ session }: { session: OpenSession }) => {
         />
       </div>
       <Failed message={deleteFailed ?? withdrawFailed} />
+      <Lost />
       <Transcript
         alone={away}
         lines={progress.lines}

@@ -326,6 +326,22 @@ export const approved = (progress: InterviewProgress): InterviewProgress => ({
   ),
 });
 
+/**
+ * They agreed to the read-back, and their session ended before core was
+ * told (GRA-1943): the read-back as it stood before, read back again from
+ * its first part, to agree to again. What they took out is erased as
+ * agreeing erased it, so no copy holds its words again.
+ */
+export const notYetApproved = (
+  before: InterviewProgress
+): InterviewProgress => ({
+  ...before,
+  confirmed: 0,
+  facts: before.facts.map((fact) =>
+    fact.out === true ? erasedFact(fact) : fact
+  ),
+});
+
 /** Back after agreeing, to add something: only what is new will be read back. */
 export const reopened = (progress: InterviewProgress): InterviewProgress =>
   progress.person === "completed"

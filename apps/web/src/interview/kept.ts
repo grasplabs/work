@@ -2,13 +2,16 @@ import {
   factRevision,
   interviewProgressSchema,
 } from "@grasp-os/shared/interview-links";
-import type { InterviewProgress } from "@grasp-os/shared/interview-links";
+import type {
+  InterviewFact,
+  InterviewProgress,
+} from "@grasp-os/shared/interview-links";
 import type { Interviewer } from "@grasp-os/shared/onboarding";
 import { useSyncExternalStore } from "react";
 import { z } from "zod";
 
 import { approveFacts, isRefused, saveProgress } from "./api.ts";
-import { freshProgress, resumed } from "./progress.ts";
+import { freshProgress, notYetApproved, resumed } from "./progress.ts";
 
 // Someone's interview as this page holds it, kept in core after every
 // change (`/api/interview`, action `save`): shortly after it, one save at a
@@ -26,19 +29,30 @@ import { freshProgress, resumed } from "./progress.ts";
 // When their session ends mid-interview (the company's gate opens, they
 // signed out in another tab, it expired: GRA-1943), whatever isn't kept
 // yet is set aside (`setAside`): nothing more is sent, not even as the
-// page goes, until core opens the link again for a session. Until then it
-// waits in this tab alone (`sessionStorage`, under the link's draft name,
-// a hash of its secret), and once the link opens again it is held, and
-// kept, as it was: at the version it went on from, so a copy that went on
-// elsewhere meanwhile is the interview, as ever. It is forgotten as soon
-// as core answers a save of it. From the threat model:
+// page goes, until core opens the link again for a session. Until then the
+// copy that isn't kept, and what is typed in the box, wait in this tab
+// alone (`sessionStorage`, under the link's draft name, a hash of its
+// secret). This is the one time an interview's words are put in the
+// browser's storage, and only while something isn't kept. From the threat
+// model:
 //
 // - Sent without a session, or under someone else's: nothing goes out
 //   while set aside, and it is taken up again only as core opens the link,
-//   which it does only for the account the link belongs to. Anyone else
-//   is told the link opens nothing, and never sees it.
+//   which it does only for the account the link belongs to. When it opens
+//   nothing (someone else signed in, or the interview is gone), what
+//   waited is forgotten, not just hidden.
+// - Undoing what happened meanwhile (a staff new start, a delete or a
+//   withdrawal in another window, another window going on): a kept copy
+//   only ever goes onto the version it was taken at, and onto an interview
+//   that still takes saves. Otherwise core's copy is the interview, what
+//   waited is forgotten, and the page says it couldn't be kept (`useLost`).
+// - Approving what wasn't read back: an approval that hadn't reached core
+//   is never sent by itself afterwards. They see the read-back again and
+//   agree again. An approval names the facts as they stood when they
+//   agreed (`Approval`), so core refuses it once any of them changed.
 // - Kept anywhere but this tab: never in `localStorage`, the address, or
-//   what the sign-in keeps; the tab's storage goes with the tab.
+//   what the sign-in keeps; the tab's storage goes with the tab. Where the
+//   tab refuses storage, the sign-in says what isn't saved is lost.
 // - Audio: none is ever kept (ear.ts). What was written down of what they
 //   said is in the interview already; a stretch said as it ended is lost,
 //   and the sign-in says so before they speak again (`talking`).
@@ -51,6 +65,17 @@ import { freshProgress, resumed } from "./progress.ts";
 export type SaveState =
   | { state: "saved" | "saving" | "retrying" | "elsewhere" }
   | { state: "refused"; message: string };
+
+/**
+ * They agreed to the read-back, and core is to be told once it is kept:
+ * the facts as they stood when they agreed, so only exactly those are
+ * approved, however often it is asked; and the interview before, should
+ * their session end before core was told.
+ */
+interface Approval {
+  facts: InterviewFact[];
+  before: InterviewProgress;
+}
 
 interface Kept {
   secret: string;
@@ -65,23 +90,26 @@ interface Kept {
   failed: number;
   /** Nothing more is saved: deleted, or refused for good. */
   gone: boolean;
-  /** They agreed to the read-back, and core is to be told once it is kept. */
-  approving: boolean;
+  approval: Approval | null;
   /** Where it waits in this tab while it is set aside (api.ts `draftName`). */
   draft: string;
   /** Their session ended: nothing more is sent until the link opens again. */
   aside: boolean;
+  /** This tab refused to keep what waits. */
+  unkept: boolean;
+  /** What waited in this tab, held again, and core hasn't answered for it yet. */
+  restoring: boolean;
   /** What is typed in the box and not sent. */
   typed: string;
 }
 
 /** What waits in this tab while their session is ended, until the link opens again. */
 const asideSchema = z.object({
+  /** The version it goes on from: it is kept only onto that one. */
   version: z.int().min(0),
   /** What isn't kept yet; none when all of it is. */
   progress: interviewProgressSchema.nullable(),
   typed: z.string(),
-  approving: z.boolean(),
   /** They were talking: a stretch said as it ended is lost. */
   talking: z.boolean(),
 });
@@ -101,20 +129,17 @@ const asideAt = (draft: string): Aside | null => {
   }
 };
 
-/** Whether something waits under `draft`, and whether they were talking as it ended. */
-export const waitingAside = (draft: string): { talking: boolean } | null => {
-  const aside = asideAt(draft);
-  return aside === null ? null : { talking: aside.talking };
-};
-
-/** Forgets what waited under `draft`: core answered a save of it, or it is deleted. */
-const forgetAside = (draft: string): void => {
+/** Forgets what waited under `draft`: core answered for it, or it can't be kept. */
+export const forgetAside = (draft: string): void => {
   try {
     sessionStorage.removeItem(draft);
   } catch {
     // Nothing was kept.
   }
 };
+
+/** Whether anything of `mine` isn't kept in core. */
+const unsavedIn = (mine: Kept): boolean => mine.dirty || mine.typed !== "";
 
 /**
  * Writes down what waits while set aside: also when all of it is kept, so
@@ -128,25 +153,14 @@ const keepAside = (mine: Kept): void => {
     version: mine.version,
     progress: mine.dirty ? mine.progress : null,
     typed: mine.typed,
-    approving: mine.approving,
     talking: mine.progress.mode === "talk",
   };
   try {
     sessionStorage.setItem(mine.draft, JSON.stringify(aside));
+    mine.unkept = false;
   } catch {
-    // Storage refused (a private window may): it lasts while this page does.
-  }
-};
-
-/**
- * Core answered: what waited in this tab is forgotten, or, while their
- * session is ended, written down again as it now stands.
- */
-const answeredAside = (mine: Kept): void => {
-  if (mine.aside) {
-    keepAside(mine);
-  } else {
-    forgetAside(mine.draft);
+    // Storage refused (a private window may): the sign-in says it is lost.
+    mine.unkept = true;
   }
 };
 
@@ -161,6 +175,8 @@ export const retryAfter = (failed: number): number =>
 
 let kept: Kept | null = null;
 let saveState: SaveState = { state: "saved" };
+/** What waited in this tab couldn't be kept: the interview changed meanwhile. */
+let lostNow = false;
 let showingSaving: number | undefined;
 const listeners = new Set<() => void>();
 /** Told when the copy kept elsewhere took the place of this one. */
@@ -220,25 +236,30 @@ const saveOnce = async (mine: Kept): Promise<void> => {
       mine.failed += 1;
       setSaveState({ state: "retrying" });
     } else {
+      // Refused for good: nothing of it waits in this tab either.
       mine.gone = true;
+      forgetAside(mine.draft);
       setSaveState({ state: "refused", message: answer.message });
     }
     return;
   }
   mine.failed = 0;
-  mine.version = answer.version;
   if (mine.aside) {
     // Landed just before their session ended: what waits goes on from it,
-    // and is only what changed since; a copy kept elsewhere takes its place.
+    // and is only what changed since. Not kept: it waits at the version it
+    // went on from, and core's copy decides once they are back.
     if (answer.saved) {
+      mine.version = answer.version;
       mine.dirty = mine.progress !== sent;
-    } else if (answer.progress !== null) {
-      mine.progress = answer.progress;
-      mine.dirty = false;
+    } else {
+      mine.dirty = true;
     }
     keepAside(mine);
     return;
   }
+  mine.version = answer.version;
+  const { restoring } = mine;
+  mine.restoring = false;
   // Core answered for what waited in this tab, if anything did.
   forgetAside(mine.draft);
   if (answer.saved) {
@@ -247,41 +268,55 @@ const saveOnce = async (mine: Kept): Promise<void> => {
     }
     return;
   }
+  if (restoring) {
+    // What waited goes only onto the version it was taken at, and core
+    // changed meanwhile: its copy is the interview, even when it holds
+    // none (a new start), and the page says what waited couldn't be kept.
+    mine.progress = resumed(answer.progress ?? freshProgress);
+    mine.dirty = false;
+    mine.typed = "";
+    lostNow = true;
+    notify();
+    for (const taker of takers) {
+      taker();
+    }
+    return;
+  }
   if (answer.progress === null) {
     // Nothing kept to go on from: this copy is kept on top.
     mine.dirty = true;
     return;
   }
-  // Another copy went on meanwhile: that one is the interview now.
+  // Another copy went on meanwhile: that one is the interview now, and
+  // what they agreed to here is read back again from it.
   mine.progress = answer.progress;
   mine.dirty = false;
+  mine.approval = null;
   setSaveState({ state: "elsewhere" });
   for (const taker of takers) {
     taker();
   }
 };
 
-/** Tells core they approve the facts read back, as kept now: each at its revision. */
+/** Tells core they approve the facts as they stood when they agreed: each at its revision. */
 const approveOnce = async (mine: Kept): Promise<void> => {
+  const { approval } = mine;
+  if (approval === null) {
+    return;
+  }
   const facts = await Promise.all(
-    mine.progress.facts
-      .filter(({ out }) => out !== true)
-      .map(async (fact) => ({
-        id: fact.id,
-        revision: await factRevision(fact),
-      }))
+    approval.facts.map(async (fact) => ({
+      id: fact.id,
+      revision: await factRevision(fact),
+    }))
   );
   if (facts.length === 0) {
-    mine.approving = false;
+    mine.approval = null;
     return;
   }
   const answer = await approveFacts(mine.secret, facts);
-  if (kept !== mine || mine.gone) {
-    return;
-  }
-  if (isRefused(answer) && mine.aside) {
-    // Their session ended: core is told once they are back.
-    keepAside(mine);
+  if (kept !== mine || mine.gone || mine.aside) {
+    // Their session ended meanwhile: never sent again by itself (`setAside`).
     return;
   }
   if (isRefused(answer)) {
@@ -295,14 +330,13 @@ const approveOnce = async (mine: Kept): Promise<void> => {
         void save(mine);
       }, retryAfter(mine.failed));
     } else {
-      mine.approving = false;
+      mine.approval = null;
       setSaveState({ state: "refused", message: answer.message });
     }
     return;
   }
-  mine.approving = false;
+  mine.approval = null;
   mine.failed = 0;
-  answeredAside(mine);
   if (answer.approved) {
     setSaveState({ state: "saved" });
     return;
@@ -312,7 +346,6 @@ const approveOnce = async (mine: Kept): Promise<void> => {
   mine.version = answer.version;
   if (answer.progress !== null) {
     mine.progress = answer.progress;
-    answeredAside(mine);
     setSaveState({ state: "elsewhere" });
     for (const taker of takers) {
       taker();
@@ -333,7 +366,7 @@ const save = async (mine: Kept): Promise<void> => {
   mine.saving = true;
   try {
     // Once all is kept, what they agreed to goes.
-    await (mine.approving && !(mine.dirty || mine.again)
+    await (mine.approval !== null && !(mine.dirty || mine.again)
       ? approveOnce(mine)
       : saveOnce(mine));
   } finally {
@@ -345,7 +378,7 @@ const save = async (mine: Kept): Promise<void> => {
   if (
     kept === mine &&
     !mine.gone &&
-    mine.approving &&
+    mine.approval !== null &&
     !(mine.again || mine.dirty) &&
     mine.failed === 0
   ) {
@@ -370,12 +403,18 @@ export const keepNow = (): void => {
   }
 };
 
-/** They agreed to the read-back: core is told, once what was read back is kept. */
-export const approveWhenKept = (): void => {
+/**
+ * They agreed to the read-back, as it now stands (`before` is how it stood
+ * before they agreed): core is told, once what was read back is kept.
+ */
+export const approveWhenKept = (before: InterviewProgress): void => {
   if (kept === null || kept.gone) {
     return;
   }
-  kept.approving = true;
+  kept.approval = {
+    facts: kept.progress.facts.filter(({ out }) => out !== true),
+    before,
+  };
   void save(kept);
 };
 
@@ -404,9 +443,12 @@ const onPageHide = (): void => {
 };
 
 /**
- * The interview core holds for this link, from now on held here; or, back
- * after their session ended, what waited in this tab under `draft`, kept
- * at once as of the version it went on from. Back on the link after
+ * The interview core holds for this link, at `version`, from now on held
+ * here. Back after their session ended, what waited in this tab under
+ * `draft` is held instead and kept at once, but only onto the version it
+ * was taken at, and only while the interview takes saves (`settled`: it
+ * was withdrawn, or is over). Otherwise core's copy is the interview, and
+ * the page says what waited couldn't be kept. Back on the link after
  * stopping, either carries on where it was.
  */
 export const holdInterview = ({
@@ -414,20 +456,23 @@ export const holdInterview = ({
   draft,
   version,
   progress,
+  settled,
 }: {
   secret: string;
   draft: string;
   version: number;
   progress: InterviewProgress | null;
+  settled: boolean;
 }): void => {
   if (kept !== null) {
     window.clearTimeout(kept.waiting);
   }
   const aside = asideAt(draft);
-  const unsaved = aside?.progress ?? null;
+  const usable = aside !== null && aside.version === version && !settled;
+  const unsaved = usable ? aside.progress : null;
   const mine: Kept = {
     secret,
-    version: unsaved === null ? version : (aside?.version ?? version),
+    version,
     progress: resumed(unsaved ?? progress ?? freshProgress),
     saving: false,
     again: false,
@@ -435,20 +480,26 @@ export const holdInterview = ({
     waiting: undefined,
     failed: 0,
     gone: false,
-    approving: aside?.approving ?? false,
+    approval: null,
     draft,
     aside: false,
-    typed: aside?.typed ?? "",
+    unkept: false,
+    restoring: unsaved !== null,
+    typed: usable ? aside.typed : "",
   };
   kept = mine;
+  lostNow =
+    aside !== null &&
+    !usable &&
+    (aside.progress !== null || aside.typed !== "");
   saveState = { state: "saved" };
   window.removeEventListener("pagehide", onPageHide);
   window.addEventListener("pagehide", onPageHide);
   notify();
-  if (mine.dirty || mine.approving) {
+  if (mine.dirty) {
     void save(mine);
   } else if (aside !== null) {
-    // Nothing waited to be kept: what was typed is in the box again.
+    // Nothing to keep, or it can't be: only what was typed, in the box again.
     forgetAside(draft);
   }
 };
@@ -457,7 +508,9 @@ export const holdInterview = ({
  * Their session ended: nothing more is sent, and whatever isn't kept yet
  * waits in this tab until the link opens again (`holdInterview`). A save
  * on its way may still have landed; it waits all the same, and is kept
- * again as of what core answered.
+ * again as of what core answered. An approval core wasn't told of is
+ * never sent by itself afterwards: the read-back as it stood before waits
+ * instead, to agree to again.
  */
 export const setAside = (): void => {
   const mine = kept;
@@ -468,7 +521,46 @@ export const setAside = (): void => {
   window.clearTimeout(showingSaving);
   mine.aside = true;
   mine.dirty ||= mine.saving || mine.again;
+  if (mine.approval !== null) {
+    mine.progress = notYetApproved(mine.approval.before);
+    mine.dirty = true;
+    mine.approval = null;
+  }
   keepAside(mine);
+};
+
+/**
+ * They asked to delete their interview just as their session ended:
+ * nothing of it waits to be kept again, so signing in again can't add to
+ * what they asked to delete. They delete it again once back.
+ */
+export const forgetUnsaved = (): void => {
+  const mine = kept;
+  if (mine === null || !mine.aside) {
+    return;
+  }
+  mine.dirty = false;
+  mine.typed = "";
+  keepAside(mine);
+};
+
+/**
+ * Whether their session ended with something waiting under `draft`;
+ * `talking`: they were talking as it ended; `unkept`: this tab refused to
+ * keep what wasn't saved, so it is lost.
+ */
+export const waitingAside = (
+  draft: string
+): { talking: boolean; unkept: boolean } | null => {
+  const mine = kept;
+  if (mine !== null && mine.aside && mine.draft === draft) {
+    return {
+      talking: mine.progress.mode === "talk",
+      unkept: mine.unkept && unsavedIn(mine),
+    };
+  }
+  const aside = asideAt(draft);
+  return aside === null ? null : { talking: aside.talking, unkept: false };
 };
 
 /** The page lets the interview go: nothing more is saved from it. */
@@ -477,6 +569,7 @@ export const releaseInterview = (): void => {
     window.clearTimeout(kept.waiting);
   }
   kept = null;
+  lostNow = false;
   window.removeEventListener("pagehide", onPageHide);
   notify();
 };
@@ -554,6 +647,10 @@ export const useSaveState = (): SaveState =>
 /** What is typed in the box and not sent. */
 export const useTyped = (): string =>
   useSyncExternalStore(subscribe, () => kept?.typed ?? "");
+
+/** What waited in this tab while their session was ended couldn't be kept. */
+export const useLost = (): boolean =>
+  useSyncExternalStore(subscribe, () => lostNow);
 
 /** Who holds the interview: whoever they chose, Stephen while nobody was chosen. */
 export const useInterviewer = (): Interviewer =>

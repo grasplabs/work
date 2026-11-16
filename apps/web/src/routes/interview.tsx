@@ -19,8 +19,9 @@ import {
   onSessionEnded,
   openSession,
 } from "../interview/api.ts";
-import type { OpenSession } from "../interview/api.ts";
+import type { OpenSession, Refused } from "../interview/api.ts";
 import {
+  forgetAside,
   holdInterview,
   releaseInterview,
   setAside,
@@ -47,6 +48,12 @@ import { SignInOptions } from "../sign-in-options.tsx";
 // tab (kept.ts `setAside`), and they are asked to sign in again with the
 // company's sign-in; back, they go on where they were (GRA-1943).
 
+/** Their session ended mid-interview (kept.ts `waitingAside`). */
+interface Again {
+  talking: boolean;
+  unkept: boolean;
+}
+
 /** What the page shows, and the secret it was opened with. */
 type Page =
   | { state: "loading"; secret: string }
@@ -66,11 +73,23 @@ type Page =
       options: SignInOption[];
       /**
        * Their session ended mid-interview, and what isn't kept yet waits in
-       * this tab; `talking`: they were talking as it ended.
+       * this tab; `talking`: they were talking as it ended; `unkept`: this
+       * tab refused to keep what wasn't saved.
        */
-      again: { talking: boolean } | null;
+      again: Again | null;
     }
   | { state: "open"; secret: string; session: OpenSession };
+
+/** Refusals of a link that may still open as it is later: what waits in this tab for it stays. */
+const passingRefusals = new Set([
+  "interview.paused",
+  "interview.not_yet",
+  "interview.limited",
+]);
+
+/** Whether the link may still open as it is: core paused it, it isn't open yet, or core was out of reach. */
+const refusalPasses = ({ status, code }: Refused): boolean =>
+  status === 0 || status >= 500 || passingRefusals.has(code ?? "");
 
 /** Opens the link for whoever is signed in, or asks them to sign in. */
 const opened = async (secret: string, core: CoreConnection): Promise<Page> => {
@@ -86,6 +105,11 @@ const opened = async (secret: string, core: CoreConnection): Promise<Page> => {
   const answer = await openSession(secret);
   if (isRefused(answer)) {
     if (answer.code !== "interview.sign_in") {
+      if (!refusalPasses(answer)) {
+        // The link opens nothing for whoever is signed in (someone else),
+        // or nothing more is kept on it: what waited in this tab goes.
+        forgetAside(draft);
+      }
       return {
         state: "refused",
         secret,
@@ -115,6 +139,7 @@ const opened = async (secret: string, core: CoreConnection): Promise<Page> => {
     draft,
     version: answer.version,
     progress: answer.progress,
+    settled: answer.withdrawn || answer.closed,
   });
   return { state: "open", secret, session: answer };
 };
@@ -242,16 +267,18 @@ const SignIn = ({
 }: {
   options: SignInOption[];
   error: string | undefined;
-  again: { talking: boolean } | null;
+  again: Again | null;
 }) => {
   const { t } = useLingui();
+  let message = t`Use your work account, the one your link was sent to.`;
+  if (again?.unkept === true) {
+    message = t`Your sign-in ended. Sign in again with your work account to go on where you were. This window couldn't keep what wasn't saved yet, so it is lost.`;
+  } else if (again !== null) {
+    message = t`Your sign-in ended. Sign in again with your work account to go on where you were. What isn't saved yet is kept in this window until then.`;
+  }
   return (
     <Notice
-      message={
-        again === null
-          ? t`Use your work account, the one your link was sent to.`
-          : t`Your sign-in ended. Sign in again with your work account to go on where you were. What isn't saved yet is kept in this window until then.`
-      }
+      message={message}
       title={
         again === null
           ? t`Sign in to open your interview`
