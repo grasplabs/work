@@ -22,6 +22,7 @@ import {
   runClientProvision,
   startClientRelease,
 } from "../src/hosting/operation.ts";
+import { mockAccess } from "./access.ts";
 import {
   token,
   cloudflare,
@@ -46,12 +47,14 @@ import {
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { clientScripts } from "./grasp-account.ts";
 import { db, staff } from "./hosting.ts";
+import { page } from "./pages.ts";
 import { useStoreSecrets } from "./secrets-store.ts";
 
 // Here: releasing a live client, rolling it back, and offboarding it; the
 // rest in the other client-provision-*.test.ts files.
 
 mockCloudflareApi(token, cloudflare);
+mockAccess();
 
 /** Core with no Knowledge database: a release that no longer names it. */
 const withoutKnowledge = (core: WorkerEntry): WorkerEntry => ({
@@ -97,19 +100,32 @@ const deleteKnowledge = async (
 };
 
 /**
- * Runs client `clientId`'s operation as a new attempt, which fails: the
- * last step it finished, and the code and message it stopped with.
+ * Runs client `clientId`'s operation as a new attempt, which a database
+ * stops: the last step it finished, its code, what its message says of
+ * the database named `physicalName`, and what staff read on its Setup.
  */
-const stoppedRun = async (clientId: string) => {
+const stoppedRun = async (clientId: string, physicalName: string) => {
   const error = await failing(await attempt(clientId));
   if (!(error instanceof Error && "code" in error)) {
     throw new Error(`${clientId}'s run didn't stop`);
   }
   const operation = await operationOf(clientId);
+  // Its Hosting, under Settings, shows the operation and why it stopped.
+  const { html } = await page(`/organizations/${clientId}/setup?tab=settings`);
   return {
     finished: operation?.step,
     code: error.code,
-    message: error.message,
+    names: error.message.includes(physicalName),
+    missing: error.message.includes("is missing from its account"),
+    another: error.message.includes("is another database"),
+    setup: {
+      code: html.includes("foreign_resource"),
+      words: [
+        "A database or other resource the release needs is missing from the client",
+        "made again under its name, or another client",
+        "look in the account before releasing again",
+      ].every((words) => html.includes(words)),
+    },
   };
 };
 
@@ -819,7 +835,7 @@ describe("provisioning a placed client", () => {
     await startClientRelease(db, staff, await attempt(clientId), {
       releaseId: second.releaseId,
     });
-    const missing = await stoppedRun(clientId);
+    const missing = await stoppedRun(clientId, knowledge.physicalName);
     // Someone makes another database under its name.
     account.d1.push({
       uuid: crypto.randomUUID(),
@@ -829,7 +845,7 @@ describe("provisioning a placed client", () => {
     await startClientRelease(db, staff, await attempt(clientId), {
       releaseId: second.releaseId,
     });
-    const recreated = await stoppedRun(clientId);
+    const recreated = await stoppedRun(clientId, knowledge.physicalName);
 
     expect({
       missing,
@@ -841,12 +857,18 @@ describe("provisioning a placed client", () => {
       missing: {
         finished: "resources",
         code: "foreign_resource",
-        message: `${clientId}'s d1:grasp-os-knowledge, ${knowledge.physicalName}, is missing from its account`,
+        names: true,
+        missing: true,
+        another: false,
+        setup: { code: true, words: true },
       },
       recreated: {
         finished: "resources",
         code: "foreign_resource",
-        message: `${clientId}'s d1:grasp-os-knowledge: ${knowledge.physicalName} is another database than the one recorded`,
+        names: true,
+        missing: false,
+        another: true,
+        setup: { code: true, words: true },
       },
       uploaded: 0,
       runs: { core: first.releaseId, connect: first.releaseId },
@@ -873,7 +895,7 @@ describe("provisioning a placed client", () => {
     await startClientRelease(db, staff, await attempt(clientId), {
       rollback: true,
     });
-    const back = await stoppedRun(clientId);
+    const back = await stoppedRun(clientId, knowledge.physicalName);
     const backRuns = await runs(clientId);
     // A later release names it again: refused the same way, not recreated.
     const again = await importRelease(
@@ -883,13 +905,16 @@ describe("provisioning a placed client", () => {
     await startClientRelease(db, staff, await attempt(clientId), {
       releaseId: again.releaseId,
     });
-    const named = await stoppedRun(clientId);
+    const named = await stoppedRun(clientId, knowledge.physicalName);
 
     // Stopped at its migrations, the step after resources.
     const refused = {
       finished: "resources",
       code: "foreign_resource",
-      message: `${clientId}'s d1:grasp-os-knowledge, ${knowledge.physicalName}, is missing from its account`,
+      names: true,
+      missing: true,
+      another: false,
+      setup: { code: true, words: true },
     };
     expect({
       back,
