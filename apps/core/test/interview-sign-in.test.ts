@@ -2,6 +2,7 @@ import type { Roster } from "@grasp-os/shared/onboarding";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
+import { adoptDirectoryMember } from "../src/auth/auth.ts";
 import { memberFromDirectory } from "../src/auth/directory-members.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { adminCommands } from "./admin-command.ts";
@@ -127,6 +128,37 @@ const failingOnce = <T extends object>(namespace: T, method: string): T => {
       },
     });
   return namespaceOf(namespace);
+};
+
+/**
+ * The user Better Auth made for the Entra sign-in of `oid`, beside the
+ * member the directory made for it: whoever an interview-only session is.
+ */
+const signedInUserOf = async (oid: string): Promise<string> =>
+  (await env.DB.prepare(
+    "SELECT user_id FROM accounts WHERE oid = ? AND provider_id != 'entra-directory'"
+  )
+    .bind(oid)
+    .first<string>("user_id")) ?? "";
+
+/** `db`, whose first batch fails, every other call answered as it would. */
+const batchFailingOnce = (db: D1Database): D1Database => {
+  const failed = { once: false };
+  return new Proxy(db, {
+    get: (target, name): unknown => {
+      const member: unknown = Reflect.get(target, name);
+      if (typeof member !== "function") {
+        return member;
+      }
+      return (...given: unknown[]): unknown => {
+        if (name === "batch" && !failed.once) {
+          failed.once = true;
+          return Promise.reject(new Error("The database is out of reach."));
+        }
+        return Reflect.apply(member, target, given);
+      };
+    },
+  });
 };
 
 describe("signing in for an interview while the gate is closed", () => {
@@ -284,6 +316,86 @@ describe("signing in for an interview while the gate is closed", () => {
       member: userId === member,
       reopened: reopened.status,
     }).toStrictEqual({ first: null, member: true, reopened: 200 });
+  });
+
+  it("moves their interview back to the user their sign-in made when adopting the member the directory made fails after it moved, and adopts at their next sign-in", async () => {
+    const { person, address, secret } = await invited();
+    const oid = `entra-oid-${address}`;
+    const member = await memberFromDirectory(env, oid, {
+      id: oid,
+      name: "Oli Olsen",
+      email: address,
+      department: "",
+      title: "",
+      manager: null,
+    });
+    const cookie = await signedInAs(address);
+    await openLinkAs(secret, cookie);
+    const fresh = await signedInUserOf(oid);
+    await adminCommands().open();
+    const store = onboardingStore(env);
+    // The database fails the adoption's batch, after the interview moved.
+    const failing = { ...env, DB: batchFailingOnce(env.DB) };
+    const adopting = await adoptDirectoryMember(
+      failing,
+      fresh,
+      async (from, to) => {
+        await store.accountMoved(from, to);
+      }
+    ).catch(() => null);
+    const held = await store.personOfAccount(fresh);
+    const again = await signedInAs(address);
+    const { userId } = await whoami(again);
+    const { response: reopened } = await openLinkAs(secret, again);
+    expect({
+      adopting,
+      held: held === person,
+      member: userId === member,
+      reopened: reopened.status,
+    }).toStrictEqual({
+      adopting: null,
+      held: true,
+      member: true,
+      reopened: 200,
+    });
+  });
+
+  it("moves their interview back to the user their sign-in made when the member the directory made isn't adopted after all", async () => {
+    const { person, address, secret } = await invited();
+    const oid = `entra-oid-${address}`;
+    const member = await memberFromDirectory(env, oid, {
+      id: oid,
+      name: "Oli Olsen",
+      email: address,
+      department: "",
+      title: "",
+      manager: null,
+    });
+    const cookie = await signedInAs(address);
+    await openLinkAs(secret, cookie);
+    const fresh = await signedInUserOf(oid);
+    await adminCommands().open();
+    // Another sign-in of theirs made them a member meanwhile, so the batch
+    // adopts nothing.
+    const organization = await env.DB.prepare(
+      "SELECT organization_id FROM members WHERE user_id = ?"
+    )
+      .bind(member)
+      .first<string>("organization_id");
+    await env.DB.prepare(
+      "INSERT INTO members (id, organization_id, user_id, role, created_at) VALUES (?, ?, ?, 'user', ?)"
+    )
+      .bind(crypto.randomUUID(), organization, fresh, Date.now())
+      .run();
+    const store = onboardingStore(env);
+    const adopted = await adoptDirectoryMember(env, fresh, async (from, to) => {
+      await store.accountMoved(from, to);
+    });
+    expect({
+      adopted: adopted === fresh,
+      held: (await store.personOfAccount(fresh)) === person,
+      member: await store.personOfAccount(member ?? ""),
+    }).toStrictEqual({ adopted: true, held: true, member: null });
   });
 
   it("records nothing of who signed in for an interview, or opened one, in the company's audit log", async () => {

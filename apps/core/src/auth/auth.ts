@@ -399,9 +399,10 @@ const interviewInvites = async (
  *
  * What else belongs to the new user (`moving`, from one user to another:
  * an interview of theirs) moves first, before the new user goes, so a
- * failure leaves it and the user as they were, adopted at the next sign-in;
- * moving again is harmless. Moved back if the member wasn't adopted after
- * all.
+ * failure to move leaves it and the user as they were, adopted at the next
+ * sign-in; moving again is harmless. Moved back whenever the member wasn't
+ * adopted after all, the batch's failure among it: the batch is one
+ * transaction, so whose the account is says whether it landed.
  */
 export const adoptDirectoryMember = async (
   env: Env,
@@ -459,10 +460,24 @@ export const adoptDirectoryMember = async (
     SELECT 1 FROM ${accounts}
     WHERE ${accounts.id} = ${signedIn.id} AND ${accounts.userId} = ${memberId}
   )`;
+  /** Whose the account is now: the member's once the batch landed. */
+  const adoptedNow = async (): Promise<string> => {
+    const [account] = await db
+      .select({ userId: accounts.userId })
+      .from(accounts)
+      .where(eq(accounts.id, signedIn.id));
+    return account?.userId ?? userId;
+  };
+  /** Moves back what moved, unless the member was adopted. */
+  const unlessAdopted = async (adopted: string): Promise<void> => {
+    if (adopted !== memberId) {
+      await moving(memberId, adopted);
+    }
+  };
   // One batch, in order: the account moves, the user made for it goes
   // (freeing their address), the member takes their name and address, and
   // the directory's account goes, as their sign-in names them from now on.
-  await auditedBatch(env, db, [
+  const adopting = auditedBatch(env, db, [
     db
       .update(accounts)
       .set({ userId: memberId, updatedAt: now })
@@ -505,14 +520,14 @@ export const adoptDirectoryMember = async (
       target: { type: "user", id: memberId },
     }),
   ]);
-  const [account] = await db
-    .select({ userId: accounts.userId })
-    .from(accounts)
-    .where(eq(accounts.id, signedIn.id));
-  const adopted = account?.userId ?? userId;
-  if (adopted !== memberId) {
-    await moving(memberId, adopted);
+  try {
+    await adopting;
+  } catch (error) {
+    await unlessAdopted(await adoptedNow());
+    throw error;
   }
+  const adopted = await adoptedNow();
+  await unlessAdopted(adopted);
   return adopted;
 };
 
