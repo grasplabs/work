@@ -15,7 +15,7 @@ import { answerText } from "./connection-answer.ts";
 import {
   answerCaptureIdOf,
   captureIdOf,
-  keepsReadsOf,
+  keepsWholeAnswers,
 } from "./connection-capture-key.ts";
 import { connectionOwnersOf } from "./connections.ts";
 import { nativeItemReads } from "./native-tool-classes.gen.ts";
@@ -56,8 +56,9 @@ import { classOf } from "./tool-classes.ts";
 //   past it, and the item fails. Outside text is content: a captured
 //   source is never an instruction file, and the model reads it as
 //   evidence, cited as `capture:` (turn-recall.ts).
-// - A toolkit's read (GRA-1845; the threat model and the decisions are on
-//   the issue): its server names no item, and no review gives a tool's
+// - A toolkit's read, or any other whose whole answer capture keeps
+//   (connection-capture-key.ts `keepsWholeAnswers`; GRA-1845, the threat
+//   model and the decisions are on the issue): its server names no item, and no review gives a tool's
 //   item an ID, so the whole answer of one call is one source, keyed by
 //   the call (connection-capture-key.ts `answerCaptureIdOf`): the same
 //   call again is its next version, and two different calls never share
@@ -273,8 +274,8 @@ const captured = async (
   { result, readAt }: Read
 ): Promise<Ended> => {
   const [owner] = await connectionOwnersOf(env, [connectionId]);
-  // A toolkit's answer is one item, whatever its server named.
-  const answers = owner?.source === "composio";
+  // A whole answer is one item, whatever its server named.
+  const answers = owner !== undefined && keepsWholeAnswers(owner.source);
   const named = answers ? 1 : new Set(result.provenance).size;
   if (owner?.ownerUserId !== scope.personId) {
     return skippedAll("shared", named);
@@ -288,11 +289,7 @@ const captured = async (
       readAt,
     });
   }
-  // The one rule for a connection the Brain keeps reads through, which
-  // the Brain page and the disconnect dialog say by too.
-  const itemRead = keepsReadsOf(owner, scope.personId)
-    ? itemReadOf(owner.provider, action)
-    : undefined;
+  const itemRead = itemReadOf(owner.provider, action);
   const [itemId] = result.provenance;
   if (itemRead === undefined || named !== 1 || itemId === undefined) {
     return skippedAll("list", named);
@@ -329,14 +326,17 @@ export const captureRead = async (
   try {
     ended = await captured(env, scope, connectionId, action, input, read);
   } catch (error) {
-    // Connect unreachable, or the Brain refused the item (a text past its
-    // limit) or couldn't be reached: each item failed.
+    // Connect unreachable, or the Brain refused a native item (a text
+    // past its limit) or couldn't be reached: each item failed. A whole
+    // answer's failure ends in `answerCaptured`, so only connect failing
+    // to say what the connection is leaves its kind unknown here: then
+    // the call counts the items it named, and at least one, its answer.
     log.warn("connection_capture.failed", {
       connectionId,
       chatId: scope.chatId,
       ...errorFields(error),
     });
-    const items = new Set(result.provenance).size;
+    const items = Math.max(1, new Set(result.provenance).size);
     ended = [
       "brain.capture.failed",
       { items, kept: 0, failed: items, skipped: 0 },

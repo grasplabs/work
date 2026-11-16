@@ -742,7 +742,7 @@ describe(SourcesPage, () => {
       feeds:
         "How your connections feed the Brain" +
         "The Brain keeps one Gmail message or attachment, one OneNote page, or the answer of a read in an app that holds your own things, when an agent reads it for you through an account you connected yourself, and keeps it for you alone. Everything else agents search live when you ask, and the Brain keeps nothing of it." +
-        "GmailThe Brain keeps what an agent reads for you from this." +
+        "GmailThe Brain may keep some of what an agent reads for you from this." +
         "Microsoft 365Searched live, nothing kept." +
         "HubSpotSearched live, nothing kept.",
       none: "How your connections feed the BrainYou have no connections yet.",

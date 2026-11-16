@@ -13754,8 +13754,8 @@ msgid "The Brain keeps one Gmail message or attachment, one OneNote page, or the
 msgstr "Le cerveau garde un message ou une pièce jointe Gmail, une page OneNote, ou la réponse d'une lecture dans une app qui contient vos propres données, quand un agent le lit pour vous via un compte que vous avez connecté vous-même, et le garde pour vous seul. Tout le reste, les agents le cherchent en direct quand vous le demandez, et le cerveau n'en garde rien."
 
 #: src/brain/sources-page.tsx
-msgid "The Brain keeps what an agent reads for you from this."
-msgstr "Le cerveau garde ce qu'un agent lit pour vous par ici."
+msgid "The Brain may keep some of what an agent reads for you from this."
+msgstr "Le cerveau peut garder une partie de ce qu'un agent lit pour vous par ici."
 
 #: src/workflows/binding-approvals.tsx
 msgid "The Brain, as each run's person may read it"

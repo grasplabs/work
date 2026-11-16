@@ -446,13 +446,6 @@ export interface ConnectionSummary {
    */
   toolResources?: Record<string, string>;
   /**
-   * The class connect takes each of `offeredTools` to be, as
-   * `ConnectionOwner.toolClasses` gives it: what the Brain keeps of the
-   * person's reads through it goes by it (core's connection-capture.ts).
-   * Absent for a native connection.
-   */
-  toolClasses?: Record<string, Exclude<ToolClass, "never">>;
-  /**
    * An HTTP connection's origin, paths, methods and the header its
    * credential goes in: never the credential. Absent for any other.
    */
@@ -497,8 +490,9 @@ export interface ListedConnection extends ConnectionSummary {
   /** `connectedBy`'s name, while core knows them. */
   connectedByName: string | null;
   /**
-   * The Brain keeps what agents read for the person through it (core's
-   * connection-capture.ts), and erases it when it is disconnected.
+   * The Brain may keep some of what agents read for the person through
+   * it (core's connection-capture.ts): it is their own connection of a
+   * kind capture keeps reads from. Disconnecting it erases what was kept.
    */
   keepsReads?: true;
 }

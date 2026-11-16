@@ -1,9 +1,13 @@
 import type { AuditEvent } from "@grasp-os/shared/audit";
+import { chatIdSchema } from "@grasp-os/shared/ids";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { erasePerson, recallAs } from "../src/brain-next.ts";
+import { chatAgentId } from "../src/chats-rpc.ts";
 import { answerCaptureIdOf } from "../src/connection-capture-key.ts";
+import { captureRead } from "../src/connection-capture.ts";
+import { personalWorkspaceId } from "../src/personal-workspace.ts";
 import { chatOf, codeStep, says } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
@@ -364,7 +368,10 @@ describe("what a chat's agent reads through a toolkit", setUpTime, () => {
         },
       ],
       recalled: [[], [], []],
-      keepsReads: undefined,
+      // Their own toolkit connection may hold captures, whatever its tools
+      // are classed now (an admin may have reclassed one since), so the
+      // page and the disconnect dialog say so.
+      keepsReads: true,
     });
   });
 
@@ -562,5 +569,50 @@ describe("what a chat's agent reads through a toolkit", setUpTime, () => {
       othersBefore: ["capture"],
       othersAfter: [],
     });
+  });
+
+  it("counts a toolkit call whose capture failed before connect said what the connection is as one item, failed", async () => {
+    const person = await signedInApi(idp, "user");
+    const connectionId = `connection-${markerOf()}`;
+    // Connect unreachable: it can't say whose the connection is, or what.
+    const unreachable: Env = {
+      ...env,
+      CONNECT: new Proxy(env.CONNECT, {
+        get: (target, property): unknown =>
+          property === "connectionOwners"
+            ? async () => {
+                await Promise.resolve();
+                throw new Error("Connect out of reach, for the test");
+              }
+            : Reflect.get(target, property),
+      }),
+    };
+    await captureRead(
+      unreachable,
+      {
+        workspaceId: personalWorkspaceId(person.userId),
+        agentId: chatAgentId,
+        chatId: chatIdSchema.parse(crypto.randomUUID()),
+        personId: person.userId,
+        runId: crypto.randomUUID(),
+      },
+      connectionId,
+      "mail.search",
+      { query: "quote" },
+      {
+        // A toolkit's answer that names no item.
+        result: { output: JSON.stringify("Quote"), provenance: [], keep: true },
+        readAt: new Date(),
+      }
+    );
+    const events = await captures(connectionId);
+
+    expect(events.map(shown)).toStrictEqual([
+      {
+        action: "brain.capture.failed",
+        onBehalfOf: person.userId,
+        detail: { items: 1, kept: 0, failed: 1, skipped: 0 },
+      },
+    ]);
   });
 });

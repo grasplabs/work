@@ -824,7 +824,8 @@ const ConnectionFeeds = ({ connections }: { connections: Connection[] }) => {
                 <span className="text-muted-foreground">
                   {keepsReads === true ? (
                     <Trans>
-                      The Brain keeps what an agent reads for you from this.
+                      The Brain may keep some of what an agent reads for you
+                      from this.
                     </Trans>
                   ) : (
                     <Trans>Searched live, nothing kept.</Trans>
