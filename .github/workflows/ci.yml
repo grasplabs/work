@@ -60,11 +60,12 @@ concurrency:
   cancel-in-progress: ${{ github.event_name != 'push' }}
 
 jobs:
-  # Format, lint and types, the migrations' check against main, and on a
-  # pull request its branch name and title, which becomes the commit on
-  # main and the release note. The other repo checks, and that generated
-  # files are committed, run beside it (generated, below). Part of the
-  # required `check` (below).
+  # Format, lint and types, and on a pull request its branch name and
+  # title, which becomes the commit on main and the release note. The
+  # other repo checks, those that read git history among them, and that
+  # generated files are committed, run beside it (generated, below):
+  # static is a pull request's slowest check job, and needs no history of
+  # its own. Part of the required `check` (below).
   static:
     name: static
     if: github.event_name != 'push'
@@ -74,11 +75,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          # check:migrations compares with origin/main. Without blobs: git
-          # fetches the few it reads when it reads them, and the full
-          # history's took most of this job's 9 s checkout.
-          fetch-depth: 0
-          filter: blob:none
       # Saves what its setup missed (a changed lockfile, a new Vite+), for
       # this branch's next run: static runs on every event but a push, where
       # release saves.
@@ -86,7 +82,6 @@ jobs:
         with:
           save: true
       - run: vp check
-      - run: vp run check:migrations
       # The merge queue has no branch or title of its own: the pull
       # request's were checked before it joined.
       - if: github.event_name == 'pull_request'
@@ -95,6 +90,31 @@ jobs:
         run: printf '%s\n' "$PR_TITLE" | vp exec commitlint
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
+
+  # static's other half, beside it: the repo checks, the migrations' check
+  # against main and the pull request's attribution, and that generated
+  # files (Worker types, migrations, the frontend's translation catalogs)
+  # are committed. In static, after `vp check`, the tree's checks added
+  # about 40 s to the run's longest check job, and the two that read
+  # history 3 s and the full history's checkout (November 2026). Part of
+  # the required `check` (below).
+  generated:
+    name: generated
+    if: github.event_name != 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # check:migrations compares with origin/main, and the attribution
+          # reads the pull request's commits. Without blobs: git fetches the
+          # few it reads when it reads them, and the full history's took
+          # most of a 9 s checkout.
+          fetch-depth: 0
+          filter: blob:none
+      - uses: ./.github/actions/setup
+      - run: vp run check:migrations
       # The squash commit on main is the title, the description and a
       # Co-authored-by trailer for each co-author of the PR's commits, its
       # authors among them: none may credit an AI tool
@@ -108,22 +128,6 @@ jobs:
           PR_BODY: ${{ github.event.pull_request.body }}
           BASE: ${{ github.event.pull_request.base.sha }}
           HEAD: ${{ github.event.pull_request.head.sha }}
-
-  # static's other half, beside it: the repo checks that read only the
-  # tree, and that generated files (Worker types, migrations, the
-  # frontend's translation catalogs) are committed. In static, after `vp
-  # check`, they added about 40 s to the run's longest check job
-  # (November 2026). Part of the required `check` (below).
-  generated:
-    name: generated
-    if: github.event_name != 'push'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/setup
       - run: vp run check:secrets
       - run: vp run check:docs
       - run: vp run check:product-name
