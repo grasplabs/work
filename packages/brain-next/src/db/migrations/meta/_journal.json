@@ -169,6 +169,13 @@
       "when": 1794794154588,
       "tag": "0023_memory_judging",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "6",
+      "when": 1794846503882,
+      "tag": "0024_person_erasure",
+      "breakpoints": true
     }
   ]
 }

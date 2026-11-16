@@ -28,6 +28,8 @@ import {
   lineageOfWriter,
   stampWrite,
 } from "./memories.ts";
+import { isClosed, namingOf } from "./people.ts";
+import type { Naming } from "./people.ts";
 import { CurrentTextsNeededError, heldIn, judgeLate } from "./quotes.ts";
 import type { CurrentText, CurrentTexts, Written } from "./quotes.ts";
 import { accessOfKey, readerSetKeyOf, readerSetOf } from "./reader-sets.ts";
@@ -539,6 +541,8 @@ export interface AddHashes {
   writers: ReadonlyMap<string, string>;
   /** Each memory's restatement key (`restatementOf`), in the add's order. */
   restatements: readonly string[];
+  /** What its entities and speakers name, as a person's erasure closes them (people.ts). */
+  naming: Naming;
 }
 
 /** `adding`'s change key, content and sources, hashed: what its write needs, made before it. */
@@ -584,7 +588,11 @@ export const hashesOf = async (adding: Adding): Promise<AddHashes> => {
       ].map(async (writer) => [writer, await writerSubjectOf(writer)] as const)
     )
   );
-  return { key, hash, subjects, writers, restatements };
+  const naming = await namingOf(
+    adding.entities,
+    adding.memories.map(({ speaker }) => speaker)
+  );
+  return { key, hash, subjects, writers, restatements, naming };
 };
 
 /**
@@ -599,7 +607,7 @@ export const hashesOf = async (adding: Adding): Promise<AddHashes> => {
 export const writeAdd = (
   { storage, db, shared }: Omit<RememberStore, "bucket">,
   adding: Adding,
-  { key, hash, subjects, writers, restatements }: AddHashes,
+  { key, hash, subjects, writers, restatements, naming }: AddHashes,
   texts: CurrentTexts = new Map()
 ): AddedMemories => {
   const planned = planOf(adding);
@@ -621,6 +629,14 @@ export const writeAdd = (
         throw new Error(changeReused);
       }
       return answerSchema.parse(JSON.parse(before.answer));
+    }
+    // A person's erasure closed what it names (people.ts): nothing drawn
+    // again makes their card or their word again. A repeat of an add made
+    // before answers above, as it was.
+    if (isClosed(sql, naming)) {
+      throw refused(
+        "it names a person's identifier, entity or word an erasure took"
+      );
     }
     // The set is stored (read sets match readers by it); memories name it
     // by its key alone, never its row id.

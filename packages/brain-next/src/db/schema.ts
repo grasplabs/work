@@ -1215,3 +1215,37 @@ export const memoryJudgingPlaces = sqliteTable("memory_judging_places", {
   afterVersion: integer("after_version").notNull(),
   afterRow: integer("after_row").notNull(),
 });
+
+// A person's erasure in the shared store (erasure.ts `erasePersonShared`):
+// what the store derived about a person, and what is in their own word,
+// goes; the sources stay.
+
+/**
+ * What a person's erasure closed, by SHA-256 (people.ts): each identifier
+ * the host gave as theirs (`identifier:<type>:<folded>`) and each entity
+ * that was theirs alone (`entity:<id>`). An add naming one is refused, and
+ * extraction and a restore leave out what names one, so nothing drawn
+ * from a source that stays makes their card again. Never deleted.
+ */
+export const personErasureSubjects = sqliteTable(
+  "person_erasure_subjects",
+  {
+    subject: text().primaryKey(),
+    /** The erasure that closed it (`erasures.key`). */
+    erasure: text().notNull(),
+  },
+  (table) => [index("person_erasure_subjects_erasure_idx").on(table.erasure)]
+);
+
+/**
+ * A memory a person's erasure hides until the tick deletes it (memories.ts
+ * `unerasedSql`): every statement that reads, counts, links or exports a
+ * memory leaves it out. Gone with the memory.
+ */
+export const personErasureMemories = sqliteTable("person_erasure_memories", {
+  memory: integer()
+    .primaryKey()
+    .references(() => memories.row, { onDelete: "cascade" }),
+  /** The erasure that hid it (`erasures.key`). */
+  erasure: text().notNull(),
+});

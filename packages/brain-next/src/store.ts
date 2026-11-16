@@ -41,6 +41,7 @@ import {
   ownExportRequestSchema,
   ownExportStartSchema,
   personErasureSchema,
+  sharedPersonErasureSchema,
   writerErasureSchema,
   readableMemoriesRequestSchema,
   erasedRequestSchema,
@@ -111,6 +112,7 @@ import type {
   StoreKind,
   NewSource,
   PersonErasure,
+  SharedPersonErasure,
   WriterErasure,
   WriterErased,
   RecallRequest,
@@ -147,6 +149,7 @@ import {
   deleteStoreObjects,
   erase,
   eraseBatch,
+  erasePersonShared,
   eraseWriter,
   eraseWriterBatch,
   erasureStatusOf,
@@ -1275,6 +1278,27 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
   }
 
   /**
+   * Erases what this shared store derived about a person, and what is in
+   * their own word (erasure.ts `erasePersonShared`, people.ts): recorded in
+   * the ledger and hidden before it returns, deleted by its tick if not at
+   * once. The shared store's alone: a person's own store is erased whole
+   * (`erasePerson`).
+   */
+  async erasePersonShared(request: SharedPersonErasure): Promise<void> {
+    const { person, identifiers, reason } = checked(
+      sharedPersonErasureSchema,
+      request
+    );
+    if (this.#kind.kind === "person") {
+      throw new Error(sharedOnly);
+    }
+    await this.#changing(async () => {
+      await this.#readyToWrite();
+      await erasePersonShared(this.#erasures, { person, identifiers, reason });
+    });
+  }
+
+  /**
    * Erases every memory a writer wrote, learned up to now (erasure.ts
    * `eraseWriter`), as `eraseSource` erases a source: recorded in the
    * ledger and hidden before it returns, deleted by its tick if not at
@@ -1777,7 +1801,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       // Nothing of the error is kept: the batch stays to do.
       failed = true;
     }
-    // Then a batch of the memories writers' erasures hid, on its own, so a
+    // Then a batch of the memories writers' and people's erasures hid, on its own, so a
     // failure of either never holds the other back (erasure.ts
     // `eraseWriterBatch`). What it fails to delete stays hidden from every
     // read (memories.ts `unerasedSql`) and is tried again next tick.

@@ -7,6 +7,7 @@ import { chunksOf } from "./chunks.ts";
 import {
   attributeRuleOf,
   changeKeySchema,
+  erasedConfirmer,
   isWholeKey,
   newInstructionsSchema,
   newMemoriesSchema,
@@ -70,6 +71,8 @@ import {
   lineageOfWriter,
   writerErasedAfterSql,
 } from "./memories.ts";
+import { isClosed, namingOf, personSubjectOf } from "./people.ts";
+import type { Naming } from "./people.ts";
 import { readerSetKeyOf, readerSetOf } from "./reader-sets.ts";
 import { planOf, restatementOf, valueKeyFor } from "./remember.ts";
 import { memoriesWrittenSinceSql, restoreFailedSql } from "./restoring.ts";
@@ -404,7 +407,10 @@ const partLineSchema = z.union([
     message: "Not a memory to restore",
   }),
   confirmationLineSchema.refine(
-    ({ person }) => principalSchema.safeParse(person).success,
+    // A person's erasure leaves their confirmations standing, its
+    // confirmer replaced (people.ts).
+    ({ person }) =>
+      person === erasedConfirmer || principalSchema.safeParse(person).success,
     { message: "Not a confirmation to restore" }
   ),
   extractionLineSchema.refine(
@@ -696,10 +702,14 @@ const passesOverMemory = (
   sql: SqlStorage,
   line: MemoryLine,
   subject: string | null,
-  writerSubject: string | null
+  writerSubject: string | null,
+  naming: Naming
 ): boolean =>
   sql.exec("SELECT 1 FROM memories WHERE id = ?", line.id).toArray().length >
     0 ||
+  // About, relating to, or giving an identifier of what a person's
+  // erasure closed, or in their word (people.ts), as an add is refused.
+  isClosed(sql, naming) ||
   (line.source !== null &&
     (subject === null ||
       line.version === null ||
@@ -735,9 +745,10 @@ const restoreMemory = async (
   const writerSubject =
     line.writer === null ? null : await writerSubjectOf(line.writer);
   const restatement = await restatementOf(line);
+  const naming = await namingOf(line.entities, [line.speaker]);
   storage.transactionSync(() => {
     const { sql } = storage;
-    if (passesOverMemory(sql, line, subject, writerSubject)) {
+    if (passesOverMemory(sql, line, subject, writerSubject, naming)) {
       return;
     }
     const rows = entityRowsOf(sql, line);
@@ -801,14 +812,21 @@ const restoreMemory = async (
  * Writes the confirmation `line` back, over the memories it names, unless
  * the store lacks any of them (passed over, as erasing one deletes the
  * confirmation) or holds it already (the same memory, person and moment:
- * a run of this restore before). In one transaction.
+ * a run of this restore before). Its confirmer is `erasedConfirmer` once a
+ * person's erasure took them (people.ts), as the erasure leaves one it
+ * finds. In one transaction.
  */
-const restoreConfirmation = (
+const restoreConfirmation = async (
   storage: DurableObjectStorage,
   line: ConfirmationLine
-): void => {
+): Promise<void> => {
+  const confirmer = {
+    subjects: [],
+    people: [await personSubjectOf(line.person)],
+  };
   storage.transactionSync(() => {
     const { sql } = storage;
+    const person = isClosed(sql, confirmer) ? erasedConfirmer : line.person;
     const named = [line.memory, ...line.over];
     const rows = sql
       .exec<{ id: string; row: number }>(
@@ -826,7 +844,7 @@ const restoreConfirmation = (
         `SELECT 1 FROM memory_confirmations
         WHERE memory = ? AND person = ? AND at = ?`,
         memory,
-        line.person,
+        person,
         line.at
       )
       .toArray();
@@ -837,7 +855,7 @@ const restoreConfirmation = (
       .exec<{ row: number }>(
         "INSERT INTO memory_confirmations (memory, person, at) VALUES (?, ?, ?) RETURNING row",
         memory,
-        line.person,
+        person,
         line.at
       )
       .one();
@@ -952,7 +970,7 @@ const restoreMemoriesLine = async (
   if (line.kind === "memory") {
     await restoreMemory(storage, db, line);
   } else if (line.kind === "confirmation") {
-    restoreConfirmation(storage, line);
+    await restoreConfirmation(storage, line);
   } else if (line.kind === "extraction") {
     await restoreExtraction(storage, db, line);
   } else if (line.kind === "removal") {

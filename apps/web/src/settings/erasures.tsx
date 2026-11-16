@@ -64,6 +64,7 @@ const areaLabels: Record<string, MessageDescriptor> = {
   runs: msg`Unfinished runs (stopped) and decision confirmations`,
   interview: msg`Onboarding interview`,
   brain_sources: msg`What the Brain keeps that only they may read`,
+  brain_shared: msg`What the Brain learned about them, and what they said, where others may read it`,
 };
 
 /** How far an area got, in the page's language. */
@@ -148,6 +149,15 @@ const WhatErasingDoes = ({ areas }: { areas: readonly string[] }) => {
           </li>
           <li>
             <Trans>The audit trail</Trans>
+          </li>
+          <li>
+            <Trans>
+              Documents they or others shared with a team or the company stay,
+              and their text can still name them.
+            </Trans>
+          </li>
+          <li>
+            <Trans>An admin can still delete a specific document.</Trans>
           </li>
         </ul>
       </div>

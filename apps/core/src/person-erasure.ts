@@ -36,6 +36,7 @@ import { directoryProviderId } from "./auth/config.ts";
 import { eraseGapAnswerer } from "./brain-gaps.ts";
 import {
   erasePerson as eraseFromBrain,
+  erasePersonShared,
   stillDeletingTooLong,
 } from "./brain-next.ts";
 import { endHandOversOf } from "./brain-sources.ts";
@@ -195,6 +196,22 @@ const identity: ErasureStep = {
   area: "identity",
   erase: async (env, userId) => {
     const db = drizzle(env.DB);
+    // Their address is what the Brain's erasure of what it derived about
+    // them goes by (`brainShared`): it stays until that is done, so a try
+    // of it again never runs without it.
+    const [waiting] = await db
+      .select({ state: personErasureAreas.state })
+      .from(personErasureAreas)
+      .where(
+        and(
+          eq(personErasureAreas.userId, userId),
+          eq(personErasureAreas.area, "brain_shared"),
+          eq(personErasureAreas.state, "pending")
+        )
+      );
+    if (waiting !== undefined) {
+      throw new Error("Their address waits for the Brain's erasure by it");
+    }
     const held = await db
       .select({
         id: accounts.id,
@@ -326,6 +343,38 @@ const brain: ErasureStep = {
     ]);
     await purgeFromKnowledge(env, erasure.requestedBy, userId);
     await completed(db, userId, "brain");
+  },
+};
+
+/**
+ * What the Brain derived about them where others may read it, and what is
+ * in their own word there (brain-next.ts `erasePersonShared`), for Nick's
+ * decision of 16 November (GRA-1747): erasing a member removes what the
+ * Brain derived about them and keeps the company's documents, even where
+ * their text names them. The entity that is them is the one holding the
+ * address they signed in with, as `users` has it until `identity` erases
+ * it, which waits for this area: so this runs first, and a try of it
+ * again still has it. Complete once the Brain answered: recorded, hidden
+ * from every read and in its ledger; its tick deletes the rest.
+ */
+const brainShared: ErasureStep = {
+  area: "brain_shared",
+  erase: async (env, userId) => {
+    const db = drizzle(env.DB);
+    const [person] = await db
+      .select({ email: users.email })
+      .from(users)
+      .where(eq(users.id, userId));
+    if (person === undefined) {
+      return;
+    }
+    await erasePersonShared(env, {
+      personId: userId,
+      // Erased already (an erasure from before this area): no address left
+      // to go by, and their word and confirmations still go.
+      email: person.email === erasedEmail(userId) ? null : person.email,
+    });
+    await completed(db, userId, "brain_shared");
   },
 };
 
@@ -736,6 +785,7 @@ const brainSources: ErasureStep = {
  * GRA-903 adds its step here.
  */
 const steps: readonly ErasureStep[] = [
+  brainShared,
   identity,
   channels,
   connect,
@@ -781,14 +831,15 @@ const inStepOrder = (areas: readonly ErasureArea[]): ErasureArea[] => {
 
 /**
  * Where the erasure of `userId` from the Brain stands, as core records it,
- * across both of its Brain areas: `brain` (the legacy Brain's purge, and
- * their skill shares in core's database) and `brain_sources` (the new
- * Brain: pending until its call returned, which is only once their own
- * store was erased whole, files included). In the areas' own states
- * (`ErasureAreaState`): `skipped` if either was recorded skipped (no step
- * does today; the schema allows it), else `pending` while either is,
- * else `complete`; null when no erasure of them was asked for. With it,
- * when either area last changed: once `complete`, when the later of them
+ * across its Brain areas: `brain` (the legacy Brain's purge, and their
+ * skill shares in core's database), `brain_sources` (the new Brain:
+ * pending until its call returned, which is only once their own store was
+ * erased whole, files included) and `brain_shared` (what the new Brain
+ * derived about them where others may read it). In the areas' own states
+ * (`ErasureAreaState`): `skipped` if any was recorded skipped (no step
+ * does today; the schema allows it), else `pending` while any is, else
+ * `complete`; null when no erasure of them was asked for. With it, when
+ * any area last changed: once `complete`, when the last of them
  * completed. The areas alone, for Grasp's staff asking whether a person
  * was erased (brain-report.ts): one statement, whoever is named, so a
  * person never erased reads as one who never existed.
@@ -806,7 +857,11 @@ export const brainErasureStateOf = async (
     .where(
       and(
         eq(personErasureAreas.userId, userId),
-        inArray(personErasureAreas.area, [brain.area, brainSources.area])
+        inArray(personErasureAreas.area, [
+          brain.area,
+          brainSources.area,
+          brainShared.area,
+        ])
       )
     );
   const states = new Set(areas.map(({ state }) => state));
@@ -884,11 +939,14 @@ const runErasure = async (env: Env, userId: string): Promise<void> => {
         eq(personErasureAreas.state, "pending")
       )
     );
-  for (const { area } of pending) {
-    const step = steps.find((each) => each.area === area);
-    if (step === undefined) {
+  // In the order the areas run (`steps`): their address goes last of what
+  // needs it (`brainShared`, then `identity`).
+  const due = new Set(pending.map(({ area }) => area));
+  for (const step of steps) {
+    if (!due.has(step.area)) {
       continue;
     }
+    const { area } = step;
     try {
       // oxlint-disable-next-line no-await-in-loop -- one area at a time
       await step.erase(env, userId);

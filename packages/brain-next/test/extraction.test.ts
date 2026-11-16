@@ -519,6 +519,98 @@ describe("extracting memories", () => {
     });
   });
 
+  it("draws nothing again of a person an erasure took, nor in their word, from a source that stays, and draws the rest and a colleague with their first name", async () => {
+    const token = unique("t");
+    const group = unique("g");
+    const bob = unique("bob");
+    const reader: Reader = { person: bob, groups: [group] };
+    const anna = unique("anna");
+    const statementsOf = async (named: string) => {
+      const read = await readAs(reader, named);
+      return read.map(({ statement }) => statement);
+    };
+    const first = unique("Anna");
+    const name = `${first} Smit`;
+    const colleague = `${first} Visser`;
+    const address = `${unique("a")}@acme.test`;
+    const project = unique("Atlas");
+    const text = `${token}: ${name} (${address}) leads finance. ${colleague} leads sales. ${project} ships in May.`;
+    answers.set(
+      token,
+      answering({
+        entities: [
+          { key: "a", kind: "person", names: [name], emails: [address] },
+          { key: "c", kind: "person", names: [colleague] },
+          { key: "p", kind: "project", names: [project] },
+        ],
+        memories: [
+          {
+            about: "a",
+            attribute: "role",
+            value: "finance lead",
+            type: "fact",
+            statement: `${name} leads finance.`,
+            quote: `${name} (${address}) leads finance.`,
+          },
+          {
+            about: "c",
+            attribute: "role",
+            value: "sales lead",
+            type: "fact",
+            statement: `${colleague} leads sales.`,
+            quote: `${colleague} leads sales.`,
+          },
+          {
+            about: "p",
+            type: "fact",
+            statement: `${project} ships in May.`,
+            quote: `${project} ships in May.`,
+          },
+        ],
+      })
+    );
+    const bobs = fromOutside({
+      speaker: { kind: "internal", person: bob },
+    });
+    const { source } = await added(text, audience(group), { extract: bobs });
+    await tick();
+    const drawnFirst = await statementsOf(name);
+
+    await shared().erasePersonShared({
+      person: anna,
+      identifiers: [{ type: "email", value: address }],
+      reason: "person_erased",
+    });
+    // The note stays; a new version of it is drawn from again, and one in
+    // her own word.
+    const again = await added(`${text} `, audience(group), {
+      extract: bobs,
+      source,
+    });
+    await added(`${text}  `, audience(group), {
+      extract: fromOutside({ speaker: { kind: "internal", person: anna } }),
+    });
+    await tick();
+    await tick();
+
+    expect({
+      drawnFirst,
+      her: await statementsOf(name),
+      colleague: await statementsOf(colleague),
+      project: [...new Set(await statementsOf(project))],
+      // Drawn from the new version: the rest of it was written.
+      fromNewVersion: await readAs(reader, project).then((read) =>
+        read.some(({ source: on }) => on?.version === again.version)
+      ),
+    }).toStrictEqual({
+      drawnFirst: [`${name} leads finance.`],
+      her: [],
+      colleague: [`${colleague} leads sales.`],
+      project: [`${project} ships in May.`],
+      fromNewVersion: true,
+    });
+  });
+
   it("drops a memory whose quote is not in the text, and one the check doesn't support", async () => {
     const token = unique("t");
     const name = unique("Globex");

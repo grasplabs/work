@@ -2298,6 +2298,10 @@ msgstr "Ein Admin"
 msgid "An admin abandoned the data change this version needs, so it can't be shared. Ask Grasp to build the change again."
 msgstr "Ein Admin hat die Datenänderung verworfen, die diese Version braucht, daher kann sie nicht geteilt werden. Bitten Sie Grasp, die Änderung neu zu bauen."
 
+#: src/settings/erasures.tsx
+msgid "An admin can still delete a specific document."
+msgstr "Ein Admin kann ein bestimmtes Dokument weiterhin löschen."
+
 #: src/routes/_shell.settings.profile.tsx
 msgid "An admin changes it, in Members and roles."
 msgstr "Ein Admin ändert sie, unter Mitglieder und Rollen."
@@ -4897,6 +4901,10 @@ msgstr "Dokumente"
 #: src/brain/sources-page.tsx
 msgid "Documents and workflow runs show here once they reach the Brain."
 msgstr "Dokumente und Workflow-Läufe erscheinen hier, sobald sie im Gehirn ankommen."
+
+#: src/settings/erasures.tsx
+msgid "Documents they or others shared with a team or the company stay, and their text can still name them."
+msgstr "Dokumente, die sie oder andere mit einem Team oder dem Unternehmen geteilt haben, bleiben, und ihr Text kann sie weiterhin nennen."
 
 #: src/settings/stephen-settings.tsx
 msgid "Does things for people here"
@@ -15935,6 +15943,10 @@ msgstr "Was das Gehirn aufbewahrt und Sie lesen dürfen, und die Suche darin, so
 #: src/brain/brain-log.tsx
 msgid "What the brain kept of it"
 msgstr "Was das Gehirn davon behalten hat"
+
+#: src/settings/erasures.tsx
+msgid "What the Brain learned about them, and what they said, where others may read it"
+msgstr "Was das Brain über sie gelernt hat und was sie gesagt haben, wo andere es lesen dürfen"
 
 #: src/brain/memories-page.tsx
 msgid "What the Brain learns from sources and from what you tell it shows here."

@@ -25,6 +25,7 @@
 /** The erasure areas (person-erasure.ts), and removal before them. */
 export const erasureAreas = [
   "removal",
+  "brain_shared",
   "identity",
   "channels",
   "connect",
@@ -576,17 +577,19 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   // The audit log: IDs only, never rewritten, archived for 7 years (D2).
   "auditLog.events": { kept: "the audit log (D2)" },
   "auditLog.archives": noPerson,
-  // The new Brain's shared store (@grasp-os/brain-next, GRA-1747): what a
-  // team, the company, an App's users or a staff-list team may read, or
-  // nobody. What one person alone may read is never here: the store
-  // refuses it as it is added (store.ts `#mayKeep`), and it is kept in
-  // that person's own store, the same tables, which their erasure deletes
-  // whole (`brain_sources`, brain-next.ts `erasePerson`), its record in
-  // R2 read before the store answers anything, so a restore of it brings
-  // nothing back. So a person's own store needs no entry here. What stays
-  // is the company's, naming a person by ID at most (D1). Its word indexes
-  // (migrations, not in the schema) hold the words of these passages and
-  // memories, and go with them.
+  // The new Brain's shared store (@grasp-os/brain-next): what a team, the
+  // company, an App's users or a staff-list team may read, or nobody.
+  // Erasing a member removes what the Brain derived about them and what is
+  // in their own word, and keeps the company's documents, even where their
+  // text names them (decided 16 November, GRA-1747): `brain_shared`
+  // (brain-next.ts `erasePersonShared`; the Brain's people.ts). What one
+  // person alone may read is never here (the store refuses it,
+  // store.ts `#mayKeep`): it is in their own store, the same tables, which
+  // their erasure deletes whole (`brain_sources`, brain-next.ts
+  // `erasePerson`), its record in R2 read before the store answers
+  // anything, so a restore brings nothing back; so a person's own store
+  // needs no entry here. The word indexes (migrations, not in the schema)
+  // hold the words of these passages and memories, and go with them.
   "brainStore.reader_sets": {
     none: "sets of groups: the shared store refuses a set of one person",
   },
@@ -595,11 +598,11 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   },
   "brainStore.files": noPerson,
   "brainStore.source_versions": {
-    company: "versions of what a team, the company or an App's users may read",
+    company: "documents a team or more may read, even where they name them",
   },
   "brainStore.current_versions": { company: "the current version of each" },
   "brainStore.removed_sources": {
-    company: "sources taken out of use, kept as history",
+    company: "documents taken out of use, kept as history",
   },
   "brainStore.source_changes": {
     company: "the change keys of each add, as its producer named them",
@@ -610,7 +613,7 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "brainStore.known_groups": {
     kept: "SHA-256 of each key named a group, so an erased group stays closed",
   },
-  "brainStore.chunks": { company: "passages of those versions" },
+  "brainStore.chunks": { company: "passages of those documents" },
   "brainStore.vector_models": noPerson,
   "brainStore.vector_blocks": { company: "vector codes of those passages" },
   "brainStore.vector_codes": { company: "vector codes of those passages" },
@@ -620,19 +623,26 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "brainStore.unembeddable": noPerson,
   "brainStore.work_items": {
     company:
-      "work on those sources; a drawing's payload names whose word a version is, by ID",
+      "work on those documents; a drawing names whose word a version is, by ID, and leaves out what is in an erased person's",
   },
   "brainStore.work_model_bucket": noPerson,
   "brainStore.word_index": noPerson,
   "brainStore.erasures": {
-    kept: "the erasure ledger's record: SHA-256 of a source's key, a person's own source's too, or of a writer's lineage (D2)",
+    kept: "the erasure ledger's record: SHA-256 of a source's key, a writer's lineage or an erased person's id (D2)",
   },
   "brainStore.erasing_versions": { kept: "erasures under way, by row" },
   "brainStore.erased_versions": {
     kept: "what an older release's erasure hid, by SHA-256 of a source's key",
   },
+  "brainStore.person_erasure_subjects": {
+    kept: "SHA-256 of what a person's erasure closed, so nothing makes it again",
+  },
+  "brainStore.person_erasure_memories": {
+    kept: "the memories a person's erasure hides until the tick deletes them, by row",
+  },
   "brainStore.exports": {
-    company: "exports of the company's Brain an admin asked for",
+    company:
+      "exports an admin asked for; one started before a member's erasure is stale",
   },
   "brainStore.export_parts": noPerson,
   "brainStore.export_sources": {
@@ -640,20 +650,13 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   },
   "brainStore.export_sweep": noPerson,
   "brainStore.restores": noPerson,
-  "brainStore.entities": {
-    company: "what the company's memories are about, people among them",
-  },
-  "brainStore.memories": {
-    company:
-      "drawn from those sources or written by an App; whose word each is, by ID (D1)",
-  },
-  "brainStore.entity_names": {
-    company: "names and identifiers those memories give; gone with the memory",
-  },
-  "brainStore.memory_confirmations": {
-    company:
-      "who confirmed a memory others may read, by ID (D1); others see only that it was",
-  },
+  // The entity that is them (by the address they signed in with), the
+  // memories about it or in their word, and the names those gave.
+  "brainStore.entities": { erased: "brain_shared" },
+  "brainStore.memories": { erased: "brain_shared" },
+  "brainStore.entity_names": { erased: "brain_shared" },
+  // Their confirmations stand, their id replaced (`erasedConfirmer`).
+  "brainStore.memory_confirmations": { erased: "brain_shared" },
   "brainStore.memory_confirmed_over": noPerson,
   "brainStore.memory_extractions": {
     company: "marks of the versions fully drawn from",
@@ -695,9 +698,10 @@ export const reviewedPersonColumns: Readonly<
   "brainStore.erasures": ["subject"],
   "brainStore.export_sources": ["subject"],
   "brainStore.known_groups": ["subject"],
-  "brainStore.memories": ["speaker", "subject", "writer_subject"],
+  "brainStore.memories": ["speaker", "subject", "writer", "writer_subject"],
   "brainStore.memory_confirmations": ["person"],
   "brainStore.memory_extractions": ["subject"],
+  "brainStore.person_erasure_subjects": ["subject"],
   "brainStore.reader_set_members": ["principal"],
   "brainStore.removed_sources": ["subject"],
   "brainStore.source_subjects": ["group_subject", "subject"],

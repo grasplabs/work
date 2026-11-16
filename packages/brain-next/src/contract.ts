@@ -1932,6 +1932,28 @@ export const identifierSchema = z.discriminatedUnion("type", [
 ]);
 export type Identifier = z.infer<typeof identifierSchema>;
 
+/**
+ * A person to erase from the shared store (`Brain.erasePersonShared`):
+ * the host's id for them, as it names them whose word a memory is or who
+ * confirmed one, and the exact identifiers the host verified as theirs
+ * (their sign-in email). A name is never one: only exact evidence says
+ * which entity is theirs.
+ */
+export const sharedPersonErasureSchema = z.strictObject({
+  person: principalSchema,
+  identifiers: z.array(identifierSchema).max(namesPerEntityMax),
+  reason: z.literal("person_erased"),
+});
+export type SharedPersonErasure = z.infer<typeof sharedPersonErasureSchema>;
+
+/**
+ * Who confirmed a memory (`Memory.confirmed.by`) once a person's erasure
+ * took who it was (`Brain.erasePersonShared`): the confirmation stands, so
+ * the memory doesn't turn contested because someone left, and no
+ * principal is ever this.
+ */
+export const erasedConfirmer = "";
+
 /** A short text a memory holds: some text, at most `max` characters. */
 const someText = (max: number) =>
   wellFormedString().regex(/\S/u, { message: "Holds no text" }).max(max);
@@ -2142,6 +2164,7 @@ export interface Memory {
   validUntil: Date | null;
   learnedAt: Date;
   endedAt: Date | null;
+  /** `by` is `erasedConfirmer` once an erasure took who it was. */
   confirmed: { by: string; at: Date } | null;
   contested: boolean;
 }
@@ -2941,6 +2964,24 @@ export interface Brain {
    * The shared store's alone: a person's own store refuses.
    */
   eraseWriter: (request: WriterErasure) => Promise<WriterErased>;
+  /**
+   * Erases from the shared store what it derived about `person`, and what
+   * is in their own word, for an erasure of the person (erasure.ts
+   * `erasePersonShared`): every memory whose speaker is them; on an entity
+   * every identifier of which is one of `identifiers`, every memory about
+   * it or relating to it, so the entity goes with its names; on an entity
+   * that also holds another identifier, only the memories that gave one
+   * of theirs. Hidden from every read at once, recorded in the ledger,
+   * deleted by the tick if not by the call. Their confirmations stand,
+   * the confirmer replaced by `erasedConfirmer`; every export started
+   * before it is stale. Their identifiers and their entities stay closed:
+   * an add naming one is refused, and extraction and a restore leave out
+   * what names one. The sources stay. Safe to repeat: the same person is
+   * the same erasure, its identifiers those of its first call. Returns
+   * only once its entry is in the ledger: one that throws must be
+   * repeated. The shared store's alone: a person's own store refuses.
+   */
+  erasePersonShared: (request: SharedPersonErasure) => Promise<void>;
   /**
    * Whether a source was erased, from the store's record of its ledger
    * alone (`ErasureStatus`). For staff, who name what a client

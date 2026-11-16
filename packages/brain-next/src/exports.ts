@@ -458,12 +458,14 @@ const rowOf = (sql: SqlStorage, id: string): ExportRow | undefined =>
  * expressions): a source's erasure names every version. A writer's memory
  * is held by its writer's subject and when it was learned
  * (`memoriesLineOf`): a writer's erasure names every one learned before
- * it. The one rule of staleness (above).
+ * it. A person's erasure in the shared store names every export started
+ * before it, by a row naming its subject it adds to each (people.ts
+ * `applyPerson`). The one rule of staleness (above).
  */
 const namedSql = (subject: string, version: string): string => `(
   EXISTS (
     SELECT 1 FROM erasures
-    WHERE erasures.kind = 'source' AND erasures.subject = ${subject}
+    WHERE erasures.kind IN ('source', 'person') AND erasures.subject = ${subject}
   )
   OR EXISTS (
     SELECT 1 FROM erasures

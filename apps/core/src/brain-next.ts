@@ -1881,10 +1881,9 @@ export const eraseOwnGroup = async (
  * person (`person_erased`): their own store, whole, the one place it is
  * kept (their uploads, chats and runs, their instruction file, their
  * memories, every version). Deleted for good, it holds nothing and takes
- * nothing from then on. Safe to repeat. The shared store has nothing of
- * theirs to erase: it refuses whatever only one person may read as it is
- * added, and what they wrote for a team or everyone is not theirs alone,
- * so it stays.
+ * nothing from then on. Safe to repeat. What the shared store derived
+ * about them, and what is in their own word there, is
+ * `erasePersonShared`'s; what they shared with a team or everyone stays.
  *
  * Answers `erased` once it is all done, or `still_deleting` while their
  * own store waits out the time an add under way has to write a file
@@ -1913,6 +1912,37 @@ export const erasePerson = async (
   // failure throws, and the caller's retry removes it.
   await forgetOwnStoreHealth(env, personId);
   return "erased";
+};
+
+const sharedPersonErasureSchema = z.strictObject({
+  personId: idSchema,
+  // As sign-in kept it: the Brain checks it by its own identifier rule.
+  email: z.string().min(1).nullable(),
+});
+
+/**
+ * Erases from the shared store, for an admin's erasure of the member
+ * `personId`, what the Brain derived about them and what is in their own
+ * word, and keeps the company's documents, even where their text names
+ * them (decided 16 November, GRA-1747: how the plan's "removes their
+ * personal content everywhere" reads for what others may read). Which
+ * entity is theirs is decided on `email` alone, the address their
+ * sign-in verified, never on a name (the Brain's people.ts). Hidden from
+ * every read once it returns, and in the Brain's ledger, so a restore
+ * can't bring it back; deleted by the Brain's tick. Safe to repeat: the
+ * same person is the same erasure, its email the first call's. One that
+ * throws must be repeated.
+ */
+export const erasePersonShared = async (
+  env: BrainEnv,
+  erased: { personId: string; email: string | null }
+): Promise<void> => {
+  const { personId, email } = checked(sharedPersonErasureSchema, erased);
+  await brain(env).erasePersonShared({
+    person: personId,
+    identifiers: email === null ? [] : [{ type: "email", value: email }],
+    reason: "person_erased",
+  });
 };
 
 /**

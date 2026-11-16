@@ -32,6 +32,8 @@ import type {
 } from "./contract.ts";
 import { bucketCallMs } from "./embedding.ts";
 import { fileKeyOf, hashOf } from "./files.ts";
+import { isClosed, namingOf } from "./people.ts";
+import type { Naming } from "./people.ts";
 import { accessOfKey } from "./reader-sets.ts";
 import { hashesOf, writeAdd } from "./remember.ts";
 import type { Adding } from "./remember.ts";
@@ -951,6 +953,51 @@ const pieceTokensOf = (contextTokens: number | null): number | null => {
  * add without `said`), so none sends a version that asks followed by one
  * that doesn't.
  */
+/** What each entity and memory of `adding` names, hashed (people.ts), in its order. */
+interface PieceNaming {
+  entities: Naming[];
+  speakers: Naming[];
+}
+
+const pieceNamingOf = async (adding: Candidates): Promise<PieceNaming> => ({
+  entities: await Promise.all(
+    adding.entities.map(async (entity) => await namingOf([entity], []))
+  ),
+  speakers: await Promise.all(
+    adding.memories.map(async ({ speaker }) => await namingOf([], [speaker]))
+  ),
+});
+
+/**
+ * `adding` without what names what a person's erasure closed (people.ts):
+ * the entities naming one of their identifiers or entities, the memories
+ * about or relating to one, and those in their word. Their sources stay,
+ * so nothing drawn from them again makes their card or their word again.
+ */
+const leavingOutClosed = (
+  sql: SqlStorage,
+  adding: Candidates,
+  naming: PieceNaming
+): Candidates => {
+  const closed = new Set(
+    adding.entities.flatMap(({ key }, index) => {
+      const named = naming.entities[index];
+      return named !== undefined && isClosed(sql, named) ? [key] : [];
+    })
+  );
+  return keeping(
+    adding.entities,
+    adding.memories.filter((memory, index) => {
+      const said = naming.speakers[index];
+      return !(
+        closed.has(memory.about) ||
+        (memory.object !== undefined && closed.has(memory.object)) ||
+        (said !== undefined && isClosed(sql, said))
+      );
+    })
+  );
+};
+
 const writePiece = async (
   { storage, owner }: WorkContext,
   {
@@ -969,26 +1016,57 @@ const writePiece = async (
     last: boolean;
   }
 ): Promise<"written" | "superseded"> => {
-  const full: Adding = {
+  const { sql } = storage;
+  const addOf = (kept: Candidates): Adding => ({
     change,
     access,
-    entities: adding.entities,
-    memories: adding.memories,
+    entities: kept.entities,
+    memories: kept.memories,
     ...(last ? { extracted: { source, version } } : {}),
+  });
+  // What a person's erasure closed is left out (`leavingOutClosed`), as
+  // the store holds it now, and again in the write's transaction: one that
+  // landed in between fails the attempt, and the queue tries it again.
+  // An add of this change made before answers as it was made.
+  const naming = await pieceNamingOf(adding);
+  const kept = leavingOutClosed(sql, adding, naming);
+  const whole = addOf(adding);
+  const full = addOf(kept);
+  const wholeHashes = await hashesOf(whole);
+  const leftOut =
+    kept.memories.length !== adding.memories.length ||
+    kept.entities.length !== adding.entities.length;
+  const hashes = leftOut ? await hashesOf(full) : wholeHashes;
+  const store = {
+    storage,
+    db: drizzle(storage),
+    // The shared store's tick names no owner (`WorkContext.owner`).
+    shared: owner === undefined,
   };
-  const hashes = await hashesOf(full);
-  const { sql } = storage;
   try {
     return storage.transactionSync(() => {
       if (currentOf(sql, source, version) === undefined) {
         return "superseded";
       }
-      writeAdd(
-        // The shared store's tick names no owner (`WorkContext.owner`).
-        { storage, db: drizzle(storage), shared: owner === undefined },
-        full,
-        hashes
-      );
+      const madeBefore =
+        sql
+          .exec("SELECT 1 FROM memory_changes WHERE key = ?", wholeHashes.key)
+          .toArray().length > 0;
+      if (madeBefore) {
+        writeAdd(store, whole, wholeHashes);
+        return "written";
+      }
+      const now = leavingOutClosed(sql, adding, naming);
+      if (
+        now.memories.length !== kept.memories.length ||
+        now.entities.length !== kept.entities.length
+      ) {
+        throw new WorkError("failed");
+      }
+      // Nothing left to write: no add, unless it marks the version.
+      if (full.memories.length > 0 || full.extracted !== undefined) {
+        writeAdd(store, full, hashes);
+      }
       return "written";
     });
   } catch (error) {
