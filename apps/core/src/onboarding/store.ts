@@ -1727,6 +1727,12 @@ export class Onboarding extends DurableObject<Env> {
     }
     const { person, link, roster } = found.value;
     const work = this.#linkWork(person.id);
+    // A withdrawal is final (T5): nothing more said is kept, whichever tab
+    // saves it. They can still read it and delete it, which isn't a save.
+    // Checked again with the version, once hashing let another call land.
+    if (this.#withdrawnAt(person.id) !== null) {
+      return acted(work, refused("interview.withdrawn"));
+    }
     if (version !== link.version) {
       const held = this.#held(person.id);
       if (held === null && link.deletedAt !== null) {
@@ -1742,6 +1748,9 @@ export class Onboarding extends DurableObject<Env> {
       );
     }
     const erasing = await this.#erasing(person.id, progress);
+    if (this.#withdrawnAt(person.id) !== null) {
+      return acted(work, refused("interview.withdrawn"));
+    }
     // A copy that brings back a line they removed is an older one, whichever
     // tab sends it; and hashing let another save land: an older copy now.
     const current = this.#versionOf(person.id);

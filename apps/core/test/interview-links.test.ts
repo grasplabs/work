@@ -993,6 +993,34 @@ describe("taking part, approving and withdrawing", () => {
     });
   });
 
+  it("keeps nothing more said once they withdrew, whichever tab saves it, and still lets them delete it (T5)", async () => {
+    const { secrets, me } = await running();
+    await opened(secrets.oli, me);
+    await takePart(secrets.oli, me);
+    const { version } = await savedOf(await save(secrets.oli, me, 0));
+    await withdraw(secrets.oli, me);
+    // Another tab, opened before the withdrawal, saves on from where it was.
+    const after = await save(
+      secrets.oli,
+      me,
+      version,
+      progress("Said in another tab after withdrawing.")
+    );
+    const read = await opened(secrets.oli, me);
+    const deleted = await remove(secrets.oli, me);
+    expect({
+      after: [after.status, await codeOf(after)],
+      said: read.progress?.lines.map(({ text }) => text),
+      version: read.version,
+      deleted: deleted.status,
+    }).toStrictEqual({
+      after: [410, "interview.withdrawn"],
+      said: ["What did you do this morning?", sentinel],
+      version,
+      deleted: 200,
+    });
+  });
+
   it.each([
     ["deleting it from the link", "delete"],
     ["a new start from Grasp's admin", "newStart"],
