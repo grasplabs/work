@@ -1793,13 +1793,6 @@
       "when": 1794787120840,
       "tag": "0255_eager_korg",
       "breakpoints": true
-    },
-    {
-      "idx": 256,
-      "version": "6",
-      "when": 1794820327067,
-      "tag": "0256_parallel_crystal",
-      "breakpoints": true
     }
   ]
 }
