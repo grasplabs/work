@@ -2,12 +2,11 @@ import { isExpectedError } from "@grasp-os/shared/errors";
 import type { AppId } from "@grasp-os/shared/ids";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { env } from "cloudflare:workers";
-import { expect } from "vite-plus/test";
 
 import { appKind, createApp, findApp } from "../../src/apps.ts";
 import type { Acting } from "../../src/auth/identity.ts";
 import { rollback } from "../../src/publish.ts";
-import { runInSession } from "../../src/sandbox-session.ts";
+import { noPlaceOf, runInSession } from "../../src/sandbox-session.ts";
 import { SandboxUnavailableError } from "../../src/sandboxed.ts";
 import { appOf, withFiles } from "../app-definitions.ts";
 import type { TestApp } from "../app-definitions.ts";
@@ -116,14 +115,27 @@ export const supervisor = (): Fetcher => {
   return host;
 };
 
+/** What `holdPlace` says when the sandbox had no place for it. */
+const noPlace = "no place";
+
+/**
+ * How often `heldPlace` asks for a place, each ask waiting about 3 s for
+ * one: a minute in all, far longer than a process takes to go and a new
+ * one to start (scripts/workerd-sandbox.ts, `startupMs`), and well inside
+ * the file's timeout, so a place that never frees fails with its refusal.
+ */
+const placeAsks = 20;
+
 /**
  * Holds one of `owner`'s places in the sandbox with a session that spins,
- * until it's given up on (`signal`).
+ * until it's given up on (`signal`). `opened` hears once it holds it: the
+ * supervisor opens a session only once it has its place and a process.
  */
 export const holdPlace = async (
   owner: string,
   signal: AbortSignal,
-  subOwner?: string
+  subOwner?: string,
+  opened?: () => void
 ): Promise<unknown> => {
   if (host === undefined) {
     throw new Error("These tests run with SANDBOX_HOST bound.");
@@ -146,25 +158,41 @@ export class Spin extends WorkerEntrypoint { run() { for (;;) {} } }
         cpuMs: 30_000,
         wallMs: 60_000,
       },
-      { signal }
+      { signal, opened }
     );
   } catch (error) {
-    return signal.aborted ? "given up" : `refused: ${String(error)}`;
+    if (signal.aborted) {
+      return "given up";
+    }
+    return noPlaceOf(error) ? noPlace : `refused: ${String(error)}`;
   }
 };
 
-/** How long a session takes to start, at most, in these tests. */
-export const startsMs = 1500;
-
-/** `owner`'s place held (`holdPlace`), once it surely is: how it ends. */
+/**
+ * `owner`'s place held (`holdPlace`), once it is: how it ends. Asked for
+ * again while the sandbox has no place for it: a session that just ended
+ * keeps its place until its process is gone (scripts/workerd-sandbox.ts),
+ * which on a busy runner can take longer than one ask waits.
+ */
 export const heldPlace = async (
   owner: string,
   signal: AbortSignal,
   subOwner?: string
 ): Promise<{ ended: Promise<unknown> }> => {
-  const ended = holdPlace(owner, signal, subOwner);
-  await expect(
-    Promise.race([ended, scheduler.wait(startsMs).then(() => "holding")])
-  ).resolves.toBe("holding");
-  return { ended };
+  let last: unknown = noPlace;
+  for (let ask = 0; ask < placeAsks; ask += 1) {
+    const holding = Promise.withResolvers<"holding">();
+    const ended = holdPlace(owner, signal, subOwner, () => {
+      holding.resolve("holding");
+    });
+    // oxlint-disable-next-line no-await-in-loop -- one ask at a time
+    last = await Promise.race([ended, holding.promise]);
+    if (last === "holding") {
+      return { ended };
+    }
+    if (last !== noPlace) {
+      break;
+    }
+  }
+  throw new Error(`The place wasn't held: ${String(last)}`);
 };

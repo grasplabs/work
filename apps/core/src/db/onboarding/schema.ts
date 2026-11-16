@@ -146,6 +146,15 @@ export const links = sqliteTable("links", {
    */
   version: integer().notNull().default(0),
   /**
+   * The page that last saved the interview, its count of saves then, and
+   * the version that save made: a later save of the same page goes on
+   * from it, though it never heard of that version, while nothing else
+   * has moved the version since. None before a save that names its page.
+   */
+  savedByPage: text("saved_by_page"),
+  savedPageSave: integer("saved_page_save"),
+  savedVersion: integer("saved_version"),
+  /**
    * The account the interview belongs to (GRA-1790): the one whose
    * address, verified by the company's sign-in, it was sent to, when it
    * first opened the link; from then on it alone opens it. The only reader

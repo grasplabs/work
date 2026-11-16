@@ -501,7 +501,8 @@ const ReviewDialog = ({
 };
 /**
  * Making changes of the model of the App's draft of `app`, over
- * `revision`, the one the page read (core refuses one the draft moved
+ * `revision`, the one the page read, or the one its own last change left
+ * if the page hasn't read that yet (core refuses one the draft moved
  * past): previewed first, reviewed in a dialog where they remove, retype,
  * change access or need a value (`dialog`), and once made, `onMade` with
  * the model after.
@@ -518,13 +519,16 @@ export const useModelChanges = ({
   const action = useCoreAction();
   const [problem, setProblem] = useState<string>();
   const [review, setReview] = useState<Review>();
+  // The page reads the draft again after a change, a moment later: the
+  // next change goes over the revision this one left, not the one before.
+  const [left, setLeft] = useState(revision);
+  const over = Math.max(revision, left);
   const define = async (
     change: ModelChange,
     preview: boolean
   ): Promise<DataModelChange | undefined> =>
     await action.run(
-      async (session) =>
-        await session.apps.define(app, revision, change, preview)
+      async (session) => await session.apps.define(app, over, change, preview)
     );
   /** Makes `change` now, saying core's problem if it can't be made. */
   const apply = async (change: ModelChange): Promise<boolean> => {
@@ -536,6 +540,7 @@ export const useModelChanges = ({
       setProblem(made.problem);
       return false;
     }
+    setLeft(made.revision);
     setProblem(undefined);
     review?.settle(true);
     setReview(undefined);
