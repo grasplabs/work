@@ -204,7 +204,10 @@ const ManagedFacts = ({
   );
 };
 
-/** One agent: its card. An admin's opens its page; anyone else's, a chat with it. */
+/**
+ * One agent: its card. One the person manages opens its page; any other
+ * is only shown. Its Chat button opens the chat with it mentioned.
+ */
 const AgentCard = ({
   shown,
   teams,
@@ -223,9 +226,9 @@ const AgentCard = ({
         <AgentAvatar face={shown.face} />
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
           {state === undefined ? (
-            <Link className={nameClass} search={{ agent: shown.id }} to="/">
-              {shown.name}
-            </Link>
+            // Not theirs to manage: the page asks nothing; its Chat button
+            // opens the chat with it mentioned.
+            <span className="truncate font-medium">{shown.name}</span>
           ) : (
             <Link
               className={nameClass}
