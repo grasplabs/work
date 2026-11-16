@@ -82,8 +82,9 @@ import { markPrivateRead } from "./private-reads.ts";
 // reaches the model with the question, as data (chat-agent.ts).
 //
 // Where else to look (GRA-1873): with a recall as the person, the model
-// is also told the connections their agent may use for them now
-// (`usableConnections`, what `env.connections.list()` lists), connected,
+// is also told the connections their agent may use for them now that
+// are connected and granted at least one action that reads
+// (`usableConnections`: a part of what `env.connections.list()` lists),
 // by the names its code calls them by. The Brain holds at most the items
 // read through them before (connection-capture.ts), so each holds more
 // than it does. Named only where the answer reaches the person alone:
