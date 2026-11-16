@@ -47,7 +47,6 @@ export type StoryLine = z.output<typeof storyLineSchema>;
 /** What the page asks: the lines of one part, on its link, in whose voice and in which language. */
 export const interviewStoryRequestSchema = z.strictObject({
   secret: interviewSecretSchema,
-  key: interviewSecretSchema,
   locale: interviewLocaleSchema,
   interviewer: interviewerSchema.default("stephen"),
   lines: z

@@ -58,7 +58,8 @@ export const testCapabilityKey =
  */
 export const testTokenKey = btoa("e2e-only-token-key-of-32-bytes!!");
 
-const sessionCookie = "__Host-grasp.session_token";
+/** The name of core's session cookie. */
+export const sessionCookie = "__Host-grasp.session_token";
 
 /** The `name=value` pairs a response sets, as a `Cookie` header. */
 const cookiesOf = (response: Response): string =>

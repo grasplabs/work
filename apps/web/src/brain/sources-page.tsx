@@ -195,6 +195,11 @@ const ProducerBadge = ({ producer }: { producer: BrainSourceProducer }) => {
       message: "Fetched from a connection",
       context: "a source of the Brain",
     }),
+    interview: t({ message: "Interview", context: "a source of the Brain" }),
+    claim: t({
+      message: "What your team said",
+      context: "a source of the Brain",
+    }),
   }[producer];
   return <Badge variant="outline">{label}</Badge>;
 };

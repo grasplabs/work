@@ -27,6 +27,7 @@ import {
   kept,
   mapped,
   openLink,
+  rosterOf,
   team,
   ticketsReply,
   told,
@@ -882,5 +883,54 @@ describe("what a team said, put together", { timeout: 120_000 }, () => {
       gave,
       records: records.map(({ type }) => type),
     }).toStrictEqual({ gave: `brain:${ids.team}`, records: [] });
+  });
+
+  it("takes a claim out once fewer than five of the team's people now make it, when one who did moves to another team", async () => {
+    // Ops of eight who told their own work (Sam and Ada a step each): five
+    // of them say tickets come in through Zendesk, Pim among them.
+    const keys = [
+      "lea",
+      "max",
+      "mia",
+      "mo",
+      "noor",
+      "pim",
+      "rik",
+      "sam",
+      "ada",
+    ] as const;
+    const ids = await team(keys);
+    await mapped(ids);
+    await told(ids);
+    await agree(ids.sam, [fact("s1", "step", "Answers the phone.")]);
+    await agree(ids.ada, [fact("a1", "step", "Closes the day's tickets.")]);
+    await drawTickets(ids);
+    await intake(ids, [zendeskClaim]);
+    const member = await signedInApi(idp, "user");
+    const before = await statementsFor(member.api, ids);
+    // Pim moves to Billing: Ops still has seven who told, but four of its
+    // people now make the claim.
+    const roster = rosterOf(ids, keys);
+    const billing = `${ids.team}-billing`;
+    await onboardingStore(env).saveRoster(
+      {
+        teams: [
+          ...roster.teams,
+          { id: billing, name: "Billing", lead: null, does: "", off: false },
+        ],
+        people: roster.people.map((person) =>
+          person.id === ids.pim ? { ...person, team: billing } : person
+        ),
+      },
+      { type: "system" }
+    );
+    await onboardingStore(env).purgeBrain();
+    expect({
+      before,
+      after: await statementsFor(member.api, ids),
+    }).toStrictEqual({
+      before: [zendeskClaim.text],
+      after: [],
+    });
   });
 });

@@ -59,7 +59,7 @@ const LINK: Record<Locale, LinkWords> = {
       "Your company never sees what one person said, only what five or more people said, put together. You can stop at any time, and delete everything for 7 days afterwards.",
     button: "Talk with Stephen",
     yours:
-      "This link is yours alone, so please don't pass it on. It opens your interview on the first device you open it on.",
+      "This link is yours alone, so please don't pass it on. You sign in with your work account to open it.",
     until: "The interviews run until {closes}.",
     reply:
       "Questions? Reply to this email, and it reaches the person at {company} who runs the interviews.",
@@ -73,7 +73,7 @@ const LINK: Record<Locale, LinkWords> = {
       "Je bedrijf ziet nooit wat één persoon zei, alleen wat vijf of meer mensen samen zeiden. Je kunt altijd stoppen, en daarna nog 7 dagen alles verwijderen.",
     button: "Praat met Stephen",
     yours:
-      "Deze link is alleen van jou, dus geef hem niet door. Hij opent je interview op het eerste apparaat waarop je hem opent.",
+      "Deze link is alleen van jou, dus geef hem niet door. Je logt in met je werkaccount om hem te openen.",
     until: "De interviews lopen tot en met {closes}.",
     reply:
       "Vragen? Beantwoord deze e-mail, dan komt hij bij de persoon bij {company} die de interviews regelt.",
@@ -87,7 +87,7 @@ const LINK: Record<Locale, LinkWords> = {
       "Ihr Unternehmen sieht nie, was eine einzelne Person gesagt hat, nur, was fünf oder mehr Personen zusammen gesagt haben. Sie können jederzeit aufhören und danach noch 7 Tage lang alles löschen.",
     button: "Mit Stephen sprechen",
     yours:
-      "Dieser Link gehört nur Ihnen, bitte geben Sie ihn nicht weiter. Er öffnet Ihr Interview auf dem ersten Gerät, auf dem Sie ihn öffnen.",
+      "Dieser Link gehört nur Ihnen, bitte geben Sie ihn nicht weiter. Sie melden sich mit Ihrem Arbeitskonto an, um ihn zu öffnen.",
     until: "Die Interviews laufen bis zum {closes}.",
     reply:
       "Fragen? Antworten Sie auf diese E-Mail, dann erreicht sie die Person bei {company}, die die Interviews betreut.",
@@ -101,7 +101,7 @@ const LINK: Record<Locale, LinkWords> = {
       "Votre entreprise ne voit jamais ce qu’une personne a dit, seulement ce que cinq personnes ou plus ont dit, mis ensemble. Vous pouvez arrêter à tout moment, et tout supprimer pendant les 7 jours qui suivent.",
     button: "Parler avec Stephen",
     yours:
-      "Ce lien n’est qu’à vous, merci de ne pas le transmettre. Il ouvre votre entretien sur le premier appareil où vous l’ouvrez.",
+      "Ce lien n’est qu’à vous, merci de ne pas le transmettre. Vous vous connectez avec votre compte professionnel pour l’ouvrir.",
     until: "Les entretiens sont ouverts jusqu’au {closes}.",
     reply:
       "Des questions ? Répondez à cet e-mail : il parviendra à la personne de {company} qui organise les entretiens.",
@@ -115,7 +115,7 @@ const LINK: Record<Locale, LinkWords> = {
       "Tu empresa nunca ve lo que dijo una sola persona, solo lo que dijeron cinco o más personas, en conjunto. Puedes parar cuando quieras, y borrarlo todo durante los 7 días siguientes.",
     button: "Hablar con Stephen",
     yours:
-      "Este enlace es solo tuyo, así que no lo compartas. Abre tu entrevista en el primer dispositivo en el que lo abras.",
+      "Este enlace es solo tuyo, así que no lo compartas. Inicias sesión con tu cuenta del trabajo para abrirlo.",
     until: "Las entrevistas están abiertas hasta el {closes}.",
     reply:
       "¿Tienes preguntas? Responde a este correo y le llegará a la persona de {company} que organiza las entrevistas.",

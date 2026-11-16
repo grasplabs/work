@@ -3398,10 +3398,6 @@ msgstr "Carried out a confirmed write to an App, or failed to"
 msgid "Carry on now"
 msgstr "Carry on now"
 
-#: src/routes/interview.tsx
-msgid "Carry on there. Lost that device? Ask whoever sent you the link for a new start."
-msgstr "Carry on there. Lost that device? Ask whoever sent you the link for a new start."
-
 #: src/settings/audit-chain.tsx
 msgid "Chain check"
 msgstr "Chain check"
@@ -4685,6 +4681,10 @@ msgstr "Deleted their conversations in chat apps"
 msgid "Deleted. Nothing you said is kept."
 msgstr "Deleted. Nothing you said is kept."
 
+#: src/interview/page.tsx
+msgid "Deleted. What the Brain kept of it is being removed."
+msgstr "Deleted. What the Brain kept of it is being removed."
+
 #: src/activity/audit-words.ts
 msgid "Denied packages"
 msgstr "Denied packages"
@@ -5338,8 +5338,8 @@ msgid "Everyone from Grasp is signed out at once, and nobody from Grasp can sign
 msgstr "Everyone from Grasp is signed out at once, and nobody from Grasp can sign in again until a new window is opened."
 
 #: src/onboarding/interviews-progress.tsx
-msgid "Everyone has a link of their own: whoever has it is them, so send each only to its owner. Links that are not out yet open on their day, or once their lead has talked."
-msgstr "Everyone has a link of their own: whoever has it is them, so send each only to its owner. Links that are not out yet open on their day, or once their lead has talked."
+msgid "Everyone has a link of their own. It opens only once they sign in with your company's sign-in, at the address on the list. Links that are not out yet open on their day, or once their lead has talked."
+msgstr "Everyone has a link of their own. It opens only once they sign in with your company's sign-in, at the address on the list. Links that are not out yet open on their day, or once their lead has talked."
 
 #: src/drafts/sharing.tsx
 #: src/people/share-picker.tsx
@@ -5984,6 +5984,10 @@ msgstr "From Google Drive. I read only the files you add."
 msgid "From SharePoint or OneDrive. I read only the files you add."
 msgstr "From SharePoint or OneDrive. I read only the files you add."
 
+#: src/brain/memories-page.tsx
+msgid "From what your team said, version {version}"
+msgstr "From what your team said, version {version}"
+
 #: src/settings/audit-archive.tsx
 msgid "From when each event was recorded, archive included. After this, archived events are deleted."
 msgstr "From when each event was recorded, archive included. After this, archived events are deleted."
@@ -5995,6 +5999,10 @@ msgstr "From your Apps"
 #: src/onboarding/setup-steps.tsx
 msgid "From your HR or payroll system. Microsoft 365 or Google can be connected later, with us."
 msgstr "From your HR or payroll system. Microsoft 365 or Google can be connected later, with us."
+
+#: src/brain/memories-page.tsx
+msgid "From your interview, version {version}"
+msgstr "From your interview, version {version}"
 
 #: src/settings/staff-access.tsx
 msgid "Full access"
@@ -6995,6 +7003,11 @@ msgstr "Integration"
 #: src/routes/_shell.integrations.index.tsx
 msgid "Integrations"
 msgstr "Integrations"
+
+#: src/brain/sources-page.tsx
+msgctxt "a source of the Brain"
+msgid "Interview"
+msgstr "Interview"
 
 #. Something that has not happened yet, on a timeline
 #: src/brain/brain.ts
@@ -12449,6 +12462,10 @@ msgstr "Sign in to connect {name} now"
 msgid "Sign in to Grasp"
 msgstr "Sign in to Grasp"
 
+#: src/routes/interview.tsx
+msgid "Sign in to open your interview"
+msgstr "Sign in to open your interview"
+
 #: src/sign-in-options.tsx
 msgid "Sign in with {label}"
 msgstr "Sign in with {label}"
@@ -12459,6 +12476,7 @@ msgstr "Sign in with your organization's account."
 
 #: src/frame/person-menu.tsx
 #: src/routes/_shell.settings.security.tsx
+#: src/routes/interview.tsx
 #: src/routes/staff.tsx
 msgid "Sign out"
 msgstr "Sign out"
@@ -12533,6 +12551,10 @@ msgstr "Signing"
 #: src/connections/connect-dialog.tsx
 msgid "Signing in happens at {app}. It takes about a minute."
 msgstr "Signing in happens at {app}. It takes about a minute."
+
+#: src/routes/interview.tsx
+msgid "Signing in is recorded by your company's sign-in, as every sign-in is."
+msgstr "Signing in is recorded by your company's sign-in, as every sign-in is."
 
 #: src/frame/person-menu.tsx
 msgid "Signing out didn't work"
@@ -13356,6 +13378,10 @@ msgstr "Thank you. I’ve asked our team to add {asked}. For now, add those docu
 #: src/onboarding/connect-steps.tsx
 msgid "Thank you. I’ve asked our team to connect {name}. For now, check who leads which team."
 msgstr "Thank you. I’ve asked our team to connect {name}. For now, check who leads which team."
+
+#: src/routes/interview.tsx
+msgid "That account can't open this interview. Sign in with the work account your link was sent to."
+msgstr "That account can't open this interview. Sign in with the work account your link was sent to."
 
 #: src/sign-in-errors.ts
 msgid "That account isn't part of your organization."
@@ -14354,10 +14380,6 @@ msgstr "This file's text is too long for the Brain to keep. Split it into smalle
 msgid "This interview can't be opened"
 msgstr "This interview can't be opened"
 
-#: src/routes/interview.tsx
-msgid "This interview is open on another device"
-msgstr "This interview is open on another device"
-
 #: src/interview/composer.tsx
 msgid "This interview went on in another window. You now see that one."
 msgstr "This interview went on in another window. You now see that one."
@@ -15081,6 +15103,10 @@ msgstr "Use your organization’s account to go on."
 #: src/onboarding/ai-step.tsx
 msgid "Use your own key"
 msgstr "Use your own key"
+
+#: src/routes/interview.tsx
+msgid "Use your work account, the one your link was sent to."
+msgstr "Use your work account, the one your link was sent to."
 
 #: src/chat/thread.tsx
 msgid "Used {tool}"
@@ -15911,6 +15937,11 @@ msgstr "What you chose"
 msgid "What your chats with Grasp start with, and only yours: how you like to work, what you are responsible for."
 msgstr "What your chats with Grasp start with, and only yours: how you like to work, what you are responsible for."
 
+#: src/brain/sources-page.tsx
+msgctxt "a source of the Brain"
+msgid "What your team said"
+msgstr "What your team said"
+
 #: src/apps/app-workspace.tsx
 msgid "What your team sees"
 msgstr "What your team sees"
@@ -16647,6 +16678,10 @@ msgstr "You were asked this as the {owner}. Answer it in the brain: everyone in 
 #: src/interview/page.tsx
 msgid "You withdrew. Nothing you said is used from now on."
 msgstr "You withdrew. Nothing you said is used from now on."
+
+#: src/interview/page.tsx
+msgid "You withdrew. What the Brain kept of it is being removed."
+msgstr "You withdrew. What the Brain kept of it is being removed."
 
 #: src/interview/transcript.tsx
 #: src/routes/guest.tsx

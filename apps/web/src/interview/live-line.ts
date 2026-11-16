@@ -11,7 +11,7 @@ import { pcmBytes, transcriptionRate } from "./pcm.ts";
 // they say it over a WebSocket to core on the page's own origin
 // (`GET /api/transcription`), which relays it to the transcription
 // upstream; their words come back while they talk. Core takes the link's
-// secret and the device's key in the first frame, and picks the words to
+// secret in the first frame, and the session on the upgrade, and picks the words to
 // listen for itself. Only stretches of speech are sent, and a little
 // silence now and then, so the upstream doesn't hang up while nobody
 // speaks.
@@ -35,7 +35,7 @@ const readyMs = 10_000;
 /** What a live line is opened with. */
 export interface LiveLineOptions {
   locale: Locale;
-  link: { secret: string; key: string };
+  link: { secret: string };
   /** What is heard so far of the stretch being sent, all of it, every time there is more. */
   onPartial: (text: string) => void;
   /** The line is listening, or not any more. */

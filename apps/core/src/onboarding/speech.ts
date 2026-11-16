@@ -22,7 +22,8 @@ import { keepLine, keptLine, storedKeyOf } from "../speech-cache.ts";
 import type { SpokenKey } from "../speech-cache.ts";
 import { platformSpeech, speechModelOf } from "../speech.ts";
 import { auditStaffRoute } from "../staff-audit.ts";
-import { linkHeaders, linkRefusal } from "./links.ts";
+import { interviewCaller } from "./interview-caller.ts";
+import { linkHeaders, linkRefusal, noCallerRefusal } from "./links.ts";
 import { spokenOf } from "./spoken-lines.ts";
 import { adminWho, onboardingStore } from "./store.ts";
 import type { Took } from "./store.ts";
@@ -39,9 +40,9 @@ import type { Took } from "./store.ts";
 //
 // What it must not do, and what stops it:
 //
-// - Say lines for anyone: only someone's interview link, on the device it
-//   is open on, while it may be saved (the store's `speechOnLink`), or an
-//   admin signed in. A request from another site is refused, as no other
+// - Say lines for anyone: only someone's interview link, for the account
+//   it belongs to, signed in (interview-caller.ts), while it may be saved
+//   (the store's `speechOnLink`), or an admin signed in. A request from another site is refused, as no other
 //   site may spend an admin's voice.
 // - Tell the company who talked, and when: a line on a link is said by
 //   the system, never in anyone's name, as the interview's turns are; the
@@ -154,14 +155,20 @@ type Asked = NonNullable<Awaited<ReturnType<typeof requestOf>>>;
  * the link open, so no erasure lands between them (`speechOnLink`).
  */
 const onLink = async (
+  request: Request,
   env: Env,
   link: NonNullable<Asked["link"]>,
   stored: string,
   requestId: string
 ): Promise<Listener | Response> => {
+  // The session names whose interview it may be (interview-caller.ts).
+  const caller = await interviewCaller(env, request.headers);
+  if (typeof caller === "string") {
+    return noCallerRefusal(caller, requestId);
+  }
   const found = await onboardingStore(env).speechOnLink(
     await sha256Hex(link.secret),
-    await sha256Hex(link.key),
+    caller.account,
     stored,
     voiceBudgets.link
   );
@@ -382,7 +389,7 @@ export const speechResponse = async (
   const listener =
     asked.link === undefined
       ? await forAdmin(request, env, stored, requestId)
-      : await onLink(env, asked.link, stored, requestId);
+      : await onLink(request, env, asked.link, stored, requestId);
   if (listener instanceof Response) {
     return listener;
   }

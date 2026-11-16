@@ -30,7 +30,6 @@ export type SaveState =
 
 interface Kept {
   secret: string;
-  key: string;
   version: number;
   progress: InterviewProgress;
   /** A save on its way, and whether a change came in meanwhile. */
@@ -85,9 +84,9 @@ const setSaveState = (next: SaveState): void => {
 export const progressNow = (): InterviewProgress =>
   kept?.progress ?? freshProgress;
 
-/** The link and key this page holds, while it holds one. */
-export const linkNow = (): { secret: string; key: string } | null =>
-  kept === null ? null : { secret: kept.secret, key: kept.key };
+/** The link this page holds, while it holds one. */
+export const linkNow = (): { secret: string } | null =>
+  kept === null ? null : { secret: kept.secret };
 
 const saveOnce = async (mine: Kept): Promise<void> => {
   mine.dirty = false;
@@ -95,7 +94,6 @@ const saveOnce = async (mine: Kept): Promise<void> => {
   const answer = await saveProgress({
     action: "save",
     secret: mine.secret,
-    key: mine.key,
     version: mine.version,
     progress: sent,
   });
@@ -152,7 +150,7 @@ const approveOnce = async (mine: Kept): Promise<void> => {
     mine.approving = false;
     return;
   }
-  const answer = await approveFacts(mine.secret, mine.key, facts);
+  const answer = await approveFacts(mine.secret, facts);
   if (kept !== mine || mine.gone) {
     return;
   }
@@ -258,7 +256,6 @@ const onPageHide = (): void => {
     {
       action: "save",
       secret: mine.secret,
-      key: mine.key,
       version: mine.version,
       progress: mine.progress,
     },
@@ -266,15 +263,13 @@ const onPageHide = (): void => {
   );
 };
 
-/** The interview core holds for this link and device, from now on held here. */
+/** The interview core holds for this link, from now on held here. */
 export const holdInterview = ({
   secret,
-  key,
   version,
   progress,
 }: {
   secret: string;
-  key: string;
   version: number;
   progress: InterviewProgress | null;
 }): void => {
@@ -283,7 +278,6 @@ export const holdInterview = ({
   }
   kept = {
     secret,
-    key,
     version,
     progress: progress ?? freshProgress,
     saving: false,

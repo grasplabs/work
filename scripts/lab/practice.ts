@@ -105,8 +105,6 @@ const practicePersonSchema = z.object({
   /** Their id in the key. */
   employee: z.string(),
   name: z.string(),
-  /** The key of the device the lab opened their link on. */
-  key: z.string().optional(),
   /** When a model played them: how it went. */
   played: playedSchema.optional(),
 });
@@ -188,6 +186,13 @@ const teamNameOf = (key: AnswerKey): string => {
   return [...count].toSorted((a, b) => b[1] - a[1])[0]?.[0] ?? "Team";
 };
 
+/**
+ * The address a practice person signs in with on the local stack, at the
+ * stack's company domain: their link went to it, and only its account opens
+ * it (GRA-1790).
+ */
+export const practiceEmail = (id: string): string => `${id}@acme.test`;
+
 /** The roster of a practice company: the lead the lab adds, and everyone in the key. */
 const rosterOf = (
   key: AnswerKey,
@@ -210,7 +215,7 @@ const rosterOf = (
         {
           id: leadId,
           name: lead,
-          email: "",
+          email: practiceEmail(leadId),
           team,
           title: "Team lead",
           away: false,
@@ -218,7 +223,7 @@ const rosterOf = (
         ...key.employees.map((employee, at) => ({
           id: people[at]?.id ?? employee.id,
           name: employee.name,
-          email: "",
+          email: practiceEmail(people[at]?.id ?? employee.id),
           team,
           title: roleName(key, employee.role),
           away: false,
@@ -357,7 +362,7 @@ export const makePractice = async (
     throw new PracticeError("The lead has no link.");
   }
   await playInterview(
-    linkOn(leadLink),
+    linkOn(leadLink, practiceEmail(leadId)),
     modelPlayer(askerOf(core), lead, leadSystem(key, lead, locale)),
     { locale }
   );
