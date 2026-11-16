@@ -229,9 +229,14 @@ const setSaveState = (next: SaveState): void => {
 export const progressNow = (): InterviewProgress =>
   kept?.progress ?? freshProgress;
 
-/** The link this page holds, while it holds one. */
+/**
+ * The link this page holds, while it holds one and their session hasn't
+ * ended: everything said on the link goes by it (turns, stories, lines
+ * said, the ear), so nothing goes out while it is set aside, whatever
+ * answer lands meanwhile.
+ */
 export const linkNow = (): { secret: string } | null =>
-  kept === null ? null : { secret: kept.secret };
+  kept === null || kept.aside ? null : { secret: kept.secret };
 
 const saveOnce = async (mine: Kept): Promise<void> => {
   mine.dirty = false;
@@ -343,7 +348,9 @@ const approveOnce = async (mine: Kept): Promise<void> => {
     return;
   }
   const answer = await approveFacts(mine.secret, facts);
-  if (kept !== mine || mine.gone) {
+  if (kept !== mine || mine.gone || mine.aside) {
+    // Answered after their session ended: it changes nothing, here or in
+    // what waits in this tab, and nothing goes out for it.
     return;
   }
   if (isRefused(answer)) {
@@ -587,20 +594,25 @@ export const forgetUnsaved = (asked: Undone): void => {
 /**
  * Whether their session ended with something waiting under `draft`;
  * `talking`: they were talking as it ended; `unkept`: this tab refused to
- * keep what wasn't saved, so it is lost.
+ * keep what wasn't saved, so it is lost; `undone`: a delete or withdrawal
+ * they asked for as it ended, which didn't happen, and what wasn't saved
+ * was let go for it.
  */
 export const waitingAside = (
   draft: string
-): { talking: boolean; unkept: boolean } | null => {
+): { talking: boolean; unkept: boolean; undone: Undone | null } | null => {
   const mine = kept;
   if (mine !== null && mine.aside && mine.draft === draft) {
     return {
       talking: mine.progress.mode === "talk",
       unkept: mine.unkept && unsavedIn(mine),
+      undone: mine.undone,
     };
   }
   const aside = asideAt(draft);
-  return aside === null ? null : { talking: aside.talking, unkept: false };
+  return aside === null
+    ? null
+    : { talking: aside.talking, unkept: false, undone: aside.undone };
 };
 
 /** The page lets the interview go: nothing more is saved from it. */

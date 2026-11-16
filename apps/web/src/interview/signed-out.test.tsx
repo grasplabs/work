@@ -26,6 +26,7 @@ import { Route as interviewRoute } from "../routes/interview.tsx";
 import { draftName, hearRecording } from "./api.ts";
 import { releaseInterview } from "./kept.ts";
 import { loopEventName } from "./loop.ts";
+import { prepare, setSound } from "./speech.ts";
 
 // The interview page when the session behind it ends mid-interview
 // (GRA-1943): the company's gate opens, they signed out in another tab,
@@ -96,6 +97,20 @@ const readingBack: InterviewProgress = {
   wants: "readback",
 };
 
+/** At the read-back, its one part two lines long: Stephen tells it as a story. */
+const readingBackTwo: InterviewProgress = {
+  ...readingBack,
+  facts: [
+    ...readingBack.facts,
+    {
+      id: "f2",
+      tag: "system",
+      text: "You book it in Exact.",
+      record: "Book it in Exact.",
+    },
+  ],
+};
+
 /** Who the faked core finds signed in on the browser's cookie. */
 type Who = "them" | "someone else" | "nobody";
 
@@ -109,6 +124,8 @@ interface FakeCore {
   deleted: boolean;
   /** Its last day passed: nothing more is kept. */
   closed: boolean;
+  /** The company paused the interviews: the link opens nothing for now. */
+  paused: boolean;
   /** Saves fail on core's side, and are tried again. */
   failing: boolean;
   /** Approvals fail on core's side, and are tried again. */
@@ -265,6 +282,7 @@ const fakeCore = (progress: InterviewProgress): FakeCore => {
     withdrawn: false,
     deleted: false,
     closed: false,
+    paused: false,
     failing: false,
     approveFailing: false,
     turnFacts: [],
@@ -281,16 +299,22 @@ const fakeCore = (progress: InterviewProgress): FakeCore => {
     const path = new URL(input, "https://grasp.test").pathname;
     const sent = typeof init?.body === "string" ? init.body : "{}";
     const body = sentSchema.parse(JSON.parse(sent));
-    core.calls.push({ path, action: body.action, who: core.who });
+    // Whose session it is, as the call was sent: a call held on its way
+    // is answered for whoever sent it.
+    const { who } = core;
+    core.calls.push({ path, action: body.action, who });
     await core.holding[body.action ?? path];
+    if (who === "nobody") {
+      return refusal(401, "interview.sign_in");
+    }
+    if (who === "someone else") {
+      return refusal(404, "interview.link_invalid");
+    }
     if (path === "/api/speech") {
       return Response.json({ code: "speech.unavailable" }, { status: 503 });
     }
-    if (core.who === "nobody") {
-      return refusal(401, "interview.sign_in");
-    }
-    if (core.who === "someone else") {
-      return refusal(404, "interview.link_invalid");
+    if (core.paused) {
+      return refusal(423, "interview.paused");
     }
     if (path === "/api/interview/turn") {
       return turnStream(core.turnFacts);
@@ -510,6 +534,38 @@ const callsSince = (core: FakeCore, from: number) =>
     action: action ?? path,
     who,
   }));
+
+/** What waits in the tab, read as the page writes it: its version, the copy and the box. */
+const asideSchemaOf = (raw: string) => {
+  const parsed = z
+    .object({
+      version: z.int(),
+      progress: z.unknown(),
+      typed: z.string(),
+    })
+    .parse(JSON.parse(raw.slice(raw.indexOf("=") + 1)));
+  return {
+    version: parsed.version,
+    progress: parsed.progress,
+    typed: parsed.typed,
+  };
+};
+
+/** The page's audio, faked for lines said out loud: a level meter, and no sound. */
+const audioContext = {
+  destination: {},
+  createAnalyser: () => ({
+    fftSize: 1024,
+    connect: (): void => {
+      // Nothing to hear it.
+    },
+  }),
+};
+
+/** `new AudioContext()`, faked: it gives the faked context. */
+const FakeAudioContext = function FakeAudioContext(): typeof audioContext {
+  return audioContext;
+};
 
 /** Counts the conversation's starts on this page, as the loop tells them. */
 const countLoopStarts = (): { count: number; stop: () => void } => {
@@ -836,6 +892,7 @@ describe("the interview page when its session ends mid-interview", () => {
     core.who = "nobody";
     await press("Delete it");
     await until(() => text().includes(signInAgain), "the sign-in again");
+    const signInSaid = text();
     core.who = "them";
     const before = core.calls.length;
     await backSignedIn();
@@ -853,7 +910,18 @@ describe("the interview page when its session ends mid-interview", () => {
       said: text().includes(
         "Your sign-in had ended, so your interview wasn't deleted: delete it again if you still want to."
       ),
-    }).toStrictEqual({ saves: 0, stored: "", said: true });
+      signIn: {
+        notDeleted: signInSaid.includes(
+          "Your sign-in ended, so your interview wasn't deleted and what wasn't saved yet wasn't kept: sign in again with your work account to delete it."
+        ),
+        keptHere: signInSaid.includes("is kept in this window"),
+      },
+    }).toStrictEqual({
+      saves: 0,
+      stored: "",
+      said: true,
+      signIn: { notDeleted: true, keptHere: false },
+    });
   });
 
   it("saves nothing of their interview back once they are back after asking to withdraw as it ended, and says they didn't withdraw", async () => {
@@ -881,6 +949,7 @@ describe("the interview page when its session ends mid-interview", () => {
     core.who = "nobody";
     await press("Withdraw instead");
     await until(() => text().includes(signInAgain), "the sign-in again");
+    const signInSaid = text();
     core.who = "them";
     const before = core.calls.length;
     await backSignedIn();
@@ -898,7 +967,19 @@ describe("the interview page when its session ends mid-interview", () => {
       said: text().includes(
         "Your sign-in had ended, so you didn't withdraw: withdraw again if you still want to."
       ),
-    }).toStrictEqual({ saves: [], withdrawn: false, stored: "", said: true });
+      signIn: {
+        notWithdrawn: signInSaid.includes(
+          "Your sign-in ended, so you didn't withdraw and what wasn't saved yet wasn't kept: sign in again with your work account to withdraw."
+        ),
+        keptHere: signInSaid.includes("is kept in this window"),
+      },
+    }).toStrictEqual({
+      saves: [],
+      withdrawn: false,
+      stored: "",
+      said: true,
+      signIn: { notWithdrawn: true, keptHere: false },
+    });
   });
 
   it("keeps nothing of this window when another window goes on between opening the link and its first save, and says so", async () => {
@@ -1142,5 +1223,224 @@ describe("the interview page when its session ends mid-interview", () => {
     const waiting = stored();
     release();
     expect(waiting).toContain("Said while a save was on its way.");
+  });
+
+  it("changes nothing, here or in what waits, when an approval's answer lands after their session ended", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const core = fakeCore(readingBack);
+    // Core answers the approval with its own copy, in the conversation
+    // again: another window pressed "Add something" meanwhile.
+    const answerApproval = hold(core, "approve");
+    const inner = globalThis.fetch;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string, init?: RequestInit) => {
+        const sent = typeof init?.body === "string" ? init.body : "{}";
+        const answer = await inner(input, init);
+        return sent.includes('"action":"approve"') && answer.ok
+          ? Response.json({
+              approved: false,
+              version: core.version + 3,
+              progress: typing,
+            })
+          : answer;
+      })
+    );
+    const loops = countLoopStarts();
+    await load(`#${secret}`);
+    await until(
+      () => buttonNamed("Yes, that’s correct") !== undefined,
+      "the read-back"
+    );
+    await until(() => loops.count > 0, "the conversation");
+    await press("Yes, that’s correct");
+    await until(
+      () => core.calls.some(({ action }) => action === "approve"),
+      "the approval on its way"
+    );
+    core.who = "nobody";
+    const showSignIn = hold(core, "session");
+    await heard();
+    const waited = stored();
+    const before = core.calls.length;
+    const startedBefore = loops.count;
+    answerApproval();
+    // Past the moment a conversation starts again, and his first turn.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+    const meanwhile = {
+      sent: callsSince(core, before),
+      restarted: loops.count - startedBefore,
+      stored: stored(),
+      elsewhere: text().includes("This interview went on in another window."),
+    };
+    showSignIn();
+    await until(() => text().includes(signInAgain), "the sign-in again");
+    loops.stop();
+    expect(meanwhile).toStrictEqual({
+      sent: [],
+      restarted: 0,
+      stored: waited,
+      elsewhere: false,
+    });
+  });
+
+  it("keeps nothing of the interview in the tab's storage while their session lasts", async () => {
+    const core = fakeCore(typing);
+    await inConversation();
+    await type("I check it in Exact.");
+    await press("Send");
+    await until(() => core.kept.length > 0, "what they said, kept");
+    await type("Half an answer");
+    expect(stored()).toBe("");
+  });
+
+  it("waits on from a save that lands just after their session ended: only what changed since, at the version it made", async () => {
+    const core = fakeCore(typing);
+    await inConversation();
+    const land = hold(core, "save");
+    await type("Said as the save went out.");
+    await press("Send");
+    await until(
+      () => core.calls.some(({ action }) => action === "save"),
+      "the save on its way"
+    );
+    core.who = "nobody";
+    await heard();
+    await until(() => text().includes(signInAgain), "the sign-in again");
+    land();
+    await until(() => core.kept.length > 0, "the save, landed");
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const waiting = asideSchemaOf(stored());
+    expect(waiting).toStrictEqual({
+      version: core.version,
+      progress: null,
+      typed: "",
+    });
+  });
+
+  it("says nothing of a delete that didn't happen once the interview changed while they were away", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const core = fakeCore(finishedTalking);
+    await load(`#${secret}`);
+    await act(async () => {
+      buttonNamed("Delete my interview")?.dispatchEvent(
+        new PointerEvent("pointerdown", { bubbles: true })
+      );
+      await vi.advanceTimersByTimeAsync(4000);
+    });
+    await until(() => buttonNamed("Delete it") !== undefined, "Delete it");
+    core.who = "nobody";
+    await press("Delete it");
+    await until(() => text().includes(signInAgain), "the sign-in again");
+    // Deleted in another window meanwhile.
+    core.progress = null;
+    core.version += 1;
+    core.who = "them";
+    await backSignedIn();
+    await until(() => text().includes("Which language"), "the interview, anew");
+    expect(text()).not.toContain("wasn't deleted");
+  });
+
+  it("keeps what waits while the link refuses for now (paused), and keeps it once it opens", async () => {
+    const core = fakeCore(typing);
+    await endedSending(core, "Said before the pause.");
+    core.paused = true;
+    core.who = "them";
+    await backSignedIn();
+    await until(
+      () => text().includes("This interview can't be opened"),
+      "the pause"
+    );
+    const whilePaused = stored().includes("Said before the pause.");
+    core.paused = false;
+    await backSignedIn();
+    await until(
+      () =>
+        linesKept(core).some((said) => said.includes("Said before the pause.")),
+      "what waited, kept"
+    );
+    expect(whilePaused).toBeTruthy();
+  });
+
+  it("asks them to sign in again when his turn finds the session ended, before anything else is sent", async () => {
+    const core = fakeCore(typing);
+    await inConversation();
+    core.who = "nobody";
+    const before = core.calls.length;
+    await type("I check it in Exact.");
+    await press("Send");
+    await until(() => text().includes(signInAgain), "the sign-in again");
+    expect(callsSince(core, before)).toStrictEqual([
+      { action: "/api/interview/turn", who: "nobody" },
+      { action: "session", who: "nobody" },
+    ]);
+  });
+
+  it("asks them to sign in again when a part's story finds the session ended", async () => {
+    const core = fakeCore(readingBackTwo);
+    afterOpen(() => {
+      core.who = "nobody";
+    });
+    await load(`#${secret}`);
+    await until(() => text().includes(signInAgain), "the sign-in again");
+    expect(callsSince(core, 1)).toStrictEqual([
+      { action: "/api/interview/story", who: "nobody" },
+      { action: "session", who: "nobody" },
+    ]);
+  });
+
+  it("asks them to sign in again when a line said finds the session ended, and asks for no line still waiting", async () => {
+    const core = fakeCore(typing);
+    await inConversation();
+    vi.stubGlobal("AudioContext", FakeAudioContext);
+    setSound(true);
+    core.who = "nobody";
+    const before = core.calls.length;
+    const voicing = { speaker: "stephen", tone: null } as const;
+    await act(async () => {
+      for (const line of ["One.", "Two.", "Three.", "Four."]) {
+        prepare(line, voicing);
+      }
+      await Promise.resolve();
+    });
+    await until(() => text().includes(signInAgain), "the sign-in again");
+    setSound(false);
+    expect(
+      callsSince(core, before).filter(({ action }) => action === "/api/speech")
+    ).toStrictEqual([
+      { action: "/api/speech", who: "nobody" },
+      { action: "/api/speech", who: "nobody" },
+    ]);
+  });
+
+  it("goes on with the conversation when the link opens again on a new session before the sign-in shows", async () => {
+    const core = fakeCore(typing);
+    const loops = countLoopStarts();
+    await inConversation();
+    core.who = "nobody";
+    const reopen = hold(core, "session");
+    await heard();
+    // They signed in again in another tab meanwhile.
+    core.who = "them";
+    reopen();
+    await until(() => loops.count > 1, "the conversation, again");
+    await until(() => answerBox() !== null, "the answer box");
+    const before = core.calls.length;
+    await type("Back from the other tab.");
+    await press("Send");
+    await until(
+      () =>
+        callsSince(core, before).some(
+          ({ action, who }) =>
+            action === "/api/interview/turn" && who === "them"
+        ),
+      "his turn, asked"
+    );
+    loops.stop();
+    expect(text()).not.toContain(signInAgain);
   });
 });

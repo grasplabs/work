@@ -27,6 +27,7 @@ import {
   setAside,
   waitingAside,
 } from "../interview/kept.ts";
+import type { Undone } from "../interview/kept.ts";
 import { stopLoop } from "../interview/loop.ts";
 import { InterviewPage } from "../interview/page.tsx";
 import { signInErrorMessage, signInErrorSearch } from "../sign-in-errors.ts";
@@ -52,6 +53,8 @@ import { SignInOptions } from "../sign-in-options.tsx";
 interface Again {
   talking: boolean;
   unkept: boolean;
+  /** A delete or withdrawal asked for as it ended, which didn't happen. */
+  undone: Undone | null;
 }
 
 /** What the page shows, and the secret it was opened with. */
@@ -78,7 +81,17 @@ type Page =
        */
       again: Again | null;
     }
-  | { state: "open"; secret: string; session: OpenSession };
+  | {
+      state: "open";
+      secret: string;
+      session: OpenSession;
+      /**
+       * Which opening of the link on this page: opened again on a new
+       * session (signed in again elsewhere before the sign-in showed), the
+       * interview starts afresh from what core holds, its conversation too.
+       */
+      opening: number;
+    };
 
 /** Refusals of a link that may still open as it is later: what waits in this tab for it stays. */
 const passingRefusals = new Set([
@@ -90,6 +103,9 @@ const passingRefusals = new Set([
 /** Whether the link may still open as it is: core paused it, it isn't open yet, or core was out of reach. */
 const refusalPasses = ({ status, code }: Refused): boolean =>
   status === 0 || status >= 500 || passingRefusals.has(code ?? "");
+
+/** How often this page opened a link: each opening is held afresh. */
+let openings = 0;
 
 /** Opens the link for whoever is signed in, or asks them to sign in. */
 const opened = async (secret: string, core: CoreConnection): Promise<Page> => {
@@ -142,7 +158,8 @@ const opened = async (secret: string, core: CoreConnection): Promise<Page> => {
     withdrawn: answer.withdrawn,
     closed: answer.closed,
   });
-  return { state: "open", secret, session: answer };
+  openings += 1;
+  return { state: "open", secret, session: answer, opening: openings };
 };
 
 /**
@@ -272,7 +289,11 @@ const SignIn = ({
 }) => {
   const { t } = useLingui();
   let message = t`Use your work account, the one your link was sent to.`;
-  if (again?.unkept === true) {
+  if (again?.undone === "delete") {
+    message = t`Your sign-in ended, so your interview wasn't deleted and what wasn't saved yet wasn't kept: sign in again with your work account to delete it.`;
+  } else if (again?.undone === "withdraw") {
+    message = t`Your sign-in ended, so you didn't withdraw and what wasn't saved yet wasn't kept: sign in again with your work account to withdraw.`;
+  } else if (again?.unkept === true) {
     message = t`Your sign-in ended. Sign in again with your work account to go on where you were. This window couldn't keep what wasn't saved yet, so it is lost.`;
   } else if (again !== null) {
     message = t`Your sign-in ended. Sign in again with your work account to go on where you were. What isn't saved yet is kept in this window until then.`;
@@ -382,7 +403,12 @@ const Interview = () => {
       );
     }
     case "open": {
-      return <InterviewPage key={shown.secret} session={shown.session} />;
+      return (
+        <InterviewPage
+          key={`${shown.secret}:${shown.opening}`}
+          session={shown.session}
+        />
+      );
     }
     default: {
       return shown satisfies never;
