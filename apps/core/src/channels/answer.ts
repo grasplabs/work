@@ -5,10 +5,9 @@ import { permissionErrors } from "@grasp-os/shared/permissions";
 import type { SentMessage, Thread } from "chat";
 import { z } from "zod";
 
-import { signInConfig } from "../auth/config.ts";
 import { chatAgentId, personalWorkspaceId } from "../chats-rpc.ts";
 import { workspace } from "../durable-objects.ts";
-import { answerCard, draftCard, heldWritesCard, lineCard } from "./cards.tsx";
+import { answerCards, draftCard, heldWritesCard, lineCard } from "./cards.tsx";
 import {
   offerConnectOwn,
   ownMicrosoftNeed,
@@ -17,7 +16,7 @@ import {
 import type { Conversation } from "./connect-own.ts";
 import type { ChannelHandoff, ChannelMessage } from "./door.ts";
 import { checkOf, inertView, turnHeldWrites } from "./held.ts";
-import { inTeams, inertOn } from "./inert.ts";
+import { inTeams } from "./inert.ts";
 import { sortRequest } from "./request-sorting.ts";
 import { countAnswered, countSignal } from "./signals.ts";
 import type { ChannelSignal } from "./signals.ts";
@@ -358,8 +357,9 @@ const cardIn = (
 
 /**
  * One question asked in the person's chat for `platform`, and its answer
- * on one card with its thumbs: written into it as the model writes it in a
- * Teams direct message, otherwise posted whole once it is done.
+ * on as many cards as it takes, the thumbs under the last: the first
+ * written into as the model writes it in a Teams direct message, the rest
+ * posted after it once it is done; otherwise all posted once it is done.
  */
 const answerOne = async (
   env: Env,
@@ -435,8 +435,6 @@ const answerOne = async (
   const { chatId, answer, calls } = asked;
   const answered = answer.outcome === "answered";
   const final = answer.answer.trim();
-  // As the platform shows it, inert (inert.ts).
-  const posted = inertOn(platform)(final);
   if (!answered || final === "") {
     log.warn("channel.turn_failed", { platform, outcome: answer.outcome });
     await countSignal(env, platform, "failed");
@@ -473,15 +471,6 @@ const answerOne = async (
   const timed = async () => {
     await countAnswered(env, platform, Date.now() - startedAt);
   };
-  const origin = signInConfig(env)?.origin;
-  if (origin === undefined) {
-    await deliver(answerCard({ locale, text: posted, rate }));
-    await timed();
-    await offers();
-    await recorded();
-    return;
-  }
-  const chatUrl = `${origin}/?chat=${encodeURIComponent(chatId)}`;
   // Without their own Microsoft 365 he answered from what the company
   // shared alone: once a day, he offers to connect it, in their direct
   // message alone. What he carries on with once they have answers there
@@ -517,11 +506,36 @@ const answerOne = async (
         locale,
         writes: writes.map((write) => inertView(platform, write)),
         ...(check === undefined ? {} : { check }),
-        openUrl: chatUrl,
       })
     );
   });
-  await deliver(answerCard({ locale, text: posted, chatUrl, rate }));
+  // Whole and inert, in as many cards as it takes (`answerCards`): the
+  // first as the card it was written into, where there is one, the rest
+  // posted after it in order, the thumbs under the last. A part the
+  // platform refuses ends it with the line that something went wrong,
+  // and the held writes still get their card, which no page of Grasp
+  // shows, and the turn is still kept, before what posting threw.
+  const [first, ...rest] = answerCards({ locale, text: final, platform, rate });
+  try {
+    if (first !== undefined) {
+      await deliver(first);
+    }
+    for (const part of rest) {
+      // oxlint-disable-next-line no-await-in-loop -- in order
+      await postIn(env, platform, thread, part);
+    }
+  } catch (error) {
+    try {
+      // Not counted again: the answer's own failure is (`postIn`).
+      await quietly("failed_line", async () => {
+        await thread.post(say("failed", locale));
+      })();
+      await held();
+    } finally {
+      await recorded();
+    }
+    throw error;
+  }
   await timed();
   await held();
   await offers();

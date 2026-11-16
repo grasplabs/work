@@ -12,6 +12,7 @@ import { z } from "zod";
 
 import worker from "../src/index.ts";
 import {
+  botConnectorFailOnceUrl,
   botConnectorMembersUrl,
   botConnectorPostedUrl,
   botConnectorUninstallUrl,
@@ -272,6 +273,17 @@ export const uninstalledFor = async (person: TeamsPerson): Promise<void> => {
   await providers().fetch(botConnectorUninstallUrl, {
     method: "POST",
     body: JSON.stringify({ conversation: person.conversation }),
+  });
+};
+
+/** Teams fails, once, the next post in `conversation` holding `holding`. */
+export const failsOnce = async (
+  conversation: string,
+  holding: string
+): Promise<void> => {
+  await providers().fetch(botConnectorFailOnceUrl, {
+    method: "POST",
+    body: JSON.stringify({ conversation, holding }),
   });
 };
 
