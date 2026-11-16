@@ -85,7 +85,7 @@ describe("a person's own agent offered to the company", slow, () => {
     });
   });
 
-  it("is taken on by the company's own admin as one that reaches nobody and may do nothing yet, with what its owner gave it, and its owner no longer changes it", async () => {
+  it("is taken on by the company's own admin as one that reaches nobody and may do nothing yet, on though its owner paused it, with what its owner gave it, and its owner no longer changes it", async () => {
     const ann = await signedInApi(idp, "user");
     const user = await signedInApi(idp, "user");
     const admin = await signedInApi(idp, "admin");
@@ -94,6 +94,7 @@ describe("a person's own agent offered to the company", slow, () => {
       name: "style.md",
       bytes: utf8("Short."),
     });
+    await ann.api.connections.setAgentPaused(mine.id, true);
     await ann.api.connections.offerOwnAgent(mine.id, true);
 
     const byUser = await outcome(user.api.connections.adoptAgent(mine.id));
@@ -122,6 +123,10 @@ describe("a person's own agent offered to the company", slow, () => {
       ownerChanges: await outcome(
         ann.api.connections.changeAgent(mine.id, said("Mine again"))
       ),
+      ownerRemoves: await outcome(
+        ann.api.connections.removeAgentDocument(mine.id, documents[0]?.id ?? "")
+      ),
+      ownerDeletes: await outcome(ann.api.connections.deleteAgent(mine.id)),
       again: await outcome(admin.api.connections.adoptAgent(mine.id)),
     }).toStrictEqual({
       byUser: "role.forbidden",
@@ -131,7 +136,33 @@ describe("a person's own agent offered to the company", slow, () => {
       documents: ["style.md"],
       ownersNow: [],
       ownerChanges: "role.forbidden",
+      ownerRemoves: "role.forbidden",
+      ownerDeletes: "role.forbidden",
       again: "agent.not_offered",
+    });
+  });
+
+  it("keeps what an admin gave the agent it took on when a later call to take it on comes in", async () => {
+    const ann = await signedInApi(idp, "user");
+    const admin = await signedInApi(idp, "admin");
+    const mine = await ann.api.connections.makeOwnAgent(said("Scribe"));
+    await ann.api.connections.offerOwnAgent(mine.id, true);
+    await admin.api.connections.adoptAgent(mine.id);
+    await admin.api.connections.setAgentToolClass(mine.id, "read-own", {
+      who: "everyone",
+    });
+
+    const again = await outcome(admin.api.connections.adoptAgent(mine.id));
+    const settings = await admin.api.connections.agentSettings(mine.id);
+
+    expect({
+      again,
+      readOwn: settings.classes.find(
+        ({ toolClass }) => toolClass === "read-own"
+      )?.audience,
+    }).toStrictEqual({
+      again: "agent.not_offered",
+      readOwn: { who: "everyone" },
     });
   });
 

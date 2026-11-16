@@ -9483,8 +9483,8 @@ msgid "Offer to the company"
 msgstr "Aan het bedrijf aanbieden"
 
 #: src/agents/agent-share.tsx
-msgid "Offered on {since}. Your company's admins can now read what {name} is told and the documents it has, and may take it on."
-msgstr "Aangeboden op {since}. De beheerders van je bedrijf kunnen nu lezen wat {name} wordt verteld en welke documenten hij heeft, en hem overnemen."
+msgid "Offered on {since}. Your company's admins can now read what {name} is told, and may take it on."
+msgstr "Aangeboden op {since}. De beheerders van jullie bedrijf kunnen nu lezen wat {name} wordt verteld, en het overnemen."
 
 #: src/agents/agent-share.tsx
 msgid "Offered to the company"

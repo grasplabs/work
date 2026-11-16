@@ -565,24 +565,39 @@ export const deleteAgent = async (
   const by = { changedBy: identity.userId, changedAt: new Date() };
   const nobody = { who: "nobody" as const, teams: "[]" };
   const db = drizzle(env.DB);
+  // Every write only while the agent is still whose it was when checked:
+  // one the company adopted meanwhile is no longer its former owner's.
+  const stillWhose = sql`EXISTS (SELECT 1 FROM ${agents} WHERE ${agents.id} = ${agent.id} AND ${ownedBy(agent.ownerId)})`;
   await auditedBatch(env, db, [
     db
       .update(agentReach)
       .set({ on: false, ...nobody, ...by })
-      .where(eq(agentReach.agentId, agent.id)),
+      .where(and(eq(agentReach.agentId, agent.id), stillWhose)),
     db
       .update(agentToolClasses)
       .set({ ...nobody, ...by })
-      .where(eq(agentToolClasses.agentId, agent.id)),
-    db.delete(agentPlaces).where(eq(agentPlaces.agentId, agent.id)),
-    db.delete(agentWakes).where(eq(agentWakes.agentId, agent.id)),
-    db.delete(agentDocuments).where(eq(agentDocuments.agentId, agent.id)),
+      .where(and(eq(agentToolClasses.agentId, agent.id), stillWhose)),
+    db
+      .delete(agentPlaces)
+      .where(and(eq(agentPlaces.agentId, agent.id), stillWhose)),
+    db
+      .delete(agentWakes)
+      .where(and(eq(agentWakes.agentId, agent.id), stillWhose)),
+    db
+      .delete(agentDocuments)
+      .where(and(eq(agentDocuments.agentId, agent.id), stillWhose)),
     // Last before the event, which is recorded only if this changed a
     // row: an agent deleted twice at once is recorded once.
     db
       .update(agents)
       .set({ state: "deleted", nameKey: null, ...by })
-      .where(and(eq(agents.id, agent.id), ne(agents.state, "deleted"))),
+      .where(
+        and(
+          eq(agents.id, agent.id),
+          ne(agents.state, "deleted"),
+          ownedBy(agent.ownerId)
+        )
+      ),
     outboxedIfChanged(db, {
       actor: actorOf(identity),
       action: "agent.deleted",
@@ -867,32 +882,20 @@ export const adoptAgent = async (
   const now = new Date();
   const by = { changedBy: identity.userId, changedAt: now };
   const db = drizzle(env.DB);
-  const isCompanys = sql`EXISTS (SELECT 1 FROM ${agents} WHERE ${agents.id} = ${agent.id} AND ${agents.ownerId} IS NULL AND ${agents.state} IS NOT 'deleted')`;
+  // Still offered by its owner, under the name checked: what this call
+  // adopts. Every write rests on it, before the agent changes, so a later
+  // call, or one after a rename, writes nothing.
+  const stillOffered = and(
+    eq(agents.id, agent.id),
+    notDeleted,
+    ownedBy(agent.ownerId),
+    isNotNull(agents.offeredAt),
+    eq(agents.name, agent.name)
+  );
+  const isCompanys = sql`EXISTS (SELECT 1 FROM ${agents} WHERE ${stillOffered})`;
   await namedOnce(
     async () =>
       await auditedBatch(env, db, [
-        db
-          .update(agents)
-          .set({
-            ownerId: null,
-            offeredAt: null,
-            nameKey: agentNameKey(agent.name),
-            ...by,
-          })
-          .where(
-            and(
-              eq(agents.id, agent.id),
-              notDeleted,
-              ownedBy(agent.ownerId),
-              isNotNull(agents.offeredAt)
-            )
-          ),
-        outboxedIfChanged(db, {
-          actor: actorOf(identity),
-          action: "agent.adopted",
-          target: { type: "agent", id: agent.id },
-          detail: detailOf({ ...agent, model: agent.model }),
-        }),
         // Reaching nobody, every class for nobody: as a new agent starts.
         db
           .insert(agentReach)
@@ -915,6 +918,23 @@ export const adoptAgent = async (
               set: { who: "nobody", teams: "[]", ...by },
             })
         ),
+        // On, as the company's agents start: an owner's pause is theirs.
+        db
+          .update(agents)
+          .set({
+            ownerId: null,
+            offeredAt: null,
+            state: "on",
+            nameKey: agentNameKey(agent.name),
+            ...by,
+          })
+          .where(stillOffered),
+        outboxedIfChanged(db, {
+          actor: actorOf(identity),
+          action: "agent.adopted",
+          target: { type: "agent", id: agent.id },
+          detail: detailOf({ ...agent, model: agent.model }),
+        }),
       ])
   );
   const after = await readAgent(env, agent.id);

@@ -5,6 +5,7 @@ import { Card } from "@grasp-os/ui/components/card";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { useRouter } from "@tanstack/react-router";
 
+import { changeThenRefresh } from "../change-then-refresh.ts";
 import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
 import { SettingsSection } from "../settings/settings-parts.tsx";
@@ -65,7 +66,7 @@ export const ShareAgent = ({
       }
       description={
         offered
-          ? t`Offered on ${since}. Your company's admins can now read what ${name} is told and the documents it has, and may take it on.`
+          ? t`Offered on ${since}. Your company's admins can now read what ${name} is told, and may take it on.`
           : t`Offer ${name} to your company's admins. If they take it on, it becomes one of the company's agents: they choose who may ask it and what it may do, and you no longer change it.`
       }
       title={t`Share with the company`}
@@ -100,10 +101,17 @@ export const OfferedAgents = ({
   };
   const decide = (agentId: string, adopt: boolean): void => {
     void run(async (session) => {
-      await (adopt
-        ? session.connections.adoptAgent(agentId)
-        : session.connections.declineAgent(agentId));
-      await router.invalidate({ sync: true });
+      // Read again however it ends: another admin may have decided first.
+      await changeThenRefresh(
+        async () => {
+          await (adopt
+            ? session.connections.adoptAgent(agentId)
+            : session.connections.declineAgent(agentId));
+        },
+        async () => {
+          await router.invalidate({ sync: true });
+        }
+      );
     });
   };
   return (
