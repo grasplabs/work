@@ -6,11 +6,11 @@ import {
   agentIdSchema,
   appIdSchema,
   chatIdSchema,
-  collectionIdSchema,
   connectionIdSchema,
   identifierMaxLength,
   identifierSchema,
   runIdSchema,
+  teamIdSchema,
   triggerIdSchema,
   workflowResourceIdSchema,
   workspaceIdSchema,
@@ -113,11 +113,26 @@ export type PermissionSubjectType = PermissionSubject["type"];
 /** A subject as a client sends it, with a plain string ID. */
 export type PermissionSubjectInput = z.input<typeof permissionSubjectSchema>;
 
-/** A Knowledge collection, as a permission's object. */
-const collectionObjectSchema = z.strictObject({
-  type: z.literal("collection"),
-  collectionId: collectionIdSchema,
-});
+/**
+ * Most teams one `brain` permission names: the Brain reads as at most
+ * 1,000 groups (`readerGroupsMax` in `@grasp-os/brain-next/contract`), and
+ * the company is always one of them.
+ */
+export const brainTeamsMax = 999;
+
+/**
+ * The teams an App's `brain` permission names: what a request may name,
+ * and the only shape core reads back from storage (core's
+ * brain-grant-teams.ts). Team IDs, at least one, at most `brainTeamsMax`,
+ * each once.
+ */
+export const brainTeamsSchema = z
+  .array(teamIdSchema)
+  .min(1)
+  .max(brainTeamsMax)
+  .refine((teams) => new Set(teams).size === teams.length, {
+    message: "Each team once",
+  });
 
 /**
  * What the platform itself offers an App, as a permission's object, one
@@ -139,12 +154,22 @@ const collectionObjectSchema = z.strictObject({
  *   (remember, proposals) will be an action of its own, with its own
  *   consent, so an approved read grant never gains writes.
  */
-const platformObjectSchema = z.strictObject({ type: z.literal("platform") });
+const platformObjectSchema = z.strictObject({
+  type: z.literal("platform"),
+  /**
+   * The teams an App's `brain` permission reaches beyond what everyone in
+   * the company may read, by ID (a rename changes nothing): its recall
+   * reads, of these, the teams the person it acts for is in, and the App
+   * is shared only with people in all of them (core's brain-recall.ts and
+   * app-provenance.ts). Absent, it reaches the company alone. At most
+   * `brainTeamsMax`, each once; only on an App's `brain` permission.
+   */
+  teams: brainTeamsSchema.optional(),
+});
 
 /**
  * What a permission gives access to: a connection (all of it, or one
- * resource in it, such as one mailbox), a Knowledge collection, an
- * independent workflow (to follow its runs, `read`, start it, `start`,
+ * resource in it, such as one mailbox), an independent workflow (to follow its runs, `read`, start it, `start`,
  * or send events to its runs, `send`, which neither of the others
  * implies), an App's sealed functions, for an agent (reading with
  * `read`, writing with `write`: core's agent-apps.ts), one of an App's
@@ -159,7 +184,6 @@ export const permissionObjectSchema = z.discriminatedUnion("type", [
     /** One resource in the connection; absent means the whole connection. */
     resource: identifierSchema.optional(),
   }),
-  collectionObjectSchema,
   z.strictObject({
     type: z.literal("workflow"),
     workflowId: workflowResourceIdSchema,
@@ -186,9 +210,8 @@ export type PermissionObjectType = PermissionObject["type"];
  */
 const connectionActionPattern = /^[A-Za-z][\w.-]{0,63}$/u;
 
-/** The actions of collections and workflows, fixed by the platform. */
+/** The actions of workflows and the platform, fixed by the platform. */
 const platformActions = {
-  collection: ["read", "write"],
   workflow: ["read", "start", "send"],
   platform: ["statistics", "guests", "brain"],
 } as const;
@@ -261,6 +284,8 @@ const platformBindingNames: ReadonlySet<string> = new Set([
   "DATA_STORES",
   "DB",
   "DEV_SKIP_ROUTER_SECRET",
+  // Who follows an App's or workflow's draft (core's src/draft-watch.ts).
+  "DRAFT_WATCHES",
   "DURABLE_OBJECT_JURISDICTION",
   "EMAIL",
   // Our own embedding model's objects (core's src/embedder.ts).
@@ -405,6 +430,18 @@ const checkGrant = (
       message: "A platform permission has one action",
     });
   }
+  // Only the Brain is read as far as teams go.
+  if (
+    object.type === "platform" &&
+    object.teams !== undefined &&
+    !actions.includes("brain")
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["object", "teams"],
+      message: "Only a permission to read the Brain names teams",
+    });
+  }
   // The audit log records the actions as one identifier-sized value.
   if (actions.join(" ").length > identifierMaxLength) {
     context.addIssue({
@@ -425,30 +462,26 @@ export type PermissionRequest = z.input<typeof permissionRequestSchema>;
 /**
  * A permission a blueprint declares (a built-in's `blueprint.json`, or
  * what its App asked for as it was marked): a request without its
- * subject, which is every App created from it. Only a collection (for a
- * built-in, one it declares: `declaredCollectionSchema` in
- * `@grasp-os/shared/knowledge`), or what the platform offers (its
- * statistics, guest chats): the things that name the same thing for
- * whoever creates from it, where a connection is someone's or set up for
- * one App, and a workflow or exports name an App its creator may not see.
- * A collection only to read: an App never writes one (it keeps what it
- * writes in its own store), so `write` would give it nothing.
+ * subject, which is every App created from it. Only what the platform
+ * offers (its statistics, guest chats, the Brain): the thing that names
+ * the same for whoever creates from it, where a connection is someone's
+ * or set up for one App, and a workflow or exports name an App its
+ * creator may not see.
  */
 export const declaredPermissionSchema = z
   .strictObject({
     ...grantShape,
-    object: z.discriminatedUnion("type", [
-      collectionObjectSchema,
-      platformObjectSchema,
-    ]),
+    object: platformObjectSchema,
   })
   .superRefine(checkGrant)
-  .superRefine(({ object, actions }, context) => {
-    if (object.type === "collection" && actions.includes("write")) {
+  .superRefine(({ object }, context) => {
+    // Teams are its requester's, as a connection is someone's: whoever
+    // creates from it names their own.
+    if (object.type === "platform" && object.teams !== undefined) {
       context.addIssue({
         code: "custom",
-        path: ["actions"],
-        message: "An App only reads a collection",
+        path: ["object", "teams"],
+        message: "A blueprint names no teams",
       });
     }
   });
@@ -479,7 +512,7 @@ export type BlueprintWorkflow = z.infer<typeof blueprintWorkflowSchema>;
  * An App's active permission on a connection or to start a workflow goes
  * back to requested when someone who couldn't grant
  * it (Grasp staff included) makes another version of the App current
- * (`AppVersionsApi.publish`, `AppDraftsApi.publish`), until an admin
+ * (`drafts.publish`, `versions.rollback`), until an admin
  * grants it again.
  */
 export const permissionStatusSchema = z.enum([
@@ -512,11 +545,7 @@ export interface Permission {
   /** User IDs, and when (ISO 8601). */
   requestedBy: string;
   requestedAt: string;
-  /**
-   * Who granted it last, and when. On a requested permission, it was
-   * granted before and is asked for again (`AppVersionsApi.publish`);
-   * only `status` says what it allows.
-   */
+  /** Who granted it, and when: only `status` says what it allows. */
   grantedBy: string | null;
   grantedAt: string | null;
   revokedBy: string | null;
@@ -605,7 +634,7 @@ export interface PermissionsApi {
  * member; it doesn't intersect the grant with the person's own access. That
  * part of "never more than the person" (R5) is enforced where the access
  * lives: connect limits personal connections to their owner, and the
- * Knowledge queries limit collections to what the person may read.
+ * Brain recalls only what the person may read.
  */
 export const authoritySchema = z
   .strictObject({
@@ -683,6 +712,10 @@ export const permissionErrors = defineErrorFamily({
     "A shared connection is granted by an admin. You can withdraw the request.",
   "permission.denied_before":
     "The person already turned this down in this chat. Don't ask again unless they say so.",
+  "permission.team_brain_workflow":
+    "An App whose permission to read the Brain names teams can't be called from a workflow, and an App a workflow may call can't name teams.",
   "permission.too_many_requests":
     "This chat already has too many connection requests waiting. Wait until the person decides them.",
+  "permission.own_in_chat_app":
+    "A connection of the person's own can be granted only in a chat in Grasp, not in a chat app, and a grant there holds in that chat alone. Tell them to ask you in a chat in Grasp (Chat, in Grasp's sidebar), grant it there, and have the work done in that chat.",
 });

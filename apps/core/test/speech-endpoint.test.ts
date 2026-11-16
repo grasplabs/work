@@ -1,18 +1,24 @@
 import { randomToken } from "@grasp-os/shared/encoding";
 import { errorPayloadSchema } from "@grasp-os/shared/errors";
-import { interviewApiPath } from "@grasp-os/shared/interview-links";
 import type { Roster } from "@grasp-os/shared/onboarding";
 import { speechPath } from "@grasp-os/shared/voice";
 import type { SpeechRequestBody } from "@grasp-os/shared/voice";
+import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { voiceBudgets } from "../src/onboarding/speech.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
+import { storedKeyOf } from "../src/speech-cache.ts";
 import { secondsPerCharacter } from "./ai-providers-fake.ts";
 import { mockIdp } from "./idp.ts";
-import { onLink, participate } from "./interview-link.ts";
+import {
+  onLink,
+  openLinkAs,
+  participate,
+  signedInAs,
+} from "./interview-link.ts";
 import { carrying } from "./platform-providers.ts";
 import { routed, signedInWithRole, unique } from "./sign-in.ts";
 
@@ -38,9 +44,6 @@ const dayMs = 24 * 60 * 60 * 1000;
 
 const idp = mockIdp();
 
-/** What a session answers, as far as these tests read it: the device's key. */
-const sessionKey = z.object({ key: z.string().optional() });
-
 /** A line said, as these tests read it. */
 const answerSchema = z.object({
   audio: z.string(),
@@ -59,13 +62,17 @@ const askedSchema = z.object({
 
 const isoDay = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 
-/** A line no other test says, so the cache and the provider have never seen it. */
+/**
+ * A line no other test says, so the cache and the provider have never seen
+ * it: each digit a letter of its own, so two lines never become the same.
+ */
 const newLine = (): string =>
-  `Hello there, ${unique().replaceAll(/\d/gu, "x")}.`;
+  `Hello there, ${unique().replaceAll(/\d/gu, (digit) => "ghijklmnop".charAt(Number(digit)))}.`;
 
 /**
  * An onboarding running since yesterday, with one person whose link is
- * out, opened on a device: who they are, their secret and key.
+ * out, opened signed in as them: who they are, and their link as the page
+ * holds it.
  */
 const opened = async () => {
   const store = onboardingStore(env);
@@ -77,7 +84,7 @@ const opened = async () => {
         id: person,
         name: "Oli Olsen",
         team: "ops",
-        email: "",
+        email: `${person}@acme.test`,
         title: "",
         away: false,
       },
@@ -94,24 +101,37 @@ const opened = async () => {
   await store.releaseDue();
   const link = await store.linkOf(person);
   const secret = link?.split("#")[1] ?? "";
-  const session = await routed(interviewApiPath, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ action: "session", secret }),
-  });
-  const { key } = sessionKey.parse(await session.json());
-  return { person, link: { secret, key: key ?? "" } };
+  const { link: device } = await openLinkAs(
+    secret,
+    await signedInAs(`${person}@acme.test`)
+  );
+  return { person, link: device };
 };
 
-/** Asks for `body` to be said, as the page does. */
+/**
+ * Asks for `body` to be said, as the page does: a link in it is its secret
+ * alone, and its session goes as the browser's cookie.
+ */
 const speak = async (
-  body: SpeechRequestBody | Record<string, unknown>,
+  {
+    link,
+    ...body
+  }: (SpeechRequestBody | Record<string, unknown>) & {
+    link?: { secret: string; cookie?: string };
+  },
   headers: Record<string, string> = {}
 ): Promise<Response> =>
   await routed(speechPath, {
     method: "POST",
-    headers: { "content-type": "application/json", ...headers },
-    body: JSON.stringify(body),
+    headers: {
+      "content-type": "application/json",
+      "sec-fetch-site": "same-origin",
+      ...(link?.cookie === undefined ? {} : { cookie: link.cookie }),
+      ...headers,
+    },
+    body: JSON.stringify(
+      link === undefined ? body : { ...body, link: { secret: link.secret } }
+    ),
   });
 
 /** A refusal's status and code. */
@@ -173,12 +193,8 @@ describe("lines said at the speech endpoint", { timeout: 60_000 }, () => {
 
   it.each([
     ["a link that isn't one", "unknown", 404, "interview.link_invalid"],
-    [
-      "a device the link isn't open on",
-      "elsewhere",
-      403,
-      "interview.elsewhere",
-    ],
+    ["someone else signed in", "elsewhere", 404, "interview.link_invalid"],
+    ["nobody signed in", "signedOut", 401, "interview.sign_in"],
     // Before taking part the voice reads them what this is; once they
     // withdrew it says nothing more (GRA-329, T5).
     ["someone who withdrew", "withdrawn", 410, "interview.withdrawn"],
@@ -191,8 +207,12 @@ describe("lines said at the speech endpoint", { timeout: 60_000 }, () => {
         await onLink({ action: "withdraw", ...link });
       }
       const asked = {
-        unknown: { secret: randomToken(), key: link.key },
-        elsewhere: { secret: link.secret, key: randomToken() },
+        unknown: { ...link, secret: randomToken() },
+        elsewhere: {
+          ...link,
+          cookie: await signedInAs(`someone-${unique()}@acme.test`),
+        },
+        signedOut: { secret: link.secret, cookie: "" },
         withdrawn: link,
       }[kind];
 
@@ -291,10 +311,29 @@ describe("lines said at the speech endpoint", { timeout: 60_000 }, () => {
     await again.body?.cancel();
     const fresh = await speak({ text: after, language: "en", link });
     const result = { again: again.status, new: await codeOf(fresh) };
+    // What was said is noted for its erasure (GRA-1897); a line refused is
+    // never said, and nothing of it is noted.
+    const noted = await runInDurableObject(
+      onboardingStore(env),
+      async (_instance, state) => {
+        const keys = [await storedKeyOf(before), await storedKeyOf(after)];
+        return keys.map(
+          (key) =>
+            state.storage.sql
+              .exec(
+                "SELECT key FROM spoken_keys WHERE who = ? AND key = ?",
+                `link:${person}`,
+                key
+              )
+              .toArray().length
+        );
+      }
+    );
 
-    expect(result).toStrictEqual({
+    expect({ ...result, noted }).toStrictEqual({
       again: 200,
       new: [429, "speech.limited"],
+      noted: [1, 0],
     });
     await expect(carrying(before)).resolves.toHaveLength(1);
     await expect(carrying(after)).resolves.toStrictEqual([]);

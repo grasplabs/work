@@ -9,14 +9,10 @@ import { z } from "zod";
 import { loadRelease } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
 import { fixtureHostFor } from "../src/app-tests.ts";
-import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
 import { releaseIdsOf } from "../src/apps.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
-import { editWorkflowDraft, workflowDraft } from "../src/workflow-drafts.ts";
-import {
-  createWorkflowResource,
-  publishWorkflowVersion,
-} from "../src/workflow-resources.ts";
+import { editWorkflowDraft, workflowDraft } from "../src/workflow-editor.ts";
+import { createWorkflowResource } from "../src/workflow-resources.ts";
 import {
   candidateActivation,
   candidateRunFor,
@@ -33,22 +29,23 @@ import type { HostedActivation } from "../src/workflows/resource-runs.ts";
 import type { StepError } from "../src/workflows/sealed-isolate.ts";
 import { sealedRunModules } from "../src/workflows/sealed-run.ts";
 import type { SealedRunMemory } from "../src/workflows/sealed-run.ts";
-import { testApp } from "./app-definitions.ts";
+import { boundIn, testApp } from "./app-definitions.ts";
 import type { TestApp } from "./app-definitions.ts";
 import { allEvents } from "./audit-events.ts";
 import { fakeProvider } from "./model-provider.ts";
 import { engineOfTest } from "./run-host.ts";
 import { appWith, person, seal } from "./sealed-apps.ts";
 import { unique } from "./sign-in.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
 
 // A JSON workflow's run on the run host (resource-runs.ts,
 // `runActivation`), whatever started it: an independent run, a test run of
-// a draft's checkpoint or a run an App's test started. Each is started for
+// a workflow's draft or a run an App's test started. Each is started for
 // real, its activation loaded as the dispatcher loads it, and run on the
 // run host with its build's own generated module (`sealedRunModules`).
 // What each must keep there, from the threat model of its kind:
 //
-// - a test run of a checkpoint calls nothing: every call is answered from
+// - a test run of a draft calls nothing: every call is answered from
 //   its start's fixtures, and its waits are held short;
 // - a run an App's test started reaches nothing of the organization's: its
 //   model calls are answered by its fixture, never a model, and its store
@@ -310,7 +307,7 @@ const drafted = async (by: Identity, steps: unknown[], status: unknown) => {
   const workflow = await createWorkflowResource(env, by, `test-${unique()}`);
   const { revision: base } = await workflowDraft(env, by, workflow.id);
   const saved = await editWorkflowDraft(env, by, workflow.id, {
-    expectedRevision: base,
+    revision: base,
     source: definitionOf(
       steps,
       {
@@ -412,14 +409,16 @@ const requestsApp = async (
   const keys = await contracts(admin);
   const builder = await person("builder");
   const files = requestsFiles();
-  const app = await appWith(files, "Requests", builder);
   const resource = await createWorkflowResource(
     env,
     builder,
     `greet-${unique()}`
   );
-  await publishWorkflowVersion(env, builder, resource.id, {
-    definition: definitionOf(
+  await publishDefinition(
+    env,
+    builder,
+    resource.id,
+    definitionOf(
       steps,
       {
         ai: { contract: keys.model },
@@ -427,14 +426,13 @@ const requestsApp = async (
         decisions: { approval: { contract: keys.approval } },
       },
       status
-    ),
-    basedOn: null,
-  });
-  await bindWorkflowToApp(env, builder, resource.id, {
-    app: app.app,
-    alias: "followUp",
-    version: 1,
-  });
+    )
+  );
+  const app = await appWith(
+    boundIn(files, { followUp: resource.id }),
+    "Requests",
+    builder
+  );
   await seal(app);
   const release = await loadRelease(env, app.app, 1);
   return { app: app.app, resource: resource.id, release, files, fixture };
@@ -494,7 +492,7 @@ describe(
   "the engine a JSON workflow's run runs on",
   { timeout: 180_000 },
   () => {
-    it("runs a test run of a draft's checkpoint generated for the run host there, every call answered from its start's fixtures", async () => {
+    it("runs a test run of a workflow's draft generated for the run host there, every call answered from its start's fixtures", async () => {
       const provider = await fakeProvider({
         text: '{"line":"From a real model"}',
         inputTokens: 1,

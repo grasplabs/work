@@ -12,6 +12,7 @@ import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { objectSchema } from "./json-workflow-apps.ts";
 import { outcome, routed, signedInApi, unique } from "./sign-in.ts";
+import { publishOverRpc } from "./workflow-publishing.ts";
 
 // Event sources and the webhook triggers on them (event-sources.ts,
 // workflows/source-events.ts), from their threat model: a delivery that
@@ -88,14 +89,10 @@ const triggerOn = async (
   const { id, name } = await builder.api.workflowResources.create(
     `hook-${unique()}`
   );
-  await builder.api.workflowResources.publish(id, {
-    definition: definitionOf(),
-    basedOn: null,
-  });
+  await publishOverRpc(builder.api, id, definitionOf());
   const trigger = await builder.api.workflowResources.triggers.create({
     kind: "webhook",
     workflowId: id,
-    version: 1,
     config: { source, type },
   });
   if (grant) {
@@ -592,7 +589,6 @@ describe("an event source", () => {
       builder.api.workflowResources.triggers.create({
         kind: "webhook",
         workflowId: workflow,
-        version: 1,
         config: { source: source.id, type: "invoice.paid" },
       })
     );

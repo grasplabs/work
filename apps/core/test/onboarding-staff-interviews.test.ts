@@ -1,15 +1,14 @@
 import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
-import { interviewApiPath } from "@grasp-os/shared/interview-links";
 import type { InterviewProgress } from "@grasp-os/shared/interview-links";
 import type { Roster } from "@grasp-os/shared/onboarding";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
-import { z } from "zod";
 
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { adminCommands, adminSnapshot } from "./admin-command.ts";
+import { onLink, openLinkAs, sentToOf, signedInAs } from "./interview-link.ts";
 import { onboardingLog } from "./onboarding-log.ts";
-import { auditedDuring, outcome, routed, unique } from "./sign-in.ts";
+import { auditedDuring, outcome, unique } from "./sign-in.ts";
 
 // The interviews by name as Grasp's admin reads and steers them (the
 // admin snapshot and admin commands): where everyone stands, the one
@@ -40,20 +39,6 @@ const progress = (): InterviewProgress => ({
   interviewer: "claire",
 });
 
-/** What a link's session answers, as far as these tests read it. */
-const sessionOf = z.object({ key: z.string().optional() });
-
-/** Opens a link's path on a device, as the interview page does: its key. */
-const openOn = async (path: string): Promise<string> => {
-  const secret = path.split("#")[1] ?? "";
-  const answer = await routed(interviewApiPath, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ action: "session", secret }),
-  });
-  return sessionOf.parse(await answer.json()).key ?? "";
-};
-
 /**
  * An onboarding running since yesterday: Ops (no lead), whose two
  * people's links are out, Oli having talked; and Labs, which doesn't take
@@ -72,7 +57,12 @@ const running = async () => {
       { id: ids.oli, name: "Oli Olsen", team: "ops" },
       { id: ids.ona, name: "Ona Ek", team: "ops" },
       { id: ids.lia, name: "Lia Berg", team: "labs" },
-    ].map((one) => ({ ...one, email: "", title: "", away: false })),
+    ].map((one) => ({
+      ...one,
+      email: `person-${unique()}@acme.test`,
+      title: "",
+      away: false,
+    })),
   };
   const by = { type: "system" } as const;
   await store.setPaused(false, by);
@@ -88,23 +78,21 @@ const running = async () => {
   );
   await store.releaseDue();
   const path = (await store.linkOf(ids.oli)) ?? "";
-  const key = await openOn(path);
-  const secret = path.split("#")[1] ?? "";
-  const saved = await routed(interviewApiPath, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      action: "save",
-      secret,
-      key,
-      version: 0,
-      progress: progress(),
-    }),
+  // Oli opens it, signed in as the address it went to, as the page does.
+  const { link: oli } = await openLinkAs(
+    path.split("#")[1] ?? "",
+    await signedInAs(await sentToOf(ids.oli))
+  );
+  const saved = await onLink({
+    action: "save",
+    ...oli,
+    version: 0,
+    progress: progress(),
   });
   if (!saved.ok) {
     throw new Error(`Oli's interview wasn't kept (${saved.status})`);
   }
-  return { store, ids, oli: { secret, key } };
+  return { store, ids, oli };
 };
 
 describe("the interviews, as Grasp's admin sees and steers them", () => {

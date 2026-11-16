@@ -1092,6 +1092,11 @@ const scenario = (people: readonly string[], seed: number) => {
             found,
           })
         ),
+        // No memories in these scenarios: recall through memories, hidden
+        // versus absent, is tested in the store (packages/brain-next
+        // test/recall-memories.test.ts).
+        memories: [],
+        contested: [],
         notFound: expected.notFound,
         truncated: false,
       },

@@ -51,7 +51,12 @@ import * as React from "react";
 //   />
 
 /** The hue of a kind of mention (the theme's `--mention-*`). */
-export type PromptMentionTone = "app" | "workflow" | "person" | "command";
+export type PromptMentionTone =
+  | "app"
+  | "workflow"
+  | "person"
+  | "agent"
+  | "command";
 
 /** How a kind of mention shows: in the dropdown's groups, and as a chip. */
 export interface PromptMentionKind {
@@ -114,6 +119,7 @@ const promptChipVariants = cva(
         app: "bg-mention-app/12 text-mention-app",
         workflow: "bg-mention-workflow/12 text-mention-workflow",
         person: "bg-mention-person/12 text-mention-person",
+        agent: "bg-mention-agent/12 text-mention-agent",
         command: "bg-mention-command/12 text-mention-command",
       },
     },

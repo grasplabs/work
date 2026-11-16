@@ -95,7 +95,6 @@ const listening = async () => {
   const trigger = await builder.api.workflowResources.triggers.create({
     kind: "connector",
     workflowId: workflow.id,
-    version: 1,
     config: {
       connection: { connectionId: connection },
       event: "m365.mail.received",
@@ -261,7 +260,7 @@ describe("connector events", () => {
     });
     const lookups = recorded.filter(
       ({ query }) =>
-        query.includes('"trigger_resource_versions"."event_type"') &&
+        query.includes('"trigger_resources"."event_type"') &&
         query.includes('json_each("permissions"."actions")')
     );
     const plans = await Promise.all(

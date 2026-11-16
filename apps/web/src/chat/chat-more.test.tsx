@@ -35,8 +35,6 @@ const leave: ChatSummary = {
   createdAt: "2026-10-20T08:00:00.000Z",
   lastAt: "2026-10-20T08:00:00.000Z",
   running: false,
-  appId: null,
-  via: "web",
   make: null,
 };
 
@@ -48,7 +46,6 @@ const firstUpdate: ChatUpdate = {
       id: 2,
       role: "assistant",
       text: answer,
-      citations: [],
       code: [],
       tools: [],
       end: "done",

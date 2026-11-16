@@ -42,7 +42,6 @@ const item: BindingApprovalItem = {
   pending: {
     workflow: { id: "workflow-quotes", name: "Quotes" },
     version: 2,
-    live: true,
     bindings: [
       {
         alias: "summary",
@@ -102,7 +101,6 @@ const shown = async () => {
     reconnect: { state: "ready", data: [] },
     requests: undefined,
     decisions: { state: "ready", data: [] },
-    workflowGoLives: { state: "ready", data: [] },
     heldStarts: { state: "ready", data: [] },
     bindings: { state: "ready", data: [item] },
   } satisfies Waiting;

@@ -15,7 +15,7 @@ import { createElement } from "react";
 import type { ReactNode } from "react";
 
 // How the Code view (app-code.tsx) shows code, and Publish
-// (publish.tsx) a file's change: @pierre/diffs draws a file, and a
+// (drafts/share-with-team.tsx) a file's change: @pierre/diffs draws a file, and a
 // change, as a code editor does, in a shadow root of its own,
 // with line numbers, a gutter, scrolling sideways for long lines, and only
 // the lines in sight (its virtualizer), so a file of thousands of lines

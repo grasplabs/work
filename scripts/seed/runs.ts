@@ -347,7 +347,6 @@ export const seedRuns = async ({
     const { runId } = await sessionOf(run.plan.by).api.workflowResources.start(
       workflowId,
       {
-        version: 1,
         args: run.plan.input,
         key: crypto.randomUUID(),
       }

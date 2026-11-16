@@ -82,6 +82,7 @@ import {
 } from "./connect-steps.tsx";
 import { DocumentDrop } from "./document-drop.tsx";
 import type { DocumentRow } from "./document-drop.tsx";
+import { ForgetKickoff } from "./forget-kickoff.tsx";
 import { HrLeads } from "./hr-leads.tsx";
 import { InterviewsProgress } from "./interviews-progress.tsx";
 import { LanguageChoice } from "./language-choice.tsx";
@@ -474,6 +475,7 @@ const Welcome = (props: StepProps) => {
   const chosen = localeNames[isLocale(i18n.locale) ? i18n.locale : "en"];
   const minutes = onboardingMinutes;
   const asked = useAsked(lines, picked);
+  const refresh = useRefresh();
   return (
     <>
       {/* The question is the end of what Stephen says, not a line after it; answered, he says so in the new language. */}
@@ -514,6 +516,7 @@ const Welcome = (props: StepProps) => {
       >
         {t`Let’s start`}
       </Primary>
+      <ForgetKickoff kickoff={props.data.view.kickoff} onForgotten={refresh} />
     </>
   );
 };
@@ -1165,6 +1168,8 @@ const Documents = (props: StepProps) => {
   const saidProblemOf = useSaidProblemOf();
   const [pending, setPending] = useState<Pending[]>([]);
   const [fresh, setFresh] = useState(false);
+  // Why a document that was read could not be removed.
+  const [removeProblem, setRemoveProblem] = useState<string>();
   // Whether the step is still on screen: a reading that ends after it is left is kept, but not said.
   const here = useRef(true);
   useEffect(() => {
@@ -1221,7 +1226,7 @@ const Documents = (props: StepProps) => {
     }
     told.current += 1;
   };
-  // Core keeps two documents of the same name as two: each row is its own upload, by an id of its own.
+  // Core keeps two documents of the same name as two: each is its own upload in the Brain, by an id of its own.
   const take = (from: (File | PickedFile)[]) => {
     const added = from.map((each, at): Pending => ({
       key: crypto.randomUUID(),
@@ -1330,6 +1335,19 @@ const Documents = (props: StepProps) => {
       await refresh();
     }
   };
+  // A document that was read, removed in core: its reading forgotten, its file erased when theirs.
+  const removeKept = async (id: string): Promise<boolean> => {
+    setRemoveProblem(undefined);
+    const removed = await run(async (session) => {
+      await session.onboarding.removeDocument(id);
+      return true;
+    }, setRemoveProblem);
+    if (removed !== true) {
+      return false;
+    }
+    await refresh();
+    return true;
+  };
   const reading = pending.filter((each) => each.state === "reading");
   const count = kept.length;
   const rows: DocumentRow[] = [
@@ -1362,11 +1380,17 @@ const Documents = (props: StepProps) => {
       <Onward>
         <DocumentDrop
           onAdd={take}
-          onRemove={(row) => {
+          onRemove={async (row) => {
+            if (row.state === "read") {
+              return await removeKept(row.key);
+            }
             setPending((now) => now.filter((each) => each.key !== row.key));
+            return true;
           }}
           rows={rows}
         />
+        <p className="text-muted-foreground text-xs">{t`I keep each file in your Brain, for you alone.`}</p>
+        <ErrorText>{removeProblem}</ErrorText>
         {suites.length === 0 ? null : (
           <div className="flex flex-col items-center gap-2">
             <div className="flex flex-wrap justify-center gap-2">

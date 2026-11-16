@@ -1,6 +1,7 @@
 import type { App } from "@grasp-os/shared/apps";
 import type { ChatWork } from "@grasp-os/shared/chat";
 import { failureText } from "@grasp-os/shared/errors";
+import type { WorkflowResource } from "@grasp-os/shared/workflow-resources";
 import { Button } from "@grasp-os/ui/components/button";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { TriangleAlertIcon } from "lucide-react";
@@ -11,30 +12,36 @@ import { NotLoaded } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
 
-// While a chat's agent builds Apps (`app_builder`): what is read of them
-// (`useChatBuilds`), the Apps whose drafts it worked on, which the App's
-// workspace previews (apps/app-workspace.tsx).
+// While a chat's agent builds Apps and workflows: what is read of them
+// (`useChatBuilds`), the Apps and workflows whose drafts it worked on,
+// which an App's workspace previews (apps/app-workspace.tsx) and a
+// workflow's page draws.
 
-/** What was read: the person's Apps, and what the chat worked on. */
+/** What was read: the person's Apps and workflows, and what the chat worked on. */
 interface Builds {
   apps: App[];
+  workflows: WorkflowResource[];
   worked: ChatWork[];
 }
 
 /**
- * The person's Apps and what the chat worked on. Outside the component, as
- * the React Compiler can't compile `try`.
+ * The person's Apps and workflows, and what the chat worked on. Outside
+ * the component, as the React Compiler can't compile `try`.
  */
 const readBuilds = async (
   core: CoreConnection,
   chatId: string
 ): Promise<Loaded<Builds>> => {
   try {
-    const [apps, worked] = await core.withSession(
+    const [apps, workflows, worked] = await core.withSession(
       async (session) =>
-        await Promise.all([session.apps.list(), session.chats.worked(chatId)])
+        await Promise.all([
+          session.apps.list(),
+          session.workflowResources.list(),
+          session.chats.worked(chatId),
+        ])
     );
-    return { state: "ready", data: { apps, worked } };
+    return { state: "ready", data: { apps, workflows, worked } };
   } catch (error) {
     return { state: "refused", message: failureText(error) };
   }
@@ -174,10 +181,10 @@ export const BuildsFailure = ({ read }: { read: ChatBuildsRead }) => {
   );
 };
 
-/** An App the chat's agent worked on, with its name. */
+/** An App or a workflow the chat's agent worked on, with its name. */
 export interface NamedWork {
   work: ChatWork;
-  /** The App's name; its ID where the person can't see the App. */
+  /** Its name; its ID where the person can't see it. */
   name: string;
 }
 
@@ -190,7 +197,13 @@ export const workOf = ({ builds }: ChatBuildsRead): NamedWork[] => {
     return [];
   }
   const apps = new Map<string, App>(builds.apps.map((app) => [app.id, app]));
+  const workflows = new Map<string, string>(
+    builds.workflows.map(({ id, name }) => [id, name])
+  );
   return builds.worked.flatMap((work) => {
+    if (work.kind === "workflow") {
+      return [{ work, name: workflows.get(work.id) ?? work.id }];
+    }
     const app = apps.get(work.id);
     if (app?.archived === true) {
       return [];

@@ -36,7 +36,7 @@ export const ResetTestData = ({
   const [asking, setAsking] = useState(false);
   const reset = async (): Promise<void> => {
     const done = await run(async (session) => {
-      await session.apps.drafts.resetTestData(app);
+      await session.apps.preview.resetData(app);
       return true;
     });
     if (done !== undefined) {

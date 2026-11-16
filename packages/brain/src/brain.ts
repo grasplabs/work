@@ -94,7 +94,7 @@ export interface BrainPorts<C> {
   /**
    * Called before every version is written, by anyone: throws to refuse
    * what the host never lets be saved (core's: the Grasp skills but by
-   * their sync, a memory file over its limit). `sync` is the host's own
+   * their sync). `sync` is the host's own
    * sync writing (documents.ts `Write.sync`).
    */
   onWrite: (write: {
@@ -102,7 +102,7 @@ export interface BrainPorts<C> {
     path: string;
     text: string;
     sync: boolean;
-  }) => Promise<void>;
+  }) => void | Promise<void>;
   /** Who may recall, as the host decides it (recall.ts). */
   recall: {
     /** Refuses a reader who may not recall at all. */

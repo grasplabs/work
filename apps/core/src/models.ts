@@ -47,6 +47,7 @@ import {
   defaultModelEffort,
   modelEfforts,
   modelErrors,
+  modelPurposeMaxLength,
 } from "@grasp-os/shared/models";
 import type {
   ModelEffort,
@@ -287,7 +288,7 @@ const sessionShape = {
    */
   effort: z.enum(modelEfforts).optional(),
   /** Why the call is made, for the audit log. */
-  purpose: z.string().max(64).regex(purposePattern),
+  purpose: z.string().max(modelPurposeMaxLength).regex(purposePattern),
   /** Who or what asked: a person, an agent, an App or a workflow run. */
   trigger: auditActorSchema,
   /**
@@ -314,8 +315,8 @@ const sessionShape = {
        */
       z.strictObject({ onboarding: z.literal(true) }),
       /**
-       * Core's own upkeep of the Brain (knowledge/entities.ts): reading a
-       * source's text for the entities it names, for no one in particular,
+       * Core's own upkeep of the Brain (brain-next.ts `brainModel`): its
+       * background work reading a source's text, for no one in particular,
        * kept apart from onboarding in spend and audit (`platform` in its
        * events). Only core's own code makes such a call.
        */
@@ -327,14 +328,6 @@ const sessionShape = {
        * makes such a call.
        */
       z.strictObject({ platform: z.literal("dashboard_widgets") }),
-      /**
-       * Core's own reranking of a person's recall (knowledge/rerank.ts),
-       * only when the recall asks for it: it carries the company's own
-       * words, and is made for them, counted as theirs, by the trigger that names them. A delegate's recall reranks
-       * under its own authority and context instead. Only core's own code
-       * makes such a call.
-       */
-      z.strictObject({ platform: z.literal("brain_recall") }),
       /**
        * Core's own sorting of a request someone made of Stephen in a chat
        * app (channels/request-sorting.ts), from their words and his

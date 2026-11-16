@@ -1,20 +1,22 @@
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
+import { z } from "zod";
 
-import { chatAgentId, personalWorkspaceId } from "../src/chats-rpc.ts";
+import { inTeams } from "../src/channels/inert.ts";
+import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import { workspace } from "../src/durable-objects.ts";
-import { codeStep, pausedReply, says } from "./agent-chat.ts";
-import { requestGranted } from "./apps.ts";
+import { keptAnswersOf, pausedReply, says } from "./agent-chat.ts";
 import { mockIdp } from "./idp.ts";
-import { readCollection } from "./knowledge.ts";
+import { attacks, ordinary } from "./inert-answers.ts";
 import { fakeProvider } from "./model-provider.ts";
-import { clientOrigin } from "./sign-in-config.ts";
-import { signedInApi, unique } from "./sign-in.ts";
 import {
   member,
   memberAnsweredBy,
+  mentionIn,
   messageFrom,
+  newGroup,
+  onGroupRoster,
   post,
   reached,
   watched,
@@ -23,8 +25,9 @@ import {
 // A member's Teams message answered by the organization's agent in their
 // own Teams chat in Grasp (src/channels/answer.ts): the turn runs in their
 // own Workspace object, with the model provider faked behind connect, and the
-// answer, with its sources, goes back through connect to the fake Bot
-// Connector (test/bot-connector-fake.ts).
+// answer goes back through connect to the fake Bot Connector
+// (test/bot-connector-fake.ts) on one card, the model's words as written,
+// with every link form Teams reads broken (src/channels/inert.ts).
 
 const idp = mockIdp();
 
@@ -60,58 +63,25 @@ const answersIn = async (conversation: string): Promise<string[]> => {
 };
 
 describe("a member's question", setUpTime, () => {
-  it("is answered in their own Teams chat, with the documents it cites", async () => {
-    const admin = await signedInApi(idp, "admin");
-    const { id: collectionId } = await admin.api.knowledge.createCollection({
-      name: `Handbook ${unique()}`,
-      access: "everyone",
-    });
-    const saved = await admin.api.knowledge.saveDocument({
-      collectionId,
-      path: "leave.md",
-      text: "# Parental leave\n\nParental leave lasts sixteen weeks.",
-      ifVersion: 0,
-    });
-    await requestGranted(
-      idp,
-      admin,
-      readCollection(
-        { type: "agent", agentId: chatAgentId },
-        collectionId,
-        `H${unique()}`.toUpperCase()
-      )
-    );
+  it("is answered in their own Teams chat, labelled as made by AI", async () => {
     const { userId, teams } = await member(
       idp,
-      codeStep(
-        `export default async (self, env) => (await env.knowledge.read(${JSON.stringify(saved.id)})).text;`
-      ),
-      says(
-        `Leave lasts sixteen weeks [Parental leave](grasp:note/${saved.id}).`
-      )
+      says("Leave lasts sixteen weeks.")
     );
 
     await post(messageFrom(teams, { text: "How long is parental leave?" }));
 
     const chats = await chatsOf(userId);
     expect(chats).toMatchObject([{ title: "Microsoft Teams", via: "teams" }]);
-    // The answer, streamed in its own message, then its sources.
+    // The answer, on its card.
     const answers = await answersIn(teams.conversation);
     const answer = answers.join("\n");
     expect({
       answered: answer.includes("Leave lasts sixteen weeks"),
-      noteLinks: answer.includes("grasp:note"),
-      source: answer.includes("1. Parental leave"),
-      sourceLink: answer.includes(
-        `${clientOrigin}/knowledge/${collectionId}?doc=${saved.id}`
-      ),
       // Labelled as made by AI, as Teams shows it.
       aiLabel: answer.includes("AIGeneratedContent"),
     }).toStrictEqual({
       answered: true,
-      noteLinks: false,
-      source: true,
-      sourceLink: true,
       aiLabel: true,
     });
   });
@@ -208,5 +178,109 @@ describe("a turn that can't answer", setUpTime, () => {
       "I can only read text for now. Type your question, and I'll answer it.",
     ]);
     expect(provider.requests).toHaveLength(0);
+  });
+});
+
+/** What a Teams activity carries that these tests read. */
+const activitySchema = z
+  .object({
+    text: z.string().optional(),
+    attachments: z
+      .array(
+        z
+          .object({
+            content: z
+              .object({
+                body: z
+                  .array(z.object({ text: z.string().optional() }).loose())
+                  .optional(),
+              })
+              .loose()
+              .optional(),
+          })
+          .loose()
+      )
+      .optional(),
+    entities: z
+      .array(z.object({ streamType: z.string().optional() }).loose())
+      .optional(),
+  })
+  .loose();
+
+/** What Teams was sent in `conversation`, each activity as read here. */
+const activitiesIn = async (conversation: string) => {
+  const { activities } = await reached(conversation);
+  return activities.map((activity) => activitySchema.parse(activity));
+};
+
+/** The first `TextBlock` of each card Teams was sent in `conversation`. */
+const cardTextsIn = async (conversation: string): Promise<string[]> => {
+  const activities = await activitiesIn(conversation);
+  return activities.flatMap(({ attachments = [] }) =>
+    attachments.flatMap(({ content }) => {
+      const text = content?.body?.[0]?.text;
+      return text === undefined ? [] : [text];
+    })
+  );
+};
+
+/** Where a card's text would still read as an inline link or a definition. */
+const linkForm = /\]\(|\]:/u;
+
+describe("a member's answer with links the model wrote", setUpTime, () => {
+  it("is only ever a card showing them as written, every link form broken, in a private chat and a group chat, and kept as written", async () => {
+    const ann = await member(idp, says(attacks), says(attacks));
+    const group = newGroup();
+    await onGroupRoster(group, [{ person: ann.teams }]);
+
+    await post(messageFrom(ann.teams, { text: "How does leave work?" }));
+    await post(mentionIn(ann.teams, group, "How does leave work?"));
+
+    const answers = async (conversation: string) => {
+      const texts = await cardTextsIn(conversation);
+      return texts.filter((text) => text.startsWith("Read"));
+    };
+    const [inPrivate, inGroup] = [
+      await answers(ann.teams.conversation),
+      await answers(group),
+    ];
+    const activities = [
+      ...(await activitiesIn(ann.teams.conversation)),
+      ...(await activitiesIn(group)),
+    ];
+    expect({
+      // Never Teams' own stream, nor message text, which renders HTML,
+      // images and links: only the card's `TextBlock`, which reads no
+      // HTML or images.
+      streamed: activities.some(({ entities = [] }) =>
+        entities.some(({ streamType }) => streamType !== undefined)
+      ),
+      inText: activities.some(
+        ({ text }) => text?.includes("evil.com") === true
+      ),
+      // The card as it ends: the model's words, each link form broken.
+      cards: [inPrivate.at(-1), inGroup.at(-1)],
+      // Nothing posted, the cards updated while written included, holds
+      // a form a card reads as a link.
+      linkForms: [...inPrivate, ...inGroup].filter((text) =>
+        linkForm.test(text)
+      ),
+      kept: await keptAnswersOf(ann.userId),
+    }).toStrictEqual({
+      streamed: false,
+      inText: false,
+      cards: [inTeams(attacks), inTeams(attacks)],
+      linkForms: [],
+      kept: [[attacks], [attacks]],
+    });
+  });
+
+  it("keeps an ordinary answer's words and formatting, nothing escaped", async () => {
+    const { teams } = await member(idp, says(ordinary));
+
+    await post(messageFrom(teams, { text: "How does leave work?" }));
+
+    const cards = await cardTextsIn(teams.conversation);
+    expect(cards.findLast((text) => text.includes("Leave"))).toBe(ordinary);
   });
 });

@@ -7,12 +7,12 @@ import type { PageProblem, ServerLog } from "@grasp-os/shared/pages";
 import { dataErrors } from "@grasp-os/shared/stores";
 import { DurableObject } from "cloudflare:workers";
 
-import { draftBase, readDraft } from "./app-drafts.ts";
-import type { Draft } from "./app-drafts.ts";
-import { changesAnything } from "./apps.ts";
+import { appKind } from "./apps.ts";
 import { emptyThrowawayStore } from "./data-stores.ts";
 import { isPageModules } from "./draft-references.ts";
 import type { PageModules } from "./draft-references.ts";
+import { changesAnything, readDraft } from "./drafts.ts";
+import type { DraftState } from "./drafts.ts";
 import { inJurisdiction } from "./durable-objects.ts";
 import { PreviewBuilds } from "./preview-builds.ts";
 import type { PreviewBuilt } from "./preview-builds.ts";
@@ -25,7 +25,7 @@ import type { Reports } from "./preview-reports.ts";
 // its caller, with their own roles, on one store of test data the
 // preview's builders share: only the data is shared. Core checks the
 // caller builds the App before every call reaches this object
-// (app-drafts-rpc.ts, agent-builds.ts, draft-runs.ts); this object holds
+// (app-preview-rpc.ts, agent-builds.ts, draft-runs.ts); this object holds
 // what the preview shares:
 //
 // - the seed its test store is named by (draft-runs.ts, `draftStore`),
@@ -36,23 +36,13 @@ import type { Reports } from "./preview-reports.ts";
 //   logged (server-logs.ts);
 // - one build per viewer and revision (preview-builds.ts), and the
 //   references its pages last built against, for while the draft's
-//   server code doesn't build;
-// - the pages that follow the draft (`watch`): every write tells this
-//   object (`revised`, app-drafts.ts), which tells each, so every open
-//   preview of the App takes the write at once, whoever made it.
+//   server code doesn't build.
 //
-// The draft itself is the App's, in core's database: read afresh for each
-// step, so a write whose telling failed still comes into the preview at
-// its next call. What this object keeps is the preview's alone, never the
-// draft: a restart loses its reports and watchers, which a page's next
-// call and watch make again.
-
-/**
- * Most pages of one person's one preview tells of the draft's writes at
- * once: a page past it takes the place of their oldest, so nobody fills
- * the preview for the others.
- */
-const watchersPerPerson = 20;
+// The draft itself is the App's, in core's database (drafts.ts): read
+// afresh for each step, and followed by the pages open on it through its
+// own object (draft-watch.ts). What this object keeps is the preview's
+// alone, never the draft: a restart loses its reports, which a page's
+// next call makes again.
 
 /** How often a check waiting for the preview reads its reports again. */
 const pollMs = 100;
@@ -66,74 +56,14 @@ const storesKey = "stores";
 /** Where the references its pages last built against are kept. */
 const referencesKey = "references";
 
-/** Where a page that follows the draft hears of its writes: its revision. */
-export type DraftListener = Rpc.Stub<(revision: number) => Promise<void>>;
-
 export class AppPreview extends DurableObject<Env> {
   /** What the preview ran into (preview-reports.ts). */
   readonly #reports = new PreviewReports();
   /** What bounds the preview's builds (preview-builds.ts). */
   readonly #builds = new PreviewBuilds();
-  /**
-   * The pages that follow the draft's writes (`watch`), by ID, each with
-   * whose it is, oldest first.
-   */
-  readonly #watchers = new Map<
-    string,
-    { personId: string; listener: DraftListener }
-  >();
-
   /** The App this object previews: the name it was made by. */
   get #app(): AppId {
     return appIdSchema.parse(this.ctx.id.name);
-  }
-
-  /**
-   * The App's draft was written (a chat's agent, a person's edit, a
-   * restore, a discard or a publish): every page that follows it hears
-   * of its revision, so each open preview takes the write at once. A
-   * page that can't be reached is dropped.
-   */
-  async revised(): Promise<void> {
-    const { revision } = await readDraft(this.env, this.#app);
-    await Promise.all(
-      [...this.#watchers].map(async ([id, { listener }]) => {
-        try {
-          await listener(revision);
-        } catch {
-          this.#drop(id);
-        }
-      })
-    );
-  }
-
-  /**
-   * Follows the draft's writes for one page of `personId`'s (`revised`):
-   * `listener` hears each revision. Past {@link watchersPerPerson} of
-   * theirs, their oldest page stops following, which reads the draft
-   * afresh at its next call anyway. Returns the ID `unwatch` drops it by.
-   */
-  watch(personId: string, listener: DraftListener): string {
-    const theirs = [...this.#watchers].filter(
-      ([, watcher]) => watcher.personId === personId
-    );
-    const displaced = Math.max(0, theirs.length - watchersPerPerson + 1);
-    for (const [id] of theirs.slice(0, displaced)) {
-      this.#drop(id);
-    }
-    const id = crypto.randomUUID();
-    this.#watchers.set(id, { personId, listener: listener.dup() });
-    return id;
-  }
-
-  /** Stops telling the page `watch` answered `id` for. */
-  unwatch(id: string): void {
-    this.#drop(id);
-  }
-
-  #drop(id: string): void {
-    this.#watchers.get(id)?.listener[Symbol.dispose]();
-    this.#watchers.delete(id);
   }
 
   /**
@@ -155,7 +85,7 @@ export class AppPreview extends DurableObject<Env> {
    * What a call of the preview runs on now (draft-runs.ts): what it shows
    * (`draft`), and the seed its test store is named by.
    */
-  async run(): Promise<{ draft: Draft; seed: string }> {
+  async run(): Promise<{ draft: DraftState; seed: string }> {
     const draft = await this.draft();
     return { draft, seed: this.#seed() };
   }
@@ -164,7 +94,7 @@ export class AppPreview extends DurableObject<Env> {
    * What the preview shows, which a viewer has open now: the draft, over
    * the version it began from; while the draft changes nothing (none
    * written yet, or published, discarded or rolled back), the version it
-   * is over (`draftBase`, the live one), at the draft's revision, so the
+   * is over (the live one), at the draft's revision, so the
    * preview always shows the App and the draft's next write comes into
    * the frame showing it. With `fallback`, that version whatever the
    * draft holds: what a preview shows while the draft's page doesn't
@@ -173,13 +103,13 @@ export class AppPreview extends DurableObject<Env> {
    */
   async draft({
     fallback = false,
-  }: { fallback?: boolean } = {}): Promise<Draft> {
-    const draft = await readDraft(this.env, this.#app);
+  }: { fallback?: boolean } = {}): Promise<DraftState> {
+    const draft = await readDraft(this.env, { kind: "app", id: this.#app });
     this.#reports.opened();
     if (!fallback && changesAnything(draft)) {
       return draft;
     }
-    const base = await draftBase(this.env, this.#app, draft);
+    const base = await appKind.liveBase(this.env, this.#app);
     if (base === null) {
       throw appErrors.create("app.not_running");
     }
@@ -208,7 +138,7 @@ export class AppPreview extends DurableObject<Env> {
    * call names a new, empty store, and every store it named emptied for
    * good (`DataStore.emptyThrowaway`), a call under way on one refused.
    * Core checks the caller builds the App, and audits it, first
-   * (app-drafts-rpc.ts).
+   * (app-preview-rpc.ts).
    */
   async resetData(): Promise<void> {
     this.ctx.storage.kv.put(seedKey, crypto.randomUUID());
@@ -253,9 +183,6 @@ export class AppPreview extends DurableObject<Env> {
    * was removed (app-removal.ts).
    */
   async discard(): Promise<void> {
-    for (const id of this.#watchers.keys()) {
-      this.#drop(id);
-    }
     await this.#emptyStores();
     this.#reports.drop();
     await this.ctx.storage.deleteAll();
@@ -275,7 +202,10 @@ export class AppPreview extends DurableObject<Env> {
     revision: number | undefined,
     build: () => Promise<PreviewBuilt>
   ): Promise<PreviewBuilt> {
-    const { revision: now } = await readDraft(this.env, this.#app);
+    const { revision: now } = await readDraft(this.env, {
+      kind: "app",
+      id: this.#app,
+    });
     return await this.#builds.build(
       `${viewer}:${what}`,
       revision ?? now,
@@ -287,7 +217,7 @@ export class AppPreview extends DurableObject<Env> {
   /**
    * Keeps `references`, the page modules (draft-references.ts) the
    * draft's server code last generated, for its pages to build against
-   * while it doesn't (app-drafts-rpc.ts).
+   * while it doesn't (app-preview-rpc.ts).
    */
   keepReferences(references: PageModules | null): void {
     this.ctx.storage.kv.put(referencesKey, references);
@@ -310,7 +240,10 @@ export class AppPreview extends DurableObject<Env> {
     revision: number,
     problem: PreviewProblem | null
   ): Promise<void> {
-    const { revision: now } = await readDraft(this.env, this.#app);
+    const { revision: now } = await readDraft(this.env, {
+      kind: "app",
+      id: this.#app,
+    });
     if (now !== revision) {
       return;
     }
@@ -333,7 +266,10 @@ export class AppPreview extends DurableObject<Env> {
     if (typeof at !== "number" || at === readOnlyRevision) {
       return;
     }
-    const { revision } = await readDraft(this.env, this.#app);
+    const { revision } = await readDraft(this.env, {
+      kind: "app",
+      id: this.#app,
+    });
     if (at !== revision) {
       return;
     }

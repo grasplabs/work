@@ -6,6 +6,7 @@ import { appVisitorApiPath } from "@grasp-os/shared/app-visitors";
 import { auditExportPath } from "@grasp-os/shared/audit-log";
 import {
   brainActionPath,
+  brainErasurePath,
   brainReportPath,
 } from "@grasp-os/shared/brain-report";
 import { channelPlatformOf } from "@grasp-os/shared/channels";
@@ -47,10 +48,16 @@ import { handleAuthRequest } from "./auth/routes.ts";
 import {
   brainExportsPath,
   brainExportsResponse,
+  brainOwnExportPath,
+  brainOwnExportResponse,
   brainRestorePath,
   brainRestoreResponse,
 } from "./brain-next-exports.ts";
-import { brainActionResponse, brainReportResponse } from "./brain-report.ts";
+import {
+  brainActionResponse,
+  brainErasureResponse,
+  brainReportResponse,
+} from "./brain-report.ts";
 import { installBuiltinsOnce } from "./builtins.ts";
 import { ensureClockOnce } from "./clock.ts";
 import {
@@ -62,11 +69,6 @@ import { docsResponse } from "./docs.ts";
 import { errorReportResponse } from "./error-reports.ts";
 import { errorResponse } from "./errors.ts";
 import { guestResponse } from "./guests.ts";
-import {
-  brainExportPath,
-  brainExportResponse,
-} from "./knowledge/brain-export.ts";
-import { originalResponse } from "./knowledge/uploads.ts";
 import { mailIngressResponse } from "./mail-ingress.ts";
 import { hearResponse } from "./onboarding/hear.ts";
 import { interviewTurnResponse } from "./onboarding/interview.ts";
@@ -201,15 +203,13 @@ const frontendResponse = async (
     : await pageResponse(pathname, request, env);
 };
 
-/** `/api/knowledge/uploads/<id>/original`: an upload's original. */
-const originalPath = /^\/api\/knowledge\/uploads\/(?<id>[\w-]+)\/original$/u;
-
 /**
- * The pages a link opens, which have no session: the link's secret in the
- * body is all they have. A guest's (src/guests.ts), and someone's own
- * interview, with the device's key too (src/onboarding/links.ts), whose
- * lines are said at the speech endpoint, and what they say is written down
- * over a WebSocket, both also for an admin signed in
+ * The pages a link opens, with the link's secret in the body. A guest's
+ * (src/guests.ts) has no session: the secret is all it has. Someone's own
+ * interview needs the session of the account it belongs to too, which only
+ * these routes read for it (src/onboarding/links.ts, interview-caller.ts);
+ * its lines are said at the speech endpoint, and what they say is written
+ * down over a WebSocket, both also for an admin signed in
  * (src/onboarding/speech.ts, src/onboarding/transcription.ts).
  */
 const linkResponse = async (
@@ -347,13 +347,14 @@ const pathHandlers: ReadonlyMap<
   (request: Request, env: Env, requestId: string) => Promise<Response>
 > = new Map([
   [auditExportPath, auditExportResponse],
-  [brainExportPath, brainExportResponse],
   [errorReportPath, errorReportResponse],
   [onboardingSummaryPath, onboardingSummaryResponse],
   [aiStatusReportPath, aiStatusReportResponse],
   [brainReportPath, brainReportResponse],
   [brainActionPath, brainActionResponse],
+  [brainErasurePath, brainErasureResponse],
   [brainExportsPath, brainExportsResponse],
+  [brainOwnExportPath, brainOwnExportResponse],
   [brainRestorePath, brainRestoreResponse],
   [adminSnapshotPath, adminSnapshotResponse],
   [adminKickoffPath, adminKickoffResponse],
@@ -467,10 +468,6 @@ const route = async (
   const appCall = await appCallResponse(pathname, request, env, requestId);
   if (appCall !== undefined) {
     return appCall;
-  }
-  const original = originalPath.exec(pathname)?.groups?.id;
-  if (original !== undefined) {
-    return await originalResponse(request, env, original, requestId);
   }
   if (isUnder(pathname, "/api")) {
     return errorResponse(

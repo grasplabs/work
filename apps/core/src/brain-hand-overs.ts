@@ -1,21 +1,39 @@
 import type { AuditEvent } from "@grasp-os/shared/audit";
-import { and, asc, eq, sql } from "drizzle-orm";
+import { errorName, log } from "@grasp-os/shared/log";
+import { and, asc, eq, isNull, sql } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
+import type { DrizzleD1Database } from "drizzle-orm/d1";
 
+import type { Held, Outbox } from "./audit-outbox.ts";
 import { brainHandOvers, personErasures } from "./db/core/schema.ts";
-import { chunks } from "./db/d1.ts";
+import { queriesPerInvocationMax, statementsWithin } from "./db/d1.ts";
 
 // What core has still to hand over to the new Brain: a source by its
 // producer and id, never its content (brain-sources.ts reads that when the
 // Brain's queue runs the hand-over).
 //
 // Each is noted from the audit event of the change that touched it, which
-// core writes in the same batch as the change (core's outbox). The drain
-// that takes the event to the log notes the hand-over before the event
-// leaves its outbox, and a drain that fails to note it keeps the event for
-// the next drain (audit-outbox.ts). So every change that was made is noted
-// at least once, and nothing else is: no person, App or agent can note
-// one. Noting the same source again is one intent.
+// core writes in the same batch as the change (core's outbox, or a
+// Durable Object's). The drain that takes the event to the log notes the
+// hand-over before the event leaves its outbox, and holds an event it
+// fails to note for the next drain (audit-outbox.ts): that event alone,
+// so a note that keeps failing keeps no other event from the log
+// (`handOverNotes`). So every change that was made is noted at least
+// once, and nothing else is: no person, App or agent can note one. A
+// source noted again while its hand-over is open is one intent: by the
+// same event, nothing changes; by another, the newer noting takes its
+// place, and its hand-over reads the source as it is then.
+//
+// A noting stays until its hand-over ends, and it ends in the same batch
+// as the one event that says how (brain-sources.ts `producersOf`): handed
+// over, refused or skipped. So it ends once however often its attempt runs
+// or its attempt's answer is lost, and never without its event. A drain
+// that notes it again after it ended opens it again, and it ends a second
+// time: when the drain's own note went through but its answer was lost,
+// so the event stayed in its outbox, and its hand-over ended before the
+// next drain noted it again. Ruling that out needs a memory of ended
+// notings that outlives their rows, which nothing bounds.
 //
 // A producer is registered here, by the audit events that note it, and in
 // brain-sources.ts, by its source's key and how it is read (`producers`,
@@ -38,6 +56,20 @@ export const handOverProducers = {
     ],
     target: "workflow_run",
   },
+  // A turn of a person's own chat, answered (workspace.ts `captureTurn`):
+  // noted, not yet kept, only for a turn that may be handed over; its
+  // hand-over ends in handed over, refused or skipped, with why.
+  chat: {
+    actions: ["chat.turn_noted"],
+    target: "chat_turn",
+  },
+  // A team's claim, as the onboarding decides it stands (onboarding/store.ts
+  // `#noteClaimSource`, drained from its own outbox). A person's interview
+  // is never noted here: its audit events would reach the company.
+  claim: {
+    actions: ["onboarding.claim.brain_source"],
+    target: "onboarding_claim",
+  },
 } as const satisfies Record<
   string,
   { actions: readonly string[]; target: string }
@@ -51,12 +83,13 @@ export interface HandOverIntent {
 }
 
 /**
- * An intent as the relay took it: removed only as it was noted then. Its
+ * An intent as the relay took it: marked only as it was noted then. Its
  * producer as stored, which may be one no longer registered.
  */
 export interface TakenHandOver {
   producer: string;
   sourceId: string;
+  /** The ID of the audit event that noted it. */
   noting: string;
 }
 
@@ -76,10 +109,12 @@ const notedBy: ReadonlyMap<
   )
 );
 
-/** The hand-overs `events` note, each source once. */
-const intentsOf = (events: readonly AuditEvent[]): HandOverIntent[] => {
-  const intents = new Map<string, HandOverIntent>();
-  for (const { action, target } of events) {
+/** The hand-overs `events` note, each source once, by the last event noting it. */
+const intentsOf = (
+  events: readonly AuditEvent[]
+): (HandOverIntent & { noting: string })[] => {
+  const intents = new Map<string, HandOverIntent & { noting: string }>();
+  for (const { id, action, target } of events) {
     const noted = notedBy.get(action);
     if (noted === undefined || target?.type !== noted.target) {
       continue;
@@ -87,46 +122,39 @@ const intentsOf = (events: readonly AuditEvent[]): HandOverIntent[] => {
     intents.set(JSON.stringify([noted.producer, target.id]), {
       producer: noted.producer,
       sourceId: target.id,
+      noting: id,
     });
   }
   return [...intents.values()];
 };
 
-/** Rows per insert: four bound parameters each, within D1's 100. */
-const rowsPerInsert = 25;
-
 /**
- * Notes the hand-overs `events` (audit events the log now has) call for,
- * each in place of one noted before. Safe to repeat: a drain cut short
- * notes them again. Throws when they can't be noted, so the drain keeps
- * the events for the next one.
+ * Notes `intents`, each in place of one of its source noted before by
+ * another event, to be relayed again: all in one D1 batch, which is one
+ * transaction, so all of them or (throwing) none. Safe to repeat: a drain
+ * cut short notes them again, and an event that noted a hand-over still
+ * open changes nothing.
  */
-export const noteHandOvers = async (
+const noted = async (
   env: Pick<Env, "DB">,
-  events: readonly AuditEvent[]
+  intents: readonly (HandOverIntent & { noting: string })[]
 ): Promise<void> => {
-  const intents = intentsOf(events);
-  if (intents.length === 0) {
-    return;
-  }
   const db = drizzle(env.DB);
   const notedAt = new Date();
-  const [first, ...rest] = chunks(intents, rowsPerInsert).map((part) =>
+  // As many rows an insert as D1 binds, counted from the insert itself.
+  const [first, ...rest] = statementsWithin(intents, (part) =>
     db
       .insert(brainHandOvers)
-      .values(
-        part.map((intent) => ({
-          ...intent,
-          noting: crypto.randomUUID(),
-          notedAt,
-        }))
-      )
+      .values(part.map((intent) => ({ ...intent, notedAt })))
       .onConflictDoUpdate({
         target: [brainHandOvers.producer, brainHandOvers.sourceId],
         set: {
           noting: sql`excluded.noting`,
           notedAt: sql`excluded.noted_at`,
+          // SQL, not a bound value: the conflict clause binds nothing.
+          relayedAt: sql`NULL`,
         },
+        setWhere: sql`${brainHandOvers.noting} <> excluded.noting`,
       })
   );
   if (first !== undefined) {
@@ -134,7 +162,114 @@ export const noteHandOvers = async (
   }
 };
 
-/** The hand-overs noted longest ago, at most `limit`. */
+/**
+ * How many notes one drain tries alone, at most (`handOverNotes`): a tenth
+ * of the queries D1 runs for one invocation, which every task of the
+ * clock's shares, so a drain's tries alone leave nine tenths to the rest.
+ * Beside them a drain makes three queries a batch (take, note, settle):
+ * at the clock's 50 batches, 250 at the very most for core's outbox. The
+ * same clock drain (`drainAuditOutboxes`) also drains Knowledge's, up to
+ * 100 more (take and settle a batch), about 350 in all. A tenth is also one
+ * batch's notings (`auditOutboxTakeMax`), so a drain can try each of a
+ * full batch alone.
+ */
+export const loneNotesPerDrain = queriesPerInvocationMax / 10;
+
+/** Each distinct name among `errors`, sorted, for a log line. */
+const namesOf = (errors: readonly unknown[]): string[] =>
+  [...new Set(errors.map(errorName))].toSorted();
+
+/**
+ * What a drain must do with an outbox's events before they leave it
+ * (audit-outbox.ts `required`), for one drain, batch by batch: notes the
+ * hand-overs `events` (audit events the log now has) call for, and
+ * answers the events whose note failed, which the drain holds for the
+ * next.
+ *
+ * A batch's note is one transaction, so when it fails, nothing says which
+ * event it failed for: each of its notings is then tried alone, and only
+ * those that fail alone are held. So an event whose note keeps failing
+ * holds itself and no other while fewer such events than a drain's tries
+ * alone sit ahead of the rest, and a note that failed for the batch's
+ * size or mix (#2237's, over D1's bound parameters) is done event by
+ * event. Once that many or more fail alone at the head of the outbox,
+ * each drain spends its tries on them, and the notings behind them whose
+ * batch's note fails are held untried, healthy ones too, until the notes
+ * at the head go through: their events still reach the log; only their
+ * notes wait.
+ *
+ * A note tried alone is a D1 query of its own, so a drain tries at most
+ * `loneNotes` alone, counted across its batches, whether they fail or go
+ * through: `loneNotesPerDrain` for a drain that runs alone in its
+ * invocation (the clock's, a Durable Object's alarm or erasure), none for
+ * a drain soon after a write, which shares its write's invocation with
+ * any number of others (every write of a clock task, or of a request
+ * that writes in a loop). Past that, a batch whose note fails holds its
+ * notings without trying each, and the drain goes on: its events that
+ * note nothing settle, so a newer sign-in still reaches the log behind
+ * any number of notes that fail (up to the drain's own bound,
+ * audit-outbox.ts `drain`), and a later drain tries the held ones alone
+ * again, oldest first. Ending the drain once the tries are spent would
+ * keep the events behind them waiting for as long as that many notes keep
+ * failing.
+ *
+ * When the drain is done, one warning (`brain.hand_overs.noted_alone`)
+ * says how many notings it noted alone and the names of the errors their
+ * batches' notes failed with.
+ */
+export const handOverNotes = (
+  env: Pick<Env, "DB">,
+  loneNotes: number
+): Required<Pick<Outbox, "required" | "drained">> => {
+  let left = loneNotes;
+  let notedAlone = 0;
+  const why: unknown[] = [];
+  return {
+    required: async (events): Promise<Held> => {
+      const intents = intentsOf(events);
+      try {
+        await noted(env, intents);
+        return { ids: [], errors: [] };
+      } catch (error) {
+        const tried = intents.slice(0, left);
+        left -= tried.length;
+        const each = await Promise.allSettled(
+          tried.map(async (intent) => {
+            await noted(env, [intent]);
+          })
+        );
+        const failed = [
+          ...tried.filter((_, index) => each[index]?.status === "rejected"),
+          ...intents.slice(tried.length),
+        ];
+        const went = intents.length - failed.length;
+        if (went > 0) {
+          notedAlone += went;
+          why.push(error);
+        }
+        return {
+          ids: failed.map(({ noting }) => noting),
+          errors: namesOf([
+            error,
+            ...each.flatMap((one): unknown[] =>
+              one.status === "rejected" ? [one.reason] : []
+            ),
+          ]),
+        };
+      }
+    },
+    drained: () => {
+      if (notedAlone > 0) {
+        log.warn("brain.hand_overs.noted_alone", {
+          notings: notedAlone,
+          errors: namesOf(why).join(","),
+        });
+      }
+    },
+  };
+};
+
+/** The hand-overs noted longest ago and not yet relayed, at most `limit`. */
 export const pendingHandOvers = async (
   env: Pick<Env, "DB">,
   limit: number
@@ -146,33 +281,68 @@ export const pendingHandOvers = async (
       noting: brainHandOvers.noting,
     })
     .from(brainHandOvers)
+    .where(isNull(brainHandOvers.relayedAt))
     .orderBy(asc(brainHandOvers.notedAt))
     .limit(limit);
 
+/** `taken`'s row, only while it is still as noted when it was taken. */
+const stillNoted = ({ producer, sourceId, noting }: TakenHandOver): SQL =>
+  sql`${brainHandOvers.producer} = ${producer} AND ${brainHandOvers.sourceId} = ${sourceId} AND ${brainHandOvers.noting} = ${noting}`;
+
 /**
- * Removes `taken`, each only while it is still as noted when it was taken:
- * one noted again since stays, to be handed over again.
+ * Marks `relayed` as on the Brain's queue, and removes `dropped`, which
+ * never will be (a producer core no longer registers, an id the Brain
+ * can't key): each only while it is still as noted when it was taken, so
+ * one noted anew since is relayed again.
  */
-export const removeHandOvers = async (
+export const settleRelay = async (
   env: Pick<Env, "DB">,
-  taken: readonly TakenHandOver[]
+  relayed: readonly TakenHandOver[],
+  dropped: readonly TakenHandOver[]
 ): Promise<void> => {
   const db = drizzle(env.DB);
-  const [first, ...rest] = taken.map(({ producer, sourceId, noting }) =>
-    db
-      .delete(brainHandOvers)
-      .where(
-        and(
-          eq(brainHandOvers.producer, producer),
-          eq(brainHandOvers.sourceId, sourceId),
-          eq(brainHandOvers.noting, noting)
-        )
-      )
-  );
+  const relayedAt = new Date();
+  const [first, ...rest] = [
+    ...relayed.map((taken) =>
+      db.update(brainHandOvers).set({ relayedAt }).where(stillNoted(taken))
+    ),
+    ...dropped.map((taken) =>
+      db.delete(brainHandOvers).where(stillNoted(taken))
+    ),
+  ];
   if (first !== undefined) {
     await db.batch([first, ...rest]);
   }
 };
+
+/**
+ * The noting of `intent` whose hand-over is open: the ID of the event that
+ * noted it, or `undefined` when none is (its hand-over ended).
+ */
+export const openNoting = async (
+  env: Pick<Env, "DB">,
+  intent: HandOverIntent
+): Promise<string | undefined> => {
+  const row = await drizzle(env.DB)
+    .select({ noting: brainHandOvers.noting })
+    .from(brainHandOvers)
+    .where(
+      and(
+        eq(brainHandOvers.producer, intent.producer),
+        eq(brainHandOvers.sourceId, intent.sourceId)
+      )
+    )
+    .get();
+  return row?.noting;
+};
+
+/** That `taken`'s hand-over is still open, as noted then, as SQL. */
+export const stillOpen = (taken: TakenHandOver): SQL =>
+  sql`EXISTS (SELECT 1 FROM ${brainHandOvers} WHERE ${stillNoted(taken)})`;
+
+/** The statement that ends `taken`'s hand-over, if it is still open as noted then. */
+export const endedHandOver = (db: DrizzleD1Database, taken: TakenHandOver) =>
+  db.delete(brainHandOvers).where(stillNoted(taken));
 
 /** Whether core's records say `personId`'s erasure has begun. */
 export const erasureBegun = async (

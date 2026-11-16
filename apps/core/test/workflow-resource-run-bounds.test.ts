@@ -4,10 +4,8 @@ import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import type { Acting } from "../src/auth/identity.ts";
-import {
-  deleteWorkflowResource,
-  shareWorkflowResource,
-} from "../src/workflow-resources.ts";
+import { shareWorkflowResource } from "../src/workflow-members.ts";
+import { deleteWorkflowResource } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
 import { runEngine } from "../src/workflows/engine.ts";
 import {
@@ -123,7 +121,7 @@ describe("the bounds on runs of JSON workflows", () => {
         { type: "person", person: ada },
         workflow.id,
         {
-          version: 1,
+          expected: 1,
           args: { who: "Ada" },
           key: unique(),
         }

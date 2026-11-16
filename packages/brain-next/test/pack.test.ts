@@ -3,7 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { packItemTokens, recallLimit, tokensOf } from "../src/contract.ts";
 import { exactsOf } from "../src/exact.ts";
 import { fuse, packOf, quoteMaxLength, quoteOf } from "../src/pack.ts";
-import type { Found } from "../src/pack.ts";
+import type { Entry, Found } from "../src/pack.ts";
 import { termsOf } from "../src/words.ts";
 
 // The pure parts of the pack: the token estimate, fusion by rank, the
@@ -11,7 +11,7 @@ import { termsOf } from "../src/words.ts";
 // tested in apps/core (brain-next-pack.test.ts).
 
 /** A chunk found, by its row, with `text`. */
-const chunk = (row: number, text = `Chunk ${row}.`): Found => ({
+const passage = (row: number, text = `Chunk ${row}.`): Found => ({
   row,
   source: `upload:${row}`,
   version: 1,
@@ -19,6 +19,25 @@ const chunk = (row: number, text = `Chunk ${row}.`): Found => ({
   text,
   found: "words",
 });
+
+/** `found` as an entry of a way's list. */
+const entryOf = (found: Found): Entry => ({
+  kind: "passage",
+  key: `passage ${found.row}`,
+  passage: found,
+});
+
+/** A chunk found, as an entry of a way's list. */
+const chunk = (row: number, text?: string): Entry =>
+  entryOf(passage(row, text));
+
+/** An entry's chunk row. */
+const rowOf = (entry: Entry): number =>
+  entry.kind === "passage" ? entry.passage.row : -1;
+
+/** An entry's chunk text. */
+const textOf = (entry: Entry): string =>
+  entry.kind === "passage" ? entry.passage.text : "";
 
 /** What a question asks a quote for. */
 const askedOf = (question: string) => ({
@@ -85,12 +104,12 @@ describe("fusion by rank", () => {
       fuse([
         [a, d, c],
         [b, c],
-      ]).map(({ row }) => row)
+      ]).map(rowOf)
     ).toStrictEqual([3, 1, 2, 4]);
   });
 
   it("keeps how the first list found a chunk it shares with another", () => {
-    const exact = { ...chunk(1), found: "exact" as const };
+    const exact = entryOf({ ...passage(1), found: "exact" });
     expect(fuse([[exact], [chunk(1)]])).toStrictEqual([exact]);
   });
 });
@@ -142,12 +161,14 @@ describe("a pack", () => {
 
       expect(spent, `seed ${seed}`).toBeLessThanOrEqual(budget);
       const whole = found.every((one) =>
-        pack.items.some((item) => item.whole && item.text === one.text)
+        pack.items.some((item) => item.whole && item.text === textOf(one))
       );
       expect(pack.truncated, `seed ${seed}`).toBe(!whole);
       for (const item of pack.items) {
-        const from = found.find(({ row }) => `upload:${row}` === item.source);
-        expect(from?.text, `seed ${seed}`).toContain(item.text);
+        const from = found.find(
+          (one) => `upload:${rowOf(one)}` === item.source
+        );
+        expect(from && textOf(from), `seed ${seed}`).toContain(item.text);
       }
     }
   });
@@ -156,10 +177,10 @@ describe("a pack", () => {
     const long = (row: number) =>
       chunk(row, `Payment terms ${row}. ${"Other words here. ".repeat(40)}`);
     const found = [long(1), long(2), long(3)];
-    const quotes = found.map((one) => ({
-      ...one,
-      text: quoteOf(one.text, askedOf("payment")),
-    }));
+    const quotes = [1, 2, 3].map((row) => {
+      const one = passage(row, textOf(long(row)));
+      return { ...one, text: quoteOf(one.text, askedOf("payment")) };
+    });
     const quotesOnly = quotes.reduce(
       (sum, { source, version, position, text, found: how }) =>
         sum +
@@ -197,6 +218,8 @@ describe("a pack", () => {
           found: "words",
         },
       ],
+      memories: [],
+      contested: [],
       notFound: ["missing"],
       truncated: true,
     });

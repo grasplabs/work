@@ -50,7 +50,9 @@ export interface BrainPackItem {
  * What answers the question, best first, within the budget: from an App
  * or a workflow, only what everyone in the company may read (never a
  * team's content, nor anyone's private chats or personal files); from a
- * chat's code, what that person's teams may read. Then the parts of the
+ * chat's code, what that person's teams may read in their own chat in
+ * Grasp, in a turn they started, and anywhere else only what everyone in
+ * the company may read. Then the parts of the
  * question nothing it may read holds (`notFound`), and whether the budget
  * left out or shortened a passage found (`truncated`).
  */
@@ -59,3 +61,154 @@ export interface BrainPack {
   readonly notFound: readonly string[];
   readonly truncated: boolean;
 }
+
+// Skills, beside recall: an App's action (`ctx.brain.skills`) and a
+// workflow's step (`ctx.brain.<alias>.skills`) select and read the same
+// skills a chat's code does (`env.skills`): Grasp's own and the
+// company's. A skill is guidance; it grants nothing.
+
+/**
+ * A skill at one version, as a selection names it, Grasp's own (`grasp`)
+ * or the company's (`company`): keep it for the whole task, and read that
+ * version.
+ */
+export interface BrainSkill {
+  readonly scope: "grasp" | "company";
+  readonly name: string;
+  readonly version: number;
+  /** When to use it. */
+  readonly description: string;
+}
+
+/** A skill at its version, whole: its `SKILL.md`. */
+export interface BrainSkillText {
+  readonly scope: "grasp" | "company";
+  readonly name: string;
+  readonly version: number;
+  readonly text: string;
+}
+
+// Entities, beside recall: an App's action (`ctx.brain.entities`) and a
+// workflow's step (`ctx.brain.<alias>.entities`) read the entities and
+// memories everyone in the company may read; an App's action reads what
+// its own code remembered too (`ctx.brain.remember`), for someone who
+// uses the App.
+
+/** What kind of thing an entity is. */
+export type BrainEntityKind =
+  | "person"
+  | "team"
+  | "customer"
+  | "supplier"
+  | "project"
+  | "product"
+  | "tool"
+  | "routine"
+  | "app"
+  | "workflow"
+  | "connection"
+  | "term";
+
+/** An entity, as everyone in the company may see it: its ID, kind and earliest name. */
+export interface BrainEntity {
+  readonly id: string;
+  readonly kind: BrainEntityKind;
+  readonly name: string | null;
+}
+
+/** An exact identifier of an entity: an email address, or a reference such as `crm:ACME-1`. */
+export interface BrainIdentifier {
+  readonly type: "email" | "ref";
+  readonly value: string;
+}
+
+/**
+ * A memory on a card: what it says (`statement`), the attribute it is
+ * filed under and its value, when the Brain learned it (ISO 8601), whether
+ * a person confirmed it, and whether another current
+ * memory says otherwise (`contested`).
+ */
+export interface BrainMemory {
+  readonly id: string;
+  readonly attribute: string | null;
+  readonly value: string | null;
+  readonly statement: string;
+  readonly learnedAt: string;
+  readonly confirmed: boolean;
+  readonly contested: boolean;
+}
+
+/**
+ * A page of an entity's card: its current memories by attribute, its
+ * relations to other entities, and its memories under no attribute
+ * (`notes`). `next`, while more follow, is the `after` of the next page.
+ */
+export interface BrainCard {
+  readonly entity: BrainEntity;
+  readonly attributes: readonly {
+    readonly attribute: string;
+    readonly memories: readonly BrainMemory[];
+    readonly contested: boolean;
+  }[];
+  readonly relations: readonly {
+    readonly attribute: string | null;
+    readonly side: "about" | "object";
+    readonly other: BrainEntity;
+    readonly memory: BrainMemory;
+  }[];
+  readonly notes: readonly BrainMemory[];
+  readonly next: string | null;
+}
+
+/**
+ * A fact an App remembers (`ctx.brain.remember`), in its own name: what
+ * it says (`statement`, at most 1,000 characters), the attribute it is
+ * filed under and its value (at most 500 characters), and the entity it
+ * is about. Pass an entity's `id` (and its `kind`) to file it on an
+ * entity the App read from the Brain. Without an `id`, give its `kind`,
+ * `names` and exact `identifiers`: an identifier links it only to an
+ * entity this App's own memories made, never to one someone else's
+ * memories name, and otherwise a new entity is made. A person's `preference` or `instruction` is only ever their own
+ * word, never an App's.
+ */
+export interface BrainRemember {
+  readonly about: {
+    readonly kind: BrainEntityKind;
+    readonly id?: string;
+    readonly names?: readonly string[];
+    readonly identifiers?: readonly BrainIdentifier[];
+  };
+  readonly attribute?: string;
+  readonly value?: string;
+  readonly statement: string;
+}
+
+/** Entities to find (`entities.find`): of a kind, by a whole name, or by an exact identifier. */
+export interface BrainEntitiesFind {
+  readonly kind?: BrainEntityKind;
+  readonly name?: string;
+  readonly identifier?: BrainIdentifier;
+  /** A page's `next`, for the page after it. */
+  readonly after?: string;
+}
+
+/**
+ * `Calls` (each operation's member, by its name) for the operations
+ * `Listed`, a dotted one under its group: `entities.get` as
+ * `entities.get`, `recall` as itself. None for an operation not listed.
+ */
+export type BrainMembersOf<Calls, Listed extends keyof Calls & string> = Pick<
+  Calls,
+  Exclude<Listed, `${string}.${string}`>
+> & {
+  readonly [
+    Group in Listed extends `${infer Prefix}.${string}` ? Prefix : never
+  ]: {
+    readonly [
+      Operation in Extract<
+        Listed,
+        `${Group}.${string}`
+      > as Operation extends `${Group}.${infer Name}` ? Name : never
+    ]: Calls[Operation];
+  };
+};

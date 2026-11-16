@@ -247,7 +247,7 @@ describe("model spend", { timeout: 60_000 }, () => {
     const converted = await outcome(
       models(rulesEnv).platformCall({
         model: "openai/gpt-5.4-mini",
-        purpose: "knowledge.conversion",
+        purpose: "upload.conversion",
         trigger,
         work: { platform: "document_conversion" },
         input: "Write out this document as Markdown.",

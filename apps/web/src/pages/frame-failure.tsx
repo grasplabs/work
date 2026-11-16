@@ -46,6 +46,7 @@ const titles: Readonly<Record<FailureReason, MessageDescriptor>> = {
   corrupt: msg`This page couldn't load`,
   "not-sealed": msg`This version can't open`,
   "version-revoked": msg`This version was revoked`,
+  outdated: msg`This version can't open`,
   unsupported: msg`This browser is too old`,
   unknown: msg`This page couldn't load`,
 };
@@ -64,6 +65,7 @@ const reasons: Readonly<Record<FailureReason, MessageDescriptor>> = {
   corrupt: msg`This page's stored code no longer matches the code that was published, so it wasn't opened. Tell an admin.`,
   "not-sealed": msg`This version of the App hasn't been sealed, so it can't be opened. A builder can publish it again.`,
   "version-revoked": msg`This version of the App was revoked and no longer runs. A builder can publish another version from History.`,
+  outdated: msg`This version of the App was published before a Grasp update and no longer runs. A builder can publish the App again.`,
   unsupported: msg`This browser is too old for App pages. Update it, or open this page in a current Chrome, Edge, Firefox or Safari.`,
   unknown: msg`Something went wrong while it opened.`,
 };

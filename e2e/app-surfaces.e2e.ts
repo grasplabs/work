@@ -14,7 +14,7 @@ const surfacedApp = async () => {
   const { core, api } = apiOf(builder);
   try {
     const { id: app } = await api.apps.create({ name });
-    await release(api, app, surfaceFiles(), name);
+    await release(api, app, surfaceFiles());
     return { builder, name, app };
   } finally {
     core[Symbol.dispose]();
@@ -30,7 +30,7 @@ test("an App's page stops once the App is no longer shared with the person", asy
   let app: string;
   try {
     ({ id: app } = await owner.api.apps.create({ name }));
-    await release(owner.api, app, surfaceFiles(), name);
+    await release(owner.api, app, surfaceFiles());
     await owner.api.apps.members.add(app, {
       type: "person",
       id: user.userId,
@@ -98,7 +98,7 @@ test("an App's sidebar entry opens its page, and its settings page is its settin
   let plain: string;
   try {
     ({ id: plain } = await api.apps.create({ name: `${name} plain` }));
-    await release(api, plain, navigationFiles(), name);
+    await release(api, plain, navigationFiles());
   } finally {
     core[Symbol.dispose]();
   }

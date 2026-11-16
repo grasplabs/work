@@ -1,6 +1,15 @@
 import { z } from "zod";
 
-import type { BrainPack, BrainRecall } from "./brain-recall.ts";
+import type {
+  BrainCard,
+  BrainEntitiesFind,
+  BrainEntity,
+  BrainMembersOf,
+  BrainPack,
+  BrainRecall,
+  BrainSkill,
+  BrainSkillText,
+} from "./brain-recall.ts";
 
 // What a workflow's `ctx` calls take and answer: their options and
 // results, as generated code and its types see them.
@@ -112,16 +121,50 @@ export interface FilesActions {
 }
 
 /**
- * What a brain permission's steps do: recall what everyone in the
- * company may read, whoever the run acts for, with the same request and
- * pack as an App's action (`brain-recall.ts`).
+ * What a brain permission's steps do, by action, with the same requests
+ * and answers as an App's action (`brain-recall.ts`): recall what everyone
+ * in the company may read, whoever the run acts for; select and read its
+ * skills (`skills.select`, `skills.read`); and read entities
+ * (`entities.get`, `entities.find`). A dotted action is a member of its group:
+ * `ctx.brain.<alias>.entities.get`.
  */
 export interface BrainActions {
   readonly recall: (
     request: BrainRecall,
     options: CallOptions
   ) => Promise<BrainPack>;
+  readonly "skills.select": (
+    request: { readonly task: string },
+    options: CallOptions
+  ) => Promise<{ readonly skills: readonly BrainSkill[] }>;
+  readonly "skills.read": (
+    request: {
+      readonly skill: Pick<BrainSkill, "scope" | "name" | "version">;
+    },
+    options: CallOptions
+  ) => Promise<BrainSkillText>;
+  readonly "entities.get": (
+    request: {
+      readonly entity: string;
+      readonly asOf?: string;
+      readonly after?: string;
+    },
+    options: CallOptions
+  ) => Promise<BrainCard | null>;
+  readonly "entities.find": (
+    request: BrainEntitiesFind,
+    options: CallOptions
+  ) => Promise<{
+    readonly entities: readonly BrainEntity[];
+    readonly next: string | null;
+  }>;
 }
+
+/** `ctx.brain.<alias>` for the brain actions `Listed` (`BrainMembersOf`). */
+export type BrainMembers<Listed extends keyof BrainActions> = BrainMembersOf<
+  BrainActions,
+  Listed
+>;
 
 /**
  * How a decision ended: answered, by whom (their user ID) and with what

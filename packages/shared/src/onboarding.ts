@@ -110,7 +110,10 @@ export type RosterTeam = z.output<typeof rosterTeamSchema>;
 export const rosterPersonSchema = z.strictObject({
   id: idSchema,
   name: nameSchema,
-  /** Empty when they have none: their link is handed to them on paper. */
+  /**
+   * Empty when they have none: their link can be handed to them on paper,
+   * and opens once the list has an address they sign in with (GRA-1790).
+   */
   email: z.union([z.literal(""), z.email().max(120)]).default(""),
   team: idSchema,
   title: z.string().trim().max(80).default(""),
@@ -253,6 +256,12 @@ export interface OnboardingView {
   agreed: boolean;
   /** Grasp paused the interviews: no link opens and none goes out. */
   paused: boolean;
+  /**
+   * The kickoff: `in` while it is kept, which the admin can delete
+   * (`deleteKickoff`); `erasing` once deleted while what it gave the brain
+   * is still being erased, which finishes by itself; null without one.
+   */
+  kickoff: "in" | "erasing" | null;
   /**
    * The sponsor's first name, when the kickoff named them; null before it
    * is in, or when it did not. The one word of the kickoff the admin sees.
@@ -452,6 +461,12 @@ export interface OnboardingApi
   links: () => Promise<LinkToSend[]>;
   /** The admin took these people's links to send: they are new no more. */
   linksTaken: (people: string[]) => Promise<void>;
+  /**
+   * Deletes the kickoff for good, and everything drawn from it: what the
+   * admin's onboarding, Stephen and the brain knew of it. Asked again, it
+   * finishes what a failed delete left.
+   */
+  deleteKickoff: () => Promise<void>;
 }
 
 /** Why the onboarding refused something. */
@@ -459,6 +474,8 @@ export const onboardingErrors = defineErrorFamily({
   "onboarding.invalid": "That isn't something the onboarding takes.",
   "onboarding.staff_only": "Only Grasp's staff do that.",
   "onboarding.no_roster": "Add who works where first.",
+  "onboarding.kickoff_unfinished":
+    "The kickoff is deleted. What was drawn from it is still being erased, and that finishes by itself.",
   "onboarding.past": "The interviews can't start in the past.",
   "onboarding.no_link": "That person has no link out yet.",
   "onboarding.not_found": "Nobody on the list by that id.",

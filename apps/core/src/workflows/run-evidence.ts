@@ -6,9 +6,10 @@ import { drizzle } from "drizzle-orm/d1";
 import { runBrainVersions } from "../db/core/schema.ts";
 
 // What a workflow run recalled stays pinned to the run (GRA-299, kept on
-// the new Brain by GRA-1731): every version its recalls handed it is kept
-// with the run, by its source and number, only ever added to, with the
-// permission to read the Brain it came through. Before the run lets
+// the new Brain by GRA-1731): every version its recalls handed it, and
+// every skill version it selected or read (GRA-1830), is kept with the
+// run, by its source and number, only ever added to, with the permission
+// to read the Brain it came through. Before the run lets
 // anything leave it (a model call, a connection call, an App function
 // call, a decision opened for people, its output), the host checks the
 // run may still read them all (resource-reads.ts): each permission still
@@ -24,10 +25,12 @@ import { runBrainVersions } from "../db/core/schema.ts";
 // does.
 
 /**
- * Most versions one run keeps (one per version and permission): far above
- * what a run's recalls hand it, so a run past it is recalling in a loop.
- * It is refused further recalls rather than kept growing, and each check
- * before something leaves the run stays bounded.
+ * Most versions one run keeps (one per version and permission). A recall's
+ * pack keeps one per passage it hands on; a page of entities up to about
+ * 300, and a card about 200, when every memory has a source of its own. So a run that loops over
+ * entities' cards reaches it in a handful of calls. Past it, a run is
+ * refused what would add more (`brain.budget_exceeded`) rather than kept
+ * growing, so each check before something leaves the run stays bounded.
  */
 export const runEvidenceMaxRows = 1000;
 

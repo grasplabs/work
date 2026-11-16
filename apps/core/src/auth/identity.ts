@@ -121,6 +121,8 @@ export const staffRole = async (
  * from the sign-in config, anyone else's from their membership.
  * `undefined` once they have neither.
  *
+ * A session for someone's interview alone is nobody's here (GRA-1790).
+ *
  * A staff session reaches the onboarding alone, whatever the config's
  * staff scope: Grasp's staff identity is for managing a deployment, never
  * for acting inside the client's workspace. A staff member who needs to
@@ -134,8 +136,15 @@ export const sessionIdentity = async (
     name: string;
     expiresAt: Date;
     staff: boolean;
+    /** A session for the person's own interview alone (GRA-1790). */
+    interview: boolean;
   }
 ): Promise<Identity | undefined> => {
+  // Nobody, to every route that asks who it is: only the interview's own
+  // routes read such a session (onboarding/interview-caller.ts).
+  if (session.interview) {
+    return undefined;
+  }
   const person = {
     userId: session.userId,
     email: session.email,
@@ -195,6 +204,7 @@ export const signedInSession = async (
     name: user.name,
     expiresAt: session.expiresAt,
     staff: session.staff,
+    interview: session.interview,
   });
   return person === undefined
     ? undefined

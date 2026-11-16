@@ -40,6 +40,14 @@ export const chats = sqliteTable(
     /** It read restricted data, and is in restricted mode for good. */
     restricted: integer({ mode: "boolean" }).notNull().default(false),
     /**
+     * It handed its model or its code something only its person may read
+     * (private-reads.ts): from then on, for good, what its agent writes
+     * where others read waits for the person to confirm it.
+     */
+    privateRead: integer("private_read", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    /**
      * The person the chat belongs to, whom its agent acts for, and the
      * only one who reaches it.
      */
@@ -66,10 +74,9 @@ export const chats = sqliteTable(
      */
     thread: text(),
     /**
-     * The App the chat is for (`ChatsApi.forApp`): the one its person
-     * builds there, which its agent is told of; null for any other chat.
-     * Only a pointer: what the agent may do to the App is decided on
-     * every call, as for any chat.
+     * Unused, dropped in a later release: the App a chat was bound to.
+     * A chat's App or workflow is now the one it worked on, as the
+     * draft's checkpoints name it (`chatsWorkedOn` in drafts.ts).
      */
     appId: text("app_id"),
     /**
@@ -118,6 +125,12 @@ export const chatMessages = sqliteTable(
      * message.
      */
     built: text(),
+    /**
+     * The agent that gave an answer, or asked a step of it (`ChatMessage`'s
+     * `agentId`): the chat's agent of its turn. Null for a question, and
+     * for what was kept before a chat could have several agents.
+     */
+    agentId: text("agent_id"),
   },
   (table) => [index("chat_messages_chat").on(table.chatId, table.id)]
 );
@@ -171,13 +184,9 @@ export const chatSources = sqliteTable(
 
 /**
  * The Knowledge documents a chat's code was given, each once, with the
- * chat's last message when it first was (`givenAfter`, 0 before any): a
- * search's hits, a read's document, and what a follow resolved to a
- * document. What its answers may cite (`ChatCitation`): an answer stored
- * after that message. By message, not by clock, so an answer and a read
- * in the same millisecond keep their order. Written only for a code run
- * that is still open, with its sources (`recordSources` in workspace.ts);
- * at most `chatDocumentsMax` a chat, the oldest dropped.
+ * chat's last message when it first was (`givenAfter`). Nothing writes or
+ * reads it since a chat's code no longer reaches Knowledge (GRA-1735): a
+ * chat's rows go with it, and a later release drops the table.
  */
 export const chatDocuments = sqliteTable(
   "chat_documents",
@@ -222,7 +231,26 @@ export const chatRunSources = sqliteTable(
   ]
 );
 
-// Unused since the App's one shared draft (app-drafts.ts) replaced each
+/**
+ * When this person last used each memory the Brain handed them: one row a
+ * memory, by the store it is in and that store's id for it, kept when a
+ * recall as them pins it (`brain-memory:`, history-access.ts) and moved
+ * on by each later one (workspace.ts `memoriesUsed`). Their own recall
+ * ranks memories by it (brain-next.ts `recallAs`), so one they never use
+ * fades. Theirs alone: no other person's recall reads it; erased with
+ * their Workspace. Outlives the chat that used it.
+ */
+export const memoryUses = sqliteTable(
+  "memory_uses",
+  {
+    store: text({ enum: ["own", "shared"] }).notNull(),
+    memory: text().notNull(),
+    usedAt: integer("used_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.store, table.memory] })]
+);
+
+// Unused since the App's one shared draft (drafts.ts) replaced each
 // chat's drafts and their previews: nothing reads or writes these, and a
 // chat's rows go with it. Kept so a roll back to the release before still
 // has them; dropped in a later release (expand, then contract).
@@ -383,14 +411,10 @@ export const auditOutbox = sqliteTable("audit_outbox", {
 });
 
 /**
- * Settled turns' outcomes still owed to the Brain (src/brain-capture.ts),
- * each written in the same transaction as the turn's last message, so a
- * turn never settles without its capture. `facts` is what the turn's end
- * said (how it ended, its model, its answer), identifiers only; the
- * object delivers the rest from the chat when it delivers. Deleted once
- * the Brain has it, or once its chat is deleted; one the Brain refused for
- * good stays `dead`. `seq` only grows (AUTOINCREMENT): the Brain's cursor
- * of this object's turns.
+ * Settled turns' outcomes once owed to today's Brain, while core captured
+ * them. Nothing writes or delivers them any more; what is left is deleted
+ * with its chat or its person, and the table is dropped in a later
+ * release.
  */
 export const brainCaptureIntents = sqliteTable(
   "brain_capture_intents",
@@ -399,7 +423,7 @@ export const brainCaptureIntents = sqliteTable(
     eventId: text("event_id").notNull(),
     /** The chat the outcome rests on. */
     evidenceId: text("evidence_id").notNull(),
-    /** JSON: the turn's end, as `brain-capture.ts` reads it. */
+    /** JSON: the turn's end. */
     facts: text().notNull(),
     state: text({ enum: ["pending", "dead"] })
       .notNull()
@@ -445,6 +469,42 @@ export const chatFiles = sqliteTable(
   (table) => [index("chat_files_chat").on(table.chatId, table.createdAt)]
 );
 
+/** Where a held App call stands (held-app-calls.ts). */
+export type HeldAppCallStatus = "waiting" | "confirmed" | "declined" | "lapsed";
+
+/**
+ * Writes to an App that a chat's agent asked for after the chat used
+ * something only its person may read (held-app-calls.ts), held for that
+ * person: the call exactly as the agent's code sent it, by its SHA-256,
+ * which the person confirms. Kept here, with the chat it came from, as its
+ * transcript is; the request is emptied once it is decided, or once it
+ * waited past its day (`lapsed`), when it is neither listed nor
+ * confirmable.
+ * Deleted with the chat.
+ */
+export const heldAppCalls = sqliteTable(
+  "held_app_calls",
+  {
+    id: text().primaryKey(),
+    // No foreign key: a core rolled back to before this table deletes a
+    // chat without knowing it, which one would refuse for good.
+    chatId: text("chat_id").$type<ChatId>().notNull(),
+    agentId: text("agent_id").notNull(),
+    personId: text("person_id").notNull(),
+    appId: text("app_id").notNull(),
+    /** The function's path and kind, as the request names them. */
+    function: text().notNull(),
+    kind: text().notNull(),
+    /** The request, exactly as it would run; null once decided. */
+    request: text(),
+    /** The request's SHA-256, hex: what confirming names. */
+    requestHash: text("request_hash").notNull(),
+    heldAt: integer("held_at", { mode: "timestamp_ms" }).notNull(),
+    status: text().$type<HeldAppCallStatus>().notNull(),
+  },
+  (table) => [index("held_app_calls_chat").on(table.chatId, table.status)]
+);
+
 /**
  * Every code run of a chat's agent, as evidence of what ran and how it
  * ended: its run ID (the lease its stubs answer to, random and never
@@ -471,7 +531,7 @@ export const chatCodeRuns = sqliteTable(
     /**
      * Always written; null on a run an earlier release opened, kept so a
      * rollback's code still writes here. Its draft writes never amend a
-     * turn's undo point (app-drafts.ts).
+     * turn's checkpoint (drafts.ts).
      */
     turnId: text("turn_id"),
     sourceHash: text("source_hash").notNull(),

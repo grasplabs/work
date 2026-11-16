@@ -9,11 +9,14 @@ import type { Json } from "@grasp-os/shared/json";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import { stableIdPattern } from "@grasp-os/shared/store-limits";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
+import { sql } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 
 import { callAppFunctionById, functionById } from "../app-functions.ts";
 import { findApp, usableApp } from "../apps.ts";
 import { memberOf } from "../auth/identity.ts";
 import { appHost } from "../durable-objects.ts";
+import { teamBrainOfAppSql } from "../permissions.ts";
 import { restrict } from "../restricted.ts";
 import { requireAppCallAuthority } from "./resource-authority.ts";
 import type { CallingRun, CandidateBinding } from "./resource-authority.ts";
@@ -55,13 +58,9 @@ import type { AppCall } from "./resource-calls.ts";
 //   one revoked) is refused that call (`workflow.call_denied`) until an
 //   admin grants it.
 // - A later version of the App changing what the function does. The
-//   grant trusts the code of the version an admin reviewed, as the App's
-//   own write grants do, and is treated alike: a version made current by
-//   someone who couldn't grant asks for it again (permissions.ts,
-//   `madeCurrent`, the same statement), so the workflow's calls are
-//   refused until an admin grants it over that version; one an admin
-//   makes current keeps it. A publish also refuses a version whose
-//   function no longer fits its callers (app-function-bindings.ts).
+//   grant is of the access, whichever version runs, as the App's own
+//   grants are: a publish refuses a version whose function no longer
+//   fits its callers (app-function-bindings.ts).
 // - A forged ID, or one from another App or tenant. The grant names the
 //   App and the function together, so an ID granted on one App reaches
 //   nothing on another, and an ID nobody granted reaches nothing; an ID
@@ -104,6 +103,12 @@ import type { AppCall } from "./resource-calls.ts";
 //   before and after the call (restricted.ts). What the App's data
 //   reaches through the workflow, and the workflow's through the App, the
 //   data policy follows (data-policy.ts).
+// - A team's Brain content reaching a run (GRA-1842). An App whose grant
+//   to read the Brain names teams may hold what only those teams may
+//   read; whoever follows a run isn't checked against that. So such an
+//   App answers no workflow (`permission.team_brain_workflow`), checked
+//   with the grant before and during each call; its requests refuse it
+//   first (permissions.ts).
 // - Evidence. Its receipts, kept by `makeCall` before and after, name
 //   the run, workflow, App, function ID, key, person and outcome, and the
 //   call's request ID, never an argument or an answer. The App's own
@@ -212,6 +217,16 @@ export const callApp = async (
   const authorized = own(async (): Promise<void> => {
     effect.requireHolds();
     await requireAppCallAuthority(env, run, appId, call.function);
+    // An App whose Brain grant names teams answers no workflow (GRA-1842):
+    // its data may hold a team's content, which nothing checks in a run.
+    // Its requests refuse this already (permissions.ts); this holds
+    // whatever got past them.
+    const teamBrain = await drizzle(env.DB).get<{ found: number }>(
+      sql`SELECT ${teamBrainOfAppSql(appId)} AS found`
+    );
+    if (teamBrain.found !== 0) {
+      throw permissionErrors.create("permission.team_brain_workflow");
+    }
   });
   await authorized();
   const person = await memberOf(env.DB, run.principal);
@@ -298,7 +313,7 @@ export const appCallKey = ({
 }: Pick<AppCall, "app" | "function">): string => `app:${app}/${fn}`;
 
 /**
- * What `call` of a test run of a draft's checkpoint answers: the answer
+ * What `call` of a test run of a draft at one revision answers: the answer
  * its start gave under `appCallKey` (`binding`, of kind `app`), checked
  * against what the function answers in the App's current version, as a
  * real call's would be. Nothing is called: only the App's release is

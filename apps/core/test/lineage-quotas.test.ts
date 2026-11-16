@@ -421,7 +421,7 @@ describe("run lineage quotas", { timeout: 90_000 }, () => {
     const start = async (who: string) =>
       await outcome(
         builder.api.workflowResources.start(id, {
-          version: 1,
+          expected: 1,
           args: { who },
           key: crypto.randomUUID(),
         })

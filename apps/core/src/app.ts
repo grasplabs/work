@@ -478,7 +478,7 @@ export class App extends DurableObject<Env> {
 
   /**
    * Tells every connection that follows the App that another of its
-   * versions was made current (apps.ts, `makeCurrent`): each tells the
+   * versions was made current (apps.ts, `activateVersion`): each tells the
    * pages that follow its version (pages-rpc.ts, `watchVersion`), which
    * read it again as their person. Returns at once, with how many
    * connections it told; a connection that is gone is dropped.

@@ -1,6 +1,7 @@
 import { isExpectedError } from "@grasp-os/shared/errors";
 import type { AppId, ChatId, WorkspaceId } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
+import type { Subject } from "@grasp-os/shared/subject";
 
 /**
  * Durable Objects keep their data in the EU. workerd doesn't implement
@@ -32,6 +33,15 @@ export const appPreview = (
   env: Pick<Env, "APP_PREVIEWS" | "DURABLE_OBJECT_JURISDICTION">,
   app: AppId
 ) => inJurisdiction(env, env.APP_PREVIEWS).getByName(app);
+
+/**
+ * Who follows an App's or workflow's draft (draft-watch.ts), named by its
+ * subject: one per draft.
+ */
+export const draftWatch = (
+  env: Pick<Env, "DRAFT_WATCHES" | "DURABLE_OBJECT_JURISDICTION">,
+  { kind, id }: Subject
+) => inJurisdiction(env, env.DRAFT_WATCHES).getByName(`${kind}:${id}`);
 
 /**
  * A chat's own object (chat-session.ts): its agent's turns, named by its

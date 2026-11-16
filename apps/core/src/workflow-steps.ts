@@ -7,7 +7,7 @@ import type { z } from "zod";
 // One step of a draft edited on the canvas or by the agent (GRA-514): a
 // change of a step's fields, or a step inserted into a list of steps,
 // applied to the draft's grasp-workflow/2 text as JSON. Pure: the draft
-// saves what it answers as its next revision (workflow-drafts.ts,
+// saves what it answers as its next revision (workflow-editor.ts,
 // `editWorkflowStep`), checked like any edit, so a step the format refuses
 // is saved with its problems and never becomes a checkpoint.
 //

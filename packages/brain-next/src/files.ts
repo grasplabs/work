@@ -2,6 +2,7 @@ import { and, eq, inArray, lte, sql } from "drizzle-orm";
 import type { DrizzleSqliteDODatabase } from "drizzle-orm/durable-sqlite";
 
 import type { BrainBucket } from "./bucket.ts";
+import { fileGraceMs } from "./contract.ts";
 import { files, vectorFiles } from "./db/schema.ts";
 
 // The original files of source versions, in the host's Brain bucket (R2,
@@ -45,9 +46,6 @@ import { files, vectorFiles } from "./db/schema.ts";
 // object a run has just written again: its row stays, held, the object is
 // gone, and the next run that needs that text runs the model again. No
 // wrong data, only a model call.
-
-/** How long an add may take between noting a file and recording its version. */
-export const fileGraceMs = 15 * 60 * 1000;
 
 /** Files swept at once: as many as one statement can name. */
 const sweepBatch = 100;

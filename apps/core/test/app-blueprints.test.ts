@@ -5,14 +5,10 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { createFromBlueprint } from "../src/app-blueprints.ts";
-import { commitApp, testApp, withFiles } from "./app-definitions.ts";
-import { outlook, release, requestGranted } from "./apps.ts";
+import { testApp, withFiles } from "./app-definitions.ts";
+import { commitApp, outlook, release, requestGranted } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
-import {
-  collectionWithNote,
-  readCollection,
-  storedGrant,
-} from "./knowledge.ts";
+import { storedGrant } from "./knowledge.ts";
 import { mailConnection } from "./mail-connection.ts";
 import { racingDb } from "./racing-db.ts";
 import { calledAs } from "./sealed-apps.ts";
@@ -107,12 +103,7 @@ export const Route = createFileRoute("/")({ component: Notes });
 const notesApp = async (owner: Person): Promise<string> => {
   const { id } = await owner.api.apps.create({ name: `Notes ${unique()}` });
   await release(owner, id, v1);
-  await commitApp(
-    owner.api.apps.files,
-    id,
-    { "AGENTS.md": "# Notes, v2\n" },
-    "Version 2"
-  );
+  await commitApp(owner.api, id, { "AGENTS.md": "# Notes, v2\n" });
   return id;
 };
 
@@ -151,6 +142,14 @@ const mailboxOf = async (owner: Person): Promise<string> => {
   return id;
 };
 
+/** A permission for `app` to read the platform's statistics, declarable. */
+const statisticsOf = (app: string): PermissionRequest => ({
+  subject: { type: "app", appId: app },
+  object: { type: "platform" },
+  actions: ["statistics"],
+  binding: "HANDBOOK",
+});
+
 // The test of the same code seals two Apps' releases, the source's and the
 // copy's, one after the other, and calls each. That is the point of it:
 // the copy runs the same code with none of the data. Nothing polls or
@@ -162,29 +161,14 @@ describe("blueprints", { timeout: 60_000 }, () => {
       personApi("builder"),
       personApi("builder"),
     ]);
-    const admin = await signedInApi(idp, "admin");
     const source = await notesApp(owner);
-    const [{ collectionId: handbook }, { collectionId: later }] =
-      await Promise.all([
-        collectionWithNote(admin.api, {
-          name: `Handbook ${unique()}`,
-          access: "everyone",
-        }),
-        collectionWithNote(admin.api, {
-          name: `Later ${unique()}`,
-          access: "everyone",
-        }),
-      ]);
     const [mail, mailbox] = await Promise.all([
       mailConnection(),
       mailboxOf(owner),
     ]);
-    // Granted, and asked for: the collection is declared, the rest not.
-    await requestGranted(
-      idp,
-      owner,
-      readCollection({ type: "app", appId: source }, handbook)
-    );
+    // Granted, and asked for: what the platform offers is declared, the
+    // rest not.
+    await requestGranted(idp, owner, statisticsOf(source));
     await requestGranted(idp, owner, {
       ...outlook(source, "MAIL"),
       object: { type: "connection", connectionId: mail.id },
@@ -210,9 +194,12 @@ describe("blueprints", { timeout: 60_000 }, () => {
     await share(owner, source, maker, "user");
     const { id: blueprint } = await owner.api.apps.blueprints.mark(source, 1);
     // Asked for after the version was marked: not declared.
-    await owner.api.permissions.request(
-      readCollection({ type: "app", appId: source }, later, "LATER")
-    );
+    await owner.api.permissions.request({
+      subject: { type: "app", appId: source },
+      object: { type: "platform" },
+      actions: ["guests"],
+      binding: "LATER",
+    });
 
     const listed = await maker.api.apps.blueprints.list();
     const created = await maker.api.apps.blueprints.create(blueprint, named);
@@ -221,11 +208,7 @@ describe("blueprints", { timeout: 60_000 }, () => {
       appId: created.app.id,
     });
 
-    const declared = {
-      object: { type: "collection", collectionId: handbook },
-      actions: ["read"],
-      binding: "HANDBOOK",
-    };
+    const { subject: _subject, ...declared } = statisticsOf(source);
     expect({
       declared: listed.find(({ app }) => app === source)?.permissions,
       asked: created.permissions.map(
@@ -270,40 +253,26 @@ describe("blueprints", { timeout: 60_000 }, () => {
     });
   });
 
-  // Only reads of a collection are declarable now: a grant or a blueprint
-  // kept from before, holding a collection to write, is refused, never
-  // asked for again, and never an internal error.
-  it("ask for no collection to write, whatever an App or a blueprint held from before", async () => {
+  // Knowledge is gone (GRA-1735): a grant on a collection an App holds from
+  // before is never declared, and a blueprint that declared one before is
+  // refused whole, never asked for, and never an internal error.
+  it("ask for no Knowledge collection, whatever an App or a blueprint held from before", async () => {
     const owner = await personApi("builder");
-    const admin = await signedInApi(idp, "admin");
     const source = await notesApp(owner);
-    const { collectionId } = await collectionWithNote(admin.api, {
-      name: `Handbook ${unique()}`,
-      access: "everyone",
-    });
-    await requestGranted(
-      idp,
-      owner,
-      readCollection({ type: "app", appId: source }, collectionId)
+    await storedGrant(
+      { type: "app", id: source },
+      { type: "collection", id: "handbook" },
+      ["read"],
+      "HANDBOOK"
     );
-    const writes = async (actions: string[]) =>
-      await env.DB.prepare(
-        "UPDATE permissions SET actions = ? WHERE subject_id = ? AND object_type = 'collection'"
-      )
-        .bind(JSON.stringify(actions), source)
-        .run();
-    await writes(["read", "write"]);
-    const markedWhileWriting = await outcome(
-      owner.api.apps.blueprints.mark(source, 1)
-    );
-    await writes(["read"]);
     const { id: blueprint } = await owner.api.apps.blueprints.mark(source, 1);
+    const marked = await owner.api.apps.blueprints.list();
     await env.DB.prepare("UPDATE blueprints SET permissions = ? WHERE id = ?")
       .bind(
         JSON.stringify([
           {
-            object: { type: "collection", collectionId },
-            actions: ["read", "write"],
+            object: { type: "collection", collectionId: "handbook" },
+            actions: ["read"],
             binding: "HANDBOOK",
           },
         ]),
@@ -324,12 +293,12 @@ describe("blueprints", { timeout: 60_000 }, () => {
       .first<number>("copies");
 
     expect({
-      markedWhileWriting,
+      declared: marked.find(({ id }) => id === blueprint)?.permissions,
       created,
       copies,
       filesLeft: storedAfter - storedBefore,
     }).toStrictEqual({
-      markedWhileWriting: "permission.invalid",
+      declared: [],
       created: "permission.invalid",
       copies: 0,
       filesLeft: 0,
@@ -337,19 +306,12 @@ describe("blueprints", { timeout: 60_000 }, () => {
   });
 
   it("create an App with the same code and none of the data, audited", async () => {
-    const [owner, maker, admin] = await Promise.all([
+    const [owner, maker] = await Promise.all([
       personApi("builder"),
       personApi("builder"),
-      personApi("admin"),
     ]);
     const source = await notesApp(owner);
-    const { collectionId } = await collectionWithNote(admin.api, {
-      name: `Handbook ${unique()}`,
-      access: "everyone",
-    });
-    await owner.api.permissions.request(
-      readCollection({ type: "app", appId: source }, collectionId)
-    );
+    await owner.api.permissions.request(statisticsOf(source));
     await calledAs(
       await owner.api.whoami(),
       source,
@@ -397,11 +359,16 @@ describe("blueprints", { timeout: 60_000 }, () => {
     // The same code and none of the data: the new App starts empty, and
     // shared with nobody.
     const theirs = await maker.api.apps.list();
-    await maker.api.apps.versions.publish(app.id, 1);
+    await maker.api.versions.rollback({ kind: "app", id: app.id }, 1);
     const { name: sourceName } = await owner.api.apps.get(source);
+    // The source's version 1, as its draft saved it.
+    const sourceFiles = await owner.api.versions.files(
+      { kind: "app", id: source },
+      1
+    );
     expect({
       listed: theirs.some(({ id }) => id === app.id),
-      files: await maker.api.apps.files.read(app.id, 1),
+      files: await maker.api.versions.files({ kind: "app", id: app.id }, 1),
       // The maker has a role in the source, so its notes would show to
       // them had any come along.
       sourceNotes: await notesOf(maker, source),
@@ -412,9 +379,10 @@ describe("blueprints", { timeout: 60_000 }, () => {
       listed: true,
       // The same code, but for AGENTS.md: the source's agents wrote it
       // from what the source read, which the copy has no sources for.
-      files: withFiles(v1, {
+      files: {
+        ...sourceFiles,
         "AGENTS.md": `Created from the blueprint ${sourceName}. Write what this App does here.\n`,
-      }).files,
+      },
       sourceNotes: { ok: true, value: ["Only the source's"] },
       notes: { ok: true, value: [] },
       members: [],

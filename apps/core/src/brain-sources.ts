@@ -1,20 +1,44 @@
 import type { AuditEntry } from "@grasp-os/shared/audit";
 import { log } from "@grasp-os/shared/log";
-import { eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
+import type { DrizzleD1Database } from "drizzle-orm/d1";
 
-import { auditedBatch, outboxed } from "./audit-outbox.ts";
+import { auditedBatch, outboxedWhere } from "./audit-outbox.ts";
+import { memberRole } from "./auth/identity.ts";
 import {
+  endedHandOver,
   erasureBegun,
   handOverProducers,
+  openNoting,
   pendingHandOvers,
-  removeHandOvers,
+  settleRelay,
+  stillOpen,
 } from "./brain-hand-overs.ts";
-import type { HandOverProducer } from "./brain-hand-overs.ts";
-import { runSource } from "./brain-next-origins.ts";
+import type { HandOverProducer, TakenHandOver } from "./brain-hand-overs.ts";
+import {
+  chatSource,
+  chatsOf,
+  chatTurnOf,
+  runSource,
+} from "./brain-next-origins.ts";
 import { queueHandOvers } from "./brain-next.ts";
-import type { Handed, Producers, SourceRef } from "./brain-next.ts";
-import { workflowStartReceipts } from "./db/core/schema.ts";
+import type {
+  Handed,
+  HandOverAttempt,
+  HandOverOutcome,
+  Producers,
+  SourceRef,
+} from "./brain-next.ts";
+import {
+  appStarted,
+  holdsWorkflowSql,
+  runSourceInUse,
+} from "./brain-run-sources.ts";
+import { brainHandOvers, workflowStartReceipts } from "./db/core/schema.ts";
+import { workspace } from "./durable-objects.ts";
+import { claimOf, claimSource } from "./onboarding/new-brain.ts";
+import { personalWorkspaceId } from "./personal-workspace.ts";
 import { resultOf, runOf } from "./workflows/resource-runs.ts";
 import { detailsRemoved } from "./workflows/retention.ts";
 import { evidenceOf } from "./workflows/run-evidence.ts";
@@ -32,28 +56,53 @@ import { evidenceOf } from "./workflows/run-evidence.ts";
 //   restricted mode, or whose details are past their retention. A run
 //   reads only what its person may read, so its person never reads more
 //   through the Brain than the run read for them. Core shows a run's raw
-//   result only while that person still holds the workflow's user role;
-//   the Brain's copy has no such check, so they keep recalling it after
-//   they lose the workflow (accepted for now: GRA-1829). A run that
+//   result only while that person still holds the workflow's role, and so
+//   does the Brain: nothing is handed over for a person who no longer
+//   holds it (skipped `no_role`), and what was is taken out of use once
+//   they lose it (brain-run-sources.ts, GRA-1829). A run an App started
+//   for its person is shown on the App's page to whoever uses the App, so
+//   the workflow's role decides nothing of it: it is handed over as on its
+//   own, and its App's rule for taking it out of use is GRA-1926. A run that
 //   recalled from the Brain (its recall evidence, run-evidence.ts) hands
 //   over only how it ended, never what it returned: the Brain never holds
 //   a second copy of what it recalled, which would outlive that source
 //   being narrowed or erased (GRA-1731).
 //
+// - A turn of a person's own chat (`chat:<person>/<chat>/<answer>`), in
+//   their own store alone, in its chat's group (brain-next-origins.ts):
+//   once, change `answer`: what they asked, their words alone. Never what
+//   was answered: an answer can quote anything its prompt held (a step's
+//   result, an earlier turn's, the recall, instruction files, memories,
+//   skills), and its copy here would outlive that being erased or the
+//   person losing it, until GRA-1855 gives an answer a record of what it
+//   used. Only while the chat is still theirs, in Grasp's
+//   own app, shared with no one, not restricted and not being deleted, as
+//   their Workspace holds it now (workspace.ts `turnForBrain`); a turn
+//   nobody asked for there and then is never noted. Deleting the chat
+//   erases them all in one call before its rows go (`eraseChat`).
+//
 // Nothing for a person whose erasure has begun (core's `personErasures`):
 // a reader answers `erased`, with the readers it would have named, and the
-// Brain closes the source's key. What is gone answers `gone`, and nothing
-// is added.
+// Brain closes the source's key. What is gone answers `gone`, with why
+// (`HandOverSkip`, a fixed set), and nothing is added.
 //
-// Each hand-over is audited without content: `brain.source.handover_started`
-// before its text leaves core, then `brain.source.handed_over` with the
-// Brain's version, or `brain.source.handover_refused` when it was refused
-// for good (what it adds was erased, or its one reader's erasure began:
-// brain-next.ts `handOver`). Each attempt records its own. Each is added
+// Each hand-over is audited without content, ids only, the same for every
+// producer (brain-next.ts `handOver`): `brain.source.handover_started`
+// before its text leaves core, then exactly one outcome:
+// `brain.source.handed_over` with the Brain's version,
+// `brain.source.handover_refused` when it was refused for good (what it
+// adds was erased, or its one reader's erasure began), or
+// `brain.source.handover_skipped` with why it is not handed over after
+// all. So a noting event never stands alone in the log. The outcome is
+// written here, in the same batch that ends the noted hand-over
+// (brain-hand-overs.ts), and only while it is open as the attempt read it
+// before reading its source: an attempt tried again after its answer was
+// lost, or after it failed past its outcome (closing a key), records
+// nothing more, and one whose noting was replaced by a newer leaves its
+// outcome to the newer's. A start is recorded by each attempt whose text
+// leaves core, also only while its noted hand-over is open. Each is added
 // through core's `addSource`, which picks the store its readers belong in;
 // nothing here assumes which.
-
-const gone: Handed = { kind: "gone" };
 
 /** How a run may end: only an ended run is handed over. */
 const endedStatuses: ReadonlySet<string> = new Set([
@@ -65,12 +114,33 @@ const endedStatuses: ReadonlySet<string> = new Set([
 /** Run `id`, ended, as it ended: how, and what it returned or failed with. */
 const runOfId = async (env: Env, id: string): Promise<Handed> => {
   const row = await runOf(env, id);
-  if (row === undefined || !endedStatuses.has(row.status) || row.restricted) {
-    return gone;
+  if (row === undefined) {
+    return { kind: "gone", skipped: "deleted" };
+  }
+  if (!endedStatuses.has(row.status)) {
+    // Only a run's end notes it, and an ended run never runs again: tried
+    // again by the queue's rules, never read as gone.
+    throw new Error("The run has not ended: handed over later");
+  }
+  if (row.restricted) {
+    return { kind: "gone", skipped: "restricted" };
   }
   const readers = { kind: "owner", personId: row.principalId } as const;
   if (await erasureBegun(env, row.principalId)) {
     return { kind: "erased", readers };
+  }
+  // Only while its person still holds the workflow, as the run page shows
+  // its result: a hand-over that read the role before they lost it is of a
+  // run their revocation covers (brain-run-sources.ts). Not for a run an
+  // App started for them, whose result its App shows them whether or not
+  // they hold the workflow.
+  if (!(await appStarted(env, row.id))) {
+    const [held] = await drizzle(env.DB).all<{ held: number }>(
+      sql`SELECT ${holdsWorkflowSql(row.principalId, row.workflowResourceId)} AS held`
+    );
+    if (held?.held !== 1) {
+      return { kind: "gone", skipped: "no_role" };
+    }
   }
   const receipt = await drizzle(env.DB)
     .select({ detailsRemovedAt: workflowStartReceipts.detailsRemovedAt })
@@ -83,7 +153,7 @@ const runOfId = async (env: Env, id: string): Promise<Handed> => {
       detailsRemovedAt: receipt?.detailsRemovedAt ?? null,
     })
   ) {
-    return gone;
+    return { kind: "gone", skipped: "past_retention" };
   }
   const [{ result, error }, recalled] = await Promise.all([
     resultOf(env, row),
@@ -111,83 +181,233 @@ const runOfId = async (env: Env, id: string): Promise<Handed> => {
   };
 };
 
+/** Turn `id` of a person's own chat, as their Workspace holds it now. */
+const chatTurnOfId = async (env: Env, id: string): Promise<Handed> => {
+  const turn = chatTurnOf(id);
+  if (turn === undefined) {
+    return { kind: "gone", skipped: "deleted" };
+  }
+  const { personId, chatId, answerId } = turn;
+  const readers = { kind: "owner", personId } as const;
+  if (await erasureBegun(env, personId)) {
+    return { kind: "erased", readers };
+  }
+  if ((await memberRole(env.DB, personId)) === undefined) {
+    return { kind: "gone", skipped: "not_a_member" };
+  }
+  const said = await workspace(env, personalWorkspaceId(personId)).turnForBrain(
+    chatId,
+    personId,
+    answerId
+  );
+  if (said.kind === "deleting") {
+    // Neither kept nor gone yet: a throw, so the queue tries it again by
+    // its own rules (later, and parked after too many), and it ends as
+    // the deletion did: skipped as `deleted`, or handed over.
+    throw new Error("The chat is being deleted: handed over later");
+  }
+  if (said.kind === "skipped") {
+    return { kind: "gone", skipped: said.reason };
+  }
+  return {
+    kind: "source",
+    change: "answer",
+    text: said.question,
+    whenTooLarge: "A question asked in a chat, too large to keep.",
+    readers,
+    group: chatSource(personId, chatId),
+  };
+};
+
 /**
  * Every producer (brain-hand-overs.ts `handOverProducers`): its source
- * for an id it noted (brain-next-origins.ts), and how that source is read
- * as its records hold it now.
+ * for an id it noted (brain-next-origins.ts), how that source is read as
+ * its records hold it now, and what the ids of its sources that name a
+ * person start with (`ofPerson`), for that person's erasure
+ * (`endHandOversOf`): null when its ids name nobody.
  */
 const producers: Record<
   HandOverProducer,
   {
     source: (id: string) => SourceRef;
     read: (env: Env, id: string) => Promise<Handed>;
+    ofPerson: ((personId: string) => string) | null;
   }
 > = {
-  run: { source: runSource, read: runOfId },
+  // A run's id is its own: the person it acted for is its row's.
+  run: { source: runSource, read: runOfId, ofPerson: null },
+  chat: {
+    // The id as noted: its parts are read back when it is handed over.
+    source: (id) => ({ producer: "chat", id }),
+    read: chatTurnOfId,
+    ofPerson: chatsOf,
+  },
+  // A team claim's id is minted by the onboarding and names nobody. A
+  // person's interview is no producer here: core adds it itself
+  // (onboarding/new-brain.ts), as the hand-over's audit events would tell
+  // the company about it.
+  claim: { source: claimSource, read: claimOf, ofPerson: null },
 };
 
 /** Whether `kind` is a producer's: a source of any other has nothing to hand over. */
 const isProducer = (kind: string): kind is HandOverProducer =>
   Object.hasOwn(producers, kind);
 
-/** `source` as its producer's records hold it now. */
-const handedOf = async (env: Env, source: SourceRef): Promise<Handed> =>
-  isProducer(source.producer)
-    ? await producers[source.producer].read(env, source.id)
-    : gone;
-
 /** The target an audit event names a source by: as its producer's events do. */
-const targetOf = (source: SourceRef): AuditEntry["target"] => ({
-  type: isProducer(source.producer)
-    ? handOverProducers[source.producer].target
-    : source.producer,
+const targetOf = (
+  source: SourceRef & { producer: HandOverProducer }
+): AuditEntry["target"] => ({
+  type: handOverProducers[source.producer].target,
   id: source.id,
 });
 
-/** Records `entry` in core's outbox now: throws when it can't. */
-const record = async (env: Env, entry: AuditEntry): Promise<void> => {
-  const db = drizzle(env.DB);
-  await auditedBatch(env, db, [outboxed(db, entry)]);
-};
+/** The audit action each way a hand-over ends is recorded by. */
+const outcomeActions = {
+  added: "brain.source.handed_over",
+  refused: "brain.source.handover_refused",
+  skipped: "brain.source.handover_skipped",
+} as const satisfies Record<HandOverOutcome["kind"], string>;
+
+/** The audit entry of `outcome` for `source`: ids, a version or a reason. */
+const outcomeEntry = (
+  source: SourceRef & { producer: HandOverProducer },
+  outcome: HandOverOutcome
+): AuditEntry => ({
+  actor: { type: "system" },
+  action: outcomeActions[outcome.kind],
+  target: targetOf(source),
+  detail:
+    outcome.kind === "added"
+      ? { producer: source.producer, version: outcome.version }
+      : { producer: source.producer, reason: outcome.reason },
+});
 
 /**
- * Core's producers, as the Brain's hand-overs reach them: each source read
- * from core's records now, its hand-over recorded before its text leaves
- * core and again once it ended. The clock gives them to the Brain's tick
- * (brain-next.ts `workBrain`).
+ * The ending statements of `taken`, as `outcome`, as an attempt writes
+ * them; for a run added, also that its person holds a run source of its
+ * workflow in use (brain-run-sources.ts), while it is still open.
  */
-export const producersOf = (env: Env): Producers => ({
-  read: async (source) => {
-    const handed = await handedOf(env, source);
-    if (handed.kind === "source") {
-      await record(env, {
-        actor: { type: "system" },
-        action: "brain.source.handover_started",
-        target: targetOf(source),
-        detail: { producer: source.producer },
-      });
-    }
-    return handed;
-  },
-  settled: async (source, outcome) => {
-    await record(
-      env,
-      outcome.kind === "added"
-        ? {
-            actor: { type: "system" },
-            action: "brain.source.handed_over",
-            target: targetOf(source),
-            detail: { producer: source.producer, version: outcome.version },
-          }
-        : {
-            actor: { type: "system" },
-            action: "brain.source.handover_refused",
-            target: targetOf(source),
-            detail: { producer: source.producer, reason: outcome.reason },
-          }
-    );
+const ending = (
+  db: DrizzleD1Database,
+  taken: TakenHandOver & { producer: HandOverProducer },
+  outcome: HandOverOutcome
+) =>
+  [
+    outboxedWhere(
+      db,
+      outcomeEntry({ producer: taken.producer, id: taken.sourceId }, outcome),
+      stillOpen(taken)
+    ),
+    ...(taken.producer === "run" && outcome.kind === "added"
+      ? [runSourceInUse(db, taken.sourceId, stillOpen(taken))]
+      : []),
+    endedHandOver(db, taken),
+  ] as const;
+
+/** An attempt with nothing open to end: it records nothing. */
+const nothingOpen = (handed: Handed): HandOverAttempt => ({
+  handed,
+  started: async () => await Promise.resolve(false),
+  ended: async () => {
+    await Promise.resolve();
   },
 });
+
+/**
+ * Core's producers, as the Brain's hand-overs reach them: each attempt
+ * reads the noted hand-over it may end, then the source from core's
+ * records now, and records, in core's outbox, its start before its text
+ * leaves core and its one outcome, each only while that noted hand-over
+ * is still open as it read it (brain-hand-overs.ts). The clock gives them
+ * to the Brain's tick (brain-next.ts `workBrain`).
+ */
+export const producersOf = (env: Env): Producers => ({
+  attempt: async (source) => {
+    const { producer, id } = source;
+    if (!isProducer(producer)) {
+      // None noted it (the relay drops what no producer registers).
+      return nothingOpen({ kind: "gone", skipped: "deleted" });
+    }
+    const known = { producer, id };
+    // Before the source: a noting made after this read stays open, and
+    // its own item reads the source again.
+    const noting = await openNoting(env, { producer, sourceId: id });
+    const handed = await producers[producer].read(env, id);
+    if (noting === undefined) {
+      return nothingOpen(handed);
+    }
+    const taken = { producer, sourceId: id, noting };
+    const db = drizzle(env.DB);
+    return {
+      handed,
+      started: async () => {
+        const [stored] = await auditedBatch(env, db, [
+          outboxedWhere(
+            db,
+            {
+              actor: { type: "system" },
+              action: "brain.source.handover_started",
+              target: targetOf(known),
+              detail: { producer },
+            },
+            stillOpen(taken)
+          ),
+        ]);
+        return stored.meta.changes > 0;
+      },
+      ended: async (outcome) => {
+        await auditedBatch(env, db, ending(db, taken, outcome));
+      },
+    };
+  },
+});
+
+/**
+ * Ends every hand-over still open whose source's id names `personId`
+ * (each producer's `ofPerson`: their chats' turns) as refused `erased`,
+ * each with its one outcome and only while it is still open as read here,
+ * by the pair of statements an attempt ends with (`ending`): for their
+ * erasure (person-erasure.ts), once the Brain erased what was theirs, so
+ * no noting keeps their id after it, also one whose item the queue parked
+ * for good. All in one batch, which D1 counts as one query, and one drain
+ * after. Such an item, if it runs later, finds nothing open and closes its
+ * key. A noting made after this read is ended by its own attempt, as
+ * `erased`. Safe to repeat: one already ended is ended no more.
+ */
+export const endHandOversOf = async (
+  env: Env,
+  personId: string
+): Promise<void> => {
+  const db = drizzle(env.DB);
+  const open: (TakenHandOver & { producer: HandOverProducer })[] = [];
+  for (const producer of Object.keys(producers).filter(isProducer)) {
+    const { ofPerson } = producers[producer];
+    if (ofPerson === null) {
+      continue;
+    }
+    const start = ofPerson(personId);
+    // oxlint-disable-next-line no-await-in-loop -- one producer at a time
+    const rows = await db
+      .select({
+        sourceId: brainHandOvers.sourceId,
+        noting: brainHandOvers.noting,
+      })
+      .from(brainHandOvers)
+      .where(
+        and(
+          eq(brainHandOvers.producer, producer),
+          sql`substr(${brainHandOvers.sourceId}, 1, ${start.length}) = ${start}`
+        )
+      );
+    open.push(...rows.map((row) => ({ ...row, producer })));
+  }
+  const [first, ...rest] = open.flatMap((taken) =>
+    ending(db, taken, { kind: "refused", reason: "erased" })
+  );
+  if (first !== undefined) {
+    await auditedBatch(env, db, [first, ...rest]);
+  }
+};
 
 /** Intents one relay reads at a time, oldest first. */
 const relayPage = 100;
@@ -198,10 +418,11 @@ const relayPagesMax = 10;
 /**
  * Puts what core noted to hand over (brain-hand-overs.ts) on the Brain's
  * work queue (brain-next.ts `queueHandOvers`), the oldest first, then
- * removes what it put on, each only as noted when taken: one noted again
- * meanwhile stays, for the next relay. A page that fails stays noted, for
- * the next. A row whose producer core doesn't know (none registers it any
- * more) is removed unrelayed and counted in the log, so it holds up
+ * marks what it put on as relayed, each only as noted when taken: one
+ * noted anew meanwhile stays, for the next relay. A page that fails stays
+ * noted, for the next. A row whose producer core doesn't know (none
+ * registers it any more), or whose id the Brain can't key, never will be
+ * handed over: removed unrelayed and counted in the log, so it holds up
  * nothing. Only keys go: what is added is what its producer answers when
  * the item runs. The clock runs it.
  */
@@ -212,18 +433,36 @@ export const relayHandOvers = async (env: Env): Promise<void> => {
     if (taken.length === 0) {
       return;
     }
-    const sources = taken.flatMap(({ producer, sourceId }) =>
-      isProducer(producer) ? [producers[producer].source(sourceId)] : []
+    const known = taken.flatMap((each) =>
+      isProducer(each.producer)
+        ? [
+            {
+              taken: each,
+              source: producers[each.producer].source(each.sourceId),
+            },
+          ]
+        : []
     );
-    if (sources.length < taken.length) {
+    if (known.length < taken.length) {
       log.warn("brain.hand_over.unknown_producer", {
-        count: taken.length - sources.length,
+        count: taken.length - known.length,
       });
     }
     // oxlint-disable-next-line no-await-in-loop -- one page after the other
-    await queueHandOvers(env, sources);
+    const leftOut = await queueHandOvers(
+      env,
+      known.map(({ source }) => source)
+    );
+    const unkeyable = new Set(leftOut);
+    const relayed = known.flatMap(({ taken: each, source }) =>
+      unkeyable.has(source) ? [] : [each]
+    );
     // oxlint-disable-next-line no-await-in-loop -- one page after the other
-    await removeHandOvers(env, taken);
+    await settleRelay(
+      env,
+      relayed,
+      taken.filter((each) => !relayed.includes(each))
+    );
     if (taken.length < relayPage) {
       return;
     }

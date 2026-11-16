@@ -4,10 +4,10 @@ import { expect } from "@playwright/test";
 import type { Download, Page } from "@playwright/test";
 
 import { test } from "./csp.ts";
-import { apiOf, peopleIn } from "./people.ts";
+import { peopleIn } from "./people.ts";
 
 // Every export offers Markdown or PDF (export/export-menu.tsx, and the
-// open chat's menu, chat/chat-more.tsx): a document and a chat each
+// open chat's menu, chat/chat-more.tsx): a brain note and a chat each
 // download as Markdown, and each prints as a page of their own, under
 // the app's Content Security Policy (the `test` here fails on any
 // violation).
@@ -99,50 +99,39 @@ const closePrint = async (page: Page, title: string): Promise<void> => {
   }, title);
 };
 
-test("a document and a chat each export as Markdown and as a page to print", async ({
+test("a brain note and a chat each export as Markdown and as a page to print", async ({
   pageOf,
 }) => {
   const { admin } = peopleIn("exports");
-  const { core, api } = apiOf(admin);
-  let collectionId: string;
-  let documentId: string;
-  try {
-    ({ id: collectionId } = await api.knowledge.createCollection({
-      name: `Handbook ${crypto.randomUUID()}`,
-      access: "everyone",
-    }));
-    ({ id: documentId } = await api.knowledge.saveDocument({
-      collectionId,
-      path: "leave.md",
-      text: "# Leave\n\nSixteen weeks, **paid**.\n\n## Who\n\nEveryone.\n",
-      ifVersion: 0,
-    }));
-  } finally {
-    core[Symbol.dispose]();
-  }
   const page = await pageOf(admin);
 
-  await page.goto(`/knowledge/${collectionId}?doc=${documentId}`);
-  await expect(page.getByText("Sixteen weeks")).toBeVisible(pageRead);
-  const document = page.waitForEvent("download");
+  // Every deployment's brain has its Vision page (brain.e2e.ts).
+  await page.goto("/brain/vision");
+  await expect(
+    page.getByRole("heading", { level: 1, name: "Vision page" })
+  ).toBeVisible(pageRead);
+  const note = page.waitForEvent("download");
   await choose(page, "Export", "Markdown (.md)");
-  const file = await document;
-  expect(file.suggestedFilename()).toBe("leave.md");
-  expect(await textOf(file)).toContain("Sixteen weeks, **paid**.");
+  const file = await note;
+  expect(file.suggestedFilename()).toBe("vision-page.md");
+  const exported = await textOf(file);
+  expect(exported).toMatch(/^---\nid: "vision"\n/u);
+  expect(exported).toContain("\n# Vision page\n");
 
   // The page to print: the Grasp mark, the title, then the text rendered,
   // in a frame of this origin that keeps its policy, styled by the app's
   // own stylesheets: the title (a page's title, the prototype's 28 px) and the text's
   // headings in Newsreader (Markdown's serif headings), the text in Geist.
+  // The file's frontmatter is the file's alone: the page leaves it out.
   await countPrints(page);
   await choose(page, "Export", "PDF");
   await expect
     .poll(async () => await page.evaluate(() => window.printed))
     .toBe(1);
-  const printed = page.frameLocator('iframe[title="Leave"]');
-  const heading = printed.getByRole("heading", { name: "Leave" });
+  const printed = page.frameLocator('iframe[title="Vision page"]');
+  const heading = printed.getByRole("heading", { name: "Vision page" });
   await expect(heading).toHaveCount(1);
-  await expect(printed.getByText("paid", { exact: true })).toBeAttached();
+  await expect(printed.locator("main")).not.toContainText('id: "vision"');
   await expect
     .poll(
       async () =>
@@ -154,18 +143,18 @@ test("a document and a chat each export as Markdown and as a page to print", asy
     .toMatch(/^28px "Newsreader Variable"/u);
   expect(
     await printed
-      .getByRole("heading", { level: 2, name: "Who" })
+      .getByRole("heading", { level: 2, name: "Timeline" })
       .evaluate((element) => getComputedStyle(element).fontFamily)
   ).toMatch(/^"Newsreader Variable"/u);
   expect(
     await printed
-      .getByText("paid", { exact: true })
+      .locator("main")
       .evaluate((element) => getComputedStyle(element).fontFamily)
   ).toMatch(/^"Geist Variable"/u);
   await expect(printed.locator('[data-slot="grasp-mark"]')).toHaveCount(1);
   // Once the dialog closes, the page to print goes.
-  await closePrint(page, "Leave");
-  await expect(page.locator('iframe[title="Leave"]')).toHaveCount(0);
+  await closePrint(page, "Vision page");
+  await expect(page.locator('iframe[title="Vision page"]')).toHaveCount(0);
 
   // A chat: its title, and each question.
   const tag = crypto.randomUUID().slice(0, 8);

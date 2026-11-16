@@ -1,9 +1,7 @@
 // @vitest-environment happy-dom
 import type { RunFileListing } from "@grasp-os/shared/run-files";
-import type {
-  WorkflowResourceRun,
-  WorkflowRole,
-} from "@grasp-os/shared/workflow-resources";
+import type { MemberRole } from "@grasp-os/shared/subject-members";
+import type { WorkflowResourceRun } from "@grasp-os/shared/workflow-resources";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
 import {
@@ -52,7 +50,7 @@ const running: WorkflowResourceRun = {
 };
 
 /** Run `running` opened for a reader with `role`, core listing `files`: what core was asked to stop. */
-const opened = async (role: WorkflowRole, files: RunFileListing[] | null) => {
+const opened = async (role: MemberRole, files: RunFileListing[] | null) => {
   let current = running;
   const stopped: { workflow: string; run: string }[] = [];
   const workflowResources = {

@@ -15,10 +15,11 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
-import { AppHistory } from "./app-history.tsx";
+import { DraftHistory } from "../drafts/draft-history.tsx";
+import { buildsApp } from "./app-role.ts";
 
 // Revoking an App's release and placing or lifting a legal hold on it,
-// in its History, against core's `apps.versions` as the page reaches
+// in its History, against core's `apps.releases` as the page reaches
 // it over RPC (the boundary from the web app), faked: it keeps each
 // sealed release's revocation and holds, answers each change with the
 // release as it then is, and refuses a reason or hold name core would.
@@ -28,6 +29,7 @@ Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 const appId = appIdSchema.parse("app-1");
 
 const version = (number: number): AppVersion => ({
+  kind: "app",
   app: appId,
   version: number,
   label: `26.10.${number}`,
@@ -35,7 +37,6 @@ const version = (number: number): AppVersion => ({
   tree: `tree-${number}`,
   files: 3,
   author: "user-owner",
-  message: `Change ${number}`,
   createdAt: `2026-10-0${number}T09:00:00.000Z`,
 });
 
@@ -81,7 +82,7 @@ const why = (input: unknown): string => {
 /** Core's versions of an App whose versions 1 and 2 are sealed, and each call asked. */
 const fakeVersions = () => {
   const asked: unknown[][] = [];
-  const releases = new Map<number, AppRelease>(
+  const held = new Map<number, AppRelease>(
     [2, 1].map((number) => [
       number,
       {
@@ -95,7 +96,7 @@ const fakeVersions = () => {
     ])
   );
   const sealed = (number: number): AppRelease => {
-    const release = releases.get(number);
+    const release = held.get(number);
     if (release === undefined) {
       throw new Error("This version isn't sealed.");
     }
@@ -106,10 +107,12 @@ const fakeVersions = () => {
       await Promise.resolve();
       return [version(3), version(2), version(1)];
     },
-    releases: async (): Promise<AppRelease[]> => {
+  };
+  const releases = {
+    list: async (): Promise<AppRelease[]> => {
       await Promise.resolve();
       asked.push(["releases"]);
-      return [...releases.values()];
+      return [...held.values()];
     },
     revoke: async (
       _app: string,
@@ -122,7 +125,7 @@ const fakeVersions = () => {
         ...sealed(number),
         revokedAt: "2026-10-30T10:00:00.000Z",
       };
-      releases.set(number, release);
+      held.set(number, release);
       return release;
     },
     placeHold: async (
@@ -138,15 +141,15 @@ const fakeVersions = () => {
           : "";
       asked.push(["placeHold", number, hold, reason]);
       const release = sealed(number);
-      const held = {
+      const placed = {
         ...release,
         holds: [
           ...release.holds,
           { hold, placedAt: "2026-10-30T10:00:00.000Z" },
         ],
       };
-      releases.set(number, held);
-      return held;
+      held.set(number, placed);
+      return placed;
     },
     releaseHold: async (
       _app: string,
@@ -160,7 +163,7 @@ const fakeVersions = () => {
         ...release,
         holds: release.holds.filter((each) => each.hold !== hold),
       };
-      releases.set(number, lifted);
+      held.set(number, lifted);
       return lifted;
     },
   };
@@ -168,10 +171,11 @@ const fakeVersions = () => {
   const drafts = {
     get: async () =>
       await Promise.resolve({
-        app: appId,
+        subject: { kind: "app", id: appId },
         base: 2,
         changed: [],
         deleted: [],
+        definitionChanged: false,
         revision: 4,
         updatedAt: null,
         updatedBy: null,
@@ -185,7 +189,10 @@ const fakeVersions = () => {
       }),
   };
   const members = { list: async () => await Promise.resolve([]) };
-  return { session: { apps: { versions, drafts }, members }, asked };
+  return {
+    session: { apps: { releases }, versions, drafts, members },
+    asked,
+  };
 };
 
 let root: Root | undefined;
@@ -210,7 +217,14 @@ const shown = async (
     ): Promise<T> => await run(session),
   };
   const rootRoute = createRootRoute({
-    component: () => <AppHistory app={desk} identity={viewer} />,
+    component: () => (
+      <DraftHistory
+        builds={buildsApp(desk, viewer) && !desk.archived}
+        identity={viewer}
+        live={desk.currentVersion}
+        subject={{ kind: "app", id: desk.id }}
+      />
+    ),
   });
   const router = createRouter({
     routeTree: rootRoute,
@@ -413,7 +427,7 @@ describe("An App's releases, revoked or held, for its admins", () => {
 
   it("says so when the releases can't be read, rather than showing none revoked or held", async () => {
     const { session } = fakeVersions();
-    session.apps.versions.releases = async (): Promise<AppRelease[]> => {
+    session.apps.releases.list = async (): Promise<AppRelease[]> => {
       await Promise.resolve();
       throw new Error("Grasp couldn't read the releases.");
     };

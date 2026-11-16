@@ -1,25 +1,18 @@
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import {
-  codeResults,
-  codeStep,
-  model,
-  personalChatsOf,
-  says,
-} from "./agent-chat.ts";
-import { allEvents } from "./audit-events.ts";
+import { codeStep, model, personalChatsOf, says } from "./agent-chat.ts";
 import { mockIdp } from "./idp.ts";
 import { answeringProvider } from "./model-provider.ts";
 import { outcome, signedInApi, unique } from "./sign-in.ts";
 
-// A chat bound to an App (`chats.forApp`), through `/rpc` as the App's
-// page reaches it and from the chat's code: the person's chat where Grasp
-// changes the App with them. What could go wrong: someone who doesn't
-// build the App gets a chat for it, or one for an App that is archived or
-// isn't there; two asks make two chats; one person gets another's chat;
-// the binding goes unrecorded; the chat's agent isn't told the App, and a
-// build asked there makes a second App instead of changing this one; a
-// chat that drafted the App elsewhere is left behind for a new one.
+// The person's chat for an App or a workflow (`chats.forSubject`), through
+// `/rpc` as its page reaches it: the chat whose agent last worked on it
+// with them, none before, when the next question starts one. What could
+// go wrong: someone who doesn't build it gets a chat for it, or one for
+// an App that is archived or isn't there; one person gets another's
+// chat; the agent isn't told what a question is about, and a build asked
+// there makes a second App instead of changing this one; a chat that
+// drafted it elsewhere is left behind for a new one.
 
 const idp = mockIdp();
 
@@ -30,6 +23,12 @@ const aboutApp =
 /** The workflow a question's note says it is about, as the request's JSON has it. */
 const aboutWorkflow =
   /page of the workflow \\"(?<name>[^"\\]+)\\" \((?<id>[^)]+)\)/u;
+
+/** What `who`'s chat for App `id` came to: their chat, or a refusal. */
+const forApp = async (
+  who: Awaited<ReturnType<typeof signedInApi>>,
+  id: string
+) => await outcome(who.api.chats.forSubject({ kind: "app", id }));
 
 /** A builder's App, and the people around it. */
 const anApp = async () => {
@@ -43,38 +42,8 @@ const anApp = async () => {
   return { builder, other, user, app, name };
 };
 
-describe("a chat for an App", () => {
-  it("is the builder's own, named after the App, the same one each time, and recorded with the App", async () => {
-    const { builder, app, name } = await anApp();
-
-    const first = await builder.api.chats.forApp(app.id);
-    const again = await builder.api.chats.forApp(app.id);
-    const listed = await builder.api.chats.list();
-    const events = await allEvents();
-    const created = events.find(
-      ({ action, target }) =>
-        action === "chat.created" && target?.id === first.id
-    );
-
-    expect({
-      title: first.title,
-      app: first.appId,
-      again: again.id === first.id,
-      listed: listed.find(({ id }) => id === first.id)?.appId,
-      recorded: { actor: created?.actor, app: created?.detail.app },
-    }).toStrictEqual({
-      title: name,
-      app: app.id,
-      again: true,
-      listed: app.id,
-      recorded: {
-        actor: { type: "person", userId: builder.userId },
-        app: app.id,
-      },
-    });
-  });
-
-  it("is the chat that last worked on the App: one started on Chat that drafted it, rather than one of its own", async () => {
+describe("the chat for an App", () => {
+  it("is none before a chat worked on the App, then the chat whose agent drafted it, the same each time", async () => {
     const { builder, app } = await anApp();
     const write = `export default async (self, env) => {
   await env.build.write(${JSON.stringify(app.id)}, { "notes.md": "from Chat" }, { revision: (await env.build.files(${JSON.stringify(app.id)})).revision });
@@ -84,54 +53,54 @@ describe("a chat for an App", () => {
       codeStep(write),
       says("Written.")
     );
-    const own = await builder.api.chats.forApp(app.id);
+    const subject = { kind: "app", id: app.id } as const;
+    const before = await builder.api.chats.forSubject(subject);
     const { chat: started } = await newChat();
     await stub.ask(started.id, { text: "Add notes to it.", model });
 
-    const again = await builder.api.chats.forApp(app.id);
+    const found = await builder.api.chats.forSubject(subject);
+    const again = await builder.api.chats.forSubject(subject);
     const listed = await builder.api.chats.list();
 
     expect({
-      carriesOn: again.id === started.id,
-      // Nothing new made: the App's first chat stays in the list.
-      chats: listed.map(({ id }) => id).toSorted(),
+      before,
+      found: found?.id,
+      again: again?.id,
+      // Nothing new made: the chat that drafted it is the only one.
+      chats: listed.map(({ id }) => id),
     }).toStrictEqual({
-      carriesOn: true,
-      chats: [own.id, started.id].toSorted(),
+      before: null,
+      found: started.id,
+      again: started.id,
+      chats: [started.id],
     });
   });
 
-  it("is each builder's own: another builder of the App gets a chat of their own", async () => {
+  it("is each builder's own: another builder of the App finds none of theirs", async () => {
     const { builder, other, app } = await anApp();
     await builder.api.apps.members.add(app.id, {
       type: "person",
       id: other.userId,
       role: "builder",
     });
+    const write = `export default async (self, env) => {
+  await env.build.write(${JSON.stringify(app.id)}, { "notes.md": "mine" }, { revision: (await env.build.files(${JSON.stringify(app.id)})).revision });
+};`;
+    const { stub, newChat } = await personalChatsOf(
+      builder.userId,
+      codeStep(write),
+      says("Written.")
+    );
+    const { chat } = await newChat();
+    await stub.ask(chat.id, { text: "Add notes to it.", model });
+    const subject = { kind: "app", id: app.id } as const;
 
-    const mine = await builder.api.chats.forApp(app.id);
-    const theirs = await other.api.chats.forApp(app.id);
-    const theirChats = await other.api.chats.list();
+    const mine = await builder.api.chats.forSubject(subject);
 
     expect({
-      apart: mine.id !== theirs.id,
-      theirsListed: theirChats.map(({ id }) => id),
-    }).toStrictEqual({ apart: true, theirsListed: [theirs.id] });
-  });
-
-  it("says whose App it is for when read on its own, as a chat past the list's end is, and only to its own person", async () => {
-    const { builder, other, app } = await anApp();
-    const chat = await builder.api.chats.forApp(app.id);
-
-    expect({
-      own: await builder.api.chats.summary(chat.id),
-      another: await outcome(other.api.chats.summary(chat.id)),
-      none: await outcome(builder.api.chats.summary(crypto.randomUUID())),
-    }).toStrictEqual({
-      own: { ...chat, running: false },
-      another: "agent.chat_not_found",
-      none: "agent.chat_not_found",
-    });
+      mine: mine?.id,
+      theirs: await other.api.chats.forSubject(subject),
+    }).toStrictEqual({ mine: chat.id, theirs: null });
   });
 
   it("is refused to someone who doesn't build the App, for an archived App, and for one that isn't there, making no chat", async () => {
@@ -142,12 +111,12 @@ describe("a chat for an App", () => {
       role: "user",
     });
     const tried = {
-      user: await outcome(user.api.chats.forApp(app.id)),
-      stranger: await outcome(other.api.chats.forApp(app.id)),
-      nothing: await outcome(builder.api.chats.forApp(`app-${unique()}`)),
+      user: await forApp(user, app.id),
+      stranger: await forApp(other, app.id),
+      nothing: await forApp(builder, `app-${unique()}`),
     };
     await builder.api.apps.archive(app.id);
-    const archived = await outcome(builder.api.chats.forApp(app.id));
+    const archived = await forApp(builder, app.id);
 
     expect({
       ...tried,
@@ -164,31 +133,6 @@ describe("a chat for an App", () => {
       nothing: "app.not_found",
       archived: "app.archived",
       chats: { user: [], stranger: [], builder: [] },
-    });
-  });
-
-  it("tells its agent which App it is for, and another chat none", async () => {
-    const { builder, app } = await anApp();
-    const info =
-      "export default async (self, env) => (await env.chat.info()).app;";
-    const { stub, newChat } = await personalChatsOf(
-      builder.userId,
-      codeStep(info),
-      says("It is for the App."),
-      codeStep(info),
-      says("It is for nothing in particular.")
-    );
-    const bound = await builder.api.chats.forApp(app.id);
-    await stub.ask(bound.id, { text: "Which App?", model });
-    const { chat } = await newChat();
-    await stub.ask(chat.id, { text: "Which App?", model });
-
-    expect({
-      bound: await codeResults(stub, bound.id),
-      other: await codeResults(stub, chat.id),
-    }).toStrictEqual({
-      bound: [{ isError: false, text: `Returned:\n${app.id}` }],
-      other: [{ isError: false, text: "Returned:\nnull" }],
     });
   });
 
@@ -230,29 +174,6 @@ describe("a chat for an App", () => {
       told,
       drafted: worked.map(({ id }) => id),
     }).toStrictEqual({ told: [name, app.id], drafted: [app.id] });
-  });
-
-  it("tells the agent the App with every question in a chat made for it, named or not", async () => {
-    const { builder, app } = await anApp();
-    const told: (string | undefined)[] = [];
-    await answeringProvider((requests) => {
-      told.push(
-        aboutApp.exec(JSON.stringify(requests.at(-1)?.body))?.groups?.id
-      );
-      return says("Noted.");
-    });
-    const chat = await builder.api.chats.forApp(app.id);
-
-    await builder.api.chats.send(chat.id, { text: "Make it blue.", model });
-    await vi.waitFor(
-      async () => {
-        const chats = await builder.api.chats.list();
-        expect(chats.find(({ id }) => id === chat.id)?.running).toBeFalsy();
-      },
-      { timeout: 20_000 }
-    );
-
-    expect(told).toStrictEqual([app.id]);
   });
 
   it("refuses a question about an App the person doesn't build, or one archived, taking no turn", async () => {
@@ -323,6 +244,43 @@ describe("a chat for an App", () => {
 
     expect({ told, refused }).toStrictEqual({
       told: [workflow.name, workflow.id],
+      refused: "workflow.resource_unavailable",
+    });
+  });
+});
+
+describe("the chat for a workflow", () => {
+  it("is the person's chat whose agent last drafted it, none before, and refused to someone who doesn't build it", async () => {
+    const [builder, user] = await Promise.all([
+      signedInApi(idp, "builder"),
+      signedInApi(idp, "user"),
+    ]);
+    const made = await builder.api.workflowResources.create(
+      `quotes-${unique()}`
+    );
+    const id = JSON.stringify(made.id);
+    const draft = `export default async (self, env) => {
+  const draft = await env.workflowBuild.draft(${id});
+  await env.workflowBuild.write(${id}, draft.source + "\\n", { revision: draft.revision });
+};`;
+    const { stub, newChat } = await personalChatsOf(
+      builder.userId,
+      codeStep(draft),
+      says("Drafted.")
+    );
+    const subject = { kind: "workflow", id: made.id } as const;
+    const before = await builder.api.chats.forSubject(subject);
+    const { chat } = await newChat();
+    await stub.ask(chat.id, { text: "Draft it.", model });
+
+    const after = await builder.api.chats.forSubject(subject);
+    expect({
+      before,
+      after: after?.id,
+      refused: await outcome(user.api.chats.forSubject(subject)),
+    }).toStrictEqual({
+      before: null,
+      after: chat.id,
       refused: "workflow.resource_unavailable",
     });
   });

@@ -7,8 +7,9 @@
  * model calls spent this month by purpose, as the model gateway recorded
  * them; and the
  * three things staff may do: put a parked item back in the queue, rebuild
- * the word indexes, and re-embed. Every
- * read and action is in the company's audit log, by the staff member.
+ * the word indexes, and re-embed; and whether one source or person was
+ * erased (brain-erasure-lookup.tsx). Every read, action and lookup is in
+ * the company's audit log, by the staff member.
  *
  * Operational state only: counts, ages, kinds of work, error codes,
  * sizes, recall's counts, and erasures as counts alone. Amber marks what
@@ -52,6 +53,7 @@ import { useState } from "react";
 import { brainActionFn } from "../clients/brain-functions.ts";
 import { thenRefresh } from "../use-action.ts";
 import { agoWords } from "./ai-status-words.ts";
+import { BrainErasureLookupSection } from "./brain-erasure-lookup.tsx";
 import type { BrainRead } from "./brain-loads.ts";
 import { Figure } from "./parts.tsx";
 import { EmptySection, Section, SectionRow } from "./section.tsx";
@@ -115,12 +117,14 @@ const stepWords: Record<BrainStep, string> = {
   sweep: "Sweeping files nothing holds",
   repack: "Repacking vector codes",
   reindex: "Rebuilding the word indexes",
+  quotes: "Judging memories against their sources",
   embedding: "Putting passages on the queue to embed",
 };
 
 const wayWords: Record<BrainSearchWay, string> = {
   words: "Words",
   exact: "Exact parts",
+  entities: "Entities",
   meaning: "Meaning",
 };
 
@@ -560,6 +564,21 @@ const Recall = ({ report }: { report: BrainReport }) => {
           <TableBody>
             {brainSearchWays.map((way) => {
               const counts = recall.ways[way];
+              if (counts === undefined) {
+                // A core of an older release, on a slower channel, doesn't send it.
+                return (
+                  <TableRow key={way}>
+                    <TableCell variant="card">{wayWords[way]}</TableCell>
+                    <TableCell
+                      className="text-right"
+                      colSpan={2}
+                      variant="card"
+                    >
+                      Not available yet
+                    </TableCell>
+                  </TableRow>
+                );
+              }
               return (
                 <TableRow key={way}>
                   <TableCell variant="card">{wayWords[way]}</TableCell>
@@ -684,7 +703,7 @@ const ModelSpend = ({ report }: { report: BrainReport }) => {
  */
 const Ledger = ({ report }: { report: BrainReport }) => {
   const { ledger } = report;
-  const unwritten = ledger.source.unwritten + ledger.person.unwritten;
+  const { unwritten } = ledger.source;
   return (
     <Collapsible defaultOpen={unwritten > 0}>
       <Section
@@ -697,7 +716,7 @@ const Ledger = ({ report }: { report: BrainReport }) => {
         title="Erasures"
       >
         <SectionRow
-          description="Erased sources and people, whole, with their ledger entry written."
+          description="Erased sources, whole, with their ledger entry written."
           label="In the ledger"
         >
           <span className="flex items-center gap-3">
@@ -707,7 +726,7 @@ const Ledger = ({ report }: { report: BrainReport }) => {
               </Badge>
             ) : null}
             <span className="tabular-nums">
-              {`${whole(ledger.source.written)} ${plural(ledger.source.written, "source", "sources")}, ${whole(ledger.person.written)} ${plural(ledger.person.written, "person", "people")}`}
+              {`${whole(ledger.source.written)} ${plural(ledger.source.written, "source", "sources")}`}
             </span>
           </span>
         </SectionRow>
@@ -752,8 +771,9 @@ const Ledger = ({ report }: { report: BrainReport }) => {
 const Steps = ({ report }: { report: BrainReport }) => {
   const now = Date.parse(report.now);
   const failing = brainSteps.flatMap((step) => {
+    // Not reported (undefined) by a core of an older release: nothing.
     const failed = report.stepsFailed[step];
-    return failed === null ? [] : [{ step, failed }];
+    return failed === null || failed === undefined ? [] : [{ step, failed }];
   });
   return (
     <Section
@@ -926,6 +946,7 @@ export const BrainHealth = ({
       <Await fallback={<Reading />} promise={read}>
         {(answered) => <Report acting={{ busy, act }} read={answered} />}
       </Await>
+      <BrainErasureLookupSection clientId={clientId} />
     </>
   );
 };

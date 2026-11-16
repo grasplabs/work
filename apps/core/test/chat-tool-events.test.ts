@@ -74,14 +74,14 @@ const line = ({ at: _at, ...event }: ChatToolEvent) => event;
 const stepCode = `export default async (self, env) => {
   const files = await env.chat.files();
   const workflows = await env.workflows.independent();
-  const found = await env.knowledge.search("the secret parental leave policy");
+  const found = await env.skills.select({ task: "the secret parental leave policy" });
   let refused = false;
   try {
-    await env.knowledge.read("doc-that-is-not-there");
+    await env.skills.read({ skill: { scope: "company", name: "not-there", version: 1 } });
   } catch {
     refused = true;
   }
-  return { files: files.length, workflows: workflows.length, hits: found.hits.length, refused };
+  return { files: files.length, workflows: workflows.length, hits: found.skills.length, refused };
 };`;
 
 describe("a chat's tool lines", () => {
@@ -104,7 +104,7 @@ describe("a chat's tool lines", () => {
       lines: tools.map(line),
       // Each came once, in the order the code made them.
       ids: tools.map(({ id }) => id),
-      // The search's words are the person's question: never on a line.
+      // The task's words are the person's question: never on a line.
       leaked: JSON.stringify(tools).includes("secret"),
       // Refused with an error code, never a message.
       code: /^[a-z_]+\.[a-z_]+$/u.test(tools[3]?.reason ?? ""),
@@ -133,16 +133,16 @@ describe("a chat's tool lines", () => {
         {
           id: tools[2]?.id,
           callId,
-          method: "knowledge.search",
+          method: "skills.select",
           target: null,
-          summary: { hits: 0 },
+          summary: { skills: 0 },
           outcome: "ok",
           reason: null,
         },
         {
           id: tools[3]?.id,
           callId,
-          method: "knowledge.read",
+          method: "skills.read",
           target: null,
           summary: {},
           outcome: "refused",

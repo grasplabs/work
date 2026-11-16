@@ -32,6 +32,7 @@ import { inJurisdiction } from "../src/durable-objects.ts";
 import { ageOwnErasure, breakOwnStore } from "./brain-next-own-store.ts";
 import { holdNextBucketPut, ledgerOf } from "./brain-next-traces.ts";
 import { mockIdp } from "./idp.ts";
+import { addedSharedFile } from "./instruction-saves.ts";
 import { signedInWithRole } from "./sign-in.ts";
 
 // A person's own store (GRA-1762), as core reaches it: what only one
@@ -363,29 +364,19 @@ describe("what one person alone may read, in their own store", () => {
       file,
       change: crypto.randomUUID(),
       text: "Call me by my first name",
+      after: 0,
     });
-    await addInstructionFile(env, {
-      file: company,
-      change: crypto.randomUUID(),
-      text: "We sell bicycles",
-    });
+    await addedSharedFile(company, "We sell bicycles", person);
     const theirStore = `person:${person}`;
     const wanted = { source, version: 1 };
 
     const read = await readSourceVersionAs(env, person, wanted);
-    const files = await readInstructionFilesAs(env, { userId: person }, [
-      company,
-      file,
-    ]);
+    const files = await readInstructionFilesAs(env, person, [company, file]);
     const othersRead = await addressedBy(
       async () => await readSourceVersionAs(env, colleague, wanted)
     );
     const othersFiles = await addressedBy(
-      async () =>
-        await readInstructionFilesAs(env, { userId: colleague }, [
-          company,
-          file,
-        ])
+      async () => await readInstructionFilesAs(env, colleague, [company, file])
     );
 
     expect({
@@ -774,21 +765,18 @@ describe("a person's own store failing", () => {
     });
     const company: InstructionFile = { scope: "company", name: "facts" };
     const theirFile: InstructionFile = { scope: "person", personId: person };
-    await addInstructionFile(env, {
-      file: company,
-      change: crypto.randomUUID(),
-      text: "We sell bicycles",
-    });
+    await addedSharedFile(company, "We sell bicycles", person);
     await addInstructionFile(env, {
       file: theirFile,
       change: crypto.randomUUID(),
       text: "Call me by my first name",
+      after: 0,
     });
     const broken = await breakOwnStore(person);
     try {
       const listed = await listSourcesAs(env, person, {});
       const versions = await listVersionsAs(env, person, { source: teamNote });
-      const files = await readInstructionFilesAs(env, { userId: person }, [
+      const files = await readInstructionFilesAs(env, person, [
         company,
         theirFile,
       ]);
@@ -817,22 +805,7 @@ describe("a person's own store failing", () => {
 });
 
 describe("erasing a person", () => {
-  it("as a withdrawal leaves their own store answering and taking adds", async () => {
-    const person = await member();
-    const word = markerWord();
-    const readers: SourceReaders = { kind: "owner", personId: person };
-    await add(newSource(), `Their own ${word}`, readers);
-
-    await erasePerson(env, { personId: person, reason: "withdrawn" });
-    await add(newSource(), `Added after ${word}`, readers);
-
-    const found = await textsFor(person, word, true);
-    expect(found.toSorted()).toStrictEqual(
-      [`Added after ${word}`, `Their own ${word}`].toSorted()
-    );
-  });
-
-  it("erases their own store whole after the shared store, stays pending while it is still deleting, and then answers them as nothing does", async () => {
+  it("erases their own store whole, stays pending while it is still deleting, and then answers them as nothing does", async () => {
     const person = await member();
     const team = await teamOf(person);
     const word = markerWord();
@@ -845,18 +818,20 @@ describe("erasing a person", () => {
     });
     // Their instruction file, two versions, in their own store alone.
     const file: InstructionFile = { scope: "person", personId: person };
-    for (const text of ["Call me Sam", "Call me by my first name"]) {
+    for (const [after, text] of [
+      "Call me Sam",
+      "Call me by my first name",
+    ].entries()) {
       // oxlint-disable-next-line no-await-in-loop -- one version at a time
       await addInstructionFile(env, {
         file,
         change: crypto.randomUUID(),
         text,
+        after,
       });
     }
     const theirFile = async () => {
-      const files = await readInstructionFilesAs(env, { userId: person }, [
-        file,
-      ]);
+      const files = await readInstructionFilesAs(env, person, [file]);
       return files.map(({ version, text }) => [version, text]);
     };
     const erasing = { personId: person, reason: "person_erased" } as const;

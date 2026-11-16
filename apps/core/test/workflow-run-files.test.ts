@@ -9,10 +9,7 @@ import { sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import {
-  createWorkflowResource,
-  publishWorkflowVersion,
-} from "../src/workflow-resources.ts";
+import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { sweepWorkflowStartDetails } from "../src/workflows/retention.ts";
@@ -26,6 +23,7 @@ import {
 import type { FilesAnswer, FilesCaller } from "../src/workflows/run-files.ts";
 import { startFilesOf } from "./run-file-starts.ts";
 import { outcome, unique } from "./sign-in.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
 
 // A workflow run's own files (GRA-724, workflows/run-files.ts), from its
 // threat model, through the files host itself: what a step asks of them
@@ -80,10 +78,7 @@ const definition = JSON.stringify({
 /** A run of a workflow of `by`'s, handed one file by its start, once it ended. */
 const handedRun = async (by: Identity): Promise<string> => {
   const workflow = await createWorkflowResource(env, by, `files-${unique()}`);
-  await publishWorkflowVersion(env, by, workflow.id, {
-    definition,
-    basedOn: null,
-  });
+  await publishDefinition(env, by, workflow.id, definition);
   const handed = await startFilesOf({
     name: "a.csv",
     type: "text/csv",
@@ -93,7 +88,7 @@ const handedRun = async (by: Identity): Promise<string> => {
     env,
     { type: "person", person: by },
     workflow.id,
-    { version: 1, args: { doc: { id: handed.id } }, key: unique() },
+    { expected: 1, args: { doc: { id: handed.id } }, key: unique() },
     undefined,
     undefined,
     undefined,

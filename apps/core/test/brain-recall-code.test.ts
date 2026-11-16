@@ -4,6 +4,7 @@ import { readDefinition } from "@grasp-os/runtime/definition";
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import type { FunctionResult } from "@grasp-os/shared/functions";
 import {
+  appIdSchema,
   permissionIdSchema,
   triggerIdSchema,
   workflowResourceIdSchema,
@@ -17,12 +18,18 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
+import { appsReadableBy } from "../src/app-access.ts";
 import { callAppFunction } from "../src/app-functions.ts";
-import { addMember } from "../src/app-members.ts";
-import { publishVersion } from "../src/app-publish.ts";
+import { addMember, listMembers, removeMember } from "../src/app-members.ts";
+import { anyTeamGrant, mayReadBrainTeamsOf } from "../src/app-provenance.ts";
 import type { Release } from "../src/app-releases.ts";
-import { appFor } from "../src/apps.ts";
-import { drainAuditOutboxes } from "../src/audit-outbox.ts";
+import { removeApp } from "../src/app-removal.ts";
+import { resetAppData } from "../src/app-schema.ts";
+import { updateApp } from "../src/app-settings.ts";
+import { setArchived } from "../src/app-status.ts";
+import { appKind, appFor } from "../src/apps.ts";
+import { drainAuditOutboxes } from "../src/audit-drains.ts";
+import { teamsOf } from "../src/auth/identity.ts";
 import {
   addSource,
   eraseSource,
@@ -32,22 +39,22 @@ import {
 import type { SourceReaders, SourceRef } from "../src/brain-next.ts";
 import { recallFor } from "../src/brain-recall.ts";
 import { producersOf, relayHandOvers } from "../src/brain-sources.ts";
+import { uploadToBrain } from "../src/brain-uploads.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
+import { permissionsOpenTo } from "../src/permissions-open.ts";
 import {
   grantPermission,
   requestPermission,
   revokePermission,
 } from "../src/permissions.ts";
+import { rollback } from "../src/publish.ts";
 import { approveResourceBinding } from "../src/resource-bindings.ts";
 import { createTriggerResource } from "../src/trigger-resources.ts";
 import { approveWorkflowBinding } from "../src/workflow-bindings.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
-import {
-  createWorkflowResource,
-  publishWorkflowVersion,
-  shareWorkflowResource,
-} from "../src/workflow-resources.ts";
+import { shareWorkflowResource } from "../src/workflow-members.ts";
+import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { chatOf, codeResults, codeStep, says } from "./agent-chat.ts";
@@ -58,9 +65,10 @@ import { appWith, person, seal } from "./sealed-apps.ts";
 import type { Fixture } from "./sealed-apps.ts";
 import { unique } from "./sign-in.ts";
 import { webhookConfig } from "./source-config.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
 
-// The one recall code reaches (GRA-1731; the threat model is on the
-// issue): an App's action (`ctx.brain.recall`), a workflow's step
+// The one recall code reaches (GRA-1731, and GRA-1842 for an App's grant
+// naming teams; the threat models are on the issues): an App's action (`ctx.brain.recall`), a workflow's step
 // (`ctx.brain.<alias>.recall`) and a chat's code (`env.brain.recall`)
 // send the same request and get the same pack, from core's
 // brain-recall.ts. How it can fail, and what each test holds it to:
@@ -73,9 +81,15 @@ import { webhookConfig } from "./source-config.ts";
 //    recalls only what everyone in the company may read, whoever calls:
 //    never a team's note, never anyone's own. A chat's code recalls as its
 //    person's teams, never their own: what it gets stays in their chat.
-// 3. The surfaces drift apart: an App and a workflow answer the same
+// 3. An App's grant names teams: its recall reads, of those, the teams
+//    the person it acts for is in, and the App is shared with, and
+//    answers, only people in all of them, so what it saved of a team's
+//    text reaches nobody outside that team (but its owner and admins,
+//    who manage it whatever it read). A rename breaks nothing; only an
+//    App's grant names teams.
+// 4. The surfaces drift apart: an App and a workflow answer the same
 //    request the same pack.
-// 4. Untrusted input reaches the Brain, or a refusal or the audit log
+// 5. Untrusted input reaches the Brain, or a refusal or the audit log
 //    carries the question: each is refused in the same fixed words, and
 //    the audit event says who, for whom and how many, never what.
 // The leak harness (brain-next-leaks.test.ts) probes the same recall
@@ -109,12 +123,16 @@ const granted = async (
   return asked.id;
 };
 
-/** The Brain's grant for `subject`, as an admin gives it. */
+/**
+ * The Brain's grant for `subject`, as an admin gives it, reaching `teams`
+ * too when given.
+ */
 const brainGrant = (
-  subject: PermissionRequest["subject"]
+  subject: PermissionRequest["subject"],
+  teams?: string[]
 ): PermissionRequest => ({
   subject,
-  object: { type: "platform" },
+  object: { type: "platform", ...(teams === undefined ? {} : { teams }) },
   actions: ["brain"],
   binding: `BRAIN_${unique().replaceAll(/\W/gu, "_").toUpperCase()}`,
 });
@@ -136,8 +154,7 @@ const added = async (
 
 /**
  * A source everyone in the company may read, added to the shared store
- * as its producer would: core's producers add none yet, so code's recall
- * finds nothing else today.
+ * as an upload shared with everyone is (brain-uploads.ts).
  */
 const forEveryone = async (text: string): Promise<SourceRef> => {
   const source: SourceRef = { producer: "upload", id: crypto.randomUUID() };
@@ -149,6 +166,14 @@ const forEveryone = async (text: string): Promise<SourceRef> => {
   });
   return source;
 };
+
+/** A WebVTT file saying `text`, as a person uploads one. */
+const vttFile = (text: string) => ({
+  name: "Notes.vtt",
+  bytes: new TextEncoder().encode(
+    `WEBVTT\n\n00:00:00.000 --> 00:00:05.000\n${text}\n`
+  ),
+});
 
 /** Runs core's hand-overs to the Brain now, as its clock would. */
 const handOver = async (): Promise<void> => {
@@ -210,7 +235,7 @@ const company = async () => {
     teamId: payroll,
   });
   await forEveryone(`For everyone: ${word} is in the handbook.`);
-  return { word, admin, ada, uma };
+  return { word, admin, ada, uma, teams: { payroll, adas, umas } };
 };
 
 /** The request every surface sends here. */
@@ -263,7 +288,7 @@ export const ask = action({
 const askOf = async (owner: Member, users: Member[]) => {
   const fixture: Fixture = await appWith(askApp(), "Ask", owner);
   const release: Release = await seal(fixture);
-  await publishVersion(env, fixture.owner, fixture.app, 1);
+  await rollback(env, appKind, fixture.owner, fixture.app, 1);
   for (const user of users) {
     // oxlint-disable-next-line no-await-in-loop -- one at a time
     await env.DB.prepare(
@@ -338,8 +363,11 @@ const recallingWorkflow = async (
   const key = `brain-${unique()}`;
   await publishCatalogContract(env, admin, { key, kind: "brain" });
   const workflow = await createWorkflowResource(env, by, `recall-${unique()}`);
-  await publishWorkflowVersion(env, by, workflow.id, {
-    definition: JSON.stringify({
+  await publishDefinition(
+    env,
+    by,
+    workflow.id,
+    JSON.stringify({
       $schema: workflowSchemaUrl,
       args: {
         kind: "object",
@@ -364,9 +392,8 @@ const recallingWorkflow = async (
         },
         ...(hold === "after" ? [holdStep] : []),
       ],
-    }),
-    basedOn: null,
-  });
+    })
+  );
   const permissionId = await granted(
     by,
     admin,
@@ -390,7 +417,7 @@ const startedRun = async (
     env,
     { type: "person", person: by },
     id,
-    { version: 1, args, key: unique() }
+    { expected: 1, args, key: unique() }
   );
   if (runId === null) {
     throw new Error("The start admitted no run");
@@ -533,6 +560,79 @@ describe("recall, as an App, a workflow and a chat reach it", setUpTime, () => {
     expect(JSON.stringify(events)).not.toContain(word);
   });
 
+  it("finds an upload for everyone at an App's recall, and never one for a team or for its uploader alone", async () => {
+    const [admin, ada] = await Promise.all([
+      person("admin"),
+      person("builder"),
+    ]);
+    const team = await teamOf(ada);
+    const word = `upload${unique().replaceAll(/\W/gu, "")}`;
+    const [everyoneUpload, teamUpload, herUpload] = [
+      crypto.randomUUID(),
+      crypto.randomUUID(),
+      crypto.randomUUID(),
+    ];
+    // Uploaded as the Sources page uploads, through the producer itself.
+    await uploadToBrain(
+      env,
+      ada,
+      vttFile(`For everyone: ${word} is in the handbook.`),
+      { kind: "everyone" },
+      everyoneUpload
+    );
+    await uploadToBrain(
+      env,
+      ada,
+      vttFile(`For her team: ${word} is planned in March.`),
+      { kind: "team", teamId: team },
+      teamUpload
+    );
+    await uploadToBrain(
+      env,
+      ada,
+      vttFile(`For her alone: ${word} is booked for May.`),
+      { kind: "me" },
+      herUpload
+    );
+    const app = await askOf(ada, []);
+    const permissionId = await granted(
+      ada,
+      admin,
+      brainGrant({ type: "app", appId: app.app }),
+      app.release.manifest.resourceVersion
+    );
+    await approveResourceBinding(env, admin, {
+      app: app.app,
+      alias: "brain",
+      target: { kind: "brain", permissionId },
+      reviewed: { version: 1 },
+    });
+
+    const pack = z
+      .object({
+        items: z.array(
+          z.object({ source: z.object({ id: z.string() }), found: z.string() })
+        ),
+      })
+      .parse(await askedOf(app, ada, { question: word, tokens: 800 }));
+    // By its words or exactly: recall also adds passages by meaning alone.
+    const found = new Set(
+      pack.items.flatMap(({ source, found: how }) =>
+        how === "meaning" ? [] : [source.id]
+      )
+    );
+
+    expect({
+      everyoneUpload: found.has(everyoneUpload),
+      teamUpload: found.has(teamUpload),
+      herUpload: found.has(herUpload),
+    }).toStrictEqual({
+      everyoneUpload: true,
+      teamUpload: false,
+      herUpload: false,
+    });
+  });
+
   it("answers everyone an App is shared with the same pack of what the whole company may read, admins included", async () => {
     const { word, admin, ada, uma } = await company();
     const app = await askOf(ada, []);
@@ -573,7 +673,6 @@ describe("recall, as an App, a workflow and a chat reach it", setUpTime, () => {
     const trigger = await createTriggerResource(env, ada, {
       kind: "webhook",
       workflowId: workflow.id,
-      version: 1,
       config: await webhookConfig(),
     });
     await granted(ada, admin, {
@@ -592,7 +691,7 @@ describe("recall, as an App, a workflow and a chat reach it", setUpTime, () => {
       env,
       { type: "trigger", triggerId: trigger.id },
       workflow.id,
-      { version: 1, args: { question: word, tokens: 800 }, key: unique() }
+      { expected: 1, args: { question: word, tokens: 800 }, key: unique() }
     );
     if (runId === null) {
       throw new Error("The start admitted no run");
@@ -1112,8 +1211,11 @@ const recallingThen = async (
   const key = `brain-${unique()}`;
   await publishCatalogContract(env, admin, { key, kind: "brain" });
   const workflow = await createWorkflowResource(env, by, `then-${unique()}`);
-  await publishWorkflowVersion(env, by, workflow.id, {
-    definition: JSON.stringify({
+  await publishDefinition(
+    env,
+    by,
+    workflow.id,
+    JSON.stringify({
       $schema: workflowSchemaUrl,
       args: {
         kind: "object",
@@ -1136,9 +1238,8 @@ const recallingThen = async (
         },
         ...then.steps,
       ],
-    }),
-    basedOn: null,
-  });
+    })
+  );
   const permissionId = await granted(
     by,
     admin,
@@ -1160,7 +1261,7 @@ describe("what code recalls, passed on", setUpTime, () => {
     // Bob's Notes, with no Brain, shared with Uma and Ben.
     const fixture: Fixture = await appWith(notesApp(), "Notes", bob);
     const release: Release = await seal(fixture);
-    await publishVersion(env, fixture.owner, fixture.app, 1);
+    await rollback(env, appKind, fixture.owner, fixture.app, 1);
     const notes = { ...fixture, release };
     for (const member of [uma, ben]) {
       // oxlint-disable-next-line no-await-in-loop -- one at a time
@@ -1267,5 +1368,651 @@ describe("what code recalls, passed on", setUpTime, () => {
       { timeout: 20_000, interval: 100 }
     );
     expect(asked).toBe(`For everyone: ${word} is in the handbook.`);
+  });
+});
+
+/**
+ * Keep: an action that recalls its question and saves each item's text
+ * as a note its members read, and a query of those notes.
+ */
+const keepApp = () =>
+  testApp(
+    {
+      name: "Keep",
+      tables: {
+        notes: {
+          fields: { title: "v.string()" },
+          access: { read: "appMembers", write: "appMembers" },
+        },
+      },
+      permissions: ['permission.brain({ operations: ["recall"] })'],
+    },
+    {
+      "server/keep.ts": `import { v } from "@grasp-os/sdk";
+import { action, mutation, query } from "@server/_generated/server";
+
+export const save = mutation({
+  args: { title: v.string() },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    await ctx.db.insert("notes", args);
+    return null;
+  },
+});
+
+export const keep = action({
+  args: { question: v.string() },
+  returns: v.array(v.string()),
+  handler: async (ctx, args) => {
+    const pack = await ctx.brain.recall({ question: args.question, budget: { tokens: 800 } });
+    for (const item of pack.items) {
+      await ctx.runMutation(save, { title: item.text });
+    }
+    return pack.items.map((item) => item.text);
+  },
+});
+
+export const titles = query({
+  args: {},
+  returns: v.array(v.string()),
+  handler: async (ctx) => (await ctx.db.query("notes").take(100)).map((note) => note.title).sort(),
+});
+`,
+    }
+  );
+
+/**
+ * `app`'s `brain` declaration bound by `admin` to a grant `owner` asked
+ * for, reaching `teams`.
+ */
+const boundToTeams = async (
+  app: Fixture & { release: Release },
+  owner: Member,
+  admin: Member,
+  teams: string[]
+): Promise<string> => {
+  const permissionId = await granted(
+    owner,
+    admin,
+    brainGrant({ type: "app", appId: app.app }, teams),
+    app.release.manifest.resourceVersion
+  );
+  await approveResourceBinding(env, admin, {
+    app: app.app,
+    alias: "brain",
+    target: { kind: "brain", permissionId },
+    reviewed: { version: 1 },
+  });
+  return permissionId;
+};
+
+/** The Keep App of `owner`, sealed and current. */
+const keepOf = async (owner: Member) => {
+  const fixture: Fixture = await appWith(keepApp(), "Keep", owner);
+  const release: Release = await seal(fixture);
+  await rollback(env, appKind, fixture.owner, fixture.app, 1);
+  return { ...fixture, release };
+};
+
+/** How `run` ended: `done`, or its error's code and details. */
+const outcomeOf = async (run: () => Promise<unknown>): Promise<unknown> => {
+  try {
+    await run();
+    return "done";
+  } catch (error) {
+    const { code, details } = z
+      .object({ code: z.string(), details: z.unknown().optional() })
+      .parse(error);
+    return { code, details };
+  }
+};
+
+/**
+ * A workflow of `by`'s that calls `name` (its stable ID `fn`) of App
+ * `app` and returns its answer, its grant to call it asked for by `by`:
+ * the request's outcome (`outcomeOf`) and the workflow.
+ */
+const callingWorkflow = async (
+  by: Member,
+  admin: Member,
+  app: string,
+  fn: string,
+  name: string
+) => {
+  const workflow = await createWorkflowResource(env, by, `calls-${unique()}`);
+  await publishDefinition(
+    env,
+    by,
+    workflow.id,
+    JSON.stringify({
+      $schema: workflowSchemaUrl,
+      args: { kind: "object", fields: { question: { kind: "string" } } },
+      permissions: {
+        apps: { keep: { app, functions: { [fn]: name } } },
+      },
+      steps: [
+        { id: "read", type: "call", app: "keep", function: fn, args: {} },
+      ],
+    })
+  );
+  const asked = await outcomeOf(
+    async () =>
+      await granted(
+        by,
+        admin,
+        {
+          subject: { type: "workflow", workflowId: workflow.id },
+          object: { type: "app", appId: app, function: fn },
+          actions: ["call"],
+          binding: `KEEP_${unique().replaceAll(/\W/gu, "_").toUpperCase()}`,
+        },
+        1
+      )
+  );
+  return { asked, workflow };
+};
+
+/** How a run of `id` for `by` ended: its value, or its code. */
+const ranOfCalls = async (by: Member, id: string): Promise<unknown> => {
+  const { runId } = await startWorkflow(
+    env,
+    { type: "person", person: by },
+    id,
+    { expected: 1, args: { question: "any" }, key: unique() }
+  );
+  if (runId === null) {
+    throw new Error("The start admitted no run");
+  }
+  return await endOf(by, id, runId);
+};
+
+/**
+ * Of `answer`, a list of texts, those that carry this test's own `word`,
+ * sorted; anything else (a refusal) as it is. Recall also finds what other
+ * tests added by meaning, which the reader may read: never this test's to
+ * count.
+ */
+const carrying = (word: string, answer: unknown): unknown =>
+  Array.isArray(answer)
+    ? answer
+        .filter(
+          (text): text is string =>
+            typeof text === "string" && text.includes(word)
+        )
+        .toSorted()
+    : answer;
+
+/** `member` as a request of theirs is signed in now: their teams now. */
+const now = async (member: Member): Promise<Member> => ({
+  ...member,
+  teams: await teamsOf(env.DB, member.userId),
+});
+
+/** `member`, put in `team` as core keeps it. */
+const joined = async (team: string, member: Member): Promise<void> => {
+  await env.DB.prepare(
+    "INSERT INTO team_members (id, team_id, user_id, created_at) VALUES (?, ?, ?, ?)"
+  )
+    .bind(crypto.randomUUID(), team, member.userId, Date.now())
+    .run();
+};
+
+describe("an App whose grant names teams", setUpTime, () => {
+  it("recalls its grant's team for someone in it, beside the company's, never another team's nor anyone's own, and answers nobody outside the team, an admin included", async () => {
+    const { word, admin, ada, teams } = await company();
+    const app = await askOf(ada, []);
+    // Ada's team: she is in it, the admin isn't.
+    await boundToTeams(app, ada, admin, [teams.adas]);
+    const asks = { question: word, tokens: 800 };
+    expect({
+      ada: carrying(word, textsOf(await askedOf(app, await now(ada), asks))),
+      admin: await askedOf(app, await now(admin), asks),
+    }).toStrictEqual({
+      ada: [
+        `Ada's team: ${word} is planned in March.`,
+        `For everyone: ${word} is in the handbook.`,
+      ],
+      admin: { failed: "app.unreadable" },
+    });
+  });
+
+  it("keeps what an action saved of a team's recall from everyone outside that team it is shared with, a rename of the team breaking nothing", async () => {
+    const { word, admin, ada, uma, teams } = await company();
+    const ben = await person("user");
+    await joined(teams.adas, ben);
+    const app = await keepOf(ada);
+    // What carries this test's word: what else recall finds isn't its to count.
+    const own = async (...args: Parameters<typeof calledOf>) =>
+      carrying(word, await calledOf(...args));
+    await boundToTeams(app, ada, admin, [teams.adas]);
+    const share = async (member: Member) =>
+      await addMember(env, await now(ada), app.app, {
+        type: "person",
+        id: member.userId,
+        role: "user",
+      });
+    // Ben is in Ada's team: shared. Uma isn't: refused. Nor is an admin
+    // outside it, alike; an admin in it is shared.
+    const adminInTeam = await person("admin");
+    await joined(teams.adas, adminInTeam);
+    await share(ben);
+    await share(adminInTeam);
+    await expect(share(uma)).rejects.toMatchObject({
+      code: "app.share_unreadable",
+    });
+    await expect(share(admin)).rejects.toMatchObject({
+      code: "app.share_unreadable",
+    });
+    // The team renamed: nothing names it by its name.
+    await env.DB.prepare("UPDATE teams SET name = 'Renamed' WHERE id = ?")
+      .bind(teams.adas)
+      .run();
+    // Ben keeps what he recalls: his team's note, and the note for
+    // everyone.
+    const teamNote = `Ada's team: ${word} is planned in March.`;
+    const kept = [
+      teamNote,
+      `For everyone: ${word} is in the handbook.`,
+    ].toSorted();
+    expect({
+      saved: await own(app, await now(ben), "keep.keep", {
+        question: word,
+      }),
+      benReads: await own(app, await now(ben), "keep.titles", {}),
+    }).toStrictEqual({ saved: kept, benReads: kept });
+    // Uma shared with anyway (a share that raced the grant): every call
+    // refused, so she never reads the team's note Ben saved.
+    await env.DB.prepare(
+      "INSERT INTO app_members (app_id, member_type, member_id, role, added_by, added_at) VALUES (?, 'person', ?, 'user', ?, ?)"
+    )
+      .bind(app.app, uma.userId, ada.userId, Date.now())
+      .run();
+    // Ben leaves the team: from his next call, he is refused too.
+    await env.DB.prepare(
+      "DELETE FROM team_members WHERE team_id = ? AND user_id = ?"
+    )
+      .bind(teams.adas, ben.userId)
+      .run();
+    expect({
+      umaReads: await own(app, await now(uma), "keep.titles", {}),
+      umaKeeps: await own(app, await now(uma), "keep.keep", {
+        question: word,
+      }),
+      benReads: await own(app, await now(ben), "keep.titles", {}),
+      adaReads: await own(app, await now(ada), "keep.titles", {}),
+    }).toStrictEqual({
+      umaReads: { failed: "app.unreadable" },
+      umaKeeps: { failed: "app.unreadable" },
+      benReads: { failed: "app.unreadable" },
+      adaReads: kept,
+    });
+    // Its owner leaves the team too: she no longer reads it either.
+    await env.DB.prepare(
+      "DELETE FROM team_members WHERE team_id = ? AND user_id = ?"
+    )
+      .bind(teams.adas, ada.userId)
+      .run();
+    await expect(
+      own(app, await now(ada), "keep.titles", {})
+    ).resolves.toStrictEqual({ failed: "app.unreadable" });
+  });
+
+  it("closes what an App kept of a team's recall to its owner and an admin outside that team, who still revoke, reset, archive and remove it", async () => {
+    const { word, admin, ada, teams } = await company();
+    // Carl is in payroll, as the admin is; Ada, who owns Keep, isn't, nor
+    // is a second admin.
+    const carl = await person("builder");
+    await joined(teams.payroll, carl);
+    const outsideAdmin = await person("admin");
+    const app = await keepOf(ada);
+    // What carries this test's word: what else recall finds isn't its to count.
+    const own = async (...args: Parameters<typeof calledOf>) =>
+      carrying(word, await calledOf(...args));
+    await addMember(env, await now(ada), app.app, {
+      type: "person",
+      id: carl.userId,
+      role: "builder",
+    });
+    const grant = await boundToTeams(app, carl, admin, [teams.payroll]);
+    const payrollNote = `Payroll only: ${word} is paid at the usual rate.`;
+    const kept = [
+      payrollNote,
+      `For everyone: ${word} is in the handbook.`,
+    ].toSorted();
+    expect({
+      saved: await own(app, await now(carl), "keep.keep", {
+        question: word,
+      }),
+      carlReads: await own(app, await now(carl), "keep.titles", {}),
+      adminReads: await own(app, await now(admin), "keep.titles", {}),
+      adaReads: await own(app, await now(ada), "keep.titles", {}),
+      adaKeeps: await own(app, await now(ada), "keep.keep", {
+        question: word,
+      }),
+      outsideAdminReads: await calledOf(
+        app,
+        await now(outsideAdmin),
+        "keep.titles",
+        {}
+      ),
+      adaOpens: await outcomeOf(
+        async () => await appFor(env, await now(ada), app.app, "user")
+      ),
+    }).toStrictEqual({
+      saved: kept,
+      carlReads: kept,
+      adminReads: kept,
+      adaReads: { failed: "app.unreadable" },
+      adaKeeps: { failed: "app.unreadable" },
+      outsideAdminReads: { failed: "app.unreadable" },
+      adaOpens: { code: "app.unreadable", details: undefined },
+    });
+    // Managing it reads none of its data: still theirs.
+    const name = await env.DB.prepare("SELECT name FROM apps WHERE id = ?")
+      .bind(app.app)
+      .first<{ name: string }>();
+    // Whom it is shared with is theirs to see and take back; renaming it
+    // stays closed, as every change of the App does.
+    const sharedWith = await listMembers(env, await now(ada), app.app);
+    const adminSees = await listMembers(env, await now(outsideAdmin), app.app);
+    expect({
+      sharedWith: sharedWith.map(({ id }) => id),
+      adminSees: adminSees.map(({ id }) => id),
+      renamed: await outcomeOf(
+        async () =>
+          await updateApp(env, await now(ada), app.app, { name: "Renamed" })
+      ),
+      unshared: await outcomeOf(async () => {
+        await removeMember(env, await now(ada), app.app, {
+          type: "person",
+          id: carl.userId,
+        });
+      }),
+      carlAfter: await own(app, await now(carl), "keep.titles", {}),
+    }).toStrictEqual({
+      sharedWith: [carl.userId],
+      adminSees: [carl.userId],
+      renamed: { code: "app.unreadable", details: undefined },
+      unshared: "done",
+      carlAfter: { failed: "app.not_found" },
+    });
+    const listed = await permissionsOpenTo(env, await now(outsideAdmin), {
+      type: "app",
+      appId: app.app,
+    });
+    expect({
+      // The grant is listed to them, to decide, as any App's.
+      listed: listed.some(({ id }) => id === grant),
+      revoked: await outcomeOf(
+        async () => await revokePermission(env, outsideAdmin, grant)
+      ),
+      reset: await outcomeOf(async () => {
+        await resetAppData(env, await now(outsideAdmin), app.app, name?.name);
+      }),
+      archived: await outcomeOf(
+        async () => await setArchived(env, await now(ada), app.app, true)
+      ),
+      removed: await outcomeOf(async () => {
+        await removeApp(env, await now(ada), app.app);
+      }),
+    }).toStrictEqual({
+      listed: true,
+      revoked: "done",
+      reset: "done",
+      archived: "done",
+      removed: "done",
+    });
+  });
+
+  it("names in a grant only teams its requester is in now, refusing a team they aren't in, one that isn't there and another company's alike", async () => {
+    const { admin, ada, teams } = await company();
+    const app = await askOf(ada, []);
+    // Another company's team, Ada among its members.
+    const other = crypto.randomUUID();
+    const otherTeam = crypto.randomUUID();
+    await env.DB.batch([
+      env.DB.prepare(
+        "INSERT INTO organizations (id, name, slug, created_at) VALUES (?, 'Other', ?, ?)"
+      ).bind(other, other, Date.now()),
+      env.DB.prepare(
+        "INSERT INTO teams (id, name, organization_id, created_at) VALUES (?, 'Theirs', ?, ?)"
+      ).bind(otherTeam, other, Date.now()),
+      env.DB.prepare(
+        "INSERT INTO team_members (id, team_id, user_id, created_at) VALUES (?, ?, ?, ?)"
+      ).bind(crypto.randomUUID(), otherTeam, ada.userId, Date.now()),
+    ]);
+    const asked = async (team: string) =>
+      await outcomeOf(
+        async () =>
+          await requestPermission(
+            env,
+            ada,
+            brainGrant({ type: "app", appId: app.app }, [teams.adas, team]),
+            rolesOf(ada)
+          )
+      );
+    const refused = {
+      code: "permission.invalid",
+      details: { issues: ["object: Name only teams you are in."] },
+    };
+    expect({
+      notIn: await asked(teams.payroll),
+      none: await asked(crypto.randomUUID()),
+      otherCompany: await asked(otherTeam),
+      own: await outcomeOf(
+        async () =>
+          await granted(
+            ada,
+            admin,
+            brainGrant({ type: "app", appId: app.app }, [teams.adas]),
+            1
+          )
+      ),
+    }).toStrictEqual({
+      notIn: refused,
+      none: refused,
+      otherCompany: refused,
+      own: "done",
+    });
+  });
+
+  it("is never called from a workflow: its grant to a workflow is refused, so is naming teams once a workflow may call it, and so is a call that got past both", async () => {
+    const { admin, ada: asCreated, teams } = await company();
+    const ada = await now(asCreated);
+    const refused = {
+      code: "permission.team_brain_workflow",
+      details: undefined,
+    };
+    // A team's Keep: a workflow's grant to call it is refused.
+    const scoped = await keepOf(ada);
+    await boundToTeams(scoped, ada, admin, [teams.adas]);
+    const titles = await functionIdOf(scoped.app, "keep.titles");
+    const toScoped = await callingWorkflow(
+      ada,
+      admin,
+      scoped.app,
+      titles,
+      "keep.titles"
+    );
+    // A Keep a workflow may call: naming a team for it is refused.
+    const called = await keepOf(ada);
+    const calledTitles = await functionIdOf(called.app, "keep.titles");
+    const toCalled = await callingWorkflow(
+      ada,
+      admin,
+      called.app,
+      calledTitles,
+      "keep.titles"
+    );
+    const naming = await outcomeOf(
+      async () => await boundToTeams(called, ada, admin, [teams.adas])
+    );
+    // A team's grant written past both (as no request can): the run's call
+    // is refused all the same.
+    await env.DB.prepare(
+      "INSERT INTO permissions (id, subject_type, subject_id, object_type, object_id, actions, binding, status, requested_by, requested_at, granted_by, granted_at, teams) VALUES (?, 'app', ?, 'platform', 'platform', '[\"brain\"]', 'TEAM_BRAIN', 'active', ?, ?, ?, ?, ?)"
+    )
+      .bind(
+        crypto.randomUUID(),
+        called.app,
+        ada.userId,
+        Date.now(),
+        admin.userId,
+        Date.now(),
+        JSON.stringify([teams.adas])
+      )
+      .run();
+    expect({
+      grantToScoped: toScoped.asked,
+      grantToCalled: toCalled.asked,
+      naming,
+      run: await ranOfCalls(await now(ada), toCalled.workflow.id),
+    }).toStrictEqual({
+      grantToScoped: refused,
+      grantToCalled: "done",
+      naming: refused,
+      run: { failed: "permission.team_brain_workflow" },
+    });
+  });
+
+  it("reads a stored teams value no request could make as the team nobody is in, every shape alike: listed so, closing its App, refusing its recall", async () => {
+    const { word, admin, ada, teams } = await company();
+    const app = await askOf(ada, []);
+    const shapes: Record<string, string> = {
+      empty: "[]",
+      twice: JSON.stringify([teams.adas, teams.adas]),
+      tooMany: JSON.stringify(
+        Array.from({ length: 1000 }, (_, at) => `team-${at}`)
+      ),
+      notAnId: "[1]",
+      nullInside: JSON.stringify([teams.adas, null]),
+      notJson: "not json",
+      aString: JSON.stringify(teams.adas),
+      aNumber: "5",
+      anObject: JSON.stringify({ teams: [teams.adas] }),
+    };
+    const insert = env.DB.prepare(
+      "INSERT INTO permissions (id, subject_type, subject_id, object_type, object_id, actions, binding, status, requested_by, requested_at, granted_by, granted_at, teams) VALUES (?, 'app', ?, 'platform', 'platform', '[\"brain\"]', ?, 'active', ?, 0, ?, 0, ?)"
+    );
+    const rows = Object.entries(shapes).map(([name, stored]) => ({
+      name,
+      stored,
+      listedGrant: crypto.randomUUID(),
+      // An App of its own, to hold the gate and recall to it alone.
+      appId: appIdSchema.parse(`app-${crypto.randomUUID()}`),
+      grant: crypto.randomUUID(),
+    }));
+    await env.DB.batch(
+      rows.flatMap(({ name, stored, listedGrant, appId, grant }) => [
+        insert.bind(
+          listedGrant,
+          app.app,
+          `TEAMS_${name.toUpperCase()}`,
+          ada.userId,
+          admin.userId,
+          stored
+        ),
+        insert.bind(grant, appId, "BRAIN", ada.userId, admin.userId, stored),
+      ])
+    );
+    const listed = await permissionsOpenTo(env, await now(admin), {
+      type: "app",
+      appId: app.app,
+    });
+    const adaNow = await now(ada);
+    const adaTeams = adaNow.teams.map(({ id }) => id);
+    const outcomes: Record<string, unknown> = {};
+    for (const { name, listedGrant, appId, grant } of rows) {
+      // oxlint-disable-next-line no-await-in-loop -- one shape at a time
+      const opens = await mayReadBrainTeamsOf(env, appId, adaTeams);
+      // oxlint-disable-next-line no-await-in-loop -- one shape at a time
+      const recalled = await outcomeOf(
+        async () =>
+          await recallFor(
+            env,
+            {
+              authority: authoritySchema.parse({
+                subject: { type: "app", appId },
+                onBehalfOf: ada.userId,
+                mode: "interactive",
+                appVersion: 1,
+              }),
+              context: { type: "app", appId },
+              permissionId: permissionIdSchema.parse(grant),
+              actor: { type: "system" },
+            },
+            requestOf(word)
+          )
+      );
+      outcomes[name] = {
+        listedAs: listed.find(({ id }) => id === listedGrant)?.object,
+        opens,
+        recalled,
+      };
+    }
+    const unreadable = {
+      listedAs: { type: "platform", teams: ["*"] },
+      opens: false,
+      recalled: {
+        code: "permission.denied",
+        details: { action: "brain" },
+      },
+    };
+    expect({ outcomes, counted: await anyTeamGrant(env) }).toStrictEqual({
+      outcomes: Object.fromEntries(rows.map(({ name }) => [name, unreadable])),
+      counted: true,
+    });
+  });
+
+  it("closes only the App whose stored teams don't read as teams, never another's listing", async () => {
+    const { ada } = await company();
+    const [broken, fine] = await Promise.all([keepOf(ada), askOf(ada, [])]);
+    await env.DB.prepare(
+      "INSERT INTO permissions (id, subject_type, subject_id, object_type, object_id, actions, binding, status, requested_by, requested_at, granted_by, granted_at, teams) VALUES (?, 'app', ?, 'platform', 'platform', '[\"brain\"]', 'BROKEN', 'active', ?, ?, ?, ?, '\"not a list\"')"
+    )
+      .bind(
+        crypto.randomUUID(),
+        broken.app,
+        ada.userId,
+        Date.now(),
+        ada.userId,
+        Date.now()
+      )
+      .run();
+    expect({
+      readable: [
+        ...(await appsReadableBy(env, await now(ada), [broken.app, fine.app])),
+      ],
+      brokenOpens: await outcomeOf(
+        async () => await appFor(env, await now(ada), broken.app, "user")
+      ),
+    }).toStrictEqual({
+      readable: [fine.app],
+      brokenOpens: { code: "app.unreadable", details: undefined },
+    });
+  });
+
+  it("names teams only on an App's permission to read the Brain", async () => {
+    const { admin, ada, teams } = await company();
+    const { workflow } = await recallingWorkflow(ada, admin);
+    const app = await askOf(ada, []);
+    const asked = async (request: PermissionRequest) =>
+      await requestPermission(env, ada, request, rolesOf(ada));
+    await expect(
+      asked(
+        brainGrant({ type: "workflow", workflowId: workflow.id }, [teams.adas])
+      )
+    ).rejects.toMatchObject({ code: "permission.invalid" });
+    await expect(
+      asked({
+        ...brainGrant({ type: "app", appId: app.app }, [teams.adas]),
+        actions: ["statistics"],
+      })
+    ).rejects.toMatchObject({ code: "permission.invalid" });
+    await expect(
+      asked(
+        brainGrant({ type: "app", appId: app.app }, [teams.adas, teams.adas])
+      )
+    ).rejects.toMatchObject({ code: "permission.invalid" });
   });
 });

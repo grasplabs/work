@@ -3,7 +3,8 @@ import { chatIdSchema } from "@grasp-os/shared/ids";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import { chatWork, readDraft, saveDraft } from "../src/app-drafts.ts";
+import { appKind } from "../src/apps.ts";
+import { chatWork, readDraft, saveDraft } from "../src/drafts.ts";
 import {
   appName,
   findApp,
@@ -24,7 +25,8 @@ import {
   transcript,
   turnChecks,
 } from "./agent-chat.ts";
-import { commitApp, withFiles } from "./app-definitions.ts";
+import { withFiles } from "./app-definitions.ts";
+import { commitApp } from "./apps.ts";
 import { agentWriting } from "./draft-writers.ts";
 import { mockIdpWith } from "./idp.ts";
 import { defineNotes, notesCode, notesFiles } from "./notes-client-app.ts";
@@ -51,7 +53,7 @@ const mistypedAt = (attempt: number) =>
 describe("building Apps from a chat", { timeout: 120_000 }, () => {
   it("keeps the draft apart from what a builder commits meanwhile, both ways", async () => {
     const ledger = `const [app] = (await env.apps.list()).filter(({ name }) => name === "Ledger");`;
-    const { builder, existing, chat, grant } = await setUp([
+    const { builder, existing, chat } = await setUp([
       codeStep(`export default async (self, env) => {
         ${ledger}
         await env.build.write(app.id, { "notes.md": "the agent's" }, { revision: (await env.build.files(app.id)).revision });
@@ -65,16 +67,13 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       };`),
       says("Still mine."),
     ]);
-    await grant();
 
     await chat.ask("Add notes to the Ledger");
     // A builder commits meanwhile, the same file too.
-    await commitApp(
-      builder.api.apps.files,
-      existing,
-      { "notes.md": "the builder's", "builder.md": "mine" },
-      "Mine"
-    );
+    const { version } = await commitApp(builder.api, existing, {
+      "notes.md": "the builder's",
+      "builder.md": "mine",
+    });
     await chat.ask("Are your notes still there?");
 
     const [draft, after] = await codeResults(chat.stub, chat.chat.id);
@@ -91,14 +90,16 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       notes: "the agent's",
       builder: null,
     });
-    await expect(builder.api.apps.files.read(existing)).resolves.toStrictEqual(
+    await expect(
+      builder.api.versions.files({ kind: "app", id: existing }, version)
+    ).resolves.toStrictEqual(
       withFiles(ledgerDefinition, {
         "AGENTS.md": "# Ledger\n",
         "notes.md": "the builder's",
         "builder.md": "mine",
       }).files
     );
-    // The chat's page lists what its agent worked on (app-drafts.test.ts
+    // The chat's page lists what its agent worked on (drafts.test.ts
     // has who reads it).
     const listed = await chatWork(env, chat.chat.id);
     // The draft names the code step that wrote it, where the thread shows
@@ -114,7 +115,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
   });
 
   it("answers every write with what doesn't compile, however often the same error comes back, and never locks the agent out", async () => {
-    const { chat, grant } = await setUp(
+    const { chat } = await setUp(
       [
         codeStep(`export default async (self, env) => {
         ${findApp}
@@ -139,7 +140,6 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       "builder",
       true
     );
-    await grant();
 
     await chat.ask("Build an invoice desk");
     await chat.ask("Try once more");
@@ -285,7 +285,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       "\nexport const list = query({",
       '\nif (globalThis.Object === Object) throw new Error("No notes today");\nexport const list = query({'
     );
-    const { chat, grant } = await setUp(
+    const { chat } = await setUp(
       [
         codeStep(`export default async (self, env) => {
         ${findApp}
@@ -309,7 +309,6 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       "builder",
       true
     );
-    await grant();
 
     await chat.ask("Build a notes App");
 
@@ -338,7 +337,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     // registers and passes the server check. Passed then, a page with
     // calls that don't exist would be published. The draft's builds
     // inspect once, for both, and a stand-in check never passes.
-    const { person, chat, grant } = await setUp([
+    const { person, chat } = await setUp([
       codeStep(`export default async (self, env) => {
         ${findApp}
         const checked = await env.build.check(app.id);
@@ -350,7 +349,6 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       };`),
       says("It doesn't pass yet."),
     ]);
-    await grant();
     const { id: app } = await person.api.apps.create({ name: appName });
     const chatId = chatIdSchema.parse(chat.chat.id);
     // Never inspected before, so no kept registration serves it.
@@ -359,8 +357,10 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     });
     await saveDraft(
       env,
+      appKind,
+
       app,
-      await readDraft(env, app),
+      await readDraft(env, { kind: "app", id: app }),
       {
         changes: files.files,
         unchanged: [],
@@ -416,7 +416,9 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
         server: "failed",
       },
     });
-    await expect(person.api.apps.versions.list(app)).resolves.toStrictEqual([]);
+    await expect(
+      person.api.versions.list({ kind: "app", id: app })
+    ).resolves.toStrictEqual([]);
   });
 
   it("says a write's build couldn't run, passes nothing then, and checks it at the next write once it can", async () => {
@@ -428,7 +430,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     };`;
     // Never built before, so no build of it is in the cache to serve.
     const unbuilt = `${fixed}\n// ${crypto.randomUUID()}\n`;
-    const { chat, grant } = await setUp(
+    const { chat } = await setUp(
       [
         codeStep(`export default async (self, env) => {
         ${findApp}
@@ -443,7 +445,6 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       "builder",
       true
     );
-    await grant();
     // The compiler can't start: no build can run now. (The build cache
     // being out is only a miss: the build runs, build-cache.ts.)
     const { LOADER: loader } = env;
@@ -482,7 +483,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
   });
 
   it("says a write's build didn't finish within its bound, and passes nothing", async () => {
-    const { chat, grant } = await setUp(
+    const { chat } = await setUp(
       [
         codeStep(`export default async (self, env) => {
         ${findApp}
@@ -498,7 +499,6 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       "builder",
       true
     );
-    await grant();
     // The build cache holds every build until the test ends: none finishes
     // within the bound, which the test shortens.
     const held = Promise.withResolvers<boolean>();

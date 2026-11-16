@@ -23,13 +23,13 @@ import {
   workflowStartReceipts,
 } from "../db/core/schema.ts";
 import { requireNotStaff } from "../sharing.ts";
-import { draftCheckpoint } from "../workflow-drafts.ts";
+import { draftText } from "../workflow-editor.ts";
 import { requireWorkflowRole } from "../workflow-resources.ts";
 import { candidateRunFor, startCandidateRun } from "./candidate-runs.ts";
 import { detailsRemoved } from "./retention.ts";
 
-// A test of a draft's checkpoint over recent real items (GRA-513): the
-// checkpoint runs once on the input of each of the tester's most recent
+// A test of a workflow's draft over recent real items (GRA-513): the
+// draft runs once on the input of each of the tester's most recent
 // runs, each as a test run of its own (candidate-runs.ts), and the test
 // records which run each item came from and what became of it. Threat
 // model, each tried in workflow-item-tests.test.ts:
@@ -227,9 +227,9 @@ export const itemTestFor = async (
 };
 
 /**
- * Tests workflow `id`'s draft checkpoint for `by`, one of its builders,
- * over their recent real runs (`workflowItemTestStartSchema`): one test
- * run of the checkpoint at exactly the revision named for each run's
+ * Tests workflow `id`'s draft for `by`, one of its builders, over their
+ * recent real runs (`workflowItemTestStartSchema`): one test run of the
+ * draft at exactly the revision named for each run's
  * input, every call answered from the start's fixtures. The test, item by
  * item; an item whose test run was refused says why.
  */
@@ -251,8 +251,8 @@ export const startItemTest = async (
     workflowItemTestStartSchema,
     input
   );
-  // A checkpoint that can't be run refuses the test, not each item.
-  await draftCheckpoint(env, workflow.id, revision);
+  // A draft moved past the revision refuses the test, not each item.
+  await draftText(env, workflow.id, revision);
   const sources = await recentRuns(env, by, workflow.id, items);
   if (sources.length === 0) {
     throw workflowResourceErrors.create("workflow.item_test_empty");

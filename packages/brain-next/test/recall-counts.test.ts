@@ -25,8 +25,12 @@ const model: EmbedModel = { name: "counts-test", build: "1" };
 const dimensions = 4;
 const vector = [1, 0.1, 0.1, 0.1];
 
-const reader: Reader & { person: string } = { person: "reader", groups: [] };
-const own: Access = { kind: "owner", person: reader.person };
+const reader: Reader & { person: string } = {
+  person: "reader",
+  groups: ["team:reader"],
+};
+/** A group only the reader is in: the shared store keeps nothing one person's alone. */
+const own: Access = { kind: "audience", group: "team:reader" };
 
 /** Adds `text` to a source of its own, with a vector for its first chunk. */
 const addWithVector = async (text: string): Promise<void> => {
@@ -95,11 +99,22 @@ describe("recall's counts, as staff see them", () => {
 
     expect({ before, after }).toStrictEqual({
       before: {
-        ways: { words: way(0), exact: way(0), meaning: way(0) },
+        ways: {
+          words: way(0),
+          exact: way(0),
+          entities: way(0),
+          meaning: way(0),
+        },
         withoutMeaning: noneWithout,
       },
+      // The entities way looks for names in every question of some word.
       after: {
-        ways: { words: way(4), exact: way(2), meaning: way(1) },
+        ways: {
+          words: way(4),
+          exact: way(2),
+          entities: way(4),
+          meaning: way(1),
+        },
         withoutMeaning: noneWithout,
       },
     });
@@ -128,12 +143,23 @@ describe("recall's counts, as staff see them", () => {
 
     expect({ afterMeaning, afterWords }).toStrictEqual({
       afterMeaning: {
-        ways: { words: way(1), exact: way(0), meaning: way(1, 1) },
+        // Meaning failed before the entities way ran.
+        ways: {
+          words: way(1),
+          exact: way(0),
+          entities: way(0),
+          meaning: way(1, 1),
+        },
         withoutMeaning: noneWithout,
       },
       // Words failed first: no other way ran.
       afterWords: {
-        ways: { words: way(2, 1), exact: way(0), meaning: way(1, 1) },
+        ways: {
+          words: way(2, 1),
+          exact: way(0),
+          entities: way(0),
+          meaning: way(1, 1),
+        },
         withoutMeaning: noneWithout,
       },
     });
@@ -163,7 +189,12 @@ describe("recall's counts, as staff see them", () => {
     ).rejects.toThrow("The Brain refused it");
 
     await expect(counts()).resolves.toStrictEqual({
-      ways: { words: way(3), exact: way(0), meaning: way(0) },
+      ways: {
+        words: way(3),
+        exact: way(0),
+        entities: way(3),
+        meaning: way(0),
+      },
       withoutMeaning: { timed_out: 2, failed: 0, refused: 1, unusable: 1 },
     });
   });
@@ -191,7 +222,12 @@ describe("recall's counts, as staff see them", () => {
       before: 1,
       later: true,
       after: {
-        ways: { words: way(0), exact: way(0), meaning: way(0) },
+        ways: {
+          words: way(0),
+          exact: way(0),
+          entities: way(0),
+          meaning: way(0),
+        },
         withoutMeaning: noneWithout,
       },
     });

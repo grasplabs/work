@@ -46,28 +46,34 @@ export const financeDrive =
 export const personalDrive =
   "b!zY9xW8vU7tS6rQ5pO4nM3lK2jI1hG0fEdCbA9zY8xW7vU6tS5rQ4pO3nM2lK1jI0";
 
+/**
+ * The middle of Graph's IDs, so a message's or an event's is 152
+ * characters for `invoices@` and an attachment's 180, as Graph's own
+ * (its "Get attachment" reference): what fits a connector's 256-character
+ * bound on a read's provenance (connector-kit's `provenanceSchema`).
+ */
+const itemPad = "iIsqMbYjsT5e-T7KzowPTAAAYbvZTAAAiQ8W967B7TKB";
+const attachmentPad = "iIsqMbYjsT5e-T7KzowPTAAAYbvZTAAAiQ8W967B7TKBjgx9rVEUR";
+
 const local = (mailbox: string): string =>
   (mailbox.split("@")[0] ?? mailbox).replaceAll(/[^A-Za-z]/gu, "");
 
 /** A message ID of `mailbox`, as Graph shapes them. */
 export const messageId = (mailbox: string, n: number): string =>
-  `AAMkAGE1M2IyNGNmLTI5MTktNDUyZi1iOTVjLTc2ZjI5ZmNmZmQ2MwBGAAAAAAD${local(mailbox)}BwBmtXf2uSv0SqAGJ5k6N7QDAAAAAAEMAAA${n}=`;
+  `AAMkAGE1M2IyNGNmLTI5MTktNDUyZi1iOTVjLTc2ZjI5ZmNmZmQ2MwBGAAAAAAD${itemPad}${local(mailbox)}BwBmtXf2uSv0SqAGJ5k6N7QDAAAAAAEMAAA${n}=`;
 
 /** The ID a message gets once it's moved. */
 export const movedId = (mailbox: string, n: number): string =>
   `${messageId(mailbox, n).slice(0, -1)}Mvd=`;
 
 export const eventId = (mailbox: string, n: number): string =>
-  `AAMkAGE1M2IyNGNmLTI5MTktNDUyZi1iOTVjLTc2ZjI5ZmNmZmQ2MwBGAAAAAAD${local(mailbox)}BwBmtXf2uSv0SqAGJ5k6N7QDAAAAAAENAAA${n}=`;
+  `AAMkAGE1M2IyNGNmLTI5MTktNDUyZi1iOTVjLTc2ZjI5ZmNmZmQ2MwBGAAAAAAD${itemPad}${local(mailbox)}BwBmtXf2uSv0SqAGJ5k6N7QDAAAAAAENAAA${n}=`;
 
-export const pdfAttachmentId =
-  "AAMkAGE1M2IyNGNmLTI5MTktNDUyZi1iOTVjLTc2ZjI5ZmNmZmQ2MwBGAAAAAADBwBmtXf2uSv0SqAGJ5k6N7QDAAAAAAEMAAABEgAQAKqz9bB4Rl5Fh5T0S2CKW0Y=";
+export const pdfAttachmentId = `AAMkAGE1M2IyNGNmLTI5MTktNDUyZi1iOTVjLTc2ZjI5ZmNmZmQ2MwBGAAAAAAD${attachmentPad}BwBmtXf2uSv0SqAGJ5k6N7QDAAAAAAEMAAABEgAQAKqz9bB4Rl5Fh5T0S2CKW0Y=`;
 
-export const itemAttachmentId =
-  "AAMkAGE1M2IyNGNmLTI5MTktNDUyZi1iOTVjLTc2ZjI5ZmNmZmQ2MwBGAAAAAADBwBmtXf2uSv0SqAGJ5k6N7QDAAAAAAEMAAABEgAQAC7hXqL0nUFJpUe2FCTbPtY=";
+export const itemAttachmentId = `AAMkAGE1M2IyNGNmLTI5MTktNDUyZi1iOTVjLTc2ZjI5ZmNmZmQ2MwBGAAAAAAD${attachmentPad}BwBmtXf2uSv0SqAGJ5k6N7QDAAAAAAEMAAABEgAQAC7hXqL0nUFJpUe2FCTbPtY=`;
 
-export const bigAttachmentId =
-  "AAMkAGE1M2IyNGNmLTI5MTktNDUyZi1iOTVjLTc2ZjI5ZmNmZmQ2MwBGAAAAAADBwBmtXf2uSv0SqAGJ5k6N7QDAAAAAAEMAAABEgAQAMu0Rz2uI2hEm1LpHkQyVxg=";
+export const bigAttachmentId = `AAMkAGE1M2IyNGNmLTI5MTktNDUyZi1iOTVjLTc2ZjI5ZmNmZmQ2MwBGAAAAAAD${attachmentPad}BwBmtXf2uSv0SqAGJ5k6N7QDAAAAAAEMAAABEgAQAMu0Rz2uI2hEm1LpHkQyVxg=`;
 
 /**
  * The invoice PDF attached to the first message, as bytes: binary after

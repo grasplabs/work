@@ -18,10 +18,9 @@ import { afterEach, describe, expect, it } from "vite-plus/test";
 import { AppAccessRequests } from "./app-access-requests.tsx";
 
 // Asking for access for an App's App on its Integrations tab, against
-// core's permissions, connections and collections as the page reaches them
-// over RPC (the boundary from the web app), faked: it keeps the App's
-// requests, each waiting for an admin, and refuses one as core does when
-// asked to (a personal collection the App can't hold).
+// core's permissions and connections as the page reaches them over RPC
+// (the boundary from the web app), faked: it keeps the App's requests,
+// each waiting for an admin, and refuses one as core does when asked to.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -58,19 +57,6 @@ const hubspot = {
   tools: ["HUBSPOT_LIST_DEALS", "HUBSPOT_CREATE_DEAL", "HUBSPOT_DELETE_DEAL"],
   // Grasp classed only these two: the third is never offered.
   offeredTools: ["HUBSPOT_LIST_DEALS", "HUBSPOT_CREATE_DEAL"],
-};
-
-const handbook = {
-  id: "collection-1",
-  name: "Sales handbook",
-  description: "",
-  owner: "user-admin",
-  access: "everyone",
-  teams: [],
-  sensitive: false,
-  source: "here",
-  createdAt: "2026-10-01T09:00:00.000Z",
-  writable: false,
 };
 
 /** Core for one App, its requests, and each request asked. */
@@ -121,12 +107,6 @@ const fakeCore = ({ refusing }: { refusing?: string } = {}) => {
           description: null,
           inputs: [],
         }));
-      },
-    },
-    knowledge: {
-      listCollections: async () => {
-        await Promise.resolve();
-        return [handbook];
       },
     },
   };
@@ -288,39 +268,20 @@ describe("Asking for access for an App, for its builders", () => {
     );
   });
 
-  it("asks to read a collection", async () => {
-    const { session, asked } = fakeCore();
-    await shown(session);
-
-    await press(button("Ask for access"));
-    await choose("What it needs", "A collection to read");
-    await choose("Collection", "Sales handbook");
-    await press(button("Ask an admin"));
-
-    expect(asked).toStrictEqual([
-      {
-        subject: { type: "app", appId: "app-1" },
-        object: { type: "collection", collectionId: "collection-1" },
-        actions: ["read"],
-        binding: "SALES_HANDBOOK",
-      },
-    ]);
-  });
-
   it("says why core refused, and keeps the request to change", async () => {
     const { session } = fakeCore({
-      refusing: "A personal collection can't be given to an App or agent.",
+      refusing: "This connection isn't there any more.",
     });
     await shown(session);
 
     await press(button("Ask for access"));
-    await choose("What it needs", "A collection to read");
-    await choose("Collection", "Sales handbook");
+    await choose("Connection", "hubspot · sales@acme.test");
+    await tick("HUBSPOT_LIST_DEALS");
     await press(button("Ask an admin"));
 
     expect({
       told: document.body.textContent?.includes(
-        "A personal collection can't be given to an App or agent."
+        "This connection isn't there any more."
       ),
       open: button("Ask an admin") !== undefined,
     }).toStrictEqual({ told: true, open: true });

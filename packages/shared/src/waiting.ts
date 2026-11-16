@@ -17,9 +17,11 @@ import type {
   GapAskedNotification,
   PackageNotification,
   TriggerStoppedNotification,
+  TriggerWorkflowChangedNotification,
 } from "./notifications.ts";
 import { grantReviewSchema } from "./permissions.ts";
 import type { Permission } from "./permissions.ts";
+import type { SkillShare } from "./skills.ts";
 import type { PendingWorkflowBindings } from "./workflow-resources.ts";
 
 // What waits on a person (core's waiting-rpc.ts): one feed of everything
@@ -30,8 +32,7 @@ import type { PendingWorkflowBindings } from "./workflow-resources.ts";
 // that same kind's own call, its checks and audit included: the feed adds
 // no way to decide anything. An item goes by itself once what it is
 // about is settled, wherever that was. A kind settled on its own page (a
-// decision, which is confirmed there; an App's version to
-// review; a connection to sign in to again; a question of the brain)
+// decision, which is confirmed there; a connection to sign in to again; a question of the brain)
 // takes no verdict here.
 
 /** Why a call on what waits was refused. */
@@ -88,23 +89,6 @@ export interface PermissionRequestItem extends ItemBase {
   reviewedVersion: number | null;
 }
 
-/**
- * A version of an independent workflow a builder asked to go live, for
- * its owner or an admin to approve or send back; for whoever asked only
- * while nobody else may (`selfApproval`).
- */
-export interface WorkflowGoLiveItem extends ItemBase {
-  kind: "workflowGoLive";
-  verdicts: ("approve" | "reject")[];
-  workflow: { id: string; name: string };
-  version: number;
-  requestedBy: string;
-  /** The lifecycle revision it was read at: a verdict names it. */
-  revision: number;
-  /** The reader asked for it, and approves it themselves as nobody else may. */
-  selfApproval: boolean;
-}
-
 /** One of the brain's open questions an admin asked the person: answered in the brain. */
 export interface OpenQuestionItem extends ItemBase {
   kind: "openQuestion";
@@ -117,6 +101,13 @@ export interface StoppedScheduleItem extends ItemBase {
   kind: "stoppedSchedule";
   verdicts: never[];
   notification: TriggerStoppedNotification;
+}
+
+/** A workflow the person's triggers start, of which someone else made another version live: their triggers start it, acting as them. */
+export interface WorkflowChangedItem extends ItemBase {
+  kind: "workflowChanged";
+  verdicts: never[];
+  notification: TriggerWorkflowChangedNotification;
 }
 
 /** Packages of an App the person builds, revoked as malware or newly advised against. */
@@ -151,7 +142,7 @@ export interface AppMessageItem extends ItemBase {
 }
 
 /**
- * A workflow version, live or asked to go live, whose bindings no admin
+ * A workflow's live version whose bindings no admin
  * approved, so its starts are refused: for the organization's own admins,
  * who approve each binding on it (`WorkflowResourcesApi.approveBinding`).
  */
@@ -177,20 +168,32 @@ export interface DecisionItem extends ItemBase {
   decision: DecisionView;
 }
 
+/**
+ * A person's ask to share one of their skills with the company or a team: for the
+ * organization's own admins, who read its text and decide it on the
+ * skills page (`SkillsApi.approve`, `decline`).
+ */
+export interface SkillShareItem extends ItemBase {
+  kind: "skillShare";
+  verdicts: never[];
+  share: SkillShare;
+}
+
 export type WaitingItem =
   | HeldWriteItem
   | UnknownOutcomeItem
   | PermissionRequestItem
-  | WorkflowGoLiveItem
   | OpenQuestionItem
   | StoppedScheduleItem
+  | WorkflowChangedItem
   | PackageNoticeItem
   | StoppedEventsItem
   | AppMessageItem
   | BindingApprovalItem
   | SignInAgainItem
   | DecisionItem
-  | HeldStartItem;
+  | HeldStartItem
+  | SkillShareItem;
 
 export type WaitingKind = WaitingItem["kind"];
 
@@ -202,12 +205,12 @@ export const waitingParts = [
   "held",
   "outcomes",
   "requests",
-  "workflowGoLives",
   "notifications",
   "connections",
   "decisions",
   "heldStarts",
   "bindings",
+  "skillShares",
 ] as const;
 export type WaitingPart = (typeof waitingParts)[number];
 
@@ -268,14 +271,6 @@ export const waitingVerdictSchema = z.union([
     kind: z.literal("permissionRequest"),
     id: identifierSchema,
     verdict: z.literal("reject"),
-  }),
-  z.strictObject({
-    kind: z.literal("workflowGoLive"),
-    workflow: identifierSchema,
-    version: z.int().min(1),
-    /** The lifecycle revision as shown: one changed since is refused. */
-    revision: z.int().min(0),
-    verdict: z.enum(["approve", "reject"]),
   }),
 ]);
 export type WaitingVerdict = z.input<typeof waitingVerdictSchema>;

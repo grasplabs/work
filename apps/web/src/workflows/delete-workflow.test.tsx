@@ -1,5 +1,5 @@
+import type { MemberRole } from "@grasp-os/shared/subject-members";
 // @vitest-environment happy-dom
-import type { WorkflowRole } from "@grasp-os/shared/workflow-resources";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
 import {
@@ -38,7 +38,7 @@ const settled = async (): Promise<void> => {
 
 /** The section for a reader in `role`, core refusing as `refuses` says. */
 const shown = async (
-  role: WorkflowRole,
+  role: MemberRole,
   admin: boolean,
   refuses: { delete?: string; release?: string } = {}
 ) => {

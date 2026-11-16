@@ -13,7 +13,7 @@ import { publishCatalogContract } from "../src/workflow-catalog.ts";
 import {
   shareWorkflowResource,
   unshareWorkflowResource,
-} from "../src/workflow-resources.ts";
+} from "../src/workflow-members.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { mailControlUrl } from "./mail-server.ts";

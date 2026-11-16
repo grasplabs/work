@@ -14,8 +14,8 @@ import {
   MailWarningIcon,
   PencilLineIcon,
   PlayIcon,
-  RocketIcon,
   ScaleIcon,
+  BookOpenIcon,
   ShieldAlertIcon,
   SparklesIcon,
   SplitIcon,
@@ -41,7 +41,6 @@ export const kindLabel: Record<InboxKind, MessageDescriptor> = {
     message: "Check a proposal",
     context: "inbox item kind",
   }),
-  goLive: msg({ message: "Go live", context: "inbox item kind" }),
   approveChange: msg({ message: "Change", context: "inbox item kind" }),
   confirmResult: msg({ message: "Result", context: "inbox item kind" }),
   conflict: msg({
@@ -63,6 +62,11 @@ export const kindLabel: Record<InboxKind, MessageDescriptor> = {
     message: "Stopped schedule",
     context: "inbox item kind",
   }),
+  workflowChanged: msg({
+    message: "Workflow changed",
+    context:
+      "inbox item kind: another version of a workflow the person's triggers start went live",
+  }),
   packageNotice: msg({
     message: "Packages",
     context: "inbox item kind: what a scan found of approved packages",
@@ -80,13 +84,16 @@ export const kindLabel: Record<InboxKind, MessageDescriptor> = {
     context:
       "inbox item kind: what a workflow reaches, for an admin to approve",
   }),
+  skillShare: msg({
+    message: "Skill",
+    context: "inbox item kind: a skill someone asked to share with the company",
+  }),
   decision: msg({ message: "Decision", context: "inbox item kind" }),
 };
 
 export const kindIcon: Record<InboxKind, LucideIcon> = {
   checkDrawing: WorkflowIcon,
   checkProposal: GitCompareArrowsIcon,
-  goLive: RocketIcon,
   approveChange: PencilLineIcon,
   confirmResult: CircleCheckIcon,
   conflict: SplitIcon,
@@ -99,10 +106,12 @@ export const kindIcon: Record<InboxKind, LucideIcon> = {
   unknownOutcome: CircleHelpIcon,
   permissionRequest: LockKeyholeIcon,
   stoppedSchedule: CalendarOffIcon,
+  workflowChanged: GitCompareArrowsIcon,
   packageNotice: ShieldAlertIcon,
   stoppedEvents: MailWarningIcon,
   appMessage: BellIcon,
   bindingApproval: LockKeyholeIcon,
+  skillShare: BookOpenIcon,
   decision: ScaleIcon,
 };
 

@@ -14,8 +14,6 @@ import type {
   WorkflowVersionRecord,
 } from "./brain-records.ts";
 import { defineErrorFamily } from "./errors.ts";
-import type { CollectionId, DocumentId } from "./ids.ts";
-import type { DocumentType } from "./knowledge.ts";
 import type { WorkKnowledge } from "./work-knowledge.ts";
 
 /** The standard business processes a workflow belongs to. */
@@ -175,14 +173,7 @@ export interface Tool {
   ai?: AiKind;
 }
 
-/**
- * Most Knowledge documents with a transcript `brain.read` lists as
- * sources, the newest saved first: each by how many turns it has, never
- * the turns, which `brain.transcript` reads when the source is opened.
- */
-export const brainTranscriptSourcesMax = 50;
-
-/** A source's id, as `brain.transcript` takes one. */
+/** A source's id, as the brain takes one. */
 export const sourceIdSchema = z.string().min(1).max(200);
 
 /** One turn, answer or passage in a transcript. */
@@ -230,15 +221,11 @@ export interface Source {
   teamIds?: string[];
   /** An interview written up as an article, paragraph by paragraph. */
   article?: string[];
-  /**
-   * How many turns its transcript has, when it has one: `brain.read` says
-   * only this; `brain.transcript(id)` reads the turns and chapters.
-   */
+  /** How many turns its transcript has, when it has one. */
   transcriptTurns?: number;
   /**
    * The whole conversation, word for word; its statements are highlights
-   * in it. Never sent by `brain.read`: the page puts here what
-   * `brain.transcript` read.
+   * in it. Never sent by `brain.read`.
    */
   transcript?: Transcript;
   /**
@@ -366,6 +353,13 @@ export interface Connection {
   via: "direct" | "composio";
   /** Tool names in workflow steps that this connection covers. */
   matches: string[];
+  /**
+   * Whether the Brain keeps what an agent reads for this person through it
+   * (GRA-1730): a native provider with a tool that answers one item
+   * (core's `nativeItemReads`, the table capture keeps by), connected by
+   * the person themselves. Absent for every other.
+   */
+  keepsReads?: true;
 }
 
 /** Everything the brain is built from. */
@@ -455,17 +449,6 @@ export interface BrainApi {
    */
   goals: () => Promise<Goal[]>;
   /**
-   * One source's transcript (`brain.transcript`), as the person may read it
-   * now, or null: alike when it has none and when they may not read it.
-   * A team's interviews have none, for anyone.
-   */
-  transcript: (sourceId: string) => Promise<Transcript | null>;
-  /**
-   * What changed in the brain since a moment (`brain.changes`), newest
-   * first, a page at a time, as the person may read it.
-   */
-  changes: (options: BrainChangesOptions) => Promise<BrainChangePage>;
-  /**
    * Adds records to the brain (brain-records.ts), all or none: for
    * admins. A record core holds already, exactly so, is left as it is.
    */
@@ -531,63 +514,3 @@ export const brainErrors = defineErrorFamily({
     "Those aren't groups of the brain's teams: each needs a name and teams the brain has, each team in one group at most.",
   "brain.work_not_found": "Grasp knows of no such piece of work.",
 });
-
-/**
- * Most changes one page holds: its documents, and as many collections,
- * fit in the audit event that records the read (`auditProvenanceMaxItems`).
- */
-export const brainChangesMaxLimit = 50;
-
-/** How far back the changes go, whatever moment is asked about: 90 days. */
-export const brainChangesMaxAgeMs = 90 * 24 * 60 * 60 * 1000;
-
-/** What a call for the brain's changes asks for. */
-export const brainChangesOptionsSchema = z.strictObject({
-  /**
-   * Changes after this moment (ISO 8601): at most `brainChangesMaxAgeMs`
-   * ago, an earlier one taken as that.
-   */
-  since: z.iso.datetime({ offset: true }),
-  /** Where the page before ended (`BrainChangePage.next`); none for the first. */
-  cursor: z.string().min(1).max(512).optional(),
-  limit: z.int().min(1).max(brainChangesMaxLimit).default(50),
-});
-export type BrainChangesOptions = z.input<typeof brainChangesOptionsSchema>;
-
-/**
- * One change in the brain: what core records today. A union on `kind`, so
- * goals, questions and workflow suggestions join it once core keeps them.
- */
-export type BrainChange =
-  | {
-      /** A Knowledge document added or changed: what a listing shows of it, never its text. */
-      kind: "document";
-      /** ISO 8601: when it was last changed. */
-      at: string;
-      /** Added after the moment asked about, or only changed since. */
-      change: "added" | "changed";
-      document: {
-        id: DocumentId;
-        collectionId: CollectionId;
-        path: string;
-        title: string;
-        type: DocumentType;
-      };
-    }
-  | {
-      /**
-       * A source the onboarding gave the brain, as `brain.read`'s sources
-       * name it (the kickoff, the staff list): for admins, who read them.
-       */
-      kind: "source";
-      /** ISO 8601: when it came in, or was last saved. */
-      at: string;
-      source: { id: string; title: string };
-    };
-
-/** A page of the brain's changes, newest first. */
-export interface BrainChangePage {
-  changes: BrainChange[];
-  /** Where the next page starts; null when this is the last. */
-  next: string | null;
-}

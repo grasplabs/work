@@ -15,11 +15,10 @@ import type { DashboardApi } from "./dashboard.ts";
 import type { DataPolicyApi } from "./data-policy.ts";
 import type { DecisionsApi } from "./decisions.ts";
 import type { DependenciesApi } from "./dependencies.ts";
+import type { DraftsApi, VersionsApi } from "./drafts.ts";
 import type { HeldStartsApi } from "./held-starts.ts";
-import type { KnowledgeSignalsApi } from "./knowledge-signals.ts";
-import type { KnowledgeApi } from "./knowledge.ts";
+import type { InstructionsApi } from "./instruction-files.ts";
 import type { MembersApi } from "./members.ts";
-import type { MemoryApi } from "./memory.ts";
 import type { ModelsApi } from "./models.ts";
 import type { NotificationsApi } from "./notifications.ts";
 import type { OnboardingGateApi } from "./onboarding-gate.ts";
@@ -33,8 +32,8 @@ import type { ResourceBindingsApi } from "./resource-bindings.ts";
 import type { Role } from "./roles.ts";
 import type { SessionsApi } from "./sign-in.ts";
 import type { SignalsApi } from "./signals.ts";
+import type { SkillsApi } from "./skills.ts";
 import type { StephenRequestsApi } from "./stephen-requests.ts";
-import type { UploadsApi } from "./uploads.ts";
 import type { WaitingApi } from "./waiting.ts";
 import type { WorkflowResourcesApi } from "./workflow-resources.ts";
 import type { WorkflowsApi } from "./workflows.ts";
@@ -44,6 +43,8 @@ export interface SignInOption {
   /** Passed to Better Auth's `POST /api/auth/sign-in/sso` as `providerId`. */
   providerId: string;
   label: string;
+  /** Grasp's staff's own sign-in: never for anyone's interview (GRA-1790). */
+  staff: boolean;
 }
 
 /** The signed-in person, as the server sees them right now. */
@@ -98,8 +99,13 @@ export interface SessionApi {
    * are shared with them, and every App for admins.
    */
   readonly apps: AppsApi;
-  /** Knowledge: collections, documents and their versions. */
-  readonly knowledge: KnowledgeApi;
+  /**
+   * The drafts of Apps and workflows: one per App or workflow, shared by
+   * its builders and their chats' agents, published by a person.
+   */
+  readonly drafts: DraftsApi;
+  /** The versions of Apps and workflows: compared, and rolled back to. */
+  readonly versions: VersionsApi;
   /**
    * What the company brain is built from, assembled from the onboarding,
    * the brain's records and the connections, each as the person may
@@ -112,22 +118,18 @@ export interface SessionApi {
    */
   readonly brainSources: BrainSourcesApi;
   /**
+   * Skills: the person's own, which they write; asking to share one with
+   * the company; and, for admins, deciding those asks and retiring the
+   * company's skills.
+   */
+  readonly skills: SkillsApi;
+  /**
    * The memories the agent saved for the person in their own chats:
    * undoing one there.
    */
   readonly brainMemories: BrainMemoriesApi;
-  /**
-   * Knowledge usage signals, computed daily: what's missing or stale in the
-   * collections the person owns.
-   */
-  readonly knowledgeSignals: KnowledgeSignalsApi;
-  /** Memory files: the collections that hold them. */
-  readonly memory: MemoryApi;
-  /**
-   * Files uploaded into Knowledge: uploading one, and following its
-   * status as its text is extracted.
-   */
-  readonly uploads: UploadsApi;
+  /** Instruction files, for those who may edit each. */
+  readonly instructions: InstructionsApi;
   /**
    * Accounts connected through OAuth: the person's own, and shared ones
    * (which only admins connect and disconnect).

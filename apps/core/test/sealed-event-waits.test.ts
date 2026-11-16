@@ -16,10 +16,7 @@ import {
 } from "../src/workflow-bindings.ts";
 import { generatedModule } from "../src/workflow-builds.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
-import {
-  createWorkflowResource,
-  publishWorkflowVersion,
-} from "../src/workflow-resources.ts";
+import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
 import { eventTypeKey } from "../src/workflows/event-envelopes.ts";
 import { RunHost, waitStepPrefix } from "../src/workflows/host.ts";
@@ -50,6 +47,7 @@ import { engineOfTest } from "./run-host.ts";
 import { admittedFreely, liveStatus, runObject } from "./runs.ts";
 import { moduleOf as harnessModuleOf } from "./sealed-run-harness.ts";
 import { unique } from "./sign-in.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
 
 // A sealed run's event waits on the run host (sealed-run.ts, host.ts's
 // `listen`), from their threat model. The isolate runs the build's code,
@@ -148,8 +146,11 @@ const eventWorkflow = async () => {
     admin,
     `waits-${unique()}`
   );
-  await publishWorkflowVersion(env, admin, workflow.id, {
-    definition: JSON.stringify({
+  await publishDefinition(
+    env,
+    admin,
+    workflow.id,
+    JSON.stringify({
       $schema: workflowSchemaUrl,
       args: objectSchema({ jobId: { kind: "string" } }),
       permissions: {
@@ -168,9 +169,8 @@ const eventWorkflow = async () => {
         },
         listen("awaitOther", completed, "otherEvents"),
       ],
-    }),
-    basedOn: null,
-  });
+    })
+  );
   const approvals: Record<string, string> = {};
   for (const alias of ["jobEvents", "otherEvents"]) {
     // oxlint-disable-next-line no-await-in-loop -- two approvals, in turn
@@ -192,7 +192,7 @@ const waitingRun = async ({ admin, workflow }: EventWorkflow) => {
     env,
     { type: "person", person: admin },
     workflow.id,
-    { version: 1, args: { jobId: "job-1" }, key: unique() }
+    { expected: 1, args: { jobId: "job-1" }, key: unique() }
   );
   if (runId === null) {
     throw new Error("The start admitted no run");

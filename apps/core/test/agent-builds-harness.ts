@@ -4,11 +4,11 @@ import { appErrors } from "@grasp-os/shared/apps";
 import { env } from "cloudflare:workers";
 import { z } from "zod";
 
-import { readDraft } from "../src/app-drafts.ts";
+import { readDraft } from "../src/drafts.ts";
 import { chatOf, setObjectEnv, toolStep } from "./agent-chat.ts";
 import type { WorkspaceStub } from "./agent-chat.ts";
 import { testApp } from "./app-definitions.ts";
-import { release, requestGranted } from "./apps.ts";
+import { release } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { createIdp } from "./fake-idp.ts";
 import type { ProviderReply } from "./model-provider.ts";
@@ -95,9 +95,9 @@ export const tryEach = (calls: Record<string, string>, before = ""): string =>
 
 /**
  * A chat of `role`'s person (a builder unless another is given) answered
- * by `replies`, with an App a builder released so the Apps collection is
- * there, and `grant`: a permission of the agent's own on it, which
- * building doesn't need but whose revocation ends what the agent does.
+ * by `replies`, with an App a builder released, and `grant`: a permission
+ * of the agent's own, to read a collection for everyone, which building
+ * doesn't need but whose revocation ends what the agent does.
  */
 export const setUp = async (
   /** The model's replies, or those it gives about the released App. */
@@ -122,15 +122,7 @@ export const setUp = async (
     person.userId,
     ...(typeof replies === "function" ? replies(existing) : replies)
   );
-  const grant = async () => {
-    await requestGranted(idp, admin, {
-      subject: chat.agent,
-      object: { type: "collection", collectionId: "apps" },
-      actions: ["read"],
-      binding: "APP_LIBRARY",
-    });
-  };
-  return { admin, builder, person, existing, chat, grant };
+  return { admin, builder, person, existing, chat };
 };
 
 /**
@@ -140,7 +132,7 @@ export const setUp = async (
 export const draftDefinitionOf = async (
   app: string
 ): Promise<AppDefinition> => {
-  const draft = await readDraft(env, app);
+  const draft = await readDraft(env, { kind: "app", id: app });
   return readDefinition(JSON.parse(draft.definition ?? "null"));
 };
 

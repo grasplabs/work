@@ -23,6 +23,8 @@ export const stephenGraphFake = () => {
   interface World {
     events: Record<string, unknown>[];
     messages: Record<string, unknown>[];
+    /** Its To Do lists, as Graph answers them (`todo/lists`). */
+    todoLists: Record<string, unknown>[];
   }
   /** A named table: its header row, and its body as Graph answers ranges. */
   interface Table {
@@ -192,7 +194,7 @@ export const stephenGraphFake = () => {
 
   return {
     /**
-     * POST `{ mailbox, events, messages }` to set a mailbox's world,
+     * POST `{ mailbox, events, messages, todoLists }` to set a mailbox's world,
      * `{ drive, files }` a drive's files (each `{ id, name, mimeType,
      * text }`), `{ table: "drive/item/name", columns, values, numberFormat }`
      * a workbook's table, or `{ failNext }`; GET reads what reached them.
@@ -210,6 +212,7 @@ export const stephenGraphFake = () => {
         worlds.set(mailbox.toLowerCase(), {
           events: recordsOf(set.events),
           messages: recordsOf(set.messages),
+          todoLists: recordsOf(set.todoLists),
         });
       }
       if (typeof drive === "string") {
@@ -250,8 +253,11 @@ export const stephenGraphFake = () => {
         if (world === undefined) {
           return undefined;
         }
+        // Its To Do lists, or its calendar and mail.
         answer = () =>
-          mailboxAnswer(world, request.method, parts.slice(4), url);
+          parts[4] === "todo" && parts[5] === "lists"
+            ? Response.json({ value: world.todoLists })
+            : mailboxAnswer(world, request.method, parts.slice(4), url);
       } else if (kind === "drives" && drives.has(parts[3] ?? "")) {
         // /v1.0/drives/{drive}/root/... or /v1.0/drives/{drive}/items/{item}[/content]
         const drive = parts[3] ?? "";

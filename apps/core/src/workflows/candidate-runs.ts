@@ -56,7 +56,7 @@ import {
   storeBuild,
   workflowManifestFormat,
 } from "../workflow-builds.ts";
-import { draftCheckpoint } from "../workflow-drafts.ts";
+import { draftText } from "../workflow-editor.ts";
 import { candidateParams } from "../workflow-params.ts";
 import {
   candidateBuildOf,
@@ -81,8 +81,8 @@ import type { EngineStatus } from "./runs.ts";
 import type { HostedResourceRun } from "./sealed-run.ts";
 import { snapshotFrom, snapshotOf, snapshotStored } from "./state-snapshots.ts";
 
-// Test runs of a workflow's draft checkpoint, never published (GRA-815,
-// spec 13.10 and 22.7): a builder runs the exact checkpoint they checked,
+// Test runs of a workflow's draft, never published (GRA-815,
+// spec 13.10 and 22.7): a builder runs the exact revision they checked,
 // before anyone else's runs can, to see what it does. Threat model, each
 // tried in candidate-runs.test.ts:
 //
@@ -97,9 +97,10 @@ import { snapshotFrom, snapshotOf, snapshotStored } from "./state-snapshots.ts";
 //   else the defaults (`candidateParams`), never the values set on the
 //   workflow: its builder wrote its code, and a sensitive value they can't
 //   read could otherwise be handed back to them in its output.
-// - Running what wasn't checked. Only the latest draft revision, once it
-//   passed, and only at the revision the start names
-//   (`draftCheckpoint`): compiled as a publication would compile it,
+// - Running what wasn't checked. Only the draft at exactly the revision
+//   the start names (`draftText`, `draft.conflict` once it moved), and
+//   only once it passes (`workflow.definition_invalid` otherwise):
+//   compiled as a publication would compile it,
 //   pinned by its manifest's hash, and verified on every load as a
 //   version's build is (`loadCandidateBuild`).
 // - Someone else's draft. Only the workflow's builders start, read or
@@ -320,11 +321,11 @@ const rowOf = async (env: Env, id: string): Promise<CandidateRow | undefined> =>
     .get();
 
 /**
- * Starts a test run of workflow `id`'s draft checkpoint for `by`, one of
- * its builders, from `input` (`workflowCandidateStartSchema`): the
- * checkpoint at exactly the revision it names, compiled now into a build
+ * Starts a test run of workflow `id`'s draft for `by`, one of its
+ * builders, from `input` (`workflowCandidateStartSchema`): the draft at
+ * exactly the revision it names, compiled now into a build
  * of its own and pinned to it; its args and parameters checked against
- * the checkpoint's contract; every call it will make answered from the
+ * the draft's contract; every call it will make answered from the
  * start's fixtures. Its run's ID.
  */
 export const startCandidateRun = async (
@@ -359,8 +360,8 @@ export const startCandidateRun = async (
     workflowCandidateStartSchema,
     input
   );
-  const checkpoint = await draftCheckpoint(env, workflow.id, revision);
-  const built = await candidateBuildOf(env, by, workflow, checkpoint.source);
+  const source = await draftText(env, workflow.id, revision);
+  const built = await candidateBuildOf(env, by, workflow, source);
   const inputText = acceptedInput(JSON.stringify(built.contract.args), given);
   const paramsText = candidateParams(built.contract, params);
   // What the workflow keeps between its runs, read once and frozen with
@@ -540,7 +541,7 @@ const loadedCandidateRun = async (
     run: {
       runId,
       workflowId: pin.workflow,
-      // No version's: a test run of a checkpoint.
+      // No version's: a test run of a draft.
       version: 0,
       principal: row.principalId,
       input: z.json().parse(JSON.parse(row.input)),

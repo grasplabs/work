@@ -4,8 +4,15 @@ import type { DrizzleSqliteDODatabase } from "drizzle-orm/durable-sqlite";
 
 import type { BrainBucket } from "./bucket.ts";
 import { chunksOf } from "./chunks.ts";
-import { restoringNow, erasedSource } from "./contract.ts";
+import {
+  changeTaken,
+  erasedSource,
+  restoringNow,
+  staleVersion,
+} from "./contract.ts";
 import type {
+  AddedVersion,
+  ChangeRequest,
   CurrentRequest,
   NewSource,
   ReadableRequest,
@@ -22,13 +29,16 @@ import {
 } from "./db/schema.ts";
 import { enqueueEmbedding } from "./embedding.ts";
 import {
-  erasuresSoFar,
+  groupOfSource,
   isErased,
-  lastErasedVersion,
-  isPersonErasedSince,
+  isThread,
+  isUnderErasedGroup,
+  keepGroup,
   keepSubject,
   subjectOf,
+  subjectsOver,
 } from "./erasure.ts";
+import { enqueueExtraction, enqueueExtractionIfDue } from "./extraction.ts";
 import {
   fileKeyOf,
   hashOf,
@@ -38,7 +48,9 @@ import {
   isInDoubt,
   noteWrite,
 } from "./files.ts";
+import { judgeVersion } from "./quotes.ts";
 import { readableSql, readerSetKeyOf, readerSetOf } from "./reader-sets.ts";
+import { refuseRemoved } from "./removal.ts";
 import { isRestoring } from "./restoring.ts";
 import { removeVectorsOf } from "./vectors.ts";
 import { indexWords } from "./words.ts";
@@ -70,6 +82,8 @@ export interface SourcesStore {
   readonly storage: DurableObjectStorage;
   readonly db: DrizzleSqliteDODatabase;
   readonly bucket: BrainBucket;
+  /** Whether it may hold groups: a person's own store; the shared one never. */
+  readonly groups: boolean;
 }
 
 const encoder = new TextEncoder();
@@ -80,21 +94,51 @@ const encoder = new TextEncoder();
  * instruction file's never is (contract.ts `addInstructions`).
  */
 interface Adding {
-  readonly added: NewSource;
+  /** The add, and the current version it expects when it names one. */
+  readonly added: NewSource & { readonly after?: number | null };
   /** The source's key as the erasure ledger names it (erasure.ts). */
   readonly subject: string;
-  /**
-   * When readable by one person alone: that person as the erasure ledger
-   * names them, and where the record of erasures was as the add began,
-   * before its file was written: an erasure of them since may have missed
-   * it (`record`).
-   */
-  readonly onlyFor?: { subject: string; soFar: number };
+  /** Its group's key as the erasure ledger names it: null for none. */
+  readonly group: string | null;
+  /** The keys its key lies under, as the ledger names them (`subjectsOver`). */
+  readonly over: readonly string[];
   readonly hash: string;
   readonly readers: string;
   /** Its chunks when it is indexed, each with its text's SHA-256: none when not. */
   readonly chunks: readonly { text: string; hash: string }[];
 }
+
+/** What an add answers that names another group than its source's first. */
+const otherGroup =
+  "The Brain refused it: a source keeps the group it was first added in";
+
+/** What an add answers that says otherwise than its source's first whether it is a thread. */
+const otherThread =
+  "The Brain refused it: a source keeps whether it is a thread, as its first version said";
+
+/**
+ * Refuses `adding` when its group's key was erased, or a group its key
+ * lies under was (`isUnderErasedGroup`, named or not: as an erased key's
+ * add, `erasedSource`), or when its source was first added in another group,
+ * or in none: a source keeps its group for good, so a group's erasure
+ * finds every version of it.
+ */
+const refuseByGroup = (sql: SqlStorage, adding: Adding): void => {
+  if (
+    (adding.group !== null && isErased(sql, adding.group)) ||
+    isUnderErasedGroup(sql, adding.over)
+  ) {
+    throw new Error(erasedSource);
+  }
+  const held = groupOfSource(sql, adding.added.source);
+  if (held !== undefined && held !== adding.group) {
+    throw new Error(otherGroup);
+  }
+  const thread = isThread(sql, adding.added.source);
+  if (thread !== undefined && thread !== (adding.added.thread === true)) {
+    throw new Error(otherThread);
+  }
+};
 
 /** A version, as an add finds it: its row, number, file and readers' key. */
 const versionFields = {
@@ -104,14 +148,25 @@ const versionFields = {
   readers: readerSets.key,
 };
 
+/** When `added`'s text was read, as a change row keeps it, if it said. */
+const readAtOf = (added: NewSource): { readAt?: Date } =>
+  added.readAt === undefined ? {} : { readAt: new Date(added.readAt) };
+
 /**
  * The version `adding` already made or matches, by the order above,
  * keeping a new change's key for the current version it matches; or
  * `undefined` when it is a new version. Throws when its change was added
  * before with other text or readers.
+ *
+ * An add over an expected version (`after`) never matches the current
+ * one: it always makes a new version, so landing moves the version, and a
+ * writer that read the version before it is refused as stale. Matching
+ * would let a decision "land" without moving it, and an older writer's
+ * `after` still pass over it.
  */
 const madeBefore = (
   db: DrizzleSqliteDODatabase,
+  storage: DurableObjectStorage,
   { added, hash, readers }: Adding
 ): SourceVersionRef | undefined => {
   const byChange = db
@@ -128,9 +183,17 @@ const madeBefore = (
     .get();
   if (byChange !== undefined) {
     if (byChange.file !== hash || byChange.readers !== readers) {
-      throw new Error(
-        "The Brain refused it: this change was added before with other text or readers"
-      );
+      throw new Error(changeTaken);
+    }
+    // Sent over a version at or past the one it made: no repeat of that
+    // add, which was over an earlier one. Refused as stale, never answered
+    // as if it had written.
+    if (
+      added.after !== undefined &&
+      added.after !== null &&
+      byChange.version <= added.after
+    ) {
+      throw new Error(staleVersion);
     }
     return { source: added.source, version: byChange.version };
   }
@@ -144,8 +207,14 @@ const madeBefore = (
     .innerJoin(readerSets, eq(readerSets.id, sourceVersions.readerSet))
     .where(eq(currentVersions.source, added.source))
     .get();
+  // Expected to be over another version than the current one: refused,
+  // nothing written, before anything else is compared.
+  if (added.after !== undefined && (current?.version ?? null) !== added.after) {
+    throw new Error(staleVersion);
+  }
   if (
     current === undefined ||
+    added.after !== undefined ||
     current.file !== hash ||
     current.readers !== readers
   ) {
@@ -156,9 +225,59 @@ const madeBefore = (
       source: added.source,
       change: added.change,
       versionRow: current.row,
+      ...readAtOf(added),
     })
     .run();
+  // A new change asking for memories of a version an earlier add kept
+  // without: drawn now, unless drawn already or under way.
+  if (added.extract !== undefined) {
+    enqueueExtractionIfDue(
+      storage,
+      added.source,
+      current.version,
+      added.extract
+    );
+  }
   return { source: added.source, version: current.version };
+};
+
+/**
+ * The source's current version when its text was last read later than
+ * `added`'s (each says when it was read: the latest `read_at` among the
+ * current version's changes, `readAtOf`), marked `newer`: then `added` is
+ * written nowhere. A later read of the current text is a change of the
+ * current version (`madeBefore`), so it counts too.
+ */
+const newerThan = (
+  db: DrizzleSqliteDODatabase,
+  added: NewSource
+): AddedVersion | undefined => {
+  if (added.readAt === undefined) {
+    return undefined;
+  }
+  const current = db
+    .select({
+      version: sourceVersions.version,
+      readAt: max(sourceChanges.readAt),
+    })
+    .from(currentVersions)
+    .innerJoin(
+      sourceVersions,
+      eq(sourceVersions.row, currentVersions.versionRow)
+    )
+    .innerJoin(
+      sourceChanges,
+      eq(sourceChanges.versionRow, currentVersions.versionRow)
+    )
+    .where(eq(currentVersions.source, added.source))
+    .groupBy(sourceVersions.version)
+    .get();
+  const lastRead = current?.readAt ?? undefined;
+  return current !== undefined &&
+    lastRead !== undefined &&
+    lastRead.getTime() > added.readAt
+    ? { source: added.source, version: current.version, newer: true }
+    : undefined;
 };
 
 /**
@@ -176,29 +295,32 @@ const record = (
   db: DrizzleSqliteDODatabase,
   storage: DurableObjectStorage,
   adding: Adding
-): SourceVersionRef | undefined => {
-  // Erased while this add wrote its file: closed for good. Or for one
-  // person alone, whose erasure came after it began and before this: it
-  // may have missed it, so it is refused, writing nothing (its file is
-  // left to the sweep). An add that begins after it is new, and kept.
-  // A restore is under way (restoring.ts): nothing is added meanwhile.
+): AddedVersion | undefined => {
+  // Erased while this add wrote its file: closed for good, writing nothing
+  // (its file is left to the sweep). A restore is under way
+  // (restoring.ts): nothing is added meanwhile.
   if (isRestoring(storage.sql)) {
     throw new Error(restoringNow);
   }
-  const { onlyFor } = adding;
-  if (
-    isErased(storage.sql, adding.subject) ||
-    (onlyFor !== undefined &&
-      isPersonErasedSince(storage.sql, onlyFor.subject, onlyFor.soFar))
-  ) {
+  if (isErased(storage.sql, adding.subject)) {
     throw new Error(erasedSource);
   }
+  // Removed while this add wrote its file: closed, its history kept.
+  refuseRemoved(storage.sql, adding.added.source);
+  refuseByGroup(storage.sql, adding);
   // The same change, or the same text and readers, added meanwhile.
-  const before = madeBefore(db, adding);
+  const before = madeBefore(db, storage, adding);
   if (before !== undefined) {
     return before;
   }
   const { added, hash } = adding;
+  // Read before the current version was: a late add of an older read
+  // never replaces a newer one. Checked here, in the transaction that
+  // would make it current, so no other add slips in between.
+  const newer = newerThan(db, added);
+  if (newer !== undefined) {
+    return newer;
+  }
   if (isInDoubt(db, hash)) {
     return undefined;
   }
@@ -211,14 +333,10 @@ const record = (
     .from(sourceVersions)
     .where(eq(sourceVersions.source, added.source))
     .get();
-  // Past every version erased too (erasure.ts): a number names one
-  // version for good, so nothing that holds an old one (a late vector put,
-  // a citation) ever meets new text under it.
-  const version =
-    Math.max(
-      last?.version ?? 0,
-      lastErasedVersion(storage.sql, adding.subject)
-    ) + 1;
+  // A number names one version for good, so nothing that holds an old
+  // one (a late vector put, a citation) ever meets new text under it: only
+  // an erasure deletes a version, and it closes the source's key.
+  const version = (last?.version ?? 0) + 1;
   const { row } = db
     .insert(sourceVersions)
     .values({
@@ -244,28 +362,69 @@ const record = (
     // Embedded through the queue, put on it with the chunks: no crash
     // leaves chunks that are never embedded.
     enqueueEmbedding(storage, added.source, version);
+    // Memories drawn from it the same way, when its producer said whose
+    // words it is.
+    if (added.extract !== undefined) {
+      enqueueExtraction(storage, added.source, version, added.extract);
+    }
   }
   db.insert(sourceChanges)
-    .values({ source: added.source, change: added.change, versionRow: row })
+    .values({
+      source: added.source,
+      change: added.change,
+      versionRow: row,
+      ...readAtOf(added),
+    })
     .run();
-  keepSubject(storage.sql, added.source, adding.subject);
+  keepSubject(
+    storage.sql,
+    added.source,
+    adding.subject,
+    adding.group,
+    added.thread === true
+  );
+  if (adding.group !== null) {
+    keepGroup(storage.sql, adding.group);
+  }
   // The version before stops being found by meaning as it stops being
   // current: its chunks' vector codes go with the pointer.
   const replaced = db
-    .select({ versionRow: currentVersions.versionRow })
+    .select({
+      versionRow: currentVersions.versionRow,
+      judgedRow: currentVersions.judgedRow,
+      version: sourceVersions.version,
+    })
     .from(currentVersions)
+    .innerJoin(
+      sourceVersions,
+      eq(sourceVersions.row, currentVersions.versionRow)
+    )
     .where(eq(currentVersions.source, added.source))
     .get();
   if (replaced !== undefined) {
     removeVectorsOf(storage.sql, replaced.versionRow);
   }
+  // Its memories judged against it as it becomes current, the text in
+  // hand, and marked judged with the pointer (quotes.ts).
   db.insert(currentVersions)
-    .values({ source: added.source, versionRow: row })
+    .values({ source: added.source, versionRow: row, judgedRow: row })
     .onConflictDoUpdate({
       target: currentVersions.source,
-      set: { versionRow: row },
+      set: { versionRow: row, judgedRow: row },
     })
     .run();
+  judgeVersion(storage.sql, {
+    source: added.source,
+    version,
+    text: added.text,
+    replaced:
+      replaced === undefined
+        ? undefined
+        : {
+            version: replaced.version,
+            judged: replaced.judgedRow === replaced.versionRow,
+          },
+  });
   if (replaced !== undefined) {
     // Their full vectors too, once no current chunk holds their text: the
     // sweep checks and deletes (files.ts).
@@ -284,6 +443,31 @@ const record = (
   }
   return { source: added.source, version };
 };
+/**
+ * When the version `ref` was added: what an add answers beside it, the
+ * same however often its change is repeated. Refused once that version is
+ * gone (erased meanwhile).
+ */
+export const versionAddedAt = (
+  db: DrizzleSqliteDODatabase,
+  { source, version }: SourceVersionRef
+): Date => {
+  const found = db
+    .select({ addedAt: sourceVersions.addedAt })
+    .from(sourceVersions)
+    .where(
+      and(
+        eq(sourceVersions.source, source),
+        eq(sourceVersions.version, version)
+      )
+    )
+    .get();
+  if (found === undefined) {
+    throw new Error("The Brain no longer holds that version");
+  }
+  return found.addedAt;
+};
+
 /** What an add that must be made again says: the same words as a lost file's. */
 const addAgain = "The Brain lost the file while adding it: add it again";
 
@@ -293,20 +477,21 @@ const addAgain = "The Brain lost the file while adding it: add it again";
  * can be repeated after a lost reply, or after a crash between the file
  * and the version, which it then finishes. Its text is cut into chunks
  * and indexed for recall when `indexed`; otherwise it is only kept whole.
+ * With `after`, only over that current version (`staleVersion` otherwise),
+ * asked again in the transaction that writes.
  */
 export const addVersion = async (
-  { storage, db, bucket }: SourcesStore,
-  added: NewSource,
+  { storage, db, bucket, groups }: SourcesStore,
+  added: Adding["added"],
   { indexed }: { indexed: boolean }
-): Promise<SourceVersionRef> => {
-  const soFar = erasuresSoFar(storage.sql);
+): Promise<AddedVersion> => {
   const body = encoder.encode(added.text);
   const adding: Adding = {
     added,
     subject: await subjectOf(added.source),
-    ...(added.access.kind === "owner"
-      ? { onlyFor: { subject: await subjectOf(added.access.person), soFar } }
-      : {}),
+    group: added.group === undefined ? null : await subjectOf(added.group),
+    // The shared store holds no group: nothing under one to look up.
+    over: groups ? await subjectsOver(added.source) : [],
     hash: await hashOf(body),
     readers: readerSetKeyOf(added.access),
     chunks: await Promise.all(
@@ -319,10 +504,14 @@ export const addVersion = async (
   if (isErased(storage.sql, adding.subject)) {
     throw new Error(erasedSource);
   }
+  // Before its change is looked up: a retry of an add made before the
+  // removal is refused too.
+  refuseRemoved(storage.sql, added.source);
+  refuseByGroup(storage.sql, adding);
   if (isRestoring(storage.sql)) {
     throw new Error(restoringNow);
   }
-  const before = madeBefore(db, adding);
+  const before = madeBefore(db, storage, adding);
   if (before !== undefined) {
     return before;
   }
@@ -390,6 +579,40 @@ WHERE source = ?1 AND version = ?4
     WHERE current_versions.source = ?1
       AND current.reader_set IN (SELECT reader_set FROM readable)
   )`;
+
+/** `?1` the source, `?4` the change: the version it made, by `versionSql`'s rule. */
+const changeVersionSql = `
+WITH ${readableSql}
+SELECT version.version AS version FROM source_changes AS change
+JOIN source_versions AS version ON version.row = change.version_row
+WHERE change.source = ?1 AND change.change = ?4
+  AND version.row NOT IN (SELECT version_row FROM erasing_versions)
+  AND version.reader_set IN (SELECT reader_set FROM readable)
+  AND EXISTS (
+    SELECT 1 FROM current_versions
+    JOIN source_versions AS current ON current.row = current_versions.version_row
+    WHERE current_versions.source = ?1
+      AND current.reader_set IN (SELECT reader_set FROM readable)
+  )`;
+
+/**
+ * The version the change `change` of `source` made: `null` when it made
+ * none or `reader` may not read it (as `readVersion`), alike.
+ */
+export const changeVersion = (
+  { storage }: Pick<SourcesStore, "storage">,
+  { source, change, reader }: ChangeRequest
+): number | null =>
+  storage.sql
+    .exec<{ version: number }>(
+      changeVersionSql,
+      source,
+      reader.person,
+      JSON.stringify(reader.groups),
+      change
+    )
+    .toArray()
+    .at(0)?.version ?? null;
 
 /**
  * A version of a source, current or history, whole from its file:

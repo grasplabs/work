@@ -33,7 +33,11 @@ export const erasureAreas = [
   "brain",
   "runs",
   "interview",
+  "brain_sources",
 ] as const;
+
+/** An area of a person's erasure (person-erasure.ts): one of `erasureAreas` but removal. */
+export type ErasureAreaName = Exclude<(typeof erasureAreas)[number], "removal">;
 
 /** What erasing a person does to a table that names one. */
 export type ErasureClass =
@@ -88,6 +92,15 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "core.app_draft_points": { company: "drafts of Apps they wrote" },
   "core.app_draft_point_files": { company: "drafts of Apps they wrote" },
   "core.app_draft_contents": { company: "drafts of Apps they wrote" },
+  "core.drafts": { company: "drafts of Apps and workflows they wrote" },
+  "core.draft_files": { company: "drafts of Apps and workflows they wrote" },
+  "core.draft_checkpoints": {
+    company: "drafts of Apps and workflows they wrote",
+  },
+  "core.draft_checkpoint_files": {
+    company: "drafts of Apps and workflows they wrote",
+  },
+  "core.draft_blobs": { company: "drafts of Apps and workflows they wrote" },
   "core.app_candidates": { company: "candidates they made" },
   "core.sdk_artifact_deletions": { none: "owner is a deleting process" },
   "core.action_invocations": { company: "actions run for them, as runs are" },
@@ -138,6 +151,20 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "core.agent_places": { company: "settings an admin changed" },
   "core.agent_tool_classes": { company: "settings an admin changed" },
   "core.app_requests": { company: "Apps they asked Grasp for" },
+  // Their asks to share a skill (a waiting one holds their text) are
+  // deleted; on asks they decided as an admin, `decided_by` is cleared,
+  // and the decision stays.
+  "core.skill_shares": { erased: "brain" },
+  // Admins' decisions on the company's and the teams' skills, with the
+  // text each decided: the company's, and what the Brain follows, so they
+  // stay. Who decided (`decided_by`) is cleared when that admin is erased.
+  // Their audience (`audience`) names the company or a team, never a person.
+  "core.skill_decisions": {
+    company:
+      "decisions on the company's and the teams' skills, unnamed once their decider is erased",
+  },
+  // The names of the skills they deleted for good: theirs alone.
+  "core.skill_deletions": { erased: "brain" },
   "core.improvement_signals": { kept: "IDs and counts only" },
   "core.notifications": { erased: "channels" },
   // What they asked Stephen, with where their weekly summary stood.
@@ -243,6 +270,10 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "core.app_workflow_bindings": { company: "bindings they made" },
   "core.workflow_candidate_runs": { company: "candidate runs (D3)" },
   "core.brain_gap_states": { company: "who answered a gap, by ID" },
+  "core.brain_uploads": {
+    company:
+      "who uploaded which file into the Brain for a team or everyone, by ID and the file's name; their uploads for themselves alone, by ID with no name, go with brain_sources once the Brain erased them; a file's text is the Brain's",
+  },
   "core.uploads": { company: "Knowledge uploads; Personal ones the Brain's" },
   "core.knowledge_signals": { erased: "apps" },
   "core.knowledge_signal_dismissals": {
@@ -254,13 +285,23 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "core.audit_outbox": { kept: "audit events on their way to the log (D2)" },
   "core.audit_outbox_rejected": { kept: "audit events the log refused (D2)" },
   "core.brain_capture_intents": { company: "outcomes of runs (D3), by run" },
-  "core.brain_hand_overs": {
-    none: "a source's kind and ID until the new Brain's queue takes it",
+  // What core has still to hand over to the new Brain, by a source's kind
+  // and id, until its hand-over ends. A chat turn's id names its person
+  // (`<person>/<chat>/<answer>`); a run's names nobody. Their erasure ends
+  // their open ones as erased once the Brain erased what was theirs
+  // (person-erasure.ts, brain-sources.ts `endHandOversOf`), also one whose
+  // item the queue parked for good.
+  "core.brain_hand_overs": { erased: "brain_sources" },
+  // Whose run results the Brain holds by workflow, and when each was taken
+  // out of use as they lost it (brain-run-sources.ts): IDs and a count, as
+  // the runs themselves are the company's.
+  "core.brain_run_sources": {
+    company: "whose run results it took out of use, by workflow (D3)",
   },
   // A person's own Brain store's health, keyed by the SHA-256 of their ID:
   // removed once the Brain's erasure erased their store (brain-next.ts
   // `erasePerson`).
-  "core.brain_own_stores": { erased: "brain" },
+  "core.brain_own_stores": { erased: "brain_sources" },
   "core.brain_records": {
     company: "agreed facts naming roles; a gap's answer names who gave it",
   },
@@ -367,6 +408,8 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "workspace.chat_search_text": { erased: "workspace" },
   "workspace.chat_sources": { erased: "workspace" },
   "workspace.chat_tool_events": { erased: "workspace" },
+  "workspace.held_app_calls": { erased: "workspace" },
+  "workspace.memory_uses": { erased: "workspace" },
   "workspace.preview_release_artifacts": { erased: "workspace" },
   "workspace.preview_releases": { erased: "workspace" },
   "workspace.preview_stores": { erased: "workspace" },
@@ -383,6 +426,13 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "onboarding.asked_about": { erased: "interview" },
   "onboarding.brain_sent": { erased: "interview" },
   "onboarding.interview_settings": { erased: "interview" },
+  // An interview's (`link:<person>`) go with it; an admin's
+  // (`admin:<user>`), hashes of what the voice said for them, go with
+  // the interview area too (person-erasure.ts).
+  "onboarding.spoken_keys": { erased: "interview" },
+  // What the new Brain holds of their interview, until its erasure there
+  // returned.
+  "onboarding.brain_interviews": { erased: "interview" },
   // The roster's and the onboarding's own: who did what, by ID (D5).
   "onboarding.teams": { company: "the company's roster: a team's lead (D5)" },
   "onboarding.works": { company: "the company's roster: who does what (D5)" },
@@ -398,6 +448,9 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
     kept: "audit events on their way to the log (D2)",
   },
   "onboarding.brain_teams": noPerson,
+  "onboarding.brain_claims": {
+    company: "a team's claims seven or more told and five back, names out",
+  },
   "onboarding.checked_differences": {
     company: "a team's difference five or more told each way, names out",
   },
@@ -559,6 +612,9 @@ export const reviewedPersonColumns: Readonly<
   "core.app_members": ["added_by", "member_id", "member_type"],
   "core.app_pointers": ["changed_by"],
   "core.app_requests": ["requested_by"],
+  "core.skill_shares": ["decided_by", "requested_by"],
+  "core.skill_decisions": ["decided_by"],
+  "core.skill_deletions": ["person_id"],
   "core.app_resource_bindings": ["approved_by", "revoked_by"],
   "core.app_test_decisions": ["decided_by", "recipients"],
   "core.app_test_runs": ["deciders", "principal"],
@@ -573,6 +629,8 @@ export const reviewedPersonColumns: Readonly<
   "core.blueprints": ["marked_by"],
   "core.brain_gap_states": ["answered_by"],
   "core.business_store_members": ["added_by", "member_id", "member_type"],
+  "core.brain_run_sources": ["person_id"],
+  "core.brain_uploads": ["uploaded_by"],
   "core.business_stores": ["closing_owner", "owner_id"],
   "core.channel_accounts": ["platform_user_id", "user_id"],
   "core.channel_conversations": ["user_id"],
@@ -595,6 +653,12 @@ export const reviewedPersonColumns: Readonly<
     "subject_id",
     "subject_type",
   ],
+  // A draft's subject is the App or workflow it drafts, never a person.
+  "core.draft_blobs": ["subject_id", "subject_kind"],
+  "core.draft_checkpoint_files": ["subject_id", "subject_kind"],
+  "core.draft_checkpoints": ["person_id", "subject_id", "subject_kind"],
+  "core.draft_files": ["subject_id", "subject_kind"],
+  "core.drafts": ["subject_id", "subject_kind", "updated_by"],
   "core.erased_subjects": ["subject_hash", "user_id"],
   "core.event_sources": ["created_by"],
   "core.guest_chats": ["invited_by"],
@@ -643,7 +707,7 @@ export const reviewedPersonColumns: Readonly<
   "core.teams": ["member_count"],
   "core.tool_class_settings": ["changed_by"],
   "core.trigger_resource_versions": ["principal_binding"],
-  "core.trigger_resources": ["email_address", "owner_id"],
+  "core.trigger_resources": ["email_address", "owner_id", "principal_binding"],
   "core.uploads": ["actor", "uploaded_by"],
   "core.users": ["email", "email_verified"],
   "core.workflow_binding_approvals": ["approved_by", "revoked_by"],
@@ -687,13 +751,14 @@ export const reviewedPersonColumns: Readonly<
   "dataStore.sdk_store": ["deleted_by"],
   "onboarding.approvals": ["person"],
   "onboarding.asked_about": ["person"],
+  "onboarding.brain_interviews": ["person", "user_id"],
   "onboarding.brain_sent": ["person"],
   "onboarding.counted": ["person"],
   "onboarding.interview_settings": ["person"],
   "onboarding.interview_states": ["person"],
   "onboarding.interviews": ["person"],
   "onboarding.link_codes": ["person"],
-  "onboarding.links": ["person"],
+  "onboarding.links": ["person", "sent_to_email", "user_id"],
   "onboarding.participations": ["person"],
   "onboarding.people": ["email"],
   "onboarding.readbacks": ["person"],
@@ -702,4 +767,5 @@ export const reviewedPersonColumns: Readonly<
   "workspace.custom_widgets": ["person_id"],
   "workspace.dashboard_widgets": ["person_id"],
   "workspace.dashboards": ["person_id"],
+  "workspace.held_app_calls": ["person_id"],
 };

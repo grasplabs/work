@@ -190,7 +190,7 @@ describe("a chat's brain", setUpTime, () => {
       toolStep("searchBrain", { question: word }),
       says("It opens then.")
     );
-    const forApp = await builder.api.chats.forApp(app.id);
+    const forApp = await builder.api.chats.create("App changes");
     await stub.ask(forApp.id, { text: "Note the depot.", model });
     const withoutGrant = provider.requests.length;
     await requestGranted(idp, admin, {

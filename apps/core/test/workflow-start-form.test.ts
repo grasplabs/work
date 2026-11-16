@@ -1,18 +1,19 @@
 import type { Role } from "@grasp-os/shared/roles";
+import type { Identity } from "@grasp-os/shared/rpc";
 import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import type { Acting } from "../src/auth/identity.ts";
-import { decideGoLive, requestGoLive } from "../src/workflow-lifecycle.ts";
+import { rollback } from "../src/publish.ts";
+import { shareWorkflowResource } from "../src/workflow-members.ts";
 import {
+  workflowKind,
   createWorkflowResource,
-  publishWorkflowVersion,
-  shareWorkflowResource,
 } from "../src/workflow-resources.ts";
 import { workflowStartForm } from "../src/workflow-start-form.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
 import { auditedDuring, outcome, unique } from "./sign-in.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
 
 // Starting an independent workflow by hand from its page (GRA-1305): what
 // the page reads to start one (src/workflow-start-form.ts), and that the
@@ -23,7 +24,7 @@ import { auditedDuring, outcome, unique } from "./sign-in.ts";
 // refuses, or one that lets through input the workflow doesn't take.
 
 /** A member of the organization in `role`, as their session has them. */
-const person = async (role: Role): Promise<Acting> => {
+const person = async (role: Role): Promise<Identity> => {
   const userId = crypto.randomUUID();
   await env.DB.batch([
     env.DB.prepare(
@@ -36,7 +37,15 @@ const person = async (role: Role): Promise<Acting> => {
       "INSERT INTO members (id, organization_id, user_id, role, created_at) VALUES (?, 'organization', ?, ?, ?)"
     ).bind(crypto.randomUUID(), userId, role, Date.now()),
   ]);
-  return { userId, role, teams: [], staff: false };
+  return {
+    userId,
+    email: `${userId}@acme.test`,
+    name: "Person",
+    role,
+    teams: [],
+    staff: false,
+    expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+  };
 };
 
 /**
@@ -69,10 +78,12 @@ const greetingWorkflow = async () => {
     person("user"),
   ]);
   const workflow = await createWorkflowResource(env, ada, `greet-${unique()}`);
-  await publishWorkflowVersion(env, ada, workflow.id, {
-    definition: definitionOf("1.0.0", greeting),
-    basedOn: null,
-  });
+  await publishDefinition(
+    env,
+    ada,
+    workflow.id,
+    definitionOf("1.0.0", greeting)
+  );
   await shareWorkflowResource(env, ada, workflow.id, {
     type: "person",
     id: uma.userId,
@@ -83,14 +94,14 @@ const greetingWorkflow = async () => {
 
 /** What starting `id` by hand as `by` with the form's version and `input` answers. */
 const started = async (
-  by: Acting,
+  by: Identity,
   id: string,
   version: number | null,
   input: unknown
 ): Promise<string> =>
   await outcome(
     startWorkflow(env, { type: "person", person: by }, id, {
-      version,
+      expected: version,
       args: input,
       key: `key-${unique()}`,
     })
@@ -150,13 +161,15 @@ describe("starting an independent workflow by hand", () => {
   it("marks a field that takes a person, offers the organization's people and teams by name to pick, and takes a person, team or role", async () => {
     const { ada, uma } = await greetingWorkflow();
     const workflow = await createWorkflowResource(env, ada, `ask-${unique()}`);
-    await publishWorkflowVersion(env, ada, workflow.id, {
-      definition: definitionOf("1.0.0", {
+    await publishDefinition(
+      env,
+      ada,
+      workflow.id,
+      definitionOf("1.0.0", {
         approver: { kind: "person" },
         note: { kind: "string" },
-      }),
-      basedOn: null,
-    });
+      })
+    );
     await shareWorkflowResource(env, ada, workflow.id, {
       type: "person",
       id: uma.userId,
@@ -223,25 +236,18 @@ describe("starting an independent workflow by hand", () => {
     });
   });
 
-  it("runs the version approved to go live, not one published after it, and none before any is published", async () => {
+  it("runs the live version, the one rolled back to rather than one published after it, and none before any is published", async () => {
     const { ada, uma, workflow } = await greetingWorkflow();
-    const admin = await person("admin");
-    const asked = await requestGoLive(env, ada, workflow.id, {
-      version: 1,
-      revision: 0,
-    });
-    await decideGoLive(env, admin, workflow.id, {
-      version: 1,
-      verdict: "approve",
-      revision: asked.revision,
-    });
-    // Version 2 takes other input, and isn't live.
-    await publishWorkflowVersion(env, ada, workflow.id, {
-      definition: definitionOf("1.1.0", {
+    // Version 2 takes other input, and is rolled back from.
+    await publishDefinition(
+      env,
+      ada,
+      workflow.id,
+      definitionOf("1.1.0", {
         who: { kind: "string" },
-      }),
-      basedOn: 1,
-    });
+      })
+    );
+    await rollback(env, workflowKind, ada, workflow.id, 1);
     const empty = await createWorkflowResource(env, ada, `new-${unique()}`);
     const live = await workflowStartForm(env, uma, workflow.id);
 

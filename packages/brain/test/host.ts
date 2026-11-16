@@ -17,6 +17,8 @@ import type { BrainErrorCode } from "../src/contract.ts";
 import type { Writer } from "../src/documents.ts";
 import type { BrainEvent } from "../src/events.ts";
 import { collectionIdSchema } from "../src/ids.ts";
+import type { PurgeResult } from "../src/knowledge.ts";
+import { purgePerson } from "../src/purge.ts";
 import type { OnErase } from "../src/purge.ts";
 
 // A host for the Brain, as small as one can be: callers are a person and
@@ -258,24 +260,42 @@ export const newCollection = async (
     { type: "person", userId: "owner" }
   );
 
+/** A collection only `userId` reads, theirs (`access` "me"). */
+export const ownCollection = async (
+  brain: Brain<Caller>,
+  userId: string,
+  name = "Own"
+): Promise<CollectionRow> =>
+  await ensureCollection(
+    brain,
+    {
+      id: crypto.randomUUID(),
+      name,
+      description: "",
+      owner: userId,
+      access: "me",
+      sensitive: false,
+      source: "here",
+      createdAt: new Date(),
+    },
+    { type: "person", userId }
+  );
+
 /** A host's copies of nothing: a purge reaches only the Brain's own. */
 export const noCopies: OnErase = {
-  rewrite: async () => {
-    await Promise.resolve();
-  },
   forgetActor: async () => {
     await Promise.resolve();
   },
-  forgetDocuments: async () => {
-    await Promise.resolve();
-  },
-  countFiles: async () => await Promise.resolve(0),
   forgetFiles: async () => {
     await Promise.resolve();
   },
-  personalCollection: async (userId) =>
-    await Promise.resolve(`personal-${userId}`),
-  requireRewritable: async () => {
-    await Promise.resolve();
-  },
 };
+
+/** Purges `userId` as `by`, as a person's erasure does. */
+export const purgeOf = async (
+  brain: Brain<Caller>,
+  by: Writer,
+  userId: string,
+  onErase: OnErase = noCopies
+): Promise<PurgeResult> =>
+  await purgePerson(brain, by, { userId, reason: "erasure_request" }, onErase);

@@ -1,3 +1,4 @@
+import { brainSourceErrors } from "@grasp-os/shared/brain-sources";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import {
   chatIdSchema,
@@ -9,7 +10,7 @@ import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { readableVersionsAs } from "../brain-next.ts";
-import type { SourceVersionRef } from "../brain-next.ts";
+import type { PinnedVersionRef } from "../brain-next.ts";
 import { runChatSources } from "../db/core/schema.ts";
 import { readableSources } from "../history-access.ts";
 import { authorize } from "../permissions.ts";
@@ -23,10 +24,13 @@ import { evidenceOf } from "./run-evidence.ts";
 
 /**
  * `brain.revoked` for a refusal (any expected error: a grant, a member or
- * a read refused), or `error` as it is.
+ * a read refused), or `error` as it is. A stored row the Brain refuses as
+ * no request it takes (`brain.request_invalid`) stops the run as itself:
+ * nothing was revoked.
  */
 const revokedOr = (error: unknown): unknown =>
-  isExpectedError(error)
+  isExpectedError(error) &&
+  brainSourceErrors.codeOf(error) !== "brain.request_invalid"
     ? workflowResourceErrors.create("brain.revoked")
     : error;
 
@@ -49,7 +53,7 @@ const requireChatPinsReadable = async (
   if (first === undefined) {
     return;
   }
-  const readable = await readableSources(
+  const { readable } = await readableSources(
     env,
     {
       workspaceId: workspaceIdSchema.parse(first.workspaceId),
@@ -76,13 +80,14 @@ const requireOwnEvidenceReadable = async (
   if (rows.length === 0) {
     return;
   }
-  // SAFETY: core wrote each row from a pack's own item; checked again,
-  // strictly, by `readableVersionsAs`, which refuses a producer it
-  // doesn't know, and the run with it.
+  // SAFETY: core wrote each row from a pack's own item or a skill it
+  // handed the run (`skillVersionRefOf`); checked again, strictly, by
+  // `readableVersionsAs`, which refuses a producer it doesn't know, and
+  // the run with it.
   const versions = rows.map(
     ({ producer, sourceId, version }) =>
       // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-      ({ source: { producer, id: sourceId }, version }) as SourceVersionRef
+      ({ source: { producer, id: sourceId }, version }) as PinnedVersionRef
   );
   try {
     for (const permissionId of new Set(rows.map((row) => row.permissionId))) {

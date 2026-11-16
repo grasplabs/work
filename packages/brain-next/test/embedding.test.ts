@@ -37,14 +37,9 @@ import type {
   BreakableEmbedder,
   Breakage,
 } from "../../embed/test/test-models.ts";
-import { vectorModelNameOf } from "../src/contract.ts";
+import { fileGraceMs, vectorModelNameOf } from "../src/contract.ts";
 import { bucketCallMs, embedBatch } from "../src/embedding.ts";
-import {
-  fileGraceMs,
-  hashOf,
-  sweepDeleteMs,
-  vectorKeyOf,
-} from "../src/files.ts";
+import { hashOf, sweepDeleteMs, vectorKeyOf } from "../src/files.ts";
 import { workAttemptsMax } from "../src/work.ts";
 
 /** No hand-overs: these tests hand nothing over. */
@@ -109,6 +104,7 @@ const tick = async (embedders: Embedders, aheadMs = 0): Promise<void> => {
     at: new Date(clock.at),
     embedders,
     handOvers: noHandOvers,
+    contextTokens: null,
   });
 };
 
@@ -122,7 +118,16 @@ const textOf = (topic: string, count: number): string =>
     "\n\n"
   );
 
-const ownedBy = (person: string): Access => ({ kind: "owner", person });
+/**
+ * A group only `person` is in, and their reader: what each source here is
+ * read by. Groups, never one person's alone, which the shared store keeps
+ * nowhere.
+ */
+const groupOf = (person: string): string => `team:${person}`;
+const readBy = (person: string): Access => ({
+  kind: "audience",
+  group: groupOf(person),
+});
 
 const add = async (
   source: string,
@@ -149,7 +154,7 @@ const found = async (
   const { chunks } = await store().searchVectors({
     model: vectorModelNameOf(model),
     vector: [...vector],
-    reader: { person, groups: [] },
+    reader: { person, groups: [groupOf(person)] },
     limit: 50,
   });
   return chunks;
@@ -364,7 +369,7 @@ describe("embedding through the queue", () => {
   it("embeds a source's chunks in batches, every chunk once, found only by its readers", async () => {
     const chunks = embedBatch + 4;
     const text = textOf("Rotterdam", chunks);
-    const version = await add("doc", text, ownedBy("anna"));
+    const version = await add("doc", text, readBy("anna"));
 
     await tick(embeddersOf(int8));
     // The rebuild a first model starts is marked done at the next tick.
@@ -396,11 +401,11 @@ describe("embedding through the queue", () => {
 
   it("runs the model once for a text, however many sources and versions hold it", async () => {
     const text = textOf("Utrecht", 3);
-    await add("first", text, ownedBy("anna"));
+    await add("first", text, readBy("anna"));
     await tick(embeddersOf(int8));
     const once = asked.length;
 
-    const version = await add("second", text, ownedBy("bert"));
+    const version = await add("second", text, readBy("bert"));
     await tick(embeddersOf(int8));
 
     expect({
@@ -416,11 +421,11 @@ describe("embedding through the queue", () => {
 
   it("finds a source by meaning only for its new readers once its readers change, those taken off finding nothing from the moment of the change", async () => {
     const text = textOf("Delft", 2);
-    await add("doc", text, ownedBy("anna"));
+    await add("doc", text, readBy("anna"));
     await tick(embeddersOf(int8));
     const before = await placesFound("anna", paragraph("Delft", 0));
 
-    const version = await add("doc", text, ownedBy("bert"));
+    const version = await add("doc", text, readBy("bert"));
     const rightAfter = {
       anna: await placesFound("anna", paragraph("Delft", 0)),
       bert: await placesFound("bert", paragraph("Delft", 0)),
@@ -444,13 +449,13 @@ describe("embedding through the queue", () => {
   });
 
   it("embeds only the newest version when one arrives while a batch is under way", async () => {
-    await add("doc", textOf("Gouda", 3), ownedBy("anna"));
+    await add("doc", textOf("Gouda", 3), readBy("anna"));
     const held = gate();
     const embedders = embeddersOf(int8, env.EMBEDDER, held.before);
     const ticking = tickNoting(embedders);
     await held.reached;
 
-    const version = await add("doc", textOf("Leiden", 2), ownedBy("anna"));
+    const version = await add("doc", textOf("Leiden", 2), readBy("anna"));
     held.open();
     const ticked = await ticking;
     await tick(embeddersOf(int8));
@@ -478,7 +483,7 @@ describe("embedding through the queue", () => {
 
   it("embeds a batch again after the store was killed in the middle of it, each chunk once", async () => {
     const chunks = 5;
-    const version = await add("doc", textOf("Breda", chunks), ownedBy("anna"));
+    const version = await add("doc", textOf("Breda", chunks), readBy("anna"));
     const held = gate();
     const ticking = tickNoting(embeddersOf(int8, env.EMBEDDER, held.before));
     await held.reached;
@@ -520,7 +525,7 @@ describe("embedding through the queue", () => {
     const version = await add(
       "doc",
       `${paragraph("Zwolle", 0)} ${marker}`,
-      ownedBy("anna")
+      readBy("anna")
     );
     await breakBulk("crash");
 
@@ -547,7 +552,7 @@ describe("embedding through the queue", () => {
   });
 
   it("writes nothing the embedders give that isn't the host's model's, and parks the item with its code", async () => {
-    await add("doc", textOf("Hoorn", 2), ownedBy("anna"));
+    await add("doc", textOf("Hoorn", 2), readBy("anna"));
     // Embedders that say they run the int8 model but run the float one.
     const wrong = embeddersOf(int8, env.OTHER_EMBEDDER);
 
@@ -579,7 +584,7 @@ describe("embedding through the queue", () => {
   });
 
   it("puts back what parked when staff re-embed, and embeds it", async () => {
-    const version = await add("doc", textOf("Assen", 2), ownedBy("anna"));
+    const version = await add("doc", textOf("Assen", 2), readBy("anna"));
     await breakBulk("crash");
     for (let attempt = 0; attempt < workAttemptsMax; attempt += 1) {
       // oxlint-disable-next-line no-await-in-loop -- past each backoff, one tick at a time
@@ -604,7 +609,7 @@ describe("embedding through the queue", () => {
   });
 
   it("embeds nothing while the host runs no model, says so, and embeds everything once one arrives", async () => {
-    const version = await add("doc", textOf("Emmen", 3), ownedBy("anna"));
+    const version = await add("doc", textOf("Emmen", 3), readBy("anna"));
 
     await tick(embeddersOf(null));
     const without = await store().workOverview();
@@ -632,7 +637,7 @@ describe("embedding through the queue", () => {
 
   it("after a change of model, keeps recall by words answering, finds by the new build once the rebuild is over, and removes the old build's vectors", async () => {
     const haarlem = [0, 1, 2].map((index) => paragraph("Haarlem", index));
-    const version = await add("doc", textOf("Haarlem", 3), ownedBy("anna"));
+    const version = await add("doc", textOf("Haarlem", 3), readBy("anna"));
     await tick(embeddersOf(int8));
     const held = gate();
     const ticking = tickNoting(
@@ -642,7 +647,7 @@ describe("embedding through the queue", () => {
 
     const { items: byWords } = await store().recall({
       question: "Haarlem supplier",
-      reader: { person: "anna", groups: [] },
+      reader: { person: "anna", groups: [groupOf("anna")] },
       budget: { tokens: 4000 },
     });
     const during = {
@@ -716,7 +721,7 @@ describe("embedding through the queue", () => {
         ? `${paragraph("Venlo", index)} ${poisonWord}`
         : paragraph("Venlo", index)
     ).join("\n\n");
-    const version = await add("doc", text, ownedBy("anna"));
+    const version = await add("doc", text, readBy("anna"));
     await breakBulk("trap");
     const trapAsked = () =>
       asked.filter((passage) => passage.includes(poisonWord)).length;
@@ -770,8 +775,8 @@ describe("embedding through the queue", () => {
         ? `${paragraph("Tiel", index)} ${poisonWord}`
         : paragraph("Tiel", index)
     ).join("\n\n");
-    const version = await add("broken", text, ownedBy("anna"));
-    const other = await add("other", textOf("Goes", 3), ownedBy("anna"));
+    const version = await add("broken", text, readBy("anna"));
+    const other = await add("other", textOf("Goes", 3), readBy("anna"));
     await breakBulk("poison");
 
     for (let attempt = 0; attempt < workAttemptsMax; attempt += 1) {
@@ -801,7 +806,7 @@ describe("embedding through the queue", () => {
     const version = await add(
       "doc",
       textOf("Harderwijk", chunks),
-      ownedBy("anna")
+      readBy("anna")
     );
     await breakBulk("budget");
 
@@ -829,7 +834,7 @@ describe("embedding through the queue", () => {
     const version = await add(
       "doc",
       [repeated, repeated, repeated, paragraph("Meppel", 1)].join("\n\n"),
-      ownedBy("anna")
+      readBy("anna")
     );
 
     await tick(embeddersOf(int8));
@@ -851,7 +856,7 @@ describe("embedding through the queue", () => {
   it("never keeps a vector for a place whose text changed while its call ran, and embeds the new text there", async () => {
     const old = paragraph("Elburg", 0);
     const fresh = paragraph("Elburg", 1);
-    await add("doc", old, ownedBy("anna"));
+    await add("doc", old, readBy("anna"));
     const held = gate();
     const ticking = tickNoting(embeddersOf(int8, env.EMBEDDER, held.before));
     await held.reached;
@@ -867,7 +872,7 @@ describe("embedding through the queue", () => {
       sql.exec("DELETE FROM current_versions WHERE source = 'doc'");
       sql.exec("DELETE FROM source_versions WHERE source = 'doc'");
     });
-    const version = await add("doc", fresh, ownedBy("anna"));
+    const version = await add("doc", fresh, readBy("anna"));
     held.open();
     await ticking;
     const late = await found("anna", old);
@@ -893,10 +898,10 @@ describe("embedding through the queue", () => {
     const held = await holding({ puts: bucketCallMs });
     const ticked: string[] = [];
     await withTimersFaked(0, async () => {
-      await add("doc", text, ownedBy("anna"));
+      await add("doc", text, readBy("anna"));
       // Its write never answers: the run stops waiting, and fails.
       ticked.push(await tickNoting(embeddersOf(int8)));
-      await add("doc", paragraph("Nunspeet", 1), ownedBy("anna"));
+      await add("doc", paragraph("Nunspeet", 1), readBy("anna"));
       // A sweep a little less than the grace after the run stopped
       // waiting: the row is not due. That run's write never answers too.
       vi.setSystemTime(Date.now() + fileGraceMs - 5000);
@@ -916,9 +921,9 @@ describe("embedding through the queue", () => {
 
   it("neither reads nor writes a vector object a sweep's late delete may still land on, embedding its passage with the model meanwhile", async () => {
     const text = paragraph("Kampen", 0);
-    await add("doc", text, ownedBy("anna"));
+    await add("doc", text, readBy("anna"));
     await tick(embeddersOf(int8));
-    await add("doc", paragraph("Kampen", 1), ownedBy("anna"));
+    await add("doc", paragraph("Kampen", 1), readBy("anna"));
     await tick(embeddersOf(int8));
     const key = vectorKeyOf(
       vectorModelNameOf(int8),
@@ -932,7 +937,7 @@ describe("embedding through the queue", () => {
     });
     asked.length = 0;
 
-    const version = await add("again", text, ownedBy("anna"));
+    const version = await add("again", text, readBy("anna"));
     await tick(embeddersOf(int8));
     const stillThere = (await env.BRAIN_OBJECTS.head(key)) !== null;
     held.releaseDeletes();
@@ -951,10 +956,10 @@ describe("embedding through the queue", () => {
   });
 
   it("stays rebuilt while new sources wait or park, and is not while what a rebuild put on the queue is parked", async () => {
-    await add("first", textOf("Tiel", 1), ownedBy("anna"));
+    await add("first", textOf("Tiel", 1), readBy("anna"));
     await tick(embeddersOf(int8));
     await tick(embeddersOf(int8));
-    await add("second", textOf("Oss", 1), ownedBy("anna"));
+    await add("second", textOf("Oss", 1), readBy("anna"));
     const waiting = await embeddingNow();
     await breakBulk("crash");
     const failUntilParked = async () => {
@@ -992,9 +997,9 @@ describe("embedding through the queue", () => {
     const kept = paragraph("Ede", 0);
     const replaced = paragraph("Ede", 1);
     const added = paragraph("Ede", 2);
-    await add("doc", [kept, replaced].join("\n\n"), ownedBy("anna"));
+    await add("doc", [kept, replaced].join("\n\n"), readBy("anna"));
     await tick(embeddersOf(int8));
-    await add("doc", [kept, added].join("\n\n"), ownedBy("anna"));
+    await add("doc", [kept, added].join("\n\n"), readBy("anna"));
     await tick(embeddersOf(int8));
     const beforeGrace = await vectorsKept(int8, [kept, replaced, added]);
 
@@ -1012,11 +1017,11 @@ describe("embedding through the queue", () => {
   it("writes no vector for a chunk replaced while its batch ran", async () => {
     const gone = paragraph("Doetinchem", 0);
     const newer = paragraph("Doetinchem", 1);
-    await add("doc", gone, ownedBy("anna"));
+    await add("doc", gone, readBy("anna"));
     const held = gate();
     const ticking = tickNoting(embeddersOf(int8, env.EMBEDDER, held.before));
     await held.reached;
-    await add("doc", newer, ownedBy("anna"));
+    await add("doc", newer, readBy("anna"));
     held.open();
     await ticking;
     const written = await vectorsKept(int8, [gone]);
@@ -1034,7 +1039,7 @@ describe("embedding through the queue", () => {
 
   it("keeps nothing of a reply with a vector that isn't one, in the bucket or the store", async () => {
     const texts = [0, 1, 2].map((index) => paragraph("Maastricht", index));
-    await add("doc", texts.join("\n\n"), ownedBy("anna"));
+    await add("doc", texts.join("\n\n"), readBy("anna"));
     const pool = embeddersOf(int8);
     const broken: Embedders = {
       model: int8,
@@ -1061,7 +1066,7 @@ describe("embedding through the queue", () => {
   });
 
   it("sends nothing to the embedders for chunks without a hash, and ends its tick", async () => {
-    const version = await add("doc", textOf("Lelystad", 3), ownedBy("anna"));
+    const version = await add("doc", textOf("Lelystad", 3), readBy("anna"));
     await tick(embeddersOf(null));
     // Eighteen chunks without a hash, as written before hashes were
     // (written in place here to stand for them).
@@ -1096,7 +1101,7 @@ describe("embedding through the queue", () => {
   });
 
   it("fails as no_progress, never going round, a run whose every write was refused", async () => {
-    await add("doc", textOf("Dronten", embedBatch), ownedBy("anna"));
+    await add("doc", textOf("Dronten", embedBatch), readBy("anna"));
     const held = gate();
     const ticking = tickNoting(embeddersOf(int8, env.EMBEDDER, held.before));
     await held.reached;
@@ -1124,7 +1129,7 @@ describe("embedding through the queue", () => {
 
   it("embeds a passage the module failed on in one object when another object embeds it, marking nothing", async () => {
     const text = `${paragraph("Hattem", 0)} ${poisonWord}`;
-    const version = await add("doc", text, ownedBy("anna"));
+    const version = await add("doc", text, readBy("anna"));
     await breakBulk("trap-once");
 
     await tick(embeddersOf(int8));
@@ -1143,15 +1148,15 @@ describe("embedding through the queue", () => {
 
   it("forgets a passage passed over once no current version holds its text, so the text is tried again later", async () => {
     const trapped = `${paragraph("Steenwijk", 0)} ${poisonWord}`;
-    await add("doc", trapped, ownedBy("anna"));
+    await add("doc", trapped, readBy("anna"));
     await breakBulk("trap");
     await tick(embeddersOf(int8));
     const { unembeddable: passedOver } = await embeddingNow();
-    await add("doc", paragraph("Steenwijk", 1), ownedBy("anna"));
+    await add("doc", paragraph("Steenwijk", 1), readBy("anna"));
     await tick(embeddersOf(int8));
     await breakBulk(null);
 
-    const version = await add("doc", trapped, ownedBy("anna"));
+    const version = await add("doc", trapped, readBy("anna"));
     await tick(embeddersOf(int8));
 
     const { embedded, unembeddable } = await embeddingNow();
@@ -1170,7 +1175,7 @@ describe("embedding through the queue", () => {
 
   it("writes what came back when a later call of the run breaks, marks nothing, and fails the attempt", async () => {
     const chunks = 6;
-    const version = await add("doc", textOf("Ommen", chunks), ownedBy("anna"));
+    const version = await add("doc", textOf("Ommen", chunks), readBy("anna"));
     const pool = embeddersOf(int8);
     // The first texts answered, then the embedders break.
     const breaking: Embedders = {
@@ -1221,7 +1226,7 @@ describe("embedding through the queue", () => {
 
   it("writes nothing of a run in flight for a source an erasure takes", async () => {
     const text = paragraph("Zwartsluis", 0);
-    await add("erased", text, ownedBy("anna"));
+    await add("erased", text, readBy("anna"));
     const held = gate();
     const ticking = tickNoting(embeddersOf(int8, env.EMBEDDER, held.before));
     await held.reached;
@@ -1246,7 +1251,7 @@ describe("embedding through the queue", () => {
 
   it("keeps no verdict of another build than the host's: a passage is passed over only on its own build's word", async () => {
     const text = `${paragraph("Blokker", 0)} ${poisonWord}`;
-    await add("doc", text, ownedBy("anna"));
+    await add("doc", text, readBy("anna"));
     // The embedders run the float build while the host expects the int8
     // one, and refuse the text.
     await breakBulk("trap", env.OTHER_EMBEDDER);
@@ -1271,8 +1276,8 @@ describe("embedding through the queue", () => {
   });
 
   it("counts as embedded only chunks of current versions, never those of a version hidden and not yet erased", async () => {
-    await add("hidden", textOf("Vollenhove", 2), ownedBy("anna"));
-    await add("shown", textOf("Blokzijl", 1), ownedBy("anna"));
+    await add("hidden", textOf("Vollenhove", 2), readBy("anna"));
+    await add("shown", textOf("Blokzijl", 1), readBy("anna"));
     await tick(embeddersOf(int8));
     // An erasure hides a version at once and deletes it at a later tick:
     // its codes stay meanwhile (hidden here as it does, in place).

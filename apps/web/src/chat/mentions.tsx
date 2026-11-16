@@ -9,6 +9,7 @@ import type {
 import { useLingui } from "@lingui/react/macro";
 import {
   AppWindowIcon,
+  BotIcon,
   SquareSlashIcon,
   UserIcon,
   WorkflowIcon,
@@ -20,8 +21,10 @@ import { loadFromCore } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
 
 // What a question can mention, typed after `@` in the box to ask in or
-// picked from its add menu (composer-menu.tsx): the organization's Apps,
-// workflows and people, each kind with its icon and its hue. A mention is
+// picked from its add menu (composer-menu.tsx): the agents the person may
+// ask, each of which then answers the question in turn, and the
+// organization's Apps, workflows and people, each kind with its icon and
+// its hue. A mention is
 // a chip in the text, and goes with the question by its ID
 // (`ChatQuestion.mentions`), so core tells the agent exactly which. The
 // commands a question can run (`/`, to come) are a kind of their own.
@@ -33,6 +36,7 @@ type ChipKind = ChatMentionKind | "command";
 export const useMentionKinds = (): Record<ChipKind, PromptMentionKind> => {
   const { t } = useLingui();
   return {
+    agent: { label: t`Agents`, icon: <BotIcon />, tone: "agent" },
     app: { label: t`Apps`, icon: <AppWindowIcon />, tone: "app" },
     workflow: {
       label: t`Workflows`,
@@ -60,7 +64,12 @@ export const useMentionables = (): readonly PromptSuggestion[] | undefined => {
   useEffect(() => {
     const left = new AbortController();
     const readNow = async (): Promise<void> => {
-      const [apps, workflows, people] = await Promise.all([
+      const [agents, apps, workflows, people] = await Promise.all([
+        loadFromCore(
+          core,
+          async (session) => await session.chats.agents(),
+          left.signal
+        ),
         loadFromCore(
           core,
           async (session) => await session.apps.list(),
@@ -81,6 +90,15 @@ export const useMentionables = (): readonly PromptSuggestion[] | undefined => {
         return;
       }
       setRead([
+        // The agents they may ask: one mentioned answers the question.
+        ...(agents.state === "ready" ? agents.data : []).map(
+          ({ id, name, job }) => ({
+            kind: "agent",
+            id,
+            label: name,
+            ...(job === "" ? {} : { description: job }),
+          })
+        ),
         ...(apps.state === "ready" ? apps.data : []).map(({ id, name }) => ({
           kind: "app",
           id,
@@ -133,7 +151,7 @@ export const useMentionTrigger = (
 const isMentionKind = (kind: string): kind is ChatMentionKind =>
   chatMentionKinds.some((each) => each === kind);
 
-/** The mentions in the box that go with the question: an App, a workflow or a person, by ID. */
+/** The mentions in the box that go with the question: an agent, an App, a workflow or a person, by ID. */
 export const chatMentionsOf = (
   mentions: readonly PromptMention[]
 ): ChatMention[] =>

@@ -1,16 +1,19 @@
+import type { InstructionFileRef } from "@grasp-os/shared/instruction-files";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
+import { appKind } from "../src/apps.ts";
 import { chatAgentId, personalWorkspaceId } from "../src/chats-rpc.ts";
+import { keepMadeInChat } from "../src/drafts.ts";
 import { workspace } from "../src/durable-objects.ts";
-import { codeStep, says } from "./agent-chat.ts";
-import { requestGranted } from "./apps.ts";
+import { codeStep, model, says } from "./agent-chat.ts";
 import { botConnectorMembersUrl } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
-import { newTeam, readCollection } from "./knowledge.ts";
+import { saveInstructions } from "./instruction-saves.ts";
+import { fakeProvider } from "./model-provider.ts";
 import { acmeTenant } from "./sign-in-config.ts";
-import { callAuth, signedInApi, unique } from "./sign-in.ts";
+import { signedInApi, unique } from "./sign-in.ts";
 import {
   kept,
   member,
@@ -29,7 +32,7 @@ import {
 // Stephen asked in a Teams group chat or channel (src/channels/door.ts):
 // only a message that @mentions him is taken, and its answer reads only
 // what everyone in the conversation may read, as Teams' roster names them
-// (src/knowledge/access.ts). The turn runs in the asker's own Workspace
+// (turn-recall.ts). The turn runs in the asker's own Workspace
 // object, with the model provider faked behind connect, and the roster and the
 // answer go through connect to the fake Bot Connector.
 
@@ -62,105 +65,17 @@ const chatsOf = async (userId: string) =>
         .toArray()
   );
 
-/**
- * A handbook for everyone and a collection for one team, each with one
- * document, that the organization's agent may read; and the team's id.
- */
-const handbookAndTeamNotes = async () => {
-  const admin = await signedInApi(idp, "admin");
-  const teamId = await newTeam(admin, []);
-  const [handbook, team] = await Promise.all([
-    admin.api.knowledge.createCollection({
-      name: `Handbook ${unique()}`,
-      access: "everyone",
-    }),
-    admin.api.knowledge.createCollection({
-      name: `Bonus ${unique()}`,
-      access: "teams",
-      teams: [teamId],
-    }),
-  ]);
-  const [lunch, bonus] = await Promise.all([
-    admin.api.knowledge.saveDocument({
-      collectionId: handbook.id,
-      path: "lunch.md",
-      text: "# Lunch\n\nLunch is served at noon.",
-      ifVersion: 0,
-    }),
-    admin.api.knowledge.saveDocument({
-      collectionId: team.id,
-      path: "bonus.md",
-      text: "# Bonus\n\nThe bonus pool is forty thousand.",
-      ifVersion: 0,
-    }),
-  ]);
-  for (const collectionId of [handbook.id, team.id]) {
-    // oxlint-disable-next-line no-await-in-loop -- one grant at a time
-    await requestGranted(
-      idp,
-      admin,
-      readCollection(
-        { type: "agent", agentId: chatAgentId },
-        collectionId,
-        `C${unique()}`.toUpperCase()
-      )
-    );
-  }
-  return { admin, teamId, lunchId: lunch.id, bonusId: bonus.id };
-};
-
-/** The agent's code: each document's text, or `unreadable`. */
-const readsBoth = (lunchId: string, bonusId: string) =>
-  codeStep(`export default async (self, env) => {
-  const read = async (id) => {
-    try {
-      return (await env.knowledge.read(id)).text;
-    } catch {
-      return "unreadable";
-    }
-  };
-  return { lunch: await read(${JSON.stringify(lunchId)}), bonus: await read(${JSON.stringify(bonusId)}) };
-};`);
-
-/** What the model was told after the code at `index` of its requests ran. */
-const toldAfter = (
-  provider: { requests: readonly { body: unknown }[] },
-  index: number
-) => {
-  const told = JSON.stringify(provider.requests[index]?.body ?? null);
-  return {
-    lunch: told.includes("Lunch is served at noon"),
-    bonus: told.includes("The bonus pool is forty thousand"),
-  };
-};
-
-/** Adds `userId` to the team `teamId`, as an admin does. */
-const addToTeam = async (
-  admin: { session: string },
-  teamId: string,
-  userId: string
-): Promise<void> => {
-  const added = await callAuth("/organization/add-team-member", admin.session, {
-    teamId,
-    userId,
-  });
-  if (!added.ok) {
-    throw new Error(`Adding ${userId} to the team failed`);
-  }
-};
+/** Saves `text` as the next version of `file`, as `by` does from a page. */
+const save = async (
+  by: Awaited<ReturnType<typeof signedInApi>>,
+  file: InstructionFileRef,
+  text: string
+) => await saveInstructions(by.api, file, text);
 
 describe("in a group chat", setUpTime, () => {
-  it("an answer reads only what every member may read, though the asker may read more", async () => {
-    const { admin, teamId, lunchId, bonusId } = await handbookAndTeamNotes();
-    const ann = await member(
-      idp,
-      readsBoth(lunchId, bonusId),
-      says("In private."),
-      readsBoth(lunchId, bonusId),
-      says("In the group.")
-    );
+  it("answers in a chat of its own for the group, read from its roster, which is nobody's private conversation", async () => {
+    const ann = await member(idp, says("In private."), says("In the group."));
     const bo = await memberAnsweredBy(idp, ann.provider);
-    await addToTeam(admin, teamId, ann.userId);
     const group = newGroup();
     await onGroupRoster(group, [{ person: ann.teams }, { person: bo.teams }]);
 
@@ -169,17 +84,11 @@ describe("in a group chat", setUpTime, () => {
 
     const { activities, asked } = await reached(group);
     expect({
-      // Ann alone reads her team's note; with Bo in the chat, her answer
-      // doesn't, and the handbook is still read.
-      alone: toldAfter(ann.provider, 1),
-      together: toldAfter(ann.provider, 3),
       answered: JSON.stringify(activities).includes("In the group."),
       rosterRead: asked.includes(`${group} *`),
       // The group isn't anyone's private conversation.
       kept: await kept(group),
     }).toStrictEqual({
-      alone: { lunch: true, bonus: true },
-      together: { lunch: true, bonus: false },
       answered: true,
       rosterRead: true,
       kept: [],
@@ -191,65 +100,9 @@ describe("in a group chat", setUpTime, () => {
     ]);
   });
 
-  it("reads what a team shares when every member is in it", async () => {
-    const { admin, teamId, lunchId, bonusId } = await handbookAndTeamNotes();
-    const ann = await member(
-      idp,
-      readsBoth(lunchId, bonusId),
-      says("All of us.")
-    );
-    const bo = await memberAnsweredBy(idp, ann.provider);
-    await addToTeam(admin, teamId, ann.userId);
-    await addToTeam(admin, teamId, bo.userId);
-    const group = newGroup();
-    await onGroupRoster(group, [{ person: ann.teams }, { person: bo.teams }]);
-
-    await post(mentionIn(ann.teams, group, "What's the bonus pool?"));
-
-    expect(toldAfter(ann.provider, 1)).toStrictEqual({
-      lunch: true,
-      bonus: true,
-    });
-  });
-
-  it("a guest narrows it to nothing, as does someone Grasp hasn't seen", async () => {
-    const { lunchId, bonusId } = await handbookAndTeamNotes();
-    const ann = await member(
-      idp,
-      readsBoth(lunchId, bonusId),
-      says("A guest is here."),
-      readsBoth(lunchId, bonusId),
-      says("A stranger is here.")
-    );
-    const withGuest = newGroup();
-    await onGroupRoster(withGuest, [
-      { person: ann.teams },
-      { person: teamsPerson(), userRole: "guest" },
-    ]);
-    const withStranger = newGroup();
-    await onGroupRoster(withStranger, [
-      { person: ann.teams },
-      { person: teamsPerson() },
-    ]);
-
-    await post(mentionIn(ann.teams, withGuest, "When is lunch?"));
-    await post(mentionIn(ann.teams, withStranger, "When is lunch?", "channel"));
-
-    expect(toldAfter(ann.provider, 1)).toStrictEqual({
-      lunch: false,
-      bonus: false,
-    });
-    expect(toldAfter(ann.provider, 3)).toStrictEqual({
-      lunch: false,
-      bonus: false,
-    });
-    const { activities } = await reached(withGuest);
-    expect(JSON.stringify(activities)).toContain("A guest is here.");
-  });
-
   it("gives the agent no way to act or hold a write, only to read", async () => {
     const actsWith = codeStep(
-      `export default async (self, env) => ["connections", "apps", "build", "workflows", "memory", "brain", "knowledge"].filter((name) => { try { return env[name] !== undefined; } catch { return false; } }).join(",");`
+      `export default async (self, env) => ["connections", "apps", "build", "workflows", "brain", "knowledge"].filter((name) => { try { return env[name] !== undefined; } catch { return false; } }).join(",");`
     );
     const ann = await member(
       idp,
@@ -266,15 +119,92 @@ describe("in a group chat", setUpTime, () => {
 
     const told = (index: number) =>
       JSON.stringify(ann.provider.requests[index]?.body ?? null);
-    expect(told(1)).toContain("connections,apps,build,workflows,memory");
-    expect(told(3)).toContain('\\"knowledge\\"');
-    expect(told(3)).not.toContain("connections,");
+    // Neither has Knowledge, which no chat reads since the Brain replaced
+    // it: in private the agent's APIs, in the group none of them.
+    expect(told(1)).toContain('"Returned:\\nconnections,apps,build,workflows"');
+    expect(told(3)).toContain('"Returned:\\n"');
     // Nor any of the tools that write, ask for a connection or read the
     // brain: each calls an API the group's chat doesn't have.
     expect([dedicated.test(told(0)), dedicated.test(told(2))]).toStrictEqual([
       true,
       false,
     ]);
+  });
+
+  it("starts from the company's and the agent's instruction files in a group, never a person's, the asker's own included, and adds her own in her direct message", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const ann = await member(idp, says("In private."), says("In the group."));
+    const u = unique();
+    await save(
+      admin,
+      { scope: "company", name: "instructions" },
+      `Company ${u}`
+    );
+    await save(admin, { scope: "agent", agentId: chatAgentId }, `Agent ${u}`);
+    await save(ann, { scope: "person", personId: ann.userId }, `Ann's ${u}`);
+    const group = newGroup();
+    await onGroupRoster(group, [{ person: ann.teams }]);
+
+    await post(messageFrom(ann.teams, { text: "Hi." }));
+    await post(mentionIn(ann.teams, group, "Hi."));
+
+    const told = (index: number) => {
+      const body = JSON.stringify(ann.provider.requests[index]?.body ?? null);
+      return [`Company ${u}`, `Agent ${u}`, `Ann's ${u}`].filter((marker) =>
+        body.includes(marker)
+      );
+    };
+    expect({ direct: told(0), group: told(1) }).toStrictEqual({
+      // Her direct message is her own chat, as in Grasp (GRA-1821,
+      // workspace.ts `answersAlone`); a group chat is read by all in it,
+      // though its roster holds her alone.
+      direct: [`Company ${u}`, `Agent ${u}`, `Ann's ${u}`],
+      group: [`Company ${u}`, `Agent ${u}`],
+    });
+  });
+
+  it("gives an App's file to its builder in their own chat, in Grasp and in their direct message", async () => {
+    const provider = await fakeProvider(
+      says("Hi."),
+      says("Still here."),
+      says("In Grasp.")
+    );
+    const ada = await memberAnsweredBy(idp, provider, "builder");
+    const u = unique();
+    const { id: appId } = await ada.api.apps.create({ name: `Desk ${u}` });
+    await save(ada, { scope: "app", appId }, `App ${u}`);
+    /** Keeps chat `chatId` as having worked on the App last, as Build it does. */
+    const workedOn = async (chatId: string) => {
+      await keepMadeInChat(env, appKind, appId, ada.userId, {
+        chatId,
+        turnId: null,
+        callId: null,
+      });
+    };
+    await post(messageFrom(ada.teams, { text: "Hi." }));
+    const [direct] = await chatsOf(ada.userId);
+    if (direct === undefined) {
+      throw new TypeError("Expected her direct message's chat");
+    }
+    await workedOn(direct.id);
+    await post(messageFrom(ada.teams, { text: "And now?" }));
+    const own = workspace(env, personalWorkspaceId(ada.userId));
+    const web = await own.createChat("In Grasp", ada.userId, chatAgentId);
+    await workedOn(web.id);
+    await own.ask(web.id, { text: "And here?", model });
+
+    const told = (index: number) =>
+      JSON.stringify(provider.requests[index]?.body ?? null).includes(
+        `App ${u}`
+      );
+    expect({
+      direct: { via: direct.via, toldApp: told(1) },
+      web: told(2),
+    }).toStrictEqual({
+      // Her direct message is her own chat, as in Grasp (GRA-1821).
+      direct: { via: "teams", toldApp: true },
+      web: true,
+    });
   });
 
   it("takes nothing not said to Stephen: no line, no roster read, no turn", async () => {

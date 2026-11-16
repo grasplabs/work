@@ -1,8 +1,6 @@
 import type { Permission } from "@grasp-os/shared/permissions";
-import type {
-  WorkflowRole,
-  WorkflowRunStatus,
-} from "@grasp-os/shared/workflow-resources";
+import type { MemberRole } from "@grasp-os/shared/subject-members";
+import type { WorkflowRunStatus } from "@grasp-os/shared/workflow-resources";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import { WorkerEntrypoint, exports } from "cloudflare:workers";
 
@@ -83,10 +81,10 @@ const followsWorkflow =
 export interface AgentIndependentWorkflow {
   id: string;
   name: string;
-  /** The version published last; null before the first. */
+  /** The live version; null before the first is published. */
   currentVersion: number | null;
   /** The person's role in it. */
-  role: WorkflowRole;
+  role: MemberRole;
 }
 
 /**
@@ -154,7 +152,7 @@ export class WorkflowsApi extends WorkerEntrypoint<Env, AgentScope> {
   async offer(
     workflow: unknown,
     input: unknown
-  ): Promise<{ offer: string; workflow: string; version: number }> {
+  ): Promise<{ offer: string; workflow: string }> {
     return await asPerson(this.env, this.ctx.props, {
       allowed: () => true,
       action: "write",
@@ -171,10 +169,7 @@ export class WorkflowsApi extends WorkerEntrypoint<Env, AgentScope> {
           input
         );
       },
-      detail: (offered) => ({
-        workflow: offered.workflow,
-        version: offered.version,
-      }),
+      detail: (offered) => ({ workflow: offered.workflow }),
     });
   }
 
@@ -232,7 +227,6 @@ export class WorkflowsApi extends WorkerEntrypoint<Env, AgentScope> {
       },
       detail: (standing) => ({
         workflow: standing.workflow,
-        version: standing.version,
         held: standing.held,
         status: standing.status,
       }),

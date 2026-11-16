@@ -312,6 +312,13 @@ const Disconnect = ({
                 again.
               </Trans>
             </DialogDescription>
+            {connection.keepsReads === true ? (
+              <DialogDescription>
+                <Trans>
+                  Everything the Brain kept from it is erased for good.
+                </Trans>
+              </DialogDescription>
+            ) : null}
           </DialogHeader>
           <DialogFooter closeLabel={t`Close`} showCloseButton>
             <Button

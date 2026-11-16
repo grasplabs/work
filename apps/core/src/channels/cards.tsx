@@ -1,8 +1,8 @@
 import {
+  convertEmojiPlaceholders,
   Actions,
   Button,
   Card,
-  CardLink,
   CardText,
   Field,
   Fields,
@@ -13,6 +13,7 @@ import {
 import type { CardElement, PostableCard } from "chat";
 import { z } from "zod";
 
+import { inertOn } from "./inert.ts";
 import { say } from "./words.ts";
 import type { ChannelLocale, LineName } from "./words.ts";
 
@@ -25,9 +26,11 @@ import type { ChannelLocale, LineName } from "./words.ts";
 // A card holds what other people wrote: an answer, a document's title, the
 // values of a change. Each platform caps what one message may carry, and a
 // card over the cap is refused whole, so the cards measure that text as
-// they put it on and stop before the cap. A card of held writes never asks
-// for a press on values it couldn't show in full: it sends the person to
-// Grasp to see and confirm them there instead.
+// they put it on and stop before the cap. An answer too long for one
+// message goes whole, over as many as it takes (`answerCards`). A card of
+// held writes never asks for a press on values it couldn't show in full.
+// Nothing on a card links to the conversation in Grasp: a chat app's
+// conversation is no chat there (GRA-1919).
 
 /**
  * How much text from outside Grasp one card carries, in bytes as JSON
@@ -37,14 +40,29 @@ import type { ChannelLocale, LineName } from "./words.ts";
  */
 const outsideBytes = 16 * 1024;
 
-/** The most held writes one card shows; more are confirmed in Grasp. */
+/**
+ * The most characters of text in one section of a card: Slack's limit for
+ * a section's text in Block Kit, past which its adapter cuts it
+ * (`SECTION_TEXT_MAX_CHARS`). Measured on what Slack is sent: its adapter
+ * names emoji in full (`{{emoji:chart_up}}` becomes
+ * `:chart_with_upwards_trend:`), which lengthens a text; its bold only
+ * shortens one.
+ */
+const sectionChars = 3000;
+
+/**
+ * The most blocks Slack takes in one message (Block Kit: "You can include
+ * up to 50 blocks in each message"), past which it refuses the message
+ * whole. An answer's card is a section per piece and, under the last, one
+ * actions block of thumbs: a card holds one section fewer than this.
+ */
+const slackBlocksPerMessage = 50;
+
+/** The most held writes one card shows; more can't be confirmed on it. */
 export const maxWritesOnCard = 10;
 
-/** The most values one held write shows; more are confirmed in Grasp. */
+/** The most values one held write shows; more can't be confirmed on it. */
 export const maxValuesPerWrite = 10;
-
-/** The most sources under an answer. */
-export const maxSources = 10;
 
 /** The longest a title, a label or a link may be on a card, in characters. */
 const maxTitleChars = 200;
@@ -113,12 +131,6 @@ const ownLink = (url: string): string => {
   return address;
 };
 
-/**
- * Characters that end a link's label early on some platform (`]` in
- * Markdown, `|` and `>` in Slack's links), taken out of a label.
- */
-const linkBreakers = /[[\]<>|]/gu;
-
 /** The card as each adapter takes it. */
 const cardOf = (element: unknown): CardElement => {
   const card = toCardElement(element);
@@ -128,65 +140,19 @@ const cardOf = (element: unknown): CardElement => {
   return card;
 };
 
-/** A source an answer was given from: a document the person can open. */
-export interface AnswerSource {
-  title: string;
-  url: string;
-}
-
 /** An answer, as a chat app shows it. */
 export interface AnswerCard {
   locale: ChannelLocale;
-  /** The answer, in Markdown. */
+  /** The answer, in Markdown, as the model wrote it. */
   text: string;
-  /** What it was answered from, numbered in this order. */
-  sources: readonly AnswerSource[];
-  /** The chat in Grasp, where the whole answer is. */
-  chatUrl: string;
+  /** The platform it goes to, whose own syntax its pieces are made inert in. */
+  platform: string;
   /**
    * The request the answer is for (stephen-requests.ts), where the person
    * can rate it with a thumb: Helpful or Not helpful.
    */
   rate?: string | undefined;
 }
-
-/** `sources` as numbered links, within half a card's room for outside text. */
-const listedSources = (sources: readonly AnswerSource[], room: Room) =>
-  sources.slice(0, maxSources).map((source, index) => {
-    const title = fit(
-      source.title.replaceAll(linkBreakers, ""),
-      maxTitleChars,
-      room
-    );
-    const address = linkable(source.url);
-    const url =
-      address !== null && sizeOf(address) <= room.left ? address : null;
-    if (url !== null) {
-      room.left -= sizeOf(url);
-    }
-    return { label: `${index + 1}. ${title.text}`, url, key: `${index}` };
-  });
-
-/** The numbered sources under an answer, if it has any. */
-const SourcesSection = ({
-  locale,
-  listed,
-}: {
-  locale: ChannelLocale;
-  listed: ReturnType<typeof listedSources>;
-}) =>
-  listed.length === 0 ? null : (
-    <Section>
-      <CardText style="bold">{say("sources", locale)}</CardText>
-      {listed.map(({ label, url, key }) =>
-        url === null ? (
-          <CardText key={key}>{label}</CardText>
-        ) : (
-          <CardLink key={key} label={label} url={url} />
-        )
-      )}
-    </Section>
-  );
 
 /** A thumb on an answer, by the request it is for (stephen-requests.ts). */
 export const helpfulAction = "answer.helpful";
@@ -212,80 +178,267 @@ const RateButtons = ({
       ];
 
 /**
- * An answer with its numbered sources, labelled as made by AI where the
- * platform has a label for it (Teams). Text past what the platform takes
- * is cut, and the card links to the chat in Grasp.
+ * What a piece of an answer is on `platform`, as its card carries it: made
+ * inert (inert.ts), which can make it longer (Slack's `&` is `&amp;`), and
+ * that again as the adapter names its emoji in it. A piece is cut from the
+ * answer as the model wrote it and measured as these, never cut from the
+ * inert text, where a cut could part an escape such as `&lt;`.
  */
-export const answerCard = ({
-  locale,
-  text,
-  sources,
-  chatUrl,
-  rate,
-}: AnswerCard): PostableCard => {
-  // The sources take at most half the room, so a long answer keeps the
-  // rest; a source whose address no longer fits is named without a link.
-  const sourcesRoom: Room = { left: outsideBytes / 2 };
-  const listed = listedSources(sources, sourcesRoom);
-  const room: Room = {
-    left: outsideBytes - (outsideBytes / 2 - sourcesRoom.left),
+const sentOn =
+  (platform: string) =>
+  (piece: string): readonly string[] => {
+    const inert = inertOn(platform)(piece);
+    return [
+      inert,
+      convertEmojiPlaceholders(inert, platform === "slack" ? "slack" : "teams"),
+    ];
   };
-  const answer = fit(text, Number.POSITIVE_INFINITY, room);
-  // Grasp has what the card leaves out: the rest of the answer, or the
-  // sources past the first few.
-  const whole = answer.whole && sources.length <= maxSources;
-  const card = (
-    <Card>
-      <CardText>{answer.text}</CardText>
-      {answer.whole ? null : (
-        <CardText style="muted">{say("answerTooLong", locale)}</CardText>
-      )}
-      {SourcesSection({ locale, listed })}
-      {whole && rate === undefined ? null : (
-        <Actions>
-          {RateButtons({ locale, rate })}
-          {whole ? null : (
-            <LinkButton url={ownLink(chatUrl)}>
-              {say("openInGrasp", locale)}
-            </LinkButton>
-          )}
-        </Actions>
-      )}
-    </Card>
+
+/** Whether every form a piece is sent in fits one section of a card. */
+const fitsSection = (forms: readonly string[]): boolean =>
+  forms.every(
+    (form) => form.length <= sectionChars && sizeOf(form) <= outsideBytes
   );
-  return { card: cardOf(card), aiGenerated: true };
+
+/** What a piece costs a card, in bytes as JSON, in the largest form it is sent in. */
+const costOf = (forms: readonly string[]): number =>
+  Math.max(...forms.map((form) => sizeOf(form)));
+
+/** Where UTF-16 keeps the second half of a surrogate pair. */
+const lowSurrogates = { from: 0xdc_00, to: 0xdf_ff };
+
+/** Whether a piece starting at `at` would part a surrogate pair. */
+const partsPair = (text: string, at: number): boolean => {
+  // At the second half of a pair, its own value: a lone low surrogate.
+  const unit = text.codePointAt(at) ?? 0;
+  return unit >= lowSurrogates.from && unit <= lowSurrogates.to;
 };
 
 /**
- * The numbered sources of an answer the person saw streamed as text, sent
- * right after it, labelled as made by AI like the answer; with the link to
- * the chat in Grasp when there are more sources than a card lists.
+ * An emoji placeholder, as the Chat SDK writes and converts one: a copy of
+ * its `EMOJI_PLACEHOLDER_REGEX`, which it doesn't export, flags and all
+ * (channels-cards.test.ts holds it to the SDK's own conversion). Never cut
+ * inside, or both halves show as text.
  */
-export const sourcesCard = ({
+// oxlint-disable-next-line require-unicode-regexp -- the SDK's own flags, exactly
+export const emojiPlaceholders = /\{\{emoji:[a-z0-9_]+\}\}/gi;
+
+/**
+ * For each position of `text`, whether a cut there would part a placeholder
+ * that fits a section in each form it is sent in (`sent`). One too long for
+ * a section is no emoji anyone sees whole: it is cut like any text, so its
+ * pieces are full-size, never a character each.
+ */
+const insidePlaceholders = (
+  text: string,
+  sent: (piece: string) => readonly string[]
+): Uint8Array => {
+  const inside = new Uint8Array(text.length + 1);
+  for (const match of text.matchAll(emojiPlaceholders)) {
+    if (fitsSection(sent(match[0]))) {
+      inside.fill(1, match.index + 1, match.index + match[0].length);
+    }
+  }
+  return inside;
+};
+
+/** A piece of nothing but white space. */
+const onlyWhiteSpace = /^\s+$/u;
+
+/** Where a paragraph ends: a blank line, and any more after it. */
+const paragraphBreaks = /\n[^\S\n]*\n(?:[^\S\n]*\n)*/gu;
+
+/** The largest of ascending `cuts` the piece from its start to fits a section. */
+const largestFitting = (
+  cuts: readonly number[],
+  fits: (cut: number) => boolean
+): number | undefined => {
+  let low = 0;
+  let high = cuts.length - 1;
+  let found: number | undefined;
+  while (low <= high) {
+    const middle = Math.floor((low + high) / 2);
+    const cut = cuts[middle];
+    if (cut !== undefined && fits(cut)) {
+      found = cut;
+      low = middle + 1;
+    } else {
+      high = middle - 1;
+    }
+  }
+  return found;
+};
+
+/**
+ * `text` in pieces that each fit a section, untouched when it fits one,
+ * each an exact slice of it, so the pieces joined are `text`, never one
+ * empty. Cut where a reader pauses: after a paragraph's blank lines, else
+ * between sentences (`Intl.Segmenter`, in the person's language), else
+ * between characters (graphemes), else, inside a character cluster no
+ * section holds, between code points. Each piece reads at most a section's
+ * stretch of the text, so the work grows with the text alone, whatever it
+ * holds. Fenced code is not repaired: Slack, which shows fences, reads them
+ * its own way, and a block longer than a section is cut like any text.
+ * Each piece is measured as `platform` is sent it (`sentOn`).
+ */
+export const piecesOf = (
+  text: string,
+  locale: ChannelLocale,
+  platform: string
+): string[] => {
+  const sent = sentOn(platform);
+  if (fitsSection(sent(text))) {
+    return [text];
+  }
+  const paragraphs = Array.from(
+    text.matchAll(paragraphBreaks),
+    (match) => match.index + match[0].length
+  );
+  const segmenters = (["sentence", "grapheme"] as const).map(
+    (granularity) => new Intl.Segmenter(locale, { granularity })
+  );
+  const parts = insidePlaceholders(text, sent);
+  const whole = (cut: number) => parts[cut] !== 1;
+  const pieces: string[] = [];
+  let start = 0;
+  let paragraph = 0;
+  while (start < text.length) {
+    const from = start;
+    if (
+      text.length - from <= sectionChars &&
+      fitsSection(sent(text.slice(from)))
+    ) {
+      pieces.push(text.slice(from));
+      break;
+    }
+    // The stretch a section could hold, and where each kind of cut falls.
+    const window = text.slice(from, from + sectionChars);
+    const fits = (cut: number) => fitsSection(sent(text.slice(from, cut)));
+    while ((paragraphs[paragraph] ?? Number.POSITIVE_INFINITY) <= from) {
+      paragraph += 1;
+    }
+    const byParagraph: number[] = [];
+    for (let at = paragraph; at < paragraphs.length; at += 1) {
+      const cut = paragraphs[at] ?? Number.POSITIVE_INFINITY;
+      if (cut > from + window.length) {
+        break;
+      }
+      byParagraph.push(cut);
+    }
+    // A stretch that ends before the text does may end inside a sentence
+    // or a character cluster, which then seems to start where it was
+    // parted: the last start found is the one the stretch's end can fake.
+    const truncated = from + window.length < text.length;
+    const bySegment = segmenters.map((segmenter) => {
+      const starts = Array.from(
+        segmenter.segment(window),
+        ({ index }) => from + index
+      );
+      return (truncated ? starts.slice(0, -1) : starts).filter(
+        (cut) => cut > from && whole(cut)
+      );
+    });
+    // Never between the halves of a surrogate pair, which the stretch's
+    // end may part.
+    const byCodePoint: number[] = [];
+    let at = from;
+    for (const point of window) {
+      at += point.length;
+      if (!partsPair(text, at) && whole(at)) {
+        byCodePoint.push(at);
+      }
+    }
+    // A single code point always fits a section: the last resort can't fail.
+    const cut =
+      [byParagraph, ...bySegment, byCodePoint]
+        .map((cuts) => largestFitting(cuts, fits))
+        .find((found) => found !== undefined) ??
+      from + (byCodePoint[0] === undefined ? 1 : byCodePoint[0] - from);
+    pieces.push(text.slice(from, cut));
+    start = cut;
+  }
+  return pieces;
+};
+
+/**
+ * An answer, labelled as made by AI where the platform has a label for it
+ * (Teams), whole and inert on `platform`: as many cards as it takes, each
+ * within what the platform takes in one message, its text cut as the model
+ * wrote it, only where a paragraph or a sentence ends (`piecesOf`), each
+ * piece made inert after the cut (inert.ts), in order, and the thumbs under
+ * the last.
+ */
+export const answerCards = ({
   locale,
-  sources,
-  chatUrl,
+  text,
+  platform,
   rate,
-}: Omit<AnswerCard, "text">): PostableCard => {
-  const listed = listedSources(sources, { left: outsideBytes });
-  const more = sources.length > maxSources;
+}: AnswerCard): PostableCard[] => {
+  const sent = sentOn(platform);
+  const inert = inertOn(platform);
+  const cards: string[][] = [];
+  let room = 0;
+  for (const piece of piecesOf(text, locale, platform)) {
+    // Only white space where a cut fell before blank lines: nothing to show,
+    // and a section of nothing else Slack may refuse.
+    if (onlyWhiteSpace.test(piece)) {
+      continue;
+    }
+    const cost = costOf(sent(piece));
+    const last = cards.at(-1);
+    if (
+      last === undefined ||
+      cost > room ||
+      last.length >= slackBlocksPerMessage - 1
+    ) {
+      cards.push([inert(piece)]);
+      room = outsideBytes - cost;
+      continue;
+    }
+    last.push(inert(piece));
+    room -= cost;
+  }
+  return cards.map((pieces, at) => {
+    const thumbs = at === cards.length - 1 && rate !== undefined;
+    const card = (
+      <Card>
+        {pieces.map((piece, index) => (
+          <CardText key={index}>{piece}</CardText>
+        ))}
+        {thumbs ? <Actions>{RateButtons({ locale, rate })}</Actions> : null}
+      </Card>
+    );
+    return { card: cardOf(card), aiGenerated: true };
+  });
+};
+
+/**
+ * An answer still being written, as its card shows it until the answer
+ * is whole (answer.ts): its words so far, labelled as made by AI, and the
+ * words the card shows of them. Text past what the platform takes is cut.
+ */
+export const draftCard = (
+  text: string
+): { posted: PostableCard; shown: string } => {
+  const { text: shown } = fit(text, Number.POSITIVE_INFINITY, {
+    left: outsideBytes,
+  });
   const card = (
     <Card>
-      {SourcesSection({ locale, listed })}
-      {!more && rate === undefined ? null : (
-        <Actions>
-          {RateButtons({ locale, rate })}
-          {more ? (
-            <LinkButton url={ownLink(chatUrl)}>
-              {say("openInGrasp", locale)}
-            </LinkButton>
-          ) : null}
-        </Actions>
-      )}
+      <CardText>{shown}</CardText>
     </Card>
   );
-  return { card: cardOf(card), aiGenerated: true };
+  return { posted: { card: cardOf(card), aiGenerated: true }, shown };
 };
+
+/** One of Stephen's lines on a card of its own. */
+export const lineCard = (line: string): PostableCard => ({
+  card: cardOf(
+    <Card>
+      <CardText>{line}</CardText>
+    </Card>
+  ),
+});
 
 /** Where a held write is: waiting for the press, or as the press ran it. */
 export type WriteState =
@@ -332,8 +485,6 @@ export interface HeldWritesCard {
   /** In the order they run. */
   writes: readonly HeldWriteView[];
   check?: ReadCheck;
-  /** The held writes in Grasp, where each can be seen and confirmed too. */
-  openUrl: string;
   /** Set once the press has ended; the card is edited in place. */
   outcome?: PressOutcome;
 }
@@ -389,13 +540,12 @@ const checkLine = (check: ReadCheck, locale: ChannelLocale, room: Room) =>
  * Cancel carry the writes' ids and input hashes, so a press confirms
  * exactly what the card showed. They are on the card only while every
  * write is held and every value is on it whole: otherwise the card says
- * so and links to Grasp, where the person sees all of it.
+ * it can't be confirmed, and to ask for fewer changes at a time.
  */
 export const heldWritesCard = ({
   locale,
   writes,
   check,
-  openUrl,
   outcome,
 }: HeldWritesCard): PostableCard => {
   if (writes.length === 0) {
@@ -453,21 +603,16 @@ export const heldWritesCard = ({
       {outcome === undefined ? null : (
         <CardText style="bold">{say(outcome, locale)}</CardText>
       )}
-      <Actions>
-        {pressable ? (
+      {pressable ? (
+        <Actions>
           <Button id={confirmAction} style="primary" value={press}>
             {say("confirm", locale)}
           </Button>
-        ) : null}
-        {pressable ? (
           <Button id={cancelAction} value={press}>
             {say("cancel", locale)}
           </Button>
-        ) : null}
-        <LinkButton url={ownLink(openUrl)}>
-          {say("openInGrasp", locale)}
-        </LinkButton>
-      </Actions>
+        </Actions>
+      ) : null}
     </Card>
   );
   return { card: cardOf(card) };
@@ -537,14 +682,18 @@ export interface StartOfferCard {
   /** Its id in `chat_workflow_offers`, which the press names. */
   offerId: string;
   workflow: string;
-  /** The values it starts with, each whole (workflow-offers.ts). */
+  /** The values it starts with, as the platform gets them (workflow-offers.ts). */
   values: readonly { label: string; value: string }[];
 }
 
 /**
  * A workflow offered on a card: its name, each value it would start with,
  * and Start, whose press names only the offer, so it starts exactly what
- * the card showed, and only for the person it was offered to.
+ * the card showed, and only for the person it was offered to. Start is on
+ * the card only while its name and every value are on it whole, as shown
+ * (`workflow` and `values` as the platform gets them, made inert, which
+ * can make them longer): otherwise the card says so, and nothing starts
+ * from it.
  */
 export const startOfferCard = ({
   locale,
@@ -553,14 +702,17 @@ export const startOfferCard = ({
   values,
 }: StartOfferCard): PostableCard => {
   const room: Room = { left: outsideBytes };
-  const name = fit(workflow, maxTitleChars, room).text;
-  const shown = values.map((each) => ({
-    label: fit(each.label, maxLabelChars, room).text,
-    value: fit(each.value, Number.POSITIVE_INFINITY, room).text,
-  }));
+  const name = fit(workflow, maxTitleChars, room);
+  let { whole } = name;
+  const shown = values.map((each) => {
+    const label = fit(each.label, maxLabelChars, room);
+    const value = fit(each.value, Number.POSITIVE_INFINITY, room);
+    whole &&= label.whole && value.whole;
+    return { label: label.text, value: value.text };
+  });
   const card = (
     <Card>
-      <CardText>{say("startOffer", locale, { workflow: name })}</CardText>
+      <CardText>{say("startOffer", locale, { workflow: name.text })}</CardText>
       {shown.length === 0 ? null : (
         <Fields>
           {shown.map(({ label, value }, at) => (
@@ -568,11 +720,15 @@ export const startOfferCard = ({
           ))}
         </Fields>
       )}
-      <Actions>
-        <Button id={startAction} style="primary" value={offerId}>
-          {say("startButton", locale)}
-        </Button>
-      </Actions>
+      {whole ? (
+        <Actions>
+          <Button id={startAction} style="primary" value={offerId}>
+            {say("startButton", locale)}
+          </Button>
+        </Actions>
+      ) : (
+        <CardText>{say("startTooLong", locale)}</CardText>
+      )}
     </Card>
   );
   return { card: cardOf(card), aiGenerated: true };

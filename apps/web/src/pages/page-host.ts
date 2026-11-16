@@ -153,6 +153,11 @@ export type FailureReason =
   | "not-sealed"
   /** The version running was revoked, and no longer runs. */
   | "version-revoked"
+  /**
+   * The version running was sealed in a release format this platform no
+   * longer reads, before a Grasp update: a new version replaces it.
+   */
+  | "outdated"
   /** The browser doesn't enforce what keeps a page in its frame. */
   | "unsupported"
   | "unknown";
@@ -183,6 +188,7 @@ const failures: Readonly<Record<string, FailureReason>> = {
   "version.manifest_corrupt": "corrupt",
   "version.not_sealed": "not-sealed",
   "version.revoked": "version-revoked",
+  "version.format_unsupported": "outdated",
 };
 
 /** Why opening a page failed, as the page says it. */
@@ -1025,7 +1031,7 @@ export const previewTarget = (
         follow?.problem();
       }
       await on(link, async ({ apps }) => {
-        await apps.drafts.previewReport(app, at, location.current(), problem);
+        await apps.preview.report(app, at, location.current(), problem);
       });
     },
     ...(follow === undefined ? {} : { followUpdates: follow.followUpdates }),
@@ -1519,7 +1525,7 @@ export interface DraftRevisions {
 
 /**
  * Runs the pages of the draft of `app` in `frame`, as a preview
- * (`runFrame`), at `location`: of the draft's undo point `point`, or of
+ * (`runFrame`), at `location`: of the draft's checkpoint `point`, or of
  * the App's version `version`, read-only. The draft as it is now takes each newer revision `revisions` names in the frame it has
  * open (preview-updates.ts); one that can't come in that way starts the
  * frame afresh, as a new version of an App does (`updated`).
@@ -1556,7 +1562,7 @@ export const runPreview = (
     frame,
     {
       open: async (session) =>
-        await session.apps.drafts.preview(app, point, version),
+        await session.apps.preview.open(app, point, version),
       openMs: pageLimits.previewOpenMs,
       // A connection of its own: core keeps a preview's callbacks (its
       // server calls') per connection, with no way of the frame's own to
@@ -1585,7 +1591,7 @@ export const runPreview = (
               await on(
                 link,
                 async ({ apps }) =>
-                  await apps.drafts.previewUpdate(
+                  await apps.preview.update(
                     bundle.app,
                     revision,
                     appVersion === undefined ? {} : { appVersion }

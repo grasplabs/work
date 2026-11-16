@@ -49,6 +49,7 @@ import { mockIdp } from "./idp.ts";
 import { configuredLimits } from "./quota-limits.ts";
 import { outcome, signedInApi, unique } from "./sign-in.ts";
 import { connectDb } from "./test-env.ts";
+import { publishOverRpc } from "./workflow-publishing.ts";
 
 // Independent workflows' email triggers (workflows/inbound-email.ts), from
 // their threat model: mail reaches a trigger only through the signed
@@ -766,27 +767,24 @@ describe("independent workflows' email triggers", { timeout: 120_000 }, () => {
     }).toStrictEqual({ full: true, runsWhileFull: 0, freed: 202, runs: 1 });
   });
 
-  it("try a message again, never refuse it for good, when its trigger moves to another version as it starts, then start it at that version", async () => {
+  it("start a message on the version published as it starts, once, however often it comes", async () => {
     const { builder, workflow, trigger, address } = await emailTrigger();
-    await builder.api.workflowResources.publish(workflow, {
-      definition: definitionOf("args.subject.trim()"),
-      basedOn: 1,
-    });
     const message = invoiceMail({
       to: address,
-      messageId: `moved-${unique()}@acme.test`,
+      messageId: `published-${unique()}@acme.test`,
     });
-    // Moved to version 2 after core read the trigger, just as the start
-    // checks what the trigger may do.
+    // Version 2 published after core read the live version, just as the
+    // start checks what the trigger may do.
     const moving = racedAt(/trigger_resources AS live/u, async () => {
-      await builder.api.workflowResources.triggers.setVersion(trigger.id, 2);
+      await publishOverRpc(
+        builder.api,
+        workflow,
+        definitionOf("args.subject.trim()")
+      );
     });
-    const failed = vi.spyOn(console, "error").mockReturnValue();
-
     const raced = await outcome(
       deliver(address, message, { changes: { DB: moving } })
     );
-    failed.mockRestore();
     const again = await deliver(address, message);
     const versions = await env.DB.prepare(
       "SELECT workflow_resource_version AS version FROM workflow_start_receipts WHERE invoker_type = 'trigger' AND invoker_id = ?"
@@ -800,7 +798,8 @@ describe("independent workflows' email triggers", { timeout: 120_000 }, () => {
       versions: versions.results.map(({ version }) => version),
       refused: await refusalsOf(trigger.id),
     }).toStrictEqual({
-      raced: false,
+      // The live version as the start is admitted: the one published.
+      raced: true,
       again: undefined,
       versions: [2],
       refused: [],
@@ -901,10 +900,7 @@ const publishedWorkflow = async (builder: Person): Promise<string> => {
   const { id } = await builder.api.workflowResources.create(
     `named-${unique()}`
   );
-  await builder.api.workflowResources.publish(id, {
-    definition: definitionOf(),
-    basedOn: null,
-  });
+  await publishOverRpc(builder.api, id, definitionOf());
   return id;
 };
 
@@ -917,7 +913,6 @@ const createEmailTrigger = async (
   await builder.api.workflowResources.triggers.create({
     kind: "email",
     workflowId: workflow,
-    version: 1,
     config: {
       input: mapping,
       ...(address === undefined ? {} : { address }),
@@ -1026,7 +1021,6 @@ describe(
             {
               kind: "email",
               workflowId: workflow,
-              version: 1,
               config: { input: mapping, address: name },
             }
           )
@@ -1249,7 +1243,7 @@ describe(
 
       const refused = await outcome(
         builder.api.workflowResources.start(workflow, {
-          version: 1,
+          expected: 1,
           args: {
             subject: "Invoice",
             from: "ben@acme.test",

@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
 
-import type { DraftWriter } from "../src/app-drafts.ts";
 import { memberOf } from "../src/auth/identity.ts";
+import type { DraftWriter } from "../src/drafts.ts";
 
 /**
  * The agent of `person`'s chat `chatId` writing a draft for them, in turn

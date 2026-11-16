@@ -29,8 +29,6 @@ import type { Answer, Player } from "./person.ts";
 
 /** An interview that was played: how it went, and which facts each answer held, in the order of the person's lines. */
 export interface Played {
-  /** The key of the device it was played on: the link opens only there. */
-  key: string;
   answers: number;
   minutes: number;
   /** For each line of the person, the ids of their facts that were in it. */
@@ -150,39 +148,25 @@ export interface PlayOptions {
    * have taken two people, not the time a model took.
    */
   clock?: "talk";
-  /** The device's key, when the link was opened on this device before. */
-  key?: string;
   /** What happens to them on the way, by minute (events.ts). */
   events?: readonly Planned[];
 }
 
-/** Opens the link on this device: its key, and the version what was said is kept as. */
-const opened = async (
-  link: Link,
-  key: string | undefined
-): Promise<{ key: string; version: number }> => {
-  const session = await link.open(key);
-  if (session.state === "elsewhere") {
-    throw new Error(
-      "This interview is open on another device: give it a new start first."
-    );
-  }
-  const issued = session.key ?? key;
-  if (issued === undefined) {
-    throw new Error("The link gave this device no key.");
-  }
+/** Opens the link: the version what was said is kept as. */
+const opened = async (link: Link): Promise<{ version: number }> => {
+  const session = await link.open();
   // They read what it is for and agree to take part, as their page asks; agreeing again changes nothing.
-  await link.participate(issued);
-  return { key: issued, version: session.version };
+  await link.participate();
+  return { version: session.version };
 };
 
 /** Plays one interview on `link`, start to end. */
 export const playInterview = async (
   link: Link,
   player: Player,
-  { locale, interviewer, clock, key: knownKey, events = [] }: PlayOptions
+  { locale, interviewer, clock, events = [] }: PlayOptions
 ): Promise<Played> => {
-  const { key, version: opening } = await opened(link, knownKey);
+  const { version: opening } = await opened(link);
   let version = opening;
   const startedAt = Date.now();
   let progress: InterviewProgress = {
@@ -200,7 +184,6 @@ export const playInterview = async (
     ...(interviewer === "claire" ? { interviewer } : {}),
   };
   const played: Played = {
-    key,
     answers: 0,
     minutes: 0,
     said: [],
@@ -231,33 +214,30 @@ export const playInterview = async (
     happened.push({ kind: event.kind, answer: played.answers, ...more });
   };
   const save = async () => {
-    version = await link.save(key, version, progress);
+    version = await link.save(version, progress);
   };
   const turn = async (
     event: InterviewEvent,
     reading?: string[]
   ): Promise<StephenTurn> =>
-    await link.turn(
-      {
-        event,
-        locale,
-        interviewer: interviewer ?? "stephen",
-        lines: progress.lines.map(({ from, text, typed, file }) => ({
-          from,
-          text,
-          ...(typed === undefined ? {} : { typed }),
-          ...(file === undefined ? {} : { file }),
-        })),
-        facts: progress.facts
-          .filter(({ out }) => out !== true)
-          .map(({ id, tag, text }) => ({ id, tag, text })),
-        phase: progress.phase,
-        minutes: minutes(),
-        ...(reading === undefined ? {} : { reading }),
-        adding: false,
-      },
-      key
-    );
+    await link.turn({
+      event,
+      locale,
+      interviewer: interviewer ?? "stephen",
+      lines: progress.lines.map(({ from, text, typed, file }) => ({
+        from,
+        text,
+        ...(typed === undefined ? {} : { typed }),
+        ...(file === undefined ? {} : { file }),
+      })),
+      facts: progress.facts
+        .filter(({ out }) => out !== true)
+        .map(({ id, tag, text }) => ({ id, tag, text })),
+      phase: progress.phase,
+      minutes: minutes(),
+      ...(reading === undefined ? {} : { reading }),
+      adding: false,
+    });
   const says = (
     text: string,
     facts: string[],
@@ -320,7 +300,7 @@ export const playInterview = async (
       return false;
     }
     await save();
-    ({ version } = await opened(link, key));
+    ({ version } = await opened(link));
     away += awayCountsMost;
     progress = taken(progress, await turn("resume"));
     await save();
@@ -493,7 +473,6 @@ export const playInterview = async (
   const standing = progress.facts.filter(({ out }) => out !== true);
   if (standing.length > 0) {
     await link.approve(
-      key,
       await Promise.all(
         standing.map(async (fact) => ({
           id: fact.id,

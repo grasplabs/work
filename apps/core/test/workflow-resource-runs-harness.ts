@@ -13,10 +13,7 @@ import { z } from "zod";
 
 import type { Acting } from "../src/auth/identity.ts";
 import { generatedModule } from "../src/workflow-builds.ts";
-import {
-  createWorkflowResource,
-  publishWorkflowVersion,
-} from "../src/workflow-resources.ts";
+import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
 import { runEngine } from "../src/workflows/engine.ts";
 import { admitAttempt } from "../src/workflows/quotas.ts";
@@ -31,6 +28,7 @@ import { runObject, whileEngineRefuses } from "./runs.ts";
 import { putArtifact } from "./sealed-apps.ts";
 import { moduleOf } from "./sealed-run-harness.ts";
 import { outcome, unique } from "./sign-in.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
 
 /**
  * The harness of runs of JSON workflows, shared by the
@@ -104,10 +102,7 @@ export const failingDefinition = definitionOf([], {
 /** A workflow of `by`'s, published once from `definition`. */
 export const published = async (by: Acting, definition: string) => {
   const workflow = await createWorkflowResource(env, by, `run-${unique()}`);
-  await publishWorkflowVersion(env, by, workflow.id, {
-    definition,
-    basedOn: null,
-  });
+  await publishDefinition(env, by, workflow.id, definition);
   return workflow;
 };
 
@@ -171,7 +166,8 @@ export const forgedModule = async (id: string, code: string): Promise<void> => {
       "UPDATE workflow_resource_versions SET manifest = ?, manifest_hash = ? WHERE workflow_resource_id = ? AND version = 1"
     ).bind(text, await sha256Hex(text), id),
     env.DB.prepare(
-      "CREATE TRIGGER workflow_resource_versions_immutable_update BEFORE UPDATE ON workflow_resource_versions BEGIN SELECT RAISE(ABORT, 'workflow_resource_versions are immutable'); END"
+      // As migration 0250 left it: only a version's label changes.
+      "CREATE TRIGGER workflow_resource_versions_immutable_update BEFORE UPDATE OF workflow_resource_id, version, definition_version, definition, definition_json_hash, profile_version, evaluator_hash, contract, contract_hash, manifest, manifest_hash, author_id, created_at, seal_id ON workflow_resource_versions BEGIN SELECT RAISE(ABORT, 'workflow_resource_versions are immutable'); END"
     ),
   ]);
 };
@@ -183,7 +179,7 @@ export const start = async (
   key = unique()
 ): Promise<WorkflowStart> =>
   await startWorkflow(env, { type: "person", person: by }, id, {
-    version: 1,
+    expected: 1,
     args: { who: "Ada" },
     key,
   });

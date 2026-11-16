@@ -15,9 +15,15 @@ import type {
   EntityId,
   Memory,
   MemoryChangeOutcome,
+  MemoryId,
   PersonReader,
   Reader,
+  RecallRequest,
+  RetiredMemory,
+  SourceVersionRef,
 } from "./contract.ts";
+import { byWordsFound } from "./order.ts";
+import type { MemoryOrder } from "./order.ts";
 import { readableSql } from "./reader-sets.ts";
 import { termsOf } from "./words.ts";
 
@@ -25,11 +31,15 @@ import { termsOf } from "./words.ts";
 // about an entity, each of one lineage (the source it rests on, or its
 // writer), never written over. What is current is read, never stored: a
 // memory is ended by a newer one of its lineage about the same entity and
-// one-value attribute (or the same value, for one of many), counted only
-// when the reader may read the newer one, so a reader is told what a
+// one-value attribute (or the same value, for one of many), or, filed
+// under no attribute, by a newer one of its lineage that restates it
+// (remember.ts `valueKeyFor`), counted only when the reader may read the
+// newer one, so a reader is told what a
 // store without the memories hidden from them would tell; or by its
-// writer retiring it, the one change ever written to a memory. A
-// time-bound one stops being current at its end (`validUntil`).
+// writer retiring it, the one change ever written to a memory; or, for a
+// memory resting on a version before its source's current one, by that
+// version's text no longer holding its quote (quotes.ts). A time-bound
+// one stops being current at its end (`validUntil`).
 //
 // Every statement here filters by the reader inside itself, before
 // anything is ordered, counted or capped: a memory's own set of readers,
@@ -75,15 +85,66 @@ const readableKeysSql = `SELECT key FROM reader_sets
     WHERE id IN (SELECT reader_set FROM readable)`;
 
 /**
+ * Whether the row `erasure` of `erasures` is an erasure of the writer
+ * whose lineage's SHA-256 is `subject` made after the moment `at` (SQL
+ * expressions): one seek of `erasures_writer_idx`, however often the
+ * writer was erased. The one rule of what a writer's erasure covers.
+ */
+export const writerErasedAfterSql = (
+  erasure: string,
+  subject: string,
+  at: string
+): string =>
+  `(${erasure}.kind = 'writer' AND ${erasure}.subject = ${subject}
+    AND ${erasure}.erased_at > ${at})`;
+
+/** Whether the row `erasure` of `erasures` covers the memory `memory` (`writerErasedAfterSql`). */
+export const erasedBySql = (memory: string, erasure: string): string =>
+  writerErasedAfterSql(
+    erasure,
+    `${memory}.writer_subject`,
+    `${memory}.learned_at`
+  );
+
+/**
+ * Whether no erasure of the memory `alias`'s writer came after it was
+ * learned (erasure.ts `eraseWriter`): a writer's erasure hides, from the
+ * statement that records it on, every memory of that writer learned
+ * before it, until the tick deletes them, also those an older copy of the
+ * store comes back with (a restore of an export writes none: restore.ts
+ * `passesOverMemory`); what the writer adds afterwards is learned after it.
+ * Asked of every memory a statement may read, count, link or export.
+ */
+export const unerasedSql = (alias: string): string => `(
+  ${alias}.writer_subject IS NULL OR NOT EXISTS (
+    SELECT 1 FROM erasures AS gone WHERE ${erasedBySql(alias, "gone")}
+  )
+)`;
+
+/**
  * The conditions under which the memory `alias` is visible to the reader:
  * in its set of readers, and, resting on a version, in that version's and
- * its source's current version's, that version not hidden by an erasure.
+ * its source's current version's, that version not hidden by an erasure;
+ * and no erasure of its writer since it was learned (`unerasedSql`).
  */
 export const visibleSql = (alias: string): string => `(
   ${alias}.readers IN (${readableKeysSql})
   AND (${alias}.source IS NULL
     OR ${versionVisibleSql(`${alias}.source`, `${alias}.version`)})
+  AND ${unerasedSql(alias)}
 )`;
+
+/**
+ * Whether the memory `alias` was retired by its writer by the moment `at`
+ * (an expression, milliseconds). A retired memory stays history, read
+ * where history is asked for (`readMemories` with `history`), and gives
+ * nothing to any other read: no name, no match of a name or identifier
+ * asked, no mention that makes its entity seen (entities.ts), so nothing
+ * those reads answer rests on a memory every pin check withholds
+ * (`readableMemories`).
+ */
+export const retiredSql = (alias: string, at: string): string =>
+  `(${alias}.retired_at IS NOT NULL AND ${alias}.retired_at <= ${at})`;
 
 /**
  * The moment the dates a fact is true are judged at: `?20`, a read as of a
@@ -98,37 +159,77 @@ const startSql = (alias: string): string =>
   `max(${alias}.learned_at, coalesce(${alias}.valid_from, ${alias}.learned_at))`;
 
 /**
+ * When the memory `alias` went out by `at` (quotes.ts): the add of its
+ * source's current version, when that version is the one its source's
+ * memories were judged against and the memory is out. One row or none:
+ * a seek of `memory_outs` that finds nothing for a memory never put out.
+ */
+const outSql = (alias: string, at: string): string => `
+  SELECT current.added_at AS at FROM memory_outs AS out
+  -- The out row first, by its key: one row read (workerd counts a seek
+  -- that finds nothing as one) for a memory never out.
+  CROSS JOIN current_versions AS pointer
+    ON pointer.source = ${alias}.source AND pointer.judged_row = pointer.version_row
+  CROSS JOIN source_versions AS current ON current.row = pointer.version_row
+  WHERE out.memory = ${alias}.row AND current.added_at <= ${at}`;
+
+/**
  * The newer memories of `alias`'s lineage that end it, by the order of
  * its lineage (a later version's, or a later row of the same), about the
  * same entity and attribute and, for an attribute of many values, the
- * same value, each learned by `learned` and started by `valid` (its world
- * start, or when it was learned), and not retired by `learned`: a retired memory ends nothing, so forgetting a newer
- * value makes the one before current again. None for a memory with no
- * attribute. `visible` keeps to those the reader may read.
+ * same value; for a memory filed under no attribute, a restatement of it
+ * (remember.ts `valueKeyFor`): each learned by `learned` and started by
+ * `valid` (its world start, or when it was learned), and neither retired
+ * nor out by `learned`: a retired memory ends nothing, so forgetting a
+ * newer value makes the one before current again; nor does one whose
+ * quote left its source (quotes.ts), so a source that says "Anna", then
+ * "Bob", then "Anna" again, with no memory drawn from the last, has Anna
+ * current again. `visible` keeps to those the reader may read, so a
+ * restatement merges what one says twice only for a reader of the newer:
+ * nobody reads a memory they couldn't before.
  */
 const newerSql = (
   alias: string,
   learned: string,
   valid: string,
   visible: boolean
-): string => `
-  SELECT ${startSql("newer")} AS at FROM memories AS newer
-  WHERE newer.entity = ${alias}.entity
-    AND newer.attribute = ${alias}.attribute
-    AND newer.lineage = ${alias}.lineage
-    AND (${alias}.one_value = 1 OR newer.value_key = ${alias}.value_key)
+): string => {
+  // Two seeks, one for each kind of attribute, never an OR between them:
+  // an OR kept `value_key` out of the index (`memories_lineage_value_idx`),
+  // so a memory of many values read every memory of its lineage. The
+  // second compares the attribute with IS, which the index takes as it
+  // takes =, so one filed under none (one_value 0, attribute null) seeks
+  // its restatements the same way.
+  const rest = `
     AND (newer.lineage_order > ${alias}.lineage_order
       OR (newer.lineage_order = ${alias}.lineage_order AND newer.row > ${alias}.row))
     AND newer.learned_at <= ${learned}
     AND ${startSql("newer")} <= ${valid}
     AND (newer.retired_at IS NULL OR newer.retired_at > ${learned})
+    AND NOT EXISTS (${outSql("newer", learned)})
     ${visible ? `AND ${visibleSql("newer")}` : ""}`;
+  return `
+  SELECT ${startSql("newer")} AS at FROM memories AS newer
+  WHERE ${alias}.one_value = 1
+    AND newer.entity = ${alias}.entity
+    AND newer.attribute = ${alias}.attribute
+    AND newer.lineage = ${alias}.lineage${rest}
+  UNION ALL
+  SELECT ${startSql("newer")} AS at FROM memories AS newer
+  WHERE ${alias}.one_value = 0
+    AND newer.entity = ${alias}.entity
+    AND newer.attribute IS ${alias}.attribute
+    AND newer.lineage = ${alias}.lineage
+    AND newer.value_key = ${alias}.value_key${rest}`;
+};
 
 /**
  * The later versions of `alias`'s source marked fully extracted by `?4`,
  * for readers of both the add that marked it and that version: each ends
  * every memory of an earlier version of it, whatever its attribute
- * (contract.ts `extracted`).
+ * (contract.ts `extracted`); a thread's never do, each version being one
+ * message (`NewSource.thread`). The thread is asked of a mark found, so a
+ * memory with none reads nothing more.
  */
 const extractedSql = (alias: string): string => `
   SELECT extracted.at AS at FROM memory_extractions AS extracted
@@ -136,19 +237,26 @@ const extractedSql = (alias: string): string => `
     AND extracted.version > ${alias}.lineage_order
     AND extracted.at <= ?4
     AND extracted.readers IN (${readableKeysSql})
-    AND ${versionVisibleSql("extracted.source", "extracted.version")}`;
+    AND ${versionVisibleSql("extracted.source", "extracted.version")}
+    AND NOT EXISTS (
+      SELECT 1 FROM source_subjects AS kept
+      WHERE kept.source = extracted.source AND kept.thread = 1
+    )`;
 
 /**
  * When the reader saw `m` stop being believed, as of `?4`: retired then,
  * or ended by a newer memory of its lineage they may read, from its
- * start, or by a later version of its source marked fully extracted;
- * never before it was learned itself (an older version's memory that came
- * late is history from the start). Null while believed.
+ * start, or by a later version of its source marked fully extracted, or
+ * out (`outSql`: its source's current version, which the reader may read,
+ * no longer holds its quote); never before it was learned itself (an
+ * older version's memory that came late is history from the start). Null
+ * while believed.
  */
 export const endedAtSql = `max(m.learned_at, (SELECT min(at) FROM (
   SELECT m.retired_at AS at WHERE m.retired_at IS NOT NULL AND m.retired_at <= ?4
   UNION ALL${newerSql("m", "?4", validSql, true)}
   UNION ALL${extractedSql("m")}
+  UNION ALL${outSql("m", "?4")}
 )))`;
 
 /** A current rival of `m` the reader may read: judged current, same fact, another value. */
@@ -160,13 +268,16 @@ const rivalSql = `
       AND rival.attribute = m.attribute AND rival.value_key IS NOT m.value_key`;
 
 /**
- * The latest confirmation of `m` that counts for the reader, as JSON, or
- * null: one made over memories they may all read, and over every current
- * rival they may read, so one made without seeing a rival never ranks
- * first for a reader who sees it.
+ * The latest confirmation of `m` that counts for the reader, as JSON (its
+ * row too, for what it rests on), or null: one made over memories they
+ * may all read, and over every current rival they may read, so one made
+ * without seeing a rival never ranks first for a reader who sees it. A
+ * memory it was made over that its writer retired since still decides
+ * this by whether the reader may read it: a reader who never could learns
+ * nothing from its retirement.
  */
 const confirmationSql = `(
-  SELECT json_object('by', confirmed.person, 'at', confirmed.at)
+  SELECT json_object('by', confirmed.person, 'at', confirmed.at, 'row', confirmed.row)
   FROM memory_confirmations AS confirmed
   WHERE confirmed.memory = m.row AND confirmed.at <= ?4
     AND NOT EXISTS (
@@ -184,7 +295,7 @@ const confirmationSql = `(
 )`;
 
 /** A memory as the statements below return it. */
-interface MemoryRow extends Record<string, SqlStorageValue> {
+export interface MemoryRow extends Record<string, SqlStorageValue> {
   row: number;
   entity_row: number;
   id: string;
@@ -211,7 +322,7 @@ interface MemoryRow extends Record<string, SqlStorageValue> {
 }
 
 /** What a statement over memories is made of (`memoriesSql`). */
-interface MemoriesQuery {
+export interface MemoriesQuery {
   /** Common tables the others use, after `readable`. */
   prelude?: string;
   /** The memories asked about, as rows (`row`). */
@@ -242,7 +353,7 @@ interface MemoriesQuery {
  * one-value attribute) are judged with them, and returned only if asked
  * about too.
  */
-const memoriesSql = ({
+export const memoriesSql = ({
   prelude,
   base,
   filter,
@@ -258,15 +369,15 @@ candidates AS MATERIALIZED (
   SELECT row FROM base
   UNION
   SELECT partner.row FROM base
-  JOIN memories AS asked ON asked.row = base.row AND asked.one_value = 1
-  JOIN memories AS partner
+  CROSS JOIN memories AS asked ON asked.row = base.row AND asked.one_value = 1
+  CROSS JOIN memories AS partner
     ON partner.attribute = asked.attribute
     AND partner.entity = asked.entity
 ),
 seen AS MATERIALIZED (
   SELECT m.row AS row, ${endedAtSql} AS ended_at
   FROM candidates
-  JOIN memories AS m ON m.row = candidates.row
+  CROSS JOIN memories AS m ON m.row = candidates.row
   WHERE m.learned_at <= ?4 AND ${visibleSql("m")}
 ),
 judged AS MATERIALIZED (
@@ -274,7 +385,7 @@ judged AS MATERIALIZED (
     (seen.ended_at IS NULL
       AND (m.valid_from IS NULL OR m.valid_from <= ${validSql})
       AND (m.valid_until IS NULL OR m.valid_until > ${validSql})) AS is_current
-  FROM seen JOIN memories AS m ON m.row = seen.row
+  FROM seen CROSS JOIN memories AS m ON m.row = seen.row
 )`;
   const select = `
 SELECT m.row AS row, about.row AS entity_row, m.id AS id, about.id AS about,
@@ -305,7 +416,7 @@ const latestStamp = (sql: SqlStorage): number =>
     .at(0)?.latest ?? 0;
 
 /** The stamp the next write gets (`stampWrite`), not yet kept. */
-const nextStamp = (sql: SqlStorage): number =>
+export const nextStamp = (sql: SqlStorage): number =>
   Math.max(Date.now(), latestStamp(sql)) + 1;
 
 /** `stamp` kept as the latest a write was given. */
@@ -332,6 +443,18 @@ export const stampWrite = (sql: SqlStorage): number => {
 };
 
 /**
+ * Keeps `at` as the latest stamp if it is later, in the caller's
+ * transaction: a writer's erasure (erasure.ts), so every write after it,
+ * also after a replay of it into an older copy of the store, is stamped
+ * after it. Never lowers it.
+ */
+export const raiseStamp = (sql: SqlStorage, at: number): void => {
+  if (at > latestStamp(sql)) {
+    keepStamp(sql, at);
+  }
+};
+
+/**
  * The moment a read of now is given: now, or the latest stamp if later,
  * so it sees every write made before it; what its cursor carries. If the
  * clock goes back, reads keep to the latest stamp until it catches up:
@@ -349,11 +472,15 @@ export const lineageOfWriter = (writer: string): string => `writer:${writer}`;
 export const lineageOfSource = (source: string): string => `source:${source}`;
 
 /** A date of a memory, from its milliseconds. */
-const dateOf = (at: number | null): Date | null =>
-  at === null ? null : new Date(at);
+export const dateOf = (at: number | null | undefined): Date | null =>
+  at === null || at === undefined ? null : new Date(at);
 
 /** A confirmation as `confirmationSql` builds it. */
-const confirmationSchema = z.strictObject({ by: z.string(), at: z.number() });
+const confirmationSchema = z.strictObject({
+  by: z.string(),
+  at: z.number(),
+  row: z.number(),
+});
 
 /** A memory's type as stored. */
 const memoryTypeSchema = z.enum(memoryTypes);
@@ -361,7 +488,7 @@ const memoryTypeSchema = z.enum(memoryTypes);
 /** A confirmation as `confirmationSql` gives it, or none. */
 const confirmationOf = (
   json: string | null
-): { by: string; at: number } | null => {
+): { by: string; at: number; row: number } | null => {
   if (json === null) {
     return null;
   }
@@ -369,7 +496,7 @@ const confirmationOf = (
 };
 
 /** `row` as the contract's `Memory`. */
-const memoryOf = (row: MemoryRow): Memory => {
+export const memoryOf = (row: MemoryRow): Memory => {
   const confirmed = confirmationOf(row.confirmation);
   return {
     id: row.id,
@@ -432,7 +559,7 @@ const memoryRowsAt = (
     .toArray();
 
 /** Runs a statement over memories with its bindings, as rows. */
-const memoryRows = (
+export const memoryRows = (
   sql: SqlStorage,
   statement: string,
   first: SqlStorageValue,
@@ -484,6 +611,17 @@ const aboutSql = memoriesSql({
   order: aboutOrder,
 });
 
+/**
+ * `?1` the entity's row, `?6` the attribute: its current memories the
+ * reader may read.
+ */
+const currentOfAttributeSql = memoriesSql({
+  base: `SELECT row FROM memories
+    WHERE entity = ?1 AND attribute = ?6`,
+  filter: "judged.is_current = 1",
+  order: "m.row",
+});
+
 /** What reads of memories are asked with. */
 export interface MemoriesAsked {
   entity: EntityId;
@@ -504,7 +642,7 @@ export interface MemoriesAsked {
  * `readMemories`): one more is read than asked, to tell whether more
  * follow.
  */
-export const readMemories = (
+const readMemoryRows = (
   sql: SqlStorage,
   {
     entity,
@@ -517,10 +655,24 @@ export const readMemories = (
     after,
     limit,
   }: MemoriesAsked
-): MemoriesRead => {
+): {
+  read: MemoriesRead;
+  rows: MemoryRow[];
+  limit: number;
+  reader: Reader;
+  at: number;
+  learned: number;
+} => {
   const found = entityRowOf(sql, entity);
   if (found === undefined) {
-    return { memories: [], more: false };
+    return {
+      read: { memories: [], more: false },
+      rows: [],
+      limit,
+      reader,
+      at,
+      learned,
+    };
   }
   const rows = memoryRowsAt(
     sql,
@@ -541,20 +693,150 @@ export const readMemories = (
   );
   const memories = rows.slice(0, limit).map(memoryOf);
   const last = memories.at(-1);
-  if (rows.length <= limit || last === undefined) {
-    return { memories, more: false };
-  }
+  const read: MemoriesRead =
+    rows.length <= limit || last === undefined
+      ? { memories, more: false }
+      : {
+          memories,
+          more: true,
+          next: {
+            at: new Date(cursorAt),
+            learned: new Date(learned),
+            attribute: last.attribute,
+            confirmed: last.confirmed !== null,
+            learnedAt: last.learnedAt,
+            memory: last.id,
+          },
+        };
+  return { read, rows, limit, reader, at, learned };
+};
+
+/** `readMemories`, as the contract answers it. */
+export const readMemories = (
+  sql: SqlStorage,
+  asked: MemoriesAsked
+): MemoriesRead => readMemoryRows(sql, asked).read;
+
+/**
+ * A memory an answer rests on, as a statement finds it: the version of a
+ * source it rests on, or, in a writer's word (`source` null), itself.
+ */
+export interface HeldMemory {
+  source: string | null;
+  version: number | null;
+  memory: string;
+}
+
+/**
+ * What an answer rests on (contract.ts `Card.restsOn`, `restsOnWords`):
+ * of `held`, each version of a source once, and each memory in a writer's
+ * word once, by id.
+ */
+export const restingOn = (
+  held: readonly HeldMemory[]
+): { restsOn: SourceVersionRef[]; restsOnWords: MemoryId[] } => ({
+  restsOn: [
+    ...new Map(
+      held.flatMap(({ source, version }) =>
+        source === null || version === null
+          ? []
+          : [[JSON.stringify([source, version]), { source, version }] as const]
+      )
+    ).values(),
+  ],
+  restsOnWords: [
+    ...new Set(
+      held.flatMap(({ source, memory }) => (source === null ? [memory] : []))
+    ),
+  ],
+});
+
+/** `row`, as what an answer rests on. */
+const heldOfRow = ({ source, version, id }: MemoryRow): HeldMemory => ({
+  source,
+  version,
+  memory: id,
+});
+
+/**
+ * `?1` the confirmations' rows (JSON), `?2` the moment read at: the
+ * memories each was made over, but those their writer retired by then,
+ * which an answer rests on no more (a forgotten memory gives nothing to a
+ * read but history, `retiredSql`). Whether the confirmation counts still
+ * turns on whether the reader may read each (`confirmationSql`), so a
+ * reader who loses access to a retired one later keeps an earlier read
+ * that says it was confirmed (Known on #2261).
+ */
+const overruledSql = `
+SELECT DISTINCT m.source AS source, m.version AS version, m.id AS memory
+FROM json_each(?1) AS asked
+CROSS JOIN memory_confirmed_over AS over ON over.confirmation = asked.value
+CROSS JOIN memories AS m ON m.row = over.memory
+WHERE NOT ${retiredSql("m", "?2")}`;
+
+/**
+ * `readMemories`, with every memory what the page says rests on
+ * (contract.ts `Card.restsOn`, `restsOnWords`): its memories; each
+ * contested one's current rivals, judged as the page was; the memories
+ * each counted confirmation was made over; and the memory past the page
+ * (`more`).
+ */
+export const readMemoriesHeld = (
+  sql: SqlStorage,
+  asked: MemoriesAsked
+): { read: MemoriesRead; held: HeldMemory[] } => {
+  const { read, rows, limit, reader, at, learned } = readMemoryRows(sql, asked);
+  const page = rows.slice(0, limit);
+  // The current memories of each entity (the memory's own: a relation's
+  // subject, whichever side the card is on) and attribute a contested
+  // memory of the page has, read once however many of them it holds.
+  const current = new Map<string, MemoryRow[]>();
+  const currentOf = (entityRow: number, attribute: string): MemoryRow[] => {
+    const key = JSON.stringify([entityRow, attribute]);
+    const memories =
+      current.get(key) ??
+      memoryRowsAt(
+        sql,
+        currentOfAttributeSql,
+        at,
+        entityRow,
+        reader,
+        learned,
+        -1,
+        attribute
+      );
+    current.set(key, memories);
+    return memories;
+  };
+  const rivals = page.flatMap((row) =>
+    row.contested === 1 && row.attribute !== null
+      ? currentOf(row.entity_row, row.attribute).filter(
+          ({ value_key: key }) => key !== row.value_key
+        )
+      : []
+  );
+  const confirmations = page.flatMap(
+    (row) => confirmationOf(row.confirmation)?.row ?? []
+  );
+  const overruled =
+    confirmations.length === 0
+      ? []
+      : sql
+          .exec<{
+            source: string | null;
+            version: number | null;
+            memory: string;
+          }>(overruledSql, JSON.stringify(confirmations), learned)
+          .toArray()
+          .map(({ source, version, memory }) => ({ source, version, memory }));
   return {
-    memories,
-    more: true,
-    next: {
-      at: new Date(cursorAt),
-      learned: new Date(learned),
-      attribute: last.attribute,
-      confirmed: last.confirmed !== null,
-      learnedAt: last.learnedAt,
-      memory: last.id,
-    },
+    read,
+    held: [
+      // The page's memories, and the one past it.
+      ...rows.map((row) => heldOfRow(row)),
+      ...rivals.map((row) => heldOfRow(row)),
+      ...overruled,
+    ],
   };
 };
 
@@ -604,6 +886,49 @@ SELECT * FROM (
 WHERE side <= ?11
 ORDER BY fact_first, about, attribute, side`,
 });
+
+/**
+ * `?1` the memory ids asked about (JSON), `?2` and `?3` the reader
+ * (`readableSql`), `?4` the moment: the ids of those learned by then that
+ * the reader may read (`visibleSql`, as every read decides it) and that
+ * their writer had not retired by then, a seek by id each. Whether a
+ * newer memory ended one, or its time is over, is not asked: a memory
+ * once recalled stays as readable as a passage of an older version does.
+ */
+const readableMemoriesSql = `
+WITH ${readableSql}
+SELECT m.id AS id FROM json_each(?1) AS asked
+CROSS JOIN memories AS m ON m.id = asked.value
+WHERE m.learned_at <= ?4
+  AND (m.retired_at IS NULL OR m.retired_at > ?4)
+  AND ${visibleSql("m")}`;
+
+/**
+ * Of `memories`, those the reader may read now and their writer has not
+ * retired (contract.ts `readableMemories`), in the order asked, each once.
+ */
+export const readableMemories = (
+  sql: SqlStorage,
+  { memories, reader }: { memories: readonly MemoryId[]; reader: Reader }
+): MemoryId[] => {
+  const asked = [...new Set(memories)];
+  if (asked.length === 0) {
+    return [];
+  }
+  const readable = new Set(
+    sql
+      .exec<{ id: string }>(
+        readableMemoriesSql,
+        JSON.stringify(asked),
+        reader.person,
+        JSON.stringify(reader.groups),
+        readMoment(sql)
+      )
+      .toArray()
+      .map(({ id }) => id)
+  );
+  return asked.filter((id) => readable.has(id));
+};
 
 /**
  * A page of the contested facts the reader may read (contract.ts
@@ -701,17 +1026,6 @@ const currentOneSql = memoriesSql({
 });
 
 /**
- * `?1` the entity's row, `?6` the attribute: its current memories the
- * reader may read.
- */
-const currentOfAttributeSql = memoriesSql({
-  base: `SELECT row FROM memories
-    WHERE entity = ?1 AND attribute = ?6`,
-  filter: "judged.is_current = 1",
-  order: "m.row",
-});
-
-/**
  * The reader confirms the memory `id`, current and readable to them, over
  * the current memories they may read that say something else of its
  * entity and one-value attribute (contract.ts `confirmMemory`). Run in one
@@ -775,56 +1089,158 @@ export const confirmMemory = (
 };
 
 /**
- * Retires the memory `id` if its lineage is the reader's person's own (as
- * writer), the reader may read it, it is not retired, and it is in its
- * world time now: current, or ended by a newer memory of its lineage,
- * which a person forgets as well, so it never becomes current again when
- * the newer one is retired too. One they already retired answers `done`
- * again (contract.ts `retireMemory`).
+ * Retires the memory `id` if its lineage is `writer`'s own, the reader may
+ * read it, it is not retired, and it is in its world time now: current, or
+ * ended by a newer memory of its lineage, which a writer forgets as well,
+ * so it never becomes current again when the newer one is retired too.
+ * Answers when it was retired and by which change (`change`, kept with
+ * it), as recorded: one this writer already retired answers its recorded
+ * time and change again, never new ones, whatever change the call names,
+ * so a retry answers what the first try did and another call learns it
+ * wasn't the one (contract.ts `retireMemory`). Null alike
+ * for no such memory, another writer's (retired or not), one the reader
+ * may not read and one that expired before it was retired.
  */
 export const retireMemory = (
   sql: SqlStorage,
-  { id, reader }: { id: string; reader: PersonReader }
-): MemoryChangeOutcome => {
+  {
+    id,
+    reader,
+    writer,
+    change,
+  }: { id: string; reader: Reader; writer: string; change: string }
+): RetiredMemory | null => {
   const asked = [
     id,
     reader.person,
     JSON.stringify(reader.groups),
-    lineageOfWriter(reader.person),
+    lineageOfWriter(writer),
     readMoment(sql),
   ];
   const stamp = nextStamp(sql);
-  const retired = sql.exec(
-    `WITH ${readableSql}
-    UPDATE memories AS m SET retired_at = ?6
-    WHERE m.id = ?1 AND m.lineage = ?4 AND m.retired_at IS NULL
-      AND (m.valid_from IS NULL OR m.valid_from <= ?5)
-      AND (m.valid_until IS NULL OR m.valid_until > ?5)
-      AND ${visibleSql("m")}`,
-    ...asked,
-    stamp
-  );
-  retired.toArray();
-  if (retired.rowsWritten > 0) {
-    keepStamp(sql, stamp);
-    return "done";
-  }
-  // Retired already, by this writer, and the reader may read it: a retry.
-  const again = sql
-    .exec(
+  const [retired] = sql
+    .exec<{ retired_at: number; retired_change: string | null }>(
       `WITH ${readableSql}
-      SELECT 1 FROM memories AS m
+      UPDATE memories AS m SET retired_at = ?6, retired_change = ?7
+      WHERE m.id = ?1 AND m.lineage = ?4 AND m.retired_at IS NULL
+        AND (m.valid_from IS NULL OR m.valid_from <= ?5)
+        AND (m.valid_until IS NULL OR m.valid_until > ?5)
+        AND ${visibleSql("m")}
+      RETURNING retired_at, retired_change`,
+      ...asked,
+      stamp,
+      change
+    )
+    .toArray();
+  if (retired !== undefined) {
+    keepStamp(sql, stamp);
+    return {
+      retiredAt: new Date(retired.retired_at),
+      change: retired.retired_change,
+    };
+  }
+  // Retired already, by this writer, and the reader may read it: a retry
+  // or another call, answered with the time and change recorded then.
+  const [again] = sql
+    .exec<{ retired_at: number; retired_change: string | null }>(
+      `WITH ${readableSql}
+      SELECT m.retired_at, m.retired_change FROM memories AS m
       WHERE m.id = ?1 AND m.lineage = ?4 AND m.retired_at <= ?5
         AND ${visibleSql("m")}`,
       ...asked
     )
     .toArray();
-  return again.length > 0 ? "done" : "nothing";
+  return again === undefined
+    ? null
+    : { retiredAt: new Date(again.retired_at), change: again.retired_change };
 };
 
 /**
- * `?1` the question's telling terms (JSON, words.ts `Term`): the memories
- * that hold any, in any form, with how many they hold so and as written.
+ * The reader's use (the request's `used`) as recall cuts by it: each
+ * memory's id to the latest moment they used it, in milliseconds.
+ */
+export type UsedAt = ReadonlyMap<string, number>;
+
+/** `used` as recall cuts by it (`UsedAt`): the latest use of each memory. */
+export const usedAtOf = (used: RecallRequest["used"] = []): UsedAt => {
+  const latest = new Map<string, number>();
+  for (const { memory, at } of used) {
+    latest.set(memory, Math.max(latest.get(memory) ?? 0, at.getTime()));
+  }
+  return latest;
+};
+
+/**
+ * What a statement returns of each candidate it judged instead of the
+ * memory itself, so the store orders and cuts them (`cutMemories`):
+ * `rows` as `memoriesSql`'s `outer` gives them, and what the way scores
+ * them by besides.
+ */
+export const candidatesOuter = (score = ""): string => `
+SELECT row, id, confirmation IS NOT NULL AS confirmed, learned_at${score}
+FROM rows`;
+
+/** A candidate as `candidatesOuter` returns it. */
+export interface CandidateRow extends Record<string, SqlStorageValue> {
+  row: number;
+  id: string;
+  confirmed: number;
+  learned_at: number;
+}
+
+/** `candidate` as `byFreshness` (order.ts) orders it, with the reader's use. */
+export const orderOf = (
+  { id, confirmed, learned_at: learnedAt }: CandidateRow,
+  used: UsedAt
+): MemoryOrder => ({
+  confirmed: confirmed === 1,
+  learnedAt,
+  usedAt: used.get(id) ?? null,
+  id,
+});
+
+/**
+ * `?1` the rows of memories a cut chose (JSON): those of them the reader
+ * may read that are current as of `?4`, judged again here, in the same
+ * statement as they are read (`memoriesSql`): never trusted from the
+ * statement that chose them.
+ */
+const chosenSql = memoriesSql({
+  base: `SELECT m.row FROM json_each(?1) AS asked
+    CROSS JOIN memories AS m ON m.row = asked.value`,
+  filter: "judged.is_current = 1",
+  order: "m.row",
+});
+
+/**
+ * The memories of `chosen` (rows, in their order) the reader may read and
+ * that are current as of `at`, read whole, in that order: a cut's second
+ * statement, after the one that judged and chose them (`candidatesOuter`).
+ * Run in the same synchronous step as that one, with no await between, so
+ * both read one snapshot; and judged again all the same, so one that is
+ * not readable or current gives nothing.
+ */
+export const chosenMemories = (
+  sql: SqlStorage,
+  chosen: readonly number[],
+  reader: Reader,
+  at: number
+): MemoryRow[] => {
+  if (chosen.length === 0) {
+    return [];
+  }
+  const read = new Map(
+    memoryRows(sql, chosenSql, JSON.stringify(chosen), reader, at, -1).map(
+      (row) => [row.row, row]
+    )
+  );
+  return chosen.flatMap((row) => read.get(row) ?? []);
+};
+
+/**
+ * `?1` the question's telling terms (JSON, words.ts `Term`): the current
+ * memories the reader may read that hold any, in any form, with how many
+ * they hold so and as written, as candidates (`candidatesOuter`).
  */
 const wordsSql = memoriesSql({
   prelude: `found AS MATERIALIZED (
@@ -846,26 +1262,37 @@ matched AS MATERIALIZED (
 )`,
   base: "SELECT row FROM matched",
   joins: "\nJOIN matched ON matched.row = m.row",
-  columns: ", matched.words AS words",
+  columns: ", matched.words AS words, matched.exact AS exact",
   filter: "judged.is_current = 1",
-  order: `matched.words DESC, matched.exact DESC, confirmation IS NULL,
-  m.learned_at DESC, m.id DESC`,
+  order: "m.row",
+  outer: candidatesOuter(", words, exact"),
 });
 
-/** A memory the words way found, with how many of the question's telling words it holds. */
+/**
+ * A memory the words way found: how many of the question's telling words
+ * it holds in any form, and how many as written.
+ */
 export interface MemoryFound extends Memory {
   words: number;
+  exact: number;
+  usedAt: Date | null;
 }
 
 /**
  * The current memories the reader may read, as of `at` (milliseconds),
- * that hold the question's telling words in any form, best first: more
- * of them, then more of them as written, then confirmed, then newer. At
- * most `limit` (`recallLimit` by default). For recall's words way: each
- * memory is scored on its own words alone, never on how often a word is
- * in what the reader may not read. Synchronous, so it reads the same
- * snapshot as the rest of a recall. It takes one moment, `at`: what the
- * store learned and the dates a fact is true are judged at the same one.
+ * that hold the question's telling words in any form, best first, as
+ * order.ts `byWordsFound` orders them: more of them, then more of them as
+ * written, then confirmed, fresher for the reader (`used`), newer. At
+ * most `recallLimit`, cut in that order. For
+ * recall's words way: each memory is scored on its own words alone, never
+ * on how often a word is in what the reader may not read.
+ *
+ * Two statements: the first judges every memory that holds a word and
+ * returns only what it is ordered by; the store orders and cuts them; the
+ * second reads the chosen whole (`chosenMemories`). Synchronous, with no
+ * await between them, so both read the same snapshot as the rest of a
+ * recall. It takes one moment, `at`: what the store learned and the dates
+ * a fact is true are judged at the same one.
  */
 export const memoriesByWords = (
   sql: SqlStorage,
@@ -873,20 +1300,47 @@ export const memoriesByWords = (
     question,
     reader,
     at,
-    limit = recallLimit,
-  }: { question: string; reader: Reader; at: number; limit?: number }
+    used = new Map(),
+  }: {
+    question: string;
+    reader: Reader;
+    at: number;
+    used?: UsedAt;
+  }
 ): MemoryFound[] => {
   const { telling } = termsOf(question);
   if (telling.length === 0) {
     return [];
   }
-  return memoryRowsAt(
+  const candidates = sql
+    .exec<CandidateRow & { words: number; exact: number }>(
+      wordsSql,
+      JSON.stringify(telling),
+      reader.person,
+      JSON.stringify(reader.groups),
+      at,
+      -1,
+      ...Array.from<null>({ length: bindingsBeforeValid + 1 }).fill(null)
+    )
+    .toArray()
+    .map((candidate) => ({
+      ...orderOf(candidate, used),
+      row: candidate.row,
+      words: candidate.words,
+      exact: candidate.exact,
+    }))
+    .toSorted(byWordsFound)
+    .slice(0, recallLimit);
+  const counts = new Map(candidates.map((found) => [found.row, found]));
+  return chosenMemories(
     sql,
-    wordsSql,
-    null,
-    JSON.stringify(telling),
+    candidates.map(({ row }) => row),
     reader,
-    at,
-    limit
-  ).map((row) => ({ ...memoryOf(row), words: Number(row.words) }));
+    at
+  ).map((row) => ({
+    ...memoryOf(row),
+    words: counts.get(row.row)?.words ?? 0,
+    exact: counts.get(row.row)?.exact ?? 0,
+    usedAt: dateOf(used.get(row.id)),
+  }));
 };

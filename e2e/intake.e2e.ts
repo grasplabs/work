@@ -47,7 +47,7 @@ const intakeFor = async (admin: Person): Promise<string> => {
     }
     // Live, for the people it is shared with (until then, its
     // builders' alone).
-    await api.apps.versions.publish(created.app.id, 1);
+    await api.versions.rollback({ kind: "app", id: created.app.id }, 1);
     // Its stakeholder chats, through the permission just granted, bound as
     // an admin binds them on the App's Resources tab.
     const guests = created.permissions.find(

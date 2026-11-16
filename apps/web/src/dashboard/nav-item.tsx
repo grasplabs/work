@@ -28,6 +28,7 @@ const readCount = async (core: CoreConnection): Promise<number | undefined> => {
         "failedRun",
         "openQuestion",
         "stoppedSchedule",
+        "workflowChanged",
         "packageNotice",
         "stoppedEvents",
         "appMessage",

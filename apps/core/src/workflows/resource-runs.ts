@@ -1145,8 +1145,8 @@ export const sealedActivation = async (
 
 /**
  * `activation` as the run host runs it (`sealedActivation`), whatever
- * started it: an independent workflow's run, a test run of a draft's
- * checkpoint (its calls answered from its start's fixtures, its waits held
+ * started it: an independent workflow's run, a test run of a draft at
+ * one revision (its calls answered from its start's fixtures, its waits held
  * short: `calling.candidate`, `maxSleepMs`), or a run an App's test started
  * (its calls served by its test: `calling.fixture`).
  */
@@ -1164,8 +1164,8 @@ export const sealedActivationOf = ({
 
 /**
  * Runs one activation of `activation.run` (an independent workflow's run,
- * a run an App's test started, fixture-runs.ts, or a test run of its draft's
- * checkpoint, candidate-runs.ts): the build's generated module in an
+ * a run an App's test started, fixture-runs.ts, or a test run of its draft at
+ * one revision, candidate-runs.ts): the build's generated module in an
  * isolate of its own on the run host (`sealedActivation`).
  * Answers the run's output, once it matches its version's output schema.
  */

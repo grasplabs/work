@@ -8,6 +8,7 @@ import { withheldResult } from "../src/agent.ts";
 import { chatOf, codeResults, codeStep, model, says } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
+import { heldFor } from "./held-in-connect.ts";
 import { mockIdp } from "./idp.ts";
 import { mailConnection, mailWithSearch } from "./mail-connection.ts";
 import { fakeProvider } from "./model-provider.ts";
@@ -675,25 +676,24 @@ describe("a chat's connections", setUpTime, () => {
       { found: true, withheld: false },
       { found: false, withheld: true },
     ]);
-    // Audited by the agent for its person: the grant the read rested on.
+    // Audited by the agent for its person, as one event: the read the
+    // revoked grant held, counted, never what it found.
     const events = await eventsOf(chat.agent.agentId, (found) =>
       found.some(({ action }) => action === "chat.history_withheld")
     );
     expect(
       events
         .filter(({ action }) => action === "chat.history_withheld")
-        .map(({ target, detail }) => ({
-          target,
-          connection: detail.connection,
-          action: detail.action,
-          resource: detail.resource,
-        }))
+        .map(({ target, detail }) => ({ target, detail }))
     ).toStrictEqual([
       {
         target: { type: "chat", id: chat.chat.id },
-        connection: mail.id,
-        action: "mail.search",
-        resource: null,
+        detail: {
+          workspace: chat.id,
+          runs: 1,
+          sources: 1,
+          connections: 1,
+        },
       },
     ]);
   });
@@ -735,7 +735,12 @@ describe("a chat's connections", setUpTime, () => {
     await chat.stub.ask(teams.id, { text: asked, model });
     await chat.ask(asked);
 
-    const waiting = await person.api.pendingActions.list();
+    // Where each was held: the Teams chat's in a chat app, the web chat's
+    // in Grasp.
+    const waiting = [
+      ...(await heldFor(person, "chat_app")),
+      ...(await heldFor(person, "grasp")),
+    ];
     const fromTeams = waiting.find(
       ({ context }) => context.type === "chat" && context.chatId === teams.id
     );

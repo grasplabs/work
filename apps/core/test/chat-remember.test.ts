@@ -3,9 +3,9 @@ import type { ChatMessage } from "@grasp-os/shared/chat";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
+import { keepAudience } from "../src/chat-audiences.ts";
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import { inJurisdiction, workspace } from "../src/durable-objects.ts";
-import { keepAudience } from "../src/knowledge/access.ts";
 import {
   codeStep,
   model,
@@ -32,7 +32,8 @@ import { signedInApi, unique } from "./sign-in.ts";
 // - The check given what the chat's tools read.
 // - A saved memory the person can't undo, or one that someone else can.
 // - A save where nobody sees a notice: a shared thread, a direct message
-//   on a chat platform, a turn nobody started.
+//   on a chat platform (the person's own chat, GRA-1821, but it shows
+//   neither the notice nor its Undo), a turn nobody started.
 
 const idp = mockIdp();
 
@@ -194,7 +195,9 @@ describe("the agent remembering in a person's own chat", () => {
         undoneByOther: "nothing",
         // Undone twice, as a double click or a retry does.
         undone: ["done", "done"],
-        after: [[]],
+        // Its only memory forgotten, the customer gives no name to a find
+        // (it stays history, read with the entity's memories).
+        after: [],
         checkedTheirMessage: true,
         checkedTheSubject: true,
       });

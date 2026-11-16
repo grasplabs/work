@@ -1,0 +1,1 @@
+ALTER TABLE `forget_lines` ADD `queued` integer;

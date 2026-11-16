@@ -16,7 +16,16 @@ export interface ChatSeed {
   /** How long ago it started, in hours. */
   hoursAgo: number;
   /** Questions and answers, in turn. */
-  turns: { question: string; answer: string }[];
+  turns: {
+    question: string;
+    answer: string;
+    /**
+     * The Brain upload, by its name, that the answer names
+     * (scripts/seed/brain.ts): the seed writes the chat only once recall,
+     * as its person, finds it for the question.
+     */
+    answeredBy?: string;
+  }[];
 }
 
 export const chats: ChatSeed[] = [
@@ -32,9 +41,11 @@ export const chats: ChatSeed[] = [
           "Three invoices above €2,500 are waiting for finance to approve them in Supplier invoices. The oldest is from Kantoorhuis Utrecht (office rent), waiting since yesterday morning. You can answer each one from its run in Workflows.",
       },
       {
-        question: "And how many failed this month?",
+        question:
+          "And how many failed this month because the invoice had no VAT number?",
         answer:
-          "Three runs of Supplier invoices failed in the last 30 days, each because the invoice had no VAT number. The coding rules in Finance say to send those back to the supplier.",
+          "Three runs of Supplier invoices failed in the last 30 days, each on an invoice without a VAT number. Coding supplier invoices.docx says to send those back to the supplier, never to book them.",
+        answeredBy: "Coding supplier invoices.docx",
       },
     ],
   },
@@ -46,7 +57,8 @@ export const chats: ChatSeed[] = [
       {
         question: "How long do we have to acknowledge a complaint?",
         answer:
-          "Two working days, in writing, according to the complaints procedure in Procedures. Complaints sets that deadline when it registers a complaint, and asks compliance before offering compensation above €250.",
+          "Two working days, in writing, according to Complaints procedure.docx. Complaints sets that deadline when it registers a complaint, and asks compliance before offering compensation above €250.",
+        answeredBy: "Complaints procedure.docx",
       },
     ],
   },
@@ -59,7 +71,8 @@ export const chats: ChatSeed[] = [
         question:
           "How many applications came in without a payslip in the last two weeks?",
         answer:
-          "Of the applications Client onboarding checked in the last two weeks, about two in five still had documents to chase, most often the payslip or the employer statement. Required documents in Procedures says to chase them by email the same day.",
+          "Of the applications Client onboarding checked in the last two weeks, about two in five still had documents to chase, most often the payslip or the employer statement. Required documents.docx says to chase them by email the same day.",
+        answeredBy: "Required documents.docx",
       },
       {
         question: "Draft a reminder I can send for a missing payslip.",
@@ -89,7 +102,34 @@ export const chats: ChatSeed[] = [
         question:
           "Which lender wants a valuation report no older than six months?",
         answer:
-          "Lender A, according to Lender requirements in Client files. The page is past its review date, so it's worth checking with the lender before you rely on it.",
+          "Lender A, according to Lender requirements.docx, which Mortgage advice keeps in the Brain.",
+        answeredBy: "Lender requirements.docx",
+      },
+    ],
+  },
+  {
+    by: "jeroen",
+    title: "Booking a new laptop",
+    hoursAgo: 30,
+    turns: [
+      {
+        question: "Which ledger account do I book a new laptop on?",
+        answer:
+          "On 4300 Software and data. Coding supplier invoices.docx, which Finance keeps in the Brain, books software, data, laptops and phones there. If the invoice has no VAT number, send it back to the supplier instead of booking it.",
+        answeredBy: "Coding supplier invoices.docx",
+      },
+    ],
+  },
+  {
+    by: "lisa",
+    title: "Compensation for a complaint",
+    hoursAgo: 8,
+    turns: [
+      {
+        question: "Who approves a compensation above €250 for a complaint?",
+        answer:
+          "Compliance approves it first. Complaints procedure.docx says customer service offers compensation up to €250 itself; anything above that goes to compliance before you offer it.",
+        answeredBy: "Complaints procedure.docx",
       },
     ],
   },

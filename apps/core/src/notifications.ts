@@ -47,7 +47,10 @@ import type { SessionCheck } from "./session-check.ts";
 // of the brain's open questions (`gap_asked`, written by brain-gaps.ts in the batch that
 // records the ask), or that a schedule trigger they own stopped
 // (`trigger_stopped`, written by workflows/schedule-triggers.ts in the
-// batch that stops it), or that connect stopped hearing a mailbox or
+// batch that stops it), or that someone else made another version of a
+// workflow their triggers start live (`trigger_workflow_changed`, written
+// by workflow-publish.ts in the batch that makes it live, through
+// trigger-resources.ts), or that connect stopped hearing a mailbox or
 // drive their triggers listen to (`events_stopped`, written by
 // connector-source-notices.ts as connect's audit events reach core), or
 // that the clock found the approved packages of an App they build
@@ -56,8 +59,8 @@ import type { SessionCheck } from "./session-check.ts";
 // packages/rescan.ts in the batch that records it, or what an App's
 // server code told them (`app_message`, written by app-notifications.ts).
 // A question is listed while it is open: once anyone answers or closes
-// it, it goes from the list by itself; a stopped trigger while it is
-// still theirs and not deleted; a package notice or an App's message
+// it, it goes from the list by itself; a stopped trigger, or a workflow
+// changed under one, while the trigger is still theirs and not deleted; a package notice or an App's message
 // while they can still open the App.
 //
 // A person lists only notifications of Apps they can still open
@@ -67,7 +70,7 @@ import type { SessionCheck } from "./session-check.ts";
 /** How long a person's read notifications are kept. */
 const keptReadMs = 30 * 24 * 60 * 60 * 1000;
 
-/** A schedule trigger that stopped, and whom it tells: its owner. */
+/** A trigger that stopped, or whose workflow changed, and whom it tells: its owner. */
 export interface StopNotice {
   triggerId: string;
   workflowId: string;
@@ -90,6 +93,27 @@ export const stopNoticed = (
     .select(
       sql`SELECT ${crypto.randomUUID()}, ${personId}, 'trigger_stopped', NULL, ${workflowId}, NULL, ${now}, ${now}, NULL, ${triggerId}, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL WHERE ${recorded} AND ${activeMember(personId)}`
     );
+};
+
+/**
+ * The statement that tells `personId` someone else made another version
+ * of workflow `workflowId` live, which their trigger `triggerId` (and any
+ * other of theirs on it) starts from then on, in the batch that makes it
+ * live, only while they are a member of the organization: one unread
+ * notice per person and workflow, of the first change since they read
+ * the last.
+ */
+export const triggerWorkflowNoticed = (
+  db: DrizzleD1Database,
+  { triggerId, workflowId, personId, recorded }: StopNotice
+) => {
+  const now = Date.now();
+  return db.insert(notifications).select(
+    sql`SELECT ${crypto.randomUUID()}, ${personId}, 'trigger_workflow_changed', NULL, ${workflowId}, NULL, ${now}, ${now}, NULL, ${triggerId}, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL WHERE ${recorded} AND ${activeMember(personId)}
+        AND NOT EXISTS (SELECT 1 FROM ${notifications} WHERE ${notifications.personId} = ${personId}
+          AND ${notifications.type} = 'trigger_workflow_changed'
+          AND ${notifications.workflowId} = ${workflowId} AND ${notifications.readAt} IS NULL)`
+  );
 };
 
 /** A source connect stopped hearing, and whom it tells. */
@@ -122,6 +146,9 @@ export const eventsStopNoticed = (
     )
     .onConflictDoNothing({ target: notifications.id });
 };
+
+/** The notifications about one of the person's triggers. */
+const triggerTypes = ["trigger_stopped", "trigger_workflow_changed"] as const;
 
 /** The notifications of what core's rescan found of approved packages. */
 const packageTypes = ["package_revoked", "package_advisory"] as const;
@@ -181,7 +208,7 @@ const visibleTo = (env: Env, person: Identity): SQL | undefined =>
         isNull(brainGapStates.closedAt)
       ),
       and(
-        eq(notifications.type, "trigger_stopped"),
+        inList(notifications.type, triggerTypes),
         eq(triggerResources.ownerId, person.userId),
         isNull(triggerResources.deletedAt)
       ),
@@ -206,9 +233,9 @@ const gapOn = and(
 const gapStateOn = eq(brainGapStates.gapId, notifications.gapId);
 /** Joins `trigger_resources` to a notification: a stopped trigger. */
 const triggerOn = eq(triggerResources.id, notifications.triggerId);
-/** Joins `workflow_resources` to a notification: a stopped trigger's workflow. */
+/** Joins `workflow_resources` to a notification: its trigger's workflow. */
 const workflowOn = and(
-  eq(notifications.type, "trigger_stopped"),
+  inList(notifications.type, triggerTypes),
   eq(workflowResources.id, notifications.workflowId)
 );
 
@@ -217,7 +244,7 @@ interface ListedRow {
   id: string;
   type:
     | "gap_asked"
-    | "trigger_stopped"
+    | (typeof triggerTypes)[number]
     | PackageNotification["type"]
     | "events_stopped"
     | "app_message";
@@ -347,7 +374,7 @@ const notificationOf = (row: ListedRow): Notification[] => {
     : [
         {
           id: row.id,
-          type: "trigger_stopped",
+          type: row.type,
           trigger: row.trigger,
           workflow: row.workflow,
           workflowName: row.workflowName,

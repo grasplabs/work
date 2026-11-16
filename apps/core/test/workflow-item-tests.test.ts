@@ -10,12 +10,9 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
-import { editWorkflowDraft, workflowDraft } from "../src/workflow-drafts.ts";
-import {
-  createWorkflowResource,
-  publishWorkflowVersion,
-  shareWorkflowResource,
-} from "../src/workflow-resources.ts";
+import { editWorkflowDraft, workflowDraft } from "../src/workflow-editor.ts";
+import { shareWorkflowResource } from "../src/workflow-members.ts";
+import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
 import {
   candidateRunFor,
@@ -27,8 +24,9 @@ import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { allEvents } from "./audit-events.ts";
 import { objectSchema, passing } from "./json-workflow-apps.ts";
 import { outcome, unique } from "./sign-in.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
 
-// A test of a draft's checkpoint over recent real items
+// A test of a workflow's draft over recent real items
 // (workflows/item-tests.ts), from its threat model: each item runs as a
 // test run that calls nothing, a write least of all; it takes only runs
 // whose details the tester sees, with their input still kept; what it
@@ -137,13 +135,15 @@ const workflowOf = async (
   draft: Parameters<typeof definitionOf>[1]
 ) => {
   const workflow = await createWorkflowResource(env, by, `items-${unique()}`);
-  await publishWorkflowVersion(env, by, workflow.id, {
-    definition: definitionOf("Version 1", echo),
-    basedOn: null,
-  });
+  await publishDefinition(
+    env,
+    by,
+    workflow.id,
+    definitionOf("Version 1", echo)
+  );
   const { revision: base } = await workflowDraft(env, by, workflow.id);
   const saved = await editWorkflowDraft(env, by, workflow.id, {
-    expectedRevision: base,
+    revision: base,
     source: definitionOf("Version 2", draft),
   });
   expect(saved.problems).toStrictEqual([]);
@@ -160,7 +160,7 @@ const ranFor = async (
     env,
     { type: "person", person: by },
     id,
-    { version: 1, args: { who }, key: unique() }
+    { expected: 1, args: { who }, key: unique() }
   );
   if (runId === null) {
     throw new Error("The start made a run");

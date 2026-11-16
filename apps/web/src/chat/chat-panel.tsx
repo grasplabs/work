@@ -213,8 +213,17 @@ const Welcome = ({ text }: { text: string }) => (
 /** The conversation, or what to ask before there is one; `focusBox` takes the person to the box. */
 const Thread = ({ focusBox }: { focusBox: () => void }) => {
   const { t } = useLingui();
-  const { chatId, finding, view, failure, empty, words, ask, composer } =
-    useGlobalChat();
+  const {
+    chatId,
+    finding,
+    view,
+    failure,
+    empty,
+    words,
+    ask,
+    composer,
+    offered,
+  } = useGlobalChat();
   const { placement } = useDockablePanel();
   // A subject's chat, while core finds it, or why it gave none.
   if (finding.searching || finding.failure !== undefined) {
@@ -250,6 +259,7 @@ const Thread = ({ focusBox }: { focusBox: () => void }) => {
       }
     >
       <ChatThread
+        agents={offered?.agents}
         chatId={chatId}
         compact={placement !== "fullscreen"}
         loaded={view.loaded || failure !== undefined}

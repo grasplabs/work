@@ -98,7 +98,7 @@ import { useCoreRead } from "./use-core-read.ts";
 // it takes, and adds new ones; who reaches the records and the orders
 // they're read in sit behind the bar's two quieter buttons. Whoever builds the App changes it
 // here as the chat's agent does, through the definition's own operations,
-// into the App's draft (`apps.drafts.define`): nothing changes for the
+// into the App's draft (`apps.define`): nothing changes for the
 // App's people until the draft is published, and a change that removes,
 // retypes, changes access or needs a value for records is reviewed first
 // (data-model-changes.tsx). While the chat's agent works on the App, the
@@ -112,7 +112,7 @@ import { useCoreRead } from "./use-core-read.ts";
 const useTestTables = (app: string, revision: number, resets: number) => {
   const read = useCoreRead(
     `${app}/${revision}/${resets}`,
-    async (session) => await session.apps.drafts.testTables(app)
+    async (session) => await session.apps.preview.tables(app)
   );
   return read?.state === "ready" ? read.data : undefined;
 };
@@ -456,7 +456,7 @@ export const AppDataModel = ({
   const { t } = useLingui();
   const read = useCoreRead(
     `${app}/${revision}`,
-    async (session) => await session.apps.drafts.dataModel(app)
+    async (session) => await session.apps.dataModel(app)
   );
   // What a change made here answered, at the revision it was made over:
   // shown until the draft's next revision is read.
@@ -468,6 +468,7 @@ export const AppDataModel = ({
   const [creating, setCreating] = useState(false);
   const changes = useModelChanges({
     app,
+    revision,
     onMade: (next) => {
       onChanged?.();
       // What uses the indexes comes with the next read of the draft.

@@ -260,8 +260,10 @@ describe("a person's own store at work on its own alarm", () => {
     await until(() => started.includes(key));
     const erasing = { personId: person, reason: "person_erased" } as const;
     const first = await erasePerson(env, erasing);
-    // Past the time an add has to write its file: only the tick under way
-    // keeps the erasure from finishing.
+    // Past the time an add has to write its file. The tick under way sent
+    // no write (its item is held before any), and, the store erased, it
+    // can send none and reports nothing: the erasure is done, and the row
+    // stays gone however the tick ends.
     await ageOwnErasure(person);
     const whileTicking = await erasePerson(env, erasing);
     gate.open = true;
@@ -276,7 +278,7 @@ describe("a person's own store at work on its own alarm", () => {
       removed: withRow.stores - after.stores,
     }).toStrictEqual({
       first: "still_deleting",
-      whileTicking: "still_deleting",
+      whileTicking: "erased",
       done: "erased",
       removed: 1,
     });

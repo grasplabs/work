@@ -1,3 +1,6 @@
+import { emptyDefinition, readDefinition } from "@grasp-os/runtime/definition";
+import type { AppVersion } from "@grasp-os/shared/apps";
+import type { LiveVersion, Version } from "@grasp-os/shared/drafts";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type {
   GrantReview,
@@ -8,34 +11,136 @@ import type { Identity } from "@grasp-os/shared/rpc";
 import { env } from "cloudflare:workers";
 import { vi } from "vite-plus/test";
 
-import { publishVersion } from "../src/app-publish.ts";
-import { commitFiles, latestVersion } from "../src/apps.ts";
+import { defineDraft, writeAppDraft } from "../src/app-review.ts";
+import {
+  appKind,
+  applyChanges,
+  commitDraft,
+  draftDefinition,
+  editableApp,
+  latestVersion,
+} from "../src/apps.ts";
+import { draftOf, filesOf } from "../src/drafts.ts";
+import { publish, rollback } from "../src/publish.ts";
 import { sessionRecheckMs } from "../src/session-check.ts";
-import { commitApp, definitionInput, sourceParts } from "./app-definitions.ts";
+import { definitionInput, sourceParts } from "./app-definitions.ts";
 import type { TestSource } from "./app-definitions.ts";
 import type { Idp } from "./idp.ts";
 import { signedInApi } from "./sign-in.ts";
 
 /**
- * `commitFiles` of a test's `source`: its files, with its definition when
- * it is a test's App, as `commitApp` commits them over RPC.
+ * A test's publish of `source` by `by`, in core, as `publishApp` does it
+ * over RPC: its definition, when it is a test's App, written whole into
+ * App `app`'s draft (`defineDraft`), then its files over the revision
+ * read (`writeAppDraft`), then the draft published (publish.ts). Answers
+ * the version made live.
+ */
+export const publishDefined = async (
+  on: Env,
+  by: Identity,
+  app: string,
+  source: TestSource
+): Promise<LiveVersion> => {
+  let { revision } = await draftOf(on, appKind, app);
+  const { files, definition } = sourceParts(source);
+  if (definition !== undefined) {
+    const defined = await defineDraft(on, by, app, revision, {
+      op: "setDefinition",
+      definition: definitionInput(definition),
+    });
+    if (!defined.ok) {
+      throw new Error(defined.problem);
+    }
+    revision += 1;
+  }
+  if (Object.keys(files).length > 0) {
+    await writeAppDraft(on, by, app, revision, { ...files });
+    revision += 1;
+  }
+  return await publish(on, appKind, by, app, revision);
+};
+
+/**
+ * Commits `source` as App `app`'s next version for `by`, in core, as
+ * publishing commits a draft (`commitDraft`): its files, with its
+ * definition when it is a test's App (else the latest version's), over
+ * the App's latest version. Leaves the draft alone, and is neither
+ * checked nor built nor live: for tests whose Apps aren't about
+ * publishing, which make the version live as a roll back does
+ * (`release`), or run it as they need. Answers the version.
  */
 export const commitDefined = async (
   on: Env,
-  by: Parameters<typeof commitFiles>[1],
+  by: Identity,
   app: string,
-  source: TestSource,
-  message: string
-): ReturnType<typeof commitFiles> => {
-  const { files, definition } = sourceParts(source);
-  return await commitFiles(
-    on,
-    by,
-    app,
+  source: TestSource
+): Promise<{ version: number }> => {
+  const { id, name } = await editableApp(on, by, app);
+  const parent = await latestVersion(on, id);
+  const { files: changes, definition } = sourceParts(source);
+  const latest = await draftDefinition(on, id, {
+    base: parent,
+    definition: null,
+  });
+  const defined =
+    definition === undefined
+      ? (latest?.definition ?? emptyDefinition(name))
+      : readDefinition(definitionInput(definition));
+  const files = await filesOf(on, appKind, id, { base: parent, changes: {} });
+  applyChanges(files, changes, defined);
+  const { version } = await commitDraft(on, by, id, {
+    parent,
+    version: (parent ?? 0) + 1,
     files,
-    message,
-    definition === undefined ? undefined : definitionInput(definition)
-  );
+    definition: defined,
+  });
+  return { version };
+};
+
+/** `commitDefined`, for the person signed in to `api`. */
+export const commitApp = async (
+  api: Pick<Builder["api"], "whoami">,
+  app: string,
+  source: TestSource
+): Promise<{ version: number }> =>
+  await commitDefined(env, await api.whoami(), app, source);
+
+/**
+ * Binds workflow `workflowId` to App `app` under `alias` for `by`, written
+ * straight to the database as an App version binding it leaves it, at the
+ * workflow's live version: for tests whose App is a stand-in written to
+ * the database too, with no release to publish. Answers the binding's ID.
+ */
+export const standInBinding = async (
+  app: string,
+  alias: string,
+  workflowId: string,
+  by: Pick<Identity, "userId">
+): Promise<string> => {
+  const id = crypto.randomUUID();
+  await env.DB.prepare(
+    `INSERT INTO app_workflow_bindings (id, app_id, alias, workflow_resource_id, workflow_resource_version, status, bound_by, bound_at)
+     SELECT ?, ?, ?, id, current_version, 'active', ?, ? FROM workflow_resources WHERE id = ?`
+  )
+    .bind(id, app, alias, by.userId, Date.now(), workflowId)
+    .run();
+  return id;
+};
+
+/** The ID of App `app`'s active binding of `alias`, which its live version made. */
+export const activeBinding = async (
+  app: string,
+  alias: string
+): Promise<string> => {
+  const row = await env.DB.prepare(
+    "SELECT id FROM app_workflow_bindings WHERE app_id = ? AND alias = ? AND status = 'active'"
+  )
+    .bind(app, alias)
+    .first<{ id: string }>();
+  if (row === null) {
+    throw new Error(`${app} binds nothing as ${alias}`);
+  }
+  return row.id;
 };
 
 /**
@@ -75,10 +180,22 @@ export const ordinaryData = async (app: string): Promise<void> => {
     .run();
 };
 
+/** The App versions among `versions`, as `versions.list` answers every kind's. */
+export const appVersionsOf = (versions: readonly Version[]): AppVersion[] =>
+  versions.flatMap((version) => ("app" in version ? [version] : []));
+
+/** `version` as an App's version, which `versions.get` of an App answers. */
+export const appVersionOf = (version: Version): AppVersion => {
+  if (!("app" in version)) {
+    throw new Error("Not an App's version");
+  }
+  return version;
+};
+
 /**
  * Makes the App open to the people it is shared with, as its first
  * publish does: its latest version, an empty first one for an App with
- * none, published by its owner (app-publish.ts, `publishVersion`). For
+ * none, made live by its owner (publish.ts, `rollback`). For
  * tests of what those people do, which aren't about publishing
  * (draft-publish.test.ts and app-publish.test.ts are).
  */
@@ -102,17 +219,13 @@ export const published = async (app: string): Promise<void> => {
   };
   const latest = await latestVersion(env, appIdSchema.parse(app));
   if (latest !== null) {
-    await publishVersion(env, by, app, latest);
+    await rollback(env, appKind, by, app, latest);
     return;
   }
-  const first = await commitFiles(
-    env,
-    by,
-    app,
-    { "README.md": "An App.\n" },
-    "First"
-  );
-  await publishVersion(env, by, app, first.version);
+  const { version } = await commitDefined(env, by, app, {
+    "README.md": "An App.\n",
+  });
+  await rollback(env, appKind, by, app, version);
 };
 
 /**
@@ -133,22 +246,20 @@ export const standInLive = async (app: string): Promise<void> => {
 };
 
 /**
- * Commits `files` as the App's next version and publishes it, with its
- * data classified as ordinary (`ordinaryData`), so a call without a
- * page's lease reaches it too.
+ * A fixture that seeds a live version directly, never a publish: commits
+ * `files` as the App's next version (`commitApp`: no draft, no check)
+ * and makes it live as a roll back does, with its data classified as
+ * ordinary (`ordinaryData`), so a call without a page's lease reaches it
+ * too. For tests about anything but publishing, versions, bindings or
+ * approvals, which publish from the draft (`publishApp`).
  */
 export const release = async (
   builder: Builder,
   app: string,
   files: TestSource
 ): Promise<number> => {
-  const { version } = await commitApp(
-    builder.api.apps.files,
-    app,
-    files,
-    "Release"
-  );
-  await builder.api.apps.versions.publish(app, version);
+  const { version } = await commitApp(builder.api, app, files);
+  await builder.api.versions.rollback({ kind: "app", id: app }, version);
   await ordinaryData(app);
   return version;
 };

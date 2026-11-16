@@ -50,7 +50,7 @@ const exampleOf = async (admin: Person, blueprint: string): Promise<AppId> => {
   const made = await admin.api.apps.blueprints.create(blueprint, {
     name: `${blueprint} ${unique()}`,
   });
-  await admin.api.apps.versions.publish(made.app.id, 1);
+  await admin.api.versions.rollback({ kind: "app", id: made.app.id }, 1);
   return appIdSchema.parse(made.app.id);
 };
 

@@ -294,14 +294,24 @@ test("a person asks in a new chat, follows the answer, renames it, and reads and
   );
   // Confirming goes through core's checks again: the agent was never
   // granted this connection, so it's refused, and the write still waits.
+  // Why is said above the list, which keeps it should the card go: which
+  // write, then core's reason, each a sentence of its own.
   await waiting.getByRole("button", { name: `Confirm ${described}` }).click();
-  await expect(waiting.getByRole("alert")).toHaveText(
-    "This App or agent has no permission to do that."
-  );
+  const refused = waiting.getByRole("alert");
+  await expect(
+    refused.getByText(`${described} didn't go through.`, { exact: true })
+  ).toBeVisible();
+  await expect(
+    refused.getByText("This App or agent has no permission to do that.", {
+      exact: true,
+    })
+  ).toBeVisible();
   await expect(waiting).toContainText("cleo@acme.test");
-  // Rejecting each drops it.
+  // Rejecting each drops it, and with a decision that went through, the
+  // refusal's alert goes too.
   await waiting.getByRole("button", { name: `Reject ${described}` }).click();
   await expect(waiting).not.toContainText("cleo@acme.test");
+  await expect(waiting.getByRole("alert")).toHaveCount(0);
   // One whose input holds more than its tool shows says so, and its exact
   // input is open from the start.
   await holdWrite(user, chatId, {
@@ -598,7 +608,7 @@ test("the chat on every other page carries on the open chat, which is the same c
 
   // On another page it is still open, on the same chat; a new chat starts
   // afresh.
-  await page.goto("/knowledge");
+  await page.goto("/projects");
   await expect(messages.getByRole("listitem").first()).toHaveText(question);
   await chat.getByRole("button", { name: "New chat" }).click();
   await expect(messages).toHaveCount(0);

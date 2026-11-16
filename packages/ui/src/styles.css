@@ -130,6 +130,7 @@
   --mention-app: oklch(0.5 0.13 245);
   --mention-workflow: oklch(0.5 0.14 305);
   --mention-person: oklch(0.52 0.12 60);
+  --mention-agent: oklch(0.5 0.12 150);
   --mention-command: oklch(0.5 0.1 165);
   /*
    * Code's colours, wherever code is highlighted (the chat's answers, an
@@ -226,6 +227,7 @@
     --mention-app: oklch(0.79 0.1 245);
     --mention-workflow: oklch(0.78 0.11 305);
     --mention-person: oklch(0.82 0.11 70);
+    --mention-agent: oklch(0.8 0.11 150);
     --mention-command: oklch(0.8 0.1 165);
     --syntax-keyword: oklch(0.78 0.11 305);
     --syntax-string: oklch(0.8 0.12 155);
@@ -339,6 +341,7 @@
   --color-mention-app: var(--mention-app);
   --color-mention-workflow: var(--mention-workflow);
   --color-mention-person: var(--mention-person);
+  --color-mention-agent: var(--mention-agent);
   --color-mention-command: var(--mention-command);
   --color-syntax-keyword: var(--syntax-keyword);
   --color-syntax-string: var(--syntax-string);

@@ -58,6 +58,21 @@ export interface AgentScope {
    * side effect is refused (`admitEffect`).
    */
   unattended?: boolean;
+  /**
+   * A turn whose answer reaches its person alone (workspace.ts
+   * `answersAlone`: their own chat in Grasp or their direct message on a
+   * chat app, asked there and then; never a thread others share, nor a
+   * turn nobody started): the only scope their own skills steer
+   * (brain-skills.ts `skillsReachOf`). Set by that turn alone; any scope
+   * without it gets none of them.
+   */
+  ownChat?: boolean;
+  /**
+   * The chat is one others share: a group chat or channel on a chat
+   * platform (its `thread`), which reads only what everyone in it may, as
+   * its roster was last kept (`chat_audiences`), and nothing without one.
+   */
+  shared?: boolean;
   /** The code run the stub was made for: it answers only while that runs. */
   runId: string;
 }
@@ -91,8 +106,8 @@ export interface AgentApi {
 /**
  * An agent's ID: letters, digits and `-` only (as the organization's ID,
  * every chat's agent, is), so it reads the same in a permission, an audit
- * event and a memory path (`agents/<id>/AGENTS.md`), and never reaches
- * into another's.
+ * event and the key of its instruction file (brain-next.ts), and never
+ * reaches into another's.
  */
 export const workspaceAgentIdSchema = z.string().regex(/^[A-Za-z0-9-]{1,64}$/u);
 
@@ -169,8 +184,7 @@ export const isRunRefusal = (error: unknown): boolean => {
 };
 
 /**
- * Records with the chat what a call read from (collections, a
- * connection), before the call hands over what it read: every later model
+ * Records with the chat what a call read from (a connection), before the call hands over what it read: every later model
  * request of the chat carries them as provenance, so the client's model
  * rules judge it by them (workspace.ts). A run that ended since the call
  * began records nothing, and the call is refused: what it read never
@@ -180,8 +194,6 @@ export const recordSources = async (
   env: Env,
   { workspaceId, chatId, runId }: AgentScope,
   sources: readonly string[],
-  /** The Knowledge documents the call hands over, which answers may cite. */
-  documentIds: readonly string[] = [],
   /**
    * What the run's result rests on, if not `sources`: a connection call's
    * grant (`connectionRead`), where the chat's provenance names the
@@ -193,7 +205,6 @@ export const recordSources = async (
     chatId,
     runId,
     sources,
-    documentIds,
     runReads
   );
   if (recorded !== "open") {
@@ -203,7 +214,7 @@ export const recordSources = async (
 
 /**
  * Records with the run alone what a call read that isn't the chat's
- * provenance (an App's answer or files, the Knowledge catalog), before the
+ * provenance (an App's answer or files, the Brain's grant), before the
  * call hands it over, so the run's result is withheld from the model once
  * the agent may no longer read it for its person (history-access.ts). A
  * run that ended since the call began records nothing, and the call is
@@ -315,7 +326,7 @@ export const agentCallEntry = (
 /**
  * Records a call of the chat's code as `agent.call`, by the workspace's
  * agent acting for the chat's person, in the chat: for the calls nothing
- * below records (a Knowledge read, a connection call and a model request
+ * below records (a connection call and a model request
  * record themselves). Through core's outbox, which never fails the call
  * (`keepAuditEvent`).
  */

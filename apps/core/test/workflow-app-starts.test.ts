@@ -29,7 +29,10 @@ import type { Authority } from "@grasp-os/shared/permissions";
 import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { maxLiveRunsPerPrincipal } from "@grasp-os/shared/workflow-resources";
-import type { WorkflowResourceRun } from "@grasp-os/shared/workflow-resources";
+import type {
+  WorkflowResourceRun,
+  WorkflowStart,
+} from "@grasp-os/shared/workflow-resources";
 import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
@@ -38,10 +41,6 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { invocationFor } from "../src/app-functions.ts";
 import type { Release } from "../src/app-releases.ts";
 import { cancelArchivedRuns, setArchived } from "../src/app-status.ts";
-import {
-  bindWorkflowToApp,
-  unbindWorkflowFromApp,
-} from "../src/app-workflow-bindings.ts";
 import { appFor } from "../src/apps.ts";
 import { personOf } from "../src/connections.ts";
 import { openStore } from "../src/data-stores.ts";
@@ -49,7 +48,7 @@ import type { OpenStore } from "../src/data-stores.ts";
 import { appHost, workspace } from "../src/durable-objects.ts";
 import { hostFunctionCall } from "../src/function-host.ts";
 import type { HostedApp, Runner } from "../src/function-host.ts";
-import { createCollection } from "../src/knowledge/collection-rules.ts";
+import { brainGrantRead } from "../src/history-access.ts";
 import { defaultMaxAttempts } from "../src/outbox-delivery.ts";
 import type { OutboxConsumer } from "../src/outbox-delivery.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
@@ -60,10 +59,7 @@ import {
 } from "../src/permissions.ts";
 import { StoreHost } from "../src/store-host.ts";
 import { setWorkflowParams } from "../src/workflow-params.ts";
-import {
-  createWorkflowResource,
-  publishWorkflowVersion,
-} from "../src/workflow-resources.ts";
+import { createWorkflowResource } from "../src/workflow-resources.ts";
 import {
   appWorkflowStarts,
   dispatchStartIntent,
@@ -77,12 +73,13 @@ import {
   stopRetryMs,
 } from "../src/workflows/resource-runs.ts";
 import { storeOfNewApp } from "./app-stores.ts";
-import { racingDb, standInLive } from "./apps.ts";
+import { racingDb, standInBinding, standInLive } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { objectSchema } from "./json-workflow-apps.ts";
 import { sleeping, woken } from "./runs.ts";
 import { outcome, unique } from "./sign-in.ts";
 import { applied } from "./store-schemas.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
 
 // Starting independent workflows from an App's server functions
 // (function-host.ts, workflow-start-intents.ts): an action's
@@ -358,10 +355,7 @@ const workflowOf = async (owner: Identity, waits = false) => {
     owner,
     `follow-up-${unique()}`
   );
-  await publishWorkflowVersion(env, owner, workflow.id, {
-    definition: definitionOf(waits),
-    basedOn: null,
-  });
+  await publishDefinition(env, owner, workflow.id, definitionOf(waits));
   return workflow;
 };
 
@@ -463,11 +457,7 @@ const fixture = async (
   const store = await openStore(env, storeId);
   await store.applySchema(applied(manifestText(manifest.schema)));
   const workflow = await workflowOf(ada, waits);
-  const binding = await bindWorkflowToApp(env, ada, workflow.id, {
-    app,
-    alias: "followUp",
-    version: 1,
-  });
+  const binding = await standInBinding(app, "followUp", workflow.id, ada);
   const asked = await requestPermission(
     env,
     ada,
@@ -489,7 +479,7 @@ const fixture = async (
     app,
     workflowId: workflow.id,
     permissionId: asked.id,
-    bindingId: binding.id,
+    bindingId: binding,
     store,
     release: {
       manifest: sealed.parsed,
@@ -544,6 +534,7 @@ const call = async (
 ): Promise<FunctionResult> => {
   const invocation = await invocationFor(options.runEnv ?? env, fx.release, {
     by,
+    origin: "page",
     requestId: crypto.randomUUID(),
     deadline: Date.now() + 30_000,
     ...(options.agent === undefined ? {} : { agent: options.agent }),
@@ -675,6 +666,24 @@ const settledOf = async (store: OpenStore) => {
   }));
 };
 
+/**
+ * Runs the store's alarm and waits until its outbox has no entry left
+ * owed. A commit arms the store's own alarm a second later, which on a
+ * busy machine can fire first: `runDurableObjectAlarm` then finds none
+ * set and returns while that alarm is still handing the entries over.
+ */
+const delivered = async (store: OpenStore) => {
+  await runDurableObjectAlarm(objectOf(store));
+  await vi.waitFor(
+    async () => {
+      const entries = await settledOf(store);
+      // Whatever is still owed shows in the failure, not just that one is.
+      expect(entries.filter(({ settled }) => !settled)).toStrictEqual([]);
+    },
+    { timeout: 30_000, interval: 100 }
+  );
+};
+
 /** A dispatch that admits the start, then dies before it acknowledges. */
 const killedDispatch: OutboxConsumer = async (entry) => {
   await dispatchStartIntent(env, entry);
@@ -753,6 +762,46 @@ describe("an action starting a workflow", () => {
         },
       ],
     });
+  });
+
+  it("starts the workflow's live version through its binding, whichever it was bound at, and leaves a run on the version it started on", async () => {
+    let earlier: WorkflowStart | undefined;
+    // Version 2 goes live once the binding, made at version 1, is: the
+    // binding follows it. A run of version 1 started before stays on it.
+    const fx = await fixture(true, async ({ ada, app }) => {
+      const bound = await env.DB.prepare(
+        "SELECT workflow_resource_id AS id FROM app_workflow_bindings WHERE app_id = ?"
+      )
+        .bind(app)
+        .first<{ id: string }>();
+      const id = bound?.id ?? "";
+      earlier = await startWorkflow(env, { type: "person", person: ada }, id, {
+        expected: 1,
+        args: { who: "Ada" },
+        key: `key-${unique()}`,
+      });
+      await publishDefinition(
+        env,
+        ada,
+        id,
+        definitionOf(true).replace('"1 hour"', '"2 hours"')
+      );
+    });
+    const started = await call(fx, fx.bob, "requests.kickOff", { who: "Bob" });
+    expect(started.ok).toBeTruthy();
+    if (!started.ok) {
+      return;
+    }
+    const handle = handleSchema["~standard"].validate(started.value);
+    const [before, after] = await Promise.all([
+      runOf(fx, earlier?.id ?? null),
+      runOf(fx, "value" in handle ? handle.value.runId : null),
+    ]);
+    expect({
+      version: field(started.value, "version"),
+      runs: [before.version, after.version],
+      stillRunning: before.endedAt === null,
+    }).toStrictEqual({ version: 2, runs: [1, 2], stillRunning: true });
   });
 
   it("stops the runs the App started once a builder archives it", async () => {
@@ -924,7 +973,12 @@ describe("an action starting a workflow", () => {
     );
     // Granted on the version live, as the admin reviewed it.
     await grantPermission(env, fx.admin, regranted.id, { version: 1 });
-    await unbindWorkflowFromApp(env, fx.ada, fx.bindingId);
+    // Ended, as a version that binds nothing there ends it.
+    await env.DB.prepare(
+      "UPDATE app_workflow_bindings SET status = 'removed' WHERE id = ?"
+    )
+      .bind(fx.bindingId)
+      .run();
     const unbound = await call(fx, fx.bob, "requests.kickOff", { who: "Bob" });
     expect({
       outsider: answerOf(outsider),
@@ -955,11 +1009,7 @@ describe("App code starting a workflow it didn't declare", () => {
     // Another workflow Ada binds to the App, which the App never declared.
     const fx = await fixture(false, async ({ admin, ada, app }) => {
       const other = await workflowOf(ada);
-      await bindWorkflowToApp(env, ada, other.id, {
-        app,
-        alias: "other",
-        version: 1,
-      });
+      await standInBinding(app, "other", other.id, ada);
       const asked = await requestPermission(
         env,
         ada,
@@ -1011,7 +1061,7 @@ describe("a mutation starting a workflow after it commits", () => {
       { key }
     );
     const staged = await outboxOf(fx.store);
-    await runDurableObjectAlarm(objectOf(fx.store));
+    await delivered(fx.store);
     const receipts = await receiptsOf(fx.app);
     const run = await ended(fx, receipts[0]?.id ?? null);
     expect({
@@ -1096,7 +1146,7 @@ describe("a mutation starting a workflow after it commits", () => {
               (error: unknown) => codeOf(error)
             )
         : "unclaimed";
-    await runDurableObjectAlarm(objectOf(fx.store));
+    await delivered(fx.store);
     const receipts = await receiptsOf(fx.app);
     const outbox = await outboxOf(fx.store);
     expect({
@@ -1158,7 +1208,7 @@ describe("a mutation starting a workflow after it commits", () => {
     await env.DB.prepare(archiveApp)
       .bind(Date.now(), archivedBy(fx), fx.app)
       .run();
-    await runDurableObjectAlarm(objectOf(fx.store));
+    await delivered(fx.store);
     expect({
       committed: staged.ok,
       receipts: await receiptsOf(fx.app),
@@ -1178,12 +1228,12 @@ describe("a mutation starting a workflow after it commits", () => {
     )
       .bind(fx.app, fx.bob.userId)
       .run();
-    await runDurableObjectAlarm(objectOf(fx.store));
+    await delivered(fx.store);
     const afterRemoval = await receiptsOf(fx.app);
 
     const adas = await call(fx, fx.ada, "requests.submit", { who: "Ada" });
     await revokePermission(env, fx.admin, fx.permissionId);
-    await runDurableObjectAlarm(objectOf(fx.store));
+    await delivered(fx.store);
     const logged = await allEvents();
     const events = logged.filter(
       (event) =>
@@ -1304,23 +1354,19 @@ const agentOf = async (
 };
 
 /**
- * A real chat of Bob's whose code read an everyone handbook, and its
- * agent, granted `write` on the fixture's App and `read` on the handbook
- * (`readId`).
+ * A real chat of Bob's whose code read the Brain, and its agent, granted
+ * `write` on the fixture's App and the Brain (`readId`), which the read
+ * rests on.
  */
 const chatThatRead = async (fx: Fixture) => {
   const { agent } = await agentOf(fx);
   const stub = workspace(env, agent.workspaceId);
   const created = { id: agent.chatId };
-  const handbook = await createCollection(env, fx.admin, {
-    name: `Handbook ${unique()}`,
-    access: "everyone",
-  });
   await runInDurableObject(stub, (_object, state) => {
     state.storage.sql.exec(
       "INSERT INTO chat_run_sources (chat_id, run_id, source_id, withheld_at) VALUES (?, 'run-1', ?, NULL)",
       created.id,
-      handbook.id
+      brainGrantRead
     );
   });
   const asked = await requestPermission(
@@ -1328,9 +1374,9 @@ const chatThatRead = async (fx: Fixture) => {
     fx.ada,
     {
       subject: { type: "agent", agentId: agent.agentId },
-      object: { type: "collection", collectionId: handbook.id },
-      actions: ["read"],
-      binding: "HANDBOOK",
+      object: { type: "platform" },
+      actions: ["brain"],
+      binding: "BRAIN",
     },
     rolesOf(fx.ada)
   );
@@ -1338,7 +1384,7 @@ const chatThatRead = async (fx: Fixture) => {
   return {
     agent,
     stub,
-    chat: { id: created.id, read: handbook.id },
+    chat: { id: created.id, read: brainGrantRead },
     readId: asked.id,
   };
 };
@@ -1351,7 +1397,7 @@ describe("what a start rechecks, and records", () => {
     await appHost(env, fx.app).restrict();
     // Dispatched after the App read restricted data: what it staged may
     // carry it.
-    await runDurableObjectAlarm(objectOf(fx.store));
+    await delivered(fx.store);
     const after = await call(fx, fx.bob, "requests.kickOff", { who: "Bob" });
     const { results } = await env.DB.prepare(
       "SELECT receipt.idempotency_key AS key, receipt.restricted AS receipt, run.restricted AS run FROM workflow_start_receipts AS receipt JOIN workflow_resource_runs AS run ON run.id = receipt.id WHERE receipt.invoker_type = 'app' AND receipt.invoker_id = ? ORDER BY receipt.created_at, receipt.id"
@@ -1399,7 +1445,7 @@ describe("what a start rechecks, and records", () => {
       { agent }
     );
     await revokePermission(env, fx.admin, permissionId);
-    await runDurableObjectAlarm(objectOf(fx.store));
+    await delivered(fx.store);
     const afterAgent = await settledOf(fx.store);
     const admitted = await detailsOf("workflow.start.admitted", fx.workflowId);
     const refused = await detailsOf("workflow.start_intent.refused", fx.app);
@@ -1411,7 +1457,7 @@ describe("what a start rechecks, and records", () => {
     )
       .bind(Date.now(), fx.app)
       .run();
-    await runDurableObjectAlarm(objectOf(fx.store));
+    await delivered(fx.store);
     expect({
       kept: kept.ok,
       staged: staged.ok,
@@ -1446,7 +1492,7 @@ describe("what a start rechecks, and records", () => {
       { who: "Bob" },
       { agent }
     );
-    await runDurableObjectAlarm(objectOf(fx.store));
+    await delivered(fx.store);
     const before = await settledOf(fx.store);
     const staged = await call(
       fx,
@@ -1462,7 +1508,7 @@ describe("what a start rechecks, and records", () => {
       await personOf(env, fx.bob),
       { type: "person", userId: fx.bob.userId }
     );
-    await runDurableObjectAlarm(objectOf(fx.store));
+    await delivered(fx.store);
 
     expect({
       calls: [kept.ok, staged.ok],
@@ -1509,8 +1555,8 @@ describe("what a start rechecks, and records", () => {
     const kept = await ranFor();
     await revokePermission(env, fx.admin, readId);
     const revoked = await ranFor();
-    // A concurrent turn of the chat sees the revoke and withholds the
-    // handbook, after the agent's call already took what it read.
+    // A concurrent turn of the chat sees the revoke and withholds what it
+    // read under the grant, after the agent's call already took it.
     await runInDurableObject(stub, (_object, state) => {
       state.storage.sql.exec(
         "UPDATE chat_run_sources SET withheld_at = ? WHERE chat_id = ?",
@@ -1765,7 +1811,7 @@ describe("what a start rechecks, and records", () => {
     const fx = await fixture();
     const started = await call(fx, fx.bob, "requests.kickOffPlain", {});
     const staged = await call(fx, fx.bob, "requests.submitPlain", {});
-    await runDurableObjectAlarm(objectOf(fx.store));
+    await delivered(fx.store);
     const { results } = await env.DB.prepare(
       "SELECT input FROM workflow_start_receipts WHERE invoker_type = 'app' AND invoker_id = ? ORDER BY created_at, id"
     )
@@ -2200,7 +2246,7 @@ describe("what a start rechecks, and records", () => {
     const fx = await fixture();
     const taken = await outcome(
       startWorkflow(env, { type: "person", person: fx.ada }, fx.workflowId, {
-        version: 1,
+        expected: 1,
         args: { who: "Ada" },
         key: `grasp:after-commit:${unique()}`,
       })

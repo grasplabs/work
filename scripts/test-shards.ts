@@ -198,7 +198,7 @@ export const spreadOver = (
  * last file of the one before had ended: up to two minutes of start-up
  * per group on a CI runner, for a group of one file (October 2026,
  * GRA-1094). Of one group each, a shard starts only its own, and a group
- * kept apart to run alone (vite.brain.config.ts) has its runner to itself.
+ * kept apart to run alone (vite.stephen.config.ts) has its runner to itself.
  * Each group gets one shard, and each shard left over goes to the group
  * whose shards would end last, of those that end later than their longest
  * unit alone would: a group held up by one long file (the compiler's

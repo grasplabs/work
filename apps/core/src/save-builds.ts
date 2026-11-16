@@ -11,11 +11,7 @@ import {
   undeclaredFunctions,
 } from "@grasp-os/runtime/definition";
 import { generateModules, symbolicModules } from "@grasp-os/runtime/host";
-import type {
-  BuildDiagnostic,
-  CommittedVersion,
-  SavedBuild,
-} from "@grasp-os/shared/apps";
+import type { BuildDiagnostic, SavedBuild } from "@grasp-os/shared/apps";
 import { diagnosticCategory } from "@grasp-os/shared/diagnostics";
 import type { AppId } from "@grasp-os/shared/ids";
 import { log } from "@grasp-os/shared/log";
@@ -31,7 +27,10 @@ import { buildPages, checkAppCode, withinBuildWait } from "./pages.ts";
 import type { BuildProfile } from "./pages.ts";
 import { platformRunner } from "./platform-sandbox.ts";
 
-type SavedBuilds = CommittedVersion["builds"];
+/** How the builds of a saved version went. */
+interface SavedBuilds {
+  pages: SavedBuild;
+}
 
 /** What a save says of a build that couldn't run; nothing of App code. */
 const couldNotRun =

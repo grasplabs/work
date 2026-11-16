@@ -65,6 +65,7 @@ const tick = async (host: HandOvers, aheadMs = 0): Promise<void> => {
     at: new Date(clock.at),
     embedders: noEmbedders,
     handOvers: host,
+    contextTokens: null,
   });
 };
 

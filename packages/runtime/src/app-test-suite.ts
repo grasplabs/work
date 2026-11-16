@@ -92,7 +92,7 @@ export const readSuite = (schema: unknown, tests: unknown): AppTestSuite => {
  *   "an owner reads back the note they create": async (t) => {
  *     const ada = t.withIdentity({ name: "Ada" });
  *     const id = await ada.mutation(api.notes.create, { title: "First" });
- *     expect(await ada.query(api.notes.get, { id })).toMatchObject({
+ *     await expect(ada.query(api.notes.get, { id })).resolves.toMatchObject({
  *       title: "First",
  *     });
  *   },

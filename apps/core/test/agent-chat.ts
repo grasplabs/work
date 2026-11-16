@@ -122,6 +122,38 @@ export const transcript = async (
 ): Promise<Message[]> =>
   await runInDurableObject(stub, (instance) => instance.messages(chatId));
 
+/**
+ * The agent's words each of `personId`'s chats in their own Workspace
+ * keeps, chat by chat, oldest first.
+ */
+export const keptAnswersOf = async (personId: string): Promise<string[][]> => {
+  const stub = workspace(env, personalWorkspaceId(personId));
+  const chatIds = await runInDurableObject(stub, (_instance, state) =>
+    state.storage.sql
+      .exec<{ id: string }>(
+        "SELECT id FROM chats WHERE person_id = ? ORDER BY created_at",
+        personId
+      )
+      .toArray()
+      .map(({ id }) => id)
+  );
+  const kept: string[][] = [];
+  for (const chatId of chatIds) {
+    // oxlint-disable-next-line no-await-in-loop -- chat by chat
+    const messages = await transcript(stub, chatId);
+    kept.push(
+      messages.flatMap((message) =>
+        message.role === "assistant"
+          ? message.content.flatMap((block) =>
+              block.type === "text" ? [block.text] : []
+            )
+          : []
+      )
+    );
+  }
+  return kept;
+};
+
 /** How the notice of a turn's check begins (agent-builds.ts, `turnCheck`). */
 const turnCheckStart = "Grasp checked the drafts you wrote this turn";
 

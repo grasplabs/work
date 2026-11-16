@@ -1,6 +1,6 @@
 import { definitionToolNames } from "@grasp-os/shared/chat";
 import type {
-  ChatCitation,
+  ChatAgent,
   ChatCode,
   ChatMessage,
   ChatOutput,
@@ -51,6 +51,7 @@ import {
 import { createContext, Fragment, lazy, Suspense, use, useState } from "react";
 import type { ReactElement, ReactNode } from "react";
 
+import { AgentAvatar } from "../agents/agent-avatar.tsx";
 import type { ThinkingOf } from "../brain/thinking/play.ts";
 import { useCopy } from "../copy.ts";
 import { ConnectAiProvider } from "../frame/connect-ai-provider.tsx";
@@ -77,7 +78,6 @@ import { recoveredSteps } from "./recovered.ts";
 import { SavedMemoryLine } from "./saved-memory.tsx";
 import { readingFileOf, signOf } from "./sign.ts";
 import type { WorkState } from "./sign.ts";
-import { AnswerCited, AnswerSources, useCitedDocuments } from "./sources.tsx";
 import { minutesAndSeconds, turnsOf, workedFor } from "./turns.ts";
 import { widgetLinesOf } from "./widget-lines.ts";
 
@@ -601,41 +601,6 @@ const Reasoning = ({
   );
 };
 
-/** The quiet row of actions under an answer, with what it cites when it cites any. */
-const ReplyActions = ({
-  cited,
-  children,
-}: {
-  cited?: { chatId: string; messageId: number };
-  children: ReactNode;
-}) => {
-  const sources = useCitedDocuments();
-  return cited === undefined ? (
-    <MessageActions>{children}</MessageActions>
-  ) : (
-    <AnswerSources cited={sources}>{children}</AnswerSources>
-  );
-};
-
-/** An answer's words, each span that cites a document an inline citation. */
-const ReplyText = ({
-  text,
-  citations,
-  written,
-}: {
-  text: string;
-  citations?: ChatCitation[];
-  /** Still being written: each new word fades in. */
-  written: boolean;
-}) => (
-  <AnswerMarkdown
-    cited={citations?.map(({ documentId }) => documentId)}
-    sources={useCitedDocuments()}
-    text={text}
-    written={written}
-  />
-);
-
 /** The calls the chat's code made, as the thread was given them. */
 const ChatTools = createContext<readonly ChatToolEvent[]>([]);
 
@@ -863,7 +828,6 @@ const Reply = ({
   card,
   sign,
   onRetry,
-  cited,
   compact,
 }: {
   reply: Omit<ChatPartial, "reasoning"> & {
@@ -871,8 +835,6 @@ const Reply = ({
     reasoning?: ChatReasoning;
     end?: Answer["end"];
     failure?: Answer["failure"];
-    /** A stored answer's citations; one being written has none. */
-    citations?: ChatCitation[];
   };
   results: ReadonlyMap<string, Result>;
   /** What the running code step has logged so far. */
@@ -887,15 +849,13 @@ const Reply = ({
   sign?: WorkState;
   /** Asks the last question again, offered under the last answer. */
   onRetry?: () => void;
-  /** A stored answer that cites documents: its chat and message, so its row of actions can open them. */
-  cited?: { chatId: string; messageId: number };
   /** In the chat dock: its answer at the dock's size. */
   compact: boolean;
 }) => {
   const { t } = useLingui();
   const answer = reply.text.trim();
   const quiet = writing || sign !== undefined;
-  const shown = (
+  return (
     <Message>
       {/* Its words set for reading; in the dock, at the dock's size. */}
       <MessageContent size={compact ? "default" : "reading"}>
@@ -915,11 +875,7 @@ const Reply = ({
         />
         {card}
         {answer === "" ? null : (
-          <ReplyText
-            citations={reply.citations}
-            text={reply.text}
-            written={writing}
-          />
+          <AnswerMarkdown text={reply.text} written={writing} />
         )}
         {reply.end === "cancelled" ? (
           <p className="text-muted-foreground">
@@ -938,23 +894,17 @@ const Reply = ({
           <GraspSign said={reply.text.length} state={sign} />
         )}
         {quiet || (answer === "" && onRetry === undefined) ? null : (
-          <ReplyActions cited={cited}>
+          <MessageActions>
             {answer === "" ? null : <CopyAnswer text={answer} />}
             {onRetry === undefined || reply.end === "failed" ? null : (
               <MessageAction label={t`Ask again`} onClick={onRetry}>
                 <RefreshCcwIcon />
               </MessageAction>
             )}
-          </ReplyActions>
+          </MessageActions>
         )}
       </MessageContent>
     </Message>
-  );
-  // Only an answer that cites documents asks core what it cites.
-  return cited === undefined ? (
-    shown
-  ) : (
-    <AnswerCited cited={cited}>{shown}</AnswerCited>
   );
 };
 
@@ -1082,8 +1032,68 @@ const lastAnswerOf = (
 /** Where the page passes no calls of the chat's code. */
 const noTools: readonly ChatToolEvent[] = [];
 
+/** Where the page passes no agents. */
+const noAgents: readonly ChatAgent[] = [];
+
+/**
+ * The answers that name their agent, by ID: in a chat more than one agent
+ * answered in, each answer whose agent isn't the one before it. A chat one
+ * agent answers in names none, as it always did.
+ */
+export const answerAgentsOf = (
+  messages: readonly ChatMessage[]
+): ReadonlyMap<number, string> => {
+  const answers = messages.filter(
+    (message): message is Answer => message.role === "assistant"
+  );
+  const named = new Map<number, string>();
+  if (new Set(answers.flatMap(({ agentId }) => agentId ?? [])).size < 2) {
+    return named;
+  }
+  let before: string | undefined;
+  for (const { id, agentId } of answers) {
+    if (agentId !== undefined && agentId !== before) {
+      named.set(id, agentId);
+    }
+    before = agentId ?? before;
+  }
+  return named;
+};
+
+/** The agent that gave the answers under it: its picture and name. */
+const AnswerBy = ({ agent }: { agent: ChatAgent | undefined }) => {
+  const { t } = useLingui();
+  const name = agent?.name ?? t`An agent you can no longer ask`;
+  return (
+    <p className="text-muted-foreground flex items-center gap-2 text-sm font-medium">
+      <AgentAvatar face={agent?.face ?? "stephen"} size="default" />
+      {name}
+    </p>
+  );
+};
+
+/**
+ * The agent writing an answer now, named where it isn't the one that
+ * answered last: the next one a question addressed. Nothing otherwise.
+ */
+const WrittenBy = ({
+  agents,
+  writer,
+  last,
+}: {
+  agents: readonly ChatAgent[];
+  writer: string | undefined;
+  last: Answer | undefined;
+}) =>
+  writer === undefined ||
+  last?.agentId === undefined ||
+  writer === last.agentId ? null : (
+    <AnswerBy agent={agents.find(({ id }) => id === writer)} />
+  );
+
 /** The chat's messages, and the response being written, oldest first. */
 export const ChatThread = ({
+  agents = noAgents,
   chatId,
   loaded,
   messages,
@@ -1097,6 +1107,12 @@ export const ChatThread = ({
   build,
   children,
 }: {
+  /**
+   * The agents the person may ask, which name each answer that another
+   * agent gave than the one before it; none, and no names, where the page
+   * hasn't them.
+   */
+  agents?: readonly ChatAgent[] | undefined;
   /** The chat, whose answers' sources core is asked for. */
   chatId: string;
   /** Whether core has sent the chat yet: until then, it is loading. */
@@ -1189,26 +1205,29 @@ export const ChatThread = ({
   // replies its question already has, or stands as an answer of its own.
   const written =
     shown === null ? null : (
-      <Reply
-        compact={compact}
-        output={output}
-        reply={{
-          ...shown,
-          reasoning:
-            shown.reasoning === ""
-              ? undefined
-              : { text: shown.reasoning, ms: null },
-        }}
-        results={results}
-        running={running}
-        sign={doing}
-        top={
-          doing !== undefined && replies.length === 0 ? (
-            <Working doing={doing} file={file} />
-          ) : undefined
-        }
-        writing
-      />
+      <>
+        <WrittenBy agents={agents} last={lastAnswer} writer={shown.agentId} />
+        <Reply
+          compact={compact}
+          output={output}
+          reply={{
+            ...shown,
+            reasoning:
+              shown.reasoning === ""
+                ? undefined
+                : { text: shown.reasoning, ms: null },
+          }}
+          results={results}
+          running={running}
+          sign={doing}
+          top={
+            doing !== undefined && replies.length === 0 ? (
+              <Working doing={doing} file={file} />
+            ) : undefined
+          }
+          writing
+        />
+      </>
     );
   const writtenGoesOn = written !== null && items.at(-1)?.kind === "answer";
   const waiting = pendingPlan(messages, running);
@@ -1218,9 +1237,15 @@ export const ChatThread = ({
         <Reading />
       </div>
     ) : null;
+  const answerAgents = answerAgentsOf(messages);
   const renderReplies = (answers: readonly Answer[]): ReactNode =>
     answers.map((message) => (
       <Fragment key={message.id}>
+        {answerAgents.has(message.id) ? (
+          <AnswerBy
+            agent={agents.find(({ id }) => id === answerAgents.get(message.id))}
+          />
+        ) : null}
         <Reply
           compact={compact}
           onRetry={
@@ -1234,11 +1259,6 @@ export const ChatThread = ({
           running={running}
           sign={
             shown === null && message === replies.at(-1) ? doing : undefined
-          }
-          cited={
-            message.citations.length === 0
-              ? undefined
-              : { chatId, messageId: message.id }
           }
           card={cardOf(message.id)}
           top={topOf(message.id)}

@@ -1,5 +1,6 @@
 import {
   applyOperation,
+  definitionManifest,
   definitionSources,
   definitionText,
   emptyDefinition,
@@ -11,7 +12,7 @@ import type {
   DefinitionOperation,
   FrozenJson,
 } from "@grasp-os/runtime/definition";
-import { ownFiles } from "@grasp-os/runtime/host";
+import { declaredPermission, ownFiles } from "@grasp-os/runtime/host";
 import type { WorkflowEventContract } from "@grasp-os/runtime/host";
 
 // An App's definition as a test writes it, and the code generated from
@@ -19,8 +20,8 @@ import type { WorkflowEventContract } from "@grasp-os/runtime/host";
 // holds its definition beside its files, and its config, schema and
 // `server/_generated/` as the definition and its code generate them
 // (core's apps.ts, app-definition.ts), the tests' Apps (core's and e2e/'s)
-// too: a test commits its files with the definition (`TestApp`,
-// `commitApp`), never what is generated, which no write may name.
+// too: a test publishes its files with the definition (`TestApp`,
+// `publishApp`), never what is generated, which no write may name.
 
 /** A row rule, as `setAccess` takes it. */
 type Rule =
@@ -60,13 +61,11 @@ export interface AppSpec {
    */
   readonly contracts?: Readonly<Record<string, WorkflowEventContract>>;
   /**
-   * The workflow version a draft bound under each alias of `contracts`
-   * (`bindWorkflow`), which the version records: a definition committed
+   * The workflow a draft bound under each alias (`bindWorkflow`), which
+   * the version records and binds as it goes live: a definition written
    * by hand may name any.
    */
-  readonly bound?: Readonly<
-    Record<string, { readonly workflowId: string; readonly version: number }>
-  >;
+  readonly bound?: Readonly<Record<string, { readonly workflowId: string }>>;
   /** Answers for a schema change, by table and field name. */
   readonly answers?: readonly {
     readonly table: string;
@@ -98,14 +97,26 @@ const applied = (
   });
 };
 
-/** What sets each of `spec`'s workflow contracts, with the version bound. */
+/** No events, listen tasks or decisions: a workflow the App only starts. */
+const startsOnly: WorkflowEventContract = {
+  events: {},
+  listens: {},
+  decisions: {},
+};
+
+/** What sets each of `spec`'s workflow contracts, with the workflow bound. */
 const contractOperations = (spec: AppSpec): DefinitionOperation[] =>
-  Object.entries(spec.contracts ?? {}).map(([alias, contract]) => {
+  [
+    ...new Set([
+      ...Object.keys(spec.contracts ?? {}),
+      ...Object.keys(spec.bound ?? {}),
+    ]),
+  ].map((alias) => {
     const bound = spec.bound?.[alias];
     return {
       op: "setWorkflowContract",
       alias,
-      contract,
+      contract: spec.contracts?.[alias] ?? startsOnly,
       ...(bound === undefined ? {} : { bound }),
     };
   });
@@ -268,30 +279,79 @@ export const sourceParts = (
 export const definitionInput = (definition: AppDefinition): unknown =>
   JSON.parse(definitionText(definition));
 
-/**
- * A test's commit of `source` (`apps.files.commit`): its files, with its
- * definition when it is a test's App.
- */
-export const commitApp = <Committed>(
-  api: {
-    readonly commit: (
+/** What `writeApp` and `publishApp` call of a person's session. */
+interface DraftSession {
+  readonly apps: {
+    readonly define: (
       app: string,
-      changes: Record<string, string | null>,
-      message: string,
-      definition?: unknown
-    ) => Committed;
-  },
+      revision: number,
+      operation: unknown
+    ) => Promise<{ ok: true } | { ok: false; problem: string }>;
+  };
+  readonly drafts: {
+    readonly get: (subject: {
+      kind: "app";
+      id: string;
+    }) => Promise<{ revision: number }>;
+    readonly write: (
+      subject: { kind: "app"; id: string },
+      revision: number,
+      changes: Record<string, string | null>
+    ) => Promise<{ revision: number }>;
+    readonly publish: (
+      subject: { kind: "app"; id: string },
+      revision: number
+    ) => Promise<{ version: number; label: string }>;
+  };
+}
+
+/**
+ * Writes `source` into App `app`'s draft as `api`'s person, as a builder
+ * does in Grasp: its definition, when it is a test's App, written whole
+ * (`apps.define`), then its files over the revision read
+ * (`drafts.write`). Answers the draft's revision after.
+ */
+export const writeApp = async (
+  api: DraftSession,
   app: string,
-  source: TestSource,
-  message: string
-): Committed => {
+  source: TestSource
+): Promise<number> => {
+  const subject = { kind: "app", id: app } as const;
+  let { revision } = await api.drafts.get(subject);
   const { files, definition } = sourceParts(source);
-  return api.commit(
-    app,
-    { ...files },
-    message,
-    definition === undefined ? undefined : definitionInput(definition)
+  if (definition !== undefined) {
+    const answer = await api.apps.define(app, revision, {
+      op: "setDefinition",
+      definition: definitionInput(definition),
+    });
+    if (!answer.ok) {
+      throw new Error(answer.problem);
+    }
+    // The define was the write after the revision read.
+    revision += 1;
+  }
+  if (Object.keys(files).length > 0) {
+    ({ revision } = await api.drafts.write(subject, revision, { ...files }));
+  }
+  return revision;
+};
+
+/**
+ * A test's publish of `source` as `api`'s person: written into App
+ * `app`'s draft (`writeApp`), then the draft published
+ * (`drafts.publish`). Answers the version made live.
+ */
+export const publishApp = async (
+  api: DraftSession,
+  app: string,
+  source: TestSource
+): Promise<{ version: number; label: string }> => {
+  const revision = await writeApp(api, app, source);
+  const { version, label } = await api.drafts.publish(
+    { kind: "app", id: app },
+    revision
   );
+  return { version, label };
 };
 
 /** `app` with its definition as `change` makes it, and the code generated from it. */
@@ -299,6 +359,37 @@ export const redefined = (
   app: TestApp,
   change: (definition: AppDefinition) => AppDefinition
 ): TestApp => appOf(change(app.definition), app.files);
+
+/**
+ * `app` binding workflow `workflowId` under its workflow permission
+ * `alias`, as a draft's `bindWorkflow` records it, keeping what it
+ * declares of the workflow: the binding goes live with the version.
+ */
+export const boundIn = (
+  app: TestApp,
+  bound: Readonly<Record<string, string>>
+): TestApp =>
+  redefined(app, (definition) => {
+    let changed = definition;
+    for (const [alias, workflowId] of Object.entries(bound)) {
+      const held = declaredPermission(
+        definitionManifest(changed),
+        alias,
+        "workflows"
+      );
+      if (held === undefined) {
+        throw new Error(`The App declares no workflow ${alias}`);
+      }
+      const { events, listens, decisions } = held;
+      changed = applyOperation(changed, {
+        op: "setWorkflowContract",
+        alias,
+        contract: { events, listens, decisions },
+        bound: { workflowId },
+      });
+    }
+    return changed;
+  });
 
 /**
  * `app` with its definition changed by `operations`, as the agent's

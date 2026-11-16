@@ -49,10 +49,11 @@ test("a builder sees their workflows on the board, and opens them in full", asyn
     made = await Promise.all(
       [`tally-${tag}`, `later-${tag}`].map(async (name) => {
         const workflow = await api.workflowResources.create(name);
-        await api.workflowResources.publish(workflow.id, {
-          definition: countingDefinition(),
-          basedOn: null,
+        // A new workflow's draft is at revision 0: written, then published.
+        await api.drafts.write({ kind: "workflow", id: workflow.id }, 0, {
+          "workflow.json": countingDefinition(),
         });
+        await api.drafts.publish({ kind: "workflow", id: workflow.id }, 1);
         return { id: workflow.id, name: workflow.name };
       })
     );
@@ -61,7 +62,6 @@ test("a builder sees their workflows on the board, and opens them in full", asyn
       throw new Error("No workflow was made");
     }
     const { runId } = await api.workflowResources.start(counted.id, {
-      version: 1,
       args: { who: "Ada" },
       key: `count-${tag}`,
     });

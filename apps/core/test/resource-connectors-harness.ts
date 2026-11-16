@@ -10,8 +10,9 @@ import { z } from "zod";
 
 import { callAppFunction } from "../src/app-functions.ts";
 import { loadRelease } from "../src/app-releases.ts";
-import { commitApp, testApp, withFiles } from "./app-definitions.ts";
+import { testApp, withFiles } from "./app-definitions.ts";
 import type { TestApp, TestSource } from "./app-definitions.ts";
+import { commitApp } from "./apps.ts";
 import { consentCode, graphSentUrl } from "./connect-providers.ts";
 import { createIdp } from "./fake-idp.ts";
 import { mailControlUrl, mailServerUrl } from "./mail-server.ts";
@@ -254,12 +255,11 @@ export const mailerApp = async (
   const builder = await signedInApi(idp, "builder");
   const created = await builder.api.apps.create({ name: "Mailer" });
   await commitApp(
-    builder.api.apps.files,
+    builder.api,
     created.id,
-    options.files ?? mailFiles(options.contract),
-    "First"
+    options.files ?? mailFiles(options.contract)
   );
-  await builder.api.apps.versions.publish(created.id, 1);
+  await builder.api.versions.rollback({ kind: "app", id: created.id }, 1);
   const connectionId = await connectShared(admin);
   const requested = await builder.api.permissions.request({
     subject: { type: "app", appId: created.id },
@@ -656,8 +656,8 @@ export const contactsApp = async (
   const admin = await signedInApi(idp, "admin");
   const builder = await signedInApi(idp, "builder");
   const created = await builder.api.apps.create({ name: "Contacts" });
-  await commitApp(builder.api.apps.files, created.id, crmFiles(), "First");
-  await builder.api.apps.versions.publish(created.id, 1);
+  await commitApp(builder.api, created.id, crmFiles());
+  await builder.api.versions.rollback({ kind: "app", id: created.id }, 1);
   const crm = await crmConnection();
   await options.before?.(crm);
   const requested = await builder.api.permissions.request({

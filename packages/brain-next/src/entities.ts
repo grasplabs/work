@@ -12,7 +12,14 @@ import type {
   Identifier,
   Reader,
 } from "./contract.ts";
-import { readMoment, visibleSql } from "./memories.ts";
+import {
+  readMoment,
+  restingOn,
+  retiredSql,
+  unerasedSql,
+  visibleSql,
+} from "./memories.ts";
+import type { HeldMemory } from "./memories.ts";
 import { readableSql } from "./reader-sets.ts";
 import { foldForSearch } from "./words.ts";
 
@@ -24,9 +31,9 @@ import { foldForSearch } from "./words.ts";
 // a relation relates to. Checked inside every statement, before anything
 // is capped.
 //
-// An add links an entity on exact identifiers alone, never on a name: the
-// first entity of the same kind holding one (`linkedBy`). Linking by name
-// and proposals of likely matches are the linker's (GRA-1740).
+// An add links an entity on its exact identifiers: the first entity of
+// the same kind holding one (`linkedBy`); given none, by an exact name of
+// two words or more (linking.ts `linkedByName`).
 
 /** An entity's kind as stored. */
 const kindSchema = z.enum(entityKinds);
@@ -49,24 +56,44 @@ export const foldIdentifier = ({ type, value }: Identifier): string =>
   type === "email" ? value.toLowerCase() : value;
 
 /**
- * An entity the reader may see: a memory they may read mentions it.
+ * An entity the reader may see: a memory they may read, its writer hasn't
+ * retired (`retiredSql`), mentions it; with `learnedBy` (an expression,
+ * milliseconds), one learned and not retired by then.
  */
-const mentionedSql = (entity: string): string => `(
+export const mentionedSql = (entity: string, learnedBy?: string): string => {
+  const kept =
+    learnedBy === undefined
+      ? "AND m.retired_at IS NULL"
+      : `AND m.learned_at <= ${learnedBy} AND NOT ${retiredSql("m", learnedBy)}`;
+  return `(
   EXISTS (SELECT 1 FROM memories AS m
-    WHERE m.entity = ${entity} AND ${visibleSql("m")})
+    WHERE m.entity = ${entity} ${kept} AND ${visibleSql("m")})
   OR EXISTS (SELECT 1 FROM memories AS m
-    WHERE m.object = ${entity} AND ${visibleSql("m")})
+    WHERE m.object = ${entity} ${kept} AND ${visibleSql("m")})
 )`;
+};
 
 /**
  * Whether the memory `alias` is read by exactly the set of readers whose
  * key (`reader_sets.key`) is `?3`:
  * its own set is it, and, resting on a version, so are the version's and
- * its source's current version's, the version not hidden by an erasure.
+ * its source's current version's, the version not hidden by an erasure;
+ * and no erasure of its writer since it was learned (memories.ts
+ * `unerasedSql`), so nothing links to an entity by what an erasure took.
  * So everyone who may read an add with those readers may read it too.
+ *
+ * A memory its writer retired counts here, unlike for
+ * every read (memories.ts `retiredSql`): a new mention with the same name
+ * or identifier links to the entity a forgotten memory named
+ * (`linkedBy`, linking.ts `linkedByName`), rather than making a second
+ * one; merging and splitting entities is GRA-1857's. So an add that names
+ * such an entity by its id as a reader is refused (`mayName`, through
+ * `mentionedSql`, which a forgotten memory doesn't hold), while one by its
+ * name or identifier links to it.
  */
-const coveredSql = (alias: string): string => `(
+export const coveredSql = (alias: string): string => `(
   ${alias}.readers = ?3
+  AND ${unerasedSql(alias)}
   AND (${alias}.source IS NULL OR EXISTS (
     SELECT 1 FROM source_versions AS based
     JOIN current_versions ON current_versions.source = based.source
@@ -100,11 +127,11 @@ export const linkedBy = (
     .exec<{ row: number | null }>(
       `SELECT min(entities.row) AS row
       FROM json_each(?2) AS asked
-      JOIN entity_names
+      CROSS JOIN entity_names
         ON entity_names.type = asked.value ->> 0
         AND entity_names.folded = asked.value ->> 1
-      JOIN memories AS m ON m.row = entity_names.memory
-      JOIN entities ON entities.row = entity_names.entity
+      CROSS JOIN memories AS m ON m.row = entity_names.memory
+      CROSS JOIN entities ON entities.row = entity_names.entity
       WHERE entities.kind = ?1 AND ${coveredSql("m")}`,
       kind,
       JSON.stringify(identifiers.map((id) => [id.type, foldIdentifier(id)])),
@@ -173,18 +200,21 @@ export const keepNames = (
 };
 
 /**
- * When the first memory the reader may read that mentions the entity at
- * `entity` was learned: null when there is none, so they may not see it. What
- * entities are ordered by, so where one stands among those a reader sees
- * depends only on what they may read: an entity linked long ago through
- * a hidden memory stands where its first memory they may read puts it.
+ * When the first memory the reader may read, not retired (`retiredSql`),
+ * that mentions the entity at `entity` was learned: null when there is
+ * none, so they may not see it. What entities are ordered by, so where
+ * one stands among those a reader sees depends only on what they may
+ * read: an entity linked long ago through a hidden memory stands where its
+ * first memory they may read puts it.
  */
 const firstMentionSql = (entity: string): string => `(SELECT min(first) FROM (
   SELECT m.learned_at AS first FROM memories AS m
-  WHERE m.entity = ${entity} AND m.learned_at <= ?9 AND ${visibleSql("m")}
+  WHERE m.entity = ${entity} AND m.learned_at <= ?9
+    AND NOT ${retiredSql("m", "?9")} AND ${visibleSql("m")}
   UNION ALL
   SELECT m.learned_at FROM memories AS m
-  WHERE m.object = ${entity} AND m.learned_at <= ?9 AND ${visibleSql("m")}
+  WHERE m.object = ${entity} AND m.learned_at <= ?9
+    AND NOT ${retiredSql("m", "?9")} AND ${visibleSql("m")}
 ))`;
 
 /**
@@ -199,30 +229,38 @@ const firstMentionSql = (entity: string): string => `(SELECT min(first) FROM (
 // Its cost: by kind alone, every entity of that kind is checked for a
 // memory the reader may read (and its first one found) before the limit,
 // so it grows with the entities of the kind. A name or an identifier
-// narrows it through `entity_names` first. No cheap bound keeps the order
-// exact; measure before a client's scale.
+// drives it from `entity_names` instead: it reads the entities so named.
+// No cheap bound keeps the order exact; measure before a client's scale.
 const findSql = `
 WITH ${readableSql},
 found AS MATERIALIZED (
   SELECT entities.row AS row, entities.id AS id, entities.kind AS kind,
     ${firstMentionSql("entities.row")} AS first
-  FROM entities
-  WHERE (?1 IS NULL OR entities.kind = ?1)
-    -- Found through the index of names when one is asked: the first.
-    AND (json_array_length(?4) = 0 OR entities.row IN (
-      SELECT entity_names.entity FROM entity_names
-      WHERE entity_names.type = ?4 ->> '$[0][0]'
+  FROM (
+    -- Driven from the index of names when one is asked (the first), each
+    -- entity once, reached by its row: never every entity.
+    SELECT entities.row, entities.id, entities.kind
+    FROM (
+      SELECT DISTINCT entity_names.entity AS entity FROM entity_names
+      WHERE json_array_length(?4) > 0
+        AND entity_names.type = ?4 ->> '$[0][0]'
         AND entity_names.folded = ?4 ->> '$[0][1]'
-    ))
+    ) AS named
+    CROSS JOIN entities ON entities.row = named.entity
+    UNION ALL
+    SELECT row, id, kind FROM entities WHERE json_array_length(?4) = 0
+  ) AS entities
+  WHERE (?1 IS NULL OR entities.kind = ?1)
     AND NOT EXISTS (
       SELECT 1 FROM json_each(?4) AS asked
       WHERE NOT EXISTS (
         SELECT 1 FROM entity_names
-        JOIN memories AS m ON m.row = entity_names.memory
+        CROSS JOIN memories AS m ON m.row = entity_names.memory
         WHERE entity_names.entity = entities.row
           AND entity_names.type = asked.value ->> 0
           AND entity_names.folded = asked.value ->> 1
           AND m.learned_at <= ?9
+          AND NOT ${retiredSql("m", "?9")}
           AND ${visibleSql("m")}
       )
     )
@@ -235,34 +273,50 @@ LIMIT ?5`;
 
 /**
  * `?1` the entities asked (JSON rows), `?4` the moment read at: each
- * one's earliest name a memory the reader may read, learned by then, gave (by when that memory was learned, then its
- * id), or null.
+ * one's earliest name a memory the reader may read, learned and not
+ * retired by then (`retiredSql`), gave (by when that memory was learned,
+ * then its id), with the source and
+ * version that memory rests on (both null for a writer's word) and its
+ * id (`[name, source, version, memory]`), or null.
  */
 const firstNameSql = `
 WITH ${readableSql}
 SELECT asked.value AS entity, (
-  SELECT entity_names.value FROM entity_names
-  JOIN memories AS m ON m.row = entity_names.memory
+  SELECT json_array(entity_names.value, m.source, m.version, m.id)
+  FROM entity_names
+  CROSS JOIN memories AS m ON m.row = entity_names.memory
   WHERE entity_names.entity = asked.value AND entity_names.type = 'name'
-    AND m.learned_at <= ?4 AND ${visibleSql("m")}
+    AND m.learned_at <= ?4 AND NOT ${retiredSql("m", "?4")}
+    AND ${visibleSql("m")}
   ORDER BY m.learned_at, m.id, entity_names.folded
   LIMIT 1
-) AS name
+) AS named
 FROM json_each(?1) AS asked`;
 
-/** Entities found, as the reader sees them: with the earliest name they may see. */
-const asSeen = (
+/** A name `firstNameSql` gave: the name, the source and version it rests on, and the memory that gave it. */
+const namedSchema = z.tuple([
+  z.string(),
+  z.string().nullable(),
+  z.number().nullable(),
+  z.string(),
+]);
+
+/**
+ * Entities found, as the reader sees them: with the earliest name they
+ * may see, and the memories that gave those names (`held`).
+ */
+export const namedOf = (
   sql: SqlStorage,
   found: readonly { row: number; id: string; kind: string }[],
   reader: Reader,
   at: number
-): Entity[] => {
+): { entities: Entity[]; held: HeldMemory[] } => {
   if (found.length === 0) {
-    return [];
+    return { entities: [], held: [] };
   }
   const names = new Map(
     sql
-      .exec<{ entity: number; name: string | null }>(
+      .exec<{ entity: number; named: string | null }>(
         firstNameSql,
         JSON.stringify(found.map(({ row }) => row)),
         reader.person,
@@ -270,22 +324,110 @@ const asSeen = (
         at
       )
       .toArray()
-      .map(({ entity, name }) => [entity, name])
+      .map(({ entity, named }) => [
+        entity,
+        named === null ? null : namedSchema.parse(JSON.parse(named)),
+      ])
   );
-  return found.map(({ row, id, kind }) => ({
-    id,
-    kind: kindSchema.parse(kind),
-    name: names.get(row) ?? null,
-  }));
+  const held: HeldMemory[] = [];
+  const entities = found.map(({ row, id, kind }) => {
+    const named = names.get(row) ?? null;
+    if (named === null) {
+      return { id, kind: kindSchema.parse(kind), name: null };
+    }
+    const [name, source, version, memory] = named;
+    held.push({ source, version, memory });
+    return { id, kind: kindSchema.parse(kind), name };
+  });
+  return { entities, held };
 };
+
+/** Entities found, as the reader sees them: with the earliest name they may see. */
+export const asSeen = (
+  sql: SqlStorage,
+  found: readonly { row: number; id: string; kind: string }[],
+  reader: Reader,
+  at: number
+): Entity[] => namedOf(sql, found, reader, at).entities;
+
+/**
+ * `?1` the entities' rows (JSON), `?4` the moment read at, `?5` the names
+ * and identifiers asked (JSON, each `[type, folded]`): the memories what
+ * makes each one seen and found rests on. The first memory the reader may
+ * read, learned and not retired by then (`retiredSql`), that mentions it
+ * (by when it was learned, then its id: the one `firstMentionSql` stands
+ * it by), and of each asked, the earliest such memory that gave it (one
+ * of the rows `findSql` holds it by).
+ */
+const heldBySql = `
+WITH ${readableSql},
+held AS (
+  SELECT (SELECT mention.row FROM (
+      SELECT m.row AS row, m.learned_at AS learned, m.id AS id
+      FROM memories AS m
+      WHERE m.entity = asked.value AND m.learned_at <= ?4
+        AND NOT ${retiredSql("m", "?4")} AND ${visibleSql("m")}
+      UNION ALL
+      SELECT m.row, m.learned_at, m.id FROM memories AS m
+      WHERE m.object = asked.value AND m.learned_at <= ?4
+        AND NOT ${retiredSql("m", "?4")} AND ${visibleSql("m")}
+    ) AS mention
+    ORDER BY mention.learned, mention.id
+    LIMIT 1) AS row
+  FROM json_each(?1) AS asked
+  UNION ALL
+  SELECT (SELECT m.row FROM entity_names
+      CROSS JOIN memories AS m ON m.row = entity_names.memory
+      WHERE entity_names.entity = asked.value
+        AND entity_names.type = named.value ->> 0
+        AND entity_names.folded = named.value ->> 1
+        AND m.learned_at <= ?4 AND NOT ${retiredSql("m", "?4")}
+        AND ${visibleSql("m")}
+      ORDER BY m.learned_at, m.id
+      LIMIT 1)
+  FROM json_each(?1) AS asked CROSS JOIN json_each(?5) AS named
+)
+SELECT DISTINCT m.source AS source, m.version AS version, m.id AS memory
+FROM held CROSS JOIN memories AS m ON m.row = held.row`;
+
+/**
+ * The memories what makes the entities at `rows` seen by the reader as of
+ * `at`, and found by each of `asked` (`[type, folded]`), rests on
+ * (`heldBySql`).
+ */
+export const heldBy = (
+  sql: SqlStorage,
+  rows: readonly number[],
+  reader: Reader,
+  at: number,
+  asked: readonly (readonly [string, string])[] = []
+): HeldMemory[] =>
+  rows.length === 0
+    ? []
+    : sql
+        .exec<{
+          source: string | null;
+          version: number | null;
+          memory: string;
+        }>(
+          heldBySql,
+          JSON.stringify(rows),
+          reader.person,
+          JSON.stringify(reader.groups),
+          at,
+          JSON.stringify(asked)
+        )
+        .toArray()
+        .map(({ source, version, memory }) => ({ source, version, memory }));
 
 /**
  * `?1` the entity's row, `?4` the moment read at, `?5` 1 to go on after
  * the name whose place is `?6` (when the first memory that gave it was
  * learned), `?7` (that memory's id), `?8` (its type) and `?9` (folded),
  * `?10` the most to read: each name and identifier of the entity a
- * memory the reader may read, learned by then, gave, once, as the first
- * such memory wrote it, in that order.
+ * memory the reader may read, learned and not retired by then
+ * (`retiredSql`), gave, once, as the first such memory wrote it, in that
+ * order.
  */
 const namesPageSql = `
 WITH ${readableSql},
@@ -297,8 +439,9 @@ given AS (
       ORDER BY m.learned_at, m.id
     ) AS copy
   FROM entity_names
-  JOIN memories AS m ON m.row = entity_names.memory
-  WHERE entity_names.entity = ?1 AND m.learned_at <= ?4 AND ${visibleSql("m")}
+  CROSS JOIN memories AS m ON m.row = entity_names.memory
+  WHERE entity_names.entity = ?1 AND m.learned_at <= ?4
+    AND NOT ${retiredSql("m", "?4")} AND ${visibleSql("m")}
 )
 SELECT type, value, folded, learned, memory FROM given
 WHERE copy = 1
@@ -397,11 +540,11 @@ export const findEntities = (
   sql: SqlStorage,
   { reader, at, cursorAt, kind, identifier, name, after, limit }: EntitiesAsked
 ): EntityPage => {
-  const asked = [
+  const asked: (readonly [string, string])[] = [
     ...(identifier === undefined
       ? []
-      : [[identifier.type, foldIdentifier(identifier)]]),
-    ...(name === undefined ? [] : [["name", foldName(name)]]),
+      : [[identifier.type, foldIdentifier(identifier)] as const]),
+    ...(name === undefined ? [] : [["name", foldName(name)] as const]),
   ];
   const found = sql
     .exec<{ row: number; id: string; kind: string; first: number }>(
@@ -417,14 +560,31 @@ export const findEntities = (
       at
     )
     .toArray();
-  const entities = asSeen(sql, found.slice(0, limit), reader, at);
+  const { entities, held: names } = namedOf(
+    sql,
+    found.slice(0, limit),
+    reader,
+    at
+  );
+  // What makes each found, the one past the page too (`more`).
+  const resting = restingOn([
+    ...names,
+    ...heldBy(
+      sql,
+      found.map(({ row }) => row),
+      reader,
+      at,
+      asked
+    ),
+  ]);
   const last = found.at(limit - 1);
   if (found.length <= limit || last === undefined) {
-    return { entities, more: false };
+    return { entities, more: false, ...resting };
   }
   return {
     entities,
     more: true,
+    ...resting,
     next: {
       at: new Date(cursorAt),
       learnedAt: new Date(last.first),

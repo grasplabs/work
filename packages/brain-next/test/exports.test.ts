@@ -10,6 +10,7 @@ import type {
   Embedders,
   HandOvers,
   NewEntity,
+  ErasedRequest,
   NewMemory,
   PersonReader,
   Reader,
@@ -19,8 +20,15 @@ import { env } from "cloudflare:workers";
 import { beforeAll, describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
-import { exportFileNameSchema } from "../src/contract.ts";
+import { catchUpDue } from "../src/catch-up.ts";
 import {
+  exportFileNameSchema,
+  instructionsMaxLength,
+  removedSource,
+  restoringNow,
+} from "../src/contract.ts";
+import {
+  exportFormat,
   exportPartBytes,
   manifestSchema as storeManifestSchema,
 } from "../src/exports.ts";
@@ -61,6 +69,7 @@ const tick = async (store: Store): Promise<void> => {
     at: new Date(),
     embedders: noEmbedders,
     handOvers: noHandOvers,
+    contextTokens: null,
   });
 };
 
@@ -126,6 +135,7 @@ const lineSchema = z.object({
   version: z.number(),
   access: z.unknown(),
   current: z.boolean(),
+  removed: z.boolean(),
   indexed: z.boolean(),
   changes: z.array(z.string()),
   text: z.string(),
@@ -166,15 +176,27 @@ const linesOf = async (store: Store, id: string): Promise<Line[]> => {
 const of = (lines: readonly Line[], sources: readonly string[]) =>
   lines
     .filter(({ source }) => sources.includes(source))
-    .map(({ source, version, current, text, access, indexed, changes }) => ({
-      source,
-      version,
-      current,
-      text,
-      access,
-      indexed,
-      changes,
-    }))
+    .map(
+      ({
+        source,
+        version,
+        current,
+        removed,
+        text,
+        access,
+        indexed,
+        changes,
+      }) => ({
+        source,
+        version,
+        current,
+        removed,
+        text,
+        access,
+        indexed,
+        changes,
+      })
+    )
     .toSorted((a, b) =>
       a.source === b.source
         ? a.version - b.version
@@ -424,6 +446,22 @@ const restoreSettled = async (id: string) => {
   throw new Error("The restore was still running after 10 ticks");
 };
 
+/** Ticks the shared store until its catch-up of quotes is done (catch-up.ts): at most 10 ticks. */
+const caughtUp = async (): Promise<void> => {
+  for (let ticks = 0; ticks < 10; ticks += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- a tick at a time
+    const due = await runInDurableObject(shared(), (_instance, state) =>
+      catchUpDue(state.storage.sql)
+    );
+    if (!due) {
+      return;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- a tick at a time
+    await tick(shared());
+  }
+  throw new Error("The catch-up of quotes was still due after 10 ticks");
+};
+
 /** How many versions the shared store holds. */
 const versionsHeld = async (): Promise<number> =>
   await runInDurableObject(
@@ -511,10 +549,45 @@ const drawn = (source: string, statement: string): NewMemory => ({
   basis: { kind: "source", source, version: 1, quote: "words" },
 });
 
+/** A memory about `c`, a system's fact, written by `writer`. */
+const writtenBy = (writer: string, statement: string): NewMemory => ({
+  about: "c",
+  type: "fact",
+  statement,
+  speaker: { kind: "system" },
+  basis: { kind: "writer", writer },
+});
+
 /** The text of the object at `key` in the bucket: empty when there is none. */
 const textAt = async (key: string): Promise<string> => {
   const object = await env.BRAIN_OBJECTS.get(key);
   return (await object?.text()) ?? "";
+};
+
+/**
+ * Each part of the done export `id` rewritten by `edit`, its checksum and
+ * size in the manifest made to match: what a restore's own checks of a
+ * line, past the manifest's, must catch.
+ */
+const rewriteParts = async (
+  id: string,
+  edit: (body: string) => string
+): Promise<void> => {
+  const key = `exports/${id}/manifest.json`;
+  const manifest = storeManifestSchema.parse(JSON.parse(await textAt(key)));
+  const parts = await Promise.all(
+    manifest.parts.map(async (part) => {
+      const file = `exports/${id}/${part.file}`;
+      const body = edit(await textAt(file));
+      await env.BRAIN_OBJECTS.put(file, body);
+      return {
+        ...part,
+        sha256: await sha256(body),
+        bytes: new TextEncoder().encode(body).byteLength,
+      };
+    })
+  );
+  await env.BRAIN_OBJECTS.put(key, JSON.stringify({ ...manifest, parts }));
 };
 
 describe("exports and restores", () => {
@@ -526,20 +599,22 @@ describe("exports and restores", () => {
   });
 
   describe("a company's export", { timeout: 60_000 }, () => {
-    it("holds every version a group may read, with its readers and history, and nothing one person alone, or no one known, may read (threats 4, 5)", async () => {
+    // What one person alone may read is never in the shared store, whose
+    // export this is: it refuses it (personal.test.ts).
+    it("holds every version a group may read, with its readers and history, and nothing no one known may read (threats 4, 5)", async () => {
       const teamSource = `test:${unique()}`;
+      const removedKey = `test:${unique()}`;
       const nobodys = `test:${unique()}`;
-      const theirs = `test:${unique()}`;
-      const wasTeams = `test:${unique()}`;
       const instructions = `instructions:${unique()}`;
-      const person = unique();
       const group = `team:${unique()}`;
       await add(shared(), teamSource, "first words", team(group));
       await add(shared(), teamSource, "second words", team(group), "2");
       await add(shared(), nobodys, "nobody's words", { kind: "none" });
-      await add(shared(), theirs, "their own words", alone(person));
-      await add(shared(), wasTeams, "a team's words", team(group));
-      await add(shared(), wasTeams, "now theirs alone", alone(person), "2");
+      // Removed (removal.ts): held by the version that was current then,
+      // marked removed, as its history.
+      await add(shared(), removedKey, "kept words", team(group), "1");
+      await add(shared(), removedKey, "removed words", team(group), "2");
+      await shared().removeSources({ sources: [removedKey] });
       await shared().addInstructions({
         source: instructions,
         change: "1",
@@ -554,13 +629,14 @@ describe("exports and restores", () => {
       const lines = await linesOf(shared(), id);
 
       expect(
-        of(lines, [teamSource, nobodys, theirs, wasTeams, instructions])
+        of(lines, [teamSource, removedKey, nobodys, instructions])
       ).toStrictEqual(
         [
           {
             source: teamSource,
             version: 1,
             current: false,
+            removed: false,
             text: "first words",
             access: team(group),
             indexed: true,
@@ -570,7 +646,28 @@ describe("exports and restores", () => {
             source: teamSource,
             version: 2,
             current: true,
+            removed: false,
             text: "second words",
+            access: team(group),
+            indexed: true,
+            changes: ["2"],
+          },
+          {
+            source: removedKey,
+            version: 1,
+            current: false,
+            removed: false,
+            text: "kept words",
+            access: team(group),
+            indexed: true,
+            changes: ["1"],
+          },
+          {
+            source: removedKey,
+            version: 2,
+            current: false,
+            removed: true,
+            text: "removed words",
             access: team(group),
             indexed: true,
             changes: ["2"],
@@ -579,6 +676,7 @@ describe("exports and restores", () => {
             source: instructions,
             version: 1,
             current: true,
+            removed: false,
             text: "the company's instructions",
             access: team(group),
             indexed: false,
@@ -676,31 +774,6 @@ describe("exports and restores", () => {
         olderFiles: await keysUnder(`exports/${older}/`),
         kept: kept?.state,
       }).toStrictEqual({ replaced: "expired", olderFiles: [], kept: "done" });
-    });
-
-    it("is made stale by a person's erasure that hid a source's history it holds (threat 6)", async () => {
-      const person = unique();
-      const group = `team:${unique()}`;
-      const source = `test:${unique()}`;
-      await add(shared(), source, "the team's first words", team(group));
-      const { id } = await shared().startExport("test");
-      await settled(shared(), id);
-      // The source narrows to the person alone, who is then erased: their
-      // erasure takes its every version, the team's first among them.
-      await add(shared(), source, "now theirs alone", alone(person), "2");
-      await shared().erasePerson({ person, reason: "person_erased" });
-      const status = await shared().exportStatus({ id });
-      const served = await shared().exportFile({
-        id,
-        file: "manifest.json",
-      });
-      await tick(shared());
-      await tick(shared());
-      expect({
-        state: status?.state,
-        served,
-        files: await keysUnder(`exports/${id}/`),
-      }).toStrictEqual({ state: "erased", served: null, files: [] });
     });
 
     it("is made stale by an erasure that lands while a part's versions are read, before the part is recorded (threat 11)", async () => {
@@ -1049,14 +1122,14 @@ describe("exports and restores", () => {
       await putBack(shared(), emptyShared);
       await shared().startRestore(id, "test");
 
-      // An add lands while the restore runs: it narrows the source.
+      // An add lands while the restore runs: it changes the source's readers.
       await expect(
         called(
           shared().addSource({
             source,
             change: "3",
             text: "narrowed",
-            access: alone(unique()),
+            access: team(`team:${unique()}`),
           })
         )
       ).rejects.toThrow("restoring an export");
@@ -1240,6 +1313,140 @@ describe("exports and restores", () => {
       });
     });
 
+    it("closes again after a restore a key removed before any version was added under it, and one removed with its history, and leaves one erased since to the ledger", async () => {
+      await putBack(shared(), emptyShared);
+      const group = `team:${unique()}`;
+      const [before, after, erased] = [
+        `test:${unique()}`,
+        `test:${unique()}`,
+        `test:${unique()}`,
+      ];
+      // Removed before its first add landed: a mark with no version.
+      await shared().removeSources({ sources: [before] });
+      // Removed with its history: a version marked removed.
+      await add(shared(), after, "kept words", team(group));
+      await shared().removeSources({ sources: [after] });
+      // Removed before any add, then erased: the erasure closes it alone.
+      await shared().removeSources({ sources: [erased] });
+      await shared().eraseSource({ source: erased, reason: "deleted" });
+      const { id } = await shared().startExport("test");
+      await settled(shared(), id);
+      // The keys its removal lines name, read from its parts as downloaded.
+      const manifest = z
+        .looseObject({ parts: z.array(z.looseObject({ file: z.string() })) })
+        .parse(
+          JSON.parse(
+            (await shared().exportFile({ id, file: "manifest.json" })) ?? ""
+          )
+        );
+      const bodies = await Promise.all(
+        manifest.parts.map(
+          async ({ file }) => (await shared().exportFile({ id, file })) ?? ""
+        )
+      );
+      const removalLines = bodies
+        .flatMap((body) => body.trimEnd().split("\n"))
+        .map((line) =>
+          z.looseObject({ kind: z.string().optional() }).parse(JSON.parse(line))
+        )
+        .filter(({ kind }) => kind === "removal");
+      await putBack(shared(), emptyShared);
+      await shared().startRestore(id, "test");
+      const done = await restoreSettled(id);
+      const added = async (source: string) => {
+        try {
+          await shared().addSource({
+            source,
+            change: unique(),
+            text: "new words",
+            access: team(group),
+          });
+          return "added";
+        } catch (error) {
+          return error instanceof Error ? error.message : String(error);
+        }
+      };
+
+      expect({
+        done: done?.state,
+        keys: await Promise.all(
+          [before, after].map(async (key) => await shared().keyState(key))
+        ),
+        adds: await Promise.all([before, after].map(added)),
+        // The erasure was in the ledger the restored store replays.
+        erasedKey: await shared().keyState(erased),
+        // The key removed before any version; the other is marked on its
+        // version's line; the erased one is in no line at all.
+        removalLines,
+      }).toStrictEqual({
+        done: "done",
+        keys: ["held", "held"],
+        adds: [removedSource, removedSource],
+        erasedKey: "erased",
+        removalLines: [{ kind: "removal", source: before }],
+      });
+    });
+
+    it("is erased once the ledger erases a key it holds as removed before any version, its files deleted", async () => {
+      await putBack(shared(), emptyShared);
+      const removed = `test:${unique()}`;
+      await shared().removeSources({ sources: [removed] });
+      const { id } = await shared().startExport("test");
+      const written = await settled(shared(), id);
+      await shared().eraseSource({ source: removed, reason: "deleted" });
+      const erased = await shared().exportStatus({ id });
+      await tick(shared());
+      await tick(shared());
+
+      expect({
+        written: written?.state,
+        erased: erased?.state,
+        files: await keysUnder(`exports/${id}/`),
+      }).toStrictEqual({ written: "done", erased: "erased", files: [] });
+    });
+
+    it("restores when each version's text was read, so no earlier read replaces it after a restore; a version that never said restores with none", async () => {
+      await putBack(shared(), emptyShared);
+      const group = `team:${unique()}`;
+      const [saidRead, unsaid] = [`test:${unique()}`, `test:${unique()}`];
+      await shared().addSource({
+        source: saidRead,
+        change: "1",
+        text: "read at two",
+        access: team(group),
+        readAt: 2000,
+      });
+      await add(shared(), unsaid, "read whenever", team(group));
+      const { id } = await shared().startExport("test");
+      await settled(shared(), id);
+      await putBack(shared(), emptyShared);
+      await shared().startRestore(id, "test");
+      const done = await restoreSettled(id);
+
+      const earlierRead = async (source: string) =>
+        await shared().addSource({
+          source,
+          change: "2",
+          text: "read at one",
+          access: team(group),
+          readAt: 1000,
+        });
+      const earlier = await earlierRead(saidRead);
+      const unsaidEarlier = await earlierRead(unsaid);
+      expect({
+        done: done?.state,
+        earlier: { version: earlier.version, newer: earlier.newer },
+        unsaidEarlier: {
+          version: unsaidEarlier.version,
+          newer: unsaidEarlier.newer,
+        },
+      }).toStrictEqual({
+        done: "done",
+        earlier: { version: 1, newer: true },
+        unsaidEarlier: { version: 2, newer: undefined },
+      });
+    });
+
     it("starts a failed restore again from the same export, whatever erasure landed meanwhile, and counts the whole restore", async () => {
       await putBack(shared(), emptyShared);
       const group = `team:${unique()}`;
@@ -1329,6 +1536,80 @@ describe("exports and restores", () => {
         restore: status?.state,
         held: await versionsHeld(),
       }).toStrictEqual({ exported: 2, restore: "done", held: 2 });
+    });
+
+    it("restores an emptied instruction file and skill as they were, each by the rule its add took it by", async () => {
+      await putBack(shared(), emptyShared);
+      const group = `team:${unique()}`;
+      const instructions = `instructions:${unique()}`;
+      const skill = `skill:company:${unique()}`;
+      // An emptied file is a version of its own: whitespace alone, or nothing.
+      for (const [source, text] of [
+        [instructions, "the company's instructions"],
+        [instructions, " \n\t"],
+        [skill, ""],
+      ] as const) {
+        // oxlint-disable-next-line no-await-in-loop -- one version at a time
+        await shared().addInstructions({
+          source,
+          change: unique(),
+          text,
+          access: team(group),
+        });
+      }
+      const { id } = await shared().startExport("test");
+      await settled(shared(), id);
+      await putBack(shared(), emptyShared);
+
+      await shared().startRestore(id, "test");
+      const status = await restoreSettled(id);
+      const reader = readerOf(unique(), [group]);
+      const first = await shared().readVersion({
+        source: instructions,
+        version: 1,
+        reader,
+      });
+      const current = await shared().readCurrent({
+        sources: [instructions, skill],
+        reader,
+      });
+      expect({
+        status: status?.state,
+        first: first?.text,
+        current: current.map(({ source, text }) => ({ source, text })),
+      }).toStrictEqual({
+        status: "done",
+        first: "the company's instructions",
+        current: [
+          { source: instructions, text: " \n\t" },
+          { source: skill, text: "" },
+        ],
+      });
+    });
+
+    it("fails a restore whose instruction file is longer than an add takes, and writes nothing of it (threat 8)", async () => {
+      await putBack(shared(), emptyShared);
+      const marker = unique();
+      await shared().addInstructions({
+        source: `instructions:${unique()}`,
+        change: "1",
+        text: marker,
+        access: team(`team:${unique()}`),
+      });
+      const { id } = await shared().startExport("test");
+      await settled(shared(), id);
+      // Within what a document's text may be, past an instruction file's.
+      await rewriteParts(id, (body) =>
+        body.replace(marker, "x".repeat(instructionsMaxLength + 1))
+      );
+      await putBack(shared(), emptyShared);
+      await shared().startRestore(id, "test");
+      const restore = await restoreSettled(id);
+
+      expect({
+        state: restore?.state,
+        held: await versionsHeld(),
+      }).toStrictEqual({ state: "failed", held: 0 });
     });
 
     it("restores into a store that holds only Grasp's own skills, which stay", async () => {
@@ -1479,7 +1760,7 @@ describe("exports and restores", () => {
         bytes: 1,
       };
       const manifest = storeManifestSchema.safeParse({
-        format: 2,
+        format: exportFormat,
         id: crypto.randomUUID(),
         deployment: "test",
         scope: "company",
@@ -1895,6 +2176,100 @@ describe("exports and restores", () => {
             .one().latest
       );
 
+    // GRA-1807: what a chat showed of a memory is replaced only for what
+    // the ledger erased, which outlives a lost storage; never because the
+    // storage lacks it until the restore puts it back.
+    it("answers a memory a host once read as kept while the storage is lost, refuses while it restores, and keeps it after; one whose source or writer was erased answers erased throughout", async () => {
+      await putBack(shared(), emptyShared);
+      const group = `team:${unique()}`;
+      const reader = readerOf(`person:${unique()}`, [group]);
+      const kept = `test:${unique()}`;
+      const erased = `test:${unique()}`;
+      await add(shared(), kept, "words kept", team(group));
+      await add(shared(), erased, "words erased", team(group));
+      const keptWriter = `app:${unique()}`;
+      const erasedWriter = `app:${unique()}`;
+      const added = await shared().addMemories({
+        change: unique(),
+        access: team(group),
+        entities: [customer()],
+        memories: [
+          drawn(kept, "Acme keeps its words"),
+          drawn(erased, "Acme erases its words"),
+          writtenBy(keptWriter, "Acme keeps its writer"),
+          writtenBy(erasedWriter, "Acme erases its writer"),
+        ],
+      });
+      const [onKept = "", onErased = "", byKept = "", byErased = ""] =
+        added.memories;
+      // What a host pinned as each was handed over: what it rests on.
+      const { memories } = await shared().readMemories({
+        entity: added.entities.c ?? "",
+        reader,
+      });
+      const asked: ErasedRequest = {
+        sources: [kept, erased],
+        memories: [onKept, onErased, byKept, byErased].flatMap((id) =>
+          memories.flatMap(({ id: held, source, writer, learnedAt }) =>
+            held === id
+              ? [
+                  {
+                    memory: id,
+                    source: source?.source ?? null,
+                    writer,
+                    learnedAt: learnedAt.getTime(),
+                  },
+                ]
+              : []
+          )
+        ),
+      };
+      await shared().eraseSource({ source: erased, reason: "deleted" });
+      await shared().eraseWriter({
+        writer: erasedWriter,
+        reason: "deleted",
+        change: unique(),
+      });
+      const erasedOnly = {
+        sources: [erased],
+        memories: [onErased, byErased],
+      };
+      const before = await shared().erasedOf(asked);
+
+      const { id } = await shared().startExport("test");
+      await expect(settled(shared(), id)).resolves.toMatchObject({
+        state: "done",
+      });
+      // Its storage lost, its bucket kept: the ledger is read again.
+      await putBack(shared(), emptyShared);
+      const lost = await shared().erasedOf(asked);
+      const started = await shared().startRestore(id, "test");
+      const restoring = await called(shared().erasedOf(asked)).then(
+        () => "answered",
+        (error: unknown) => (error instanceof Error ? error.message : "")
+      );
+      await expect(restoreSettled(id)).resolves.toMatchObject({
+        state: "done",
+      });
+      const after = await shared().erasedOf(asked);
+
+      expect({
+        asked: asked.memories.map(({ memory }) => memory),
+        before,
+        lost,
+        started: started.state,
+        restoring,
+        after,
+      }).toStrictEqual({
+        asked: [onKept, onErased, byKept, byErased],
+        before: erasedOnly,
+        lost: erasedOnly,
+        started: "running",
+        restoring: restoringNow,
+        after: erasedOnly,
+      });
+    });
+
     it("brings back what each reader read of memories, contested facts, confirmations, entities and their names, and recall, and never lowers the write stamp (threats 1, 4, 7)", async () => {
       await putBack(shared(), emptyShared);
       const group = `team:${unique()}`;
@@ -1984,8 +2359,13 @@ describe("exports and restores", () => {
         memories: [status("churned")],
       });
       await expect(
-        shared().retireMemory({ memory: churned.memories[0] ?? "", reader })
-      ).resolves.toBe("done");
+        shared().retireMemory({
+          memory: churned.memories[0] ?? "",
+          reader,
+          writer: person,
+          change: "retire",
+        })
+      ).resolves.not.toBeNull();
       // Another team's customer, hidden from the first.
       const globex = await shared().addMemories({
         change: "globex",
@@ -2055,6 +2435,9 @@ describe("exports and restores", () => {
       const stampBefore = await latestStamp();
 
       await exportedAndRestored();
+      // Restored sources are judged by the catch-up's next ticks
+      // (catch-up.ts): the first memory's quote left the second version.
+      await caughtUp();
       const after = await readsOf();
       // A producer's retry of an add made before answers as it did.
       const again = await shared().addMemories({
@@ -2089,6 +2472,53 @@ describe("exports and restores", () => {
         held: 5,
         contested: 1,
       });
+    });
+
+    it("keys a memory filed under no attribute as it is restored, so a restatement after the restore merges with it (GRA-1752)", async () => {
+      await putBack(shared(), emptyShared);
+      const group = `team:${unique()}`;
+      const person = `person:${unique()}`;
+      const reader = readerOf(person, [group]);
+      const restated: NewMemory = {
+        about: "c",
+        type: "fact",
+        statement: "Acme works from Delft.",
+        speaker: { kind: "system" },
+        basis: { kind: "writer", writer: person },
+      };
+      const before = await shared().addMemories({
+        change: "before",
+        access: team(group),
+        entities: [customer()],
+        memories: [restated],
+      });
+
+      await exportedAndRestored();
+      const entity = before.entities.c ?? "";
+      const after = await shared().addMemories({
+        change: "after",
+        access: team(group),
+        reader,
+        entities: [customer({ id: entity, names: [] })],
+        memories: [restated],
+      });
+      const { memories } = await shared().readMemories({
+        entity,
+        reader,
+        history: true,
+      });
+      const stateOf = (id: string | undefined) => {
+        const memory = memories.find((read) => read.id === id);
+        if (memory === undefined) {
+          return "unread";
+        }
+        return memory.endedAt === null ? "current" : "ended";
+      };
+
+      expect({
+        restored: stateOf(before.memories[0]),
+        restatement: stateOf(after.memories[0]),
+      }).toStrictEqual({ restored: "ended", restatement: "current" });
     });
 
     it("leaves out a memory drawn from a source erased after the export was made: not in the store, and in no file left in the bucket (threats 2, 3)", async () => {
@@ -2208,7 +2638,12 @@ describe("exports and restores", () => {
         ).rejects.toThrow("restoring an export");
         await expect(
           called(
-            shared().retireMemory({ memory: made.memories[0] ?? "", reader })
+            shared().retireMemory({
+              memory: made.memories[0] ?? "",
+              reader,
+              writer: person,
+              change: "retire",
+            })
           )
         ).rejects.toThrow("restoring an export");
       } finally {
@@ -2280,7 +2715,8 @@ describe("exports and restores", () => {
         }
       };
       // As an older release wrote it (format 1, versions only), and as a
-      // newer one might (format 3, with what this one doesn't know).
+      // newer one might (a format past this one's, with what this one
+      // doesn't know).
       const refusedOlder = await refusalOf({
         ...older,
         format: 1,
@@ -2288,7 +2724,7 @@ describe("exports and restores", () => {
       });
       const refusedNewer = await refusalOf({
         ...manifest,
-        format: 3,
+        format: exportFormat + 1,
         somethingNew: true,
       });
       const held = await inStore(
@@ -2312,7 +2748,7 @@ describe("exports and restores", () => {
 
       expect({
         older: refusedOlder.includes(
-          "made by an older release and holds no memories"
+          "made by an older release, which this one can't restore"
         ),
         newer: refusedNewer.includes("made by a newer release"),
         held,
@@ -2363,7 +2799,7 @@ describe("exports and restores", () => {
       const older = await copied((manifest) => ({ ...manifest, format: 1 }));
       const newer = await copied((manifest) => ({
         ...manifest,
-        format: 3,
+        format: exportFormat + 1,
         somethingNew: true,
       }));
       const holding = await copied((manifest) => manifest, true);
@@ -2593,25 +3029,11 @@ describe("exports and restores", () => {
       });
       const { id } = await shared().startExport("test");
       await settled(shared(), id);
-      // The memory's part made into an instruction to a group, its
-      // checksum and size made to match: an add refuses an instruction
-      // anyone but its writer may read.
-      const key = `exports/${id}/manifest.json`;
-      const manifest = storeManifestSchema.parse(JSON.parse(await textAt(key)));
-      const parts = await Promise.all(
-        manifest.parts.map(async (part) => {
-          const file = `exports/${id}/${part.file}`;
-          const written = await textAt(file);
-          const body = written.replace('"type":"fact"', '"type":"instruction"');
-          await env.BRAIN_OBJECTS.put(file, body);
-          return {
-            ...part,
-            sha256: await sha256(body),
-            bytes: new TextEncoder().encode(body).byteLength,
-          };
-        })
+      // The memory made into an instruction to a group: an add refuses an
+      // instruction anyone but its writer may read.
+      await rewriteParts(id, (body) =>
+        body.replace('"type":"fact"', '"type":"instruction"')
       );
-      await env.BRAIN_OBJECTS.put(key, JSON.stringify({ ...manifest, parts }));
       await putBack(shared(), emptyShared);
       await shared().startRestore(id, "test");
       const restore = await restoreSettled(id);

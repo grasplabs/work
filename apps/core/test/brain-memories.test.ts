@@ -90,10 +90,15 @@ const orderOf = ({
   (detail?.outcome === "attempted" ? 0 : 1);
 
 /** A kind of entity that has `attribute`, as the Brain lists them. */
-const kindOf = (attribute: string) =>
-  Object.entries(entityAttributes).find(([, rules]) =>
-    Object.hasOwn(rules, attribute)
-  )?.[0];
+const kindOf = (attribute: string) => {
+  const kind = memoryChoices.kinds.find((each) =>
+    Object.hasOwn(entityAttributes[each], attribute)
+  );
+  if (kind === undefined) {
+    throw new Error(`No kind has the attribute ${attribute}`);
+  }
+  return kind;
+};
 
 /** The person themselves, as a caller of brain-memories.ts. */
 const themselves = (personId: string): MemoryCaller => ({
@@ -253,6 +258,17 @@ describe("a person's memories", () => {
     expect(saved.filter(([, outcome]) => outcome !== "saved")).toStrictEqual(
       []
     );
+  });
+
+  it("refuses a memory of a type the Brain doesn't list, as its type rules out", async () => {
+    const anna = await person();
+    await expect(
+      rememberAs(env, anna, {
+        ...status("Acme", "Renewing"),
+        // @ts-expect-error -- a type the Brain doesn't list
+        type: "rumour",
+      })
+    ).rejects.toThrow("That isn't a valid request to the Brain.");
   });
 
   it("refuses someone who is no longer a member", async () => {

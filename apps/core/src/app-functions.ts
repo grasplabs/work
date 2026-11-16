@@ -61,6 +61,7 @@ import {
 import { hostedRelease, noStore, requireNotRevoked } from "./release-runner.ts";
 import { invocationSources } from "./resource-adapter.ts";
 import type {
+  InvocationOrigin,
   InvocationProvenance,
   InvocationSources,
 } from "./resource-adapter.ts";
@@ -89,6 +90,8 @@ import type { CallingAgent } from "./workflow-start-intents.ts";
 interface FunctionCaller {
   readonly by: Pick<Identity, "userId" | "role"> &
     Partial<Pick<Identity, "teams">>;
+  /** Where the call comes from (`InvocationOrigin`), as core resolved it. */
+  readonly origin: InvocationOrigin;
   readonly requestId: string;
   readonly deadline: number;
   /**
@@ -196,6 +199,7 @@ export const invocationFor = async (
   release: Release,
   {
     by,
+    origin,
     requestId,
     deadline,
     stillAllowed,
@@ -219,14 +223,19 @@ export const invocationFor = async (
   // meanwhile stops a call already running.
   // The roles the gate read last, which who calls is told (`people`).
   let admitted: WriterRoles | undefined;
+  // Whether any admission so far let them in as a builder.
+  let built = false;
   const authorize = async () => {
     await requireNotRevoked(env, app, release.manifest.resourceVersion);
     await stillAllowed?.();
     admitted = await functionRoles(env, by, app);
+    built ||= admitted.appBuilder;
     return admitted;
   };
   const bindings = resourceBindingsFor(env, {
     app,
+    origin,
+    builtInCall: () => built,
     authority,
     context: { type: "app", appId: app },
     sources,
@@ -369,10 +378,9 @@ export const publicFunctionOf = (
 export interface FunctionAnswer {
   readonly result: FunctionResult;
   /**
-   * Where what the call read through its resources comes from, with its
-   * classification (spec 32.3): the Knowledge collections, and whether
-   * any was sensitive or restricted, and each connection read from with
-   * the resources its connector named. Null when no function ran.
+   * Where what the call read through its resources comes from (spec
+   * 32.3): each connection read from with the resources its connector
+   * named. Null when no function ran.
    */
   readonly provenance: InvocationProvenance | null;
   /** The release that ran, when one did. */
@@ -679,6 +687,25 @@ const currentResolution = async (
 };
 
 /**
+ * Where a call with `options` comes from (`InvocationOrigin`): a Code Mode
+ * run's names its sandbox session, an agent's names the agent, a page's
+ * says so; anything else is a workflow step's (workflows/app-calls.ts).
+ */
+const originOf = ({
+  page,
+  parentSession,
+  agent,
+}: FunctionCallOptions): InvocationOrigin => {
+  if (parentSession !== undefined) {
+    return "code_mode";
+  }
+  if (agent !== undefined) {
+    return "agent";
+  }
+  return page === true ? "page" : "workflow";
+};
+
+/**
  * `call` of the public function at `path` of `release` (App `appId`'s),
  * as `callFunction` resolved it, run through the function host for `by`:
  * the tail every call of a function shares, by name or by ID.
@@ -720,6 +747,7 @@ const invokedCall = async (
   try {
     const invocation = await invocationFor(env, release, {
       by,
+      origin: originOf(options),
       requestId,
       deadline,
       ...(stillAllowed === undefined ? {} : { stillAllowed }),
@@ -1385,8 +1413,11 @@ export const invokeAppAction = async (
     const release = await loadRelease(env, found.id, version);
     const path = publicFunctionOf(release, call.reference);
     resolved = path;
+    // Only a person's page starts an action's invocation
+    // (action-invocation.ts, through page-calls.ts).
     const invocation = await invocationFor(env, release, {
       by,
+      origin: "page",
       requestId,
       deadline,
     });
