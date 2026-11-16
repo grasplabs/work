@@ -19,7 +19,6 @@
     }
   },
   "scripts": {
-    "build": "node build-blueprints.ts && node build-agent-docs.ts && node ../../packages/compiler/build.ts ../web/dist && node build-extractor.ts ../web/dist && node ../docs/build.ts ../web/dist/docs",
     "dev": "vp run dev:build && vp run dev:migrate && vp run dev:start",
     "dev:build": "vp -C ../web build --mode development && vp run build && node ../connect/build.ts",
     "dev:migrate": "node ../../scripts/d1-local-migrations.ts --persist-to \"${DEV_PERSIST_TO:-.wrangler/state}\" -c wrangler.jsonc -c \"${CONNECT_WRANGLER_CONFIG:-../connect/wrangler.jsonc}\"",
