@@ -23,7 +23,7 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { Route as interviewRoute } from "../routes/interview.tsx";
-import { draftName, hearRecording } from "./api.ts";
+import { draftName, hearRecording, onSessionEnded } from "./api.ts";
 import { releaseInterview } from "./kept.ts";
 import { loopEventName } from "./loop.ts";
 import { prepare, setSound } from "./speech.ts";
@@ -508,14 +508,25 @@ const afterOpen = (after: () => void): void => {
 
 /** A stretch they said, sent to be written down from its recording, as the microphone path sends it. */
 const heard = async (): Promise<void> => {
-  await act(async () => {
-    await hearRecording({
-      secret,
-      locale: "en",
-      seconds: 2,
-      audio: new Blob(["a stretch said"]),
-    });
+  // Its answer, if their session ended, never comes back: waited for is
+  // the page being told the session ended.
+  const ended = Promise.withResolvers<boolean>();
+  const stopListening = onSessionEnded(() => {
+    ended.resolve(true);
   });
+  try {
+    await act(async () => {
+      void hearRecording({
+        secret,
+        locale: "en",
+        seconds: 2,
+        audio: new Blob(["a stretch said"]),
+      });
+      await ended.promise;
+    });
+  } finally {
+    stopListening();
+  }
 };
 
 /** Holds every call of `action` until the returned release is called. */
@@ -534,22 +545,6 @@ const callsSince = (core: FakeCore, from: number) =>
     action: action ?? path,
     who,
   }));
-
-/** What waits in the tab under the link's draft name, as the page writes it: its version, the copy and the box. */
-const asideSchemaOf = (raw: string) => {
-  const parsed = z
-    .object({
-      version: z.int(),
-      progress: z.unknown(),
-      typed: z.string(),
-    })
-    .parse(JSON.parse(raw));
-  return {
-    version: parsed.version,
-    progress: parsed.progress,
-    typed: parsed.typed,
-  };
-};
 
 /** The page's audio, faked for lines said out loud: a level meter, and no sound. */
 const audioContext = {
@@ -1296,7 +1291,7 @@ describe("the interview page when its session ends mid-interview", () => {
     expect(stored()).toBe("");
   });
 
-  it("waits on from a save that lands just after their session ended: only what changed since, at the version it made", async () => {
+  it("keeps what waited as it was taken when a save lands just after their session ended, and once back says nothing and saves nothing again", async () => {
     const core = fakeCore(typing);
     await inConversation();
     const land = hold(core, "save");
@@ -1309,19 +1304,23 @@ describe("the interview page when its session ends mid-interview", () => {
     core.who = "nobody";
     await heard();
     await until(() => text().includes(signInAgain), "the sign-in again");
+    const taken = stored();
+    // Core keeps it, though its answer never reaches the page.
     land();
-    await until(() => core.kept.length > 0, "the save, landed");
-    await act(async () => {
-      await Promise.resolve();
-    });
-    const waiting = asideSchemaOf(
-      sessionStorage.getItem(await draftName(secret)) ?? "null"
-    );
-    expect(waiting).toStrictEqual({
-      version: core.version,
-      progress: null,
-      typed: "",
-    });
+    await until(() => core.kept.length > 0, "the save, landed in core");
+    const afterLanding = stored();
+    core.who = "them";
+    const before = core.calls.length;
+    await backSignedIn();
+    await until(() => answerBox() !== null, "their interview");
+    await until(() => stored() === "", "what waited, let go");
+    expect({
+      unchanged: afterLanding === taken,
+      said: text().includes("couldn't be kept"),
+      savedAgain: callsSince(core, before).filter(
+        ({ action }) => action === "save"
+      ),
+    }).toStrictEqual({ unchanged: true, said: false, savedAgain: [] });
   });
 
   it("says nothing of a delete that didn't happen once the interview changed while they were away", async () => {

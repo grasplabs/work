@@ -120,16 +120,17 @@ interface Kept {
   approval: Approval | null;
   /** Where it waits in this tab while it is set aside (api.ts `draftName`). */
   draft: string;
-  /** Their session ended: nothing more is sent until the link opens again. */
-  aside: boolean;
+  /**
+   * Their session ended: what waits in this tab for them, as it was taken
+   * then (`setAside`); none while their session lasts.
+   */
+  aside: Aside | null;
   /** This tab refused to keep what waits. */
   unkept: boolean;
   /** What waited in this tab, held again, and core hasn't answered for it yet. */
   restoring: boolean;
   /** What is typed in the box and not sent. */
   typed: string;
-  /** A delete or a withdrawal that met the ended session, and didn't happen. */
-  undone: Undone | null;
 }
 
 /** What they asked for as their session ended, and didn't happen. */
@@ -174,21 +175,12 @@ export const forgetAside = (draft: string): void => {
   }
 };
 
-/** Whether anything of `mine` isn't kept in core. */
-const unsavedIn = (mine: Kept): boolean => mine.dirty || mine.typed !== "";
-
 /**
  * Writes down what waits while set aside: also when all of it is kept, so
  * the page tells them they are signing in again.
  */
-const keepAside = (mine: Kept): void => {
-  const aside: Aside = {
-    version: mine.version,
-    progress: mine.dirty ? mine.progress : null,
-    typed: mine.typed,
-    talking: mine.progress.mode === "talk",
-    undone: mine.undone,
-  };
+const keepAside = (mine: Kept, aside: Aside): void => {
+  mine.aside = aside;
   try {
     sessionStorage.setItem(mine.draft, JSON.stringify(aside));
     mine.unkept = false;
@@ -537,11 +529,10 @@ export const holdInterview = ({
     gone: false,
     approval: null,
     draft,
-    aside: false,
+    aside: null,
     unkept: false,
     restoring: unsaved !== null,
     typed,
-    undone: null,
   };
   kept = mine;
   lostNow = lost;
@@ -576,24 +567,33 @@ export const setAside = (by: CallKind): boolean => {
     return false;
   }
   const asked: Undone | null = by === "delete" || by === "withdraw" ? by : null;
-  if (mine.aside && asked === null) {
-    return false;
-  }
-  if (!mine.aside) {
-    mine.aside = true;
-    mine.dirty ||= mine.saving || mine.again;
-    if (mine.approval !== null) {
-      mine.progress = notYetApproved(mine.approval.before);
-      mine.dirty = true;
-      mine.approval = null;
+  if (mine.aside !== null) {
+    if (asked === null) {
+      return false;
     }
+    keepAside(mine, {
+      ...mine.aside,
+      progress: null,
+      typed: "",
+      undone: asked,
+    });
+    notify();
+    return true;
   }
-  if (asked !== null) {
-    mine.dirty = false;
-    mine.typed = "";
-    mine.undone = asked;
+  let unsaved: InterviewProgress | null = null;
+  if (mine.approval !== null) {
+    unsaved = notYetApproved(mine.approval.before);
+  } else if (mine.dirty || mine.saving || mine.again) {
+    unsaved = mine.progress;
   }
-  keepAside(mine);
+  // Taken as it is now; the page itself shows what it showed.
+  keepAside(mine, {
+    version: mine.version,
+    progress: asked === null ? unsaved : null,
+    typed: asked === null ? mine.typed : "",
+    talking: mine.progress.mode === "talk",
+    undone: asked,
+  });
   notify();
   return true;
 };
@@ -609,11 +609,12 @@ export const waitingAside = (
   draft: string
 ): { talking: boolean; unkept: boolean; undone: Undone | null } | null => {
   const mine = kept;
-  if (mine !== null && mine.aside && mine.draft === draft) {
+  if (mine !== null && mine.aside !== null && mine.draft === draft) {
+    const { talking, progress, typed, undone } = mine.aside;
     return {
-      talking: mine.progress.mode === "talk",
-      unkept: mine.unkept && unsavedIn(mine),
-      undone: mine.undone,
+      talking,
+      unkept: mine.unkept && (progress !== null || typed !== ""),
+      undone,
     };
   }
   const aside = asideAt(draft);
@@ -701,7 +702,7 @@ export const useSaveState = (): SaveState =>
 
 /** Their session ended: the page takes nothing more until they sign in again. */
 export const useAside = (): boolean =>
-  useSyncExternalStore(subscribe, () => kept?.aside ?? false);
+  useSyncExternalStore(subscribe, () => kept !== null && kept.aside !== null);
 
 /** What is typed in the box and not sent. */
 export const useTyped = (): string =>

@@ -2,6 +2,7 @@
 
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
+import { beginCalls, endCalls } from "./api.ts";
 import { openEar } from "./ear.ts";
 import type { EarEvent } from "./ear.ts";
 
@@ -114,6 +115,8 @@ const browser = (): void => {
       return Response.json({ heard: "Words from the recording." });
     })
   );
+  // The ear's calls go in the session the page holds (api.ts `gated`).
+  beginCalls();
   Object.defineProperty(navigator, "mediaDevices", {
     configurable: true,
     value: { getUserMedia: async () => await Promise.resolve(stream) },
@@ -150,6 +153,7 @@ const recordingsReady = async (): Promise<void> => {
 
 describe("an ear writing a stretch down from its recording", () => {
   afterEach(() => {
+    endCalls();
     room.speaking = false;
     stopping.length = 0;
     asked.length = 0;
