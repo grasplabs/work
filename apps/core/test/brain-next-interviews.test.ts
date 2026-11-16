@@ -2,7 +2,7 @@ import { brainOf, personalBrainOf } from "@grasp-os/brain-next/contract";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { beforeEach, describe, expect, it } from "vite-plus/test";
+import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { drainAuditOutboxes } from "../src/audit-drains.ts";
@@ -28,6 +28,7 @@ import {
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { teamMayClaim } from "../src/onboarding/team-claims.ts";
 import { retryErasures } from "../src/person-erasure.ts";
+import { adminCommands } from "./admin-command.ts";
 import { ageOwnErasure } from "./brain-next-own-store.ts";
 import { mockIdp } from "./idp.ts";
 import {
@@ -54,7 +55,7 @@ import {
   zendeskClaim,
   zendeskSaid,
 } from "./onboarding-team.ts";
-import type { Key } from "./onboarding-team.ts";
+import type { Ids, Key } from "./onboarding-team.ts";
 import { acmeTenant } from "./sign-in-config.ts";
 import {
   entraPerson,
@@ -952,6 +953,65 @@ describe("interviews in the new Brain", { timeout: 120_000 }, () => {
   });
 });
 
+/**
+ * The team's intake running again and held at its model call, inside the
+ * store's Brain work (`#withBrain`), until `release`: Ada says more, so
+ * the team is due, and its drawing is done first.
+ */
+const heldIntake = async (ids: Ids) => {
+  const store = onboardingStore(env);
+  await agree(
+    ids.ada,
+    [
+      fact("a1", "step", "Closes the day's tickets."),
+      fact("a2", "step", "Files the day's notes."),
+    ],
+    1
+  );
+  await answering([ticketsReply(ids)], async () => await store.drawNext());
+  const arrived = Promise.withResolvers<null>();
+  const released = Promise.withResolvers<null>();
+  const reply = claimsReply([zendeskClaim]);
+  const intaking = answeringWith(
+    async (requests) => {
+      arrived.resolve(null);
+      await released.promise;
+      return reply(requests);
+    },
+    async () => await store.intakeNext()
+  );
+  const first = await Promise.race([
+    arrived.promise.then(() => "held"),
+    intaking.then(({ result }) => `given ${result}`),
+  ]);
+  expect(first).toBe("held");
+  return {
+    release: async () => {
+      released.resolve(null);
+      await intaking;
+    },
+  };
+};
+
+/** Waits until `done` reads true of the onboarding's store: a request's own transaction landed. */
+const landed = async (done: (sql: SqlStorage) => boolean): Promise<void> => {
+  await vi.waitFor(
+    async () => {
+      const yes = await runInDurableObject(onboardingStore(env), (_, state) =>
+        done(state.storage.sql)
+      );
+      if (!yes) {
+        throw new Error("Not landed yet");
+      }
+    },
+    { timeout: 10_000, interval: 10 }
+  );
+};
+
+const interviewGone = (person: string) => (sql: SqlStorage) =>
+  sql.exec("SELECT person FROM interviews WHERE person = ?", person).toArray()
+    .length === 0;
+
 describe("team claims in the new Brain", { timeout: 120_000 }, () => {
   beforeEach(holdAlarm);
 
@@ -1246,6 +1306,120 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
     recalled: await recalled(max, "Zendesk", "claim"),
     listed: await claimsOf(max),
   });
+
+  /** A team member's read of the claim through the real read path: what they recall and list. */
+  const claimRead = async (max: string) => {
+    const { recalled: read, listed } = await readableBy(max);
+    return { recalled: read, listed };
+  };
+
+  it("are unreadable the moment an edit leaves four behind one, while an intake holds the Brain's work", async () => {
+    const { ids, max } = await drawnTeam({ eight: true });
+    await intakeOf(ids, [zendeskClaim]);
+    await handOverNow();
+    const before = await recalled(max, "Zendesk", "claim");
+    const held = await heldIntake(ids);
+    // Pim takes back the fact that backed the claim, as their page does:
+    // four of its backers are left, eight of the team still interviewed.
+    await agree(
+      ids.pim,
+      [
+        fact("p1", "step", "Tags the ticket."),
+        { ...fact("p2", "system", "Tickets arrive in Zendesk."), out: true },
+      ],
+      1
+    );
+    const during = await claimRead(max);
+    await held.release();
+    await settled();
+    expect({
+      before,
+      during,
+      after: await recalled(max, "Zendesk", "claim"),
+    }).toStrictEqual({
+      before: [zendeskClaim.text],
+      during: { recalled: [], listed: [] },
+      after: [],
+    });
+  });
+
+  it("stay readable when an edit leaves all five behind one and seven interviewed, while an intake holds the Brain's work", async () => {
+    const { ids, max } = await drawnTeam({ eight: true });
+    await intakeOf(ids, [zendeskClaim]);
+    await handOverNow();
+    const held = await heldIntake(ids);
+    // Rik, who backs none of them, takes back the one fact he approved:
+    // seven of the team are still interviewed, five behind the claim.
+    await agree(
+      ids.rik,
+      [{ ...fact("r1", "step", "Checks the queue at noon."), out: true }],
+      1
+    );
+    const during = await recalled(max, "Zendesk", "claim");
+    await held.release();
+    await settled();
+    expect({
+      during,
+      after: await recalled(max, "Zendesk", "claim"),
+    }).toStrictEqual({
+      during: [zendeskClaim.text],
+      after: [zendeskClaim.text],
+    });
+  });
+
+  it.each([
+    ["withdraws", "withdraw"],
+    ["deletes their interview", "delete"],
+    ["is given a new start by staff", "new_start"],
+    ["is erased by core", "erased"],
+  ] as const)(
+    "are unreadable the moment a backer %s and leaves four behind one, while an intake holds the Brain's work",
+    async (_, change) => {
+      const { ids, max } = await drawnTeam({ eight: true });
+      await intakeOf(ids, [zendeskClaim]);
+      await handOverNow();
+      const pim = await accountOfPerson(ids.pim);
+      const name = await env.DB.prepare("SELECT name FROM users WHERE id = ?")
+        .bind(pim)
+        .first<string>("name");
+      const admin = await signedInApi(idp, "admin");
+      if (change === "erased") {
+        await admin.api.members.remove(pim);
+      }
+      const held = await heldIntake(ids);
+      // Each waits on the Brain's work once its own transaction landed.
+      let acting: Promise<unknown>;
+      if (change === "withdraw" || change === "delete") {
+        acting = onLink({ action: change, ...(await openLink(ids.pim)) });
+      } else if (change === "new_start") {
+        acting = adminCommands().newStart(ids.pim);
+      } else {
+        acting = admin.api.members.erase(pim, name ?? "");
+      }
+      await landed(
+        change === "withdraw"
+          ? (sql) =>
+              sql
+                .exec(
+                  "SELECT person FROM participations WHERE person = ? AND withdrawn_at IS NOT NULL",
+                  ids.pim
+                )
+                .toArray().length === 1
+          : interviewGone(ids.pim)
+      );
+      const during = await claimRead(max);
+      await held.release();
+      await acting;
+      await settled();
+      expect({
+        during,
+        after: await recalled(max, "Zendesk", "claim"),
+      }).toStrictEqual({
+        during: { recalled: [], listed: [] },
+        after: [],
+      });
+    }
+  );
 
   it("are unreadable the moment a move leaves six interviewed, before core's clock erases them", async () => {
     const { ids, max } = await drawnTeam();

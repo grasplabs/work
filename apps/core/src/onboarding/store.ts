@@ -1332,10 +1332,9 @@ export class Onboarding extends DurableObject<Env> {
     this.#askNewcomers(before, roster);
     // Someone moved out, made a lead or taken off may leave a team too
     // small to have claims shown (`teamMayClaim`), or a claim under five of
-    // its team's people now (`#toPurge`, the one recount): those claims are
-    // owed an erasure at once, which core's clock does within a minute.
-    this.#eraseClaimsOfSmallTeams();
-    this.#eraseClaims(this.#toPurge().records);
+    // its team's people now: those claims are owed an erasure at once,
+    // which core's clock does within a minute.
+    this.#markClaimsThatNoLongerStand();
     return { removed: gone.length, erased };
   }
 
@@ -6559,6 +6558,20 @@ export class Onboarding extends DurableObject<Env> {
       .run();
   }
 
+  /**
+   * The one recount, in the caller's transaction, after anything that may
+   * take a claim under five of its team's people now or its team under
+   * what may have claims shown (`#toPurge`, `#eraseClaimsOfSmallTeams`):
+   * each such claim is marked to be erased in the same transaction as the
+   * change, so no team member reads it from that moment
+   * (`interviewTeamOf`), however long the Brain's own work waits
+   * (`#withBrain`). The Brain's erasure of it follows (`owedErasures`).
+   */
+  #markClaimsThatNoLongerStand(): void {
+    this.#eraseClaimsOfSmallTeams();
+    this.#eraseClaims(this.#toPurge().records);
+  }
+
   /** Runs `work` with the brain once what it is doing with it now is done. */
   async #withBrain<T>(work: () => Promise<T>): Promise<T> {
     const before = this.#braining;
@@ -7571,13 +7584,16 @@ export class Onboarding extends DurableObject<Env> {
         .where(eq(interviewStates.person, person.id))
         .run();
       this.#brainDue(person.team, now);
-      return;
+    } else {
+      this.#db
+        .update(interviewStates)
+        .set({ agreedAt: null, drawnAt: null })
+        .where(eq(interviewStates.person, person.id))
+        .run();
     }
-    this.#db
-      .update(interviewStates)
-      .set({ agreedAt: null, drawnAt: null })
-      .where(eq(interviewStates.person, person.id))
-      .run();
+    // A claim it took under five backers, or a team it took under seven
+    // interviewed, is unreadable from this transaction on.
+    this.#markClaimsThatNoLongerStand();
   }
 
   #onRoster(person: string): boolean {
@@ -7635,6 +7651,9 @@ export class Onboarding extends DurableObject<Env> {
     // goes with it. A referral names nobody else: whom it names is worked
     // out from the roster only as it is made (`#referOne`).
     this.#db.delete(referrals).where(eq(referrals.person, person)).run();
+    // A claim it took under five backers, or a team it took under seven
+    // interviewed, is unreadable from this transaction on.
+    this.#markClaimsThatNoLongerStand();
   }
 
   /** `person`'s interview as stored, or null when there is none or it doesn't parse. */
