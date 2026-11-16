@@ -224,11 +224,11 @@ export const pairOf = (quote: string): string | null => {
 };
 
 /** Whether `source`'s memories are never judged: kept whole, or a thread. */
-const neverJudged = (sql: SqlStorage, source: string): boolean =>
+export const neverJudged = (sql: SqlStorage, source: string): boolean =>
   isWholeKey(source) || isThread(sql, source) === true;
 
 /** Puts the memory `row` of `source` in: its quote is held. */
-const putIn = (sql: SqlStorage, row: number, source: string): void => {
+export const putIn = (sql: SqlStorage, row: number, source: string): void => {
   sql.exec("DELETE FROM memory_outs WHERE memory = ?", row);
   sql.exec(
     "INSERT OR IGNORE INTO memory_ins (memory, source) VALUES (?, ?)",
@@ -238,7 +238,7 @@ const putIn = (sql: SqlStorage, row: number, source: string): void => {
 };
 
 /** Puts the memory `row` of `source` out: its quote isn't held. */
-const putOut = (
+export const putOut = (
   sql: SqlStorage,
   row: number,
   source: string,
@@ -254,7 +254,7 @@ const putOut = (
 };
 
 /** Whether `quote` is held by the text `index` is of. */
-const isHeld = (index: QuoteIndex, quote: string | null): boolean =>
+export const isHeld = (index: QuoteIndex, quote: string | null): boolean =>
   quote !== null && index.holds(quote);
 
 /** The version a source's current pointer named before an add moves it. */
@@ -352,6 +352,8 @@ export const judgeVersion = (
     replaced: Replaced | undefined;
   }
 ): void => {
+  // Judged whole here: a pass of the catch-up under way for it is done with.
+  sql.exec("DELETE FROM memory_judging_places WHERE source = ?", source);
   if (neverJudged(sql, source)) {
     return;
   }
