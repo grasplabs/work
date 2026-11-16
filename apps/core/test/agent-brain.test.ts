@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 
 import { addSource } from "../src/brain-next.ts";
 import { turnRecallMethod, turnRecallTool } from "../src/turn-recall.ts";
+import { newTeam } from "./admin-teams.ts";
 import {
   chatOf,
   codeResults,
@@ -18,7 +19,6 @@ import {
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
-import { newTeam } from "./knowledge.ts";
 import { signedInApi, signedInWithRole, unique } from "./sign-in.ts";
 
 // The company brain for a chat's code (`env.brain`): read as the chat's

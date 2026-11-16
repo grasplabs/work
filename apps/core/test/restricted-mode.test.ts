@@ -25,9 +25,9 @@ import {
   reached,
 } from "./contexts.ts";
 import { mockIdp } from "./idp.ts";
-import { storedGrant } from "./knowledge.ts";
 import { mailConnection } from "./mail-connection.ts";
 import { outcome, signedInApi, unique } from "./sign-in.ts";
+import { storedGrant } from "./stored-grants.ts";
 
 // Restricted mode: a chat or App that read restricted data (an App's
 // restricted answer, say: agent-apps.ts, workflows/app-calls.ts) still

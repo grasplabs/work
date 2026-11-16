@@ -6,11 +6,12 @@ import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { sourcesOfApps } from "../src/app-provenance.ts";
+import { newTeam } from "./admin-teams.ts";
 import { outlook, published, requestGranted } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
-import { newTeam, storedGrant } from "./knowledge.ts";
 import { mailConnection } from "./mail-connection.ts";
 import { auditedDuring, outcome, signedInApi, unique } from "./sign-in.ts";
+import { storedGrant } from "./stored-grants.ts";
 import { connectDb } from "./test-env.ts";
 
 // Provenance on sharing: an App keeps what it reads, so sharing it must
