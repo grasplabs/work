@@ -107,7 +107,6 @@ describe("an organization's Setup", () => {
       workers: [
         "grasp-os-core",
         "grasp-os-connect",
-        "grasp-os-knowledge",
         "grasp-os-files",
         "grasp-os-audit-archive",
         "Read what runs",
@@ -141,7 +140,7 @@ describe("an organization's Setup", () => {
       toOldPages: false,
       needs: false,
       numbers: false,
-      workers: [true, true, true, true, true, true],
+      workers: [true, true, true, true, true],
       gateway: false,
       history: { kept: true, settingUp: false },
       releases: {

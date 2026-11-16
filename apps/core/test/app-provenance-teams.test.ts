@@ -3,9 +3,9 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
+import { newTeam } from "./admin-teams.ts";
 import { outlook, published, requestGranted } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
-import { newTeam } from "./knowledge.ts";
 import { firstVersion, outcome, signedInApi, unique } from "./sign-in.ts";
 import { connectDb } from "./test-env.ts";
 

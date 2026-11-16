@@ -5,8 +5,8 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { appHost } from "../src/durable-objects.ts";
+import { newTeam } from "./admin-teams.ts";
 import { requestGranted } from "./apps.ts";
-import { newTeam } from "./knowledge.ts";
 import { apiOf, referenceTo } from "./notes-client-app.ts";
 import {
   mockSessionIdp,

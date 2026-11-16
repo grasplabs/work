@@ -98,7 +98,7 @@ catalog:
   standardwebhooks: 1.1.1
   drizzle-kit: 0.31.11
   drizzle-orm: 0.45.3
-  # Knowledge frontmatter.
+  # YAML frontmatter: core, the docs and the Brain read it.
   yaml: 2.9.1
   # Bundles an App's approved npm packages in the package builder's isolate
   # (packages/compiler/src/packages), run on workerd.
@@ -258,7 +258,7 @@ catalog:
   react-dom: 19.3.0
   # recharts' peer; same release as react.
   react-is: 19.3.0
-  # Knowledge documents, rendered in the frontend: no raw HTML.
+  # Markdown, rendered in the frontend and the kit: no raw HTML.
   react-markdown: 10.1.0
   # Fast Refresh in a chat's preview frame (spec 19.2.1): the runtime the
   # preview kit carries and the Babel plugin preview builds instrument with.

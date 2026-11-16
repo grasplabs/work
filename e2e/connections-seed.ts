@@ -9,100 +9,77 @@
  * connections scene's people are signed in, for each attempt; tests only
  * look theirs up.
  */
-import { execFileSync } from "node:child_process";
-import path from "node:path";
-import { setTimeout as sleep } from "node:timers/promises";
-
 import { test } from "@playwright/test";
+import { z } from "zod";
 
 import type { Cast } from "./people.ts";
-import { stateDir } from "./stack.ts";
+import { origin } from "./stack.ts";
 
 export const quoted = (text: string): string =>
   `'${text.replaceAll("'", "''")}'`;
 
 /**
- * How often `whileBusy` tries a write the stack's local state was too busy
- * for (the dev server shares its files), waiting 200 ms first and twice as
- * long each time after: 3 s at most in all.
+ * Each Worker's local database, by the ID the dev server keeps it under:
+ * core's has no ID of its own locally, so it goes by its binding, `DB`;
+ * connect's by its `preview_database_id` (apps/connect/wrangler.jsonc).
  */
-const busyAttempts = 5;
-const firstBusyWaitMs = 200;
+const databases = {
+  core: "DB",
+  connect: "grasp-os-connect",
+} as const;
 
-/**
- * What wrangler prints when another process held the state: SQLite's
- * SQLITE_BUSY, workerd's opaque "internal error; reference = …" when a D1
- * batch fails under the same contention, or R2's "Unspecified error" when
- * two puts (two test workers seeding at once) meet. Any other error, a
- * constraint failing say, fails the run.
- */
-const busyErrors = [
-  "SQLITE_BUSY",
-  "internal error; reference =",
-  "put: Unspecified error",
-];
+/** What the dev server's D1 API answers a query, as far as this reads. */
+const answerSchema = z.object({
+  success: z.boolean(),
+  errors: z.array(z.object({ message: z.string() })),
+});
 
-const isBusy = (error: unknown): boolean =>
-  error instanceof Error &&
-  "stderr" in error &&
-  busyErrors.some((text) => String(error.stderr).includes(text));
-
-/**
- * Runs `write`, a wrangler command on the stack's local state that does
- * the same whether it runs once or again, until it isn't refused as busy.
- */
-export const whileBusy = async (write: () => void): Promise<void> => {
-  for (let attempt = 1; ; attempt += 1) {
-    try {
-      write();
-      return;
-    } catch (error) {
-      if (attempt >= busyAttempts || !isBusy(error)) {
-        throw error;
-      }
-    }
-    // oxlint-disable-next-line no-await-in-loop -- one try at a time
-    await sleep(firstBusyWaitMs * 2 ** (attempt - 1));
+/** `text` parsed as JSON, or null when it isn't JSON. */
+const jsonOrNull = (text: string): unknown => {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
   }
 };
 
-/** Each Worker's wrangler config, from core's folder. */
-const configs = {
-  core: "wrangler.jsonc",
-  connect: "../connect/wrangler.jsonc",
-} as const;
-
 /**
- * Runs SQL on connect's local database (or core's), which the e2e stack
- * keeps together (e2e/stack.ts), as one batch in one transaction, which
- * SQLite undoes whole when it can't finish: so a busy batch is tried again.
+ * Runs SQL on connect's local database (or core's), as one batch in one
+ * transaction, through the dev server's own D1 API (miniflare's local
+ * explorer): on the database objects core and connect use, one query after
+ * another. A second runtime on the stack's state (`wrangler d1 execute
+ * --local`) held the database file's lock while it wrote, and whatever the
+ * dev server asked of that database meanwhile failed with SQLITE_BUSY: a
+ * sign-in of a test running beside it among them (merge queue, November
+ * 2026).
  */
 export const execute = async (
   sql: string,
-  worker: keyof typeof configs = "connect"
+  worker: keyof typeof databases = "connect"
 ): Promise<void> => {
-  await whileBusy(() => {
-    execFileSync(
-      path.join(import.meta.dirname, "../node_modules/.bin/wrangler"),
-      [
-        "d1",
-        "execute",
-        "DB",
-        "--local",
-        "-c",
-        configs[worker],
-        "--persist-to",
-        stateDir,
-        "--command",
-        sql,
-      ],
-      {
-        cwd: path.join(import.meta.dirname, "../apps/core"),
-        stdio: "pipe",
-        env: { ...process.env, WRANGLER_SEND_METRICS: "false" },
-      }
+  const response = await fetch(
+    new URL(
+      `/cdn-cgi/local/explorer/api/d1/database/${databases[worker]}/raw`,
+      origin
+    ),
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sql }),
+    }
+  );
+  const body = await response.text();
+  // Anything but the API's own JSON (the explorer turned off, or core's
+  // 404 for a path it doesn't know) fails with what came back.
+  const answer = answerSchema.safeParse(jsonOrNull(body));
+  if (!response.ok || !answer.success || !answer.data.success) {
+    const said = answer.success
+      ? answer.data.errors.map(({ message }) => message).join("; ")
+      : body;
+    throw new Error(
+      `SQL on ${worker}'s local database failed (${response.status}): ${said}`
     );
-  });
+  }
 };
 
 export interface SeededConnection {
