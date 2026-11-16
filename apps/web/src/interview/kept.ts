@@ -127,8 +127,14 @@ interface Kept {
   aside: Aside | null;
   /** This tab refused to keep what waits. */
   unkept: boolean;
-  /** What waited in this tab, held again, and core hasn't answered for it yet. */
-  restoring: boolean;
+  /**
+   * What waited in this tab, held again, and core hasn't answered for it
+   * yet: with the copy that was on its way as their session ended, which
+   * it may go on from (`Aside.sending`).
+   */
+  restoring: { sending: InterviewProgress | null } | null;
+  /** The copy a save on its way sent. */
+  sending: InterviewProgress | null;
   /** What is typed in the box and not sent. */
   typed: string;
 }
@@ -145,6 +151,12 @@ const asideSchema = z.object({
   version: z.int().min(0),
   /** What isn't kept yet; none when all of it is. */
   progress: interviewProgressSchema.nullable(),
+  /**
+   * The copy a save on its way sent as their session ended: it may have
+   * landed in core though its answer was dropped (api.ts `gated`), and
+   * what waits then goes on from it.
+   */
+  sending: interviewProgressSchema.nullable(),
   typed: z.string(),
   /** They were talking: a stretch said as it ended is lost. */
   talking: z.boolean(),
@@ -189,6 +201,13 @@ const keepAside = (mine: Kept, aside: Aside): void => {
     mine.unkept = true;
   }
 };
+
+/** Whether two copies of the interview are the same, word for word. */
+const sameCopy = (
+  one: InterviewProgress | null,
+  other: InterviewProgress | null
+): boolean =>
+  one !== null && other !== null && canonicalJson(one) === canonicalJson(other);
 
 /** How soon after a change it is kept: changes close together are kept together. */
 const keepAfterMs = 400;
@@ -240,12 +259,14 @@ export const linkNow = (): { secret: string } | null =>
 const saveOnce = async (mine: Kept): Promise<void> => {
   mine.dirty = false;
   const sent = mine.progress;
+  mine.sending = sent;
   const answer = await saveProgress({
     action: "save",
     secret: mine.secret,
     version: mine.version,
     progress: sent,
   });
+  mine.sending = null;
   if (kept !== mine || mine.gone) {
     return;
   }
@@ -268,7 +289,7 @@ const saveOnce = async (mine: Kept): Promise<void> => {
   mine.failed = 0;
   mine.version = answer.version;
   const { restoring } = mine;
-  mine.restoring = false;
+  mine.restoring = null;
   // Core answered for what waited in this tab, if anything did.
   forgetAside(mine.draft);
   if (answer.saved) {
@@ -277,7 +298,13 @@ const saveOnce = async (mine: Kept): Promise<void> => {
     }
     return;
   }
-  if (restoring) {
+  if (restoring !== null && sameCopy(restoring.sending, answer.progress)) {
+    // Their own save, on its way as the session ended, landed meanwhile:
+    // what waited goes on from it, kept on top of it.
+    mine.dirty = true;
+    return;
+  }
+  if (restoring !== null) {
     // What waited goes only onto the version it was taken at, and core
     // changed meanwhile: its copy is the interview, even when it holds
     // none (a new start), and the page says what waited couldn't be kept.
@@ -461,23 +488,30 @@ const takenUp = (
   { version, progress, withdrawn, closed }: Opened
 ): {
   unsaved: InterviewProgress | null;
+  sending: InterviewProgress | null;
   typed: string;
   lost: Lost | null;
   undone: Undone | null;
 } => {
   if (aside === null) {
-    return { unsaved: null, typed: "", lost: null, undone: null };
+    return {
+      unsaved: null,
+      sending: null,
+      typed: "",
+      lost: null,
+      undone: null,
+    };
   }
   // What waited is what core holds now: their own save landed as the
-  // session ended, and only its answer was dropped (api.ts `gated`).
-  const landed =
-    aside.progress !== null &&
-    progress !== null &&
-    canonicalJson(aside.progress) === canonicalJson(progress);
-  const unchanged = aside.version === version || landed;
+  // session ended, and only its answer was dropped (api.ts `gated`). Or
+  // core holds the copy that was on its way: what waited goes on from it.
+  const landed = sameCopy(aside.progress, progress);
+  const unchanged =
+    aside.version === version || landed || sameCopy(aside.sending, progress);
   if (unchanged && !withdrawn && !closed) {
     return {
       unsaved: landed ? null : aside.progress,
+      sending: aside.sending,
       typed: aside.typed,
       lost: null,
       undone: aside.undone,
@@ -490,6 +524,7 @@ const takenUp = (
   }
   return {
     unsaved: null,
+    sending: null,
     typed: "",
     lost,
     undone: unchanged ? aside.undone : null,
@@ -516,7 +551,10 @@ export const holdInterview = ({
     window.clearTimeout(kept.waiting);
   }
   beginCalls();
-  const { unsaved, typed, lost, undone } = takenUp(asideAt(draft), opened);
+  const { unsaved, sending, typed, lost, undone } = takenUp(
+    asideAt(draft),
+    opened
+  );
   const mine: Kept = {
     secret,
     version: opened.version,
@@ -531,7 +569,8 @@ export const holdInterview = ({
     draft,
     aside: null,
     unkept: false,
-    restoring: unsaved !== null,
+    restoring: unsaved === null ? null : { sending },
+    sending: null,
     typed,
   };
   kept = mine;
@@ -574,6 +613,7 @@ export const setAside = (by: CallKind): boolean => {
     keepAside(mine, {
       ...mine.aside,
       progress: null,
+      sending: null,
       typed: "",
       undone: asked,
     });
@@ -590,6 +630,7 @@ export const setAside = (by: CallKind): boolean => {
   keepAside(mine, {
     version: mine.version,
     progress: asked === null ? unsaved : null,
+    sending: asked === null && mine.saving ? mine.sending : null,
     typed: asked === null ? mine.typed : "",
     talking: mine.progress.mode === "talk",
     undone: asked,
