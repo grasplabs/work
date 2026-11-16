@@ -21,7 +21,7 @@ import type { CodeTurn } from "./agent.ts";
 import { appendAuditEvent } from "./audit-outbox.ts";
 import {
   mergeRecalled,
-  recallAs,
+  recallOwnedAs,
   recallQuestionMaxLength,
   recalledTokens,
 } from "./brain-next.ts";
@@ -38,6 +38,7 @@ import {
   recalledMemoryPin,
 } from "./history-access.ts";
 import { modelForRole, modelSettings, models } from "./models.ts";
+import { markPrivateRead } from "./private-reads.ts";
 
 // The recall before a chat's question (GRA-1732), from the Brain
 // (brain-next.ts), as the person whose chat it is. The question is
@@ -270,18 +271,19 @@ const leftOf = (started: number, ms: number): number =>
 /**
  * The first pass, and a second for the analysis's words, within the
  * budget the first left, when the first is thin and the analysis answered
- * in time with words of its own.
+ * in time with words of its own; and whether either handed over anything
+ * of the person's own store (`recallOwnedAs`), which marks the chat.
  */
 const recalled = async (
   recalling: Recalling,
   reads: Reads,
   question: string,
   analysed: Promise<string | null | undefined>
-): Promise<RecalledPack> => {
+): Promise<{ pack: RecalledPack; fromOwn: boolean }> => {
   const { env, turn } = recalling;
   const started = Date.now();
   const recall = async (query: string, tokens: number) =>
-    await recallAs(env, turn.scope.personId, {
+    await recallOwnedAs(env, turn.scope.personId, {
       question: query,
       budget: { tokens },
       ...reads,
@@ -290,7 +292,7 @@ const recalled = async (
     async () => await recall(question, turnRecallBudget.tokens),
     turnRecallDeadlineMs
   );
-  if (!isThin(first)) {
+  if (!isThin(first.pack)) {
     return first;
   }
   let query: string | null | undefined;
@@ -305,7 +307,7 @@ const recalled = async (
   }
   // What the first left of the budget: the second takes no more, so
   // nothing of either is left out when they are merged.
-  const left = turnRecallBudget.tokens - recalledTokens(first);
+  const left = turnRecallBudget.tokens - recalledTokens(first.pack);
   if (
     query === null ||
     query === undefined ||
@@ -319,7 +321,10 @@ const recalled = async (
       async () => await recall(query, left),
       leftOf(started, turnRecallDeadlineMs)
     );
-    return mergeRecalled(first, second);
+    return {
+      pack: mergeRecalled(first.pack, second.pack),
+      fromOwn: first.fromOwn || second.fromOwn,
+    };
   } catch {
     log.warn("chat.recall_second_pass_failed", {});
     return first;
@@ -465,7 +470,7 @@ export const recallForTurn = async (
   let result: string | undefined;
   let failure = "The recall failed.";
   try {
-    const pack = await recalled(recalling, reads, query, analysed);
+    const { pack, fromOwn } = await recalled(recalling, reads, query, analysed);
     // Its answer can no longer be used: let go of now, not after the writes.
     analysis.abort();
     const versions = [
@@ -503,6 +508,12 @@ export const recallForTurn = async (
     // model never got.
     await withinTime(
       async () => {
+        // Something of the person's own store marks the chat first, for
+        // good: what it writes for others then waits for them
+        // (private-reads.ts).
+        if (fromOwn) {
+          await markPrivateRead(env, scope, "recall");
+        }
         await recordRunReads(env, scope, [
           brainGrantRead,
           ...versions,

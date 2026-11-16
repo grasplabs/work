@@ -40,6 +40,14 @@ export const chats = sqliteTable(
     /** It read restricted data, and is in restricted mode for good. */
     restricted: integer({ mode: "boolean" }).notNull().default(false),
     /**
+     * It handed its model or its code something only its person may read
+     * (private-reads.ts): from then on, for good, what its agent writes
+     * where others read waits for the person to confirm it.
+     */
+    privateRead: integer("private_read", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    /**
      * The person the chat belongs to, whom its agent acts for, and the
      * only one who reaches it.
      */
@@ -459,6 +467,42 @@ export const chatFiles = sqliteTable(
     createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
   },
   (table) => [index("chat_files_chat").on(table.chatId, table.createdAt)]
+);
+
+/** Where a held App call stands (held-app-calls.ts). */
+export type HeldAppCallStatus = "waiting" | "confirmed" | "declined" | "lapsed";
+
+/**
+ * Writes to an App that a chat's agent asked for after the chat used
+ * something only its person may read (held-app-calls.ts), held for that
+ * person: the call exactly as the agent's code sent it, by its SHA-256,
+ * which the person confirms. Kept here, with the chat it came from, as its
+ * transcript is; the request is emptied once it is decided, or once it
+ * waited past its day (`lapsed`), when it is neither listed nor
+ * confirmable.
+ * Deleted with the chat.
+ */
+export const heldAppCalls = sqliteTable(
+  "held_app_calls",
+  {
+    id: text().primaryKey(),
+    // No foreign key: a core rolled back to before this table deletes a
+    // chat without knowing it, which one would refuse for good.
+    chatId: text("chat_id").$type<ChatId>().notNull(),
+    agentId: text("agent_id").notNull(),
+    personId: text("person_id").notNull(),
+    appId: text("app_id").notNull(),
+    /** The function's path and kind, as the request names them. */
+    function: text().notNull(),
+    kind: text().notNull(),
+    /** The request, exactly as it would run; null once decided. */
+    request: text(),
+    /** The request's SHA-256, hex: what confirming names. */
+    requestHash: text("request_hash").notNull(),
+    heldAt: integer("held_at", { mode: "timestamp_ms" }).notNull(),
+    status: text().$type<HeldAppCallStatus>().notNull(),
+  },
+  (table) => [index("held_app_calls_chat").on(table.chatId, table.status)]
 );
 
 /**

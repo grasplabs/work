@@ -1082,6 +1082,31 @@ export interface ChatSubscriptionApi {
   release: () => Promise<void>;
 }
 
+/** The most held App calls one page of `ChatsApi.heldCalls` lists. */
+export const heldAppCallsPage = 50;
+
+/**
+ * A write to an App the chat's agent asked for after the chat used
+ * something only its person may read, held until that person confirms
+ * or declines it (`ChatsApi.heldCalls`). `request` is the call exactly as
+ * it would run; confirming names its `requestHash`.
+ */
+export interface HeldAppCall {
+  id: string;
+  appId: string;
+  /** The App's name now; null once it was removed. */
+  appName: string | null;
+  /** The function's path in the App, as the request names it. */
+  function: string;
+  /** `mutation` or `action`. */
+  kind: string;
+  request: string;
+  requestHash: string;
+  heldAt: string;
+  /** When it lapses, never run, unless confirmed before. */
+  expiresAt: string;
+}
+
 /** The signed-in person's chats with the organization's agent. */
 export interface ChatsApi {
   /** The models a question may name, the default first. */
@@ -1196,6 +1221,25 @@ export interface ChatsApi {
    * `id`. Audited; the agent is told.
    */
   denyConnection: (chatId: string, id: string) => Promise<void>;
+  /**
+   * The writes to Apps the chat's agent asked for after the chat used
+   * something only the person can read, which wait for them, oldest
+   * first, at most {@link heldAppCallsPage} a page: a full page goes on
+   * `after` its last one's `id`.
+   */
+  heldCalls: (chatId: string, after?: string) => Promise<HeldAppCall[]>;
+  /**
+   * Confirms the chat's held App call `id` for exactly the request whose
+   * SHA-256 is `requestHash`, and runs it once, as the agent acting for
+   * the person. Audited; the agent is told how it ended.
+   */
+  confirmHeldCall: (
+    chatId: string,
+    id: string,
+    requestHash: string
+  ) => Promise<void>;
+  /** Declines the chat's held App call `id`: it never runs. Audited; the agent is told. */
+  declineHeldCall: (chatId: string, id: string) => Promise<void>;
   /**
    * Follows the chat: `onUpdate` gets the messages after the one with ID
    * `after` (all of them for `null`) and what the agent is writing, then

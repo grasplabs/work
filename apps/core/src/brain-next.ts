@@ -1060,6 +1060,33 @@ const storesOf = (findings: readonly Finding[]): Map<string, MemoryStore> =>
     )
   );
 
+/**
+ * Whether the reader's own store found anything for a recall (`findingsOf`:
+ * its finding follows the shared store's): a passage by any way, a part
+ * it holds, a term or a memory. Whatever it found shapes what the pack
+ * hands over, an item or memory of it, or only which words `notFound`
+ * lists and whether the budget cut it short (across.ts `packAcross`), so
+ * the pack then rests on what only the person may read, though none of
+ * it fit.
+ */
+const ownFound = (findings: readonly Finding[]): boolean => {
+  const [, own] = findings;
+  if (own === undefined) {
+    return false;
+  }
+  return [
+    own.words,
+    own.stopWords,
+    own.terms,
+    own.exact,
+    own.capped,
+    own.meaning,
+    own.memories.words,
+    own.memories.entities,
+    own.memories.rivals,
+  ].some((found) => found.length > 0);
+};
+
 /** A person's use of memories, per store (`usedOf`), for its requests. */
 type Used = Record<MemoryStore, NonNullable<RecallRequest["used"]>>;
 
@@ -1101,6 +1128,62 @@ const usedOf = async (
 };
 
 /**
+ * `recallAs`'s pack, and beside it whether the person's own store, where
+ * everything only they may read is kept, found anything for it
+ * (`fromOwn`, `ownFound`): an item or a memory in it, or only a match
+ * that decided which words it says were not found or that it was cut
+ * short. Core's own bookkeeping for marking the chat it goes to
+ * (private-reads.ts, turn-recall.ts), never part of what recall answers,
+ * nor handed to the model, code or a page.
+ */
+export const recallOwnedAs = async (
+  env: BrainEnv & Pick<Env, "DB" | "EMBEDDER" | "WORKSPACES">,
+  personId: string,
+  recall: Recall
+): Promise<{ pack: RecalledPack; fromOwn: boolean }> => {
+  // Ranked by their use only where the answer reaches them alone: a
+  // recall as their teams or the company (a channel, a thread, a turn
+  // they didn't start, code) is ordered as for anyone, and
+  // their Workspace isn't asked.
+  const [request, used] = await Promise.all([
+    recallRequestAs(env, personId, recall),
+    reachOf(recall) === "person"
+      ? usedOf(env, personId, recall.asOf ?? new Date())
+      : undefined,
+  ]);
+  const findings = await findingsOf(env, request, "find", used);
+  const { items, memories, contested, notFound, truncated } = packAcross(
+    request.question,
+    request.budget.tokens,
+    findings
+  );
+  const stores = storesOf(findings);
+  const recalledMemories = memories.map((memory) => {
+    const store = stores.get(memory.memory);
+    // A packed memory is one a store found: never one of none.
+    if (store === undefined) {
+      throw new Error("A packed memory no store found");
+    }
+    return {
+      ...memory,
+      store,
+      source: versionRefOf(memory.source),
+      said: saidOf(memory, personId),
+    };
+  });
+  return {
+    pack: {
+      items: recalledItems(items),
+      memories: recalledMemories,
+      contested,
+      notFound,
+      truncated,
+    },
+    fromOwn: ownFound(findings),
+  };
+};
+
+/**
  * A pack of what the member `personId` may read for `question`, as core
  * counts them now, within `budget.tokens` (the Brain's estimate,
  * `tokensOf`), and, with `asOf`, of each source as it was then: the
@@ -1124,42 +1207,8 @@ export const recallAs = async (
   personId: string,
   recall: Recall
 ): Promise<RecalledPack> => {
-  // Ranked by their use only where the answer reaches them alone: a
-  // recall as their teams or the company (a channel, a thread, a turn
-  // they didn't start, code) is ordered as for anyone, and
-  // their Workspace isn't asked.
-  const [request, used] = await Promise.all([
-    recallRequestAs(env, personId, recall),
-    reachOf(recall) === "person"
-      ? usedOf(env, personId, recall.asOf ?? new Date())
-      : undefined,
-  ]);
-  const findings = await findingsOf(env, request, "find", used);
-  const { items, memories, contested, notFound, truncated } = packAcross(
-    request.question,
-    request.budget.tokens,
-    findings
-  );
-  const stores = storesOf(findings);
-  return {
-    items: recalledItems(items),
-    memories: memories.map((memory) => {
-      const store = stores.get(memory.memory);
-      // A packed memory is one a store found: never one of none.
-      if (store === undefined) {
-        throw new Error("A packed memory no store found");
-      }
-      return {
-        ...memory,
-        store,
-        source: versionRefOf(memory.source),
-        said: saidOf(memory, personId),
-      };
-    }),
-    contested,
-    notFound,
-    truncated,
-  };
+  const { pack } = await recallOwnedAs(env, personId, recall);
+  return pack;
 };
 
 /**
