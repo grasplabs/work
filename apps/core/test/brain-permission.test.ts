@@ -43,7 +43,7 @@ describe("the Brain's permission", setUpTime, () => {
     const env = await envOf(actingFor(agent, admin.userId));
     expect({
       statistics,
-      stubs: Object.keys(env).filter((name) => name !== "KNOWLEDGE"),
+      stubs: Object.keys(env),
     }).toStrictEqual({
       statistics: "permission.invalid",
       stubs: [],

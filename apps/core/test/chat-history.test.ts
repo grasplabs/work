@@ -8,11 +8,11 @@ import { withheldResponse, withheldResult } from "../src/agent.ts";
 import { addSource } from "../src/brain-next.ts";
 import type { SourceReaders } from "../src/brain-next.ts";
 import { workspace } from "../src/durable-objects.ts";
+import { newTeam } from "./admin-teams.ts";
 import { chatOf, codeResults, codeStep, says } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
-import { newTeam } from "./knowledge.ts";
 import { outcome, signedInApi, signedInWithRole, unique } from "./sign-in.ts";
 
 // What a chat's code read, kept with the chat: what every later model

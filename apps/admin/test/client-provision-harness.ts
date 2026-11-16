@@ -664,7 +664,7 @@ export const probeFailures: ProbeFailure[] = [
   },
   {
     name: "a database that doesn't answer",
-    probe: { down: ["KNOWLEDGE"] },
+    probe: { down: ["DB"] },
     code: "probe_binding_unanswered",
   },
   {

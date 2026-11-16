@@ -336,15 +336,7 @@ const drawAll = async (ids: Ids, tool: string, word: string) => {
     .includes(word);
 };
 
-/** Whether Knowledge's words index still finds `word` as a token: its pages don't keep it in one piece. */
-const indexFinds = async (word: string): Promise<boolean> =>
-  (await env.KNOWLEDGE.prepare(
-    "SELECT 1 AS held FROM search_words WHERE search_words MATCH ? LIMIT 1"
-  )
-    .bind(`"${word}"`)
-    .first()) !== null;
-
-/** Where `word` is left: the store's tables, both databases, the audit log, interview turns, and what the admin and the brain show. */
+/** Where `word` is left: the store's tables, core's database, the audit log, interview turns, and what the admin and the brain show. */
 const leftOf = async (admin: SessionApi, ids: Ids, word: string) => {
   const store = onboardingStore(env);
   const events = await allEvents();
@@ -355,10 +347,6 @@ const leftOf = async (admin: SessionApi, ids: Ids, word: string) => {
   return {
     store: await onboardingTablesWith(word),
     core: await d1ColumnsWith(env.DB, word),
-    knowledge: [
-      ...(await d1ColumnsWith(env.KNOWLEDGE, word)),
-      ...((await indexFinds(word)) ? ["search_words"] : []),
-    ],
     audit: JSON.stringify(events).toLowerCase().includes(word),
     turns: JSON.stringify(contexts).toLowerCase().includes(word),
     shown: {
@@ -461,7 +449,6 @@ describe(
           after: {
             store: [],
             core: [],
-            knowledge: [],
             audit: false,
             turns: false,
             shown: { documents: false, brief: false, brain: false },

@@ -109,10 +109,6 @@ const startEmpty = async (): Promise<void> => {
     env.DB,
     migrationsSchema.parse(testBinding("CORE_MIGRATIONS"))
   );
-  await applyD1Migrations(
-    env.KNOWLEDGE,
-    migrationsSchema.parse(testBinding("KNOWLEDGE_MIGRATIONS"))
-  );
 
   // Connect's database too: core's tests call the real connect Worker, which
   // reads its connection registry there.

@@ -190,7 +190,6 @@ describe(
         sameSource: true,
         generatedAnew: true,
         grasp: [
-          "@grasp-os/brain",
           "@grasp-os/shared",
           "@grasp-os/runtime",
           "@grasp-os/sdk",
@@ -205,7 +204,6 @@ describe(
         unlocked: [],
         importers: [
           ".",
-          "vendor/@grasp-os/brain",
           "vendor/@grasp-os/runtime",
           "vendor/@grasp-os/sdk",
           "vendor/@grasp-os/shared",

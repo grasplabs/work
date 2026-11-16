@@ -274,7 +274,7 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
     company:
       "who uploaded which file into the Brain for a team or everyone, by ID and the file's name; their uploads for themselves alone, by ID with no name, go with brain_sources once the Brain erased them; a file's text is the Brain's",
   },
-  "core.uploads": { company: "Knowledge uploads; Personal ones the Brain's" },
+  "core.uploads": { erased: "brain" },
   "core.knowledge_signals": { erased: "apps" },
   "core.knowledge_signal_dismissals": {
     none: "subject is a search or document",
@@ -508,60 +508,6 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   },
   "dataStore.sdk_file_events": { company: "the App's files they own" },
   "dataStore.sdk_file_writes": { company: "the App's files they own" },
-  // The Brain and Knowledge (the Brain's personal purge erases a person's
-  // own; what they wrote in the company's collections is the company's).
-  "brain.collections": {
-    company: "collections; their Personal one the Brain's",
-  },
-  "brain.documents": { company: "documents; their Personal ones the Brain's" },
-  "brain.versions": { company: "versions; their Personal ones the Brain's" },
-  "brain.brain_memories": { erased: "brain" },
-  "brain.brain_episodes": { erased: "brain" },
-  "brain.brain_episode_members": { erased: "brain" },
-  "brain.brain_lessons": { erased: "brain" },
-  "brain.brain_lesson_versions": { erased: "brain", via: "brain_lessons" },
-  "brain.brain_lesson_evidence": { erased: "brain", via: "brain_episodes" },
-  "brain.brain_memory_cites": { erased: "brain", via: "brain_memories" },
-  "brain.brain_receipts": { erased: "brain" },
-  "brain.brain_consolidation_marks": { erased: "brain" },
-  "brain.brain_consolidation_due": { erased: "brain" },
-  "brain.brain_entities": {
-    company: "what documents name; those only their records name go",
-  },
-  "brain.brain_entity_keys": { company: "keys of entities, with them" },
-  "brain.brain_mentions": { company: "names in documents, with them" },
-  "brain.brain_assertions": {
-    company: "relations documents state; their memories' go with them",
-  },
-  "brain.brain_link_jobs": { company: "links of documents, with them" },
-  "brain.sections": { company: "documents; their Personal ones the Brain's" },
-  "brain.transcripts": {
-    company: "documents; their Personal ones the Brain's",
-  },
-  "brain.brain_payloads": { company: "uploads; their Personal ones go" },
-  "brain.brain_erased_evidence": { kept: "IDs of evidence erased" },
-  "brain.brain_purges": {
-    kept: "each purge's own record: the admin who ran it, by ID",
-  },
-  "brain.brain_purge_steps": noPerson,
-  "brain.brain_exports": { company: "exports of the Brain an admin asked for" },
-  "brain.brain_export_files": noPerson,
-  "brain.brain_erased_documents": {
-    kept: "the purge's own record: document IDs and hashes of their places",
-  },
-  "brain.brain_entity_matches": {
-    company: "who decided two entities are one, gone with the entities",
-  },
-  "brain.audit_outbox": { kept: "audit events on their way to the log (D2)" },
-  "brain.audit_outbox_rejected": { kept: "audit events the log refused (D2)" },
-  "brain.brain_capture_cursors": noPerson,
-  "brain.brain_payload_releases": noPerson,
-  "brain.brain_sequences": noPerson,
-  "brain.links": noPerson,
-  "brain.search_rebuilds": noPerson,
-  "brain.brain_forgotten_people": {
-    kept: "keeps their memory from coming back",
-  },
   // The audit log: IDs only, never rewritten, archived for 7 years (D2).
   "auditLog.events": { kept: "the audit log (D2)" },
   "auditLog.archives": noPerson,
@@ -577,17 +523,6 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
 export const reviewedPersonColumns: Readonly<
   Record<string, readonly string[]>
 > = {
-  "brain.brain_assertions": ["subject_entity_id", "subject_name"],
-  "brain.brain_entity_matches": ["decided_by"],
-  "brain.brain_episode_members": ["user_id"],
-  "brain.brain_episodes": ["owner_id"],
-  "brain.brain_forgotten_people": ["user_id"],
-  "brain.brain_lessons": ["retired_by"],
-  "brain.brain_memories": ["owner_id"],
-  "brain.brain_purges": ["superseded_by"],
-  "brain.collections": ["owner"],
-  "brain.documents": ["owner"],
-  "brain.versions": ["author"],
   "core.access_revocations": ["user_ids"],
   "core.accounts": ["user_id"],
   "core.action_invocations": ["person_id"],

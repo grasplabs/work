@@ -1,27 +1,26 @@
-import type { ErasedFiles, OnErase } from "@grasp-os/brain/purge";
 import { and, asc, eq, inArray, lt, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
-import { uploadCleanups, uploads } from "../db/core/schema.ts";
-import { inList } from "../db/d1.ts";
+import { uploadCleanups, uploads } from "./db/core/schema.ts";
+import { inList } from "./db/d1.ts";
 
-// What is left of the files once uploaded into Knowledge: the uploads of
-// the collections a person's erasure purges (`uploadErasure`), which it
-// forgets, deleting their originals from R2, and those left unended,
-// which the clock forgets (`sweepLeftUploads`). Nothing uploads into
-// Knowledge any more: the purge forgets an upload whatever state it was
-// left in. An original's delete is
-// recorded (`upload_cleanups`) in the batch that forgets its upload, then
-// done, every one due, page after page; an R2 refusal fails the purge's
-// step, or the clock's run, and its rerun deletes what is left. Nothing
-// reads as erased before it is.
+// What is left of the files once uploaded into Knowledge, which is gone
+// (GRA-1941): core's own rows of them (`uploads`) and their originals in
+// `FILES` under `knowledge/`. A person's erasure forgets every upload they
+// made (`eraseUploadsOf`), and the clock those left unended
+// (`sweepLeftUploads`); S7 of GRA-1735 drops the tables. Nothing uploads
+// into Knowledge any more. An original's delete is recorded
+// (`upload_cleanups`) in the batch that forgets its upload, then done,
+// every one due, page after page; an R2 refusal fails the erasure's area,
+// or the clock's run, and its rerun deletes what is left. Nothing reads as
+// erased before it is.
 //
 // The clock forgets only an upload unchanged for `storingMs`: one the
 // release before this one was still taking as it was replaced may yet
 // store its original, and deleting its key first would leave that object
 // with no row or record to delete it by. A recorded delete is due at once,
-// for the purge and for the clock alike, so a purge's step ends with every
-// original it recorded gone.
+// for an erasure and for the clock alike, so an erasure's area ends with
+// every original it recorded gone.
 
 /**
  * How long after an upload last changed its original may still be being
@@ -37,7 +36,7 @@ export const cleanupsPerPage = 100;
  * Deletes every original recorded for deleting whose upload is gone or
  * failed, a page at a time, clearing each page's records once R2 has
  * deleted them. Throws when R2 or the database refuses: the records stay,
- * for the purge run again.
+ * for the run again.
  */
 const cleanUpOriginals = async (env: Env): Promise<void> => {
   const db = drizzle(env.DB);
@@ -63,12 +62,20 @@ const cleanUpOriginals = async (env: Env): Promise<void> => {
 };
 
 /**
- * Forgets the uploads of the collection `scope` and records their originals for deleting,
- * in one batch, then deletes every original due (`cleanUpOriginals`).
+ * Every upload `userId` made, wherever they uploaded it (GRA-1941): its
+ * row, and its original, recorded for deleting in one batch, then every
+ * original due deleted (`cleanUpOriginals`). Without Knowledge nothing
+ * tells a collection only they read from one they shared, and what any of
+ * them was uploaded into is gone, so none of theirs is kept. A person's
+ * erasure calls it (person-erasure.ts, the `brain` area); it throws when
+ * R2 or the database refuses, and the area runs it again.
  */
-const forgetUploads = async (env: Env, scope: ErasedFiles): Promise<void> => {
+export const eraseUploadsOf = async (
+  env: Env,
+  userId: string
+): Promise<void> => {
   const db = drizzle(env.DB);
-  const where = eq(uploads.collectionId, scope.collectionId);
+  const where = eq(uploads.uploadedBy, userId);
   await db.batch([
     db
       .insert(uploadCleanups)
@@ -91,7 +98,7 @@ const forgetUploads = async (env: Env, scope: ErasedFiles): Promise<void> => {
 };
 
 /**
- * Every minute (the clock), until the cutover removes Knowledge: forgets
+ * Every minute (the clock), until S7 drops the tables: forgets
  * the uploads that never ended and haven't changed for `storingMs`
  * (nothing finishes one any more), recording
  * their originals for deleting, then deletes every original due, those a
@@ -124,16 +131,3 @@ export const sweepLeftUploads = async (env: Env): Promise<void> => {
   ]);
   await cleanUpOriginals(env);
 };
-
-/**
- * The uploads as a person's purge reaches them (purge.ts `OnErase`): the
- * originals of the files uploaded into the collections it purges hold the
- * data too, so it forgets the uploads and deletes their originals before
- * it deletes anything of the collections. Until the cutover's last step
- * removes Knowledge.
- */
-export const uploadErasure = (env: Env): Pick<OnErase, "forgetFiles"> => ({
-  forgetFiles: async (_person, scope) => {
-    await forgetUploads(env, scope);
-  },
-});

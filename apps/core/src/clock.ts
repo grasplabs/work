@@ -1,4 +1,3 @@
-import { sweepPayloads } from "@grasp-os/brain/payloads";
 import { errorFields, log } from "@grasp-os/shared/log";
 import {
   ClockObject,
@@ -26,9 +25,7 @@ import { inJurisdiction } from "./durable-objects.ts";
 import { warmQuestionEmbedder } from "./embedder.ts";
 import { sweepGuestChats } from "./guests.ts";
 import { sweepHeldStartInputs } from "./held-starts.ts";
-import { expireBrainExports } from "./knowledge/export-expiry.ts";
-import { brainOf } from "./knowledge/ports.ts";
-import { sweepLeftUploads } from "./knowledge/uploads.ts";
+import { sweepLeftUploads } from "./knowledge-uploads.ts";
 import { retryDisconnects } from "./members.ts";
 import { sweepModelUsage } from "./model-usage.ts";
 import { rescanPackages } from "./packages/rescan.ts";
@@ -106,28 +103,10 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     period: "minute",
     run: retryAccessRevocations,
   },
-  // Uploads into Knowledge left unended, and the originals due for
-  // deleting, a failure's before uploads stopped among them
-  // (src/knowledge/uploads.ts). Nothing uploads into Knowledge.
+  // Uploads once made into Knowledge left unended, and the originals due
+  // for deleting, a failure's before uploads stopped among them
+  // (src/knowledge-uploads.ts). Nothing uploads into Knowledge.
   { name: "knowledge.uploads", period: "minute", run: sweepLeftUploads },
-  // Today's Brain's exports written before nothing could export any more:
-  // their files deleted once due, and those a purge ran after at the next
-  // minute, retried while R2 refuses (src/knowledge/export-expiry.ts). No
-  // export is written.
-  { name: "brain.exports", period: "minute", run: expireBrainExports },
-  // Knowledge payloads no version refers to, past their grace: what a
-  // Knowledge save that failed staged (packages/brain's payloads.ts). A
-  // purge collects them too, but only past their grace: this collects
-  // them after it, so an erasure is complete within minutes. Knowledge is
-  // still written (`env.knowledge`, the purge) until the cutover removes
-  // it, and this with it.
-  {
-    name: "knowledge.payloads",
-    period: "minute",
-    run: async (env, at) => {
-      await sweepPayloads(brainOf(env), at);
-    },
-  },
   // Deploys apply migrations first (CI's db:migrate, and the admin's
   // deploy), so `platform_versions` exists. A version running before it
   // does records nothing, and the first run after the migration records
