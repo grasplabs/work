@@ -7,7 +7,7 @@ import { z } from "zod";
 
 import {
   answerCard,
-  ratingCard,
+  draftCard,
   cancelAction,
   confirmAction,
   heldWritesCard,
@@ -267,8 +267,12 @@ const everyCard = channelLocales.flatMap((locale) => [
     }),
   },
   {
-    name: `rating (${locale})`,
-    card: ratingCard({ locale, rate: crypto.randomUUID() }),
+    name: `answer being written (${locale})`,
+    card: draftCard("You have a call with Jan").posted,
+  },
+  {
+    name: `largest answer being written (${locale})`,
+    card: draftCard(heavy(200_000)).posted,
   },
   {
     name: `one held write (${locale})`,

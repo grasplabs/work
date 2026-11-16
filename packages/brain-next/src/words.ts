@@ -527,6 +527,13 @@ export const reindexWords = (
   const again = state.target === wordsVersion;
   const cursor = again ? state.cursor : 0;
   const memoryCursor = again ? state.memory_cursor : 0;
+  if (!again) {
+    // Quotes were judged by the rules before (quotes.ts): no source's
+    // judgment counts until it is judged by these.
+    sql.exec(
+      "UPDATE current_versions SET judged_row = NULL WHERE judged_row IS NOT NULL"
+    );
+  }
   if (cursor >= 0) {
     const batch = sql
       .exec<{ row: number; text: string }>(

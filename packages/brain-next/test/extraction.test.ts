@@ -915,8 +915,14 @@ describe("extracting memories", () => {
         const current = await readAs(reader, name);
         seenDuringPieces.push(current.map(({ value }) => value ?? ""));
       }
-      const found = ["invoices", "deliveries"].filter((about) =>
-        request.input.includes(complaint(about))
+      // The newer version still says the first's complaint, so its quote
+      // keeps it in (quotes.ts) and only the newer version's mark can end
+      // it: asked of the newer version, the model proposes only what is
+      // new.
+      const found = ["invoices", "deliveries"].filter(
+        (about) =>
+          request.input.includes(complaint(about)) &&
+          (about === "deliveries" || !request.input.includes("Sentence"))
       );
       return answering({
         entities: [{ key: "c", kind: "customer", names: [name] }],
@@ -935,15 +941,15 @@ describe("extracting memories", () => {
       source,
     });
     await tick();
-    // A newer version far longer than a piece: the complaint about
-    // deliveries only at its end.
+    // A newer version far longer than a piece: the first's complaint at
+    // its start, the complaint about deliveries only at its end.
     const filler = Array.from(
       { length: 40 },
       (_, index) => `Sentence ${index} of ${token} says nothing to keep.`
     ).join(" ");
     // Every sentence holds the token, so the model knows each piece's answer.
     await added(
-      `${token}: ${filler} ${complaint("deliveries")} in ${token}.`,
+      `${token}: ${complaint("invoices")}. ${filler} ${complaint("deliveries")} in ${token}.`,
       audience(group),
       { extract: fromOutside(), source }
     );
