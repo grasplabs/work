@@ -26,7 +26,7 @@ import {
 import { rollback } from "../src/publish.ts";
 import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { testApp } from "./app-definitions.ts";
-import { allEvents } from "./audit-events.ts";
+import { allEvents, eventsAfter, logHead } from "./audit-events.ts";
 import { finishedByTheClock } from "./brain-next-own-store.ts";
 import { consentCode } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
@@ -1834,6 +1834,24 @@ describe("erasing a person", () => {
     }).toStrictEqual({
       maxOnRota: true,
       logged: [[ids.max, null]],
+    });
+  });
+
+  it("records one deletion of their interview when both their account and the list's address find it", async () => {
+    const { admin, person } = await removedPerson();
+    const email = String(person.person.email);
+    const { theirSecret } = await onTheList(email);
+    // Their link held by their account, the list still has their address.
+    const opened = await sessionWith(theirSecret, email);
+    const head = await logHead();
+    await admin.api.members.erase(person.userId, String(person.person.name));
+    const events = await eventsAfter(head);
+    const deleted = events.filter(
+      ({ action }) => action === "onboarding.interview.deleted"
+    );
+    expect({ opened, deleted: deleted.length }).toStrictEqual({
+      opened: "open",
+      deleted: 1,
     });
   });
 

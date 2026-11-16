@@ -1550,7 +1550,7 @@ export class Onboarding extends DurableObject<Env> {
     });
   }
 
-  /** Whoever core erased whose entry is still on the list (`#closeLinkHeldBy`). */
+  /** Whoever core erased whose entry is still on the list (`#closeAndDeleteHeldBy`). */
   #erasedPeople(): Set<string> {
     return new Set(
       this.#db
@@ -4356,27 +4356,28 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /**
-   * Closes `person`'s link for good, as core asks as it erases `account`,
-   * before their interview is deleted (person-erasure.ts), but only while
-   * the link was sent by `sentBy` and is held by `account` or by no
-   * account: checked by the same statement that closes it, so the next
-   * holder's link, after a new start, is never closed for someone else.
-   * Its code goes, so it answers `interview.link_invalid`, it is marked
-   * erased, so no code is made for it again, and the account it belonged
-   * to and the address it went to are forgotten. Unlike a delete on their
-   * own request, no new interview can be saved under it. What they were
-   * asked about goes too (a referral naming them may have set it,
-   * `#referOne`): nobody asks them anything again. Their entry on the list
-   * stays, an admin's to remove; taken off the list, the mark goes with
-   * the link. Whether it closed it.
+   * Closes `person`'s link for good and deletes their interview, in one
+   * transaction, as core asks as it erases `account` (person-erasure.ts),
+   * but only while the link was sent by `sentBy`, isn't closed yet, and is
+   * held by `account` or by no account: checked by the same statement that
+   * closes it, so the next holder's link, after a new start, is never
+   * closed for someone else, and an erasure that finds the same link twice
+   * (by the account, then by the address) deletes it once. Its code goes,
+   * so it answers `interview.link_invalid`, it is marked erased, so no code
+   * is made for it again, and the account it belonged to and the address
+   * it went to are forgotten. Unlike a delete on their own request, no new
+   * interview can be saved under it. What they were asked about goes too
+   * (a referral naming them may have set it, `#referOne`): nobody asks them
+   * anything again. Their entry on the list stays, an admin's to remove;
+   * taken off the list, the mark goes with the link. Whether it did.
    */
-  #closeLinkHeldBy(
+  #closeAndDeleteHeldBy(
     person: string,
     account: string,
     sentBy: string,
     now: string
   ): boolean {
-    const closed = this.ctx.storage.transactionSync(() => {
+    return this.ctx.storage.transactionSync(() => {
       const [link] = this.#db
         .update(links)
         .set({
@@ -4384,12 +4385,13 @@ export class Onboarding extends DurableObject<Env> {
           // the new Brain (`owedErasures`), and nobody opens it again.
           account: null,
           sentTo: null,
-          erasedAt: sql`coalesce(${links.erasedAt}, ${now})`,
+          erasedAt: now,
         })
         .where(
           and(
             eq(links.person, person),
             lte(links.sentAt, sentBy),
+            isNull(links.erasedAt),
             or(isNull(links.account), eq(links.account, account))
           )
         )
@@ -4403,10 +4405,9 @@ export class Onboarding extends DurableObject<Env> {
       // Mail still to go about them (a reminder, say) goes nowhere now.
       // Sent mail stays: the company's record, as the roster is.
       dropMailAbout(this.ctx.storage.sql, person);
+      this.#deleteRows(person, { type: "system" }, now);
       return true;
     });
-    this.#decideInterviews();
-    return closed;
   }
 
   /**
@@ -4459,7 +4460,7 @@ export class Onboarding extends DurableObject<Env> {
    * went out by `sentBy`, when the erasure was asked for (one sent after
    * it went to someone the address was released to, whose interview
    * stays), and that `account` or no account holds (after a new start,
-   * the next holder's interview stays: `#closeLinkHeldBy`). Whether it
+   * the next holder's interview stays: `#closeAndDeleteHeldBy`). Whether it
    * deleted one.
    */
   async eraseInterviewOf(
@@ -4467,15 +4468,21 @@ export class Onboarding extends DurableObject<Env> {
     account: string,
     sentBy: string
   ): Promise<boolean> {
-    // Their link answers nothing any more, before anything waits: no new
-    // interview is saved under the entry that stays, even while the
-    // delete waits on the Brain's and the voice's cleanup.
+    // Their link answers nothing any more and what they said is gone,
+    // before anything waits: no new interview is saved under the entry
+    // that stays, even while the Brain's and the voice's cleanup follow.
     if (
-      !this.#closeLinkHeldBy(person, account, sentBy, new Date().toISOString())
+      !this.#closeAndDeleteHeldBy(
+        person,
+        account,
+        sentBy,
+        new Date().toISOString()
+      )
     ) {
       return false;
     }
-    await this.deleteOnRequest(person, { type: "system" });
+    this.#deliverAudit();
+    await this.#afterForget();
     return true;
   }
 
@@ -4511,17 +4518,28 @@ export class Onboarding extends DurableObject<Env> {
       return false;
     }
     this.ctx.storage.transactionSync(() => {
-      this.#forget(person, now, "interview.deleted", whoIs(by));
-      this.#db
-        .update(links)
-        .set({ deletedAt: now, version: link.version + 1 })
-        .where(eq(links.person, person))
-        .run();
-      this.#changed(by, "onboarding.interview.deleted", {});
+      this.#deleteRows(person, by, now);
     });
     this.#deliverAudit();
     await this.#afterForget();
     return true;
+  }
+
+  /**
+   * Deletes `person`'s interview, in the caller's transaction, as `by`
+   * asked (`deleteOnRequest`, and core's erasure, `#closeAndDeleteHeldBy`):
+   * what they said goes, a copy left open can't save it back (the link's
+   * version moves on), and the audit log has that it was done, not for
+   * whom.
+   */
+  #deleteRows(person: string, by: AuditActor, now: string): void {
+    this.#forget(person, now, "interview.deleted", whoIs(by));
+    this.#db
+      .update(links)
+      .set({ deletedAt: now, version: sql`${links.version} + 1` })
+      .where(eq(links.person, person))
+      .run();
+    this.#changed(by, "onboarding.interview.deleted", {});
   }
 
   /**
@@ -5672,8 +5690,11 @@ export class Onboarding extends DurableObject<Env> {
    * something they approved that counts. Only they count towards the five
    * a team needs (`minTeamShown`).
    */
-  #tellers(teamId: string): { person: string; facts: DrawInput["facts"] }[] {
-    const roster = this.#roster();
+  #tellers(
+    teamId: string,
+    /** The list as read once for many teams (a recount), else read here. */
+    roster: Roster | null = this.#roster()
+  ): { person: string; facts: DrawInput["facts"] }[] {
     const team = roster?.teams.find(({ id }) => id === teamId);
     if (roster === null || team === undefined) {
       return [];
@@ -6538,8 +6559,9 @@ export class Onboarding extends DurableObject<Env> {
         .all()
         .map(({ team }) => team)
     );
+    const roster = this.#roster();
     for (const team of teamsHeld) {
-      if (!teamMayClaim(this.#tellers(team).length)) {
+      if (!teamMayClaim(this.#tellers(team, roster).length)) {
         this.#db
           .update(brainClaims)
           .set({ erase: true })
@@ -6619,7 +6641,7 @@ export class Onboarding extends DurableObject<Env> {
     const emptied = new Set(
       teamIds.filter((team) => {
         const onRoster = roster?.teams.some(({ id }) => id === team) === true;
-        return !onRoster || this.#tellers(team).length < minTeamShown;
+        return !onRoster || this.#tellers(team, roster).length < minTeamShown;
       })
     );
     // A map no longer standing on its lead's facts takes its pieces of
@@ -7592,8 +7614,13 @@ export class Onboarding extends DurableObject<Env> {
         .run();
     }
     // A claim it took under five backers, or a team it took under seven
-    // interviewed, is unreadable from this transaction on.
-    this.#markClaimsThatNoLongerStand();
+    // interviewed, is unreadable from this transaction on. Only a loss can
+    // take either down (something they approved stopped counting, or
+    // nothing does any more): a gain never lowers backing, so it pays no
+    // recount.
+    if (lost || !counts) {
+      this.#markClaimsThatNoLongerStand();
+    }
   }
 
   #onRoster(person: string): boolean {

@@ -715,7 +715,13 @@ describe("interviews in the new Brain", { timeout: 120_000 }, () => {
     }).toStrictEqual({ first: "pending", retried: "complete", owed: [] });
   });
 
-  it("go with core's erasure of the wrong recipient who opened a link, and leave the interview of the right person who opened it after staff's new start", async () => {
+  // What this proves: core's erasure finds an interview by the account
+  // that holds its link now, never through a Brain copy still owed under
+  // that account (`personOfAccount`). The guard on closing the link itself
+  // (`#closeAndDeleteHeldBy`) is proved by person-erasure.test.ts, "leaves
+  // the interview of whoever holds the link when the list's address was
+  // corrected to theirs after it opened".
+  it("go with core's erasure of the wrong recipient who opened a link, finding by the account only the link it holds now, so the right person's interview after staff's new start stays", async () => {
     const marker = `marker${unique()}`;
     const ids = await team();
     // The list had the wrong address: Lea's link went to someone else,
@@ -1339,6 +1345,45 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
     }).toStrictEqual({
       before: [zendeskClaim.text],
       during: { recalled: [], listed: [] },
+      after: [],
+    });
+  });
+
+  it("stay readable through an approval and a save that only add what someone approved, and are marked when one save adds a fact and takes back the one that backed them, while an intake holds the Brain's work", async () => {
+    const { ids, max } = await drawnTeam({ eight: true });
+    await intakeOf(ids, [zendeskClaim]);
+    await handOverNow();
+    const held = await heldIntake(ids);
+    // Rik, who backs none of them, says more and approves it: a gain.
+    await agree(
+      ids.rik,
+      [
+        fact("r1", "step", "Checks the queue at noon."),
+        fact("r2", "step", "Checks it again at four."),
+      ],
+      1
+    );
+    const afterGain = await recalled(max, "Zendesk", "claim");
+    // Pim, in one save, adds a fact and takes back the one that backed it.
+    await agree(
+      ids.pim,
+      [
+        fact("p1", "step", "Tags the ticket."),
+        { ...fact("p2", "system", "Tickets arrive in Zendesk."), out: true },
+        fact("p3", "step", "Closes the tag."),
+      ],
+      1
+    );
+    const afterMixed = await claimRead(max);
+    await held.release();
+    await settled();
+    expect({
+      afterGain,
+      afterMixed,
+      after: await recalled(max, "Zendesk", "claim"),
+    }).toStrictEqual({
+      afterGain: [zendeskClaim.text],
+      afterMixed: { recalled: [], listed: [] },
       after: [],
     });
   });
