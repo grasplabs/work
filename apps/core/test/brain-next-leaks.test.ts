@@ -4179,7 +4179,11 @@ describe(
           return memories.map((memory) => memory.statement);
         })
       );
-      /** What the shared store gives `person`, in the team and the company, for the marker. */
+      /**
+       * Whether the shared store gives `person`, in the team and the
+       * company, anything holding the marker or naming the depot: what
+       * other tests keep there may answer too, so never a count.
+       */
       const sharedGives = async (person: string) => {
         const reader = { person, groups: [team, "company"] };
         const { items, memories } = await sharedStore().recall({
@@ -4191,7 +4195,8 @@ describe(
           reader,
           name: `Depot ${depot}`,
         });
-        return [...items, ...memories, ...entities].length;
+        const given = JSON.stringify([...items, ...memories, ...entities]);
+        return given.includes(word) || given.includes(depot);
       };
       const before = ann.provider.requests.length;
       await post(
@@ -4209,7 +4214,7 @@ describe(
         benGotIt: JSON.stringify(toBen.map(({ body }) => body)).includes(word),
       }).toStrictEqual({
         ownKept: [statement],
-        sharedGives: { ann: 0, ben: 0 },
+        sharedGives: { ann: false, ben: false },
         benAnswered: true,
         benGotIt: false,
       });
