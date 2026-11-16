@@ -83,9 +83,12 @@ import { readStephenReach } from "./stephen-reach.ts";
 // Threat model: re-identifying a person through small groups and filters.
 //
 // - A group that points at a few people: every split folds its groups of
-//   fewer than five people into one (`requestsReport`), a question is
-//   named only once five or more people asked it, and a tool only once he
-//   called it for five or more.
+//   fewer than five people into one (`requestsReport`), a question and a
+//   topic are named only once five or more people asked them (a topic's
+//   name rests on one person's message too, GRA-1923), and a tool only
+//   once he called it for five or more. A name follows the report it is
+//   shown with, never the whole list: it goes again when its people fall
+//   under five, an erased person's requests going with them.
 // - A filter that narrows the whole report to a few people (a small team,
 //   a place two people use): the report comes back empty, saying so
 //   (`tooFew`), rather than split for them. A team fewer than five can
@@ -365,12 +368,30 @@ const requestsIn = async (
   }));
 };
 
-/** Names of the topics. */
-const topicNames = async (env: Env) =>
-  await drizzle(env.DB)
-    .select({ id: stephenRequestTopics.id, name: stephenRequestTopics.name })
-    .from(stephenRequestTopics)
-    .orderBy(asc(stephenRequestTopics.name));
+/**
+ * The names of the topics `ids` names. A name rests on one person's
+ * message (channels/request-sorting.ts), so it is held to a question's
+ * floor: only topics a report shows as a group of their own, five or more
+ * people (`topicsIn`), are ever named.
+ */
+const topicsNamed = async (
+  env: Env,
+  ids: readonly string[]
+): Promise<{ id: string; name: string }[]> =>
+  ids.length === 0
+    ? []
+    : await drizzle(env.DB)
+        .select({
+          id: stephenRequestTopics.id,
+          name: stephenRequestTopics.name,
+        })
+        .from(stephenRequestTopics)
+        .where(inList(stephenRequestTopics.id, [...new Set(ids)]))
+        .orderBy(asc(stephenRequestTopics.name));
+
+/** Every topic a report names: only those five or more people asked about. */
+const topicsIn = (report: Pick<RequestsReport, "byTopic">): string[] =>
+  report.byTopic.map(({ key }) => key).filter((key) => key !== elsewhere);
 
 /** The wording and role of the questions `ids` names. */
 const questionsNamed = async (
@@ -500,11 +521,10 @@ const pageOf = async (
     throw stephenRequestErrors.create("stephen_requests.filter_invalid");
   }
   const filter = parsed.data;
-  const [today, settings, reach, topics, companyTeams] = await Promise.all([
+  const [today, settings, reach, companyTeams] = await Promise.all([
     companyDay(env),
     readRequestSettings(env),
     reachOf(env),
-    topicNames(env),
     drizzle(env.DB)
       .select({ id: teams.id, name: teams.name })
       .from(teams)
@@ -556,7 +576,10 @@ const pageOf = async (
     settings,
     pace:
       filter.range === "month" && !onePerson ? paceToEnd(report, today) : null,
-    topics,
+    topics: await topicsNamed(env, [
+      ...topicsIn(report),
+      ...(beforeReport === null ? [] : topicsIn(beforeReport)),
+    ]),
     questions: await questionsNamed(env, [
       ...namedIn(report),
       ...(beforeReport?.questions.map(({ question }) => question) ?? []),
@@ -743,8 +766,40 @@ const firstDay = (
 };
 
 /**
+ * The wording and role of the questions `ids` names that five or more
+ * different people asked, over every request kept, counted in the same
+ * statement as the wording is read, so no erasure falls between the two.
+ * A need that has a status but no longer comes out of the report is
+ * listed only while that holds: an erasure or a withdrawal that takes its
+ * question under five takes its wording and Grasp's proposal (which may
+ * name its topic) off Needs you and the weekly summary. Its status is
+ * kept, and shows again with a fifth person.
+ */
+const askedByFive = async (
+  env: Env,
+  ids: readonly string[]
+): Promise<{ id: string; name: string; role: string | null }[]> =>
+  ids.length === 0
+    ? []
+    : await drizzle(env.DB)
+        .select({
+          id: stephenRequestQuestions.id,
+          name: stephenRequestQuestions.wording,
+          role: stephenRequestQuestions.role,
+        })
+        .from(stephenRequestQuestions)
+        .where(
+          and(
+            inList(stephenRequestQuestions.id, [...new Set(ids)]),
+            sql`(SELECT count(DISTINCT ${stephenRequests.personId}) FROM ${stephenRequests}
+              WHERE ${stephenRequests.questionId} = ${stephenRequestQuestions.id}) >= ${fewestPeople}`
+          )
+        );
+
+/**
  * The needs that have a status but no longer come out of the report,
- * still listed, so what their fix did can be said.
+ * still listed, so what their fix did can be said: only those whose
+ * question is named (`askedByFive`).
  */
 const statusedOnly = (
   keys: readonly string[],
@@ -942,10 +997,9 @@ const needsOf = async (
     by: "day",
   };
   const db = drizzle(env.DB);
-  const [reach, statuses, topics, companyTeams] = await Promise.all([
+  const [reach, statuses, companyTeams] = await Promise.all([
     reachOf(env),
     db.select().from(stephenRequestNeeds),
-    topicNames(env),
     db
       .select({ id: teams.id, name: teams.name })
       .from(teams)
@@ -956,15 +1010,18 @@ const needsOf = async (
     perPerson: false,
     reach: reach.byTeam,
   });
-  const questionIds = [
-    ...namedIn(report),
-    ...statuses
-      .map(({ key }) => kindOfKey(key))
-      .filter(({ kind }) => kind !== "quietTeam")
-      .map(({ id }) => id),
-  ];
-  const named = await questionsNamed(env, questionIds);
-  const questions = new Map(named.map((row) => [row.id, row]));
+  const fromStatuses = statuses
+    .map(({ key }) => kindOfKey(key))
+    .filter(({ kind }) => kind !== "quietTeam")
+    .map(({ id }) => id);
+  const [inReport, stillAsked, topics] = await Promise.all([
+    questionsNamed(env, namedIn(report)),
+    askedByFive(env, fromStatuses),
+    topicsNamed(env, topicsIn(report)),
+  ]);
+  const questions = new Map(
+    [...inReport, ...stillAsked].map((row) => [row.id, row])
+  );
   const roles = new Map([...questions].map(([id, row]) => [id, row.role]));
   const fromReport = needsIn(report, reach, roles);
   const found = [
