@@ -1,4 +1,4 @@
-# Vite+, Node.js and the workspace's installed dependencies: every job's
+# Node.js, Vite+ and the workspace's installed dependencies: every job's
 # setup, the journeys' too. The installed node_modules are cached whole, by
 # the lockfile and what else the install reads (the `keys` step):
 # restoring them skips the install, which with pnpm's store restored (still
@@ -47,9 +47,19 @@ inputs:
 runs:
   using: composite
   steps:
-    - uses: voidzero-dev/setup-vp@3754dd7dbdb32bd8f6d28b6043de13ad3a75f21f # v1.21.1
+    # Node.js from GitHub's own copies (actions/node-versions, or the
+    # runner's tool cache), not from nodejs.org through Vite+'s Node
+    # manager: that download takes about a second, but on 16 November 2026
+    # it took 63 and 103 s in two runs a minute apart, holding up every job
+    # of each. Vite+ then runs on it (node-manager: false). Its own cache is
+    # off: node_modules and pnpm's store are cached below.
+    - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
       with:
         node-version-file: .node-version
+        package-manager-cache: false
+    - uses: voidzero-dev/setup-vp@3754dd7dbdb32bd8f6d28b6043de13ad3a75f21f # v1.21.1
+      with:
+        node-manager: false
         cache: false
         run-install: false
     # node_modules are keyed by what the install reads, not by whole
