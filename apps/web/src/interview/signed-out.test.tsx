@@ -132,8 +132,8 @@ interface FakeCore {
   approveFailing: boolean;
   /** What his turns write down. */
   turnFacts: { tag: string; text: string; record: string; quote: string }[];
-  /** Waited for before a call of this action is answered, while set. */
-  holding: Partial<Record<string, Promise<boolean>>>;
+  /** The next call of this action (or to this path) is held (`hold`). */
+  holding: Partial<Record<string, Held>>;
   /** Every call, with who was signed in as it came. */
   calls: { path: string; action: unknown; who: Who }[];
   /** Each save core kept, as it kept it. */
@@ -273,6 +273,71 @@ const onLink = (
   }
 };
 
+/**
+ * How a call is held on its way: `before` core sees it (a call aborted
+ * meanwhile never reaches core), on the `wire` (core takes it later,
+ * whatever happens to the call), or its `answer` (core took it at once;
+ * the call aborted meanwhile loses only the answer).
+ */
+interface Held {
+  until: Promise<boolean>;
+  when: "before" | "wire" | "answer";
+}
+
+/** Waits for `until`, unless `signal` aborts first: then fails as `fetch` does. */
+const unlessAborted = async (
+  until: Promise<boolean>,
+  signal: AbortSignal | null | undefined
+): Promise<void> => {
+  const aborted = Promise.withResolvers<boolean>();
+  const abort = (): void => {
+    aborted.reject(new DOMException("The call was aborted.", "AbortError"));
+  };
+  if (signal?.aborted === true) {
+    abort();
+  }
+  signal?.addEventListener("abort", abort, { once: true });
+  try {
+    await Promise.race([until, aborted.promise]);
+  } finally {
+    signal?.removeEventListener("abort", abort);
+  }
+};
+
+/** What core answers a call: by who sent it, and what it asks. */
+const answerFor = (
+  core: FakeCore,
+  {
+    path,
+    body,
+    who,
+  }: { path: string; body: z.output<typeof sentSchema>; who: Who }
+): Response => {
+  {
+    if (who === "nobody") {
+      return refusal(401, "interview.sign_in");
+    }
+    if (who === "someone else") {
+      return refusal(404, "interview.link_invalid");
+    }
+    if (path === "/api/speech") {
+      return Response.json({ code: "speech.unavailable" }, { status: 503 });
+    }
+    if (core.paused) {
+      return refusal(423, "interview.paused");
+    }
+    if (path === "/api/interview/turn") {
+      return turnStream(core.turnFacts);
+    }
+    if (path === "/api/interview/hear") {
+      return Response.json({ heard: "" });
+    }
+    return path === "/api/interview"
+      ? onLink(core, body)
+      : Response.json({}, { status: 503 });
+  }
+};
+
 /** Core's interview routes, faked: what they keep and every call made of them. */
 const fakeCore = (progress: InterviewProgress | null): FakeCore => {
   const core: FakeCore = {
@@ -303,28 +368,22 @@ const fakeCore = (progress: InterviewProgress | null): FakeCore => {
     // is answered for whoever sent it.
     const { who } = core;
     core.calls.push({ path, action: body.action, who });
-    await core.holding[body.action ?? path];
-    if (who === "nobody") {
-      return refusal(401, "interview.sign_in");
+    const key = body.action ?? path;
+    const held = core.holding[key];
+    core.holding[key] = undefined;
+    const signal = init?.signal;
+    if (held?.when === "before") {
+      await unlessAborted(held.until, signal);
+    } else if (held?.when === "wire") {
+      await held.until;
+    } else {
+      await unlessAborted(Promise.resolve(true), signal);
     }
-    if (who === "someone else") {
-      return refusal(404, "interview.link_invalid");
+    const answer = answerFor(core, { path, body, who });
+    if (held?.when === "answer") {
+      await unlessAborted(held.until, signal);
     }
-    if (path === "/api/speech") {
-      return Response.json({ code: "speech.unavailable" }, { status: 503 });
-    }
-    if (core.paused) {
-      return refusal(423, "interview.paused");
-    }
-    if (path === "/api/interview/turn") {
-      return turnStream(core.turnFacts);
-    }
-    if (path === "/api/interview/hear") {
-      return Response.json({ heard: "" });
-    }
-    return path === "/api/interview"
-      ? onLink(core, body)
-      : Response.json({}, { status: 503 });
+    return answer;
   };
   vi.stubGlobal("fetch", vi.fn(fetched));
   return core;
@@ -529,12 +588,15 @@ const heard = async (): Promise<void> => {
   }
 };
 
-/** Holds every call of `action` until the returned release is called. */
-const hold = (core: FakeCore, action: string): (() => void) => {
+/** Holds the next call of `action` (or to that path) as `when` says, until the returned release is called. */
+const hold = (
+  core: FakeCore,
+  action: string,
+  when: Held["when"] = "before"
+): (() => void) => {
   const { promise, resolve } = Promise.withResolvers<boolean>();
-  core.holding[action] = promise;
+  core.holding[action] = { until: promise, when };
   return () => {
-    core.holding[action] = undefined;
     resolve(true);
   };
 };
@@ -1263,7 +1325,7 @@ describe("the interview page when its session ends mid-interview", () => {
     const core = fakeCore(readingBack);
     // Core answers the approval with its own copy, in the conversation
     // again: another window pressed "Add something" meanwhile.
-    const answerApproval = hold(core, "approve");
+    const answerApproval = hold(core, "approve", "answer");
     const inner = globalThis.fetch;
     vi.stubGlobal(
       "fetch",
@@ -1334,7 +1396,7 @@ describe("the interview page when its session ends mid-interview", () => {
   it("keeps what waited as it was taken when a save lands just after their session ended, and once back says nothing and saves nothing again", async () => {
     const core = fakeCore(typing);
     await inConversation();
-    const land = hold(core, "save");
+    const land = hold(core, "save", "answer");
     await type("Said as the save went out.");
     await press("Send");
     await until(
@@ -1566,8 +1628,8 @@ describe("the interview page when its session ends mid-interview", () => {
     await openDeleteDialog();
     core.failing = false;
     core.who = "nobody";
-    // A try again of it goes out as the session ends, and is held.
-    const answerSave = hold(core, "save");
+    // A try again of it goes out as the session ends; its 401 comes late.
+    const answerSave = hold(core, "save", "answer");
     await act(async () => {
       await vi.advanceTimersByTimeAsync(3000);
     });
@@ -1655,46 +1717,95 @@ describe("the interview page when its session ends mid-interview", () => {
     });
   });
 
-  it("lets nothing a save on its way as the session ended brings change the interview held again on a new session", async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
+  it.each([
+    [
+      "lands as the session ends, its answer lost",
+      { save: "answer", reopen: "before" },
+    ],
+    [
+      "lands only after the link opened again, before what waited is kept",
+      { save: "wire", reopen: "answer" },
+    ],
+  ] as const)(
+    "builds on their own save that %s, and never calls it a change, once the link opens again on a new session",
+    async (_, held) => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      const core = fakeCore(typing);
+      await inConversation();
+      const letSaveGo = hold(core, "save", held.save);
+      await type("Line on its way.");
+      await press("Send");
+      await until(
+        () => core.calls.some(({ action }) => action === "save"),
+        "the save on its way"
+      );
+      await type("Box text");
+      core.who = "nobody";
+      signedInAgainAfterHear(core);
+      const answerReopen = hold(core, "session", held.reopen);
+      await heard();
+      await until(
+        () =>
+          core.calls.some(
+            ({ action, who }) => action === "session" && who === "them"
+          ),
+        "the link, asked for again"
+      );
+      // Their save reaches core now, whichever way it is held.
+      letSaveGo();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(50);
+      });
+      answerReopen();
+      await until(() => answerBox() !== null, "the interview, again");
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(3000);
+      });
+      expect({
+        box: answerBox()?.value,
+        kept: linesKept(core)
+          .at(-1)
+          ?.some((said) => said.includes("Line on its way.")),
+        lost: text().includes("couldn't be kept"),
+        elsewhere: text().includes("went on in another window"),
+        signIn: text().includes(signInAgain),
+      }).toStrictEqual({
+        box: "Box text",
+        kept: true,
+        lost: false,
+        elsewhere: false,
+        signIn: false,
+      });
+    }
+  );
+
+  it("aborts every call on its way as their session ends", async () => {
     const core = fakeCore(typing);
     await inConversation();
-    const answerSave = hold(core, "save");
-    await type("Line on its way.");
+    const signals: AbortSignal[] = [];
+    const inner = globalThis.fetch;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string, init?: RequestInit) => {
+        const sent = typeof init?.body === "string" ? init.body : "";
+        // The link opened again belongs to no session's calls.
+        if (
+          init?.signal !== undefined &&
+          init.signal !== null &&
+          !sent.includes('"action":"session"')
+        ) {
+          signals.push(init.signal);
+        }
+        return await inner(input, init);
+      })
+    );
+    hold(core, "save");
+    await type("Said as it ended.");
     await press("Send");
-    await until(
-      () => core.calls.some(({ action }) => action === "save"),
-      "the save on its way"
-    );
-    await type("Box text");
+    await untilAsked(core, "save");
     core.who = "nobody";
-    signedInAgainAfterHear(core);
     await heard();
-    await until(
-      () =>
-        core.calls.some(
-          ({ action, who }) => action === "session" && who === "them"
-        ),
-      "the link, opened again"
-    );
-    await until(() => answerBox() !== null, "the interview, again");
-    answerSave();
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(3000);
-    });
-    expect({
-      box: answerBox()?.value,
-      kept: linesKept(core).some((said) => said.includes("Line on its way.")),
-      lost: text().includes("couldn't be kept"),
-      elsewhere: text().includes("went on in another window"),
-      signIn: text().includes(signInAgain),
-    }).toStrictEqual({
-      box: "Box text",
-      kept: true,
-      lost: false,
-      elsewhere: false,
-      signIn: false,
-    });
+    expect(signals.every((signal) => signal.aborted)).toBeTruthy();
   });
 
   it.each([
@@ -1706,7 +1817,7 @@ describe("the interview page when its session ends mid-interview", () => {
       vi.useFakeTimers({ shouldAdvanceTime: true });
       const core = fakeCore(typing);
       await inConversation();
-      const answerIt = hold(core, path);
+      const answerIt = hold(core, path, "answer");
       if (path === "/api/interview/turn") {
         await type("Asked of him as it ended.");
         await press("Send");
@@ -1746,7 +1857,7 @@ describe("the interview page when its session ends mid-interview", () => {
   it("lets nothing a part's story answers after their session ended reach the page or what waits", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const core = fakeCore(readingBackTwo);
-    const answerIt = hold(core, "/api/interview/story");
+    const answerIt = hold(core, "/api/interview/story", "answer");
     await load(`#${secret}`);
     await until(
       () => core.calls.some(({ path }) => path === "/api/interview/story"),
@@ -1775,7 +1886,7 @@ describe("the interview page when its session ends mid-interview", () => {
     await inConversation();
     vi.stubGlobal("AudioContext", FakeAudioContext);
     setSound(true);
-    const answerIt = hold(core, "/api/speech");
+    const answerIt = hold(core, "/api/speech", "answer");
     await act(async () => {
       prepare("Said as it ended.", { speaker: "stephen", tone: null });
       await Promise.resolve();
@@ -1818,7 +1929,7 @@ describe("the interview page when its session ends mid-interview", () => {
       () => buttonNamed("Type instead, without sound") !== undefined,
       "what this is"
     );
-    const answerIt = hold(core, "participate");
+    const answerIt = hold(core, "participate", "answer");
     await press("Type instead, without sound");
     await untilAsked(core, "participate");
     core.who = "nobody";
@@ -1850,7 +1961,7 @@ describe("the interview page when its session ends mid-interview", () => {
       const core = fakeCore(finishedTalking);
       await load(`#${secret}`);
       await openDeleteDialog();
-      const answerIt = hold(core, action);
+      const answerIt = hold(core, action, "answer");
       await press(pressed);
       await untilAsked(core, action);
       core.who = "nobody";
