@@ -1,3 +1,4 @@
+import { personalBrainOf } from "@grasp-os/brain-next/contract";
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import { chatIdSchema } from "@grasp-os/shared/ids";
 import { env } from "cloudflare:workers";
@@ -7,6 +8,7 @@ import { erasePerson, recallAs } from "../src/brain-next.ts";
 import { chatAgentId } from "../src/chats-rpc.ts";
 import { answerCaptureIdOf } from "../src/connection-capture-key.ts";
 import { captureRead } from "../src/connection-capture.ts";
+import { inJurisdiction } from "../src/durable-objects.ts";
 import { personalWorkspaceId } from "../src/personal-workspace.ts";
 import { chatOf, codeStep, says } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
@@ -300,6 +302,97 @@ describe("what a chat's agent reads through a toolkit", setUpTime, () => {
       keepsReads: true,
     });
     expect(JSON.stringify(events)).not.toContain(found);
+  });
+
+  it("keeps nothing of an answer with no text in it, and counts the blocks it left out", async () => {
+    const person = await signedInApi(idp, "user");
+    const own = await ownToolkit(person);
+    // Each answer of `mail.read` in turn, and how many blocks it leaves out.
+    const answers: { answer: unknown; leftOut: number }[] = [
+      // An image alone.
+      {
+        answer: blocks({ type: "image", data: pixel, mimeType: "image/png" }),
+        leftOut: 1,
+      },
+      // Audio alone.
+      {
+        answer: blocks({ type: "audio", data: pixel, mimeType: "audio/wav" }),
+        leftOut: 1,
+      },
+      // An embedded binary resource alone.
+      {
+        answer: blocks({
+          type: "resource",
+          resource: {
+            uri: "file:///quote.bin",
+            mimeType: "application/octet-stream",
+            blob: pixel,
+          },
+        }),
+        leftOut: 1,
+      },
+      // Blocks of a kind MCP has no schema for, or malformed: a text block
+      // without its text.
+      {
+        answer: blocks(
+          { type: "video", uri: "https://v.example/1" },
+          { type: "text" }
+        ),
+        leftOut: 2,
+      },
+      // No blocks at all.
+      { answer: blocks(), leftOut: 0 },
+    ];
+    const chat = await chatOf(
+      person.userId,
+      ...answers.flatMap((_, index) => [
+        step(calling("MAIL", "mail.read", { message: `m${index}` })),
+        says("Read it."),
+      ])
+    );
+    await grant(chat, own.id, "MAIL", ["mail.read"]);
+
+    for (const [index, { answer }] of answers.entries()) {
+      // oxlint-disable-next-line no-await-in-loop -- one answer at a time
+      await own.answer("mail.read", answer);
+      // oxlint-disable-next-line no-await-in-loop -- one turn at a time
+      await chat.ask("Read it.");
+      // oxlint-disable-next-line no-await-in-loop -- its capture first
+      await captures(own.id, index + 1);
+    }
+    const events = await captures(own.id, answers.length);
+    const store = personalBrainOf(
+      inJurisdiction(env, env.BRAIN_STORE),
+      person.userId
+    );
+    const states = await Promise.all(
+      answers.map(async (_, index) => {
+        const id = await answerCaptureIdOf(own.id, person.userId, "mail.read", {
+          message: `m${index}`,
+        });
+        return await store.keyState(`capture:${id}`);
+      })
+    );
+
+    expect({
+      events: events.map(shown),
+      // Nothing was ever added under any of their keys.
+      states,
+    }).toStrictEqual({
+      events: answers.map(({ leftOut }) => ({
+        action: "brain.capture.skipped",
+        onBehalfOf: person.userId,
+        detail: {
+          reason: "no_text",
+          items: 1,
+          kept: 0,
+          failed: 0,
+          skipped: 1,
+          ...(leftOut === 0 ? {} : { leftOut }),
+        },
+      })),
+      states: answers.map(() => "free"),
+    });
   });
 
   it("keeps nothing of a write, an error answer or a read of the company's things", async () => {
