@@ -1727,8 +1727,7 @@ describe("erasing a person", () => {
           save += 1
         ) {
           // The page reads its version anew, then saves on it.
-          // oxlint-disable-next-line no-await-in-loop -- one save after another
-          const read = await store.openLink(secretMark, {
+          const read = store.openLink(secretMark, {
             account: keyMark,
             address,
           });

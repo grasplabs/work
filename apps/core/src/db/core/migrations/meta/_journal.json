@@ -1807,13 +1807,6 @@
       "when": 1794828221922,
       "tag": "0257_slow_sauron",
       "breakpoints": true
-    },
-    {
-      "idx": 258,
-      "version": "6",
-      "when": 1794838767898,
-      "tag": "0258_loose_wild_child",
-      "breakpoints": true
     }
   ]
 }

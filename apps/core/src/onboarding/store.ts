@@ -128,7 +128,7 @@ import {
   onboardingStatementsOf,
   purgeOnboardingRecords,
 } from "../brain-records.ts";
-import { interviewTeams, organizations } from "../db/core/schema.ts";
+import { organizations } from "../db/core/schema.ts";
 import { inList } from "../db/d1.ts";
 import { migrateOnWake } from "../db/migrate.ts";
 import migrations from "../db/onboarding/migrations/migrations.js";
@@ -966,12 +966,6 @@ export class Onboarding extends DurableObject<Env> {
    */
   readonly #takenOut = new Set<string>();
 
-  /** How many changes that narrow core's interview teams are under way (`#narrowingTeams`). */
-  #narrowing = 0;
-
-  /** The sync of core's interview teams under way: the next waits for it (`syncInterviewTeams`). */
-  #teamsSynced: Promise<void> = Promise.resolve();
-
   /**
    * How claims that stop standing are taken out of use in the Brain
    * (`#claimsFirst`): given by core's subclass, the object the Worker
@@ -1126,18 +1120,8 @@ export class Onboarding extends DurableObject<Env> {
     by: AuditActor,
     { confirmed = true }: { confirmed?: boolean } = {}
   ): Promise<OnboardingView> {
-    // Whoever the list takes off, or moves, reads their old team's claims
-    // no more from before the save commits (`#narrowingTeams`).
-    const teamOf = new Map(roster.people.map(({ id, team }) => [id, team]));
-    const leaving = this.#grants().flatMap(({ account, person, team }) =>
-      teamOf.get(person) === team ? [] : [account]
-    );
-    return await this.#narrowingTeams(
-      leaving,
-      async () =>
-        await this.#claimsFirst(
-          async () => await this.#saveRosterOnce(roster, by, { confirmed })
-        )
+    return await this.#claimsFirst(
+      async () => await this.#saveRosterOnce(roster, by, { confirmed })
     );
   }
 
@@ -1666,12 +1650,11 @@ export class Onboarding extends DurableObject<Env> {
    * whatever the list says. Anyone else is told it opens nothing, as for a
    * link that never was.
    */
-  async openLink(
+  openLink(
     secretMark: string,
     caller: LinkCaller,
     now: string = new Date().toISOString()
-  ): Promise<LinkAnswer<InterviewSession>> {
-    let bound = false;
+  ): LinkAnswer<InterviewSession> {
     const found = this.ctx.storage.transactionSync(() => {
       const opened = this.#onLink(secretMark, caller, now, "open");
       if (!opened.ok) {
@@ -1679,7 +1662,6 @@ export class Onboarding extends DurableObject<Env> {
       }
       const { person, link } = opened.value;
       if (link.account === null || link.openedAt === null) {
-        bound = link.account === null;
         // Theirs from this moment, in the same transaction that found the
         // address theirs (`#holds`).
         this.#db
@@ -1700,10 +1682,6 @@ export class Onboarding extends DurableObject<Env> {
     });
     if (!found.ok) {
       return found;
-    }
-    // Their team's claims are theirs to read from now on (`interview_teams`).
-    if (bound) {
-      await this.#syncTeamsQuietly();
     }
     const { person, link, roster, plan } = found.value;
     const team = roster.teams.find(({ id }) => id === person.team);
@@ -2998,17 +2976,8 @@ export class Onboarding extends DurableObject<Env> {
    * person asks; the audit log has that they did, not for whom.
    */
   async newStart(person: string, by: AuditActor): Promise<boolean> {
-    // The account that held the link reads the team's claims no more from
-    // before the new start commits (`#narrowingTeams`).
-    const losing = this.#grants().flatMap(({ account, person: of }) =>
-      of === person ? [account] : []
-    );
-    return await this.#narrowingTeams(
-      losing,
-      async () =>
-        await this.#claimsFirst(
-          async () => await this.#newStartOnce(person, by)
-        )
+    return await this.#claimsFirst(
+      async () => await this.#newStartOnce(person, by)
     );
   }
 
@@ -4544,7 +4513,7 @@ export class Onboarding extends DurableObject<Env> {
    * account), erased under `from` by core's clock. Nothing when `from` holds
    * none, or `to` holds one already.
    */
-  async accountMoved(from: string, to: string): Promise<void> {
+  accountMoved(from: string, to: string): void {
     this.ctx.storage.transactionSync(() => {
       const [held] = this.#db
         .select({ person: links.person })
@@ -4561,7 +4530,6 @@ export class Onboarding extends DurableObject<Env> {
         .run();
     });
     this.#decideInterviews();
-    await this.#syncTeamsQuietly();
   }
 
   /**
@@ -6223,134 +6191,6 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /**
-   * Writes to core's records which staff-list team's claims each account
-   * reads (`interview_teams`, brain-next.ts `interviewTeamOf`, GRA-1942):
-   * that of the interview it holds, while the link isn't erased and its
-   * person is on the list in that team. Only what differs is written, one
-   * sync at a time, each from the store as it is when it starts, so the
-   * last one leaves core's records as the store is. An account core no
-   * longer knows gets no row. Run after each change of it here, and by
-   * core's clock (`settleOnboardingBrain`), which catches one that failed.
-   */
-  async syncInterviewTeams(): Promise<void> {
-    const before = this.#teamsSynced;
-    const run = (async () => {
-      await before;
-      await this.#syncTeamsNow();
-    })();
-    this.#teamsSynced = whatever(run);
-    await run;
-  }
-
-  /** `syncInterviewTeams`, after a change here that must not fail for it: core's clock tries again. */
-  async #syncTeamsQuietly(): Promise<void> {
-    try {
-      await this.syncInterviewTeams();
-    } catch (error) {
-      log.error("onboarding.interview_teams_failed", {
-        error: error instanceof Error ? error.name : "unknown",
-      });
-    }
-  }
-
-  /**
-   * Each account's interview team as the store has it now: the account
-   * holding a link that isn't erased, its person, and that person's team
-   * on the list.
-   */
-  #grants(): { account: string; person: string; team: string }[] {
-    return this.#db
-      .select({
-        account: links.account,
-        person: links.person,
-        team: people.team,
-      })
-      .from(links)
-      .innerJoin(people, eq(people.id, links.person))
-      .where(and(isNotNull(links.account), isNull(links.erasedAt)))
-      .all()
-      .flatMap(({ account, person, team }) =>
-        account === null ? [] : [{ account, person, team }]
-      );
-  }
-
-  /**
-   * Makes `change`, which takes `accounts` out of the team whose claims
-   * they read (a roster save, a new start), the strictest way round: their
-   * rows in core's records go first, one step of the syncs
-   * (`syncInterviewTeams`), and a failure there fails the change with
-   * nothing of it made. While any such change runs, a sync only takes rows
-   * away, never gives one, as the store may not be as it will be; once it
-   * is done, it syncs again, which gives what the change gave.
-   */
-  async #narrowingTeams<T>(
-    accounts: readonly string[],
-    change: () => Promise<T>
-  ): Promise<T> {
-    const before = this.#teamsSynced;
-    const narrowed = (async () => {
-      await before;
-      this.#narrowing += 1;
-      try {
-        if (accounts.length > 0) {
-          await this.env.DB.batch(
-            accounts.map((account) =>
-              this.env.DB.prepare(
-                "DELETE FROM interview_teams WHERE user_id = ?"
-              ).bind(account)
-            )
-          );
-        }
-      } catch (error) {
-        this.#narrowing -= 1;
-        throw error;
-      }
-    })();
-    this.#teamsSynced = whatever(narrowed);
-    await narrowed;
-    try {
-      return await change();
-    } finally {
-      this.#narrowing -= 1;
-      await this.#syncTeamsQuietly();
-    }
-  }
-
-  async #syncTeamsNow(): Promise<void> {
-    const rows = await drizzleD1(this.env.DB)
-      .select({ userId: interviewTeams.userId, team: interviewTeams.team })
-      .from(interviewTeams);
-    const held = new Map(rows.map(({ userId, team }) => [userId, team]));
-    // Read after core's records, as the writes are made from it: a change
-    // that narrows (`#narrowingTeams`) is under way or done by then.
-    const wanted = new Map(
-      this.#grants().map(({ account, team }) => [account, team])
-    );
-    const widening = this.#narrowing === 0;
-    const writes = [
-      ...[...held]
-        .filter(([userId, team]) => wanted.get(userId) !== team)
-        .map(([userId]) =>
-          this.env.DB.prepare(
-            "DELETE FROM interview_teams WHERE user_id = ?"
-          ).bind(userId)
-        ),
-      ...(widening ? [...wanted] : [])
-        .filter(([account, team]) => held.get(account) !== team)
-        .map(([account, team]) =>
-          this.env.DB.prepare(
-            `INSERT INTO interview_teams (user_id, team)
-             SELECT ?1, ?2 WHERE EXISTS (SELECT 1 FROM users WHERE id = ?1)
-             ON CONFLICT (user_id) DO UPDATE SET team = excluded.team`
-          ).bind(account, team)
-        ),
-    ];
-    if (writes.length > 0) {
-      await this.env.DB.batch(writes);
-    }
-  }
-
-  /**
    * People whose interview the new Brain may hold otherwise than the
    * store last decided: something it rests on moved (`interviewDueSql`),
    * or they left the list with a source of theirs still standing.
@@ -6795,9 +6635,7 @@ export class Onboarding extends DurableObject<Env> {
       .all();
     const dropped = held.filter(({ record }) => !current.has(record));
     if (dropped.length > 0) {
-      throw new ClaimsFallError(
-        dropped.map(({ source }) => ({ source, team }))
-      );
+      throw new ClaimsFallError(dropped.map(({ source }) => source));
     }
     const kept = new Set(held.map(({ record }) => record));
     for (const { record, text } of shown) {
@@ -6876,9 +6714,7 @@ export class Onboarding extends DurableObject<Env> {
     });
     const out = [...owed, ...falling];
     if (out.length > 0) {
-      throw new ClaimsFallError(
-        out.map(({ source, team }) => ({ source, team }))
-      );
+      throw new ClaimsFallError(out.map(({ source }) => source));
     }
   }
 
@@ -6911,8 +6747,7 @@ export class Onboarding extends DurableObject<Env> {
       if (!(error instanceof ClaimsFallError)) {
         throw error;
       }
-      const { claims } = error;
-      const sources = claims.map(({ source }) => source);
+      const { sources } = error;
       this.ctx.storage.transactionSync(() => {
         this.#db
           .update(brainClaims)
@@ -6925,7 +6760,7 @@ export class Onboarding extends DurableObject<Env> {
           cause: error,
         });
       }
-      const erased = await this.#removeClaims(claims);
+      const erased = await this.#removeClaims(sources);
       for (const source of sources) {
         this.#takenOut.add(source);
       }

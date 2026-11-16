@@ -1,12 +1,11 @@
 import { log } from "@grasp-os/shared/log";
 
 import { eraseSource, removeSharedSources } from "../brain-next.ts";
-import type { FallingClaim } from "./claims-fall.ts";
 import { Onboarding as OnboardingStore } from "./store.ts";
 import { claimSource } from "./team-claims.ts";
 
 /**
- * Takes `claims` out of use in the shared store, all at once (throwing
+ * Takes the claims `sources` out of use in the shared store, all at once (throwing
  * when the Brain can't), then erases each, so the Brain's ledger keeps it
  * out after a restore of the store from before. An erasure that fails is
  * left owed, for core's clock: the claim is out of use already. The
@@ -14,19 +13,19 @@ import { claimSource } from "./team-claims.ts";
  */
 const takeOut = async (
   env: Env,
-  claims: readonly FallingClaim[]
+  sources: readonly string[]
 ): Promise<string[]> => {
   await removeSharedSources(
     env,
-    claims.map(({ source }) => claimSource(source))
+    sources.map((source) => claimSource(source))
   );
   const erased: string[] = [];
-  for (const { source, team } of claims) {
+  for (const source of sources) {
     try {
       // oxlint-disable-next-line no-await-in-loop -- one erasure at a time
       await eraseSource(env, {
         source: claimSource(source),
-        readers: { kind: "interviews", teamId: team },
+        readers: { kind: "everyone" },
         reason: "deleted",
       });
       erased.push(source);
@@ -49,6 +48,6 @@ const takeOut = async (
  */
 export class Onboarding extends OnboardingStore {
   constructor(ctx: DurableObjectState, env: Env) {
-    super(ctx, env, async (claims) => await takeOut(env, claims));
+    super(ctx, env, async (sources) => await takeOut(env, sources));
   }
 }

@@ -21,8 +21,9 @@ import { claimSource } from "./team-claims.ts";
 //   of anyone's interview may reach that log, not even that it is in their
 //   Brain. Only the onboarding's own log, which staff read, notes it.
 // - A team's claim (`claim:<id>`): its sentence alone (no names, no
-//   quotes), readable by the people of that staff-list team, only while
-//   five or more back it and seven or more of the team were interviewed
+//   quotes), readable by everyone in the company (GRA-1748, decided on 16
+//   November), only while five or more back it and seven or more of the
+//   team were interviewed
 //   (counted by the store, never in the Brain). Noted by an audit event
 //   for the hand-over (brain-hand-overs.ts), which reads it here
 //   (`claimOf`) when it runs: a team's, never a person's.
@@ -99,7 +100,7 @@ export const claimOf = async (env: Env, id: string): Promise<Handed> => {
         change: id,
         text: held.text,
         whenTooLarge: "A claim of the team's too large to keep.",
-        readers: { kind: "interviews", teamId: held.team },
+        readers: { kind: "everyone" },
       };
 };
 
@@ -115,7 +116,7 @@ const erase = async (env: Env, owed: OwedErasure): Promise<void> => {
   }
   await eraseSource(env, {
     source: claimSource(owed.source),
-    readers: { kind: "interviews", teamId: owed.team },
+    readers: { kind: "everyone" },
     reason: "deleted",
   });
 };
@@ -153,27 +154,17 @@ export const eraseOwedOnboardingSources = async (
 
 /**
  * Settles what the onboarding owes the new Brain: every erasure owed
- * first, then every interview to add (`addOwedInterviews`), then core's
- * record of whose team's claims each account reads, after a change whose
- * own sync failed (`syncInterviewTeams`). Core's clock runs it every
- * minute.
+ * first, then every interview to add (`addOwedInterviews`). Core's clock
+ * runs it every minute.
  */
 export const settleOnboardingBrain = async (env: Env): Promise<void> => {
   await eraseOwedOnboardingSources(env);
   await addOwedInterviews(env);
-  try {
-    await onboardingStore(env).syncInterviewTeams();
-  } catch (error) {
-    log.error("onboarding.interview_teams_failed", {
-      error: error instanceof Error ? error.name : "unknown",
-    });
-  }
 };
 
 /**
  * Erases every interview the Brain holds under `account` that no longer
- * stands, whoever's link it came from, and core's record of the team whose
- * claims it read (`interview_teams`), then throws while any is still
+ * stands, whoever's link it came from, then throws while any is still
  * owed: for core's erasure of that account, which lets go only once none
  * is (person-erasure.ts). Keyed by the account alone, so it never reaches
  * the interview of whoever holds that link now.
@@ -182,10 +173,6 @@ export const eraseOnboardingAccount = async (
   env: Env,
   account: string
 ): Promise<void> => {
-  // Whose team's claims the account reads goes from core's records with
-  // the link it no longer holds (`syncInterviewTeams`); failing, this
-  // throws, and the erasure is tried again.
-  await onboardingStore(env).syncInterviewTeams();
   await eraseOwedOnboardingSources(env, { account });
   const owed = await onboardingStore(env).owedErasures({ account });
   if (owed.length > 0) {

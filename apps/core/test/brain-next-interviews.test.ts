@@ -1,5 +1,6 @@
 import { brainOf, personalBrainOf } from "@grasp-os/brain-next/contract";
 import { sha256Hex } from "@grasp-os/shared/encoding";
+import { permissionErrors } from "@grasp-os/shared/permissions";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
@@ -226,12 +227,6 @@ const restartOnboarding = async (): Promise<void> => {
   });
 };
 
-/** The staff-list team whose claims `userId` reads, as core keeps it (`interview_teams`). */
-const interviewTeamIn = async (userId: string): Promise<string | null> =>
-  await env.DB.prepare("SELECT team FROM interview_teams WHERE user_id = ?")
-    .bind(userId)
-    .first<string>("team");
-
 /**
  * Core's env with every erasure in the Brain's stores failing, as when the
  * Brain is out of reach: what an inline erasure, or the clock's, leaves.
@@ -361,6 +356,22 @@ const recalled = async (
     )
     .map(({ text }) => text)
     .filter((text) => text.includes(word));
+};
+
+/**
+ * What someone who isn't a member reads of a team's claim: core refuses
+ * them before anything is read (`permission.person_inactive`), so
+ * `refused`; anything else they got, as recalled.
+ */
+const readByNonMember = async (userId: string): Promise<string[] | string> => {
+  try {
+    return await recalled(userId, "Zendesk", "claim");
+  } catch (error) {
+    if (permissionErrors.codeOf(error) === "permission.person_inactive") {
+      return "refused";
+    }
+    throw error;
+  }
 };
 
 /** The team claims `userId` may read: listed, each with every version of it they may read. */
@@ -645,14 +656,12 @@ describe("interviews in the new Brain", { timeout: 120_000 }, () => {
     expect({
       done: completed !== null,
       kept: await keptIn(key, lea),
-      team: await interviewTeamIn(lea),
       reopened: reopened.ok ? "open" : reopened.code,
       owed: await store.owedErasures({ person: ids.lea }),
     }).toStrictEqual({
       done: true,
       // Her own store erased whole holds nothing: its keys read `free`.
       kept: { shared: "erased", own: "free" },
-      team: null,
       reopened: "interview.link_invalid",
       owed: [],
     });
@@ -698,12 +707,10 @@ describe("interviews in the new Brain", { timeout: 120_000 }, () => {
             .toArray().length
       ),
       backs: await store.sentFor(ids.lea),
-      team: await interviewTeamIn(lea),
       kept: await keptIn(key, lea),
     }).toStrictEqual({
       interview: 0,
       backs: [],
-      team: null,
       kept: { shared: "erased", own: "free" },
     });
   });
@@ -1130,7 +1137,7 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
     return { ids, max };
   };
 
-  it("stand only at five backers, for the team alone, and are erased for good when a withdrawal leaves four", async () => {
+  it("stand only at five backers, for every current member of the company and nobody else, and are erased for good when a withdrawal leaves four", async () => {
     const { ids, max } = await drawnTeam();
     const [, ...fourOfThem] = zendeskSaid;
     const fourCite = "Zendesk sends the tickets on.";
@@ -1143,22 +1150,31 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
       },
     ]);
     await handOverNow();
+    // A member of no team on the list reads it as the team does (GRA-1748);
+    // someone an admin removed, and someone who never was a member (a
+    // guest, an App's visitor, an interview's own session), read nothing.
     const outsider = await signsIn(`outsider-${unique()}@acme.test`);
+    const former = await signsIn(`former-${unique()}@acme.test`);
+    const admin = await signedInApi(idp, "admin");
+    await admin.api.members.remove(former);
     const listed = await claimsOf(max);
+    const outsiderClaims = await claimsOf(outsider);
     expect({
-      team: await interviewTeamIn(max),
       max: await recalled(max, "Zendesk", "claim"),
       listed: listed.map(({ versions }) => versions),
       fourCite: await recalled(max, "sends", "claim"),
       outsider: await recalled(outsider, "Zendesk", "claim"),
-      outsiderListed: await claimsOf(outsider),
+      outsiderListed: outsiderClaims.map(({ versions }) => versions),
+      former: await readByNonMember(former),
+      stranger: await readByNonMember(`stranger-${unique()}`),
     }).toStrictEqual({
-      team: ids.team,
       max: [zendeskClaim.text],
       listed: [[1]],
       fourCite: [],
-      outsider: [],
-      outsiderListed: [],
+      outsider: [zendeskClaim.text],
+      outsiderListed: [[1]],
+      former: "refused",
+      stranger: "refused",
     });
     // Pim withdraws: the claim rests on four now. Core's clock erases it:
     // no recall, no listing, no version of it, as history or otherwise.
@@ -1376,9 +1392,8 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
     });
   });
 
-  /** What `max` can read of the team's claims now: the group core gives them, recall and listing. */
+  /** What `max` can read of the team's claims now: recall and listing. */
   const readableBy = async (max: string) => ({
-    group: await interviewTeamIn(max),
     recalled: await recalled(max, "Zendesk", "claim"),
     listed: await claimsOf(max),
   });
@@ -1588,7 +1603,6 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
       type: "system",
     });
     await expect(readableBy(max)).resolves.toStrictEqual({
-      group: ids.team,
       recalled: [],
       listed: [],
     });
@@ -1600,7 +1614,6 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
     await handOverNow();
     await onLink({ action: "withdraw", ...(await openLink(ids.rik)) });
     await expect(readableBy(max)).resolves.toStrictEqual({
-      group: ids.team,
       recalled: [],
       listed: [],
     });
@@ -1615,7 +1628,7 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
     await onLink({ action: "withdraw", ...(await openLink(ids.pim)) });
     expect({ before, now: await readableBy(max) }).toStrictEqual({
       before: [zendeskClaim.text],
-      now: { group: ids.team, recalled: [], listed: [] },
+      now: { recalled: [], listed: [] },
     });
   });
 
@@ -1721,45 +1734,6 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
       afterIntake: [],
     });
   });
-
-  it.each([
-    ["is taken off the list", "off"],
-    ["moves to another team", "moved"],
-    ["is given a new start", "new_start"],
-  ] as const)(
-    "are unreadable to one who %s from the moment the change returns, while the claim stands for the team",
-    async (_, change) => {
-      const { ids, max } = await drawnTeam({ eight: true });
-      await intakeOf(ids, [zendeskClaim]);
-      await handOverNow();
-      // Rik backs none of the claims: seven stay interviewed whatever
-      // happens to him, so the claim stands.
-      const rik = await accountOfPerson(ids.rik);
-      const before = await recalled(rik, "Zendesk", "claim");
-      const store = onboardingStore(env);
-      if (change === "off") {
-        await store.saveRoster(rosterWith(ids, { keys: eightBut("rik") }), {
-          type: "system",
-        });
-      } else if (change === "moved") {
-        await store.saveRoster(
-          rosterWith(ids, { keys: eightBut(), moved: ["rik"] }),
-          { type: "system" }
-        );
-      } else {
-        await store.newStart(ids.rik, { type: "system" });
-      }
-      expect({
-        before,
-        rik: await recalled(rik, "Zendesk", "claim"),
-        max: await recalled(max, "Zendesk", "claim"),
-      }).toStrictEqual({
-        before: [zendeskClaim.text],
-        rik: [],
-        max: [zendeskClaim.text],
-      });
-    }
-  );
 
   it("keep a claim a refused withdrawal would drop owed its erasure, and take it out at the next try, also after the object restarted", async () => {
     const { ids, max } = await drawnTeam({ eight: true });
@@ -1985,12 +1959,10 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
     const listed = await claimsOf(max);
     expect({
       first: first === undefined,
-      group: await interviewTeamIn(max),
       oldKey: listed.some(({ source }) => source.id === first?.source.id),
       recalled: await recalled(max, "Zendesk", "claim"),
     }).toStrictEqual({
       first: false,
-      group: ids.team,
       oldKey: false,
       recalled: [],
     });
@@ -2025,7 +1997,7 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
       before: [zendeskClaim.text],
       owed: false,
       shared: "erased",
-      now: { group: ids.team, recalled: [], listed: [] },
+      now: { recalled: [], listed: [] },
     });
   });
 
@@ -2049,7 +2021,7 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
     }).toStrictEqual({
       first: false,
       oldKey: false,
-      now: { group: ids.team, recalled: [], listed: [] },
+      now: { recalled: [], listed: [] },
     });
   });
 
@@ -2077,7 +2049,7 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
     }).toStrictEqual({
       owed: false,
       shared: "erased",
-      now: { group: ids.team, recalled: [], listed: [] },
+      now: { recalled: [], listed: [] },
     });
   });
 
@@ -2178,7 +2150,7 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
     }).toStrictEqual({
       gave: `brain:${ids.team}`,
       moved: true,
-      now: { group: ids.team, recalled: [], listed: [] },
+      now: { recalled: [], listed: [] },
     });
   });
 });
