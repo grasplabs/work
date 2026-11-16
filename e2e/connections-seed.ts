@@ -34,6 +34,15 @@ const answerSchema = z.object({
   errors: z.array(z.object({ message: z.string() })),
 });
 
+/** `text` parsed as JSON, or null when it isn't JSON. */
+const jsonOrNull = (text: string): unknown => {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+};
+
 /**
  * Runs SQL on connect's local database (or core's), as one batch in one
  * transaction, through the dev server's own D1 API (miniflare's local
@@ -59,10 +68,16 @@ export const execute = async (
       body: JSON.stringify({ sql }),
     }
   );
-  const answer = answerSchema.parse(await response.json());
-  if (!answer.success) {
+  const body = await response.text();
+  // Anything but the API's own JSON (the explorer turned off, or core's
+  // 404 for a path it doesn't know) fails with what came back.
+  const answer = answerSchema.safeParse(jsonOrNull(body));
+  if (!response.ok || !answer.success || !answer.data.success) {
+    const said = answer.success
+      ? answer.data.errors.map(({ message }) => message).join("; ")
+      : body;
     throw new Error(
-      `SQL on ${worker}'s local database failed (${response.status}): ${answer.errors.map(({ message }) => message).join("; ")}`
+      `SQL on ${worker}'s local database failed (${response.status}): ${said}`
     );
   }
 };
