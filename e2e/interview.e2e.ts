@@ -28,6 +28,7 @@ import {
   wavOf,
 } from "./interview-turns.ts";
 import { signInStaff } from "./people.ts";
+import { origin } from "./stack.ts";
 
 // Someone's own interview, end to end (GRA-345, GRA-346, GRA-382,
 // GRA-1790): they open their link, sign in with the company's sign-in and
@@ -197,6 +198,33 @@ const holdNextSave = async (page: Page) => {
 };
 
 /**
+ * Holds the next page's opening read (`session`) until `open`: the save
+ * the page sends as it goes leaves at `pagehide`, out of the test's sight,
+ * and the next page's read could reach core first.
+ */
+const holdOpening = async (page: Page): Promise<() => void> => {
+  const opened = Promise.withResolvers<null>();
+  await page.route(`**${interviewApiPath}`, async (route: Route) => {
+    if ((route.request().postData() ?? "").includes('"action":"session"')) {
+      await opened.promise;
+    }
+    await route.fallback();
+  });
+  return () => {
+    opened.resolve(null);
+  };
+};
+
+/** The interview core keeps on `link`, read as `page`'s person, as JSON. */
+const keptOn = async (page: Page, link: string): Promise<string> => {
+  const response = await page.request.post(`${origin}${interviewApiPath}`, {
+    data: { action: "session", secret: link.split("#")[1] ?? "" },
+    headers: { origin, "sec-fetch-site": "same-origin" },
+  });
+  return await response.text();
+};
+
+/**
  * Core's answer that it kept a save of `page`'s whose progress holds
  * `holds`. The page keeps each change a moment after it, or as it goes,
  * and "Saved" shows until a save takes long: a reload before core kept
@@ -290,8 +318,14 @@ test("someone removes a line of theirs and takes out what was written from it, a
 
   // Kept removed by core, though the page went before it heard of its last
   // save: after a reload, the transcript shows it removed.
+  const open = await holdOpening(page);
   await page.reload();
   lastSave.release();
+  // What the page sent as it went is kept: core's copy has the line removed.
+  await expect
+    .poll(async () => await keptOn(page, link))
+    .toContain('"removed":true');
+  open();
   await page.getByRole("button", { name: "Transcript" }).click();
   await expect(transcript.getByText("Removed.")).toBeVisible();
   await page.getByRole("button", { name: "Transcript" }).click();
