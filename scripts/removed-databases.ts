@@ -1,3 +1,5 @@
+import nodePath from "node:path";
+
 import { z } from "zod";
 
 import { parseJsonc } from "./jsonc.ts";
@@ -83,7 +85,9 @@ export const storageOf = (
     ),
     migrationDirs: (config.d1_databases ?? []).flatMap(
       ({ migrations_dir: dir }) =>
-        dir === undefined ? [] : [`${base}${dir.replace(/^\.\//u, "")}`]
+        // Resolved from the config's folder, as Wrangler resolves it: a
+        // folder outside it (`../../packages/…`) by its own path.
+        dir === undefined ? [] : [nodePath.posix.join(base, dir)]
     ),
   };
 };
