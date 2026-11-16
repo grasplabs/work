@@ -23,7 +23,7 @@
 # and the store only to install when node_modules missed, unless it
 # passes `store: true`.
 #
-# Only a job that says so saves a cache it missed: `static` for a pull
+# Only a job that says so saves a cache it missed: `static`'s `main` part for a pull
 # request, so the pull request's next run hits it, and `release` on a
 # push to main, whose caches every pull request can read. Every job saving
 # would have them all pack the same 2 GB at once, for one to win.
