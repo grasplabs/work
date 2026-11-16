@@ -37,6 +37,7 @@ import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
 import { roleLabel } from "../labels.ts";
 import { NotLoaded } from "../load-from-core.tsx";
+import type { Loaded } from "../load-from-core.tsx";
 import { usePeopleApart } from "../people/people-apart.ts";
 import type { PeopleApart } from "../people/people-apart.ts";
 import { RoleSelect, SharePicker } from "../people/share-picker.tsx";
@@ -65,22 +66,34 @@ export const readMembers = async (
 ): Promise<SubjectMember[]> => await membersOf(session, kind).list(id);
 
 /**
- * Whom `subject` is shared with, read again each time it is shared from
- * the page (`shares`, one more each time); none to read without a
- * subject (someone it isn't read for). Undefined while it is read.
+ * The read of whom `subject` is shared with, read again each time it is
+ * shared from the page (`shares`, one more each time), the last one held
+ * while it is; none to read without a subject (someone it isn't read
+ * for). Undefined only until the first read lands, failed or not.
  */
-export const useMembers = (
+export const useMembersRead = (
   subject: Subject | undefined,
   shares = 0
-): readonly SubjectMember[] | undefined => {
+): Loaded<SubjectMember[]> | undefined => {
   const scope =
     subject === undefined ? "none" : `${subject.kind}:${subject.id}`;
-  const read = useCoreRead(
+  return useCoreRead(
     `${scope}/${shares}`,
     async (session) =>
       subject === undefined ? [] : await readMembers(session, subject),
     scope
   );
+};
+
+/**
+ * Whom `subject` is shared with (`useMembersRead`): undefined while it is
+ * read, or when it couldn't be.
+ */
+export const useMembers = (
+  subject: Subject | undefined,
+  shares = 0
+): readonly SubjectMember[] | undefined => {
+  const read = useMembersRead(subject, shares);
   return read?.state === "ready" ? read.data : undefined;
 };
 
