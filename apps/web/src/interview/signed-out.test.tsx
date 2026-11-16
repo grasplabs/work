@@ -1090,9 +1090,14 @@ describe("the interview page when its session ends mid-interview", () => {
     const core = fakeCore(typing);
     await inConversation();
     core.who = "nobody";
+    const before = core.calls.length;
     await heard();
     await until(() => text().includes(signInAgain), "the sign-in again");
-    expect(text()).toContain(signInAgain);
+    // Asked to sign in again by that answer itself: the link, asked again.
+    expect(callsSince(core, before)).toStrictEqual([
+      { action: "/api/interview/hear", who: "nobody" },
+      { action: "session", who: "nobody" },
+    ]);
   });
 
   it("sends nothing as the page goes once their session ended", async () => {
