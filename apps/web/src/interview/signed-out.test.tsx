@@ -274,7 +274,7 @@ const onLink = (
 };
 
 /** Core's interview routes, faked: what they keep and every call made of them. */
-const fakeCore = (progress: InterviewProgress): FakeCore => {
+const fakeCore = (progress: InterviewProgress | null): FakeCore => {
   const core: FakeCore = {
     who: "them",
     version: 1,
@@ -560,6 +560,44 @@ const audioContext = {
 /** `new AudioContext()`, faked: it gives the faked context. */
 const FakeAudioContext = function FakeAudioContext(): typeof audioContext {
   return audioContext;
+};
+
+/** Waits until a call of `action` (or to that path) was asked for since the test began. */
+const untilAsked = async (core: FakeCore, action: string): Promise<void> => {
+  await until(
+    () => core.calls.some((call) => (call.action ?? call.path) === action),
+    `${action}, asked for`
+  );
+};
+
+/** Holds the delete button for its four seconds: the dialog to delete or withdraw opens. */
+const openDeleteDialog = async (): Promise<void> => {
+  await until(
+    () => buttonNamed("Delete my interview") !== undefined,
+    "their interview, to delete"
+  );
+  await act(async () => {
+    buttonNamed("Delete my interview")?.dispatchEvent(
+      new PointerEvent("pointerdown", { bubbles: true })
+    );
+    await vi.advanceTimersByTimeAsync(4000);
+  });
+  await until(() => buttonNamed("Delete it") !== undefined, "the dialog");
+};
+
+/** They sign in again in another tab the moment a recording finds the session ended, before this page asks for the link again. */
+const signedInAgainAfterHear = (core: FakeCore): void => {
+  const inner = globalThis.fetch;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: string, init?: RequestInit) => {
+      const answer = await inner(input, init);
+      if (input.endsWith("/api/interview/hear")) {
+        core.who = "them";
+      }
+      return answer;
+    })
+  );
 };
 
 /** Counts the conversation's starts on this page, as the loop tells them. */
@@ -1256,6 +1294,8 @@ describe("the interview page when its session ends mid-interview", () => {
     core.who = "nobody";
     const showSignIn = hold(core, "session");
     await heard();
+    // The page asks for the link again as it is set aside: counted before.
+    await untilAsked(core, "session");
     const waited = stored();
     const before = core.calls.length;
     const startedBefore = loops.count;
@@ -1462,4 +1502,372 @@ describe("the interview page when its session ends mid-interview", () => {
     loops.stop();
     expect(text()).not.toContain(signInAgain);
   });
+
+  it("takes no more input once their session ended, before the sign-in shows", async () => {
+    const core = fakeCore(typing);
+    await inConversation();
+    await type("Half an answer");
+    core.who = "nobody";
+    const showSignIn = hold(core, "session");
+    await heard();
+    const frozen = answerBox()?.closest("[inert]") !== null;
+    showSignIn();
+    await until(() => text().includes(signInAgain), "the sign-in again");
+    expect({ frozen, saving: text().includes("Saving…") }).toStrictEqual({
+      frozen: true,
+      saving: false,
+    });
+  });
+
+  it.each([
+    [
+      "Delete it",
+      "delete",
+      "Your sign-in ended, so your interview wasn't deleted and what wasn't saved yet wasn't kept: sign in again with your work account to delete it.",
+    ],
+    [
+      "Withdraw instead",
+      "withdraw",
+      "Your sign-in ended, so you didn't withdraw and what wasn't saved yet wasn't kept: sign in again with your work account to withdraw.",
+    ],
+  ] as const)(
+    "sends nothing for %s pressed between their session ending and the sign-in showing, and says it didn't happen",
+    async (pressed, action, said) => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      const core = fakeCore(finishedTalking);
+      await load(`#${secret}`);
+      await openDeleteDialog();
+      core.who = "nobody";
+      const showSignIn = hold(core, "session");
+      await heard();
+      const before = core.calls.length;
+      await press(pressed);
+      const sent = callsSince(core, before).filter(
+        (call) => call.action === action
+      );
+      showSignIn();
+      await until(() => text().includes(said), "the sign-in, saying so");
+      expect(sent).toStrictEqual([]);
+    }
+  );
+
+  it("keeps nothing of a save on its way back once a delete met the ended session, whatever that save answers later", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const core = fakeCore(finishedTalking);
+    await load(`#${secret}`);
+    await until(() => buttonNamed("4 of 5") !== undefined, "the rating");
+    // The rating isn't kept yet: it is tried again.
+    core.failing = true;
+    await press("4 of 5");
+    await until(
+      () => core.calls.some(({ action }) => action === "save"),
+      "the rating's save"
+    );
+    await openDeleteDialog();
+    core.failing = false;
+    core.who = "nobody";
+    // A try again of it goes out as the session ends, and is held.
+    const answerSave = hold(core, "save");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3000);
+    });
+    await until(
+      () =>
+        core.calls.some(
+          ({ action, who }) => action === "save" && who === "nobody"
+        ),
+      "the try again, on its way"
+    );
+    await press("Delete it");
+    await until(() => text().includes(signInAgain), "the sign-in again");
+    const taken = stored();
+    answerSave();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+    const afterAnswer = stored();
+    const signInSaid = text();
+    core.who = "them";
+    const before = core.calls.length;
+    await backSignedIn();
+    await until(
+      () => buttonNamed("Delete my interview") !== undefined,
+      "their interview, to delete again"
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3000);
+    });
+    expect({
+      unchanged: afterAnswer === taken,
+      notDeleted: signInSaid.includes(
+        "so your interview wasn't deleted and what wasn't saved yet wasn't kept"
+      ),
+      savedAfter: callsSince(core, before).filter(
+        ({ action }) => action === "save"
+      ),
+      rating: core.kept.map(({ rating }) => rating ?? null),
+    }).toStrictEqual({
+      unchanged: true,
+      notDeleted: true,
+      savedAfter: [],
+      rating: [],
+    });
+  });
+
+  it("holds what waited, and goes on once, when the link opens again on a new session before the sign-in shows", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const core = fakeCore(typing);
+    const loops = countLoopStarts();
+    await inConversation();
+    // A line they sent isn't kept yet: core's saves fail for now.
+    core.failing = true;
+    await type("Unsaved line.");
+    await press("Send");
+    await until(
+      () => core.calls.some(({ action }) => action === "save"),
+      "a save tried"
+    );
+    await type("Half typed");
+    core.failing = false;
+    core.who = "nobody";
+    signedInAgainAfterHear(core);
+    const startsBefore = loops.count;
+    await heard();
+    await until(() => loops.count > startsBefore, "the conversation, again");
+    await until(
+      () => linesKept(core).some((said) => said.includes("Unsaved line.")),
+      "the line, kept"
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3000);
+    });
+    loops.stop();
+    expect({
+      starts: loops.count - startsBefore,
+      box: answerBox()?.value,
+      lost: text().includes("couldn't be kept"),
+      signIn: text().includes(signInAgain),
+    }).toStrictEqual({
+      starts: 1,
+      box: "Half typed",
+      lost: false,
+      signIn: false,
+    });
+  });
+
+  it("lets nothing a save on its way as the session ended brings change the interview held again on a new session", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const core = fakeCore(typing);
+    await inConversation();
+    const answerSave = hold(core, "save");
+    await type("Line on its way.");
+    await press("Send");
+    await until(
+      () => core.calls.some(({ action }) => action === "save"),
+      "the save on its way"
+    );
+    await type("Box text");
+    core.who = "nobody";
+    signedInAgainAfterHear(core);
+    await heard();
+    await until(
+      () =>
+        core.calls.some(
+          ({ action, who }) => action === "session" && who === "them"
+        ),
+      "the link, opened again"
+    );
+    await until(() => answerBox() !== null, "the interview, again");
+    answerSave();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3000);
+    });
+    expect({
+      box: answerBox()?.value,
+      kept: linesKept(core).some((said) => said.includes("Line on its way.")),
+      lost: text().includes("couldn't be kept"),
+      elsewhere: text().includes("went on in another window"),
+      signIn: text().includes(signInAgain),
+    }).toStrictEqual({
+      box: "Box text",
+      kept: true,
+      lost: false,
+      elsewhere: false,
+      signIn: false,
+    });
+  });
+
+  it.each([
+    ["his turn", "/api/interview/turn"],
+    ["a recording written down", "/api/interview/hear"],
+  ] as const)(
+    "lets nothing %s answers after their session ended reach the page or what waits",
+    async (_, path) => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      const core = fakeCore(typing);
+      await inConversation();
+      const answerIt = hold(core, path);
+      if (path === "/api/interview/turn") {
+        await type("Asked of him as it ended.");
+        await press("Send");
+      } else {
+        await act(async () => {
+          void hearRecording({
+            secret,
+            locale: "en",
+            seconds: 2,
+            audio: new Blob(["said as it ended"]),
+          });
+          await Promise.resolve();
+        });
+      }
+      await until(
+        () => core.calls.some((call) => call.path === path),
+        "the call on its way"
+      );
+      core.who = "nobody";
+      await heard();
+      await untilAsked(core, "session");
+      await until(() => text().includes(signInAgain), "the sign-in again");
+      const taken = { stored: stored(), shown: text() };
+      const before = core.calls.length;
+      answerIt();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(3000);
+      });
+      expect({
+        stored: stored(),
+        shown: text(),
+        sent: callsSince(core, before),
+      }).toStrictEqual({ ...taken, sent: [] });
+    }
+  );
+
+  it("lets nothing a part's story answers after their session ended reach the page or what waits", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const core = fakeCore(readingBackTwo);
+    const answerIt = hold(core, "/api/interview/story");
+    await load(`#${secret}`);
+    await until(
+      () => core.calls.some(({ path }) => path === "/api/interview/story"),
+      "the story on its way"
+    );
+    core.who = "nobody";
+    await heard();
+    await untilAsked(core, "session");
+    await until(() => text().includes(signInAgain), "the sign-in again");
+    const taken = { stored: stored(), shown: text() };
+    const before = core.calls.length;
+    answerIt();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3000);
+    });
+    expect({
+      stored: stored(),
+      shown: text(),
+      sent: callsSince(core, before),
+    }).toStrictEqual({ ...taken, sent: [] });
+  });
+
+  it("lets nothing a line said answers after their session ended reach the page or what waits", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const core = fakeCore(typing);
+    await inConversation();
+    vi.stubGlobal("AudioContext", FakeAudioContext);
+    setSound(true);
+    const answerIt = hold(core, "/api/speech");
+    await act(async () => {
+      prepare("Said as it ended.", { speaker: "stephen", tone: null });
+      await Promise.resolve();
+    });
+    await until(
+      () => core.calls.some(({ path }) => path === "/api/speech"),
+      "the line on its way"
+    );
+    core.who = "nobody";
+    await heard();
+    await untilAsked(core, "session");
+    await until(() => text().includes(signInAgain), "the sign-in again");
+    const taken = { stored: stored(), shown: text() };
+    const before = core.calls.length;
+    answerIt();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3000);
+    });
+    setSound(false);
+    expect({
+      stored: stored(),
+      shown: text(),
+      sent: callsSince(core, before),
+    }).toStrictEqual({ ...taken, sent: [] });
+  });
+
+  it("lets nothing taking part answers after their session ended start the interview", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const core = fakeCore(null);
+    const loops = countLoopStarts();
+    await load(`#${secret}`);
+    await until(() => buttonNamed("Continue") !== undefined, "the language");
+    await press("Continue");
+    await until(
+      () => buttonNamed("Stephen") !== undefined,
+      "who interviews them"
+    );
+    await press("Stephen");
+    await until(
+      () => buttonNamed("Type instead, without sound") !== undefined,
+      "what this is"
+    );
+    const answerIt = hold(core, "participate");
+    await press("Type instead, without sound");
+    await untilAsked(core, "participate");
+    core.who = "nobody";
+    await heard();
+    await untilAsked(core, "session");
+    await until(() => text().includes(signInAgain), "the sign-in again");
+    const taken = { stored: stored(), shown: text() };
+    const before = core.calls.length;
+    answerIt();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3000);
+    });
+    loops.stop();
+    expect({
+      stored: stored(),
+      shown: text(),
+      sent: callsSince(core, before),
+      started: loops.count,
+    }).toStrictEqual({ ...taken, sent: [], started: 0 });
+  });
+
+  it.each([
+    ["Delete it", "delete"],
+    ["Withdraw instead", "withdraw"],
+  ] as const)(
+    "lets nothing %s answers after their session ended reach the page or what waits",
+    async (pressed, action) => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      const core = fakeCore(finishedTalking);
+      await load(`#${secret}`);
+      await openDeleteDialog();
+      const answerIt = hold(core, action);
+      await press(pressed);
+      await untilAsked(core, action);
+      core.who = "nobody";
+      await heard();
+      await untilAsked(core, "session");
+      await until(() => text().includes(signInAgain), "the sign-in again");
+      const taken = { stored: stored(), shown: text() };
+      const before = core.calls.length;
+      answerIt();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(3000);
+      });
+      expect({
+        stored: stored(),
+        shown: text(),
+        sent: callsSince(core, before),
+      }).toStrictEqual({ ...taken, sent: [] });
+    }
+  );
 });
