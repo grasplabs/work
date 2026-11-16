@@ -28,6 +28,9 @@ export const agentErrors = defineErrorFamily({
   "agent.too_many_own": `You have ${ownAgentsMax} agents of your own, the most a person keeps. Delete one to make another.`,
   "agent.own_off":
     "Your company has turned off agents of people's own. An admin can turn them back on.",
+  "agent.app_unknown": "That isn't an app your company offers.",
+  "agent.apps_unread":
+    "The apps it needs couldn't be worked out just now: no AI model answered. Add them by hand, or try again.",
   "agent.first_stays":
     "The company's first agent can't be deleted. Pause it to stop it answering.",
   "agent.model_unknown":
@@ -77,6 +80,8 @@ export const agentErrors = defineErrorFamily({
     "The file's text couldn't be read just now. Attach it again in a moment.",
   "agent.plan_not_found":
     "There's no such plan in this chat, or it was built already.",
+  "agent.draft_not_found":
+    "There's no such agent drafted in this chat, or it was made already.",
   "agent.plan_needs_connection":
     "This plan needs a connection that isn't there yet. Connect it, then build it.",
   "agent.file_not_found":

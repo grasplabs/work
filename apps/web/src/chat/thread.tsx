@@ -56,6 +56,7 @@ import type { ThinkingOf } from "../brain/thinking/play.ts";
 import { useCopy } from "../copy.ts";
 import { ConnectAiProvider } from "../frame/connect-ai-provider.tsx";
 import { useMemberAdmin } from "../use-member-admin.ts";
+import { pendingAgentDraft, ThreadAgentDraft } from "./agent-draft-card.tsx";
 import { AnswerMarkdown } from "./answer-markdown.tsx";
 import {
   SeeInBrain,
@@ -1231,6 +1232,7 @@ export const ChatThread = ({
     );
   const writtenGoesOn = written !== null && items.at(-1)?.kind === "answer";
   const waiting = pendingPlan(messages, running);
+  const drafted = pendingAgentDraft(messages, running);
   const reading =
     doing === "reading" ? (
       <div aria-busy="true">
@@ -1273,6 +1275,14 @@ export const ChatThread = ({
             chatId={chatId}
             plan={message.planned}
             waiting={waiting?.callId === message.planned.callId}
+          />
+        )}
+        {message.agentDraft === undefined ? null : (
+          <ThreadAgentDraft
+            build={build}
+            chatId={chatId}
+            draft={message.agentDraft}
+            waiting={drafted?.callId === message.agentDraft.callId}
           />
         )}
       </Fragment>
