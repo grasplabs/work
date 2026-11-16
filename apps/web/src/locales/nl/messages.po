@@ -472,6 +472,10 @@ msgstr "{days, plural, one {runs vandaag gestart} other {runs gestart in de afge
 msgid "{days, plural, one {The last # day} other {The last # days}}"
 msgstr "{days, plural, one {De laatste dag} other {De laatste # dagen}}"
 
+#: src/settings/chat-accounts.tsx
+msgid "{deleted, plural, =0 {No conversations to delete.} one {# conversation deleted.} other {# conversations deleted.}}"
+msgstr "{deleted, plural, =0 {Geen gesprekken om te verwijderen.} one {# gesprek verwijderd.} other {# gesprekken verwijderd.}}"
+
 #: src/routes/_shell.settings.security.tsx
 msgid "{devices, plural, one {Signed in on # device. Sign out any you do not recognise.} other {Signed in on # devices. Sign out any you do not recognise.}}"
 msgstr "{devices, plural, one {Ingelogd op # apparaat. Log elk apparaat uit dat je niet herkent.} other {Ingelogd op # apparaten. Log elk apparaat uit dat je niet herkent.}}"
@@ -4556,6 +4560,7 @@ msgstr "Definitie"
 #: src/chat/chat-more.tsx
 #: src/chat/delete-chat-dialog.tsx
 #: src/projects/project-view.tsx
+#: src/settings/chat-accounts.tsx
 #: src/settings/event-sources.tsx
 #: src/settings/teams.tsx
 msgid "Delete"
@@ -4591,6 +4596,7 @@ msgstr "{projectName} verwijderen?"
 #: src/apps/app-remove.tsx
 #: src/brain/skills-page.tsx
 #: src/brain/sources-page.tsx
+#: src/settings/chat-accounts.tsx
 msgid "Delete for good"
 msgstr "Definitief verwijderen"
 
@@ -4642,6 +4648,14 @@ msgstr "Deze upload verwijderen?"
 msgid "Delete this workflow"
 msgstr "Deze workflow verwijderen"
 
+#: src/settings/chat-accounts.tsx
+msgid "Delete your conversations in chat apps"
+msgstr "Je gesprekken in chat-apps verwijderen"
+
+#: src/settings/chat-accounts.tsx
+msgid "Delete your conversations in chat apps?"
+msgstr "Je gesprekken in chat-apps verwijderen?"
+
 #: src/interview/closed.tsx
 msgid "Delete your interview?"
 msgstr "Je interview verwijderen?"
@@ -4662,6 +4676,10 @@ msgstr "Heeft een webhookbron verwijderd"
 #: src/activity/audit-words.ts
 msgid "Deleted entries past their retention"
 msgstr "Vermeldingen na hun bewaartermijn verwijderd"
+
+#: src/activity/audit-words.ts
+msgid "Deleted their conversations in chat apps"
+msgstr "Heeft de eigen gesprekken in chat-apps verwijderd"
 
 #: src/interview/page.tsx
 msgid "Deleted. Nothing you said is kept."
@@ -6190,6 +6208,10 @@ msgstr "Grasp kon deze vraag niet aan het model stellen. Probeer het opnieuw."
 msgid "Grasp couldn't remove its own access at these apps. Until someone removes it there, it may still work."
 msgstr "Grasp kon zijn eigen toegang bij deze apps niet verwijderen. Tot iemand die daar verwijdert, werkt die misschien nog."
 
+#: src/settings/chat-accounts.tsx
+msgid "Grasp deletes what it keeps of every conversation you had with Stephen in a chat app, and what your Brain kept from them. He starts afresh the next time you write. The messages stay in the chat app itself. This can't be undone."
+msgstr "Grasp verwijdert wat het bewaart van elk gesprek dat je met Stephen in een chat-app had, en wat je Brain eruit heeft onthouden. De volgende keer dat je schrijft, begint hij opnieuw. De berichten blijven in de chat-app zelf staan. Dit kan niet ongedaan worden gemaakt."
+
 #: src/dashboard/outcome-card.tsx
 msgid "Grasp doesn't know where this came from, so it can't be resolved here."
 msgstr "Grasp weet niet waar dit vandaan kwam, dus het kan hier niet worden afgehandeld."
@@ -6245,6 +6267,10 @@ msgstr "Grasp zelf"
 #: src/settings/erasures.tsx
 msgid "Grasp keeps no copy of it, so type it in full."
 msgstr "Grasp bewaart er geen kopie van, dus typ het volledig."
+
+#: src/settings/chat-accounts.tsx
+msgid "Grasp keeps what you say to Stephen in a chat app, so he can follow the conversation and learn from it."
+msgstr "Grasp bewaart wat je Stephen in een chat-app schrijft, zodat hij het gesprek kan volgen en ervan kan leren."
 
 #: src/brain/work-knowledge.tsx
 msgid "Grasp knows nothing about this work in its own words yet."
@@ -12893,6 +12919,10 @@ msgstr "Stephen kan hem in Microsoft Teams aanbieden aan iedereen die hem mag st
 msgid "Stephen can send it in Microsoft Teams once you've had a chat with him there."
 msgstr "Stephen kan het in Microsoft Teams sturen zodra je daar met hem hebt gechat."
 
+#: src/settings/chat-accounts.tsx
+msgid "Stephen is still answering one of your conversations. Try again in a moment."
+msgstr "Stephen is nog bezig een van je gesprekken te beantwoorden. Probeer het zo opnieuw."
+
 #: src/settings/stephen-card.tsx
 msgid "Stephen outside Grasp"
 msgstr "Stephen buiten Grasp"
@@ -15193,10 +15223,6 @@ msgctxt "highest end of a rating of the interview"
 msgid "Very good"
 msgstr "Heel goed"
 
-#: src/chat/chat-window.tsx
-msgid "via {app}"
-msgstr "via {app}"
-
 #: src/connections/source-badge.tsx
 msgid "Via Composio"
 msgstr "Via Composio"
@@ -16737,6 +16763,14 @@ msgstr "De naam van je bedrijf in Grasp. Een beheerder wijzigt hem."
 #: src/routes/_shell.settings.billing.tsx
 msgid "Your company’s VAT number, as invoices show it."
 msgstr "Het btw-nummer van je bedrijf, zoals het op facturen staat."
+
+#: src/settings/chat-accounts.tsx
+msgid "Your conversations are being deleted. If any remain, try again in a moment."
+msgstr "Je gesprekken worden verwijderd. Als er nog over zijn, probeer het dan zo opnieuw."
+
+#: src/settings/chat-accounts.tsx
+msgid "Your conversations in chat apps"
+msgstr "Je gesprekken in chat-apps"
 
 #: src/brain/memories-page.tsx
 msgid "Your correction is kept as your own word, for you alone, and shown beside what the Brain holds. What others read stays as it is."

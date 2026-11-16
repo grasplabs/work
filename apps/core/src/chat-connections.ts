@@ -390,6 +390,12 @@ export const askInChat = async (
     });
   }
   const personal = connection.ownerUserId !== null;
+  // Only its person grants their own connection, on a card in the chat, and
+  // a chat app's conversation is no chat in Grasp (GRA-1919): asked there,
+  // nobody could ever decide it. A shared one waits for an admin anywhere.
+  if (personal && scope.via !== undefined && scope.via !== "web") {
+    throw permissionErrors.create("permission.own_in_chat_app");
+  }
   // Admins read why a shared connection is asked for, and nothing holds a
   // request for its person first: refused from a chat that used something
   // only its person may read (private-reads.ts). Their own personal

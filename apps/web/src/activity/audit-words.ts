@@ -138,6 +138,10 @@ const words: readonly { action: string; text: MessageDescriptor }[] = [
     action: "chat.app_call.declined",
     text: msg`Declined a write to an App`,
   },
+  {
+    action: "chat.apps_deleted",
+    text: msg`Deleted their conversations in chat apps`,
+  },
   { action: "chat", text: msg`Changed a chat` },
   {
     action: "brain.source.handover_skipped",

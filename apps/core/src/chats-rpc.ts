@@ -174,7 +174,6 @@ const summaryOfMade = (chat: Chat): ChatSummary => ({
   createdAt: chat.createdAt.toISOString(),
   lastAt: chat.lastAt.toISOString(),
   running: false,
-  via: chat.via,
   make: makeOf(chat),
 });
 

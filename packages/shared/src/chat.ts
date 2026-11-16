@@ -140,11 +140,6 @@ export interface ChatSummary {
   lastAt: string;
   /** Whether its agent is working on a question now. */
   running: boolean;
-  /**
-   * Which channel it came through: Grasp's own app (`web`), or a chat
-   * platform by its adapter's name (`teams`, `slack`), for good.
-   */
-  via: ChatChannel;
   /** What "Make something" started it to make, for good; null for any other chat. */
   make: ChatMake | null;
 }

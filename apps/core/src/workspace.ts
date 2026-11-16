@@ -945,6 +945,20 @@ const handsTurnsOver = ({
 }: Pick<Chat, "thread" | "restricted">): boolean =>
   answersAlone({ thread }, false) && !restricted;
 
+/**
+ * The one rule for which of `personId`'s chats Grasp's own surfaces show
+ * (GRA-1919): only one that came through Grasp's own app. A conversation
+ * with the agent in a chat app (Teams, Slack, any other) is never a chat
+ * in Grasp: no list, search or address shows or opens it, and asked for
+ * by its ID it answers exactly as one that doesn't exist. It is kept here
+ * all the same, for its agent and the Brain (`askThrough`,
+ * `turnForBrain`), and its person deletes it from Settings
+ * (`forgetChatApps`). Every read a person's surface makes has it in its
+ * own statement, so a hidden chat takes no slot and leaves no trace.
+ */
+const shownInGrasp = (personId: string) =>
+  and(eq(chats.personId, personId), eq(chats.via, "web"));
+
 /** A person's or team's workspace: chats and the Code Mode agent on Pi. */
 export class Workspace extends DurableObject<Env> {
   readonly #db = drizzle(this.ctx.storage);
@@ -1119,9 +1133,7 @@ export class Workspace extends DurableObject<Env> {
       .from(chatMessages)
       .innerJoin(chats, eq(chats.id, chatMessages.chatId))
       .leftJoin(chatSearchText, eq(chatSearchText.messageId, chatMessages.id))
-      .where(
-        and(eq(chats.personId, personId), isNull(chatSearchText.messageId))
-      )
+      .where(and(shownInGrasp(personId), isNull(chatSearchText.messageId)))
       .all();
     for (const { id, chatId, message } of unread) {
       this.#keepSaid(
@@ -1194,14 +1206,13 @@ export class Workspace extends DurableObject<Env> {
         title: chats.title,
         createdAt: chats.createdAt,
         lastAt: chats.lastAt,
-        via: chats.via,
         makeKind: chats.makeKind,
         makeProject: chats.makeProject,
         agentId: chats.agentId,
         said: sql<string>`'' || ${saidWords}`,
       })
       .from(chats)
-      .where(eq(chats.personId, personId))
+      .where(shownInGrasp(personId))
       .orderBy(desc(chats.lastAt))
       .all();
     const found = rows
@@ -1306,12 +1317,17 @@ export class Workspace extends DurableObject<Env> {
     return id;
   }
 
-  /** Refuses `personId` a new chat once they keep {@link maxChatsPerPerson}. */
+  /**
+   * Refuses `personId` a new chat once they keep {@link maxChatsPerPerson}
+   * in Grasp (`shownInGrasp`). A chat app's conversations count toward no
+   * cap: the person deletes them (`forgetChatApps`), and a chat app's
+   * message is never refused for them.
+   */
   requireRoomForChat(personId: string): void {
     const [kept] = this.#db
       .select({ count: count() })
       .from(chats)
-      .where(eq(chats.personId, personId))
+      .where(shownInGrasp(personId))
       .all();
     if ((kept?.count ?? 0) >= maxChatsPerPerson) {
       throw agentErrors.create("agent.too_many_chats");
@@ -1320,7 +1336,8 @@ export class Workspace extends DurableObject<Env> {
 
   /**
    * A new chat, which belongs to `personId`: agent `agentId` answers in it,
-   * acting for them. Refused past {@link maxChatsPerPerson}. Made `by`
+   * acting for them. Refused past {@link maxChatsPerPerson} in Grasp; a
+   * chat app's conversation never is (`requireRoomForChat`). Made `by`
    * someone (the person, through the chat API), it is audited with it, in
    * the same transaction; core's own chats (tests) pass nobody.
    *
@@ -1350,7 +1367,9 @@ export class Workspace extends DurableObject<Env> {
       throw permissionErrors.create("permission.context_invalid");
     }
     const channel = chatChannelSchema.parse(via);
-    this.requireRoomForChat(personId);
+    if (channel === "web") {
+      this.requireRoomForChat(personId);
+    }
     const id = chatIdSchema.parse(crypto.randomUUID());
     const chat = this.ctx.storage.transactionSync(() => {
       if (by !== undefined) {
@@ -1391,7 +1410,7 @@ export class Workspace extends DurableObject<Env> {
     file: { name: string; type: ChatFileType; bytes: number; text: string },
     by: AuditActor
   ): ChatFile {
-    const { id } = this.#ownChat(chatId, personId);
+    const { id } = this.#graspChat(chatId, personId);
     if (this.#deleting.has(id)) {
       throw agentErrors.create("agent.chat_not_found");
     }
@@ -1440,7 +1459,7 @@ export class Workspace extends DurableObject<Env> {
     fileId: string,
     by: AuditActor
   ): void {
-    const { id } = this.#ownChat(chatId, personId);
+    const { id } = this.#graspChat(chatId, personId);
     // A question starting in the chat may have chosen it already, and
     // binds it only once it is kept, after awaits (`#turn`): no file of
     // the chat is removed while it has a turn, which is taken before its
@@ -2556,7 +2575,7 @@ export class Workspace extends DurableObject<Env> {
     personId: string,
     question: Question
   ): Promise<void> {
-    const chat = this.#ownChat(chatId, personId);
+    const chat = this.#graspChat(chatId, personId);
     const started = Promise.withResolvers<boolean>();
     const ended = this.#sentTurns(chat, question, started);
     this.#sent.add(ended);
@@ -3451,7 +3470,7 @@ export class Workspace extends DurableObject<Env> {
    * a stop that can't reach it fails, for its person to try again.
    */
   async cancel(chatId: unknown, personId: string): Promise<boolean> {
-    const { id } = this.#ownChat(chatId, personId);
+    const { id } = this.#graspChat(chatId, personId);
     // The ChatSession's turn; or the question this object is preparing,
     // whose stop is kept for it as it is claimed.
     const turnId = (await this.#activeTurn(id)) ?? this.#turns.get(id)?.id;
@@ -3980,8 +3999,8 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /**
-   * `personId`'s chats, the most recently active first: at most
-   * {@link listedChats}.
+   * `personId`'s chats in Grasp (`shownInGrasp`), the most recently active
+   * first: at most {@link listedChats}.
    */
   chats(personId: string): ChatSummary[] {
     return this.#db
@@ -3991,12 +4010,11 @@ export class Workspace extends DurableObject<Env> {
         agentId: chats.agentId,
         createdAt: chats.createdAt,
         lastAt: chats.lastAt,
-        via: chats.via,
         makeKind: chats.makeKind,
         makeProject: chats.makeProject,
       })
       .from(chats)
-      .where(eq(chats.personId, personId))
+      .where(shownInGrasp(personId))
       .orderBy(desc(chats.lastAt))
       .limit(listedChats)
       .all()
@@ -4012,7 +4030,6 @@ export class Workspace extends DurableObject<Env> {
       | "agentId"
       | "createdAt"
       | "lastAt"
-      | "via"
       | "makeKind"
       | "makeProject"
     >
@@ -4024,7 +4041,6 @@ export class Workspace extends DurableObject<Env> {
       createdAt: chat.createdAt.toISOString(),
       lastAt: chat.lastAt.toISOString(),
       running: this.#isRunning(chat.id),
-      via: chat.via,
       make: makeOf(chat),
     };
   }
@@ -4035,7 +4051,8 @@ export class Workspace extends DurableObject<Env> {
    * draft, or whose Build it made it), the one active last, as their list
    * shows it, so its page carries on where they left it, with all it
    * knows; `null` while they have none, when the next question there
-   * starts one. A chat others share on a chat platform is never one.
+   * starts one. Only a chat Grasp shows them (`shownInGrasp`): never a
+   * chat app's conversation, theirs alone or shared.
    */
   subjectChat(
     personId: string,
@@ -4047,9 +4064,8 @@ export class Workspace extends DurableObject<Env> {
       .from(chats)
       .where(
         and(
-          eq(chats.personId, personId),
-          sql`${chats.id} IN (SELECT value FROM json_each(${JSON.stringify(drafted)}))`,
-          isNull(chats.thread)
+          shownInGrasp(personId),
+          sql`${chats.id} IN (SELECT value FROM json_each(${JSON.stringify(drafted)}))`
         )
       )
       .orderBy(desc(chats.lastAt))
@@ -4059,7 +4075,7 @@ export class Workspace extends DurableObject<Env> {
 
   /** `personId`'s chat `chatId`, as their list shows it, listed or not. */
   chatSummary(chatId: unknown, personId: string): ChatSummary {
-    return this.#summaryOf(this.#ownChat(chatId, personId));
+    return this.#summaryOf(this.#graspChat(chatId, personId));
   }
 
   /**
@@ -4076,7 +4092,7 @@ export class Workspace extends DurableObject<Env> {
     personId: string,
     callId: unknown
   ): { plan: ChatPlan; make: ChatMake | null } {
-    const chat = this.#ownChat(chatId, personId);
+    const chat = this.#graspChat(chatId, personId);
     const { id } = chat;
     // Its question would be refused: nothing is made for it.
     if (this.#turns.has(id) || this.#isRunning(id)) {
@@ -4147,7 +4163,7 @@ export class Workspace extends DurableObject<Env> {
       stopped,
     }: { text: string; built: QuestionBuilt; stopped: string }
   ): Promise<void> {
-    const chat = this.#ownChat(chatId, personId);
+    const chat = this.#graspChat(chatId, personId);
     const { plan, app, workflow } = built;
     this.#keep(
       chat.id,
@@ -4440,7 +4456,7 @@ export class Workspace extends DurableObject<Env> {
     title: string,
     by: AuditActor
   ): void {
-    const { id } = this.#ownChat(chatId, personId);
+    const { id } = this.#graspChat(chatId, personId);
     this.ctx.storage.transactionSync(() => {
       this.#db.update(chats).set({ title }).where(eq(chats.id, id)).run();
       this.#outboxed(by, "chat.renamed", id);
@@ -4466,10 +4482,93 @@ export class Workspace extends DurableObject<Env> {
     person: ConnectionPerson,
     by: AuditActor
   ): Promise<number> {
-    const { id } = this.#ownChat(chatId, personId);
+    const { id } = this.#graspChat(chatId, personId);
     if (person.userId !== personId) {
       throw agentErrors.create("agent.chat_not_found");
     }
+    return await this.#deleteChat(id, personId, person, by, true);
+  }
+
+  /**
+   * Deletes every conversation `personId` had with an agent in a chat app
+   * (Teams, Slack), which Grasp never shows them as a chat
+   * (`shownInGrasp`), each as `deleteChat` deletes a chat: what their
+   * Brain kept of it, the writes held in it, the connections granted in
+   * it, the transcript its agent replays, its rows. Their next message
+   * there starts a conversation anew. What the chat app itself keeps of
+   * it is the chat app's. Each goes on its own: one that can't go yet
+   * (its agent at work, `agent.conversation_answering`) or whose deletion
+   * failed part-way stays, and fails the call; asked again, it deletes
+   * what is left, as each step of a deletion is safe to repeat. Audited
+   * once for the action, after every deletion settled, as `by`'s, with
+   * how many went and how many didn't: never one event per conversation,
+   * nor anything they said. How many it deleted.
+   */
+  async forgetChatApps(
+    personId: string,
+    person: ConnectionPerson,
+    by: AuditActor
+  ): Promise<number> {
+    if (person.userId !== personId) {
+      throw agentErrors.create("agent.chat_not_found");
+    }
+    const conversations = this.#db
+      .select({ id: chats.id })
+      .from(chats)
+      .where(and(eq(chats.personId, personId), ne(chats.via, "web")))
+      .all();
+    // A click while an earlier one deletes them: that one answers, and
+    // audits, for both.
+    if (conversations.some(({ id }) => this.#deleting.has(id))) {
+      throw agentErrors.create("agent.delete_under_way");
+    }
+    const settled = await Promise.allSettled(
+      conversations.map(
+        async ({ id }) =>
+          await this.#deleteChat(id, personId, person, by, false)
+      )
+    );
+    const failures: unknown[] = [];
+    for (const each of settled) {
+      if (each.status === "rejected") {
+        const reason: unknown = each.reason;
+        failures.push(reason);
+      }
+    }
+    const deleted = settled.length - failures.length;
+    this.#outboxEntry({
+      actor: by,
+      action: "chat.apps_deleted",
+      target: { type: "person", id: personId },
+      detail: {
+        workspace: this.ctx.id.name ?? null,
+        deleted,
+        failed: failures.length,
+      },
+    });
+    this.#deliverAudit();
+    const [failure] = failures;
+    if (agentErrors.codeOf(failure) === "agent.busy") {
+      throw agentErrors.create("agent.conversation_answering");
+    }
+    if (failure instanceof Error) {
+      throw failure;
+    }
+    return deleted;
+  }
+
+  /**
+   * Deletes chat `id`, as `deleteChat` says; recorded as `chat.deleted`
+   * unless `audited` is false, for an action that records itself once
+   * (`forgetChatApps`).
+   */
+  async #deleteChat(
+    id: ChatId,
+    personId: string,
+    person: ConnectionPerson,
+    by: AuditActor,
+    audited = true
+  ): Promise<number> {
     if (this.#turns.has(id) || this.#deleting.has(id)) {
       throw agentErrors.create("agent.busy");
     }
@@ -4546,7 +4645,9 @@ export class Workspace extends DurableObject<Env> {
         this.ctx.storage.kv.delete(`${builtKeyPrefix}${id}`);
         this.ctx.storage.kv.delete(`${runningKeyPrefix}${id}`);
         this.ctx.storage.kv.delete(`${copiedKeyPrefix}${id}`);
-        this.#outboxed(by, "chat.deleted", id, { declined });
+        if (audited) {
+          this.#outboxed(by, "chat.deleted", id, { declined });
+        }
       });
       this.#deliverAudit();
       this.#stopped.delete(id);
@@ -4664,10 +4765,10 @@ export class Workspace extends DurableObject<Env> {
     }
     // What an erasure took is replaced before anything of the chat is shown.
     const masked = await this.#replaceErased(
-      this.#scopeOf(this.#ownChat(chatId, personId))
+      this.#scopeOf(this.#graspChat(chatId, personId))
     );
     // Read again after the await: the chat may have gone meanwhile.
-    const { id } = this.#ownChat(chatId, personId);
+    const { id } = this.#graspChat(chatId, personId);
     let watching = 0;
     for (const watchers of this.#watchers.values()) {
       watching += watchers.size;
@@ -4810,7 +4911,7 @@ export class Workspace extends DurableObject<Env> {
    * requests).
    */
   requireChat(chatId: unknown, personId: string): ChatId {
-    return this.#ownChat(chatId, personId).id;
+    return this.#graspChat(chatId, personId).id;
   }
 
   // What a chat's agent writes of Apps' drafts (agent-builds.ts), which
@@ -4976,9 +5077,32 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /**
-   * The chat, if it is `personId`'s: the one person its agent acts for,
-   * and the only one who reaches it. Anyone else's is refused as if there
-   * were none.
+   * The chat, if it is `personId`'s and one Grasp shows them
+   * (`shownInGrasp`): what every by-ID read of a person's surface goes
+   * through. Anything else, anyone else's or a chat app's conversation,
+   * is refused in the same statement, as if there were none.
+   */
+  #graspChat(chatId: unknown, personId: string): Chat {
+    const id = chatIdSchema.safeParse(chatId);
+    const chat = id.success
+      ? this.#db
+          .select()
+          .from(chats)
+          .where(and(eq(chats.id, id.data), shownInGrasp(personId)))
+          .get()
+      : undefined;
+    if (chat === undefined) {
+      throw agentErrors.create("agent.chat_not_found");
+    }
+    return chat;
+  }
+
+  /**
+   * The chat, if it is `personId`'s, whichever channel it came through:
+   * for core's own calls on a decision made for it (`heldDecided`,
+   * `connectionDecided`, `packagesDecided`), a chat app's included, never
+   * for what a person's surface reads (`#graspChat`). Anyone else's is
+   * refused as if there were none.
    */
   #ownChat(chatId: unknown, personId: string): Chat {
     const chat = this.#chat(chatId);

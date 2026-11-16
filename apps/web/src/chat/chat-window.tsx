@@ -1,5 +1,4 @@
 import type { ChatSearchHit, ChatSummary } from "@grasp-os/shared/chat";
-import { chatPlatformName } from "@grasp-os/shared/chat";
 import { hasEvery } from "@grasp-os/shared/chat-search";
 import { failureText } from "@grasp-os/shared/errors";
 import { Button } from "@grasp-os/ui/components/button";
@@ -56,13 +55,6 @@ const periodLabel: Record<ChatPeriod, MessageDescriptor> = {
 
 /** How long typing rests before core is asked what was said. */
 const searchRestMs = 200;
-
-/** The chat platform a chat came through, before its time. */
-const ChannelName = ({ via }: { via: string }) => {
-  const { t } = useLingui();
-  const app = chatPlatformName(via);
-  return <>{t`via ${app}`} · </>;
-};
 
 /**
  * One chat: its title, and on the right when it was last used; found by
@@ -121,7 +113,6 @@ const ChatRow = ({
               {chat.title}
             </span>
             <span className="text-muted-foreground flex-none text-xs tabular-nums group-hover/row:invisible group-has-data-popup-open/row:invisible pointer-coarse:invisible">
-              {chat.via === "web" ? null : <ChannelName via={chat.via} />}
               <time dateTime={chat.lastAt}>{when}</time>
             </span>
           </span>
