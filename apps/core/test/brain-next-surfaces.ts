@@ -9926,6 +9926,21 @@ export const memoriesRpcProbes = {
       await forget("not an id", { memory: markers }),
     ];
   },
+  // Which entity is the person themselves: theirs alone, whatever someone
+  // else's own entity holds; refused for someone who isn't a member.
+  ownEntity: async ({ personId, markers }) => {
+    await othersOwnEntity(markers);
+    return [
+      await answer(
+        "the reader's own",
+        async () => await memoriesAs(personId).ownEntity()
+      ),
+      await answer(
+        "as someone who isn't a member",
+        async () => await memoriesAs(stranger()).ownEntity()
+      ),
+    ];
+  },
   ...showingPage(
     memoryPageProbes({
       entities: async (personId, kind, from) =>
@@ -9949,7 +9964,13 @@ export const memoriesRpcProbes = {
     })
   ),
 } satisfies Record<
-  "forget" | "entities" | "memories" | "contested" | "confirm" | "correct",
+  | "forget"
+  | "ownEntity"
+  | "entities"
+  | "memories"
+  | "contested"
+  | "confirm"
+  | "correct",
   Probe
 >;
 

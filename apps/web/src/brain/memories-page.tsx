@@ -48,8 +48,9 @@ import {
 import { Textarea } from "@grasp-os/ui/components/textarea";
 import { toast } from "@grasp-os/ui/components/toast";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { useId, useRef, useState } from "react";
+import { createContext, use, useId, useRef, useState } from "react";
 
+import { useHeldCoreRead } from "../apps/use-core-read.ts";
 import { ErrorText } from "../error-text.tsx";
 import { formatDateTime } from "../format.ts";
 import { NotLoaded } from "../load-from-core.tsx";
@@ -669,10 +670,25 @@ const MemoryLine = ({
 };
 
 /**
- * An entity's name, or a word for one without: one a correction of theirs
- * stands for that they may no longer read, or one with no name.
+ * The id of the entity that is the person themselves, in their own store
+ * (`brainMemories.ownEntity`), for `EntityName`: null while unknown.
+ */
+const OwnEntity = createContext<string | null>(null);
+
+/**
+ * An entity's name, or a word for one without: the person themselves,
+ * one a correction of theirs stands for that they may no longer read, or
+ * one with no name.
  */
 const EntityName = ({ entity }: { entity: BrainEntityListed }) => {
+  const own = use(OwnEntity);
+  if (entity.entity.store === "own" && entity.entity.id === own) {
+    return (
+      <Trans context="the person themselves, as the Brain names them">
+        You
+      </Trans>
+    );
+  }
   if (entity.unreadable) {
     return (
       <span className="text-muted-foreground">
@@ -1021,110 +1037,120 @@ export const MemoriesPage = () => {
   };
   const contested = useContested(changes);
   const entities = useEntities(kind, changes);
+  // Which entity is the person themselves: theirs to ask alone. Read again
+  // with each change, as their first memory about themselves makes it.
+  const { loaded: ownRead } = useHeldCoreRead(
+    `own-entity#${changes}`,
+    async (session) => await session.brainMemories.ownEntity(),
+    "own-entity"
+  );
+  const own = ownRead?.state === "ready" ? ownRead.data : null;
   const contestedHeading = useId();
   const entitiesHeading = useId();
   const kindId = useId();
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto">
-      <div className="pb-chat mx-auto flex w-full max-w-5xl flex-col gap-8 px-6 pt-8 md:px-12">
-        <PageHeader>
-          <PageHeaderTitle>
-            <Trans context="the Brain's memories page">Memories</Trans>
-          </PageHeaderTitle>
-          <PageHeaderDescription>
+    <OwnEntity value={own}>
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="pb-chat mx-auto flex w-full max-w-5xl flex-col gap-8 px-6 pt-8 md:px-12">
+          <PageHeader>
+            <PageHeaderTitle>
+              <Trans context="the Brain's memories page">Memories</Trans>
+            </PageHeaderTitle>
+            <PageHeaderDescription>
+              <Trans>
+                What the Brain remembers that you may read, where each memory
+                came from, and where sources disagree.
+              </Trans>
+            </PageHeaderDescription>
+          </PageHeader>
+          <p className="text-muted-foreground text-sm">
             <Trans>
-              What the Brain remembers that you may read, where each memory came
-              from, and where sources disagree.
+              Those marked Only you are yours alone: nobody else sees them,
+              admins included.
             </Trans>
-          </PageHeaderDescription>
-        </PageHeader>
-        <p className="text-muted-foreground text-sm">
-          <Trans>
-            Those marked Only you are yours alone: nobody else sees them, admins
-            included.
-          </Trans>
-        </p>
-        <section
-          aria-labelledby={contestedHeading}
-          className="flex flex-col gap-3"
-        >
-          <h2 className="text-sm font-medium" id={contestedHeading}>
-            <Trans>Where sources disagree</Trans>
-          </h2>
-          <ContestedList
-            contested={contested}
-            onChanged={changed}
-            onCorrect={correct}
-            onOpen={(entity) => {
-              setKind(entity.kind);
-              setOpened(entity.entity);
-            }}
-            read={changes}
-          />
-        </section>
-        <section
-          aria-labelledby={entitiesHeading}
-          className="flex flex-col gap-3"
-        >
-          <h2 className="text-sm font-medium" id={entitiesHeading}>
-            <Trans>What the Brain remembers</Trans>
-          </h2>
-          <div className="flex flex-col gap-1.5">
-            <FieldLabel htmlFor={kindId}>
-              <Trans>Kind</Trans>
-            </FieldLabel>
-            <NativeSelect
-              id={kindId}
-              onChange={(event) => {
-                const picked = brainEntityKinds.find(
-                  (each) => each === event.target.value
-                );
-                if (picked !== undefined) {
-                  setKind(picked);
-                  setOpened(undefined);
-                }
-              }}
-              value={kind}
-            >
-              {brainEntityKinds.map((each) => (
-                <NativeSelectOption key={each} value={each}>
-                  {kindLabel(each)}
-                </NativeSelectOption>
-              ))}
-            </NativeSelect>
-          </div>
-          <div className="grid min-h-0 gap-6 lg:grid-cols-2">
-            <EntityList
-              entities={entities}
-              onPick={(entity) => {
+          </p>
+          <section
+            aria-labelledby={contestedHeading}
+            className="flex flex-col gap-3"
+          >
+            <h2 className="text-sm font-medium" id={contestedHeading}>
+              <Trans>Where sources disagree</Trans>
+            </h2>
+            <ContestedList
+              contested={contested}
+              onChanged={changed}
+              onCorrect={correct}
+              onOpen={(entity) => {
+                setKind(entity.kind);
                 setOpened(entity.entity);
               }}
-              picked={opened}
+              read={changes}
             />
-            {opened === undefined ? null : (
-              <EntityPanel
-                changes={changes}
-                entity={opened}
-                key={keyOf(opened)}
-                onChanged={changed}
-                onCorrect={correct}
+          </section>
+          <section
+            aria-labelledby={entitiesHeading}
+            className="flex flex-col gap-3"
+          >
+            <h2 className="text-sm font-medium" id={entitiesHeading}>
+              <Trans>What the Brain remembers</Trans>
+            </h2>
+            <div className="flex flex-col gap-1.5">
+              <FieldLabel htmlFor={kindId}>
+                <Trans>Kind</Trans>
+              </FieldLabel>
+              <NativeSelect
+                id={kindId}
+                onChange={(event) => {
+                  const picked = brainEntityKinds.find(
+                    (each) => each === event.target.value
+                  );
+                  if (picked !== undefined) {
+                    setKind(picked);
+                    setOpened(undefined);
+                  }
+                }}
+                value={kind}
+              >
+                {brainEntityKinds.map((each) => (
+                  <NativeSelectOption key={each} value={each}>
+                    {kindLabel(each)}
+                  </NativeSelectOption>
+                ))}
+              </NativeSelect>
+            </div>
+            <div className="grid min-h-0 gap-6 lg:grid-cols-2">
+              <EntityList
+                entities={entities}
+                onPick={(entity) => {
+                  setOpened(entity.entity);
+                }}
+                picked={opened}
               />
-            )}
-          </div>
-        </section>
+              {opened === undefined ? null : (
+                <EntityPanel
+                  changes={changes}
+                  entity={opened}
+                  key={keyOf(opened)}
+                  onChanged={changed}
+                  onCorrect={correct}
+                />
+              )}
+            </div>
+          </section>
+        </div>
+        {correcting === undefined ? null : (
+          <CorrectDialog
+            key={correcting.opening}
+            memory={correcting.memory}
+            onClose={() => {
+              setCorrecting(undefined);
+            }}
+            onCorrected={changed}
+            opening={correcting.opening}
+            returnTo={correcting.returnTo}
+          />
+        )}
       </div>
-      {correcting === undefined ? null : (
-        <CorrectDialog
-          key={correcting.opening}
-          memory={correcting.memory}
-          onClose={() => {
-            setCorrecting(undefined);
-          }}
-          onCorrected={changed}
-          opening={correcting.opening}
-          returnTo={correcting.returnTo}
-        />
-      )}
-    </div>
+    </OwnEntity>
   );
 };

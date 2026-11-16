@@ -16720,6 +16720,11 @@ msgstr "Sí: su hash coincide y enlaza con el evento anterior."
 msgid "You"
 msgstr "Tú"
 
+#: src/brain/memories-page.tsx
+msgctxt "the person themselves, as the Brain names them"
+msgid "You"
+msgstr "Tú"
+
 #: src/interview/words.ts
 msgid "You and AI"
 msgstr "Tú y la IA"

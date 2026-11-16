@@ -16720,6 +16720,11 @@ msgstr "Yes: its hash matches, and it links to the event before it."
 msgid "You"
 msgstr "You"
 
+#: src/brain/memories-page.tsx
+msgctxt "the person themselves, as the Brain names them"
+msgid "You"
+msgstr "You"
+
 #: src/interview/words.ts
 msgid "You and AI"
 msgstr "You and AI"

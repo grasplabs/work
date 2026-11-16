@@ -274,6 +274,12 @@ export interface BrainMemoriesApi {
   confirm: (memory: BrainMemoryPlace) => Promise<BrainMemoryOutcome>;
   /** Says a memory is wrong, with what is right: saved as their own word, for them alone, and confirmed. */
   correct: (correction: BrainCorrection) => Promise<BrainCorrected>;
+  /**
+   * The id of the entity that is the person themselves, in their own
+   * store (what they said about themselves is filed under it); null until
+   * they said anything about themselves. Theirs alone to ask.
+   */
+  ownEntity: () => Promise<string | null>;
 }
 
 /** What core answers a correction it can't take as it is. */
