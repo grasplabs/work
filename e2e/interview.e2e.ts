@@ -2,6 +2,7 @@ import { writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { interviewApiPath } from "@grasp-os/shared/interview-links";
 import { interviewTurnRequestSchema } from "@grasp-os/shared/interview-turn";
 import { expect } from "@playwright/test";
 import type { Page, Route } from "@playwright/test";
@@ -164,6 +165,27 @@ test("someone has their interview by typing, carries on after stopping, and agre
   });
 });
 
+/**
+ * Core's answer that it kept a save of `page`'s whose progress holds
+ * `holds`. The page keeps each change a moment after it, or as it goes,
+ * and "Saved" shows until a save takes long: a reload before core kept
+ * the change races the page's last save against the next page's read.
+ */
+const keptWith = async (page: Page, holds: string): Promise<void> => {
+  await page.waitForResponse(async (response) => {
+    const request = response.request();
+    if (
+      new URL(response.url()).pathname !== interviewApiPath ||
+      request.method() !== "POST" ||
+      !(request.postData() ?? "").includes(holds)
+    ) {
+      return false;
+    }
+    const answer: unknown = await response.json();
+    return z.object({ saved: z.literal(true) }).safeParse(answer).success;
+  });
+};
+
 test("someone removes a line of theirs and takes out what was written from it, and neither is said to anyone again", async ({
   page,
 }) => {
@@ -224,6 +246,7 @@ test("someone removes a line of theirs and takes out what was written from it, a
   await transcript
     .getByRole("button", { name: `Remove your line: Only Ria knows ${run},` })
     .click();
+  const removed = keptWith(page, '"removed":true');
   await page
     .getByRole("alertdialog")
     .getByRole("button", { name: "Remove" })
@@ -232,6 +255,7 @@ test("someone removes a line of theirs and takes out what was written from it, a
   await expect(transcript.getByText(run)).toHaveCount(0);
 
   // Kept removed by core: after a reload, the transcript shows it removed.
+  await removed;
   await page.reload();
   await page.getByRole("button", { name: "Transcript" }).click();
   await expect(transcript.getByText("Removed.")).toBeVisible();
@@ -260,10 +284,12 @@ test("someone removes a line of theirs and takes out what was written from it, a
   await expect(page.getByText(adding)).toBeVisible();
   const more = page.getByLabel("Your answer");
   await more.fill("Then I book it in Exact.");
+  const added = keptWith(page, "You check the invoice in Exact.");
   await more.press("Enter");
   await expect(page.getByText(readBack)).toBeVisible();
   await expect(page.getByText("You check the invoice in Exact.")).toBeVisible();
   await expect(page.getByText("Saved")).toBeVisible();
+  await added;
   await page.reload();
   await expect(page.getByText("You check the invoice in Exact.")).toBeVisible();
   expect({
