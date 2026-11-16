@@ -34,6 +34,12 @@ interface Kept {
   progress: InterviewProgress;
   /** A save on its way, and whether a change came in meanwhile. */
   saving: boolean;
+  /**
+   * This page, as its saves name it, and how many it sent: core takes a
+   * later save of the page over a version an earlier one made that the
+   * page never heard of (its answer lost, or on its way as it closed).
+   */
+  page: { id: string; saves: number };
   again: boolean;
   /** Something changed that isn't kept yet. */
   dirty: boolean;
@@ -88,6 +94,12 @@ export const progressNow = (): InterviewProgress =>
 export const linkNow = (): { secret: string } | null =>
   kept === null ? null : { secret: kept.secret };
 
+/** The page as the next save names it (`page`): its next count. */
+const nextSave = (mine: Kept): { id: string; save: number } => {
+  mine.page.saves += 1;
+  return { id: mine.page.id, save: mine.page.saves };
+};
+
 const saveOnce = async (mine: Kept): Promise<void> => {
   mine.dirty = false;
   const sent = mine.progress;
@@ -96,6 +108,7 @@ const saveOnce = async (mine: Kept): Promise<void> => {
     secret: mine.secret,
     version: mine.version,
     progress: sent,
+    page: nextSave(mine),
   });
   if (kept !== mine || mine.gone) {
     return;
@@ -252,12 +265,17 @@ const onPageHide = (): void => {
     return;
   }
   mine.dirty = false;
+  // A save of the page's may have landed already, its answer lost or on
+  // its way, and moved the version on past this page's: this one goes on
+  // from it, as core takes the page's later saves (`page`). Counted too,
+  // so a page brought back from the back/forward cache goes on from it.
   void saveProgress(
     {
       action: "save",
       secret: mine.secret,
       version: mine.version,
       progress: mine.progress,
+      page: nextSave(mine),
     },
     { keepalive: true }
   );
@@ -281,6 +299,7 @@ export const holdInterview = ({
     version,
     progress: progress ?? freshProgress,
     saving: false,
+    page: { id: crypto.randomUUID(), saves: 0 },
     again: false,
     dirty: false,
     waiting: undefined,

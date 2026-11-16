@@ -1389,7 +1389,7 @@ const Documents = (props: StepProps) => {
           }}
           rows={rows}
         />
-        <p className="text-muted-foreground text-xs">{t`I keep each file in your Brain, for you alone.`}</p>
+        <p className="text-muted-foreground text-xs">{t`I keep each file in your Brain, for you alone. What I read in it, never the file itself, helps me in the interviews with the teams it is about, or with every team when it names none.`}</p>
         <ErrorText>{removeProblem}</ErrorText>
         {suites.length === 0 ? null : (
           <div className="flex flex-col items-center gap-2">
