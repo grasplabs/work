@@ -10,6 +10,7 @@ import {
   pressedChanges,
   pressedStart,
   settleRequest,
+  sweepStephenRequests,
 } from "../src/channels/stephen-requests.ts";
 import { chatAgentId } from "../src/chats-rpc.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
@@ -396,6 +397,140 @@ describe("sorting a request", setUpTime, () => {
         { outcome: "unanswered", sorted: true },
         { outcome: "done", sorted: true },
       ],
+    });
+  });
+});
+
+/**
+ * Everything an admin reads of Stephen's requests: the report, the
+ * panel of `topic`, Needs you, Stephen's week and the weekly summary.
+ */
+const readsOf = async (
+  admin: Awaited<ReturnType<typeof signedInApi>>,
+  topic: string
+) =>
+  JSON.stringify(
+    await Promise.all([
+      admin.api.stephenRequests.report({ range: "month" }),
+      admin.api.stephenRequests.report({ range: "month", topic }),
+      admin.api.stephenRequests.report({ range: "year" }),
+      admin.api.stephenRequests.needs("en"),
+      admin.api.stephenRequests.week(),
+      admin.api.stephenRequests.summary(),
+    ])
+  );
+
+/** Every topic's name and question's wording kept, in order. */
+const namesKept = async (): Promise<string[]> => {
+  const { results } = await env.DB.prepare(
+    "SELECT name FROM stephen_request_topics UNION ALL SELECT wording FROM stephen_request_questions ORDER BY 1"
+  ).all<{ name: string }>();
+  return results.map(({ name }) => name);
+};
+
+describe("a topic the sorter names", setUpTime, () => {
+  afterEach(cleanUp);
+
+  it("is named to admins only once five people asked about it in Teams, never one person five times, and no longer once one of them is erased", async () => {
+    // A topic's name rests on one person's message (request-sorting.ts),
+    // so it is held to a question's floor: named only where the report
+    // shows the topic as a group of five or more people.
+    const admin = await signedInApi(idp, "admin");
+    const name = `Workload ${unique()}`;
+    const ann = await member(
+      idp,
+      ...Array.from({ length: 9 }, () => says("Take a break."))
+    );
+    const asks = async (who: { teams: typeof ann.teams }, text: string) => {
+      stephenRequestReplies.push(sorting({ newTopic: name }));
+      await post(messageFrom(who.teams, { text }));
+    };
+    for (const at of [1, 2, 3, 4, 5]) {
+      // oxlint-disable-next-line no-await-in-loop -- one message after another
+      await asks(ann, `I'm burning out (${at}), what can I do?`);
+    }
+    const topic = await env.DB.prepare(
+      "SELECT id FROM stephen_request_topics"
+    ).first<{ id: string }>();
+    const topicId = topic?.id ?? "";
+    const onePersonFiveTimes = await readsOf(admin, topicId);
+    for (const at of [1, 2, 3]) {
+      // oxlint-disable-next-line no-await-in-loop -- one person after another
+      const other = await memberAnsweredBy(idp, ann.provider);
+      // oxlint-disable-next-line no-await-in-loop -- one person after another
+      await asks(other, `Too much work (${at}).`);
+    }
+    const fourPeople = await readsOf(admin, topicId);
+    const fifth = await memberAnsweredBy(idp, ann.provider);
+    await asks(fifth, "Too much work, again.");
+    const fivePeople = await admin.api.stephenRequests.report({
+      range: "month",
+    });
+    const fivePeopleReads = await readsOf(admin, topicId);
+    await admin.api.members.remove(fifth.userId);
+    await admin.api.members.erase(fifth.userId, String(fifth.person.name));
+    const afterErasure = await readsOf(admin, topicId);
+    const kept = await keptOf(ann.userId);
+
+    expect({
+      kept: kept.map((row) => row.topic_id),
+      onePersonFiveTimes: onePersonFiveTimes.includes(name),
+      fourPeople: fourPeople.includes(name),
+      fivePeople: {
+        named: fivePeople.topics,
+        byTopic: fivePeople.report.byTopic.map(({ key, people: count }) => [
+          key,
+          count,
+        ]),
+        everywhere: fivePeopleReads.includes(name),
+      },
+      afterErasure: afterErasure.includes(name),
+    }).toStrictEqual({
+      kept: Array.from({ length: 5 }, () => topicId),
+      onePersonFiveTimes: false,
+      fourPeople: false,
+      fivePeople: {
+        named: [{ id: topicId, name }],
+        byTopic: [[topicId, 5]],
+        everywhere: true,
+      },
+      afterErasure: false,
+    });
+  });
+
+  it("goes, with its question, at the sweep after the one person whose requests it rested on is erased", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const ann = await member(
+      idp,
+      says("Take a break."),
+      says("Sixteen weeks.")
+    );
+    const ben = await memberAnsweredBy(idp, ann.provider);
+    const [annTopic, benTopic] = [`Workload ${unique()}`, `Leave ${unique()}`];
+    stephenRequestReplies.push(
+      sorting({
+        newTopic: annTopic,
+        newQuestion: "How do I cope with stress?",
+      }),
+      sorting({ newTopic: benTopic, newQuestion: "How long is leave?" })
+    );
+    await post(messageFrom(ann.teams, { text: "I'm burning out." }));
+    await post(messageFrom(ben.teams, { text: "How long is my leave?" }));
+    const before = await namesKept();
+
+    await admin.api.members.remove(ann.userId);
+    await admin.api.members.erase(ann.userId, String(ann.person.name));
+    // A name just made waits a day for the request that made it.
+    await sweepStephenRequests(env, new Date(Date.now() + 2 * 86_400_000));
+
+    expect({ before, after: await namesKept() }).toStrictEqual({
+      before: [
+        "How do I cope with stress?",
+        "How long is leave?",
+        benTopic,
+        annTopic,
+      ],
+      after: ["How long is leave?", benTopic],
     });
   });
 });

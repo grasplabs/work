@@ -17,6 +17,7 @@ import type { ToolCall } from "../chat-tool-events.ts";
 import {
   stephenRequestCards,
   stephenRequestQuestions,
+  stephenRequestTopics,
   stephenRequests,
   stephenSummaries,
   teamMembers,
@@ -528,9 +529,9 @@ export const rateRequest = async (
 };
 
 /**
- * Deletes requests past their thirteen months, and the questions no
- * request points at any more that are older than a day (a question just
- * named waits for the request that named it).
+ * Deletes requests past their thirteen months, and the questions and
+ * topics nothing points at any more that are older than a day (a name
+ * just made waits for the request that made it).
  */
 export const sweepStephenRequests = async (
   env: Env,
@@ -545,6 +546,16 @@ export const sweepStephenRequests = async (
     sql`${stephenRequestQuestions.createdAt} < ${now.getTime() - 86_400_000}
         AND NOT EXISTS (SELECT 1 FROM ${stephenRequests}
           WHERE ${stephenRequests.questionId} = ${stephenRequestQuestions.id})`
+  );
+  // The topics, likewise, once no question points at them either: a name
+  // rests on one person's message, so it goes with the last request that
+  // points at it, swept or erased (GRA-1923).
+  await db.delete(stephenRequestTopics).where(
+    sql`${stephenRequestTopics.createdAt} < ${now.getTime() - 86_400_000}
+        AND NOT EXISTS (SELECT 1 FROM ${stephenRequests}
+          WHERE ${stephenRequests.topicId} = ${stephenRequestTopics.id})
+        AND NOT EXISTS (SELECT 1 FROM ${stephenRequestQuestions}
+          WHERE ${stephenRequestQuestions.topicId} = ${stephenRequestTopics.id})`
   );
   // Cards whose request is gone (swept or erased), a day on.
   await db.delete(stephenRequestCards).where(
