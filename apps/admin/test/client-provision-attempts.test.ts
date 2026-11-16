@@ -218,7 +218,7 @@ describe("provisioning a placed client", () => {
           "A try stopped in its migrations step without recording why"
         ),
       }).toMatchObject({
-        applies: 3,
+        applies: 2,
         provisioned: once(clientId),
         noticeNamesStep: true,
       });
@@ -307,10 +307,10 @@ describe("provisioning a placed client", () => {
       });
 
       expect({
-        // The refused one, then the retry's three.
+        // The refused one, then the retry's two: one per database.
         sent: cloudflare.calls.filter(isMigration).length,
         provisioned: await provisioned(account, clientId),
-      }).toMatchObject({ sent: 4, provisioned: once(clientId) });
+      }).toMatchObject({ sent: 3, provisioned: once(clientId) });
     } finally {
       refused.release();
       errors.mockRestore();

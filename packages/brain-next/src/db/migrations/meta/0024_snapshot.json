@@ -1,9 +1,71 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "d87e17a5-fad1-4692-b9d7-96bc98dc4a74",
+  "id": "6998d3be-8a4f-4ec9-a751-3a9da7c21e45",
   "prevId": "b3c5aea7-73b6-4be1-8491-f206df92e38f",
   "tables": {
+    "chunk_days": {
+      "name": "chunk_days",
+      "columns": {
+        "chunk": {
+          "name": "chunk",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "month_day": {
+          "name": "month_day",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "year": {
+          "name": "year",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "chunk_days_chunk_idx": {
+          "name": "chunk_days_chunk_idx",
+          "columns": [
+            "chunk"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "chunk_days_chunk_chunks_row_fk": {
+          "name": "chunk_days_chunk_chunks_row_fk",
+          "tableFrom": "chunk_days",
+          "tableTo": "chunks",
+          "columnsFrom": [
+            "chunk"
+          ],
+          "columnsTo": [
+            "row"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "chunk_days_month_day_year_chunk_pk": {
+          "columns": [
+            "month_day",
+            "year",
+            "chunk"
+          ],
+          "name": "chunk_days_month_day_year_chunk_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
     "chunks": {
       "name": "chunks",
       "columns": {
@@ -1779,49 +1841,6 @@
       "checkConstraints": {
         "memory_stamps_one": {
           "name": "memory_stamps_one",
-          "value": "id = 1"
-        }
-      }
-    },
-    "own_entity": {
-      "name": "own_entity",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "integer",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "entity": {
-          "name": "entity",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "own_entity_entity_entities_row_fk": {
-          "name": "own_entity_entity_entities_row_fk",
-          "tableFrom": "own_entity",
-          "tableTo": "entities",
-          "columnsFrom": [
-            "entity"
-          ],
-          "columnsTo": [
-            "row"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {
-        "own_entity_one": {
-          "name": "own_entity_one",
           "value": "id = 1"
         }
       }

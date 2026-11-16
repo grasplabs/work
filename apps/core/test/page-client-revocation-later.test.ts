@@ -2,7 +2,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { appHost } from "../src/durable-objects.ts";
-import { newTeam } from "./knowledge.ts";
+import { newTeam } from "./admin-teams.ts";
 import { runMinuteTasks } from "./maintenance.ts";
 import { apiOf, referenceTo } from "./notes-client-app.ts";
 import {

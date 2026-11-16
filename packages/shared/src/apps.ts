@@ -756,6 +756,8 @@ export const appErrors = defineErrorFamily({
   "app.blueprint_not_found": "There's no such blueprint.",
   "app.version_not_found": "The App has no such version.",
   "app.too_large": "The App's files would be over its limits.",
+  "app.agents_too_large":
+    "The App's AGENTS.md would be over its limit. Make it shorter.",
   "app.conflict": "Someone else changed this App at the same time. Try again.",
   "app.not_running": "The App has no current version to run yet.",
   "app.link_taken": "Another App has that link. Choose another.",

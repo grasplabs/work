@@ -35,6 +35,7 @@ import type { BuiltinBlueprint } from "#blueprints";
 
 import { versionMadeCurrent } from "./access-revocations.ts";
 import { appsFoundBy, stillOpenTo } from "./app-access.ts";
+import { appMemoryPath } from "./app-agents-file.ts";
 import { generatedPaths, withGeneratedCode } from "./app-definition.ts";
 import { refuseAppWorkflows } from "./app-no-workflows.ts";
 import type { AppRow, StoredDefinition, VersionRow } from "./apps.ts";
@@ -70,7 +71,6 @@ import {
   blueprints,
   permissions,
 } from "./db/core/schema.ts";
-import { appMemoryPath } from "./knowledge/memory-files.ts";
 import {
   declarableOf,
   declaredRequests,
