@@ -1,3 +1,10 @@
+import {
+  brainOf,
+  packItemTokens,
+  recallBudgetMax,
+  vectorModelNameOf,
+} from "@grasp-os/brain-next/contract";
+import { runDurableObjectAlarm } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -22,9 +29,13 @@ import {
   rememberAs,
 } from "../src/brain-next.ts";
 import type { SourceReaders, SourceRef } from "../src/brain-next.ts";
+import { inJurisdiction } from "../src/durable-objects.ts";
+import { embedderModel, questionVectorOf } from "../src/embedder.ts";
 import { turnRecallBudget } from "../src/turn-recall.ts";
+import { recalledByMeaning } from "./brain-next-leaks-harness.ts";
+import { outWord } from "./brain-next-out-reads.ts";
 import { mockIdp } from "./idp.ts";
-import { signedInApi } from "./sign-in.ts";
+import { signedInApi, unique } from "./sign-in.ts";
 
 // How often a chat's first turn is marked as having used what only its
 // person may read (GRA-1944, brain-next.ts `recallOwnedAs`), on a fixed
@@ -244,6 +255,203 @@ describe("how often a chat's first turn is marked", () => {
           })),
         }))
       );
+    }
+  );
+});
+
+/** Most alarms a person's own store may take to embed its passages. */
+const ownAlarmsMost = 50;
+
+/**
+ * Runs `personId`'s own store's alarms until it sleeps with every passage
+ * embedded by the model core runs, as it does on its own once something
+ * is added; fails if it doesn't within `ownAlarmsMost` alarms.
+ */
+const ownEmbedded = async (personId: string): Promise<void> => {
+  const own = inJurisdiction(env, env.BRAIN_STORE).getByName(
+    `person:${personId}`
+  );
+  let awake = true;
+  for (let run = 0; awake && run < ownAlarmsMost; run += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- one alarm after another
+    awake = await runDurableObjectAlarm(own);
+  }
+  const { embedding } = await own.workOverview();
+  if (
+    awake ||
+    !embedding.rebuilt ||
+    embedding.embedded + embedding.unembeddable !== embedding.chunks
+  ) {
+    throw new Error(
+      `The own store wasn't embedded in ${ownAlarmsMost} alarms: ${JSON.stringify(embedding)}`
+    );
+  }
+};
+
+/** `personId`'s first-turn recall of `question` within `tokens`, by meaning. */
+const ownedByMeaning = async (
+  personId: string,
+  question: string,
+  tokens: number
+) => {
+  const { value } = await recalledByMeaning(
+    "a first turn's recall",
+    async () =>
+      await recallOwnedAs(env, personId, {
+        question,
+        budget: { tokens },
+        personal: true,
+      })
+  );
+  return value;
+};
+
+/** The vector core's question embedder gives `question`, asked until it answers in time. */
+const questionVector = async (question: string): Promise<number[]> => {
+  for (let ask = 0; ask < 5; ask += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- one ask after another
+    const embedded = await questionVectorOf(env, question);
+    if (embedded.kind === "vector") {
+      return embedded.vector;
+    }
+  }
+  throw new Error("The question embedder never answered in time");
+};
+
+describe("a chat's first turn, by meaning", () => {
+  it(
+    "marks a turn whose recall finds a passage of the person's own by meaning alone, its words only in the company's",
+    slow,
+    async () => {
+      const person = await signedInApi(idp, "user");
+      const personId = person.userId;
+      const own: SourceRef = { producer: "upload", id: crypto.randomUUID() };
+      await added(own, "Kerstrooster voor de winkel in december.", {
+        kind: "owner",
+        personId,
+      });
+      await ownEmbedded(personId);
+      const word = `w${unique().replaceAll(/\W/gu, "")}`;
+      await added(
+        { producer: "upload", id: crypto.randomUUID() },
+        `The ${word} policy covers travel.`,
+        { kind: "everyone" }
+      );
+
+      const { pack, fromOwn } = await ownedByMeaning(
+        personId,
+        `${word} policy`,
+        recallBudgetMax
+      );
+
+      expect({
+        own: pack.items
+          .filter(({ source }) => source.id === own.id)
+          .map(({ found }) => found),
+        fromOwn,
+      }).toStrictEqual({ own: ["meaning"], fromOwn: true });
+    }
+  );
+
+  it(
+    "marks a turn whose recall the person's own store only reorders: its passage takes a rank by meaning, the budget leaves it out, and the company's passages come in another order",
+    slow,
+    async () => {
+      const person = await signedInApi(idp, "user");
+      const personId = person.userId;
+      // Letters alone: a word with a digit would be an ID, found exactly too.
+      const word = outWord("w");
+      const question = `${word} rota`;
+      // The person's own passage, by meaning alone (it holds no word of
+      // the question), its citation too long for what the budget leaves.
+      const own: SourceRef = { producer: "upload", id: "o".repeat(240) };
+      await added(own, "Kerstrooster voor de winkel in december.", {
+        kind: "owner",
+        personId,
+      });
+      await ownEmbedded(personId);
+      // The company's: two by the question's words, the first holding
+      // both; one by meaning alone; and one by a word, ranked last, whose
+      // citation never fits, so both packs are cut short alike.
+      const company = {
+        first: `${word} rota for the depot.`,
+        second: `${word} notes.`,
+        meant: "Opening hours of the shop.",
+        last: `${word} archive of every older note kept for the record.`,
+      };
+      const ids = {
+        first: crypto.randomUUID(),
+        second: crypto.randomUUID(),
+        meant: crypto.randomUUID(),
+        last: "l".repeat(240),
+      };
+      for (const key of ["first", "second", "meant", "last"] as const) {
+        // oxlint-disable-next-line no-await-in-loop -- added one after another
+        await added({ producer: "upload", id: ids[key] }, company[key], {
+          kind: "everyone",
+        });
+      }
+      // The company's passage by meaning has the one code the shared store
+      // holds: the farthest a vector can be from the question, so the
+      // person's own passage is always nearer.
+      const vector = await questionVector(question);
+      await brainOf(inJurisdiction(env, env.BRAIN_STORE)).putVectors({
+        model: {
+          name: vectorModelNameOf(await embedderModel()),
+          centre: vector.map(() => 0),
+        },
+        vectors: [
+          {
+            chunk: { source: `upload:${ids.meant}`, version: 1, position: 0 },
+            vector: vector.map((value) => -value),
+          },
+        ],
+      });
+      // Room for the three short passages and one token: never for a
+      // citation as long as the person's own, or the last one's.
+      const tokens =
+        (["first", "second", "meant"] as const).reduce(
+          (sum, key) =>
+            sum +
+            packItemTokens({
+              source: `upload:${ids[key]}`,
+              version: 1,
+              position: 0,
+              text: company[key],
+              whole: true,
+              found: "words",
+            }),
+          0
+        ) + 1;
+
+      const { pack, fromOwn } = await ownedByMeaning(
+        personId,
+        question,
+        tokens
+      );
+      const { value: shared } = await recalledByMeaning(
+        "the same turn as their teams",
+        async () =>
+          await recallAs(env, personId, {
+            question,
+            budget: { tokens },
+            personal: false,
+          })
+      );
+      const keyOf = (id: string) =>
+        Object.entries(ids).find(([, each]) => each === id)?.[0] ?? id;
+
+      expect({
+        own: pack.items.map(({ source }) => keyOf(source.id)),
+        shared: shared.items.map(({ source }) => keyOf(source.id)),
+        truncated: [pack.truncated, shared.truncated],
+        fromOwn,
+      }).toStrictEqual({
+        own: ["first", "second", "meant"],
+        shared: ["first", "meant", "second"],
+        truncated: [true, true],
+        fromOwn: true,
+      });
     }
   );
 });

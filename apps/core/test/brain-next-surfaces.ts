@@ -363,7 +363,7 @@ const strangers = (): Access => ({
  * asking it otherwise (`markedDayAsked`) must answer as one asking a day
  * nobody mentions (`absentDayAsked`).
  */
-const markedDay = "13/11/2091";
+export const markedDay = "13/11/2091";
 
 /** A source's text holding every marker, and the marked day. */
 const markedText = (markers: readonly string[]): string =>
@@ -374,7 +374,11 @@ const markedText = (markers: readonly string[]): string =>
  * but for their month: a word of letters, which `echoesHidden` writes as
  * a place in the list like a marker, never touching the places' digits.
  */
-const markedDayAsked = { month: "november", day: "13", year: "2091" } as const;
+export const markedDayAsked = {
+  month: "november",
+  day: "13",
+  year: "2091",
+} as const;
 const absentDayAsked = { month: "december", day: "13", year: "2091" } as const;
 
 /** The same text, past the most bytes a source may have. */
