@@ -173,17 +173,31 @@ interface Dropped {
 /**
  * `tables` ordered so each comes before the tables its foreign keys name
  * (SQLite refuses to drop a table whose parent is gone), each table's
- * parents read from SQLite itself (`pragma_foreign_key_list`).
+ * parents read from SQLite itself: a `PRAGMA foreign_key_list` statement
+ * per table, as D1 allows it. D1 refuses the pragma as a table-valued
+ * function (`pragma_foreign_key_list(…)` in a SELECT: SQLITE_AUTH), as the
+ * admin's e2e stack does.
  */
 const childrenFirst = async (
   database: D1Database,
   tables: readonly Dropped[]
 ): Promise<Dropped[]> => {
-  const { results } = await database
-    .prepare(
-      "SELECT m.name AS child, f.\"table\" AS parent FROM sqlite_master m, pragma_foreign_key_list(m.name) f WHERE m.type = 'table'"
-    )
-    .all<{ child: string; parent: string }>();
+  const lists =
+    tables.length === 0
+      ? []
+      : await database.batch<{ table: string }>(
+          tables.map(({ name }) =>
+            database.prepare(
+              `PRAGMA foreign_key_list("${name.replaceAll('"', '""')}")`
+            )
+          )
+        );
+  const results = tables.flatMap(({ name }, index) =>
+    (lists[index]?.results ?? []).map(({ table }) => ({
+      child: name,
+      parent: table,
+    }))
+  );
   const ordered: Dropped[] = [];
   let left = [...tables];
   while (left.length > 0) {
