@@ -171,7 +171,9 @@ export const heldAppCallsIn = async (
 
 /**
  * The writes for the card of a turn of chat `chatId`, which came through
- * `platform`, for `userId`, oldest first, in `locale`: those connect held
+ * `platform`, for `userId`, oldest first (exactly as asked among writes to
+ * an App; by time across kinds, a connection's first on a tie), in
+ * `locale`: those connect held
  * since `since` (milliseconds since the epoch), and every write to an App
  * still waiting in the chat, whenever it was held. A call the agent makes
  * again while the same request waits is that same hold, held before this

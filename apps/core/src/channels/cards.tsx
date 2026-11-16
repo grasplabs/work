@@ -769,8 +769,11 @@ const groupsOf = (
 
 /**
  * A turn's held writes on as few cards as it takes for each to be decided
- * there, in the order asked. The card to confirm carries the longest
- * prefix, in the order asked, of the writes that lay out whole together
+ * there, in the order asked: `writes` as held.ts lists them, exactly as
+ * asked among writes to an App, and by time across a connection's write
+ * and an App's (a connection's first on a tie). The card to confirm
+ * carries the longest prefix, in that order, of the writes that lay out
+ * whole together
  * (`confirmableOn`: at most `maxWritesOnCard`, measured with a warning
  * line, whether or not the turn has one). Once one write can't join it,
  * every write after it waits too, so none is confirmed ahead of one asked

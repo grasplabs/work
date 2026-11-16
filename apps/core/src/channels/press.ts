@@ -189,6 +189,27 @@ const stillAsShown = async (
 };
 
 /**
+ * The order writes run in, as their card lists them (held.ts
+ * `turnHeldWrites`): by when each was held, a connection's write first on
+ * a tie, then by id. Among writes to an App that is exactly the order
+ * asked (each held later than the one before: `Workspace.holdAppCall`);
+ * across a connection's write and an App's it is by time.
+ */
+const inOrderAsked = (one: StillHeld, other: StillHeld): number => {
+  if (one.at !== other.at) {
+    return one.at - other.at;
+  }
+  const oneIsApp = "chatId" in one;
+  if (oneIsApp !== "chatId" in other) {
+    return oneIsApp ? 1 : -1;
+  }
+  if (one.view.id === other.view.id) {
+    return 0;
+  }
+  return one.view.id < other.view.id ? -1 : 1;
+};
+
+/**
  * Why a Confirm on `held` (a press's writes, as held now) can't run, or
  * null when it can. A card to confirm carries the prefix, in the order
  * asked, of its turn's writes that lay out whole together
@@ -309,15 +330,18 @@ export const pressCard = async (
     return;
   }
   const { identity, person } = member;
-  const held = await stillAsShown(env, { userId, person }, press, {
+  const named = await stillAsShown(env, { userId, person }, press, {
     platform,
     locale,
   });
-  if (held === null) {
+  if (named === null) {
     log.info("channel.press_refused", { platform, reason: "changed" });
     await sayThere(event, "changedSince", locale);
     return;
   }
+  // As their card lists them, whatever order the press names them in
+  // (`inOrderAsked`).
+  const held = named.toSorted(inOrderAsked);
   // As the card showed them, what the model wrote inert (held.ts).
   const writes: HeldWriteView[] = held.map(({ view }) => view);
   // Confirm only what a card to confirm could carry (`notConfirmable`): a

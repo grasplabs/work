@@ -511,6 +511,30 @@ describe("a press on a held write to an App in Teams that mustn't run anything",
   );
 
   it(
+    "runs a confirmed card's writes in the order asked, whatever order the press lists them in",
+    slow,
+    async () => {
+      const a = `a-${unique()}`;
+      const b = `b-${unique()}`;
+      const held = await heldInTeams(undefined, { first: writesNotes([a, b]) });
+      // The card's own writes, listed the other way round.
+      const reversed = JSON.stringify(
+        z
+          .array(z.unknown())
+          .parse(JSON.parse(held.value ?? "[]"))
+          .toReversed()
+      );
+      await post({
+        ...messageFrom(held.person.teams, { text: undefined }),
+        replyToId: held.cardId,
+        value: { actionId: confirmAction, value: reversed },
+      });
+
+      await expect(held.titles()).resolves.toStrictEqual([a, b]);
+    }
+  );
+
+  it(
     "keeps the order asked: once a write can't join the card to confirm, every later one waits too, on a card to cancel that says so, and a Confirm sent with that card's writes runs nothing",
     slow,
     async () => {

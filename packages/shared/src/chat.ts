@@ -502,7 +502,7 @@ const unseenClass = String.raw`\p{Cc}\p{Cf}\p{Co}\p{Cn}\p{Cs}\p{Default_Ignorabl
 
 /**
  * What a question or an option never holds outside a standard emoji
- * (`standardEmoji`): anything nobody sees as text (`unseenClass`) and the
+ * (`withoutStandardEmoji`): anything nobody sees as text (`unseenClass`) and the
  * line and paragraph separators, so it shows as the one line it reads as,
  * and can't pass for something the page itself shows.
  */
@@ -514,12 +514,29 @@ const notInAskLine = new RegExp(`[${unseenClass}\\p{Zl}\\p{Zp}]`, "u");
  * line that asks something may hold one. Only ask lines read it; what a
  * person confirms before it is sent (`shownVisibly`) shows every character
  * nobody sees, inside an emoji too.
+ *
+ * `RGI_Emoji` needs the `v` flag, which not every browser the web build
+ * targets has (Chrome 111, Firefox 114 and 115, Safari 16.4 to 16.6 lack
+ * it), so the pattern is built the first time an ask line is read, never
+ * as this module loads. Where it can't be built, it is `null` and no emoji
+ * is taken out: an ask line holding one is refused, the stricter rule.
  */
-// Built from a string: the `v` flag that `RGI_Emoji` needs is newer than
-// the language level the App compiler type-checks this file at (es2024);
-// every runtime that reads it (workerd, the browsers Grasp supports) has it.
-// oxlint-disable-next-line prefer-regex-literals -- see above
-const standardEmoji = new RegExp(String.raw`\p{RGI_Emoji}`, "gv");
+let standardEmoji: RegExp | null | undefined;
+
+/** `line` with every standard emoji taken out, where the runtime can find them. */
+const withoutStandardEmoji = (line: string): string => {
+  if (standardEmoji === undefined) {
+    try {
+      // From a string: the `v` flag is newer than the language level the
+      // App compiler type-checks this file at.
+      // oxlint-disable-next-line prefer-regex-literals -- see above
+      standardEmoji = new RegExp(String.raw`\p{RGI_Emoji}`, "gv");
+    } catch {
+      standardEmoji = null;
+    }
+  }
+  return standardEmoji === null ? line : line.replaceAll(standardEmoji, "");
+};
 
 /**
  * What a person sees of text that is sent as it is, which they confirm
@@ -561,8 +578,7 @@ const askLine = (max: number) =>
     .regex(unpadded)
     .refine(
       (line) =>
-        !notInAskLine.test(line.replaceAll(standardEmoji, "")) &&
-        line.isWellFormed(),
+        !notInAskLine.test(withoutStandardEmoji(line)) && line.isWellFormed(),
       {
         message:
           "One line of well-formed text, with no control or invisible formatting characters outside a standard emoji",

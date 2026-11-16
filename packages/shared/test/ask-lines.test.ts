@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { chatAskSchema } from "../src/chat.ts";
 
@@ -51,5 +51,46 @@ describe("a question's line", () => {
       payload: taken("Ship it\u{E0101}\u{E0142} today?"),
       loneSelector: taken("Ship it Y️ today?"),
     }).toStrictEqual({ filler: false, payload: false, loneSelector: false });
+  });
+});
+
+describe("a question's line where the runtime can't build the emoji pattern", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.resetModules();
+  });
+
+  it("falls back to the stricter rule: an emoji's selector is refused, plain text taken", async () => {
+    // A browser without the `v` flag, which `RGI_Emoji` needs.
+    vi.stubGlobal(
+      "RegExp",
+      new Proxy(RegExp, {
+        construct: (target, args: [string, string?]) => {
+          if (args[1]?.includes("v") === true) {
+            throw new SyntaxError(
+              "Invalid flags supplied to RegExp constructor"
+            );
+          }
+          return Reflect.construct(target, args);
+        },
+      })
+    );
+    vi.resetModules();
+    const { chatAskSchema: older } = await import("../src/chat.ts");
+    const takenThere = (question: string): boolean =>
+      older.safeParse({
+        questions: [
+          {
+            kind: "choice",
+            question,
+            options: [{ label: "Yes" }, { label: "No" }],
+          },
+        ],
+      }).success;
+
+    expect({
+      heart: takenThere("Ship it \u2764\uFE0F today?"),
+      plain: takenThere("Ship it today?"),
+    }).toStrictEqual({ heart: false, plain: true });
   });
 });

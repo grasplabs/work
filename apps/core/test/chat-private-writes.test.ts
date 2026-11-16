@@ -273,6 +273,37 @@ const copiesNotes =
     says("Done."),
   ];
 
+describe("App writes held in one chat", () => {
+  it("keep the order asked, held in the same millisecond too: each later than the one before", async () => {
+    const { userId } = await signedInApi(idp, "user");
+    const chats = await personalChatsOf(userId);
+    const { chat } = await chats.newChat();
+    const now = Date.now();
+    const holdOf = async (title: string) =>
+      await chats.stub.holdAppCall(
+        chat.id,
+        userId,
+        {
+          agentId: chats.agent.agentId,
+          appId: crypto.randomUUID(),
+          function: "notes.create",
+          kind: "mutation",
+          request: title,
+          requestHash: await sha256Hex(title),
+        },
+        now
+      );
+    const first = await holdOf("first");
+    const second = await holdOf("second");
+    const listed = await chats.stub.heldAppCalls(chat.id, userId, "web", now);
+
+    expect({
+      later: second.heldAt > first.heldAt,
+      listed: listed.map(({ request }) => request),
+    }).toStrictEqual({ later: true, listed: ["first", "second"] });
+  });
+});
+
 describe("what a chat writes for others once it used something only its person may read", () => {
   it(
     "holds a write to an App after recalling the person's own source, runs exactly that request once when they confirm it, and still writes to their own space",
