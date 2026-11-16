@@ -11,7 +11,7 @@ import { Skeleton } from "@grasp-os/ui/components/skeleton";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Link, useRouter, useRouterState } from "@tanstack/react-router";
 import { RotateCcwIcon, SearchXIcon, TriangleAlertIcon } from "lucide-react";
-import { use, useEffect } from "react";
+import { use, useEffect, useEffectEvent } from "react";
 import type { ComponentType, ReactNode, SVGProps } from "react";
 
 import { ErrorText } from "../error-text.tsx";
@@ -140,10 +140,19 @@ export const NotFound = ({
 };
 
 /**
- * Asks for the page again (its loaders read from core once more), while
- * not already `trying`; or, to `reload`, loads Grasp anew.
+ * Asks for the page again (its loaders read from core once more), or for
+ * what a section reads itself (`again`), while not already `trying`; or,
+ * to `reload`, loads Grasp anew.
  */
-const TryAgain = ({ trying, reload }: { trying: boolean; reload: boolean }) => {
+const TryAgain = ({
+  trying,
+  reload,
+  again,
+}: {
+  trying: boolean;
+  reload: boolean;
+  again: (() => void) | undefined;
+}) => {
   const router = useRouter();
   const { t } = useLingui();
   return (
@@ -154,7 +163,11 @@ const TryAgain = ({ trying, reload }: { trying: boolean; reload: boolean }) => {
           window.location.reload();
           return;
         }
-        void router.invalidate();
+        if (again === undefined) {
+          void router.invalidate();
+          return;
+        }
+        again();
       }}
     >
       <RotateCcwIcon data-icon="inline-start" />
@@ -169,6 +182,7 @@ export const ErrorState = ({
   title,
   heading: Heading = "h1",
   reload = false,
+  again,
 }: {
   reason: string | undefined;
   /** What failed; "This page didn't load" without it. */
@@ -177,9 +191,16 @@ export const ErrorState = ({
   heading?: StateHeading;
   /** Whether trying again loads Grasp anew: the page's file is gone after a new release. */
   reload?: boolean;
+  /**
+   * Reads again what a section reads itself, rather than the page's
+   * loaders: what Try again does then.
+   */
+  again?: () => void;
 }) => {
   const { t } = useLingui();
-  const trying = useRouterState({ select: (state) => state.isLoading });
+  const loading = useRouterState({ select: (state) => state.isLoading });
+  // Only the page's own loaders say they are on their way.
+  const trying = again === undefined && loading;
   const inFrame = use(InFrame);
   return (
     <Empty>
@@ -197,7 +218,7 @@ export const ErrorState = ({
       </EmptyHeader>
       <EmptyContent>
         <div className="flex flex-wrap justify-center gap-2">
-          <TryAgain reload={reload} trying={trying} />
+          <TryAgain again={again} reload={reload} trying={trying} />
           {offersChat(Heading, inFrame) ? <GoToChat /> : null}
         </div>
       </EmptyContent>
@@ -231,26 +252,40 @@ export const PageError = ({
 };
 
 /**
- * Reads the page again once core can be reached, while `page` says its read
- * found core out of reach: at once when a connection is open already (it
- * answered since the read failed, or the read alone hung), otherwise as
- * soon as the next one answers. So "can't be reached" stays only while core
- * can't be; a read that fails again waits for the connection after.
+ * Reads again once core can be reached, while `page` says its read found
+ * core out of reach: the page's loaders, or what a section reads itself
+ * (`again`). At once when a connection is open already (it answered since
+ * the read failed, or the read alone hung), otherwise as soon as the next
+ * one answers. So "can't be reached" stays only while core can't be; a
+ * read that fails again waits for the connection after. A refusal, or
+ * something core doesn't have, is core's answer: never read again.
  */
-const useReadAgainWhenBack = (page: Loaded<unknown>): void => {
+const useReadAgainWhenBack = (
+  page: Loaded<unknown>,
+  again?: () => void
+): void => {
   const router = useRouter();
   const core = useCore();
   const offline = page.state === "offline";
-  useEffect(() => {
-    const again = (): void => {
+  // The latest `again`, which a section may make anew at each render.
+  const readAgain = useEffectEvent((): void => {
+    if (again === undefined) {
       void router.invalidate();
-    };
-    const stop = offline ? core.onConnected(again) : undefined;
+      return;
+    }
+    again();
+  });
+  useEffect(() => {
+    const stop = offline
+      ? core.onConnected(() => {
+          readAgain();
+        })
+      : undefined;
     if (offline && core.connected) {
-      again();
+      readAgain();
     }
     return stop;
-  }, [core, offline, router]);
+  }, [core, offline]);
 };
 
 /**
@@ -291,18 +326,28 @@ export const NotLoadedState = ({
   notFound,
   icon,
   heading,
+  again,
 }: {
   page: Exclude<Loaded<unknown>, { state: "ready" }>;
   notFound?: string;
   icon?: StateIcon;
   heading?: StateHeading;
+  /**
+   * Reads it again, for a section that reads it itself rather than the
+   * page's loaders: on Try again, and once core is back.
+   */
+  again?: () => void;
 }) => {
   const { i18n } = useLingui();
-  useReadAgainWhenBack(page);
+  useReadAgainWhenBack(page, again);
   return page.state === "missing" ? (
     <NotFoundState heading={heading} icon={icon} title={notFound} />
   ) : (
-    <ErrorState heading={heading} reason={notLoadedText(page, i18n)} />
+    <ErrorState
+      again={again}
+      heading={heading}
+      reason={notLoadedText(page, i18n)}
+    />
   );
 };
 

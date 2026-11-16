@@ -2466,4 +2466,29 @@ describe(AppWorkspace, () => {
       shown: { preview: true, lineOver: true },
     });
   });
+
+  it("shows the preview without the line under the bar when who uses the App can't be read", async () => {
+    const core = new PreviewingCore(undefined, deskOfVersion1);
+    socketsTo(core);
+    const fake = fakeApps({ sharedWith: [memberOf("team", "t-fin")] });
+    // Who uses it is lost on the way, as a dropped connection loses it.
+    fake.apps.members.list = async () => {
+      await Promise.resolve();
+      throw new Error("Peer closed WebSocket: 1006");
+    };
+    await opened(
+      fake.apps,
+      identityOf(false),
+      "chat-members-lost",
+      async () => await Promise.resolve(watching())
+    );
+    await act(async () => {
+      await core.reached;
+    });
+    await settled();
+    expect({
+      preview: document.querySelector("iframe") !== null,
+      line: changesLine() !== null,
+    }).toStrictEqual({ preview: true, line: false });
+  });
 });

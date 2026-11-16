@@ -56,7 +56,7 @@ import {
   showsUnpublishedChanges,
   UnpublishedChanges,
 } from "../drafts/share-with-team.tsx";
-import { memberNames, useMembers } from "../drafts/sharing.tsx";
+import { memberNames, useMembersRead } from "../drafts/sharing.tsx";
 import { StatusBadge } from "../drafts/status-badge.tsx";
 import { hasChanges, useDraft } from "../drafts/use-draft.ts";
 import { ErrorText } from "../error-text.tsx";
@@ -70,6 +70,7 @@ import { LoadingLines } from "../frame/page-states.tsx";
 import { SettingUp, SettingUpBar, Updating } from "../frame/setting-up.tsx";
 import type { SetUp } from "../frame/setting-up.tsx";
 import type { Crumb } from "../frame/site-header.tsx";
+import type { Loaded } from "../load-from-core.tsx";
 import { PageFrame } from "../pages/page-frame.tsx";
 import type { FrameFix } from "../pages/page-frame.tsx";
 import { useVersionPushes } from "../pages/use-version-pushes.ts";
@@ -374,12 +375,13 @@ const PreviewState = ({
  * Over the preview, once a call of it was refused as its test data
  * doesn't fit the draft's data model: core applies the change to the
  * test data only once it is reset (core's sealed-previews.ts), in Data.
- * Over its foot, never in a row above it: it comes with a call the
- * person made, or a write of Grasp's, and goes at the draft's next write,
- * so a row would move the page under their pointer each time.
+ * Over its bottom corner, never in a row above it: it comes with a call
+ * the person made, or a write of Grasp's, and goes at the draft's next
+ * write, so a row would move the page under their pointer each time; a
+ * corner leaves the rest of the page's foot to use.
  */
 const StaleTestData = ({ app }: { app: string }) => (
-  <div className="animate-in fade-in-0 absolute inset-x-3 bottom-3 motion-reduce:animate-none">
+  <div className="animate-in fade-in-0 absolute right-3 bottom-3 max-w-sm motion-reduce:animate-none">
     <Alert variant="attention">
       <TriangleAlertIcon />
       <AlertTitle>
@@ -1016,9 +1018,10 @@ const useReadAgainOnNewBase = (app: App, base: number | null | undefined) => {
  * Whether the line of changes only its builders see shows under the bar
  * (`changesLine`), over the builders' own version (`mine`), and the draft
  * the preview shows (`previewed`): none until whether the line shows is
- * known, the first time. That waits on who uses the App, read apart from
- * the draft, and a line coming in once the preview shows would push the
- * page down under the person's pointer.
+ * known, the first time. That waits on who uses the App (`members`),
+ * read apart from the draft, while that read is on its way: a line coming
+ * in once the preview shows would push the page down under the person's
+ * pointer. A read that failed shows the preview without the line.
  */
 const useChangesLine = ({
   app,
@@ -1028,7 +1031,7 @@ const useChangesLine = ({
 }: {
   app: App;
   draft: Draft | undefined;
-  members: readonly SubjectMember[] | undefined;
+  members: Loaded<SubjectMember[]> | undefined;
   mine: boolean;
 }): { changesLine: boolean; previewed: Draft | undefined } => {
   const waits =
@@ -1040,9 +1043,10 @@ const useChangesLine = ({
   if (!known && draft !== undefined && !waits) {
     setKnown(true);
   }
+  const shared = members?.state === "ready" ? members.data : [];
   return {
     changesLine:
-      mine && showsUnpublishedChanges(app.currentVersion, draft, members ?? []),
+      mine && showsUnpublishedChanges(app.currentVersion, draft, shared),
     previewed: known ? draft : undefined,
   };
 };
@@ -1082,7 +1086,8 @@ const Building = ({
   // Whom it is shared with: who uses it, and whom Share adds to, read
   // again each time it is shared from here.
   const [shares, setShares] = useState(0);
-  const members = useMembers({ kind: "app", id: app.id }, shares);
+  const membersRead = useMembersRead({ kind: "app", id: app.id }, shares);
+  const members = membersRead?.state === "ready" ? membersRead.data : undefined;
   const { setUp, onFrame } = useSetUp({
     app,
     shown,
@@ -1096,7 +1101,7 @@ const Building = ({
   const { changesLine, previewed } = useChangesLine({
     app,
     draft,
-    members,
+    members: membersRead,
     mine: !theirs && sharesApp(app, identity),
   });
   return (

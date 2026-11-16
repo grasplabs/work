@@ -12,12 +12,14 @@ import {
   RouterProvider,
   useRouterState,
 } from "@tanstack/react-router";
+import type { AnyRoute } from "@tanstack/react-router";
 import type { RpcStub } from "capnweb";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
+import { WorkKnowledgeTab } from "../brain/work-knowledge.tsx";
 import { CoreConnection } from "../core-connection.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
@@ -197,10 +199,14 @@ describe("where a page can't stand", () => {
 /** How each connection after the first does: answers, or fails as core down does. */
 type Attempt = "answers" | "down";
 
-/** A tab on a stand-in core, its connections after the first doing as `attempts` says. */
-const tabOnCore = (attempts: Attempt[]) => {
+/**
+ * A tab on a stand-in core, its connections after the first doing as
+ * `attempts` says. On the first, every read drops the connection, or, given
+ * `refusal`, is refused with that code, core's answer.
+ */
+const tabOnCore = (attempts: Attempt[], refusal?: string) => {
   const breaks: (() => void)[] = [];
-  const reads = { apps: 0 };
+  const reads = { apps: 0, work: 0 };
   let connections = 0;
   let back: (() => void) | undefined;
   const core = new CoreConnection({
@@ -214,18 +220,38 @@ const tabOnCore = (attempts: Attempt[]) => {
       connections += 1;
       const connection = connections;
       const attempt = connection === 1 ? "answers" : attempts[connection - 2];
+      /** `answer`, unless this is the first connection. */
+      const read = async <T,>(answer: T): Promise<T> => {
+        await Promise.resolve();
+        if (connection === 1 && refusal !== undefined) {
+          throw Object.assign(new Error("Refused."), { code: refusal });
+        }
+        if (connection === 1) {
+          // The socket drops: what was on its way fails without a code.
+          breaks[0]?.();
+          throw new Error("Peer closed WebSocket: 1006");
+        }
+        return answer;
+      };
       const session = {
         whoami: async () => await Promise.resolve({ userId: "ada" }),
         apps: {
           list: async () => {
             reads.apps += 1;
-            await Promise.resolve();
-            if (connection === 1) {
-              // The socket drops: what was on its way fails without a code.
-              breaks[0]?.();
-              throw new Error("Peer closed WebSocket: 1006");
-            }
-            return [{ name: "Invoices" }];
+            return await read([{ name: "Invoices" }]);
+          },
+        },
+        brain: {
+          work: async (id: string) => {
+            reads.work += 1;
+            return await read({
+              id,
+              name: "Invoicing",
+              sentences: [],
+              confidence: "heard",
+              canAskMore: false,
+              moreAsked: false,
+            });
           },
         },
       };
@@ -245,7 +271,8 @@ const tabOnCore = (attempts: Attempt[]) => {
         },
       };
       // SAFETY: the tab reaches only `authenticate`, `whoami`,
-      // `apps.list`, `onRpcBroken` and disposal, which this stand-in has.
+      // `apps.list`, `brain.work`, `onRpcBroken` and disposal, which this
+      // stand-in has.
       // oxlint-disable-next-line typescript/no-unsafe-type-assertion, anti-slop/no-chained-type-assertions -- see SAFETY
       return stub as unknown as RpcStub<CoreApi>;
     },
@@ -259,42 +286,21 @@ const tabOnCore = (attempts: Attempt[]) => {
     await settled();
     await settled();
   };
-  return { core, reads, online };
+  /** The first connection drops, with nothing on its way. */
+  const drop = (): void => {
+    breaks[0]?.();
+  };
+  return { core, reads, online, drop, connections: () => connections };
 };
 
 /** Whether `data`, a route's loader data, is what the Apps page read. */
 const isRead = (data: unknown): data is Loaded<{ name: string }[]> =>
   typeof data === "object" && data !== null && "state" in data;
 
-/** The page listing Ada's Apps, read over `core`, shown with what it read. */
-const appsPage = async (core: CoreConnection) => {
-  const rootRoute = createRootRoute({ component: Outlet });
-  const Apps = () => {
-    const page: unknown = useRouterState({
-      select: ({ matches }) => matches.at(-1)?.loaderData,
-    });
-    if (!isRead(page)) {
-      return null;
-    }
-    return page.state === "ready" ? (
-      <h1>{page.data.map(({ name }) => name).join(",")}</h1>
-    ) : (
-      <PageNotLoaded crumbs={[{ label: "Apps" }]} page={page} />
-    );
-  };
+/** `routeTree` over `core`, rendered in the frame. */
+const render = async (core: CoreConnection, routeTree: AnyRoute) => {
   const router = createRouter({
-    routeTree: rootRoute.addChildren([
-      createRoute({
-        getParentRoute: () => rootRoute,
-        path: "/",
-        loader: async () =>
-          await loadFromCore(
-            core,
-            async (session) => await session.apps.list()
-          ),
-        component: Apps,
-      }),
-    ]),
+    routeTree,
     history: createMemoryHistory({ initialEntries: ["/"] }),
     context: { core },
   });
@@ -314,6 +320,54 @@ const appsPage = async (core: CoreConnection) => {
     await router.load();
   });
   await settled();
+};
+
+/** A page that reads for itself: a piece of work's Knowledge tab. */
+const workPage = async (core: CoreConnection) => {
+  const rootRoute = createRootRoute({ component: Outlet });
+  await render(
+    core,
+    rootRoute.addChildren([
+      createRoute({
+        getParentRoute: () => rootRoute,
+        path: "/",
+        component: () => <WorkKnowledgeTab work="invoicing" />,
+      }),
+    ])
+  );
+};
+
+/** The page listing Ada's Apps, read over `core`, shown with what it read. */
+const appsPage = async (core: CoreConnection) => {
+  const rootRoute = createRootRoute({ component: Outlet });
+  const Apps = () => {
+    const page: unknown = useRouterState({
+      select: ({ matches }) => matches.at(-1)?.loaderData,
+    });
+    if (!isRead(page)) {
+      return null;
+    }
+    return page.state === "ready" ? (
+      <h1>{page.data.map(({ name }) => name).join(",")}</h1>
+    ) : (
+      <PageNotLoaded crumbs={[{ label: "Apps" }]} page={page} />
+    );
+  };
+  await render(
+    core,
+    rootRoute.addChildren([
+      createRoute({
+        getParentRoute: () => rootRoute,
+        path: "/",
+        loader: async () =>
+          await loadFromCore(
+            core,
+            async (session) => await session.apps.list()
+          ),
+        component: Apps,
+      }),
+    ])
+  );
 };
 
 describe("a page that found Grasp out of reach", () => {
@@ -344,4 +398,46 @@ describe("a page that found Grasp out of reach", () => {
       back: { heading: "Invoices", reads: 2 },
     });
   });
+
+  it("reads a part it reads itself again too, once Grasp answers, rather than the page", async () => {
+    const { core, reads, online } = tabOnCore(["answers"]);
+    await workPage(core);
+    const dropped = {
+      unreachable: document.body.textContent?.includes("can't be reached"),
+      reads: reads.work,
+    };
+    await online();
+    expect({
+      dropped,
+      back: {
+        shown: document.body.textContent?.includes(
+          "Grasp knows nothing about this work in its own words yet."
+        ),
+        reads: reads.work,
+      },
+    }).toStrictEqual({
+      dropped: { unreachable: true, reads: 1 },
+      back: { shown: true, reads: 2 },
+    });
+  });
+
+  it.each([
+    ["refused", "role.forbidden"],
+    ["not found", "app.not_found"],
+  ])(
+    "never reads a page core answered %s again as its connection comes back",
+    async (_answer, code) => {
+      const { core, reads, online, drop, connections } = tabOnCore(
+        ["answers"],
+        code
+      );
+      await appsPage(core);
+      drop();
+      await online();
+      expect({ connections: connections(), reads: reads.apps }).toStrictEqual({
+        connections: 2,
+        reads: 1,
+      });
+    }
+  );
 });

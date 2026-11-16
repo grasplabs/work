@@ -403,14 +403,14 @@ const FrameTop = ({
  * What a frame with no bar of its own (`bare`) is doing, while it does:
  * over its corner, never in a row above it, which would come and go as
  * the page works and move the page under the person's pointer while they
- * use it.
+ * use it. It has nothing to press, so clicks go through it to the page.
  */
 const FrameNotice = ({ state }: { state: PageState }) => {
   if (!saysSomething(state)) {
     return null;
   }
   return (
-    <div className="animate-in fade-in-0 absolute top-3 right-3 max-w-sm motion-reduce:animate-none print:hidden">
+    <div className="animate-in fade-in-0 pointer-events-none absolute top-3 right-3 max-w-sm motion-reduce:animate-none print:hidden">
       <Alert live="polite">
         {state.status === "fixing" ? <Spinner /> : <InfoIcon />}
         <AlertTitle>
