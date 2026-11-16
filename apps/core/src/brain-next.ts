@@ -5291,7 +5291,8 @@ const codeAttributes = attributeNames.filter(
 
 /** A fact App code remembers (`rememberForAppAs`). */
 const codeRememberSchema = z.strictObject({
-  about: memoryAboutSchema,
+  // Never a person's own entity: App code writes to the shared store.
+  about: memoryAboutSchema.omit({ own: true }),
   attribute: z.enum(codeAttributes).optional(),
   value: memoryText(valueMaxLength).optional(),
   statement: memoryText(statementMaxLength),

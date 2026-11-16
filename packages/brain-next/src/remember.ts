@@ -28,7 +28,7 @@ import {
   lineageOfWriter,
   stampWrite,
 } from "./memories.ts";
-import { ownEntityRow } from "./own-entity.ts";
+import { isOwnEntityRow, ownEntityRow } from "./own-entity.ts";
 import { CurrentTextsNeededError, heldIn, judgeLate } from "./quotes.ts";
 import type { CurrentText, CurrentTexts, Written } from "./quotes.ts";
 import { accessOfKey, readerSetKeyOf, readerSetOf } from "./reader-sets.ts";
@@ -191,6 +191,16 @@ const entityRowsOf = (
         !mayName(sql, known.row, readers, reader)
       ) {
         throw refused(`entity ${index} names no entity of its kind`);
+      }
+      // The store's own entity, named by its id, takes no name or
+      // identifier either: no evidence may ever find it (own-entity.ts).
+      if (
+        isOwnEntityRow(sql, known.row) &&
+        (entity.names.length > 0 || entity.identifiers.length > 0)
+      ) {
+        throw refused(
+          `entity ${index}: the own entity is a person named by nothing else`
+        );
       }
       ({ row } = known);
     }

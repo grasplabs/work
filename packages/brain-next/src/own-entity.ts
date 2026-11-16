@@ -15,6 +15,12 @@ export const ownEntityId = (sql: SqlStorage): EntityId | null =>
     .toArray()
     .at(0)?.id ?? null;
 
+/** Whether the entity at `row` is the store's own entity. */
+export const isOwnEntityRow = (sql: SqlStorage, row: number): boolean =>
+  sql
+    .exec("SELECT 1 FROM own_entity WHERE id = 1 AND entity = ?", row)
+    .toArray().length > 0;
+
 /**
  * The row of the store's own entity: the one it has, or else a new
  * `person` made now. Run inside an add's transaction, so two first adds
