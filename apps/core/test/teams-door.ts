@@ -328,7 +328,7 @@ export const kept = async (conversation: string) => {
 export const memberAnsweredBy = async (
   idp: Idp,
   provider: FakeProvider,
-  role: "user" | "builder" = "user"
+  role: "user" | "builder" | "admin" = "user"
 ) => {
   const signedIn = await signedInApi(idp, role);
   const { oid } = signedIn.person;

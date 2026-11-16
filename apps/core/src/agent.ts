@@ -15,7 +15,6 @@ import { z } from "zod";
 
 import { docsSection } from "./agent-docs.ts";
 import type { AgentApi, AgentScope } from "./agent-scope.ts";
-import { withoutLinks } from "./channels/stephen-rules.ts";
 import type { ChannelText } from "./channels/stephen-rules.ts";
 import { describeRun, runCode, sourceHash } from "./code-mode.ts";
 import type { CodeRun } from "./code-mode.ts";
@@ -875,22 +874,6 @@ export const withheldAssistant = (
     ],
   };
 };
-
-/**
- * `message` with no links in its text, as a chat platform's chat keeps
- * and shows the agent's own words (`withoutLinks`); others as they are.
- */
-export const inOwnWords = (message: Message): Message =>
-  message.role === "assistant"
-    ? {
-        ...message,
-        content: message.content.map((block) =>
-          block.type === "text"
-            ? { ...block, text: withoutLinks(block.text) }
-            : block
-        ),
-      }
-    : message;
 
 /** The text of an answer, its thinking and calls left out. */
 export const textOf = (message: AssistantMessage | undefined): string =>

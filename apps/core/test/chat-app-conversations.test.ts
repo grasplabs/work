@@ -6,6 +6,7 @@ import { z } from "zod";
 
 import { appKind } from "../src/apps.ts";
 import { drainObjectOutbox } from "../src/audit-outbox.ts";
+import { inertOn } from "../src/channels/inert.ts";
 import { chatAgentId, personalWorkspaceId } from "../src/chats-rpc.ts";
 import { keepMadeInChat } from "../src/drafts.ts";
 import { workspace } from "../src/durable-objects.ts";
@@ -341,9 +342,11 @@ describe("a conversation with the agent in Teams", setUpTime, () => {
     });
   });
 
-  it("gets an answer too long for one message whole, over several, and no message links to a chat in Grasp", async () => {
-    // Posted whole where nothing streams: a group chat's thread.
-    const sentence = "The quarter's invoices were paid on time. ";
+  it("gets an answer too long for one message whole and inert, over several, and no message links to a chat in Grasp", async () => {
+    // Posted whole where nothing streams: a group chat's thread. Full of
+    // what a card would read as a link, which each piece breaks.
+    const sentence =
+      "Tom & Jerry's <b>invoices</b> are at [the list](https://e.test). ";
     const answer = Array.from(
       { length: 30 },
       (_, at) => `${at}. ${sentence.repeat(40).trim()}`
@@ -369,9 +372,15 @@ describe("a conversation with the agent in Teams", setUpTime, () => {
       .join("");
     expect({
       several: messages.length > 1,
-      whole: ink(shown).includes(ink(answer)),
+      whole: ink(shown).includes(ink(inertOn("teams")(answer))),
+      linkForm: shown.includes("]("),
       linksToChat: said.includes("?chat="),
-    }).toStrictEqual({ several: true, whole: true, linksToChat: false });
+    }).toStrictEqual({
+      several: true,
+      whole: true,
+      linkForm: false,
+      linksToChat: false,
+    });
   });
 
   it("counts toward no cap on chats: a person with as many chat-app conversations as the cap still starts a chat in Grasp, and is answered in Teams", async () => {

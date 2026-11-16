@@ -13,6 +13,7 @@ import {
 import type { CardElement, PostableCard } from "chat";
 import { z } from "zod";
 
+import { inertOn } from "./inert.ts";
 import { say } from "./words.ts";
 import type { ChannelLocale, LineName } from "./words.ts";
 
@@ -134,8 +135,10 @@ const cardOf = (element: unknown): CardElement => {
 /** An answer, as a chat app shows it. */
 export interface AnswerCard {
   locale: ChannelLocale;
-  /** The answer, in Markdown. */
+  /** The answer, in Markdown, as the model wrote it. */
   text: string;
+  /** The platform it goes to, whose own syntax its pieces are made inert in. */
+  platform: string;
   /**
    * The request the answer is for (stephen-requests.ts), where the person
    * can rate it with a thumb: Helpful or Not helpful.
@@ -166,19 +169,32 @@ const RateButtons = ({
         </Button>,
       ];
 
-/** Whether a piece of an answer fits one section of a card. */
-const fitsSection = (piece: string): boolean => {
-  const sent = convertEmojiPlaceholders(piece, "slack");
-  return (
-    sent.length <= sectionChars &&
-    sizeOf(sent) <= outsideBytes &&
-    sizeOf(piece) <= outsideBytes
-  );
-};
+/**
+ * What a piece of an answer is on `platform`, as its card carries it: made
+ * inert (inert.ts), which can make it longer (Slack's `&` is `&amp;`), and
+ * that again as the adapter names its emoji in it. A piece is cut from the
+ * answer as the model wrote it and measured as these, never cut from the
+ * inert text, where a cut could part an escape such as `&lt;`.
+ */
+const sentOn =
+  (platform: string) =>
+  (piece: string): readonly string[] => {
+    const inert = inertOn(platform)(piece);
+    return [
+      inert,
+      convertEmojiPlaceholders(inert, platform === "slack" ? "slack" : "teams"),
+    ];
+  };
 
-/** What a piece costs a card, in bytes as JSON, as either platform is sent it. */
-const costOf = (piece: string): number =>
-  Math.max(sizeOf(piece), sizeOf(convertEmojiPlaceholders(piece, "slack")));
+/** Whether every form a piece is sent in fits one section of a card. */
+const fitsSection = (forms: readonly string[]): boolean =>
+  forms.every(
+    (form) => form.length <= sectionChars && sizeOf(form) <= outsideBytes
+  );
+
+/** What a piece costs a card, in bytes as JSON, in the largest form it is sent in. */
+const costOf = (forms: readonly string[]): number =>
+  Math.max(...forms.map((form) => sizeOf(form)));
 
 /** Where UTF-16 keeps the second half of a surrogate pair. */
 const lowSurrogates = { from: 0xdc_00, to: 0xdf_ff };
@@ -243,9 +259,15 @@ const largestFitting = (
  * stretch of the text, so the work grows with the text alone, whatever it
  * holds. Fenced code is not repaired: Slack, which shows fences, reads them
  * its own way, and a block longer than a section is cut like any text.
+ * Each piece is measured as `platform` is sent it (`sentOn`).
  */
-export const piecesOf = (text: string, locale: ChannelLocale): string[] => {
-  if (fitsSection(text)) {
+export const piecesOf = (
+  text: string,
+  locale: ChannelLocale,
+  platform: string
+): string[] => {
+  const sent = sentOn(platform);
+  if (fitsSection(sent(text))) {
     return [text];
   }
   const paragraphs = Array.from(
@@ -262,13 +284,16 @@ export const piecesOf = (text: string, locale: ChannelLocale): string[] => {
   let paragraph = 0;
   while (start < text.length) {
     const from = start;
-    if (text.length - from <= sectionChars && fitsSection(text.slice(from))) {
+    if (
+      text.length - from <= sectionChars &&
+      fitsSection(sent(text.slice(from)))
+    ) {
       pieces.push(text.slice(from));
       break;
     }
     // The stretch a section could hold, and where each kind of cut falls.
     const window = text.slice(from, from + sectionChars);
-    const fits = (cut: number) => fitsSection(text.slice(from, cut));
+    const fits = (cut: number) => fitsSection(sent(text.slice(from, cut)));
     while ((paragraphs[paragraph] ?? Number.POSITIVE_INFINITY) <= from) {
       paragraph += 1;
     }
@@ -317,31 +342,36 @@ export const piecesOf = (text: string, locale: ChannelLocale): string[] => {
 
 /**
  * An answer, labelled as made by AI where the platform has a label for it
- * (Teams), whole: as many cards as it takes, each within what the platform
- * takes in one message, its text cut only where a paragraph or a sentence
- * ends (`piecesOf`), in order, and the thumbs under the last.
+ * (Teams), whole and inert on `platform`: as many cards as it takes, each
+ * within what the platform takes in one message, its text cut as the model
+ * wrote it, only where a paragraph or a sentence ends (`piecesOf`), each
+ * piece made inert after the cut (inert.ts), in order, and the thumbs under
+ * the last.
  */
 export const answerCards = ({
   locale,
   text,
+  platform,
   rate,
 }: AnswerCard): PostableCard[] => {
+  const sent = sentOn(platform);
+  const inert = inertOn(platform);
   const cards: string[][] = [];
   let room = 0;
-  for (const piece of piecesOf(text, locale)) {
+  for (const piece of piecesOf(text, locale, platform)) {
     // Only white space where a cut fell before blank lines: nothing to show,
     // and a section of nothing else Slack may refuse.
     if (onlyWhiteSpace.test(piece)) {
       continue;
     }
-    const cost = costOf(piece);
+    const cost = costOf(sent(piece));
     const last = cards.at(-1);
     if (last === undefined || cost > room) {
-      cards.push([piece]);
+      cards.push([inert(piece)]);
       room = outsideBytes - cost;
       continue;
     }
-    last.push(piece);
+    last.push(inert(piece));
     room -= cost;
   }
   return cards.map((pieces, at) => {
@@ -359,20 +389,32 @@ export const answerCards = ({
 };
 
 /**
- * The thumbs for an answer the person saw streamed as text, sent right
- * after it, labelled as made by AI like the answer.
+ * An answer still being written, as its card shows it until the answer
+ * is whole (answer.ts): its words so far, labelled as made by AI, and the
+ * words the card shows of them. Text past what the platform takes is cut.
  */
-export const ratingCard = ({
-  locale,
-  rate,
-}: Pick<AnswerCard, "locale" | "rate">): PostableCard => {
+export const draftCard = (
+  text: string
+): { posted: PostableCard; shown: string } => {
+  const { text: shown } = fit(text, Number.POSITIVE_INFINITY, {
+    left: outsideBytes,
+  });
   const card = (
     <Card>
-      <Actions>{RateButtons({ locale, rate })}</Actions>
+      <CardText>{shown}</CardText>
     </Card>
   );
-  return { card: cardOf(card), aiGenerated: true };
+  return { posted: { card: cardOf(card), aiGenerated: true }, shown };
 };
+
+/** One of Stephen's lines on a card of its own. */
+export const lineCard = (line: string): PostableCard => ({
+  card: cardOf(
+    <Card>
+      <CardText>{line}</CardText>
+    </Card>
+  ),
+});
 
 /** Where a held write is: waiting for the press, or as the press ran it. */
 export type WriteState =
@@ -616,14 +658,18 @@ export interface StartOfferCard {
   /** Its id in `chat_workflow_offers`, which the press names. */
   offerId: string;
   workflow: string;
-  /** The values it starts with, each whole (workflow-offers.ts). */
+  /** The values it starts with, as the platform gets them (workflow-offers.ts). */
   values: readonly { label: string; value: string }[];
 }
 
 /**
  * A workflow offered on a card: its name, each value it would start with,
  * and Start, whose press names only the offer, so it starts exactly what
- * the card showed, and only for the person it was offered to.
+ * the card showed, and only for the person it was offered to. Start is on
+ * the card only while its name and every value are on it whole, as shown
+ * (`workflow` and `values` as the platform gets them, made inert, which
+ * can make them longer): otherwise the card says so, and nothing starts
+ * from it.
  */
 export const startOfferCard = ({
   locale,
@@ -632,14 +678,17 @@ export const startOfferCard = ({
   values,
 }: StartOfferCard): PostableCard => {
   const room: Room = { left: outsideBytes };
-  const name = fit(workflow, maxTitleChars, room).text;
-  const shown = values.map((each) => ({
-    label: fit(each.label, maxLabelChars, room).text,
-    value: fit(each.value, Number.POSITIVE_INFINITY, room).text,
-  }));
+  const name = fit(workflow, maxTitleChars, room);
+  let { whole } = name;
+  const shown = values.map((each) => {
+    const label = fit(each.label, maxLabelChars, room);
+    const value = fit(each.value, Number.POSITIVE_INFINITY, room);
+    whole &&= label.whole && value.whole;
+    return { label: label.text, value: value.text };
+  });
   const card = (
     <Card>
-      <CardText>{say("startOffer", locale, { workflow: name })}</CardText>
+      <CardText>{say("startOffer", locale, { workflow: name.text })}</CardText>
       {shown.length === 0 ? null : (
         <Fields>
           {shown.map(({ label, value }, at) => (
@@ -647,11 +696,15 @@ export const startOfferCard = ({
           ))}
         </Fields>
       )}
-      <Actions>
-        <Button id={startAction} style="primary" value={offerId}>
-          {say("startButton", locale)}
-        </Button>
-      </Actions>
+      {whole ? (
+        <Actions>
+          <Button id={startAction} style="primary" value={offerId}>
+            {say("startButton", locale)}
+          </Button>
+        </Actions>
+      ) : (
+        <CardText>{say("startTooLong", locale)}</CardText>
+      )}
     </Card>
   );
   return { card: cardOf(card), aiGenerated: true };

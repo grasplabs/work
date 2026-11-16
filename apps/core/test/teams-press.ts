@@ -13,10 +13,15 @@ import { member, messageFrom, post, reached } from "./teams-door.ts";
 // sends them, for the press's tests (channels-press.test.ts).
 
 /**
- * A member whose Teams turn held two mails, to Ben then to Cleo, on a mail
- * server that answers as `plan` says; and the card that turn sent.
+ * A member whose Teams turn held two mails, to Ben then to Cleo, with
+ * `subjects`, on a mail server that answers as `plan` says; and the card
+ * that turn sent.
  */
-export const heldTurn = async (idp: Idp, plan: MailAnswer[] = []) => {
+export const heldTurn = async (
+  idp: Idp,
+  plan: MailAnswer[] = [],
+  subjects: readonly [string, string] = ["Invoice INV-7", "Reminder"]
+) => {
   const admin = await signedInApi(idp, "admin");
   // A send whose fields its server lists, so core can check a chat app's
   // write against them (channels/stephen-rules.ts).
@@ -33,7 +38,7 @@ export const heldTurn = async (idp: Idp, plan: MailAnswer[] = []) => {
   const person = await member(
     idp,
     codeStep(
-      `export default async (self, env) => { ${send("ben@acme.test", "Invoice INV-7")} ${send("cleo@acme.test", "Reminder")} return "held"; };`
+      `export default async (self, env) => { ${send("ben@acme.test", subjects[0])} ${send("cleo@acme.test", subjects[1])} return "held"; };`
     ),
     says("Both mails wait for you to confirm them.")
   );

@@ -8,7 +8,7 @@ import { z } from "zod";
 
 import {
   answerCards,
-  ratingCard,
+  draftCard,
   cancelAction,
   confirmAction,
   heldWritesCard,
@@ -23,6 +23,7 @@ import type {
   PressOutcome,
   WriteState,
 } from "../src/channels/cards.tsx";
+import { inertOn } from "../src/channels/inert.ts";
 import {
   channelLocales,
   fill,
@@ -250,21 +251,38 @@ const outcomes: PressOutcome[] = [
   "changedSince",
 ];
 
+/** The chat apps an answer goes to, each made inert its own way. */
+const platforms = ["teams", "slack"] as const;
+
 /** Every card Stephen sends, small and as large as it gets, in each language. */
 const everyCard = channelLocales.flatMap((locale) => [
-  ...answerCards({
-    locale,
-    text: "You have a call with Jan at 10:00.",
-    rate: crypto.randomUUID(),
-  }).map((card, at) => ({ name: `answer ${at} (${locale})`, card })),
-  ...answerCards({
-    locale,
-    text: heavy(200_000),
-    rate: crypto.randomUUID(),
-  }).map((card, at) => ({ name: `largest answer ${at} (${locale})`, card })),
+  ...platforms.flatMap((platform) => [
+    ...answerCards({
+      locale,
+      text: "You have a call with Jan at 10:00.",
+      platform,
+      rate: crypto.randomUUID(),
+    }).map((card, at) => ({
+      name: `answer ${at} on ${platform} (${locale})`,
+      card,
+    })),
+    ...answerCards({
+      locale,
+      text: heavy(200_000),
+      platform,
+      rate: crypto.randomUUID(),
+    }).map((card, at) => ({
+      name: `largest answer ${at} on ${platform} (${locale})`,
+      card,
+    })),
+  ]),
   {
-    name: `rating (${locale})`,
-    card: ratingCard({ locale, rate: crypto.randomUUID() }),
+    name: `answer being written (${locale})`,
+    card: draftCard("You have a call with Jan").posted,
+  },
+  {
+    name: `largest answer being written (${locale})`,
+    card: draftCard(heavy(200_000)).posted,
   },
   {
     name: `one held write (${locale})`,
@@ -598,13 +616,20 @@ const cardBytes = (text: string): number =>
   new TextEncoder().encode(JSON.stringify(text)).length - 2;
 
 /** What is wrong with `pieces` of `text`: none of it, for pieces as they must be. */
-const wrongWith = (text: string, pieces: readonly string[]) => ({
-  joinedBack: pieces.join("") === text,
-  empty: pieces.filter((piece) => piece === "").length,
-  tooLarge: pieces.filter(
-    (piece) => piece.length > 3000 || cardBytes(piece) > 16 * 1024
-  ).length,
-});
+const wrongWith = (
+  text: string,
+  pieces: readonly string[],
+  platform: string
+) => {
+  const sent = pieces.map((piece) => inertOn(platform)(piece));
+  return {
+    joinedBack: pieces.join("") === text,
+    empty: pieces.filter((piece) => piece === "").length,
+    tooLarge: sent.filter(
+      (piece) => piece.length > 3000 || cardBytes(piece) > 16 * 1024
+    ).length,
+  };
+};
 
 const allRight = { joinedBack: true, empty: 0, tooLarge: 0 };
 
@@ -612,14 +637,20 @@ describe("an answer in pieces", () => {
   it("keeps every character where it was, indentation and blank lines too, when it fits one message", () => {
     const text =
       "Here:\n\n```python\ndef f():\n    x = 1\n\n    return x\n```\n\n- a\n\n  - nested b";
-    expect(piecesOf(text, "en")).toStrictEqual([text]);
+    expect(
+      platforms.map((platform) => piecesOf(text, "en", platform))
+    ).toStrictEqual([[text], [text]]);
   });
 
   it("joins back to exactly the answer, with no piece empty and each within a section, for answers of every kind", () => {
     const answers = Array.from({ length: 60 }, (_, at) => answerFrom(at + 1));
     expect(
-      answers.map((text) => wrongWith(text, piecesOf(text, "en")))
-    ).toStrictEqual(answers.map(() => allRight));
+      platforms.flatMap((platform) =>
+        answers.map((text) =>
+          wrongWith(text, piecesOf(text, "en", platform), platform)
+        )
+      )
+    ).toStrictEqual(platforms.flatMap(() => answers.map(() => allRight)));
   });
 
   it("never cuts inside a character cluster, wherever the cluster falls against a section's end", () => {
@@ -639,7 +670,7 @@ describe("an answer in pieces", () => {
             Array.from(graphemes.segment(text), ({ index }) => index)
           );
           let at = 0;
-          for (const piece of piecesOf(text, "en").slice(0, -1)) {
+          for (const piece of piecesOf(text, "en", "slack").slice(0, -1)) {
             at += piece.length;
             if (!boundaries.has(at)) {
               inside.push(offset);
@@ -663,16 +694,22 @@ describe("an answer in pieces", () => {
       // One character cluster longer than a section: a letter and its marks.
       cluster: `a${"\u0301".repeat(5000)} and after`,
       pairs: "😀".repeat(5000),
+      // What each platform escapes or breaks, which makes a piece longer.
+      escapes: "Tom & Jerry <b>said</b> [x](https://e.test) ".repeat(2000),
     };
     expect(
-      Object.fromEntries(
-        Object.entries(hostile).map(([name, text]) => [
-          name,
-          wrongWith(text, piecesOf(text, "en")),
-        ])
+      platforms.map((platform) =>
+        Object.fromEntries(
+          Object.entries(hostile).map(([name, text]) => [
+            name,
+            wrongWith(text, piecesOf(text, "en", platform), platform),
+          ])
+        )
       )
     ).toStrictEqual(
-      Object.fromEntries(Object.keys(hostile).map((name) => [name, allRight]))
+      platforms.map(() =>
+        Object.fromEntries(Object.keys(hostile).map((name) => [name, allRight]))
+      )
     );
   });
 });
@@ -685,9 +722,11 @@ describe("Stephen's cards in Slack", () => {
     };
     const shown = Object.fromEntries(
       Object.entries(answers).map(([name, text]) => {
-        const sections = answerCards({ locale: "en", text }).flatMap((card) =>
-          sectionTexts(card)
-        );
+        const sections = answerCards({
+          locale: "en",
+          text,
+          platform: "slack",
+        }).flatMap((card) => sectionTexts(card));
         return [
           name,
           {
@@ -706,9 +745,11 @@ describe("Stephen's cards in Slack", () => {
 
   it("measures an answer as Slack is sent it, emoji names and all, so none of it is cut", () => {
     const text = "{{emoji:chart_up}} ".repeat((64 * 1024) / 19);
-    const sections = answerCards({ locale: "en", text }).flatMap((card) =>
-      sectionTexts(card)
-    );
+    const sections = answerCards({
+      locale: "en",
+      text,
+      platform: "slack",
+    }).flatMap((card) => sectionTexts(card));
     expect({
       lengthened: convertEmojiPlaceholders(text, "slack").length > text.length,
       eachWithin: sections.every((section) => section.length <= 3000),
@@ -726,8 +767,9 @@ describe("Stephen's cards in Slack", () => {
     // And one paragraph that is a single sentence too long for any message.
     const text = [...paragraphs, "x".repeat(40_000)].join("\n\n");
     const rate = crypto.randomUUID();
-    const cards = answerCards({ locale: "de", text, rate });
-    const inSlack = cards.map((card) => sectionTexts(card));
+    const cards = answerCards({ locale: "de", text, platform: "teams", rate });
+    const slackCards = answerCards({ locale: "de", text, platform: "slack" });
+    const inSlack = slackCards.map((card) => sectionTexts(card));
     const teams = cards.map((card) => inTeams(card));
     const shownInTeams = teams.flatMap(({ texts }) => texts).join("");
     const pieces = inSlack.flat();
@@ -738,7 +780,7 @@ describe("Stephen's cards in Slack", () => {
         (card) =>
           JSON.stringify(withinTeams(card)) === JSON.stringify(allWithin)
       ),
-      withinSlack: cards.every((card) => pastSlack(card).length === 0),
+      withinSlack: slackCards.every((card) => pastSlack(card).length === 0),
       wholeInTeams: ink(shownInTeams) === ink(text),
       wholeInSlack: ink(pieces.join("")) === ink(text),
       // Each piece ends where a sentence or paragraph does, but for the

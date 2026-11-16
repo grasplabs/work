@@ -3,10 +3,7 @@ import { workspaceIdSchema } from "@grasp-os/shared/ids";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import {
-  heldWriteRefusal,
-  withoutLinks,
-} from "../src/channels/stephen-rules.ts";
+import { heldWriteRefusal } from "../src/channels/stephen-rules.ts";
 import { workspace } from "../src/durable-objects.ts";
 import {
   codeResults,
@@ -277,13 +274,12 @@ describe("a chat app's writes", setUpTime, () => {
 });
 
 describe("a chat app's answers", setUpTime, () => {
-  it("keep no link of the model's own, a note's neither, and the mark of the text it answered by", async () => {
-    const set = await setUp(
-      "teams",
-      says(
-        "The figures are in [the Q3 report](https://evil.test/q3) and [Q3](grasp:note/doc-1), see https://evil.test/more."
-      )
-    );
+  it("keep the model's words as written, and the mark of the text it answered by", async () => {
+    // Made inert where they are posted (channels/inert.ts), never
+    // rewritten where they are kept.
+    const written =
+      "The figures are in [the Q3 report](https://evil.test/q3) and [Q3](grasp:note/doc-1), see https://evil.test/more.";
+    const set = await setUp("teams", says(written));
     const answer = await set.ask("Where are the Q3 figures?");
     const messages = await transcript(set.stub, set.chat.id);
     const kept = messages.flatMap((message) =>
@@ -295,7 +291,6 @@ describe("a chat app's answers", setUpTime, () => {
     );
     // The model was told the mark with the channel's rules.
     const [request] = set.provider.requests;
-    const shown = "The figures are in the Q3 report and Q3, see.";
     expect({
       answer: answer.answer,
       kept,
@@ -303,59 +298,12 @@ describe("a chat app's answers", setUpTime, () => {
         `<channel mark=\\"${answer.channelText}\\">`
       ),
       mark: answer.channelText?.length,
-    }).toStrictEqual({ answer: shown, kept: [shown], marked: true, mark: 64 });
-  });
-
-  // Each title quoting of a note link and of an outside link, as main
-  // posted them before the cutover (`shownText` over `withoutLinks`): the
-  // PR body's table.
-  it("keep a note link's words alone whatever its title's quoting, the same in the answer and in the chat", async () => {
-    const forms = [
-      ["[the policy](grasp:note/doc-1)", "the policy"],
-      ['[the policy](grasp:note/doc-1 "Leave policy")', "the policy"],
-      ["[the policy](grasp:note/doc-1 'Leave policy')", "the policy"],
-      ["[the policy](grasp:note/doc-1 (Leave policy))", "the policy"],
-      ["[the HR page](https://evil.test/hr)", "the HR page"],
-      ['[the HR page](https://evil.test/hr "HR")', "the HR page"],
-      ["[the HR page](https://evil.test/hr 'HR')", "[the HR page]( 'HR')"],
-      ["[the HR page](https://evil.test/hr (HR))", "[the HR page]( (HR))"],
-    ] as const;
-    const written = forms.map(([form]) => `See ${form}.`).join("\n");
-    const shown = forms.map(([, words]) => `See ${words}.`).join("\n");
-    const set = await setUp("teams", says(written));
-    const answer = await set.ask("Where is the leave policy?");
-    const messages = await transcript(set.stub, set.chat.id);
-    const kept = messages.flatMap((message) =>
-      message.role === "assistant"
-        ? message.content.flatMap((block) =>
-            block.type === "text" ? [block.text] : []
-          )
-        : []
-    );
-    expect({ answer: answer.answer, kept }).toStrictEqual({
-      answer: shown,
-      kept: [shown],
+    }).toStrictEqual({
+      answer: written,
+      kept: [written],
+      marked: true,
+      mark: 64,
     });
-  });
-});
-
-describe("Stephen's own words", () => {
-  it("lose every link, Grasp's own too, keeping each one's words", () => {
-    expect(
-      [
-        "Open [it](https://evil.test) now.",
-        "Mail <mailto:ben@acme.test> or www.evil.test today.",
-        "![a picture](grasp:note/doc-1) of [Q3](grasp:note/doc-2)",
-      ].map(withoutLinks)
-    ).toStrictEqual(["Open it now.", "Mail or today.", "a picture of Q3"]);
-  });
-
-  it("are left as they are where there was no link", () => {
-    const words = [
-      "Merci ! Le rapport est prêt : voyez-le.",
-      "Steps:\n  1. Open the report\n      2. Check Q3",
-    ];
-    expect(words.map(withoutLinks)).toStrictEqual(words);
   });
 });
 

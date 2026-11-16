@@ -12,7 +12,6 @@ import { say } from "../src/channels/words.ts";
 import { chatAgentId } from "../src/chats-rpc.ts";
 import { codeStep, says } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
-import { botConnectorStreamsUrl } from "./connect-providers.ts";
 import { heldFor } from "./held-in-connect.ts";
 import { mockIdp } from "./idp.ts";
 import { mailConnection } from "./mail-connection.ts";
@@ -22,7 +21,6 @@ import {
   member,
   messageFrom,
   post,
-  providers,
   reached,
   watched,
 } from "./teams-door.ts";
@@ -237,12 +235,8 @@ describe("a Teams turn that holds writes", setUpTime, () => {
       says(answer)
     );
     const { conversation } = person.teams;
-    // Posted whole, as where Teams refuses a stream; and its second part
-    // refused, once.
-    await providers().fetch(botConnectorStreamsUrl, {
-      method: "POST",
-      body: JSON.stringify({ refuse: conversation }),
-    });
+    // Its first part is the card it was written into; its second, posted
+    // after it, refused, once.
     await failsOnce(conversation, "SECOND-PART");
 
     await post(

@@ -20,7 +20,7 @@ import type {
   PressOutcome,
   WriteState,
 } from "./cards.tsx";
-import { memberOf, viewOf } from "./held.ts";
+import { inertView, memberOf, viewOf } from "./held.ts";
 import { pressedChanges } from "./stephen-requests.ts";
 import { say } from "./words.ts";
 import type { ChannelLocale } from "./words.ts";
@@ -180,7 +180,10 @@ export const pressCard = async (
     await sayThere(event, "changedSince", locale);
     return;
   }
-  const writes: HeldWriteView[] = held.map(viewOf);
+  // As the card showed them, what the model wrote inert (held.ts).
+  const writes: HeldWriteView[] = held
+    .map(viewOf)
+    .map((write) => inertView(platform, write));
   const shown = (outcome?: PressOutcome) => ({
     locale,
     writes,

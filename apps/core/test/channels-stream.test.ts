@@ -1,8 +1,14 @@
+import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
+import { z } from "zod";
 
-import { pausedReply, says } from "./agent-chat.ts";
-import { botConnectorStreamsUrl } from "./connect-providers.ts";
+import { inTeams } from "../src/channels/inert.ts";
+import { chatAgentId, personalWorkspaceId } from "../src/chats-rpc.ts";
+import { workspace } from "../src/durable-objects.ts";
+import { keptAnswersOf, pausedReply, says } from "./agent-chat.ts";
+import { botConnectorEditsUrl } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
+import type { ProviderReply } from "./model-provider.ts";
 import {
   member,
   messageFrom,
@@ -12,11 +18,16 @@ import {
   watched,
 } from "./teams-door.ts";
 
-// An answer streamed into a member's private Teams chat as the model
-// writes it (src/channels/answer.ts), through Microsoft's own streaming:
-// typing activities that carry the text so far, then the whole answer,
-// then its sources. Where Teams refuses the stream, typing and the whole
-// answer follow as before.
+// An answer written into a member's private Teams chat as the model
+// writes its words (src/channels/answer.ts): one Adaptive Card, posted
+// once there are words to show and then updated in place, never a second
+// message and never Teams' own stream. Every update is the model's words
+// so far with each link form a card reads broken (src/channels/inert.ts),
+// so no update leads anywhere, wherever a chunk ends; the last is the
+// whole answer, kept as the model wrote it. An update Teams refuses
+// leaves the card as it was; a turn that fails ends the card as Stephen's
+// line, on a card. Each step waits for what the card shows, never on the
+// clock: the model's stream stops at each pause until let go.
 
 const idp = mockIdp();
 
@@ -25,84 +36,369 @@ watched();
 /** Signing people in and granting permissions can be slow on CI. */
 const setUpTime = { timeout: 60_000 };
 
-const answer =
-  "Parental leave lasts sixteen weeks. You take it in one go, or in two parts, and you tell your manager a month before.";
+/** What a Teams activity carries that these tests read. */
+const activitySchema = z
+  .object({
+    type: z.string(),
+    text: z.string().optional(),
+    attachments: z
+      .array(
+        z
+          .object({
+            content: z
+              .object({
+                body: z
+                  .array(z.object({ text: z.string().optional() }).loose())
+                  .optional(),
+              })
+              .loose()
+              .optional(),
+          })
+          .loose()
+      )
+      .optional(),
+    entities: z
+      .array(z.object({ streamType: z.string().optional() }).loose())
+      .optional(),
+  })
+  .loose();
 
-/** The streamed parts of what Teams was sent in `conversation`, in order. */
-const streamedIn = async (conversation: string) => {
-  const { activities } = await reached(conversation);
-  return activities.filter((activity) =>
-    JSON.stringify(activity).includes('"streamType":"streaming"')
-  );
+/**
+ * The messages Teams was sent in `conversation`, in order: each one's id,
+ * the id it updated if it is an update, whether it is a card, and the
+ * words it shows (its card's first text, or its own text).
+ */
+const messagesIn = async (conversation: string) => {
+  const { sent } = await reached(conversation);
+  return sent.flatMap(({ activity, id, editOf }) => {
+    const {
+      type,
+      attachments,
+      text,
+      entities = [],
+    } = activitySchema.parse(activity);
+    // Not the card offering their own Microsoft 365 (connect-own.ts).
+    if (
+      (type !== "message" && editOf === undefined) ||
+      JSON.stringify(activity).includes("/connect-microsoft")
+    ) {
+      return [];
+    }
+    const cardText = attachments?.[0]?.content?.body?.[0]?.text;
+    return [
+      {
+        id,
+        editOf,
+        card: cardText !== undefined,
+        words: cardText ?? text ?? "",
+        streamed: entities.some(({ streamType }) => streamType !== undefined),
+      },
+    ];
+  });
 };
 
-describe("a member's answer", setUpTime, () => {
-  it("streams in order, then ends as the whole answer", async () => {
-    const { reply, release } = pausedReply(says(answer), 40);
-    const { teams } = await member(idp, reply);
+/** Every text a Teams activity's card shows, in order. */
+const textsOf = (activity: unknown): string[] =>
+  activitySchema
+    .parse(activity)
+    .attachments?.flatMap(
+      ({ content }) =>
+        content?.body?.flatMap(({ text }) =>
+          text === undefined ? [] : [text]
+        ) ?? []
+    ) ?? [];
+
+/** Waits, within a bound, for the card in `conversation` to show `words`. */
+const cardShows = async (conversation: string, words: string) => {
+  await expect
+    .poll(
+      async () => {
+        const messages = await messagesIn(conversation);
+        return messages.at(-1)?.words;
+      },
+      { timeout: 15_000, message: `the card to show ${JSON.stringify(words)}` }
+    )
+    .toBe(words);
+};
+
+/** Each pause of a reply, and a way to let it go. */
+const pausesAt = (points: readonly number[]) =>
+  points.map((at) => {
+    const until = Promise.withResolvers<boolean>();
+    const stopped = Promise.withResolvers<boolean>();
+    return {
+      pause: {
+        at,
+        until: until.promise,
+        reached: () => {
+          stopped.resolve(true);
+        },
+      },
+      /** Settles once the model's stream stopped here. */
+      reached: stopped.promise,
+      release: () => {
+        until.resolve(true);
+      },
+    };
+  });
+
+/** Where a card's text would still read as an inline link or a definition. */
+const linkForm = /\]\(|\]:/u;
+
+/** Consecutive repeats of `words` taken out: what the card showed in turn. */
+const inTurn = (words: readonly string[]): string[] =>
+  words.filter((each, at) => each !== words[at - 1]);
+
+describe("an answer written into its card", setUpTime, () => {
+  it("is one card updated in place, no link form standing at any chunk's end, the last update whole, and kept as written", async () => {
+    const answer = [
+      'Leave lasts [sixteen weeks](https://evil.com/leave?d=secret "t") in all.',
+      "Ask [your lead][lead] first.",
+      "[lead]: https://evil.com/lead",
+    ].join("\n\n");
+    // Mid-label, right after a label's `]`, mid-address, inside a
+    // reference, and before its definition's `:`: the card shows the
+    // words so far, each link form broken.
+    const stops = [
+      answer.indexOf("weeks]"),
+      answer.indexOf("](https://evil.com/leave") + 1,
+      answer.indexOf("evil.com/leave"),
+      answer.indexOf("][lead]") + 1,
+      answer.indexOf("]: https") + 1,
+    ];
+    const pauses = pausesAt(stops);
+    const reply: ProviderReply = {
+      ...says(answer),
+      pause: pauses.map(({ pause }) => pause),
+    };
+    const { userId, teams } = await member(idp, reply);
 
     const posting = post(messageFrom(teams, { text: "How does leave work?" }));
-    // Its first words show while the model still writes.
-    await expect
-      .poll(async () => await streamedIn(teams.conversation), {
-        timeout: 15_000,
-      })
-      .not.toHaveLength(0);
-    release();
+    for (const [index, at] of stops.entries()) {
+      // oxlint-disable-next-line no-await-in-loop -- chunk by chunk
+      await cardShows(teams.conversation, inTeams(answer.slice(0, at)));
+      pauses[index]?.release();
+    }
     await posting;
 
-    const streamed = await streamedIn(teams.conversation);
-    const texts = streamed.map(({ text }) => text ?? "");
-    expect(answer.startsWith(texts[0] ?? "-")).toBeTruthy();
-    // Each update holds the one before it: the answer, in order.
-    for (const [index, text] of texts.entries()) {
-      expect(text.startsWith(texts[index - 1] ?? "")).toBeTruthy();
-    }
-    const { activities } = await reached(teams.conversation);
-    const messages = activities.filter(({ type }) => type === "message");
-    const [whole] = messages.map((each) => JSON.stringify(each));
+    const messages = await messagesIn(teams.conversation);
+    const [card] = messages;
     expect({
-      text: messages[0]?.text,
-      final: whole?.includes('"streamType":"final"'),
-      aiLabel: whole?.includes("AIGeneratedContent"),
+      // Its first post, then updates of that card alone, showing in turn
+      // what each chunk's end showed, then the whole answer.
+      firstIsAPost: card?.editOf === undefined,
+      updatesOfIt: messages.slice(1).every(({ editOf }) => editOf === card?.id),
+      shown: inTurn(messages.map(({ words }) => words)),
+      streamed: messages.some(({ streamed }) => streamed),
+      linkForms: messages.filter(({ words }) => linkForm.test(words)),
+      kept: await keptAnswersOf(userId),
     }).toStrictEqual({
-      text: answer,
-      final: true,
-      aiLabel: true,
+      firstIsAPost: true,
+      updatesOfIt: true,
+      shown: inTurn(
+        [...stops.map((at) => answer.slice(0, at)), answer].map(inTeams)
+      ),
+      streamed: false,
+      linkForms: [],
+      kept: [[answer]],
     });
   });
 
-  it("follows typing as a whole answer when Teams refuses the stream", async () => {
-    const { reply, release } = pausedReply(says(answer), 40);
-    const { teams } = await member(idp, reply);
-    await providers().fetch(botConnectorStreamsUrl, {
-      method: "POST",
-      body: JSON.stringify({ refuse: teams.conversation }),
+  it("shows no more than a card takes while written, then ends as the answer's first card, the rest posted after it in order, nothing twice", async () => {
+    const answer = "Leave lasts sixteen weeks. ".repeat(800);
+    // Past what one card takes (cards.tsx), then chunk after chunk that
+    // changes nothing it shows. That an update showing what the card
+    // shows already is never sent holds by construction (answer.ts
+    // `cardInto`): here, without a clock, one skipped can't be told from
+    // one the throttles merged.
+    const pauses = pausesAt([18_000, 19_000, 20_000, 21_000]);
+    const { teams } = await member(idp, {
+      ...says(answer),
+      pause: pauses.map(({ pause }) => pause),
     });
 
     const posting = post(messageFrom(teams, { text: "How does leave work?" }));
     await expect
       .poll(
         async () => {
-          const { activities } = await reached(teams.conversation);
-          return activities.map(({ type }) => type);
+          const messages = await messagesIn(teams.conversation);
+          return messages.at(-1)?.words.endsWith("…");
         },
-        { timeout: 15_000 }
+        { timeout: 15_000, message: "the card to show all it takes" }
       )
-      .toContain("typing");
-    release();
+      .toBe(true);
+    for (const [index, pause] of pauses.entries()) {
+      pause.release();
+      // oxlint-disable-next-line no-await-in-loop -- chunk by chunk
+      await pauses[index + 1]?.reached;
+    }
     await posting;
 
-    const { activities } = await reached(teams.conversation);
-    const messages = activities
-      .filter(({ type }) => type === "message")
+    const messages = await messagesIn(teams.conversation);
+    const [card] = messages;
+    const { sent } = await reached(teams.conversation);
+    // The answer as it ended: the card's last update, then what was posted
+    // after it, each card's every text.
+    const last = sent.findLastIndex(({ editOf }) => editOf === card?.id);
+    const ended = sent
+      .slice(last)
+      .filter(({ editOf }, at) => at === 0 || editOf === undefined)
       // Not the card offering their own Microsoft 365 (connect-own.ts).
       .filter(
-        (activity) => !JSON.stringify(activity).includes("/connect-microsoft")
+        ({ activity }) =>
+          !JSON.stringify(activity).includes("/connect-microsoft")
       )
-      .map((each) => JSON.stringify(each));
-    expect(messages).toHaveLength(1);
-    expect(messages[0]).toContain(answer);
-    await expect(streamedIn(teams.conversation)).resolves.toStrictEqual([]);
+      .map(({ activity }) => textsOf(activity).join(""));
+    expect({
+      // The card as cut while written, then the answer's first card in its
+      // place, then the rest posted: no update in between.
+      sends: messages.slice(0, 2).map(({ editOf }) => editOf),
+      postedAfter: messages.slice(2).map(({ editOf }) => editOf ?? "posted"),
+      cut: card?.words.endsWith("…"),
+      several: ended.length > 1,
+      whole:
+        ended.join("").replaceAll(/\s/gu, "") === answer.replaceAll(/\s/gu, ""),
+      postedOnce: new Set(ended).size === ended.length,
+    }).toStrictEqual({
+      sends: [undefined, card?.id],
+      postedAfter: ended.slice(1).map(() => "posted"),
+      cut: true,
+      several: true,
+      whole: true,
+      postedOnce: true,
+    });
+  });
+
+  it("keeps its card as it was when Teams refuses an update, and still ends it whole", async () => {
+    const answer =
+      "Parental leave lasts sixteen weeks. You take it in one go, or in two parts.";
+    const at = answer.indexOf("You take");
+    const [pause] = pausesAt([at]);
+    const { userId, teams } = await member(idp, {
+      ...says(answer),
+      pause: pause?.pause,
+    });
+
+    const posting = post(messageFrom(teams, { text: "How does leave work?" }));
+    await cardShows(teams.conversation, answer.slice(0, at));
+    await providers().fetch(botConnectorEditsUrl, {
+      method: "POST",
+      body: JSON.stringify({ conversation: teams.conversation, count: 1 }),
+    });
+    pause?.release();
+    await posting;
+
+    const messages = await messagesIn(teams.conversation);
+    const [first] = messages;
+    expect({
+      shown: inTurn(messages.map(({ words }) => words)),
+      posts: messages.filter(({ editOf }) => editOf === undefined).length,
+      kept: await keptAnswersOf(userId),
+    }).toStrictEqual({
+      shown: [answer.slice(0, at), answer],
+      posts: 1,
+      kept: [[answer]],
+    });
+    expect(messages.at(-1)?.editOf).toBe(first?.id);
+  });
+
+  it("posts the answer whole, once, when Teams refuses every try of its card's last update", async () => {
+    const answer =
+      "Parental leave lasts sixteen weeks. You take it in one go, or in two parts.";
+    const at = answer.indexOf("You take");
+    const [pause] = pausesAt([at]);
+    const { teams } = await member(idp, {
+      ...says(answer),
+      pause: pause?.pause,
+    });
+
+    const posting = post(messageFrom(teams, { text: "How does leave work?" }));
+    await cardShows(teams.conversation, answer.slice(0, at));
+    await providers().fetch(botConnectorEditsUrl, {
+      method: "POST",
+      body: JSON.stringify({ conversation: teams.conversation, count: 100 }),
+    });
+    pause?.release();
+    await posting;
+
+    const messages = await messagesIn(teams.conversation);
+    const posts = messages.filter(
+      ({ editOf, words }) =>
+        editOf === undefined && words.startsWith("Parental")
+    );
+    expect(posts.map(({ words }) => words)).toStrictEqual([
+      answer.slice(0, at),
+      answer,
+    ]);
+  });
+
+  it("ends its card as Stephen's line, on a card, when the turn fails after its first words", async () => {
+    const words = "Let me look [that](https://evil.com/x) up.";
+    const [pause] = pausesAt([words.length]);
+    const { teams } = await member(
+      idp,
+      {
+        text: words,
+        toolCalls: [
+          {
+            id: `call_${crypto.randomUUID()}`,
+            name: "executeCode",
+            arguments: { code: "export default async () => 1;" },
+          },
+        ],
+        inputTokens: 200,
+        outputTokens: 40,
+        pause: pause?.pause,
+      },
+      { status: 500, errorType: "api_error" }
+    );
+
+    const posting = post(messageFrom(teams, { text: "Look it up." }));
+    await cardShows(teams.conversation, inTeams(words));
+    pause?.release();
+    await posting;
+
+    const messages = await messagesIn(teams.conversation);
+    const [card] = messages;
+    const last = messages.findLast(({ editOf }) => editOf === card?.id);
+    expect({
+      posts: messages
+        .filter(({ editOf }) => editOf === undefined)
+        .map(({ words: shown }) => shown),
+      last: [last?.card, last?.words],
+    }).toStrictEqual({
+      posts: [inTeams(words)],
+      last: [
+        true,
+        "Something went wrong, and I couldn't answer. Try again in a moment.",
+      ],
+    });
+  });
+
+  it("says Stephen's line, once, when the turn is refused before any words", async () => {
+    // A turn of the chat's under way, held before its answer, so the
+    // person's message is refused as the chat being busy.
+    const { reply, release } = pausedReply(says("Still on it."), 3);
+    const { userId, teams, provider } = await member(idp, reply);
+    const first = workspace(env, personalWorkspaceId(userId)).askThrough(
+      userId,
+      chatAgentId,
+      "teams",
+      "What's on today?",
+      undefined,
+      { kind: "direct" }
+    );
+    await expect
+      .poll(() => provider.requests.length, { timeout: 15_000 })
+      .toBe(1);
+
+    await post(messageFrom(teams, { text: "How does leave work?" }));
+    release();
+    await first;
+
+    const messages = await messagesIn(teams.conversation);
+    expect(messages.map(({ words, editOf }) => [words, editOf])).toStrictEqual([
+      ["The AI model is busy right now. Try again in a minute.", undefined],
+    ]);
   });
 });

@@ -442,6 +442,14 @@ const lines = {
     fr: "Lancer",
     es: "Iniciar",
   },
+  /** Under an offer whose values its card can't show in full: no Start. */
+  startTooLong: {
+    en: "This card can't show every value in full, so it can't be started here. Ask me again with shorter values, or start it in Grasp.",
+    nl: "Deze kaart kan niet elke waarde volledig laten zien, dus je kunt hem hier niet starten. Vraag het me opnieuw met kortere waarden, of start hem in Grasp.",
+    de: "Diese Karte kann nicht jeden Wert vollständig zeigen, deshalb kann es hier nicht gestartet werden. Fragen Sie mich noch einmal mit kürzeren Werten, oder starten Sie es in Grasp.",
+    fr: "Cette carte ne peut pas montrer chaque valeur en entier, il ne peut donc pas être lancé ici. Redemandez-le-moi avec des valeurs plus courtes, ou lancez-le dans Grasp.",
+    es: "Esta tarjeta no puede mostrar cada valor completo, así que no se puede iniciar aquí. Vuelve a pedírmelo con valores más cortos, o inícialo en Grasp.",
+  },
   /** Once the press started the run. */
   started: {
     en: "I started {workflow} for you. I'll tell you here when it has finished.",
