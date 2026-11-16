@@ -66,6 +66,14 @@ const slackBlocksPerMessage = 50;
  */
 const slackFieldChars = 2000 - 3;
 
+/**
+ * The most characters a button's value carries: Block Kit's limit for a
+ * button's `value`, past which Slack refuses the message. A press names
+ * its card's writes in it, so a card names no more than fit (Teams has no
+ * smaller limit, and a card is held to both).
+ */
+const buttonValueChars = 2000;
+
 /** The most held writes one card shows; more can't be confirmed on it. */
 export const maxWritesOnCard = 10;
 
@@ -577,6 +585,14 @@ const checkLine = (check: ReadCheck, locale: ChannelLocale, room: Room) =>
         where: fit(check.where, maxTitleChars, room).text,
       });
 
+/** What a press on a card of `writes` carries: each write's id and hash, a write to an App's with its chat. */
+const pressOfWrites = (writes: readonly HeldWriteView[]): string =>
+  JSON.stringify(
+    writes.map(({ id, inputHash, chatId }) =>
+      chatId === undefined ? { id, inputHash } : { id, inputHash, chatId }
+    )
+  );
+
 /**
  * `writes` as a card on `platform` lays them out, in `locale`, within the
  * card's room: what it shows of each, what a press carries (the writes it
@@ -591,14 +607,12 @@ const laidOut = ({
 }: Pick<HeldWritesCard, "locale" | "platform" | "writes" | "check">) => {
   const room: Room = { left: outsideBytes };
   const shown = writes.slice(0, maxWritesOnCard);
-  const press = JSON.stringify(
-    shown.map(({ id, inputHash, chatId }) =>
-      chatId === undefined ? { id, inputHash } : { id, inputHash, chatId }
-    )
-  );
+  const press = pressOfWrites(shown);
+  // A press that names more than a button carries can't be on the card.
+  const pressFits = press.length <= buttonValueChars;
   room.left -= sizeOf(press);
   const warning = check === undefined ? null : checkLine(check, locale, room);
-  let whole = shown.length === writes.length;
+  let whole = shown.length === writes.length && pressFits;
   const steps = shown.map((write, index) => {
     const title = fit(write.title, maxTitleChars, room);
     const values = write.values.slice(0, maxValuesPerWrite).map((each) => {
@@ -613,7 +627,7 @@ const laidOut = ({
     whole &&= title.whole && values.length === write.values.length;
     return { write, number: index + 1, title: title.text, values };
   });
-  return { shown, press, warning, steps, whole };
+  return { shown, press, pressFits, warning, steps, whole };
 };
 
 /**
@@ -646,14 +660,16 @@ export const heldWritesCard = ({
   if (writes.length === 0) {
     throw new Error("A card of held writes needs at least one write");
   }
-  const { shown, press, warning, steps, whole } = laidOut({
+  const { shown, press, pressFits, warning, steps, whole } = laidOut({
     locale,
     platform,
     writes,
     check,
   });
   const cancellable =
-    outcome === undefined && shown.every((write) => write.state === "held");
+    pressFits &&
+    outcome === undefined &&
+    shown.every((write) => write.state === "held");
   const pressable = whole && cancellable && !cancelOnly;
   const card = (
     <Card>
@@ -710,7 +726,8 @@ export const heldWritesCard = ({
  * A turn's held writes on as few cards as it takes for each to be decided
  * there, in the order they run: first one card of those that can be
  * confirmed together (at most `maxWritesOnCard`, each whole: `laidOut`),
- * then the rest, `maxWritesOnCard` a card, with Cancel alone. So a write no
+ * then the rest, with Cancel alone, as many a card as a press can name
+ * (`maxWritesOnCard`, `buttonValueChars`). So a write no
  * card can show whole, or one past the first card's ten, never takes
  * Confirm from the others, and every one has a Cancel. How many cards that
  * is is bounded by what waits: a write held for an App lapses after a day,
@@ -736,10 +753,20 @@ export const heldWritesCards = ({
       rest.push(write);
     }
   }
-  const cancelOnly = Array.from(
-    { length: Math.ceil(rest.length / maxWritesOnCard) },
-    (_, at) => rest.slice(at * maxWritesOnCard, (at + 1) * maxWritesOnCard)
-  );
+  // As many a card as one card names in a press: one write always fits.
+  const cancelOnly: HeldWriteView[][] = [];
+  for (const write of rest) {
+    const last = cancelOnly.at(-1);
+    if (
+      last !== undefined &&
+      last.length < maxWritesOnCard &&
+      pressOfWrites([...last, write]).length <= buttonValueChars
+    ) {
+      last.push(write);
+    } else {
+      cancelOnly.push([write]);
+    }
+  }
   const first =
     confirmable.length === 0
       ? []

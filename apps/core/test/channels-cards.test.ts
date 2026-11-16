@@ -13,6 +13,7 @@ import {
   cancelAction,
   confirmAction,
   heldWritesCard,
+  heldWritesCards,
   maxValuesPerWrite,
   maxWritesOnCard,
   piecesOf,
@@ -309,6 +310,20 @@ const everyCard = channelLocales.flatMap((locale) => [
       })),
     }),
   },
+  ...platforms.flatMap((platform) =>
+    heldWritesCards({
+      locale,
+      platform,
+      writes: largest().map((each) => ({
+        ...each,
+        chatId: crypto.randomUUID(),
+      })),
+      check: { read: "mail" },
+    }).map((card, at) => ({
+      name: `largest held writes as a turn's cards, ${at} on ${platform} (${locale})`,
+      card,
+    }))
+  ),
   ...outcomes.map((outcome) => ({
     name: `largest held writes, ${outcome} (${locale})`,
     card: heldWritesCard({
@@ -376,12 +391,13 @@ describe("Stephen's cards in Teams", () => {
     });
   });
 
-  it("never asks for a press on values it couldn't show whole, or on writes that ran", () => {
+  it("never asks to confirm values it couldn't show whole, offers only Cancel then, and nothing on writes that ran", () => {
     const pressesOf = (postable: PostableCard) => {
       const { actions, texts } = inTeams(postable);
       return {
-        presses: actions.filter((action) => action.type === "Action.Submit")
-          .length,
+        presses: actions
+          .filter((action) => action.type === "Action.Submit")
+          .map((action) => action.data?.actionId),
         // A conversation in a chat app is no chat in Grasp (GRA-1919):
         // nothing on the card leads there.
         links: actions.filter((action) => action.type === "Action.OpenUrl")
@@ -423,10 +439,10 @@ describe("Stephen's cards in Teams", () => {
         })
       ),
     }).toStrictEqual({
-      tooLong: { presses: 0, links: 0, saysTooLong: true },
-      tooMany: { presses: 0, links: 0, saysTooLong: true },
-      running: { presses: 0, links: 0, saysTooLong: false },
-      ended: { presses: 0, links: 0, saysTooLong: false },
+      tooLong: { presses: [cancelAction], links: 0, saysTooLong: true },
+      tooMany: { presses: [cancelAction], links: 0, saysTooLong: true },
+      running: { presses: [], links: 0, saysTooLong: false },
+      ended: { presses: [], links: 0, saysTooLong: false },
     });
   });
 
