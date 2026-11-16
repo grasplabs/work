@@ -72,7 +72,9 @@ export const brainModules = {
   // recallAs gave the chat's own person, passages and memories, two of its
   // packs merged at most (mergeRecalled, which only drops what both hold
   // and orders them), as data; what an analysis says only ever becomes
-  // that same person's question.
+  // that same person's question. Beside them, in the person's own chat
+  // alone, the names of the connections their agent may use (GRA-1873):
+  // its grants, nothing of the Brain's, probed in turn-recall.test.ts.
   "apps/core/src/turn-recall.ts": "core",
   // Checks what a chat once handed over with core's readableVersionsAs and
   // readableMemoriesAs, and hands on only which of those it may still
