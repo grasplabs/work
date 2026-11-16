@@ -184,7 +184,8 @@ export class Pagers {
     this.#changed(pager);
     return () => {
       pager.listeners.delete(onChange);
-      // As a query's: kept across a resubscribe within one task.
+      // Kept across a resubscribe within one task; idle, its first page
+      // stays followed as a query nobody reads is (client-query-cache.ts).
       queueMicrotask(() => {
         if (pager.listeners.size === 0) {
           this.#idlePager(pager);
@@ -488,6 +489,7 @@ export class Pagers {
    */
   #idlePager(pager: Pager): void {
     Pagers.#stopPages(pager);
+    const before = pager.pages;
     // Nobody reads the list: what waited on it ends as a no-op.
     pager.waiting?.resolve(null);
     pager.waiting = undefined;
@@ -501,6 +503,13 @@ export class Pagers {
       first.pageSize !== pager.initialPageSize
     ) {
       pager.pages = [this.#page(pager, null, null, pager.initialPageSize)];
+    }
+    // The pages a Load More added, and an ended first page, start again
+    // with the list: they are let go of now, not kept followed.
+    for (const { entry } of before) {
+      if (!pager.pages.some((page) => page.entry === entry)) {
+        this.#queries.dropUnread(entry);
+      }
     }
     pagerChanged(pager);
   }

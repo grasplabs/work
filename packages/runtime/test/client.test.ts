@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { clientInternals, GraspClient } from "../src/client-core.ts";
 import { GraspError } from "../src/client-error.ts";
+import { maxKeptUnread } from "../src/client-query-entry.ts";
 import type { ClientTransport } from "../src/client-transport.ts";
 import type { FileRef } from "../src/file-references.ts";
 import type { Id } from "../src/index.ts";
@@ -413,6 +414,8 @@ const listHost = (titles: readonly string[]) => {
   return {
     state,
     asked,
+    /** How many pages are followed now. */
+    following: () => followed.size,
     client: new GraspClient(transport),
     /** Pushes every page followed now, or those `which` picks. */
     reread: (which: (page: Asked) => boolean = () => true) => {
@@ -1363,6 +1366,74 @@ describe("the session client reading a query again", () => {
           isLoading || JSON.stringify(titles) !== '["a","aa"]'
       )
     ).toStrictEqual([]);
+  });
+});
+
+describe("the session client keeping queries nobody reads", () => {
+  it("lets go of the one unread longest past a few, so a query read now is still followed where core allows a hundred", async () => {
+    // Core follows a hundred queries a connection, refusing more for good,
+    // as `querySubscriptionLimits.perConnection` does; here twenty.
+    const allowed = 20;
+    const open = new Set<number>();
+    let made = 0;
+    const transport: ClientTransport = {
+      call: async () => await Promise.resolve(answered(null)),
+      watch: async (_request, onSnapshot) => {
+        await Promise.resolve();
+        if (open.size >= allowed) {
+          throw Object.assign(new Error("Too many queries."), {
+            code: "page.too_many_queries",
+          });
+        }
+        made += 1;
+        const id = made;
+        open.add(id);
+        onSnapshot({ revision: 1, ...answered({ title: `Note ${id}` }) });
+        return {
+          release: () => {
+            open.delete(id);
+          },
+        };
+      },
+    };
+    const internals = clientInternals(new GraspClient(transport));
+    // A search box: a query per keystroke, each read a moment.
+    for (let typed = 1; typed <= 40; typed += 1) {
+      const entry = internals.entry(api.notes.get, { id: idOf(typed) });
+      const stop = internals.subscribe(entry, unheard);
+      // oxlint-disable-next-line no-await-in-loop -- one keystroke after another
+      await vi.waitFor(() => {
+        expect(entry.snapshot.value).toBeDefined();
+      });
+      stop();
+    }
+    const shown = internals.entry(api.notes.get, { id: idOf(41) });
+    const stop = internals.subscribe(shown, unheard);
+    await vi.waitFor(() => {
+      expect(shown.snapshot.value ?? shown.snapshot.error?.code).toBeDefined();
+    });
+    stop();
+
+    expect({
+      shown: shown.snapshot.error?.code ?? "followed",
+      keptAtMost: open.size <= maxKeptUnread + 1,
+    }).toStrictEqual({ shown: "followed", keptAtMost: true });
+  });
+
+  it("lets go of the pages a Load More added once nobody reads the list, keeping its first followed", async () => {
+    const host = listHost(["a", "b", "c", "d", "e"]);
+    const list = listOf(host, 2);
+    await vi.waitFor(() => {
+      expect(list.titles()).toStrictEqual(["a", "b"]);
+    });
+    await list.pager.loadMore();
+    await vi.waitFor(() => {
+      expect(list.titles()).toStrictEqual(["a", "b", "c", "d"]);
+    });
+    list.stop();
+    await aTaskLater();
+
+    expect(host.following()).toBe(1);
   });
 });
 

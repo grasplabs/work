@@ -162,11 +162,21 @@ test("a person creates, loads, edits and deletes notes, and two saves of differe
   await expect(editor.getByLabel("Title")).toHaveValue("Send the invoice");
   await expect(editor.getByLabel("Body")).toHaveValue("Before Friday");
   await editor.getByLabel("Title").fill("Send the invoice today");
+  // The editor as it was typed in: once the save is answered it opens
+  // afresh on the note it saved, without this mark.
+  await editor.getByLabel("Title").evaluate((field) => {
+    field.dataset.typed = "";
+  });
   await editor.getByRole("button", { name: "Save changes" }).click();
   await expect(list.getByRole("listitem")).toHaveText([
     /Send the invoice today/u,
     /My title/u,
   ]);
+  // The list shows the save before the page hears its answer, and core
+  // pushes each query on its own: only the answer tells the page that
+  // what it kept of a note nobody shows may be older, so it reads that
+  // note afresh when it shows again.
+  await expect(editor.locator("[data-typed]")).toHaveCount(0);
   await reloaded.getByRole("button", { name: "Edit My title" }).click();
   await expect(editor.getByLabel("Title")).toHaveValue("My title");
 

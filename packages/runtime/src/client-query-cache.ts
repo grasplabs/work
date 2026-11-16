@@ -5,7 +5,13 @@ import type { Json } from "@grasp-os/shared/json";
 import type { AccessFence } from "./access-fence.ts";
 import { clientError } from "./client-error.ts";
 import type { GraspError } from "./client-error.ts";
-import { keepMs, loading, show, wanted } from "./client-query-entry.ts";
+import {
+  keepMs,
+  loading,
+  maxKeptUnread,
+  show,
+  wanted,
+} from "./client-query-entry.ts";
 import type { QueryEntry } from "./client-query-entry.ts";
 import {
   QueryFollower,
@@ -21,12 +27,15 @@ import type { ClientTransport } from "./client-transport.ts";
  * The client's queries, by reference and normalized arguments, shared by
  * the components and imperative reads that read them: followed from when
  * a component first reads one until nothing has read it for a while
- * (`keepMs`), then dropped; read from the host otherwise. So what a
- * component that comes back within that while shows is kept current by
- * core's pushes, never what the query was when the last one left.
+ * (`keepMs`), or more than `maxKeptUnread` others went unread since, then
+ * dropped; read from the host otherwise. So what a component that comes
+ * back within that while shows is kept current by core's pushes, never
+ * what the query was when the last one left.
  */
 export class QueryCache {
   readonly #queries = new Map<string, QueryEntry>();
+  /** The queries nobody reads now, the one unread longest first. */
+  readonly #unread = new Set<QueryEntry>();
   readonly #follower: QueryFollower;
   readonly #reader: QueryReader;
 
@@ -95,6 +104,7 @@ export class QueryCache {
     entry.listeners.add(onChange);
     clearTimeout(entry.evict);
     entry.evict = undefined;
+    this.#unread.delete(entry);
     // Dropped while its render waited to commit: cached again, unless
     // another reader has made the query's entry anew meanwhile.
     if (!this.#queries.has(entry.key)) {
@@ -137,21 +147,58 @@ export class QueryCache {
 
   /**
    * Drops `entry`, and stops following it, once nothing has read it for a
-   * while.
+   * while, or sooner once more than `maxKeptUnread` others are unread
+   * after it.
    */
   release(entry: QueryEntry): void {
     if (wanted(entry) || entry.evict !== undefined) {
       return;
     }
+    this.#unread.add(entry);
     entry.evict = setTimeout(() => {
       entry.evict = undefined;
       if (!wanted(entry)) {
-        unfollow(entry);
-        entry.reading?.stop.abort();
-        entry.reading = undefined;
-        this.#queries.delete(entry.key);
+        this.#drop(entry);
       }
     }, keepMs);
+    for (const oldest of this.#unread) {
+      if (this.#unread.size <= maxKeptUnread) {
+        break;
+      }
+      // Read since, imperatively: it is let go of once that read is done.
+      if (wanted(oldest)) {
+        this.#unread.delete(oldest);
+        clearTimeout(oldest.evict);
+        oldest.evict = undefined;
+      } else {
+        this.#drop(oldest);
+      }
+    }
+  }
+
+  /** Drops `entry` now, if nothing reads it: a page a list let go of. */
+  dropUnread(entry: QueryEntry): void {
+    if (!wanted(entry)) {
+      this.#drop(entry);
+    }
+  }
+
+  /**
+   * Stops following `entry`, and forgets it: what it showed, followed by
+   * no one from now on, is shown to no one either (a list idle across it
+   * reads its page afresh).
+   */
+  #drop(entry: QueryEntry): void {
+    clearTimeout(entry.evict);
+    entry.evict = undefined;
+    this.#unread.delete(entry);
+    unfollow(entry);
+    entry.reading?.stop.abort();
+    entry.reading = undefined;
+    if (this.#queries.get(entry.key) === entry) {
+      this.#queries.delete(entry.key);
+    }
+    show(entry, loading);
   }
 
   /** The queries part of a fence (`AccessFence.fence`). */
@@ -182,13 +229,7 @@ export class QueryCache {
   #accessChanged(error: GraspError): void {
     for (const entry of this.#queries.values()) {
       if (!wanted(entry)) {
-        clearTimeout(entry.evict);
-        entry.evict = undefined;
-        unfollow(entry);
-        entry.reading?.stop.abort();
-        entry.reading = undefined;
-        this.#queries.delete(entry.key);
-        show(entry, loading);
+        this.#drop(entry);
       } else if (entry.live === undefined) {
         entry.shown = entry.sent;
         entry.stale = true;

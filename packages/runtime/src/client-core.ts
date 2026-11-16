@@ -84,9 +84,11 @@ import { Submissions } from "./submissions.ts";
 //   left unknown is sent again only within the generation it was sent
 //   under; after access was lost, it is refused unsent as
 //   `auth.principal_changed`.
-// - Subscriptions pile up: a query is followed only while a component
-//   reads it, released as soon as the last one stops (a skipped query
-//   follows nothing); core bounds what a page follows.
+// - Subscriptions pile up: a query is followed from when a component
+//   first reads it until nobody has for `keepMs`, and at most
+//   `maxKeptUnread` queries nobody reads stay followed, the one unread
+//   longest let go of first (a skipped query follows nothing); core bounds
+//   what a page follows, well above that.
 // - Invocation options travel as arguments: options are read on their
 //   own, strictly, and only the normalized input is sent.
 // - A malformed reference or argument reaches the host: references are

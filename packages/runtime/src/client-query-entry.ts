@@ -154,3 +154,11 @@ export const settleRead = (
  * pushed it.
  */
 export const keepMs = 30_000;
+
+/**
+ * How many queries nobody reads are kept, and followed, at most: past it
+ * the one nobody has read longest is dropped. Well within what core lets
+ * one connection follow (`querySubscriptionLimits.perConnection`), so
+ * the queries a page shows are followed, however many it read before.
+ */
+export const maxKeptUnread = 16;
