@@ -107,6 +107,7 @@ import {
   isNull,
   like,
   lt,
+  lte,
   ne,
   not,
   or,
@@ -1550,7 +1551,7 @@ export class Onboarding extends DurableObject<Env> {
     });
   }
 
-  /** Whoever core erased whose entry is still on the list (`closeLinkOf`). */
+  /** Whoever core erased whose entry is still on the list (`#closeLinkHeldBy`). */
   #erasedPeople(): Set<string> {
     return new Set(
       this.#db
@@ -4352,28 +4353,28 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /**
-   * Closes `person`'s link for good, as core asks as it erases them,
-   * before their interview is deleted (person-erasure.ts): its code goes,
-   * so it answers `interview.link_invalid`, it is marked erased, so no
-   * code is made for it again, and the account it belonged to and the
-   * address it went to are forgotten.
-   * Unlike a delete on their own request, no new interview can be saved
-   * under it. What they were asked about goes too (a referral naming them
-   * may have set it, `#referOne`): nobody asks them anything again. Their
-   * entry on the list stays, an admin's to remove; taken off the list, the
-   * mark goes with the link.
+   * Closes `person`'s link for good, as core asks as it erases `account`,
+   * before their interview is deleted (person-erasure.ts), but only while
+   * the link was sent by `sentBy` and is held by `account` or by no
+   * account: checked by the same statement that closes it, so the next
+   * holder's link, after a new start, is never closed for someone else.
+   * Its code goes, so it answers `interview.link_invalid`, it is marked
+   * erased, so no code is made for it again, and the account it belonged
+   * to and the address it went to are forgotten. Unlike a delete on their
+   * own request, no new interview can be saved under it. What they were
+   * asked about goes too (a referral naming them may have set it,
+   * `#referOne`): nobody asks them anything again. Their entry on the list
+   * stays, an admin's to remove; taken off the list, the mark goes with
+   * the link. Whether it closed it.
    */
-  closeLinkOf(person: string, now: string = new Date().toISOString()): void {
-    this.ctx.storage.transactionSync(() => {
-      this.#db.delete(linkCodes).where(eq(linkCodes.person, person)).run();
-      this.#db.delete(askedAbout).where(eq(askedAbout.person, person)).run();
-      // Mail still to go about them (a reminder, say) goes nowhere now.
-      // Sent mail stays: the company's record, as the roster is.
-      dropMailAbout(this.ctx.storage.sql, person);
-      // Marked erased for good, so no code is made for the link again
-      // (`linkOf`, `#writeRoster`): a missing code alone is a link not
-      // made yet.
-      this.#db
+  #closeLinkHeldBy(
+    person: string,
+    account: string,
+    sentBy: string,
+    now: string
+  ): boolean {
+    const closed = this.ctx.storage.transactionSync(() => {
+      const [link] = this.#db
         .update(links)
         .set({
           // Their account and their address go: their interview leaves
@@ -4382,10 +4383,27 @@ export class Onboarding extends DurableObject<Env> {
           sentTo: null,
           erasedAt: sql`coalesce(${links.erasedAt}, ${now})`,
         })
-        .where(eq(links.person, person))
-        .run();
+        .where(
+          and(
+            eq(links.person, person),
+            lte(links.sentAt, sentBy),
+            or(isNull(links.account), eq(links.account, account))
+          )
+        )
+        .returning({ person: links.person })
+        .all();
+      if (link === undefined) {
+        return false;
+      }
+      this.#db.delete(linkCodes).where(eq(linkCodes.person, person)).run();
+      this.#db.delete(askedAbout).where(eq(askedAbout.person, person)).run();
+      // Mail still to go about them (a reminder, say) goes nowhere now.
+      // Sent mail stays: the company's record, as the roster is.
+      dropMailAbout(this.ctx.storage.sql, person);
+      return true;
     });
     this.#decideInterviews();
+    return closed;
   }
 
   /**
@@ -4417,12 +4435,11 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /**
-   * Whose interview belongs to `account` (`links.account`, GRA-1790): for
-   * core's erasure of that account, which finds it so whatever address the
-   * list has for them now. Also once its link no longer names the account
-   * (an erasure that closed it, then failed), while the Brain's copy of it
-   * under that account is still owed an erasure: the erasure tried again
-   * finds it there. Null when neither does.
+   * Whose interview belongs to `account` now (`links.account`, GRA-1790):
+   * for core's erasure of that account, which finds it so whatever address
+   * the list has for them now. Null when none does. What the Brain still
+   * holds under the account, from a link it no longer holds, is erased by
+   * the account (`owedErasures` with `account`), never through this.
    */
   personOfAccount(account: string): string | null {
     const [link] = this.#db
@@ -4430,42 +4447,31 @@ export class Onboarding extends DurableObject<Env> {
       .from(links)
       .where(eq(links.account, account))
       .all();
-    if (link !== undefined) {
-      return link.person;
-    }
-    const [owed] = this.#db
-      .select({ person: brainInterviews.person })
-      .from(brainInterviews)
-      .where(
-        and(
-          eq(brainInterviews.account, account),
-          eq(brainInterviews.erase, true)
-        )
-      )
-      .all();
-    return owed?.person ?? null;
+    return link?.person ?? null;
   }
 
   /**
    * Deletes `person`'s interview and closes their link for good, as core
-   * asks once it erased whoever had their address (person-erasure.ts), but
-   * only a link that went out by `sentBy`, when the erasure was asked for:
-   * one sent after it went to someone the address was released to, whose
-   * interview stays. Whether it deleted one.
+   * asks as it erases `account` (person-erasure.ts), but only a link that
+   * went out by `sentBy`, when the erasure was asked for (one sent after
+   * it went to someone the address was released to, whose interview
+   * stays), and that `account` or no account holds (after a new start,
+   * the next holder's interview stays: `#closeLinkHeldBy`). Whether it
+   * deleted one.
    */
-  async eraseInterviewOf(person: string, sentBy: string): Promise<boolean> {
-    const [link] = this.#db
-      .select({ sentAt: links.sentAt })
-      .from(links)
-      .where(eq(links.person, person))
-      .all();
-    if (link === undefined || link.sentAt > sentBy) {
-      return false;
-    }
+  async eraseInterviewOf(
+    person: string,
+    account: string,
+    sentBy: string
+  ): Promise<boolean> {
     // Their link answers nothing any more, before anything waits: no new
     // interview is saved under the entry that stays, even while the
     // delete waits on the Brain's and the voice's cleanup.
-    this.closeLinkOf(person);
+    if (
+      !this.#closeLinkHeldBy(person, account, sentBy, new Date().toISOString())
+    ) {
+      return false;
+    }
     await this.deleteOnRequest(person, { type: "system" });
     return true;
   }
@@ -6307,9 +6313,17 @@ export class Onboarding extends DurableObject<Env> {
    *   team under seven.
    */
   owedErasures(
-    scope?: { person: string; teams?: readonly string[] } | { claims: true }
+    scope?:
+      | { person: string; teams?: readonly string[] }
+      | { claims: true }
+      | { account: string }
   ): OwedErasure[] {
     this.#decideInterviews();
+    if (scope !== undefined && "account" in scope) {
+      return this.owedErasures().filter(
+        (owed) => owed.kind === "interview" && owed.account === scope.account
+      );
+    }
     if (scope !== undefined) {
       const ofTeams = new Set<string>();
       if ("person" in scope) {
@@ -6460,22 +6474,6 @@ export class Onboarding extends DurableObject<Env> {
           .run();
       }
     });
-  }
-
-  /**
-   * Whether the new Brain may still hold `person`'s interview otherwise
-   * than the store does now: for core's erasure of a person, which lets go
-   * only once it doesn't.
-   */
-  interviewOwed(person: string): boolean {
-    this.#decideInterviews();
-    const [row] = this.ctx.storage.sql
-      .exec<{ owed: number }>(
-        "SELECT EXISTS (SELECT 1 FROM brain_interviews WHERE person = ? AND erase = 1) AS owed",
-        person
-      )
-      .toArray();
-    return row?.owed === 1;
   }
 
   /**

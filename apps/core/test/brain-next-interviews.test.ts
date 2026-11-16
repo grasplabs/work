@@ -714,6 +714,105 @@ describe("interviews in the new Brain", { timeout: 120_000 }, () => {
     }).toStrictEqual({ first: "pending", retried: "complete", owed: [] });
   });
 
+  it("go with core's erasure of the wrong recipient who opened a link, and leave the interview of the right person who opened it after staff's new start", async () => {
+    const marker = `marker${unique()}`;
+    const ids = await team();
+    // The list had the wrong address: Lea's link went to someone else,
+    // who opened it and agreed to what they said.
+    await mapped(ids, {
+      facts: [fact("l9", "rule", `Every refund needs ${marker} first.`)],
+    });
+    const store = onboardingStore(env);
+    const wrong = await accountOfPerson(ids.lea);
+    await settled();
+    const key = await interviewKeyOf(wrong);
+    // The admin corrects the address, and staff give a new start: the
+    // wrong recipient's copy in the Brain is still owed its erasure.
+    const right = `right-${unique()}@acme.test`;
+    const { roster } = await store.view();
+    await store.saveRoster(
+      {
+        teams: roster?.teams ?? [],
+        people: (roster?.people ?? []).map((person) =>
+          person.id === ids.lea ? { ...person, email: right } : person
+        ),
+      },
+      { type: "system" }
+    );
+    await store.newStart(ids.lea, { type: "system" });
+    // The right person opens the same link and says something of their
+    // own, while the Brain fails every erasure: the wrong recipient's copy
+    // is still owed one when they are erased.
+    const secret = ((await store.linkOf(ids.lea)) ?? "").split("#")[1] ?? "";
+    const cookie = await signedInAs(right);
+    const failing = erasuresFailing();
+    const first = await onLink({ action: "session", secret, cookie }, failing);
+    const { version } = z
+      .object({ version: z.number() })
+      .parse(await first.json());
+    const own = `own${unique()}`;
+    await onLink(
+      {
+        action: "save",
+        secret,
+        cookie,
+        version,
+        progress: {
+          person: "progress",
+          told: false,
+          mode: "type",
+          lines: [{ from: "person", text: `I start with ${own}.` }],
+          facts: [],
+          phase: "you",
+          wants: "answer",
+          startedAt: Date.now(),
+          confirmed: 0,
+          adding: false,
+          addedAt: 0,
+        },
+      },
+      failing
+    );
+    const owedThen = await store.owedErasures({ person: ids.lea });
+    // Then the wrong recipient is erased.
+    const admin = await signedInApi(idp, "admin");
+    await admin.api.members.remove(wrong);
+    const name = await env.DB.prepare("SELECT name FROM users WHERE id = ?")
+      .bind(wrong)
+      .first<string>("name");
+    await admin.api.members.erase(wrong, name ?? "");
+    await ageOwnErasure(wrong);
+    await retryErasures(env);
+    const { response: reopened } = await openLinkAs(secret, cookie);
+    const { shared } = await keptIn(key, wrong);
+    const kept = z
+      .object({
+        progress: z.object({
+          lines: z.array(z.object({ text: z.string() })),
+        }),
+      })
+      .safeParse(await reopened.json());
+    expect({
+      owedThen: owedThen.flatMap((owed) =>
+        owed.kind === "interview" ? [owed.account] : []
+      ),
+      reopened: reopened.status,
+      theirs: kept.data?.progress.lines.map(({ text }) => text) ?? [],
+      wrongCopy: shared,
+      area: await env.DB.prepare(
+        "SELECT state FROM person_erasure_areas WHERE user_id = ? AND area = 'interview'"
+      )
+        .bind(wrong)
+        .first<string>("state"),
+    }).toStrictEqual({
+      owedThen: [wrong],
+      reopened: 200,
+      theirs: [`I start with ${own}.`],
+      wrongCopy: "erased",
+      area: "complete",
+    });
+  });
+
   it("say a deletion is done at once, and that what the Brain kept is still being removed, when its erasure fails in the request; core's clock then erases it", async () => {
     const marker = `marker${unique()}`;
     const ids = await team();

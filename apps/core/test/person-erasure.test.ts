@@ -30,12 +30,7 @@ import { allEvents } from "./audit-events.ts";
 import { finishedByTheClock } from "./brain-next-own-store.ts";
 import { consentCode } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
-import {
-  answering,
-  answeringWith,
-  holdAlarm,
-  sentToOf,
-} from "./interview-link.ts";
+import { answering, answeringWith, holdAlarm } from "./interview-link.ts";
 import { holding, rememberAs } from "./knowledge-purge.ts";
 import { linkedNaming, ownCollectionOf, seed } from "./knowledge.ts";
 import { runMinuteTasks } from "./maintenance.ts";
@@ -274,9 +269,15 @@ const onList = async (sql: string, ...values: unknown[]) =>
 const byPeople = (events: readonly AuditEvent[]): AuditEvent[] =>
   events.filter(({ actor }) => actor.type !== "system");
 
-/** The account that signs in as `address`, as the store is told of it. */
-const accountFor = (address: string): string =>
-  `account-${address.toLowerCase()}`;
+/**
+ * The account that signs in as `address`, as the store is told of it: the
+ * user core has with that address, as their sign-in would be, or one of
+ * its own for an address no user has.
+ */
+const accountFor = async (address: string): Promise<string> =>
+  (await env.DB.prepare("SELECT id FROM users WHERE lower(email) = lower(?)")
+    .bind(address)
+    .first<string>("id")) ?? `account-${address.toLowerCase()}`;
 
 /**
  * What a link's page gets opening it with `secret`, signed in as the
@@ -288,7 +289,7 @@ const sessionWith = async (
   address: string
 ): Promise<string> => {
   const answer = await onboardingStore(env).openLink(await sha256Hex(secret), {
-    account: accountFor(address),
+    account: await accountFor(address),
     address,
   });
   return answer.ok ? "open" : answer.code;
@@ -549,6 +550,12 @@ const referralWhileErased = async (erased: "max" | "pim") => {
     fact("x1", "who", "Pim handles the new tickets, not Max."),
     fact("x2", "work", "Max plans the rota with Lea."),
   ]);
+  // Their link is held by their account, as their sign-in opened it.
+  await onList(
+    "UPDATE links SET user_id = ? WHERE person = ?",
+    person.userId,
+    ids[erased]
+  );
   let asked = 0;
   await answeringWith(
     async () => {
@@ -1697,7 +1704,7 @@ describe("erasing a person", () => {
       theirs
     );
     const secretMark = await sha256Hex(theirSecret);
-    const keyMark = accountFor(address);
+    const keyMark = await accountFor(address);
 
     // Their page keeps saving for as long as core erases their interview
     // (`eraseInterviewOf`, as person-erasure.ts asks it), the cleanup
@@ -1707,7 +1714,7 @@ describe("erasing a person", () => {
       async (store: Onboarding) => {
         const erasure = { running: true };
         const erased = store
-          .eraseInterviewOf(theirs, new Date().toISOString())
+          .eraseInterviewOf(theirs, keyMark, new Date().toISOString())
           .finally(() => {
             erasure.running = false;
           });
@@ -1830,6 +1837,33 @@ describe("erasing a person", () => {
     });
   });
 
+  it("leaves the interview of whoever holds the link when the list's address was corrected to theirs after it opened", async () => {
+    const { admin, person } = await removedPerson();
+    const email = String(person.person.email);
+    // The entry had someone else's address, who opened the link with it.
+    const { theirs, theirSecret } = await onTheList(
+      `holder-${crypto.randomUUID().slice(0, 8)}@acme.test`
+    );
+    const holder = `account-holder-${crypto.randomUUID().slice(0, 8)}`;
+    const { roster } = await onboardingStore(env).view();
+    const listed = roster?.people.find(({ id }) => id === theirs)?.email ?? "";
+    const openAs = async () => {
+      const answer = await onboardingStore(env).openLink(
+        await sha256Hex(theirSecret),
+        { account: holder, address: listed }
+      );
+      return answer.ok ? "open" : answer.code;
+    };
+    const before = await openAs();
+    // Then the list's address is corrected to the erased person's.
+    await onList("UPDATE people SET email = ? WHERE id = ?", email, theirs);
+    await admin.api.members.erase(person.userId, String(person.person.name));
+    expect({ before, after: await openAs() }).toStrictEqual({
+      before: "open",
+      after: "open",
+    });
+  });
+
   it("leaves nothing of a referral that named them before their erasure but the company's records of it", async () => {
     // The test draws the referral itself, inside its faked provider (holdAlarm).
     await holdAlarm();
@@ -1840,10 +1874,16 @@ describe("erasing a person", () => {
     const store = onboardingStore(env);
     const ids = await onboardingTeam(["lea", "max", "mia", "mo", "pim"]);
     await mapped(ids);
-    // Pim is them: the list has them by the address that is theirs.
+    // Pim is them: the list has them by the address that is theirs, and
+    // their link is held by their account, as their sign-in opened it.
     await onList(
       "UPDATE people SET email = ? WHERE id = ?",
       String(person.person.email),
+      ids.pim
+    );
+    await onList(
+      "UPDATE links SET user_id = ? WHERE person = ?",
+      person.userId,
       ids.pim
     );
     const works = await store.teamWorks(ids.team);
@@ -1875,7 +1915,8 @@ describe("erasing a person", () => {
       return row?.work ?? null;
     };
     const pimLink = await store.linkOf(ids.pim);
-    const pimAddress = await sentToOf(ids.pim);
+    // As whoever holds Pim's link: them.
+    const pimAddress = String(person.person.email);
     const pimSecret = pimLink?.split("#")[1] ?? "";
     const queuedToPim = async () => {
       const rows = await onList(

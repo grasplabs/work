@@ -132,7 +132,10 @@ const erase = async (env: Env, owed: OwedErasure): Promise<void> => {
  */
 export const eraseOwedOnboardingSources = async (
   env: Env,
-  scope?: { person: string; teams?: readonly string[] } | { claims: true }
+  scope?:
+    | { person: string; teams?: readonly string[] }
+    | { claims: true }
+    | { account: string }
 ): Promise<void> => {
   const store = onboardingStore(env);
   for (const owed of await store.owedErasures(scope)) {
@@ -160,16 +163,19 @@ export const settleOnboardingBrain = async (env: Env): Promise<void> => {
 };
 
 /**
- * `eraseOwedOnboardingSources`, then throws while the Brain may still hold
- * `person`'s interview: for core's erasure of a person, which lets go only
- * once it doesn't.
+ * Erases every interview the Brain holds under `account` that no longer
+ * stands, whoever's link it came from, then throws while any is still
+ * owed: for core's erasure of that account, which lets go only once none
+ * is (person-erasure.ts). Keyed by the account alone, so it never reaches
+ * the interview of whoever holds that link now.
  */
-export const eraseOnboardingInterview = async (
+export const eraseOnboardingAccount = async (
   env: Env,
-  person: string
+  account: string
 ): Promise<void> => {
-  await eraseOwedOnboardingSources(env, { person });
-  if (await onboardingStore(env).interviewOwed(person)) {
+  await eraseOwedOnboardingSources(env, { account });
+  const owed = await onboardingStore(env).owedErasures({ account });
+  if (owed.length > 0) {
     throw new Error("The Brain still holds their interview.");
   }
 };
