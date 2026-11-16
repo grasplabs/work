@@ -134,6 +134,52 @@ const without = (
     Object.entries(row).filter(([column]) => !columns.includes(column))
   );
 
+/**
+ * `erased_versions` as migration 0006 made it, with its index and
+ * triggers, holding a row that points at `erasure`: what a shared store
+ * kept of a person's erasure until GRA-1903, in every release before
+ * migration 0024 dropped it.
+ */
+const erasedVersionsAt = (erasure: string): Copy => ({
+  tables: [
+    {
+      name: "erased_versions",
+      created: `CREATE TABLE \`erased_versions\` (
+	\`erasure\` text NOT NULL,
+	\`subject\` text NOT NULL,
+	\`version\` integer NOT NULL,
+	PRIMARY KEY(\`erasure\`, \`subject\`, \`version\`),
+	FOREIGN KEY (\`erasure\`) REFERENCES \`erasures\`(\`key\`) ON UPDATE no action ON DELETE no action
+)`,
+      rows: [{ erasure, subject: "a".repeat(64), version: 1 }],
+    },
+  ],
+  others: [
+    "CREATE INDEX `erased_versions_subject_idx` ON `erased_versions` (`subject`,`version`)",
+    `CREATE TRIGGER \`erased_versions_no_update\` BEFORE UPDATE ON \`erased_versions\` BEGIN
+	SELECT RAISE(ABORT, 'erased versions are recorded, never changed');
+END`,
+    `CREATE TRIGGER \`erased_versions_no_delete\` BEFORE DELETE ON \`erased_versions\` BEGIN
+	SELECT RAISE(ABORT, 'erased versions are recorded, never deleted');
+END`,
+  ],
+});
+
+/** `copy` as a release that had run only its first `migrations` left it. */
+const ranOnly = (copy: Copy, migrations: number): Copy => ({
+  ...copy,
+  tables: copy.tables.map((table) =>
+    table.name === "__drizzle_migrations"
+      ? {
+          ...table,
+          rows: table.rows
+            .toSorted((a, b) => Number(a.created_at) - Number(b.created_at))
+            .slice(0, migrations),
+        }
+      : table
+  ),
+});
+
 /** The store's bucket failing puts while `broken`, as R2 down would. */
 const breakPuts = async (broken: boolean): Promise<void> => {
   const bucket = env.BRAIN_OBJECTS;
@@ -869,8 +915,8 @@ describe("a writer's erasure", () => {
     ).rejects.toThrow("only the shared store takes this");
   });
 
-  describe("a store of the release before", () => {
-    /** How many migrations the release before had run: 0000 to 0014. */
+  describe("a store of an earlier release", () => {
+    /** How many migrations the release before writers' erasures had run: 0000 to 0014. */
     const releaseBeforeMigrations = 15;
 
     // Migration 0016 makes `erasures` anew, which rows of `erased_versions`
@@ -894,104 +940,90 @@ describe("a writer's erasure", () => {
       // the retiring change, no removals (removal.ts, a later migration),
       // every migration after the release before's not yet run, and a row
       // that points at the erasure.
+      // The release before ran migrations 0000 to 0014: every one after
+      // them runs again, not only this release's five.
+      const ran = ranOnly(now, releaseBeforeMigrations);
+      const pointing = erasedVersionsAt(erasure);
       const before: Copy = {
         // The table of memories that failed to delete is the release's own,
         // and so are the quotes' (migration 0022, quotes.ts).
-        tables: now.tables
-          .filter(
-            ({ name }) =>
-              ![
-                "memory_erase_failures",
-                "removed_sources",
-                "memory_outs",
-                "memory_ins",
-                "memory_judging",
-                "memory_judging_places",
-              ].includes(name)
-          )
-          .map((table) => {
-            switch (table.name) {
-              case "erasures": {
-                return {
-                  ...table,
-                  created: table.created
-                    .replace(", 'writer'", "")
-                    .replace(/,\s*`memories` integer/u, "")
-                    .replace(/,\s*`change` text/u, "")
-                    .replace(/,\s*`swept_learned_at` integer/u, "")
-                    .replace(/,\s*`swept_row` integer/u, ""),
-                  // Earlier tests' writers' erasures: the release before had none.
-                  rows: table.rows
-                    .filter(({ kind }) => kind !== "writer")
-                    .map((row) =>
-                      without(
-                        row,
-                        "memories",
-                        "change",
-                        "swept_learned_at",
-                        "swept_row"
-                      )
+        tables: [
+          ...ran.tables
+            .filter(
+              ({ name }) =>
+                ![
+                  "memory_erase_failures",
+                  "removed_sources",
+                  "memory_outs",
+                  "memory_ins",
+                  "memory_judging",
+                  "memory_judging_places",
+                ].includes(name)
+            )
+            .map((table) => {
+              switch (table.name) {
+                case "erasures": {
+                  return {
+                    ...table,
+                    created: table.created
+                      .replace(", 'writer'", "")
+                      .replace(/,\s*`memories` integer/u, "")
+                      .replace(/,\s*`change` text/u, "")
+                      .replace(/,\s*`swept_learned_at` integer/u, "")
+                      .replace(/,\s*`swept_row` integer/u, ""),
+                    // Earlier tests' writers' erasures: the release before had none.
+                    rows: table.rows
+                      .filter(({ kind }) => kind !== "writer")
+                      .map((row) =>
+                        without(
+                          row,
+                          "memories",
+                          "change",
+                          "swept_learned_at",
+                          "swept_row"
+                        )
+                      ),
+                  };
+                }
+                case "memories": {
+                  return {
+                    ...table,
+                    created: table.created
+                      .replace(/,\s*`writer_subject` text/u, "")
+                      .replace(/,\s*`retired_change` text/u, ""),
+                    rows: table.rows.map((row) =>
+                      without(row, "writer_subject", "retired_change")
                     ),
-                };
+                  };
+                }
+                case "current_versions": {
+                  return {
+                    ...table,
+                    created: table.created.replace(
+                      /,\s*`judged_row` integer/u,
+                      ""
+                    ),
+                    rows: table.rows.map((row) => without(row, "judged_row")),
+                  };
+                }
+                case "source_subjects": {
+                  return {
+                    ...table,
+                    created: table.created.replace(
+                      /,\s*`thread` integer DEFAULT false NOT NULL/u,
+                      ""
+                    ),
+                    rows: table.rows.map((row) => without(row, "thread")),
+                  };
+                }
+                default: {
+                  return table;
+                }
               }
-              case "memories": {
-                return {
-                  ...table,
-                  created: table.created
-                    .replace(/,\s*`writer_subject` text/u, "")
-                    .replace(/,\s*`retired_change` text/u, ""),
-                  rows: table.rows.map((row) =>
-                    without(row, "writer_subject", "retired_change")
-                  ),
-                };
-              }
-              case "current_versions": {
-                return {
-                  ...table,
-                  created: table.created.replace(
-                    /,\s*`judged_row` integer/u,
-                    ""
-                  ),
-                  rows: table.rows.map((row) => without(row, "judged_row")),
-                };
-              }
-              case "source_subjects": {
-                return {
-                  ...table,
-                  created: table.created.replace(
-                    /,\s*`thread` integer DEFAULT false NOT NULL/u,
-                    ""
-                  ),
-                  rows: table.rows.map((row) => without(row, "thread")),
-                };
-              }
-              case "erased_versions": {
-                return {
-                  ...table,
-                  rows: [
-                    ...table.rows,
-                    { erasure, subject: "a".repeat(64), version: 1 },
-                  ],
-                };
-              }
-              case "__drizzle_migrations": {
-                return {
-                  ...table,
-                  rows: table.rows
-                    .toSorted(
-                      (a, b) => Number(a.created_at) - Number(b.created_at)
-                    )
-                    // The release before ran migrations 0000 to 0014: every
-                    // one after them runs again, not only this release's five.
-                    .slice(0, releaseBeforeMigrations),
-                };
-              }
-              default: {
-                return table;
-              }
-            }
-          }),
-        others: now.others.filter(
+            }),
+          ...pointing.tables,
+        ],
+        others: [...ran.others, ...pointing.others].filter(
           (made) =>
             !made.includes("memories_writer_idx") &&
             !made.includes("erasures_writer_idx") &&
@@ -1026,6 +1058,84 @@ describe("a writer's erasure", () => {
           state.storage.sql.exec("DELETE FROM erasures WHERE key = ?", erasure);
         })
       ).rejects.toThrow(/never deleted/u);
+    });
+
+    // Migration 0024 drops `erased_versions`, whose rows point at
+    // `erasures`, which nothing reads since GRA-1903. A copy the release
+    // before it left comes back: the store opens, and replays what was
+    // erased since the copy before it answers.
+    it("opens a copy the release before left, rows in the table it drops, and replays the erasures since: a source's and a writer's", async () => {
+      const group = unique("g");
+      const reader: Reader = { person: unique("p"), groups: [group] };
+      const access = { kind: "audience", group } as const;
+      const earlier = unique("test:earlier-");
+      const erased = unique("test:erased-");
+      const kept = unique("test:kept-");
+      for (const source of [earlier, erased, kept]) {
+        // oxlint-disable-next-line no-await-in-loop -- one add at a time
+        await shared().addSource({
+          source,
+          change: "1",
+          text: `${word()} to erase or keep`,
+          access,
+        });
+      }
+      await shared().eraseSource({ source: earlier, reason: "deleted" });
+      const writer = app();
+      const name = word();
+      const { entities } = await remember(
+        group,
+        [{ key: "c", kind: "customer", names: [`${name} Holdings`] }],
+        [
+          said("c", `${name} by the erased writer`, {
+            kind: "writer",
+            writer,
+          }),
+          said("c", `${name} by another`, { kind: "writer", writer: app() }),
+        ]
+      );
+      const now = await copyOf(shared());
+      const key = now.tables
+        .find(({ name: table }) => table === "erasures")
+        ?.rows.find(({ kind }) => kind === "source")?.key;
+      const pointing = erasedVersionsAt(typeof key === "string" ? key : "");
+      // The release before this one ran migrations 0000 to 0023.
+      const ran = ranOnly(now, 24);
+      const before: Copy = {
+        tables: [...ran.tables, ...pointing.tables],
+        others: [...ran.others, ...pointing.others],
+      };
+      const erasedWriter = await shared().eraseWriter({
+        writer,
+        reason: "deleted",
+        change: "reset-1",
+      });
+      await shared().eraseSource({ source: erased, reason: "deleted" });
+
+      await restore(shared(), before);
+
+      const { memories } = await shared().readMemories({
+        entity: entities.c ?? "",
+        reader,
+      });
+      expect({
+        states: await Promise.all(
+          [earlier, erased, kept].map(
+            async (source) => await shared().keyState(source)
+          )
+        ),
+        memories: memories.map(({ statement }) => statement),
+        // The stored answer, as the ledger's entry keeps it: not a recount.
+        retried: await shared().eraseWriter({
+          writer,
+          reason: "deleted",
+          change: "reset-1",
+        }),
+      }).toStrictEqual({
+        states: ["erased", "erased", "held"],
+        memories: [`${name} by another`],
+        retried: { erasedAt: erasedWriter.erasedAt, memories: 1 },
+      });
     });
   });
 
