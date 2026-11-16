@@ -5,8 +5,8 @@
  * the company's name, people in teams and roles, the onboarding's roster and plan, the
  * prototype's Apps with the workflows core can run, 30 days of their
  * runs, a page over each App's own records (scripts/seed/pages.ts),
- * Knowledge, and
- * chats. Run it while `vp run dev` runs.
+ * the Brain's uploads, instruction files and skills
+ * (scripts/seed/brain.ts), and chats. Run it while `vp run dev` runs.
  *
  * Everything goes through core's API as the person who would do it, signed
  * in through the local fake IdP; only what no API does is written into the
@@ -22,23 +22,27 @@
  * start it again.
  */
 import { definitionText as appDefinitionText } from "@grasp-os/runtime/definition";
+import type { AppDefinition } from "@grasp-os/runtime/definition";
 import { appErrors } from "@grasp-os/shared/apps";
-import { knowledgeErrors } from "@grasp-os/shared/knowledge";
+import {
+  brainSourceErrors,
+  brainUploadErrors,
+} from "@grasp-os/shared/brain-sources";
+import { instructionFileErrors } from "@grasp-os/shared/instruction-files";
 import { onboardingErrors, planDays } from "@grasp-os/shared/onboarding";
 import { organizationErrors } from "@grasp-os/shared/organization";
-import type { PermissionRequest } from "@grasp-os/shared/permissions";
+import { skillErrors } from "@grasp-os/shared/skills";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import { z } from "zod";
 
 import { appDefinition, appFiles } from "./seed/app-files.ts";
 import { apps, decisionResponse } from "./seed/apps.ts";
 import type { AppSeed, WorkflowSeed } from "./seed/apps.ts";
+import { confirmAnsweredBy, seedBrain } from "./seed/brain.ts";
 import { chats, writeTranscript } from "./seed/chats.ts";
 import { companyName, people, roster, teamNames } from "./seed/company.ts";
 import type { Person, PersonKey, TeamName } from "./seed/company.ts";
 import { definitionText } from "./seed/definitions.ts";
-import { collections } from "./seed/knowledge.ts";
-import type { CollectionSeed } from "./seed/knowledge.ts";
 import {
   authCall,
   localD1,
@@ -193,102 +197,30 @@ const sessionFor = (
   return session;
 };
 
-/** A collection, created by an admin, and its documents, written by its writer. */
-const seedCollection = async (
-  seed: CollectionSeed,
-  sessions: ReadonlyMap<PersonKey, Session>,
-  teams: ReadonlyMap<TeamName, string>
-): Promise<string> => {
-  const creator = sessionFor(sessions, seed.createdBy).api.knowledge;
-  const { knowledge } = sessionFor(sessions, seed.writer).api;
-  // Its writer reads it, whoever created it.
-  const listed = await knowledge.listCollections();
-  const collection =
-    listed.find(({ name }) => name === seed.name) ??
-    (await creator.createCollection({
-      name: seed.name,
-      description: seed.description,
-      ...(seed.teams.length === 0
-        ? { access: "everyone" }
-        : {
-            access: "teams",
-            teams: seed.teams.flatMap((team) => teams.get(team) ?? []),
-          }),
-      sensitive: seed.sensitive ?? false,
-    }));
-  for (const document of seed.documents) {
-    try {
-      // oxlint-disable-next-line no-await-in-loop -- one save at a time
-      await knowledge.saveDocument({
-        collectionId: collection.id,
-        path: document.path,
-        text: document.text,
-        ifVersion: 0,
-      });
-    } catch (error) {
-      // It's there already: seeded before.
-      if (knowledgeErrors.codeOf(error) === "knowledge.conflict") {
-        continue;
-      }
-      throw error;
-    }
-    if (document.update !== undefined) {
-      // oxlint-disable-next-line no-await-in-loop -- one save at a time
-      await knowledge.saveDocument({
-        collectionId: collection.id,
-        path: document.path,
-        text: document.update.text,
-        ifVersion: 1,
-        message: document.update.message,
-      });
-    }
-  }
-  return collection.id;
-};
-
 /**
- * Brings an App seeded before it had its board, or with an older one, to
- * the seed's, as its next version published with the definition that
- * holds its table. Only the seed's own change is published: a later
- * version that holds exactly the live one plus the seed's files (a seed
- * stopped before publishing it) is published; one with anyone else's
- * changes is left alone, and so is the App, as committing over it would
- * release them.
+ * Writes `definition` and `changes` into App `app`'s draft over
+ * `revision`, the one read, and publishes it as its owner: live, the
+ * people it is shared with use it.
  */
-const upgradeBoard = async (
+const publishSeeded = async (
   owner: Session,
-  adminSession: Session,
-  app: { id: string; name: string; currentVersion: number | null },
-  seed: AppSeed
+  app: string,
+  revision: number,
+  changes: Record<string, string>,
+  definition: AppDefinition
 ): Promise<void> => {
-  const current = app.currentVersion ?? undefined;
-  const files = await owner.api.apps.files.read(app.id, current);
-  const wanted = appFiles(seed);
-  const changed = Object.fromEntries(
-    Object.entries(wanted).filter(([path, code]) => files[path] !== code)
-  );
-  if (Object.keys(changed).length === 0) {
-    return;
+  const subject = { kind: "app", id: app } as const;
+  const whole: unknown = JSON.parse(appDefinitionText(definition));
+  const defined = await owner.api.apps.define(app, revision, {
+    op: "setDefinition",
+    definition: whole,
+  });
+  if (!defined.ok) {
+    throw new Error(defined.problem);
   }
-  const [latest] = await owner.api.apps.versions.list(app.id);
-  if (latest !== undefined && latest.version !== current) {
-    const later = await owner.api.apps.files.read(app.id, latest.version);
-    if (Object.entries(changed).some(([path, code]) => later[path] !== code)) {
-      console.warn(
-        `${app.name} has a version that isn't live, with changes of its own: its board is left as it is.`
-      );
-      return;
-    }
-    await adminSession.api.apps.versions.publish(app.id, latest.version);
-    return;
-  }
-  const { version } = await owner.api.apps.files.commit(
-    app.id,
-    changed,
-    "Add the App's board",
-    JSON.parse(appDefinitionText(appDefinition(seed)))
-  );
-  await adminSession.api.apps.versions.publish(app.id, version);
+  // The definition was the write after `revision`.
+  const drafted = await owner.api.drafts.write(subject, revision + 1, changes);
+  await owner.api.drafts.publish(subject, drafted.revision);
 };
 
 /**
@@ -349,7 +281,9 @@ const seedWorkflow = async (
   const listed = await adminSession.api.workflowResources.list();
   const found = listed.find(({ name }) => name === workflow.id);
   const published =
-    found === undefined ? [] : await resources.versions(found.id);
+    found === undefined
+      ? []
+      : await owner.api.versions.list({ kind: "workflow", id: found.id });
   if (found !== undefined && published.length > 0) {
     return found.id;
   }
@@ -381,10 +315,13 @@ const seedWorkflow = async (
       }
     }
   }
-  await resources.publish(created.id, {
-    definition: definitionText(workflow.parts),
-    basedOn: null,
+  // Its draft as the seed defines it, published as its first version.
+  const draft = await resources.draft(created.id);
+  const subject = { kind: "workflow", id: created.id } as const;
+  const drafted = await owner.api.drafts.write(subject, draft.revision, {
+    "workflow.json": definitionText(workflow.parts),
   });
+  await owner.api.drafts.publish(subject, drafted.revision);
   if (decision !== undefined) {
     const teamId = teams.get(decision.team);
     if (teamId === undefined) {
@@ -405,7 +342,7 @@ const seedWorkflow = async (
     const id = teams.get(team);
     if (id !== undefined) {
       // oxlint-disable-next-line no-await-in-loop -- one change at a time
-      await resources.share(created.id, { type: "team", id, role });
+      await resources.members.add(created.id, { type: "team", id, role });
     }
   }
   return created.id;
@@ -419,9 +356,10 @@ const startBindingOf = (alias: string): string =>
 
 /**
  * The App's permission to start each of its workflows from its pages,
- * asked by the App's owner and granted by an admin, where it has none;
- * one still requested (a seed stopped before granting it) is granted
- * now. One someone revoked is left revoked: that was their decision.
+ * asked by the App's owner and granted by an admin, where it has none.
+ * The admin grants only the request this run made: one already requested
+ * waits for an admin to review it, and one someone revoked is left
+ * revoked: that was their decision.
  */
 const seedStartPermissions = async (
   appSeed: AppSeed,
@@ -438,27 +376,22 @@ const seedStartPermissions = async (
   for (const { alias } of appSeed.workflows) {
     const workflowId = workflowIds.get(alias);
     const binding = startBindingOf(alias);
-    const had = held.find(({ binding: name }) => name === binding);
     if (
       workflowId === undefined ||
-      (had !== undefined && had.status !== "requested")
+      held.some(({ binding: name }) => name === binding)
     ) {
       continue;
     }
-    let id = had?.id;
-    if (id === undefined) {
-      // oxlint-disable-next-line no-await-in-loop -- one request at a time
-      const requested = await sessionFor(
-        sessions,
-        appSeed.owner
-      ).api.permissions.request({
-        subject: { type: "app", appId: app },
-        object: { type: "workflow", workflowId },
-        actions: ["start"],
-        binding,
-      });
-      ({ id } = requested);
-    }
+    // oxlint-disable-next-line no-await-in-loop -- one request at a time
+    const { id } = await sessionFor(
+      sessions,
+      appSeed.owner
+    ).api.permissions.request({
+      subject: { type: "app", appId: app },
+      object: { type: "workflow", workflowId },
+      actions: ["start"],
+      binding,
+    });
     // oxlint-disable-next-line no-await-in-loop -- one grant at a time
     await adminSession.api.permissions.grant(id, { version: currentVersion });
   }
@@ -468,13 +401,13 @@ const seedStartPermissions = async (
  * An App: created by its owner with its workflows and pages, its version
  * published by an admin, shared with its teams, its workflows' owners and
  * deciders set, and,
- * while it has none, its runs. Returns its ID, and how many runs it got.
+ * while it has none, its runs. Returns how many runs it got.
  */
 const seedApp = async (
   seed: AppSeed,
   sessions: ReadonlyMap<PersonKey, Session>,
   teams: ReadonlyMap<TeamName, string>
-): Promise<{ id: string; runs: number }> => {
+): Promise<number> => {
   const adminSession = sessionFor(sessions, admin.key);
   const owner = sessionFor(sessions, seed.owner);
   const all = await adminSession.api.apps.list();
@@ -489,7 +422,7 @@ const seedApp = async (
   // decision. The seed leaves it as it is.
   if (app.archived) {
     console.warn(`${app.name} is archived: the seed leaves it as it is.`);
-    return { id: app.id, runs: 0 };
+    return 0;
   }
   // The process it serves, unless someone set one already.
   if (app.process === null) {
@@ -503,39 +436,25 @@ const seedApp = async (
       await seedWorkflow(workflow, seed, sessions, teams)
     );
   }
-  if (app.currentVersion === null) {
-    for (const { alias } of seed.workflows) {
-      const id = workflowIds.get(alias);
-      if (id !== undefined) {
-        // oxlint-disable-next-line no-await-in-loop -- one binding at a time
-        await owner.api.workflowResources.bindToApp(id, {
-          app: app.id,
-          alias,
-          version: 1,
-        });
-      }
-    }
-    const { version } = await owner.api.apps.files.commit(
+  // Published only in the run that made it: an App there already, from
+  // an earlier run or made by someone since, keeps its code and
+  // definition (a definition built again gives its tables new IDs, which
+  // its records' store refuses), and one a stopped run left unpublished
+  // stays so. For the whole demo again, start over (see the header).
+  if (existing === undefined) {
+    // Its workflows bound with it, its board's table and page, published
+    // from its draft once its checks and workflow tests pass.
+    const { revision } = await owner.api.drafts.get({
+      kind: "app",
+      id: app.id,
+    });
+    await publishSeeded(
+      owner,
       app.id,
+      revision,
       appFiles(seed),
-      "Release the App's workflows and board",
-      JSON.parse(appDefinitionText(appDefinition(seed)))
+      appDefinition(seed, workflowIds)
     );
-    // An admin publishes it, which approves its code, once its workflow
-    // tests pass: live, the people it is shared with use it.
-    await adminSession.api.apps.versions.publish(app.id, version);
-  } else {
-    // Its board needs the App's own files and workflow bindings: one
-    // seeded before them keeps what it has (nothing has shipped, so no
-    // seed migrates it; reset local data to seed it anew).
-    const files = await owner.api.apps.files.read(app.id, app.currentVersion);
-    if (files["grasp.config.ts"] === appFiles(seed)["grasp.config.ts"]) {
-      await upgradeBoard(owner, adminSession, app, seed);
-    } else {
-      console.warn(
-        `${app.name} was seeded before its independent workflows: its board is left as it is. Reset local data to seed it again.`
-      );
-    }
   }
   const board = boards[seed.name];
   if (board !== undefined) {
@@ -557,7 +476,7 @@ const seedApp = async (
     // oxlint-disable-next-line no-await-in-loop -- one workflow at a time
     const ran = await owner.api.workflowResources.runs(id);
     if (ran.length > 0) {
-      return { id: app.id, runs: 0 };
+      return 0;
     }
   }
   const runs = await seedRuns({
@@ -567,66 +486,7 @@ const seedApp = async (
     sessions,
     db: core,
   });
-  return { id: app.id, runs };
-};
-
-/**
- * Apps' access to Knowledge: one an admin granted, and one still
- * waiting for an admin, so the dashboard has a request to show.
- */
-const seedPermissions = async (
-  sessions: ReadonlyMap<PersonKey, Session>,
-  appIds: ReadonlyMap<string, string>,
-  collectionIds: ReadonlyMap<string, string>
-): Promise<void> => {
-  const adminSession = sessionFor(sessions, admin.key);
-  const wanted = [
-    {
-      app: "Issue-to-Resolution",
-      by: "lisa",
-      collection: "Procedures",
-      binding: "PROCEDURES",
-      grant: true,
-    },
-    {
-      app: "Purchase-to-Pay",
-      by: "eva",
-      collection: "Finance",
-      binding: "HANDBOOK",
-      grant: false,
-    },
-  ] as const;
-  for (const { app, by, collection, binding, grant } of wanted) {
-    const appId = appIds.get(app);
-    const collectionId = collectionIds.get(collection);
-    if (appId === undefined || collectionId === undefined) {
-      continue;
-    }
-    // oxlint-disable-next-line no-await-in-loop -- one App at a time
-    const held = await adminSession.api.permissions.list({
-      type: "app",
-      appId,
-    });
-    if (held.some(({ binding: name }) => name === binding)) {
-      continue;
-    }
-    const request: PermissionRequest = {
-      subject: { type: "app", appId },
-      object: { type: "collection", collectionId },
-      actions: ["read"],
-      binding,
-    };
-    // oxlint-disable-next-line no-await-in-loop -- one request at a time
-    const { id } = await sessionFor(sessions, by).api.permissions.request(
-      request
-    );
-    if (grant) {
-      // oxlint-disable-next-line no-await-in-loop -- one grant at a time
-      const { currentVersion } = await adminSession.api.apps.get(appId);
-      // oxlint-disable-next-line no-await-in-loop -- one grant at a time
-      await adminSession.api.permissions.grant(id, { version: currentVersion });
-    }
-  }
+  return runs;
 };
 
 /**
@@ -702,9 +562,15 @@ const seedOrganization = async (adminSession: Session): Promise<boolean> => {
   return true;
 };
 
-/** The chats, each in its person's Workspace object. */
+/**
+ * The chats, each in its person's Workspace object; one whose answers name
+ * uploads only once recall, as its person, finds each of them. One that
+ * names an upload deleted in the demo is skipped with a line: the seed
+ * leaves alone what a person removed.
+ */
 const seedChats = async (
-  sessions: ReadonlyMap<PersonKey, Session>
+  sessions: ReadonlyMap<PersonKey, Session>,
+  uploadsDeleted: ReadonlySet<string>
 ): Promise<number> => {
   let created = 0;
   const now = Date.now();
@@ -715,6 +581,18 @@ const seedChats = async (
     if (listed.some(({ title }) => title === chat.title)) {
       continue;
     }
+    const deleted = chat.turns.find(
+      ({ answeredBy }) =>
+        answeredBy !== undefined && uploadsDeleted.has(answeredBy)
+    );
+    if (deleted !== undefined) {
+      console.info(
+        `Skipped the chat "${chat.title}" of ${chat.by}: ${deleted.answeredBy} was deleted in the demo`
+      );
+      continue;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- one chat at a time
+    await confirmAnsweredBy(api, chat);
     // oxlint-disable-next-line no-await-in-loop -- one chat at a time
     const { id } = await api.chats.create(chat.title);
     const workspace = localObject("Workspace", "chats", id);
@@ -748,19 +626,15 @@ const main = async (): Promise<void> => {
         : "The onboarding has its roster and plan already"
     );
 
-    const collectionIds = new Map<string, string>();
-    for (const seed of collections) {
-      // oxlint-disable-next-line no-await-in-loop -- one collection at a time
-      const id = await seedCollection(seed, sessions, teams);
-      collectionIds.set(seed.name, id);
-    }
-    console.info(`${collections.length} Knowledge collections`);
+    const { uploadsAdded, uploadsThere, uploadsDeleted, instructionsWritten } =
+      await seedBrain((key) => sessionFor(sessions, key), teams);
+    console.info(
+      `The Brain: ${uploadsAdded} new uploads (${uploadsThere} there already), ${instructionsWritten} new instruction files`
+    );
 
-    const appIds = new Map<string, string>();
     for (const seed of apps) {
       // oxlint-disable-next-line no-await-in-loop -- one App at a time
-      const { id, runs } = await seedApp(seed, sessions, teams);
-      appIds.set(seed.name, id);
+      const runs = await seedApp(seed, sessions, teams);
       let ran = `${runs} runs over the last 30 days`;
       if (seed.workflows.length === 0) {
         ran = "no workflows yet";
@@ -769,9 +643,8 @@ const main = async (): Promise<void> => {
       }
       console.info(`App ${seed.name}: ${ran}`);
     }
-    await seedPermissions(sessions, appIds, collectionIds);
 
-    const created = await seedChats(sessions);
+    const created = await seedChats(sessions, uploadsDeleted);
     console.info(`${created} new chats`);
     console.info(
       `Done. Sign in at http://localhost:5173 as ${admin.email} (${admin.name}), or as any of its members (people in scripts/seed/company.ts).`
@@ -787,10 +660,13 @@ const main = async (): Promise<void> => {
 try {
   await main();
 } catch (error) {
-  // An App or Knowledge error says what core refused, in its own words.
+  // An App or Brain error says what core refused, in its own words.
   const coded =
     appErrors.codeOf(error) ??
-    knowledgeErrors.codeOf(error) ??
+    brainSourceErrors.codeOf(error) ??
+    brainUploadErrors.codeOf(error) ??
+    instructionFileErrors.codeOf(error) ??
+    skillErrors.codeOf(error) ??
     onboardingErrors.codeOf(error) ??
     organizationErrors.codeOf(error) ??
     workflowResourceErrors.codeOf(error);

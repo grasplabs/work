@@ -3,18 +3,19 @@ import type { AppId } from "@grasp-os/shared/ids";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import { readDraft, saveDraft } from "../src/app-drafts.ts";
+import { appKind } from "../src/apps.ts";
+import { readDraft, saveDraft } from "../src/drafts.ts";
 import { agentWriting } from "./draft-writers.ts";
 import { mockIdp } from "./idp.ts";
 import { newTeam } from "./knowledge.ts";
 import { outcome, signedInApi, unique } from "./sign-in.ts";
 
 // Share with your team, as the App's workspace does it (the web's
-// share sheet): the builder's changes published (`apps.drafts.publish`),
+// share sheet): the builder's changes published (`drafts.publish`),
 // then the App shared with each team chosen (`apps.members.add`), in one
 // step for the person; Undo takes each new share back
 // (`apps.members.remove`) and, when a version was live before, makes it
-// live again over the one just published (`apps.versions.publish`). What
+// live again over the one just published (`versions.rollback`). What
 // could go wrong: the team not reaching what was shared, or still
 // reaching it after Undo; Undo leaving the shared version live, or
 // taking back a share that was there before.
@@ -42,11 +43,13 @@ const writeDraft = async (
   app: AppId,
   changes: Record<string, string>
 ): Promise<number> => {
-  const { id: chatId } = await person.api.chats.forApp(app);
+  const { id: chatId } = await person.api.chats.create("App changes");
   const written = await saveDraft(
     env,
+    appKind,
+
     app,
-    await readDraft(env, app),
+    await readDraft(env, { kind: "app", id: app }),
     { changes, unchanged: [] },
     await agentWriting(person, chatId)
   );
@@ -66,13 +69,12 @@ const share = async (
   const { currentVersion: before } = await builder.api.apps.get(app);
   const members = await builder.api.apps.members.list(app);
   const shared = new Set(members.map(({ id }) => id));
-  const { changed } = await builder.api.apps.drafts.get(app);
+  const { changed } = await builder.api.drafts.get({ kind: "app", id: app });
   let published = before;
   if (changed.length > 0) {
-    ({ currentVersion: published } = await builder.api.apps.drafts.publish(
-      app,
-      revision,
-      "Shared"
+    ({ version: published } = await builder.api.drafts.publish(
+      { kind: "app", id: app },
+      revision
     ));
   }
   const added = teams.filter((team) => !shared.has(team));
@@ -98,8 +100,13 @@ const undo = async (
     await builder.api.apps.members.remove(app, { type: "team", id: team });
   }
   if (before !== null && published !== null && published !== before) {
-    const { revision } = await builder.api.apps.drafts.get(app);
-    await builder.api.apps.versions.publish(app, before, revision, published);
+    const { revision } = await builder.api.drafts.get({ kind: "app", id: app });
+    await builder.api.versions.rollback(
+      { kind: "app", id: app },
+      before,
+      revision,
+      published
+    );
   }
 };
 
@@ -141,7 +148,7 @@ describe("sharing an App with a team", { timeout: 120_000 }, () => {
 
     // Shared again, with nothing new to publish, then changes shared
     // later: the team stays, and Undo makes the version before live again.
-    const { revision } = await builder.api.apps.drafts.get(app);
+    const { revision } = await builder.api.drafts.get({ kind: "app", id: app });
     await share(builder, app, revision, [team]);
     const later = await share(
       builder,

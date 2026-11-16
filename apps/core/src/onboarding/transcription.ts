@@ -31,6 +31,7 @@ import { isOwnOrigin } from "../rpc.ts";
 import { sessionRecheckMs } from "../session-check.ts";
 import { auditStaffRoute } from "../staff-audit.ts";
 import { platformTranscription } from "../transcription.ts";
+import { interviewCaller } from "./interview-caller.ts";
 import { onboardingStore } from "./store.ts";
 import type { Took } from "./store.ts";
 
@@ -49,10 +50,11 @@ import type { Took } from "./store.ts";
 //   deployment's own origin (426 without the upgrade, 403 from any other
 //   origin, or none). The URL carries nothing secret.
 // - The page's first frame, within `startWaitMs`, is text: `{"type":
-//   "start", "language", "sampleRate", "previousText"?, "link"?: {"secret",
-//   "key"}}` (`transcriptionStartSchema`). With `link`, someone's own
-//   interview link, on the device it opened on; without, an admin signed
-//   in, by the session cookie the upgrade carried.
+//   "start", "language", "sampleRate", "previousText"?, "link"?:
+//   {"secret"}}` (`transcriptionStartSchema`). With `link`, someone's own
+//   interview link, for the account it belongs to, by the session cookie
+//   the upgrade carried (interview-caller.ts); without, an admin signed
+//   in, by that cookie.
 // - Core answers `{"type": "ready", "session", "maxSeconds"}` once the
 //   upstream is open, or an `error` frame and closes.
 // - Then the page sends binary frames of audio, 16-bit little-endian PCM,
@@ -68,16 +70,16 @@ import type { Took } from "./store.ts";
 //
 // What it must not do, and what stops it:
 //
-// - Listen for anyone (GRA-361, C4): only someone's own link, on the
-//   device it is open on, while it may be saved (the store's
+// - Listen for anyone (GRA-361, C4): only someone's own link, for the
+//   account it belongs to, signed in, while it may be saved (the store's
 //   `transcriptionOnLink`, as a line said), or an admin signed in. Another
 //   person's link, an unknown one and a removed person's answer as at the
 //   speech endpoint. Nothing reaches the upstream before that, and nothing
 //   but `start` is read until it.
 // - Keep listening once that no longer holds (GRA-361, L7, L8): the link
-//   or the admin's session is checked again every `sessionRecheckMs`
-//   while the socket is open, as `/rpc`'s connections are, and a socket
-//   ends once it fails, or once the check can't be made.
+//   and its session, or the admin's session, is checked again every
+//   `sessionRecheckMs` while the socket is open, as `/rpc`'s connections
+//   are, and a socket ends once it fails, or once the check can't be made.
 // - Lend an admin's cookie to another site: browsers send cookies with
 //   any WebSocket upgrade, so the upgrade must come from the deployment's
 //   own origin (`isOwnOrigin`), as `/rpc`'s.
@@ -156,15 +158,24 @@ interface Hearer {
   still: () => Promise<CodedError | undefined>;
 }
 
-/** Why someone's link no longer lets them listen, or `undefined`. */
+/**
+ * Why someone's link no longer lets them listen, or `undefined`: their
+ * session, as the upgrade carried it, ended or is someone else's
+ * (interview-caller.ts), or the link no longer lets them.
+ */
 const linkStill = async (
   env: Env,
+  headers: Headers,
   secretMark: string,
-  keyMark: string
+  account: string
 ): Promise<CodedError | undefined> => {
+  const caller = await interviewCaller(env, headers);
+  if (typeof caller === "string" || caller.account !== account) {
+    return interviewErrors.create("interview.sign_in");
+  }
   const found = await onboardingStore(env).transcriptionStill(
     secretMark,
-    keyMark
+    account
   );
   return found.ok ? undefined : interviewErrors.create(found.code);
 };
@@ -185,14 +196,23 @@ const adminStill = async (
 /** Whom a session on someone's link is for, or why their link refuses it. */
 const onLink = async (
   env: Env,
+  headers: Headers,
   link: NonNullable<Start["link"]>,
   requestId: string
 ): Promise<Hearer | CodedError> => {
+  // The session the upgrade carried names whose interview it may be
+  // (interview-caller.ts).
+  const caller = await interviewCaller(env, headers);
+  if (typeof caller === "string") {
+    return caller === "sign_in"
+      ? interviewErrors.create("interview.sign_in")
+      : requestErrors.create("request.forbidden");
+  }
+  const { account } = caller;
   const secretMark = await sha256Hex(link.secret);
-  const keyMark = await sha256Hex(link.key);
   const found = await onboardingStore(env).transcriptionOnLink(
     secretMark,
-    keyMark
+    account
   );
   if (!found.ok) {
     if (found.code === "interview.link_invalid") {
@@ -210,7 +230,7 @@ const onLink = async (
     // As a line said on a link: by the system, never in anyone's name.
     by: { type: "system" },
     person,
-    still: async () => await linkStill(env, secretMark, keyMark),
+    still: async () => await linkStill(env, headers, secretMark, account),
   };
 };
 
@@ -371,7 +391,7 @@ class Relay {
       hearer =
         start.link === undefined
           ? await forAdmin(this.#env, this.#headers)
-          : await onLink(this.#env, start.link, this.#requestId);
+          : await onLink(this.#env, this.#headers, start.link, this.#requestId);
     } catch {
       log.error("transcription.check_failed", { requestId: this.#requestId });
       this.#fail(transcriptionErrors.create("transcription.failed"));

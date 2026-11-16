@@ -4,9 +4,10 @@ import type { StoreFields } from "@grasp-os/shared/stores";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 
-import { publishVersion } from "../src/app-publish.ts";
+import { appKind } from "../src/apps.ts";
 import { openStore } from "../src/data-stores.ts";
 import type { OpenStore } from "../src/data-stores.ts";
+import { rollback } from "../src/publish.ts";
 import { testApp, withFiles } from "./app-definitions.ts";
 import type { TestApp } from "./app-definitions.ts";
 import { commitDefined } from "./apps.ts";
@@ -181,7 +182,7 @@ export const migrated = async (
   const fixture: Fixture = await appWith(start, "Notes", owner);
   const first = await seal(fixture);
   if (firstCurrent) {
-    await publishVersion(env, fixture.owner, fixture.app, 1);
+    await rollback(env, appKind, fixture.owner, fixture.app, 1);
   }
   const store = await openStore(env, fixture.store);
   const fromSchema = first.manifest.schemaHash;
@@ -211,8 +212,7 @@ export const migrated = async (
     withFiles(
       migratedFiles(fromSchema, placeholder, handler, fixtures, next),
       extra
-    ),
-    "Migrate"
+    )
   );
   const refused = await refusalOf(async () => await seal(fixture, 2));
   const toSchema = namedSchema(refused.details);
@@ -223,8 +223,7 @@ export const migrated = async (
     withFiles(
       migratedFiles(fromSchema, toSchema, handler, fixtures, next),
       extra
-    ),
-    "Migrate to the sealed schema"
+    )
   );
   const release = await seal(fixture, 3);
   return {

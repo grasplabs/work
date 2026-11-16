@@ -1,0 +1,717 @@
+import { brainOf, personalBrainOf } from "@grasp-os/brain-next/contract";
+import type { ChatMessage } from "@grasp-os/shared/chat";
+import { runInDurableObject } from "cloudflare:test";
+import { env } from "cloudflare:workers";
+import { drizzle } from "drizzle-orm/d1";
+import { describe, expect, it, vi } from "vite-plus/test";
+
+import { withheldResult } from "../src/agent.ts";
+import { organizationId } from "../src/auth/auth.ts";
+import {
+  addSource,
+  eraseSource,
+  forgetAs,
+  rememberAs,
+} from "../src/brain-next.ts";
+import type { SourceReaders, SourceRef } from "../src/brain-next.ts";
+import { personalWorkspaceId } from "../src/chats-rpc.ts";
+import { teamMembers, teams } from "../src/db/core/schema.ts";
+import { inJurisdiction, workspace } from "../src/durable-objects.ts";
+import { codeStep, personalChatsOf, says, setObjectEnv } from "./agent-chat.ts";
+import type { WorkspaceStub } from "./agent-chat.ts";
+import { requestGranted } from "./apps.ts";
+import { mockIdp } from "./idp.ts";
+import { fakeProvider } from "./model-provider.ts";
+import type { FakeProvider, ProviderReply } from "./model-provider.ts";
+import { signedInApi, unique } from "./sign-in.ts";
+
+// What a chat keeps showing of what it read from the Brain (GRA-1807),
+// through a person's own chats as they ask and open them: the Workspace,
+// its ChatSession, the gateway, connect and the Brain are real; the model
+// provider is the fake behind connect. Once the content a recall or a
+// code step handed over is erased for good, the chat's own copy of it
+// goes too, replaced by the line the model gets, checked when the chat is
+// opened; what is only no longer readable (a narrowed source, a forgotten
+// memory) keeps showing, as the person saw it while they could, and never
+// reaches the model again. From the ways it can fail: the chat shows the
+// erased text, keeps it in its object for a later read, or sends it to the
+// model; a narrowed source or a forgotten memory vanishes from the chat as
+// if erased; a Brain that can't be asked lets the text show unchecked.
+
+const idp = mockIdp();
+
+/** Signing people in and whole turns take a while on CI. */
+const slow = { timeout: 120_000 };
+
+/** A word no other test's sources hold: letters only. */
+const word = () =>
+  `zq${crypto
+    .randomUUID()
+    .replaceAll(/[^a-f]/gu, "")
+    .slice(0, 12)}`;
+
+const owner = (personId: string): SourceReaders => ({
+  kind: "owner",
+  personId,
+});
+
+/** Adds `text` to the Brain as a new upload `readers` may read. */
+const added = async (
+  text: string,
+  readers: SourceReaders
+): Promise<SourceRef> => {
+  const source: SourceRef = { producer: "upload", id: crypto.randomUUID() };
+  await addSource(env, {
+    source,
+    change: crypto.randomUUID(),
+    text,
+    readers,
+  });
+  return source;
+};
+
+/** A new team with `personId` in it. */
+const teamOf = async (personId: string): Promise<string> => {
+  const teamId = crypto.randomUUID();
+  const db = drizzle(env.DB);
+  await db.insert(teams).values({
+    id: teamId,
+    name: `Team ${unique()}`,
+    organizationId,
+    createdAt: new Date(),
+  });
+  await db.insert(teamMembers).values({
+    id: crypto.randomUUID(),
+    teamId,
+    userId: personId,
+    createdAt: new Date(),
+  });
+  return teamId;
+};
+
+/**
+ * A new member's own chats in Grasp's app, answered by `replies`, whose
+ * agent holds the `brain` grant; `chat` is a new one of them.
+ */
+const recallingChats = async (...replies: ProviderReply[]) => {
+  const admin = await signedInApi(idp, "admin");
+  const person = await signedInApi(idp, "user");
+  const chats = await personalChatsOf(person.userId, ...replies);
+  await requestGranted(idp, admin, {
+    subject: chats.agent,
+    object: { type: "platform" },
+    actions: ["brain"],
+    binding: "BRAIN",
+  });
+  const { chat, ask } = await chats.newChat();
+  /** Whether the next turn's requests to the model carry `text`. */
+  const sendsNext = async (text: string): Promise<boolean> => {
+    const before = chats.provider.requests.length;
+    await ask("Thanks, and what else is new?");
+    return JSON.stringify(
+      chats.provider.requests.slice(before).map(({ body }) => body)
+    ).includes(text);
+  };
+  return { ...chats, person, chat, ask, sendsNext };
+};
+
+/**
+ * The chat's messages as its person's page gets them when they open it:
+ * the first update of a new watch.
+ */
+const opened = async (
+  person: Awaited<ReturnType<typeof signedInApi>>,
+  chatId: string
+): Promise<ChatMessage[]> => {
+  const messages: ChatMessage[] = [];
+  const subscription = await person.api.chats.watch(chatId, null, (update) => {
+    messages.push(...update.messages);
+  });
+  try {
+    return await vi.waitFor(
+      () => {
+        expect(messages.at(-1)?.role).toBe("assistant");
+        return messages;
+      },
+      { timeout: 10_000 }
+    );
+  } finally {
+    subscription[Symbol.dispose]();
+  }
+};
+
+/** What each step's result of `messages` says, in order. */
+const resultsOf = (messages: readonly ChatMessage[]): string[] =>
+  messages.flatMap((message) =>
+    message.role === "result" ? [message.text] : []
+  );
+
+/**
+ * Whether anything the Workspace object keeps (every table it has, and
+ * its key-value storage) holds `text`: the chat's own copy, its search
+ * text, its records of what it read, anything.
+ */
+const objectHolds = async (
+  stub: WorkspaceStub,
+  text: string
+): Promise<boolean> =>
+  await runInDurableObject(stub, (_instance, state) => {
+    const { sql } = state.storage;
+    const tables = sql
+      .exec<{ name: string }>(
+        "SELECT name FROM sqlite_master WHERE type = 'table'"
+      )
+      .toArray()
+      .filter(({ name }) => !name.startsWith("_cf_"));
+    const rows = tables.map(({ name }) =>
+      sql.exec(`SELECT * FROM "${name.replaceAll('"', '""')}"`).toArray()
+    );
+    return JSON.stringify([rows, [...state.storage.kv.list()]]).includes(text);
+  });
+
+/** An object's call refused: the Brain away. */
+const refused = async (): Promise<never> => {
+  await Promise.resolve();
+  throw new Error("The Brain is away");
+};
+
+/**
+ * `namespace` (the Brain's) with every object's `erasedOf` refused: the
+ * Brain away as a chat is opened.
+ */
+const refusingErasedOf = (namespace: object): object =>
+  new Proxy(namespace, {
+    get: (target, name): unknown => {
+      const value: unknown = Reflect.get(target, name);
+      if (typeof value !== "function") {
+        return value;
+      }
+      if (name === "jurisdiction") {
+        return (...args: unknown[]): object =>
+          // SAFETY: a namespace's `jurisdiction` answers a namespace.
+          // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+          refusingErasedOf(Reflect.apply(value, target, args) as object);
+      }
+      if (name !== "getByName" && name !== "get") {
+        return (...args: unknown[]): unknown =>
+          Reflect.apply(value, target, args);
+      }
+      return (...args: unknown[]): object => {
+        // SAFETY: a namespace's `getByName` and `get` answer an object's stub.
+        // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+        const stub = Reflect.apply(value, target, args) as object;
+        return new Proxy(stub, {
+          get: (object, property): unknown => {
+            const own: unknown = Reflect.get(object, property);
+            if (property !== "erasedOf" || typeof own !== "function") {
+              return own;
+            }
+            return refused;
+          },
+        });
+      };
+    },
+  });
+
+/**
+ * A new member's Teams direct message whose first turn's code recalled a
+ * marked company source: `ask` asks it again, `narrow` narrows the source
+ * to a team they aren't in, `erase` erases it for good; `before` is
+ * whether the Workspace object held the marker after the first turn.
+ */
+const teamsDirect = async () => {
+  const admin = await signedInApi(idp, "admin");
+  const person = await signedInApi(idp, "user");
+  const agentId = crypto.randomUUID();
+  await requestGranted(idp, admin, {
+    subject: { type: "agent", agentId },
+    object: { type: "platform" },
+    actions: ["brain"],
+    binding: "BRAIN",
+  });
+  const depot = word();
+  const marker = word();
+  const text = `${depot} ${marker}`;
+  const source = await added(text, { kind: "everyone" });
+  const asked = { question: depot, budget: { tokens: 800 } };
+  await fakeProvider(
+    codeStep(
+      `export default async (self, env) => { const pack = await env.brain.recall(${JSON.stringify(asked)}); return pack.items.map(({ text }) => text).join(" | "); };`
+    ),
+    says("Noted."),
+    says("Ok."),
+    says("Ok.")
+  );
+  const stub = workspace(env, personalWorkspaceId(person.userId));
+  const ask = async (question: string) =>
+    await stub.askThrough(
+      person.userId,
+      agentId,
+      "teams",
+      question,
+      undefined,
+      { kind: "direct" }
+    );
+  await ask("Please look that up.");
+  const narrow = async () => {
+    await brainOf(inJurisdiction(env, env.BRAIN_STORE)).addSource({
+      source: `upload:${source.id}`,
+      change: crypto.randomUUID(),
+      text,
+      access: { kind: "audience", group: `team:${crypto.randomUUID()}` },
+    });
+  };
+  const erase = async () => {
+    await eraseSource(env, {
+      source,
+      readers: { kind: "everyone" },
+      reason: "deleted",
+    });
+  };
+  return {
+    stub,
+    marker,
+    ask,
+    narrow,
+    erase,
+    before: await objectHolds(stub, marker),
+  };
+};
+
+/** A row of a table. */
+type Row = Record<string, SqlStorageValue>;
+
+/** Tables another table of the store makes itself (the word indexes' pages). */
+const madeByAnother = /^(?:sqlite_|(?:chunk|memory)_(?:words|stems)_)/u;
+
+/** Kills `stub`'s object, as a crash or a restore restarts it. */
+const kill = async (stub: DurableObjectStub): Promise<void> => {
+  try {
+    await runInDurableObject(stub, (_instance, state) => {
+      state.abort("Killed by the test");
+    });
+  } catch {
+    // The kill ends the call it was made in.
+  }
+};
+
+/**
+ * `personId`'s own store's storage lost, its bucket and ledger kept, as
+ * a lost Durable Object storage leaves it; `putBack` restores the copy
+ * taken before, as a restore from a backup does.
+ */
+const ownStorageLost = async (personId: string) => {
+  // A fresh stub for each call: one an object was killed through is broken.
+  const stub = () =>
+    inJurisdiction(env, env.BRAIN_STORE).getByName(`person:${personId}`);
+  const copy = await runInDurableObject(stub(), async (_instance, state) => {
+    const { sql } = state.storage;
+    const tables = sql
+      .exec<{ name: string; sql: string }>(
+        `SELECT name, sql FROM sqlite_master WHERE type = 'table'
+        AND name NOT LIKE '\\_cf\\_%' ESCAPE '\\'`
+      )
+      .toArray()
+      .filter(({ name }) => !madeByAnother.test(name))
+      .map(({ name, sql: created }) => ({
+        name,
+        created,
+        rows: sql
+          .exec<Row>(
+            created.startsWith("CREATE VIRTUAL TABLE")
+              ? `SELECT rowid AS rowid, * FROM "${name}"`
+              : `SELECT * FROM "${name}"`
+          )
+          .toArray(),
+      }));
+    const others = sql
+      .exec<{ sql: string | null }>(
+        "SELECT sql FROM sqlite_master WHERE type IN ('index', 'trigger') ORDER BY type"
+      )
+      .toArray()
+      .flatMap(({ sql: created }) => (created === null ? [] : [created]));
+    await state.storage.deleteAll();
+    return { tables, others };
+  });
+  await kill(stub());
+  const putBack = async (): Promise<void> => {
+    await runInDurableObject(stub(), async (_instance, state) => {
+      await state.storage.deleteAll();
+      const { sql } = state.storage;
+      state.storage.transactionSync(() => {
+        sql.exec("PRAGMA defer_foreign_keys = ON");
+        for (const { created } of copy.tables) {
+          sql.exec(created);
+        }
+        for (const { name, rows } of copy.tables) {
+          for (const row of rows) {
+            const columns = Object.keys(row);
+            sql.exec(
+              `INSERT INTO "${name}" (${columns.map((column) => `"${column}"`).join(", ")})
+              VALUES (${columns.map(() => "?").join(", ")})`,
+              ...Object.values(row)
+            );
+          }
+        }
+        for (const created of copy.others) {
+          sql.exec(created);
+        }
+      });
+    });
+    await kill(stub());
+  };
+  return { putBack };
+};
+
+/** Whether the provider's requests so far carried `text`. */
+const sentSoFar = (provider: FakeProvider, text: string): boolean =>
+  JSON.stringify(provider.requests.map(({ body }) => body)).includes(text);
+
+describe("what a chat shows of what it read from the Brain", () => {
+  it(
+    "replaces a recall's passage once its source is erased, as the chat is opened, keeps nothing of it in the chat's object and never sends it again",
+    slow,
+    async () => {
+      const depot = word();
+      const marker = word();
+      const chats = await recallingChats(says("Noted."), says("Ok."));
+      const source = await added(
+        `Depot ${depot} keeps code ${marker} at the gate`,
+        owner(chats.person.userId)
+      );
+      await chats.ask(`Where does depot ${depot} keep its code?`);
+      const before = {
+        sent: sentSoFar(chats.provider, marker),
+        shown: resultsOf(await opened(chats.person, chats.chat.id)).some(
+          (text) => text.includes(marker)
+        ),
+      };
+      // An admin's hard delete of the upload: erased for good.
+      await eraseSource(env, {
+        source,
+        readers: owner(chats.person.userId),
+        reason: "deleted",
+      });
+      const shown = await opened(chats.person, chats.chat.id);
+      const held = await objectHolds(chats.stub, marker);
+      const sentAgain = await chats.sendsNext(marker);
+
+      expect({
+        before,
+        results: resultsOf(shown),
+        shown: JSON.stringify(shown).includes(marker),
+        held,
+        sentAgain,
+      }).toStrictEqual({
+        before: { sent: true, shown: true },
+        results: [withheldResult],
+        shown: false,
+        held: false,
+        sentAgain: false,
+      });
+    }
+  );
+
+  it(
+    "replaces a code step's output once a source its code recalled is erased, as the chat is opened, and never sends it again",
+    slow,
+    async () => {
+      const depot = word();
+      const marker = word();
+      const asked = { question: depot, budget: { tokens: 800 } };
+      const chats = await recallingChats(
+        codeStep(
+          `export default async (self, env) => { const pack = await env.brain.recall(${JSON.stringify(asked)}); return pack.items.map(({ text }) => text).join(" | "); };`
+        ),
+        says("Noted."),
+        says("Ok.")
+      );
+      const source = await added(`${depot} ${marker}`, { kind: "everyone" });
+      // A question the recall before it finds nothing for: the code reads.
+      await chats.ask("Please look that up.");
+      const before = resultsOf(await opened(chats.person, chats.chat.id)).some(
+        (text) => text.includes(marker)
+      );
+      await eraseSource(env, {
+        source,
+        readers: { kind: "everyone" },
+        reason: "deleted",
+      });
+      const shown = await opened(chats.person, chats.chat.id);
+
+      expect({
+        before,
+        // The recall before the question found nothing: the code's is last.
+        codeResult: resultsOf(shown).at(-1),
+        shown: JSON.stringify(shown).includes(marker),
+        held: await objectHolds(chats.stub, marker),
+        sentAgain: await chats.sendsNext(marker),
+      }).toStrictEqual({
+        before: true,
+        codeResult: withheldResult,
+        shown: false,
+        held: false,
+        sentAgain: false,
+      });
+    }
+  );
+
+  it(
+    "replaces what a Teams direct message's code read of an erased source at its next turn, never opened in Grasp, also once it was withheld for being narrowed before, or the Brain couldn't be asked the turn before",
+    slow,
+    async () => {
+      const erased = await teamsDirect();
+      await erased.erase();
+      await erased.ask("Thanks, and what else is new?");
+      const erasedAfter = await objectHolds(erased.stub, erased.marker);
+
+      // Withheld for being narrowed first, which keeps it; erased after.
+      const narrowed = await teamsDirect();
+      await narrowed.narrow();
+      await narrowed.ask("Thanks, and what else is new?");
+      const narrowedAfter = await objectHolds(narrowed.stub, narrowed.marker);
+      await narrowed.erase();
+      await narrowed.ask("And anything else?");
+      const narrowedErasedAfter = await objectHolds(
+        narrowed.stub,
+        narrowed.marker
+      );
+
+      // The Brain can't be asked what was erased at the first turn after.
+      const away = await teamsDirect();
+      await away.erase();
+      const restore = await setObjectEnv(away.stub, {
+        BRAIN_STORE: refusingErasedOf(env.BRAIN_STORE),
+      });
+      try {
+        await away.ask("Thanks, and what else is new?");
+      } finally {
+        await restore();
+      }
+      const awayAfter = await objectHolds(away.stub, away.marker);
+      await away.ask("And anything else?");
+      const backAfter = await objectHolds(away.stub, away.marker);
+
+      expect({
+        before: [erased.before, narrowed.before, away.before],
+        erasedAfter,
+        narrowedAfter,
+        narrowedErasedAfter,
+        awayAfter,
+        backAfter,
+      }).toStrictEqual({
+        before: [true, true, true],
+        erasedAfter: false,
+        narrowedAfter: true,
+        narrowedErasedAfter: false,
+        awayAfter: true,
+        backAfter: false,
+      });
+    }
+  );
+
+  it(
+    "keeps showing what a source narrowed since handed over, as the person saw it, and never sends it again",
+    slow,
+    async () => {
+      const depot = word();
+      const marker = word();
+      const chats = await recallingChats(says("Noted."), says("Ok."));
+      const teamId = await teamOf(chats.person.userId);
+      const text = `Depot ${depot} keeps code ${marker} at the gate`;
+      const source = await added(text, { kind: "team", teamId });
+      await chats.ask(`Where does depot ${depot} keep its code?`);
+      // Narrowed to a team the person isn't in.
+      await brainOf(inJurisdiction(env, env.BRAIN_STORE)).addSource({
+        source: `upload:${source.id}`,
+        change: crypto.randomUUID(),
+        text,
+        access: { kind: "audience", group: `team:${crypto.randomUUID()}` },
+      });
+      const shown = await opened(chats.person, chats.chat.id);
+
+      expect({
+        shown: resultsOf(shown).some((each) => each.includes(marker)),
+        held: await objectHolds(chats.stub, marker),
+        sentAgain: await chats.sendsNext(marker),
+      }).toStrictEqual({ shown: true, held: true, sentAgain: false });
+    }
+  );
+
+  it(
+    "keeps showing a memory the person forgot, and replaces one an erasure of the source it rests on deleted",
+    slow,
+    async () => {
+      const chats = await recallingChats(
+        says("Noted."),
+        says("Ok."),
+        says("Noted."),
+        says("Ok.")
+      );
+      const personId = chats.person.userId;
+      // A memory of theirs, which they then forget.
+      const forgottenDepot = word();
+      const forgotten = `Depot ${forgottenDepot} is ${word()}`;
+      const kept = await rememberAs(env, personId, {
+        change: crypto.randomUUID(),
+        about: { kind: "customer", names: [`Depot ${forgottenDepot}`] },
+        attribute: "status",
+        value: "open",
+        type: "fact",
+        statement: forgotten,
+        quote: forgotten,
+      });
+      await chats.ask(`What is the status of depot ${forgottenDepot}?`);
+      await forgetAs(env, personId, kept.memory);
+      const forgottenShown = resultsOf(
+        await opened(chats.person, chats.chat.id)
+      ).some((text) => text.includes(forgotten));
+      const forgottenSent = await chats.sendsNext(forgotten);
+
+      // A memory drawn from a source of theirs, which they then erase.
+      const drawnDepot = word();
+      const drawn = `Depot ${drawnDepot} keeps its keys at the gate`;
+      const own = await added(drawn, owner(personId));
+      await personalBrainOf(
+        inJurisdiction(env, env.BRAIN_STORE),
+        personId
+      ).addMemories({
+        change: crypto.randomUUID(),
+        access: { kind: "owner", person: personId },
+        entities: [
+          { key: "c", kind: "customer", names: [`Depot ${drawnDepot}`] },
+        ],
+        memories: [
+          {
+            about: "c",
+            type: "fact",
+            statement: drawn,
+            speaker: { kind: "system" },
+            basis: {
+              kind: "source",
+              source: `upload:${own.id}`,
+              version: 1,
+              quote: drawn,
+            },
+          },
+        ],
+      });
+      const second = await chats.newChat();
+      await second.ask(`Where does depot ${drawnDepot} keep its keys?`);
+      const drawnBefore = resultsOf(
+        await opened(chats.person, second.chat.id)
+      ).some((text) => text.includes(drawn));
+      await eraseSource(env, {
+        source: own,
+        readers: owner(personId),
+        reason: "deleted",
+      });
+      const drawnShown = await opened(chats.person, second.chat.id);
+
+      expect({
+        forgotten: { shown: forgottenShown, sent: forgottenSent },
+        drawn: {
+          before: drawnBefore,
+          results: resultsOf(drawnShown),
+          held: await objectHolds(chats.stub, drawn),
+        },
+      }).toStrictEqual({
+        forgotten: { shown: true, sent: false },
+        drawn: { before: true, results: [withheldResult], held: false },
+      });
+    }
+  );
+
+  it(
+    "rewrites nothing while the person's own store has lost its storage, as a turn and an open find what it recalled missing, and still shows it once the store is restored",
+    slow,
+    async () => {
+      const chats = await recallingChats(says("Noted."), says("Ok."));
+      const personId = chats.person.userId;
+      const depot = word();
+      const statement = `Depot ${depot} is ${word()}`;
+      await rememberAs(env, personId, {
+        change: crypto.randomUUID(),
+        about: { kind: "customer", names: [`Depot ${depot}`] },
+        attribute: "status",
+        value: "open",
+        type: "fact",
+        statement,
+        quote: statement,
+      });
+      await chats.ask(`What is the status of depot ${depot}?`);
+      const shownBefore = resultsOf(
+        await opened(chats.person, chats.chat.id)
+      ).some((text) => text.includes(statement));
+      const lost = await ownStorageLost(personId);
+      // A turn finds it unreadable and withholds it; nothing was erased.
+      const sentWhileLost = await chats.sendsNext(statement);
+      const whileLost = {
+        shown: resultsOf(await opened(chats.person, chats.chat.id)).some(
+          (text) => text.includes(statement)
+        ),
+        held: await objectHolds(chats.stub, statement),
+      };
+      await lost.putBack();
+      const restored = {
+        shown: resultsOf(await opened(chats.person, chats.chat.id)).some(
+          (text) => text.includes(statement)
+        ),
+        held: await objectHolds(chats.stub, statement),
+      };
+
+      expect({
+        shownBefore,
+        sentWhileLost,
+        whileLost,
+        restored,
+      }).toStrictEqual({
+        shownBefore: true,
+        sentWhileLost: false,
+        whileLost: { shown: true, held: true },
+        restored: { shown: true, held: true },
+      });
+    }
+  );
+
+  it(
+    "shows a recall withheld when the Brain can't be asked as the chat opens, rewriting nothing, and replaces it at the next open",
+    slow,
+    async () => {
+      const depot = word();
+      const marker = word();
+      const chats = await recallingChats(says("Noted."));
+      const source = await added(
+        `Depot ${depot} keeps code ${marker} at the gate`,
+        owner(chats.person.userId)
+      );
+      await chats.ask(`Where does depot ${depot} keep its code?`);
+      await eraseSource(env, {
+        source,
+        readers: owner(chats.person.userId),
+        reason: "deleted",
+      });
+      const restore = await setObjectEnv(chats.stub, {
+        BRAIN_STORE: refusingErasedOf(env.BRAIN_STORE),
+      });
+      let away: { results: string[]; held: boolean };
+      try {
+        away = {
+          results: resultsOf(await opened(chats.person, chats.chat.id)),
+          held: await objectHolds(chats.stub, marker),
+        };
+      } finally {
+        await restore();
+      }
+      const back = {
+        results: resultsOf(await opened(chats.person, chats.chat.id)),
+        held: await objectHolds(chats.stub, marker),
+      };
+
+      expect({ away, back }).toStrictEqual({
+        away: { results: [withheldResult], held: true },
+        back: { results: [withheldResult], held: false },
+      });
+    }
+  );
+});

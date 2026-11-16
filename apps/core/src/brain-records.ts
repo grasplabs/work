@@ -1,9 +1,4 @@
-import type { OnErase } from "@grasp-os/brain/purge";
-import {
-  actorOf,
-  auditActorSchema,
-  auditProvenanceMaxItems,
-} from "@grasp-os/shared/audit";
+import { actorOf, auditProvenanceMaxItems } from "@grasp-os/shared/audit";
 import type { AuditActor } from "@grasp-os/shared/audit";
 import type {
   Candidate,
@@ -55,9 +50,9 @@ import {
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { auditedBatch, outboxed, outboxedIfChanged } from "./audit-outbox.ts";
+import { auditedBatch, outboxed } from "./audit-outbox.ts";
 import { brainRecords, workflowResources } from "./db/core/schema.ts";
-import { inList } from "./db/d1.ts";
+import { inList, statementsWithin } from "./db/d1.ts";
 
 // The brain's records, as core keeps them (`brain_records`), and adding
 // them (`brain.addRecords`). Threat model, and how each is closed (the
@@ -89,17 +84,15 @@ import { inList } from "./db/d1.ts";
 //   own records out (`purgeOnboardingRecords`, as the system), whole.
 // - A replaced kickoff left counting: the onboarding alone retires what
 //   the old transcript gave (`retireOnboardingRecords`, as the system),
-//   audited. A retired record is kept, never deleted, and still reached by
-//   a content purge, but `brain.read` leaves it out; its id stays taken.
-// - A purged document left in the brain: the onboarding alone takes its
+//   audited. A retired record is kept, never deleted, until the kickoff
+//   is deleted (`eraseOnboardingRecords`); `brain.read` leaves it out;
+//   its id stays taken.
+// - A removed document left in the brain: the onboarding alone takes its
 //   own drawings out (`purgeOnboardingDrawings`, as the system), whole.
-// - A purged name or passage left in a record, reaching agents through
-//   `brain.read`: a Knowledge content purge reaches every record through
-//   core's `OnErase` (`brainRecordErasure`), rewriting the words in it as
-//   it rewrites a document's. Ids and the values the schema names are
-//   kept, so what a record names still holds. Once purged, a record sent
-//   again under its id (the onboarding giving a team's intake again) is
-//   left as purged, never its words put back.
+// - A record's words put back: a record an earlier release's term purge
+//   rewrote (`purged_at`) is left as purged when it is sent again under
+//   its id (the onboarding giving a team's intake again), never its words
+//   put back.
 
 /** A record's key across types, as its audit event names it. */
 const keyOf = ({ type, id }: { type: string; id: string }): string =>
@@ -300,9 +293,6 @@ const types = [
   "vision",
 ] as const;
 
-/** Rows one insert writes: four columns each, within D1's 100 bound parameters. */
-const rowsPerInsert = 20;
-
 /** The records `input` holds, each once, or why it holds none. */
 const recordsOf = (input: unknown): BrainRecord[] => {
   const parsed = brainRecordsSchema.safeParse(input);
@@ -448,21 +438,16 @@ const writeRecords = async (
     body: bodyOf(record),
     addedAt,
   });
-  // Four columns a row: a statement inserts at most `rowsPerInsert` rows,
-  // within D1's 100 bound parameters.
-  const [first, ...more] = Array.from(
-    { length: Math.ceil(fresh.length / rowsPerInsert) },
-    (_, index) =>
-      fresh.slice(index * rowsPerInsert, (index + 1) * rowsPerInsert).map(row)
+  // As many rows an insert as D1 binds, counted from the insert itself.
+  const [first, ...more] = statementsWithin(fresh, (part) =>
+    db.insert(brainRecords).values(part.map(row))
   );
   if (first === undefined) {
     return;
   }
-  const insert = (rows: ReturnType<typeof row>[]) =>
-    db.insert(brainRecords).values(rows);
   await auditedBatch(env, db, [
-    insert(first),
-    ...more.map(insert),
+    first,
+    ...more,
     outboxed(db, {
       actor,
       action: "brain.records.added",
@@ -825,6 +810,49 @@ export const retireOnboardingRecords = async (
     }),
   ]);
   return retiring.length;
+};
+
+/** Whether a record's id starts with one of `prefixes` (after `onb-`). */
+const onboardingPrefixed = (prefixes: readonly string[]) =>
+  or(
+    ...prefixes.map((prefix) =>
+      like(brainRecords.id, `${onboardingIdPrefix}${prefix}%`)
+    )
+  );
+
+/**
+ * How many records the onboarding gave the brain whose id starts with one
+ * of `prefixes` (after `onb-`), retired ones too: what erasing them
+ * (`eraseOnboardingRecords`) takes.
+ */
+export const onboardingRecordsHeld = async (
+  env: Env,
+  prefixes: readonly string[]
+): Promise<number> => {
+  const [row] = await drizzle(env.DB)
+    .select({ held: sql<number>`count(*)` })
+    .from(brainRecords)
+    .where(onboardingPrefixed(prefixes));
+  return row?.held ?? 0;
+};
+
+/**
+ * Erases, for good, every record the onboarding gave the brain whose id
+ * starts with one of `prefixes` (after `onb-`), retired ones too, which
+ * still hold their words: what the admin deleting the kickoff takes
+ * (onboarding/kickoff-records.ts). The store's own event records the
+ * delete, with how many it takes, before this runs; this writes none of
+ * its own, so one delete is one event. Returns how many it erased.
+ */
+export const eraseOnboardingRecords = async (
+  env: Env,
+  prefixes: readonly string[]
+): Promise<number> => {
+  const erased = await drizzle(env.DB)
+    .delete(brainRecords)
+    .where(onboardingPrefixed(prefixes))
+    .returning({ id: brainRecords.id });
+  return erased.length;
 };
 
 /** A dated value of a team, by the team it is for. */
@@ -1208,162 +1236,3 @@ export const readBrainRecords = async (env: Env): Promise<HeldRecords> => {
   withGoalChanges(held);
   return held;
 };
-
-/**
- * Keys whose strings are ids, dates or values the schema names, never
- * anyone's words: a purge leaves them, so a record still names what it
- * named and still reads (a purged term can't be an id: `(removed)` isn't
- * one). A tool's `ai` is one of its values; a drawing's is text.
- */
-const notWords: ReadonlySet<string> = new Set([
-  "type",
-  "id",
-  "kind",
-  "date",
-  "interviewee",
-  "teamIds",
-  "sourceId",
-  "toolIds",
-  "candidateId",
-  "followsUp",
-  "pain",
-  "teamId",
-  "about",
-  "workflowId",
-  "goalId",
-  "app",
-  "workflow",
-  "status",
-  "state",
-  "of",
-  "per",
-  "unit",
-  "basis",
-  "why",
-]);
-
-/** Whether the strings under `key` of a record of `type` are words. */
-const holdsWords = (type: unknown, key: string): boolean =>
-  !notWords.has(key) && !(type === "tool" && key === "ai");
-
-/**
- * `value` (a stored record, or part of it) with `change` applied to every
- * string of words in it, under `key`, of a record of `type`.
- */
-const mapWords = (
-  value: unknown,
-  key: string,
-  type: unknown,
-  change: (text: string) => string
-): unknown => {
-  if (typeof value === "string") {
-    return holdsWords(type, key) ? change(value) : value;
-  }
-  if (Array.isArray(value)) {
-    return value.map((item: unknown) => mapWords(item, key, type, change));
-  }
-  if (value !== null && typeof value === "object") {
-    return Object.fromEntries(
-      Object.entries(value).map(([name, item]: [string, unknown]) => [
-        name,
-        mapWords(item, name, type, change),
-      ])
-    );
-  }
-  return value;
-};
-
-/** A stored record's type, as its body says it. */
-const typeIn = (value: unknown): unknown =>
-  value !== null && typeof value === "object" && "type" in value
-    ? value.type
-    : undefined;
-
-/** `body` as stored, with `change` applied to its words; `null` if unreadable. */
-const changedBody = (
-  body: string,
-  change: (text: string) => string
-): unknown => {
-  let value: unknown;
-  try {
-    value = JSON.parse(body);
-  } catch {
-    return null;
-  }
-  return mapWords(value, "", typeIn(value), change);
-};
-
-/** Records one batch of a purge rewrites: two statements each. */
-const recordsPerPurgeBatch = 40;
-
-/**
- * Rewrites the words of every record with `rewrite` (a content purge's:
- * its terms replaced), as `actor`; a record it leaves as it is isn't
- * written. Each only as it was read: one changed since is left to a
- * purge again. Each change is audited in its batch, by the record's key
- * alone, never its words.
- */
-const rewriteRecords = async (
-  env: Env,
-  actor: AuditActor,
-  rewrite: (text: string) => string
-): Promise<void> => {
-  const db = drizzle(env.DB);
-  const rows = await db
-    .select({
-      id: brainRecords.id,
-      type: brainRecords.type,
-      body: brainRecords.body,
-    })
-    .from(brainRecords);
-  const changes = rows.flatMap(({ id, type, body }) => {
-    const changed = changedBody(body, rewrite);
-    if (changed === null) {
-      return [];
-    }
-    // Written as the schema reads it when it still does; otherwise (a
-    // label the markers took past its length) as rewritten, which
-    // `readBrainRecords` leaves out: the words go, whatever the record.
-    const parsed = brainRecordSchema.safeParse(changed);
-    const now = parsed.success ? bodyOf(parsed.data) : JSON.stringify(changed);
-    return now === body ? [] : [{ id, type, body, now }];
-  });
-  const purgedAt = new Date();
-  const write = ({ id, type, body, now }: (typeof changes)[number]) =>
-    [
-      db
-        .update(brainRecords)
-        .set({ body: now, purgedAt })
-        .where(and(eq(brainRecords.id, id), eq(brainRecords.body, body))),
-      outboxedIfChanged(db, {
-        actor,
-        action: "brain.records.purged",
-        target: { type: "brain_record", id: keyOf({ type, id }) },
-      }),
-    ] as const;
-  for (let at = 0; at < changes.length; at += recordsPerPurgeBatch) {
-    const [first, ...rest] = changes
-      .slice(at, at + recordsPerPurgeBatch)
-      .flatMap(write);
-    if (first !== undefined) {
-      // oxlint-disable-next-line no-await-in-loop -- one bounded batch after another
-      await auditedBatch(env, db, [first, ...rest]);
-    }
-  }
-};
-
-/**
- * The Playbook's records as a Knowledge purge reaches them: their words
- * are people's too, so a content purge rewrites them. No record names
- * who added it, so a personal purge has no one to forget here.
- */
-export const brainRecordErasure = (
-  env: Env
-): Pick<OnErase, "rewrite" | "forgetActor"> => ({
-  rewrite: async (by, rewrite) => {
-    await rewriteRecords(env, auditActorSchema.parse(by.actor), rewrite);
-  },
-  forgetActor: async () => {
-    // Records keep no author: the audit log names who added them.
-  },
-});

@@ -9,8 +9,7 @@
  * here: someone's interview is its minutes and how much they agreed to,
  * beside their name. Staff act from here as from the company's Grasp
  * before (commands.tsx): marking the one reminder, asking a team in,
- * sending a failed mail again and giving someone who lost their device a
- * new start. The invitation and the list of links to send aren't here: a
+ * sending a failed mail again and giving someone a new start. The invitation and the list of links to send aren't here: a
  * link is a credential, which core never sends.
  */
 import type { AdminLink } from "@grasp-os/shared/admin-snapshot";
@@ -230,8 +229,9 @@ const besideOf = (each: PersonView, link: AdminLink | undefined): string => {
 /**
  * What Grasp can do for one person: note the one reminder, send their
  * failed mail again once what stopped it is put right, and, in the row's
- * menu, give them a new start when they lost the device their interview
- * was on, which deletes what they said, so only on their request.
+ * menu, give them a new start when their interview went wrong (a link
+ * opened at a wrong address among it), which deletes what they said, so
+ * only on their request.
  */
 const PersonActions = ({
   clientId,
@@ -282,7 +282,7 @@ const PersonActions = ({
                   confirm: {
                     title: `Give ${name} a new start?`,
                     description:
-                      "What they said so far is deleted, and their link opens on the next device that opens it. Do this only when they asked.",
+                      "What they said so far is deleted, and their link opens for the next account that signs in with the address on the list. Do this only when they asked.",
                     action: "Delete and start over",
                   },
                 },

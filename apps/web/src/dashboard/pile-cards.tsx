@@ -4,7 +4,6 @@ import { useLingui, Trans } from "@lingui/react/macro";
 import { Link, useRouter } from "@tanstack/react-router";
 
 import {
-  askedAgain,
   grantReviewed,
   objectOf,
   reviewedVersion,
@@ -125,7 +124,6 @@ export const RequestDetails = ({
 }) => {
   const { binding } = request;
   const version = reviewedVersionText(request, directory);
-  const again = askedAgain(request, directory);
   const requester = personName(directory, request.requestedBy);
   const date = formatTime(request.requestedAt);
   return (
@@ -151,7 +149,6 @@ export const RequestDetails = ({
           <Trans>asked for by the agent, in their chat</Trans>
         </p>
       )}
-      {again === undefined ? null : <p>{again}</p>}
     </div>
   );
 };

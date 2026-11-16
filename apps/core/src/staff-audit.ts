@@ -84,7 +84,7 @@ const targetKeyOf = (target: object): string => {
 };
 
 /**
- * A target's name as a surface's: `KnowledgeRpc` is `knowledge`. Read from
+ * A target's name as a surface's: `BrainSourcesRpc` is `brainSources`. Read from
  * its class's name, which the minified bundle keeps (`keep_names`,
  * wrangler.jsonc; scripts/workerd-minified-checks.ts checks it).
  */

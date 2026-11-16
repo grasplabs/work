@@ -118,10 +118,42 @@ const words: readonly { action: string; text: MessageDescriptor }[] = [
     action: "chat.turn_noted",
     text: msg`Noted a question asked in a chat, to keep in its person's own Brain`,
   },
+  {
+    action: "chat.private_read",
+    text: msg`Used something only its person can read, so what it writes for others waits for them`,
+  },
+  {
+    action: "chat.app_call.confirmed",
+    text: msg`Confirmed a write to an App`,
+  },
+  {
+    action: "chat.app_call.ended",
+    text: msg`Carried out a confirmed write to an App, or failed to`,
+  },
+  {
+    action: "chat.app_call.lapsed",
+    text: msg`Ended a held write to an App nobody confirmed within a day`,
+  },
+  {
+    action: "chat.app_call.declined",
+    text: msg`Declined a write to an App`,
+  },
+  {
+    action: "chat.apps_deleted",
+    text: msg`Deleted their conversations in chat apps`,
+  },
   { action: "chat", text: msg`Changed a chat` },
   {
     action: "brain.source.handover_skipped",
     text: msg`Didn't keep something noted for the Brain, and recorded why`,
+  },
+  {
+    action: "brain.capture.erased",
+    text: msg`Erased what the Brain kept from a connection, as it was disconnected`,
+  },
+  {
+    action: "brain.run_sources.removed",
+    text: msg`Stopped the Brain using someone's workflow results, as they lost the workflow`,
   },
   { action: "agent.call", text: msg`The agent looked something up` },
   { action: "model.refused", text: msg`A model call was refused` },
@@ -341,6 +373,31 @@ const words: readonly { action: string; text: MessageDescriptor }[] = [
   },
   { action: "statistics.read", text: msg`Read an App's statistics` },
   { action: "brain.recall", text: msg`Recalled from the Brain` },
+  { action: "brain.upload", text: msg`Uploaded a file into the Brain` },
+  { action: "brain.upload.added", text: msg`Uploaded a file into the Brain` },
+  {
+    action: "brain.upload.refused",
+    text: msg`Was refused an upload into the Brain, or its removal`,
+  },
+  { action: "brain.upload.failed", text: msg`An upload into the Brain failed` },
+  {
+    action: "brain.upload.deleted",
+    text: msg`Erased an upload from the Brain for good`,
+  },
+  {
+    action: "brain.upload.delete_failed",
+    text: msg`Couldn't erase an upload from the Brain`,
+  },
+  {
+    action: "brain.upload.listed",
+    text: msg`Looked at the uploads shared with a team or everyone`,
+  },
+  // Each named exactly: a release installing skills is no read.
+  { action: "brain.skills.select", text: msg`Read skills from the Brain` },
+  { action: "brain.skills.read", text: msg`Read skills from the Brain` },
+  // An App or a workflow reading entities: each named exactly.
+  { action: "brain.entities.get", text: msg`Read entities from the Brain` },
+  { action: "brain.entities.find", text: msg`Read entities from the Brain` },
   { action: "guest.invited", text: msg`Invited a guest` },
   { action: "guest.revoked", text: msg`Took back a guest's link` },
   { action: "guest.read", text: msg`Read what a guest wrote` },

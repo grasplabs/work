@@ -1,6 +1,4 @@
-import { collections } from "@grasp-os/brain/schema";
 import { appErrors } from "@grasp-os/shared/apps";
-import type { AppRole } from "@grasp-os/shared/apps";
 import type {
   AuditActor,
   AuditDetailValue,
@@ -35,12 +33,12 @@ import type {
   WorkContext,
 } from "@grasp-os/shared/permissions";
 import {
-  isMemberAdmin,
   requireAdmin,
   requireBuilder,
   roleErrors,
 } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
+import type { MemberRole } from "@grasp-os/shared/subject-members";
 import {
   triggerEventsRequest,
   triggerStartRequest,
@@ -51,7 +49,6 @@ import {
   eq,
   inArray,
   getTableColumns,
-  isNotNull,
   isNull,
   ne,
   or,
@@ -70,19 +67,18 @@ import {
   outboxedIfChanged,
   storedEvent,
 } from "./audit-outbox.ts";
-import { activeMember } from "./auth/auth.ts";
+import { activeMember, organizationId } from "./auth/auth.ts";
 import { memberRole } from "./auth/identity.ts";
 import type { Acting } from "./auth/identity.ts";
+import { storedTeamsOf, unreadableTeam } from "./brain-grant-teams.ts";
 import { personOf, requireOfferedConnection } from "./connections.ts";
 import { madeSensitiveByGrant, widenedByGrant } from "./data-policy.ts";
 import type { Grantee } from "./data-policy.ts";
 import {
   apps,
-  appVersions,
   auditOutbox,
   permissions,
   triggerResources,
-  triggerResourceVersions,
   workflowResources,
 } from "./db/core/schema.ts";
 import { isUniqueViolation } from "./db/d1.ts";
@@ -147,13 +143,7 @@ const objectColumns = (object: PermissionObject) => {
         objectType: object.type,
         objectId: object.connectionId,
         resource: object.resource ?? null,
-      };
-    }
-    case "collection": {
-      return {
-        objectType: object.type,
-        objectId: object.collectionId,
-        resource: null,
+        teams: null,
       };
     }
     case "workflow": {
@@ -161,6 +151,7 @@ const objectColumns = (object: PermissionObject) => {
         objectType: object.type,
         objectId: object.workflowId,
         resource: null,
+        teams: null,
       };
     }
     case "app": {
@@ -169,6 +160,7 @@ const objectColumns = (object: PermissionObject) => {
         objectType: object.type,
         objectId: object.appId,
         resource: object.function ?? null,
+        teams: null,
       };
     }
     case "platform": {
@@ -177,6 +169,7 @@ const objectColumns = (object: PermissionObject) => {
         objectType: object.type,
         objectId: "platform",
         resource: null,
+        teams: object.teams === undefined ? null : JSON.stringify(object.teams),
       };
     }
     default: {
@@ -196,12 +189,6 @@ const objectOf = (row: Row): PermissionObject => {
         ...(resource === undefined ? {} : { resource }),
       });
     }
-    case "collection": {
-      return permissionObjectSchema.parse({
-        type: row.objectType,
-        collectionId: row.objectId,
-      });
-    }
     case "workflow": {
       return permissionObjectSchema.parse({
         type: row.objectType,
@@ -216,7 +203,14 @@ const objectOf = (row: Row): PermissionObject => {
       });
     }
     case "platform": {
-      return permissionObjectSchema.parse({ type: row.objectType });
+      return permissionObjectSchema.parse({
+        type: row.objectType,
+        // A malformed value as the team nobody is in: shown and checked
+        // closed, and no one else's listing breaks on it.
+        ...(row.teams === null
+          ? {}
+          : { teams: storedTeamsOf(row.teams) ?? [unreadableTeam] }),
+      });
     }
     default: {
       throw new Error(`Unknown permission object ${String(row.objectType)}`);
@@ -312,9 +306,12 @@ const auditDetail = ({
   binding,
   chat,
 }: Permission): Record<string, AuditDetailValue> => {
-  // The object's IDs by name: connectionId and resource, collectionId,
-  // workflowId, or appId.
-  const { type: objectType, ...ids } = object;
+  // The object's IDs by name: connectionId and resource,
+  // workflowId, or appId. A Brain permission's teams aren't counted: the
+  // permission the event names holds them, and a count read by SQL (a
+  // revocation's event) couldn't check them as `storedTeamsOf` does.
+  const { type: objectType, ...ids } =
+    object.type === "platform" ? { type: object.type } : object;
   const { subjectType, subjectId } = subjectColumns(subject);
   return {
     subjectType,
@@ -427,13 +424,20 @@ const tellPolicyChanged = async (
   }
 };
 
+/** The object kinds the platform serves, as a permission row stores them. */
+const servedObjectTypes = permissionObjectSchema.options.map(
+  ({ shape }) => shape.type.value
+);
+
 /**
  * That a permission row is of a kind the platform serves, as SQL: not a
- * store's own grant nor a grant on a store. Those are left from before each
- * App's store was its own; nothing serves them, so every read takes them
- * as not there, and a later release removes them with their audit events.
+ * store's own grant, and on an object of a kind it serves. The rest are
+ * left from kinds the platform removed (a grant on a store, from before
+ * each App's store was its own; one on a Knowledge collection, from
+ * before the Brain): nothing serves them, so every read takes them as not
+ * there, and a later release removes them with their audit events.
  */
-const servedSql = sql`${permissions.subjectType} <> 'store' AND ${permissions.objectType} <> 'store'`;
+const servedSql = sql`${permissions.subjectType} <> 'store' AND ${inArray(permissions.objectType, servedObjectTypes)}`;
 
 export const findRow = async (env: Env, id: string): Promise<Row | undefined> =>
   await drizzle(env.DB)
@@ -476,74 +480,6 @@ const requireApps = async (
 };
 
 /**
- * A collection a permission names must exist, and not be someone's
- * personal collection: Apps and agents never read those (see
- * knowledge/access.ts), so nobody can be asked to grant one.
- *
- * Nor is an App given the Apps collection (knowledge/apps-collection.ts).
- * It is open to everyone as a collection, but Knowledge shows each entry
- * only to whoever may open its App, and provenance (app-provenance.ts)
- * judges a collection by the collection's access alone. So an App that
- * read it could hold another App's AGENTS.md, and be shared with someone
- * who may not open that App, and both provenance checks would pass. An
- * agent acts for its person, who may read what they find there, and keeps
- * nothing to share: it may be given it, to read. Nobody writes it (its
- * entries are made from the Apps themselves), and an agent builds Apps
- * as its person with no permission of its own (agent-builds.ts), so a
- * `write` on it would allow nothing: it is refused rather than granted.
- */
-const requireCollection = async (
-  env: Env,
-  subject: PermissionSubject,
-  object: PermissionObject,
-  actions: readonly string[]
-): Promise<void> => {
-  if (object.type !== "collection") {
-    return;
-  }
-  const found = await drizzle(env.KNOWLEDGE)
-    .select({ access: collections.access, source: collections.source })
-    .from(collections)
-    .where(eq(collections.id, object.collectionId))
-    .get();
-  if (!found) {
-    throw permissionErrors.create("permission.invalid", {
-      issues: ["object.collectionId: There's no such collection."],
-    });
-  }
-  if (found.access === "me") {
-    throw permissionErrors.create("permission.invalid", {
-      issues: [
-        "object.collectionId: A personal collection can't be given to an App or agent.",
-      ],
-    });
-  }
-  if (found.access === "admins") {
-    throw permissionErrors.create("permission.invalid", {
-      issues: [
-        "object.collectionId: A collection for admins can't be given to an App or agent.",
-      ],
-    });
-  }
-  // Code that keeps what it reads (an App, an independent workflow or
-  // trigger) never gets it: only an agent, acting for its person.
-  if (found.source === "apps" && subject.type !== "agent") {
-    throw permissionErrors.create("permission.invalid", {
-      issues: [
-        "object.collectionId: The Apps collection is given to agents alone.",
-      ],
-    });
-  }
-  if (found.source === "apps" && actions.some((action) => action !== "read")) {
-    throw permissionErrors.create("permission.invalid", {
-      issues: [
-        "actions: The Apps collection is only read. Building Apps needs no permission of the agent's own.",
-      ],
-    });
-  }
-};
-
-/**
  * Who may name what in a permission, handed in by the caller: an App's
  * roles (`appFor` in apps.ts) and an independent resource's
  * (`requireResourceRole` in permission-resources.ts), passed in because
@@ -551,7 +487,7 @@ const requireCollection = async (
  * doesn't exist.
  */
 export interface PermissionRoles {
-  app: (app: AppId, role: AppRole) => Promise<unknown>;
+  app: (app: AppId, role: MemberRole) => Promise<unknown>;
   resource: (
     ref: { type: "workflow" | "trigger"; id: string },
     needed: "user" | "builder"
@@ -670,10 +606,7 @@ const requireAppCallerFits = (
  * Refuses an object `subject` has no use for: what the platform offers is
  * for an App's code; a trigger only starts, so it holds `start` on a
  * workflow, and a connector trigger its event's read on its connection,
- * and nothing else; only an App sends a workflow's runs events. Only an
- * agent writes a collection: an App and a workflow only read one (their
- * collection stubs have no write), and keep what they write elsewhere, so
- * `write` would give them nothing an admin could see being granted.
+ * and nothing else; only an App sends a workflow's runs events.
  */
 const requireObjectFits = (
   subject: PermissionSubject,
@@ -688,9 +621,21 @@ const requireObjectFits = (
   if (object.type === "platform" && subject.type !== "app" && !brainReader) {
     refuseRequest("subject: Only an App uses what the platform offers.");
   }
+  // Teams only for an App: what it recalls of a team is checked against
+  // whoever it is shared with (app-provenance.ts); nothing checks a
+  // workflow's runs or an agent's chats so.
+  if (
+    object.type === "platform" &&
+    object.teams !== undefined &&
+    subject.type !== "app"
+  ) {
+    refuseRequest(
+      "object: Only an App's permission to read the Brain names teams."
+    );
+  }
   requireAppCallerFits(subject, object);
   // A connector trigger also hears its connection's events: which, the
-  // one its version names, is `requireTriggerPins`'s to check.
+  // one it names, is `requireTriggerPins`'s to check.
   if (
     subject.type === "trigger" &&
     object.type !== "connection" &&
@@ -702,20 +647,11 @@ const requireObjectFits = (
     );
   }
   requireSenderFits(subject, object, actions);
-  if (
-    object.type === "collection" &&
-    subject.type !== "agent" &&
-    actions.includes("write")
-  ) {
-    refuseRequest(
-      "actions: Only an agent writes a collection. An App or a workflow reads it, and keeps what it writes elsewhere."
-    );
-  }
 };
 
 /**
  * Refuses a connector trigger's grant on a connection but exactly the
- * connection and part its current version names, for its event's read
+ * connection and part it names, for its event's read
  * action alone.
  */
 const requireTriggerHears = async (
@@ -726,18 +662,11 @@ const requireTriggerHears = async (
 ): Promise<void> => {
   const heard = await drizzle(env.DB)
     .select({
-      connectionId: triggerResourceVersions.connectionId,
-      resource: triggerResourceVersions.connectionResource,
-      eventType: triggerResourceVersions.eventType,
+      connectionId: triggerResources.connectionId,
+      resource: triggerResources.connectionResource,
+      eventType: triggerResources.eventType,
     })
     .from(triggerResources)
-    .innerJoin(
-      triggerResourceVersions,
-      and(
-        eq(triggerResourceVersions.triggerId, triggerResources.id),
-        eq(triggerResourceVersions.version, triggerResources.currentVersion)
-      )
-    )
     .where(
       and(
         eq(triggerResources.id, triggerId),
@@ -764,8 +693,8 @@ const requireTriggerHears = async (
 };
 
 /**
- * Refuses a trigger's grant on any workflow but the one the trigger's
- * current version starts: a trigger starts one workflow, and its grant
+ * Refuses a trigger's grant on any workflow but the one the trigger
+ * starts: a trigger starts one workflow, and its grant
  * names it; on a connection, any but the one it hears
  * (`requireTriggerHears`). A trigger that isn't live names none.
  */
@@ -786,15 +715,8 @@ const requireTriggerPins = async (
     return;
   }
   const pinned = await drizzle(env.DB)
-    .select({ workflowId: triggerResourceVersions.workflowResourceId })
+    .select({ workflowId: triggerResources.workflowResourceId })
     .from(triggerResources)
-    .innerJoin(
-      triggerResourceVersions,
-      and(
-        eq(triggerResourceVersions.triggerId, triggerResources.id),
-        eq(triggerResourceVersions.version, triggerResources.currentVersion)
-      )
-    )
     .where(
       and(
         eq(triggerResources.id, subject.triggerId),
@@ -848,8 +770,8 @@ const eventIdSql = (fresh: string): SQL =>
 
 /**
  * What `auditDetail` records of a permission row, as SQL: its IDs by name
- * (connectionId and resource; collectionId; workflowId; appId), its
- * actions and its binding.
+ * (connectionId and resource; workflowId; appId; for a kind the platform
+ * no longer serves, `objectId`), its actions and its binding.
  */
 const auditDetailSql = sql`json_patch(
   json_object('subjectType', ${permissions.subjectType}, 'subjectId', ${permissions.subjectId}, 'objectType', ${permissions.objectType}),
@@ -858,13 +780,14 @@ const auditDetailSql = sql`json_patch(
       json_object('connectionId', ${permissions.objectId}),
       CASE WHEN ${permissions.resource} IS NULL THEN '{}' ELSE json_object('resource', ${permissions.resource}) END
     )
-    WHEN 'collection' THEN json_object('collectionId', ${permissions.objectId})
     WHEN 'app' THEN json_patch(
       json_object('appId', ${permissions.objectId}),
       CASE WHEN ${permissions.resource} IS NULL THEN '{}' ELSE json_object('function', ${permissions.resource}) END
     )
     WHEN 'workflow' THEN json_object('workflowId', ${permissions.objectId})
-    ELSE '{}'
+    WHEN 'platform' THEN '{}'
+    -- A kind the platform no longer serves (servedSql): its object by ID.
+    ELSE json_object('objectId', ${permissions.objectId})
   END
 )`;
 
@@ -928,14 +851,14 @@ export const revokedWith = (
   );
 
 /**
- * The statements revoking, for `by`, `subject`'s grants on a store that
- * still hold binding name `binding`, each audited with the reason: left
- * from before each App's store was its own, they serve nothing and every
+ * The statements revoking, for `by`, `subject`'s grants on an object of a
+ * kind the platform no longer serves that still hold binding name
+ * `binding`, each audited with the reason: they serve nothing and every
  * read takes them as not there (`servedSql`), yet the name stays taken
  * among the subject's live permissions. So a request under that name
  * frees it in its own batch. A later release removes the rest.
  */
-const leftoverStoreGrantsRevoked = (
+const leftoverGrantsRevoked = (
   db: DrizzleD1Database,
   by: Acting,
   subject: PermissionSubject,
@@ -947,12 +870,93 @@ const leftoverStoreGrantsRevoked = (
     and(
       ofSubject(subject),
       eq(permissions.binding, binding),
-      sql`${permissions.objectType} = 'store'`,
+      sql`NOT ${inArray(permissions.objectType, servedObjectTypes)}`,
       ne(permissions.status, "revoked"),
       isNull(permissions.chatId)
     ),
     "binding kind removed"
   );
+
+/**
+ * That `userId` is in each of `teams` now, a team of this organization,
+ * as SQL: what a request naming teams (an App's grant to read the Brain)
+ * needs, so a requester names only teams whose content they may read,
+ * and an ID that is no team, or another company's, is refused the same.
+ * One bound list, whatever the number of teams.
+ */
+const inEveryTeamSql = (userId: string, teams: readonly string[]): SQL =>
+  sql`NOT EXISTS (SELECT 1 FROM json_each(${JSON.stringify(teams)}) AS named
+    WHERE NOT EXISTS (SELECT 1 FROM team_members AS held
+      JOIN teams AS team ON team.id = held.team_id
+      WHERE held.team_id = named.value AND held.user_id = ${userId}
+        AND team.organization_id = ${organizationId}))`;
+
+/**
+ * That App `app` has a grant to read the Brain naming teams, asked for or
+ * ever granted, as SQL (GRA-1842). Its data may hold a team's content,
+ * which nothing checks once a workflow's run holds it, so no workflow
+ * calls it until GRA-1843 rules what runs may carry.
+ */
+export const teamBrainOfAppSql = (app: SQLWrapper | string): SQL =>
+  sql`EXISTS (SELECT 1 FROM permissions AS brain
+    WHERE brain.subject_type = 'app' AND brain.subject_id = ${app}
+      AND brain.object_type = 'platform' AND brain.teams IS NOT NULL
+      AND (brain.status <> 'revoked' OR brain.granted_at IS NOT NULL))`;
+
+/** That a workflow may call one of App `app`'s functions, asked for or granted, as SQL. */
+const workflowCallsAppSql = (app: string): SQL =>
+  sql`EXISTS (SELECT 1 FROM permissions AS caller
+    WHERE caller.subject_type = 'workflow' AND caller.object_type = 'app'
+      AND caller.object_id = ${app} AND caller.resource IS NOT NULL
+      AND caller.status <> 'revoked')`;
+
+/**
+ * What a request must hold as it is written, each with the refusal that
+ * says it doesn't (GRA-1842): a request naming teams only by someone in
+ * all of them, and only for an App no workflow may call; a workflow's
+ * grant to call an App's function only on an App whose Brain grant names
+ * no team.
+ */
+const teamGuardsOf = (
+  by: Acting,
+  subject: PermissionSubject,
+  object: PermissionObject
+): { holds: SQL; refusal: () => Error }[] => {
+  if (
+    object.type === "platform" &&
+    object.teams !== undefined &&
+    subject.type === "app"
+  ) {
+    return [
+      {
+        holds: inEveryTeamSql(by.userId, object.teams),
+        refusal: () =>
+          permissionErrors.create("permission.invalid", {
+            issues: ["object: Name only teams you are in."],
+          }),
+      },
+      {
+        holds: sql`NOT ${workflowCallsAppSql(subject.appId)}`,
+        refusal: () =>
+          permissionErrors.create("permission.team_brain_workflow"),
+      },
+    ];
+  }
+  if (
+    subject.type === "workflow" &&
+    object.type === "app" &&
+    object.function !== undefined
+  ) {
+    return [
+      {
+        holds: sql`NOT ${teamBrainOfAppSql(object.appId)}`,
+        refusal: () =>
+          permissionErrors.create("permission.team_brain_workflow"),
+      },
+    ];
+  }
+  return [];
+};
 
 /**
  * Asks for a permission for an App, an agent, or an independent workflow
@@ -998,7 +1002,6 @@ export const requestPermission = async (
     const { requireAppFunction } = await import("./app-function-bindings.ts");
     await requireAppFunction(env, object.appId, object.function);
   }
-  await requireCollection(env, subject, object, actions);
   const row: Row = {
     id: crypto.randomUUID(),
     ...subjectColumns(subject),
@@ -1019,6 +1022,9 @@ export const requestPermission = async (
   };
   const permission = toPermission(row);
   const db = drizzle(env.DB);
+  // Held in the insert itself, so a membership or a grant landing
+  // meanwhile is decided with it.
+  const guards = teamGuardsOf(by, subject, object);
   // Not under a name one of a chat's own permissions has
   // (`noBindingClash`), in the insert itself: the unique indexes each
   // cover one side only.
@@ -1034,11 +1040,13 @@ export const requestPermission = async (
     // Admitted last, with nothing slow left before the write.
     await admit?.();
     await auditedBatch(env, db, [
-      ...leftoverStoreGrantsRevoked(db, by, subject, binding),
+      ...leftoverGrantsRevoked(db, by, subject, binding),
       insertWhere(
         db,
         row,
-        sql`NOT EXISTS (SELECT 1 FROM ${permissions} WHERE subject_type = ${subjectType} AND subject_id = ${subjectId} AND binding = ${binding} AND chat_id IS NOT NULL AND status <> 'revoked')${live}`
+        sql`NOT EXISTS (SELECT 1 FROM ${permissions} WHERE subject_type = ${subjectType} AND subject_id = ${subjectId} AND binding = ${binding} AND chat_id IS NOT NULL AND status <> 'revoked')${live}${sql.join(
+          guards.map(({ holds }) => sql` AND ${holds}`)
+        )}`
       ),
       outboxedIfChanged(
         db,
@@ -1054,17 +1062,34 @@ export const requestPermission = async (
   if ((await findRow(env, row.id)) === undefined) {
     // A trigger deleted meanwhile is refused as one gone is.
     await requireSubjectBuilder(subject, roles);
+    // Which guard didn't hold, as read now: only which refusal to give.
+    for (const { holds, refusal } of guards) {
+      // oxlint-disable-next-line no-await-in-loop -- at most two, in order
+      const held = await db.get<{ held: number }>(sql`SELECT ${holds} AS held`);
+      if (held.held === 0) {
+        throw refusal();
+      }
+    }
     throw permissionErrors.create("permission.conflict", { binding });
   }
   return permission;
 };
 
+/** `object` without a Brain grant's teams. */
+const withoutTeams = (object: PermissionObject): PermissionObject => {
+  if (object.type !== "platform") {
+    return object;
+  }
+  const { teams: _teams, ...rest } = object;
+  return rest;
+};
+
 /**
  * What a blueprint of App `app` declares as it is marked
  * (app-blueprints.ts), for each App created from it to ask for: of what
- * `app` asks for or was given (its permissions that aren't revoked), its
- * collections and what the platform offers, which name the same thing for
- * whoever creates from it. A connection is someone's, set up for this
+ * `app` asks for or was given (its permissions that aren't revoked), what
+ * the platform offers, which names the same thing for whoever creates
+ * from it. A connection is someone's, set up for this
  * App, and a workflow names an App, which the creator may not
  * see: a copy's builders ask for those themselves.
  */
@@ -1079,15 +1104,17 @@ export const declarableOf = async (
       and(
         ofSubject({ type: "app", appId: app }),
         inArray(permissions.status, ["requested", "active"]),
-        inArray(permissions.objectType, ["collection", "platform"])
+        eq(permissions.objectType, "platform")
       )
     )
     .orderBy(asc(permissions.requestedAt), asc(permissions.id));
-  // Refused, as a request would be, when one is no longer declarable (a
-  // collection to write, which no App does): never an internal error.
+  // Refused, as a request would be, when one is no longer declarable:
+  // never an internal error.
   return rows.map((row) =>
     permissionErrors.parse("permission.invalid", declaredPermissionSchema, {
-      object: objectOf(row),
+      // A Brain grant's teams are its requester's: a copy asks for the
+      // company alone, and its builders name their own teams.
+      object: withoutTeams(objectOf(row)),
       actions: stringListSchema.parse(JSON.parse(row.actions)),
       binding: row.binding,
     })
@@ -1148,9 +1175,8 @@ export const declaredRequests = (
   blueprint: string
 ): { rows: Row[]; entries: AuditEntry[] } => {
   // Checked again as each is asked for: a blueprint keeps what it declared
-  // when it was marked, and what may be declared has narrowed since (a
-  // collection only to read), so none is asked for that a request would be
-  // refused.
+  // when it was marked, and what may be declared may have narrowed since,
+  // so none is asked for that a request would be refused.
   const checked = declared.map((permission) =>
     permissionErrors.parse(
       "permission.invalid",
@@ -1193,7 +1219,7 @@ export const workflowStartRequests = (
  * The requests of trigger `trigger`, made by `by` as they create it
  * (trigger-resources.ts): to start workflow `workflowId`, the one it pins,
  * and, for a connector trigger, to hear its event on its connection
- * (`events`, as its version names them). The rows and their audit
+ * (`events`, as it names them). The rows and their audit
  * entries, for the batch that creates the trigger, so no trigger is left
  * without a way to be allowed. Like any request, they allow nothing until
  * an admin grants them.
@@ -1290,9 +1316,9 @@ const requireServedFunction = async (env: Env, row: Row): Promise<void> => {
  *
  * `reviewed` names the version of the App the admin reviewed: the one
  * current as they decided (null for an agent's permission, or an App with
- * none current). The grant lands only while it still is, and approves it
- * (`madeCurrent`); otherwise it is refused with `app.conflict` and changes
- * nothing, so a builder can't swap the code while the admin looks.
+ * none current). The grant lands only while it still is; otherwise it is
+ * refused with `app.conflict` and changes nothing, so a builder can't swap
+ * the code while the admin looks.
  */
 export const grantPermission = async (
   env: Env,
@@ -1310,15 +1336,6 @@ export const grantPermission = async (
   if (!found) {
     throw permissionErrors.create("permission.not_found");
   }
-  // No grant ever names a missing or personal collection, nor gives an App
-  // the Apps collection, nor anything but reading it, however old its
-  // request.
-  await requireCollection(
-    env,
-    subjectOf(found),
-    objectOf(found),
-    toPermission(found).actions
-  );
   // A chat's own request: an admin grants only a shared connection, still
   // connected and offered. A personal one is its person's alone: to anyone
   // else it doesn't exist.
@@ -1384,20 +1401,6 @@ export const grantPermission = async (
     // The Apps whose data it makes sensitive again, read before that
     // happens below: their open connections are told to look again.
     madeSensitiveByGrant(db, widened, storedEvent(event.id)),
-    // An admin granting an App's permission approves the version they
-    // reviewed (`madeCurrent`), as they would by making it current.
-    db
-      .update(appVersions)
-      .set({ approved: 1 })
-      .where(
-        and(
-          eq(appVersions.appId, found.subjectId),
-          eq(appVersions.version, version ?? 0),
-          eq(appVersions.approved, 0),
-          isApp ? storedEvent(event.id) : sql`0`,
-          stillReviewed
-        )
-      ),
     // Who may start or follow a workflow changed: starts decided before
     // are refused (workflow-starts.ts).
     ...(found.objectType === "workflow"
@@ -1447,78 +1450,23 @@ export const grantPermission = async (
 };
 
 /**
- * That `by` could grant a permission as the batch runs, as SQL: an admin
- * of the organization, not Grasp staff, still an admin then.
- */
-const canGrantSql = (by: Identity): SQL =>
-  isMemberAdmin(by) ? stillAdminSql(by) : sql`0`;
-
-/**
- * That a permission lets an App change things for the person using it,
- * as SQL on its row: any on a connection (core can't tell a connector's
- * writes from its reads; connect knows), or with an action other than
- * `read`, such as starting a workflow, inviting guests, or an agent
- * calling an App's functions that write.
- */
-const changesThingsSql = or(
-  eq(permissions.objectType, "connection"),
-  sql`EXISTS (SELECT 1 FROM json_each(${permissions.actions}) WHERE value NOT IN ('read', 'statistics'))`
-);
-
-/**
- * `changesThingsSql` for one action of a permission on `object`: reading
- * the platform's statistics (`statistics`) changes nothing either.
- */
-const changesThings = (object: PermissionObject, action: string): boolean =>
-  object.type === "connection" ||
-  (action !== "read" && action !== "statistics");
-
-/**
- * That `version` of `app` is one no admin approved (`madeCurrent`), as
- * SQL; each a value, or a column of the query it runs in. A version never
- * made current (null) is not one. The host always names a
- * version the App has; an independent workflow's start also requires the
- * version to exist (workflow-starts.ts).
- */
-const unapprovedSql = (
-  app: string | SQLWrapper,
-  version: number | SQLWrapper
-): SQL =>
-  sql`EXISTS (SELECT 1 FROM ${appVersions} WHERE ${appVersions.appId} = ${app} AND ${appVersions.version} = ${version} AND ${appVersions.approved} = 0)`;
-
-/**
  * The permissions that allow `action` on `object` for `subject`, as SQL
  * for a WHERE on `permissions`: the one rule every check goes by
  * (`authorize`, and connector events reaching Apps). Active, of that
  * subject, on that object (a permission for a whole connection covers each
  * resource in it; one for a resource only that resource), and listing the
- * action. For an App's code, an action that changes things (on a
- * connection, or other than `read`) also needs `appVersion`, the version
- * it runs, to be one an admin approved (`madeCurrent`): a run keeps the
- * version it started on, which may be one made current since without,
- * its permissions granted again for another. Without a version, which the
- * host always sets for an App, nothing is approved: it fails closed. The
- * App and its version may be columns of the query it runs in. `changes`
- * says whether the action changes things when the action alone doesn't.
- * A chat's own permission allows only in that chat, for the person who
- * asked for it there (`where`, `holdsIn`).
+ * action. An approval is of the access, never of a version: whichever
+ * version of an App runs uses what was granted. The App may be a column
+ * of the query it runs in. A chat's own permission allows only in that
+ * chat, for the person who asked for it there (`where`, `holdsIn`).
  */
 export const allowingPermissionSql = (
   subject: PermissionSubject | { type: "app"; appId: SQLWrapper | AppId },
-  appVersion: number | SQLWrapper | undefined,
   object: PermissionObject,
   action: string,
-  changes = changesThings(object, action),
   where?: Where
 ): SQL => {
   const { objectType, objectId, resource } = objectColumns(object);
-  let unapproved: SQL | undefined;
-  if (subject.type === "app" && changes) {
-    unapproved =
-      appVersion === undefined
-        ? sql`0`
-        : sql`NOT ${unapprovedSql(subject.appId, appVersion)}`;
-  }
   return (
     and(
       eq(permissions.subjectType, subject.type),
@@ -1535,128 +1483,9 @@ export const allowingPermissionSql = (
         ? isNull(permissions.resource)
         : or(isNull(permissions.resource), eq(permissions.resource, resource)),
       sql`EXISTS (SELECT 1 FROM json_each(${permissions.actions}) WHERE value = ${action})`,
-      unapproved,
       holdsIn(where)
     ) ?? sql`0`
   );
-};
-
-/** A version of an App becoming current (`madeCurrent`). */
-export interface MadeCurrent {
-  app: AppId;
-  version: number;
-  /** The version it replaces. */
-  previous: number | null;
-  /** That the batch did make it current, as SQL (apps.ts). */
-  changed: SQL;
-  /**
-   * Whether the App's permissions stay as they are, whoever makes it
-   * current: only for an App's first version copied from a blueprint,
-   * made current for the first time, which was approved as it was created.
-   */
-  keep: boolean;
-}
-
-/**
- * The statements, for the batch that makes a version the current version
- * of an App (apps.ts), for its approval and the App's permissions, each
- * only if the batch did make it current (`changed`). An admin grants a
- * permission trusting the code that will use it, and an App's code runs
- * as whoever uses it, so a builder's next version could otherwise write
- * a shared collection, say, as the next admin who opens it.
- *
- * The version is approved (`app_versions.approved`, which `authorize`
- * reads) if `by` could grant the permissions themselves (`canGrantSql`),
- * and unapproved otherwise. And unless `by` could, or the permissions are
- * kept (`keep`), each of the App's permissions active when the batch runs
- * that lets it change things for the person using it (`changesThingsSql`),
- * and each workflow's grant to call one of its functions (whose code the
- * version holds, run as the person each run acts for), is asked for
- * again: first an audit event for each
- * (`permission.requested`, by `by`, with the version, the one it replaced
- * and who had granted it), then the update, back to requested, asked for
- * by `by`, keeping who granted it and when. Both select their rows with the same condition when the batch
- * runs, nothing read before it, so a grant made just before is asked for
- * again too. The App's own grants that only read are kept: the code
- * reads what the person may.
- * Core's database has no full-text index, so nothing in the batch moves
- * `changes()` under them.
- */
-export const madeCurrent = (
-  env: Env,
-  by: Identity,
-  { app, version, previous, changed, keep }: MadeCurrent
-): BatchItem<"sqlite">[] => {
-  const db = drizzle(env.DB);
-  const approval = db
-    .update(appVersions)
-    .set({
-      approved: keep ? 1 : sql`CASE WHEN ${canGrantSql(by)} THEN 1 ELSE 0 END`,
-    })
-    .where(
-      and(eq(appVersions.appId, app), eq(appVersions.version, version), changed)
-    );
-  if (keep) {
-    return [approval];
-  }
-  // The App's own grants that change things, and the workflows' grants
-  // to call its functions: both trust the code of the version made
-  // current, so both are asked for again alike.
-  const requestedAgain = and(
-    or(
-      and(ofSubject({ type: "app", appId: app }), changesThingsSql),
-      and(
-        eq(permissions.subjectType, "workflow"),
-        eq(permissions.objectType, "app"),
-        eq(permissions.objectId, app),
-        isNotNull(permissions.resource),
-        sql`EXISTS (SELECT 1 FROM workflow_resources AS live
-          WHERE live.id = ${permissions.subjectId} AND live.deleted_at IS NULL)`
-      )
-    ),
-    eq(permissions.status, "active"),
-    changed,
-    sql`NOT ${canGrantSql(by)}`
-  );
-  const now = new Date();
-  const eventId = eventIdSql(crypto.randomUUID());
-  const event = sql`json_object(
-    'id', ${eventId},
-    'at', ${now.toISOString()},
-    'source', 'core',
-    'actor', json(${JSON.stringify(actorOf(by))}),
-    'action', 'permission.requested',
-    'target', json_object('type', 'permission', 'id', ${permissions.id}),
-    'provenance', json('[]'),
-    'detail', json_set(
-      ${auditDetailSql},
-      '$.actions', ${joined(permissions.actions)},
-      '$.binding', ${permissions.binding},
-      '$.version', ${version},
-      '$.previous', ${previous},
-      '$.grantedBy', ${permissions.grantedBy}
-    )
-  )`;
-  return [
-    approval,
-    db
-      .insert(auditOutbox)
-      .select(
-        sql`SELECT ${eventId}, ${event}, ${now.getTime()} FROM ${permissions} WHERE ${requestedAgain}`
-      ),
-    db
-      .update(permissions)
-      // Who granted it, and when, stay: a request with them is one asked
-      // for again (`Permission.grantedBy`). Only the status allows.
-      // Asked for by `by` now, a person: not the agent that once may have.
-      .set({
-        status: "requested",
-        requestedBy: by.userId,
-        requestedAt: now,
-        requestedVia: null,
-      })
-      .where(requestedAgain),
-  ];
 };
 
 /**
@@ -1732,9 +1561,7 @@ export const listPermissions = async (
   by: Pick<Identity, "role">,
   subject?: unknown,
   openApps?: SQL,
-  status?: unknown,
-  /** Only the workflows' grants to call App `calling`'s functions. */
-  calling?: AppId
+  status?: unknown
 ): Promise<Permission[]> => {
   requireBuilder(by);
   const inStatus =
@@ -1787,14 +1614,6 @@ export const listPermissions = async (
         ofOne,
         ofOpenApp,
         inStatus,
-        calling === undefined
-          ? undefined
-          : and(
-              eq(permissions.subjectType, "workflow"),
-              eq(permissions.objectType, "app"),
-              eq(permissions.objectId, calling),
-              isNotNull(permissions.resource)
-            ),
         eq(permissions.personal, false),
         servedSql
       )
@@ -1802,19 +1621,6 @@ export const listPermissions = async (
     .orderBy(asc(permissions.requestedAt), asc(permissions.id));
   return rows.map((row) => toPermission(row));
 };
-
-/**
- * Whether `by` publishing a draft of the App that holds `permission` would
- * ask an admin for it again, as `madeCurrent` does: one that changes
- * things, unless `by` could grant it (one of the organization's own
- * admins).
- */
-export const askedAgainBy = (
-  by: Pick<Identity, "role" | "staff">,
-  permission: Permission
-): boolean =>
-  !isMemberAdmin(by) &&
-  permission.actions.some((action) => changesThings(permission.object, action));
 
 /**
  * The person an App or agent acts for must still be in the organization:
@@ -1848,7 +1654,8 @@ const permissionsIn = async (
       and(
         ofSubject(subject),
         inArray(permissions.status, statuses),
-        holdsIn(where)
+        holdsIn(where),
+        servedSql
       )
     )
     .orderBy(asc(permissions.requestedAt), asc(permissions.id));
@@ -1884,23 +1691,36 @@ export const grantedPermissions = async (
 };
 
 /**
+ * Whether `authority` holds an active `brain` grant, read now: what an
+ * App, run or agent needs to recall. A chat asks it before its turn, to
+ * offer the brain at all and recall for the question (workspace.ts,
+ * agent.ts), and recall asks it again as it reads.
+ */
+export const hasBrainGrant = async (
+  env: Env,
+  authority: Authority
+): Promise<boolean> => {
+  const granted = await grantedPermissions(env, authority);
+  return granted.some(
+    ({ object, actions }) =>
+      object.type === "platform" && actions.includes("brain")
+  );
+};
+
+/**
  * The permission check. Every server path that lets an App or agent touch a
- * connection, a collection or a workflow calls it first, on every call:
+ * connection, a workflow or an App calls it first, on every call:
  * the person it acts for is still a member, and `permissionId` (the
  * permission the stub was built from) is active, of that exact subject,
  * covers the object and allows the action. Only that permission counts, so
  * revoking it stops its stubs even when another permission covers the same
  * thing. A permission for a whole connection covers each resource in it;
- * one for a resource covers only that resource. For an App's code, an
- * action that changes things (on a connection, or other than `read`) also
- * needs the version it runs to be one an admin approved (`madeCurrent`).
- * A chat's own permission allows only in that chat, `context` (none
+ * one for a resource covers only that resource. A chat's own permission allows only in that chat, `context` (none
  * given: nowhere), and only for the person who asked for it there. Throws `permission.denied`
  * or `permission.person_inactive` otherwise.
  *
  * It doesn't intersect the grant with the person's own access (R5): connect
- * does that for personal connections, and the Knowledge queries for
- * collections.
+ * does that for personal connections.
  */
 export const authorize = async (
   env: Env,
@@ -1916,14 +1736,10 @@ export const authorize = async (
     .from(permissions)
     .where(
       and(
-        allowingPermissionSql(
-          authority.subject,
-          authority.appVersion,
-          object,
-          action,
-          changesThings(object, action),
-          { context, onBehalfOf: authority.onBehalfOf }
-        ),
+        allowingPermissionSql(authority.subject, object, action, {
+          context,
+          onBehalfOf: authority.onBehalfOf,
+        }),
         eq(permissions.id, permissionId)
       )
     )

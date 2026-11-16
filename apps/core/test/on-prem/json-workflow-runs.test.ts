@@ -5,16 +5,14 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import type { Acting } from "../../src/auth/identity.ts";
 import { approveWorkflowBinding } from "../../src/workflow-bindings.ts";
 import { publishCatalogContract } from "../../src/workflow-catalog.ts";
-import {
-  createWorkflowResource,
-  publishWorkflowVersion,
-} from "../../src/workflow-resources.ts";
+import { createWorkflowResource } from "../../src/workflow-resources.ts";
 import { startWorkflow } from "../../src/workflow-starts.ts";
 import { resourceRunFor } from "../../src/workflows/resource-runs.ts";
 import { admitRunEvent } from "../../src/workflows/run-events.ts";
 import { definitionOf, passing } from "../json-workflow-apps.ts";
 import { liveStatus } from "../runs.ts";
 import { unique } from "../sign-in.ts";
+import { publishDefinition } from "../workflow-publishing.ts";
 
 // A JSON workflow's run on-prem: its sealed build loads as a sandbox
 // session owned by its workflow, with only the run host's calls passed in
@@ -38,20 +36,22 @@ describe("a JSON workflow's run on-prem", () => {
     ]);
     const by: Acting = { userId, role: "builder", teams: [], staff: false };
     const workflow = await createWorkflowResource(env, by, `run-${unique()}`);
-    await publishWorkflowVersion(env, by, workflow.id, {
-      definition: definitionOf([
+    await publishDefinition(
+      env,
+      by,
+      workflow.id,
+      definitionOf([
         { id: "pause", type: "wait", for: "1 second" },
         // A wait the host resolves to a deadline, and sleeps until.
         { id: "linger", type: "wait", until: { $expr: "0" } },
         passing("greet"),
-      ]),
-      basedOn: null,
-    });
+      ])
+    );
     const { runId } = await startWorkflow(
       env,
       { type: "person", person: by },
       workflow.id,
-      { version: 1, args: { who: "Ada" }, key: unique() }
+      { expected: 1, args: { who: "Ada" }, key: unique() }
     );
     const run = await vi.waitFor(
       async () => {
@@ -101,8 +101,11 @@ describe("a JSON workflow's run on-prem", () => {
       },
     });
     const workflow = await createWorkflowResource(env, by, `run-${unique()}`);
-    await publishWorkflowVersion(env, by, workflow.id, {
-      definition: definitionOf(
+    await publishDefinition(
+      env,
+      by,
+      workflow.id,
+      definitionOf(
         [
           {
             id: "job",
@@ -116,9 +119,8 @@ describe("a JSON workflow's run on-prem", () => {
           permissions: { events: { jobEvents: { contract } } },
           status: { $expr: 'job.timedOut ? "" : job.event.data.note' },
         }
-      ),
-      basedOn: null,
-    });
+      )
+    );
     await approveWorkflowBinding(env, by, workflow.id, {
       alias: "jobEvents",
       target: { kind: "event" },
@@ -128,7 +130,7 @@ describe("a JSON workflow's run on-prem", () => {
       env,
       { type: "person", person: by },
       workflow.id,
-      { version: 1, args: { who: "Ada" }, key: unique() }
+      { expected: 1, args: { who: "Ada" }, key: unique() }
     );
     if (runId === null) {
       throw new Error("The start admitted no run");

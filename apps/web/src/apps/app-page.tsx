@@ -25,13 +25,13 @@ import {
 } from "lucide-react";
 import type { ReactNode } from "react";
 
+import { StatusBadge } from "../drafts/status-badge.tsx";
 import { ItemBar, ItemShell } from "../frame/item-shell.tsx";
 import type { Crumb } from "../frame/site-header.tsx";
 import { pageHref, useAppAddress } from "../pages/app-address.ts";
 import { PageFrame } from "../pages/page-frame.tsx";
 import { buildsApp } from "./app-role.ts";
 import type { AppSettingsSection } from "./app-settings.tsx";
-import { StatusBadge, statusOf } from "./app-status.tsx";
 import { AppWorkspace } from "./app-workspace.tsx";
 import type {
   ReadOnlyShown,
@@ -140,7 +140,9 @@ const AppPage = ({
           name={name}
           // Who uses it sees it only live; anything else says so.
           state={
-            statusOf(app) === "live" ? undefined : <StatusBadge app={app} />
+            !app.archived && app.currentVersion !== null ? undefined : (
+              <StatusBadge archived={app.archived} live={app.currentVersion} />
+            )
           }
         />
       }

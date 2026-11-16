@@ -332,8 +332,8 @@ export const journaledCtx = (
   );
 
   /**
-   * The members of each files or brain permission: exactly the actions its
-   * steps take, each a call of that action through its alias.
+   * The members of each files permission: exactly the actions its steps
+   * take, each a call of that action through its alias.
    */
   const actionMembers = (
     held: Readonly<Record<string, readonly string[]>> | undefined
@@ -345,7 +345,16 @@ export const journaledCtx = (
       ])
     );
   const files = actionMembers(permissions.files);
-  const brain = actionMembers(permissions.brain);
+  // The Brain's actions by path: `skills.select` as `skills.select`.
+  const brain = membersOf(
+    Object.entries(permissions.brain ?? {}).map(([alias, actions]) => [
+      alias,
+      pathMembers(
+        Object.fromEntries(actions.map((action) => [action, action])),
+        (action) => call(alias, action)
+      ),
+    ])
+  );
 
   const ai =
     permissions.ai === true

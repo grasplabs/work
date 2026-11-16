@@ -90,7 +90,7 @@ describe("a chat's preview of its draft", { timeout: 60_000 }, () => {
         files.files["src/routes/index.tsx"] ?? ""
       ).replace("Clicked", "Pressed"),
     });
-    const preview = await framed(builder.api.apps.drafts.preview(app));
+    const preview = await framed(builder.api.apps.preview.open(app));
 
     expect({
       published: {

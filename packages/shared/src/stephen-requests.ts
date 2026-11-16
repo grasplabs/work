@@ -841,6 +841,7 @@ export interface RequestsPage {
   settings: StephenRequestSettings;
   /** The month's pace, for the month today is in. */
   pace: number | null;
+  /** The topics the report names: only those five or more people asked about. */
   topics: Named[];
   /** The questions the report names: only those five or more people asked. */
   questions: (Named & { role: string | null })[];

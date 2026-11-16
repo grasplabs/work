@@ -1,0 +1,1 @@
+ALTER TABLE `erasures` ADD `sources` integer;

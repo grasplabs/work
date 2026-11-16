@@ -574,7 +574,8 @@ describe("the Google Workspace connector's Gmail tools", () => {
         encoding: "base64",
         content: pdfBase64,
       },
-      provenance: [messageId(invoices, 1)],
+      // A part of the message, named apart from it.
+      provenance: [`${messageId(invoices, 1)}/${partIds.pdf}`],
     });
     // One inline in its part needs no second request.
     await expect(

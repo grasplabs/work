@@ -22,7 +22,7 @@ const newApp = async (files: TestSource): Promise<string> => {
   const { core, api } = apiOf(builder);
   try {
     const { id } = await api.apps.create({ name });
-    await release(api, id, files, name);
+    await release(api, id, files);
     return id;
   } finally {
     core[Symbol.dispose]();
@@ -92,8 +92,7 @@ test("a new version made current switches a clean page at once, and asks an edit
         app,
         withFiles(files, {
           "src/routes/start.tsx": `${files.files["src/routes/start.tsx"]}// ${mark}\n`,
-        }),
-        mark
+        })
       );
     } finally {
       again.core[Symbol.dispose]();

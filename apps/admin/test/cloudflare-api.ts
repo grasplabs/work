@@ -29,6 +29,9 @@ import {
   brainActionPath,
   brainActionPurpose,
   brainActionRequestSchema,
+  brainErasurePath,
+  brainErasurePurpose,
+  brainErasureRequestSchema,
   brainReportPath,
   brainReportPurpose,
   brainReportRequestSchema,
@@ -504,6 +507,23 @@ const answerBrainAction = async (
   return Response.json({ outcome: core.brainOutcome ?? "done" });
 };
 
+/** What a client's core answers the admin's erasure lookup with, as core does. */
+const answerBrainErasure = async (
+  { core }: CoreHost,
+  live: VersionState,
+  request: Request
+): Promise<Response> => {
+  const asked = await signedForBrain(live, request, {
+    purpose: brainErasurePurpose,
+    schema: brainErasureRequestSchema,
+  });
+  if (asked === null) {
+    return new Response("Forbidden", { status: 403 });
+  }
+  core.brainAsks.push(asked);
+  return Response.json(core.brainErasure ?? { state: "not_erased" });
+};
+
 /** Two hex characters at a time. */
 const hexPair = /../gu;
 
@@ -712,6 +732,7 @@ const signedPosts: ReadonlyMap<
   [aiStatusReportPath, answerAiStatus],
   [brainReportPath, answerBrainReport],
   [brainActionPath, answerBrainAction],
+  [brainErasurePath, answerBrainErasure],
 ]);
 
 /**

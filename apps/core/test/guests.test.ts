@@ -12,7 +12,7 @@ import {
 import { z } from "zod";
 
 import { addSource } from "../src/brain-next.ts";
-import { grantReviewed, release, requestGranted } from "./apps.ts";
+import { release, requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import {
   answering,
@@ -509,11 +509,9 @@ describe("guest chats through a binding", { timeout: 90_000 }, () => {
     );
     await bindGuests(app, permission);
     const bound = await call(app, builder.userId, "list");
-    // Version 2 invites too: what was approved serves it no more. (Its
-    // permission, which changes things, is asked for again with it, and
-    // an admin grants it again.)
+    // Version 2 invites too: the binding approved for less serves it no
+    // more, until an admin binds it again. (The permission stays granted.)
     await release(builder, app, guestFiles());
-    await grantReviewed(admin.api, permission);
     const widened = await call(app, builder.userId, "list");
     const binding = await bindGuests(app, permission);
     const { token } = await invite(app, builder.userId);

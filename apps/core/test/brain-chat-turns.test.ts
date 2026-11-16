@@ -1,16 +1,18 @@
 import { brainOf, recallBudgetMax } from "@grasp-os/brain-next/contract";
 import type { Brain, SourceErasure } from "@grasp-os/brain-next/contract";
+import { auditOutboxTakeMax, createAuditEvent } from "@grasp-os/shared/audit";
 import { chatIdSchema } from "@grasp-os/shared/ids";
 import type { ChatId } from "@grasp-os/shared/ids";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { and, eq } from "drizzle-orm";
+import { and, eq, like } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import { drainAuditOutboxes } from "../src/audit-outbox.ts";
+import { drainAuditOutboxes } from "../src/audit-drains.ts";
+import { drainObjectOutbox } from "../src/audit-outbox.ts";
 import { organizationId } from "../src/auth/auth.ts";
-import { noteHandOvers } from "../src/brain-hand-overs.ts";
+import { handOverNotes, loneNotesPerDrain } from "../src/brain-hand-overs.ts";
 import {
   chatSource,
   chatTurnOf,
@@ -24,16 +26,21 @@ import {
   workBrain,
 } from "../src/brain-next.ts";
 import type { Producers, SourceRef } from "../src/brain-next.ts";
-import { producersOf, relayHandOvers } from "../src/brain-sources.ts";
+import {
+  endHandOversOf,
+  producersOf,
+  relayHandOvers,
+} from "../src/brain-sources.ts";
 import { chatAgentId, personalWorkspaceId } from "../src/chats-rpc.ts";
-import { teamMembers, teams } from "../src/db/core/schema.ts";
+import { brainHandOvers, teamMembers, teams } from "../src/db/core/schema.ts";
 import { inJurisdiction, workspace } from "../src/durable-objects.ts";
 import { codeStep, model, says } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
-import { allEvents } from "./audit-events.ts";
+import { allEvents, loggedEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { fakeProvider } from "./model-provider.ts";
 import type { ProviderReply } from "./model-provider.ts";
+import { refusingNotes } from "./refused-notes.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
 
 // A person's chat turns in the new Brain (GRA-1805), through the real
@@ -52,6 +59,8 @@ import { outcome, signedInApi } from "./sign-in.ts";
 // - A deleted chat's turns stay, or come back with a hand-over that lands
 //   after the delete (threat 6).
 // - A delete whose erasure failed lets the chat go (threat 7).
+// - A turn whose note keeps failing holds up its Workspace's other events
+//   on their way to the log (GRA-1875).
 
 const idp = mockIdp();
 
@@ -175,6 +184,15 @@ const notedEvents = async (personId: string, chatId = "") => {
   );
 };
 
+/** Strings in a fixed order, for comparing sets. */
+const byText = (a: string, b: string): number => a.localeCompare(b);
+
+/** The chats each of `refs` is a turn of, each once. */
+const chatsOf = (refs: readonly { id: string }[]): string[] =>
+  [...new Set(refs.flatMap(({ id }) => chatTurnOf(id)?.chatId ?? []))].toSorted(
+    byText
+  );
+
 /** A store binding out of reach: every store it names throws. */
 const outOfReach = (): never => {
   throw new Error("The Brain is out of reach");
@@ -209,6 +227,122 @@ const brainOutOfReach = async (
     await runInDurableObject(stub, (instance) => {
       Reflect.set(envOf(instance), "BRAIN_STORE", real);
     });
+  };
+};
+
+/**
+ * The Workspace object's audit log out of reach, so its outbox keeps what
+ * it notes, until the returned function puts it back.
+ */
+const auditLogOutOfReach = async (
+  stub: ReturnType<typeof workspace>
+): Promise<() => Promise<void>> => {
+  const real: unknown = await runInDurableObject(stub, (instance) => {
+    const objectEnv = envOf(instance);
+    const was: unknown = Reflect.get(objectEnv, "AUDIT_LOG");
+    Reflect.set(objectEnv, "AUDIT_LOG", {
+      getByName: outOfReach,
+      jurisdiction: () => ({ getByName: outOfReach }),
+    });
+    return was;
+  });
+  return async () => {
+    await runInDurableObject(stub, (instance) => {
+      Reflect.set(envOf(instance), "AUDIT_LOG", real);
+    });
+  };
+};
+
+/** How many audit events the Workspace object's outbox still holds. */
+const outboxLeft = async (stub: ReturnType<typeof workspace>) =>
+  await runInDurableObject(stub, (_, state) => {
+    const [row] = state.storage.sql
+      .exec<{ count: number }>("SELECT count(*) AS count FROM audit_outbox")
+      .toArray();
+    return row?.count ?? 0;
+  });
+
+/** The hand-overs still open whose source names `personId`, by their ids. */
+const openFor = async (personId: string): Promise<string[]> => {
+  const rows = await drizzle(env.DB)
+    .select({ sourceId: brainHandOvers.sourceId })
+    .from(brainHandOvers)
+    .where(
+      and(
+        eq(brainHandOvers.producer, "chat"),
+        like(brainHandOvers.sourceId, `${personId}/%`)
+      )
+    );
+  return rows.map(({ sourceId }) => sourceId);
+};
+
+/**
+ * `count` questions of `personId`'s chat `chatId` noted, as their outbox's
+ * drain notes them, none handed over yet: their sources' ids.
+ */
+const notedFor = async (
+  personId: string,
+  chatId: string,
+  count: number
+): Promise<string[]> => {
+  const ids = Array.from(
+    { length: count },
+    (_, index) => `${personId}/${chatId}/${index + 1}`
+  );
+  const held = await handOverNotes(env, loneNotesPerDrain).required(
+    ids.map((id) => ({
+      id: crypto.randomUUID(),
+      at: new Date().toISOString(),
+      source: "core",
+      actor: { type: "system" },
+      action: "chat.turn_noted",
+      target: { type: "chat_turn", id },
+      provenance: [],
+      detail: {},
+    }))
+  );
+  expect(held.ids, "the notes were refused").toStrictEqual([]);
+  return ids;
+};
+
+/** Each distinct list of hand-over events with reasons the sources `ids` have, as JSON. */
+const endingsOfAll = async (ids: readonly string[]): Promise<string[]> => {
+  const logged = await allEvents();
+  const endings = new Set(
+    ids.map((id) =>
+      JSON.stringify(
+        logged
+          .filter(
+            ({ action, target }) =>
+              action.startsWith("brain.source.") && target?.id === id
+          )
+          .map(({ action, detail }) => `${action}:${String(detail?.reason)}`)
+      )
+    )
+  );
+  return [...endings];
+};
+
+/**
+ * `real`, whose next batch writes its first `statements` and then fails,
+ * as a database failing part-way through: each later batch as `real`.
+ */
+const failsAfter = (real: D1Database, statements: number): D1Database => {
+  let failed = false;
+  return {
+    prepare: (query) => real.prepare(query),
+    batch: async <T>(list: D1PreparedStatement[]) => {
+      if (failed) {
+        return await real.batch<T>(list);
+      }
+      failed = true;
+      await real.batch(list.slice(0, statements));
+      throw new Error("D1 failed part-way");
+    },
+    exec: async (query) => await real.exec(query),
+    // oxlint-disable-next-line typescript/no-deprecated -- D1Database still has it
+    dump: async () => await real.dump(),
+    withSession: (constraint) => real.withSession(constraint),
   };
 };
 
@@ -565,23 +699,38 @@ describe("a person's chat turn", () => {
     ]);
   });
 
-  it("is never handed over from a chat app's chat, a turn nothing but a wake asked for, or a restricted chat", async () => {
+  it("is handed over from their direct message on a chat app as from their chat in Grasp, and never from a thread others share, a turn nothing but a wake asked for, or a restricted chat", async () => {
     const marker = word();
     const { person, stub, chatId, ask } = await chatter(
       says(`Woken ${marker}.`),
-      says(`Teams ${marker}.`),
+      says(`Direct ${marker}.`),
+      says(`Shared ${marker}.`),
       says(`Restricted ${marker}.`),
       says(`Asked ${marker}.`)
     );
     await stub.askUnattended(chatId, { text: `Wake ${marker}`, model });
-    const onTeams = await stub.createChat(
-      "On Teams",
+    // Their direct message is their own chat (GRA-1821); a thread others
+    // share is not, though its roster holds them alone.
+    const direct = await stub.askThrough(
       person.userId,
       chatAgentId,
+      "teams",
+      `Direct ${marker}?`,
       undefined,
-      "teams"
+      { kind: "direct" }
     );
-    await stub.ask(onTeams.id, { text: `Teams ${marker}?`, model });
+    await stub.askThrough(
+      person.userId,
+      chatAgentId,
+      "slack",
+      `Shared ${marker}?`,
+      undefined,
+      {
+        thread: `C${crypto.randomUUID()}`,
+        kind: "group",
+        audience: { members: [person.userId], outsiders: false },
+      }
+    );
     const restricted = await person.api.chats.create("Restricted");
     await stub.restrictChat(chatIdSchema.parse(restricted.id));
     await stub.ask(chatIdSchema.parse(restricted.id), {
@@ -590,13 +739,23 @@ describe("a person's chat turn", () => {
     });
     // A turn of their own chat after them, handed over as ever.
     await ask(`Asked ${marker}?`);
-    const found = await handedTo(person.userId, marker);
+    const both = [direct.chatId, chatId].toSorted(byText);
+    // Recalled by them from their own store, each once handed over.
+    const found = await vi.waitFor(
+      async () => {
+        await handOverNow();
+        const recalledNow = chatsOf(await recalled(person.userId, marker));
+        expect(recalledNow, "a turn was never handed over").toStrictEqual(both);
+        return recalledNow;
+      },
+      { timeout: 15_000, interval: 200 }
+    );
     const kept = await notedEvents(person.userId);
 
     expect({
-      found: found.length,
-      kept: kept.length,
-    }).toStrictEqual({ found: 1, kept: 1 });
+      found,
+      noted: chatsOf(kept.flatMap(({ target }) => target ?? [])),
+    }).toStrictEqual({ found: both, noted: both });
   });
 });
 
@@ -618,9 +777,10 @@ describe("a deleted chat", () => {
 
     await person.api.chats.remove(chatId);
     // The turn noted again, as a drain cut short notes it.
-    if (event !== undefined) {
-      await noteHandOvers(env, [event]);
-    }
+    const held = await handOverNotes(env, loneNotesPerDrain).required(
+      event === undefined ? [] : [event]
+    );
+    expect(held.ids, "the note was refused").toStrictEqual([]);
     await handOverNow();
 
     await expect(recalled(person.userId, marker)).resolves.toStrictEqual([]);
@@ -658,13 +818,12 @@ describe("a deleted chat", () => {
     const core = producersOf(env);
     // The chat is deleted after its turn was read, before it is added.
     const racing: Producers = {
-      ...core,
-      read: async (source) => {
-        const handed = await core.read(source);
+      attempt: async (source) => {
+        const attempt = await core.attempt(source);
         if (source.producer === "chat") {
           await person.api.chats.remove(chatId);
         }
-        return handed;
+        return attempt;
       },
     };
 
@@ -695,17 +854,27 @@ describe("a deleted chat", () => {
     await putBack();
     await handedTo(person.userId, `Again ${marker}`);
     await person.api.chats.remove(chatId);
+    // The turn that answered without its instruction files says so.
+    const logged = await allEvents();
+    const withoutFiles = logged.filter(
+      ({ action, detail }) =>
+        action === "agent.call" &&
+        detail.method === "brain.instructions" &&
+        detail.chat === chatId
+    );
 
     expect({
       refused: refused === "ok" ? "deleted" : "refused",
       kept: listed.map(({ id }) => id),
       again,
       after: await recalled(person.userId, marker),
+      withoutFiles: withoutFiles.map(({ detail }) => detail.unavailable),
     }).toStrictEqual({
       refused: "refused",
       kept: [chatId],
       again: "ok",
       after: [],
+      withoutFiles: [true],
     });
   });
 
@@ -809,5 +978,488 @@ describe("a deleted chat", () => {
       found: [],
       listed: [],
     });
+  });
+
+  it("notes every question of a chat whose outbox the log couldn't take for a while, however many at once", async () => {
+    const marker = word();
+    const asked = 27;
+    const { person, stub, chatId, ask } = await chatter(
+      ...Array.from({ length: asked }, () => says("Noted."))
+    );
+    const putBack = await auditLogOutOfReach(stub);
+    for (let turn = 1; turn < asked; turn += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one turn after the other
+      await ask(`Turn ${turn} ${marker}?`);
+    }
+    const held = await outboxLeft(stub);
+    await putBack();
+    // The next turn's drain takes them all at once.
+    await ask(`Turn ${asked} ${marker}?`);
+    await vi.waitFor(
+      async () => {
+        await expect(outboxLeft(stub)).resolves.toBe(0);
+      },
+      { timeout: 15_000, interval: 200 }
+    );
+    const noted = await notedEvents(person.userId, chatId);
+    const open = await openFor(person.userId);
+
+    expect({
+      heldAtLeast: held >= asked - 1,
+      noted: noted.length,
+      open: open.length,
+    }).toStrictEqual({ heldAtLeast: true, noted: asked, open: asked });
+  });
+
+  it("ends a question's hand-over the queue parked as erased when its person is erased, so no noting keeps their id", async () => {
+    const marker = word();
+    const { person, chatId, ask } = await chatter(says("Parked."));
+    const admin = await signedInApi(idp, "admin");
+    await ask(`Park ${marker}?`);
+    await vi.waitFor(
+      async () => {
+        await expect(notedEvents(person.userId, chatId)).resolves.toHaveLength(
+          1
+        );
+      },
+      { timeout: 15_000, interval: 200 }
+    );
+    // The Brain's queue fails it until it parks it (5 attempts, its
+    // backoff waited out each time).
+    const failing: Producers = {
+      attempt: async () => {
+        await Promise.resolve();
+        throw new Error("Core is out of reach");
+      },
+    };
+    await handOverNow(failing);
+    for (let attempt = 1; attempt < 5; attempt += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one tick after the other
+      await workBrain(env, later(10 * 60_000), failing);
+    }
+    const [noted] = await notedEvents(person.userId, chatId);
+    const key = `chat:${noted?.target?.id ?? ""}`;
+    const { parked } = await brainOf(
+      inJurisdiction(env, env.BRAIN_STORE)
+    ).workOverview();
+    const wasParked = parked.some(
+      (item) => item.kind === "source.handover" && item.key === key
+    );
+    const openBefore = await openFor(person.userId);
+
+    await admin.api.members.remove(person.userId);
+    const erased = await admin.api.members.erase(
+      person.userId,
+      String(person.person.name)
+    );
+    await handOverNow();
+
+    expect({
+      wasParked,
+      openBefore: openBefore.length,
+      completed: typeof erased.completedAt,
+      open: await openFor(person.userId),
+      ended: await endingsFor(noted?.target?.id ?? ""),
+    }).toStrictEqual({
+      wasParked: true,
+      openBefore: 1,
+      completed: "string",
+      open: [],
+      ended: ["brain.source.handover_refused:erased"],
+    });
+  });
+
+  it("ends every hand-over still open of a person with hundreds of them in one erasure step, each in exactly one outcome", async () => {
+    const { person, chatId } = await chatter();
+    const admin = await signedInApi(idp, "admin");
+    const ids = await notedFor(person.userId, chatId, 300);
+    const openBefore = await openFor(person.userId);
+
+    await admin.api.members.remove(person.userId);
+    const erased = await admin.api.members.erase(
+      person.userId,
+      String(person.person.name)
+    );
+
+    expect({
+      openBefore: openBefore.length,
+      completed: typeof erased.completedAt,
+      open: await openFor(person.userId),
+      endings: await endingsOfAll(ids),
+    }).toStrictEqual({
+      openBefore: ids.length,
+      completed: "string",
+      open: [],
+      endings: [JSON.stringify(["brain.source.handover_refused:erased"])],
+    });
+  });
+
+  it("ends each of a person's hand-overs once when ending them failed part-way and is tried again", async () => {
+    const { person, chatId } = await chatter();
+    const admin = await signedInApi(idp, "admin");
+    const ids = await notedFor(person.userId, chatId, 300);
+    // The first 100 ended (their outcome and end, pair by pair), then the
+    // database fails the rest.
+    await expect(
+      endHandOversOf({ ...env, DB: failsAfter(env.DB, 2 * 100) }, person.userId)
+    ).rejects.toThrow("D1 failed part-way");
+    const left = await openFor(person.userId);
+
+    // The erasure's own step, tried again, ends what is left.
+    await admin.api.members.remove(person.userId);
+    const erased = await admin.api.members.erase(
+      person.userId,
+      String(person.person.name)
+    );
+
+    expect({
+      left: left.length,
+      completed: typeof erased.completedAt,
+      open: await openFor(person.userId),
+      endings: await endingsOfAll(ids),
+    }).toStrictEqual({
+      left: 200,
+      completed: "string",
+      open: [],
+      endings: [JSON.stringify(["brain.source.handover_refused:erased"])],
+    });
+  });
+});
+
+/** The events in the Workspace object's outbox, in the order it stored them. */
+const outboxOf = async (stub: ReturnType<typeof workspace>) =>
+  await runInDurableObject(stub, (_, state) =>
+    state.storage.sql
+      .exec<{ id: string; event: string }>(
+        "SELECT id, event FROM audit_outbox ORDER BY rowid"
+      )
+      .toArray()
+      .map(({ id, event }) => {
+        const parsed: unknown = JSON.parse(event);
+        const target: unknown =
+          typeof parsed === "object" && parsed !== null
+            ? Reflect.get(parsed, "target")
+            : undefined;
+        const targetId: unknown =
+          typeof target === "object" && target !== null
+            ? Reflect.get(target, "id")
+            : undefined;
+        return {
+          id,
+          action: String(
+            typeof parsed === "object" && parsed !== null
+              ? Reflect.get(parsed, "action")
+              : ""
+          ),
+          targetId: typeof targetId === "string" ? targetId : "",
+        };
+      })
+  );
+
+/** The IDs of the events in the Workspace object's outbox, in order. */
+const outboxIdsOf = async (
+  stub: ReturnType<typeof workspace>
+): Promise<string[]> => {
+  const rows = await outboxOf(stub);
+  return rows.map(({ id }) => id);
+};
+
+/** The hand-overs still open whose source names `personId`, sorted. */
+const openSortedFor = async (personId: string): Promise<string[]> => {
+  const open = await openFor(personId);
+  return open.toSorted();
+};
+
+/**
+ * Drains the Workspace object's outbox in the object, as its alarm does:
+ * two at once when `twice`.
+ */
+const drainIn = async (
+  stub: ReturnType<typeof workspace>,
+  { twice = false }: { twice?: boolean } = {}
+): Promise<void> => {
+  await runInDurableObject(
+    stub,
+    async (_, state) =>
+      await Promise.all(
+        Array.from(
+          { length: twice ? 2 : 1 },
+          async () =>
+            await drainObjectOutbox(env, state.storage.sql, loneNotesPerDrain)
+        )
+      )
+  );
+};
+
+/**
+ * How the log holds `ids`, read without draining: each one's count, and
+ * whether those it holds are in the order of `ids`.
+ */
+const loggedOf = async (
+  ids: readonly string[]
+): Promise<{ counts: number[]; inOrder: boolean }> => {
+  const events = await loggedEvents();
+  const logged = events.map(({ id }) => id);
+  const present = ids.map((id) => logged.indexOf(id)).filter((at) => at !== -1);
+  return {
+    counts: ids.map((id) => logged.filter((each) => each === id).length),
+    inOrder: present.every(
+      (at, index) => index === 0 || at > (present[index - 1] ?? at)
+    ),
+  };
+};
+
+/** Core's database out of reach: any use of it throws. */
+const databaseDown = (): D1Database =>
+  new Proxy(env.DB, {
+    get: () => {
+      throw new Error("D1 is out of reach");
+    },
+  });
+
+describe("a turn whose note keeps failing", () => {
+  it("holds only its own event in its Workspace's outbox across drains, two at once, while the chat's events before and after it reach the log in order, and is noted, then handed over, once when it can be", async () => {
+    const marker = word();
+    const { person, stub, chatId, ask } = await chatter(
+      says("One."),
+      says("Two."),
+      says("Three.")
+    );
+    const putBack = await auditLogOutOfReach(stub);
+    await ask(`First ${marker}?`);
+    await person.api.chats.rename(chatId, "Renamed once");
+    await ask(`Second ${marker}?`);
+    await person.api.chats.rename(chatId, "Renamed twice");
+    await ask(`Third ${marker}?`);
+    const stored = await vi.waitFor(
+      async () => {
+        const rows = await outboxOf(stub);
+        expect(
+          rows.filter(({ action }) => action === "chat.turn_noted"),
+          "every turn noted in the outbox"
+        ).toHaveLength(3);
+        return rows;
+      },
+      { timeout: 15_000, interval: 100 }
+    );
+    const turns = stored.filter(({ action }) => action === "chat.turn_noted");
+    const refused = turns[1] ?? { id: "", targetId: "" };
+    const lift = await refusingNotes({ id: refused.targetId });
+    await putBack();
+    // Three times two drains at once while its note is refused.
+    const left: string[][] = [];
+    for (let drain = 0; drain < 3; drain += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one pair after another
+      await drainIn(stub, { twice: true });
+      // oxlint-disable-next-line no-await-in-loop -- read after each pair
+      left.push(await outboxIdsOf(stub));
+    }
+    const ids = stored.map(({ id }) => id);
+    const whileRefused = {
+      left,
+      logged: await loggedOf(ids),
+      open: await openSortedFor(person.userId),
+    };
+    await lift();
+    await drainIn(stub);
+    await handOverNow();
+
+    expect({
+      whileRefused,
+      after: {
+        left: await outboxLeft(stub),
+        logged: await loggedOf(ids),
+        ended: await endingsFor(refused.targetId),
+      },
+    }).toStrictEqual({
+      whileRefused: {
+        left: [[refused.id], [refused.id], [refused.id]],
+        logged: { counts: ids.map(() => 1), inOrder: true },
+        open: turns
+          .filter((_, index) => index !== 1)
+          .map(({ targetId }) => targetId)
+          .toSorted(),
+      },
+      after: {
+        left: 0,
+        logged: { counts: ids.map(() => 1), inOrder: true },
+        ended: ["brain.source.handed_over"],
+      },
+    });
+  });
+
+  it("lets a newer event through past more held turns than a drain takes at once", async () => {
+    const { person, stub, chatId } = await chatter();
+    // A full batch of turns, and one more, whose notes are refused, ahead
+    // of a rename: forged into the object's outbox, as its turns are kept.
+    const turns = Array.from(
+      { length: auditOutboxTakeMax + 1 },
+      (_, index) => `${person.userId}/${chatId}/held-${index}`
+    );
+    const lift = await refusingNotes({
+      prefix: `${person.userId}/${chatId}/held-`,
+    });
+    const forged = turns.map((id) =>
+      createAuditEvent(
+        {
+          actor: { type: "system" },
+          action: "chat.turn_noted",
+          target: { type: "chat_turn", id },
+        },
+        "core"
+      )
+    );
+    await runInDurableObject(stub, (_, state) => {
+      for (const event of forged) {
+        state.storage.sql.exec(
+          "INSERT INTO audit_outbox (id, event, created_at) VALUES (?, ?, ?)",
+          event.id,
+          JSON.stringify(event),
+          Date.now()
+        );
+      }
+    });
+    await person.api.chats.rename(chatId, "Renamed after");
+    const waiting = await outboxOf(stub);
+    const rename = waiting.find(({ action }) => action === "chat.renamed");
+
+    await drainIn(stub);
+    const whileRefused = {
+      left: await outboxLeft(stub),
+      rename: await loggedOf([rename?.id ?? ""]),
+    };
+    await lift();
+    await drainIn(stub);
+
+    expect({
+      whileRefused,
+      after: {
+        left: await outboxLeft(stub),
+        open: await openSortedFor(person.userId),
+      },
+    }).toStrictEqual({
+      whileRefused: {
+        left: turns.length,
+        rename: { counts: [1], inOrder: true },
+      },
+      after: { left: 0, open: turns.toSorted() },
+    });
+  });
+
+  it("holds every turn while core's database is out of reach, skips none, lets the chat's other events through, and notes each once it is back", async () => {
+    const marker = word();
+    const { person, stub, chatId, ask } = await chatter(
+      says("One."),
+      says("Two.")
+    );
+    const putBack = await auditLogOutOfReach(stub);
+    await ask(`First ${marker}?`);
+    await person.api.chats.rename(chatId, "Renamed");
+    await ask(`Second ${marker}?`);
+    const stored = await vi.waitFor(
+      async () => {
+        const rows = await outboxOf(stub);
+        expect(
+          rows.filter(({ action }) => action === "chat.turn_noted"),
+          "every turn noted in the outbox"
+        ).toHaveLength(2);
+        return rows;
+      },
+      { timeout: 15_000, interval: 100 }
+    );
+    const turns = stored.filter(({ action }) => action === "chat.turn_noted");
+    // Core's database out of reach (the object's env is the test's, so
+    // for every writer), then the log back: the turns' notes are what
+    // needs the database. Put back before anything else reads it.
+    const realDb = await runInDurableObject(stub, (instance) => {
+      const objectEnv = envOf(instance);
+      const was: unknown = Reflect.get(objectEnv, "DB");
+      Reflect.set(objectEnv, "DB", databaseDown());
+      return was;
+    });
+    let leftWhileDown: string[];
+    try {
+      await putBack();
+      await drainIn(stub);
+      await drainIn(stub);
+      leftWhileDown = await outboxIdsOf(stub);
+    } finally {
+      await runInDurableObject(stub, (instance) => {
+        Reflect.set(envOf(instance), "DB", realDb);
+      });
+    }
+    const ids = stored.map(({ id }) => id);
+    const whileDown = {
+      left: leftWhileDown,
+      logged: await loggedOf(ids),
+      open: await openFor(person.userId),
+    };
+    await drainIn(stub);
+
+    expect({
+      whileDown,
+      after: {
+        left: await outboxLeft(stub),
+        logged: await loggedOf(ids),
+        open: await openSortedFor(person.userId),
+      },
+    }).toStrictEqual({
+      whileDown: {
+        left: turns.map(({ id }) => id),
+        logged: { counts: ids.map(() => 1), inOrder: true },
+        open: [],
+      },
+      after: {
+        left: 0,
+        logged: { counts: ids.map(() => 1), inOrder: true },
+        open: turns.map(({ targetId }) => targetId).toSorted(),
+      },
+    });
+  });
+});
+
+describe("a turn delivered again", () => {
+  it("is noted once however often its capture is delivered, before a drain or after it took the first", async () => {
+    const { person, stub, chatId, ask } = await chatter(says("Noted."));
+    const head = await allEvents();
+    await ask(`Note this ${word()}?`);
+    const [first] = await vi.waitFor(
+      async () => {
+        const noted = await notedEvents(person.userId, chatId);
+        expect(noted, "the turn was noted").toHaveLength(1);
+        return noted;
+      },
+      { timeout: 15_000, interval: 100 }
+    );
+    const answerId = Number(first?.target?.id.split("/").at(-1));
+    const capture = { outcome: "answered", answerId, attended: true } as const;
+    // Delivered again after the drain took the first, twice at once, as a
+    // call retried and a capture whose retire failed deliver it.
+    await Promise.all([
+      stub.captureTurn(chatId, capture),
+      stub.captureTurn(chatId, capture),
+    ]);
+    // And again while the log is out of reach: the outbox keeps it once.
+    const putBack = await auditLogOutOfReach(stub);
+    await stub.captureTurn(chatId, capture);
+    await stub.captureTurn(chatId, capture);
+    const outbox = await outboxOf(stub);
+    const held = outbox.filter(
+      ({ action }) => action === "chat.turn_noted"
+    ).length;
+    await putBack();
+    await runInDurableObject(stub, async (_, state) => {
+      await drainObjectOutbox(env, state.storage.sql, loneNotesPerDrain);
+    });
+    const after = await allEvents();
+
+    expect({
+      held,
+      noted: await notedEvents(person.userId, chatId),
+      gaps: after
+        .slice(head.length)
+        .filter(({ action }) => action === "audit.gap").length,
+      left: await outboxLeft(stub),
+    }).toStrictEqual({ held: 1, noted: [first], gaps: 0, left: 0 });
   });
 });

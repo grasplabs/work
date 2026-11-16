@@ -94,6 +94,16 @@ export interface ConnectResult {
    */
   provenance: string[];
   /**
+   * Set when core may keep `output` as a source in the Brain (GRA-1730),
+   * the source of the one item `provenance` names: a call that names more
+   * than one is not kept. Only on a read connect
+   * carried out just now (no side effect, never held, never a stored
+   * answer), whose server named the items it read, from a connection
+   * whose provider's terms allow copies. Absent, nothing of the call is
+   * kept.
+   */
+  keep?: true;
+  /**
    * Set when connect held the call for the person it acts for to confirm
    * (a side effect from chat, from a person using an App, or from a context
    * that read restricted data): nothing was done yet, so `output` is the
@@ -479,6 +489,11 @@ export interface OrganizationConnection {
 export interface ListedConnection extends ConnectionSummary {
   /** `connectedBy`'s name, while core knows them. */
   connectedByName: string | null;
+  /**
+   * The Brain keeps what agents read for the person through it (core's
+   * connection-capture.ts), and erases it when it is disconnected.
+   */
+  keepsReads?: true;
 }
 
 /**
@@ -1259,6 +1274,14 @@ export interface ActionDescription {
   complete: boolean;
 }
 
+/**
+ * Where a held action was held: in Grasp (a chat in Grasp, an App, a
+ * run), or in a chat app's conversation, which Grasp never shows as a
+ * chat and whose held actions are decided on their card there.
+ */
+export const heldInSchema = z.enum(["grasp", "chat_app"]);
+export type HeldIn = z.infer<typeof heldInSchema>;
+
 /** A held action, as the person it waits for sees it. */
 export interface PendingAction {
   id: string;
@@ -1687,7 +1710,7 @@ export const eventListenersMax = 5000;
  * Who listens for events of `type` on a connection: an App whose current
  * version has an event trigger for `type` and holds an active
  * permission on the connection that allows the type's read action
- * (`connectorEventActions`), from a version an admin approved. The
+ * (`connectorEventActions`). The
  * permission is on the whole connection (`resource` null) or on one
  * resource of it (a mailbox, a drive). `owner` is the App's owner, whom
  * its triggered runs act for. On a personal connection connect listens
@@ -1980,10 +2003,15 @@ export interface ConnectApi
     request: NativeOperationRequest
   ) => Promise<NativeOperation>;
   /**
-   * The held actions waiting for `person`, newest first (at most 200):
-   * none for Grasp staff.
+   * The held actions waiting for `person` that were held where `heldIn`
+   * says, newest first (at most 200, of those alone): in Grasp, or in a
+   * chat app's conversation (`chatApp` on the capability). None for Grasp
+   * staff.
    */
-  listPendingActions: (person: ConnectionPerson) => Promise<PendingAction[]>;
+  listPendingActions: (
+    person: ConnectionPerson,
+    heldIn: HeldIn
+  ) => Promise<PendingAction[]>;
   /** One held action waiting for the person, or `null`. */
   pendingAction: (request: HeldRequest) => Promise<PendingAction | null>;
   /**
@@ -2081,11 +2109,13 @@ export interface ConnectApi
   refuseConfirmation: (request: RefuseConfirmation) => Promise<void>;
   /**
    * The oldest audit events connect recorded that core hasn't acknowledged,
-   * in the order they were stored, at most `auditOutboxTakeMax`. Taking
-   * removes nothing: events core took but didn't acknowledge are taken
-   * again, so core appends each at least once, and the log keeps it once.
+   * but those `held` names by ID (those core holds within a drain: an
+   * erasure it could not finish yet; none by default), in the order they
+   * were stored, at most `auditOutboxTakeMax`. Taking removes nothing:
+   * events core took but didn't acknowledge are taken again, so core
+   * appends each at least once, and the log keeps it once.
    */
-  takeAuditEvents: () => Promise<OutboxedAuditEvent[]>;
+  takeAuditEvents: (held?: readonly string[]) => Promise<OutboxedAuditEvent[]>;
   /**
    * Settles taken events by ID: removes those core appended to the audit
    * log, and moves those the log can't take to `audit_outbox_rejected`,
@@ -2353,6 +2383,8 @@ export const connectErrors = defineErrorFamily({
   "connect.catalog_entry_not_found": "There's no such entry in the catalog.",
   "connect.catalog_unavailable":
     "Composio's toolkits can't be listed right now. Try again shortly.",
+  "connect.agent_app_off":
+    "This agent doesn't have this app. Whoever manages it can add the app on its page.",
   "connect.class_off":
     "Your company hasn't turned this kind of action on for you, so it wasn't done. An admin can turn it on.",
   "connect.class_unknown":

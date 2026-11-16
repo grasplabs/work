@@ -464,14 +464,11 @@ describe(
         const source = brain.sources.find(
           ({ teamIds }) => teamIds?.includes(teamId) === true
         );
-        const opened =
-          source === undefined ? null : await api.brain.transcript(source.id);
-        const shown = JSON.stringify([source, opened]);
+        const shown = JSON.stringify(source);
         return {
           listed: source === undefined ? null : { how: source.how },
           turns: source?.transcriptTurns,
           inListing: source?.transcript,
-          opened,
           statements: said.filter((words) => shown.includes(words)),
         };
       };
@@ -479,7 +476,6 @@ describe(
         listed: { how: "7 people" },
         turns: undefined,
         inListing: undefined,
-        opened: null,
         statements: [],
       };
       expect({
@@ -488,23 +484,13 @@ describe(
         staff: await outcome(staff.brain.read()),
         admin: await shownTo(admin.api),
         member: await shownTo(member.api),
-        nobody: {
-          read: await outcome(nobodyCore.authenticate().brain.read()),
-          opened: await outcome(
-            nobodyCore
-              .authenticate()
-              .brain.transcript(`onb-src-${"0".repeat(32)}`)
-          ),
-        },
+        nobody: await outcome(nobodyCore.authenticate().brain.read()),
       }).toStrictEqual({
         said: true,
         staff: "role.forbidden",
         admin: safe,
         member: safe,
-        nobody: {
-          read: "auth.unauthenticated",
-          opened: "auth.unauthenticated",
-        },
+        nobody: "auth.unauthenticated",
       });
     });
 

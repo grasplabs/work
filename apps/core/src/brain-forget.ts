@@ -16,11 +16,10 @@ import { brainRecords } from "./db/core/schema.ts";
 
 // Taking a source, or some things that were said, out of the brain on an
 // admin's word (`brain.forgetPreview`, `brain.forget`): the prototype's
-// `lib/brain-forget.ts`. Built alongside the content purge (a Knowledge
-// purge rewrites terms wherever they are, brain-records.ts
-// `brainRecordErasure`) and the onboarding's own purge of what rested on
-// a withdrawn interview (`purgeOnboardingRecords`): this takes whole
-// records the admin names, which neither of them does. A person's own
+// `lib/brain-forget.ts`. Beside the onboarding's own purge of what rested
+// on a withdrawn interview (`purgeOnboardingRecords`), this takes whole
+// records the admin names; since the cutover removed the term purge
+// (decision B), it is how an admin takes a record's words out. A person's own
 // removal of their interview (GRA-332) stays the onboarding's.
 //
 // Threat model, and how each is closed:

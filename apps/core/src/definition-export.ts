@@ -3,7 +3,6 @@ import {
   generatedPaths,
   ownFiles,
 } from "@grasp-os/runtime/host";
-import type { WorkflowPin } from "@grasp-os/runtime/host";
 import { versionErrors } from "@grasp-os/shared/app-releases";
 import { appErrors } from "@grasp-os/shared/apps";
 import { actorOf } from "@grasp-os/shared/audit";
@@ -33,7 +32,7 @@ import {
 import { appendAuditEvent } from "./audit-outbox.ts";
 import type { Acting } from "./auth/identity.ts";
 import { requireNotStaff } from "./sharing.ts";
-import { exportedWorkflowVersion } from "./workflow-resources.ts";
+import { exportedWorkflowVersion, liveWorkflow } from "./workflow-resources.ts";
 
 // Exporting an App's definition (GRA-363): its current sealed release and
 // the exact workflow versions it binds, as a package of portable source
@@ -60,8 +59,8 @@ import { exportedWorkflowVersion } from "./workflow-resources.ts";
 //   unresolved under the alias that names it, never by its name. Its
 //   events, listens and decisions travel with the App's declaration,
 //   which is the App's own source (`grasp.config.ts`) its builders read.
-//   The definition names the workflow versions the App's drafts bound
-//   (`workflowBindings`) by ID and number, as the App's builders read
+//   The definition names the workflows the App's drafts bound
+//   (`workflowBindings`) by ID, as the App's builders read
 //   them already: an ID grants nothing, and a destination binds its own.
 //   Kept, so the definition still hashes to `definitionHash`.
 // - An export goes unrecorded: it is in the audit log before anything is
@@ -72,7 +71,7 @@ import { exportedWorkflowVersion } from "./workflow-resources.ts";
 //   and refused otherwise.
 // - A version repeats, or the package grows past what one answer holds:
 //   each version is packaged once under its key and named by it
-//   everywhere else, so a version pinned again is only named; at most
+//   everywhere else, so a version bound again is only named; at most
 //   `definitionPackageMaxWorkflows` are read, and at most
 //   `definitionPackageMaxBytes` of text packaged.
 // - A package looks complete when it isn't: every binding it can't
@@ -80,7 +79,7 @@ import { exportedWorkflowVersion } from "./workflow-resources.ts";
 
 type PackagedWorkflow = DefinitionPackage["workflows"][string];
 
-/** What packaging one pin came to: the version's key, or why it has none. */
+/** What packaging one workflow came to: its version's key, or why it has none. */
 type Packed = { readonly key: string } | { readonly reason: UnresolvedReason };
 
 /** How many bytes of text an export packages at most (`env` may lower it). */
@@ -125,9 +124,9 @@ const textBudget = (max: number): TextBudget => {
 };
 
 /**
- * The workflow versions the App's pins name, each read once by `by`,
- * packaged under its key with the catalog kinds it binds, and every pin
- * that doesn't resolve. A workflow binds no other: what it binds is the
+ * The live versions of the workflows the App's release binds, each read
+ * once by `by`, packaged under its key with the catalog kinds it binds,
+ * and every binding that doesn't resolve. A workflow binds no other: what it binds is the
  * catalog's.
  */
 class PackagedVersions {
@@ -136,7 +135,7 @@ class PackagedVersions {
   readonly #env: Env;
   readonly #by: Acting;
   readonly #budget: TextBudget;
-  /** What each pin read came to, by `<workflow id>@<version>`. */
+  /** What each workflow read came to, by its ID. */
   readonly #read = new Map<string, Packed>();
 
   constructor(env: Env, by: Acting, budget: TextBudget) {
@@ -146,18 +145,17 @@ class PackagedVersions {
   }
 
   /**
-   * The key of the version `pin` names, packaged the first time it is
-   * named and only named after; null, with an unresolved entry for
-   * `alias`, for one that can't be packaged.
+   * The key of the live version of workflow `id`, packaged the
+   * first time it is named and only named after; null, with an
+   * unresolved entry for `alias`, for one that can't be packaged.
    */
-  async pack(alias: string, pin: WorkflowPin): Promise<string | null> {
-    const id = `${pin.workflowId}@${pin.version}`;
+  async pack(alias: string, id: string): Promise<string | null> {
     let packed = this.#read.get(id);
     if (packed === undefined) {
       if (this.#read.size >= definitionPackageMaxWorkflows) {
         throw versionErrors.create("version.export_too_large");
       }
-      packed = await this.#packed(pin);
+      packed = await this.#packed(id);
       this.#read.set(id, packed);
     }
     if ("reason" in packed) {
@@ -167,17 +165,22 @@ class PackagedVersions {
     return packed.key;
   }
 
-  async #packed(pin: WorkflowPin): Promise<Packed> {
+  async #packed(id: string): Promise<Packed> {
+    // What a binding starts: the workflow's live version.
+    const live = await liveWorkflow(this.#env, id);
+    if (live?.currentVersion === undefined || live.currentVersion === null) {
+      return { reason: "missing" };
+    }
     const found = await exportedWorkflowVersion(
       this.#env,
       this.#by,
-      pin.workflowId,
-      pin.version
+      id,
+      live.currentVersion
     );
     if (found.status !== "found") {
       return { reason: found.status };
     }
-    const key = `${workflowNamespace}/${found.name}/${found.definitionVersion}`;
+    const key = `${workflowNamespace}/${found.name}/${found.contractVersion}`;
     const files = this.#budget(`workflows/${key}`, found.files);
     this.packaged[key] = {
       provenance: {
@@ -203,8 +206,8 @@ const generatedNames: ReadonlySet<string> = new Set(
 /**
  * The definition package of the App `input` names, for `by`, who must
  * build it and isn't Grasp staff: its current version's sealed release,
- * every artifact checked, and the workflow versions it binds as its seal
- * pinned them, those `by` builds. Audited before it is answered.
+ * every artifact checked, and the live versions of the workflows its seal
+ * binds, those `by` builds. Audited before it is answered.
  */
 export const exportAppDefinition = async (
   env: Env,
@@ -251,7 +254,7 @@ export const exportAppDefinition = async (
   }
   const bindings: DefinitionPackage["app"]["bindings"] = {};
   // What an admin binds or grants: neither the workflows, which the
-  // package carries pinned below, nor the people, which need no binding.
+  // package carries below, nor the people, which need no binding.
   for (const resource of Object.values(release.app.permissions)) {
     const kind = resource["~permission"];
     if (kind !== "workflows" && kind !== "people") {
@@ -261,15 +264,15 @@ export const exportAppDefinition = async (
   const versions = new PackagedVersions(env, by, budget);
   const workflows: DefinitionPackage["app"]["workflows"] = {};
   for (const { alias } of declaredPermissions(release.app, "workflows")) {
-    const pinned = release.workflows.find(
+    const bound = release.workflows.find(
       (workflow) => workflow.alias === alias
-    )?.pinned;
-    if (pinned === undefined) {
+    )?.workflowId;
+    if (bound === undefined) {
       versions.unresolved.push({ alias, reason: "unbound" });
       workflows[alias] = null;
     } else {
-      // oxlint-disable-next-line no-await-in-loop -- each pin read once, in order
-      workflows[alias] = await versions.pack(alias, pinned);
+      // oxlint-disable-next-line no-await-in-loop -- each workflow read once, in order
+      workflows[alias] = await versions.pack(alias, bound);
     }
   }
   const { store } = release;

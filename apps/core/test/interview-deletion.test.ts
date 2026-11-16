@@ -1,5 +1,4 @@
 import type { Workspace } from "@grasp-os/shared/brain";
-import { interviewApiPath } from "@grasp-os/shared/interview-links";
 import type {
   InterviewFact,
   InterviewLine,
@@ -40,7 +39,8 @@ import {
   ticketsReply,
 } from "./onboarding-team.ts";
 import type { Ids } from "./onboarding-team.ts";
-import { auditedDuring, routed, signedInApi, unique } from "./sign-in.ts";
+import { auditedDuring, signedInApi, unique } from "./sign-in.ts";
+import { sayOnLink, stillKept } from "./spoken.ts";
 
 // Deleting an interview (GRA-368, the store's `#forget` and `purgeBrain`):
 // from its link, by Grasp's staff on request, with a new start, or by
@@ -271,13 +271,11 @@ const brainOf = async (ids: Ids) => {
   };
 };
 
-/** Deletes Max's interview from his link, on the device it is on. */
+/** Deletes Max's interview from his link, signed in as him. */
 const deleteOnLink = async (person: string): Promise<number> => {
-  const { secret, key } = await openLink(person);
-  const response = await routed(interviewApiPath, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ action: "delete", secret, key }),
+  const response = await onLink({
+    action: "delete",
+    ...(await openLink(person)),
   });
   return response.status;
 };
@@ -703,22 +701,19 @@ describe("deleting an interview", { timeout: 180_000 }, () => {
     const said = sentinels();
     await mapped(ids);
     await toldWith(ids, said);
-    const keyOf = (words: string): SpokenKey => ({
-      text: stephenSays(words),
-      spoken: `[warm] ${stephenSays(words)}`,
-      voice: platformAi.speech.voices.stephen,
-      model: speechModel,
-      language: "en",
-    });
+    // Said as the page says them, on each one's own link, and kept.
+    const voiced = [
+      await sayOnLink(await openLink(ids.max), stephenSays(said.max)),
+      await sayOnLink(await openLink(ids.mia), stephenSays(said.mia)),
+      await stillKept(stephenSays(said.max)),
+    ];
     const answer = JSON.stringify({
       audio: "AAAA",
       mime: "audio/mpeg",
       words: [],
     });
-    await keepLine(env, keyOf(said.max), answer);
-    await keepLine(env, keyOf(said.mia), answer);
-    // Said before the speech settings changed: another model and voice,
-    // another language, no tone. Erased all the same.
+    // The same words kept another way: another model and voice, another
+    // language, no tone. Every way of saying what was said goes.
     const before: SpokenKey = {
       text: stephenSays(said.max),
       spoken: stephenSays(said.max),
@@ -729,10 +724,16 @@ describe("deleting an interview", { timeout: 180_000 }, () => {
     await keepLine(env, before, answer);
     await deleteOnLink(ids.max);
     expect({
-      max: await keptLine(env, keyOf(said.max)),
+      voiced,
+      max: await stillKept(stephenSays(said.max)),
       before: await keptLine(env, before),
-      mia: await keptLine(env, keyOf(said.mia)),
-    }).toStrictEqual({ max: undefined, before: undefined, mia: answer });
+      mia: await stillKept(stephenSays(said.mia)),
+    }).toStrictEqual({
+      voiced: [200, 200, true],
+      max: false,
+      before: undefined,
+      mia: true,
+    });
   });
 
   it("leaves no line kept the flat way, by model and voice, past the cache's next sweep, whatever its age", async () => {
@@ -859,25 +860,17 @@ describe(
       const said = sentinels();
       await mapped(ids);
       await toldWith(ids, said);
-      const keyOf = (words: string): SpokenKey => ({
-        text: stephenSays(words),
-        spoken: `[warm] ${stephenSays(words)}`,
-        voice: platformAi.speech.voices.stephen,
-        model: speechModel,
-        language: "en",
-      });
-      const answer = JSON.stringify({
-        audio: "AAAA",
-        mime: "audio/mpeg",
-        words: [],
-      });
-      await keepLine(env, keyOf(said.max), answer);
-      await keepLine(env, keyOf(said.mia), answer);
+      const voiced = [
+        await sayOnLink(await openLink(ids.max), stephenSays(said.max)),
+        await sayOnLink(await openLink(ids.mia), stephenSays(said.mia)),
+        await stillKept(stephenSays(said.max)),
+      ];
       await onLink({ action: "withdraw", ...(await openLink(ids.max)) });
       expect({
-        max: await keptLine(env, keyOf(said.max)),
-        mia: await keptLine(env, keyOf(said.mia)),
-      }).toStrictEqual({ max: undefined, mia: answer });
+        voiced,
+        max: await stillKept(stephenSays(said.max)),
+        mia: await stillKept(stephenSays(said.mia)),
+      }).toStrictEqual({ voiced: [200, 200, true], max: false, mia: true });
     });
 
     it("withdrawing from a lead's interview draws all of the team's work again without their facts, and nothing in the brain rests on them (T5)", async () => {
@@ -1059,15 +1052,8 @@ describe(
       const said = sentinels();
       await mapped(ids);
       await toldWith(ids, said);
-      const key: SpokenKey = {
-        text: stephenSays(said.max),
-        spoken: `[warm] ${stephenSays(said.max)}`,
-        voice: platformAi.speech.voices.stephen,
-        model: speechModel,
-        language: "en",
-      };
-      const answer = JSON.stringify({ audio: "AAAA", mime: "audio/mpeg" });
-      await keepLine(env, key, answer);
+      const line = stephenSays(said.max);
+      await expect(sayOnLink(await openLink(ids.max), line)).resolves.toBe(200);
       const files: R2Bucket = env.FILES;
       const spy = vi
         .spyOn(files, "delete")
@@ -1077,18 +1063,18 @@ describe(
       } finally {
         spy.mockRestore();
       }
-      const stuck = await keptLine(env, key);
+      const stuck = await stillKept(line);
       // The alarm, once the cache answers again.
       const gone = await store.forgetLinesNow();
       expect({
         stuck,
         gone: gone > 0,
-        after: await keptLine(env, key),
+        after: await stillKept(line),
         left: await store.forgetLinesNow(),
       }).toStrictEqual({
-        stuck: answer,
+        stuck: true,
         gone: true,
-        after: undefined,
+        after: false,
         left: 0,
       });
     });

@@ -2,6 +2,7 @@ import { dayFrom, spanBefore, weekOf } from "@grasp-os/shared/stephen-requests";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
+import { addSource } from "../src/brain-next.ts";
 import {
   companyDay,
   heardRequest,
@@ -9,13 +10,21 @@ import {
   pressedChanges,
   pressedStart,
   settleRequest,
+  sweepStephenRequests,
 } from "../src/channels/stephen-requests.ts";
+import { chatAgentId } from "../src/chats-rpc.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { sendStephenSummaries } from "../src/stephen-summary.ts";
 import { says } from "./agent-chat.ts";
+import { requestGranted } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { captureMail } from "./mail-capture.ts";
-import { fakeProvider, stephenRequestReplies } from "./model-provider.ts";
+import {
+  fakeProvider,
+  stephenJudgeReplies,
+  stephenRequestCalls,
+  stephenRequestReplies,
+} from "./model-provider.ts";
 import {
   auditedDuring,
   openRpc,
@@ -25,7 +34,17 @@ import {
   staffPerson,
   unique,
 } from "./sign-in.ts";
-import { member, messageFrom, post, reached, watched } from "./teams-door.ts";
+import {
+  member,
+  memberAnsweredBy,
+  mentionIn,
+  messageFrom,
+  newGroup,
+  onGroupRoster,
+  post,
+  reached,
+  watched,
+} from "./teams-door.ts";
 
 // Stephen's requests outside Grasp (src/channels/stephen-requests.ts,
 // src/stephen-requests.ts, src/stephen-summary.ts), from their threat
@@ -41,7 +60,7 @@ watched();
 /** Signing people in can be slow on CI. */
 const setUpTime = { timeout: 90_000 };
 
-/** What a model sorting a request answers. */
+/** What a model naming a request answers. */
 const sorting = (fields: Record<string, unknown>) => ({
   text: JSON.stringify({
     topic: null,
@@ -49,11 +68,17 @@ const sorting = (fields: Record<string, unknown>) => ({
     question: null,
     newQuestion: null,
     role: null,
-    answered: true,
     ...fields,
   }),
   inputTokens: 10,
   outputTokens: 10,
+});
+
+/** What a model judging whether he answered a request answers. */
+const judged = (answered: boolean) => ({
+  text: JSON.stringify({ answered }),
+  inputTokens: 10,
+  outputTokens: 5,
 });
 
 /** Every request kept of `userId`, with every table that names what they asked. */
@@ -69,6 +94,8 @@ const keptOf = async (userId: string) => {
 /** Each test starts with no requests, settings or replies queued. */
 const cleanUp = async (): Promise<void> => {
   stephenRequestReplies.length = 0;
+  stephenJudgeReplies.length = 0;
+  stephenRequestCalls.length = 0;
   await env.DB.batch([
     env.DB.prepare("DELETE FROM stephen_requests"),
     env.DB.prepare("DELETE FROM stephen_request_questions"),
@@ -134,6 +161,16 @@ const named = async (wording: string, role: string | null = null) => {
     ).bind(question, topic, wording, role, Date.now()),
   ]);
   return { topic, question };
+};
+
+/** The name sorting gave topic `id`. */
+const topicName = async (id: string): Promise<string> => {
+  const row = await env.DB.prepare(
+    "SELECT name FROM stephen_request_topics WHERE id = ?"
+  )
+    .bind(id)
+    .first<{ name: string }>();
+  return row?.name ?? "";
 };
 
 /** `n` people asking the same, each once. */
@@ -221,9 +258,9 @@ describe("a message Stephen takes on in Teams", setUpTime, () => {
       idp,
       says("The office opens at eight.")
     );
-    // Sorting fails, however often it is tried: whether he answered
+    // Judging fails, however often it is tried: whether he answered
     // can't be known.
-    stephenRequestReplies.push(
+    stephenJudgeReplies.push(
       ...Array.from({ length: 5 }, () => ({
         text: "Not what was asked for.",
         inputTokens: 10,
@@ -263,7 +300,7 @@ describe("a message Stephen takes on in Teams", setUpTime, () => {
       says("I don't know when the bonus is paid out.")
     );
     const other = await member(idp, says("Hello."));
-    stephenRequestReplies.push(sorting({ answered: false }));
+    stephenJudgeReplies.push(judged(false));
     const message = messageFrom(teams, { text: "When is the bonus paid?" });
 
     await post(message);
@@ -284,6 +321,266 @@ describe("a message Stephen takes on in Teams", setUpTime, () => {
     }).toStrictEqual({ outcome: "unanswered", byOther: null, byThem: "down" });
     const { lines } = await reached(teams.conversation);
     expect(lines.at(-1)).toBe("Thanks for letting me know.");
+  });
+});
+
+describe("sorting a request", setUpTime, () => {
+  afterEach(cleanUp);
+
+  it("names it from what the person wrote alone, never from his answer, in their direct message and a group chat alike, and still judges whether he answered", async () => {
+    // His answer can quote what only the person may read: in their direct
+    // message, their own chat (GRA-1821), his recall reads their own store.
+    // So the call that names a topic, a question and a role is never sent
+    // his answer, for any request; only the call judging whether he
+    // answered reads it, and says that alone (request-sorting.ts).
+    await requestGranted(idp, await signedInApi(idp, "admin"), {
+      subject: { type: "agent", agentId: chatAgentId },
+      object: { type: "platform" },
+      actions: ["brain"],
+      binding: "BRAIN",
+    });
+    const [depot, own] = [`d${unique()}`, `m${unique()}`];
+    const ann = await member(
+      idp,
+      says(`Your own note says ${own}.`),
+      says(`In the group too: ${own}.`)
+    );
+    const ben = await memberAnsweredBy(idp, ann.provider);
+    await addSource(env, {
+      source: { producer: "upload", id: crypto.randomUUID() },
+      change: crypto.randomUUID(),
+      text: `Depot ${depot} keeps Ann's own note ${own}`,
+      readers: { kind: "owner", personId: ann.userId },
+    });
+    const naming = {
+      newTopic: "Depots and stock",
+      newQuestion: "What is kept at a depot?",
+      role: "Logistics lead",
+    };
+    stephenRequestReplies.push(sorting(naming), sorting(naming));
+    // Her direct message's answer judged not to answer it; the group's
+    // judged as answered, as the provider says by default.
+    stephenJudgeReplies.push(judged(false));
+    const group = newGroup();
+    await onGroupRoster(group, [{ person: ann.teams }, { person: ben.teams }]);
+
+    const direct = messageFrom(ann.teams, {
+      text: `What about depot ${depot}?`,
+    });
+    const inGroup = mentionIn(ann.teams, group, `And depot ${depot}?`);
+    await post(direct);
+    await post(inGroup);
+
+    const sent = stephenRequestCalls.map((body) => JSON.stringify(body));
+    const namingCalls = sent.filter((body) =>
+      body.includes("You sort one message")
+    );
+    const judging = sent.filter((body) => body.includes("You judge whether"));
+    const kept = await keptOf(ann.userId);
+    /** How the request of `message` was kept: its outcome, and whether it was named. */
+    const keptFor = ({ id }: { id: string }) => {
+      const row = kept.find((each) => each.id === `teams:${id}`);
+      return {
+        outcome: row?.outcome,
+        sorted: row?.topic_id !== null && row?.question_id !== null,
+      };
+    };
+    expect({
+      // Her own store reached his answer in her direct message.
+      recalled: JSON.stringify(ann.provider.requests[0]?.body).includes(own),
+      named: namingCalls.map((body) => ({
+        asked: body.includes(`depot ${depot}?`),
+        // Not even its words: her own note's marker, which only his
+        // answer held.
+        answer: body.includes(own),
+      })),
+      judgedWithAnswer: judging.some((body) => body.includes(own)),
+      outcomes: [keptFor(direct), keptFor(inGroup)],
+    }).toStrictEqual({
+      recalled: true,
+      named: [
+        { asked: true, answer: false },
+        { asked: true, answer: false },
+      ],
+      judgedWithAnswer: true,
+      outcomes: [
+        { outcome: "unanswered", sorted: true },
+        { outcome: "done", sorted: true },
+      ],
+    });
+  });
+});
+
+/**
+ * Everything an admin reads of Stephen's requests: the report, the
+ * panel of `topic`, Needs you, Stephen's week and the weekly summary.
+ */
+const readsOf = async (
+  admin: Awaited<ReturnType<typeof signedInApi>>,
+  topic: string
+) =>
+  JSON.stringify(
+    await Promise.all([
+      admin.api.stephenRequests.report({ range: "month" }),
+      admin.api.stephenRequests.report({ range: "month", topic }),
+      admin.api.stephenRequests.report({ range: "year" }),
+      admin.api.stephenRequests.needs("en"),
+      admin.api.stephenRequests.week(),
+      admin.api.stephenRequests.summary(),
+    ])
+  );
+
+/** Every topic's name and question's wording kept, in order. */
+const namesKept = async (): Promise<string[]> => {
+  const { results } = await env.DB.prepare(
+    "SELECT name FROM stephen_request_topics UNION ALL SELECT wording FROM stephen_request_questions ORDER BY 1"
+  ).all<{ name: string }>();
+  return results.map(({ name }) => name);
+};
+
+describe("a topic the sorter names", setUpTime, () => {
+  afterEach(cleanUp);
+
+  it("is named to admins only once five people asked about it in Teams, never one person five times, and no longer once one of them is erased", async () => {
+    // A topic's name rests on one person's message (request-sorting.ts),
+    // so it is held to a question's floor: named only where the report
+    // shows the topic as a group of five or more people.
+    const admin = await signedInApi(idp, "admin");
+    const name = `Workload ${unique()}`;
+    const ann = await member(
+      idp,
+      ...Array.from({ length: 9 }, () => says("Take a break."))
+    );
+    const asks = async (who: { teams: typeof ann.teams }, text: string) => {
+      stephenRequestReplies.push(sorting({ newTopic: name }));
+      await post(messageFrom(who.teams, { text }));
+    };
+    for (const at of [1, 2, 3, 4, 5]) {
+      // oxlint-disable-next-line no-await-in-loop -- one message after another
+      await asks(ann, `I'm burning out (${at}), what can I do?`);
+    }
+    const topic = await env.DB.prepare(
+      "SELECT id FROM stephen_request_topics"
+    ).first<{ id: string }>();
+    const topicId = topic?.id ?? "";
+    const onePersonFiveTimes = await readsOf(admin, topicId);
+    for (const at of [1, 2, 3]) {
+      // oxlint-disable-next-line no-await-in-loop -- one person after another
+      const other = await memberAnsweredBy(idp, ann.provider);
+      // oxlint-disable-next-line no-await-in-loop -- one person after another
+      await asks(other, `Too much work (${at}).`);
+    }
+    const fourPeople = await readsOf(admin, topicId);
+    const fifth = await memberAnsweredBy(idp, ann.provider);
+    await asks(fifth, "Too much work, again.");
+    const fivePeople = await admin.api.stephenRequests.report({
+      range: "month",
+    });
+    const fivePeopleReads = await readsOf(admin, topicId);
+    await admin.api.members.remove(fifth.userId);
+    await admin.api.members.erase(fifth.userId, String(fifth.person.name));
+    const afterErasure = await readsOf(admin, topicId);
+    const kept = await keptOf(ann.userId);
+
+    expect({
+      kept: kept.map((row) => row.topic_id),
+      onePersonFiveTimes: onePersonFiveTimes.includes(name),
+      fourPeople: fourPeople.includes(name),
+      fivePeople: {
+        named: fivePeople.topics,
+        byTopic: fivePeople.report.byTopic.map(({ key, people: count }) => [
+          key,
+          count,
+        ]),
+        everywhere: fivePeopleReads.includes(name),
+      },
+      afterErasure: afterErasure.includes(name),
+    }).toStrictEqual({
+      kept: Array.from({ length: 5 }, () => topicId),
+      onePersonFiveTimes: false,
+      fourPeople: false,
+      fivePeople: {
+        named: [{ id: topicId, name }],
+        byTopic: [[topicId, 5]],
+        everywhere: true,
+      },
+      afterErasure: false,
+    });
+  });
+
+  it("goes, with its question, at the sweep after the one person whose requests it rested on is erased, once a day old", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const ann = await member(
+      idp,
+      says("Take a break."),
+      says("Ask your manager."),
+      says("Sixteen weeks.")
+    );
+    const ben = await memberAnsweredBy(idp, ann.provider);
+    const [annTopic, overtime, benTopic] = [
+      `Workload ${unique()}`,
+      `Overtime ${unique()}`,
+      `Leave ${unique()}`,
+    ];
+    stephenRequestReplies.push(
+      sorting({
+        newTopic: annTopic,
+        newQuestion: "How do I cope with stress?",
+      }),
+      // A topic no question points at: only its own day keeps it.
+      sorting({ newTopic: overtime }),
+      sorting({ newTopic: benTopic, newQuestion: "How long is leave?" })
+    );
+    await post(messageFrom(ann.teams, { text: "I'm burning out." }));
+    await post(messageFrom(ann.teams, { text: "Is overtime paid?" }));
+    await post(messageFrom(ben.teams, { text: "How long is my leave?" }));
+    const before = await namesKept();
+
+    await admin.api.members.remove(ann.userId);
+    await admin.api.members.erase(ann.userId, String(ann.person.name));
+    // A name just made waits a day for the request that made it.
+    await sweepStephenRequests(env, new Date());
+    const young = await namesKept();
+    await sweepStephenRequests(env, new Date(Date.now() + 2 * 86_400_000));
+
+    expect({ before, young, after: await namesKept() }).toStrictEqual({
+      young: before,
+      before: [
+        "How do I cope with stress?",
+        "How long is leave?",
+        benTopic,
+        overtime,
+        annTopic,
+      ],
+      after: ["How long is leave?", benTopic],
+    });
+  });
+});
+
+describe("the sweep of what sorting named", setUpTime, () => {
+  afterEach(cleanUp);
+
+  it("keeps a topic past its day while a question just named under it waits for its request", async () => {
+    const now = Date.now();
+    const day = 86_400_000;
+    const [topic, question] = [crypto.randomUUID(), crypto.randomUUID()];
+    const name = `Workload ${unique()}`;
+    await env.DB.batch([
+      env.DB.prepare(
+        "INSERT INTO stephen_request_topics (id, name, created_at) VALUES (?, ?, ?)"
+      ).bind(topic, name, now),
+      // Named under it a day and a half later; its request not kept yet.
+      env.DB.prepare(
+        "INSERT INTO stephen_request_questions (id, topic_id, wording, role, created_at) VALUES (?, ?, ?, NULL, ?)"
+      ).bind(question, topic, "How do I cope with stress?", now + 1.5 * day),
+    ]);
+
+    await sweepStephenRequests(env, new Date(now + 2 * day));
+
+    await expect(namesKept()).resolves.toStrictEqual([
+      "How do I cope with stress?",
+      name,
+    ]);
   });
 });
 
@@ -323,7 +620,7 @@ describe("a request a card's press belongs to", setUpTime, () => {
       // The answer is in and its card is up; the sorting is still running
       // when the person confirms, and the change fails.
       // oxlint-disable-next-line no-await-in-loop -- in the order a turn runs
-      await heardRequest(env, id, { calls, cited: false });
+      await heardRequest(env, id, { calls });
       // oxlint-disable-next-line no-await-in-loop -- in the order a turn runs
       await keepCardsOf(env, id, [`write:${id}`]);
       // oxlint-disable-next-line no-await-in-loop -- in the order a turn runs
@@ -337,7 +634,6 @@ describe("a request a card's press belongs to", setUpTime, () => {
         chatId: "chat-1",
         ended: "answered",
         calls,
-        cited: false,
         sorted: { topicId: null, questionId: null, answered: true },
       });
     }
@@ -397,6 +693,34 @@ describe("a request a card's press belongs to", setUpTime, () => {
       },
     ]);
   });
+
+  it("is the one whose answer posted the card, however many cards that answer posted", async () => {
+    await env.DB.prepare(
+      "INSERT INTO stephen_requests (id, day, place, person_id, kind, outcome, tools, missing, chat_id) VALUES ('teams:many', '2026-10-01', 'teams', 'person-ann', 'answered', 'done', '[]', '[]', 'chat-1')"
+    ).run();
+    // More cards than one statement of D1's 100 bound parameters keeps.
+    const offers = Array.from({ length: 40 }, (_, at) => `offer-${at}`);
+    await keepCardsOf(
+      env,
+      "teams:many",
+      offers.map((offer) => `offer:${offer}`)
+    );
+
+    await pressedStart(env, {
+      userId: "person-ann",
+      offerId: "offer-39",
+      workflowId: "wf-1",
+      started: true,
+    });
+
+    const request = await env.DB.prepare(
+      "SELECT kind, tools FROM stephen_requests WHERE id = 'teams:many'"
+    ).first<{ kind: string; tools: string }>();
+    expect(request).toStrictEqual({
+      kind: "workflow",
+      tools: JSON.stringify([{ id: "workflow:wf-1", ok: true }]),
+    });
+  });
 });
 
 describe("the requests report", setUpTime, () => {
@@ -430,6 +754,29 @@ describe("the requests report", setUpTime, () => {
       questions: ["How do I report sick?"],
       byPerson: null,
       tooFew: false,
+    });
+  });
+
+  it("names a topic the span before shows from five people, never one it shows from four", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const today = await companyDay(env);
+    const [many, few] = [
+      await named("Where is my payslip?"),
+      await named("Who signs the lease?"),
+    ];
+    await seed(spanBefore("month", today)?.from ?? today, [
+      ...people(5, many),
+      ...people(4, few),
+    ]);
+
+    const page = await admin.api.stephenRequests.report({ range: "month" });
+
+    expect({
+      before: page.before?.byTopic.map(({ key }) => key),
+      topics: page.topics,
+    }).toStrictEqual({
+      before: [many.topic, "elsewhere"],
+      topics: [{ id: many.topic, name: await topicName(many.topic) }],
     });
   });
 
@@ -834,6 +1181,96 @@ describe("Needs you", setUpTime, () => {
   });
 });
 
+describe("Needs you after an erasure", setUpTime, () => {
+  afterEach(cleanUp);
+
+  it("tells the proposing model the topic five or more asked about, and stops listing a fixed need, its wording and its proposal, in Needs you and the weekly summary once an erasure takes it under five", async () => {
+    const owner = await signedInApi(idp, "admin");
+    const erased = await signedInApi(idp, "user");
+    const today = await companyDay(env);
+    const leave = await named("Request leave for next week");
+    const topic = await topicName(leave.topic);
+    const asked = {
+      ...leave,
+      kind: "changed",
+      outcome: "notPossible",
+      tools: [],
+      missing: [{ id: "afas.leave", why: "actionOff" }],
+    };
+    // One of the four who stay asked twice: four people, five requests.
+    const twice = `person-${crypto.randomUUID()}`;
+    await seed(dayFrom(today, -3), [
+      ...people(3, asked),
+      { ...asked, person: twice },
+      { ...asked, person: twice },
+      { ...asked, person: erased.userId },
+    ]);
+    await fakeProvider();
+    const proposal = `Turn on Request leave under ${topic}.`;
+    stephenRequestReplies.push({
+      text: JSON.stringify({ proposal }),
+      inputTokens: 10,
+      outputTokens: 10,
+    });
+    await owner.api.stephenRequests.needs("en");
+    const need = await vi.waitFor(
+      async () => {
+        const [now] = await owner.api.stephenRequests.needs("en");
+        expect(now?.proposal).toBeTypeOf("string");
+        return now;
+      },
+      { timeout: 30_000, interval: 200 }
+    );
+    const proposing = JSON.stringify(stephenRequestCalls.at(-1));
+    await owner.api.stephenRequests.setNeedStatus(need?.key ?? "", "fixed");
+    /** Needs you and the weekly summary, as the owner reads them. */
+    const shown = async () =>
+      JSON.stringify([
+        await owner.api.stephenRequests.needs("en"),
+        await owner.api.stephenRequests.summary(),
+      ]);
+    const fivePeople = await shown();
+
+    await owner.api.members.remove(erased.userId);
+    await owner.api.members.erase(erased.userId, String(erased.person.name));
+    const fourPeople = await shown();
+    // A sweep while its question is still kept keeps the owner's decision.
+    await sweepStephenRequests(env, new Date(Date.now() + 2 * 86_400_000));
+    // A fifth person again: the owner's own decision was kept.
+    await seed(today, people(1, asked));
+    const [again] = await owner.api.stephenRequests.needs("en");
+    // Past the requests' thirteen months, the question, Grasp's proposal
+    // for it and the owner's status go at the sweep.
+    await sweepStephenRequests(env, new Date(Date.now() + 800 * 86_400_000));
+    const { results: left } = await env.DB.prepare(
+      "SELECT key FROM stephen_request_proposals UNION ALL SELECT key FROM stephen_request_needs"
+    ).all();
+
+    /** Whether `text` holds the need's wording, and its proposal. */
+    const holds = (text: string) => ({
+      wording: text.includes("Request leave for next week"),
+      proposal: text.includes(proposal),
+    });
+    expect({
+      topicToModel: proposing.includes(topic),
+      fivePeople: holds(fivePeople),
+      fourPeople: holds(fourPeople),
+      again: {
+        key: again?.key,
+        status: again?.status?.status,
+        proposal: again?.proposal,
+      },
+      left,
+    }).toStrictEqual({
+      topicToModel: true,
+      fivePeople: { wording: true, proposal: true },
+      fourPeople: { wording: false, proposal: false },
+      again: { key: need?.key, status: "fixed", proposal },
+      left: [],
+    });
+  });
+});
+
 describe("Stephen's week", setUpTime, () => {
   afterEach(cleanUp);
 
@@ -919,6 +1356,42 @@ describe("the weekly summary", setUpTime, () => {
       lines: true,
       teamsRefused: "stephen_requests.teams_closed",
     });
+  });
+
+  it("goes in Teams with what a new need is called, which a model wrote, inert in its message text", async () => {
+    const owner = await memberAnsweredBy(
+      idp,
+      await fakeProvider(says("Hello.")),
+      "admin"
+    );
+    // Their chat with Stephen, which the summary goes to.
+    await post(messageFrom(owner.teams, { text: "Hi" }));
+    const monday = weekOf(await companyDay(env));
+    // A link, a tag, and a tag spelled in entities, which Teams decodes.
+    const wording =
+      "[Leave](https://evil.com/l?d=1) <img src=https://evil.com/i.png> &lt;img src=https://evil.com/e.png&gt; &#60;img src=https://evil.com/n.png>";
+    await seed(
+      dayFrom(monday, -3),
+      people(5, {
+        ...(await named(wording)),
+        outcome: "notPossible",
+        tools: [],
+      })
+    );
+    await owner.api.stephenRequests.setSummary("teams");
+
+    await sendStephenSummaries(env, new Date(`${monday}T10:00:00Z`));
+
+    const { activities } = await reached(owner.teams.conversation);
+    const summary = JSON.stringify(activities.at(-1));
+    // Teams' message text renders `[words](address)`, HTML and entities:
+    // the name shows whole, as written, and is none of them.
+    expect({
+      shown: summary.includes(
+        "[Leave] (https://evil.com/l?d=1) &lt;img src=https://evil.com/i.png> &amp;lt;img src=https://evil.com/e.png&amp;gt; &amp;#60;img src=https://evil.com/n.png>"
+      ),
+      linkOrTag: summary.includes("](") || summary.includes("<img"),
+    }).toStrictEqual({ shown: true, linkOrTag: false });
   });
 
   it("goes only to who is still an admin asking for it as it is sent, and sums up the week it was queued for", async () => {

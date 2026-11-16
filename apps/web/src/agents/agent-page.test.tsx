@@ -1,6 +1,8 @@
 // @vitest-environment happy-dom
 import type {
   Agent,
+  AgentApp,
+  AgentAppsWorkedOut,
   AgentDocument,
   AgentInput,
   AgentSettings,
@@ -96,6 +98,7 @@ const fakeConnections = () => {
   let wakes: AgentWake[] = [];
   let documents: (AgentDocument & { agentId: string })[] = [];
   const settings = new Map<string, AgentSettings>();
+  const apps = new Map<string, AgentApp[]>();
   const changed = (id: string, change: Partial<Agent>): void => {
     agents = agents.map((agent) =>
       agent.id === id
@@ -260,6 +263,43 @@ const fakeConnections = () => {
         settings.set(id, { ...found, on, audience });
       }
     },
+    agentApps: async (agentId: string): Promise<AgentApp[]> => {
+      await Promise.resolve();
+      return apps.get(agentId) ?? [];
+    },
+    setAgentApp: async (agentId: string, app: string, on: boolean) => {
+      await Promise.resolve();
+      asked.push(["app", agentId, app, on]);
+      const rest = (apps.get(agentId) ?? []).filter((each) => each.app !== app);
+      apps.set(agentId, [
+        ...rest,
+        {
+          app,
+          name: app === "native:google" ? "Google Workspace" : app,
+          state: on ? "on" : "removed",
+          source: "person",
+        },
+      ]);
+    },
+    workOutAgentApps: async (agentId: string): Promise<AgentAppsWorkedOut> => {
+      await Promise.resolve();
+      asked.push(["work out", agentId]);
+      const added: AgentApp[] = [
+        {
+          app: "native:google",
+          name: "Google Workspace",
+          state: "on",
+          source: "instructions",
+        },
+      ];
+      apps.set(agentId, added);
+      return {
+        added,
+        turnedOn: ["read-own"],
+        suggested: ["reach-others"],
+        missing: ["Slack"],
+      };
+    },
     setAgentToolClass: async (
       id: string,
       toolClass: CompanyToolClass,
@@ -291,6 +331,7 @@ interface Shown {
   settings: Record<string, AgentSettings>;
   wakes: Record<string, AgentWake[]>;
   documents: Record<string, AgentDocument[]>;
+  apps: Record<string, AgentApp[]>;
 }
 
 /** What is shown: one agent's page, by its name, or the new agent's. */
@@ -319,6 +360,13 @@ const Page = ({
   return (
     <AgentPage
       agent={agent}
+      apps={{
+        apps: data.apps[agent.id],
+        offered: [
+          { source: "native", id: "google", name: "Google Workspace" },
+          { source: "composio", id: "hubspot", name: "HubSpot" },
+        ],
+      }}
       documents={data.documents[agent.id]}
       editable={editable}
       first={agent.id === data.agents.at(0)?.id}
@@ -372,6 +420,14 @@ const shown = async (connections: Connections, open: Open, editable = true) => {
       settings: Object.fromEntries(read),
       wakes: Object.fromEntries(woken),
       documents: Object.fromEntries(kept),
+      apps: Object.fromEntries(
+        await Promise.all(
+          agents.map(async ({ id }): Promise<[string, AgentApp[]]> => [
+            id,
+            await connections.agentApps(id),
+          ])
+        )
+      ),
     };
   };
   const rootRoute = createRootRoute({
@@ -560,7 +616,10 @@ describe("an agent's page", () => {
     await set(field("What it is for"), "Chases unpaid invoices.", "input");
     await set(field("Instructions"), "Answer only about invoices.", "input");
     await press(button("Make agent"));
-    expect(asked).toStrictEqual([["make", claire]]);
+    expect(asked).toStrictEqual([
+      ["make", claire],
+      ["work out", "agent-1"],
+    ]);
     expect(router.state.location.href).toBe("/agents/agent-1?tab=access");
   });
 
@@ -574,7 +633,10 @@ describe("an agent's page", () => {
     await press(button("Make agent"));
     expect({ whose, asked, at: router.state.location.href }).toStrictEqual({
       whose: 0,
-      asked: [["make own", claire]],
+      asked: [
+        ["make own", claire],
+        ["work out", "agent-1"],
+      ],
       at: "/agents/agent-1",
     });
   });
@@ -603,7 +665,10 @@ describe("an agent's page", () => {
     await set(field("What it is for"), "Chases unpaid invoices.", "input");
     await set(field("Instructions"), "Answer only about invoices.", "input");
     await press(button("Make agent"));
-    expect(asked).toStrictEqual([["make own", claire]]);
+    expect(asked).toStrictEqual([
+      ["make own", claire],
+      ["work out", "agent-1"],
+    ]);
   });
 
   it("shows a person's own agent as theirs alone, with no audience, classes or schedule to set, and saves what they change", async () => {
@@ -627,6 +692,53 @@ describe("an agent's page", () => {
       alone: true,
       who: true,
       asked: [["change", "agent-1", { ...claire, name: "Clara" }]],
+    });
+  });
+
+  it("works out a new agent's apps from its instructions as it is made", async () => {
+    const { connections, asked } = fakeConnections();
+    await shown(connections, "new");
+    await set(field("Name"), "Claire", "input");
+    await set(field("What it is for"), "Chases unpaid invoices.", "input");
+    await set(field("Instructions"), "Check Gmail for late payers.", "input");
+    await press(button("Make agent"));
+    expect(asked.map(([what]) => what)).toStrictEqual(["make", "work out"]);
+  });
+
+  it("works its apps out from its instructions on a press and as they are saved, says what it turned on, and turns on what it suggests only on a press", async () => {
+    const { connections, asked } = await withClaire();
+    await shown(connections, { agent: "Claire", tab: "instructions" });
+    await press(button("Work out from its instructions"));
+    const said = document.body.textContent;
+    await press(button("Turn on"));
+    await press(button("Take Google Workspace off"));
+    await set(
+      field("Instructions"),
+      "Answer about HubSpot deals too.",
+      "input"
+    );
+    await press(button("Save"));
+    expect({
+      said: [
+        said.includes("Added from its instructions: Google Workspace."),
+        said.includes("Turned on, as it only reads: Read their own."),
+        said.includes("doesn't offer: Slack."),
+        said.includes("Claire also needs “Reach others”"),
+      ],
+      asked: asked.map((each) => each.slice(0, 4)),
+    }).toStrictEqual({
+      said: [true, true, true, true],
+      asked: [
+        ["work out", "agent-1"],
+        ["class", "agent-1", "reach-others", { who: "asClass" }],
+        ["app", "agent-1", "native:google", false],
+        [
+          "change",
+          "agent-1",
+          { ...claire, instructions: "Answer about HubSpot deals too." },
+        ],
+        ["work out", "agent-1"],
+      ],
     });
   });
 
@@ -718,10 +830,9 @@ describe("an agent's page", () => {
     ]);
     // And it is the draft that is saved.
     await press(button("Save"));
-    expect(asked.at(-1)).toStrictEqual([
-      "change",
-      "agent-1",
-      { ...claire, instructions: "A draft, not saved." },
+    expect(asked.slice(-2)).toStrictEqual([
+      ["change", "agent-1", { ...claire, instructions: "A draft, not saved." }],
+      ["work out", "agent-1"],
     ]);
   });
 

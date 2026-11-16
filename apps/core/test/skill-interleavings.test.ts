@@ -5,7 +5,8 @@ import { and, asc, desc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
-import { companyChangeVersion, readCurrentSkillAs } from "../src/brain-next.ts";
+import { readCurrentSkillAs, sharedChangeVersion } from "../src/brain-next.ts";
+import type { Skill, SkillAudience } from "../src/brain-next.ts";
 import { skillsFor } from "../src/brain-skills.ts";
 import {
   skillDecisions,
@@ -21,11 +22,14 @@ import {
   retireSkill,
   saveOwnSkill,
   shareOwnSkill,
+  waitingShares,
 } from "../src/skill-shares.ts";
 import { eventsAfterWithHead, logHead } from "./audit-events.ts";
 import { actingFor } from "./contexts.ts";
 import { mockIdp } from "./idp.ts";
 import { outcome, signedInApi, unique } from "./sign-in.ts";
+import { holdsNothing } from "./stored-skills.ts";
+import { joinTeam, leaveTeam, newTeam } from "./teams.ts";
 
 // Sharing skills, every step of every operation held while another runs,
 // failed, or its reply lost (GRA-1754, from review round 9's probe): the
@@ -44,18 +48,30 @@ import { outcome, signedInApi, unique } from "./sign-in.ts";
 // - nothing personal reaches anyone else: no member is given the person's
 //   own skill, and no event holds a skill's text.
 //
+// The team dimension (GRA-1844): the same name shared with the company
+// and with two of the asker's teams, each its own audience, decided and
+// reconciled apart. Then, of each audience, all of the above, and:
+//
+// - no decision of a team share is made after its asker left the team,
+//   and no admin is shown a waiting share of someone not in its team;
+// - a member outside the teams is given the company's skill of the name
+//   (when live) and never a team's; a member of the teams is given each
+//   team's live one in its place.
+//
 // Deterministic: a fixed sweep (each of approving, asking again, retiring
 // and deleting held before each of its steps while one of those or a
 // removal runs; each failing before, or losing the reply after, each of
 // its steps), each finding of the round as its own sequence, and seeded
-// random sequences of two holds.
+// random sequences of two holds; and the same for the team operations,
+// with the asker leaving the team at every step.
 
 const idp = mockIdp();
 
 /** Every sequence is short; the whole sweep is what takes time. */
 const sweepTime = { timeout: 600_000 };
 
-type Op =
+/** The operations on the company's shares, and on the person and their skill. */
+type CompanyOp =
   | "approve"
   | "askAgain"
   | "askOld"
@@ -65,6 +81,31 @@ type Op =
   | "remove"
   | "erase"
   | "decline";
+
+/** The operations on the teams' shares: a sequence with one sets the teams up. */
+type TeamOp =
+  | "approveTeam"
+  | "askTeam"
+  | "retireTeam"
+  | "leave"
+  | "askTeamB"
+  | "approveTeamB"
+  | "rejoin";
+
+type Op = CompanyOp | TeamOp;
+
+const teamOps: ReadonlySet<string> = new Set<TeamOp>([
+  "approveTeam",
+  "askTeam",
+  "retireTeam",
+  "leave",
+  "askTeamB",
+  "approveTeamB",
+  "rejoin",
+]);
+
+/** Whether `op` is one of the teams' operations. */
+const isTeamOp = (op: Op): op is TeamOp => teamOps.has(op);
 
 /** What happens at a step of an operation. */
 type Kind = "hold" | "fail" | "lose";
@@ -101,17 +142,29 @@ const personOf = async (role: "user" | "admin"): Promise<Person> => {
   };
 };
 
-let people: { first: Person; second: Person; member: Person } | undefined;
+let people:
+  | { first: Person; second: Person; member: Person; mate: Person }
+  | undefined;
 
-/** The admins and the member every sequence of a test shares. */
+/**
+ * The admins, the member (in no team) and the team-mate (in every team of
+ * every world) every sequence of a test shares.
+ */
 const shared = async () => {
   people ??= {
     first: await personOf("admin"),
     second: await personOf("admin"),
     member: await personOf("user"),
+    mate: await personOf("user"),
   };
   return people;
 };
+
+/** The two teams of a world: the asker and the team-mate are in both. */
+interface Teams {
+  a: string;
+  b: string;
+}
 
 interface World {
   name: string;
@@ -132,7 +185,29 @@ interface World {
   other: Person | undefined;
   /** Every hold's operations, awaited before anything is checked. */
   holds: Promise<unknown>[];
+  /** The team-mate, in both teams throughout. */
+  mate: Person;
+  /** The teams, when the sequence has team operations. */
+  teams: Teams | undefined;
+  /** The last share asked of each team, as a card an admin may still click. */
+  lastTeamShare: Map<string, string>;
+  /**
+   * Once the asker left team A: the decisions of their shares with it
+   * there were then. Any other is one decided after they left.
+   */
+  decidedBeforeLeaving: Set<string> | undefined;
+  /**
+   * Once the asker rejoined team A: the decisions of their shares with it
+   * there were then. One here but not before leaving was decided while
+   * they were out.
+   */
+  decidedBeforeRejoining: Set<string> | undefined;
+  /** What an operation found as it ran: a refused ask that changed something. */
+  refusals: string[];
 }
+
+/** The audience a share or decision of team `team` is stored as. */
+const teamKey = (team: string): string => `team:${team}`;
 
 const textOf = (name: string, tag: string) =>
   `---\nname: ${name}\ndescription: d-${tag}\n---\n\nsteps-${tag}\n`;
@@ -252,15 +327,34 @@ const steppedEnv = (onStep: OnStep): { env: Env; steps: () => number } => {
   };
 };
 
-/** The newest share of the name waiting now, as the admin's card shows it; else the last one asked. */
-const cardOf = async (w: World): Promise<string> => {
+/**
+ * The newest share of the name with `audience` (stored) waiting now, as
+ * the admin's card shows it; else the last one asked of it.
+ */
+const cardOf = async (w: World, audience = "company"): Promise<string> => {
   const [waiting] = await drizzle(env.DB)
     .select({ id: skillShares.id })
     .from(skillShares)
-    .where(and(eq(skillShares.name, w.name), eq(skillShares.status, "pending")))
+    .where(
+      and(
+        eq(skillShares.name, w.name),
+        eq(skillShares.audience, audience),
+        eq(skillShares.status, "pending")
+      )
+    )
     .orderBy(desc(skillShares.requestedAt))
     .limit(1);
-  return waiting?.id ?? w.lastShare ?? crypto.randomUUID();
+  const last =
+    audience === "company" ? w.lastShare : w.lastTeamShare.get(audience);
+  return waiting?.id ?? last ?? crypto.randomUUID();
+};
+
+/** World `w`'s teams: refused when the sequence set none up. */
+const teamsOf = (w: World): Teams => {
+  if (w.teams === undefined) {
+    throw new Error("A team operation in a world without teams");
+  }
+  return w.teams;
 };
 
 /** Saves a new text of the asker's skill, outside any steps. */
@@ -272,8 +366,135 @@ const saveNew = async (w: World): Promise<number> => {
   return saved.version;
 };
 
+/** The asker's shares with team `team` that wait now, by ID. */
+const waitingWith = async (w: World, team: string): Promise<string[]> => {
+  const rows = await drizzle(env.DB)
+    .select({ id: skillShares.id })
+    .from(skillShares)
+    .where(
+      and(
+        eq(skillShares.requestedBy, w.asker.userId),
+        eq(skillShares.name, w.name),
+        eq(skillShares.audience, teamKey(team)),
+        eq(skillShares.status, "pending")
+      )
+    );
+  return rows.map(({ id }) => id);
+};
+
+/**
+ * Asks again to share the asker's skill with team `team`, at a new
+ * version. Refused (nothing new waits), it must have changed nothing: the
+ * share that waited still does.
+ */
+const askTeam = async (w: World, team: string, e: Env): Promise<void> => {
+  const version = await saveNew(w);
+  const before = await waitingWith(w, team);
+  try {
+    const asked = await shareOwnSkill(e, w.asker.ident, w.name, version, {
+      team,
+    });
+    w.lastTeamShare.set(teamKey(team), asked.id);
+  } catch (error) {
+    // Refused when nothing new waits: then nothing may have gone either.
+    // (A new one that waits is an ask that landed and lost its reply.)
+    const after = await waitingWith(w, team);
+    const written = after.some((id) => !before.includes(id));
+    if (!written && before.some((id) => !after.includes(id))) {
+      w.refusals.push("a refused ask took away the share that waited");
+    }
+    throw error;
+  }
+};
+
+/** The decisions of the asker's shares with `team` there are now, by ID. */
+const askersDecisions = async (
+  w: World,
+  team: string
+): Promise<Set<string>> => {
+  const decided = await drizzle(env.DB)
+    .select({ id: skillDecisions.id })
+    .from(skillDecisions)
+    .innerJoin(skillShares, eq(skillShares.id, skillDecisions.shareId))
+    .where(
+      and(
+        eq(skillDecisions.audience, teamKey(team)),
+        eq(skillShares.requestedBy, w.asker.userId)
+      )
+    );
+  return new Set(decided.map(({ id }) => id));
+};
+
+/**
+ * The asker leaves team A, and the decisions of their shares with it made
+ * by then are noted: nothing else runs meanwhile (a hold waits for its
+ * operations), so any other found later was decided after they left.
+ */
+const leaveTeamA = async (w: World): Promise<void> => {
+  const team = teamsOf(w).a;
+  await leaveTeam(team, w.asker.userId);
+  w.decidedBeforeLeaving = await askersDecisions(w, team);
+};
+
+/** The asker joins team A again, once they left it; what was decided while they were out is noted. */
+const rejoinTeamA = async (w: World): Promise<void> => {
+  const team = teamsOf(w).a;
+  w.decidedBeforeRejoining = await askersDecisions(w, team);
+  await joinTeam(team, w.asker.userId);
+};
+
+/** Team operation `op` in `w`, on `e`: none for an operation that isn't one. */
+const teamOperation = async (w: World, op: TeamOp, e: Env): Promise<void> => {
+  switch (op) {
+    case "approveTeam": {
+      const card = await cardOf(w, teamKey(teamsOf(w).a));
+      await approveShare(e, w.first.ident, card);
+      return;
+    }
+    case "askTeam": {
+      await askTeam(w, teamsOf(w).a, e);
+      return;
+    }
+    case "retireTeam": {
+      await retireSkill(e, w.second.ident, w.name, { team: teamsOf(w).a });
+      return;
+    }
+    case "leave": {
+      if (w.decidedBeforeLeaving === undefined) {
+        await leaveTeamA(w);
+      }
+      return;
+    }
+    case "rejoin": {
+      if (
+        w.decidedBeforeLeaving !== undefined &&
+        w.decidedBeforeRejoining === undefined
+      ) {
+        await rejoinTeamA(w);
+      }
+      return;
+    }
+    case "askTeamB": {
+      await askTeam(w, teamsOf(w).b, e);
+      return;
+    }
+    case "approveTeamB": {
+      const card = await cardOf(w, teamKey(teamsOf(w).b));
+      await approveShare(e, w.first.ident, card);
+      return;
+    }
+    default: {
+      throw new Error("Not a team operation");
+    }
+  }
+};
+
 /** Operation `op` in `w`, on `e`. */
 const operation = async (w: World, op: Op, e: Env): Promise<void> => {
+  if (isTeamOp(op)) {
+    await teamOperation(w, op, e);
+    return;
+  }
   switch (op) {
     case "approve": {
       await approveShare(e, w.first.ident, await cardOf(w));
@@ -285,13 +506,19 @@ const operation = async (w: World, op: Op, e: Env): Promise<void> => {
     }
     case "askAgain": {
       const version = await saveNew(w);
-      const asked = await shareOwnSkill(e, w.asker.ident, w.name, version);
+      const asked = await shareOwnSkill(
+        e,
+        w.asker.ident,
+        w.name,
+        version,
+        "company"
+      );
       w.lastShare = asked.id;
       return;
     }
     case "askOld": {
       // Its first version: the text that is live.
-      const asked = await shareOwnSkill(e, w.asker.ident, w.name, 1);
+      const asked = await shareOwnSkill(e, w.asker.ident, w.name, 1, "company");
       w.lastShare = asked.id;
       return;
     }
@@ -302,13 +529,14 @@ const operation = async (w: World, op: Op, e: Env): Promise<void> => {
         e,
         w.other.ident,
         w.name,
-        saved.version
+        saved.version,
+        "company"
       );
       w.lastShare = asked.id;
       return;
     }
     case "retire": {
-      await retireSkill(e, w.second.ident, w.name);
+      await retireSkill(e, w.second.ident, w.name, "company");
       return;
     }
     case "delete": {
@@ -371,8 +599,8 @@ const runOp = async (w: World, s: Sequence, index: number): Promise<number> => {
  * and waiting, and a newer one still saved: every operation has something
  * to act on.
  */
-const worldOf = async (): Promise<World> => {
-  const { first, second, member } = await shared();
+const worldOf = async (withTeams = false): Promise<World> => {
+  const { first, second, member, mate } = await shared();
   const w: World = {
     name: `mix-${unique()}`,
     asker: await personOf("user"),
@@ -387,21 +615,44 @@ const worldOf = async (): Promise<World> => {
     texts: new Set(),
     other: undefined,
     holds: [],
+    mate,
+    teams: undefined,
+    lastTeamShare: new Map(),
+    decidedBeforeLeaving: undefined,
+    decidedBeforeRejoining: undefined,
+    refusals: [],
   };
   const added = await shareOwnSkill(
     env,
     w.asker.ident,
     w.name,
-    await saveNew(w)
+    await saveNew(w),
+    "company"
   );
   await approveShare(env, first.ident, added.id);
   const waiting = await shareOwnSkill(
     env,
     w.asker.ident,
     w.name,
-    await saveNew(w)
+    await saveNew(w),
+    "company"
   );
   w.lastShare = waiting.id;
+  if (withTeams) {
+    // Team A: its first text added, the next one waiting, as the
+    // company's; team B: nothing yet.
+    const a = await newTeam(w.asker.userId, mate.userId);
+    const b = await newTeam(w.asker.userId, mate.userId);
+    w.teams = { a, b };
+    const forA = await shareOwnSkill(env, w.asker.ident, w.name, 1, {
+      team: a,
+    });
+    await approveShare(env, first.ident, forA.id);
+    const waitingForA = await shareOwnSkill(env, w.asker.ident, w.name, 2, {
+      team: a,
+    });
+    w.lastTeamShare.set(teamKey(a), waitingForA.id);
+  }
   await saveNew(w);
   return w;
 };
@@ -422,50 +673,127 @@ const countOf = (events: readonly AuditEvent[], action: string, id: string) =>
 type DecisionRow = typeof skillDecisions.$inferSelect;
 type ShareRow = typeof skillShares.$inferSelect;
 
-/** What members read of the company's skill `w.name`: its text, or null. */
-const liveTextOf = async (w: World): Promise<string | null> => {
-  const read = await readCurrentSkillAs(env, w.member.userId, {
-    scope: "company",
-    name: w.name,
-  });
+/** One audience of a world: how it is stored, named and read. */
+interface Audience {
+  /** As shares and decisions store it. */
+  key: string;
+  audience: SkillAudience;
+  /** The skill members of it read. */
+  skill: Skill;
+  /** Someone in it throughout, who reads it. */
+  reader: Person;
+  /** How a retirement's events name it. */
+  target: string;
+}
+
+/** The audiences of `w`: the company, and its teams when it has them. */
+const audiencesOf = (w: World): Audience[] => [
+  {
+    key: "company",
+    audience: { kind: "company" },
+    skill: { scope: "company", name: w.name },
+    reader: w.member,
+    target: w.name,
+  },
+  ...(w.teams === undefined ? [] : [w.teams.a, w.teams.b]).map(
+    (team): Audience => ({
+      key: teamKey(team),
+      audience: { kind: "team", team },
+      skill: { scope: "team", team, name: w.name },
+      reader: w.mate,
+      target: `${team}:${w.name}`,
+    })
+  ),
+];
+
+/** What `audience`'s reader reads of its skill of `w.name`: its text, or null. */
+const liveTextOf = async (a: Audience): Promise<string | null> => {
+  const read = await readCurrentSkillAs(env, a.reader.userId, a.skill);
   return read?.text ?? null;
 };
 
-/** That the Brain follows the latest decision, and it landed. */
+/** That the Brain follows the latest decision of `a`, and it landed. */
 const liveViolations = async (
-  w: World,
+  a: Audience,
   decisions: readonly DecisionRow[]
 ): Promise<string[]> => {
   const latest = decisions.at(-1);
   const expected =
     latest === undefined || latest.shareId === null ? null : latest.text;
-  const live = await liveTextOf(w);
+  const live = await liveTextOf(a);
   return [
     ...(live === expected
       ? []
-      : [`live ${tagOf(live)}, the latest decision says ${tagOf(expected)}`]),
+      : [
+          `${a.key}: live ${tagOf(live)}, the latest decision says ${tagOf(expected)}`,
+        ]),
     ...(latest === undefined || latest.outcome === "landed"
       ? []
-      : [`the latest decision is ${latest.outcome ?? "on its way"}`]),
+      : [`${a.key}: the latest decision is ${latest.outcome ?? "on its way"}`]),
   ];
 };
 
-/** That `decision`'s outcome is the store's, said once, of a share open when decided. */
+/**
+ * That `decision` of `a` decided a share open when decided, of its own
+ * audience, of a skill not deleted, of an asker still in its team.
+ */
+const shareViolations = (
+  w: World,
+  a: Audience,
+  decision: DecisionRow,
+  share: ShareRow | undefined
+): string[] => {
+  const found: string[] = [];
+  if (share === undefined ? !w.erased : share.status !== "approved") {
+    found.push(`${a.key}: decision ${decision.seq} is of a closed share`);
+  }
+  if (share !== undefined && share.audience !== a.key) {
+    found.push(
+      `${a.key}: decision ${decision.seq} is of another audience's share`
+    );
+  }
+  const afterDeletion =
+    w.deletedAt !== undefined && decision.decidedAt.getTime() > w.deletedAt;
+  const askers = share?.requestedBy === w.asker.userId;
+  if (afterDeletion && askers && w.texts.has(decision.text)) {
+    found.push(
+      `${a.key}: decision ${decision.seq} decided a deleted skill's text`
+    );
+  }
+  const left = w.decidedBeforeLeaving;
+  const back = w.decidedBeforeRejoining;
+  const ofTeamA = w.teams !== undefined && a.key === teamKey(w.teams.a);
+  // Decided after they left, and before they were back if they came back.
+  const whileOut =
+    left !== undefined &&
+    !left.has(decision.id) &&
+    (back === undefined || back.has(decision.id));
+  if (ofTeamA && askers && whileOut) {
+    found.push(
+      `${a.key}: decision ${decision.seq} decided after its asker left the team`
+    );
+  }
+  return found;
+};
+
+/** That `decision` of `a`'s outcome is the store's, said once, of a share open when decided. */
 const decisionViolations = async (
   w: World,
+  a: Audience,
   decision: DecisionRow,
   shares: readonly ShareRow[],
   events: readonly AuditEvent[]
 ): Promise<string[]> => {
   const found: string[] = [];
-  const made = await companyChangeVersion(env, {
+  const made = await sharedChangeVersion(env, {
+    audience: a.audience,
     name: w.name,
     change: `decision:${decision.id}`,
   });
   const landedAs = decision.outcome === "landed" ? decision.version : null;
   if (decision.outcome === null || made !== landedAs) {
     found.push(
-      `decision ${decision.seq} says ${decision.outcome ?? "nothing"} ${landedAs}, the store made ${made}`
+      `${a.key}: decision ${decision.seq} says ${decision.outcome ?? "nothing"} ${landedAs}, the store made ${made}`
     );
   }
   if (decision.shareId === null) {
@@ -477,39 +805,32 @@ const decisionViolations = async (
   const superseded = countOf(events, "skill.share.superseded", shareId);
   if (approved.length !== 1 || added.length + superseded.length !== 1) {
     found.push(
-      `decision ${decision.seq}: ${approved.length} approved, ${added.length} added, ${superseded.length} superseded`
+      `${a.key}: decision ${decision.seq}: ${approved.length} approved, ${added.length} added, ${superseded.length} superseded`
     );
   }
   if (added.some(({ detail }) => detail?.version !== decision.version)) {
-    found.push(`decision ${decision.seq}'s added event says another version`);
+    found.push(
+      `${a.key}: decision ${decision.seq}'s added event says another version`
+    );
   }
   const share = shares.find(({ id }) => id === shareId);
-  if (share === undefined ? !w.erased : share.status !== "approved") {
-    found.push(`decision ${decision.seq} is of a closed share`);
-  }
-  const afterDeletion =
-    w.deletedAt !== undefined && decision.decidedAt.getTime() > w.deletedAt;
-  const askers = share?.requestedBy === w.asker.userId;
-  if (afterDeletion && askers && w.texts.has(decision.text)) {
-    found.push(`decision ${decision.seq} decided a deleted skill's text`);
-  }
-  return found;
+  return [...found, ...shareViolations(w, a, decision, share)];
 };
 
-/** That each retirement has its decision event and one outcome. */
+/** That each retirement of `a` has its decision event and one outcome. */
 const retirementViolations = (
-  w: World,
+  a: Audience,
   decisions: readonly DecisionRow[],
   events: readonly AuditEvent[]
 ): string[] => {
   const retirements = decisions.filter(({ shareId }) => shareId === null);
-  const of = (action: string) => countOf(events, action, w.name).length;
+  const of = (action: string) => countOf(events, action, a.target).length;
   const outcomes = of("skill.retire_done") + of("skill.retire_superseded");
   return of("skill.retired") === retirements.length &&
     outcomes === retirements.length
     ? []
     : [
-        `${retirements.length} retirements, ${of("skill.retired")} retired events, ${outcomes} outcomes`,
+        `${a.key}: ${retirements.length} retirements, ${of("skill.retired")} retired events, ${outcomes} outcomes`,
       ];
 };
 
@@ -545,12 +866,79 @@ const personalViolations = async (
   const memberSees = await skillsFor(
     env,
     actingFor({ type: "agent", agentId: `agent-${unique()}` }, w.member.userId),
-    { personal: true }
+    "person",
+    holdsNothing
   );
   if (
     memberSees.some(({ name, scope }) => name === w.name && scope === "person")
   ) {
     found.push("a member is given the person's own skill");
+  }
+  return found;
+};
+
+/** What `reader`'s chat is given of the name: each skill as scope (and team). */
+const givenOf = async (w: World, reader: Person): Promise<string[]> => {
+  const given = await skillsFor(
+    env,
+    actingFor({ type: "agent", agentId: `agent-${unique()}` }, reader.userId),
+    "teams",
+    holdsNothing
+  );
+  return given
+    .filter(({ name }) => name === w.name)
+    .map((skill) =>
+      skill.scope === "team" ? `team ${skill.team}` : skill.scope
+    );
+};
+
+/**
+ * That the teams' skills reach their members alone, in place of the
+ * company's of the name, and that no admin is shown a waiting share of
+ * someone not in its team.
+ */
+const teamViolations = async (
+  w: World,
+  live: ReadonlyMap<string, boolean>
+): Promise<string[]> => {
+  if (w.teams === undefined) {
+    return [];
+  }
+  const found: string[] = [];
+  const { a, b } = w.teams;
+  const company = live.get("company") === true ? ["company"] : [];
+  const teamsLive = [a, b].filter((team) => live.get(teamKey(team)) === true);
+  const outsider = await givenOf(w, w.member);
+  if (outsider.join(",") !== company.join(",")) {
+    found.push(
+      `a member in no team is given ${outsider.join(",") || "nothing"}, not ${company.join(",") || "nothing"}`
+    );
+  }
+  const mate = await givenOf(w, w.mate);
+  const mateExpected =
+    teamsLive.length > 0
+      ? teamsLive.map((team) => `team ${team}`).toSorted()
+      : company;
+  if (mate.toSorted().join(",") !== mateExpected.join(",")) {
+    found.push(
+      `a team-mate is given ${mate.join(",") || "nothing"}, not ${mateExpected.join(",") || "nothing"}`
+    );
+  }
+  if (
+    w.decidedBeforeLeaving !== undefined &&
+    w.decidedBeforeRejoining === undefined
+  ) {
+    const shown = await waitingShares(env, w.first.ident);
+    if (
+      shown.some(
+        (share) =>
+          share.requestedBy.userId === w.asker.userId &&
+          share.audience.kind === "team" &&
+          share.audience.team.id === a
+      )
+    ) {
+      found.push("an admin is shown a share of someone who left its team");
+    }
   }
   return found;
 };
@@ -563,33 +951,49 @@ const violationsOf = async (w: World, head: number): Promise<string[]> => {
     await retryErasures(env);
   }
   const db = drizzle(env.DB);
-  const decisions = await db
-    .select()
-    .from(skillDecisions)
-    .where(eq(skillDecisions.name, w.name))
-    .orderBy(asc(skillDecisions.seq));
   const shares = await db
     .select()
     .from(skillShares)
     .where(eq(skillShares.name, w.name));
   const { events } = await eventsAfterWithHead(head);
-  const each = await Promise.all(
-    decisions.map(
-      async (decision) => await decisionViolations(w, decision, shares, events)
-    )
-  );
+  const found: string[] = [];
+  const live = new Map<string, boolean>();
+  for (const a of audiencesOf(w)) {
+    // oxlint-disable-next-line no-await-in-loop -- an audience at a time
+    const decisions = await db
+      .select()
+      .from(skillDecisions)
+      .where(
+        and(eq(skillDecisions.name, w.name), eq(skillDecisions.audience, a.key))
+      )
+      .orderBy(asc(skillDecisions.seq));
+    live.set(a.key, decisions.at(-1)?.shareId !== null && decisions.length > 0);
+    // oxlint-disable-next-line no-await-in-loop -- an audience at a time
+    const each = await Promise.all(
+      decisions.map(
+        async (decision) =>
+          await decisionViolations(w, a, decision, shares, events)
+      )
+    );
+    found.push(
+      // oxlint-disable-next-line no-await-in-loop -- an audience at a time
+      ...(await liveViolations(a, decisions)),
+      ...each.flat(),
+      ...retirementViolations(a, decisions, events)
+    );
+  }
   return [
-    ...(await liveViolations(w, decisions)),
-    ...each.flat(),
-    ...retirementViolations(w, decisions, events),
+    ...found,
     ...(await personalViolations(w, shares, events)),
+    ...(await teamViolations(w, live)),
+    ...w.refusals,
   ];
 };
 
 /** Runs `s` in a new world: its violations, described. */
 const runSequence = async (s: Sequence): Promise<string[]> => {
   const head = await logHead();
-  const w = await worldOf();
+  const w = await worldOf(s.ops.some((op) => teamOps.has(op)));
   const inner = new Set(
     s.placements.flatMap((placement) => placement.inner ?? [])
   );
@@ -613,7 +1017,7 @@ const runSequence = async (s: Sequence): Promise<string[]> => {
 
 /** How many steps operation `op` takes alone, in a new world. */
 const stepsOf = async (op: Op): Promise<number> => {
-  const w = await worldOf();
+  const w = await worldOf(teamOps.has(op));
   return await runOp(w, { ops: [op], placements: [] }, 0);
 };
 
@@ -643,6 +1047,27 @@ const innerGroups: readonly (readonly Op[])[] = [
   ["askAgain", "approve"],
   ["askOld", "approve"],
   ["otherAsk", "approve"],
+];
+
+/**
+ * The team sweep: the asker leaving the team held inside each step of
+ * each team operation and of approving for the company; and, inside each
+ * step of a team's decision, a decision of the same name for the company,
+ * a newer one for the team, and another team's ask and approval.
+ */
+const teamSweep: readonly { outer: Op; inner: readonly Op[] }[] = [
+  ...(["approveTeam", "askTeam", "retireTeam", "approve"] as const).map(
+    (outer) => ({ outer, inner: ["leave"] as const })
+  ),
+  ...(["approveTeam", "retireTeam"] as const).flatMap((outer) =>
+    (
+      [
+        ["approve"],
+        ["askTeam", "approveTeam"],
+        ["askTeamB", "approveTeamB"],
+      ] as const
+    ).map((inner) => ({ outer, inner }))
+  ),
 ];
 
 /** Park and Miller's minimal standard generator: the same numbers from the same seed, everywhere. */
@@ -815,6 +1240,92 @@ describe("sharing skills, every step against every other", () => {
         violations.push(...(await runSequence(seeded(seed))));
       }
       expect(violations).toStrictEqual([]);
+    }
+  );
+
+  it(
+    "holds each team operation held at each step while the asker leaves the team, or a decision of the same name is made for the company or another team",
+    sweepTime,
+    async () => {
+      const violations: string[] = [];
+      let runs = 0;
+      const steps = new Map<Op, number>();
+      for (const { outer, inner } of teamSweep) {
+        // oxlint-disable-next-line no-await-in-loop -- a world at a time
+        const of = steps.get(outer) ?? (await stepsOf(outer));
+        steps.set(outer, of);
+        for (let step = 1; step <= of; step += 1) {
+          // oxlint-disable-next-line no-await-in-loop -- a world at a time
+          const found = await runSequence({
+            ops: [outer, ...inner],
+            placements: [
+              {
+                op: 0,
+                step,
+                kind: "hold",
+                inner: inner.map((_, at) => at + 1),
+              },
+            ],
+          });
+          violations.push(...found);
+          runs += 1;
+        }
+      }
+      expect({ violations, ran: runs > 0 }).toStrictEqual({
+        violations: [],
+        ran: true,
+      });
+    }
+  );
+
+  it(
+    "holds when each team operation fails before, or loses the reply after, each step",
+    sweepTime,
+    async () => {
+      const violations: string[] = [];
+      for (const outer of ["approveTeam", "askTeam", "retireTeam"] as const) {
+        // oxlint-disable-next-line no-await-in-loop -- a world at a time
+        const steps = await stepsOf(outer);
+        for (let step = 1; step <= steps; step += 1) {
+          for (const kind of ["fail", "lose"] as const) {
+            // oxlint-disable-next-line no-await-in-loop -- a world at a time
+            const found = await runSequence({
+              ops: [outer],
+              placements: [{ op: 0, step, kind }],
+            });
+            violations.push(...found);
+          }
+        }
+      }
+      expect(violations).toStrictEqual([]);
+    }
+  );
+
+  it(
+    "holds asking again after leaving the team, refused, then rejoining: the first ask waits again, and is decided",
+    sweepTime,
+    async () => {
+      const violations: string[] = [];
+      // As it happens one after another, then with the leave inside each
+      // step of the ask.
+      const sequences: Sequence[] = [
+        { ops: ["leave", "askTeam", "rejoin", "approveTeam"], placements: [] },
+      ];
+      const steps = await stepsOf("askTeam");
+      for (let step = 1; step <= steps; step += 1) {
+        sequences.push({
+          ops: ["askTeam", "leave", "rejoin", "approveTeam"],
+          placements: [{ op: 0, step, kind: "hold", inner: [1] }],
+        });
+      }
+      for (const s of sequences) {
+        // oxlint-disable-next-line no-await-in-loop -- a world at a time
+        violations.push(...(await runSequence(s)));
+      }
+      expect({ violations, ran: sequences.length > 1 }).toStrictEqual({
+        violations: [],
+        ran: true,
+      });
     }
   );
 });

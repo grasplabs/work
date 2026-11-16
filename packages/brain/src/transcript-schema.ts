@@ -6,10 +6,10 @@ import { z } from "zod";
 // extractor makes one from an uploaded WebVTT file; the Brain keeps it
 // with the document's version (transcripts.ts).
 //
-// A leaf: it imports only Zod, so @grasp-os/shared/transcripts can
-// re-export it (as shared/ids.ts does the Brain's IDs) and core takes it
-// from there without loading the rest of the Brain. At the cutover it
-// moves into @grasp-os/shared for good.
+// The Brain's own copy, for its documents: core's extractor checks a
+// transcript against @grasp-os/shared/transcripts, which outlives this
+// package. The two are one schema until the cutover deletes this one; the
+// Brain can't import shared's, since shared depends on the Brain.
 //
 // A flood is held off here: at most `transcriptMaxTurns` turns,
 // `transcriptMaxChapters` chapters and `transcriptMaxBytes` in all.

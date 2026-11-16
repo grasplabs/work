@@ -1,10 +1,14 @@
 // @vitest-environment happy-dom
 import type {
+  DecidedTeamSkill,
   ListedSkill,
+  ListedTeamSkill,
   OwnSkillShare,
+  SkillAudienceAsked,
   SkillShare,
   SkillShareRequest,
   SkillsOverview,
+  SkillTeam,
 } from "@grasp-os/shared/skills";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
@@ -59,6 +63,7 @@ const asked = "---\nname: close-the-month\ndescription: Close it\n---\nSteps.";
 const request: SkillShareRequest = {
   id: "share-1",
   name: "close-the-month",
+  audience: { kind: "company" },
   status: "pending",
   requestedAt: "2026-11-12T09:00:00.000Z",
   requestedBy: { userId: "u-2", name: "Anna" },
@@ -69,9 +74,16 @@ const request: SkillShareRequest = {
   replaces: "grasp",
 };
 
-const shareOf = (name: string): OwnSkillShare => ({
+/** The company, as a share is for it. */
+const forCompany: OwnSkillShare["audience"] = { kind: "company" };
+
+const shareOf = (
+  name: string,
+  audience: OwnSkillShare["audience"] = forCompany
+): OwnSkillShare => ({
   id: `share-of-${name}`,
   name,
+  audience,
   status: "pending",
   requestedAt: "2026-11-12T09:00:00.000Z",
   requestedBy: { userId: "u-1", name: "Me" },
@@ -79,6 +91,7 @@ const shareOf = (name: string): OwnSkillShare => ({
   version: null,
   superseded: false,
   outdated: false,
+  inUse: false,
 });
 
 /** Shows the page on a faked core, as an admin or not, refusing saves with `refusal`. */
@@ -90,7 +103,12 @@ const shown = async ({
   held = {},
   approveRefusal,
   company = ["file-expenses"],
+  replacing = [],
+  retiring = [],
   overviewRefusals = [],
+  teams = [],
+  team = [],
+  teamSkills = [],
 }: {
   admin: boolean;
   refusal?: string;
@@ -104,11 +122,27 @@ const shown = async ({
   approveRefusal?: string;
   /** The names of the company's live skills. */
   company?: string[];
+  /** Of the company's skills, those with a newer approved version on its way. */
+  replacing?: string[];
+  /** Of the company's skills, those with a retirement on its way. */
+  retiring?: string[];
   /** Which reads of the page core refuses, counting from 1. */
   overviewRefusals?: number[];
+  /** The teams the person is in. */
+  teams?: SkillTeam[];
+  /** Their teams' skills. */
+  team?: ListedTeamSkill[];
+  /** Every team's skill in use, as an admin is shown them. */
+  teamSkills?: DecidedTeamSkill[];
 }) => {
   const calls: string[] = [];
   const owned = [own, other];
+  const onItsWayOf = (name: string) => {
+    if (replacing.includes(name)) {
+      return "version" as const;
+    }
+    return retiring.includes(name) ? ("retirement" as const) : null;
+  };
   const shares: OwnSkillShare[] = [...existing];
   let requests = [waiting];
   const skills = {
@@ -126,11 +160,15 @@ const shown = async ({
         own: [...owned],
         company: company.map((name) => ({
           name,
-          version: 1,
           description: "File",
+          version: 1,
+          onItsWay: onItsWayOf(name),
         })),
+        team,
+        teams,
         shares: [...shares],
         requests: admin ? requests : null,
+        teamSkills: admin ? teamSkills : null,
       };
     },
     save: async (text: string) => {
@@ -142,12 +180,36 @@ const shown = async ({
       }
       return own;
     },
-    share: async (name: string, version: number) => {
+    share: async (
+      name: string,
+      version: number,
+      audience: SkillAudienceAsked
+    ) => {
       await Promise.resolve();
-      calls.push(`share ${name}@${version}`);
-      const share = shareOf(name);
+      if (audience === "company") {
+        calls.push(`share ${name}@${version}`);
+        const share = shareOf(name);
+        shares.push(share);
+        return share;
+      }
+      calls.push(`share ${name}@${version} with ${audience.team}`);
+      const share = shareOf(name, {
+        kind: "team",
+        team: {
+          id: audience.team,
+          name: teams.find(({ id }) => id === audience.team)?.name ?? null,
+        },
+      });
       shares.push(share);
       return share;
+    },
+    retire: async (name: string, audience: SkillAudienceAsked) => {
+      await Promise.resolve();
+      calls.push(
+        audience === "company"
+          ? `retire ${name}`
+          : `retire ${name} for ${audience.team}`
+      );
     },
     approve: async (id: string) => {
       await Promise.resolve();
@@ -353,10 +415,9 @@ describe("the skills page", () => {
     });
     await shown({
       admin: false,
-      company: ["added"],
       existing: [
         at("waiting", "pending", null),
-        at("added", "approved", 3),
+        { ...at("added", "approved", 3), inUse: true },
         at("stuck", "approved", null),
         at("overtaken", "approved", null, true),
         at("refused", "declined", null),
@@ -550,5 +611,182 @@ describe("the skills page", () => {
       calls: ["overview", "overview"],
       own: true,
     });
+  });
+
+  it("shares a skill with one of the person's teams from its menu, and says whom each share is for", async () => {
+    const { calls } = await shown({
+      admin: false,
+      teams: [{ id: "t-1", name: "Sales" }],
+    });
+    await press(buttons("Share with a team")[0]);
+    const offered = [...document.querySelectorAll('[role="menuitem"]')].map(
+      (item) => item.textContent
+    );
+    await press(
+      [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
+        (item) => item.textContent === "Sales"
+      )
+    );
+    const text = document.body.textContent ?? "";
+    expect({
+      offered,
+      calls,
+      forTeam: text.includes("For the team Sales"),
+      states: [...document.querySelectorAll('[data-slot="badge"]')].map(
+        (badge) => badge.textContent
+      ),
+    }).toStrictEqual({
+      offered: ["Sales"],
+      calls: ["overview", "share quote-a-tender@2 with t-1", "overview"],
+      forTeam: true,
+      states: ["Waiting for an admin"],
+    });
+  });
+
+  it("offers no team to share with to someone in none", async () => {
+    await shown({ admin: false });
+    expect(buttons("Share with a team")).toStrictEqual([]);
+  });
+
+  it("shows an admin a team share's exact text, its team, and what approving replaces for the team's members", async () => {
+    await shown({
+      admin: true,
+      waiting: {
+        ...request,
+        audience: { kind: "team", team: { id: "t-1", name: "Sales" } },
+        replaces: "company",
+      },
+    });
+    const text = document.body.textContent ?? "";
+    expect({
+      text: text.includes("Steps."),
+      team: text.includes("For the team Sales"),
+      replaces: text.includes(
+        "Approving it replaces the company's own skill close-the-month for the members of Sales."
+      ),
+      forEveryone: text.includes("for everyone"),
+    }).toStrictEqual({
+      text: true,
+      team: true,
+      replaces: true,
+      forEveryone: false,
+    });
+  });
+
+  it("lists the person's teams' skills with their team, to be read, not retired", async () => {
+    await shown({
+      admin: false,
+      company: [],
+      teams: [{ id: "t-1", name: "Sales" }],
+      team: [
+        {
+          name: "pitch-a-client",
+          version: 3,
+          description: "Pitch",
+          team: { id: "t-1", name: "Sales" },
+        },
+      ],
+    });
+    const text = document.body.textContent ?? "";
+    expect({
+      listed: text.includes("pitch-a-client"),
+      withTeam: text.includes("Sales, version 3"),
+      retire: buttons("Retire").length,
+      everyTeam: text.includes("Every team's skills"),
+    }).toStrictEqual({
+      listed: true,
+      withTeam: true,
+      retire: 0,
+      everyTeam: false,
+    });
+  });
+
+  it("lists an admin every team's skill in use, a team they aren't in too, and retires one for its team alone", async () => {
+    const { calls } = await shown({
+      admin: true,
+      company: [],
+      teamSkills: [
+        {
+          team: { id: "t-2", name: "Legal" },
+          name: "check-a-contract",
+          version: 2,
+          onItsWay: null,
+        },
+        {
+          team: { id: "t-3", name: null },
+          name: "close-a-deal",
+          version: null,
+          onItsWay: "version",
+        },
+        {
+          team: { id: "t-2", name: "Legal" },
+          name: "file-a-claim",
+          version: 4,
+          onItsWay: "version",
+        },
+      ],
+    });
+    const text = document.body.textContent ?? "";
+    await click("Retire");
+    await press(
+      [...document.querySelectorAll<HTMLElement>("button")].findLast(
+        (each) => each.textContent === "Retire"
+      )
+    );
+    expect({
+      legal: text.includes("Legal, version 2"),
+      gone: text.includes("t-3, not added yet"),
+      replacing: text.includes("Legal, version 4; a new version is on its way"),
+      calls,
+    }).toStrictEqual({
+      legal: true,
+      gone: true,
+      replacing: true,
+      calls: ["overview", "retire check-a-contract for t-2", "overview"],
+    });
+  });
+
+  it("says when a newer approved version of a company skill is on its way, beside the one in use", async () => {
+    await shown({
+      admin: false,
+      company: ["file-expenses", "book-travel"],
+      replacing: ["book-travel"],
+    });
+    const lines = [
+      ...document.querySelectorAll('[data-slot="item-content"]'),
+    ].map((item) => item.textContent);
+    expect({
+      replacing: lines.some(
+        (line) =>
+          line?.startsWith("book-travel") &&
+          line.endsWith("Version 1; a new version is on its way")
+      ),
+      settled: lines.some(
+        (line) =>
+          line?.startsWith("file-expenses") && line.endsWith("Version 1")
+      ),
+    }).toStrictEqual({ replacing: true, settled: true });
+  });
+
+  it("keeps a skill whose retirement is on its way listed as in use, being taken out of use, with no Retire, for the company's and a team's alike", async () => {
+    await shown({
+      admin: true,
+      company: ["file-expenses"],
+      retiring: ["file-expenses"],
+      teamSkills: [
+        {
+          team: { id: "t-2", name: "Legal" },
+          name: "check-a-contract",
+          version: 3,
+          onItsWay: "retirement",
+        },
+      ],
+    });
+    const text = document.body.textContent ?? "";
+    expect({
+      company: text.includes("Version 1; being taken out of use"),
+      team: text.includes("Legal, version 3; being taken out of use"),
+      retire: buttons("Retire").length,
+    }).toStrictEqual({ company: true, team: true, retire: 0 });
   });
 });

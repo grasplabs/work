@@ -19,8 +19,9 @@ import { accessOf, invocationName } from "../src/action-invocation.ts";
 import type { FunctionRequest } from "../src/app-functions.ts";
 import { loadRelease } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
-import { commitApp, testApp, withFiles } from "./app-definitions.ts";
+import { testApp, withFiles } from "./app-definitions.ts";
 import type { TestApp } from "./app-definitions.ts";
+import { commitApp } from "./apps.ts";
 import { referenceTo } from "./notes-client-app.ts";
 import { personApi } from "./page-client.ts";
 import { clientOrigin } from "./sign-in-config.ts";
@@ -266,13 +267,8 @@ export const openedApp = async (
   const admin = people.admin ?? (await personApi("admin"));
   const { id } = await builder.api.apps.create({ name: "Writer" });
   // Its first version, published: open to the people it is shared with.
-  const { version } = await commitApp(
-    builder.api.apps.files,
-    id,
-    files,
-    "First"
-  );
-  await builder.api.apps.versions.publish(id, version);
+  const { version } = await commitApp(builder.api, id, files);
+  await builder.api.versions.rollback({ kind: "app", id }, version);
   const { lease } = await builder.api.pages.open(id);
   const { lease: adminLease } = await admin.api.pages.open(id);
   const release = await loadRelease(env, id, version);
@@ -612,11 +608,13 @@ export const published = async (opened: Opened): Promise<Release> => {
     "server/notes.ts": `${files.files["server/notes.ts"] ?? ""}\n// The second version.\n`,
   });
   const { version } = await commitApp(
-    opened.builderApi.api.apps.files,
+    opened.builderApi.api,
     opened.app,
-    changed,
-    "Second"
+    changed
   );
-  await opened.builderApi.api.apps.versions.publish(opened.app, version);
+  await opened.builderApi.api.versions.rollback(
+    { kind: "app", id: opened.app },
+    version
+  );
   return await loadRelease(env, opened.app, version);
 };

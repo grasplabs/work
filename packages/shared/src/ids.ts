@@ -87,6 +87,13 @@ export type ConnectionId = z.infer<typeof connectionIdSchema>;
 export const agentIdSchema = idSchema<"AgentId">();
 export type AgentId = z.infer<typeof agentIdSchema>;
 
+/**
+ * A team of the organization, by its stable ID: a rename changes only its
+ * name, never what names it.
+ */
+export const teamIdSchema = idSchema<"TeamId">();
+export type TeamId = z.infer<typeof teamIdSchema>;
+
 /** One permission granted to an agent or App. */
 export const permissionIdSchema = idSchema<"PermissionId">();
 export type PermissionId = z.infer<typeof permissionIdSchema>;

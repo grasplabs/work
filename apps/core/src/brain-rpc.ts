@@ -1,7 +1,6 @@
 import { addDays } from "@grasp-os/shared/admin/org-record";
 import type {
   BrainApi,
-  BrainChangePage,
   BrainForgetPreview,
   Company,
   Connection,
@@ -13,7 +12,6 @@ import type {
   TeamGroup,
   ThinkingGround,
   Tool,
-  Transcript,
   Vision,
   Workspace,
 } from "@grasp-os/shared/brain";
@@ -36,8 +34,6 @@ import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { organizationId } from "./auth/auth.ts";
-import { brainChanges } from "./brain-changes.ts";
-import type { SourceChange } from "./brain-changes.ts";
 import { forget, forgetPreview } from "./brain-forget.ts";
 import {
   answerGap,
@@ -57,14 +53,10 @@ import {
   saveTeamGroups,
   teamGroupsOf,
 } from "./brain-team-groups.ts";
-import {
-  brainTranscript,
-  knowledgeTranscriptSources,
-} from "./brain-transcripts.ts";
 import { askMorePeople, workKnowledge } from "./brain-work.ts";
+import { keepsReadsOf } from "./connection-capture-key.ts";
 import { catalogEntries, personOf } from "./connections.ts";
 import { organizations } from "./db/core/schema.ts";
-import { brainOf } from "./knowledge/ports.ts";
 import { intakeIds } from "./onboarding/brain-intake.ts";
 import {
   isKickoffTeam,
@@ -95,9 +87,7 @@ import { listWorkflowResources } from "./workflow-resources.ts";
 // |                    | interview and the documents shared in the onboarding     |
 // |                    | (admins); each team's interviews, once the brain holds   |
 // |                    | what they learned, for whoever reads records naming them |
-// |                    | (never with a transcript); Knowledge documents saved     |
-// |                    | with a transcript, for whoever may read them, by turn    |
-// |                    | count (brain-transcripts.ts)                             |
+// |                    | (never with a transcript)                                |
 // | tools              | the tools those documents name (admins)                  |
 // | connections        | the catalog's offered entries and the person's           |
 // |                    | connections                                              |
@@ -184,7 +174,7 @@ const slugOf = (name: string): string =>
 interface OnboardingFacts {
   view: OnboardingView;
   kickoff: KickoffView;
-  /** When the kickoff the brain names came in, a forgotten one's too (the store's `kickoffSourceAt`). */
+  /** When the kickoff the brain names came in (the store's `kickoffSourceAt`). */
   kickoffSourceAt: string | null;
   rosterSavedAt: string | null;
   sentLinks: { person: string; sentAt: string }[];
@@ -196,7 +186,7 @@ interface OnboardingFacts {
   interviews: CameIn[];
 }
 
-/** A source the onboarding gives the brain, and when it came in (ISO 8601): when `brain.changes` shows it. */
+/** A source the onboarding gives the brain, and when it came in (ISO 8601). */
 interface CameIn {
   source: Source;
   at: string;
@@ -447,9 +437,8 @@ const toolsOf = (
  * The onboarding's sources, each with when it came in: the kickoff when
  * its transcript came in, the staff list when it was last saved, the team
  * leads' interviews and the documents shared. The one definition of which
- * sources there are and what they are called, for `brain.read` and
- * `brain.changes` alike; none for anyone but an admin, who alone has
- * `facts`.
+ * sources there are and what they are called, for `brain.read`; none
+ * for anyone but an admin, who alone has `facts`.
  */
 const onboardingSources = (
   facts: OnboardingFacts | null,
@@ -539,14 +528,6 @@ const sourcesForRecords = async (
     named.has(source.id) ? [source] : []
   );
 };
-
-/** The onboarding's sources as changes (brain-changes.ts), with the ids and titles `brain.read` gives them. */
-const sourceChanges = (facts: OnboardingFacts | null): SourceChange[] =>
-  onboardingSources(facts).map(({ source: { id, title }, at }) => ({
-    id,
-    title,
-    at,
-  }));
 
 /**
  * The roster's teams. Each one's size is its people, its roles their
@@ -663,23 +644,32 @@ const viaOf = (source: string): Connection["via"] =>
  * active connection to it (their own, or a shared one), and the active
  * connections to entries an admin hid or the catalog doesn't list (a toolkit it no longer
  * lists, say). A native provider is connected directly; a toolkit through
- * Composio. A connection matches the tool names that are its name.
+ * Composio. A connection matches the tool names that are its name. One
+ * the Brain keeps the person's reads from says so (`keepsReads`).
  */
 const connectionsOf = async (
   env: Env,
   person: Identity
 ): Promise<Connection[]> => {
-  const [entries, listed] = await Promise.all([
+  const [entries, connecting] = await Promise.all([
     catalogEntries(env),
-    personOf(env, person).then(
-      async (connecting) => await env.CONNECT.listConnections(connecting)
-    ),
+    personOf(env, person),
   ]);
+  const listed = await env.CONNECT.listConnections(connecting);
+  const activeListed = listed.filter(({ status }) => status === "active");
   const active = new Set(
-    listed
-      .filter(({ status }) => status === "active")
+    activeListed.map(({ source, provider }) => entryKey(source, provider))
+  );
+  // What capture keeps by (connection-capture.ts): a read through the
+  // person's own connection, of a native tool that answers one item. The
+  // same table, so the page cannot say more than the code keeps.
+  const keeping = new Set(
+    activeListed
+      .filter((connection) => keepsReadsOf(connection, connecting.userId))
       .map(({ source, provider }) => entryKey(source, provider))
   );
+  const keepsReads = (key: string): { keepsReads?: true } =>
+    keeping.has(key) ? { keepsReads: true } : {};
   // A hidden entry isn't offered, but a connection to it still runs:
   // it stays, by its catalog name.
   const shown = entries.filter(
@@ -690,6 +680,7 @@ const connectionsOf = async (
     status: active.has(entryKey(source, id)) ? "connected" : "available",
     via: viaOf(source),
     matches: [name],
+    ...keepsReads(entryKey(source, id)),
   }));
   const listedKeys = new Set(
     entries.map(({ source, id }) => entryKey(source, id))
@@ -703,6 +694,7 @@ const connectionsOf = async (
         status: "connected",
         via: viaOf(source),
         matches: [provider],
+        ...keepsReads(each),
       };
     });
   return [...offered, ...unlisted];
@@ -1018,15 +1010,13 @@ export const readBrain = async (
   env: Env,
   person: Identity
 ): Promise<Workspace> => {
-  const [core, name, connections, transcribed, groups, weeks] =
-    await Promise.all([
-      readBrainCore(env, person),
-      organizationName(env),
-      connectionsOf(env, person),
-      knowledgeTranscriptSources(env, person),
-      teamGroupsOf(env),
-      onboardingStore(env).interviewWeeks(),
-    ]);
+  const [core, name, connections, groups, weeks] = await Promise.all([
+    readBrainCore(env, person),
+    organizationName(env),
+    connectionsOf(env, person),
+    teamGroupsOf(env),
+    onboardingStore(env).interviewWeeks(),
+  ]);
   const { facts, records, teams } = core;
   const sources = await recordSources(env, core);
 
@@ -1051,9 +1041,7 @@ export const readBrain = async (
     }),
     interviewWeeks: weeks,
     tools: toolsOf(documentTools(facts, teamsByName(teams)), records.tools),
-    sources: [...sources, ...transcribed].map((source) =>
-      witnessed(teams, source)
-    ),
+    sources: sources.map((source) => witnessed(teams, source)),
     statements: records.statements,
     candidates: records.candidates,
     gaps: await brainGaps(env, person, records),
@@ -1100,12 +1088,8 @@ export const readThinkingGround = async (
 };
 
 /**
- * The company brain over `/rpc`: for anyone signed in. Of its workspace,
- * only the Knowledge documents it lists as transcript sources are audited,
- * as the Knowledge read that listing is; the rest reads nothing from
- * Knowledge. Opening a source's transcript is audited as that one read
- * (brain-transcripts.ts). Its changes are, as the Knowledge read they are
- * (brain-changes.ts). Adding records is, with the records it added;
+ * The company brain over `/rpc`: for anyone signed in. It reads nothing
+ * from Knowledge. Adding records is audited, with the records it added;
  * taking them out is, by each record's key (brain-forget.ts).
  */
 export class BrainRpc extends CoreRpcTarget implements BrainApi {
@@ -1163,26 +1147,6 @@ export class BrainRpc extends CoreRpcTarget implements BrainApi {
       const { goals } = await readBrainRecords(this.#env);
       return await goalsFor(this.#env, person, goals);
     });
-  }
-
-  async transcript(sourceId: unknown): Promise<Transcript | null> {
-    return await withPerson(
-      this.#check,
-      async (person) => await brainTranscript(this.#env, person, sourceId)
-    );
-  }
-
-  async changes(options: unknown): Promise<BrainChangePage> {
-    return await withPerson(
-      this.#check,
-      async (person) =>
-        await brainChanges(
-          brainOf(this.#env),
-          person,
-          options,
-          sourceChanges(await onboardingFacts(this.#env, person))
-        )
-    );
   }
 
   async addRecords(records: BrainRecordInput[]): Promise<BrainRecordsAdded> {

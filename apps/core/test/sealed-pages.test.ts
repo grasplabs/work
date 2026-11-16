@@ -19,9 +19,9 @@ import {
   frameObjectMaxBytes,
   stageFrame,
 } from "../src/page-frame.ts";
-import { commitApp, testApp, withFiles } from "./app-definitions.ts";
+import { testApp, withFiles } from "./app-definitions.ts";
 import type { TestSource } from "./app-definitions.ts";
-import { release } from "./apps.ts";
+import { commitApp, release } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import {
   frameDocument,
@@ -444,17 +444,14 @@ describe("pages sealed with their release", { timeout: 120_000 }, () => {
     const { builder, app, id } = await published();
     // The next version builds to what the first did, so sealing it asks
     // the cache for the builds the first left there.
-    const { version } = await commitApp(
-      builder.api.apps.files,
-      app,
-      { "src/routes/index.tsx": `${files.files["src/routes/index.tsx"]}\n` },
-      "Again"
-    );
+    const { version } = await commitApp(builder.api, app, {
+      "src/routes/index.tsx": `${files.files["src/routes/index.tsx"]}\n`,
+    });
     const poisoned = {
       pages: await poisonCache("Desk"),
       server: await poisonCache("Sealed pages"),
     };
-    await builder.api.apps.versions.publish(app, version);
+    await builder.api.versions.rollback({ kind: "app", id: app }, version);
 
     const sealed = await sealedPage(env, id, version);
     const frame = await loadFrame(await builder.api.pages.open(app));
@@ -477,12 +474,9 @@ describe("pages sealed with their release", { timeout: 120_000 }, () => {
     const { builder, app, id } = await published();
     // Not made current, so not sealed: its manifest is its code's
     // inspection, kept in R2 for the same code.
-    const { version } = await commitApp(
-      builder.api.apps.files,
-      app,
-      { "src/routes/index.tsx": `${files.files["src/routes/index.tsx"]}\n` },
-      "Again"
-    );
+    const { version } = await commitApp(builder.api, app, {
+      "src/routes/index.tsx": `${files.files["src/routes/index.tsx"]}\n`,
+    });
     const saved = await versionFiles(env, id, version);
     await versionManifest(env, id, version, saved);
     const rewrote = await poisonCache("Sealed pages", (key) =>
@@ -503,18 +497,14 @@ describe("pages sealed with their release", { timeout: 120_000 }, () => {
 
   it("refuses to make a version current whose page doesn't build", async () => {
     const { builder, app, id } = await published();
-    const { version } = await commitApp(
-      builder.api.apps.files,
-      app,
-      {
-        "src/routes/broken.tsx":
-          'import { createFileRoute } from "@tanstack/react-router"; import leftPad from "left-pad";\nexport const Route = createFileRoute("/broken")({ component: () => leftPad });\n',
-      },
-      "Broken"
-    );
+    const { version } = await commitApp(builder.api, app, {
+      "src/routes/broken.tsx":
+        'import { createFileRoute } from "@tanstack/react-router"; import leftPad from "left-pad";\nexport const Route = createFileRoute("/broken")({ component: () => leftPad });\n',
+    });
 
     const refused = await failure(
-      async () => await builder.api.apps.versions.publish(app, version)
+      async () =>
+        await builder.api.versions.rollback({ kind: "app", id: app }, version)
     );
     const versions = await drizzle(env.DB)
       .select()

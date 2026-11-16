@@ -1296,7 +1296,7 @@ describe("AI providers", { timeout: 60_000 }, () => {
             `${feature}: ${provider === null ? "here" : provider.whereItRuns}`
         )
       ).toStrictEqual([
-        "conversion: OpenAI, European Union",
+        "conversion: here",
         "transcription: OpenAI, European Union",
         "speech: ElevenLabs, European Union",
       ]);

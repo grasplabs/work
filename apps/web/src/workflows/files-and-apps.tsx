@@ -1,4 +1,3 @@
-import type { WorkflowLifecycle } from "@grasp-os/shared/workflow-lifecycle";
 import type {
   PendingWorkflowBindings,
   ListedWorkflowBindingApproval,
@@ -172,8 +171,8 @@ const Files = ({ files }: { files: WorkflowFile[] }) => {
 };
 
 /**
- * The versions of workflow `workflow` whose bindings wait, each binding
- * approved for its version; `onApproved` with the binding once one is.
+ * The live version of workflow `workflow`, while its bindings wait, each
+ * binding approved for it; `onApproved` with the binding once one is.
  * What was approved is said by the tab, not here: approving the last one
  * leaves nothing waiting, and this part goes with it.
  */
@@ -213,15 +212,8 @@ const Waiting = ({
           the version it runs.
         </Trans>
       </p>
-      {pending.map(({ version, live, bindings }) => (
+      {pending.map(({ version, bindings }) => (
         <div className="flex flex-col gap-2" key={version}>
-          <h3 className="font-medium">
-            {live ? (
-              <Trans>Version {version}, which runs now</Trans>
-            ) : (
-              <Trans>Version {version}, not live yet</Trans>
-            )}
-          </h3>
           <PendingBindingList
             bindings={bindings}
             busy={busy}
@@ -365,12 +357,17 @@ const Approved = ({
   );
 };
 
-/** A part of the tab: loading until read, then its content or why not. */
+/**
+ * A part of the tab: loading until read, then its content or why not,
+ * read again with `again` when it is the tab's own read.
+ */
 const Part = <T,>({
   loaded,
+  again,
   children,
 }: {
   loaded: Loaded<T> | undefined;
+  again?: () => void;
   children: (data: T) => ReactNode;
 }): ReactNode => {
   if (loaded === undefined) {
@@ -379,7 +376,7 @@ const Part = <T,>({
   return loaded.state === "ready" ? (
     children(loaded.data)
   ) : (
-    <NotLoadedState page={loaded} />
+    <NotLoadedState again={again} page={loaded} />
   );
 };
 
@@ -419,26 +416,20 @@ interface RunningBindings {
 
 /**
  * What `RunningBindings` the reads give, once all are read: of the version
- * a start runs now, as core picks it for what waits (`pendingBindingsOf`),
- * the live one, or before any went live `currentVersion`, the one published
- * last; null before any was published.
+ * a start runs now, the live one (`version`); null before any was
+ * published.
  */
 const runningBindingsOf = (
   versions: Loaded<WorkflowResourceVersion[]>,
-  lifecycle: Loaded<WorkflowLifecycle>,
-  currentVersion: number | null,
+  version: number | null,
   approvals: Loaded<ListedWorkflowBindingApproval[]> | undefined
 ): Loaded<RunningBindings | null> | undefined => {
   if (versions.state !== "ready") {
     return versions;
   }
-  if (lifecycle.state !== "ready") {
-    return lifecycle;
-  }
   if (approvals?.state !== "ready") {
     return approvals;
   }
-  const version = lifecycle.data.live?.version ?? currentVersion;
   const running = versions.data.find((each) => each.version === version);
   return {
     state: "ready",
@@ -451,7 +442,7 @@ const runningBindingsOf = (
 
 /**
  * Files and apps of workflow `workflow`, read each time it is shown;
- * `versions`, `currentVersion` and `lifecycle` as the page read them, and
+ * `versions` and `currentVersion` as the page read them, and
  * `names` who approved its bindings. `approves` for one of the
  * organization's admins, who approve and revoke its bindings here.
  */
@@ -459,14 +450,12 @@ export const FilesAndApps = ({
   workflow,
   currentVersion,
   versions,
-  lifecycle,
   names,
   approves,
 }: {
   workflow: string;
   currentVersion: number | null;
   versions: Loaded<WorkflowResourceVersion[]>;
-  lifecycle: Loaded<WorkflowLifecycle>;
   names: Names;
   approves: boolean;
 }) => {
@@ -491,7 +480,6 @@ export const FilesAndApps = ({
     : versions;
   const runningBindings = runningBindingsOf(
     versions,
-    lifecycle,
     currentVersion,
     approvals
   );
@@ -607,6 +595,19 @@ export const FilesAndApps = ({
     }
   };
 
+  // A part read again (Try again, or core back after a blip): every part
+  // the tab reads, what was read staying until it lands.
+  const again = (): void => {
+    void (async () => {
+      const filesRead = loadFromCore(
+        core,
+        async (session) => await session.workflowResources.files(workflow)
+      );
+      await changed();
+      setFiles(await filesRead);
+    })();
+  };
+
   return (
     <div className="flex flex-col gap-8">
       {pending === undefined ||
@@ -615,7 +616,7 @@ export const FilesAndApps = ({
           id="workflow-waiting"
           title={<Trans>Waiting for your approval</Trans>}
         >
-          <Part loaded={pending}>
+          <Part again={again} loaded={pending}>
             {(data) => (
               <Waiting
                 onApproved={(alias) => {
@@ -636,7 +637,10 @@ export const FilesAndApps = ({
       {runningBindings?.state === "ready" &&
       runningBindings.data === null ? null : (
         <Section id="workflow-bindings" title={<Trans>Its bindings</Trans>}>
-          <Part loaded={runningBindings}>
+          <Part
+            again={versionsRead ? again : undefined}
+            loaded={runningBindings}
+          >
             {(data) =>
               data === null ? null : (
                 <Approved
@@ -658,10 +662,15 @@ export const FilesAndApps = ({
         </Section>
       )}
       <Section id="workflow-apps" title={<Trans>Apps it works in</Trans>}>
-        <Part loaded={appsOf}>{(data) => <Apps apps={data} />}</Part>
+        {/* Without the versions, the page's own read failed: its loaders. */}
+        <Part again={versionsRead ? again : undefined} loaded={appsOf}>
+          {(data) => <Apps apps={data} />}
+        </Part>
       </Section>
       <Section id="workflow-files" title={<Trans>Files its runs wrote</Trans>}>
-        <Part loaded={files}>{(data) => <Files files={data} />}</Part>
+        <Part again={again} loaded={files}>
+          {(data) => <Files files={data} />}
+        </Part>
       </Section>
     </div>
   );

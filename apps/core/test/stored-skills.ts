@@ -1,7 +1,9 @@
 import { brainOf } from "@grasp-os/brain-next/contract";
 import { env } from "cloudflare:workers";
 
+import type { HeldNow } from "../src/brain-skills.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
+import { heldNothing } from "../src/skill-needs.ts";
 
 // A test-only seam: a skill written straight into the Brain's store, as a
 // writer core doesn't have yet would (the company's approved publish,
@@ -25,3 +27,22 @@ export const storeSkill = async (
   });
   return version;
 };
+
+/** What a caller holds when nothing is: a skill that needs anything is left out. */
+export const holdsNothing: HeldNow = async () =>
+  await Promise.resolve(heldNothing);
+
+/** What a caller holds: these providers' connections and these tools. */
+export const holding =
+  ({
+    connections = [],
+    tools = [],
+  }: {
+    connections?: string[];
+    tools?: string[];
+  }): HeldNow =>
+  async () =>
+    await Promise.resolve({
+      connections: new Set(connections),
+      tools: new Set(tools),
+    });

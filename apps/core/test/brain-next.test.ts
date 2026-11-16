@@ -31,8 +31,12 @@ const idp = mockIdp();
 /** A word no other test's sources hold. */
 const word = () => `w${unique()}`;
 
-/** What core or the store says when it refuses an input. */
-const refused = /^(?:The Brain refused it|Refused)/u;
+/**
+ * What core or the Brain says when it refuses an input: core's own
+ * check, the Brain's, or a text the Brain can't keep.
+ */
+const refused =
+  /^(?:The Brain refused it|Refused|There's no text in this to keep|This text is too large for the Brain to keep)/u;
 
 /** What core answers an argument that isn't of the kind its call takes. */
 const invalid = { code: "brain.request_invalid" };
@@ -364,7 +368,7 @@ describe("the new Brain, inside core", { timeout: 60_000 }, () => {
     const secret = word();
     for (const readers of [
       {},
-      { kind: "everyone" },
+      { kind: "anyone" },
       { kind: "audience", group: "everyone" },
       { kind: "owner", personId: "" },
       { kind: "owner" },

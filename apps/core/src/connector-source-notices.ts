@@ -2,7 +2,8 @@ import type { AuditEvent } from "@grasp-os/shared/audit";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { drizzle } from "drizzle-orm/d1";
 
-import { drainAuditOutboxes, uuidFromHash } from "./audit-outbox.ts";
+import { drainAuditOutboxes } from "./audit-drains.ts";
+import { uuidFromHash } from "./audit-outbox.ts";
 import { eventsStopNoticed } from "./notifications.ts";
 import { listenersOf } from "./workflows/connector-events.ts";
 

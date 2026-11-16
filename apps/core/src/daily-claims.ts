@@ -8,9 +8,8 @@ import type {
 } from "./db/core/schema.ts";
 
 // Claiming a UTC day's computation, for what is computed once a day from
-// the 15-minute clock: the improvement signals (signals.ts) and
-// Knowledge's usage signals (knowledge/signals.ts). Each has a table of
-// computations with the same columns (id, day, started_at, finished_at),
+// the 15-minute clock: the improvement signals (signals.ts), whose table
+// of computations has these columns (id, day, started_at, finished_at),
 // one row per attempt.
 //
 // The first clock run of a day claims it: a claim is a row inserted only

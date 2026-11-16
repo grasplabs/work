@@ -5,7 +5,7 @@ import { z } from "zod";
 
 import { callGate } from "./call-gate.ts";
 import { test } from "./csp.ts";
-import { endSession, peopleIn, signInTo } from "./people.ts";
+import { endSession, peopleIn, signInAs, signInTo } from "./people.ts";
 
 /**
  * How long the page may take to show what came of a connection that had to
@@ -54,14 +54,32 @@ test("shows a refusal with the request ID core answered it under, for the person
   );
 });
 
-test("an interview link nobody made can't be opened, and says nothing was saved", async ({
+test("an interview link nobody made asks to sign in first, then can't be opened, says nothing was saved, and lets them sign out to sign in again", async ({
+  context,
   page,
 }) => {
   await page.goto(`/interview#${"A".repeat(43)}`);
   await expect(
+    page.getByRole("heading", { name: "Sign in to open your interview" })
+  ).toBeVisible();
+  const email = `person.${crypto.randomUUID()}@acme.test`;
+  await signInTo(context, {
+    userId: "",
+    email,
+    role: "user",
+    cookie: await signInAs(email),
+  });
+  await page.reload();
+  await expect(
     page.getByRole("heading", { name: "This interview can't be opened" })
   ).toBeVisible();
   await expect(page.getByText("Saved", { exact: true })).toHaveCount(0);
+  // Signed in with another account than the link's: a way out, to sign in
+  // again.
+  await page.getByRole("button", { name: "Sign out" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Sign in to open your interview" })
+  ).toBeVisible();
 });
 
 test("reports an error the page never caught once core has it, cut to the size core takes", async ({
@@ -171,7 +189,7 @@ test("names each member's actions for them, and asks before making someone an ad
 });
 
 for (const [where, path, landed] of [
-  ["a shell page", "/knowledge", "Knowledge"],
+  ["a shell page", "/projects", "Projects"],
   // Outside the shell, in the app's frame all the same.
   [
     "a decision page",
@@ -186,7 +204,9 @@ for (const [where, path, landed] of [
     const { member } = peopleIn("signOutFailure");
     await signInTo(context, member);
     await page.goto(path);
-    await expect(page.getByRole("heading", { name: landed })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: landed, exact: true })
+    ).toBeVisible();
     // Core, or something in front of it, answers the sign-out with a failure.
     await page.route("**/api/auth/sign-out", async (route) => {
       await route.fulfill({ status: 503, body: "Unavailable" });
@@ -511,7 +531,7 @@ test("sends someone whose session ended elsewhere to sign in, and back to the pa
 }) => {
   const { member } = peopleIn("sessionEnded");
   await signInTo(context, member);
-  await page.goto("/knowledge");
+  await page.goto("/projects");
   const nav = page.getByRole("navigation", { name: "Main" });
   await expect(nav.getByRole("link", { name: "Apps" })).toBeVisible();
 

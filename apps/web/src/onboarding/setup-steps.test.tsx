@@ -59,13 +59,15 @@ const view = (
   sponsor: string | null,
   context: OnboardingContext,
   mailSends: boolean,
-  mailDomain: string | null
+  mailDomain: string | null,
+  kickoff: OnboardingView["kickoff"]
 ): OnboardingView => ({
   roster: null,
   plan: { start: "2026-10-12", days: 14 },
   progress: null,
   agreed: true,
   paused,
+  kickoff,
   sponsor,
   context,
   waiting: 0,
@@ -88,6 +90,8 @@ interface Shown {
   ai?: AiReadiness | null;
   /** The domain core says its mail is from; a sender is set unless said. */
   mailDomain?: string | null;
+  /** The kickoff: in when it named a sponsor, unless said. */
+  kickoff?: OnboardingView["kickoff"];
 }
 
 /** What Grasp's AI has to call: Anthropic offered, and connected once a model is `ready`. */
@@ -146,6 +150,7 @@ const drawn = (
     mailSends = true,
     ai = aiOf({ ready: true }),
     mailDomain = "mail.example.test",
+    kickoff = sponsor === null ? null : "in",
   }: Shown
 ): string => {
   if (seen) {
@@ -154,7 +159,7 @@ const drawn = (
   const data: SetupData = {
     admin: "Ada",
     company: null,
-    view: view(paused, sponsor, context, mailSends, mailDomain),
+    view: view(paused, sponsor, context, mailSends, mailDomain, kickoff),
     links: [],
     documents,
     sendingDomain: mailDomain,
@@ -347,6 +352,27 @@ describe("the welcome", () => {
       expect(said("welcome", { sponsor })).toContain(says);
     }
   );
+
+  it("offers to forget the kickoff while it is in, and says when its erasure finishes by itself", () => {
+    const offer = "Forget our first conversation";
+    const erasing = "I’m still erasing what I took from it";
+    const shown = (kickoff: OnboardingView["kickoff"]) => {
+      const markup = drawn("welcome", { kickoff });
+      return {
+        offer: markup.includes(offer),
+        erasing: markup.includes(erasing),
+      };
+    };
+    expect({
+      in: shown("in"),
+      erasing: shown("erasing"),
+      none: shown(null),
+    }).toStrictEqual({
+      in: { offer: true, erasing: false },
+      erasing: { offer: false, erasing: true },
+      none: { offer: false, erasing: false },
+    });
+  });
 });
 
 describe("what Stephen says of the company", () => {
@@ -414,7 +440,7 @@ describe("a step the admin comes back to", () => {
     });
   });
 
-  it("shows the documents shared, read, as they were left", () => {
+  it("shows the documents shared, read, as they were left, each one the admin can remove", () => {
     const handbook: OnboardingDocument = {
       id: "handbook",
       name: "Handbook.pdf",
@@ -432,9 +458,16 @@ describe("a step the admin comes back to", () => {
     expect({
       listed: again.includes("Handbook.pdf"),
       read: again.includes("How claims are handled, start to end."),
+      removable: again.includes('aria-label="Remove Handbook.pdf"'),
       held: again.includes("inert"),
       comesIn: comesIn(again),
-    }).toStrictEqual({ listed: true, read: true, held: false, comesIn: false });
+    }).toStrictEqual({
+      listed: true,
+      read: true,
+      removable: true,
+      held: false,
+      comesIn: false,
+    });
   });
 
   it("has the plan summed up at once on how this works", () => {

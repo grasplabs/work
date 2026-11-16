@@ -1,9 +1,8 @@
+import { draftErrors } from "@grasp-os/shared/drafts";
 import { failureText } from "@grasp-os/shared/errors";
-import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import type {
   WorkflowDefinitionProblem,
   WorkflowDraft,
-  WorkflowResourceVersion,
 } from "@grasp-os/shared/workflow-resources";
 import { Alert, AlertDescription } from "@grasp-os/ui/components/alert";
 import { Badge } from "@grasp-os/ui/components/badge";
@@ -16,36 +15,20 @@ import { useState } from "react";
 import { ErrorText } from "../error-text.tsx";
 import { useCore } from "../use-core.ts";
 
-// A workflow's definition as its builders edit it: the draft's JSON, each
-// save one revision-checked edit that core checks against the profile,
-// what it found at its JSON Pointer and task, and publishing the latest
-// edit once it passes. The page never decides what passes: core's answer
-// does, and the editor keeps the person's text whatever it answers. What
-// passed is drawn on the page's Flow, where a step changed (`editStep`)
-// comes back here as the draft's newer revision.
+// A workflow's definition as its builders edit it: the draft's JSON
+// (`workflow.json`, the draft every builder shares), each save one
+// revision-checked edit that core checks against the profile, and what
+// it found at its JSON Pointer and task. The page never decides what
+// passes: core's answer does, and the editor keeps the person's text
+// whatever it answers. What passes is drawn on the page's Flow, where a
+// step changed (`define`) comes back here as the draft's newer
+// revision. Sharing it with the team is the bar's (Share with your team).
 
-/** What the editor last heard of a save or publication. */
+/** What the editor last heard of a save. */
 type Outcome =
   | { kind: "saved" }
   | { kind: "conflict" }
-  | { kind: "published"; version: number }
   | { kind: "failed"; reason: string };
-
-/**
- * `saved`, an edit's answer, keeping the checkpoint `held` already drew
- * when the edit left it as it was (it didn't pass): its diagram, doors
- * and all, which the answer draws without doors (`WorkflowDraft`).
- */
-export const withHeldCheckpoint = (
-  held: WorkflowDraft,
-  saved: WorkflowDraft
-): WorkflowDraft => {
-  const kept =
-    saved.checkpoint !== null &&
-    saved.checkpoint.revision === held.checkpoint?.revision &&
-    saved.checkpoint.source === held.checkpoint.source;
-  return kept ? { ...saved, checkpoint: held.checkpoint } : saved;
-};
 
 /** One problem core found, where it is, and what to change. */
 const Problem = ({ problem }: { problem: WorkflowDefinitionProblem }) => (
@@ -62,40 +45,16 @@ const Problem = ({ problem }: { problem: WorkflowDefinitionProblem }) => (
   </li>
 );
 
-/** Where the latest edit stands, in words. */
-const DraftStatus = ({ draft }: { draft: WorkflowDraft }) => {
-  const { t } = useLingui();
-  const { revision, problems, checkpoint } = draft;
-  if (revision === 0) {
-    return (
-      <p className="text-muted-foreground">
-        {checkpoint === null
-          ? t`Nobody has edited it yet: it starts from a definition that passes.`
-          : t`Nobody has edited it since its current version.`}
-      </p>
-    );
-  }
-  if (problems.length === 0) {
-    return (
-      <p className="text-muted-foreground">
-        {t`Revision ${revision} passes the profile and can be published.`}
-      </p>
-    );
-  }
-  if (checkpoint === null) {
-    return (
-      <p className="text-muted-foreground">
-        {t`Revision ${revision} doesn't pass yet, and no revision has.`}
-      </p>
-    );
-  }
-  const passed = checkpoint.revision;
-  return (
-    <p className="text-muted-foreground">
-      {t`Revision ${revision} doesn't pass yet. The latest that passed is revision ${passed}.`}
-    </p>
-  );
-};
+/** Whether the draft passes, in words. */
+const DraftStatus = ({ draft }: { draft: WorkflowDraft }) => (
+  <p className="text-muted-foreground">
+    {draft.problems.length === 0 ? (
+      <Trans>It passes its checks.</Trans>
+    ) : (
+      <Trans>It doesn&apos;t pass yet: what to fix is below.</Trans>
+    )}
+  </p>
+);
 
 /** What core found in the latest revision, when it found anything. */
 const Problems = ({
@@ -144,24 +103,17 @@ const useEdited = (loaded: WorkflowDraft) => {
 export const DefinitionEditor = ({
   workflow,
   loaded,
-  currentVersion,
   onDraft,
-  onPublished,
-  onVersionMoved,
 }: {
   workflow: string;
-  currentVersion: number | null;
   /**
    * The draft as the page last had it, read or saved; a later revision
    * saved elsewhere on the page (a step changed on the Flow) is taken
    * here while nothing is typed that it would overwrite.
    */
   loaded: WorkflowDraft;
-  /** The draft as a save or a read here left it: its checkpoint, for a test, and when it was saved. */
+  /** The draft as a save or a read here left it. */
   onDraft: (draft: WorkflowDraft) => void;
-  onPublished: (version: WorkflowResourceVersion) => void;
-  /** Someone published another version: the page reads the workflow again. */
-  onVersionMoved: () => void;
 }) => {
   const core = useCore();
   const { t } = useLingui();
@@ -176,28 +128,25 @@ export const DefinitionEditor = ({
   // until then, so nothing typed meanwhile is overwritten.
   const [replacing, setReplacing] = useState(false);
   const [outcome, setOutcome] = useState<Outcome>();
-  const publishable =
-    !edited &&
-    draft.revision > 0 &&
-    draft.problems.length === 0 &&
-    draft.checkpoint?.revision === draft.revision;
 
   const save = async (): Promise<void> => {
     setBusy(true);
     setOutcome(undefined);
     try {
-      const saved = await core.withSession(
-        async (session) =>
-          await session.workflowResources.editDraft(workflow, {
-            expectedRevision: draft.revision,
-            source: text,
-          })
-      );
-      took(withHeldCheckpoint(draft, saved));
+      const saved = await core.withSession(async (session) => {
+        await session.drafts.write(
+          { kind: "workflow", id: workflow },
+          draft.revision,
+          { "workflow.json": text }
+        );
+        // What core found in it, at the revision saved or a later one.
+        return await session.workflowResources.draft(workflow);
+      });
+      took(saved);
       setOutcome({ kind: "saved" });
     } catch (error) {
       setOutcome(
-        workflowResourceErrors.codeOf(error) === "workflow.draft_conflict"
+        draftErrors.codeOf(error) === "draft.conflict"
           ? { kind: "conflict" }
           : { kind: "failed", reason: failureText(error) }
       );
@@ -226,38 +175,6 @@ export const DefinitionEditor = ({
     setBusy(false);
   };
 
-  const publish = async (): Promise<void> => {
-    setBusy(true);
-    setOutcome(undefined);
-    try {
-      const version = await core.withSession(
-        async (session) =>
-          await session.workflowResources.publishDraft(workflow, {
-            revision: draft.revision,
-            basedOn: currentVersion,
-          })
-      );
-      setOutcome({ kind: "published", version: version.version });
-      onPublished(version);
-    } catch (error) {
-      // Someone saved a newer revision first: the draft conflicts, as a
-      // save of the revision read would, and the person chooses.
-      setOutcome(
-        workflowResourceErrors.codeOf(error) === "workflow.draft_conflict"
-          ? { kind: "conflict" }
-          : { kind: "failed", reason: failureText(error) }
-      );
-      // Built on a version no longer current: the page learns the current
-      // one, keeping the person's text, so publishing again builds on it.
-      if (
-        workflowResourceErrors.codeOf(error) === "workflow.version_conflict"
-      ) {
-        onVersionMoved();
-      }
-    }
-    setBusy(false);
-  };
-
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-col gap-2">
@@ -280,22 +197,13 @@ export const DefinitionEditor = ({
       <div className="flex flex-wrap items-center gap-2">
         <Button
           // The definition it starts from is saved as it is, too, as the
-          // first revision, to check and publish.
+          // draft's first change, to check.
           disabled={busy || (!edited && draft.revision > 0)}
           onClick={() => {
             void save();
           }}
         >
           {busy ? t`Checking…` : t`Check and save`}
-        </Button>
-        <Button
-          disabled={busy || !publishable}
-          onClick={() => {
-            void publish();
-          }}
-          variant="outline"
-        >
-          {t`Publish revision ${draft.revision}`}
         </Button>
         {edited ? (
           <span className="text-muted-foreground">
@@ -338,13 +246,8 @@ export const DefinitionEditor = ({
           </AlertDescription>
         </Alert>
       ) : null}
-      {outcome?.kind === "published" ? (
-        <output>{t`Published as version ${outcome.version}.`}</output>
-      ) : null}
       {outcome?.kind === "saved" ? (
-        <output className="sr-only">
-          {t`Saved as revision ${draft.revision}.`}
-        </output>
+        <output className="sr-only">{t`Saved.`}</output>
       ) : null}
       <ErrorText>
         {outcome?.kind === "failed" ? outcome.reason : undefined}

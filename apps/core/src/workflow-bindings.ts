@@ -57,13 +57,14 @@ import { sourcedTypesOf } from "./workflows/event-waits.ts";
 //   deciders people still in the organization, its teams or roles. A start
 //   re-reads the permission as it admits (workflow-starts.ts), so revoking
 //   it stops the next start.
-// - An approval serving more than was reviewed: a row pins the alias's
-//   declaration in the version the admin reviewed (its kind, contract key
-//   and fingerprint) and serves that version alone. A version a builder
-//   publishes later, declaring the alias the same, is code nobody reviewed
-//   with that target (it could send what the connector reads anywhere),
-//   and so is one published before: each needs its own approval. A start
-//   requires the approval of its exact version as it is admitted.
+// - An approval serving more than was reviewed: a row is the approval of
+//   one binding of the workflow, its alias's declaration as the admin
+//   reviewed it (its kind, contract key and fingerprint), and serves every
+//   version that declares it exactly so: one row per binding, never
+//   copied, so a revocation holds for every version, a roll back
+//   included. A version that declares a binding anew, or otherwise, needs
+//   an approval of its own, and its starts are refused until then. A
+//   start requires the approval it froze still active as it is admitted.
 // - A target that can't serve its contract, now or later: one function
 //   answers whether it can (`requireTargetServes`), at approval and again
 //   each time a start freezes its bindings (workflow-starts.ts), so an
@@ -419,9 +420,9 @@ const targetDetail = (
 /**
  * Approves `input` for workflow `id`, for `by`, one of the organization's
  * own admins: the alias, its target and the version they reviewed, which
- * must declare the alias as a catalog binding of the target's kind, and
- * which alone it serves. Revokes that version's earlier approval of the
- * alias in the same batch.
+ * must declare the alias as a catalog binding of the target's kind. It
+ * serves every version declaring the alias exactly so, and replaces the
+ * binding's earlier approval in the same batch.
  */
 export const approveWorkflowBinding = async (
   env: Env,
@@ -462,8 +463,8 @@ export const approveWorkflowBinding = async (
     revokedAt: null,
   };
   // Only while `by` is still an admin and the workflow is live, read in
-  // the batch. Versions never change, so the one reviewed stays the one
-  // served, whichever is current.
+  // the batch. Versions never change, so every version declaring the
+  // binding so declares what was reviewed.
   const holds = sql`${stillAdminSql(by)} AND EXISTS (SELECT 1 FROM workflow_resources
     WHERE id = ${workflow.id} AND deleted_at IS NULL)`;
   const db = drizzle(env.DB);
@@ -478,8 +479,10 @@ export const approveWorkflowBinding = async (
       .where(
         and(
           eq(workflowBindingApprovals.workflowResourceId, workflow.id),
-          eq(workflowBindingApprovals.reviewedVersion, reviewed.version),
           eq(workflowBindingApprovals.alias, alias),
+          eq(workflowBindingApprovals.kind, row.kind),
+          eq(workflowBindingApprovals.contractId, row.contractId),
+          eq(workflowBindingApprovals.fingerprint, row.fingerprint),
           eq(workflowBindingApprovals.status, "active"),
           holds
         )
@@ -524,8 +527,9 @@ export const approveWorkflowBinding = async (
 
 /**
  * Revokes approval `approval` of workflow `id`, for `by`, one of the
- * organization's own admins: the next start of a version that needs it is
- * refused. Revoking one already revoked changes nothing.
+ * organization's own admins: the next start of any version that declares
+ * its binding is refused, whichever version is live now or later.
+ * Revoking one already revoked changes nothing.
  */
 export const revokeWorkflowBinding = async (
   env: Env,
@@ -568,13 +572,12 @@ export const revokeWorkflowBinding = async (
 };
 
 /**
- * The active approval serving `binding` of version `version` of workflow
- * `id`, if there is one: given for that exact version and declaration.
+ * The active approval serving `binding`, one of workflow `id`'s, if there
+ * is one: given for that exact declaration, whichever version declares it.
  */
 export const approvalServing = async (
   env: Env,
   id: string,
-  version: number,
   binding: PinnedBinding
 ): Promise<WorkflowBindingApproval | undefined> => {
   const row = await drizzle(env.DB)
@@ -583,7 +586,6 @@ export const approvalServing = async (
     .where(
       and(
         eq(workflowBindingApprovals.workflowResourceId, id),
-        eq(workflowBindingApprovals.reviewedVersion, version),
         eq(workflowBindingApprovals.alias, binding.alias),
         eq(workflowBindingApprovals.kind, binding.kind),
         eq(workflowBindingApprovals.contractId, binding.contractId),

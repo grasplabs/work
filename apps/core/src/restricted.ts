@@ -9,10 +9,12 @@ import { auditedBatch, outboxed } from "./audit-outbox.ts";
 import { apps, workflowResourceRuns } from "./db/core/schema.ts";
 import { appHost, workspace } from "./durable-objects.ts";
 
-// Restricted mode. Once a chat or an App reads restricted data (in
-// Knowledge: what a sensitive collection holds), it is restricted for good,
-// and from then on takes no action in outside systems unless the person it
-// acts for confirms it, warned that it may carry what was read. The flag
+// Restricted mode. A chat or an App that is restricted stays so for good,
+// and takes no action in outside systems unless the person it acts for
+// confirms it, warned that it may carry what was read. What started it was
+// reading a sensitive collection in Knowledge; since #2272 nothing reads
+// one, so nothing starts it: a context already restricted is only carried
+// along, as below. What should start it now is open (GRA-1940). The flag
 // is kept where the chat or App lives (its workspace's or its own Durable
 // Object), so it survives restarts, and it is set before the data is
 // returned, so nothing that holds the data runs unrestricted. It is read
@@ -26,7 +28,7 @@ import { appHost, workspace } from "./durable-objects.ts";
 // manifest declares them, never a server's own word), and every other
 // call, a Composio toolkit's reads too (their input leaves for a third
 // party), is held there for the person (a workflow run waits for their
-// decision). Knowledge, which stays in the deployment, can be read too.
+// decision).
 //
 // The flag is only as good as the boundaries between contexts: it must
 // follow every way data moves from one to another. State shared across a
@@ -185,7 +187,7 @@ const restrictedEntry = (
 
 /**
  * Puts `context` in restricted mode, for good, after reading from
- * `sources` (collection IDs); audited when it wasn't yet. Throws
+ * `sources` (what it read, by ID); audited when it wasn't yet. Throws
  * `permission.context_invalid` as `restrictedState` does.
  *
  * A run of an independent workflow never enters it after it starts: it

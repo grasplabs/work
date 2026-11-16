@@ -77,13 +77,7 @@ export const connectorBindingsOf = async (
       .from(workflowBindingApprovals)
       .innerJoin(
         workflowResources,
-        and(
-          eq(workflowBindingApprovals.workflowResourceId, workflowResources.id),
-          eq(
-            workflowBindingApprovals.reviewedVersion,
-            workflowResources.currentVersion
-          )
-        )
+        eq(workflowBindingApprovals.workflowResourceId, workflowResources.id)
       )
       .where(
         and(

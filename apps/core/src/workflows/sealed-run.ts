@@ -221,8 +221,8 @@ import { engineStepOf } from "./sealed-steps.ts";
 //   run's as its workflow's (`workflow-resource:<id>`) in its account's
 //   lineage, a test run's as its own, a run an App's test started against
 //   its test's own admission, which counts nothing of the organization's.
-// - A test's run reaching the organization. A test run of a draft's
-//   checkpoint calls nothing: every call is answered from its start's
+// - A test's run reaching the organization. A test run of a draft at
+//   one revision calls nothing: every call is answered from its start's
 //   fixtures (resource-calls.ts, `makeCall`, `calling.candidate`). A run
 //   an App's test started makes only the calls its test serves
 //   (fixture-calls.ts, `fixtureCalls`), refused otherwise before its
@@ -412,10 +412,10 @@ import { engineStepOf } from "./sealed-steps.ts";
 //   writes under the step's key, so an attempt, a round or a replay that
 //   writes again answers the file the first wrote, never a second one.
 // - The Brain reached past what the build seals (`grasp.brain`,
-//   `ctx.brain.<alias>.recall`). The permission and the action are
-//   sealed; a recall reads, under the workflow's own permission to read
-//   the Brain, checked as it recalls, what the run's person may read,
-//   never more (brain-calls.ts).
+//   `ctx.brain.<alias>.recall`, `.skills.select`, `.skills.read`). The
+//   permission and the action are sealed; a call reads, under the
+//   workflow's own permission to read the Brain, checked as it is made,
+//   what the run's person may read, never more (brain-calls.ts).
 // - A connection call keeping a file, or attaching run files, where it
 //   mustn't. Where a read's file goes (`into`) and where a write's
 //   attachments come from (`from`) are the sealed call's, each a files
@@ -2621,7 +2621,7 @@ class SealedRun implements SealedRunKind {
         input: asks.input,
         ...(call.timeoutMs === undefined ? {} : { timeoutMs: call.timeoutMs }),
       };
-      // A test run of a draft's checkpoint reaches no person: its decision
+      // A test run of a draft at one revision reaches no person: its decision
       // is the answer its start gave the binding (`candidateDecision`,
       // checked here), opened nowhere (`decisionsKeptOf`).
       if (calling.candidate !== undefined) {
@@ -3107,7 +3107,7 @@ export interface SealedRunKind extends RunKind {
 
 /**
  * Run `run`, as its activation loaded it (resource-runs.ts: an independent
- * workflow's run, or a test run of its draft's checkpoint), as the run
+ * workflow's run, or a test run of its draft at one revision), as the run
  * host serves a sealed build's: its lineage, its authority and its share
  * from what its calls go by, which its row and its root's pin.
  */

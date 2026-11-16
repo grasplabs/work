@@ -24,7 +24,7 @@ import {
   keptEvents,
   workflowBindingApprovals,
 } from "../db/core/schema.ts";
-import { inList } from "../db/d1.ts";
+import { inList, statementsWithin } from "../db/d1.ts";
 import { resolveCatalogKeys } from "../workflow-catalog.ts";
 import { isMatchKey, matchHashOf } from "./event-matches.ts";
 import type { MatchKey } from "./event-matches.ts";
@@ -266,6 +266,9 @@ type Refusal =
 const refusals: Readonly<Record<string, Refusal>> = {
   "workflow.run_ended": "run_ended",
   "workflow.run_unavailable": "run_ended",
+  // A run an earlier release started (resource-authority.ts
+  // `frozenBindingsOf`): nothing of it takes an event again.
+  "workflow.format_unsupported": "run_ended",
   "workflow.event_denied": "event_denied",
   "workflow.event_invalid": "event_invalid",
   "workflow.event_conflict": "event_invalid",
@@ -322,26 +325,32 @@ const sourceLiveSql = (id: string | SQL): SQL =>
  */
 const handed = async (
   env: Env,
-  run: CallingRun | undefined,
+  /**
+   * The run, as its calls know it (`callingRunOf`): read here, so a run
+   * an earlier release started (`workflow.format_unsupported`) is refused
+   * as ended, never failing the delivery for every other wait.
+   */
+  runOf: () => CallingRun | undefined | Promise<CallingRun | undefined>,
   wait: Waiting,
   event: Taken,
   valid: SQL
 ): Promise<"taken" | Refusal | "retry" | "stale"> => {
   let refusal: Refusal | undefined;
-  const binding = run?.bindings.get(wait.binding);
   if (!(await holds(env, valid))) {
     return "stale";
   }
-  if (run === undefined) {
-    refusal = "run_ended";
-  } else if (
-    binding?.target.kind !== "event" ||
-    binding.target.source !== event.source
-  ) {
-    // Its approval names another source, or none: never this one's.
-    refusal = "source_mismatch";
-  } else {
-    try {
+  try {
+    const run = await runOf();
+    const binding = run?.bindings.get(wait.binding);
+    if (run === undefined) {
+      refusal = "run_ended";
+    } else if (
+      binding?.target.kind !== "event" ||
+      binding.target.source !== event.source
+    ) {
+      // Its approval names another source, or none: never this one's.
+      refusal = "source_mismatch";
+    } else {
       await admitRunEvent(env, {
         workflowId: wait.workflowId,
         runId: wait.runId,
@@ -354,15 +363,15 @@ const handed = async (
         match: wait.matchHash,
       });
       return "taken";
-    } catch (error) {
-      refusal = refusalOf(error);
-      if (refusal === undefined) {
-        log.error("workflow.event_wait_failed", {
-          run: wait.runId,
-          ...errorFields(error),
-        });
-        return "retry";
-      }
+    }
+  } catch (error) {
+    refusal = refusalOf(error);
+    if (refusal === undefined) {
+      log.error("workflow.event_wait_failed", {
+        run: wait.runId,
+        ...errorFields(error),
+      });
+      return "retry";
     }
   }
   if (refusal === "run_ended") {
@@ -572,9 +581,13 @@ export const routeSourceEvent = async (
       continue;
     }
     // oxlint-disable-next-line no-await-in-loop -- as above
-    const run = await callingRunOf(env, wait.workflowId, wait.runId);
-    // oxlint-disable-next-line no-await-in-loop -- as above
-    const outcome = await handed(env, run, wait, event, also);
+    const outcome = await handed(
+      env,
+      async () => await callingRunOf(env, wait.workflowId, wait.runId),
+      wait,
+      event,
+      also
+    );
     if (keeps && outcome !== "taken" && outcome !== "retry") {
       // oxlint-disable-next-line no-await-in-loop -- as above
       await letGo(env, event.same, wait.runId);
@@ -686,24 +699,31 @@ export const enterMatchWait = async (
   }
   const db = drizzle(env.DB);
   const expiresAt = new Date(until);
-  await db
-    .insert(eventWaits)
-    .values(
-      types.map((eventType) => ({
-        runId: wait.run.runId,
-        step: wait.step,
-        eventType,
-        workflowId: wait.run.workflowId,
-        binding: wait.binding,
-        sourceId: source,
-        matchHash: wait.matchHash,
-        expiresAt,
-      }))
-    )
-    .onConflictDoUpdate({
-      target: [eventWaits.runId, eventWaits.step, eventWaits.eventType],
-      set: { sourceId: source, matchHash: wait.matchHash, expiresAt },
-    });
+  const [first, ...rest] = statementsWithin(types, (part) =>
+    db
+      .insert(eventWaits)
+      .values(
+        part.map((eventType) => ({
+          runId: wait.run.runId,
+          step: wait.step,
+          eventType,
+          workflowId: wait.run.workflowId,
+          binding: wait.binding,
+          sourceId: source,
+          matchHash: wait.matchHash,
+          expiresAt,
+        }))
+      )
+      .onConflictDoUpdate({
+        target: [eventWaits.runId, eventWaits.step, eventWaits.eventType],
+        set: { sourceId: source, matchHash: wait.matchHash, expiresAt },
+      })
+  );
+  // `types` is never empty (above): one batch, so the wait is entered for
+  // all its types or none.
+  if (first !== undefined) {
+    await db.batch([first, ...rest]);
+  }
   const refused: string[] = [];
   for (let attempt = 0; attempt < claimTries; attempt += 1) {
     // oxlint-disable-next-line no-await-in-loop -- one kept event after another
@@ -714,7 +734,7 @@ export const enterMatchWait = async (
     // oxlint-disable-next-line no-await-in-loop -- as above
     const outcome = await handed(
       env,
-      wait.run,
+      () => wait.run,
       {
         workflowId: wait.run.workflowId,
         runId: wait.run.runId,

@@ -220,6 +220,13 @@ export const auditDetailValueSchema = z.union([
 export type AuditDetailValue = z.infer<typeof auditDetailValueSchema>;
 
 /**
+ * Whom the recall before a chat's question read as, in its `agent.call`
+ * event's `reads` (method `brain.recall`, core's turn-recall.ts): the
+ * person, or the company alone. Never who.
+ */
+export type TurnRecallReads = "person" | "company";
+
+/**
  * One audit event, stored by core and connect in an outbox and appended to
  * the hash chain by the AuditLog object. Stored events outlive a release
  * while they wait in an outbox, so this schema only ever expands: add

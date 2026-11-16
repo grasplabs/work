@@ -203,12 +203,26 @@ export const connectModels = async (
 };
 
 /**
- * Replies to core's own calls about Stephen's requests (sorting one,
+ * Replies to core's own calls about Stephen's requests (naming one,
  * proposing a fix: src/channels/request-sorting.ts, src/stephen-requests.ts),
  * in the order a test queued them, apart from every provider's script;
  * once none is left, a sorting that sorts nothing.
  */
 export const stephenRequestReplies: ProviderReply[] = [];
+
+/**
+ * Replies to the call judging whether Stephen answered a request
+ * (src/channels/request-sorting.ts), in the order a test queued them;
+ * once none is left, that he answered.
+ */
+export const stephenJudgeReplies: ProviderReply[] = [];
+
+/**
+ * What each of core's calls about Stephen's requests sent the provider,
+ * oldest first, naming and judging alike: the tests read what reached a
+ * model, as they do a provider's `requests`.
+ */
+export const stephenRequestCalls: unknown[] = [];
 
 const sortsNothing: ProviderReply = {
   text: JSON.stringify({
@@ -217,11 +231,19 @@ const sortsNothing: ProviderReply = {
     question: null,
     newQuestion: null,
     role: null,
-    answered: true,
   }),
   inputTokens: 10,
   outputTokens: 10,
 };
+
+const answeredIt: ProviderReply = {
+  text: JSON.stringify({ answered: true }),
+  inputTokens: 10,
+  outputTokens: 5,
+};
+
+/** How the call judging whether he answered begins its instructions. */
+const judgeOpening = "You judge whether Stephen";
 
 /**
  * How core's calls about Stephen's requests begin their instructions: the
@@ -229,6 +251,7 @@ const sortsNothing: ProviderReply = {
  * what they ask.
  */
 const stephenRequestsOpenings = [
+  judgeOpening,
   "You sort one message a person sent to Stephen",
   "You help the owner of a company's Grasp workspace improve Stephen",
 ];
@@ -314,10 +337,14 @@ export const answeringProvider = async (
     // Stephen's request sorting answers apart from the test's script, as
     // it isn't part of the turn the script is written for.
     if (isStephenRequests(body)) {
+      stephenRequestCalls.push(body);
+      const judging = (JSON.stringify(body) ?? "").includes(judgeOpening);
       await answerWith(
         taken.id,
         taken.path,
-        stephenRequestReplies.shift() ?? sortsNothing
+        judging
+          ? (stephenJudgeReplies.shift() ?? answeredIt)
+          : (stephenRequestReplies.shift() ?? sortsNothing)
       );
       return;
     }

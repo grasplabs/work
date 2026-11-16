@@ -39,10 +39,12 @@ import type { ConnectionGrant } from "./bindings.ts";
 import { readsMail, textsOf } from "./channels/stephen-rules.ts";
 import { askInChat, askableConnections } from "./chat-connections.ts";
 import type { AskableConnection, AskedConnection } from "./chat-connections.ts";
+import { captureRead } from "./connection-capture.ts";
 import { connectionOwnersOf } from "./connections.ts";
 import { callObject, workspace } from "./durable-objects.ts";
 import { endOfCompanyDay } from "./organization.ts";
 import { grantedPermissions } from "./permissions.ts";
+import { markPrivateRead } from "./private-reads.ts";
 import { mailboxesFor } from "./shared-mailboxes.ts";
 
 // Connections for a chat's code: `await env.connections.call("OUTLOOK",
@@ -275,6 +277,24 @@ const keptForChatApp = async (
   }
 };
 
+/**
+ * Marks the chat of `scope` before an answer read through connection
+ * `connectionId` is handed over, when it is a personal connection (its
+ * person's mailbox or drive: connect refuses anyone else's), whose answer
+ * only they may read (private-reads.ts). One connect no longer names
+ * marks it too, failing closed.
+ */
+const markIfPersonal = async (
+  env: Env,
+  scope: AgentScope,
+  connectionId: string
+): Promise<void> => {
+  const [owner] = await connectionOwnersOf(env, [connectionId]);
+  if (owner?.ownerUserId !== null) {
+    await markPrivateRead(env, scope, "connection");
+  }
+};
+
 /** Connections, as a chat's code calls them. */
 export class ConnectionsApi extends WorkerEntrypoint<Env, AgentScope> {
   /** The agent's grant under `name`, read now, or why there is none. */
@@ -414,6 +434,8 @@ export class ConnectionsApi extends WorkerEntrypoint<Env, AgentScope> {
             authority,
             ...(heldUntil === undefined ? {} : { heldUntil }),
             ...(scope.unattended === true ? { unattended: true } : {}),
+            // Decided on its card there, never listed in Grasp (GRA-1919).
+            ...(fromChatApp(scope) ? { chatApp: true } : {}),
           };
         },
         named,
@@ -470,6 +492,9 @@ export class ConnectionsApi extends WorkerEntrypoint<Env, AgentScope> {
       await recordToolCall(this.env, scope, shown, endedBy(error));
       throw forSandbox(error);
     }
+    // When the tool answered, before anything else is awaited: what the
+    // Brain keeps of it never replaces what a later read kept.
+    const readAt = new Date();
     if (result.pending !== undefined) {
       await heldInChat(this.env, scope);
       await recordToolCall(this.env, scope, shown, {
@@ -479,6 +504,9 @@ export class ConnectionsApi extends WorkerEntrypoint<Env, AgentScope> {
       return { output: null, pending: result.pending };
     }
     const output: unknown = JSON.parse(result.output);
+    // The chat marked first, as nothing that holds the answer runs
+    // unmarked: before it is kept or recorded, and before it is handed over.
+    await markIfPersonal(this.env, scope, grant.connection.connectionId);
     if (shape !== undefined) {
       await keptForChatApp(this.env, scope, request.action, shape, output);
     }
@@ -489,7 +517,6 @@ export class ConnectionsApi extends WorkerEntrypoint<Env, AgentScope> {
       this.env,
       scope,
       [connectionId],
-      [],
       [
         connectionRead(
           connectionId,
@@ -497,6 +524,14 @@ export class ConnectionsApi extends WorkerEntrypoint<Env, AgentScope> {
           resource ?? null
         ),
       ]
+    );
+    // Recorded with the chat first: a run that ended since keeps nothing.
+    // Kept in the Brain once the agent has its answer, never in its way.
+    this.ctx.waitUntil(
+      captureRead(this.env, scope, connectionId, request.action, input, {
+        result,
+        readAt,
+      })
     );
     await recordToolCall(this.env, scope, shown);
     return { output, pending: null };
@@ -579,7 +614,8 @@ export class ConnectionsApi extends WorkerEntrypoint<Env, AgentScope> {
       throw forSandbox(error);
     }
     if (outcome.state === "done" || outcome.state === "failed") {
-      await recordSources(this.env, scope, [request.connectionId], [], [read]);
+      await markIfPersonal(this.env, scope, request.connectionId);
+      await recordSources(this.env, scope, [request.connectionId], [read]);
     }
     await recordToolCall(
       this.env,

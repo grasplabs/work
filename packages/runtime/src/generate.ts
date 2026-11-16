@@ -62,7 +62,7 @@ import { dataModelSource, serverModuleSource } from "./codegen-server.ts";
 //     what a form checks a submission with and a grid reads its columns
 //     from.
 //   - `contracts.json`: the App's manifest, each function's fingerprint
-//     and the workflow version each binding pinned, canonical: what the
+//     and the workflow each binding names, canonical: what the
 //     release's contract hash covers.
 
 /**
@@ -88,7 +88,7 @@ export const generateServerModules = (
 /**
  * `.grasp/`, by path (`generatedPaths`), the host's own for a release:
  * from its `manifest` as the host read it (`readAppManifest`) and the
- * versions the host resolved its workflow bindings to, `bound`
+ * workflows the host resolved its workflow bindings to, `bound`
  * (`WorkflowBindingExtras`), which only `contracts.json` seals.
  */
 const generateReleaseModules = async (
@@ -100,7 +100,7 @@ const generateReleaseModules = async (
     manifest,
     fingerprints: await contractFingerprints(manifest),
     workflows: Object.fromEntries(
-      bound.map(({ alias, pinned }) => [alias, { alias, pinned }])
+      bound.map(({ alias, workflowId }) => [alias, { alias, workflowId }])
     ),
   });
   return {

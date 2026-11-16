@@ -1,5 +1,12 @@
-import { packItemTokens } from "./contract.ts";
-import type { Pack, PackItem } from "./contract.ts";
+import { packItemTokens, packMemoryTokens } from "./contract.ts";
+import type {
+  FoundMemory,
+  MemoryFoundBy,
+  Pack,
+  PackContested,
+  PackItem,
+  PackMemory,
+} from "./contract.ts";
 import { foundIn } from "./exact.ts";
 import type { Exact } from "./exact.ts";
 import { holdsTerm, placedOf, sequenceOf, wordsOf } from "./words.ts";
@@ -19,6 +26,21 @@ export interface Found extends Omit<PackItem, "whole"> {
 }
 
 /**
+ * What a way's list holds: a passage, or a memory with the other sides
+ * of its fact when contested (`rivals`, packed right after it). `key` is
+ * the same for the same passage or memory in any list.
+ */
+export type Entry =
+  | { kind: "passage"; key: string; passage: Found }
+  | {
+      kind: "memory";
+      key: string;
+      memory: FoundMemory;
+      found: MemoryFoundBy;
+      rivals: readonly { key: string; memory: FoundMemory }[];
+    };
+
+/**
  * Reciprocal rank fusion's constant: a list's first result scores 1/61,
  * its tenth 1/70. The usual value (Cormack, Clarke and Büttcher, 2009),
  * kept: the evaluation showed no reason to move it.
@@ -26,28 +48,28 @@ export interface Found extends Omit<PackItem, "whole"> {
 const fusionK = 60;
 
 /**
- * `lists`, each best first, as one list by reciprocal rank fusion: a
- * chunk scores the sum of 1 / (60 + its rank) over the lists that hold
+ * `lists`, each best first, as one list by reciprocal rank fusion: an
+ * entry scores the sum of 1 / (60 + its rank) over the lists that hold
  * it, so one found high by any way comes near the top, and one found by
- * several ways above one found by one. Ties go to the chunk with the
- * better rank in a list, then to the list given first. A chunk in several
- * lists keeps how the first list given found it. Only ranks count, never
- * a list's own scores (a cosine and a count of words don't compare), so
- * vectors are one more list, given last: a chunk found by meaning alone
- * says so.
+ * several ways above one found by one. Ties go to the entry with the
+ * better rank in a list, then to the list given first. An entry in
+ * several lists keeps how the first list given found it. Only ranks
+ * count, never a list's own scores (a cosine and a count of words don't
+ * compare), so vectors are one more list, given last: a chunk found by
+ * meaning alone says so. Passages and memories are fused alike.
  */
-export const fuse = (lists: readonly (readonly Found[])[]): Found[] => {
+export const fuse = (lists: readonly (readonly Entry[])[]): Entry[] => {
   const scored = new Map<
-    number,
-    { found: Found; score: number; best: number; list: number }
+    string,
+    { entry: Entry; score: number; best: number; list: number }
   >();
   for (const [list, ranked] of lists.entries()) {
-    for (const [index, found] of ranked.entries()) {
+    for (const [index, entry] of ranked.entries()) {
       const rank = index + 1;
-      const known = scored.get(found.row);
+      const known = scored.get(entry.key);
       if (known === undefined) {
-        scored.set(found.row, {
-          found,
+        scored.set(entry.key, {
+          entry,
           score: 1 / (fusionK + rank),
           best: rank,
           list,
@@ -63,7 +85,7 @@ export const fuse = (lists: readonly (readonly Found[])[]): Found[] => {
   }
   return [...scored.values()]
     .toSorted((a, b) => b.score - a.score || a.best - b.best || a.list - b.list)
-    .map(({ found }) => found);
+    .map(({ entry }) => entry);
 };
 
 /** Most characters of a quote: about a sentence or two. */
@@ -203,27 +225,125 @@ const itemOf = (
   whole: boolean
 ): PackItem => ({ source, version, position, text, whole, found: how });
 
+/** `memory` as a memory of the pack, its statement alone. */
+const memoryItemOf = (
+  memory: FoundMemory,
+  found: MemoryFoundBy
+): PackMemory => ({
+  memory: memory.id,
+  about: memory.about,
+  attribute: memory.attribute,
+  object: memory.object,
+  type: memory.type,
+  statement: memory.statement,
+  quote: null,
+  context: null,
+  source: memory.source,
+  writer: memory.writer,
+  speaker: memory.speaker,
+  validFrom: memory.validFrom,
+  validUntil: memory.validUntil,
+  learnedAt: memory.learnedAt,
+  contested: memory.contested,
+  confirmed: memory.confirmed !== null,
+  found,
+});
+
+/** What the pack holds of an entry so far. */
+type Held =
+  | { kind: "passage"; found: Found; item: PackItem }
+  | { kind: "memory"; found: FoundMemory; item: PackMemory };
+
+/**
+ * The contested facts among `memories`: each entity's attribute for
+ * which the pack holds more than one side, in the order of its first.
+ */
+const contestedOf = (packed: readonly PackMemory[]): PackContested[] => {
+  const facts = new Map<string, PackContested>();
+  for (const { memory, about, attribute, contested } of packed) {
+    if (!contested || attribute === null) {
+      continue;
+    }
+    const key = JSON.stringify([about, attribute]);
+    const fact = facts.get(key) ?? { about, attribute, memories: [] };
+    fact.memories.push(memory);
+    facts.set(key, fact);
+  }
+  return [...facts.values()].filter(({ memories }) => memories.length > 1);
+};
+
 /**
  * `fused`, best first, fitted to `budget` tokens (contract.ts
- * `packItemTokens`): first each chunk's quote, best first, leaving out
- * one that no longer fits and going on with the next; then, with what is
- * left, each item widened to its whole chunk, best first. (A memory's
- * statement comes before its quote once memories are recalled, GRA-1745.)
- * Cut short when the budget left a chunk out or gave one only in part.
+ * `packItemTokens`, `packMemoryTokens`), in three passes, each best first,
+ * leaving out what no longer fits and going on with the next: first each
+ * passage's quote and each memory's statement (a contested memory's other
+ * sides right after it, all of them or none: `contested` lists only facts
+ * whose every side is packed); then each passage widened to its whole chunk and
+ * each memory's quote; then each memory's passage around its quote. Cut
+ * short when the budget left anything out.
  */
 export const packOf = (
-  fused: readonly Found[],
+  fused: readonly Entry[],
   asked: Asked,
   budget: number,
   notFound: string[]
 ): Pack => {
   let left = budget;
   let truncated = false;
-  const kept: { found: Found; item: PackItem }[] = [];
+  const held: Held[] = [];
+  const placed = new Set<string>();
   // Each word is stemmed once for the whole pack, however many quotes
   // hold it.
   const memo: WordMemo = new Map();
-  for (const found of fused) {
+  // A memory with the other sides of its contested fact, held or left
+  // out together: a contested fact is packed with every side the reader
+  // may read, or with none, and nothing of a group left out takes room.
+  // A side left out once (its group didn't fit) keeps the rest of its
+  // fact out too.
+  const skipped = new Set<string>();
+  const holdGroup = (
+    group: readonly { key: string; memory: FoundMemory; found: MemoryFoundBy }[]
+  ): void => {
+    const fresh = group.filter(({ key }) => !placed.has(key));
+    for (const { key } of fresh) {
+      placed.add(key);
+    }
+    if (fresh.length === 0) {
+      return;
+    }
+    const items = fresh.map(({ memory, found }) => ({
+      memory,
+      item: memoryItemOf(memory, found),
+    }));
+    const cost = items.reduce(
+      (sum, { item }) => sum + packMemoryTokens(item),
+      0
+    );
+    if (group.some(({ key }) => skipped.has(key)) || cost > left) {
+      truncated = true;
+      for (const { key } of fresh) {
+        skipped.add(key);
+      }
+      return;
+    }
+    left -= cost;
+    for (const { memory, item } of items) {
+      held.push({ kind: "memory", found: memory, item });
+    }
+  };
+  for (const entry of fused) {
+    if (entry.kind === "memory") {
+      holdGroup([
+        { key: entry.key, memory: entry.memory, found: entry.found },
+        ...entry.rivals.map((rival) => ({
+          key: rival.key,
+          memory: rival.memory,
+          found: "contested" as const,
+        })),
+      ]);
+      continue;
+    }
+    const found = entry.passage;
     // A quote is never empty, so an item costs at least its citation and
     // a token: one that can't fit is left out without choosing its quote.
     if (packItemTokens(itemOf(found, "", false)) + 1 > left) {
@@ -235,23 +355,60 @@ export const packOf = (
     const cost = packItemTokens(item);
     if (cost <= left) {
       left -= cost;
-      kept.push({ found, item });
+      held.push({ kind: "passage", found, item });
     } else {
       truncated = true;
     }
   }
-  const items = kept.map(({ found, item }) => {
-    if (item.whole) {
-      return item;
-    }
-    const whole = itemOf(found, found.text, true);
-    const more = packItemTokens(whole) - packItemTokens(item);
+  // Then more of each, in two passes: what a memory says it rests on comes
+  // before the passage around it.
+  const fits = (more: number): boolean => {
     if (more <= left) {
       left -= more;
-      return whole;
+      return true;
     }
     truncated = true;
-    return item;
-  });
-  return { items, notFound, truncated };
+    return false;
+  };
+  for (const hold of held) {
+    if (hold.kind === "passage") {
+      const whole = itemOf(hold.found, hold.found.text, true);
+      if (
+        !hold.item.whole &&
+        fits(packItemTokens(whole) - packItemTokens(hold.item))
+      ) {
+        hold.item = whole;
+      }
+    } else if (hold.found.quote !== null) {
+      const quoted = { ...hold.item, quote: hold.found.quote };
+      if (fits(packMemoryTokens(quoted) - packMemoryTokens(hold.item))) {
+        hold.item = quoted;
+      }
+    }
+  }
+  for (const hold of held) {
+    if (
+      hold.kind === "memory" &&
+      hold.found.context !== null &&
+      hold.item.quote !== null
+    ) {
+      const around = { ...hold.item, context: hold.found.context };
+      if (fits(packMemoryTokens(around) - packMemoryTokens(hold.item))) {
+        hold.item = around;
+      }
+    }
+  }
+  const items = held.flatMap((hold) =>
+    hold.kind === "passage" ? [hold.item] : []
+  );
+  const memories = held.flatMap((hold) =>
+    hold.kind === "memory" ? [hold.item] : []
+  );
+  return {
+    items,
+    memories,
+    contested: contestedOf(memories),
+    notFound,
+    truncated,
+  };
 };

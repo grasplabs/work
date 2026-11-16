@@ -119,7 +119,6 @@ describe("chat agent", () => {
       answer: "You are the person this chat belongs to.",
       // It read nothing: nothing to label it with.
       provenance: { sources: [], restricted: false },
-      cited: [],
       // In Grasp's own app: no chat app's check line, nor its text.
       check: null,
       channelText: null,
@@ -134,7 +133,7 @@ describe("chat agent", () => {
       JSON.stringify(body)
     );
     const info =
-      "info(): Promise<{ chatId: string; personId: string; app: string | null; now: string }>";
+      "info(): Promise<{ chatId: string; personId: string; now: string }>";
     expect({
       listed: first?.includes("- env.chat: "),
       declaredUpFront: first?.includes(info),

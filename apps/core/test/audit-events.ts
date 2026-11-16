@@ -15,9 +15,10 @@ import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 
 import { chainHash } from "../src/audit-chain.ts";
+import { drainAuditOutboxes } from "../src/audit-drains.ts";
 import type { AuditLog } from "../src/audit-log.ts";
 import { auditLog } from "../src/audit-log.ts";
-import { drainAuditOutboxes, drainObjectOutbox } from "../src/audit-outbox.ts";
+import { drainObjectOutbox } from "../src/audit-outbox.ts";
 import { AuditRpc } from "../src/audit-rpc.ts";
 import { identify } from "../src/auth/identity.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
@@ -65,7 +66,7 @@ const drained = async (): Promise<void> => {
     runInDurableObject(
       onboardingStore(env),
       async (_instance, state) =>
-        await drainObjectOutbox(env, state.storage.sql)
+        await drainObjectOutbox(env, state.storage.sql, 0)
     ),
   ]);
 };

@@ -170,6 +170,9 @@ export const boardOperations = (board: Board): DefinitionOperation[] => [
   { op: "addIndex", table: board.table, name: "by_stage", fields: ["stage"] },
 ];
 
+/** `text` as JSX text: its apostrophes as entities, as the App lint asks. */
+const jsxText = (text: string): string => text.replaceAll("'", "&apos;");
+
 /** `board`'s server functions and page, by path. */
 export const boardFiles = ({
   title,
@@ -192,7 +195,7 @@ export const boardFiles = ({
           }`,
   ];
   return {
-    [`server/${table}.ts`]: `import {
+    "server/board.ts": `import {
   paginationOptionsValidator,
   paginationResultValidator,
   v,
@@ -256,14 +259,14 @@ import { createFileRoute } from "@tanstack/react-router";
 const stages = ${JSON.stringify(stages)} as const;
 
 const Board = () => {
-  const counts = useQuery(api.${table}.byStage);
-  const setStage = useMutation(api.${table}.setStage);
+  const counts = useQuery(api.board.byStage);
+  const setStage = useMutation(api.board.setStage);
   return (
     <main className="flex flex-col gap-6 p-6">
       <PageHeader>
         <PageHeaderContent>
-          <PageHeaderTitle>${title}</PageHeaderTitle>
-          <PageHeaderDescription>${intro}</PageHeaderDescription>
+          <PageHeaderTitle>${jsxText(title)}</PageHeaderTitle>
+          <PageHeaderDescription>${jsxText(intro)}</PageHeaderDescription>
         </PageHeaderContent>
       </PageHeader>
       <Grid columns={4}>
@@ -288,7 +291,7 @@ const Board = () => {
           ${columns.join(",\n          ")},
         ]}
         label="${title}"
-        query={api.${table}.list}
+        query={api.board.list}
       />
     </main>
   );

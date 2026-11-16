@@ -1,7 +1,7 @@
 import { definitionText } from "@grasp-os/runtime/definition";
 import { expect } from "@playwright/test";
 
-import { commitApp, testApp } from "../apps/core/test/app-definitions.ts";
+import { publishApp, testApp } from "../apps/core/test/app-definitions.ts";
 import { test } from "./csp.ts";
 import { writeDraft } from "./draft-writes.ts";
 import { apiOf, peopleIn } from "./people.ts";
@@ -67,13 +67,11 @@ test("a builder publishes the draft a chat built from the App's workspace, which
   const name = `Invoice desk ${tag}`;
   try {
     const app = await api.apps.create({ name });
-    const { version } = await commitApp(
-      api.apps.files,
+    const { version } = await publishApp(
+      api,
       app.id,
-      testApp({ name: "Invoice desk" }, { "src/routes/index.tsx": appPage }),
-      "An invoice desk"
+      testApp({ name: "Invoice desk" }, { "src/routes/index.tsx": appPage })
     );
-    await api.apps.versions.publish(app.id, version);
     // Shared with a colleague, who uses the live version.
     await api.apps.members.add(app.id, {
       type: "person",
@@ -120,7 +118,7 @@ test("a builder publishes the draft a chat built from the App's workspace, which
       )
       .toBeGreaterThan(version);
     const live = await api.apps.get(app.id);
-    expect(await api.apps.drafts.get(app.id)).toMatchObject({
+    expect(await api.drafts.get({ kind: "app", id: app.id })).toMatchObject({
       base: live.currentVersion,
       changed: [],
     });

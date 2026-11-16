@@ -23,12 +23,36 @@ export type KeyState = "free" | "held" | "erased";
 
 /**
  * What an add says that an erasure closed: to an erased source, whose key
- * is closed for good, or for a person alone that began before that
- * person's erasure (erasure.ts). Said only to the producer that adds it,
+ * is closed for good (erasure.ts). Said only to the producer that adds it,
  * which never retries it: the message alone, so a producer tells it from
  * any other failure by comparing it whole.
  */
 export const erasedSource = "The Brain refused it: what this adds was erased";
+
+/**
+ * What an add to a removed source says (`Brain.removeSources`): it is out
+ * of use for good, its key closed while its history is kept, and the add
+ * is never tried again. Said only to the producer that adds it, which
+ * compares it whole.
+ */
+export const removedSource = "The Brain refused it: what this adds was removed";
+
+/**
+ * What an add says whose change was added before with other text or
+ * readers: nothing changed, and the version that change made stays. Said
+ * only to the producer that adds it, which compares it whole.
+ */
+export const changeTaken =
+  "The Brain refused it: this change was added before with other text or readers";
+
+/**
+ * What `addMemories` answers a change added before with other memories:
+ * the message alone, so a caller tells it from any other failure by
+ * comparing it whole (a host that lets a person retry by a change key
+ * answers it as theirs to start again).
+ */
+export const changeReused =
+  "The Brain refused it: this change was added before with other memories";
 
 /**
  * What a person's own store erased whole answers an add, or any call that
@@ -36,6 +60,17 @@ export const erasedSource = "The Brain refused it: what this adds was erased";
  * `erasedSource` is, and never tried again.
  */
 export const storeErased = "The Brain refused it: this store was erased";
+
+/**
+ * What the shared store answers an add only one person may read (`owner`
+ * access): a source, an instruction file or memories. That is kept only
+ * in that person's own store (`personalBrainOf`), so the shared store
+ * refuses it whoever calls, before it reads or writes anything. The
+ * message alone, naming no one, so a host tells it from any other failure
+ * by comparing it whole: for a host that routes by readers, it is a bug.
+ */
+export const onlyInOwnStore =
+  "The Brain refused it: what only one person may read is kept in that person's own store";
 
 /**
  * What an add with an expected current version (`NewInstructions.after`)
@@ -152,6 +187,69 @@ export const accessSchema = z.discriminatedUnion("kind", [
 ]);
 export type Access = z.infer<typeof accessSchema>;
 
+/** The classes of work, the first first: an item of a class runs before any of the next. */
+export const workPriorities = [
+  /** What someone just asked about. */
+  "asked",
+  /** What people upload on purpose. */
+  "upload",
+  /** Conversations, meetings and runs. */
+  "conversation",
+  /** Recent documents. */
+  "recent",
+  /** Old documents and archives, which may never reach the front. */
+  "archive",
+] as const;
+export type WorkPriority = (typeof workPriorities)[number];
+
+/**
+ * Whose word a memory is: an internal person's (`person`, as the host
+ * names them: the one who said it, or who confirmed it), an outside
+ * party's (a customer's mail, a supplier's document), an agent's (`agent`,
+ * as the host names it) or the system's.
+ */
+export const speakerSchema = z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.literal("internal"), person: principalSchema }),
+  z.strictObject({ kind: z.literal("outside") }),
+  z.strictObject({ kind: z.literal("agent"), agent: principalSchema }),
+  z.strictObject({ kind: z.literal("system") }),
+]);
+export type Speaker = z.infer<typeof speakerSchema>;
+
+/** Whether `timeZone` is a time zone the runtime knows (IANA, as `Intl` takes it). */
+const isTimeZone = (timeZone: string): boolean => {
+  try {
+    // Throws a RangeError for a zone it doesn't know.
+    return (
+      new Intl.DateTimeFormat("en", { timeZone }).resolvedOptions().timeZone !==
+      ""
+    );
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Memories to draw from a version as it is added (extraction.ts): whose
+ * words its text is (`speaker`, a `Speaker`: the host's to say, never a
+ * model's), when they were said (`saidAt`), in which time zone their
+ * relative dates count ("next Friday"), and which class of work the
+ * drawing takes (`workPriorities`). A version added without it is kept
+ * and found, and no memory is drawn from it. The text is one message's
+ * own words: a thread is one version per message, its quoted or
+ * forwarded history stripped by the host (core's `said`).
+ */
+export const extractSchema = z.strictObject({
+  speaker: speakerSchema,
+  // From 1970 on: the queue keeps it as milliseconds since then.
+  saidAt: z.date().min(new Date(0)),
+  timeZone: z.string().min(1).max(64).refine(isTimeZone, {
+    message: "Is no time zone",
+  }),
+  priority: z.enum(workPriorities),
+});
+export type Extract = z.infer<typeof extractSchema>;
+
 /**
  * Whether `text` is within a source's bound (`sourceTextMaxBytes`), as
  * given and as the word index takes it: folding can grow a text many
@@ -163,19 +261,35 @@ export const fitsSourceText = (text: string): boolean =>
   byteLengthOf(text) <= sourceTextMaxBytes &&
   byteLengthOf(foldForSearch(text)) <= sourceTextMaxBytes;
 
+/** Something other than whitespace. */
+const notBlank = /\S/u;
+
+/**
+ * Whether `text` is one a source can be: well-formed, and something other
+ * than whitespace, which has no passage to keep or find. With
+ * `fitsSourceText`, the store's whole rule for a source's text, which an
+ * add checks and a host checks before it adds, so what fails it is
+ * refused as what it is, never tried again.
+ */
+export const isSourceText = (text: unknown): text is string =>
+  wellFormedString().safeParse(text).success && notBlank.test(String(text));
+
 /**
  * A version of a source to add: which source, the change it is, its text,
- * who may read this version, and, in a person's own store alone, the
- * group it is erased with (`Brain.eraseSource` of the group's key): a key its own key starts
- * with, then "/". A source keeps the group of its first version.
+ * who may read this version; in a person's own store alone, the group it
+ * is erased with (`Brain.eraseSource` of the group's key): a key its own
+ * key starts with, then "/", a source keeping the group of its first
+ * version; and, to draw memories from it, whose words it is (`extract`).
  */
 export const newSourceSchema = z.strictObject({
   source: sourceIdSchema,
   change: changeKeySchema,
   group: sourceIdSchema.optional(),
   text: wellFormedString()
-    // A text of whitespace alone has no passage to keep or find.
-    .regex(/\S/u, { message: "Holds no text" })
+    .refine((text) => isSourceText(text), {
+      message: "Holds no text",
+      abort: true,
+    })
     .refine((text) => byteLengthOf(text) <= sourceTextMaxBytes, {
       message: `At most ${sourceTextMaxBytes} bytes`,
       abort: true,
@@ -184,6 +298,25 @@ export const newSourceSchema = z.strictObject({
       message: `At most ${sourceTextMaxBytes} bytes as indexed`,
     }),
   access: accessSchema,
+  extract: extractSchema.optional(),
+  /**
+   * Whether the source is a thread: one version per message, each holding
+   * that message's own words alone (`extract`). Said with its first
+   * version and kept for good, as its group: an add saying otherwise is
+   * refused. A later version of a thread never puts out or ends what an
+   * earlier one said (memories.ts); a document's current version puts out
+   * a memory of an earlier one whose quote it no longer holds (quotes.ts).
+   */
+  thread: z.boolean().optional(),
+  /**
+   * When the producer read this text from where it lives, in milliseconds
+   * since the epoch, if it read it: an add of a text read before the
+   * source's current version was read writes nothing (`AddedVersion`'s
+   * `newer`), so a late add of an older read never replaces a newer one,
+   * whatever order the adds arrive in. A `newer` answer records nothing,
+   * not even its change, so a retry of that change is judged afresh.
+   */
+  readAt: z.int().nonnegative().optional(),
 });
 export type NewSource = z.infer<typeof newSourceSchema>;
 
@@ -192,12 +325,12 @@ export const isOverInstructionsLimit = (text: string): boolean =>
   text.length > instructionsMaxLength;
 
 /**
- * An instruction file's text: some text, at most `instructionsMaxLength`
- * UTF-16 units (`.length`), the one rule for it, which the host checks
- * with too.
+ * An instruction file's text: at most `instructionsMaxLength` UTF-16
+ * units (`.length`), the one rule for it, which the host checks with
+ * too. It may be empty: an emptied file is a version of its own, and
+ * its host loads nothing for it.
  */
 export const instructionsTextSchema = wellFormedString()
-  .regex(/\S/u, { message: "Holds no text" })
   // Not zod's `max`, which counts code points.
   .refine((text) => !isOverInstructionsLimit(text), {
     message: `At most ${instructionsMaxLength} UTF-16 units`,
@@ -209,8 +342,11 @@ export const instructionsTextSchema = wellFormedString()
  * source, but never cut into chunks or indexed, so recall never finds it:
  * it is read whole (`readCurrent`).
  */
+// Neither a group nor when it was read: an instruction file is written by
+// a person over the version they saw (`after`), never a read that a later
+// one may hold off.
 export const newInstructionsSchema = newSourceSchema
-  .omit({ group: true })
+  .omit({ extract: true, group: true, readAt: true, thread: true })
   .extend({
     text: instructionsTextSchema,
     /**
@@ -219,7 +355,9 @@ export const newInstructionsSchema = newSourceSchema
      * is refused with `staleVersion` otherwise. Given, the add always makes
      * a new version, even of the current text and readers, so every add
      * that lands moves the version. A change the store already has answers
-     * with the version it made first, so a retry still adds nothing twice.
+     * with the version it made first, so a retry still adds nothing twice;
+     * sent over a version at or past that one, it is no retry, and is
+     * refused with `staleVersion`.
      * Left out, an add writes whatever is current, and current text and
      * readers make no new version.
      */
@@ -241,7 +379,7 @@ export type Reader = z.infer<typeof readerSchema>;
 
 /**
  * A reader who acts as their person, as a change made in their name (a
- * memory they retire or confirm) needs: never one with no person.
+ * memory they confirm) needs: never one with no person.
  */
 export const personReaderSchema = readerSchema.extend({
   person: principalSchema,
@@ -289,6 +427,10 @@ export const withoutMeaningReasons = [
 ] as const;
 export type WithoutMeaningReason = (typeof withoutMeaningReasons)[number];
 
+/** A memory's id: the store's own, for citing it and retiring it. */
+export const memoryIdSchema = z.uuid();
+export type MemoryId = z.infer<typeof memoryIdSchema>;
+
 /**
  * A recall: a question, in the reader's words, the reader, how many tokens
  * the pack may hold (`tokensOf`), to read the past, the moment the
@@ -301,6 +443,16 @@ export type WithoutMeaningReason = (typeof withoutMeaningReasons)[number];
  * gave no vector it could use says why (`withoutMeaning`), for staff to
  * count (`RecallOverview`); never with a vector, nor as of a moment,
  * when there was no vector to miss.
+ *
+ * `used`: when the reader last used each memory of this store they used,
+ * as the host knows its own person's use (core: when recall last handed
+ * it to them in their own chat), at or before the moment asked. Ranks
+ * memories by freshness among equals (`FoundMemory.usedAt`), so one they
+ * never use fades; it only orders, never finds, drops or reveals: a
+ * memory the reader may not read, or that isn't there, is passed over
+ * alike. Kept in no store. The reader's whole use, uncut: it is looked up
+ * in memory for each memory a way judged, never read as rows, so a longer
+ * list costs recall no more rows.
  */
 export const recallRequestSchema = z
   .strictObject({
@@ -308,6 +460,14 @@ export const recallRequestSchema = z
     reader: readerSchema,
     budget: z.strictObject({ tokens: z.int().min(1).max(recallBudgetMax) }),
     asOf: z.date().optional(),
+    used: z
+      .array(
+        z.strictObject({
+          memory: memoryIdSchema,
+          at: z.date(),
+        })
+      )
+      .optional(),
     meaning: z
       .strictObject({ model: embedModelSchema, vector: vectorSchema })
       .optional(),
@@ -333,9 +493,10 @@ export type RecallRequest = z.infer<typeof recallRequestSchema>;
 
 /**
  * The ways recall searches by (`Brain.recall`): words (its stop words
- * included), exact parts and meaning.
+ * included, over passages and memories), exact parts, the entities the
+ * question names and their relations, and meaning.
  */
-export const searchWays = ["words", "exact", "meaning"] as const;
+export const searchWays = ["words", "exact", "entities", "meaning"] as const;
 export type SearchWay = (typeof searchWays)[number];
 
 /**
@@ -365,6 +526,24 @@ export interface RecallOverview {
 export interface SourceVersionRef {
   source: SourceId;
   version: number;
+}
+
+/**
+ * What an instruction file's add answers: the version it made or already
+ * is, and when that version was added, the same on every repeat of its
+ * change.
+ */
+export interface AddedInstructions extends SourceVersionRef {
+  addedAt: Date;
+}
+
+/**
+ * What an add answers: the version it made or already is, or, `newer`, the
+ * source's current version, read later than the add's text (`readAt`):
+ * then the add wrote nothing.
+ */
+export interface AddedVersion extends SourceVersionRef {
+  newer?: true;
 }
 
 /**
@@ -402,6 +581,13 @@ export interface PackItem extends SourceVersionRef {
  */
 export interface Pack {
   items: PackItem[];
+  /**
+   * The memories found, best first, by the same fused order as `items`
+   * and from the same budget (contract.ts `PackMemory`).
+   */
+  memories: PackMemory[];
+  /** The contested facts among `memories`, each with every side packed. */
+  contested: PackContested[];
   notFound: string[];
   truncated: boolean;
 }
@@ -462,6 +648,17 @@ export interface Finding {
    * cosine and when their version was added, which ties are ordered by.
    */
   meaning: (FoundPassage & { score: number; addedAt: number })[];
+  /**
+   * The memories found: by their statement's words, best first, at most
+   * `recallLimit`; along the relations of the entities the question
+   * names, nearest first, at most `recallLimit`; and the other current
+   * sides of each contested one found.
+   */
+  memories: {
+    words: FoundMemory[];
+    entities: FoundMemory[];
+    rivals: FoundMemory[];
+  };
 }
 
 /** An ASCII letter or the space: a third of a token each (`tokensOf`). */
@@ -584,8 +781,9 @@ export type SourceListRequest = z.infer<typeof sourceListRequestSchema>;
  * A source, as a listing names it: its current version and when that was
  * added; the opening of its text (of its first passage, at most
  * `openingMaxLength` characters), for a title; whether it is the
- * reader's alone (its current version's readers are that one person); and
- * how many of its versions the reader may read.
+ * reader's alone (listed by their own store: the shared store keeps
+ * nothing one person alone may read); and how many of its versions the
+ * reader may read.
  */
 export interface ListedSource {
   source: SourceId;
@@ -643,18 +841,39 @@ export interface SourceVersion extends SourceVersionRef {
 }
 
 /**
+ * Which of the host's models a call asks for: its careful one, or its
+ * quick one, cheaper, for a check (the host's model roles).
+ */
+export const modelRoles = ["careful", "quick"] as const;
+
+/** Most characters of a model call's purpose, `brain.<kind>[.<step>]`: what the host's gateway takes. */
+export { modelPurposeMaxLength as purposeMaxLength } from "@grasp-os/shared/models";
+export type ModelRole = (typeof modelRoles)[number];
+
+/**
  * A model call the Brain's background work asks its host to make, through
- * the host's model gateway: what the call is for (`brain.<kind of work>`),
- * its instructions, its one message, and how long it may take: what is
- * left of its item's time, less a moment. The host cancels the call when
- * that is over, and says so (`timed_out`).
+ * the host's model gateway: what the call is for (`brain.<kind of work>`,
+ * and `.<step>` for a kind that makes calls of more than one kind), which
+ * of its models, its instructions, its one message, and how long it may
+ * take: what is left of its item's time, less a moment. The host cancels
+ * the call when that is over, and says so (`timed_out`).
  */
 export interface ModelRequest {
+  /** At most {@link purposeMaxLength} characters. */
   purpose: string;
+  role: ModelRole;
   system: string;
   input: string;
   timeoutMs: number;
 }
+
+/**
+ * The context window, in tokens, of the models the Brain's work asks (the
+ * smallest of them): what a piece of a source read at once is cut to
+ * (extraction.ts). Null when the host doesn't know it: then a version is
+ * read whole, and a model whose window it overflows refuses the call.
+ */
+export const contextTokensSchema = z.int().positive().nullable();
 
 /** Most milliseconds a model call may be given: an item's longest time. */
 export const modelTimeoutMaxMs = 4 * 60_000;
@@ -720,8 +939,27 @@ export const workErrors = {
   erased: "What it works on was erased.",
   embedder_unavailable: "The embedder gave no vectors for it.",
   no_progress: "It asked to go on without having done any of its work.",
+  invalid_answer: "The model's answer isn't what its work takes.",
+  window_too_small:
+    "The model's context window can't hold the work's instructions.",
+  restoring:
+    "The store is restoring an export, so it adds nothing until that is done: it is tried again.",
 } as const;
 export type WorkErrorCode = keyof typeof workErrors;
+
+/**
+ * Errors an item meets the same way on every attempt while the release
+ * and the host's models stay as they are: a call the queue won't send
+ * (`invalid_request`: its purpose, step, role or size, fixed by the code
+ * and the item's payload), or a window too small for the work
+ * (`window_too_small`: the window is the host's models'). Parked at the
+ * first, never tried again within minutes; it comes back a day later, as
+ * any parked item, when a release or the models may have changed.
+ */
+export const workErrorsParkedAtOnce: readonly WorkErrorCode[] = [
+  "invalid_request",
+  "window_too_small",
+];
 
 /** Items of one kind waiting in the queue. */
 export interface WaitingWork {
@@ -834,6 +1072,11 @@ export interface WorkOverview {
     repack: StepFailure | null;
     reindex: StepFailure | null;
     /**
+     * The catch-up of quotes (catch-up.ts): judging the sources the adds
+     * left unjudged. Cleared once a later tick's step runs through.
+     */
+    quotes: StepFailure | null;
+    /**
      * The tick's step of embedding (embedding.ts): the walk onto the
      * queue, and removing a replaced build's codes. Cleared once a later
      * tick's step runs through.
@@ -872,21 +1115,21 @@ export const storeBytesMax = 10 * 1000 ** 3;
  */
 export type StaffActionOutcome = "done" | "nothing" | "unavailable";
 
-/** How many erasures of one kind are in the ledger, and how many not yet. */
+/** How many erasures are in the ledger, and how many not yet. */
 export interface ErasureCount {
   written: number;
   unwritten: number;
 }
 
 /**
- * The erasures the store applied, as counts only: by kind, written to the
- * ledger or not yet, and by reason. Never which, when, or the SHA-256 the
+ * The erasures of sources the store applied, as counts only: written to
+ * the ledger or not yet, and by reason. Never which, when, or the SHA-256 the
  * ledger names one by: an unsalted hash of an id confirms to anyone
  * holding the id that it was erased.
  */
 export interface ErasuresOverview {
   source: ErasureCount;
-  person: ErasureCount;
+  writer: ErasureCount;
   byReason: Record<ErasureReason, number>;
 }
 
@@ -989,7 +1232,7 @@ export interface Embedders {
 // that fails is retried and, after too many failures, parked where staff
 // see it.
 
-/** The classes of work a hand-over may take (work.ts `workPriorities`). */
+/** The classes of work a hand-over may take (`workPriorities`). */
 export const handOverPriorities = ["conversation"] as const;
 export type HandOverPriority = (typeof handOverPriorities)[number];
 
@@ -1012,11 +1255,17 @@ export type HandOverRequest = z.infer<typeof handOverRequestSchema>;
 
 /**
  * Why a hand-over was refused for good: what it adds was erased (its key
- * is closed, or its one reader's erasure began), the host's answer can't
+ * is closed, or its one reader's erasure began), or removed (its key is
+ * closed, its history kept: `Brain.removeSources`), the host's answer can't
  * be added (no readers, a text that isn't one), or its text is past a
  * source's bound with nothing smaller to keep.
  */
-export const handOverRefusals = ["erased", "invalid", "too_large"] as const;
+export const handOverRefusals = [
+  "erased",
+  "removed",
+  "invalid",
+  "too_large",
+] as const;
 export type HandOverRefusal = (typeof handOverRefusals)[number];
 
 /**
@@ -1039,8 +1288,9 @@ export interface HandOvers {
   /**
    * Hands `source` over as the host's records hold it now, and says how
    * it ended (`HandOverResult`). Throws only for a failure worth trying
-   * again (a store out of reach, an audit write that failed). Safe to
-   * repeat.
+   * again (a store out of reach, an audit write that failed, the store
+   * restoring an export): never refused for a restore, which would settle
+   * it. Safe to repeat.
    */
   handOver: (source: SourceId) => Promise<HandOverResult>;
 }
@@ -1057,6 +1307,12 @@ export interface WorkRequest {
   at: Date;
   embedders: Embedders;
   handOvers: HandOvers;
+  /**
+   * The context window of the models `ask` asks, in tokens (the smallest
+   * of them): what extraction cuts a source's text to, a piece at a time
+   * (`contextTokensSchema`). Null when the host doesn't know it.
+   */
+  contextTokens: number | null;
 }
 
 /**
@@ -1083,6 +1339,16 @@ export const erasureReasons = [
 ] as const;
 export type ErasureReason = (typeof erasureReasons)[number];
 
+/**
+ * What a person's own store answers an erasure of a source
+ * (`Brain.eraseSource`): how many sources it covered, its key's and each
+ * added in it as a group, that held a version as it was applied; a repeat
+ * answers the same. None once the store was erased whole.
+ */
+export interface SourceErased {
+  sources: number;
+}
+
 /** A source to erase, every version of it, and why. */
 export const sourceErasureSchema = z.strictObject({
   source: sourceIdSchema,
@@ -1099,18 +1365,82 @@ export const sourceErasureSchema = z.strictObject({
 export type SourceErasure = z.infer<typeof sourceErasureSchema>;
 
 /**
+ * The most sources one removal takes (`Brain.removeSources`): its keys
+ * are removed in one transaction, each a few indexed statements, so one
+ * call's work stays small whatever a caller has to remove; a caller with
+ * more sends a page after the other.
+ */
+export const removalsMax = 100;
+
+/** Sources to take out of use, keeping their history (`Brain.removeSources`). */
+export const sourceRemovalSchema = z.strictObject({
+  sources: z.array(sourceIdSchema).min(1).max(removalsMax),
+});
+export type SourceRemoval = z.infer<typeof sourceRemovalSchema>;
+
+/**
  * Whether `source` may be in `group`: its key is the group's, "/" and
  * more, so no source joins a group its key isn't under.
  */
 export const isInGroup = (source: string, group: string): boolean =>
   source.length > group.length + 1 && source.startsWith(`${group}/`);
 
-/** A person whose own content to erase, and why. */
+/** A person whose own store to erase whole, and why. */
 export const personErasureSchema = z.strictObject({
   person: principalSchema,
   reason: z.enum(erasureReasons),
 });
 export type PersonErasure = z.infer<typeof personErasureSchema>;
+
+/**
+ * A writer whose memories to erase (`Brain.eraseWriter`): the host's code
+ * as the App it runs (`app:<id>`), as an add names it, and why.
+ */
+export const writerErasureSchema = z.strictObject({
+  writer: principalSchema,
+  reason: z.enum(erasureReasons),
+  /**
+   * The caller's key for this erasure, the same on each of its retries
+   * (one per store deletion, one per data reset): the same change answers
+   * the erasure it made, and erases nothing more; another is another.
+   */
+  change: changeKeySchema,
+});
+export type WriterErasure = z.infer<typeof writerErasureSchema>;
+
+/**
+ * What an erasure of a writer's memories answers: when it was recorded,
+ * and how many memories it covered then; the same on every repeat of its
+ * change (`Brain.eraseWriter`).
+ */
+export interface WriterErased {
+  erasedAt: Date;
+  memories: number;
+}
+
+/**
+ * What staff look up in the store's record of its erasure ledger: a
+ * source, by its key, as it was erased. A person's erasure is no entry of
+ * it: their own store is erased whole, and core keeps the record of that.
+ */
+export const erasureLookupSchema = z.strictObject({ source: sourceIdSchema });
+export type ErasureLookup = z.infer<typeof erasureLookupSchema>;
+
+/**
+ * Whether what staff looked up was erased, and nothing else (no reason,
+ * no count, no hash): `erased`, with when the ledger recorded the latest
+ * erasure of it, once every erasure of it is written to the ledger and
+ * this store's tick has deleted the versions it hid: hidden for good,
+ * nothing can read it and a restore can't bring it back. Its files leave
+ * the bucket in the background, after a 15-minute grace (files.ts), and
+ * a person's own store deletes what it hid on its own tick: neither is
+ * waited for. `erasing` until then; `not_erased` when the record holds no
+ * erasure of it, alike whether it ever existed; `unavailable` while the
+ * store reads its erasure ledger.
+ */
+export type ErasureStatus =
+  | { state: "erased"; at: Date }
+  | { state: "erasing" | "not_erased" | "unavailable" };
 
 /**
  * What every refusal of the store starts with: a call refused for what it
@@ -1356,7 +1686,19 @@ export interface VectorsFound {
 // the one before, which stays as history; a memory of another lineage
 // that says something else makes the fact contested: both stay current
 // and are read together, each with its source. A memory with no listed
-// attribute never ends or contests another.
+// attribute never contests another, and ends only an earlier one of its
+// lineage that it restates: the same statement as search folds text
+// (case, accents, spacing and a final full stop aside, every sign kept),
+// about the same entity, in the same speaker's word, of the same type,
+// related entity and value. So the same fact said twice by one source or
+// writer is one
+// current memory, the earlier kept as history, merged only for readers of
+// the later one.
+// A memory resting on a version before its source's current one ends at
+// that version's add when the current version no longer says its quote,
+// word for word as search folds words, and is current again if a later
+// version says it again; never for a thread (`NewSource.thread`) or a
+// source kept whole (quotes.ts).
 //
 // Who may read a memory: those in the reader set its caller gives
 // (`access`, as a source's), and, when it rests on a source version, only
@@ -1403,8 +1745,9 @@ export interface AttributeRule {
 /**
  * Every attribute a memory may be filed under, per kind of entity: the
  * fixed list. A memory about something not listed has no attribute
- * (`attribute` left out): it is kept and found, and never ends or
- * contests another.
+ * (`attribute` left out): it is kept and found, never contests another,
+ * and ends only an earlier memory of its lineage it restates word for
+ * word.
  */
 export const entityAttributes = {
   person: {
@@ -1541,20 +1884,6 @@ export const memoryTypes = [
 ] as const;
 export type MemoryType = (typeof memoryTypes)[number];
 
-/**
- * Whose word a memory is: an internal person's (`person`, as the host
- * names them: the one who said it, or who confirmed it), an outside
- * party's (a customer's mail, a supplier's document), an agent's (`agent`,
- * as the host names it) or the system's.
- */
-export const speakerSchema = z.discriminatedUnion("kind", [
-  z.strictObject({ kind: z.literal("internal"), person: principalSchema }),
-  z.strictObject({ kind: z.literal("outside") }),
-  z.strictObject({ kind: z.literal("agent"), agent: principalSchema }),
-  z.strictObject({ kind: z.literal("system") }),
-]);
-export type Speaker = z.infer<typeof speakerSchema>;
-
 /** Most memories one add takes, and most entities. */
 export const memoriesPerAddMax = 100;
 
@@ -1576,10 +1905,6 @@ export const memoriesReadMax = 100;
 /** An entity's id: the store's own, the same for every read. */
 export const entityIdSchema = z.uuid();
 export type EntityId = z.infer<typeof entityIdSchema>;
-
-/** A memory's id: the store's own, for citing it and retiring it. */
-export const memoryIdSchema = z.uuid();
-export type MemoryId = z.infer<typeof memoryIdSchema>;
 
 /**
  * An exact identifier of an entity: an email address (compared without
@@ -1626,10 +1951,12 @@ export const nameSchema = someText(valueMaxLength).refine(
  * An entity an add names, by a key of its own within the add (`key`,
  * which its memories use): the known entity `id`, or else one found by
  * its exact identifiers, the first entity of its kind holding any of
- * them (never by a name alone: linking on names and proposals are the
- * linker's), or else a new one. Its names and identifiers are kept as
- * given by each memory of the add that mentions it, so each is visible
- * only to those who can read such a memory.
+ * them; or else, given no identifier, the one entity of its kind holding
+ * one of its names of two words or more through memories read by exactly
+ * the add's readers ("Cards and links" below); or else a new one.
+ * Its names and identifiers are kept as given by each memory of the add
+ * that mentions it, so each is visible only to those who can read such a
+ * memory.
  */
 export const newEntitySchema = z.strictObject({
   key: wellFormedString().min(1).max(64),
@@ -1730,7 +2057,7 @@ export type NewMemory = z.infer<typeof newMemorySchema>;
  *
  * The change key is unique per change within the store, and comes from
  * the change's intent, never minted per attempt: for extraction, the
- * source and version (one add per version); for `remember`, the writer
+ * source, version and piece (one add per piece); for `remember`, the writer
  * and what they said. So a retry, from any caller, is the same change.
  *
  * `extracted` says a version of a source is fully extracted: every memory
@@ -1942,14 +2269,78 @@ export interface ContestedFact {
 }
 
 /**
- * One of the reader's own memories to retire: its lineage is the reader's
- * person, as writer, as `confirmMemory` takes its person from the reader.
+ * Memories to check a reader may still read, by id, and who reads them:
+ * what a host checks before it sends again a memory it once recalled (a
+ * chat's earlier recall).
+ */
+export const readableMemoriesRequestSchema = z.strictObject({
+  memories: z.array(memoryIdSchema).max(readableCheckMax),
+  reader: readerSchema,
+});
+export type ReadableMemoriesRequest = z.infer<
+  typeof readableMemoriesRequestSchema
+>;
+
+/**
+ * A memory to ask whether an erasure took it (`Brain.erasedOf`), with what
+ * it rests on as a host read it when it was handed over: the key of the
+ * source it was drawn from, or its writer, and when the store learned it.
+ * What decides is the erasure ledger alone, which outlives a lost storage:
+ * never whether the store holds the memory now.
+ */
+export const erasedMemorySchema = z.strictObject({
+  memory: memoryIdSchema,
+  source: sourceIdSchema.nullable(),
+  writer: principalSchema.nullable(),
+  learnedAt: z.int().nonnegative(),
+});
+export type ErasedMemory = z.infer<typeof erasedMemorySchema>;
+
+/**
+ * Keys and memories to ask whether an erasure took them for good
+ * (`Brain.erasedOf`): what a host once read itself.
+ */
+export const erasedRequestSchema = z.strictObject({
+  sources: z.array(sourceIdSchema).max(readableCheckMax),
+  memories: z.array(erasedMemorySchema).max(readableCheckMax),
+});
+export type ErasedRequest = z.infer<typeof erasedRequestSchema>;
+
+/** Of what `erasedOf` was asked, what an erasure took for good. */
+export interface Erased {
+  sources: SourceId[];
+  memories: MemoryId[];
+}
+
+/**
+ * A memory of `writer`'s own to retire (its lineage is that writer's), that
+ * the reader may read: a person forgetting their own word is both writer
+ * and reader; the host's code writes as the App it runs (`app:<id>`), with
+ * a reader of no person. The writer is the host's to decide, as an add's.
  */
 export const retireRequestSchema = z.strictObject({
   memory: memoryIdSchema,
-  reader: personReaderSchema,
+  reader: readerSchema,
+  writer: principalSchema,
+  /**
+   * The caller's key for this retirement, the same on each of its retries
+   * (an id minted per person and request, say): kept with the retirement,
+   * so a repeat tells the call that retired the memory from another.
+   */
+  change: changeKeySchema,
 });
 export type RetireRequest = z.infer<typeof retireRequestSchema>;
+
+/**
+ * A retired memory: when it was retired and by which change, as recorded,
+ * the same on every repeat, whoever repeats it. `change` is the stored
+ * one: a call whose own change differs did not retire it. Null for one
+ * retired before changes were kept.
+ */
+export interface RetiredMemory {
+  retiredAt: Date;
+  change: string | null;
+}
 
 /** A memory the reader confirms, as their own word. */
 export const confirmRequestSchema = z.strictObject({
@@ -1995,12 +2386,29 @@ export type EntitiesRequest = z.input<typeof entitiesRequestSchema>;
 /**
  * A page of entities, by when the first memory the reader may read that
  * mentions each was learned, then id; whether more follow, and where to
- * go on from.
+ * go on from. A memory its writer retired gives nothing to a find: no
+ * mention, no name or identifier asked.
  */
 export interface EntityPage {
   entities: Entity[];
   more: boolean;
   next?: EntitiesCursor;
+  /**
+   * Every version of a source what the page says rests on, each once:
+   * for each entity, the first memory the reader may read that mentions
+   * it (what makes it seen, and where it stands), the memory that gave
+   * its name, and the earliest that gave each name or identifier asked;
+   * and the first such memory of the entity past the page, which `more`
+   * says follows. None for what rests on a writer's word. For the host
+   * to keep with what it hands on (a run's pins); never shown to anyone.
+   */
+  restsOn: SourceVersionRef[];
+  /**
+   * Every memory in a writer's own word (no source) what the page says
+   * rests on, by id, each once: of the same memories as `restsOn`, those
+   * it has no version for. For the host to keep as `restsOn`.
+   */
+  restsOnWords: MemoryId[];
 }
 
 /** An entity to read, for a reader. */
@@ -2012,9 +2420,12 @@ export type EntityRequest = z.infer<typeof entityRequestSchema>;
 
 /**
  * An entity as a reader sees it: its kind, and its earliest name a memory
- * the reader may read gave (by when that memory was learned, then its
- * id), or null. Every name and identifier they may see is read a page at
- * a time (`readEntityNames`).
+ * the reader may read, not retired by its writer, gave (by when that
+ * memory was learned, then its id), or null when only retired memories
+ * gave one. A retired memory stays history (`readMemories` with
+ * `history`) and gives nothing else: an entity only retired memories
+ * mention is not seen. Every name and identifier they may see is read a
+ * page at a time (`readEntityNames`).
  */
 export interface Entity {
   id: EntityId;
@@ -2077,6 +2488,196 @@ export interface EntityNamesPage {
  */
 export type MemoryChangeOutcome = "done" | "nothing";
 
+// Cards and links (cards.ts, linking.ts).
+//
+// An entity's card is a view, built for each reader when asked, from the
+// memories that reader may read: never stored, so nothing has to be kept
+// in step and nobody sees a line they shouldn't.
+//
+// An add links an entity on exact evidence (contract `NewEntity`): its
+// known id, an exact identifier, or else an exact name, only where one
+// entity of its kind alone holds that name through memories read by
+// exactly the add's readers (so a link is never decided on what other
+// readers hold). A likely match short of that is never a link: proposing
+// one is GRA-1857's, joining two GRA-1835's.
+//
+// The order of adds decides a link. An entity given an identifier links
+// by its identifiers alone; one given none links by its exact name. So
+// "Jan de Vries" with an email, then "Jan de Vries" alone, are one
+// entity; "Jan de Vries" alone first, then with the email, are two. Two
+// entities of one add with the same name are not linked to each other by
+// it, and a later add of that name, finding two holders, links to
+// neither.
+//
+// A link, once made, stays; erasing the evidence does not undo it. Jan
+// holds email x; a source says "Anna Smit" has email x, so her entity is
+// Jan's (by the identifier); "Anna Smit" added without one then links to
+// it by her name. Erasing the source leaves Anna's memories on Jan's
+// card, and later adds of "Anna Smit" go on linking there. No reader sees
+// more than they may read (the readers are the same), but the evidence
+// for the join is gone, and nothing splits an entity.
+
+/**
+ * An entity's card to read, for a reader: as now, or as of a moment; a
+ * page at a time, as `readMemories` pages the memories it is built from.
+ */
+export const cardRequestSchema = z.strictObject({
+  entity: entityIdSchema,
+  reader: readerSchema,
+  asOf: z.date().optional(),
+  after: memoriesCursorSchema.optional(),
+  limit: z.int().min(1).max(memoriesReadMax).default(memoriesReadMax),
+});
+export type CardRequest = z.input<typeof cardRequestSchema>;
+
+/**
+ * An attribute of an entity on a card: its current memories the reader
+ * may read (one, or several for an attribute of many values, or for a
+ * contested one: each side with its source), and whether it is contested.
+ */
+export interface CardAttribute {
+  attribute: string;
+  memories: Memory[];
+  contested: boolean;
+}
+
+/**
+ * A relation on a card: a current memory relating the entity to another
+ * (`other`, as the reader sees it), the entity being what the memory is
+ * about (`about`) or what it relates to (`object`).
+ */
+export interface CardRelation {
+  attribute: string | null;
+  side: "about" | "object";
+  other: Entity;
+  memory: Memory;
+}
+
+/**
+ * A page of an entity's card as a reader sees it: the entity, its
+ * current values per attribute (`attributes`, in the order of the kind's
+ * list), its relations, and its current memories filed under no
+ * attribute (`notes`); all from a page of the memories the reader may
+ * read about it, in `readMemories`' order; whether more follow, and
+ * where to go on from. An attribute's values may go on in the next page.
+ */
+export interface Card {
+  entity: Entity;
+  attributes: CardAttribute[];
+  relations: CardRelation[];
+  notes: Memory[];
+  more: boolean;
+  next?: MemoriesCursor;
+  /**
+   * Every version of a source what the card says rests on, each once: its
+   * memories'; the first memory the reader may read that mentions its
+   * entity (what makes it seen); the memories that gave its entity's name
+   * and each related one's; each contested memory's current rivals (what
+   * makes it contested); the memories each counted confirmation was made
+   * over (what makes one count); and the memory past the page, which
+   * `more` says follows. None for what rests on a writer's word. For the
+   * host to keep with what it hands on (a run's pins); never shown to
+   * anyone.
+   */
+  restsOn: SourceVersionRef[];
+  /**
+   * Every memory in a writer's own word (no source) what the card says
+   * rests on, by id, each once: of the same memories as `restsOn`, those
+   * it has no version for. For the host to keep as `restsOn`.
+   */
+  restsOnWords: MemoryId[];
+}
+
+// Memories in a recall's pack (recall-memories.ts, pack.ts).
+
+/**
+ * How recall found a memory: by its statement's words (`words`), or along
+ * the relations of an entity the question names (`entities`), at most two
+ * steps; or as another side of a contested fact it found (`contested`).
+ */
+export type MemoryFoundBy = "words" | "entities" | "contested";
+
+/**
+ * A memory one store found for a recall, with what its way orders it by,
+ * as the way's statement gave them; its passage
+ * around its quote (`context`: the chunk of its version holding the
+ * quote, or none), and for the entities way how many steps from an
+ * entity the question names (0 to 2).
+ */
+export interface FoundMemory extends Memory {
+  words: number;
+  exact: number;
+  step: number;
+  /**
+   * When the reader last used it, as the request said (`used`), or null:
+   * with `learnedAt`, its freshness for them, which recall ranks by.
+   */
+  usedAt: Date | null;
+  context: { position: number; text: string } | null;
+}
+
+/**
+ * A memory in a pack: its stable id and what it is about, its statement,
+ * its source (or writer) to cite, whose word it is, its dates; its quote
+ * and the passage around it (`context`) when the budget allowed (null
+ * otherwise, or when it has none), whether it is contested, and how it
+ * was found.
+ */
+export interface PackMemory {
+  memory: MemoryId;
+  about: EntityId;
+  attribute: string | null;
+  object: EntityId | null;
+  /**
+   * What it says, as a kind. An instruction is in a pack only for its
+   * writer, as their own (`writer` is the reader): a consumer presents it
+   * as an instruction only in that person's own chats.
+   */
+  type: MemoryType;
+  statement: string;
+  quote: string | null;
+  context: { position: number; text: string } | null;
+  source: SourceVersionRef | null;
+  writer: string | null;
+  speaker: Speaker;
+  validFrom: Date | null;
+  validUntil: Date | null;
+  learnedAt: Date;
+  contested: boolean;
+  confirmed: boolean;
+  found: MemoryFoundBy;
+}
+
+/**
+ * A contested fact in a pack: an entity's attribute for which the pack
+ * holds current memories of more than one lineage saying different
+ * things, by their ids, each in `memories`.
+ */
+export interface PackContested {
+  about: EntityId;
+  attribute: string;
+  memories: MemoryId[];
+}
+
+/**
+ * The tokens a memory takes of a pack's budget: its statement, quote and
+ * context as held, and its citation (its id and source or writer).
+ */
+export const packMemoryTokens = ({
+  memory,
+  statement,
+  quote,
+  context,
+  source,
+  writer,
+}: PackMemory): number =>
+  tokensOf(statement) +
+  tokensOf(quote ?? "") +
+  tokensOf(context?.text ?? "") +
+  tokensOf(
+    `${memory} ${source === null ? (writer ?? "") : `${source.source} ${source.version}`}`
+  );
+
 /** The Brain, as its host calls it. */
 export interface Brain {
   /**
@@ -2088,7 +2689,7 @@ export interface Brain {
    * current version is that version. So an add is safe to repeat, late
    * or at once, after a lost reply or a crash.
    */
-  addSource: (source: NewSource) => Promise<SourceVersionRef>;
+  addSource: (source: NewSource) => Promise<AddedVersion>;
   /**
    * Adds a version of an instruction file as `addSource` adds a source,
    * with the same versions, change keys and safe repeats, but kept whole:
@@ -2097,9 +2698,10 @@ export interface Brain {
    * kept in that person's own store alone. With `after`, only over that
    * current version (null: none yet), checked in the writing transaction:
    * otherwise refused with `staleVersion`, nothing written; a change it
-   * has answers with its version first.
+   * has answers with its version first. Answers when that version was
+   * added too, so a repeat answers the time the first try made.
    */
-  addInstructions: (source: NewInstructions) => Promise<SourceVersionRef>;
+  addInstructions: (source: NewInstructions) => Promise<AddedInstructions>;
   /**
    * A pack of what the reader may read for the question, within its
    * budget. Two ways search at once, each among the passages of the
@@ -2137,6 +2739,12 @@ export interface Brain {
    */
   find: (request: RecallRequest) => Promise<Finding>;
   /**
+   * What `find` finds of passages alone: no memory is read, so no memory
+   * way runs, counts or can fail it (`memories` is empty). For a host
+   * that hands on passages alone.
+   */
+  findPassages: (request: RecallRequest) => Promise<Finding>;
+  /**
    * A version of a source, current or history, whole as it was added, for
    * a reader among that version's readers and the source's current
    * version's, with the groups the host counts them in now: `null` when
@@ -2161,7 +2769,8 @@ export interface Brain {
   /**
    * What this store has of the key `source`, whoever may read it: `erased`
    * when an erasure closed it, `held` when a version of it is kept
-   * (current or history), `free` when it was never given it. For the host
+   * (current or history) or it was removed (`removeSources`), `free` when
+   * it was never given it. For the host
    * only, before it keeps a source in another store (one person's own):
    * a key lives in one store. A person's own store erased whole holds
    * nothing: `free`.
@@ -2285,20 +2894,62 @@ export interface Brain {
    * it (`<group>/…`) is refused and answers `erased` (`keyState`), named
    * in the group or not; a key no add named as a group closes alone, so
    * `upload:1` erased leaves `upload:1/x` free. Never an erasure by
-   * prefix: what is erased is the key and its group's members. It
-   * answers alike whether the source held anything, and is safe to
-   * repeat.
+   * prefix: what is erased is the key and its group's members. Safe to
+   * repeat. The shared store answers nothing, alike whether the source
+   * held anything; a person's own store, whose caller acts for that
+   * person, answers how many sources the erasure covered, the same each
+   * time it is repeated (`SourceErased`).
    */
-  eraseSource: (request: SourceErasure) => Promise<void>;
+  eraseSource: (request: SourceErasure) => Promise<SourceErased | undefined>;
   /**
-   * Erases what only `person` may read, as `eraseSource` erases a source:
-   * every version readable by them alone, added up to now, and whole each
-   * source whose current version is such, and every memory readable by
-   * them alone, learned up to now, at once. A source others read now keeps
-   * their versions. Content added for them afterwards is new and kept.
-   * Answers alike whatever they held, and is safe to repeat.
+   * Takes sources out of use for good and keeps their history (removal.ts),
+   * up to `removalsMax` at once, all in one transaction: from when it
+   * returns, nothing of them is found, listed or read by anyone, history
+   * and memories drawn from them included, and nothing new is drawn from
+   * them. Their versions, memories and files stay, and nothing is written
+   * to the ledger. Each key is closed: an add to it, a retry of an earlier
+   * change included, is refused (`removedSource`), and nothing puts it
+   * back in use. An export holds them removed, and a restore brings them
+   * back so. `eraseSource` still erases one for good. Covers each key's
+   * own source alone, never a group's members. Safe to repeat, and
+   * answers alike whatever there was.
+   */
+  removeSources: (request: SourceRemoval) => Promise<void>;
+  /**
+   * Erases `person`'s own store whole, the one place what only they may
+   * read is kept: everything it holds, and from then on every call is
+   * refused, also after a restore of its storage. Safe to repeat. A
+   * person's own store alone, and only for that person: the shared store
+   * holds nothing only one person may read (it refuses such an add), so it
+   * refuses this.
    */
   erasePerson: (request: PersonErasure) => Promise<void>;
+  /**
+   * Erases every memory `writer` wrote (its lineage is the writer's),
+   * learned up to now, retired ones too, as `eraseSource` erases a source:
+   * recorded in the ledger and hidden from every read at once, deleted by
+   * the tick if not by the call, with every name, entity, link and
+   * confirmation that rests on them alone; a restore of an older copy or
+   * of an export can't bring them back. Nothing else is touched: no
+   * source, and no memory of anyone else, on the same entity or not. The
+   * writer isn't closed: what it adds afterwards is new and kept. Answers
+   * when it was recorded and how many memories it covered
+   * (`WriterErased`); repeated with the same change, the same again and
+   * nothing more erased, also after a restart or a restore, so a retry's
+   * answer is the first one's. Another change is another erasure. Returns only
+   * once the erasure is in the ledger: one that throws must be repeated.
+   * The shared store's alone: a person's own store refuses.
+   */
+  eraseWriter: (request: WriterErasure) => Promise<WriterErased>;
+  /**
+   * Whether a source was erased, from the store's record of its ledger
+   * alone (`ErasureStatus`). For staff, who name what a client
+   * gave them: it reads nothing but that record, so what was never erased
+   * answers as what never existed. The shared store's alone: a person's
+   * own store refuses, as it does `handOver` (staff's lookup reads a
+   * person's own erasure from core's record of it, never from their store).
+   */
+  erasureStatus: (request: ErasureLookup) => Promise<ErasureStatus>;
   /**
    * Starts an export of the company's Brain for `deployment`, written by
    * the queue a part a run as files in the store's part of the bucket
@@ -2398,16 +3049,49 @@ export interface Brain {
    */
   listContested: (request: ContestedRequest) => Promise<ContestedPage>;
   /**
-   * Retires one of the reader's own memories (its lineage is the reader's
-   * person, as writer) that they may read and that is not retired: current,
-   * or ended by a newer one of theirs. It stops being current from now on,
-   * or can never become current again, and stays as history. It no longer
-   * ends older memories, which may become current again unless retired
-   * too. One already retired answers `done` again, so a retry never reads
-   * as not found; one outside its time (expired) answers `nothing`, as one
-   * not theirs.
+   * Of the memories asked for, by id, those the reader may read now (as
+   * `readMemories` decides who may read one) and their writer has not
+   * retired, in the order asked and each once: what a host checks before
+   * it sends again a memory it once recalled (a chat's earlier recall).
+   * Each left out alike, whether it doesn't exist, was erased, rests on a
+   * version the reader may no longer read, or was retired. One ended by a
+   * newer memory of its lineage, or whose time is over, stays: as a
+   * source's older version stays readable once a newer one is added.
    */
-  retireMemory: (request: RetireRequest) => Promise<MemoryChangeOutcome>;
+  readableMemories: (request: ReadableMemoriesRequest) => Promise<MemoryId[]>;
+  /**
+   * Of the keys and memories asked, those an erasure took for good, as
+   * the erasure ledger alone says it, whoever may read them, in the order
+   * asked and each once: a key as `keyState` answers `erased`; a memory
+   * whose source's key is so erased, or whose writer was erased after the
+   * store learned it (`eraseWriter`). Never a retired memory, a key whose
+   * readers only changed, nor a memory only because the store doesn't
+   * hold it now: a lost storage, until a restore puts it back, lacks what
+   * was never erased. For the host only, which asks of what it once read
+   * itself, to replace what a chat showed of it. Ids alone, never text or
+   * readers. A person's own store erased whole answers all of it; a store
+   * restoring an export refuses (`restoringNow`).
+   */
+  erasedOf: (request: ErasedRequest) => Promise<Erased>;
+  /**
+   * Retires one of the writer's own memories (its lineage is the writer's,
+   * `RetireRequest`) that the reader may read and that is not retired:
+   * current, or ended by a newer one of the writer's. It stops being
+   * current from now on, or can never become current again, and stays as
+   * history. It no longer ends older memories, which may become current
+   * again unless retired too. Answers when it was retired and by which
+   * change, as recorded (`RetiredMemory`): one this writer already retired
+   * answers that same time and change again, whatever change the call
+   * names, and changes nothing, so a retry never reads as not found nor
+   * gets a new time, and a call that didn't retire it can tell by the
+   * change.
+   * Null alike when there is no such memory, when it is another writer's
+   * (retired or not), when the reader may not read it, and when it
+   * expired before it was retired: nothing tells another writer's memory
+   * from one there isn't. One this writer retired that expired afterwards
+   * still answers its time on a repeat.
+   */
+  retireMemory: (request: RetireRequest) => Promise<RetiredMemory | null>;
   /**
    * The reader confirms a current memory they may read, over the current
    * memories of other lineages they may read that say something else of
@@ -2445,6 +3129,13 @@ export interface Brain {
   readEntityNames: (request: EntityNamesRequest) => Promise<EntityNamesPage>;
   /** An entity, if the reader may see it; null alike when there is none. */
   readEntity: (request: EntityRequest) => Promise<Entity | null>;
+  /**
+   * An entity's card as the reader sees it (`Card`), built now from the
+   * memories they may read: null when they may see no such entity, alike
+   * for one nobody holds; with `asOf`, null too when no memory they may
+   * read mentioned it by then.
+   */
+  readCard: (request: CardRequest) => Promise<Card | null>;
 }
 
 /** The shared store's name: everything readable by more than one person. */

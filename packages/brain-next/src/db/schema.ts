@@ -114,13 +114,54 @@ export const sourceVersions = sqliteTable(
  * version whole (its chunks and their words), so recall never sees half
  * of one. The versions it no longer points at are history.
  */
-export const currentVersions = sqliteTable("current_versions", {
-  source: text().primaryKey(),
-  versionRow: integer("version_row")
-    .notNull()
-    .unique()
-    .references(() => sourceVersions.row),
-});
+export const currentVersions = sqliteTable(
+  "current_versions",
+  {
+    source: text().primaryKey(),
+    versionRow: integer("version_row")
+      .notNull()
+      .unique()
+      .references(() => sourceVersions.row),
+    /**
+     * The version the source's memories were last judged against
+     * (quotes.ts): its out memories (`memory_outs`) count only while this
+     * is `version_row`. Set with the pointer by an add; a path that moves
+     * the pointer without judging (a restore, an older release) leaves it
+     * behind, and the source's out memories then count for no one until it
+     * is judged again. Added by a later migration than the table's: null
+     * in a store made before it.
+     */
+    judgedRow: integer("judged_row"),
+  },
+  (table) => [
+    // The sources whose memories are not judged against their current
+    // version: what the catch-up walks (catch-up.ts).
+    index("current_versions_unjudged_idx")
+      .on(table.source)
+      .where(sql`judged_row IS NOT version_row`),
+  ]
+);
+
+/**
+ * A source taken out of use for good, its history kept (removal.ts): its
+ * key, as the erasure ledger names it too, and the version that was
+ * current then, if any. It has no current version, so nothing reads it,
+ * and an add to its key is refused while this row is there. An erasure
+ * that hides that version clears `version_row`, and one of the key
+ * deletes the row (erasure.ts).
+ */
+export const removedSources = sqliteTable(
+  "removed_sources",
+  {
+    source: text().primaryKey(),
+    /** The SHA-256 of the source's key, in hex. */
+    subject: text().notNull(),
+    versionRow: integer("version_row")
+      .unique()
+      .references(() => sourceVersions.row),
+  },
+  (table) => [index("removed_sources_subject_idx").on(table.subject)]
+);
 
 /**
  * The changes each source was added with: a key its producer gives each
@@ -138,8 +179,23 @@ export const sourceChanges = sqliteTable(
     versionRow: integer("version_row")
       .notNull()
       .references(() => sourceVersions.row),
+    /**
+     * When its producer read the text it added, if it said
+     * (`NewSource.readAt`). A version's latest is when its text was last
+     * read: no add of an earlier read replaces it (sources.ts
+     * `newerThan`). Each change keeps its own, so a later read of the same
+     * text, kept as a change of the version it matches, moves it on
+     * without anything being overwritten.
+     */
+    readAt: integer("read_at", { mode: "timestamp_ms" }),
   },
-  (table) => [primaryKey({ columns: [table.source, table.change] })]
+  (table) => [
+    primaryKey({ columns: [table.source, table.change] }),
+    // A version's changes, and the latest read of them, without a scan:
+    // `newerThan` inside the store's write, and the export's latest read
+    // and change keys of each version.
+    index("source_changes_version_idx").on(table.versionRow, table.readAt),
+  ]
 );
 
 /**
@@ -300,7 +356,7 @@ export const workItems = sqliteTable(
     key: text().notNull(),
     /** What its handler is given, as JSON. */
     payload: text().notNull(),
-    /** Its class, the first first (work.ts `workPriorities`). */
+    /** Its class, the first first (contract.ts `workPriorities`). */
     priority: integer().notNull(),
     /** The connection it belongs to, if any: each has its own limit at once. */
     connection: text(),
@@ -352,6 +408,13 @@ export const workItems = sqliteTable(
     index("work_items_parked_idx")
       .on(table.parkedAt, table.id)
       .where(sql.raw("parked_at IS NOT NULL")),
+    // Every item about a key, of any kind, waiting or running: what an
+    // erasure deletes for each source whose current version it hides
+    // (erasure.ts `hideVersions`). Without it each such delete reads the
+    // whole queue, so a group's erasure costs its sources times the
+    // queue: 50,000 sources with an item each took 56 s in workerd, past
+    // a Durable Object request's 30 s of CPU, every retry alike.
+    index("work_items_key_idx").on(table.key),
     check("work_items_priority", sql.raw("priority BETWEEN 0 AND 4")),
   ]
 );
@@ -406,39 +469,87 @@ export const wordIndex = sqliteTable(
 // Erasure (erasure.ts). `erasures` keeps each erasure the store applied,
 // by its key in the ledger in the Brain's bucket, and is how an erased
 // source's key stays closed; `erasing_versions` the versions an erasure
-// hid and the tick has still to delete; `erased_versions` what a person's
-// erasure hid, kept for good; `source_subjects` each source's key as the
-// ledger names it, so a replay finds a source by SQL.
+// hid and the tick has still to delete; `source_subjects` each source's
+// key as the ledger names it, so a replay finds a source by SQL.
 
 /**
  * An erasure the store applied, as its ledger entry names it: no content
  * and no plain id. Recorded before its ledger entry is written, then
  * confirmed once the entry is in the bucket. Never deleted: it closes an
- * erased source's key, and the last one is where a replay of the ledger
- * starts.
+ * erased source's key, hides a writer's memories learned before it
+ * (memories.ts `unerasedSql`), and the last one is where a replay of the
+ * ledger starts.
  */
 export const erasures = sqliteTable(
   "erasures",
   {
     /** Its key in the ledger (erasure.ts `ledgerKeyOf`). */
     key: text().primaryKey(),
-    kind: text({ enum: ["source", "person"] }).notNull(),
-    /** The SHA-256 of the source's key or the person's id, in hex. */
+    /**
+     * `source`, or `writer` (a writer's memories, erasure.ts
+     * `eraseWriter`). `person`: a person's erasure the shared store
+     * recorded until it refused what only one person may read (GRA-1903);
+     * nothing reads one, and none was ever released.
+     */
+    kind: text({ enum: ["source", "person", "writer"] }).notNull(),
+    /**
+     * The SHA-256 of the source's key, or of the writer's lineage
+     * (`writer:<id>`); of the person's id for `person`. In hex.
+     */
     subject: text().notNull(),
     /** Why (contract.ts `erasureReasons`). */
     reason: text().notNull(),
     erasedAt: integer("erased_at", { mode: "timestamp_ms" }).notNull(),
     /** Whether its ledger entry is known to be in the bucket, every part. */
     confirmed: integer({ mode: "boolean" }).notNull().default(false),
+    /**
+     * How many sources a source's erasure covered as it was applied: its
+     * key's and each added in it as a group (erasure.ts `apply`), so a
+     * repeat answers what it erased. Null for one recorded before it was
+     * kept.
+     */
+    sources: integer(),
+    /**
+     * How many memories a writer's erasure covered as it was applied
+     * (erasure.ts `apply`), so a repeat answers what it erased. Null for
+     * the other kinds.
+     */
+    memories: integer(),
+    /**
+     * The SHA-256 of the change a writer's erasure was asked under
+     * (contract.ts `WriterErasure.change`), as its ledger entry keeps it:
+     * the same change again answers this erasure. Null for the other kinds.
+     */
+    change: text(),
+    /**
+     * How far a writer's erasure has gone through the memories it hides,
+     * in the order of the writer's index (`memories_writer_idx`): the
+     * moment learned and the row of the last one a batch took
+     * (erasure.ts `eraseWriterBatch`), deleted or failed. Null before the
+     * first. What it hides is fixed once it is applied (erasure.ts
+     * `eraseWriterBatch`: no add or restore writes one it covers), so none lies
+     * behind it unseen.
+     */
+    sweptLearnedAt: integer("swept_learned_at"),
+    sweptRow: integer("swept_row"),
   },
   (table) => [
     // An add looks up whether its source, or its one reader, was erased.
     index("erasures_subject_idx").on(table.kind, table.subject),
+    // Whether an erasure of a memory's writer came after it was learned,
+    // asked of every memory a read takes (memories.ts `unerasedSql`): one
+    // seek, however often the writer was erased.
+    index("erasures_writer_idx")
+      .on(table.subject, table.erasedAt)
+      .where(sql.raw("kind = 'writer'")),
     // The tick confirms what isn't yet.
     index("erasures_unconfirmed_idx")
       .on(table.key)
       .where(sql.raw("confirmed = 0")),
-    check("erasures_kind", sql`${table.kind} IN ('source', 'person')`),
+    check(
+      "erasures_kind",
+      sql`${table.kind} IN ('source', 'person', 'writer')`
+    ),
   ]
 );
 
@@ -523,8 +634,7 @@ export const erasingVersions = sqliteTable(
 /**
  * A source's key as the erasure ledger names it: its SHA-256, written
  * with the source's first version, so a replay finds the source the
- * ledger names in SQL, and a person's erasure names the sources it hid.
- * With it, the SHA-256 of the group it was added in (`NewSource.group`),
+ * ledger names in SQL. With it, the SHA-256 of the group it was added in (`NewSource.group`),
  * for good: null for a source in none. A group's erasure finds its
  * sources by it.
  */
@@ -534,6 +644,12 @@ export const sourceSubjects = sqliteTable(
     source: text().primaryKey(),
     subject: text().notNull(),
     group: text("group_subject"),
+    /**
+     * Whether the source is a thread (`NewSource.thread`), for good: one
+     * version per message, each holding that message's words alone, so a
+     * later version never puts out or ends what an earlier one said.
+     */
+    thread: integer({ mode: "boolean" }).notNull().default(false),
   },
   (table) => [
     index("source_subjects_subject_idx").on(table.subject),
@@ -553,13 +669,11 @@ export const knownGroups = sqliteTable("known_groups", {
 });
 
 /**
- * What a person's erasure hid, a row a version: by number under the
- * SHA-256 of its source's key, as its ledger entry holds it (erasure.ts),
- * kept after the version is deleted, so the entry can be written again
- * whole, part by part, however many versions it names. A source's erasure
- * has none: it hides every version of its source. Kept for good, as the
- * erasure's own record, costing storage only: they hold nothing but
- * hashes and version numbers.
+ * What a person's erasure in the shared store hid, a row a version: by
+ * number under the SHA-256 of its source's key. Neither written nor read
+ * since that erasure went (GRA-1903). Kept, as expand then contract asks:
+ * a release an admin rolls back to reads it as it adds a version, so it
+ * is dropped in a later release (GRA-1907).
  */
 export const erasedVersions = sqliteTable(
   "erased_versions",
@@ -590,7 +704,13 @@ export const unembeddable = sqliteTable(
     model: text().notNull(),
     hash: text().notNull(),
   },
-  (table) => [primaryKey({ columns: [table.model, table.hash] })]
+  (table) => [
+    primaryKey({ columns: [table.model, table.hash] }),
+    // A text's passages in every model, as a version that stops being
+    // current or is erased lets go of them (files.ts `releaseVectors`),
+    // without reading the whole table for each such version.
+    index("unembeddable_hash_idx").on(table.hash),
+  ]
 );
 
 // Exports and restores (exports.ts, restore.ts). An export writes what a
@@ -761,9 +881,11 @@ export const entities = sqliteTable(
  * A memory (contract.ts `Memory`). Its lineage is the source it rests on
  * (`source:` and the source's key) or its writer (`writer:` and their
  * id); `lineage_order` orders a lineage's memories, the version number
- * for a source's, 0 for a writer's, then `row`. `value_key` is what
- * one-value attributes compare: the value folded, or the related entity's
- * id.
+ * for a source's, 0 for a writer's, then `row`. `value_key` is what a
+ * newer memory of its lineage must match to end it (remember.ts
+ * `valueKeyFor`): for an attribute, the value folded or the related
+ * entity's id; filed under none, a SHA-256 of the statement folded, its
+ * type, speaker and value, and the related entity's id.
  */
 export const memories = sqliteTable(
   "memories",
@@ -798,6 +920,14 @@ export const memories = sqliteTable(
      */
     subject: text(),
     writer: text(),
+    /**
+     * The SHA-256 of the writer's lineage (`lineage`), as the erasure
+     * ledger names a writer: how a read finds the writer's erasures, and a
+     * replay what they covered (erasure.ts). Null for a source's memory.
+     * Set by every add and restore: no release before it wrote a writer's
+     * memories to the shared store.
+     */
+    writerSubject: text("writer_subject"),
     lineage: text().notNull(),
     lineageOrder: integer("lineage_order").notNull(),
     /** Whose word it is, as JSON (contract.ts `Speaker`). */
@@ -806,6 +936,13 @@ export const memories = sqliteTable(
     validUntil: integer("valid_until"),
     learnedAt: integer("learned_at").notNull(),
     retiredAt: integer("retired_at"),
+    /**
+     * The change that retired it, as its caller named it
+     * (contract.ts `RetireRequest.change`): what a repeat, by that caller
+     * or another, is answered with, so only the one that retired it reads
+     * as having done so. Null for one retired before it was kept.
+     */
+    retiredChange: text("retired_change"),
     readers: text().notNull(),
   },
   (table) => [
@@ -815,9 +952,26 @@ export const memories = sqliteTable(
       table.lineage
     ),
     index("memories_object_idx").on(table.object),
+    // The relations between two given entities, and an entity's facts
+    // (object null) apart from its relations: what recall's walk seeks
+    // (recall-memories.ts), never reading a hub's relations whole. Added
+    // by a later migration than the table's: a store made before it gains
+    // it then.
+    index("memories_entity_object_idx").on(table.entity, table.object),
+    // A lineage's newer memories of the same value, for an attribute of
+    // many values (memories.ts `newerSql`): one seek, never the lineage.
+    index("memories_lineage_value_idx").on(
+      table.entity,
+      table.attribute,
+      table.lineage,
+      table.valueKey
+    ),
     index("memories_version_idx").on(table.source, table.version),
     index("memories_subject_idx").on(table.subject, table.version),
     index("memories_readers_idx").on(table.readers),
+    // A writer's memories learned before its erasure: what the erasure
+    // deletes, a batch at a time (erasure.ts `eraseWriterBatch`).
+    index("memories_writer_idx").on(table.writerSubject, table.learnedAt),
   ]
 );
 
@@ -845,6 +999,9 @@ export const entityNames = sqliteTable(
       columns: [table.entity, table.memory, table.type, table.folded],
     }),
     index("entity_names_folded_idx").on(table.type, table.folded, table.entity),
+    // An entity's names of one type (its earliest name): without it the
+    // planner seeks by type alone, every name.
+    index("entity_names_entity_idx").on(table.entity, table.type, table.folded),
     index("entity_names_memory_idx").on(table.memory),
   ]
 );
@@ -922,6 +1079,25 @@ export const memoryChanges = sqliteTable("memory_changes", {
 });
 
 /**
+ * A memory a writer's erasure hides that failed to delete, and how often
+ * (erasure.ts `eraseWriterBatch`): it goes behind the others, so a
+ * batch's worth that keep failing never holds the rest back. Deleted with
+ * the memory. By the memory's row, which is never used again
+ * (`AUTOINCREMENT`).
+ */
+export const memoryEraseFailures = sqliteTable(
+  "memory_erase_failures",
+  {
+    memory: integer().primaryKey(),
+    failures: integer().notNull(),
+  },
+  // Those that failed least often first, a batch's worth: a seek.
+  (table) => [
+    index("memory_erase_failures_order_idx").on(table.failures, table.memory),
+  ]
+);
+
+/**
  * How far the start-up replay of erasures on memories has come (erasure.ts
  * `replayMemoryErasures`): the highest `erasures` rowid it applied. One
  * row. A table older releases do not know, so an erasure one records
@@ -950,3 +1126,92 @@ export const memoryStamps = sqliteTable(
   },
   () => [check("memory_stamps_one", sql.raw("id = 1"))]
 );
+
+// Quotes against the current version (quotes.ts). A memory resting on a
+// version before its source's current one is out when the current
+// version's text no longer holds its quote, word for word; judged in the
+// transaction that changes either, never on the queue. Neither table holds
+// content, and both go with their memory (`ON DELETE CASCADE`). So a
+// migration that makes `memories` anew (copy, drop, rename, as migration
+// 0016 makes `erasures`) fires that cascade and wipes every out and in
+// row: it must also set every `current_versions.judged_row` to null and
+// delete every `memory_judging_places` row, so each source is judged again
+// in full by the catch-up (catch-up.ts), from its first memory, rather
+// than its out memories reading in.
+
+/**
+ * A memory that is out: resting on a version before its source's current
+ * one, whose text lacks its quote. Read as ended at the current version's
+ * add (memories.ts `endedAtSql`), while that version is the one judged
+ * (`current_versions.judged_row`). `pair` is the first two words of its
+ * quote, folded (the one word of a quote of one; null for a quote of
+ * none): how a later version's add finds the out memories whose quote may
+ * be back, by its own text's words, never by reading them all.
+ */
+export const memoryOuts = sqliteTable(
+  "memory_outs",
+  {
+    memory: integer()
+      .primaryKey()
+      .references(() => memories.row, { onDelete: "cascade" }),
+    source: text().notNull(),
+    pair: text(),
+  },
+  (table) => [index("memory_outs_pair_idx").on(table.source, table.pair)]
+);
+
+/**
+ * A memory resting on a version before its source's current one, whose
+ * text holds its quote: what the next version's add judges, without
+ * stepping over the source's out memories. Never read by a read.
+ */
+export const memoryIns = sqliteTable(
+  "memory_ins",
+  {
+    memory: integer()
+      .primaryKey()
+      .references(() => memories.row, { onDelete: "cascade" }),
+    source: text().notNull(),
+  },
+  (table) => [index("memory_ins_source_idx").on(table.source)]
+);
+
+/**
+ * The catch-up's state (catch-up.ts), one row, none before its first
+ * tick: `through`, the highest memory (`memories.row`) up to which every
+ * memory is judged, rests on its source's current version or on none, or
+ * belongs to a source not judged (so its source's pass judges it); and
+ * `turn`, the source whose pass was served last, so the next turn goes to
+ * the next unjudged source after it (null when none is left, and when its
+ * pointer goes). `through` moves on by the catch-up's
+ * scan, or by an add when no memory lies between it and the add's first:
+ * a memory an older release added unjudged keeps it behind.
+ */
+export const memoryJudging = sqliteTable(
+  "memory_judging",
+  {
+    id: integer().primaryKey(),
+    through: integer().notNull(),
+    // Null once its pointer goes (an erasure, a removal): no plain key
+    // outlives what it named.
+    turn: text().references(() => currentVersions.source, {
+      onDelete: "set null",
+    }),
+  },
+  () => [check("memory_judging_one", sql.raw("id = 1"))]
+);
+
+/**
+ * Where an unjudged source's pass of the catch-up stopped: against the
+ * version at `version_row` (a place for another version starts over),
+ * after the memory of version `after_version` and row `after_row`, in
+ * that order. Gone with the source's pointer, and once its pass ends.
+ */
+export const memoryJudgingPlaces = sqliteTable("memory_judging_places", {
+  source: text()
+    .primaryKey()
+    .references(() => currentVersions.source, { onDelete: "cascade" }),
+  versionRow: integer("version_row").notNull(),
+  afterVersion: integer("after_version").notNull(),
+  afterRow: integer("after_row").notNull(),
+});

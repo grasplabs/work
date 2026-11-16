@@ -12,6 +12,7 @@ import { z } from "zod";
 
 import worker from "../src/index.ts";
 import {
+  botConnectorFailOnceUrl,
   botConnectorMembersUrl,
   botConnectorPostedUrl,
   botConnectorUninstallUrl,
@@ -275,6 +276,17 @@ export const uninstalledFor = async (person: TeamsPerson): Promise<void> => {
   });
 };
 
+/** Teams fails, once, the next post in `conversation` holding `holding`. */
+export const failsOnce = async (
+  conversation: string,
+  holding: string
+): Promise<void> => {
+  await providers().fetch(botConnectorFailOnceUrl, {
+    method: "POST",
+    body: JSON.stringify({ conversation, holding }),
+  });
+};
+
 /** Sets what Teams' roster says of `person` in their chat. */
 export const onRoster = async (
   person: TeamsPerson,
@@ -309,12 +321,16 @@ export const kept = async (conversation: string) => {
 };
 
 /**
- * A member of the client signed in once, writing to the bot on Teams,
- * whose chats `provider` answers. The organization has one provider at a
- * time, so people in one test share it: answer them all from one.
+ * A member of the client signed in once, as `role`, writing to the bot on
+ * Teams, whose chats `provider` answers. The organization has one provider
+ * at a time, so people in one test share it: answer them all from one.
  */
-export const memberAnsweredBy = async (idp: Idp, provider: FakeProvider) => {
-  const signedIn = await signedInApi(idp, "user");
+export const memberAnsweredBy = async (
+  idp: Idp,
+  provider: FakeProvider,
+  role: "user" | "builder" | "admin" = "user"
+) => {
+  const signedIn = await signedInApi(idp, role);
   const { oid } = signedIn.person;
   if (typeof oid !== "string") {
     throw new TypeError("Expected an Entra object id");

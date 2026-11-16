@@ -593,7 +593,7 @@ export type BrainUpdate =
     }
   | {
       window: BrainWindow;
-      /** An admin's purge of `terms` from every version: removal. */
+      /** An admin takes `terms` out of the text, as a new version: removal. */
       type: "purge";
       document: BrainDocumentKey;
       terms: string[];

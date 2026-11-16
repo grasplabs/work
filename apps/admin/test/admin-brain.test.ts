@@ -4,8 +4,11 @@ import { env, exports } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { loadBrainRead } from "../src/admin/brain-loads.ts";
+import { answerKept, answerShown } from "../src/admin/erasure-answer.ts";
+import type { LookupAnswer } from "../src/admin/erasure-answer.ts";
 import {
   brainActionFn,
+  brainErasureFn,
   fetchBrainReport,
 } from "../src/clients/brain-functions.ts";
 import { readBrainReport } from "../src/clients/brain.ts";
@@ -205,8 +208,7 @@ const brainReport = (bytes: number): BrainReport => ({
     replay: "through",
     erasing: 0,
     sourcesWithoutCurrent: 0,
-    source: { written: 3, unwritten: 0 },
-    person: { written: 1, unwritten: 0 },
+    source: { written: 4, unwritten: 0 },
     byReason: { deleted: 3, retention: 0, person_erased: 0, withdrawn: 1 },
   },
   stepsFailed: {
@@ -215,6 +217,7 @@ const brainReport = (bytes: number): BrainReport => ({
     sweep: null,
     repack: null,
     reindex: null,
+    quotes: null,
     embedding: null,
   },
   recall: {
@@ -222,6 +225,7 @@ const brainReport = (bytes: number): BrainReport => ({
     ways: {
       words: { recalls: 40, failed: 0 },
       exact: { recalls: 8, failed: 0 },
+      entities: { recalls: 0, failed: 0 },
       meaning: { recalls: 0, failed: 0 },
     },
     withoutMeaning: { timed_out: 0, failed: 0, refused: 0, unusable: 0 },
@@ -248,6 +252,13 @@ const recallPartOf = (html: string): string =>
 /** The Model spend section of a page's HTML. */
 const spendPartOf = (html: string): string =>
   html.slice(html.indexOf(">Model spend<"), html.indexOf(">Erasures<"));
+
+/** The Upkeep section of a page's HTML. */
+const upkeepPartOf = (html: string): string =>
+  html.slice(
+    html.indexOf(">Upkeep<"),
+    html.indexOf(">People&#x27;s own stores<")
+  );
 
 /** The part of `html` that shows people's own stores. */
 const ownStoresPartOf = (html: string): string =>
@@ -612,6 +623,7 @@ describe("how an organization's Brain is doing", () => {
         ways: {
           words: { recalls: 40, failed: 0 },
           exact: { recalls: 8, failed: 0 },
+          entities: { recalls: 0, failed: 0 },
           meaning: { recalls: 30, failed: 2 },
         },
         withoutMeaning: { timed_out: 3, failed: 0, refused: 1, unusable: 0 },
@@ -648,6 +660,130 @@ describe("how an organization's Brain is doing", () => {
       amber: true,
       notYet: true,
       calm: false,
+    });
+  });
+
+  it("asks its core whether a source or a person was erased as the staff member, says what it answered, and sends nothing for a caller Access doesn't vouch for", async () => {
+    const acme = await liveClient();
+    acme.core.brain = brainReport(1_000_000);
+    const source = {
+      clientId: acme.clientId,
+      lookup: { kind: "source", key: "upload:0193-report" },
+    } as const;
+
+    const refused = await callServerFn(brainErasureFn, source, {
+      email: null,
+    }).then(
+      () => "answered",
+      () => "refused"
+    );
+    const asksBefore = acme.core.brainAsks.length;
+    acme.core.brainErasure = {
+      state: "erased",
+      at: "2026-11-10T09:30:00.000Z",
+    };
+    const erased = await callServerFn(brainErasureFn, source, {
+      email: "grace@grasp.test",
+    });
+    acme.core.brainErasure = { state: "not_erased" };
+    const someone = await callServerFn(
+      brainErasureFn,
+      { clientId: acme.clientId, lookup: { kind: "person", id: "user-17" } },
+      { email: "grace@grasp.test" }
+    );
+    const { html } = await page(`/organizations/${acme.clientId}/brain`);
+
+    expect({
+      refused,
+      asksBefore,
+      erased,
+      someone,
+      asked: acme.core.brainAsks.flatMap((asked) =>
+        "lookup" in asked ? [[asked.staff.email, asked.lookup]] : []
+      ),
+      offered: textOf(html).includes("Was it erased?"),
+    }).toStrictEqual({
+      refused: "refused",
+      asksBefore: 0,
+      erased: { state: "erased", at: "2026-11-10T09:30:00.000Z" },
+      someone: { state: "not_erased" },
+      asked: [
+        ["grace@grasp.test", { kind: "source", key: "upload:0193-report" }],
+        ["grace@grasp.test", { kind: "person", id: "user-17" }],
+      ],
+      offered: true,
+    });
+  });
+
+  it("reads a skipped erasure as such, and an erasure state it doesn't name, or one without what it needs, as not answered", async () => {
+    const acme = await liveClient();
+    acme.core.brain = brainReport(1_000_000);
+    const asked = async (answered: { state: string; at?: string }) => {
+      acme.core.brainErasure = answered;
+      return await callServerFn(
+        brainErasureFn,
+        { clientId: acme.clientId, lookup: { kind: "person", id: "user-17" } },
+        { email: "grace@grasp.test" }
+      );
+    };
+
+    expect({
+      skipped: await asked({ state: "skipped" }),
+      unnamed: await asked({ state: "withheld_by_policy" }),
+      erasedWithoutWhen: await asked({ state: "erased" }),
+    }).toStrictEqual({
+      skipped: { state: "skipped" },
+      unnamed: { state: "not_answered" },
+      erasedWithoutWhen: { state: "not_answered" },
+    });
+  });
+
+  it("shows an erasure lookup's answer only for the lookup submitted last, while it is still what is typed", () => {
+    const yesForA: LookupAnswer = {
+      kind: "source",
+      name: "upload:a",
+      asked: 1,
+      text: "Yes",
+      wrong: false,
+    };
+    // Looked up A, answered yes; then B typed, not yet submitted.
+    const forA = answerShown(yesForA, "source", "upload:a", 1);
+    const afterTypingB = answerShown(yesForA, "source", "upload:b", 1);
+    const afterKindChanged = answerShown(yesForA, "person", "upload:a", 1);
+    // A slow answer for A arriving once B was typed and submitted (2): kept
+    // apart from B's, never shown for B.
+    const slowA = answerShown(
+      answerKept(null, yesForA),
+      "source",
+      "upload:b",
+      2
+    );
+    // B's answer came first; A's slow one doesn't replace it.
+    const noForB: LookupAnswer = {
+      ...yesForA,
+      name: "upload:b",
+      asked: 2,
+      text: "No",
+    };
+    const keptB = answerShown(
+      answerKept(noForB, yesForA),
+      "source",
+      "upload:b",
+      2
+    );
+
+    expect({
+      forA: forA?.text,
+      afterTypingB,
+      afterKindChanged,
+      slowA,
+      keptB: keptB?.text,
+    }).toStrictEqual({
+      forA: "Yes",
+      afterTypingB: null,
+      afterKindChanged: null,
+      slowA: null,
+      keptB: "No",
     });
   });
 
@@ -764,7 +900,7 @@ describe("how an organization's Brain is doing", () => {
     });
   });
 
-  it("shows the rest of the report of a core on an older release, which sends no totals of people's own stores nor model spend, and says they aren't available yet", async () => {
+  it("shows the rest of the report of a core on an older release, which sends no totals of people's own stores, model spend, recall by entities nor the step judging memories, and says they aren't available yet", async () => {
     const older = await liveClient();
     older.core.admin = heardSnapshot("Older");
     const {
@@ -772,7 +908,16 @@ describe("how an organization's Brain is doing", () => {
       modelSpend: _spend,
       ...report
     } = brainReport(1_000_000);
-    older.core.brain = report;
+    const { entities: _entities, ...ways } = report.recall.ways;
+    const { quotes: _quotes, ...steps } = report.stepsFailed;
+    older.core.brain = {
+      ...report,
+      recall: { ...report.recall, ways },
+      stepsFailed: {
+        ...steps,
+        embedding: { at: "2026-11-12T09:55:00.000Z", reason: "failed" },
+      },
+    };
 
     const { status, html } = await page(
       `/organizations/${older.clientId}/brain`
@@ -780,9 +925,19 @@ describe("how an organization's Brain is doing", () => {
     const own = textOf(ownStoresPartOf(html));
     const spend = textOf(spendPartOf(html));
 
+    const upkeep = textOf(upkeepPartOf(html));
+
     expect({
       status,
       rest: textOf(recallPartOf(html)).includes("Words 40 0"),
+      failedStep: upkeep.includes(
+        "Putting passages on the queue to embed Failed 5 min ago"
+      ),
+      // A step the core doesn't report shows as neither failed nor fine.
+      judging: upkeep.includes("Judging memories against their sources"),
+      entitiesNotYet: textOf(recallPartOf(html)).includes(
+        "Entities Not available yet"
+      ),
       notYet: own.includes(
         "This client’s release doesn’t report people’s own stores yet."
       ),
@@ -793,9 +948,36 @@ describe("how an organization's Brain is doing", () => {
     }).toStrictEqual({
       status: 200,
       rest: true,
+      failedStep: true,
+      judging: false,
+      entitiesNotYet: true,
       notYet: true,
       totals: false,
       spendNotYet: true,
     });
+  });
+
+  it("shows the report of a core on a newer release, which reports a step this admin doesn't know, with the steps it knows", async () => {
+    const newer = await liveClient();
+    newer.core.admin = heardSnapshot("Newer");
+    const report = brainReport(1_000_000);
+    const stepsFailed = {
+      ...report.stepsFailed,
+      later: { at: "2026-11-12T09:55:00.000Z", reason: "failed" } as const,
+      quotes: { at: "2026-11-12T09:55:00.000Z", reason: "timed_out" } as const,
+    };
+    newer.core.brain = { ...report, stepsFailed };
+
+    const { status, html } = await page(
+      `/organizations/${newer.clientId}/brain`
+    );
+
+    expect({
+      status,
+      rest: textOf(recallPartOf(html)).includes("Words 40 0"),
+      upkeep: textOf(upkeepPartOf(html)).includes(
+        "Judging memories against their sources Timed out 5 min ago"
+      ),
+    }).toStrictEqual({ status: 200, rest: true, upkeep: true });
   });
 });

@@ -56,8 +56,22 @@ export interface ConnectionConfig<
   readonly actions: Actions;
 }
 
-/** What an action may ask the Brain: `recall` (`brain-recall.ts`). */
-export type BrainOperation = "recall";
+/**
+ * What an action may ask the Brain (`brain-recall.ts`): `recall`;
+ * `skills.select` and `skills.read`, as `ctx.brain.skills.select` and
+ * `ctx.brain.skills.read`; `entities.get` and `entities.find`, as
+ * `ctx.brain.entities.get` and `ctx.brain.entities.find`; and, for an
+ * App alone, `remember` and `forget`, which write in the App's own name
+ * for its users.
+ */
+export type BrainOperation =
+  | "recall"
+  | "skills.select"
+  | "skills.read"
+  | "entities.get"
+  | "entities.find"
+  | "remember"
+  | "forget";
 
 /** What a `brain` permission may say. */
 export interface BrainConfig<Operations extends readonly BrainOperation[]> {
@@ -96,10 +110,12 @@ export interface ConnectionPermission<
 }
 
 /**
- * A `brain` permission: recall from the Brain of only what everyone in
- * the company may read, whoever a call acts for: never a team's content,
- * nor anyone's own. An admin binds it to the App's own permission to read
- * the Brain.
+ * A `brain` permission: recall from the Brain, select and read its
+ * skills, and read its entities, of only what everyone in the company may
+ * read, whoever a call acts for: never a team's content, nor anyone's
+ * own; and remember and forget in the App's own name, read only through
+ * its own code by the people who use it. An admin binds it to the App's
+ * own permission to read the Brain, for exactly the operations declared.
  */
 export interface BrainPermission<
   Operations extends readonly BrainOperation[] = readonly BrainOperation[],

@@ -53,6 +53,7 @@ import {
   rated,
   reopened,
   resumed,
+  withoutLine,
 } from "./progress.ts";
 import { ReadBack } from "./read-back.tsx";
 import { Talk } from "./talk.tsx";
@@ -187,9 +188,9 @@ const InterviewFrame = ({
   children,
 }: {
   /**
-   * Whether the interview is open on this device, so what they say is
-   * kept: only then does the frame say "Saved". A link that can't be
-   * opened, or is open elsewhere, has kept nothing here.
+   * Whether the interview is open here, for the account it belongs to,
+   * so what they say is kept: only then does the frame say "Saved". A link
+   * that can't be opened has kept nothing here.
    */
   open?: boolean;
   /** Where the frame's top and bottom are measured, so the stage takes what is left. */
@@ -284,28 +285,39 @@ const Over = ({ room }: { room: number }) => {
   );
 };
 
-/** They deleted it. */
-const Deleted = ({ room }: { room: number }) => {
+/**
+ * They deleted it; or, while what the Brain kept of it is still being
+ * removed (`removing`), they are told that instead.
+ */
+const Deleted = ({ room, removing }: { room: number; removing: boolean }) => {
   const { t } = useLingui();
   const who = interviewerNames[useInterviewer()];
   return (
     <Said label={t`${who}, drawn in dots.`} room={room}>
       <PageHeaderTitle aria-live="polite">
-        {t`Deleted. Nothing you said is kept.`}
+        {removing
+          ? t`Deleted. What the Brain kept of it is being removed.`
+          : t`Deleted. Nothing you said is kept.`}
       </PageHeaderTitle>
     </Said>
   );
 };
 
-/** They withdrew: what they said stays theirs to read and delete, and nothing of it is used. */
-const Withdrawn = ({ room }: { room: number }) => {
+/**
+ * They withdrew: what they said stays theirs to read and delete, and
+ * nothing of it is used; or, while what the Brain kept of it is still
+ * being removed (`removing`), they are told that instead.
+ */
+const Withdrawn = ({ room, removing }: { room: number; removing: boolean }) => {
   const { t } = useLingui();
   const who = interviewerNames[useInterviewer()];
   return (
     <Said label={t`${who}, drawn in dots.`} room={room}>
       <div className="flex flex-col gap-2">
         <PageHeaderTitle aria-live="polite">
-          {t`You withdrew. Nothing you said is used from now on.`}
+          {removing
+            ? t`You withdrew. What the Brain kept of it is being removed.`
+            : t`You withdrew. Nothing you said is used from now on.`}
         </PageHeaderTitle>
         <p className="text-muted-foreground text-balance">
           {t`It stays here for you to read. You can still delete it.`}
@@ -389,6 +401,8 @@ const Stage = ({
   stopped,
   deleted,
   withdrawn,
+  removingDeleted,
+  removingWithdrawn,
   onCarryOn,
 }: {
   session: OpenSession;
@@ -397,6 +411,9 @@ const Stage = ({
   stopped: boolean;
   deleted: boolean;
   withdrawn: boolean;
+  /** What the Brain kept is still being removed, after deleting or withdrawing. */
+  removingDeleted: boolean;
+  removingWithdrawn: boolean;
   onCarryOn: () => void;
 }) => {
   const progress = useProgress();
@@ -404,10 +421,10 @@ const Stage = ({
   let stage: ReactNode;
   let key: string;
   if (deleted) {
-    stage = <Deleted room={room} />;
+    stage = <Deleted removing={removingDeleted} room={room} />;
     key = "deleted";
   } else if (withdrawn) {
-    stage = <Withdrawn room={room} />;
+    stage = <Withdrawn removing={removingWithdrawn} room={room} />;
     key = "withdrawn";
   } else if (session.closed) {
     stage = <Over room={room} />;
@@ -510,6 +527,7 @@ const markedIn = (lines: InterviewLine[]): number => {
 /** Deleting the interview: whether it is, and why it didn't work when it didn't. */
 const useDeleting = () => {
   const [deleted, setDeleted] = useState<"no" | "deleting" | "yes">("no");
+  const [removingDeleted, setRemovingDeleted] = useState(false);
   const [deleteFailed, setDeleteFailed] = useState<string | null>(null);
   const remove = async (): Promise<void> => {
     const link = linkNow();
@@ -517,7 +535,7 @@ const useDeleting = () => {
       return;
     }
     setDeleted("deleting");
-    const answer = await deleteInterview(link.secret, link.key);
+    const answer = await deleteInterview(link.secret);
     if (isRefused(answer)) {
       setDeleted("no");
       setDeleteFailed(answer.message);
@@ -525,9 +543,10 @@ const useDeleting = () => {
     }
     forgetInterview();
     setDeleteFailed(null);
+    setRemovingDeleted(answer.removing === true);
     setDeleted("yes");
   };
-  return { deleted, deleteFailed, remove };
+  return { deleted, removingDeleted, deleteFailed, remove };
 };
 
 /** In the conversation, and core holds that they agreed to take part. */
@@ -561,21 +580,24 @@ const withdrawOffered = (
 /** Withdrawing: whether they did, and why it didn't work when it didn't. */
 const useWithdrawing = (session: OpenSession) => {
   const [withdrawn, setWithdrawn] = useState(session.withdrawn);
+  // Still being removed, as core said when the page opened, until it isn't.
+  const [removing, setRemoving] = useState(session.removing);
   const [withdrawFailed, setWithdrawFailed] = useState<string | null>(null);
   const withdraw = async (): Promise<void> => {
     const link = linkNow();
     if (link === null) {
       return;
     }
-    const answer = await withdrawInterview(link.secret, link.key);
+    const answer = await withdrawInterview(link.secret);
     if (isRefused(answer)) {
       setWithdrawFailed(answer.message);
       return;
     }
     setWithdrawFailed(null);
+    setRemoving(answer.removing === true);
     setWithdrawn(true);
   };
-  return { withdrawn, withdrawFailed, withdraw };
+  return { withdrawn, removing, withdrawFailed, withdraw };
 };
 
 /** What the conversation says by itself follows the language on screen. */
@@ -591,8 +613,9 @@ const useWordsOnScreen = (): void => {
 export const InterviewPage = ({ session }: { session: OpenSession }) => {
   const progress = useProgress();
   const [stopped, setStopped] = useState(false);
-  const { deleted, deleteFailed, remove } = useDeleting();
-  const { withdrawn, withdrawFailed, withdraw } = useWithdrawing(session);
+  const { deleted, removingDeleted, deleteFailed, remove } = useDeleting();
+  const { withdrawn, removing, withdrawFailed, withdraw } =
+    useWithdrawing(session);
   const [transcript, setTranscript] = useState(false);
   const talking =
     inConversation(progress) &&
@@ -690,6 +713,8 @@ export const InterviewPage = ({ session }: { session: OpenSession }) => {
             setStopped(false);
           }}
           reading={reading}
+          removingDeleted={removingDeleted}
+          removingWithdrawn={removing}
           room={room}
           session={session}
           stopped={stopped}
@@ -697,7 +722,16 @@ export const InterviewPage = ({ session }: { session: OpenSession }) => {
         />
       </div>
       <Failed message={deleteFailed ?? withdrawFailed} />
-      <Transcript alone={away} lines={progress.lines} open={floating} />
+      <Transcript
+        alone={away}
+        lines={progress.lines}
+        onRemove={(at) => {
+          // Kept at once: removing can't wait for the next save.
+          update((now) => withoutLine(now, at));
+          keepNow();
+        }}
+        open={floating}
+      />
     </InterviewFrame>
   );
 };

@@ -30,9 +30,8 @@ import { describe, expect, it } from "vite-plus/test";
 import { keepsReceipt } from "../src/action-invocation.ts";
 import { functionRoles } from "../src/app-access.ts";
 import { invocationFor } from "../src/app-functions.ts";
-import { publishVersion } from "../src/app-publish.ts";
 import { loadRelease } from "../src/app-releases.ts";
-import { createApp } from "../src/apps.ts";
+import { appKind, createApp } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
 import { callMaxNested } from "../src/call-limits.ts";
 import { openStore } from "../src/data-stores.ts";
@@ -52,6 +51,7 @@ import type {
   Runner,
   UseRefusal,
 } from "../src/function-host.ts";
+import { rollback } from "../src/publish.ts";
 import { hostedRelease } from "../src/release-runner.ts";
 import { testApp } from "./app-definitions.ts";
 import { storeOfNewApp } from "./app-stores.ts";
@@ -1264,7 +1264,46 @@ describe("resources", () => {
         }
       )
     );
+    // A Brain declared for `recall` alone, asked for its skills past the
+    // client, which has no member for them: refused before the binding
+    // hears of it.
+    let recalled = false;
+    const skillsOf = async (operation: string, request: unknown) =>
+      codeOf(
+        await call(
+          fixture,
+          "action",
+          "actions.recallHelp",
+          { text: "leave" },
+          {
+            resources: bindingsOf({
+              brain: bound("brain", null, async () => {
+                recalled = true;
+                return await Promise.resolve(null);
+              }),
+            }),
+            run: misusing(
+              "actions.recallHelp",
+              async (channel) =>
+                await channel.permission("brain", operation, [request])
+            ),
+          }
+        )
+      );
+    const skills = {
+      select: await skillsOf("skills.select", { task: "leave" }),
+      read: await skillsOf("skills.read", {
+        skill: { scope: "grasp", name: "draw-a-workflow", version: 1 },
+      }),
+      // Nor, declared for `recall` alone, may it read entities.
+      card: await skillsOf("entities.get", {
+        entity: "00000000-0000-4000-8000-000000000000",
+      }),
+      found: await skillsOf("entities.find", { kind: "customer" }),
+      recalled,
+    };
     expect({
+      skills,
       undeclaredAction: await attempt(
         async (channel) =>
           await channel.permission("mail", "call", ["delete", {}])
@@ -1288,6 +1327,13 @@ describe("resources", () => {
       invite,
       invited,
     }).toStrictEqual({
+      skills: {
+        select: "permission.not_allowed",
+        read: "permission.not_allowed",
+        card: "permission.not_allowed",
+        found: "permission.not_allowed",
+        recalled: false,
+      },
       undeclaredAction: "permission.not_allowed",
       undeclaredAlias: "permission.not_allowed",
       workflowAsResource: "permission.not_allowed",
@@ -2534,6 +2580,7 @@ export const stamp = mutation({
         { manifest: release.app, run: hostedRelease(env, release).run },
         await invocationFor(env, release, {
           by: fixture.owner,
+          origin: "page",
           requestId,
           deadline: Date.now() + 30_000,
         }),
@@ -2706,7 +2753,7 @@ export const both = action({
         }
       )
     );
-    await publishVersion(env, fixture.owner, fixture.app, 1);
+    await rollback(env, appKind, fixture.owner, fixture.app, 1);
     const release = await loadRelease(env, fixture.app, 1);
     const appId = appIdSchema.parse(fixture.app);
     // A member of the App in no team, who isn't one of its builders.
@@ -2730,6 +2777,7 @@ export const both = action({
         { manifest: release.app, run: hostedRelease(env, release).run },
         await invocationFor(env, release, {
           by,
+          origin: "page",
           requestId,
           deadline: Date.now() + 30_000,
         }),
@@ -2861,6 +2909,7 @@ export const probe = action({ args: {}, returns: v.null(), handler: async () => 
       { manifest: release.app, run },
       await invocationFor(env, release, {
         by: fixture.owner,
+        origin: "page",
         requestId: personRequest,
         deadline: Date.now() + 30_000,
       }),

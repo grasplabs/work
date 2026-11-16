@@ -331,6 +331,46 @@ describe("a person's own export", () => {
 
   // Threats 1 and 2: only they start or read it; anyone else, and the
   // shared store, are refused, and what isn't theirs answers as absent.
+  it("leaves out a source removed from their store, and what was drawn from it, as no one reads it, them included", async () => {
+    const person = unique();
+    const kept = await add(person, "Kept words, mine alone");
+    const removed = await add(person, "Removed words, mine alone");
+    await own(person).addMemories({
+      change: unique(),
+      access: alone(person),
+      entities: [{ key: "c", kind: "customer", names: ["Acme"] }],
+      memories: [kept, removed].map((source) => ({
+        about: "c",
+        type: "fact" as const,
+        statement: `Drawn from ${source}`,
+        speaker: { kind: "system" as const },
+        basis: {
+          kind: "source" as const,
+          source,
+          version: 1,
+          quote: "words",
+        },
+      })),
+    });
+    await own(person).removeSources({ sources: [removed] });
+
+    const id = await start(person);
+    await settled(person);
+    const { lines } = await downloaded(person, id);
+
+    expect({
+      sources: lines
+        .filter(({ kind }) => kind === undefined)
+        .map(({ source }) => source),
+      memories: lines
+        .filter(({ kind }) => kind === "memory")
+        .map(({ statement }) => statement),
+    }).toStrictEqual({
+      sources: [kept],
+      memories: [`Drawn from ${kept}`],
+    });
+  });
+
   it("is started and read by its person alone, and an id it doesn't hold answers as nothing", async () => {
     const person = unique();
     const stranger = unique();

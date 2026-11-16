@@ -108,7 +108,6 @@ const definitionSchema = z.strictObject({
       z.strictObject({
         alias: z.string(),
         workflowId: z.string().min(1).max(128),
-        version: z.int().min(1),
       })
     )
     .optional(),

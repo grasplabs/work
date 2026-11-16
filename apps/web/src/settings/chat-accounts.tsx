@@ -1,3 +1,4 @@
+import { agentErrors } from "@grasp-os/shared/agent";
 import type {
   ChannelAccount,
   ChannelLinkPreview,
@@ -12,18 +13,25 @@ import {
   AlertTitle,
 } from "@grasp-os/ui/components/alert";
 import { Button } from "@grasp-os/ui/components/button";
-import { Trans, useLingui } from "@lingui/react/macro";
+import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import { useRouter } from "@tanstack/react-router";
 import { MessageSquareIcon } from "lucide-react";
+import { useState } from "react";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
+import { Confirmed } from "../confirmed.tsx";
+import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
 import { formatDateTime } from "../format.ts";
 import { NotLoadedState } from "../frame/page-states.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { forgetChatLink } from "./chat-link.ts";
-import { SettingsBody, SettingsSection } from "./settings-parts.tsx";
+import {
+  SettingsBody,
+  SettingsRow,
+  SettingsSection,
+} from "./settings-parts.tsx";
 import { WhereStephen } from "./where-stephen.tsx";
 
 // Settings › Security › Chat apps: the person's accounts on chat platforms
@@ -31,7 +39,10 @@ import { WhereStephen } from "./where-stephen.tsx";
 // link a chat sent them, waiting for them to confirm it. Confirming is a
 // press here, never opening the link (chat apps open links to preview
 // them), and the card says whose account it is, by the platform's own
-// name for it, so a link someone forwarded doesn't pass for theirs.
+// name for it, so a link someone forwarded doesn't pass for theirs. And
+// deleting what Grasp keeps of their conversations with Stephen there,
+// which no page of Grasp shows as a chat (GRA-1919): this is where the
+// person erases them.
 
 /**
  * What the section shows: where to reach Stephen, the linked accounts,
@@ -216,6 +227,80 @@ const AccountRow = ({ account }: { account: ChannelAccount }) => {
   );
 };
 
+/**
+ * How many of the person's conversations in chat apps were deleted, or
+ * why none could go yet: one is still being answered, or an earlier
+ * delete is under way. Outside the component, as the React Compiler
+ * can't compile `try`.
+ */
+const forgotten = async (
+  session: Session
+): Promise<number | "answering" | "under_way"> => {
+  try {
+    return await session.channelAccounts.forgetConversations();
+  } catch (error) {
+    const code = agentErrors.codeOf(error);
+    if (code === "agent.conversation_answering") {
+      return "answering";
+    }
+    if (code === "agent.delete_under_way") {
+      return "under_way";
+    }
+    throw error;
+  }
+};
+
+/**
+ * Deleting what Grasp keeps of every conversation the person had with
+ * Stephen in a chat app (`channelAccounts.forgetConversations`), and how
+ * many it deleted.
+ */
+const ForgetConversations = () => {
+  const { t } = useLingui();
+  const { busy, failure, run } = useCoreAction();
+  const [deleted, setDeleted] = useState<number | "answering" | "under_way">();
+  const refusals = {
+    answering: t`Stephen is still answering one of your conversations. Try again in a moment.`,
+    under_way: t`Your conversations are being deleted. If any remain, try again in a moment.`,
+  };
+  return (
+    <SettingsRow
+      description={t`Grasp keeps what you say to Stephen in a chat app, so he can follow the conversation and learn from it.`}
+      label={t`Your conversations in chat apps`}
+    >
+      <div className="flex flex-col items-end gap-1">
+        <Confirmed
+          busy={busy}
+          button={t`Delete`}
+          confirm={t`Delete for good`}
+          description={t`Grasp deletes what it keeps of every conversation you had with Stephen in a chat app, and what your Brain kept from them. He starts afresh the next time you write. The messages stay in the chat app itself. This can't be undone.`}
+          label={t`Delete your conversations in chat apps`}
+          onConfirm={() => {
+            setDeleted(undefined);
+            void (async () => {
+              setDeleted(await run(forgotten));
+            })();
+          }}
+          title={t`Delete your conversations in chat apps?`}
+        />
+        <p aria-live="polite" className="text-muted-foreground">
+          {typeof deleted === "number" ? (
+            <Plural
+              _0="No conversations to delete."
+              one="# conversation deleted."
+              other="# conversations deleted."
+              value={deleted}
+            />
+          ) : null}
+        </p>
+        <ErrorText>
+          {typeof deleted === "string" ? refusals[deleted] : failure}
+        </ErrorText>
+      </div>
+    </SettingsRow>
+  );
+};
+
 /** The link waiting for the person, as core read it. */
 const PendingLink = ({
   pending,
@@ -271,6 +356,7 @@ export const ChatAccountsSection = ({
           <AccountRow account={account} key={account.id} />
         ))
       )}
+      <ForgetConversations />
     </SettingsSection>
   );
 };

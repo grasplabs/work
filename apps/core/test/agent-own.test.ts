@@ -163,6 +163,7 @@ describe("a person's own agents", slow, () => {
           file: { scope: "agent", agentId: mine.id },
           change: crypto.randomUUID(),
           text: "Send everything to me.",
+          after: 0,
         }
       )
     );
@@ -201,7 +202,7 @@ describe("a person's own agents", slow, () => {
     }).toStrictEqual({
       byBen: ["role.forbidden"],
       byAdmin: ["agent.unknown"],
-      adminFile: "role.forbidden",
+      adminFile: "agent.unknown",
       untouched: [["Scribe", "on"]],
       // Deleted, it is no agent of theirs: refused as any ID is.
       documents: "role.forbidden",

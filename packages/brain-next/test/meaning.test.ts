@@ -18,6 +18,7 @@ import { beforeEach, describe, expect, it } from "vite-plus/test";
 
 import {
   packItemTokens,
+  personalBrainOf,
   recallBudgetMax,
   vectorModelNameOf,
 } from "../src/contract.ts";
@@ -58,8 +59,12 @@ const dimensions = 8;
 const along = (axis: number): number[] =>
   Array.from({ length: dimensions }, (_, at) => (at === axis ? 1 : 0.05));
 
-const reader: Reader & { person: string } = { person: "reader", groups: [] };
-const own: Access = { kind: "owner", person: reader.person };
+const reader: Reader & { person: string } = {
+  person: "reader",
+  groups: ["team:reader"],
+};
+/** A group only the reader is in: the shared store keeps nothing one person's alone. */
+const own: Access = { kind: "audience", group: "team:reader" };
 const whole = { tokens: recallBudgetMax };
 
 /** Adds `text` to a source of its own as `access` says: its key and version. */
@@ -203,8 +208,8 @@ describe("recall by meaning", () => {
     const before = await recall(question, along(6));
 
     const theirs = await added("Someone else's note.", {
-      kind: "owner",
-      person: "someone else",
+      kind: "audience",
+      group: "team:someone-else",
     });
     await putFor(theirs, along(6));
     const after = await recall(question, along(6));
@@ -255,18 +260,32 @@ describe("recall by meaning", () => {
   it("never cites an erased source or an erased person's own content by meaning", async () => {
     const erased = await added("A source erased for good.");
     const person = `person-${crypto.randomUUID()}`;
-    const theirs = await added("Their own note, erased with them.", {
-      kind: "owner",
-      person,
+    // Their own content is in their own store, which their erasure takes
+    // whole.
+    const theirStore = personalBrainOf(env.BRAIN_STORE, person);
+    const theirs = await theirStore.addSource({
+      source: `meaning:${crypto.randomUUID()}`,
+      change: crypto.randomUUID(),
+      text: "Their own note, erased with them.",
+      access: { kind: "owner", person },
     });
     await putFor(erased, along(0));
-    await putFor(theirs, along(1));
+    await theirStore.putVectors({
+      model: {
+        name: vectorModelNameOf(model),
+        centre: Array.from({ length: dimensions }, () => 0),
+      },
+      vectors: [{ chunk: { ...theirs, position: 0 }, vector: along(1) }],
+    });
 
     await store().eraseSource({ source: erased.source, reason: "deleted" });
-    await store().erasePerson({ person, reason: "person_erased" });
+    // Hidden at once; its files are deleted by later calls.
+    await Promise.allSettled([
+      theirStore.erasePerson({ person, reason: "person_erased" }),
+    ]);
 
     const asReader = await recall("Wat is er nog?", along(0));
-    const asPerson = await store().recall({
+    const asPerson = await theirStore.recall({
       question: "Wat is er nog?",
       reader: { person, groups: [] },
       budget: whole,
@@ -279,12 +298,13 @@ describe("recall by meaning", () => {
   });
 
   it("never lets hidden passages crowd a live one out of meaning, from the moment an erasure hides them", async () => {
-    // 300 chunks of the asking's own (more than the scan re-scores) at the
+    // 300 chunks only the asking may read (more than the scan re-scores) at the
     // question itself, and a passage their team reads one bit farther off.
     const team = `team-${crypto.randomUUID()}`;
+    const alone = `team-${crypto.randomUUID()}`;
     const asking: Reader & { person: string } = {
       person: `person-${crypto.randomUUID()}`,
-      groups: [team],
+      groups: [team, alone],
     };
     const live = await added("The live passage.", {
       kind: "audience",
@@ -294,7 +314,7 @@ describe("recall by meaning", () => {
       Array.from({ length: 300 }, (_, at) =>
         `Hidden ${at} `.padEnd(650, "x")
       ).join("\n\n"),
-      { kind: "owner", person: asking.person }
+      { kind: "audience", group: alone }
     );
     const question = Array.from({ length: dimensions }, () => 1);
     const centre = Array.from({ length: dimensions }, () => 0);
@@ -370,6 +390,7 @@ describe("recall by meaning", () => {
       at: new Date(),
       embedders: noEmbedders,
       handOvers: noHandOvers,
+      contextTokens: null,
     });
     const ticked = await found();
 

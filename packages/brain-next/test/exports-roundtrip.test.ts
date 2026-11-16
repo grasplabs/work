@@ -52,6 +52,8 @@ const features = [
   "more names for one entity from one memory than one entity of an add takes",
   "a source narrowed after its memories",
   "an erased source",
+  "a source removed with its history",
+  "a key removed before its first version",
 ] as const;
 type Feature = (typeof features)[number];
 
@@ -279,7 +281,12 @@ const retireOne = async ({
   const { id, writer } = pick(theirs);
   const reader = readers.find(({ person }) => person === writer);
   if (reader !== undefined) {
-    await shared().retireMemory({ memory: id, reader });
+    await shared().retireMemory({
+      memory: id,
+      reader,
+      writer: reader.person,
+      change: "retire",
+    });
   }
 };
 
@@ -402,6 +409,12 @@ const featuresHeld = async (): Promise<Record<string, number>> =>
       JOIN source_versions ON source_versions.row = current_versions.version_row
       WHERE source_versions.version > memories.version`
       ),
+      "a source removed with its history": count(
+        "SELECT count(*) AS count FROM removed_sources WHERE version_row IS NOT NULL"
+      ),
+      "a key removed before its first version": count(
+        "SELECT count(*) AS count FROM removed_sources WHERE version_row IS NULL"
+      ),
     };
   });
 
@@ -423,6 +436,20 @@ const madeBy = async (seed: number) => {
     // oxlint-disable-next-line no-await-in-loop -- one operation at a time
     await operate(series, operation);
   }
+  // Removals (removal.ts), after the series, so its seeds make what they
+  // made before: a source with a version, removed with its history, and a
+  // key removed before any version was added under it. Both keys stay
+  // closed after a restore (`keys`, read by `everyRead`).
+  const removed = `test:${tag}-removed`;
+  const removedEarly = `test:${tag}-removed-early`;
+  await shared().addSource({
+    source: removed,
+    change: "1",
+    text: `words of ${removed}`,
+    access: pick(series.accesses),
+  });
+  await shared().removeSources({ sources: [removed] });
+  await shared().removeSources({ sources: [removedEarly] });
   for (let ticks = 0; ticks < 3; ticks += 1) {
     // oxlint-disable-next-line no-await-in-loop -- a tick at a time
     await tick(shared());
@@ -442,6 +469,7 @@ const madeBy = async (seed: number) => {
       emails,
       questions: [`status ${tag}`, "words of", "requires sso"],
       asOf: new Date(Date.now() + 60_000),
+      keys: [removed, removedEarly],
     },
   };
 };
@@ -495,4 +523,66 @@ describe("a company's export, round trip", () => {
       }).toStrictEqual({ outcomes: [], unmade: [] });
     }
   );
+
+  it("keeps a thread a thread through an export, and judges a document's quotes again at its next version", async () => {
+    await restore(shared(), empty);
+    const access: Access = { kind: "audience", group: "company" };
+    const reader: PersonReader = { person: "reader", groups: ["company"] };
+    const drawnFrom = async (source: string, thread: boolean) => {
+      const line = `${source} pays by card`;
+      const { version } = await shared().addSource({
+        source,
+        change: "1",
+        text: `${line}.`,
+        access,
+        thread,
+      });
+      const added = await shared().addMemories({
+        change: crypto.randomUUID(),
+        access,
+        entities: [{ key: "c", kind: "customer", names: [`${source} Group`] }],
+        memories: [
+          {
+            about: "c",
+            type: "fact",
+            statement: `${line}.`,
+            speaker: { kind: "outside" },
+            basis: { kind: "source", source, version, quote: line },
+          },
+        ],
+      });
+      return { source, thread, entity: added.entities.c ?? "" };
+    };
+    const made = [
+      await drawnFrom("thread-a", true),
+      await drawnFrom("doc-a", false),
+    ];
+    const { id } = await shared().startExport("test");
+    const exported = await exportSettled(shared, id);
+    const restored = await restoredAfterLoss(shared, id, empty);
+    const after = [];
+    for (const { source, thread, entity } of made) {
+      // oxlint-disable-next-line no-await-in-loop -- one source at a time
+      await shared().addSource({
+        source,
+        change: "2",
+        text: "Something else was said.",
+        access,
+        thread,
+      });
+      // oxlint-disable-next-line no-await-in-loop -- one source at a time
+      const { memories } = await shared().readMemories({
+        entity,
+        reader,
+        history: true,
+      });
+      after.push(memories.map(({ endedAt }) => endedAt === null));
+    }
+
+    expect({ exported, restored, current: after }).toStrictEqual({
+      exported: "done",
+      restored: "done",
+      current: [[true], [false]],
+    });
+  });
 });

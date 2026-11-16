@@ -16,7 +16,8 @@ import { errorResponse } from "../errors.ts";
 import { models } from "../models.ts";
 import type { Listening } from "../models.ts";
 import { boundedBytes } from "../request-body.ts";
-import { linkHeaders, linkRefusal } from "./links.ts";
+import { interviewCaller } from "./interview-caller.ts";
+import { linkHeaders, linkRefusal, noCallerRefusal } from "./links.ts";
 import { onboardingStore } from "./store.ts";
 import { heardBudgets, transcriptionModel } from "./transcription.ts";
 
@@ -37,8 +38,9 @@ import { heardBudgets, transcriptionModel } from "./transcription.ts";
 //
 // What it must not do, and what stops it:
 //
-// - Write down anything for anyone: only someone's own link, on the device
-//   it is open on, while it may be saved (the store's
+// - Write down anything for anyone: only someone's own link, for the
+//   account it belongs to, signed in (interview-caller.ts), while it may be
+//   saved (the store's
 //   `transcriptionOnLink`, as the live line). Nothing reaches the upstream
 //   before that.
 // - Keep the audio: the recording is read, sent on and dropped. Nothing
@@ -138,7 +140,6 @@ const formOf = async (request: Request): Promise<Asked | null> => {
   }
   const fields = hearFieldsSchema.safeParse({
     secret: form.get("secret"),
-    key: form.get("key"),
     locale: form.get("locale"),
     seconds: form.get("seconds"),
   });
@@ -241,6 +242,11 @@ export const hearResponse = async (
       requestId
     );
   }
+  // Who asks, before anything they sent is read (interview-caller.ts).
+  const caller = await interviewCaller(env, request.headers);
+  if (typeof caller === "string") {
+    return noCallerRefusal(caller, requestId);
+  }
   const asked = await formOf(request);
   if (asked === null) {
     return refused(400, hearErrors.create("hear.invalid"), requestId);
@@ -248,7 +254,7 @@ export const hearResponse = async (
   const store = onboardingStore(env);
   const found = await store.transcriptionOnLink(
     await sha256Hex(asked.secret),
-    await sha256Hex(asked.key)
+    caller.account
   );
   if (!found.ok) {
     if (found.code === "interview.link_invalid") {

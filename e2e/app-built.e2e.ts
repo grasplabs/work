@@ -1,4 +1,5 @@
 import { expect } from "@playwright/test";
+import type { WebSocketRoute } from "@playwright/test";
 
 import { test } from "./csp.ts";
 import { appPlanned, appReady, modelScripts } from "./model-scripts.ts";
@@ -40,6 +41,59 @@ test("a builder makes an App from what they want done, shares it with their team
   const { builder, user } = peopleIn("appBuilt");
   const { opener } = modelScripts.buildsApp;
   const page = await pageOf(builder);
+  // The builder's connections to core (the tab's, and the preview's own),
+  // dropped once, as a blip does, the moment the page reads the App again
+  // once core answered the share (its first read of the App's contents
+  // after that), and refused until the page says Grasp can't be reached;
+  // the page then reads the App again by itself. Calls as Cap'n Web sends
+  // them: a push, then a pull naming its answer, which core resolves.
+  const sockets = new Set<WebSocketRoute>();
+  const blip = { sharing: false, armed: false, down: false };
+  await page.routeWebSocket("**/rpc", (socket) => {
+    if (blip.down) {
+      void socket.close();
+      return;
+    }
+    const core = socket.connectToServer();
+    sockets.add(socket);
+    socket.onClose(() => {
+      sockets.delete(socket);
+    });
+    const added = { pushed: false, answer: "" };
+    socket.onMessage((message) => {
+      const sent = String(message);
+      if (blip.sharing && sent.includes('["apps","members","add"]')) {
+        added.pushed = true;
+      } else if (added.pushed && sent.startsWith('["pull",')) {
+        added.pushed = false;
+        added.answer = `["resolve",${sent.slice('["pull",'.length, -1)},`;
+      }
+      // The App's page reads its contents only as it loads.
+      if (blip.armed && sent.includes('["apps","contents"]')) {
+        blip.armed = false;
+        blip.down = true;
+        for (const open of sockets) {
+          void open.close();
+        }
+        return;
+      }
+      core.send(message);
+    });
+    core.onMessage((message) => {
+      if (added.answer !== "" && String(message).startsWith(added.answer)) {
+        added.answer = "";
+        blip.sharing = false;
+        blip.armed = true;
+      }
+      socket.send(message);
+    });
+  });
+  // Nothing the page does as its connections drop and its preview goes
+  // fails unhandled.
+  const uncaught: string[] = [];
+  page.on("pageerror", (error) => {
+    uncaught.push(error.message);
+  });
 
   // Make something: Chat's page, what they want done, and Grasp's plan
   // for it in the chat. Nothing is made until Build it; then Grasp builds
@@ -58,11 +112,16 @@ test("a builder makes an App from what they want done, shares it with their team
     name: "Here's what Grasp will make",
   });
   await expect(plan.getByText(appPlanned)).toBeVisible(agentTurn);
-  // Build it lands on the App at once, being set up while the chat
-  // beside it builds it.
+  // Build it lands on the App at once, its bar naming it, while the chat
+  // beside it builds it. The calm "Setting up" between is not waited for
+  // here: the stack's model builds the App in about a second, so it can be
+  // gone between two of the assertion's looks. Its page test proves it
+  // (app-workspace.test.tsx).
   await plan.getByRole("button", { name: "Build it" }).click();
   await expect(page).toHaveURL(/\/apps\/[^/?]+$/u);
-  await expect(page.getByText(`Setting up ${appPlanned}…`)).toBeVisible(built);
+  await expect(
+    page.getByRole("heading", { level: 1, name: appPlanned })
+  ).toBeAttached(built);
   const app = new URL(page.url()).pathname.split("/").at(-1) ?? "";
 
   // The chat read how an App is written, wrote it, and said so.
@@ -98,8 +157,25 @@ test("a builder makes an App from what they want done, shares it with their team
       name: `Person (ID …${user.userId.slice(-namesakeIdEnd)})`,
     })
     .check();
+  blip.sharing = true;
   await sharing.getByRole("button", { name: "Share", exact: true }).click();
   await expect(page.getByText("Shared with Person")).toBeVisible(built);
+  // Its read again after sharing lost its connection: Grasp can't be
+  // reached, until a connection answers again, when the page reads the
+  // App by itself, with no Try again.
+  const unreachable = page
+    .getByRole("main")
+    .getByText("Grasp can't be reached right now. Try again in a moment.");
+  await expect(
+    page.getByRole("heading", { level: 1, name: "This page didn't load" })
+  ).toBeVisible(built);
+  await expect(unreachable).toBeVisible();
+  blip.down = false;
+  await expect(
+    page.getByRole("heading", { level: 1, name: appPlanned })
+  ).toBeAttached(built);
+  await expect(unreachable).toHaveCount(0);
+  expect(uncaught).toStrictEqual([]);
 
   // They use the live App: none of the preview's contacts, then theirs.
   const used = await pageOf(user);

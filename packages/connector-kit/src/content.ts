@@ -1,6 +1,7 @@
-import { z } from "zod";
+import type { z } from "zod";
 
 import { ToolError } from "./connector.ts";
+import type { readAsSchema } from "./manifest.ts";
 
 // What connectors share in reading a provider's answers: a file's or an
 // attachment's content as the caller asked for it, within the limits
@@ -20,8 +21,6 @@ const maxReadBytes = 4 * 1024 * 1024;
  */
 const maxContentBytes = 8 * 1024 * 1024;
 
-/** How a caller wants a file's content: as text, or base64 for extraction. */
-export const readAsSchema = z.enum(["text", "base64"]);
 type ReadAs = z.infer<typeof readAsSchema>;
 
 /** Base64 of `bytes`, a chunk at a time to spare the call stack. */

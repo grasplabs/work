@@ -70,3 +70,22 @@ export const nativeToolClasses: Readonly<
     "word.read": "read-company",
   },
 };
+
+/**
+ * Each native connector tool that answers one item's content
+ * (`answersItem`), by its connector's provider, then the tool's name:
+ * `file` when that content is a file's (`answersFile`). Core keeps
+ * what such a tool reads of a person's own things in the Brain
+ * (connection-capture.ts).
+ */
+export const nativeItemReads: Readonly<
+  Record<string, Readonly<Record<string, string>>>
+> = {
+  "google": {
+    "mail.get": "item",
+    "mail.readAttachment": "file",
+  },
+  "microsoft": {
+    "onenote.read": "item",
+  },
+};

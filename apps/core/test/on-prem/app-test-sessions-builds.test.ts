@@ -1,10 +1,10 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import { publishVersion } from "../../src/app-publish.ts";
 import { sealRelease } from "../../src/app-releases.ts";
-import { findApp } from "../../src/apps.ts";
+import { appKind, findApp } from "../../src/apps.ts";
 import { platformPlaceWaitMs } from "../../src/platform-sandbox.ts";
+import { rollback } from "../../src/publish.ts";
 import { sandboxSubOwnerHeader } from "../../src/sandbox-headers.ts";
 import { SandboxUnavailableError } from "../../src/sandboxed.ts";
 import {
@@ -57,8 +57,9 @@ describe("an App's tests on-prem", { timeout: 180_000 }, () => {
     };
     const activating = (async (): Promise<unknown> => {
       try {
-        await publishVersion(
+        await rollback(
           envWith({ SANDBOX_HOST: watching }),
+          appKind,
           built.owner,
           built.app,
           1

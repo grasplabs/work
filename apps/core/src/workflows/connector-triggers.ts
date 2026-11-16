@@ -23,7 +23,6 @@ import {
   permissions,
   triggerHourSlots,
   triggerResources,
-  triggerResourceVersions,
   workflowStartReceipts,
 } from "../db/core/schema.ts";
 import { allowingPermissionSql } from "../permissions.ts";
@@ -48,7 +47,7 @@ import type { StartFiles } from "./start-files.ts";
 //   and key (workflow-starts.ts): the same event delivered again is the
 //   same start, its run the same run, a cancelled one too.
 // - An event reaching a trigger that didn't ask for it. Only live,
-//   enabled connector triggers whose current version names the event's
+//   enabled connector triggers that name the event's
 //   connection, type and part of it (a mailbox, a drive, or none for the
 //   account's own) take it; on a personal connection, only those acting
 //   for its owner, as connect lets only its owner's calls use it.
@@ -60,13 +59,13 @@ import type { StartFiles } from "./start-files.ts";
 //   again in the statement that admits the start, so one revoked meanwhile
 //   starts nothing. A revoked or disconnected connection reports nothing.
 // - A trigger acting on authority it lost. Each delivery is a start as any
-//   trigger's: the trigger live, enabled and pinning that version, its
-//   person still with a role, and its own `start` grant active, read again
+//   trigger's: the trigger live and enabled, of the workflow's live
+//   version, its person still with a role, and its own `start` grant active, read again
 //   as the start is admitted.
 // - Code in a mapping. The input is built from JSON Pointers into the
 //   event (RFC 6901) and literal defaults (`inputOf`): nothing is
 //   evaluated, and a pointer that finds nothing leaves its default. The
-//   input is then checked against the workflow version's schema as any
+//   input is then checked against the live version's schema as any
 //   start's is; one it doesn't take is refused for good.
 // - A workflow starting itself without end: its own mail reaching a
 //   mailbox its trigger watches, or two workflows mailing each other. A
@@ -120,12 +119,10 @@ import type { StartFiles } from "./start-files.ts";
 // Email triggers' messages (inbound-email.ts) go through the same steps
 // (`startOnce`), each message an event of its own.
 
-/** A trigger that takes an event or a message, as its current version pins it. */
+/** A trigger that takes an event or a message, as it keeps its configuration. */
 export interface Taker {
   id: string;
-  version: number;
   workflowId: string;
-  workflowVersion: number;
   inputMapping: string | null;
 }
 
@@ -154,7 +151,6 @@ export const maxHeldMs = 24 * 60 * 60 * 1000;
 const hearsSql = (id: string, event: ConnectorEvent): SQL =>
   sql`EXISTS (SELECT 1 FROM ${permissions} WHERE ${allowingPermissionSql(
     { type: "trigger", triggerId: triggerIdSchema.parse(id) },
-    undefined,
     {
       type: "connection",
       connectionId: event.connection,
@@ -214,39 +210,30 @@ const tookPlace = async (
 };
 
 /**
- * The live, enabled connector triggers whose current version takes
- * `event`, that may hear it.
+ * The live, enabled connector triggers that take `event`, that may hear
+ * it.
  */
 const takersOf = async (env: Env, event: ConnectorEvent): Promise<Taker[]> => {
   const rows = await drizzle(env.DB)
     .select({
       id: triggerResources.id,
-      version: triggerResources.currentVersion,
-      workflowId: triggerResourceVersions.workflowResourceId,
-      workflowVersion: triggerResourceVersions.workflowResourceVersion,
-      inputMapping: triggerResourceVersions.inputMapping,
+      workflowId: triggerResources.workflowResourceId,
+      inputMapping: triggerResources.inputMapping,
     })
     .from(triggerResources)
-    .innerJoin(
-      triggerResourceVersions,
-      and(
-        eq(triggerResourceVersions.triggerId, triggerResources.id),
-        eq(triggerResourceVersions.version, triggerResources.currentVersion)
-      )
-    )
     .where(
       and(
         eq(triggerResources.kind, "connector"),
         eq(triggerResources.enabled, true),
         isNull(triggerResources.deletedAt),
-        eq(triggerResourceVersions.connectionId, event.connection),
-        eq(triggerResourceVersions.eventType, event.type),
+        eq(triggerResources.connectionId, event.connection),
+        eq(triggerResources.eventType, event.type),
         event.resource === undefined
-          ? isNull(triggerResourceVersions.connectionResource)
-          : eq(triggerResourceVersions.connectionResource, event.resource),
+          ? isNull(triggerResources.connectionResource)
+          : eq(triggerResources.connectionResource, event.resource),
         event.owner === null
           ? undefined
-          : eq(triggerResourceVersions.principalBinding, event.owner)
+          : eq(triggerResources.principalBinding, event.owner)
       )
     )
     .orderBy(asc(triggerResources.id));
@@ -398,24 +385,16 @@ const settle = async (
           ? (arrival.audited.dropped ?? arrival.audited.refused)
           : arrival.audited.refused,
       target: { type: "trigger", id: taker.id },
-      detail: { ...arrival.audited.detail, version: taker.version, ...detail },
+      detail: { ...arrival.audited.detail, ...detail },
     }),
   ]);
   return "gone";
 };
 
-/**
- * Where trigger `taker` stands now, read live: `moved` to another version
- * since it was read (so a refusal may be of the old version's start, and
- * the event is to be tried again, at the new one), `gone` (disabled or
- * deleted), or still `current`.
- */
-const standingOf = async (
-  env: Env,
-  taker: Taker
-): Promise<"current" | "moved" | "gone"> => {
+/** Whether trigger `taker` is disabled or deleted now, read live. */
+const isGone = async (env: Env, taker: Taker): Promise<boolean> => {
   const live = await drizzle(env.DB)
-    .select({ version: triggerResources.currentVersion })
+    .select({ id: triggerResources.id })
     .from(triggerResources)
     .where(
       and(
@@ -425,19 +404,15 @@ const standingOf = async (
       )
     )
     .get();
-  if (live === undefined) {
-    return "gone";
-  }
-  return live.version === taker.version ? "current" : "moved";
+  return live === undefined;
 };
 
 /**
  * What became of `taker`'s start of `arrival` that threw `error`: gone
  * (refused for good, audited, or held back too long, dropped, audited:
  * settled), unavailable (the trigger disabled or deleted meanwhile), or to
- * try again (core's own failure, or the trigger moved to another version
- * meanwhile, whatever it was refused with: nothing of the old version's
- * is settled for good).
+ * try again (core's own failure, or a decision gone stale, such as a
+ * version published as it was decided: tried again on the new one).
  */
 const refusalOf = async (
   env: Env,
@@ -452,11 +427,10 @@ const refusalOf = async (
     });
     return "retry";
   }
-  const standing = await standingOf(env, taker);
-  if (standing === "moved") {
-    return "retry";
-  }
-  if (error.code === "workflow.trigger_unavailable" || standing === "gone") {
+  if (
+    error.code === "workflow.trigger_unavailable" ||
+    (await isGone(env, taker))
+  ) {
     return "unavailable";
   }
   let { code } = error;
@@ -582,6 +556,9 @@ export const startOnce = async (
           : { emittingRun: arrival.stamped.runId }),
       });
     }
+    // The version live as it is admitted: a publish between its decision
+    // and its admission refuses it as stale, and it is tried again on the
+    // new one.
     await startWorkflow(
       env,
       {
@@ -590,7 +567,7 @@ export const startOnce = async (
         ...(cause === undefined ? {} : { cause }),
       },
       taker.workflowId,
-      { version: taker.workflowVersion, args: arrival.input, key },
+      { args: arrival.input, key },
       // Read again as it is admitted: what else it needs.
       arrival.also,
       {
@@ -660,8 +637,8 @@ export const startConnectorTriggers = async (
 
 /**
  * Where connect listens for connector triggers: each active grant of a
- * live, enabled connector trigger to hear its connection, for its current
- * version's event type and part and that type's read action, acting for
+ * live, enabled connector trigger to hear its connection, for its event
+ * type and part and that type's read action, acting for
  * the person it binds. A grant the trigger can't use (another part, or an
  * action its event type doesn't read) listens nowhere.
  */
@@ -674,9 +651,9 @@ export const triggerListeners = async (
     // oxlint-disable-next-line no-await-in-loop -- one query per event type, few
     const rows = await drizzle(env.DB)
       .select({
-        connection: triggerResourceVersions.connectionId,
-        resource: triggerResourceVersions.connectionResource,
-        owner: triggerResourceVersions.principalBinding,
+        connection: triggerResources.connectionId,
+        resource: triggerResources.connectionResource,
+        owner: triggerResources.principalBinding,
       })
       .from(permissions)
       .innerJoin(
@@ -686,23 +663,16 @@ export const triggerListeners = async (
           eq(permissions.subjectId, triggerResources.id)
         )
       )
-      .innerJoin(
-        triggerResourceVersions,
-        and(
-          eq(triggerResourceVersions.triggerId, triggerResources.id),
-          eq(triggerResourceVersions.version, triggerResources.currentVersion)
-        )
-      )
       .where(
         and(
           eq(triggerResources.kind, "connector"),
           eq(triggerResources.enabled, true),
           isNull(triggerResources.deletedAt),
-          eq(triggerResourceVersions.eventType, type),
+          eq(triggerResources.eventType, type),
           eq(permissions.status, "active"),
           eq(permissions.objectType, "connection"),
-          eq(permissions.objectId, triggerResourceVersions.connectionId),
-          sql`${permissions.resource} IS ${triggerResourceVersions.connectionResource}`,
+          eq(permissions.objectId, triggerResources.connectionId),
+          sql`${permissions.resource} IS ${triggerResources.connectionResource}`,
           sql`EXISTS (SELECT 1 FROM json_each(${permissions.actions}) WHERE value = ${action})`
         )
       )

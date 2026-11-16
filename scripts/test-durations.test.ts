@@ -14,8 +14,7 @@ describe("reading test files' durations from progress logs", () => {
       log(
         "2026-10-16T10:00:42.023Z passed 1500ms @grasp-os/core test/a.test.ts > a > does one thing",
         "2026-10-16T10:00:43.023Z passed 500ms @grasp-os/core test/a.test.ts > a > does another > in a nested block",
-        "2026-10-16T10:00:44.023Z passed @grasp-os/workerflow test/b.test.ts > b > took no time anyone saw",
-        "2026-10-16T10:00:45.023Z failed 2000ms scripts scripts/c.test.ts > c > fails"
+        "2026-10-16T10:00:44.023Z passed @grasp-os/workerflow test/b.test.ts > b > took no time anyone saw"
       )
     );
 
@@ -23,7 +22,6 @@ describe("reading test files' durations from progress logs", () => {
       // From 10:00:40.523, when the first began, to 10:00:43.023.
       "@grasp-os/core test/a.test.ts": 2.5,
       "@grasp-os/workerflow test/b.test.ts": 0,
-      "scripts scripts/c.test.ts": 2,
     });
   });
 
@@ -66,6 +64,36 @@ describe("reading test files' durations from progress logs", () => {
 
     expect(Object.fromEntries(seconds)).toStrictEqual({
       "@grasp-os/ui:browser (chromium) test/kit.browser.test.tsx": 31,
+    });
+  });
+
+  it("leaves out a file that failed a test in a run, so its time comes from the runs it passed", () => {
+    // A test cut at its timeout, and again on its retry: 10 s that are
+    // two timeouts, not the file's time.
+    const failing = log(
+      "2026-11-16T03:31:48.040Z failed 10131ms @grasp-os/brain-next test/r.test.ts > r > first",
+      "2026-11-16T03:31:48.195Z passed 155ms @grasp-os/brain-next test/r.test.ts > r > second",
+      "2026-11-16T03:31:48.752Z file 10970ms @grasp-os/brain-next test/r.test.ts",
+      "2026-11-16T03:31:49.000Z passed 1000ms @grasp-os/brain-next test/s.test.ts > s > one"
+    );
+    const passing = (ms: number) =>
+      log(
+        `2026-11-16T03:42:00.000Z passed ${ms}ms @grasp-os/brain-next test/r.test.ts > r > first`
+      );
+
+    expect({
+      failing: Object.fromEntries(fileSecondsIn(failing)),
+      updated: updatedDurations({ "@grasp-os/brain-next test/r.test.ts": 9 }, [
+        failing,
+        passing(1000),
+        passing(2000),
+      ]),
+    }).toStrictEqual({
+      failing: { "@grasp-os/brain-next test/s.test.ts": 1 },
+      updated: {
+        "@grasp-os/brain-next test/r.test.ts": 1.5,
+        "@grasp-os/brain-next test/s.test.ts": 1,
+      },
     });
   });
 

@@ -160,7 +160,7 @@ const probe = async (): Promise<Record<string, string>> => {
   };
 };
 
-function Notes() {
+const Notes = () => {
   const notes = useQuery(api.notes.list, {});
   const add = useMutation(api.notes.add);
   const ask = useAction(api.notes.lookLikeThePlatform);
@@ -206,7 +206,7 @@ function Notes() {
       <output aria-label="Probes">{probes}</output>
     </main>
   );
-}
+};
 export const Route = createFileRoute("/")({ component: Notes });
 `;
 

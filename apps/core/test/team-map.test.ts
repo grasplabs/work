@@ -1,5 +1,4 @@
 import { sha256Hex } from "@grasp-os/shared/encoding";
-import { interviewApiPath } from "@grasp-os/shared/interview-links";
 import type {
   InterviewFact,
   InterviewProgress,
@@ -8,21 +7,25 @@ import type {
 import type { Roster } from "@grasp-os/shared/onboarding";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
-import { z } from "zod";
 
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { assignWork, mapOf } from "../src/onboarding/team-map.ts";
 import {
+  accountOf,
   answering,
   approveAgreed,
   holdAlarm,
   modelOf,
+  onLink,
+  openLinkAs,
   participate,
   quick,
+  signedInAs,
 } from "./interview-link.ts";
+import type { Device } from "./interview-link.ts";
 import type { ProviderReply } from "./model-provider.ts";
 import { onboardingLog } from "./onboarding-log.ts";
-import { routed, unique } from "./sign-in.ts";
+import { unique } from "./sign-in.ts";
 
 // A team's map (src/onboarding/team-map.ts and the store's drawing): once
 // a lead agrees to their interview, the organization's model draws the
@@ -37,7 +40,6 @@ import { routed, unique } from "./sign-in.ts";
 
 const dayMs = 24 * 60 * 60 * 1000;
 const isoDay = (ms: number) => new Date(ms).toISOString().slice(0, 10);
-const sessionKey = z.object({ key: z.string().optional() });
 
 /** A team led by Lea, with Max and Mia, in a fresh onboarding running from `start`. */
 const team = async (start: string) => {
@@ -57,7 +59,7 @@ const team = async (start: string) => {
     id: ids[key],
     name,
     team: ids.team,
-    email: "",
+    email: `${ids[key]}@acme.test`,
     title,
     away: false,
   });
@@ -80,17 +82,15 @@ const team = async (start: string) => {
   return ids;
 };
 
-/** Someone's link opened on a device: their secret and key. */
-const openLink = async (person: string) => {
+/** Someone's link opened signed in as them: its secret and the session. */
+const openLink = async (person: string): Promise<Device> => {
   const link = await onboardingStore(env).linkOf(person);
   const secret = link?.split("#")[1] ?? "";
-  const session = await routed(interviewApiPath, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ action: "session", secret }),
-  });
-  const { key } = sessionKey.parse(await session.json());
-  return { secret, key: key ?? "" };
+  const { link: opened } = await openLinkAs(
+    secret,
+    await signedInAs(`${person}@acme.test`)
+  );
+  return opened;
 };
 
 const agreed = (id: string, record: string): InterviewFact => ({
@@ -103,7 +103,7 @@ const agreed = (id: string, record: string): InterviewFact => ({
 
 /** Saves the lead's interview as agreed to, with `facts`; returns the new version. */
 const agree = async (
-  link: { secret: string; key: string },
+  link: Device,
   version: number,
   facts: InterviewFact[]
 ): Promise<number> => {
@@ -120,11 +120,7 @@ const agree = async (
     adding: false,
     addedAt: 0,
   };
-  const response = await routed(interviewApiPath, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ action: "save", ...link, version, progress }),
-  });
+  const response = await onLink({ action: "save", ...link, version, progress });
   const saved: InterviewSaved = await response.json();
   await approveAgreed(link, facts);
   return saved.version;
@@ -201,7 +197,7 @@ describe("a team's map", { timeout: 60_000 }, () => {
     await participate(max);
     const context = await store.turnContext(
       await sha256Hex(max.secret),
-      await sha256Hex(max.key)
+      await accountOf(max)
     );
     const usage = await store.usage();
     const works = await store.teamWorks(ids.team);

@@ -16,8 +16,9 @@ import { z } from "zod";
 
 import { loadRelease } from "../src/app-releases.ts";
 import { revokeRelease } from "../src/release-retention.ts";
-import { commitApp, testApp } from "./app-definitions.ts";
+import { testApp } from "./app-definitions.ts";
 import type { TestApp } from "./app-definitions.ts";
+import { commitApp } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { chatWithDraft, previewLease } from "./previews.ts";
 import { person } from "./sealed-apps.ts";
@@ -106,13 +107,8 @@ const personApi = async (role: Role): Promise<Person> =>
 const servedApp = async () => {
   const builder = await personApi("builder");
   const { id } = await builder.api.apps.create({ name: "Notes" });
-  const { version } = await commitApp(
-    builder.api.apps.files,
-    id,
-    files,
-    "First"
-  );
-  await builder.api.apps.versions.publish(id, version);
+  const { version } = await commitApp(builder.api, id, files);
+  await builder.api.versions.rollback({ kind: "app", id }, version);
   const { lease } = await builder.api.pages.open(id);
   const release = await loadRelease(env, id, version);
   return { builder, app: id, lease, release };
@@ -535,7 +531,7 @@ const previewed = async (served: Served) => {
     role: "builder",
   });
   const leaseOf = async (by: Person) => {
-    const { lease } = await by.api.apps.drafts.preview(served.app);
+    const { lease } = await by.api.apps.preview.open(served.app);
     if (lease === undefined) {
       throw new Error("The preview opened with no lease.");
     }
@@ -816,7 +812,7 @@ describe(
         await framesOf(await post(`${served.app}/stream`, call, sent))
       );
       const before = resultOfLast(await framesOf(await attach()));
-      await builder.api.apps.drafts.resetTestData(served.app);
+      await builder.api.apps.preview.resetData(served.app);
       const reset = errorCodeOf(resultOfLast(await framesOf(await attach())));
       await builder.api.apps.archive(served.app);
       const archived = await refusalOf(await attach());

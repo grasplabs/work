@@ -11,10 +11,10 @@ import {
   workflowResourceRuns,
   workflowStartReceipts,
 } from "../src/db/core/schema.ts";
+import { shareWorkflowResource } from "../src/workflow-members.ts";
 import {
   createWorkflowResource,
   deleteWorkflowResource,
-  shareWorkflowResource,
 } from "../src/workflow-resources.ts";
 import {
   readWorkflowState,

@@ -6,32 +6,25 @@ import type {
 import type {
   AppWorkflowBinding,
   CatalogContractEntry,
-  PendingWorkflowBindings,
   ListedWorkflowBindingApproval,
+  PendingWorkflowBindings,
+  WorkflowActivity,
   WorkflowBindingApproval,
   WorkflowCandidateRun,
   WorkflowDraft,
+  WorkflowFile,
   WorkflowItemTest,
-  WorkflowMember,
   WorkflowParams,
   WorkflowResource,
-  WorkflowResourcesApi,
   WorkflowResourceRun,
-  WorkflowResourceVersion,
-  WorkflowShareCandidates,
+  WorkflowResourcesApi,
   WorkflowStart,
-  WorkflowState,
   WorkflowStartForm,
+  WorkflowState,
   WorkflowVersionSource,
-  WorkflowActivity,
-  WorkflowFile,
 } from "@grasp-os/shared/workflow-resources";
 
-import {
-  bindWorkflowToApp,
-  listAppWorkflowBindings,
-  unbindWorkflowFromApp,
-} from "./app-workflow-bindings.ts";
+import { listAppWorkflowBindings } from "./app-workflow-bindings.ts";
 import { askableFor } from "./channels/askable-workflows.ts";
 import { EventSourcesRpc } from "./event-sources-rpc.ts";
 import { makeInProject } from "./projects.ts";
@@ -51,33 +44,22 @@ import {
   catalogContracts,
   publishCatalogContract,
 } from "./workflow-catalog.ts";
-import {
-  editWorkflowDraft,
-  editWorkflowStep,
-  publishWorkflowDraft,
-  workflowDraft,
-} from "./workflow-drafts.ts";
-import { WorkflowLifecycleRpc } from "./workflow-lifecycle-rpc.ts";
+import { editWorkflowStep, workflowDraft } from "./workflow-editor.ts";
+import { WorkflowMembersRpc } from "./workflow-members.ts";
 import { workflowActivity, workflowFiles } from "./workflow-own.ts";
 import { setWorkflowParams, workflowParams } from "./workflow-params.ts";
+import { pauseWorkflow, resumeWorkflow } from "./workflow-pause.ts";
 import {
   createWorkflowResource,
   deleteWorkflowResource,
   getWorkflowResource,
   listWorkflowResources,
-  publishWorkflowVersion,
   releaseWorkflowName,
   setWorkflowAskable,
   setWorkflowProcess,
-  shareWorkflowResource,
-  unshareWorkflowResource,
   workflowAskable,
-  workflowDefinition,
-  workflowMembers,
   workflowSource,
-  workflowVersions,
 } from "./workflow-resources.ts";
-import { workflowShareCandidates } from "./workflow-share-candidates.ts";
 import { workflowStartForm } from "./workflow-start-form.ts";
 import { startWorkflow } from "./workflow-starts.ts";
 import { readWorkflowState, resetWorkflowState } from "./workflow-state.ts";
@@ -107,7 +89,7 @@ export class WorkflowResourcesRpc
 {
   readonly #env: Env;
   readonly #check: SessionCheck;
-  readonly #lifecycle: WorkflowLifecycleRpc;
+  readonly #members: WorkflowMembersRpc;
   readonly #triggers: WorkflowTriggersRpc;
   readonly #sources: EventSourcesRpc;
 
@@ -115,13 +97,13 @@ export class WorkflowResourcesRpc
     super();
     this.#env = env;
     this.#check = check;
-    this.#lifecycle = new WorkflowLifecycleRpc(env, check);
+    this.#members = new WorkflowMembersRpc(env, check);
     this.#triggers = new WorkflowTriggersRpc(env, check);
     this.#sources = new EventSourcesRpc(env, check);
   }
 
-  get lifecycle(): WorkflowLifecycleRpc {
-    return this.#lifecycle;
+  get members(): WorkflowMembersRpc {
+    return this.#members;
   }
 
   get triggers(): WorkflowTriggersRpc {
@@ -161,11 +143,17 @@ export class WorkflowResourcesRpc
     );
   }
 
-  async publish(id: string, input: unknown): Promise<WorkflowResourceVersion> {
+  async pause(id: string): Promise<WorkflowResource> {
     return await withPerson(
       this.#check,
-      async (person) =>
-        await publishWorkflowVersion(this.#env, person, id, input)
+      async (person) => await pauseWorkflow(this.#env, person, id)
+    );
+  }
+
+  async resume(id: string): Promise<WorkflowResource> {
+    return await withPerson(
+      this.#check,
+      async (person) => await resumeWorkflow(this.#env, person, id)
     );
   }
 
@@ -176,41 +164,10 @@ export class WorkflowResourcesRpc
     );
   }
 
-  async editDraft(id: string, input: unknown): Promise<WorkflowDraft> {
-    return await withPerson(
-      this.#check,
-      async (person) => await editWorkflowDraft(this.#env, person, id, input)
-    );
-  }
-
-  async editStep(id: string, input: unknown): Promise<WorkflowDraft> {
+  async define(id: string, input: unknown): Promise<WorkflowDraft> {
     return await withPerson(
       this.#check,
       async (person) => await editWorkflowStep(this.#env, person, id, input)
-    );
-  }
-
-  async publishDraft(
-    id: string,
-    input: unknown
-  ): Promise<WorkflowResourceVersion> {
-    return await withPerson(
-      this.#check,
-      async (person) => await publishWorkflowDraft(this.#env, person, id, input)
-    );
-  }
-
-  async versions(id: string): Promise<WorkflowResourceVersion[]> {
-    return await withPerson(
-      this.#check,
-      async (person) => await workflowVersions(this.#env, person, id)
-    );
-  }
-
-  async definition(id: string, version: number): Promise<string> {
-    return await withPerson(
-      this.#check,
-      async (person) => await workflowDefinition(this.#env, person, id, version)
     );
   }
 
@@ -219,18 +176,6 @@ export class WorkflowResourcesRpc
       this.#check,
       async (person) => await workflowSource(this.#env, person, id, version)
     );
-  }
-
-  async share(id: string, input: unknown): Promise<void> {
-    await withPerson(this.#check, async (person) => {
-      await shareWorkflowResource(this.#env, person, id, input);
-    });
-  }
-
-  async unshare(id: string, input: unknown): Promise<void> {
-    await withPerson(this.#check, async (person) => {
-      await unshareWorkflowResource(this.#env, person, id, input);
-    });
   }
 
   async askable(id: string): Promise<boolean> {
@@ -251,13 +196,6 @@ export class WorkflowResourcesRpc
     await withPerson(this.#check, async (person) => {
       await setWorkflowAskable(this.#env, person, id, askable);
     });
-  }
-
-  async members(id: string): Promise<WorkflowMember[]> {
-    return await withPerson(
-      this.#check,
-      async (person) => await workflowMembers(this.#env, person, id)
-    );
   }
 
   async start(id: string, input: unknown): Promise<WorkflowStart> {
@@ -383,13 +321,6 @@ export class WorkflowResourcesRpc
     );
   }
 
-  async shareCandidates(id: string): Promise<WorkflowShareCandidates> {
-    return await withPerson(
-      this.#check,
-      async (person) => await workflowShareCandidates(this.#env, person, id)
-    );
-  }
-
   async delete(id: string): Promise<void> {
     await withPerson(this.#check, async (person) => {
       await deleteWorkflowResource(this.#env, person, id);
@@ -466,19 +397,6 @@ export class WorkflowResourcesRpc
       this.#check,
       async (person) => await workflowPendingBindings(this.#env, person, id)
     );
-  }
-
-  async bindToApp(id: string, input: unknown): Promise<AppWorkflowBinding> {
-    return await withPerson(
-      this.#check,
-      async (person) => await bindWorkflowToApp(this.#env, person, id, input)
-    );
-  }
-
-  async unbindFromApp(binding: string): Promise<void> {
-    await withPerson(this.#check, async (person) => {
-      await unbindWorkflowFromApp(this.#env, person, binding);
-    });
   }
 
   async appBindings(app: string): Promise<AppWorkflowBinding[]> {

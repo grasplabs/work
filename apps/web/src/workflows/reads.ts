@@ -1,5 +1,6 @@
 import type { App } from "@grasp-os/shared/apps";
 import { roleErrors } from "@grasp-os/shared/roles";
+import type { WorkflowResourceVersion } from "@grasp-os/shared/workflow-resources";
 import type {
   RunActivity,
   RunFilter,
@@ -77,4 +78,21 @@ export const readActivity = async (
     }
     throw error;
   }
+};
+
+/**
+ * Workflow `workflow`'s versions, newest first (`versions.list`), as a
+ * workflow's: its kind's, though the shared list names both kinds.
+ */
+export const workflowVersions = async (
+  session: Session,
+  workflow: string
+): Promise<WorkflowResourceVersion[]> => {
+  const versions = await session.versions.list({
+    kind: "workflow",
+    id: workflow,
+  });
+  return versions.filter(
+    (version): version is WorkflowResourceVersion => version.kind === "workflow"
+  );
 };

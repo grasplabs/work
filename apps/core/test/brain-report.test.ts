@@ -979,6 +979,7 @@ const embedAll = async (embedders: Embedders): Promise<void> => {
       at: nextDay(),
       embedders,
       handOvers: noHandOvers,
+      contextTokens: null,
     });
     // oxlint-disable-next-line no-await-in-loop -- look after each tick
     const { embedding } = await brainWorkOverview(env);
@@ -1090,6 +1091,7 @@ describe("the Brain's embedding, as staff see it", () => {
       at: nextDay(),
       embedders: choosy,
       handOvers: noHandOvers,
+      contextTokens: null,
     });
     const before = await reported((report) => report?.embedding);
     const answered = await answerTo({ type: "reembed" });
@@ -1132,6 +1134,7 @@ describe("the Brain's embedding, as staff see it", () => {
       at: nextDay(),
       embedders: broken,
       handOvers: noHandOvers,
+      contextTokens: null,
     });
     await brain.reembed();
     let { embedding: whileBroken } = await brainWorkOverview(env);
@@ -1142,6 +1145,7 @@ describe("the Brain's embedding, as staff see it", () => {
         at: nextDay(),
         embedders: broken,
         handOvers: noHandOvers,
+        contextTokens: null,
       });
       // oxlint-disable-next-line no-await-in-loop -- looked at after each tick
       ({ embedding: whileBroken } = await brainWorkOverview(env));
@@ -1242,6 +1246,7 @@ describe("the Brain's upkeep, as staff see it", () => {
         embed: async () => await Promise.resolve({ kind: "unavailable" }),
       },
       handOvers: noHandOvers,
+      contextTokens: null,
     });
     // The step's own table refuses every write, with the marker in its words.
     await runInDurableObject(storeObject(), (_store, state) => {

@@ -15,13 +15,15 @@ import { defineErrorFamily } from "./errors.ts";
 // and approval or revocation is the host's own record of its hash.
 
 /**
- * The format of `ReleaseManifest` and of the check evidence it names. A
- * release sealed in another format is refused as such
- * (`version.format_unsupported`), sealing it again included, since its
- * manifest is stored for good: a new version replaces it, and none is
- * read as this.
+ * The format of `ReleaseManifest`, of the check evidence it names and of
+ * the contracts it seals (runtime's `contractsFormatVersion`, which
+ * changes with it: 11 since those seal the workflow each binding names,
+ * not a version it pinned). A release sealed in another format is
+ * refused as such (`version.format_unsupported`), sealing it again
+ * included, since its manifest is stored for good: a new version
+ * replaces it, and none is read as this.
  */
-export const releaseFormatVersion = 10;
+export const releaseFormatVersion = 11;
 
 const sha256Schema = z.string().regex(/^[0-9a-f]{64}$/u);
 

@@ -45,7 +45,7 @@ const notesApp = async (
   const { core, api } = apiOf(builder);
   try {
     const { id } = await api.apps.create({ name });
-    await release(api, id, files, name);
+    await release(api, id, files);
     if (sharedWith !== undefined) {
       await api.apps.members.add(id, {
         type: "person",

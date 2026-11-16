@@ -460,6 +460,20 @@ const ResourceCard = ({
         </Badge>
       </div>
       <Declared resource={resource} />
+      {kind === "brain" &&
+      resource.operations.some(
+        (operation) => operation === "remember" || operation === "forget"
+      ) ? (
+        // What approving the App's writes means, in plain words (core's
+        // brain-app-writes.ts): who reads what it saves, and through what.
+        <p className="text-muted-foreground max-w-prose">
+          <Trans>
+            This App can save memories in the Brain in its own name, which
+            everyone who uses the App reads through it, and only through it, and
+            it can take its own back.
+          </Trans>
+        </p>
+      ) : null}
       {reason === undefined ? null : (
         <p className="text-muted-foreground max-w-prose">{i18n._(reason)}</p>
       )}

@@ -1,5 +1,5 @@
 import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
-import { Trans, useLingui } from "@lingui/react/macro";
+import { useLingui } from "@lingui/react/macro";
 import { Link } from "@tanstack/react-router";
 import { useId } from "react";
 import type { ReactNode } from "react";
@@ -471,9 +471,7 @@ export const BrainHome = ({ brain }: { brain: Brain }) => {
 
 /**
  * The brain's home as a page, as the prototype shows the company note: the company's name, how the
- * brain works in a few sentences, then a block for each part of it, to go on from. Under them, the
- * way to Knowledge, where the memory, skills and uploads are: the brain's own navigation has no
- * place for it.
+ * brain works in a few sentences, then a block for each part of it, to go on from.
  */
 export const HomePage = ({
   brain,
@@ -503,15 +501,6 @@ export const HomePage = ({
             ))}
           </header>
           <BrainHome brain={brain} />
-          <footer className="text-muted-foreground border-t pt-4 text-sm">
-            <Trans>
-              The memory files, skills and uploads your agents read are in{" "}
-              <Link className="text-foreground hover:underline" to="/knowledge">
-                Knowledge
-              </Link>
-              .
-            </Trans>
-          </footer>
         </div>
       </article>
     </div>

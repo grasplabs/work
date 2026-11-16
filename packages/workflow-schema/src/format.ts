@@ -324,12 +324,22 @@ export type FilesAction = (typeof filesActions)[number];
 
 /**
  * What a `call` step on a `brain` permission does, as
- * `ctx.brain.<alias>.<action>` names it: recalls what bears on a question
- * (`{ question, budget: { tokens }, asOf? }`), of what everyone in the
- * company may read, whoever the run acts for: the same pack an App's
- * action gets.
+ * `ctx.brain.<alias>.<action>` names it, of what everyone in the company
+ * may read, whoever the run acts for, as an App's action does: `recall`
+ * recalls what bears on a question (`{ question, budget: { tokens },
+ * asOf? }`); `skills.select` selects the skills for a task (`{ task }`),
+ * and `skills.read` reads one at the version selected (`{ skill: { scope,
+ * name, version } }`); `entities.get` reads an entity's card (`{ entity,
+ * asOf?, after? }`) and `entities.find` finds entities (`{ kind?, name?,
+ * identifier?, after? }`).
  */
-export const brainActions = ["recall"] as const;
+export const brainActions = [
+  "recall",
+  "skills.select",
+  "skills.read",
+  "entities.get",
+  "entities.find",
+] as const;
 export type BrainAction = (typeof brainActions)[number];
 
 /**

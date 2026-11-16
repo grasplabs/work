@@ -19,8 +19,8 @@ import { exportAs } from "../export/export-file.tsx";
 import type { ExportFile, ExportFormat } from "../export/export-file.tsx";
 import { FigureTiles } from "../export/figure-tiles.tsx";
 import { LoadingLines } from "../frame/page-states.tsx";
-import { PlainMarkdown } from "../knowledge/markdown.tsx";
 import type { Loaded } from "../load-from-core.tsx";
+import { PlainMarkdown } from "../markdown.tsx";
 import {
   readsOf,
   reportBody,

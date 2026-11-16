@@ -15,7 +15,7 @@ import {
   ChevronDownIcon,
   InboxIcon,
   LibraryIcon,
-  NotebookPenIcon,
+  LightbulbIcon,
   BookOpenIcon,
   TargetIcon,
   UsersIcon,
@@ -340,8 +340,12 @@ export const BrainNav = ({
   // panel's links mark themselves, a rail button is told.
   const matchRoute = useMatchRoute();
   const onActivity = Boolean(matchRoute({ to: "/brain/activity" }));
-  const onMemory = Boolean(matchRoute({ to: "/brain/memory" }));
   const onSources = Boolean(matchRoute({ to: "/brain/sources" }));
+  const onMemories = Boolean(matchRoute({ to: "/brain/memories" }));
+  const memoriesLabel = t({
+    message: "Memories",
+    context: "the Brain's memories page",
+  });
   const sourcesLabel = t({
     message: "Sources",
     context: "the Brain's sources page",
@@ -426,18 +430,18 @@ export const BrainNav = ({
           <ActivityIcon />
         </PageSidebarRailButton>
         <PageSidebarRailButton
-          active={onMemory}
-          label={t`Memory`}
-          render={<Link to="/brain/memory" />}
-        >
-          <NotebookPenIcon />
-        </PageSidebarRailButton>
-        <PageSidebarRailButton
           active={onSources}
           label={sourcesLabel}
           render={<Link to="/brain/sources" />}
         >
           <LibraryIcon />
+        </PageSidebarRailButton>
+        <PageSidebarRailButton
+          active={onMemories}
+          label={memoriesLabel}
+          render={<Link to="/brain/memories" />}
+        >
+          <LightbulbIcon />
         </PageSidebarRailButton>
         <PageSidebarRailButton
           active={onSkills}
@@ -483,11 +487,11 @@ export const BrainNav = ({
         <Link className={topLinkClass} to="/brain/activity">
           <TopLinkContent icon={ActivityIcon} label={activityLabel} />
         </Link>
-        <Link className={topLinkClass} to="/brain/memory">
-          <TopLinkContent icon={NotebookPenIcon} label={t`Memory`} />
-        </Link>
         <Link className={topLinkClass} to="/brain/sources">
           <TopLinkContent icon={LibraryIcon} label={sourcesLabel} />
+        </Link>
+        <Link className={topLinkClass} to="/brain/memories">
+          <TopLinkContent icon={LightbulbIcon} label={memoriesLabel} />
         </Link>
         <Link className={topLinkClass} to="/brain/skills">
           <TopLinkContent icon={BookOpenIcon} label={skillsLabel} />

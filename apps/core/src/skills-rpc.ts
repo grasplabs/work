@@ -1,5 +1,6 @@
 import type {
   ListedSkill,
+  SkillAudienceAsked,
   SkillShare,
   SkillsApi,
   SkillsOverview,
@@ -65,10 +66,15 @@ export class SkillsRpc extends CoreRpcTarget implements SkillsApi {
     });
   }
 
-  async share(name: string, version: number): Promise<SkillShare> {
+  async share(
+    name: string,
+    version: number,
+    audience: SkillAudienceAsked
+  ): Promise<SkillShare> {
     return await withPerson(
       this.#check,
-      async (person) => await shareOwnSkill(this.#env, person, name, version)
+      async (person) =>
+        await shareOwnSkill(this.#env, person, name, version, audience)
     );
   }
 
@@ -86,9 +92,9 @@ export class SkillsRpc extends CoreRpcTarget implements SkillsApi {
     );
   }
 
-  async retire(name: string): Promise<void> {
+  async retire(name: string, audience: SkillAudienceAsked): Promise<void> {
     await withPerson(this.#check, async (person) => {
-      await retireSkill(this.#env, person, name);
+      await retireSkill(this.#env, person, name, audience);
     });
   }
 

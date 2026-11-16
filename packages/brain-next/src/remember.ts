@@ -1,12 +1,16 @@
+import { log } from "@grasp-os/shared/log";
 import type { DrizzleSqliteDODatabase } from "drizzle-orm/durable-sqlite";
 import { z } from "zod";
 
-import { attributeRuleOf, restoringNow } from "./contract.ts";
+import type { BrainBucket } from "./bucket.ts";
+import { markJudged } from "./catch-up.ts";
+import { attributeRuleOf, changeReused, restoringNow } from "./contract.ts";
 import type {
   AddedMemories,
   AttributeRule,
   NewMemory,
   newMemoriesSchema,
+  Speaker,
 } from "./contract.ts";
 import {
   foldIdentifier,
@@ -15,17 +19,20 @@ import {
   linkedBy,
   mayName,
 } from "./entities.ts";
-import { subjectOf } from "./erasure.ts";
-import { hashOf } from "./files.ts";
+import { subjectOf, writerSubjectOf } from "./erasure.ts";
+import { fileKeyOf, hashOf } from "./files.ts";
+import { linkedByName } from "./linking.ts";
 import {
   entityRowOf,
   lineageOfSource,
   lineageOfWriter,
   stampWrite,
 } from "./memories.ts";
-import { readerSetKeyOf, readerSetOf } from "./reader-sets.ts";
+import { CurrentTextsNeededError, heldIn, judgeLate } from "./quotes.ts";
+import type { CurrentText, CurrentTexts, Written } from "./quotes.ts";
+import { accessOfKey, readerSetKeyOf, readerSetOf } from "./reader-sets.ts";
 import { isRestoring } from "./restoring.ts";
-import { indexMemoryWords } from "./words.ts";
+import { foldForSearch, indexMemoryWords } from "./words.ts";
 import type { WordMemo } from "./words.ts";
 
 // Adding memories (contract.ts `addMemories`): checked whole first, then
@@ -34,10 +41,12 @@ import type { WordMemo } from "./words.ts";
 // other: within a lineage the order of its memories decides which is
 // current (memories.ts), never which add came first, so two writers never
 // both win or both lose. The same change again answers what it added,
-// whatever was added since; with other memories, it is refused.
+// whatever was added since; with other memories, it is refused. A memory
+// resting on a version before its source's current one is judged against
+// the current version's text in the add's transaction (quotes.ts).
 
 /** An add as its schema reads it. */
-type Adding = z.output<typeof newMemoriesSchema>;
+export type Adding = z.output<typeof newMemoriesSchema>;
 
 /** A memory of an add, with where its entities are in the add and its attribute's rule. */
 interface Planned {
@@ -124,20 +133,20 @@ export const planOf = ({ entities, memories }: Adding): Planned[] => {
 export interface RememberStore {
   storage: DurableObjectStorage;
   db: DrizzleSqliteDODatabase;
+  /** Where versions' files are: the current text a late memory is judged against. */
+  bucket: BrainBucket;
   /** Whether it is the shared store, which keeps nothing one person alone may read. */
   shared: boolean;
 }
 
 const encoder = new TextEncoder();
 
-/** What a refused repeat of a change says. */
-const otherMemories =
-  "The Brain refused it: this change was added before with other memories";
-
 /**
  * The entities of an add as rows: each known `id` (of its kind), else
  * the first holding one of its identifiers, or another entity of the add
- * with one of them, else a new one.
+ * with one of them, else, given no identifier, the one entity of its kind
+ * holding one of its names by memories of exactly the add's readers
+ * (linking.ts `linkedByName`), else a new one.
  */
 const entityRowsOf = (
   sql: SqlStorage,
@@ -155,7 +164,10 @@ const entityRowsOf = (
         keys
           .map((key) => linked.get(key))
           .find((found) => found !== undefined) ??
-        linkedBy(sql, entity.kind, entity.identifiers, readers);
+        linkedBy(sql, entity.kind, entity.identifiers, readers) ??
+        (entity.identifiers.length === 0
+          ? linkedByName(sql, entity.kind, entity.names, readers)
+          : undefined);
     } else {
       const known = entityRowOf(sql, entity.id);
       // An id the add may not name is refused in the words of an unknown
@@ -186,10 +198,11 @@ const entityRowsOf = (
 };
 
 /**
- * Whether this store holds the version and no erasure hides it, a refusal
- * (`why`) if not; in the shared store, a refusal too when one person alone
- * may read it: what is drawn from it is theirs alone, and lies only in
- * their own store.
+ * Whether this store holds the version, no erasure hides it and its source
+ * wasn't removed (removal.ts: nothing new is drawn from it), a refusal
+ * (`why`) if not, alike; in the shared store, a refusal too when one
+ * person alone may read it: what is drawn from it is theirs alone, and
+ * lies only in their own store.
  */
 const holdVersion = (
   { sql, shared }: { sql: SqlStorage; shared: boolean },
@@ -198,13 +211,13 @@ const holdVersion = (
   why: string
 ): void => {
   const [found] = sql
-    .exec<{ alone: number }>(
-      `SELECT (json_array_length(reader_sets.key) = 1
-          AND reader_sets.key ->> '$[0][0]' = 'person') AS alone
+    .exec<{ readers: string }>(
+      `SELECT reader_sets.key AS readers
       FROM source_versions
       JOIN reader_sets ON reader_sets.id = source_versions.reader_set
-      WHERE source = ? AND version = ?
-        AND row NOT IN (SELECT version_row FROM erasing_versions)`,
+      WHERE source = ?1 AND version = ?2
+        AND row NOT IN (SELECT version_row FROM erasing_versions)
+        AND NOT EXISTS (SELECT 1 FROM removed_sources WHERE source = ?1)`,
       source,
       version
     )
@@ -212,7 +225,15 @@ const holdVersion = (
   if (found === undefined) {
     throw refused(why);
   }
-  if (shared && found.alone === 1) {
+  if (!shared) {
+    return;
+  }
+  // Closed for a key the store can't read: it may be one person's.
+  const access = accessOfKey(found.readers);
+  if (access === undefined) {
+    throw refused("who may read what it is drawn from can't be read");
+  }
+  if (access.kind === "owner") {
     throw refused(
       "what one person alone may read is kept in that person's own store"
     );
@@ -231,41 +252,111 @@ interface Into {
   shared: boolean;
   /** Each source the add names, by its SHA-256 as the erasure ledger names it. */
   subjects: ReadonlyMap<string, string>;
+  /** Each writer the add names, by the SHA-256 of its lineage, as the ledger names it. */
+  writers: ReadonlyMap<string, string>;
+  /** Each memory's restatement key, by its place in the add (`restatementOf`). */
+  restatements: readonly string[];
   learnedAt: number;
   memo: WordMemo;
 }
 
+/** Spacing, as a statement is compared: any run of it is one space. */
+const spacing = /\s+/gu;
+
+/** A statement's end as a sentence ends it, which saying it again may drop or add. */
+const sentenceEnd = /[.!]+$/u;
+
 /**
- * What one-value attributes compare a memory by, under its attribute's
- * `rule`: its `value` folded, or the id of the entity a relation relates
- * to (`object`); none without an attribute. For an add and a restore
- * (restore.ts) alike.
+ * A statement as a restatement compares it: folded as search folds text
+ * (words.ts `foldForSearch`: case, accents and Unicode's forms), its
+ * spacing one space, and a final `.` or `!` taken off. Every other sign
+ * stays, so "-5%" and "5%", "$5M" and "€5M", "> 100" and "< 100",
+ * "1,500" and "1.500", "C++" and "C#" are never the same fact.
+ */
+const statementKeyOf = (statement: string): string =>
+  foldForSearch(statement)
+    .replaceAll(spacing, " ")
+    .trim()
+    .replace(sentenceEnd, "");
+
+/** Whose word a memory is, as a restatement compares it: its kind, and the person or agent. */
+const speakerKeyOf = (speaker: Speaker): [string, string | null] => {
+  if (speaker.kind === "internal") {
+    return [speaker.kind, speaker.person];
+  }
+  if (speaker.kind === "agent") {
+    return [speaker.kind, speaker.agent];
+  }
+  return [speaker.kind, null];
+};
+
+/**
+ * What a memory filed under no attribute is a restatement of another by:
+ * the SHA-256 of its type, whose word it is, its value folded and its
+ * statement as a restatement compares it (`statementKeyOf`), so the index
+ * holds a fixed length whatever the statement's. Hashed before a
+ * transaction.
+ */
+export const restatementOf = async ({
+  type,
+  speaker,
+  value,
+  statement,
+}: {
+  type: string;
+  speaker: Speaker;
+  value: string | null;
+  statement: string;
+}): Promise<string> =>
+  await hashOf(
+    encoder.encode(
+      JSON.stringify([
+        type,
+        speakerKeyOf(speaker),
+        foldName(value ?? ""),
+        statementKeyOf(statement),
+      ])
+    )
+  );
+
+/**
+ * What a newer memory of its lineage must match to end it (memories.ts
+ * `newerSql`), under its attribute's `rule`. One-value attributes, and
+ * many-value ones per value, compare its `value` folded, or the id of the
+ * entity a relation relates to (`object`). A memory filed under no
+ * attribute is a restatement of another when it says the same of the
+ * same related entity, in the same speaker's word (`restatementOf`, then
+ * the entity's id): so the
+ * same fact said again by its source or its writer ends what it said
+ * before, kept as history, and anything worded otherwise never does. For
+ * an add and a restore (restore.ts) alike.
  */
 export const valueKeyFor = (
   rule: AttributeRule | undefined,
-  value: string | null,
-  object: string | null
+  {
+    value,
+    object,
+    restatement,
+  }: { value: string | null; object: string | null; restatement: string }
 ): string | null => {
   if (rule === undefined) {
-    return null;
+    return `${restatement}:${object ?? ""}`;
   }
   return rule.relation === undefined ? foldName(value ?? "") : object;
 };
 
-/**
- * What one-value attributes compare a memory by: its value folded, or the
- * id of the entity a relation relates to; none without an attribute.
- */
+/** What a newer memory of its lineage must match to end `memory` (`valueKeyFor`). */
 const valueKeyOf = (
-  { ids }: Into,
+  { ids, restatements }: Into,
   memory: NewMemory,
-  plan: Planned
+  plan: Planned,
+  index: number
 ): string | null =>
-  valueKeyFor(
-    plan.rule,
-    memory.value ?? null,
-    plan.object === undefined ? null : (ids[plan.object] ?? null)
-  );
+  valueKeyFor(plan.rule, {
+    value: memory.value ?? null,
+    object: plan.object === undefined ? null : (ids[plan.object] ?? null),
+    restatement: restatements[index] ?? "",
+  });
 
 /** The SHA-256 of `source`, which the add hashed before its transaction. */
 const subjectOfSource = (
@@ -275,6 +366,18 @@ const subjectOfSource = (
   const subject = subjects.get(source);
   if (subject === undefined) {
     throw new Error("The Brain did not hash a source it adds");
+  }
+  return subject;
+};
+
+/** The SHA-256 of `writer`'s lineage, which the add hashed before its transaction. */
+const subjectOfWriter = (
+  writers: ReadonlyMap<string, string>,
+  writer: string
+): string => {
+  const subject = writers.get(writer);
+  if (subject === undefined) {
+    throw new Error("The Brain did not hash a writer it adds");
   }
   return subject;
 };
@@ -289,6 +392,7 @@ const basisOf = (
   version: number | null;
   subject: string | null;
   writer: string | null;
+  writerSubject: string | null;
   lineage: string;
   order: number;
 } => {
@@ -298,6 +402,7 @@ const basisOf = (
       version: null,
       subject: null,
       writer: basis.writer,
+      writerSubject: subjectOfWriter(into.writers, basis.writer),
       lineage: lineageOfWriter(basis.writer),
       order: 0,
     };
@@ -313,6 +418,7 @@ const basisOf = (
     version: basis.version,
     subject: subjectOfSource(into.subjects, basis.source),
     writer: null,
+    writerSubject: null,
     lineage: lineageOfSource(basis.source),
     order: basis.version,
   };
@@ -334,14 +440,14 @@ const keepMentions = (into: Into, plan: Planned, row: number): void => {
 /**
  * Writes `memory`, the add's `index`th, with its words and stems and the
  * names and identifiers of the entities it mentions, as it gave them.
- * Answers its id.
+ * Answers its id, and its row with what it rests on.
  */
 const writeMemory = (
   into: Into,
   memory: NewMemory,
   plan: Planned | undefined,
   index: number
-): string => {
+): { id: string; written: Written } => {
   const { sql, rows } = into;
   const aboutRow = plan === undefined ? undefined : rows[plan.about];
   if (plan === undefined || aboutRow === undefined) {
@@ -353,16 +459,16 @@ const writeMemory = (
     .exec<{ row: number }>(
       `INSERT INTO memories (id, entity, attribute, object, value, value_key,
         one_value, type, statement, quote, source, version, subject, writer,
-        lineage, lineage_order, speaker, valid_from, valid_until, learned_at,
-        readers)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        writer_subject, lineage, lineage_order, speaker, valid_from,
+        valid_until, learned_at, readers)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       RETURNING row`,
       id,
       aboutRow,
       memory.attribute ?? null,
       plan.object === undefined ? null : (rows[plan.object] ?? null),
       memory.value ?? null,
-      valueKeyOf(into, memory, plan),
+      valueKeyOf(into, memory, plan, index),
       plan.rule?.values === "one" ? 1 : 0,
       memory.type,
       memory.statement,
@@ -371,6 +477,7 @@ const writeMemory = (
       based.version,
       based.subject,
       based.writer,
+      based.writerSubject,
       based.lineage,
       based.order,
       JSON.stringify(memory.speaker),
@@ -382,7 +489,15 @@ const writeMemory = (
     .one();
   indexMemoryWords(sql, row, memory.statement, into.memo);
   keepMentions(into, plan, row);
-  return id;
+  return {
+    id,
+    written: {
+      row,
+      source: based.source,
+      version: based.version,
+      quote: memory.basis.quote ?? null,
+    },
+  };
 };
 
 /**
@@ -416,17 +531,18 @@ const markExtracted = (
   );
 };
 
-/**
- * Adds `adding` (above), or answers what its change added before. Its
- * memories are readable by its `access` (and, resting on a version, by
- * that version's readers too: memories.ts).
- */
-export const addMemories = async (
-  { storage, db, shared }: RememberStore,
-  adding: Adding
-): Promise<AddedMemories> => {
-  const planned = planOf(adding);
-  const { sql } = storage;
+/** What an add hashes before its transaction (`hashesOf`), for its write (`writeAdd`). */
+export interface AddHashes {
+  key: string;
+  hash: string;
+  subjects: ReadonlyMap<string, string>;
+  writers: ReadonlyMap<string, string>;
+  /** Each memory's restatement key (`restatementOf`), in the add's order. */
+  restatements: readonly string[];
+}
+
+/** `adding`'s change key, content and sources, hashed: what its write needs, made before it. */
+export const hashesOf = async (adding: Adding): Promise<AddHashes> => {
   const key = await hashOf(encoder.encode(adding.change));
   const hash = await hashOf(
     encoder.encode(
@@ -451,7 +567,44 @@ export const addMemories = async (
       )
     )
   );
-  return storage.transactionSync(() => {
+  const restatements = await Promise.all(
+    adding.memories.map(
+      async ({ type, speaker, value, statement }) =>
+        await restatementOf({ type, speaker, value: value ?? null, statement })
+    )
+  );
+  const writers = new Map(
+    await Promise.all(
+      [
+        ...new Set(
+          adding.memories.flatMap(({ basis }) =>
+            basis.kind === "writer" ? [basis.writer] : []
+          )
+        ),
+      ].map(async (writer) => [writer, await writerSubjectOf(writer)] as const)
+    )
+  );
+  return { key, hash, subjects, writers, restatements };
+};
+
+/**
+ * Writes `adding` (above), or answers what its change added before, with
+ * `hashes` made of it before (`hashesOf`), and its memories that rest on a
+ * version before their source's current one judged against `texts`, the
+ * current versions' texts (quotes.ts): `CurrentTextsNeededError` when one is
+ * missing, writing nothing. Synchronous: run it in a transaction, which a
+ * caller may share with checks of its own, so what it checks holds as the
+ * add writes.
+ */
+export const writeAdd = (
+  { storage, db, shared }: Omit<RememberStore, "bucket">,
+  adding: Adding,
+  { key, hash, subjects, writers, restatements }: AddHashes,
+  texts: CurrentTexts = new Map()
+): AddedMemories => {
+  const planned = planOf(adding);
+  const { sql } = storage;
+  {
     // Nothing is added while a restore runs (restoring.ts): it writes a
     // lineage's memories in their order, which an add between would break.
     if (isRestoring(sql)) {
@@ -465,7 +618,7 @@ export const addMemories = async (
       .toArray();
     if (before !== undefined) {
       if (before.hash !== hash) {
-        throw new Error(otherMemories);
+        throw new Error(changeReused);
       }
       return answerSchema.parse(JSON.parse(before.answer));
     }
@@ -488,12 +641,22 @@ export const addMemories = async (
       readers,
       shared,
       subjects,
+      writers,
+      restatements,
       learnedAt: stampWrite(sql),
       memo: new Map(),
     };
-    const memories = adding.memories.map((memory, index) =>
+    const made = adding.memories.map((memory, index) =>
       writeMemory(into, memory, planned[index], index)
     );
+    const written = made.map((memory) => memory.written);
+    judgeLate(sql, written, texts);
+    const first = written.at(0);
+    const last = written.at(-1);
+    if (first !== undefined && last !== undefined) {
+      markJudged(sql, first.row, last.row);
+    }
+    const memories = made.map((memory) => memory.id);
     if (adding.extracted !== undefined) {
       markExtracted(sql, adding.extracted, into);
     }
@@ -513,5 +676,69 @@ export const addMemories = async (
       JSON.stringify(answer)
     );
     return answer;
-  });
+  }
+};
+
+/**
+ * What `needed` holds of `adding`'s quotes, read from the bucket one
+ * version at a time, each text let go before the next is read: what a late
+ * add's transaction asked for (`CurrentTextsNeededError`). A version whose
+ * file is gone holds none (quotes.ts `heldIn`).
+ */
+const textsOf = async (
+  bucket: BrainBucket,
+  needed: CurrentTextsNeededError["needed"],
+  adding: Adding
+): Promise<Map<string, CurrentText>> => {
+  const read = new Map<string, CurrentText>();
+  for (const { source, row, file } of needed) {
+    const quotes = adding.memories.flatMap(({ basis }) =>
+      basis.kind === "source" && basis.source === source ? [basis.quote] : []
+    );
+    // oxlint-disable-next-line no-await-in-loop -- one text in memory at a time
+    const object = await bucket.get(fileKeyOf(file));
+    if (object === null) {
+      // As a read of a version whose file is gone says it (sources.ts).
+      log.warn("brain.version_file_missing", {});
+    }
+    // oxlint-disable-next-line no-await-in-loop -- one text in memory at a time
+    const text = object === null ? null : await object.text();
+    read.set(source, { row, file, held: heldIn(text, quotes) });
+  }
+  return read;
+};
+
+/**
+ * Adds `adding` (above), or answers what its change added before. Its
+ * memories are readable by its `access` (and, resting on a version, by
+ * that version's readers too: memories.ts). A memory resting on a version
+ * before its source's current one needs that current version's text: the
+ * transaction asks for it, the file is read, and the add is made again
+ * with it, again whenever a newer version landed while it read, so it is
+ * judged against the version current as it is written.
+ */
+export const addMemories = async (
+  store: RememberStore,
+  adding: Adding
+): Promise<AddedMemories> => {
+  // Checked before anything is hashed, as the add always was.
+  planOf(adding);
+  const hashes = await hashesOf(adding);
+  const attempt = (given: CurrentTexts): AddedMemories =>
+    store.storage.transactionSync(() => writeAdd(store, adding, hashes, given));
+  let texts: CurrentTexts = new Map();
+  for (;;) {
+    try {
+      return attempt(texts);
+    } catch (error) {
+      if (!(error instanceof CurrentTextsNeededError)) {
+        throw error;
+      }
+      texts = new Map([
+        ...texts,
+        // oxlint-disable-next-line no-await-in-loop -- read again only when a newer version landed
+        ...(await textsOf(store.bucket, error.needed, adding)),
+      ]);
+    }
+  }
 };

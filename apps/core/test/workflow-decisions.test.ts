@@ -23,12 +23,11 @@ import {
   revokeWorkflowBinding,
 } from "../src/workflow-bindings.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
-import { editWorkflowDraft, workflowDraft } from "../src/workflow-drafts.ts";
+import { editWorkflowDraft, workflowDraft } from "../src/workflow-editor.ts";
+import { shareWorkflowResource } from "../src/workflow-members.ts";
 import { setWorkflowParams } from "../src/workflow-params.ts";
 import {
   createWorkflowResource,
-  publishWorkflowVersion,
-  shareWorkflowResource,
   workflowVersions,
 } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
@@ -44,6 +43,7 @@ import { allEvents } from "./audit-events.ts";
 import { resumed, stopped, whileEngineRefuses } from "./runs.ts";
 import { outcome, unique } from "./sign-in.ts";
 import { reached } from "./teams-door.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
 
 // The decision step in JSON workflows (grasp-workflow/2's `decision`, the
 // run host's `step.decision`, resource-decisions.ts and the decision
@@ -236,10 +236,12 @@ const approvalWorkflow = async ({
     owner,
     `approve-${unique()}`
   );
-  await publishWorkflowVersion(env, owner, workflow.id, {
-    definition: definitionOf(contract, steps, status),
-    basedOn: null,
-  });
+  await publishDefinition(
+    env,
+    owner,
+    workflow.id,
+    definitionOf(contract, steps, status)
+  );
   const [version] = await workflowVersions(env, owner, workflow.id);
   const approval = await approveWorkflowBinding(env, admin, workflow.id, {
     alias: "invoiceApproval",
@@ -263,7 +265,7 @@ const started = async (
     env,
     { type: "person", person: by },
     id,
-    { version: 1, args: { amount }, key: unique() }
+    { expected: 1, args: { amount }, key: unique() }
   );
   if (runId === null) {
     throw new Error("The start admitted no run");
@@ -1379,7 +1381,7 @@ describe("a test run of a JSON workflow's decision", () => {
     );
     const { revision: base } = await workflowDraft(env, owner, workflow.id);
     const saved = await editWorkflowDraft(env, owner, workflow.id, {
-      expectedRevision: base,
+      revision: base,
       source: definitionOf(contract, approvalSteps()),
     });
     const run = async (

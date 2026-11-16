@@ -545,12 +545,12 @@ describe("a workflow's ctx", () => {
     }
   );
 
-  it("has only the files and Brain actions its steps take, as frozen members", async () => {
+  it("has only the files and Brain actions its steps take, as frozen members, the Brain's skills under `skills`", async () => {
     let held: unknown;
     const workflow = defineWorkflow({
       permissions: {
         files: { runFiles: ["read"] },
-        brain: { handbook: ["recall"] },
+        brain: { handbook: ["recall", "skills.select"] },
       },
       handler: async (ctx) => {
         held = ctx;
@@ -562,11 +562,13 @@ describe("a workflow's ctx", () => {
       read(held, "files"),
       read(held, "files", "runFiles"),
       read(held, "brain", "handbook"),
+      read(held, "brain", "handbook", "skills"),
     ];
     expect({
       data: members.map((member) => isFrozenData(member)),
       files: keysOf(read(held, "files", "runFiles")),
       brain: keysOf(read(held, "brain", "handbook")),
+      skills: keysOf(read(held, "brain", "handbook", "skills")),
       // An action no step takes is no member: deleting, writing, an action
       // the Brain doesn't have, or a name of the prototype's.
       undeclared: [
@@ -575,12 +577,21 @@ describe("a workflow's ctx", () => {
         read(held, "brain", "handbook", "search"),
         read(held, "files", "runFiles", "constructor"),
         read(held, "brain", "__proto__"),
+        read(held, "brain", "handbook", "skills", "read"),
       ],
     }).toStrictEqual({
-      data: [true, true, true],
+      data: [true, true, true, true],
       files: ["read"],
-      brain: ["recall"],
-      undeclared: [undefined, undefined, undefined, undefined, undefined],
+      brain: ["recall", "skills"],
+      skills: ["select"],
+      undeclared: [
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+      ],
     });
   });
 
@@ -591,7 +602,7 @@ describe("a workflow's ctx", () => {
           mail: { readAttachment: "mail.readAttachment", send: "mail.send" },
         },
         files: { runFiles: ["read"] },
-        brain: { handbook: ["recall"] },
+        brain: { handbook: ["recall", "skills.read"] },
       },
       handler: async (ctx) => {
         await ctx.connections.mail.readAttachment(
@@ -607,6 +618,10 @@ describe("a workflow's ctx", () => {
         await ctx.brain.handbook.recall(
           { question: "refunds", budget: { tokens: 800 } },
           { step: "found" }
+        );
+        await ctx.brain.handbook.skills.read(
+          { skill: { scope: "grasp", name: "refunds", version: 2 } },
+          { step: "howTo" }
         );
         return null;
       },
@@ -632,6 +647,11 @@ describe("a workflow's ctx", () => {
         binding: "handbook",
         operation: "recall",
         args: { question: "refunds", budget: { tokens: 800 } },
+      },
+      {
+        binding: "handbook",
+        operation: "skills.read",
+        args: { skill: { scope: "grasp", name: "refunds", version: 2 } },
       },
     ]);
   });

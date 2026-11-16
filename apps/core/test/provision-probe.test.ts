@@ -188,6 +188,7 @@ describe("the console's provisioning probe", () => {
           WORKSPACES: true,
           APPS: true,
           APP_PREVIEWS: true,
+          DRAFT_WATCHES: true,
           AUDIT_LOG: true,
           BUILTINS: true,
           CLOCK: true,
