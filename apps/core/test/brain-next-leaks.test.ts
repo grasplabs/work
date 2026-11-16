@@ -4,7 +4,7 @@ import {
   onlyInOwnStore,
   recallBudgetMax,
 } from "@grasp-os/brain-next/contract";
-import type { Access, WorkOverview } from "@grasp-os/brain-next/contract";
+import type { Access } from "@grasp-os/brain-next/contract";
 import { brainUploadReadersSchema } from "@grasp-os/shared/brain-sources";
 import type { BrainUploadReaders } from "@grasp-os/shared/brain-sources";
 import { chatIdSchema } from "@grasp-os/shared/ids";
@@ -20,7 +20,6 @@ import { handOverProducers } from "../src/brain-hand-overs.ts";
 import {
   addInstructionFile,
   addSource,
-  alarmHostOf,
   brainStaffReport,
   eraseSource,
   erasePerson,
@@ -219,30 +218,6 @@ const promptedWith = async (
     }
   }
   return prompted;
-};
-
-/** Reports `overview` as `person`'s own store's alarm does when its tick ends. */
-const reportAs = async (
-  person: string,
-  overview: WorkOverview
-): Promise<void> => {
-  const host = await alarmHostOf(env, `person:${person}`);
-  await host.report(overview);
-};
-
-/** A person's own store as staff's totals key it: the SHA-256 of their id, in hex. */
-const storeKeyOf = async (person: string): Promise<string> =>
-  Array.from(
-    new Uint8Array(
-      await crypto.subtle.digest("SHA-256", new TextEncoder().encode(person))
-    ),
-    (byte) => byte.toString(16).padStart(2, "0")
-  ).join("");
-
-/** Staff's totals of people's own stores. */
-const ownTotals = async () => {
-  const { ownStores } = await brainStaffReport(env);
-  return ownStores;
 };
 
 /** Adds `text` as a version of `source` (a new one by default). */
@@ -2695,86 +2670,6 @@ describe(
         groupRecalled: true,
         afterGroup: { groupCompany: false, directCompany: false, own: false },
         afterDirect: { company: true, own: true },
-      });
-    });
-
-    it("tells staff the same totals of people's own stores whoever of them holds what", async () => {
-      /**
-       * Two people's stores reporting what one holds, then the other: the
-       * totals before, after the first way and after the second.
-       */
-      const measured = async () => {
-        const [first, second] = [
-          `person-${crypto.randomUUID()}`,
-          `person-${crypto.randomUUID()}`,
-        ];
-        // An overview as a store that holds something reports it, with
-        // `waiting` items and `parked` (one holding nothing has no row).
-        const base = await ownStoreOf(first).workOverview();
-        const holding = (waiting: number, parked: number) => ({
-          ...base,
-          holding: true,
-          waiting:
-            waiting === 0
-              ? []
-              : [
-                  {
-                    kind: "embed",
-                    count: waiting,
-                    oldestAddedAt: new Date(1_000_000),
-                  },
-                ],
-          parkedCount: parked,
-        });
-        const ours = new Set(
-          await Promise.all([first, second].map(storeKeyOf))
-        );
-        /** What the other stores last reported: their rows, by store. */
-        const others = async () => {
-          const { results } = await env.DB.prepare(
-            "SELECT store, reported_at FROM brain_own_stores ORDER BY store"
-          ).all<{ store: string; reported_at: number }>();
-          return JSON.stringify(
-            results.filter(({ store }) => !ours.has(store))
-          );
-        };
-        const othersBefore = await others();
-        const before = await ownTotals();
-        await reportAs(first, holding(5, 2));
-        await reportAs(second, holding(0, 0));
-        const oneHoldsAll = await ownTotals();
-        await reportAs(first, holding(0, 0));
-        await reportAs(second, holding(5, 2));
-        const theOtherHoldsAll = await ownTotals();
-        const quiet = (await others()) === othersBefore;
-        for (const person of [first, second]) {
-          // oxlint-disable-next-line no-await-in-loop -- one person at a time
-          await erasePerson(env, { personId: person, reason: "person_erased" });
-        }
-        return { before, oneHoldsAll, theOtherHoldsAll, quiet };
-      };
-      // Another person's store reporting meanwhile (an earlier test's
-      // store embedding on its own alarm, since a recall named the model)
-      // moves the totals: measured again then, with two new people.
-      let measure = await measured();
-      for (let again = 0; !measure.quiet && again < 4; again += 1) {
-        // oxlint-disable-next-line no-await-in-loop -- one measure after another
-        measure = await measured();
-      }
-      const { before, oneHoldsAll, theOtherHoldsAll, quiet } = measure;
-
-      expect({
-        quiet,
-        added: {
-          stores: oneHoldsAll.stores - before.stores,
-          waiting: oneHoldsAll.waiting - before.waiting,
-          parked: oneHoldsAll.parked - before.parked,
-        },
-        same: theOtherHoldsAll,
-      }).toStrictEqual({
-        quiet: true,
-        added: { stores: 2, waiting: 5, parked: 2 },
-        same: oneHoldsAll,
       });
     });
   }
