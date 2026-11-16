@@ -948,6 +948,23 @@ describe("a recall before a question that doesn't hand over", setUpTime, () => {
     await withEnv(
       chat,
       {
+        // The first pass ends only once the analysis reached the provider:
+        // one let go of before it was sent leaves nothing there to see go.
+        BRAIN_STORE: answering(
+          env.BRAIN_STORE,
+          "find",
+          async (own, request) => {
+            for (
+              let waits = 0;
+              chat.provider.analyses.length === 0 && waits < 500;
+              waits += 1
+            ) {
+              // oxlint-disable-next-line no-await-in-loop -- until it is there
+              await scheduler.wait(20);
+            }
+            return await own(request);
+          }
+        ),
         AUDIT_LOG: answering(env.AUDIT_LOG, "append", async (own, events) => {
           if (holdsRecalled(events)) {
             step.reached = true;
