@@ -37,13 +37,16 @@ import type { CurrentVersion, QuoteIndex } from "./quotes.ts";
 // is tried, so a source that keeps failing (its file unreachable) holds no
 // one else up.
 //
-// Each tick does a bounded amount (`catchUpLimits`). A source with no
-// memory on a version before its current one (most, after a restore) is
-// marked judged without reading its file. So after a restore an out
-// memory reads current for about the largest of (unjudged sources) /
-// `looked`, (sources with memories on earlier versions) / `reads` and
-// (their memories on earlier versions) / `memories` ticks: measured in the
-// pull request.
+// Each tick does a bounded amount (`catchUpLimits`), stopping at
+// whichever limit it reaches first. A source with no memory on a version
+// before its current one (most, after a restore) is marked judged without
+// reading its file. So after a restore an out memory reads current for at
+// most about the sum of (unjudged sources) / `looked`, (sources with
+// memories on earlier versions) / `reads`, (their memories on earlier
+// versions) / `memories`, and (memories restored) / `marked` ticks: the
+// last for the mark's scan, which a restored store starts at its first
+// memory, and which also finds a source a tick between the restore's parts
+// marked judged before its memories arrived. Measured in the pull request.
 
 /** What one tick of the catch-up may do. */
 export interface CatchUpLimits {
@@ -71,6 +74,10 @@ export interface CatchUpLimits {
  *   so 10,000 take about 0.2 s; a step of the matcher about 10 ns, so 30
  *   million take about 0.3 s, which bounds a tick of long quotes of
  *   frequent words (GRA-1939) as well;
+ * - a file's text counts a step a character (`catchUpStep`): reading and
+ *   indexing a 1 MB text took about 50 to 80 ms in workerd, so a tick
+ *   stops after some 30 such texts, about 2.5 s of CPU at worst, inside an
+ *   invocation's 30 s;
  * - the mark's scan reads 10,000 memory rows at most.
  */
 export const catchUpLimits: CatchUpLimits = {
@@ -424,6 +431,7 @@ export const catchUpStep = async (
       reads += 1;
       // oxlint-disable-next-line no-await-in-loop -- one file at a time, a turn after another
       const text = await textOf(bucket, current.file);
+      spent.steps += text?.length ?? 0;
       read = {
         file: current.file,
         index: text === null ? null : quoteIndexOf(text),
