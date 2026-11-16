@@ -6,6 +6,7 @@ import { ErrorText } from "../error-text.tsx";
 import { Page, PageHeading } from "../frame/page.tsx";
 import { SettingsSection } from "../settings/settings-parts.tsx";
 import { useCoreAction } from "../use-core-action.ts";
+import { workOutQuietly } from "./agent-apps-card.tsx";
 import { AgentForm } from "./agent-form.tsx";
 import type { Typed } from "./agent-form.tsx";
 
@@ -130,15 +131,21 @@ export const NewAgent = ({
             // Every part is this form's, so all are said.
             const typed = { ...blank, ...said, modelRole: null };
             await run(async (session) => {
+              const made =
+                whose === "own"
+                  ? await session.connections.makeOwnAgent(typed)
+                  : await session.connections.makeAgent(typed);
+              // The apps its instructions call for, before its page opens.
+              if (typed.instructions.trim() !== "") {
+                await workOutQuietly(session, made.id);
+              }
               if (whose === "own") {
-                const made = await session.connections.makeOwnAgent(typed);
                 await navigate({
                   to: "/agents/$agent",
                   params: { agent: made.id },
                 });
                 return;
               }
-              const made = await session.connections.makeAgent(typed);
               await navigate({
                 to: "/agents/$agent",
                 params: { agent: made.id },
