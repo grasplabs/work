@@ -592,14 +592,17 @@ export const defineDraft = async (
     found,
     operation,
     async (draft, files, changes, definition) => {
-      if (!preview) {
-        await saveDraftChanges(
-          env,
-          { by, detail: operationDetail(operation) },
-          found,
-          { draft, files, changes, definition }
-        );
+      if (preview) {
+        return draft.revision;
       }
+      await saveDraftChanges(
+        env,
+        { by, detail: operationDetail(operation) },
+        found,
+        { draft, files, changes, definition }
+      );
+      // Each write moves the draft to its next revision (drafts.ts).
+      return draft.revision + 1;
     },
     { revision: read }
   );
@@ -609,6 +612,7 @@ export const defineDraft = async (
         model: dataModelOf(defined.definition),
         plan: defined.plan,
         change: defined.change,
+        revision: defined.saved,
       }
     : defined;
 };
