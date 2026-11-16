@@ -896,7 +896,8 @@ describe("a writer's erasure", () => {
       // that points at the erasure.
       const before: Copy = {
         // The table of memories that failed to delete is the release's own,
-        // and so are the quotes' (migration 0022, quotes.ts).
+        // and so are the quotes' (migration 0022, quotes.ts) and a person's
+        // erasure's (migration 0024, people.ts).
         tables: now.tables
           .filter(
             ({ name }) =>
@@ -907,6 +908,8 @@ describe("a writer's erasure", () => {
                 "memory_ins",
                 "memory_judging",
                 "memory_judging_places",
+                "person_erasure_subjects",
+                "person_erasure_memories",
               ].includes(name)
           )
           .map((table) => {
@@ -1002,7 +1005,8 @@ describe("a writer's erasure", () => {
             !made.includes("work_items_key_idx") &&
             !made.includes("memory_outs") &&
             !made.includes("memory_ins") &&
-            !made.includes("current_versions_unjudged_idx")
+            !made.includes("current_versions_unjudged_idx") &&
+            !made.includes("person_erasure_subjects")
         ),
       };
       expect(
