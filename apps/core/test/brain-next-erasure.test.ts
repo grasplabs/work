@@ -1363,46 +1363,6 @@ describe(
         await killStore();
       }
     });
-
-    it("passes over a person's entry and a page of its parts, as the shared store wrote them before it refused one person's content, to the entry after them", async () => {
-      const reader = await person();
-      const mark = newMark();
-      const source = newSource();
-      await add(
-        source,
-        `Behind a person's entry ${wordOf(mark)}`,
-        await alone(reader)
-      );
-      const backup = await copyOfStore();
-      await eraseShared(source, "deleted");
-      const [erasure] = await ledgerOf(keyOf(source));
-      // A person's entry and more parts of it than a page of the listing:
-      // at the same time, sorting before the erasure after them.
-      const entry = `${erasure?.slice(0, "erasures/".length + 15) ?? ""}-person-person_erased-${await hashOf(crypto.randomUUID())}`;
-      const parts = Array.from(
-        { length: 1001 },
-        (_, index) => `${entry}/${String(index).padStart(4, "0")}`
-      );
-      await Promise.all(
-        parts.map(async (part) => await env.BRAIN_OBJECTS.put(part, "[]"))
-      );
-      await env.BRAIN_OBJECTS.put(entry, JSON.stringify({ parts: 1001 }));
-      try {
-        await restoreStore(backup);
-        const answered = await settled(historyAs(reader, source, 1));
-
-        expect({
-          answered,
-          recalled: await recalledAs(reader, wordOf(mark)),
-        }).toStrictEqual({
-          answered: { value: null },
-          recalled: [],
-        });
-      } finally {
-        await env.BRAIN_OBJECTS.delete([entry, ...parts]);
-        await killStore();
-      }
-    });
   }
 );
 

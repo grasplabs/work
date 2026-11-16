@@ -669,30 +669,6 @@ export const knownGroups = sqliteTable("known_groups", {
 });
 
 /**
- * What a person's erasure in the shared store hid, a row a version: by
- * number under the SHA-256 of its source's key. Neither written nor read
- * since that erasure went (GRA-1903). Kept, as expand then contract asks:
- * a release an admin rolls back to reads it as it adds a version, so it
- * is dropped in a later release (GRA-1907).
- */
-export const erasedVersions = sqliteTable(
-  "erased_versions",
-  {
-    erasure: text()
-      .notNull()
-      .references(() => erasures.key),
-    /** The SHA-256 of the source's key, in hex. */
-    subject: text().notNull(),
-    version: integer().notNull(),
-  },
-  (table) => [
-    primaryKey({ columns: [table.erasure, table.subject, table.version] }),
-    // An add numbers a source's next version past every one erased.
-    index("erased_versions_subject_idx").on(table.subject, table.version),
-  ]
-);
-
-/**
  * A passage the host's model can't embed (embedding.ts), by its model and
  * its text's SHA-256: the embedder's own answer for that text. Passed
  * over for that model, so the rest of its source goes on; cleared by a

@@ -201,17 +201,6 @@ const ledgerKeyOf = ({ at, kind, reason, subject }: LedgerEntry): string =>
 const ledgerKeyPattern =
   /^erasures\/(?<at>\d{15})-(?<kind>source|writer)-(?<reason>[a-z_]+)-(?<subject>[0-9a-f]{64})$/u;
 
-/**
- * A person's entry, or one of its parts (`<key>/0000` on), as the shared
- * store wrote them until it refused what only one person may read
- * (GRA-1822): a replay passes over them. Nothing released holds one, and
- * a store written since holds nothing such an entry hid; one restored
- * from before keeps what it hid (GRA-1903). Removed once staging's Brain
- * is reset (GRA-1907).
- */
-const personEntryPattern =
-  /^erasures\/\d{15}-person-[a-z_]+-[0-9a-f]{64}(?:\/\d+)?$/u;
-
 const isReason = (reason: string): reason is ErasureReason =>
   erasureReasons.some((known) => known === reason);
 
@@ -1461,75 +1450,59 @@ export const replayStep = async ({
   const stopAt = Date.now() + replayStepMs;
   const stopped: string[] = [];
   let reads = 0;
-  // Where the listing goes on, in memory only: past a page that held no
-  // entry to apply (a person's entries, `personEntryPattern`), never past
-  // an entry not applied, so the store's mark moves with what it applied.
-  let startAfter = replayStart(sql);
-  for (;;) {
-    if (Date.now() >= stopAt) {
+  // Every key after the mark is one the store lacks: it applies each, in
+  // order, so the mark moves with what it applied.
+  const page = await inTime(
+    bucket.list({
+      prefix: ledgerPrefix,
+      startAfter: replayStart(sql),
+      limit: ledgerPageSize,
+    })
+  );
+  for (const { key } of page.objects) {
+    const entry = entryOf(key);
+    if (entry === undefined) {
+      // A key this release can't read (a later release's, kept through a
+      // rollback): never passed, so nothing after it is skipped.
+      throw new Error("A key of the erasure ledger can't be read");
+    }
+    if (
+      Date.now() >= stopAt ||
+      (readsEntry(entry, groups) && reads >= replayReadsPerStep)
+    ) {
       return { stopped, more: true };
     }
-    // oxlint-disable-next-line no-await-in-loop -- a page after a page with nothing to apply
-    const page = await inTime(
-      bucket.list({ prefix: ledgerPrefix, startAfter, limit: ledgerPageSize })
-    );
-    let applied = 0;
-    for (const { key } of page.objects) {
-      const entry = entryOf(key);
-      if (entry === undefined && !personEntryPattern.test(key)) {
-        // A key this release can't read (a later release's, kept through a
-        // rollback): never passed, so nothing after it is skipped.
-        throw new Error("A key of the erasure ledger can't be read");
-      }
-      const isNew =
-        entry !== undefined &&
-        sql.exec("SELECT 1 FROM erasures WHERE key = ?", key).toArray()
-          .length === 0;
-      if (isNew) {
-        if (
-          Date.now() >= stopAt ||
-          (readsEntry(entry, groups) && reads >= replayReadsPerStep)
-        ) {
+    let group = false;
+    let writer: WriterBody | undefined;
+    if (readsEntry(entry, groups)) {
+      try {
+        if (entry.kind === "writer") {
+          // oxlint-disable-next-line no-await-in-loop -- in order, one entry at a time
+          writer = await readWriterBody(bucket, key, stopAt);
+        } else {
+          // oxlint-disable-next-line no-await-in-loop -- in order, one entry at a time
+          group = await readGroupMark(bucket, key, stopAt);
+        }
+      } catch (error) {
+        if (error instanceof OutOfTimeError) {
           return { stopped, more: true };
         }
-        let group = false;
-        let writer: WriterBody | undefined;
-        if (readsEntry(entry, groups)) {
-          try {
-            if (entry.kind === "writer") {
-              // oxlint-disable-next-line no-await-in-loop -- in order, one entry at a time
-              writer = await readWriterBody(bucket, key, stopAt);
-            } else {
-              // oxlint-disable-next-line no-await-in-loop -- in order, one entry at a time
-              group = await readGroupMark(bucket, key, stopAt);
-            }
-          } catch (error) {
-            if (error instanceof OutOfTimeError) {
-              return { stopped, more: true };
-            }
-            throw error;
-          }
-          reads += 1;
-        }
-        for (const source of storage.transactionSync(() => {
-          // Kept as a group's before it applies: keys under it refused,
-          // though the copy restored predates the group's first add.
-          if (group) {
-            keepGroup(sql, entry.subject);
-          }
-          return apply(sql, key, entry, true, writer).stopped;
-        })) {
-          stopped.push(source);
-        }
-        applied += 1;
+        throw error;
       }
+      reads += 1;
     }
-    const last = page.objects.at(-1)?.key;
-    if (applied > 0 || !page.truncated || last === undefined) {
-      return { stopped, more: page.truncated };
+    for (const source of storage.transactionSync(() => {
+      // Kept as a group's before it applies: keys under it refused,
+      // though the copy restored predates the group's first add.
+      if (group) {
+        keepGroup(sql, entry.subject);
+      }
+      return apply(sql, key, entry, true, writer).stopped;
+    })) {
+      stopped.push(source);
     }
-    startAfter = last;
   }
+  return { stopped, more: page.truncated };
 };
 
 // A person's own store, erased whole (store.ts): when the person is
