@@ -89,7 +89,12 @@ import { answeringProvider } from "./model-provider.ts";
 import { noProducers } from "./no-producers.ts";
 import { carrying } from "./platform-providers.ts";
 import { routed, signedInApi, signedInWithRole, unique } from "./sign-in.ts";
-import { member as teamsMember, messageFrom, post } from "./teams-door.ts";
+import {
+  member as teamsMember,
+  messageFrom,
+  post,
+  watched as teamsWatched,
+} from "./teams-door.ts";
 
 // The marker test (brain-next-leaks.test.ts), by meaning and for memories:
 // answers that depend on a question's meaning, held to the same answers
@@ -98,6 +103,7 @@ import { member as teamsMember, messageFrom, post } from "./teams-door.ts";
 // no reader as current through any surface.
 
 const idp = mockIdp();
+teamsWatched();
 
 /** Grants the chat agent the Brain permission, once for the file. */
 const chatAgentReadsBrain = chatAgentReadsBrainOnce(idp);
