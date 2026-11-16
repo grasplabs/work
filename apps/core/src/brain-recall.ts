@@ -213,16 +213,18 @@ export const recallFor = async (
     });
     // A capture and an interview are one person's own, kept only in their
     // own store (core's addSource refuses them anywhere else), which this
-    // recall never reads; a team's claims from its interviews are read as
-    // the person alone (brain-next.ts `readerOf`): none can be here.
-    // Narrowed for the SDK's type, never thrown over.
+    // recall never reads; a team's claims from its interviews, and the
+    // company's teams its admins read, are read as the person alone
+    // (brain-next.ts `readerOf`): none can be here. Narrowed for the SDK's
+    // type, never thrown over.
     const pack: BrainPack = {
       ...recalled,
       items: recalled.items.flatMap((item) => {
         const { producer, id } = item.source;
         return producer === "capture" ||
           producer === "interview" ||
-          producer === "claim"
+          producer === "claim" ||
+          producer === "roster"
           ? []
           : [{ ...item, source: { producer, id } }];
       }),
