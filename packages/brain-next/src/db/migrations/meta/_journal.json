@@ -176,6 +176,13 @@
       "when": 1794819084162,
       "tag": "0024_chunk_days",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "6",
+      "when": 1794870742496,
+      "tag": "0025_chunk_blocks",
+      "breakpoints": true
     }
   ]
 }

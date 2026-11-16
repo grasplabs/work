@@ -251,6 +251,34 @@ export const chunkDays = sqliteTable(
     primaryKey({ columns: [table.monthDay, table.year, table.chunk] }),
     // A chunk's rows, for its delete.
     index("chunk_days_chunk_idx").on(table.chunk),
+    // A day's chunks within a block of rows (`chunk_blocks`), of any
+    // year: how recall reads only the reader's blocks for a day.
+    index("chunk_days_day_chunk_idx").on(table.monthDay, table.chunk),
+  ]
+);
+
+/**
+ * Where each set of readers' chunks are: the blocks of rows
+ * (`chunk-blocks.ts`, `chunkBlockRows` rows each, block n from row
+ * n × `chunkBlockRows`) holding a chunk of a version it reads. Recall asks
+ * the word index only within the reader's blocks, so a chunk the reader
+ * may not read is never listed. A trigger writes a row for every chunk
+ * added, by any release (migration 0025), so every chunk is in a block of
+ * its set; an add places its chunks in its set's own block (`placeChunks`),
+ * so a block holds one set's chunks. Integers alone: kept when chunks go
+ * (an empty block lists nothing), and deleted with their set (erasure.ts
+ * `dropUnusedReaderSet`).
+ */
+export const chunkBlocks = sqliteTable(
+  "chunk_blocks",
+  {
+    readerSet: integer("reader_set").notNull(),
+    block: integer().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.readerSet, table.block] }),
+    // The highest block taken, so a new one is never one taken before.
+    index("chunk_blocks_block_idx").on(table.block),
   ]
 );
 
