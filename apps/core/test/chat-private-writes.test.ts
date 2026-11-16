@@ -1,4 +1,4 @@
-import { personalBrainOf } from "@grasp-os/brain-next/contract";
+import { personalBrainOf, recallLimit } from "@grasp-os/brain-next/contract";
 import { agentErrors } from "@grasp-os/shared/agent";
 import { heldAppCallsPage } from "@grasp-os/shared/chat";
 import { sha256Hex } from "@grasp-os/shared/encoding";
@@ -10,9 +10,16 @@ import { z } from "zod";
 import { callAppFunction } from "../src/app-functions.ts";
 import { loadRelease } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
-import { addSource, recallOwnedAs, rememberAs } from "../src/brain-next.ts";
+import {
+  addSource,
+  recallAs,
+  recallOwnedAs,
+  recalledTokens,
+  rememberAs,
+} from "../src/brain-next.ts";
 import { appHost, inJurisdiction } from "../src/durable-objects.ts";
 import { heldStartMs } from "../src/held-starts.ts";
+import { turnRecallBudget } from "../src/turn-recall.ts";
 import {
   codeResults,
   codeStep,
@@ -195,6 +202,16 @@ const ownSource = async (personId: string, text: string): Promise<void> => {
     change: crypto.randomUUID(),
     text,
     readers: { kind: "owner", personId },
+  });
+};
+
+/** Adds `text` to the shared store: readable by everyone. */
+const sharedSource = async (text: string): Promise<void> => {
+  await addSource(env, {
+    source: { producer: "upload", id: crypto.randomUUID() },
+    change: crypto.randomUUID(),
+    text,
+    readers: { kind: "everyone" },
   });
 };
 
@@ -1238,6 +1255,136 @@ describe("what a chat writes for others once it used something only its person m
         memories: 0,
         depotNotFound: false,
         fromOwn: true,
+      });
+    }
+  );
+
+  it(
+    "marks when the person's own store changes only which words are said not found: the same items, the same cut",
+    slow,
+    async () => {
+      const person = await signedInApi(idp, "user");
+      const [depot, dock, own] = [word(), word(), word()];
+      // More shared passages holding two of the question's words than a
+      // way lists: the own passage, holding the third alone, ranks after
+      // all of them and is never packed.
+      for (let copy = 0; copy < recallLimit; copy += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- added one after another
+        await sharedSource(`${depot} ${dock} ${word()}`);
+      }
+      await ownSource(person.userId, `${own} ${word()} ${word()}`);
+      const question = `${depot} ${dock} ${own}`;
+      const budget = { tokens: turnRecallBudget.tokens };
+      const { pack, fromOwn } = await recallOwnedAs(env, person.userId, {
+        question,
+        budget,
+        personal: true,
+      });
+      const shared = await recallAs(env, person.userId, {
+        question,
+        budget,
+        personal: false,
+      });
+
+      expect({
+        sameItems: pack.items,
+        sameCut: pack.truncated,
+        ownNotFound: pack.notFound.includes(own),
+        sharedOwnNotFound: shared.notFound.includes(own),
+        fromOwn,
+      }).toStrictEqual({
+        sameItems: shared.items,
+        sameCut: shared.truncated,
+        ownNotFound: false,
+        sharedOwnNotFound: true,
+        fromOwn: true,
+      });
+    }
+  );
+
+  it(
+    "marks when the person's own store changes only whether the pack was cut short: the same items, the same words not found",
+    slow,
+    async () => {
+      const person = await signedInApi(idp, "user");
+      const [depot, dock] = [word(), word()];
+      await sharedSource(`${depot} ${dock} ${word()}`);
+      // Holds one of the two words: ranks after the shared passage.
+      await ownSource(person.userId, `${depot} ${word()} ${word()}`);
+      const question = `${depot} ${dock}`;
+      const alone = await recallAs(env, person.userId, {
+        question,
+        budget: { tokens: turnRecallBudget.tokens },
+        personal: false,
+      });
+      // Room for the shared passage alone.
+      const budget = { tokens: recalledTokens(alone) };
+      const { pack, fromOwn } = await recallOwnedAs(env, person.userId, {
+        question,
+        budget,
+        personal: true,
+      });
+      const shared = await recallAs(env, person.userId, {
+        question,
+        budget,
+        personal: false,
+      });
+
+      expect({
+        sameItems: pack.items,
+        sameNotFound: pack.notFound,
+        truncated: pack.truncated,
+        sharedTruncated: shared.truncated,
+        fromOwn,
+      }).toStrictEqual({
+        sameItems: shared.items,
+        sameNotFound: shared.notFound,
+        truncated: true,
+        sharedTruncated: false,
+        fromOwn: true,
+      });
+    }
+  );
+
+  it(
+    "is not marked by an own match that changes nothing the model is handed, and the write runs at once",
+    slow,
+    async () => {
+      const depot = word();
+      const title = `unchanged-${unique()}`;
+      const notes = await notesChat((app, release) => [
+        writesNote(app, release, title),
+        says("Written."),
+      ]);
+      const { person, chats, chat, ask, titles } = notes;
+      // As many shared passages holding the question's telling word as a
+      // way lists: no passage found by stop words alone is listed after.
+      for (let copy = 0; copy < recallLimit; copy += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- added one after another
+        await sharedSource(`${depot} ${word()} ${word()}`);
+      }
+      // Holds the question's stop words, none of its telling words.
+      await ownSource(person.userId, `What about the ${word()} ${word()}?`);
+      const question = `What about the ${depot}?`;
+      // The person's own store does find it, by its stop words.
+      const found = await personalBrainOf(
+        inJurisdiction(env, env.BRAIN_STORE),
+        person.userId
+      ).find({
+        question,
+        reader: { person: person.userId, groups: [] },
+        budget: turnRecallBudget,
+      });
+      await ask(question);
+
+      expect({
+        ownFound: found.stopWords.length,
+        answers: await answers(chats.stub, chat.id),
+        after: await titles(),
+      }).toStrictEqual({
+        ownFound: 1,
+        answers: ["written"],
+        after: [title],
       });
     }
   );
