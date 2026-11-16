@@ -46,6 +46,7 @@ import { endOfCompanyDay } from "./organization.ts";
 import { grantedPermissions } from "./permissions.ts";
 import { markPrivateRead } from "./private-reads.ts";
 import { mailboxesFor } from "./shared-mailboxes.ts";
+import { readsOnly } from "./tool-classes.ts";
 
 // Connections for a chat's code: `await env.connections.call("OUTLOOK",
 // "mail.search", { query })`. The agent's connection permissions, each
@@ -161,27 +162,31 @@ export const connectionGrants = async (
  * The connections the chat's agent may use for its person now: its grants
  * in this chat (`connectionGrants`) for a connection that is shared or the
  * person's own, by connect's registry, each with whether it takes calls
- * now (`active`). What `env.connections.list()` lists, and what the recall
- * before a question names as where else to look (turn-recall.ts).
+ * now (`active`) and whether any action granted only reads (`reads`, by
+ * its class: tool-classes.ts `readsOnly`). What `env.connections.list()`
+ * lists, and what the recall before a question names as where else to
+ * look (turn-recall.ts).
  */
 export const usableConnections = async (
   env: Env,
   scope: Omit<AgentScope, "runId">
-): Promise<{ connection: AgentConnection; active: boolean }[]> => {
+): Promise<
+  { connection: AgentConnection; active: boolean; reads: boolean }[]
+> => {
   const grants = await connectionGrants(env, scope);
   const owners = await connectionOwnersOf(env, [
     ...new Set(grants.map(({ connection }) => connection.connectionId)),
   ]);
   const usable = new Map(
-    owners.flatMap(({ id, ownerUserId, status }) =>
-      ownerUserId === null || ownerUserId === scope.personId
-        ? [[id, status === "active"] as const]
+    owners.flatMap((owner) =>
+      owner.ownerUserId === null || owner.ownerUserId === scope.personId
+        ? [[owner.id, owner] as const]
         : []
     )
   );
   return grants.flatMap(({ name, connection, actions }) => {
-    const active = usable.get(connection.connectionId);
-    return active === undefined
+    const owner = usable.get(connection.connectionId);
+    return owner === undefined
       ? []
       : [
           {
@@ -191,7 +196,8 @@ export const usableConnections = async (
               resource: connection.resource ?? null,
               actions,
             },
-            active,
+            active: owner.status === "active",
+            reads: actions.some((action) => readsOnly(owner, action)),
           },
         ];
   });
