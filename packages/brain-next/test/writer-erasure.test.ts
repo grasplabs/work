@@ -905,6 +905,8 @@ describe("a writer's erasure", () => {
                 "removed_sources",
                 "memory_outs",
                 "memory_ins",
+                "memory_judging",
+                "memory_judging_places",
               ].includes(name)
           )
           .map((table) => {
@@ -999,7 +1001,8 @@ describe("a writer's erasure", () => {
             !made.includes("unembeddable_hash_idx") &&
             !made.includes("work_items_key_idx") &&
             !made.includes("memory_outs") &&
-            !made.includes("memory_ins")
+            !made.includes("memory_ins") &&
+            !made.includes("current_versions_unjudged_idx")
         ),
       };
       expect(

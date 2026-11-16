@@ -1072,6 +1072,11 @@ export interface WorkOverview {
     repack: StepFailure | null;
     reindex: StepFailure | null;
     /**
+     * The catch-up of quotes (catch-up.ts): judging the sources the adds
+     * left unjudged. Cleared once a later tick's step runs through.
+     */
+    quotes: StepFailure | null;
+    /**
      * The tick's step of embedding (embedding.ts): the walk onto the
      * queue, and removing a replaced build's codes. Cleared once a later
      * tick's step runs through.
