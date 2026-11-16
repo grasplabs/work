@@ -34,6 +34,7 @@ import { brainMemoryRead } from "../src/history-access.ts";
 import {
   analysisPurpose,
   recallTimeoutReason,
+  turnRecallDeadlineMs,
   turnRecallMethod,
 } from "../src/turn-recall.ts";
 import type { ChatPlace } from "../src/workspace.ts";
@@ -500,6 +501,31 @@ const connectOwnersAnswering = async (
   }
 };
 
+/**
+ * The Brain's store, whose recalls end only once the chat's provider got
+ * more than `seen` analyses: its request goes the long way, through core's
+ * gateway and connect, so a quick first pass otherwise ends, and lets go
+ * of it, before it is sent. Within the recall's own time, past which the
+ * recall gives up anyway; one that never arrives fails the find, saying so.
+ */
+const findingAfterAnalysis = (
+  chat: { provider: { analyses: readonly unknown[] } },
+  seen: number
+): object =>
+  answering(env.BRAIN_STORE, "find", async (own, request) => {
+    const giveUpAt = Date.now() + turnRecallDeadlineMs;
+    while (chat.provider.analyses.length <= seen) {
+      if (Date.now() > giveUpAt) {
+        throw new Error(
+          "The analysis never reached the provider within the recall's time"
+        );
+      }
+      // oxlint-disable-next-line no-await-in-loop -- until it is there
+      await scheduler.wait(20);
+    }
+    return await own(request);
+  });
+
 /** Whether `events`, an append's, hold a recall's `ok`. */
 const holdsRecalled = (events: unknown): boolean =>
   Array.isArray(events) &&
@@ -528,14 +554,24 @@ describe("the recall before a chat's question", setUpTime, () => {
       { hang: true }
     );
     const warnings = vi.spyOn(console, "warn");
-    /** What asking `question` handed over, and whether it waited on the analysis. */
-    const asked = async (question: string) => {
+    /**
+     * What asking `question` handed over, and whether it waited on the
+     * analysis. A follow-up's first pass ends once its analysis reached
+     * the provider, so the provider sees each one it asks.
+     */
+    const asked = async (question: string, followUp = true) => {
       const before = {
         requests: chat.provider.requests.length,
         analyses: chat.provider.analyses.length,
         warnings: warnings.mock.calls.length,
       };
-      await chat.ask(question);
+      await (followUp
+        ? withEnv(
+            chat,
+            { BRAIN_STORE: findingAfterAnalysis(chat, before.analyses) },
+            async () => await chat.ask(question)
+          )
+        : chat.ask(question));
       return {
         recalled:
           recallIn(chat.provider.requests[before.requests]?.body)?.includes(
@@ -551,7 +587,7 @@ describe("the recall before a chat's question", setUpTime, () => {
     };
     try {
       // Finds nothing, but has nothing before it to resolve.
-      const opening = await asked(`Who keeps the ${word()} keys?`);
+      const opening = await asked(`Who keeps the ${word()} keys?`, false);
       const found = await asked(`When does depot ${depot} open?`);
       const besideUnknown = await asked(
         `When does depot ${depot} open on ${word()} days?`
@@ -948,6 +984,9 @@ describe("a recall before a question that doesn't hand over", setUpTime, () => {
     await withEnv(
       chat,
       {
+        // The first pass ends only once the analysis reached the provider:
+        // one let go of before it was sent leaves nothing there to see go.
+        BRAIN_STORE: findingAfterAnalysis(chat, 0),
         AUDIT_LOG: answering(env.AUDIT_LOG, "append", async (own, events) => {
           if (holdsRecalled(events)) {
             step.reached = true;

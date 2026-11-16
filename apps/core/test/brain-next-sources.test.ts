@@ -20,7 +20,7 @@ import { teamMembers, teams } from "../src/db/core/schema.ts";
 import { soleReadersOf } from "./brain-next-sole-readers.ts";
 import { mockIdp } from "./idp.ts";
 import { noProducers } from "./no-producers.ts";
-import { signedInWithRole, unique } from "./sign-in.ts";
+import { signedInWithRole, uniqueWord } from "./sign-in.ts";
 
 // Sources kept whole and versioned (GRA-1723), through core's functions
 // into the Brain's store and its bucket. From the threat model on the
@@ -40,7 +40,7 @@ const idp = mockIdp();
 const fileGraceMs = 15 * 60 * 1000;
 
 /** A word no other test's sources hold. */
-const word = () => `w${unique()}`;
+const word = uniqueWord;
 
 /** A source of its own, as an upload names it. */
 const newSource = (): SourceRef => ({
