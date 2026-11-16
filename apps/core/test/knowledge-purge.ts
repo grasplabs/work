@@ -211,6 +211,18 @@ export const lettersOf = (value: number, length: number): string =>
     )
   ).join("");
 
+/** How many documents Knowledge holds in `collectionId`, if it holds it. */
+export const documentsIn = async (
+  collectionId: string
+): Promise<number | "no collection"> => {
+  const row = await env.KNOWLEDGE.prepare(
+    "SELECT (SELECT count(*) FROM documents WHERE collection_id = c.id) AS documents FROM collections c WHERE c.id = ?"
+  )
+    .bind(collectionId)
+    .first<{ documents: number }>();
+  return row === null ? "no collection" : row.documents;
+};
+
 /** Saves `text` over what is at `path` now. */
 export const saveOver = async (
   person: Person,
@@ -219,13 +231,16 @@ export const saveOver = async (
   text: string,
   message?: string
 ) => {
-  const { documents } = await person.api.knowledge.listDocuments(collectionId);
-  const current = documents.find((document) => document.path === path);
+  const current = await env.KNOWLEDGE.prepare(
+    "SELECT current_version AS version FROM documents WHERE collection_id = ? AND path = ?"
+  )
+    .bind(collectionId, path)
+    .first<{ version: number }>();
   return await seed(person.api).saveDocument({
     collectionId,
     path,
     text,
-    ifVersion: current?.currentVersion ?? 0,
+    ifVersion: current?.version ?? 0,
     ...(message === undefined ? {} : { message }),
   });
 };
@@ -310,7 +325,7 @@ export const watchingPurge = ({
  * it, with its receipt: nothing in core remembers into it any more, and
  * its purge still erases what it kept.
  */
-export const seedMemory = async (
+const seedMemory = async (
   person: Person,
   input: RememberInput,
   options: CommandOptions

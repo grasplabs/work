@@ -15,7 +15,6 @@ import { DecisionsRpc } from "./decisions/rpc.ts";
 import { DraftsRpc } from "./drafts-rpc.ts";
 import { HeldStartsRpc } from "./held-starts-rpc.ts";
 import { InstructionsRpc } from "./instructions-rpc.ts";
-import { KnowledgeRpc } from "./knowledge/rpc.ts";
 import { MembersRpc } from "./members.ts";
 import { ModelsRpc } from "./models-rpc.ts";
 import { NotificationsRpc } from "./notifications.ts";
@@ -59,7 +58,6 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
   readonly #apps: AppsRpc;
   readonly #drafts: DraftsRpc;
   readonly #versions: VersionsRpc;
-  readonly #knowledge: KnowledgeRpc;
   readonly #brain: BrainRpc;
   readonly #brainSources: BrainSourcesRpc;
   readonly #skills: SkillsRpc;
@@ -107,7 +105,6 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
     this.#apps = new AppsRpc(env, full);
     this.#drafts = new DraftsRpc(env, full);
     this.#versions = new VersionsRpc(env, full);
-    this.#knowledge = new KnowledgeRpc(env, full);
     this.#brain = new BrainRpc(env, full);
     this.#brainSources = new BrainSourcesRpc(env, full);
     this.#skills = new SkillsRpc(env, full);
@@ -200,10 +197,6 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
 
   get apps(): AppsRpc {
     return this.#apps;
-  }
-
-  get knowledge(): KnowledgeRpc {
-    return this.#knowledge;
   }
 
   get brain(): BrainRpc {

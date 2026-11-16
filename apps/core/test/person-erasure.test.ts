@@ -1,8 +1,4 @@
 import { stillDeletingAtMostMs } from "@grasp-os/brain-next/contract";
-import {
-  decideEntityMatch,
-  entityMatchProposals,
-} from "@grasp-os/brain/entities";
 import { recordOutcome } from "@grasp-os/brain/outcomes";
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import { sha256Hex } from "@grasp-os/shared/encoding";
@@ -138,6 +134,30 @@ const matchesDecidedBy = async (userId: string) => {
     .bind(userId)
     .first<{ n: number }>();
   return row?.n;
+};
+
+/**
+ * Decides `name`'s pair `same` as `userId`, as today's Brain kept a
+ * decision resting on document `proof`: core decides none any more
+ * (GRA-1911) and reads none (GRA-1938), so the row is planted as its
+ * write left one, between the entities `name`'s mentions were linked to.
+ */
+const decidedSame = async (
+  userId: string,
+  name: string,
+  proof: string
+): Promise<void> => {
+  const { results } = await env.KNOWLEDGE.prepare(
+    "SELECT DISTINCT entity_id AS id FROM brain_mentions WHERE name = ? AND entity_id IS NOT NULL ORDER BY entity_id"
+  )
+    .bind(name)
+    .all<{ id: string }>();
+  const [a = "", b = ""] = results.map(({ id }) => id);
+  await env.KNOWLEDGE.prepare(
+    "INSERT INTO brain_entity_matches (entity_a, entity_b, decision, evidence_document_id, evidence_version, decided_by, decided_at) VALUES (?, ?, 'same', ?, 1, ?, ?)"
+  )
+    .bind(a, b, proof, userId, Date.now())
+    .run();
 };
 
 /** WebVTT captions saying `text`: a file the extractor reads. */
@@ -1309,7 +1329,6 @@ describe("erasing a person", () => {
     const admin = await signedInApi(idp, "admin");
     const person = await signedInApi(idp, "builder");
     const other = await signedInApi(idp, "user");
-    const brain = brainOf(env);
     /** A pair of one name in two everyone collections, linked, with a proof: what a decision rests on. */
     const pairOf = async (name: string) => {
       const ids: string[] = [];
@@ -1338,25 +1357,10 @@ describe("erasing a person", () => {
       });
       return proof.id;
     };
-    /** Decides `name`'s pair `same` as `who`, as today's Brain kept a decision. */
-    const decide = async (who: typeof person, name: string, proof: string) => {
-      const reader = {
-        type: "person" as const,
-        person: await who.api.whoami(),
-      };
-      const proposals = await entityMatchProposals(brain, reader);
-      const pair = proposals.find((match) => match.name === name);
-      const [a = "", b = ""] = pair?.entities.map(({ id }) => id) ?? [];
-      await decideEntityMatch(brain, reader, {
-        entities: [a, b],
-        decision: "same",
-        evidence: { documentId: proof, version: 1 },
-      });
-    };
     const theirs = `Rosa ${unique()}`;
     const kept = `Mila ${unique()}`;
-    await decide(person, theirs, await pairOf(theirs));
-    await decide(other, kept, await pairOf(kept));
+    await decidedSame(person.userId, theirs, await pairOf(theirs));
+    await decidedSame(other.userId, kept, await pairOf(kept));
     const before = await matchesDecidedBy(person.userId);
     await admin.api.members.remove(person.userId);
 

@@ -1,7 +1,5 @@
 import { pendingGraceMs } from "@grasp-os/brain/payloads";
 import { sha256Hex } from "@grasp-os/shared/encoding";
-import { knowledgeErrors } from "@grasp-os/shared/knowledge";
-import type { KnowledgeApi } from "@grasp-os/shared/knowledge";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
@@ -11,16 +9,15 @@ import type { CollectionInput } from "./knowledge.ts";
 import { runMinuteTasks } from "./maintenance.ts";
 import { signedInApi, unique } from "./sign-in.ts";
 
-// Each version's text is an immutable object in the Brain bucket, through
-// the API people use: what the bucket holds, what a read checks, and what
-// a crash, a lost answer, a race or a purge leaves behind.
+// Each version's text is an immutable object in the Brain bucket: what a
+// crash, a lost answer or a race leaves behind, and what the clock's
+// cleanup (`knowledge.payloads`) collects.
 
 const idp = mockIdp();
 
 const knowledgeOf = async () => {
   const person = await signedInApi(idp, "admin");
-  const api: KnowledgeApi = person.api.knowledge;
-  return { ...person, api, seeded: seed(person.api) };
+  return { ...person, seeded: seed(person.api) };
 };
 
 const shared = (): CollectionInput => ({
@@ -54,12 +51,13 @@ const statesOf = async (text: string): Promise<string[]> => {
 };
 
 /** The IDs of a collection's documents. */
-const documentIdsIn = async (
-  api: KnowledgeApi,
-  collectionId: string
-): Promise<string[]> => {
-  const { documents } = await api.listDocuments(collectionId);
-  return documents.map(({ id }) => id);
+const documentIdsIn = async (collectionId: string): Promise<string[]> => {
+  const { results } = await env.KNOWLEDGE.prepare(
+    "SELECT id FROM documents WHERE collection_id = ?"
+  )
+    .bind(collectionId)
+    .all<{ id: string }>();
+  return results.map(({ id }) => id);
 };
 
 /** The keys of the objects stored for a text's hash. */
@@ -74,16 +72,6 @@ const objectsOf = async (text: string): Promise<string[]> => {
 const objectCount = async (text: string): Promise<number> => {
   const keys = await objectsOf(text);
   return keys.length;
-};
-
-/** The code a promise was refused with. */
-const codeOf = async (promise: Promise<unknown>): Promise<unknown> => {
-  try {
-    await promise;
-  } catch (error) {
-    return knowledgeErrors.codeOf(error);
-  }
-  throw new Error("Expected a refusal");
 };
 
 /** Whether a promise was fulfilled or refused, whatever with. */
@@ -138,45 +126,9 @@ const afterGrace = async (): Promise<void> => {
   await runMinuteTasks({}, new Date(Date.now() + pendingGraceMs + 60_000));
 };
 
-describe("storing versions' texts", () => {
-  it("refuses a version whose object is missing or isn't its text, and serves nothing of it", async () => {
-    const { api, seeded } = await knowledgeOf();
-    const { id: collectionId } = await seeded.createCollection(shared());
-    const tampered = textOf(`Tampered${unique()}`);
-    const missing = textOf(`Missing${unique()}`);
-    const first = await seeded.saveDocument({
-      collectionId,
-      path: "tampered.md",
-      text: tampered,
-      ifVersion: 0,
-    });
-    const second = await seeded.saveDocument({
-      collectionId,
-      path: "missing.md",
-      text: missing,
-      ifVersion: 0,
-    });
-    const [tamperedRow] = await rowsOf(tampered);
-    const [missingRow] = await rowsOf(missing);
-    await env.BRAIN_OBJECTS.put(tamperedRow?.key ?? "", "# Policy\nSwapped.");
-    await env.BRAIN_OBJECTS.delete(missingRow?.key ?? "");
-    const { versions } = await api.history(first.id);
-
-    expect({
-      tampered: await codeOf(api.getDocument(first.id)),
-      missing: await codeOf(api.getDocument(second.id)),
-      history: versions.length,
-    }).toStrictEqual({
-      tampered: "knowledge.unavailable",
-      missing: "knowledge.unavailable",
-      history: 1,
-    });
-  });
-});
-
 describe("crashes and races", () => {
   it("saves nothing when the upload fails, and collects what it staged", async () => {
-    const { api, seeded } = await knowledgeOf();
+    const { seeded } = await knowledgeOf();
     const { id: collectionId } = await seeded.createCollection(shared());
     const text = textOf(`Upload${unique()}`);
     const down = vi
@@ -196,7 +148,7 @@ describe("crashes and races", () => {
       down.mockRestore();
     }
     const staged = await statesOf(text);
-    const listed = await documentIdsIn(api, collectionId);
+    const listed = await documentIdsIn(collectionId);
     await afterGrace();
 
     expect({
