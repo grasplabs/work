@@ -410,9 +410,8 @@ describe(
         early: `brain:${ids.team}`,
         waiting: 0,
         late: `brain:${ids.team}`,
-        // Nothing five of them said alike: no statement. The team is the
-        // roster's, never a record (GRA-1748).
-        types: ["workflow", "workflowVersion"],
+        // Nothing five of them said alike: no statement.
+        types: ["team", "workflow", "workflowVersion"],
       });
     });
 

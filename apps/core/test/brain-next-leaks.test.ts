@@ -873,17 +873,18 @@ describe(
         "the holder's run": markerWord(),
         "a question in the holder's chat": markerWord(),
         "an answer in the holder's chat": markerWord(),
+        // The company's admins read it too (GRA-1748): not forbidden to
+        // the admin's pass (`readableByAdmins`).
+        "the company's teams, for its admins": markerWord(),
       };
       // What every member may read, and nobody outside the company.
       const companyMarkers = {
         "an upload for everyone": markerWord(),
         "the company's vision from the kickoff": markerWord(),
-        "the company's teams from its staff list": markerWord(),
       };
       const {
         "an upload for everyone": everyoneUploadMarker,
         "the company's vision from the kickoff": kickoffMarker,
-        "the company's teams from its staff list": rosterMarker,
       } = companyMarkers;
       const {
         "the holder's own source": ownerMarker,
@@ -905,6 +906,7 @@ describe(
         "the holder's run": runMarker,
         "a question in the holder's chat": askedMarker,
         "an answer in the holder's chat": answerMarker,
+        "the company's teams, for its admins": rosterMarker,
       } = markers;
       // Instruction files the outsider may not get: the holder's own,
       // another agent's than theirs, and an App's they don't build (one no
@@ -1235,10 +1237,11 @@ describe(
         { producer: "kickoff", id: crypto.randomUUID() }
       );
       // The company's teams, as the onboarding hands its staff list over:
-      // every member's, without the shared word.
+      // its admins' alone, without the shared word.
+      const { userId: rosterAdmin } = await signedInWithRole(idp, "admin");
       const rosterSource = await add(
         `The company's teams ${rosterMarker}`,
-        { kind: "everyone" },
+        { kind: "admins" },
         { producer: "roster", id: crypto.randomUUID() }
       );
 
@@ -1344,6 +1347,7 @@ describe(
           runMarker,
           askedMarker,
           answerMarker,
+          rosterMarker,
         ],
         hiddenVersions: everyVersionOf(
           ...ownerIds,
@@ -1355,7 +1359,8 @@ describe(
           teamUpload,
           captureId,
           runSource,
-          turnSource
+          turnSource,
+          rosterSource
         ),
         hiddenUploads: [ownUpload.id, teamUpload.id],
         hiddenInstructionFiles: [holderFile, agentFile, appFile, usedAppFile],
@@ -1426,9 +1431,9 @@ describe(
           reader: outsider,
         },
         roster: {
-          marker: "the company's teams from its staff list",
+          marker: "the company's teams, for its admins",
           source: rosterSource,
-          reader: outsider,
+          reader: rosterAdmin,
         },
       };
       // The model prompts that carried each marker while the world was
@@ -2370,7 +2375,12 @@ describe(
 
     it("gives an admin nothing they may not read through any surface that reads, or any of core's", async () => {
       const world = await plantedWorld();
-      const { holder, markers } = world;
+      const { holder } = world;
+      // The company's teams are its admins' to read (GRA-1748).
+      const {
+        "the company's teams, for its admins": _readableByAdmins,
+        ...markers
+      } = world.markers;
 
       // An admin, through every surface that reads and every one of
       // core's: nothing of the holder's own, nor of a team they aren't in,

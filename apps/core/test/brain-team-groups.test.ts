@@ -72,8 +72,8 @@ describe("the company's groups of teams", { timeout: 120_000 }, () => {
             save: typeof detail?.save,
           },
         })),
-      // A member reads the groups as they read the teams: the staff list's
-      // teams are every member's (GRA-1748), so its groups are too.
+      // A member reads the groups as they read the teams: the staff list
+      // is the admin's, so its teams aren't theirs, nor are the groups.
       member: forMember.teamGroups,
     }).toStrictEqual({
       saved: [
@@ -98,7 +98,7 @@ describe("the company's groups of teams", { timeout: 120_000 }, () => {
           detail: { groups: 2, before: "number", save: "string" },
         },
       ],
-      member: saved,
+      member: [],
     });
   });
 

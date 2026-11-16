@@ -188,7 +188,12 @@ import {
 import type { MailState, MailToQueue } from "../mail-outbox.ts";
 import { mailDomain, mailSends, sendMail } from "../mail.ts";
 import { forgetStored } from "../speech-cache.ts";
-import { intakeIds, intakeOf, withoutNames } from "./brain-intake.ts";
+import {
+  intakeIds,
+  intakeOf,
+  rosterSource,
+  withoutNames,
+} from "./brain-intake.ts";
 import type { TeamIntake } from "./brain-intake.ts";
 import { companyTeamsText } from "./company-teams.ts";
 import type { CompanyTeam } from "./company-teams.ts";
@@ -304,11 +309,13 @@ const queuedKey = "forget_lines_queued";
 const kickoffChangesKey = "kickoff_changes";
 
 /**
- * How often the company's teams changed (a roster save, what a team does
- * drawn from its lead's map), store-wide: the key of each change the new
- * Brain is given of them (`rosterToHand`), as the kickoff's.
+ * The company's teams as the new Brain was last given them
+ * (`#rosterConfirmed`): their text, and the key of that change, a count
+ * that only grows, so a text back to an earlier one is a new version.
  */
-const rosterChangesKey = "roster_changes";
+const rosterHandedKey = "roster_handed";
+
+const rosterHandedSchema = z.object({ change: z.int(), text: z.string() });
 
 /**
  * The roster's id in the new Brain (`roster:teams`): one for the company,
@@ -1117,6 +1124,7 @@ export class Onboarding extends DurableObject<Env> {
       });
       if (confirmed) {
         this.#confirmed(before, roster);
+        this.#rosterConfirmed();
       } else {
         this.#holdNew(before, roster);
       }
@@ -1343,7 +1351,6 @@ export class Onboarding extends DurableObject<Env> {
     // its team's people now: those claims are owed an erasure at once,
     // which core's clock does within a minute.
     this.#markClaimsThatNoLongerStand();
-    this.#rosterChanged();
     return { removed: gone.length, erased };
   }
 
@@ -4001,50 +4008,64 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /**
-   * The company's teams as every member reads them (GRA-1748): each roster
-   * team's id, name, what it does and how many people it has, in the
-   * admin's order; never who is in it, their titles or its lead. Empty
-   * before the staff list is in.
+   * The company's teams as the admin confirmed them (GRA-1748): each team
+   * taking part, its name and how many people it has, in the admin's
+   * order. Only what the admin gave: never what a team does (its lead's
+   * map writes that, from their interview), who is in it, their titles
+   * or its lead; never a team switched off, nor a team or person still
+   * waiting for the admin to confirm the organization.
    */
-  companyTeams(): CompanyTeam[] {
+  #confirmedTeams(): CompanyTeam[] {
     const roster = this.#roster();
-    return (roster?.teams ?? []).map(({ id, name, does }) => ({
-      id,
-      name,
-      does,
-      people: roster?.people.filter(({ team }) => team === id).length ?? 0,
-    }));
+    const waiting = this.#unconfirmed();
+    const confirmed = (roster?.people ?? []).filter(
+      ({ id }) => !waiting.people.has(id)
+    );
+    return (roster?.teams ?? [])
+      .filter(({ id, off }) => !off && !waiting.teams.has(id))
+      .map(({ id, name }) => ({
+        id,
+        name,
+        people: confirmed.filter(({ team }) => team === id).length,
+      }));
+  }
+
+  /** What the new Brain was last given of the company's teams (`rosterHandedKey`); null before any. */
+  #rosterHanded(): z.infer<typeof rosterHandedSchema> | null {
+    const held = this.ctx.storage.kv.get(rosterHandedKey);
+    return held === undefined ? null : rosterHandedSchema.parse(held);
   }
 
   /**
    * The company's teams as the hand-over gives the new Brain now
-   * (`rosterBrainId`): their text for every member (`companyTeamsText`),
-   * under the key of the change they are (`rosterChangesKey`). Null for
-   * any other id, or before the staff list is in.
+   * (`rosterBrainId`): as the admin last confirmed them, under the key of
+   * that change. Null for any other id, or before the admin confirmed any.
    */
   rosterToHand(id: string): { change: string; text: string } | null {
-    if (id !== rosterBrainId || this.rosterSavedAt() === null) {
-      return null;
-    }
-    const changes = this.ctx.storage.kv.get(rosterChangesKey);
-    return {
-      change: String(typeof changes === "number" ? changes : 0),
-      text: companyTeamsText(this.companyTeams()),
-    };
+    const handed = this.#rosterHanded();
+    return id !== rosterBrainId || handed === null
+      ? null
+      : { change: String(handed.change), text: handed.text };
   }
 
   /**
-   * In the transaction of a change of the company's teams: counts it
-   * (`rosterChangesKey`) and notes it for the hand-over, which reads them
-   * here when it runs (`rosterToHand`). A change that leaves their text
-   * as it was is no new version: the Brain keeps the one it has.
+   * In the transaction of a save the admin confirmed: the company's teams
+   * as they stand now (`#confirmedTeams`), kept as what the new Brain is
+   * given and noted for the hand-over, which reads them when it runs
+   * (`rosterToHand`). The same text as last given changes nothing and
+   * notes nothing: no new version, and no event in the audit log.
    */
-  #rosterChanged(): void {
-    const changes = this.ctx.storage.kv.get(rosterChangesKey);
-    this.ctx.storage.kv.put(
-      rosterChangesKey,
-      (typeof changes === "number" ? changes : 0) + 1
-    );
+  #rosterConfirmed(): void {
+    const confirmed = this.#confirmedTeams();
+    const before = this.#rosterHanded();
+    const text = confirmed.length === 0 ? null : companyTeamsText(confirmed);
+    if (text === null || text === before?.text) {
+      return;
+    }
+    this.ctx.storage.kv.put(rosterHandedKey, {
+      change: (before?.change ?? 0) + 1,
+      text,
+    });
     this.#noteHandOver("roster", rosterBrainId);
   }
 
@@ -5918,7 +5939,7 @@ export class Onboarding extends DurableObject<Env> {
       return since.size > 0;
     });
     await keepOnboardingRecords(this.env, records, {
-      sources: new Set([await intakeIds.interviews(teamId)]),
+      sources: new Set([rosterSource, await intakeIds.interviews(teamId)]),
       teams: new Set([intakeIds.team(teamId)]),
     });
     const gone = this.ctx.storage.transactionSync(() => {
@@ -7247,8 +7268,6 @@ export class Onboarding extends DurableObject<Env> {
         })
         .where(eq(teams.id, teamId))
         .run();
-      // What the team does may have changed: the company's teams again.
-      this.#rosterChanged();
       this.#dropOrphanDrawings();
       this.#noted(input.person, "map.drawn", at, "grasp");
     });
