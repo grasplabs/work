@@ -1,5 +1,3 @@
-import type { PurgeResult } from "@grasp-os/brain/knowledge";
-import { purgePerson } from "@grasp-os/brain/purge";
 import { actorOf } from "@grasp-os/shared/audit";
 import type { AuditEntry } from "@grasp-os/shared/audit";
 import {
@@ -84,8 +82,7 @@ import {
   subjectsOf,
 } from "./erased-people.ts";
 import { dropHeldStarts } from "./held-starts.ts";
-import { brainOf } from "./knowledge/ports.ts";
-import { uploadErasure } from "./knowledge/uploads.ts";
+import { eraseUploadsOf, uploadsOf } from "./knowledge-uploads.ts";
 import { eraseOnboardingAccount } from "./onboarding/new-brain.ts";
 import { onboardingStore } from "./onboarding/store.ts";
 import type { ErasureAreaName } from "./person-erasure-inventory.ts";
@@ -275,43 +272,14 @@ const identity: ErasureStep = {
 };
 
 /**
- * Purges `userId` from today's Brain and Knowledge (GRA-1185), as the
- * admin `requestedBy` asked, through the package's personal purge
- * (purge.ts `purgePerson`), the one way it erases a person: their
- * memories, receipts, lessons and outcomes with the tombstone that keeps
- * them from coming back, every collection only they read (their own,
- * `access` "me"; collections they made for others stay) with every
- * version, section, transcript and payload, their uploads' originals in R2
- * (`uploadErasure`), and the search index; then who answered a gap, if it
- * was them (the answers stay, as the company's, said by no one). Nothing
- * writes Knowledge any more, but what it holds stays on a deployment until
- * the cutover's last step deletes it, so this runs until then. Recorded
- * and resumable: it throws when a step fails, and running it again
- * finishes it. Only the `brain` area calls it.
- */
-export const purgeFromKnowledge = async (
-  env: Env,
-  requestedBy: string,
-  userId: string
-): Promise<PurgeResult> => {
-  const actor = { type: "person" as const, userId: requestedBy };
-  return await purgePerson(
-    brainOf(env),
-    { actor, userId: requestedBy },
-    { userId, reason: "erasure_request" },
-    {
-      ...uploadErasure(env),
-      forgetActor: async () => {
-        await eraseGapAnswerer(env, actor, userId);
-      },
-    }
-  );
-};
-
-/**
- * What today's Brain and Knowledge hold of them, and their skill shares
- * (`purgeFromKnowledge`). Complete only once the purge returned: a
- * failure leaves the area pending, and the clock runs it again.
+ * What core holds of them for the Brain beside their own store (the
+ * `brain_sources` area): their skill shares, who answered a gap if it was
+ * them (the answers stay, as the company's, said by no one), and every
+ * file they once uploaded into Knowledge, with its original
+ * (knowledge-uploads.ts). Knowledge itself is gone (GRA-1941): what its
+ * databases held of them goes with them, deleted in the account.
+ * Complete only once each returned: a failure leaves the area pending,
+ * and the clock runs it again.
  */
 const brain: ErasureStep = {
   area: "brain",
@@ -341,7 +309,12 @@ const brain: ErasureStep = {
         .set({ decidedBy: null })
         .where(eq(skillDecisions.decidedBy, userId)),
     ]);
-    await purgeFromKnowledge(env, erasure.requestedBy, userId);
+    await eraseGapAnswerer(
+      env,
+      { type: "person", userId: erasure.requestedBy },
+      userId
+    );
+    await eraseUploadsOf(env, userId);
     await completed(db, userId, "brain");
   },
 };
@@ -831,15 +804,15 @@ const inStepOrder = (areas: readonly ErasureArea[]): ErasureArea[] => {
 
 /**
  * Where the erasure of `userId` from the Brain stands, as core records it,
- * across its Brain areas: `brain` (the legacy Brain's purge, and their
- * skill shares in core's database), `brain_sources` (the new Brain:
- * pending until its call returned, which is only once their own store was
- * erased whole, files included) and `brain_shared` (what the new Brain
- * derived about them where others may read it). In the areas' own states
- * (`ErasureAreaState`): `skipped` if any was recorded skipped (no step
- * does today; the schema allows it), else `pending` while any is, else
- * `complete`; null when no erasure of them was asked for. With it, when
- * any area last changed: once `complete`, when the last of them
+ * across its Brain areas: `brain` (what core holds of them for the
+ * Brain: skill shares, gap answers, old uploads), `brain_sources` (the new
+ * Brain: pending until its call returned, which is only once their own
+ * store was erased whole, files included) and `brain_shared` (what the new
+ * Brain derived about them where others may read it). In the areas' own
+ * states (`ErasureAreaState`): `skipped` if any was recorded skipped (no
+ * step does today; the schema allows it), else `pending` while any is,
+ * else `complete`; null when no erasure of them was asked for. With it,
+ * when any area last changed: once `complete`, when the last of them
  * completed. The areas alone, for Grasp's staff asking whether a person
  * was erased (brain-report.ts): one statement, whoever is named, so a
  * person never erased reads as one who never existed.
@@ -1081,7 +1054,15 @@ export const erasePerson = async (
     actor: actorOf(by),
     action: "member.erasure.requested",
     target: { type: "member", id: target },
-    detail: { userId: target },
+    // How many files they once uploaded into Knowledge it forgets (the
+    // `brain` area, knowledge-uploads.ts), counted here, in its one event:
+    // nothing uploads into Knowledge any more, so these are the ones it
+    // erases, and `member.erased` is often written in a later run, once
+    // they are gone.
+    detail: {
+      userId: target,
+      knowledgeUploads: await uploadsOf(env, target),
+    },
   };
   await auditedBatch(env, db, [
     db

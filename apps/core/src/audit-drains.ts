@@ -3,7 +3,6 @@ import { waitUntil } from "cloudflare:workers";
 import {
   connectOutbox,
   coreOutbox,
-  databaseOutbox,
   drainLogged,
   drainMaxBatches,
 } from "./audit-outbox.ts";
@@ -27,7 +26,7 @@ const connectOf = (env: Env, besides?: Outbox["appended"]): Outbox =>
   );
 
 /**
- * Drains every outbox: the core and Knowledge databases' and connect's,
+ * Drains every outbox: core's database's and connect's,
  * each on its own, so one that fails (connect unreachable, say) is logged
  * and leaves the others to drain. Returns how many events it appended.
  * The clock calls it, with what connect's events are to tell people
@@ -42,7 +41,6 @@ export const drainAuditOutboxes = async (
     [
       // The one drain of its invocation that tries notes alone.
       coreOutbox(env, loneNotesPerDrain),
-      databaseOutbox("knowledge", env.KNOWLEDGE),
       connectOf(env, connectAppended),
     ].map(async (outbox) => await drainLogged(env, outbox, drainMaxBatches))
   );

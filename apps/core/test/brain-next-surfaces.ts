@@ -357,9 +357,24 @@ const strangers = (): Access => ({
   group: `team:${stranger()}`,
 });
 
-/** A source's text holding every marker. */
+/**
+ * The day every marked text mentions, and no other source: a question
+ * asking it otherwise (`markedDayAsked`) must answer as one asking a day
+ * nobody mentions (`absentDayAsked`).
+ */
+const markedDay = "13/11/2091";
+
+/** A source's text holding every marker, and the marked day. */
 const markedText = (markers: readonly string[]): string =>
-  `Withheld ${markers.join(" ")}`;
+  `Withheld ${markers.join(" ")}, due ${markedDay}.`;
+
+/**
+ * The marked day as a question asks it, and a day nobody mentions, alike
+ * but for their month: a word of letters, which `echoesHidden` writes as
+ * a place in the list like a marker, never touching the places' digits.
+ */
+const markedDayAsked = { month: "november", day: "13", year: "2091" } as const;
+const absentDayAsked = { month: "december", day: "13", year: "2091" } as const;
 
 /** The same text, past the most bytes a source may have. */
 const oversizedText = (markers: readonly string[]): string =>
@@ -379,12 +394,16 @@ const twinOf = (marker: string): string =>
       : String.fromCodePoint((character.codePointAt(0) ?? 0) + 6)
   ).join("")}`;
 
-/** A question built on words: the markers, or their twins. */
+/**
+ * A question built on words: the markers, or their twins; with `day`,
+ * also the marked day, or for the twins a day nobody mentions.
+ */
 interface Asked {
   name: string;
   text: (words: readonly string[]) => string;
   budget?: number;
   asOf?: Date;
+  day?: boolean;
 }
 
 /** What a pack is asked for in a probe. */
@@ -427,6 +446,11 @@ const askedOf = (
       name: "the markers and a date",
       text: (words) => `${words.join(" ")} 14 maart 2026`,
     },
+    {
+      name: "the markers and the day only marked sources mention",
+      text: (words) => words.join(" "),
+      day: true,
+    },
     { name: "the shared word and the markers", text: withShared },
     ...[1, 40].map((tokens) => ({
       name: `the shared word and the markers in ${tokens} tokens`,
@@ -443,6 +467,12 @@ const askedOf = (
         name: `the shared word and the markers as of ${asOf.toISOString()}`,
         text: withShared,
         asOf,
+      },
+      {
+        name: `the markers and the marked day as of ${asOf.toISOString()}`,
+        text: (words: readonly string[]) => words.join(" "),
+        asOf,
+        day: true,
       },
     ]),
   ];
@@ -497,13 +527,16 @@ const askedOfMarkers = async (
 ): Promise<Answer[]> => {
   const twins = probing.markers.map(twinOf);
   const asked: Answer[] = [];
-  for (const { name, text, budget, asOf } of askedOf(probing, moments)) {
-    for (const [about, words] of [
-      ["hidden", probing.markers],
-      ["nothing", twins],
+  for (const { name, text, budget, asOf, day } of askedOf(probing, moments)) {
+    for (const [about, words, dayAsked] of [
+      ["hidden", probing.markers, markedDayAsked],
+      ["nothing", twins, absentDayAsked],
     ] as const) {
       const asking: PackAsk = {
-        question: text(words),
+        question:
+          day === true
+            ? `${text(words)} ${dayAsked.day} ${dayAsked.month} ${dayAsked.year}`
+            : text(words),
         budget: { tokens: budget ?? recallBudgetMax },
         ...(asOf === undefined ? {} : { asOf }),
       };
@@ -514,7 +547,12 @@ const askedOfMarkers = async (
         about,
         name
       );
-      asked.push(echoesHidden(answered, words));
+      asked.push(
+        echoesHidden(
+          answered,
+          day === true ? [...words, dayAsked.month] : words
+        )
+      );
     }
   }
   return asked;

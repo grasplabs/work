@@ -48,7 +48,6 @@ export const familyNamespaces = [
   "internal",
   "interview",
   "kickoff",
-  "knowledge",
   "link",
   "member",
   "migration",

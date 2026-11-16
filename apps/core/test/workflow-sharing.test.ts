@@ -1,8 +1,8 @@
 import type { Role } from "@grasp-os/shared/roles";
 import { describe, expect, it } from "vite-plus/test";
 
+import { newTeam } from "./admin-teams.ts";
 import { mockIdp } from "./idp.ts";
-import { newTeam } from "./knowledge.ts";
 import {
   openRpc,
   outcome,

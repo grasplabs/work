@@ -173,8 +173,15 @@
     {
       "idx": 24,
       "version": "6",
-      "when": 1794846503882,
-      "tag": "0024_person_erasure",
+      "when": 1794819084162,
+      "tag": "0024_chunk_days",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "6",
+      "when": 1794858756500,
+      "tag": "0025_person_erasure",
       "breakpoints": true
     }
   ]

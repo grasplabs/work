@@ -219,11 +219,6 @@
           "type": "d1"
         },
         {
-          "id": "$D1_KNOWLEDGE_ID",
-          "name": "KNOWLEDGE",
-          "type": "d1"
-        },
-        {
           "bucket_name": "grasp-os-files",
           "jurisdiction": "eu",
           "name": "FILES",
@@ -273,18 +268,6 @@
         {
           "binding": "DB",
           "databaseName": "grasp-os-core",
-          "migrations": [
-            {
-              "name": "0000_fixture.sql",
-              "r2Key": "blobs/migrations/b27a2967d05b98ee4aedc868dd1130d7f2a67e615d567b752fd5dd966dda951b",
-              "sha256": "b27a2967d05b98ee4aedc868dd1130d7f2a67e615d567b752fd5dd966dda951b",
-              "size": 51
-            }
-          ]
-        },
-        {
-          "binding": "KNOWLEDGE",
-          "databaseName": "grasp-os-knowledge",
           "migrations": [
             {
               "name": "0000_fixture.sql",

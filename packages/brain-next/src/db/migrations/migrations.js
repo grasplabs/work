@@ -23,7 +23,8 @@ import m0020 from './0020_work_key.sql';
 import m0021 from './0021_removals.sql';
 import m0022 from './0022_memory_outs.sql';
 import m0023 from './0023_memory_judging.sql';
-import m0024 from './0024_person_erasure.sql';
+import m0024 from './0024_chunk_days.sql';
+import m0025 from './0025_person_erasure.sql';
 
   export default {
     journal,
@@ -52,7 +53,8 @@ m0020,
 m0021,
 m0022,
 m0023,
-m0024
+m0024,
+m0025
     }
   }
   

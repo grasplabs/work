@@ -443,7 +443,7 @@ export const channelSignals = sqliteTable(
 
 /**
  * Who is in a chat that others share, a group chat or channel on a chat
- * platform, as its agent reads for it (`knowledge/access.ts`): kept by the
+ * platform, as its agent reads for it (chat-audiences.ts): kept by the
  * Workspace object that holds the chat, before each turn, from the
  * platform's roster then. The agent reads only what every member may
  * read, and nothing at all with `outsiders` in it: anyone Grasp can't name
@@ -2570,8 +2570,8 @@ export const runBrainEvidence = sqliteTable(
     /** The document's version it recalled. */
     version: integer().notNull(),
     /**
-     * What stood for that version's text as it was recalled (`PinnedVersion`
-     * in @grasp-os/brain/recall-store): changed by a purge.
+     * What stood for that version's text as it was recalled, by today's
+     * Brain's recall, gone since GRA-1941.
      */
     pinned: text().notNull(),
     /**
@@ -5943,7 +5943,10 @@ export const brainGapStates = sqliteTable("brain_gap_states", {
 // They name Knowledge's collections and documents by ID, with no foreign
 // key: no batch holds both databases.
 
-/** The teams that may read a `teams` collection (knowledge/access.ts). */
+/**
+ * The teams that could read a `teams` collection in Knowledge, gone since
+ * GRA-1941: nothing reads or writes it, and S7 of GRA-1735 drops it.
+ */
 export const collectionTeams = sqliteTable(
   "collection_teams",
   {
@@ -5976,8 +5979,9 @@ export const appEntries = sqliteTable("app_entries", {
 /**
  * A file once uploaded into a Knowledge collection: its original, kept in
  * R2, and where extracting its text into the document at `path` stood.
- * Nothing uploads into Knowledge any more; a purge forgets them
- * (knowledge/uploads.ts), and the table is dropped in a later release.
+ * Nothing uploads into Knowledge any more; a person's erasure and the
+ * clock forget them (knowledge-uploads.ts), and the table is dropped in a
+ * later release.
  */
 export const uploads = sqliteTable(
   "uploads",
@@ -5996,8 +6000,8 @@ export const uploads = sqliteTable(
     /** JSON: the audit log's actor for the person who uploaded it. */
     actor: text().notNull(),
     /**
-     * `saving`: claimed for the save of its text, which a purge's
-     * forgetting refuses (knowledge/uploads.ts).
+     * `saving`: claimed for the save of its text, when uploads into
+     * Knowledge still saved one (knowledge-uploads.ts).
      */
     status: text({
       enum: ["pending", "extracting", "saving", "ready", "failed"],
@@ -6022,8 +6026,8 @@ export const uploads = sqliteTable(
 );
 
 /**
- * Originals to delete from R2 (knowledge/uploads.ts), by key: recorded by
- * a purge as it forgets their uploads, and deleted by its cleanup.
+ * Originals to delete from R2 (knowledge-uploads.ts), by key: recorded as
+ * their uploads are forgotten, and deleted by the cleanup after.
  */
 export const uploadCleanups = sqliteTable("upload_cleanups", {
   /** The original's key in R2. */

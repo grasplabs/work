@@ -1,5 +1,4 @@
 import * as brainStore from "@grasp-os/brain-next/schema";
-import * as brain from "@grasp-os/brain/schema";
 import { personColumn } from "@grasp-os/shared/person-columns";
 import { is } from "drizzle-orm";
 import { getTableConfig, SQLiteTable } from "drizzle-orm/sqlite-core";
@@ -32,7 +31,6 @@ const schemas = {
   onboarding,
   dataStore,
   auditLog,
-  brain,
   brainStore,
 };
 

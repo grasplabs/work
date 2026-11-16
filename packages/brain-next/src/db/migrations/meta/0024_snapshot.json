@@ -1,9 +1,71 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "5544fcae-438f-48d2-a858-c3c4e0607adb",
+  "id": "6998d3be-8a4f-4ec9-a751-3a9da7c21e45",
   "prevId": "b3c5aea7-73b6-4be1-8491-f206df92e38f",
   "tables": {
+    "chunk_days": {
+      "name": "chunk_days",
+      "columns": {
+        "chunk": {
+          "name": "chunk",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "month_day": {
+          "name": "month_day",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "year": {
+          "name": "year",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "chunk_days_chunk_idx": {
+          "name": "chunk_days_chunk_idx",
+          "columns": [
+            "chunk"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "chunk_days_chunk_chunks_row_fk": {
+          "name": "chunk_days_chunk_chunks_row_fk",
+          "tableFrom": "chunk_days",
+          "tableTo": "chunks",
+          "columnsFrom": [
+            "chunk"
+          ],
+          "columnsTo": [
+            "row"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "chunk_days_month_day_year_chunk_pk": {
+          "columns": [
+            "month_day",
+            "year",
+            "chunk"
+          ],
+          "name": "chunk_days_month_day_year_chunk_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
     "chunks": {
       "name": "chunks",
       "columns": {
@@ -1782,76 +1844,6 @@
           "value": "id = 1"
         }
       }
-    },
-    "person_erasure_memories": {
-      "name": "person_erasure_memories",
-      "columns": {
-        "memory": {
-          "name": "memory",
-          "type": "integer",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "erasure": {
-          "name": "erasure",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "person_erasure_memories_memory_memories_row_fk": {
-          "name": "person_erasure_memories_memory_memories_row_fk",
-          "tableFrom": "person_erasure_memories",
-          "tableTo": "memories",
-          "columnsFrom": [
-            "memory"
-          ],
-          "columnsTo": [
-            "row"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "person_erasure_subjects": {
-      "name": "person_erasure_subjects",
-      "columns": {
-        "subject": {
-          "name": "subject",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "erasure": {
-          "name": "erasure",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "person_erasure_subjects_erasure_idx": {
-          "name": "person_erasure_subjects_erasure_idx",
-          "columns": [
-            "erasure"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
     },
     "reader_set_members": {
       "name": "reader_set_members",
