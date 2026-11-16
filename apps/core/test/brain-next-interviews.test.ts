@@ -1421,6 +1421,50 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
     }
   );
 
+  it.each([
+    // Seven still interviewed, four behind the claim: only the recount
+    // hides it.
+    ["a backer", ["pim"]],
+    // Two in one save: everyone it takes off the list erased without a
+    // recount each, then one recount for them all.
+    ["two backers", ["pim", "noor"]],
+  ] as const)(
+    "are unreadable the moment one roster save takes %s off the list, while an intake holds the Brain's work",
+    async (_, off) => {
+      const { ids, max } = await drawnTeam({ eight: true });
+      await intakeOf(ids, [zendeskClaim]);
+      await handOverNow();
+      const before = await recalled(max, "Zendesk", "claim");
+      const keys = [...everyone, "sam", "ada"].filter(
+        (key): key is Key => !off.some((each) => each === key)
+      );
+      // The save waits on the Brain's work once its own transaction landed.
+      const held = await heldIntake(ids);
+      const saving = onboardingStore(env).saveRoster(
+        rosterWith(ids, { keys }),
+        { type: "system" }
+      );
+      await landed(
+        (sql) =>
+          sql.exec("SELECT id FROM people WHERE id = ?", ids.pim).toArray()
+            .length === 0
+      );
+      const now = await claimRead(max);
+      await held.release();
+      await saving;
+      await settled();
+      expect({
+        before,
+        now,
+        after: await recalled(max, "Zendesk", "claim"),
+      }).toStrictEqual({
+        before: [zendeskClaim.text],
+        now: { recalled: [], listed: [] },
+        after: [],
+      });
+    }
+  );
+
   it("are unreadable the moment a move leaves six interviewed, before core's clock erases them", async () => {
     const { ids, max } = await drawnTeam();
     await intakeOf(ids, [zendeskClaim]);

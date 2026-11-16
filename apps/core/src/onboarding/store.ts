@@ -7611,6 +7611,11 @@ export class Onboarding extends DurableObject<Env> {
    */
   #forget(person: string, now: string, what: string, by: string): void {
     this.#erase(person);
+    // A claim it took under five backers, or a team it took under seven
+    // interviewed, is unreadable from this transaction on. A roster save,
+    // which erases everyone it takes off the list, recounts once for them
+    // all at the end of its own transaction (`#writeRoster`).
+    this.#markClaimsThatNoLongerStand();
     this.#noted(person, what, now, by);
   }
 
@@ -7651,9 +7656,6 @@ export class Onboarding extends DurableObject<Env> {
     // goes with it. A referral names nobody else: whom it names is worked
     // out from the roster only as it is made (`#referOne`).
     this.#db.delete(referrals).where(eq(referrals.person, person)).run();
-    // A claim it took under five backers, or a team it took under seven
-    // interviewed, is unreadable from this transaction on.
-    this.#markClaimsThatNoLongerStand();
   }
 
   /** `person`'s interview as stored, or null when there is none or it doesn't parse. */
