@@ -97,7 +97,9 @@ const shown = async (
       return await Promise.resolve({ id: "chat-1", title });
     },
     send: async (chatId: string, question: ChatQuestion) => {
-      asked.push(`send ${chatId} ${question.text}`);
+      asked.push(
+        `send ${chatId} ${question.text}${question.mentions === undefined ? "" : ` ${JSON.stringify(question.mentions)}`}`
+      );
       await Promise.resolve();
     },
     watch: async () => await Promise.withResolvers<never>().promise,
@@ -271,11 +273,12 @@ describe("Chat's page from Make something", () => {
     });
   });
 
-  it("starts the chat with the agent the address names, among those the person may talk to", async () => {
+  it("mentions the agent the address names in the box, so the question goes to it, among those the person may talk to", async () => {
     const { asked } = await shown(undefined, undefined, {
       agents: [agent("organization", "Grasp"), agent("agent-2", "Claire")],
       named: "agent-2",
     });
+    const prefilled = box().textContent;
 
     await act(async () => {
       typeInPrompt(box(), "Which invoices are late?");
@@ -287,9 +290,21 @@ describe("Chat's page from Make something", () => {
     });
     await settled();
 
-    expect(asked).toStrictEqual([
-      "create Which invoices are late? null with agent-2",
-      "send chat-1 Which invoices are late?",
-    ]);
+    expect({ prefilled, asked }).toStrictEqual({
+      // A chip, which shows the agent's name.
+      prefilled: "Claire ",
+      asked: [
+        "create @Claire Which invoices are late? null",
+        'send chat-1 @Claire Which invoices are late? [{"kind":"agent","id":"agent-2"}]',
+      ],
+    });
+  });
+
+  it("mentions nobody for an agent the person may not talk to", async () => {
+    await shown(undefined, undefined, {
+      agents: [agent("organization", "Grasp")],
+      named: "agent-hidden",
+    });
+    expect(box().textContent).toBe("");
   });
 });
