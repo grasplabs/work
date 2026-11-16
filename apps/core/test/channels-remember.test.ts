@@ -123,6 +123,11 @@ const afterNotice = async (conversation: string, cardId: string) => {
     lines: sent
       .slice(at + 1)
       .filter(({ editOf }) => editOf === undefined)
+      // Not the card offering their own Microsoft 365 (connect-own.ts).
+      .filter(
+        ({ activity }) =>
+          !JSON.stringify(activity).includes("/connect-microsoft")
+      )
       .flatMap(({ activity }) =>
         activity.text === undefined ? [] : [activity.text]
       ),
@@ -189,7 +194,10 @@ describe("the agent remembering in a person's Teams direct message", () => {
       expect({
         checks: checksSent(ann.provider),
         kept,
-        notice: card.includes(say("remembered", "en", { statement })),
+        // What the store kept, about the depot, as Grasp's own notice says it.
+        notice: card.includes(
+          say("rememberedAbout", "en", { about: `Depot ${depot}`, statement })
+        ),
         recalledInDirect: inDirect.includes(word),
         recalledInGrasp: inGrasp.includes(word),
       }).toStrictEqual({
@@ -230,14 +238,19 @@ describe("the agent remembering in a person's Teams direct message", () => {
 
       expect({
         afterBen,
-        benSaw: toBen.sent.filter(({ editOf }) => editOf !== undefined),
+        // Told in his own direct message, where he pressed.
+        benSaw: toBen.sent.flatMap(({ editOf, activity }) =>
+          editOf === undefined
+            ? []
+            : [JSON.stringify(activity).includes(say("nothingToUndo", "en"))]
+        ),
         after: await keptFor(ann.userId, `Depot ${depot}`),
         edits: edits.map((edit) => edit.includes(say("undone", "en"))),
         lines,
         forgotten,
       }).toStrictEqual({
         afterBen: [statement],
-        benSaw: [],
+        benSaw: [true],
         after: [],
         edits: [true],
         lines: [say("alreadyAnswered", "en")],
@@ -291,7 +304,9 @@ describe("the agent remembering in a person's Teams direct message", () => {
       const outcomes = await Promise.all(
         chats.map(async ({ id }) => {
           const results = await toolResults(stub, id);
-          return results.map(({ tool, isError }) => ({ tool, isError }));
+          return results.flatMap(({ tool, isError }) =>
+            tool === "remember" ? [{ tool, isError }] : []
+          );
         })
       );
 
