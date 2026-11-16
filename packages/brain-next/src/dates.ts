@@ -29,7 +29,13 @@ import { Temporal } from "temporal-polyfill";
 // day and month in figures alone ("14/03", like fractions and ranges), a
 // short month name without a year ("4 mar", "3 ago"), forms CLDR doesn't
 // write ("the 14th of March", "March 14 2026" without its comma), ranges
-// and relative days ("next Tuesday"). A reading that lies inside a longer
+// and relative days ("next Tuesday"). Nor is a day and month by name read
+// where a number stands next to it, which may be its year ("14 maart 25",
+// "March 14 2025", "14 March '25", "2025 March 14"): after it, past
+// spaces, a comma, an apostrophe, a date separator or the word the locale
+// writes before a year ("de"), or before it, past the same. So "14 maart
+// 3 mensen" is no day either; "14 maart." and "14 maart, de vergadering"
+// are 14 March of any year. A reading that lies inside a longer
 // one is dropped ("4 March" of "4 March 2026"); readings of the same
 // words in two orders are both kept. A date never starts or ends inside a
 // word or an ID: "INV-2026-03-14-7" and "PO-14.03.2026" are IDs, read by
@@ -132,6 +138,30 @@ const partOf = ({ type, value }: Intl.DateTimeFormatPart): string => {
   return literally(value);
 };
 
+/**
+ * What may stand between a day and month and a number that may be its
+ * year: spaces, a comma, an apostrophe ("'25") and the date separators.
+ */
+const yearGap = String.raw`[\s,'’.\/\-]*`;
+
+/**
+ * The word `locale` writes before a year, if any: " de " in "4 de marzo
+ * de 2026", none in "4 March 2026" or "March 4, 2026".
+ */
+const yearWordOf = (locale: string): string => {
+  const parts = new Intl.DateTimeFormat(locale, {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    timeZone: "UTC",
+  }).formatToParts(probe);
+  const year = parts.findIndex(({ type }) => type === "year");
+  const literal = parts[year - 1];
+  return literal?.type === "literal"
+    ? literal.value.replaceAll(/[^\p{L}]/gu, "")
+    : "";
+};
+
 /** A pattern read from a CLDR format: its expression, and its month names. */
 interface Pattern {
   expression: RegExp;
@@ -148,6 +178,8 @@ interface Pattern {
  */
 const patterns: readonly Pattern[] = (() => {
   const shapes = new Map<string, Map<string, Set<number>>>();
+  /** Per shape without a year, the words its locales write before a year. */
+  const yearWords = new Map<string, Set<string>>();
   for (const locale of locales) {
     for (const options of skeletons) {
       const format = new Intl.DateTimeFormat(locale, {
@@ -176,6 +208,14 @@ const patterns: readonly Pattern[] = (() => {
         }
       }
       shapes.set(shape, spellings);
+      if (options.year === undefined) {
+        const words = yearWords.get(shape) ?? new Set<string>();
+        const word = yearWordOf(locale);
+        if (word.length > 0) {
+          words.add(word);
+        }
+        yearWords.set(shape, words);
+      }
     }
   }
   return [...shapes].map(([shape, spellings]) => {
@@ -193,8 +233,20 @@ const patterns: readonly Pattern[] = (() => {
       .map(literally)
       .join("|");
     const body = shape.replace(namePlace, String.raw`(?<name>${names})\.?`);
+    const words = yearWords.get(shape);
+    // A day and month alone: no number that may be its year beside it.
+    const guards =
+      words === undefined
+        ? { before: "", after: "" }
+        : {
+            before: String.raw`(?<!\d${yearGap})`,
+            after: String.raw`(?!${yearGap}${[...words].map((word) => `(?:${literally(word)}${yearGap})?`).join("")}\d)`,
+          };
     return {
-      expression: new RegExp(`${before}${body}${after}`, "giu"),
+      expression: new RegExp(
+        `${before}${guards.before}${body}${after}${guards.after}`,
+        "giu"
+      ),
       months,
     };
   });

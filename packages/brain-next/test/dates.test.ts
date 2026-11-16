@@ -90,6 +90,25 @@ describe("the days a text mentions", () => {
     );
   });
 
+  it("reads a day and month alone only where no number beside it may be its year", () => {
+    const table: [string, [string, string[]][]][] = [
+      // A number that may be its year, after or before: left to the words.
+      ["Signed 14 maart 25.", []],
+      ["Signed March 14 2025", []],
+      ["Signed 14 March '25", []],
+      ["Signed 2025 March 14", []],
+      ["firmado el 14 de marzo de 25", []],
+      // Any number: "3 mensen" may be a year as far as the rule can tell.
+      ["14 maart 3 mensen", []],
+      // With its year, or nothing that may be one beside it.
+      ["14 maart 2026", [["14 maart 2026", ["2026-03-14"]]]],
+      ["14 maart.", [["14 maart.", ["--03-14"]]]],
+      ["14 maart, de vergadering", [["14 maart", ["--03-14"]]]],
+      ["firmado el 14 de marzo, luego", [["14 de marzo", ["--03-14"]]]],
+    ];
+    expect(table.map(([text]) => [text, read(text)])).toStrictEqual(table);
+  });
+
   it("reads 29 February without a year, and in a leap year", () => {
     expect([read("29 February"), read("29 February 2028")]).toStrictEqual([
       [["29 February", ["--02-29"]]],
