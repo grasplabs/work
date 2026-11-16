@@ -17,6 +17,7 @@ import type { Conversation } from "./connect-own.ts";
 import type { ChannelHandoff, ChannelMessage } from "./door.ts";
 import { checkOf, inertView, turnHeldWrites } from "./held.ts";
 import { inTeams } from "./inert.ts";
+import { postRemembered } from "./remembered.ts";
 import { sortRequest } from "./request-sorting.ts";
 import { countAnswered, countSignal } from "./signals.ts";
 import type { ChannelSignal } from "./signals.ts";
@@ -62,6 +63,11 @@ import { postOffers } from "./workflow-offers.ts";
 // presses Confirm: on one card those that can be confirmed together, and
 // the rest, which only Cancel can decide, on cards after it (cards.tsx
 // `heldWritesCards`, held.ts).
+//
+// Each memory the turn saved of what the person said, in their direct
+// message, is shown after its answer on a card of its own, with Undo
+// (remembered.ts), however the turn ended. One whose card can't be posted
+// is retired; remembered.ts says what can still be missed.
 
 /** How often typing is shown again while the turn runs. */
 const typingEveryMs = 3000;
@@ -435,7 +441,17 @@ const answerOne = async (
     return;
   }
   stopTyping();
-  const { chatId, answer, calls } = asked;
+  const { chatId, answer, calls, remembered } = asked;
+  // The memories the turn saved, each on its notice, under what it ended in.
+  const notices = async () => {
+    await postRemembered(
+      env,
+      { platform, userId, locale, remembered },
+      async (notice) => {
+        await postIn(env, platform, thread, notice);
+      }
+    );
+  };
   const answered = answer.outcome === "answered";
   const final = answer.answer.trim();
   if (!answered || final === "") {
@@ -446,7 +462,11 @@ const answerOne = async (
       ended: endOfTurn(answer.outcome),
       calls,
     });
-    await deliver(say("failed", locale));
+    try {
+      await deliver(say("failed", locale));
+    } finally {
+      await notices();
+    }
     return;
   }
   // What the turn did is kept now, before any card of the answer can be
@@ -540,6 +560,7 @@ const answerOne = async (
       await quietly("failed_line", async () => {
         await thread.post(say("failed", locale));
       })();
+      await notices();
       await held();
     } finally {
       await recorded();
@@ -547,6 +568,7 @@ const answerOne = async (
     throw error;
   }
   await timed();
+  await notices();
   await held();
   await offers();
   await offer();

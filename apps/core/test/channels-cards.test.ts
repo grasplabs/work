@@ -511,6 +511,9 @@ const values = {
   url: "https://acme.grasp.test/workflows/requests",
   function: "tasks.add",
   app: "Tasks",
+  statement: "Wants answers in Dutch",
+  about: "Acme",
+  value: "Dutch",
 };
 
 /** Block Kit's limits, as Slack documents them for a message's blocks. */

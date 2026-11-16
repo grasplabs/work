@@ -1,3 +1,5 @@
+import type { ChatSavedMemory } from "@grasp-os/shared/brain-memories";
+import { shownVisibly } from "@grasp-os/shared/chat";
 import {
   convertEmojiPlaceholders,
   Actions,
@@ -942,6 +944,84 @@ export const startOfferCard = ({
       ) : (
         <CardText>{say("startTooLong", locale)}</CardText>
       )}
+    </Card>
+  );
+  return { card: cardOf(card), aiGenerated: true };
+};
+
+/** Undo's action id, for the channel layer's `onAction`. */
+export const undoAction = "memory.undo";
+
+/**
+ * What Stephen saved and how he says it: about the person, or another.
+ * What the model wrote of it (the statement, whom it is about, its value)
+ * shows every character nobody sees as an escape (`shownVisibly`), as a
+ * held write's values do.
+ */
+const rememberedLine = (
+  locale: ChannelLocale,
+  saved: ChatSavedMemory
+): string => {
+  const statement = shownVisibly(saved.statement);
+  const about =
+    saved.about === undefined ? undefined : shownVisibly(saved.about);
+  const value =
+    saved.value === undefined ? undefined : shownVisibly(saved.value);
+  if (about === undefined) {
+    return value === undefined
+      ? say("remembered", locale, { statement })
+      : say("rememberedValue", locale, { statement, value });
+  }
+  return value === undefined
+    ? say("rememberedAbout", locale, { about, statement })
+    : say("rememberedAboutValue", locale, { about, statement, value });
+};
+
+/** The label above a memory that says how Stephen should act for them. */
+const rememberedKind = {
+  instruction: "rememberedInstruction",
+  preference: "rememberedPreference",
+} as const satisfies Partial<Record<ChatSavedMemory["type"], LineName>>;
+
+/**
+ * A memory the agent saved of what the person said in their direct
+ * message (remembered.ts), as the notice in Grasp's own chat shows it:
+ * what the Brain kept, whole, in as many sections as it takes, cut as
+ * written and each piece made inert after the cut (`piecesOf`, inert.ts),
+ * as the model wrote some of it; whether it says how he should act for
+ * them; and Undo, whose press names only the memory. Undo is always on
+ * the card: it only ever retires the presser's own memory.
+ */
+export const rememberedCard = ({
+  locale,
+  platform,
+  saved,
+}: {
+  locale: ChannelLocale;
+  platform: string;
+  saved: ChatSavedMemory;
+}): PostableCard => {
+  const inert = inertOn(platform);
+  const kind =
+    saved.type === "instruction" || saved.type === "preference"
+      ? rememberedKind[saved.type]
+      : undefined;
+  const pieces = piecesOf(rememberedLine(locale, saved), locale, platform);
+  const card = (
+    <Card>
+      {kind === undefined ? null : (
+        <CardText style="muted">{say(kind, locale)}</CardText>
+      )}
+      {pieces.flatMap((piece, index) =>
+        onlyWhiteSpace.test(piece)
+          ? []
+          : [<CardText key={index}>{inert(piece)}</CardText>]
+      )}
+      <Actions>
+        <Button id={undoAction} value={saved.memory}>
+          {say("undo", locale)}
+        </Button>
+      </Actions>
     </Card>
   );
   return { card: cardOf(card), aiGenerated: true };

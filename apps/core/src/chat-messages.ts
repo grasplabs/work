@@ -64,7 +64,9 @@ const thinkingOf = (message: ToolResultMessage): ThinkingStep | undefined => {
  * The memory a call of `remember` saved (agent-remember.ts), for the
  * chat's notice; none for any other result, or one that failed.
  */
-const savedOf = (message: ToolResultMessage): ChatSavedMemory | undefined => {
+export const savedOf = (
+  message: ToolResultMessage
+): ChatSavedMemory | undefined => {
   if (message.toolName !== rememberName || message.isError) {
     return undefined;
   }

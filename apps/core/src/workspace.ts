@@ -14,6 +14,7 @@ import type {
   AuditDetailValue,
   AuditEntry,
 } from "@grasp-os/shared/audit";
+import type { ChatSavedMemory } from "@grasp-os/shared/brain-memories";
 import {
   chatChannelSchema,
   chatFilesMax,
@@ -142,7 +143,12 @@ import type {
   TurnRequest,
   TurnStop,
 } from "./chat-harness.ts";
-import { chatMessageOf, partialOf, shownBuiltSchema } from "./chat-messages.ts";
+import {
+  chatMessageOf,
+  partialOf,
+  savedOf,
+  shownBuiltSchema,
+} from "./chat-messages.ts";
 import type { ShownBuilt } from "./chat-messages.ts";
 import {
   saidOf,
@@ -208,6 +214,7 @@ import type { InstructionContext } from "./instruction-files.ts";
 import { inputTokens, modelSettings, models } from "./models.ts";
 import { hasBrainGrant } from "./permissions.ts";
 import type { WorkContext } from "./restricted.ts";
+import { retireUnseen } from "./unseen-memories.ts";
 
 export type Chat = typeof chats.$inferSelect;
 
@@ -235,6 +242,12 @@ interface LiveTurn {
    * and how each ended, never what they read. Only when its asker wants them.
    */
   calls?: ToolCall[];
+  /**
+   * The memories its agent saved for the person (agent-remember.ts), as
+   * their notices show them: for a chat app's asker, who posts each with
+   * its Undo (channels/remembered.ts). Only when its asker wants them.
+   */
+  remembered?: ChatSavedMemory[];
   /** Tells a chat platform's asker the answer's text so far. */
   onText?: (text: string) => unknown;
   /**
@@ -2280,7 +2293,12 @@ export class Workspace extends DurableObject<Env> {
     text: string,
     onText: ((text: string) => unknown) | undefined,
     place: ChatPlace
-  ): Promise<{ chatId: string; answer: Answer; calls: ToolCall[] }> {
+  ): Promise<{
+    chatId: string;
+    answer: Answer;
+    calls: ToolCall[];
+    remembered: ChatSavedMemory[];
+  }> {
     const platform = chatPlatformSchema.parse(via);
     const parsedPlace = permissionErrors.parse(
       "permission.context_invalid",
@@ -2333,11 +2351,25 @@ export class Workspace extends DurableObject<Env> {
       );
     }
     const calls: ToolCall[] = [];
-    return {
-      chatId: chat.id,
-      answer: await this.#turn(chat, { text, model }, false, { onText, calls }),
-      calls,
-    };
+    const remembered: ChatSavedMemory[] = [];
+    let answer: Answer;
+    try {
+      answer = await this.#turn(chat, { text, model }, false, {
+        onText,
+        calls,
+        remembered,
+      });
+    } catch (error) {
+      // What the turn saved before it threw reaches no notice: retired.
+      await retireUnseen(
+        this.env,
+        personId,
+        "turn_threw",
+        remembered.map(({ memory }) => memory)
+      );
+      throw error;
+    }
+    return { chatId: chat.id, answer, calls, remembered };
   }
 
   /**
@@ -2387,7 +2419,8 @@ export class Workspace extends DurableObject<Env> {
    * it there and then: every entry point says which, as what the turn may
    * read depends on it (`answersAlone`). `started` is called once the turn
    * is under way: the model admitted, and nothing kept yet. `calls` gets
-   * each call its code makes, as it ends.
+   * each call its code makes, as it ends; `remembered` each memory its
+   * agent saved, as it is kept.
    */
   async #turn(
     chat: Chat,
@@ -2397,10 +2430,12 @@ export class Workspace extends DurableObject<Env> {
       started,
       onText,
       calls,
+      remembered,
     }: {
       started?: () => void;
       onText?: (text: string) => unknown;
       calls?: ToolCall[];
+      remembered?: ChatSavedMemory[];
     } = {}
   ): Promise<Answer> {
     const parsed = questionSchema.safeParse(question);
@@ -2427,6 +2462,7 @@ export class Workspace extends DurableObject<Env> {
       agentId: chat.agentId,
       reads: [],
       calls,
+      remembered,
       cache: { requests: 0, inputTokens: 0, cacheReadTokens: 0 },
     };
     this.#turns.set(chat.id, live);
@@ -3175,7 +3211,7 @@ export class Workspace extends DurableObject<Env> {
     if (this.chatState(chatId) === undefined || this.#deleting.has(chatId)) {
       return undefined;
     }
-    const { agentId: chatAgent } = this.#chat(chatId);
+    const { agentId: chatAgent, personId, via } = this.#chat(chatId);
     const live = this.#turns.get(chatId);
     // What the model said is its turn's agent's: the live turn's, or, for
     // a turn a restart cut short, the chat's, which the turn set as it
@@ -3217,12 +3253,38 @@ export class Workspace extends DurableObject<Env> {
       if (message.role === "assistant") {
         answer = id;
       }
+      this.#savedIn({ personId, via }, live, message);
     }
     // With the messages: no await between, so they are stored together.
     if (through > before.through) {
       this.ctx.storage.kv.put(copiedKey, { through, answer });
     }
     return answered ? answer : undefined;
+  }
+
+  /**
+   * A memory the chat's agent saved (`message`, a call of `remember`), for
+   * the asker of the live turn who shows its notice. In a chat app's
+   * conversation with nobody here to post it (the turn was cut short, or
+   * its result came after the turn ended), nobody ever will: retired
+   * (unseen-memories.ts). Grasp's own chat shows it from the message.
+   */
+  #savedIn(
+    { personId, via }: Pick<Chat, "personId" | "via">,
+    live: LiveTurn | undefined,
+    message: Message
+  ): void {
+    const saved = message.role === "toolResult" ? savedOf(message) : undefined;
+    if (saved === undefined) {
+      return;
+    }
+    if (live?.remembered !== undefined) {
+      live.remembered.push(saved);
+    } else if (via !== "web") {
+      this.ctx.waitUntil(
+        retireUnseen(this.env, personId, "no_asker", [saved.memory])
+      );
+    }
   }
 
   /** Shows the chat's watchers the answer streaming in, or none. */
