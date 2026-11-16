@@ -314,7 +314,12 @@ export default class Connect
    * src/provision-probe.ts).
    */
   async ensureClock(): Promise<ClockRegistration> {
-    return await clock(this.env).ensureRegistered();
+    // As data, its call to the clock's object released here: handed on as
+    // it is, that call's result would carry its release on to core, which
+    // reads the answer and keeps nothing of it.
+    using registration = await clock(this.env).ensureRegistered();
+    const { armed, tasks } = registration;
+    return { armed, tasks };
   }
 
   /**
