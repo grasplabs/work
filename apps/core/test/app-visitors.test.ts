@@ -9,6 +9,10 @@ import {
   pageLeaseHeader,
   pagePersonHeader,
 } from "@grasp-os/shared/pages";
+import {
+  createExecutionContext,
+  waitOnExecutionContext,
+} from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
@@ -107,13 +111,26 @@ const releasedNotes = async (
   await builder.api.versions.rollback({ kind: "app", id: app }, version);
 };
 
-/** Posts a visitor's request, as their page does. */
-const post = async (body: unknown): Promise<Response> =>
-  await routed(appVisitorApiPath, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
-  });
+/**
+ * Posts a visitor's request, as their page does, and waits for what core
+ * does after answering: asking looks the address up, sends its code and
+ * audits it then (`waitUntil`).
+ */
+const post = async (body: unknown): Promise<Response> => {
+  const ctx = createExecutionContext();
+  const response = await routed(
+    appVisitorApiPath,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    },
+    env,
+    ctx
+  );
+  await waitOnExecutionContext(ctx);
+  return response;
+};
 
 /** The status and code of an answer: `ok` for a 2xx. */
 const answerOf = async (response: Response) => {

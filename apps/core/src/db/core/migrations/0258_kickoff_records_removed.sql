@@ -4,5 +4,6 @@
 -- Nothing writes them any more and nothing erases them: the admin's delete
 -- of the kickoff now erases its source in the new Brain. Nothing is
 -- released (hard cut): removed, words of replaced transcripts with them.
--- Changes nothing run again.
-DELETE FROM `brain_records` WHERE `id` LIKE 'onb-vis-%' OR `id` LIKE 'onb-kt-%' OR `id` LIKE 'onb-kc-%';
+-- `GLOB`, not `LIKE`: it matches case, so no id an admin chose in another
+-- case is touched. Changes nothing run again.
+DELETE FROM `brain_records` WHERE `id` GLOB 'onb-vis-*' OR `id` GLOB 'onb-kt-*' OR `id` GLOB 'onb-kc-*';
