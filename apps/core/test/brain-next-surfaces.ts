@@ -125,6 +125,11 @@ export interface Probing {
    * web chat does, or the shared store alone, as an App's does.
    */
   personal: boolean;
+  /**
+   * Whether core's recalls are asked as the company alone (`company`), as
+   * a turn others read recalls (turn-recall.ts), whatever `personal` says.
+   */
+  company?: true;
   /** A word in the reader's own source and in every marked one. */
   sharedWord: string;
   /**
@@ -1540,7 +1545,9 @@ const recallFixtures = new Map<string, Promise<RecallFixture>>();
  * probe planting its own would add hidden sources between what the gate
  * counts before and after a pass.
  */
-const recallFixture = async (probing: Probing): Promise<RecallFixture> => {
+export const recallFixture = async (
+  probing: Probing
+): Promise<RecallFixture> => {
   const key = JSON.stringify([
     probing.personId,
     probing.reader,
@@ -1663,6 +1670,7 @@ const recallProbe =
       await recall(env, probing.personId, {
         ...asking,
         personal: probing.personal,
+        ...(probing.company ? { company: true } : {}),
       });
     const hidden = probing.markers.join(" ");
     const whole = { tokens: recallBudgetMax };
@@ -1676,11 +1684,13 @@ const recallProbe =
         )),
         byMeaning: true,
       },
-      // Not held to before: the fixture adds a readable "Plain" each time.
-      await answer(
-        "the reader's own entity, which hidden relations name",
-        async () => await asked({ question: "Plain", budget: whole })
-      ),
+      {
+        ...(await answer(
+          "the reader's own entity, which hidden relations name",
+          async () => await asked({ question: "Plain", budget: whole })
+        )),
+        byMeaning: true,
+      },
       await answer(
         "nothing",
         async () => await asked({ question: "", budget: whole })
@@ -2098,54 +2108,70 @@ export const coreProbes = {
     ];
   },
   mergeRecalled: async (probing) => {
-    const { personId, personal, markers, sharedWord } = probing;
+    const { personId, markers, sharedWord } = probing;
+    const reach = probing.company
+      ? { personal: probing.personal, company: true }
+      : { personal: probing.personal };
     await recallFixture(probing);
     // The markers' pack joined by a pack of what the reader may read,
     // within what the first left of the budget as the chat's second pass
-    // is, must be their twins' pack joined by the same.
+    // is, and their twins' pack joined by the same.
     const merged = async (words: readonly string[]) => {
       const asked = await coreBrain.recallAs(env, personId, {
         question: words.join(" "),
         budget: { tokens: recallBudgetMax },
-        personal,
+        ...reach,
       });
       const shared = await coreBrain.recallAs(env, personId, {
         question: sharedWord,
         budget: { tokens: recallBudgetMax - coreBrain.recalledTokens(asked) },
-        personal,
+        ...reach,
       });
       return coreBrain.mergeRecalled(asked, shared);
     };
+    // Neither is held to the other, apart from what meaning found either:
+    // the second pack takes what the first left of the budget, and what
+    // the first took follows its question's meaning. Each is held to its
+    // markers, and to the same call before anything hidden was added.
     return [
       {
-        ...(await answer(
-          "the markers",
-          async () => await merged(markers),
-          "hidden"
-        )),
+        ...(await answer("the markers", async () => await merged(markers))),
         byMeaning: true,
       },
       {
         ...(await answer(
           "their twins",
-          async () => await merged(markers.map((marker) => twinOf(marker))),
-          "nothing"
+          async () => await merged(markers.map((marker) => twinOf(marker)))
         )),
         byMeaning: true,
       },
     ];
   },
-  // The tokens of a pack: of the markers' pack as of their twins'.
+  // The tokens of a pack: of the markers' pack and of their twins',
+  // passage by passage with how each was found, and of its memories. Each
+  // pack depends on its question's meaning, so what meaning found takes
+  // tokens of its own; the rest takes the twins' pack's.
   recalledTokens: async (probing) => {
     await recallFixture(probing);
-    const tokens = async (words: readonly string[]) =>
-      coreBrain.recalledTokens(
-        await coreBrain.recallAs(env, probing.personId, {
-          question: words.join(" "),
-          budget: { tokens: recallBudgetMax },
-          personal: probing.personal,
-        })
-      );
+    const tokens = async (words: readonly string[]) => {
+      const pack = await coreBrain.recallAs(env, probing.personId, {
+        question: words.join(" "),
+        budget: { tokens: recallBudgetMax },
+        personal: probing.personal,
+        ...(probing.company ? { company: true } : {}),
+      });
+      return {
+        items: pack.items.map((item) => ({
+          found: item.found,
+          tokens: coreBrain.recalledTokens({
+            ...pack,
+            items: [item],
+            memories: [],
+          }),
+        })),
+        memories: coreBrain.recalledTokens({ ...pack, items: [] }),
+      };
+    };
     return [
       {
         ...(await answer(
@@ -2317,7 +2343,8 @@ export const coreProbes = {
   recallAs: recallProbe(coreBrain.recallAs),
   // Its pack, with `fromOwn` beside what the pack holds: the echo of the
   // question in `notFound` is read where it is for `recallAs`, and
-  // `fromOwn` is held to the twin's answer as the rest is.
+  // `fromOwn` is held as the rest is: to the answer before anything hidden
+  // was added, or to the twin's apart from what meaning found.
   recallOwnedAs: recallProbe(async (...args) => {
     const { pack, fromOwn } = await coreBrain.recallOwnedAs(...args);
     return { ...pack, fromOwn };
@@ -9695,10 +9722,13 @@ export const sourcesProbes = {
   search: async (probing) => {
     await recallFixture(probing);
     return [
-      await answer(
-        "the reader's own entity, which hidden relations name",
-        async () => await sourcesAs(probing.personId).search("Plain")
-      ),
+      {
+        ...(await answer(
+          "the reader's own entity, which hidden relations name",
+          async () => await sourcesAs(probing.personId).search("Plain")
+        )),
+        byMeaning: true,
+      },
       ...(await askedOfMarkers(
         probing,
         [],

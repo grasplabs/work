@@ -83,6 +83,7 @@ import { copyOfStore, restoreStore } from "./brain-next-store-copy.ts";
 import type { StoreCopy } from "./brain-next-store-copy.ts";
 import {
   chatCodeRecallProbe,
+  recallFixture,
   markedDay,
   markedDayAsked,
   textOf,
@@ -306,14 +307,16 @@ describe(
       // before the first thing hidden from it exists. Each shape, as core
       // builds it (`readerOf`), what it may read, and what it may not:
       // - the company alone (an App's or a workflow's code, `recall
-      //   recallFor`, asked in the admin's pass and acting for the reader)
-      //   and an admin in no team with nothing of their own: the passage
+      //   recallFor`, asked in the admin's pass and acting for the reader;
+      //   and a turn of the reader's that others read, `company`) and an
+      //   admin in no team with nothing of their own: the passage
       //   for everyone; not the team's handbook, nor the reader's note,
       //   nor anything after;
-      // - the reader's teams with no person (a chat that doesn't answer
-      //   its person alone, `personal: false`, and a chat's code) and a
-      //   team-mate: the passage for everyone and the handbook; not the
-      //   reader's own note, nor anything after;
+      // - the reader's teams with no person (`personal: false`, as a
+      //   chat's code reads), a team-mate, and the company with the
+      //   reader's team (an App whose grant names that team and the
+      //   holder's, acting for the reader): the passage for everyone and
+      //   the handbook; not the reader's own note, nor anything after;
       // - the reader, in the team with their own note: all three; nothing
       //   after (an erased source, a removed one, one narrowed away, the
       //   hidden ones).
@@ -366,6 +369,14 @@ describe(
       const asMate = probingAs(teamMate, [`team:${readersTeam}`]);
       const asAdmin = probingAs(admin, []);
       const asTeams: Probing = { ...probing, personal: false };
+      // A turn others read (a channel, a thread): as the company alone.
+      const asCompany: Probing = { ...probing, personal: false, company: true };
+      // Code's recall under an App's grant naming the reader's team and the
+      // holder's: as the company and, of those, the team the reader is in.
+      const asAppOfTeams: Probing = {
+        ...probing,
+        codeTeams: [readersTeam, secretTeam],
+      };
       const among = surfaces.filter(([name]) => meaningSurfaces.has(name));
       // Code's recall as an App reads as the company alone, whoever it
       // acts for: held in the admin's pass, whose before has nothing more.
@@ -376,6 +387,13 @@ describe(
       const chatCode: [string, Probe][] = [
         ["recall recallFor, as a chat's code", chatCodeRecallProbe],
       ];
+      // What the probes plant for each reader once (`recallFixture`), before
+      // any answer is taken: it adds a memory the reader's team reads, which
+      // planted later would come between a team-mate's before and after.
+      for (const each of [asAdmin, asMate, probing]) {
+        // oxlint-disable-next-line no-await-in-loop -- one reader at a time
+        await recallFixture(each);
+      }
 
       // What everyone in the company may read, so a reader of the company
       // alone has something by meaning hidden passages could crowd. Gone
@@ -403,6 +421,7 @@ describe(
       // already: as the company alone, so before the team's handbook.
       const appAmong = among.filter(([name]) => name === "recall recallFor");
       const appBefore = await answersOf(probing, appAmong);
+      const companyBefore = await answersOf(asCompany, teamsAmong);
 
       // The reader's team's, current after drafts: the team-mate's, the
       // reader's teams alone's and their chat's code's before.
@@ -419,6 +438,7 @@ describe(
       const mateBefore = await answersOf(asMate, amongMembers);
       const teamsBefore = await answersOf(asTeams, teamsAmong);
       const chatCodeBefore = await answersOf(probing, chatCode);
+      const appOfTeamsBefore = await answersOf(asAppOfTeams, appAmong);
 
       // The reader's own note, in their store: the reader's before.
       const readersNote = await add(`Notes on ${sharedWord} for the reader`, {
@@ -505,6 +525,28 @@ describe(
         kind: "owner",
         personId: holder,
       });
+      // And memories that say exactly the questions, the holder's team's
+      // alone: recall finds a memory by its words and by the entity a
+      // question names, so these would come first if they came at all.
+      for (const text of hiddenTexts) {
+        // oxlint-disable-next-line no-await-in-loop -- one memory at a time
+        await sharedStore().addMemories({
+          change: crypto.randomUUID(),
+          access: { kind: "audience", group: `team:${secretTeam}` },
+          entities: [{ key: "c", kind: "customer", names: [text] }],
+          memories: [
+            {
+              about: "c",
+              attribute: "status",
+              value: text,
+              type: "fact",
+              statement: text,
+              speaker: { kind: "system" },
+              basis: { kind: "writer", writer: holder },
+            },
+          ],
+        });
+      }
       const hidden = await allEmbedded([reader, holder]);
       const plantedEmbedded = await embeddedOf(planted);
       // The hidden passages are near: the holder, who may read them, gets
@@ -561,11 +603,23 @@ describe(
               teamsBefore,
               teamsAmong,
             ],
+            [
+              "the reader's turn others read, as the company",
+              { ...asCompany, hiddenVersions },
+              companyBefore,
+              teamsAmong,
+            ],
             ["the reader's chat's code", asReader, chatCodeBefore, chatCode],
             [
               "code's recall as an App, for the reader",
               asReader,
               appBefore,
+              appAmong,
+            ],
+            [
+              "code's recall as an App of the reader's team and the holder's, for the reader",
+              { ...asAppOfTeams, hiddenVersions },
+              appOfTeamsBefore,
               appAmong,
             ],
           ];
@@ -605,9 +659,7 @@ describe(
       await leave(secretTeam, reader);
       const leftAgain = await everyShape("out of the team again");
 
-      // What a member's recall answers through, each by meaning: a pack's
-      // tokens (`core recalledTokens`) are a count, which names no way an
-      // item was found, so it is held to before alone.
+      // What a member's recall answers through, each by meaning.
       const everyMember = [
         "core mergeRecalled",
         "core recallAs",
@@ -635,8 +687,10 @@ describe(
             teamMate: mateBefore,
             admin: adminBefore,
             teamsAlone: teamsBefore,
+            companyAlone: companyBefore,
             chatCode: chatCodeBefore,
             appForReader: appBefore,
+            appOfTeams: appOfTeamsBefore,
           }).map(([shape, answers]) => [
             shape,
             {
@@ -654,6 +708,16 @@ describe(
         hidden: hidden.rebuilt && hidden.embedded === hidden.chunks,
         planted: plantedEmbedded,
         afterErasure: afterErasure.rebuilt,
+        // The App of the reader's team reads that team's handbook, by
+        // meaning: its before holds more than the company's alone.
+        appOfTeamsReadsHandbook: meaningSourcesIn(
+          appOfTeamsBefore.values()
+        ).includes(handbookId.id),
+        // The hidden memories are there to find: the holder's recall has
+        // the one that says the markers' question.
+        holdersMemory: holders.memories.some(
+          ({ statement }) => statement === words.join(" ")
+        ),
         // By meaning, from their own store, apart from the team's copies.
         holdersByMeaning: holders.items.some(
           ({ found, source }) =>
@@ -672,25 +736,30 @@ describe(
         answeredBefore: {
           reader: {
             surfaces: everyMember,
-            withoutMeaning: ["core recalledTokens"],
+            withoutMeaning: [],
           },
           teamMate: {
             surfaces: everyMember,
-            withoutMeaning: ["core recalledTokens"],
+            withoutMeaning: [],
           },
           admin: {
             surfaces: [...everyMember, "recall recallFor"].toSorted(),
-            withoutMeaning: ["core recalledTokens"],
+            withoutMeaning: [],
           },
           teamsAlone: {
             surfaces: everyMember.filter((name) => name.startsWith("core ")),
-            withoutMeaning: ["core recalledTokens"],
+            withoutMeaning: [],
+          },
+          companyAlone: {
+            surfaces: everyMember.filter((name) => name.startsWith("core ")),
+            withoutMeaning: [],
           },
           chatCode: {
             surfaces: ["recall recallFor, as a chat's code"],
             withoutMeaning: [],
           },
           appForReader: { surfaces: ["recall recallFor"], withoutMeaning: [] },
+          appOfTeams: { surfaces: ["recall recallFor"], withoutMeaning: [] },
         },
         hidden: true,
         // One passage each, every one embedded.
@@ -700,6 +769,8 @@ describe(
         },
         afterErasure: true,
         readersNoteByMeaning: true,
+        appOfTeamsReadsHandbook: true,
+        holdersMemory: true,
         holdersByMeaning: true,
         holdersByDay: true,
         joined: true,

@@ -1807,14 +1807,14 @@ const addAt = async (
 
 /**
  * Every version `personId`'s packs cite for the questions, as of each
- * moment, by words, an exact part or a phrase; with `byMeaning`, those
- * cited by meaning instead.
+ * moment, by words, an exact part or a phrase. What a pack cites by
+ * meaning besides is whatever else they may read; an erased source's
+ * vectors are held by the leak harness, which embeds it first.
  */
 const citedBy = async (
   personId: string,
   questions: readonly string[],
-  moments: readonly (Date | undefined)[],
-  byMeaning = false
+  moments: readonly (Date | undefined)[]
 ): Promise<string[]> => {
   const packs = await Promise.all(
     questions.flatMap((question) =>
@@ -1831,7 +1831,7 @@ const citedBy = async (
   );
   return packs.flatMap(({ items }) =>
     items.flatMap(({ source, version, found }) =>
-      (found === "meaning") === byMeaning ? [`${source.id} v${version}`] : []
+      found === "meaning" ? [] : [`${source.id} v${version}`]
     )
   );
 };
@@ -1889,30 +1889,16 @@ describe("a pack after an erasure", { timeout: 120_000 }, () => {
 
     await eraseShared(whole, "deleted");
     const { erasing: left } = await brainWorkOverview(env);
-    /** What the reader's packs cite by words, and by meaning. */
-    const cited = async () => ({
-      byWords: await citedBy(reader, questions(sourceMark), moments),
-      byMeaning: await citedBy(reader, questions(sourceMark), moments, true),
-    });
-    const erasing = await cited();
+    const erasing = await citedBy(reader, questions(sourceMark), moments);
     await tickUntilErased();
-    const deleted = await cited();
+    const deleted = await citedBy(reader, questions(sourceMark), moments);
 
-    // By meaning, as of now only: whatever else the reader may read, never
-    // a version of the erased source.
-    const ofErased = ({ byMeaning }: { byMeaning: string[] }): string[] =>
-      byMeaning.filter((each) => each.startsWith(`${whole.id} `));
     expect({
       cited: before.length > 0,
       left: left > 0,
-      erasing: { byWords: erasing.byWords, byMeaning: ofErased(erasing) },
-      deleted: { byWords: deleted.byWords, byMeaning: ofErased(deleted) },
-    }).toStrictEqual({
-      cited: true,
-      left: true,
-      erasing: { byWords: [], byMeaning: [] },
-      deleted: { byWords: [], byMeaning: [] },
-    });
+      erasing,
+      deleted,
+    }).toStrictEqual({ cited: true, left: true, erasing: [], deleted: [] });
   });
 
   it("refuses a recall while the store replays its ledger after a restore, as every other call", async () => {

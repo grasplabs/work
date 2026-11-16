@@ -110,26 +110,68 @@ export const meaningSurfaces = new Set([
   "recall recallFor",
 ]);
 
+/** Whether `value` is an object with keys. */
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+/**
+ * `value` without what recall found by meaning: every list of `items`
+ * without those found by meaning, the rest of them in an order of their
+ * own (a passage found by words is ranked by its meaning too, so the
+ * order among them follows the question's meaning). Everything else as it
+ * is.
+ */
+const apartFromMeaning = (value: unknown): unknown => {
+  if (Array.isArray(value)) {
+    return value.map(apartFromMeaning);
+  }
+  if (!isRecord(value)) {
+    return value;
+  }
+  return Object.fromEntries(
+    Object.entries(value).map(([key, part]) =>
+      key === "items" && Array.isArray(part)
+        ? [
+            key,
+            part
+              .filter((item) => !(isRecord(item) && item.found === "meaning"))
+              .map(textOf)
+              .toSorted(),
+          ]
+        : [key, apartFromMeaning(part)]
+    )
+  );
+};
+
+/** Whether `got` is a pack its budget cut short. */
+const cutShort = (got: Answer["got"]): boolean =>
+  "value" in got && isRecord(got.value) && got.value.truncated === true;
+
 /**
  * What a surface's answers give away: a forbidden marker, a hidden-only
  * answer unlike its answer to words nothing holds, an answer by meaning
  * unlike the same call's `before` the hidden sources were added, or no
  * answer worth the name (a probe that calls nothing, or only ever gets
  * errors, covers nothing). An answer by meaning (`Answer.byMeaning`) is
- * held to `before` alone, where a pass has one: a question of the markers
- * and one of their twins mean different things, so their packs differ by
- * meaning whatever is hidden. A pass without one (the marker test's
- * readers, and the restore, producers and export tests) holds `core
- * recallAs`, `core mergeRecalled` and `sources search` to their markers
- * alone: those tests add hidden sources before or beside what each reader
- * may read, so no moment holds a reader's own content without them. The
- * test that answers "by meaning exactly as before anything the reader may
- * not read was added" holds them to non-interference, for each shape of
+ * held to `before`, where a pass has one: a question of the markers and
+ * one of their twins mean different things, so their packs differ by
+ * meaning whatever is hidden. A pass without one (the planted world's
+ * readers, and the restore, erasure, upload, run and export tests: they
+ * add hidden sources before or beside what each reader may read, so no
+ * moment holds a reader's own content without them) holds such an answer
+ * to its markers and, apart from what meaning found (`apartFromMeaning`),
+ * to its twins' answer: what was found by words, an exact part or an
+ * entity, the memories, what was not found, `fromOwn` and whether the
+ * budget cut it short must be the twins'. Two packs both cut short are
+ * held to their markers alone: which passages a short budget keeps
+ * follows their order, and that follows the question's meaning. The test
+ * that answers "by meaning exactly as before anything the reader may not
+ * read was added" holds them to non-interference, for each shape of
  * reader core builds (`readerOf`): a person in a team with their own
  * note, a team-mate to whom that note is hidden, a person in no team (an
  * admin with nothing of their own), the company alone (an App's or a
- * workflow's code), and teams with no person (a chat that doesn't answer
- * its person alone, and a chat's code).
+ * workflow's code, and a turn others read), the company with a team an
+ * App's grant names, and teams with no person (a chat's code).
  */
 export const findingsIn = (
   answers: readonly Answer[],
@@ -149,6 +191,29 @@ export const findingsIn = (
         ]
       : [];
   });
+  const unlikeApart =
+    before === undefined
+      ? answers.flatMap(({ about, got, call, like, byMeaning }) => {
+          const nothing = nothingOf(like);
+          if (
+            about !== "hidden" ||
+            byMeaning === undefined ||
+            nothing === undefined ||
+            (cutShort(got) && cutShort(nothing.got))
+          ) {
+            return [];
+          }
+          const [ours, theirs] = [
+            textOf(apartFromMeaning(got)),
+            textOf(apartFromMeaning(nothing.got)),
+          ];
+          return ours === theirs
+            ? []
+            : [
+                `"${call}" answered ${ours} apart from what meaning found, unlike "${nothing.call}": ${theirs}`,
+              ];
+        })
+      : [];
   const moved =
     before === undefined
       ? []
@@ -163,7 +228,13 @@ export const findingsIn = (
   const thin = answers.some(({ got }) => "value" in got)
     ? []
     : ["no call answered"];
-  return [...markersIn(answers, forbidden), ...unlike, ...moved, ...thin];
+  return [
+    ...markersIn(answers, forbidden),
+    ...unlike,
+    ...unlikeApart,
+    ...moved,
+    ...thin,
+  ];
 };
 
 /**
