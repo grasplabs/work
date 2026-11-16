@@ -30,8 +30,9 @@ export const visionFieldSchema = z.enum(visionFields);
 
 /**
  * The fields the company's vision is made of (core's
- * onboarding/kickoff-records.ts): what the kickoff said about each, and
- * the sponsor's answer, reach every member through the brain.
+ * onboarding/kickoff-company.ts): what the kickoff said about each, and
+ * the sponsor's answer, reach every member, on the Brain page and in the
+ * Brain.
  */
 export const kickoffVisionFields = {
   ambition: "goals",

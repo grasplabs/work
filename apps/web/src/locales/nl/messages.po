@@ -6019,6 +6019,10 @@ msgid "From SharePoint or OneDrive. I read only the files you add."
 msgstr "Uit SharePoint of OneDrive. Ik lees alleen de bestanden die je toevoegt."
 
 #: src/brain/memories-page.tsx
+msgid "From the company's vision, version {version}"
+msgstr "Uit de visie van het bedrijf, versie {version}"
+
+#: src/brain/memories-page.tsx
 msgid "From what your team said, version {version}"
 msgstr "Uit wat je team zei, versie {version}"
 
@@ -13792,6 +13796,11 @@ msgstr "De regels van het bedrijf voor elke agent."
 #: src/brain/skills-page.tsx
 msgid "The company's skills"
 msgstr "Skills van het bedrijf"
+
+#: src/brain/sources-page.tsx
+msgctxt "a source of the Brain"
+msgid "The company's vision"
+msgstr "De visie van het bedrijf"
 
 #: src/inbox/items.ts
 msgid "The connection stopped working. Workflows that use it wait until someone signs in again."
