@@ -11,7 +11,7 @@ import { platformElevenLabsKey } from "./connect-providers.ts";
 import { fakeProviderFor } from "./model-provider.ts";
 import { spentMicros } from "./model-usage.ts";
 import { carrying, keyPlaces, plan } from "./platform-providers.ts";
-import { outcome } from "./sign-in.ts";
+import { outcome, uniqueLetters } from "./sign-in.ts";
 
 // Speech through the model gateway: Grasp's own speech feature
 // (@grasp-os/shared/platform-ai), ElevenLabs's, says a line, judged by
@@ -33,12 +33,8 @@ const voice = "s3TPKV1kjDlVtZbl4Ksh";
 /** What a line of `characters` costs at Eleven v4's $0.08 per 1,000: 80 micros each. */
 const lineMicrosOf = (characters: number): number => characters * 80;
 
-/**
- * A line of 18 characters no other test says, so what reached the
- * provider with it is this test's.
- */
-const newLine = (): string =>
-  `Hello there, ${crypto.randomUUID().slice(0, 4)}.`;
+/** A line no other test says, so what reached the provider with it is this test's. */
+const newLine = (): string => `Hello there, ${uniqueLetters()}.`;
 
 const busy = { status: 429, headers: { "retry-after": "7" } };
 
@@ -143,11 +139,11 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
       { bytes: line.length * speechBytesPerChar, mime: "audio/mpeg" }
     );
     // Each character takes the fake 25 ms; punctuation stays with its word.
-    const last = line.split(" ").at(-1);
+    const last = line.split(" ").at(-1) ?? "";
     expect(speech.words).toStrictEqual([
       { text: "Hello", startMs: 0, endMs: 125 },
       { text: "there,", startMs: 150, endMs: 300 },
-      { text: last, startMs: 325, endMs: 450 },
+      { text: last, startMs: 325, endMs: 325 + last.length * 25 },
     ]);
     // ElevenLabs keeps neither the line nor the audio.
     await expect(sentWith(line)).resolves.toStrictEqual([
