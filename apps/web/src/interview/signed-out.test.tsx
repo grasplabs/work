@@ -1328,6 +1328,10 @@ describe("the interview page when its session ends mid-interview", () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const core = fakeCore(finishedTalking);
     await load(`#${secret}`);
+    await until(
+      () => buttonNamed("Delete my interview") !== undefined,
+      "their interview"
+    );
     await act(async () => {
       buttonNamed("Delete my interview")?.dispatchEvent(
         new PointerEvent("pointerdown", { bubbles: true })
@@ -1343,7 +1347,10 @@ describe("the interview page when its session ends mid-interview", () => {
     core.version += 1;
     core.who = "them";
     await backSignedIn();
-    await until(() => text().includes("Which language"), "the interview, anew");
+    await until(
+      () => buttonNamed("Continue") !== undefined,
+      "the interview, begun anew"
+    );
     expect(text()).not.toContain("wasn't deleted");
   });
 

@@ -1021,6 +1021,57 @@ describe("taking part, approving and withdrawing", () => {
     });
   });
 
+  it("keeps nothing a save brings when they withdraw while it is being kept (T5)", async () => {
+    const { secrets, me } = await running();
+    await opened(secrets.oli, me);
+    await takePart(secrets.oli, me);
+    const { version } = await savedOf(await save(secrets.oli, me, 0));
+    // The save's facts are being hashed (their revisions) as they withdraw.
+    const said = "Said while it was being kept.";
+    // Plain flags, each side waiting on its own timers: the store can't
+    // await anything made in the test's own context.
+    const digest = crypto.subtle.digest.bind(crypto.subtle);
+    const hold = { armed: true, hashing: false, released: false };
+    const held = vi
+      .spyOn(crypto.subtle, "digest")
+      .mockImplementation(async (algorithm, data) => {
+        if (hold.armed && new TextDecoder().decode(data).includes(said)) {
+          hold.armed = false;
+          hold.hashing = true;
+          while (!hold.released) {
+            // oxlint-disable-next-line no-await-in-loop -- waiting for the test to let it go on
+            await scheduler.wait(5);
+          }
+        }
+        return await digest(algorithm, data);
+      });
+    const saving = save(secrets.oli, me, version, progress(said));
+    await vi.waitFor(
+      () => {
+        if (!hold.hashing) {
+          throw new Error("Still waiting for the save's facts to be hashed");
+        }
+      },
+      { timeout: 5000, interval: 5 }
+    );
+    const withdrew = await withdraw(secrets.oli, me);
+    hold.released = true;
+    const saved = await saving;
+    held.mockRestore();
+    const read = await opened(secrets.oli, me);
+    expect({
+      withdrew: withdrew.status,
+      saved: [saved.status, await codeOf(saved)],
+      said: read.progress?.lines.map(({ text }) => text),
+      version: read.version,
+    }).toStrictEqual({
+      withdrew: 200,
+      saved: [410, "interview.withdrawn"],
+      said: ["What did you do this morning?", sentinel],
+      version,
+    });
+  });
+
   it.each([
     ["deleting it from the link", "delete"],
     ["a new start from Grasp's admin", "newStart"],
