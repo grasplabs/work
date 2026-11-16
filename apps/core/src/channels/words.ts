@@ -423,6 +423,92 @@ const lines = {
     es: "Algo de esta tarjeta cambió después de que te la mostrara, así que no he cambiado nada. Vuelve a pedírmelo para recibir una tarjeta nueva.",
   },
 
+  // A memory he saved of what the person said in their direct message
+  // (channels/remembered.ts): a notice of it, with Undo, then what Undo
+  // did, as the notice in Grasp's own chat says it. `{statement}`, `{about}`
+  // and `{value}` are as the Brain kept them.
+
+  /** A memory about the person themselves. */
+  remembered: {
+    en: "I'll remember this: {statement}",
+    nl: "Dit onthoud ik: {statement}",
+    de: "Das merke ich mir: {statement}",
+    fr: "Je retiendrai ceci : {statement}",
+    es: "Recordaré esto: {statement}",
+  },
+  /** A memory about the person themselves, with the value it holds. */
+  rememberedValue: {
+    en: "I'll remember this: {statement} (value: {value})",
+    nl: "Dit onthoud ik: {statement} (waarde: {value})",
+    de: "Das merke ich mir: {statement} (Wert: {value})",
+    fr: "Je retiendrai ceci : {statement} (valeur : {value})",
+    es: "Recordaré esto: {statement} (valor: {value})",
+  },
+  /** A memory about someone or something else, by name. */
+  rememberedAbout: {
+    en: "I'll remember this about {about}: {statement}",
+    nl: "Dit onthoud ik over {about}: {statement}",
+    de: "Das merke ich mir über {about}: {statement}",
+    fr: "Je retiendrai ceci à propos de {about} : {statement}",
+    es: "Recordaré esto sobre {about}: {statement}",
+  },
+  /** A memory about someone or something else, with the value it holds. */
+  rememberedAboutValue: {
+    en: "I'll remember this about {about}: {statement} (value: {value})",
+    nl: "Dit onthoud ik over {about}: {statement} (waarde: {value})",
+    de: "Das merke ich mir über {about}: {statement} (Wert: {value})",
+    fr: "Je retiendrai ceci à propos de {about} : {statement} (valeur : {value})",
+    es: "Recordaré esto sobre {about}: {statement} (valor: {value})",
+  },
+  /** Above a memory that says how he should work for them. */
+  rememberedInstruction: {
+    en: "Instruction",
+    nl: "Instructie",
+    de: "Anweisung",
+    fr: "Instruction",
+    es: "Instrucción",
+  },
+  /** Above a memory that says how they want things. */
+  rememberedPreference: {
+    en: "Preference",
+    nl: "Voorkeur",
+    de: "Präferenz",
+    fr: "Préférence",
+    es: "Preferencia",
+  },
+  /** The notice's button. */
+  undo: {
+    en: "Undo",
+    nl: "Ongedaan maken",
+    de: "Rückgängig machen",
+    fr: "Annuler",
+    es: "Deshacer",
+  },
+  /** Once Undo retired it. */
+  undone: {
+    en: "I no longer remember this.",
+    nl: "Dit onthoud ik niet meer.",
+    de: "Das merke ich mir nicht mehr.",
+    fr: "Je ne retiens plus ceci.",
+    es: "Ya no recuerdo esto.",
+  },
+  /** Undo found nothing of theirs in use to retire. */
+  nothingToUndo: {
+    en: "There was nothing to undo: I no longer use this.",
+    nl: "Er was niets ongedaan te maken: ik gebruik dit niet meer.",
+    de: "Es gab nichts rückgängig zu machen: Ich verwende das nicht mehr.",
+    fr: "Il n’y avait rien à annuler : je n’utilise plus ceci.",
+    es: "No había nada que deshacer: ya no uso esto.",
+  },
+  /** Undo couldn't be done now: the notice stays, to press again. */
+  undoFailed: {
+    en: "Something went wrong, and I couldn't undo it. Press Undo again in a moment.",
+    nl: "Er ging iets mis en ik kon het niet ongedaan maken. Druk zo nog eens op Ongedaan maken.",
+    de: "Etwas ist schiefgegangen, und ich konnte es nicht rückgängig machen. Klicken Sie gleich noch einmal auf Rückgängig machen.",
+    fr: "Un problème est survenu et je n’ai pas pu l’annuler. Appuyez de nouveau sur Annuler dans un instant.",
+    es: "Algo ha fallado y no he podido deshacerlo. Vuelve a pulsar Deshacer en un momento.",
+  },
+
   // A workflow he offers to start: a card with its values and a Start
   // button, then what became of the run, told where it was pressed.
 

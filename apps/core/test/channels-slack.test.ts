@@ -1,3 +1,4 @@
+import { personalBrainOf } from "@grasp-os/brain-next/contract";
 import {
   createExecutionContext,
   waitOnExecutionContext,
@@ -10,7 +11,11 @@ import { z } from "zod";
 
 import { memberOf } from "../src/auth/identity.ts";
 import { addSource, rememberAs } from "../src/brain-next.ts";
-import { confirmAction, startAction } from "../src/channels/cards.tsx";
+import {
+  confirmAction,
+  startAction,
+  undoAction,
+} from "../src/channels/cards.tsx";
 import { channelResponse } from "../src/channels/door.ts";
 import type { ChannelMessage } from "../src/channels/door.ts";
 import { inertOn } from "../src/channels/inert.ts";
@@ -21,13 +26,13 @@ import {
   channelAccounts,
   channelLinks,
 } from "../src/db/core/schema.ts";
-import { workspace } from "../src/durable-objects.ts";
+import { inJurisdiction, workspace } from "../src/durable-objects.ts";
 import { shareWorkflowResource } from "../src/workflow-members.ts";
 import {
   createWorkflowResource,
   setWorkflowAskable,
 } from "../src/workflow-resources.ts";
-import { codeStep, keptAnswersOf, says } from "./agent-chat.ts";
+import { codeStep, keptAnswersOf, says, toolStep } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { chatIdsOf } from "./code-step-trace.ts";
 import { slackApp, slackPostedUrl } from "./connect-providers.ts";
@@ -1041,6 +1046,93 @@ describe("a linked person's direct message in Slack", () => {
         file: true,
         ownSkill: true,
       },
+    });
+  });
+});
+
+describe("a linked person's memory in Slack", () => {
+  it("is kept in their own store, shown in their direct message with Slack's own syntax escaped, and retired by their Undo, once", async () => {
+    // As in Teams (channels-remember.test.ts): the person's own chat
+    // (GRA-1920), with the notice and Undo where they wrote.
+    const { slackUser, userId } = await linkedPerson();
+    const depot = `d${unique()}`;
+    const statement = `Depot ${depot} opens at ${marker()} <!here> & <https://evil.test|ok>`;
+    await fakeProvider(
+      toolStep("remember", {
+        about: { kind: "customer", name: `Depot ${depot}` },
+        type: "fact",
+        statement,
+        quote: `Depot ${depot} opens at`,
+      }),
+      says(JSON.stringify({ theirs: true })),
+      says("Noted.")
+    );
+    const store = personalBrainOf(inJurisdiction(env, env.BRAIN_STORE), userId);
+    const reader = { person: userId, groups: [] };
+    /** The current statements their own store holds of the depot. */
+    const kept = async () => {
+      const found = await store.findEntities({
+        reader,
+        name: `Depot ${depot}`,
+      });
+      const each = await Promise.all(
+        found.entities.map(async ({ id }) => {
+          const { memories } = await store.readMemories({ entity: id, reader });
+          return memories.map((memory) => memory.statement);
+        })
+      );
+      return each.flat();
+    };
+    const message = messageFrom(slackUser);
+    message.event.text = statement;
+    await post(message, { caught: false });
+    const { channel } = message.event;
+    const noticed = await slackSawIn(channel);
+    const notice = noticed.find(({ fields }) =>
+      JSON.stringify(fields).includes(undoAction)
+    );
+    const memory = /"value":"(?<memory>[0-9a-f-]{36})"/u.exec(
+      typeof notice?.fields.blocks === "string"
+        ? notice.fields.blocks
+        : JSON.stringify(notice?.fields.blocks ?? null)
+    )?.groups?.memory;
+    const shown = sectionTextsOf(notice?.fields.blocks);
+    const before = await kept();
+    const press = pressFrom(slackUser, {
+      channel,
+      actionId: undoAction,
+      value: memory ?? "",
+    });
+    await post(press, { form: true });
+    // Slack sends the press again, then they press again on the same card.
+    await post(press, { form: true });
+    await post({ ...press, trigger_id: `trigger-${unique()}` }, { form: true });
+    const pressed = await slackSawIn(channel);
+    const after = pressed.slice(-2);
+
+    expect({
+      memory: memory !== undefined,
+      before,
+      shownWhole: ink(shown.join("")).includes(
+        ink(inertOn("slack")(statement))
+      ),
+      unescaped: shown.filter((text) => unescapedInSlack.test(text)),
+      after: await kept(),
+      said: after.map(({ method, fields }) =>
+        method === "chat.update"
+          ? [method, JSON.stringify(fields).includes(say("undone", "en"))]
+          : [method, fields.text]
+      ),
+    }).toStrictEqual({
+      memory: true,
+      before: [statement],
+      shownWhole: true,
+      unescaped: [],
+      after: [],
+      said: [
+        ["chat.update", true],
+        ["chat.postMessage", say("alreadyAnswered", "en")],
+      ],
     });
   });
 });

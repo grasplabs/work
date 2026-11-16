@@ -2,9 +2,10 @@ import {
   brainOf,
   exactCandidatesMax,
   onlyInOwnStore,
+  personalBrainOf,
   recallBudgetMax,
 } from "@grasp-os/brain-next/contract";
-import type { Access, WorkOverview } from "@grasp-os/brain-next/contract";
+import type { Access } from "@grasp-os/brain-next/contract";
 import { brainUploadReadersSchema } from "@grasp-os/shared/brain-sources";
 import type { BrainUploadReaders } from "@grasp-os/shared/brain-sources";
 import { chatIdSchema } from "@grasp-os/shared/ids";
@@ -35,7 +36,6 @@ import {
 import {
   addInstructionFile,
   addSource,
-  alarmHostOf,
   brainExportFile,
   brainExportStatus,
   brainStaffReport,
@@ -74,7 +74,7 @@ import {
   shareWorkflowResource,
   unshareWorkflowResource,
 } from "../src/workflow-members.ts";
-import { codeStep, says } from "./agent-chat.ts";
+import { codeStep, says, toolStep } from "./agent-chat.ts";
 import { published, requestGranted } from "./apps.ts";
 import { brainModules } from "./brain-next-modules.ts";
 import {
@@ -477,21 +477,6 @@ const promptedWith = async (
     }
   }
   return prompted;
-};
-
-/** Reports `overview` as `person`'s own store's alarm does when its tick ends. */
-const reportAs = async (
-  person: string,
-  overview: WorkOverview
-): Promise<void> => {
-  const host = await alarmHostOf(env, `person:${person}`);
-  await host.report(overview);
-};
-
-/** Staff's totals of people's own stores. */
-const ownTotals = async () => {
-  const { ownStores } = await brainStaffReport(env);
-  return ownStores;
 };
 
 /** `person`'s own store, as core names it. */
@@ -4247,51 +4232,88 @@ describe(
       });
     });
 
-    it("tells staff the same totals of people's own stores whoever of them holds what", async () => {
-      const [first, second] = [
-        `person-${crypto.randomUUID()}`,
-        `person-${crypto.randomUUID()}`,
-      ];
-      // An overview as a store that holds something reports it, with
-      // `waiting` items and `parked` (one holding nothing has no row).
-      const base = await ownStoreOf(first).workOverview();
-      const holding = (waiting: number, parked: number) => ({
-        ...base,
-        holding: true,
-        waiting:
-          waiting === 0
-            ? []
-            : [
-                {
-                  kind: "embed",
-                  count: waiting,
-                  oldestAddedAt: new Date(1_000_000),
-                },
-              ],
-        parkedCount: parked,
+    it("keeps what a person says in their Teams direct message in their own store alone: never in the shared store, never for another reader", async () => {
+      // The agent remembers in a direct message as in the person's own
+      // chat in Grasp (GRA-1920): their word, in their own store, which
+      // nobody else reads, a team-mate in their own direct message
+      // included.
+      await chatAgentReadsBrain();
+      const depot = `d${unique()}`;
+      const word = markerWord();
+      const statement = `Depot ${depot} opens at ${word}`;
+      const ann = await teamsMember(
+        idp,
+        toolStep("remember", {
+          about: { kind: "customer", name: `Depot ${depot}` },
+          type: "fact",
+          statement,
+          quote: statement,
+        }),
+        says(JSON.stringify({ theirs: true })),
+        says("Noted."),
+        says("I don't know.")
+      );
+      const ben = await memberAnsweredBy(idp, ann.provider);
+      const team = `team:${await newTeam(ann.userId, ben.userId)}`;
+      await post(
+        messageFrom(ann.teams, { text: `${statement}, for the record.` })
+      );
+      const own = personalBrainOf(
+        inJurisdiction(env, env.BRAIN_STORE),
+        ann.userId
+      );
+      const annReads = { person: ann.userId, groups: [] };
+      const { entities: ownEntities } = await own.findEntities({
+        reader: annReads,
+        name: `Depot ${depot}`,
       });
-      const before = await ownTotals();
-      await reportAs(first, holding(5, 2));
-      await reportAs(second, holding(0, 0));
-      const oneHoldsAll = await ownTotals();
-      await reportAs(first, holding(0, 0));
-      await reportAs(second, holding(5, 2));
-      const theOtherHoldsAll = await ownTotals();
-      for (const person of [first, second]) {
-        // oxlint-disable-next-line no-await-in-loop -- one person at a time
-        await erasePerson(env, { personId: person, reason: "person_erased" });
-      }
+      const ownKept = await Promise.all(
+        ownEntities.map(async ({ id }) => {
+          const { memories } = await own.readMemories({
+            entity: id,
+            reader: annReads,
+          });
+          return memories.map((memory) => memory.statement);
+        })
+      );
+      /**
+       * Whether the shared store gives `person`, in the team and the
+       * company, anything holding the marker or naming the depot: what
+       * other tests keep there may answer too, so never a count.
+       */
+      const sharedGives = async (person: string) => {
+        const reader = { person, groups: [team, "company"] };
+        const { items, memories } = await sharedStore().recall({
+          question: `${word} depot ${depot}`,
+          reader,
+          budget: { tokens: recallBudgetMax },
+        });
+        const { entities } = await sharedStore().findEntities({
+          reader,
+          name: `Depot ${depot}`,
+        });
+        const given = JSON.stringify([...items, ...memories, ...entities]);
+        return given.includes(word) || given.includes(depot);
+      };
+      const before = ann.provider.requests.length;
+      await post(
+        messageFrom(ben.teams, { text: `When does depot ${depot} open?` })
+      );
+      const toBen = ann.provider.requests.slice(before);
 
       expect({
-        added: {
-          stores: oneHoldsAll.stores - before.stores,
-          waiting: oneHoldsAll.waiting - before.waiting,
-          parked: oneHoldsAll.parked - before.parked,
+        ownKept: ownKept.flat(),
+        sharedGives: {
+          ann: await sharedGives(ann.userId),
+          ben: await sharedGives(ben.userId),
         },
-        same: theOtherHoldsAll,
+        benAnswered: toBen.length > 0,
+        benGotIt: JSON.stringify(toBen.map(({ body }) => body)).includes(word),
       }).toStrictEqual({
-        added: { stores: 2, waiting: 5, parked: 2 },
-        same: oneHoldsAll,
+        ownKept: [statement],
+        sharedGives: { ann: false, ben: false },
+        benAnswered: true,
+        benGotIt: false,
       });
     });
 
