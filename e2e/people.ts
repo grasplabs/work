@@ -100,6 +100,25 @@ const unlessDropped = async (
 };
 
 /**
+ * `fetch`, saying which `step` got no answer when it gets none (a refused or
+ * reset connection, a cut-off body), with fetch's own error as the cause:
+ * fetch alone says only "fetch failed".
+ */
+const fetchSaying = async (
+  step: string,
+  input: URL | string,
+  init?: RequestInit
+): Promise<Response> => {
+  try {
+    return await fetch(input, init);
+  } catch (error) {
+    throw new Error(`${step} got no answer: ${String(error)}`, {
+      cause: error,
+    });
+  }
+};
+
+/**
  * Signs in as `email` the way a browser does: core starts the sign-in, the
  * IdP (told who by `loginHint`) sends the browser back, and core's callback
  * sets the session cookie. Returns that cookie's value; throws, with where
@@ -111,16 +130,20 @@ export const signInAs = async (
   email: string,
   providerId: "microsoft" | "grasp-staff" = "microsoft"
 ): Promise<string> => {
-  const startedAt = await fetch(new URL("/api/auth/sign-in/sso", origin), {
-    method: "POST",
-    headers: { origin, "content-type": "application/json" },
-    body: JSON.stringify({
-      providerId,
-      callbackURL: "/",
-      errorCallbackURL: "/",
-      loginHint: email,
-    }),
-  });
+  const startedAt = await fetchSaying(
+    `Sign-in as ${email}`,
+    new URL("/api/auth/sign-in/sso", origin),
+    {
+      method: "POST",
+      headers: { origin, "content-type": "application/json" },
+      body: JSON.stringify({
+        providerId,
+        callbackURL: "/",
+        errorCallbackURL: "/",
+        loginHint: email,
+      }),
+    }
+  );
   const started = await unlessDropped(startedAt, `Sign-in as ${email}`);
   const body: unknown = started.ok ? await started.json() : null;
   if (
@@ -133,14 +156,17 @@ export const signInAs = async (
     throw new Error(`Sign-in as ${email} did not start (${started.status})`);
   }
   const atIdp = await unlessDropped(
-    await fetch(body.url, { redirect: "manual" }),
+    await fetchSaying(`The IdP, signing in ${email},`, body.url, {
+      redirect: "manual",
+    }),
     "The IdP"
   );
   const finished = await unlessDropped(
-    await fetch(locationOf(atIdp, "The IdP"), {
-      redirect: "manual",
-      headers: { cookie: cookiesOf(started) },
-    }),
+    await fetchSaying(
+      `Core's callback, signing in ${email},`,
+      locationOf(atIdp, "The IdP"),
+      { redirect: "manual", headers: { cookie: cookiesOf(started) } }
+    ),
     "Core's callback"
   );
   const session = cookiesOf(finished)

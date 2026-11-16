@@ -281,7 +281,7 @@ jobs:
           # Below the step's timeout, so the reporter says what still runs
           # before the step is killed.
           GRASP_STALL_REPORT_AFTER_MINUTES: 8
-          # Seconds past a test's own timeout (counted for each attempt):
+          # Seconds past a test's own timeout:
           # room for the hooks around it, which have timeouts of their own.
           # The longest is 120 s, set by workerflow's process tests
           # (packages/workerflow/vite.process.config.ts); the rest use
@@ -649,8 +649,10 @@ jobs:
           path: ${{ runner.temp }}/e2e-results.json
           if-no-files-found: ignore
           retention-days: 14
-      # A failing test keeps its trace (playwright.config.ts).
-      - if: failure()
+      # A failing test keeps its trace (playwright.config.ts). Always: a part
+      # that hits its timeout ends cancelled, not failed, and the trace of
+      # the test that hung is the one most worth keeping.
+      - if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           # One per part: a run's artifact names are unique.

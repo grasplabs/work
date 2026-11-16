@@ -45,7 +45,7 @@ const moveUp = async (page: Page, name: string, place: number) => {
   ).toBeAttached();
 };
 
-test.use({ trace: "retain-on-failure", actionTimeout: read.timeout });
+test.use({ actionTimeout: read.timeout });
 
 test("a builder creates a table and its fields in the Data view, and sees them in the App's draft", async ({
   pageOf,
