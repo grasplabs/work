@@ -13750,12 +13750,12 @@ msgid "The Brain keeps nothing that only you may read yet, so your export holds 
 msgstr "Le Brain ne garde encore rien que vous seul puissiez lire, donc votre export ne contient rien."
 
 #: src/brain/sources-page.tsx
-msgid "The Brain keeps one Gmail message or attachment, or one OneNote page, when an agent reads it for you through an account you connected yourself, and keeps it for you alone. Everything else agents search live when you ask, and the Brain keeps nothing of it."
-msgstr "Le cerveau garde un message ou une pièce jointe Gmail, ou une page OneNote, quand un agent le lit pour vous via un compte que vous avez connecté vous-même, et le garde pour vous seul. Tout le reste, les agents le cherchent en direct quand vous le demandez, et le cerveau n'en garde rien."
+msgid "The Brain keeps one Gmail message or attachment, one OneNote page, or the answer of a read in an app that holds your own things, when an agent reads it for you through an account you connected yourself, and keeps it for you alone. Everything else agents search live when you ask, and the Brain keeps nothing of it."
+msgstr "Le cerveau garde un message ou une pièce jointe Gmail, une page OneNote, ou la réponse d'une lecture dans une app qui contient vos propres données, quand un agent le lit pour vous via un compte que vous avez connecté vous-même, et le garde pour vous seul. Tout le reste, les agents le cherchent en direct quand vous le demandez, et le cerveau n'en garde rien."
 
 #: src/brain/sources-page.tsx
-msgid "The Brain keeps the messages and pages an agent reads for you from this."
-msgstr "Le cerveau garde les messages et les pages qu'un agent lit pour vous par ici."
+msgid "The Brain keeps what an agent reads for you from this."
+msgstr "Le cerveau garde ce qu'un agent lit pour vous par ici."
 
 #: src/workflows/binding-approvals.tsx
 msgid "The Brain, as each run's person may read it"

@@ -256,7 +256,7 @@ export const composioServer = (env: Env, connection: Connection): McpServer => {
  * The class each tool a Composio connection offers is taken to be
  * (`allowedTool`), by its name.
  */
-const offeredToolClasses = (
+export const offeredToolClasses = (
   connection: Pick<Connection, "provider" | "tools">
 ): Record<string, Exclude<ToolClass, "never">> =>
   Object.fromEntries(

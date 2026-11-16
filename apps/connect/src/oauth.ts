@@ -47,6 +47,7 @@ import {
 } from "./connection-audit.ts";
 import {
   allowedToolNames,
+  offeredToolClasses,
   offeredToolNames,
   readToolNames,
   toolResourcesOf,
@@ -1029,6 +1030,7 @@ export const listConnections = async (
       offeredTools: offeredToolNames(row),
       readTools: readToolNames(row),
       toolResources: toolResourcesOf(row),
+      toolClasses: offeredToolClasses(row),
     }),
     ...(http.has(row.id) && { http: http.get(row.id) }),
   }));

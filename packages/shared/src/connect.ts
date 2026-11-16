@@ -94,13 +94,13 @@ export interface ConnectResult {
    */
   provenance: string[];
   /**
-   * Set when core may keep `output` as a source in the Brain (GRA-1730),
-   * the source of the one item `provenance` names: a call that names more
-   * than one is not kept. Only on a read connect
-   * carried out just now (no side effect, never held, never a stored
-   * answer), whose server named the items it read, from a connection
-   * whose provider's terms allow copies. Absent, nothing of the call is
-   * kept.
+   * Set when core may keep `output` as a source in the Brain: a native
+   * connector's as the source of the one item `provenance` names
+   * (GRA-1730), a toolkit's as the whole answer of the call (GRA-1845).
+   * Only on a read connect carried out just now (no side effect, never
+   * held, never a stored answer), from a connection whose provider's
+   * terms allow copies; for any but a toolkit, only when its server named
+   * the items it read. Absent, nothing of the call is kept.
    */
   keep?: true;
   /**
@@ -445,6 +445,13 @@ export interface ConnectionSummary {
    * changes the tools. Absent for a native connection.
    */
   toolResources?: Record<string, string>;
+  /**
+   * The class connect takes each of `offeredTools` to be, as
+   * `ConnectionOwner.toolClasses` gives it: what the Brain keeps of the
+   * person's reads through it goes by it (core's connection-capture.ts).
+   * Absent for a native connection.
+   */
+  toolClasses?: Record<string, Exclude<ToolClass, "never">>;
   /**
    * An HTTP connection's origin, paths, methods and the header its
    * credential goes in: never the credential. Absent for any other.

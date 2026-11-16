@@ -11,7 +11,12 @@ import type { AgentScope } from "./agent-scope.ts";
 import { keepAuditEvent } from "./audit-outbox.ts";
 import { captureGroupOf } from "./brain-next-origins.ts";
 import { addSource } from "./brain-next.ts";
-import { captureIdOf, keepsReadsOf } from "./connection-capture-key.ts";
+import { answerText } from "./connection-answer.ts";
+import {
+  answerCaptureIdOf,
+  captureIdOf,
+  keepsReadsOf,
+} from "./connection-capture-key.ts";
 import { connectionOwnersOf } from "./connections.ts";
 import { nativeItemReads } from "./native-tool-classes.gen.ts";
 import { nativeClasses } from "./tool-classes.ts";
@@ -24,10 +29,11 @@ import { nativeClasses } from "./tool-classes.ts";
 // and the decisions are on GRA-1730; in short:
 //
 // - Connect decides what may be kept (`ConnectResult.keep`): a read it
-//   carried out just now, whose server named the items it read, from a
-//   connection whose provider's terms allow copies. Without its word
-//   nothing is kept: a change, a held call, a replay, a refusal, an
-//   answer that names no item.
+//   carried out just now, from a connection whose provider's terms allow
+//   copies; a native connector's only when its server named the items it
+//   read. Without its word nothing is kept: a change, a held call, a
+//   replay, a refusal. An error answer never reaches capture: the call
+//   throws it (`connect.action_failed`).
 // - Only the person's own connection, and only a tool that reaches the
 //   person's own things (classed `read-own`: its manifest's reach `own`,
 //   or a Composio tool its review classes so). Its items are theirs alone
@@ -46,11 +52,22 @@ import { nativeClasses } from "./tool-classes.ts";
 //   beside the full copy is noise in recall, and every changed summary
 //   would be a version). Nor is a file's content read as base64 (the
 //   default of a tool that answers a file): bytes are no text to find.
-//   No Composio or MCP tool carries the mark today (GRA-1845). No cap of
-//   its own: the Brain's own limit on a source refuses what is past it,
-//   and the item fails. Outside text is content: a captured source is
-//   never an instruction file, and the model reads it as evidence, cited
-//   as `capture:` (turn-recall.ts).
+//   No cap of its own: the Brain's own limit on a source refuses what is
+//   past it, and the item fails. Outside text is content: a captured
+//   source is never an instruction file, and the model reads it as
+//   evidence, cited as `capture:` (turn-recall.ts).
+// - A toolkit's read (GRA-1845; the threat model and the decisions are on
+//   the issue): its server names no item, and no review gives a tool's
+//   item an ID, so the whole answer of one call is one source, keyed by
+//   the call (connection-capture-key.ts `answerCaptureIdOf`): the same
+//   call again is its next version, and two different calls never share
+//   one. Kept as MCP shapes it (connection-answer.ts): its structured
+//   content, or its text, never an image, audio or another binary block,
+//   which is counted (`leftOut`); an answer with no text in it is skipped
+//   (`no_text`). Only for a tool connect takes to read the person's own
+//   things (`read-own`: its review's class of a read, and the admin's
+//   mark of one), as for a native tool. Not a native connector's, which
+//   is kept item by item as above.
 // - Capturing never holds up or fails the call: it runs once the agent
 //   has its answer (`waitUntil`). Every call ends in one audit event, of
 //   IDs and counts alone (items, kept, failed, skipped, adding up to
@@ -118,8 +135,7 @@ const itemReadSchema = z.enum(["item", "file"]);
  * Whether the native tool `action` of `provider` answers one item's
  * content (`answersItem` in its manifest), and whether that is a file's
  * (`answersFile`), by the release's generated table, checked. Undefined
- * for every other tool: a list or a search, and every Composio or MCP
- * tool, which nothing marks today (GRA-1845).
+ * for every other tool: a list or a search.
  */
 const itemReadOf = (
   provider: string,
@@ -160,46 +176,18 @@ const skippedAll = (reason: string, items: number): Ended => [
 ];
 
 /**
- * The class connect and the release give the tool `action` of `owner`'s
- * connection: a Composio tool's from its review, a native one's from its
- * manifest. Undefined for one neither knows (an HTTP connection's).
+ * Keeps `text` under `id` for the chat's person alone, redacted: what it
+ * ended in, kept, or skipped as `stale` or `erased`. Throws when the Brain
+ * refused it otherwise (a text past its limit) or couldn't be reached.
  */
-const classOf = (owner: ConnectionOwner, action: string) =>
-  owner.source === "composio"
-    ? owner.toolClasses?.[action]
-    : nativeClasses.get(owner.provider)?.get(action);
-
-/** What capturing `result` of `action` ended in. */
-const captured = async (
+const keptAs = async (
   env: Env,
   scope: AgentScope,
   connectionId: string,
-  action: string,
-  input: unknown,
-  { result, readAt }: Read
+  id: string,
+  text: string,
+  readAt: Date
 ): Promise<Ended> => {
-  const named = new Set(result.provenance).size;
-  const [owner] = await connectionOwnersOf(env, [connectionId]);
-  if (owner?.ownerUserId !== scope.personId) {
-    return skippedAll("shared", named);
-  }
-  if (classOf(owner, action) !== "read-own") {
-    return skippedAll("reach", named);
-  }
-  // The one rule for a connection the Brain keeps reads through, which
-  // the Brain page and the disconnect dialog say by too.
-  const itemRead = keepsReadsOf(owner, scope.personId)
-    ? itemReadOf(owner.provider, action)
-    : undefined;
-  const [itemId] = result.provenance;
-  if (itemRead === undefined || named !== 1 || itemId === undefined) {
-    return skippedAll("list", named);
-  }
-  // A file read as base64 (the default): bytes are no text to find.
-  if (itemRead === "file" && !asksText(input)) {
-    return skippedAll("file", 1);
-  }
-  const id = await captureIdOf(connectionId, scope.personId, action, itemId);
   try {
     // Owner content: core's Brain module keeps it in the person's own
     // store, never the shared one.
@@ -212,7 +200,7 @@ const captured = async (
       // version (the Brain's rule), so reading an unchanged item adds
       // nothing, and an item that changed back is a version again.
       change: crypto.randomUUID(),
-      text: redact(result.output),
+      text: redact(text),
       readers: { kind: "owner", personId: scope.personId },
       readAt,
     });
@@ -231,12 +219,109 @@ const captured = async (
 };
 
 /**
- * Keeps the item the chat's agent read with the tool `action` through
+ * What keeping the whole answer of a toolkit's read of `action` with
+ * `input` ended in (GRA-1845): one item, the answer, its blocks left out
+ * counted (`leftOut`) when there were any.
+ */
+const answerCaptured = async (
+  env: Env,
+  scope: AgentScope,
+  connectionId: string,
+  action: string,
+  input: unknown,
+  { result, readAt }: Read
+): Promise<Ended> => {
+  const { text, leftOut } = answerText(result.output);
+  const counted: Record<string, number> = leftOut === 0 ? {} : { leftOut };
+  if (text.trim() === "") {
+    const [event, detail] = skippedAll("no_text", 1);
+    return [event, { ...detail, ...counted }];
+  }
+  let ended: Ended;
+  try {
+    const id = await answerCaptureIdOf(
+      connectionId,
+      scope.personId,
+      action,
+      input
+    );
+    ended = await keptAs(env, scope, connectionId, id, text, readAt);
+  } catch (error) {
+    // The Brain refused it (a text past its limit) or couldn't be
+    // reached: the one item failed.
+    log.warn("connection_capture.failed", {
+      connectionId,
+      chatId: scope.chatId,
+      ...errorFields(error),
+    });
+    ended = [
+      "brain.capture.failed",
+      { items: 1, kept: 0, failed: 1, skipped: 0 },
+    ];
+  }
+  const [event, detail] = ended;
+  return [event, { ...detail, ...counted }];
+};
+
+/**
+ * The class connect and the release give the tool `action` of `owner`'s
+ * connection: a Composio tool's from its review, a native one's from its
+ * manifest. Undefined for one neither knows (an HTTP connection's).
+ */
+const classOf = (owner: ConnectionOwner, action: string) =>
+  owner.source === "composio"
+    ? owner.toolClasses?.[action]
+    : nativeClasses.get(owner.provider)?.get(action);
+
+/** What capturing `result` of `action` ended in. */
+const captured = async (
+  env: Env,
+  scope: AgentScope,
+  connectionId: string,
+  action: string,
+  input: unknown,
+  { result, readAt }: Read
+): Promise<Ended> => {
+  const [owner] = await connectionOwnersOf(env, [connectionId]);
+  // A toolkit's answer is one item, whatever its server named.
+  const answers = owner?.source === "composio";
+  const named = answers ? 1 : new Set(result.provenance).size;
+  if (owner?.ownerUserId !== scope.personId) {
+    return skippedAll("shared", named);
+  }
+  if (classOf(owner, action) !== "read-own") {
+    return skippedAll("reach", named);
+  }
+  if (answers) {
+    return await answerCaptured(env, scope, connectionId, action, input, {
+      result,
+      readAt,
+    });
+  }
+  // The one rule for a connection the Brain keeps reads through, which
+  // the Brain page and the disconnect dialog say by too.
+  const itemRead = keepsReadsOf(owner, scope.personId)
+    ? itemReadOf(owner.provider, action)
+    : undefined;
+  const [itemId] = result.provenance;
+  if (itemRead === undefined || named !== 1 || itemId === undefined) {
+    return skippedAll("list", named);
+  }
+  // A file read as base64 (the default): bytes are no text to find.
+  if (itemRead === "file" && !asksText(input)) {
+    return skippedAll("file", 1);
+  }
+  const id = await captureIdOf(connectionId, scope.personId, action, itemId);
+  return await keptAs(env, scope, connectionId, id, result.output, readAt);
+};
+
+/**
+ * Keeps what the chat's agent read with the tool `action` through
  * `connectionId` (`result`) as a source its person alone may read, if
- * connect said it may be kept, the connection is that person's own, the
- * tool reaches their own things and answers one item's content (not a
- * file's bytes). For `waitUntil`: never
- * throws.
+ * connect said it may be kept, the connection is that person's own and
+ * the tool reaches their own things: a native tool's one item, when it
+ * answers one item's content (not a file's bytes); a toolkit's whole
+ * answer. For `waitUntil`: never throws.
  */
 export const captureRead = async (
   env: Env,

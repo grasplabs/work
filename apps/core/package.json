@@ -48,6 +48,7 @@
     "@grasp-os/workerflow": "workspace:*",
     "@grasp-os/workflow-schema": "workspace:*",
     "@jridgewell/trace-mapping": "catalog:",
+    "@modelcontextprotocol/sdk": "catalog:",
     "@orama/orama": "catalog:",
     "better-auth": "catalog:",
     "capnweb": "catalog:",
