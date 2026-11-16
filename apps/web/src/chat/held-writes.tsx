@@ -1,4 +1,4 @@
-import { heldAppCallsPage } from "@grasp-os/shared/chat";
+import { heldAppCallsPage, shownVisibly } from "@grasp-os/shared/chat";
 import type { HeldAppCall } from "@grasp-os/shared/chat";
 import type {
   ActionDescription,
@@ -94,12 +94,15 @@ const readHeld = async (
   }
 };
 
-/** The input an action runs with, laid out to read. */
+/**
+ * The input an action runs with, laid out to read, every character nobody
+ * sees shown as an escape (`shownVisibly`).
+ */
 export const inputOf = (input: string): string => {
   try {
-    return JSON.stringify(JSON.parse(input), null, 2);
+    return shownVisibly(JSON.stringify(JSON.parse(input), null, 2));
   } catch {
-    return input;
+    return shownVisibly(input);
   }
 };
 
@@ -119,17 +122,20 @@ const isCutShort = (value: string): boolean =>
 
 /**
  * A text value, exactly as the input holds it, all of it: no scroll box
- * hides a part. A very long one starts cut short, with a control that says
- * how much there is and shows it all (`onShowAll`), so what follows a run
- * of blank lines can't go unseen unnoticed.
+ * hides a part, and every character nobody sees is shown as an escape
+ * (`shownVisibly`), counted as shown. A very long one starts cut short,
+ * with a control that says how much there is and shows it all
+ * (`onShowAll`), so what follows a run of blank lines can't go unseen
+ * unnoticed.
  */
 const TextValue = ({
-  value,
+  value: held,
   onShowAll,
 }: {
   value: string;
   onShowAll: () => void;
 }) => {
+  const value = shownVisibly(held);
   const [all, setAll] = useState(false);
   const lines = value.split("\n");
   const start = startOf(value);
@@ -179,7 +185,7 @@ const FieldValue = ({
         {value.map((item, index) => (
           // By position: the input's own order, and values may repeat.
           <li className="break-words whitespace-pre-wrap" key={index}>
-            {item}
+            {shownVisibly(item)}
           </li>
         ))}
       </ul>

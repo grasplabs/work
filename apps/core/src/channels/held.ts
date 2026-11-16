@@ -1,5 +1,5 @@
 import { agentErrors } from "@grasp-os/shared/agent";
-import { heldAppCallsPage } from "@grasp-os/shared/chat";
+import { heldAppCallsPage, shownVisibly } from "@grasp-os/shared/chat";
 import type { ChatChannel, HeldAppCall } from "@grasp-os/shared/chat";
 import type { ConnectionPerson, PendingAction } from "@grasp-os/shared/connect";
 import { roleSchema } from "@grasp-os/shared/roles";
@@ -170,11 +170,16 @@ export const heldAppCallsIn = async (
 };
 
 /**
- * The writes the agent of chat `chatId`, which came through `platform`,
- * had held for `userId` since `since` (milliseconds since the epoch):
- * connect's and those to an App, oldest first, in `locale`. None for
- * someone no longer a member, whose writes connect drops, and whose App
- * writes could no longer run.
+ * The writes for the card of a turn of chat `chatId`, which came through
+ * `platform`, for `userId`, oldest first, in `locale`: those connect held
+ * since `since` (milliseconds since the epoch), and every write to an App
+ * still waiting in the chat, whenever it was held. A call the agent makes
+ * again while the same request waits is that same hold, held before this
+ * turn (`Workspace.holdAppCall`), so it is on this card too, never left
+ * without one; a hold on two cards is decided once, by its id and hash,
+ * and the card pressed after says it changed. None for someone no longer a
+ * member, whose writes connect drops, and whose App writes could no longer
+ * run.
  */
 export const turnHeldWrites = async (
   env: Env,
@@ -208,12 +213,10 @@ export const turnHeldWrites = async (
     )
     .map((held) => ({ at: Date.parse(held.requestedAt), view: viewOf(held) }));
   const calls = await heldAppCallsIn(env, userId, chatId, platform);
-  const toApps = calls
-    .filter(({ heldAt }) => Date.parse(heldAt) >= since)
-    .map((call) => ({
-      at: Date.parse(call.heldAt),
-      view: appViewOf(chatId, call, locale),
-    }));
+  const toApps = calls.map((call) => ({
+    at: Date.parse(call.heldAt),
+    view: appViewOf(chatId, call, locale),
+  }));
   return [...writes, ...toApps]
     .toSorted((a, b) => a.at - b.at)
     .map(({ view }) => view);
@@ -234,16 +237,18 @@ export const checkOf = (sources: readonly string[]): ReadCheck | undefined =>
 
 /**
  * `view` as a card on `platform` shows it: its title, labels and values,
- * which the model wrote, as they will be sent, nothing cut, with the
+ * which the model wrote, as they will be sent, nothing cut, every
+ * character nobody sees shown as an escape (`shownVisibly`), and the
  * platform's own link and mention syntax made inert (`inertOn`: on Teams
  * a space after a `]` a link would go on from), so the card shows where a
- * value leads, and no value leads anywhere from the card.
+ * value leads, and no value leads anywhere from the card. What the card
+ * measures to show whole is this, escapes and all.
  */
 export const inertView = (
   platform: string,
   view: HeldWriteView
 ): HeldWriteView => {
-  const inert = inertOn(platform);
+  const inert = (text: string) => inertOn(platform)(shownVisibly(text));
   return {
     ...view,
     title: inert(view.title),

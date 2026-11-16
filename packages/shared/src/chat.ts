@@ -496,6 +496,33 @@ const unpadded = /^\S(?:.*\S)?$/su;
 const notInAskLine = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u;
 
 /**
+ * What a person sees of text that is sent as it is, which they confirm
+ * before it goes (a held write's exact request or values, on a card in
+ * Grasp or a chat app): the characters nobody sees as text, by the same
+ * Unicode categories as `notInAskLine`, plus private-use and unassigned
+ * ones (Co, Cn) and half a surrogate pair alone (Cs), each shown as an
+ * escape of its code point, `\u{200D}`; a tab and a line break are text.
+ * So a title the model was steered to hide something in shows what it
+ * holds, and is sent unchanged: only what is shown is escaped.
+ *
+ * Every `\u{` in what is shown is such an escape: a backslash the text
+ * itself has before `u{` is escaped too (`\u{5C}`), so a written escape
+ * never looks like a hidden character, and no two texts look the same.
+ * JSON's own escapes (`\\`, `\"`, `\n`) never start `u{`, and stay as
+ * they are.
+ */
+const unseenOrEscape =
+  /\\(?=u\{)|(?![\t\n\r])[\p{Cc}\p{Cf}\p{Co}\p{Cn}\p{Cs}]/gu;
+
+/** `text` as a person is shown it before it is sent as it is: see `unseenOrEscape`. */
+export const shownVisibly = (text: string): string =>
+  text.replaceAll(
+    unseenOrEscape,
+    (character) =>
+      `\\u{${(character.codePointAt(0) ?? 0).toString(16).toUpperCase()}}`
+  );
+
+/**
  * One line of plain text, as everything asked is: taken as written or
  * refused, never trimmed.
  */

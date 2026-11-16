@@ -1966,7 +1966,43 @@ export class Workspace extends DurableObject<Env> {
         .get();
     });
     this.heldChanged(chat.id);
+    // Ended at its day's end though nobody reads it again (a chat app's
+    // card left unpressed): `#lapseDueHeldAppCalls`.
+    await this.#alarmBy(kept.heldAt.getTime() + heldStartMs);
     return heldAppCallRowOf(kept);
+  }
+
+  /**
+   * Ends every App write held here whose day is over (`#lapseHeldAppCalls`,
+   * chat by chat), then sets the alarm for the next one's end: so a hold
+   * nobody reads again, as a card in a chat app left unpressed, is still
+   * ended at its time, its request emptied and its end recorded.
+   */
+  async #lapseDueHeldAppCalls(now: number): Promise<void> {
+    const due = this.#db
+      .selectDistinct({ chatId: heldAppCalls.chatId })
+      .from(heldAppCalls)
+      .where(
+        and(
+          eq(heldAppCalls.status, "waiting"),
+          lte(heldAppCalls.heldAt, new Date(now - heldStartMs))
+        )
+      )
+      .all();
+    for (const { chatId } of due) {
+      // oxlint-disable-next-line no-await-in-loop -- chat by chat, each in its own write
+      await this.#lapseHeldAppCalls(chatIdSchema.parse(chatId), now);
+    }
+    const next = this.#db
+      .select({ heldAt: heldAppCalls.heldAt })
+      .from(heldAppCalls)
+      .where(eq(heldAppCalls.status, "waiting"))
+      .orderBy(asc(heldAppCalls.heldAt))
+      .limit(1)
+      .get();
+    if (next !== undefined) {
+      await this.#alarmBy(next.heldAt.getTime() + heldStartMs);
+    }
   }
 
   /**
@@ -2734,7 +2770,8 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /**
-   * Waits for every turn `send` started, however long they take: an
+   * Ends the App writes held here past their day (`#lapseDueHeldAppCalls`),
+   * then waits for every turn `send` started, however long they take: an
    * object runs while an event of its own does, so it isn't evicted under
    * a turn nobody waits on. An alarm may run 15 minutes; a turn that takes
    * longer goes on while the object stays up. After a restart there are
@@ -2742,6 +2779,9 @@ export class Workspace extends DurableObject<Env> {
    * short (`#closeInterruptedTurns`).
    */
   override async alarm(): Promise<void> {
+    // Held App writes past their day end first, so the drain below takes
+    // their records too.
+    await this.#lapseDueHeldAppCalls(Date.now());
     // Audit events the log didn't take yet go first: a turn may run long.
     await this.#drainAudit(loneNotesPerDrain);
     while (this.#sent.size > 0) {

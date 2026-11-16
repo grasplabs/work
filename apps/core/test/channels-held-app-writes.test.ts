@@ -1,4 +1,4 @@
-import { runInDurableObject } from "cloudflare:test";
+import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
@@ -10,7 +10,7 @@ import { chatAgentId } from "../src/chats-rpc.ts";
 import { workspace } from "../src/durable-objects.ts";
 import { heldStartMs } from "../src/held-starts.ts";
 import { personalWorkspaceId } from "../src/personal-workspace.ts";
-import { says } from "./agent-chat.ts";
+import { model, says } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
@@ -81,13 +81,37 @@ const cardOf = (activity: unknown) => {
   return { presses, facts, texts };
 };
 
+/** The last card of held writes posted in Teams' `conversation`, and what it shows. */
+const lastCardIn = async (conversation: string) => {
+  const { sent } = await reached(conversation);
+  const card = sent.findLast(
+    ({ activity, editOf }) =>
+      editOf === undefined &&
+      JSON.stringify(activity).includes(say("heldOne", "en"))
+  );
+  if (card?.id === undefined) {
+    throw new Error("Expected a card of held writes");
+  }
+  const shown = cardOf(card.activity);
+  return {
+    cardId: card.id,
+    shown,
+    /** What the card's Confirm carries: none where it has none. */
+    value: shown.presses.find(({ actionId }) => actionId === confirmAction)
+      ?.value,
+  };
+};
+
 /**
  * A builder on Teams with a live Notes App the Teams agent may write to,
  * whose direct message, asked about a depot only their own store knows,
- * writes a note titled `title`: the card that turn sent, and what to read
- * of what followed.
+ * writes a note titled `title`, as many times as they ask (`turns`): the
+ * card the first turn sent, and what to read of what followed.
  */
-const heldInTeams = async (title = `teams-${unique()}`) => {
+const heldInTeams = async (
+  title = `teams-${unique()}`,
+  { turns = 1 }: { turns?: number } = {}
+) => {
   const builder = await signedInApi(idp, "builder");
   const admin = await signedInApi(idp, "admin");
   const { app, release } = await liveNotes(builder);
@@ -104,8 +128,10 @@ const heldInTeams = async (title = `teams-${unique()}`) => {
     binding: bindingOf("BRAIN"),
   });
   await fakeProvider(
-    writesNote(app, release, title),
-    says("It waits for you to confirm it.")
+    ...Array.from({ length: turns }, () => [
+      writesNote(app, release, title),
+      says("It waits for you to confirm it."),
+    ]).flat()
   );
   const { oid } = builder.person;
   if (typeof oid !== "string") {
@@ -114,22 +140,9 @@ const heldInTeams = async (title = `teams-${unique()}`) => {
   const person = { ...builder, teams: teamsPerson(oid) };
   const depot = word();
   await ownSource(person.userId, `Depot ${depot} opens at seven.`);
-  await post(
-    messageFrom(person.teams, {
-      text: `When does depot ${depot} open? Note it.`,
-    })
-  );
-  const { sent } = await reached(person.teams.conversation);
-  const card = sent.findLast(({ activity }) =>
-    JSON.stringify(activity).includes(say("heldOne", "en"))
-  );
-  if (card?.id === undefined) {
-    throw new Error("Expected a card of held writes");
-  }
-  const shown = cardOf(card.activity);
-  const confirm = shown.presses.find(
-    ({ actionId }) => actionId === confirmAction
-  );
+  const question = `When does depot ${depot} open? Note it.`;
+  await post(messageFrom(person.teams, { text: question }));
+  const { cardId, shown, value } = await lastCardIn(person.teams.conversation);
   const ownWorkspace = workspace(env, personalWorkspaceId(person.userId));
   return {
     person,
@@ -137,10 +150,15 @@ const heldInTeams = async (title = `teams-${unique()}`) => {
     release,
     title,
     request: callOf(release, "notes.create", { title }),
-    cardId: card.id,
+    cardId,
     shown,
     /** What the card's Confirm carries: none where it has none. */
-    value: confirm?.value,
+    value,
+    /** Asks the same again in the same direct message: the card that turn sent. */
+    askAgain: async () => {
+      await post(messageFrom(person.teams, { text: question }));
+      return await lastCardIn(person.teams.conversation);
+    },
     /** The App's notes, as its builder reads them. */
     titles: async () => await noteTitles(builder.userId, app, release),
     /** The person's own Workspace, which keeps the hold. */
@@ -302,6 +320,104 @@ describe("a press on a held write to an App in Teams that mustn't run anything",
       }).toStrictEqual({ presses: [], said: true, waiting: 1 });
     }
   );
+
+  it(
+    "runs nothing for a press that names one of the person's own holds in Grasp's chat, and answers as for a hold nobody has",
+    slow,
+    async () => {
+      const held = await heldInTeams();
+      // A hold of the same person's, in a chat of theirs in Grasp.
+      const webTitle = `web-${unique()}`;
+      await fakeProvider(
+        writesNote(held.app, held.release, webTitle),
+        says("It waits for you.")
+      );
+      const depot = word();
+      await ownSource(held.person.userId, `Depot ${depot} opens at nine.`);
+      const web = await held.ownWorkspace.createChat(
+        "Questions",
+        held.person.userId,
+        chatAgentId
+      );
+      await held.ownWorkspace.ask(web.id, {
+        text: `When does depot ${depot} open? Note it.`,
+        model,
+      });
+      const [inGrasp] = await held.person.api.chats.heldCalls(web.id);
+      /** The lines said in their direct message after a press carrying `press`. */
+      const saidAfter = async (press: unknown[]) => {
+        const before = await linesAfterCard(held);
+        await post({
+          ...messageFrom(held.person.teams, { text: undefined }),
+          replyToId: `1729${unique()}`,
+          value: { actionId: confirmAction, value: JSON.stringify(press) },
+        });
+        const after = await linesAfterCard(held);
+        return after.slice(before.length);
+      };
+      const forged = await saidAfter([
+        {
+          id: inGrasp?.id,
+          inputHash: inGrasp?.requestHash,
+          chatId: web.id,
+        },
+      ]);
+      const nobodys = await saidAfter([
+        {
+          id: crypto.randomUUID(),
+          inputHash: "0".repeat(64),
+          chatId: web.id,
+        },
+      ]);
+      const stillInGrasp = await held.person.api.chats.heldCalls(web.id);
+
+      expect({
+        forged,
+        nobodys,
+        titles: await held.titles(),
+        stillInGrasp: stillInGrasp.map(({ id }) => id),
+      }).toStrictEqual({
+        forged: [say("changedSince", "en")],
+        nobodys: [say("changedSince", "en")],
+        titles: [],
+        stillInGrasp: [inGrasp?.id],
+      });
+    }
+  );
+
+  it(
+    "lapses once its day is over though nobody reads it again: its request is emptied and its end recorded",
+    slow,
+    async () => {
+      const held = await heldInTeams();
+      await runInDurableObject(held.ownWorkspace, (_instance, state) => {
+        state.storage.sql.exec(
+          "UPDATE held_app_calls SET held_at = held_at - ?",
+          heldStartMs + 1
+        );
+      });
+      // No press and no page: only the Workspace's own alarm.
+      await runDurableObjectAlarm(held.ownWorkspace);
+      const kept = await runInDurableObject(
+        held.ownWorkspace,
+        (_instance, state) =>
+          state.storage.sql
+            .exec<{
+              status: string;
+              request: string | null;
+            }>("SELECT status, request FROM held_app_calls")
+            .toArray()
+      );
+
+      expect({
+        kept,
+        decisions: await decisionsOn(held.app, 1),
+      }).toStrictEqual({
+        kept: [{ status: "lapsed", request: null }],
+        decisions: ["chat.app_call.lapsed"],
+      });
+    }
+  );
 });
 
 describe("a held write to an App in Teams", () => {
@@ -386,6 +502,63 @@ describe("a held write to an App in Teams", () => {
         shown: inTeams(held.request),
         links: false,
         titles: [hostile],
+      });
+    }
+  );
+
+  it(
+    "is on the next turn's card when asked for again before it was decided, and Confirm there writes it once",
+    slow,
+    async () => {
+      const held = await heldInTeams(`again-${unique()}`, { turns: 2 });
+      // Not pressed: the person asks again, and the agent makes the same call,
+      // which is the same hold.
+      const next = await held.askAgain();
+      await post({
+        ...messageFrom(held.person.teams, { text: undefined }),
+        replyToId: next.cardId,
+        value: { actionId: confirmAction, value: next.value },
+      });
+      // The first card, pressed after: nothing more runs.
+      await post(pressOn(held));
+
+      expect({
+        newCard: next.cardId !== held.cardId,
+        sameHold: next.value === held.value,
+        titles: await held.titles(),
+        waiting: await held.waiting(),
+      }).toStrictEqual({
+        newCard: true,
+        sameHold: true,
+        titles: [held.title],
+        waiting: [],
+      });
+    }
+  );
+
+  it(
+    "shows every character nobody sees in the request as an escape, and Confirm writes the request as it was asked for",
+    slow,
+    async () => {
+      // Tag characters, a bidi override and a zero-width joiner: drawn as
+      // nothing in Teams.
+      const hidden = "Agenda\u{E0041}\u{E0042}\u202Eevil\u200D!";
+      const held = await heldInTeams(hidden);
+      const [shown = ""] = held.shown.facts.map(({ value }) => value);
+      await post(pressOn(held));
+
+      expect({
+        escapes: ["\\u{E0041}", "\\u{E0042}", "\\u{202E}", "\\u{200D}"].map(
+          (escape) => shown.includes(escape)
+        ),
+        unseen: /[\p{Cf}\p{Co}\p{Cn}]/u.test(shown),
+        confirm: held.value !== undefined,
+        titles: await held.titles(),
+      }).toStrictEqual({
+        escapes: [true, true, true, true],
+        unseen: false,
+        confirm: true,
+        titles: [hidden],
       });
     }
   );

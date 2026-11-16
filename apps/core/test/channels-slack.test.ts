@@ -1063,6 +1063,30 @@ describe("a linked person's held write to an App in Slack", () => {
     });
   });
 
+  it("shows every character nobody sees in its request as an escape, with Confirm", async () => {
+    // Tag characters, a bidi override and a zero-width joiner: drawn as
+    // nothing in Slack.
+    const held = await heldAppWriteInSlack(
+      "Agenda\u{E0041}\u{E0042}\u202Eevil\u200D!"
+    );
+    const request =
+      held.card.texts.find((text) =>
+        text.startsWith(`*${say("heldAppRequest", "en")}*`)
+      ) ?? "";
+
+    expect({
+      escapes: ["\\u{E0041}", "\\u{E0042}", "\\u{202E}", "\\u{200D}"].map(
+        (escape) => request.includes(escape)
+      ),
+      unseen: /[\p{Cf}\p{Co}\p{Cn}]/u.test(request),
+      confirm: held.card.confirm !== undefined,
+    }).toStrictEqual({
+      escapes: [true, true, true, true],
+      unseen: false,
+      confirm: true,
+    });
+  });
+
   it("is on a card without Confirm where its request fits the card but not one of Slack's fields", async () => {
     // Slack's adapter cuts a field past 2,000 characters: Confirm would
     // stand under a request shown in part.

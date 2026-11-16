@@ -277,6 +277,24 @@ describe("a write to an App held for the person", () => {
     });
   });
 
+  it("shows every character nobody sees in the exact request as an escape", async () => {
+    // Tag characters, a bidi override and a zero-width joiner: drawn as
+    // nothing on the page.
+    const hidden = JSON.stringify({
+      reference: { name: "notes.create", kind: "mutation" },
+      args: { title: "Agenda\u{E0041}\u{E0042}\u202Eevil\u200D!" },
+    });
+    await shown({ calls: { "chat-1": [{ ...held, request: hidden }] } });
+    const exact = document.querySelector("pre code")?.textContent ?? "";
+
+    expect({
+      escapes: ["\\u{E0041}", "\\u{E0042}", "\\u{202E}", "\\u{200D}"].map(
+        (escape) => exact.includes(escape)
+      ),
+      unseen: /[\p{Cf}\p{Co}\p{Cn}]/u.test(exact),
+    }).toStrictEqual({ escapes: [true, true, true, true], unseen: false });
+  });
+
   it("runs nothing once it is rejected", async () => {
     const { confirmed, declined } = await shown();
     await press("Reject notes.create in Notes");
