@@ -6,9 +6,8 @@ import type { WorkContext } from "./restricted.ts";
 
 // Who is in a chat others share (a group chat or channel on a chat
 // platform), as core keeps it before each turn from the platform's roster
-// (`chat_audiences`): core's own record, read by today's Knowledge
-// (knowledge/access.ts) and by the new Brain's recall in such a chat
-// (turn-recall.ts, history-access.ts) alike, so neither rests on the other.
+// (`chat_audiences`): core's own record, read by the Brain's recall in
+// such a chat (turn-recall.ts, history-access.ts).
 
 /** Who is in a chat others share, as `chat_audiences` keeps them. */
 export interface Audience {

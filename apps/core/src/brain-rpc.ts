@@ -1,7 +1,6 @@
 import { addDays } from "@grasp-os/shared/admin/org-record";
 import type {
   BrainApi,
-  BrainChangePage,
   BrainForgetPreview,
   Company,
   Connection,
@@ -35,8 +34,6 @@ import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { organizationId } from "./auth/auth.ts";
-import { brainChanges } from "./brain-changes.ts";
-import type { SourceChange } from "./brain-changes.ts";
 import { forget, forgetPreview } from "./brain-forget.ts";
 import {
   answerGap,
@@ -60,7 +57,6 @@ import { askMorePeople, workKnowledge } from "./brain-work.ts";
 import { keepsReadsOf } from "./connection-capture-key.ts";
 import { catalogEntries, personOf } from "./connections.ts";
 import { organizations } from "./db/core/schema.ts";
-import { brainOf } from "./knowledge/ports.ts";
 import { intakeIds } from "./onboarding/brain-intake.ts";
 import {
   isKickoffTeam,
@@ -190,7 +186,7 @@ interface OnboardingFacts {
   interviews: CameIn[];
 }
 
-/** A source the onboarding gives the brain, and when it came in (ISO 8601): when `brain.changes` shows it. */
+/** A source the onboarding gives the brain, and when it came in (ISO 8601). */
 interface CameIn {
   source: Source;
   at: string;
@@ -441,9 +437,8 @@ const toolsOf = (
  * The onboarding's sources, each with when it came in: the kickoff when
  * its transcript came in, the staff list when it was last saved, the team
  * leads' interviews and the documents shared. The one definition of which
- * sources there are and what they are called, for `brain.read` and
- * `brain.changes` alike; none for anyone but an admin, who alone has
- * `facts`.
+ * sources there are and what they are called, for `brain.read`; none
+ * for anyone but an admin, who alone has `facts`.
  */
 const onboardingSources = (
   facts: OnboardingFacts | null,
@@ -533,14 +528,6 @@ const sourcesForRecords = async (
     named.has(source.id) ? [source] : []
   );
 };
-
-/** The onboarding's sources as changes (brain-changes.ts), with the ids and titles `brain.read` gives them. */
-const sourceChanges = (facts: OnboardingFacts | null): SourceChange[] =>
-  onboardingSources(facts).map(({ source: { id, title }, at }) => ({
-    id,
-    title,
-    at,
-  }));
 
 /**
  * The roster's teams. Each one's size is its people, its roles their
@@ -1101,9 +1088,8 @@ export const readThinkingGround = async (
 };
 
 /**
- * The company brain over `/rpc`: for anyone signed in. Its workspace reads
- * nothing from Knowledge. Its changes are audited, as the Knowledge read they are
- * (brain-changes.ts). Adding records is, with the records it added;
+ * The company brain over `/rpc`: for anyone signed in. It reads nothing
+ * from Knowledge. Adding records is audited, with the records it added;
  * taking them out is, by each record's key (brain-forget.ts).
  */
 export class BrainRpc extends CoreRpcTarget implements BrainApi {
@@ -1161,19 +1147,6 @@ export class BrainRpc extends CoreRpcTarget implements BrainApi {
       const { goals } = await readBrainRecords(this.#env);
       return await goalsFor(this.#env, person, goals);
     });
-  }
-
-  async changes(options: unknown): Promise<BrainChangePage> {
-    return await withPerson(
-      this.#check,
-      async (person) =>
-        await brainChanges(
-          brainOf(this.#env),
-          person,
-          options,
-          sourceChanges(await onboardingFacts(this.#env, person))
-        )
-    );
   }
 
   async addRecords(records: BrainRecordInput[]): Promise<BrainRecordsAdded> {

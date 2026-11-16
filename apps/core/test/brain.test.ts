@@ -247,17 +247,6 @@ const retiredOf = async (ids: readonly string[]) => {
 const kickoffTeams = (teams: { id: string; name: string }[]) =>
   teams.flatMap(({ id, name }) => (id.startsWith("onb-kt-") ? [name] : []));
 
-/** The IDs of the sources among `person`'s brain changes since `since`, sorted. */
-const sourcesOf = async (
-  person: Awaited<ReturnType<typeof signedInApi>>,
-  since: string
-): Promise<string[]> => {
-  const { changes } = await person.api.brain.changes({ since });
-  return changes
-    .flatMap((change) => (change.kind === "source" ? [change.source.id] : []))
-    .toSorted();
-};
-
 describe("the brain's workspace", { timeout: 120_000 }, () => {
   it("is a valid empty workspace while the deployment holds nothing for it", async () => {
     const admin = await signedInApi(idp, "admin");
@@ -289,28 +278,6 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
       gaps: [],
       workflows: [],
       connections: true,
-    });
-  });
-
-  it("gives the onboarding's sources to admins alone in its changes, since the moment asked about", async () => {
-    const admin = await signedInApi(idp, "admin");
-    const member = await signedInApi(idp, "user");
-    const since = new Date(Date.now() - 1000).toISOString();
-    await bringInKickoff();
-    await admin.api.onboarding.saveRoster(roster);
-
-    expect({
-      admin: await sourcesOf(admin, since),
-      member: await sourcesOf(member, since),
-      // Nothing came in after now.
-      later: await sourcesOf(
-        admin,
-        new Date(Date.now() + 60_000).toISOString()
-      ),
-    }).toStrictEqual({
-      admin: ["src-kickoff", "src-roster"],
-      member: [],
-      later: [],
     });
   });
 
@@ -518,21 +485,17 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
     const workspace = await admin.api.brain.read();
     const asMember = await member.api.brain.read();
     const { progress } = await admin.api.onboarding.view();
-    const since = daysAgo(15);
-    const adminChanges = await sourcesOf(admin, since);
     const finishedWeek = mondayOf(daysAgo(14));
 
     expect({
       leadTalked: progress?.teams.map(({ id, leadTalked }) => [id, leadTalked]),
       sources: workspace.sources.filter(({ id }) => id.startsWith("src.")),
       tools: workspace.tools,
-      changes: adminChanges.filter((id) => id.startsWith("src.")),
       member: {
         // The kickoff an earlier test brought in is the company's: this
         // test's sources alone.
         sources: asMember.sources.filter(({ id }) => id.startsWith("src.")),
         tools: asMember.tools,
-        changes: await sourcesOf(member, since),
       },
     }).toStrictEqual({
       leadTalked: [
@@ -596,12 +559,7 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
           sourceId: `src.document-${first.id}`,
         },
       ],
-      changes: [
-        "src.lead-finance",
-        `src.document-${first.id}`,
-        `src.document-${second.id}`,
-      ].toSorted(),
-      member: { sources: [], tools: [], changes: [] },
+      member: { sources: [], tools: [] },
     });
   });
 
