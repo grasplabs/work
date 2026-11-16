@@ -14,6 +14,7 @@ import { useRouter } from "@tanstack/react-router";
 import { useId, useState } from "react";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
+import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 
@@ -29,12 +30,15 @@ export const InstructionFileEditor = ({
   saved,
   label,
   description,
+  onSaved,
 }: {
   file: InstructionFileRef;
   /** The file as it is now; null while it was never written. */
   saved: InstructionFileText | null;
   label: string;
   description: string;
+  /** What else a save asks of core, once it landed and before the page is read again. */
+  onSaved?: (session: Session) => Promise<void>;
 }) => {
   const { t } = useLingui();
   const changedSince = t`Someone saved this file since you started. Put your changes aside to see their version, then make yours again.`;
@@ -95,6 +99,7 @@ export const InstructionFileEditor = ({
           });
           setDraft(undefined);
           setTried(undefined);
+          await onSaved?.(session);
         },
         async () => {
           await router.invalidate({ sync: true });

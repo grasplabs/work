@@ -115,6 +115,10 @@ describe("an agent made from the chat", { timeout: 120_000 }, () => {
       })
     );
     const settings = await admin.api.connections.agentSettings(made.id);
+    const told = await admin.api.instructions.read({
+      scope: "agent",
+      agentId: made.id,
+    });
     const wakes = await admin.api.connections.agentWakes(made.id);
     const events = await allEvents();
     const madeEvent = events.find(
@@ -125,6 +129,7 @@ describe("an agent made from the chat", { timeout: 120_000 }, () => {
       offered: offered(provider, 0).includes("draftAgent"),
       before: before.some((agent) => agent.name === name),
       made: made.name,
+      told: told?.text,
       audience: settings.audience,
       on: settings.classes
         .filter(({ audience }) => audience.who !== "nobody")
@@ -140,6 +145,8 @@ describe("an agent made from the chat", { timeout: 120_000 }, () => {
       offered: true,
       before: false,
       made: name,
+      // What the card said it is told: its instruction file's first version.
+      told: draft.instructions,
       audience: { who: "everyone" },
       on: [["read-own", "asClass"]],
       wakes: [["0 8 * * 1", "Sum up HR's new mail.", admin.userId]],
@@ -173,15 +180,21 @@ describe("an agent made from the chat", { timeout: 120_000 }, () => {
     // Its turn after Make it ends before another test's model answers.
     await idle(user, own.chat.id);
     const mine = await user.api.connections.ownAgents();
+    const told = await user.api.instructions.read({
+      scope: "agent",
+      agentId: made.id,
+    });
 
     expect({
       refused,
       made: made.name,
+      told: told?.text,
       mine: mine.map((agent) => [agent.name, agent.ownerId]),
     }).toStrictEqual({
       // The tool refused it back to the model: no draft the chat holds.
       refused: "agent.draft_not_found",
       made: name,
+      told: hr(name).instructions,
       mine: [[name, user.userId]],
     });
   });

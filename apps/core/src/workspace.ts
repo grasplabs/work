@@ -2901,7 +2901,6 @@ export class Workspace extends DurableObject<Env> {
         : {
             agent: {
               name: agent.name,
-              instructions: agent.instructions,
               ...(documents.length === 0 ? {} : { documents }),
             },
           }),

@@ -22,7 +22,7 @@ export const agentErrors = defineErrorFamily({
   "agent.not_for_you":
     "This agent isn't set up to answer you here. An admin decides who may use it, and where.",
   // Making and changing the company's agents (agents.ts).
-  "agent.record_invalid": "That isn't an agent's name, job or instructions.",
+  "agent.record_invalid": "That isn't an agent's name, job or picture.",
   "agent.unknown": "The company has no such agent.",
   "agent.name_taken": "Another agent already has that name.",
   "agent.too_many_own": `You have ${ownAgentsMax} agents of your own, the most a person keeps. Delete one to make another.`,

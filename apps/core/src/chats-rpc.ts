@@ -63,6 +63,7 @@ import {
   declineHeldAppCall,
   heldAppCallsOf,
 } from "./held-app-calls.ts";
+import { saveInstructionFile } from "./instruction-files.ts";
 import { modelSettings, modelEffortsOf } from "./models.ts";
 import { chatPackageRequests } from "./packages/requests.ts";
 import { callbackFor, isStub } from "./page-callbacks.ts";
@@ -597,8 +598,8 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
    * for anyone the company lets), recorded as made from a chat. A first
    * refusal leaves the draft to make again; once the agent is made, the
    * draft stays taken, so no retry makes it twice, and what the card said
-   * of whom it reaches, what it may do and when it wakes is set by the
-   * same checks, each refused as on its page. Then the chat's agent goes
+   * it is told (its instruction file), whom it reaches, what it may do and
+   * when it wakes is set by the same checks, each refused as on its page. Then the chat's agent goes
    * on, in the person's words.
    */
   async makeDraftedAgent(
@@ -618,7 +619,6 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
         name: draft.name,
         face: "pen",
         job: draft.job,
-        instructions: draft.instructions,
         modelRole: null,
       };
       const company = draft.whose === "company";
@@ -637,8 +637,15 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
         throw error;
       }
       // Made: it stays made and the draft taken, whatever fails next, and
-      // the person lands on its page to finish it there.
+      // the person lands on its page to finish it there. What it is told
+      // is its instruction file's first version, saved as on its page.
       try {
+        await saveInstructionFile(this.#env, person, {
+          file: { scope: "agent", agentId: agent.id },
+          change: crypto.randomUUID(),
+          text: draft.instructions,
+          after: 0,
+        });
         if (company) {
           await this.#setDrafted(person, agent.id, draft);
         }

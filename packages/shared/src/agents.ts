@@ -9,8 +9,9 @@ import type { ModelEffort } from "./models.ts";
 import type { AppClassAudience } from "./stephen-reach.ts";
 
 // The company's agents, as its admins make and change them: each has its
-// own name, job and instructions, its own audience and its own classes of
-// tools. The organization's own agent, the one every company starts with,
+// own name and job, its own audience and its own classes of tools. What it
+// is told is its instruction file in the Brain (instruction-files.ts),
+// edited as other instruction files are (`session.instructions`). The organization's own agent, the one every company starts with,
 // is the first of them; who reaches it and what it may do stays in
 // Settings › Stephen (stephen-reach.ts).
 
@@ -31,8 +32,6 @@ export interface Agent {
   face: string;
   /** One line on what it is for. */
   job: string;
-  /** What it is told on top of Grasp's own rules. */
-  instructions: string;
   /** The role it asks the gateway for; null: the model a chat uses anyway. */
   modelRole: ModelRole | null;
   /**
@@ -53,9 +52,13 @@ export interface Agent {
   changedAt: string | null;
 }
 
-/** Most characters an agent's name, job and instructions hold. */
+/** Most characters an agent's name and job hold. */
 export const agentNameMax = 60;
 export const agentJobMax = 200;
+/**
+ * Most characters a chat's draft of an agent's instructions holds: its
+ * instruction file's own limit, which saving it holds again.
+ */
 export const agentInstructionsMax = 8000;
 
 /**
@@ -80,7 +83,6 @@ export const agentInputSchema = z.strictObject({
   /** The figure it is drawn with, by its name. */
   face: z.string().regex(/^[a-z][a-z0-9-]{0,39}$/u),
   job: z.string().trim().max(agentJobMax),
-  instructions: z.string().max(agentInstructionsMax),
   modelRole: z.enum(modelRoles).nullable(),
   /** The model its turns use; null, or left out, for the asker's own. */
   model: z.string().min(1).max(200).nullable().default(null),
@@ -269,7 +271,7 @@ export interface AgentsApi {
    * only suggested. Never an app someone took off.
    */
   workOutAgentApps: (agentId: string) => Promise<AgentAppsWorkedOut>;
-  /** Changes an agent's name, face, job, instructions or model role. */
+  /** Changes an agent's name, face, job or model role. */
   changeAgent: (agentId: string, input: AgentInput) => Promise<void>;
   /** Pauses an agent, which then takes no turn, or turns it back on. */
   setAgentPaused: (agentId: string, paused: boolean) => Promise<void>;

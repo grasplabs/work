@@ -21,16 +21,18 @@ import { modelName } from "../chat/composer.tsx";
 import { AgentAvatar, faceOf } from "./agent-avatar.tsx";
 
 // What an admin says of an agent: its name, what it is for, the picture
-// it is drawn with, the model its turns use and its instructions. The
-// new agent's page asks for all at once (new-agent.tsx); an agent's own
-// page has them on cards of their own (agent-page.tsx), each saved by
-// itself.
+// it is drawn with, the model its turns use and, on the new agent's page,
+// its first instructions. The new agent's page asks for all at once
+// (new-agent.tsx); an agent's own page has them on cards of their own
+// (agent-page.tsx), each saved by itself, its instructions as its
+// instruction file (settings/instruction-file.tsx).
 
 /** What an admin says of an agent. */
 export interface Typed {
   name: string;
   job: string;
-  instructions: string;
+  /** Its first instructions, on the new agent's page alone. */
+  instructions?: string;
   /** The figure it is drawn with, by name. */
   face: string;
   /** The model its turns use; null for the one its asker picks. */
@@ -217,7 +219,7 @@ export const AgentForm = ({
             }}
             placeholder={t`What it should know and how it should work. Grasp's own rules always hold over these.`}
             rows={parts.length === 1 ? 14 : 8}
-            value={typed.instructions}
+            value={typed.instructions ?? ""}
           />
         </Field>
       ) : null}

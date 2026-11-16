@@ -15833,6 +15833,7 @@ msgid "What it returned"
 msgstr "What it returned"
 
 #: src/agents/agent-form.tsx
+#: src/agents/agent-page.tsx
 msgid "What it should know and how it should work. Grasp's own rules always hold over these."
 msgstr "What it should know and how it should work. Grasp's own rules always hold over these."
 

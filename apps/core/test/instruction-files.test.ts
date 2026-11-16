@@ -30,7 +30,7 @@ import { outlook, requestGranted } from "./apps.ts";
 import { ageOwnErasure } from "./brain-next-own-store.ts";
 import { actingFor } from "./contexts.ts";
 import { mockIdp } from "./idp.ts";
-import { keptAgent } from "./instruction-saves.ts";
+import { keptAgent, saveInstructions } from "./instruction-saves.ts";
 import {
   auditedDuring,
   outcome,
@@ -332,6 +332,53 @@ describe("instruction files", setUpTime, () => {
       )
     );
     expect(named).toBe("permission.context_invalid");
+  });
+
+  it("gives an agent of a person's own the file its owner wrote, only where their own file goes, and nothing of it to anyone else", async () => {
+    const owner = await signedInApi(idp, "user");
+    const other = await member("user");
+    const admin = await signedInApi(idp, "admin");
+    const mine = await owner.api.connections.makeOwnAgent({
+      name: `Scribe ${unique()}`,
+      face: "pen",
+      job: "",
+      modelRole: null,
+    });
+    const told = { scope: "agent", agentId: mine.id } as const;
+    const markers = { theirs: `Theirs alone ${unique()}` };
+    await saveInstructions(owner.api, told, markers.theirs);
+    const asOwner = agentFor(mine.id, owner.userId);
+
+    expect({
+      ownChat: await markersFor(markers, asOwner, {
+        conversation: "own",
+        personal: true,
+      }),
+      notTheirsAlone: await markersFor(markers, asOwner, {
+        conversation: "own",
+        personal: false,
+      }),
+      channel: await markersFor(markers, asOwner, { conversation: "channel" }),
+      // Acting for someone else, it is told nothing its owner wrote.
+      forSomeoneElse: await markersFor(
+        markers,
+        agentFor(mine.id, other.userId),
+        { conversation: "own", personal: true }
+      ),
+      // Kept in their own store: the company's holds no file under its ID.
+      shared: await readInstructionFilesAs(env, owner.userId, [told]),
+      // An admin who learnt its ID reads and writes nothing of it.
+      adminReads: await outcome(admin.api.instructions.read(told)),
+      ownerReads: await owner.api.instructions.read(told),
+    }).toStrictEqual({
+      ownChat: ["theirs"],
+      notTheirsAlone: [],
+      channel: [],
+      forSomeoneElse: [],
+      shared: [],
+      adminReads: "agent.unknown",
+      ownerReads: { version: 1, text: markers.theirs },
+    });
   });
 
   it("gives files only to an agent: an App or a workflow's own code gets none in a chat", async () => {
