@@ -27,7 +27,7 @@ import { connectDb } from "./test-env.ts";
 // whoever has a role in the App and builds creates an App of their own
 // from it: the same code, none of the data, and requests for what the
 // blueprint declares. The ways this could go wrong, tried below: data,
-// settings or people coming along (the source's AGENTS.md too), a grant
+// settings or people coming along, a grant
 // coming along instead of a request, a request naming a connection or
 // another App the creator may not see, a blueprint made of a version
 // nobody marked, someone without a role in the App (or who doesn't build,
@@ -83,7 +83,7 @@ const notesOf = async (person: Person, app: string): Promise<unknown> =>
     kind: "query",
   });
 
-/** A copy has every file of it but AGENTS.md, which starts as a stub. */
+/** A copy has every file of it. */
 const v1 = withFiles(notesCode, {
   "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@grasp-os/sdk/react";
@@ -96,14 +96,14 @@ function Notes() {
 
 export const Route = createFileRoute("/")({ component: Notes });
 `,
-  "AGENTS.md": "# Notes\n",
+  "README.md": "# Notes\n",
 });
 
 /** A released App of `owner`'s at version 1, with a version 2 after it. */
 const notesApp = async (owner: Person): Promise<string> => {
   const { id } = await owner.api.apps.create({ name: `Notes ${unique()}` });
   await release(owner, id, v1);
-  await commitApp(owner.api, id, { "AGENTS.md": "# Notes, v2\n" });
+  await commitApp(owner.api, id, { "README.md": "# Notes, v2\n" });
   return id;
 };
 
@@ -360,7 +360,6 @@ describe("blueprints", { timeout: 60_000 }, () => {
     // shared with nobody.
     const theirs = await maker.api.apps.list();
     await maker.api.versions.rollback({ kind: "app", id: app.id }, 1);
-    const { name: sourceName } = await owner.api.apps.get(source);
     // The source's version 1, as its draft saved it.
     const sourceFiles = await owner.api.versions.files(
       { kind: "app", id: source },
@@ -377,12 +376,8 @@ describe("blueprints", { timeout: 60_000 }, () => {
       forOwner: await outcome(owner.api.apps.get(app.id)),
     }).toStrictEqual({
       listed: true,
-      // The same code, but for AGENTS.md: the source's agents wrote it
-      // from what the source read, which the copy has no sources for.
-      files: {
-        ...sourceFiles,
-        "AGENTS.md": `Created from the blueprint ${sourceName}. Write what this App does here.\n`,
-      },
+      // The same code, every file of it.
+      files: sourceFiles,
       sourceNotes: { ok: true, value: ["Only the source's"] },
       notes: { ok: true, value: [] },
       members: [],
