@@ -7,9 +7,10 @@ import type {
   PackItem,
   PackMemory,
 } from "./contract.ts";
+import { datesIn, sameDay } from "./dates.ts";
 import { foundIn } from "./exact.ts";
 import type { Exact } from "./exact.ts";
-import { holdsTerm, placedOf, sequenceOf, wordsOf } from "./words.ts";
+import { holdsTerm, placedOf, wordsOf } from "./words.ts";
 import type { Word, WordMemo } from "./words.ts";
 
 // How what recall found becomes a pack: fused by rank, then fitted to the
@@ -133,7 +134,17 @@ const placeOfExact = (
   exacts: readonly Exact[]
 ): [number, number] | undefined => {
   const placed = placedOf(text);
-  for (const { words } of exacts) {
+  for (const exact of exacts) {
+    if (exact.kind === "date") {
+      const dated = datesIn(text).find(({ days }) =>
+        days.some((day) => exact.days.some((asked) => sameDay(day, asked)))
+      );
+      if (dated !== undefined) {
+        return [dated.start, dated.end];
+      }
+      continue;
+    }
+    const { words } = exact;
     for (let start = 0; start + words.length <= placed.length; start += 1) {
       if (words.every((word, at) => placed[start + at]?.word === word)) {
         return [
@@ -201,7 +212,7 @@ export const quoteOf = (
   let bestExact = 0;
   for (const part of parts) {
     const words = wordsOf(part, memo);
-    const exact = foundIn(sequenceOf(part), exacts, every).length;
+    const exact = foundIn(part, exacts, every).length;
     const score =
       exact * (terms.length + 1) +
       terms.filter((term) => holdsTerm(words, term)).length;

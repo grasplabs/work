@@ -1,11 +1,10 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import { exactsOf, foundIn } from "../src/exact.ts";
-import { sequenceOf } from "../src/words.ts";
 
-// What a question asks for as written: its quoted phrases and IDs, read by
-// fixed rules from the question alone. Finding them in the store, with
-// access, is tested in apps/core (brain-next-pack.test.ts).
+// What a question asks for as written: its quoted phrases, dates and IDs,
+// read by fixed rules from the question alone. Finding them in the store,
+// with access, is tested in apps/core (brain-next-pack.test.ts).
 
 /** Each exact part of `question`: as asked, and by which rule. */
 const partsOf = (question: string) =>
@@ -13,21 +12,49 @@ const partsOf = (question: string) =>
 
 /** Whether `text` holds the one exact part of `question` as written. */
 const holds = (question: string, text: string): boolean =>
-  foundIn(sequenceOf(text), exactsOf(question), [0]).length === 1;
+  foundIn(text, exactsOf(question), [0]).length === 1;
 
 describe("the exact parts of a question", () => {
-  it("reads quoted phrases, then IDs, each once, and leaves names and dates to the words way", () => {
+  it("reads quoted phrases, then dates, then IDs, each once, and leaves names to the words way", () => {
     expect(
       partsOf(
         `Did Anna Jansen sign "het nieuwe contract" for PO-77812 on 14 maart 2026, and PO-77812 again?`
       )
     ).toStrictEqual([
       { asked: "het nieuwe contract", kind: "phrase" },
+      { asked: "14 maart 2026", kind: "date" },
       { asked: "PO-77812", kind: "id" },
     ]);
   });
 
+  it("reads a timestamp as one date, and a date inside an ID as the ID", () => {
+    expect([
+      partsOf("what ran at 2026-03-14T09:00:00Z"),
+      partsOf("where is INV-2026-03-14-7"),
+    ]).toStrictEqual([
+      [{ asked: "2026-03-14T09:00:00Z", kind: "date" }],
+      [{ asked: "INV-2026-03-14-7", kind: "id" }],
+    ]);
+  });
+
+  it("finds a date by its day however a text writes it, a date without a year on any year's day", () => {
+    expect([
+      holds("on 14 maart 2026", "Signed March 14th, 2026."),
+      holds("on 14 maart 2026", "Logged 2026-03-14T09:00:00Z"),
+      holds("on 14 maart 2026", "Getekend op 14 maart."),
+      holds("on 14 maart", "Signed 14/03/2027."),
+      holds("on 03/04/2026", "Due 3 April 2026."),
+      holds("on 03/04/2026", "Due 4 March 2026."),
+      holds("on 14 maart 2026", "Signed 14 March 2027."),
+      holds("on 14 maart 2026", "Signed on the 14th, in March 2026."),
+    ]).toStrictEqual([true, true, true, true, true, true, false, false]);
+  });
+
   it("takes a word with a letter and two digits, or five digits in a row, as an ID, and nothing else", () => {
+    const idsOf = (question: string): string[] =>
+      partsOf(question)
+        .filter(({ kind }) => kind === "id")
+        .map(({ asked }) => asked);
     // What a question writes, and the IDs read from it, as written.
     const table: [string, string[]][] = [
       ["PO-17", ["PO-17"]],
@@ -46,15 +73,15 @@ describe("the exact parts of a question", () => {
       ['"PO-17', ["PO-17"]],
       ["PO-17:", ["PO-17"]],
       ["PO-17?", ["PO-17"]],
-      // Known and accepted: names of a kind, a timestamp (its colons end
-      // an ID), a compact date, an amount with five digits in a row.
+      // Known and accepted: names of a kind, a compact date, an amount
+      // with five digits in a row.
       ["v2.1", ["v2.1"]],
       ["4x4", ["4x4"]],
       ["COVID-19", ["COVID-19"]],
-      ["2026-03-14T09:00:00Z", ["2026-03-14T09", "00Z"]],
       ["20260314", ["20260314"]],
       ["€1250000", ["1250000"]],
-      // Words.
+      // Dates (rule 3) and words.
+      ["2026-03-14T09:00:00Z", []],
       ["2026-03-14", []],
       ["09:30", []],
       ["14:00-15:00", []],
@@ -75,10 +102,7 @@ describe("the exact parts of a question", () => {
       ["#4521", []],
     ];
     expect(
-      table.map(([written]) => [
-        written,
-        partsOf(`about ${written} please`).map(({ asked }) => asked),
-      ])
+      table.map(([written]) => [written, idsOf(`about ${written} please`)])
     ).toStrictEqual(table);
   });
 
