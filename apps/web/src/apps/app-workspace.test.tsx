@@ -2355,4 +2355,62 @@ describe(AppWorkspace, () => {
       again: false,
     });
   });
+
+  it("says what to do next over a newly made App as soon as it shows, while Grasp still works on it, so Grasp finishing moves nothing under the person", async () => {
+    markMade("invoice-desk");
+    const tip = "This is your new App, with example data.";
+    const core = new PreviewingCore();
+    socketsTo(core);
+    let send: ((update: ChatUpdate) => void) | undefined;
+    const turn = { messages: [], partial: null, stopped: null, held: 0 };
+    await opened(
+      fakeApps().apps,
+      identityOf(false),
+      "chat-finishing",
+      // The preview shows while Grasp's turn still runs: the person can
+      // use it then.
+      async (_chat, _after, received) => {
+        send = received;
+        received({ ...turn, running: true, worked: 1 });
+        return await Promise.resolve(watching());
+      }
+    );
+    await act(async () => {
+      await core.reached;
+    });
+    await settled();
+    const frame = document.querySelector("iframe");
+    // What is drawn over the preview, in the order it stands: something
+    // put there later pushes the page down under the person's pointer.
+    const over = (): string[] =>
+      [...document.querySelectorAll("body *")]
+        .filter(
+          (each) =>
+            frame !== null &&
+            each.childElementCount === 0 &&
+            each.closest('[aria-label="Chat"]') === null &&
+            // oxlint-disable-next-line no-bitwise -- a DOM position mask
+            (each.compareDocumentPosition(frame) &
+              Node.DOCUMENT_POSITION_FOLLOWING) !==
+              0
+        )
+        .map((each) => each.textContent)
+        .filter((text) => text !== "");
+    const whileWorking = { tip: says(tip), over: over() };
+    await act(async () => {
+      send?.({ ...turn, running: false, worked: 2 });
+      await Promise.resolve();
+    });
+    await settled();
+
+    expect({
+      whileWorking: whileWorking.tip,
+      sameFrame: document.querySelector("iframe") === frame,
+      overWhenDone: over(),
+    }).toStrictEqual({
+      whileWorking: true,
+      sameFrame: true,
+      overWhenDone: whileWorking.over,
+    });
+  });
 });
