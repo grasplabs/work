@@ -254,7 +254,11 @@ const endedByTheHost = (signal: string, status: string): string => {
  * successor only then, so a second process is the sign.
  */
 const endedMidCall = async (supervisor: SandboxSupervisor) => {
-  const [held = 0] = supervisor.pids();
+  const [held] = supervisor.pids();
+  if (held === undefined) {
+    // Never pid 0: that signals the test runner's whole process group.
+    throw new Error("The pool has no process to end mid-call");
+  }
   const call = callSupervisor(supervisor.socket, {
     body: "for (;;) {}",
     deadlineMs: 20_000,
