@@ -1061,19 +1061,30 @@ const storesOf = (findings: readonly Finding[]): Map<string, MemoryStore> =>
   );
 
 /**
- * The sources the reader's own store found passages of (`findingsOf`: its
- * finding follows the shared store's). A source is kept in one store
- * alone, so a passage of one of these is of their own store.
+ * Whether the reader's own store found anything for a recall (`findingsOf`:
+ * its finding follows the shared store's): a passage by any way, a part
+ * it holds, a term or a memory. Whatever it found shapes what the pack
+ * hands over, an item or memory of it, or only which words `notFound`
+ * lists and whether the budget cut it short (across.ts `packAcross`), so
+ * the pack then rests on what only the person may read, though none of
+ * it fit.
  */
-const ownSourcesOf = (findings: readonly Finding[]): Set<string> => {
+const ownFound = (findings: readonly Finding[]): boolean => {
   const [, own] = findings;
-  return new Set(
-    own === undefined
-      ? []
-      : [...own.words, ...own.stopWords, ...own.exact, ...own.meaning].map(
-          ({ source }) => source
-        )
-  );
+  if (own === undefined) {
+    return false;
+  }
+  return [
+    own.words,
+    own.stopWords,
+    own.terms,
+    own.exact,
+    own.capped,
+    own.meaning,
+    own.memories.words,
+    own.memories.entities,
+    own.memories.rivals,
+  ].some((found) => found.length > 0);
 };
 
 /** A person's use of memories, per store (`usedOf`), for its requests. */
@@ -1117,12 +1128,13 @@ const usedOf = async (
 };
 
 /**
- * `recallAs`'s pack, and beside it whether a passage or a memory in it is
- * of the person's own store, where everything only they may read is kept
- * (`fromOwn`): core's own bookkeeping for marking the chat it goes to
- * (private-reads.ts, turn-recall.ts), never part of what recall answers.
- * Read off what the pack holds, so it is the same for every store that
- * hands over the same pack.
+ * `recallAs`'s pack, and beside it whether the person's own store, where
+ * everything only they may read is kept, found anything for it
+ * (`fromOwn`, `ownFound`): an item or a memory in it, or only a match
+ * that decided which words it says were not found or that it was cut
+ * short. Core's own bookkeeping for marking the chat it goes to
+ * (private-reads.ts, turn-recall.ts), never part of what recall answers,
+ * nor handed to the model, code or a page.
  */
 export const recallOwnedAs = async (
   env: BrainEnv & Pick<Env, "DB" | "EMBEDDER" | "WORKSPACES">,
@@ -1159,7 +1171,6 @@ export const recallOwnedAs = async (
       said: saidOf(memory, personId),
     };
   });
-  const own = ownSourcesOf(findings);
   return {
     pack: {
       items: recalledItems(items),
@@ -1168,9 +1179,7 @@ export const recallOwnedAs = async (
       notFound,
       truncated,
     },
-    fromOwn:
-      items.some(({ source }) => own.has(source)) ||
-      recalledMemories.some(({ store }) => store === "own"),
+    fromOwn: ownFound(findings),
   };
 };
 

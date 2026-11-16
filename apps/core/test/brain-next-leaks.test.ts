@@ -278,6 +278,7 @@ const findingsIn = (
  */
 const readingSurfaces = new Set([
   "core recallAs",
+  "core recallOwnedAs",
   "core readSourceVersionAs",
   "core readInstructionFilesAs",
   "core brainStaffReport",
@@ -322,6 +323,7 @@ const reading = surfaces.filter(([name]) => readingSurfaces.has(name));
 /** The surfaces that recall, where no instruction file may ever show. */
 const recallSurfaces = new Set([
   "core recallAs",
+  "core recallOwnedAs",
   "core recallPassagesAs",
   "store recall",
   "store findPassages",

@@ -10,7 +10,7 @@ import { z } from "zod";
 import { callAppFunction } from "../src/app-functions.ts";
 import { loadRelease } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
-import { addSource, rememberAs } from "../src/brain-next.ts";
+import { addSource, recallOwnedAs, rememberAs } from "../src/brain-next.ts";
 import { appHost, inJurisdiction } from "../src/durable-objects.ts";
 import { heldStartMs } from "../src/held-starts.ts";
 import {
@@ -1174,6 +1174,70 @@ describe("what a chat writes for others once it used something only its person m
         once: heldAppCallsPage + 1,
         oldestFirst: true,
         lastHeld: `{"at":${heldAppCallsPage}}`,
+      });
+    }
+  );
+
+  it(
+    "is marked when only the recall's second pass, for the analysis's words, finds the person's own source",
+    slow,
+    async () => {
+      const depot = word();
+      const title = `second-pass-${unique()}`;
+      const notes = await notesChat((app, release) => [
+        says("Hello."),
+        writesNote(app, release, title),
+        says("It waits for you."),
+      ]);
+      const { person, chats, chat, ask, titles } = notes;
+      await ownSource(person.userId, `Depot ${depot} opens at seven.`);
+      // A first message: nothing before it to resolve, no analysis.
+      await ask(`Hello ${word()}.`);
+      // The follow-up finds nothing (thin), so its analysis is waited for,
+      // and its words alone find the person's own source.
+      chats.provider.analysisReplies.push({
+        text: JSON.stringify({ query: `When does depot ${depot} open?` }),
+        inputTokens: 40,
+        outputTokens: 10,
+      });
+      // No word of it is in the person's own source.
+      await ask(`Who keeps the ${word()} keys? Note it.`);
+
+      expect({
+        answers: await answers(chats.stub, chat.id),
+        after: await titles(),
+      }).toStrictEqual({ answers: ["held"], after: [] });
+      await eventsOf("chat.private_read", chat.id, 1);
+    }
+  );
+
+  it(
+    "counts the person's own store as used whenever its finding shaped the recall: an own match the budget cut entirely still marks",
+    slow,
+    async () => {
+      const person = await signedInApi(idp, "user");
+      const depot = word();
+      await ownSource(
+        person.userId,
+        `Depot ${depot} opens at seven. ${"The depot keeps its keys in the back office behind the counter. ".repeat(40)}`
+      );
+      const { pack, fromOwn } = await recallOwnedAs(env, person.userId, {
+        question: `When does depot ${depot} open?`,
+        budget: { tokens: 1 },
+        personal: true,
+      });
+
+      expect({
+        items: pack.items.length,
+        memories: pack.memories.length,
+        // Found, though nothing of it fits: not reported as not found.
+        depotNotFound: pack.notFound.includes(depot),
+        fromOwn,
+      }).toStrictEqual({
+        items: 0,
+        memories: 0,
+        depotNotFound: false,
+        fromOwn: true,
       });
     }
   );
