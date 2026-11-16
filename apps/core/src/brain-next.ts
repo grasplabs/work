@@ -1086,6 +1086,14 @@ const recallRequestAs = async (
 };
 
 /**
+ * What a recall's stores found (`findingsOf`): the shared store's, then
+ * the reader's own when the reader names them.
+ */
+type Findings =
+  | readonly [shared: Finding]
+  | readonly [shared: Finding, own: Finding];
+
+/**
  * What every store `request`'s reader may read from finds for it, by
  * `finding` (`find`, or `findPassages` for passages alone): the shared
  * store, and their own when the reader names them (`ownBrainOf`), the
@@ -1097,20 +1105,15 @@ const findingsOf = async (
   request: RecallRequest,
   finding: "find" | "findPassages",
   used?: Used
-): Promise<Finding[]> => {
+): Promise<Findings> => {
   const own = ownBrainOf(env, request.reader);
-  return await Promise.all([
-    brain(env)[finding](
-      used === undefined ? request : { ...request, used: used.shared }
-    ),
-    ...(own === undefined
-      ? []
-      : [
-          own[finding](
-            used === undefined ? request : { ...request, used: used.own }
-          ),
-        ]),
+  const asked = (store: MemoryStore): RecallRequest =>
+    used === undefined ? request : { ...request, used: used[store] };
+  const [shared, ownFinding] = await Promise.all([
+    brain(env)[finding](asked("shared")),
+    own?.[finding](asked("own")),
   ]);
+  return ownFinding === undefined ? [shared] : [shared, ownFinding];
 };
 
 /** `items` of a pack, each citing its source as its producer named it. */
@@ -1138,31 +1141,56 @@ const storesOf = (findings: readonly Finding[]): Map<string, MemoryStore> =>
   );
 
 /**
- * Whether the reader's own store found anything for a recall (`findingsOf`:
- * its finding follows the shared store's): a passage by any way, a part
- * it holds, a term or a memory. Whatever it found shapes what the pack
- * hands over, an item or memory of it, or only which words `notFound`
- * lists and whether the budget cut it short (across.ts `packAcross`), so
- * the pack then rests on what only the person may read, though none of
- * it fit.
+ * What a pack hands over, as one comparable value: each item's citation,
+ * text and how it was found, the memories by id, the contested facts, the
+ * words it says were not found and whether it was cut short. A memory's
+ * way of being found is left out: the model is never told it (turn-recall.ts
+ * `forModel`), and `isThin` reads a memory found by words or by entities
+ * alike.
  */
-const ownFound = (findings: readonly Finding[]): boolean => {
-  const [, own] = findings;
-  if (own === undefined) {
-    return false;
-  }
-  return [
-    own.words,
-    own.stopWords,
-    own.terms,
-    own.exact,
-    own.capped,
-    own.meaning,
-    own.memories.words,
-    own.memories.entities,
-    own.memories.rivals,
-  ].some((found) => found.length > 0);
-};
+const handedOver = ({
+  items,
+  memories,
+  contested,
+  notFound,
+  truncated,
+}: Pack): string =>
+  JSON.stringify([
+    items.map(({ source, version, position, text, found }) => [
+      source,
+      version,
+      position,
+      text,
+      found,
+    ]),
+    memories.map(({ memory }) => memory),
+    contested.map(({ about, attribute, memories: sides }) => [
+      about,
+      attribute,
+      sides,
+    ]),
+    notFound,
+    truncated,
+  ]);
+
+/**
+ * Whether `pack`, packed from `findings`, hands over anything else than
+ * the pack of the shared store's finding alone would: an item or memory
+ * of the reader's own store, the same items in another order (an own
+ * passage the budget left out still took a rank), or only a word it found
+ * that is then not said not found, or a passage of it the budget left
+ * out. Built again in memory from what was found, with no other read. An
+ * own match that changes nothing handed over (one ranked past what a way
+ * lists, say) gives nothing only the person may read.
+ */
+const differsByOwn = (
+  { question, budget }: RecallRequest,
+  [shared, own]: Findings,
+  pack: Pack
+): boolean =>
+  own !== undefined &&
+  handedOver(pack) !==
+    handedOver(packAcross(question, budget.tokens, [shared]));
 
 /** A person's use of memories, per store (`usedOf`), for its requests. */
 type Used = Record<MemoryStore, NonNullable<RecallRequest["used"]>>;
@@ -1205,19 +1233,19 @@ const usedOf = async (
 };
 
 /**
- * `recallAs`'s pack, and beside it whether the person's own store, where
- * everything only they may read is kept, found anything for it
- * (`fromOwn`, `ownFound`): an item or a memory in it, or only a match
- * that decided which words it says were not found or that it was cut
- * short. Core's own bookkeeping for marking the chat it goes to
- * (private-reads.ts, turn-recall.ts), never part of what recall answers,
- * nor handed to the model, code or a page.
+ * `recallAs`'s pack, with what it was packed from: the request, what each
+ * store found and the pack as the stores' contract gives it.
  */
-export const recallOwnedAs = async (
+const packedAs = async (
   env: BrainEnv & ReaderEnv & Pick<Env, "EMBEDDER" | "WORKSPACES">,
   personId: string,
   recall: Recall
-): Promise<{ pack: RecalledPack; fromOwn: boolean }> => {
+): Promise<{
+  pack: RecalledPack;
+  request: RecallRequest;
+  findings: Findings;
+  packed: Pack;
+}> => {
   // Ranked by their use only where the answer reaches them alone: a
   // recall as their teams or the company (a channel, a thread, a turn
   // they didn't start, code) is ordered as for anyone, and
@@ -1229,11 +1257,8 @@ export const recallOwnedAs = async (
       : undefined,
   ]);
   const findings = await findingsOf(env, request, "find", used);
-  const { items, memories, contested, notFound, truncated } = packAcross(
-    request.question,
-    request.budget.tokens,
-    findings
-  );
+  const packed = packAcross(request.question, request.budget.tokens, findings);
+  const { items, memories, contested, notFound, truncated } = packed;
   const stores = storesOf(findings);
   const recalledMemories = memories.map((memory) => {
     const store = stores.get(memory.memory);
@@ -1256,8 +1281,32 @@ export const recallOwnedAs = async (
       notFound,
       truncated,
     },
-    fromOwn: ownFound(findings),
+    request,
+    findings,
+    packed,
   };
+};
+
+/**
+ * `recallAs`'s pack, and beside it whether the person's own store, where
+ * everything only they may read is kept, made it differ from what the
+ * shared store alone would hand over (`fromOwn`, `differsByOwn`): an item
+ * or a memory of it, or only which words it says were not found or that
+ * it was cut short. Core's own bookkeeping for marking the chat it goes to
+ * (private-reads.ts, turn-recall.ts), never part of what recall answers,
+ * nor handed to the model, code or a page.
+ */
+export const recallOwnedAs = async (
+  env: BrainEnv & ReaderEnv & Pick<Env, "EMBEDDER" | "WORKSPACES">,
+  personId: string,
+  recall: Recall
+): Promise<{ pack: RecalledPack; fromOwn: boolean }> => {
+  const { pack, request, findings, packed } = await packedAs(
+    env,
+    personId,
+    recall
+  );
+  return { pack, fromOwn: differsByOwn(request, findings, packed) };
 };
 
 /**
@@ -1284,7 +1333,7 @@ export const recallAs = async (
   personId: string,
   recall: Recall
 ): Promise<RecalledPack> => {
-  const { pack } = await recallOwnedAs(env, personId, recall);
+  const { pack } = await packedAs(env, personId, recall);
   return pack;
 };
 
