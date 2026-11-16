@@ -222,6 +222,7 @@
   "@grasp-os/core test/brain-next-exports.test.ts": 1.2,
   "@grasp-os/core test/brain-next-extraction.test.ts": 0.5,
   "@grasp-os/core test/brain-next-interviews.test.ts": 20.2,
+  "@grasp-os/core test/brain-next-kickoff.test.ts": 1.2,
   "@grasp-os/core test/brain-next-leaks.test.ts": 70.3,
   "@grasp-os/core test/brain-next-origins.test.ts": 3.6,
   "@grasp-os/core test/brain-next-own-work.test.ts": 0.8,
