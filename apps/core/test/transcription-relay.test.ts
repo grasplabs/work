@@ -13,6 +13,7 @@ import { allEvents, logHead, eventsAfter } from "./audit-events.ts";
 import { platformOpenAiKey } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import {
+  accountOf,
   onLink,
   openLinkAs,
   participate,
@@ -48,7 +49,7 @@ import { routed, signedInWithRole, unique } from "./sign-in.ts";
 // - Audio kept anywhere: the store, the database, the audit log.
 // - Listening on after the link or the admin no longer may: the person
 //   taken off the list, the onboarding paused, the person withdrawing
-//   (GRA-329, T5), the admin made a member.
+//   (GRA-329, T5) or signing out, the admin made a member.
 // - Sockets opened side by side on one link, each hearing a day's budget.
 // - Listening with a model the gateway or the rules don't let it use
 //   (GRA-1064). It is charged to Grasp's own key, never the
@@ -694,6 +695,7 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
     ["the person is taken off the list", "removed", "interview.link_invalid"],
     ["the onboarding is paused", "paused", "interview.paused"],
     ["the person withdraws", "withdrawn", "interview.withdrawn"],
+    ["the person signs out", "signed_out", "interview.sign_in"],
     ["the admin is made a member", "demoted", "role.forbidden"],
   ] as const)(
     "stops listening, upstream too, once %s while the socket is open",
@@ -725,6 +727,10 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
           await store.setPaused(true, by);
         } else if (change === "withdrawn") {
           await onLink({ action: "withdraw", ...ada });
+        } else if (change === "signed_out") {
+          await env.DB.prepare("DELETE FROM sessions WHERE user_id = ?")
+            .bind(await accountOf(ada))
+            .run();
         } else {
           await env.DB.prepare("UPDATE members SET role = ? WHERE user_id = ?")
             .bind("user", admin?.userId ?? "")

@@ -77,9 +77,9 @@ import type { Took } from "./store.ts";
 //   speech endpoint. Nothing reaches the upstream before that, and nothing
 //   but `start` is read until it.
 // - Keep listening once that no longer holds (GRA-361, L7, L8): the link
-//   or the admin's session is checked again every `sessionRecheckMs`
-//   while the socket is open, as `/rpc`'s connections are, and a socket
-//   ends once it fails, or once the check can't be made.
+//   and its session, or the admin's session, is checked again every
+//   `sessionRecheckMs` while the socket is open, as `/rpc`'s connections
+//   are, and a socket ends once it fails, or once the check can't be made.
 // - Lend an admin's cookie to another site: browsers send cookies with
 //   any WebSocket upgrade, so the upgrade must come from the deployment's
 //   own origin (`isOwnOrigin`), as `/rpc`'s.
@@ -158,12 +158,21 @@ interface Hearer {
   still: () => Promise<CodedError | undefined>;
 }
 
-/** Why someone's link no longer lets them listen, or `undefined`. */
+/**
+ * Why someone's link no longer lets them listen, or `undefined`: their
+ * session, as the upgrade carried it, ended or is someone else's
+ * (interview-caller.ts), or the link no longer lets them.
+ */
 const linkStill = async (
   env: Env,
+  headers: Headers,
   secretMark: string,
   account: string
 ): Promise<CodedError | undefined> => {
+  const caller = await interviewCaller(env, headers);
+  if (typeof caller === "string" || caller.account !== account) {
+    return interviewErrors.create("interview.sign_in");
+  }
   const found = await onboardingStore(env).transcriptionStill(
     secretMark,
     account
@@ -221,7 +230,7 @@ const onLink = async (
     // As a line said on a link: by the system, never in anyone's name.
     by: { type: "system" },
     person,
-    still: async () => await linkStill(env, secretMark, account),
+    still: async () => await linkStill(env, headers, secretMark, account),
   };
 };
 
