@@ -359,6 +359,12 @@ const rowsOf = async (
     state.storage.sql.exec(sql, ...bindings).toArray()
   );
 
+/** How many rows `sql` reads of the onboarding's own store. */
+const rowCount = async (sql: string): Promise<number> => {
+  const rows = await rowsOf(sql);
+  return rows.length;
+};
+
 /** Every row of the opinions' own tables that names `person`. */
 const rowsNaming = async (person: string) => ({
   backers: await rowsOf(
@@ -461,6 +467,31 @@ const sharedInvoice = () => ({
   ...said("v1", "invoice"),
   share: "team" as const,
 });
+
+/**
+ * Runs the company's opinions as the alarm would over the next hour,
+ * with `model` answering: each step at once, and a step that failed
+ * again only once its wait (a minute, five, thirty) is over.
+ */
+const overTheHour = async (
+  model: (
+    requests: readonly SentRequest[]
+  ) => ProviderReply | Promise<ProviderReply>
+) => {
+  const store = onboardingStore(env);
+  const start = Date.now();
+  return await answeringWith(model, async () => {
+    for (const minutes of [0, 2, 7, 40]) {
+      for (let step = 0; step < 6; step += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- one step at a time, as the alarm takes them
+        const did = await store.opinionsNext(start + minutes * 60_000);
+        if (did === null || did === "opinions") {
+          break;
+        }
+      }
+    }
+  });
+};
 
 /**
  * Three teams of three, everyone telling: five across the three teams
@@ -1133,6 +1164,137 @@ describe(
         invoiceInPrompt: sent.includes("invoice"),
         page: await pageOpinions(),
       }).toStrictEqual({ asked: true, invoiceInPrompt: false, page: [] });
+    });
+
+    it("check every line a team's view cites however many a team says: three people of seventy lines each hold up no opinion", async () => {
+      const ids = await company([3, 3, 3]);
+      const [finance = [], sales = [], it3 = []] = ids;
+      for (const person of finance) {
+        const lines = Array.from({ length: 69 }, (_, at) =>
+          anonymous(
+            fact(`v${at}`, "wish", `The invoice screen point ${at} is clunky.`)
+          )
+        );
+        // oxlint-disable-next-line no-await-in-loop -- one interview at a time
+        await agree(person, [...lines, said("v70", "invoice")]);
+      }
+      for (const person of [sales[0], sales[1]]) {
+        // oxlint-disable-next-line no-await-in-loop -- one interview at a time
+        await agree(person ?? "", [said("v1", "invoice")]);
+      }
+      for (const person of [sales[2], ...it3]) {
+        // oxlint-disable-next-line no-await-in-loop -- one interview at a time
+        await agree(person ?? "", [said("v1", "meeting")]);
+      }
+      const { requests } = await overTheHour(
+        opinionsModel({
+          views: [
+            { when: "invoice", view: invoiceView },
+            { when: "meeting", view: meetingView },
+          ],
+          opinions: [invoices],
+          // Only the line about re-typing says it: the screen's don't.
+          says: (claim, line) =>
+            claim === invoiceView ? line.includes("waste") : true,
+        })
+      );
+      expect({
+        checked: requests.length > 210,
+        page: await pageOpinions(),
+        backers: await backerCount(),
+      }).toStrictEqual({ checked: true, page: [invoices.text], backers: 5 });
+    });
+
+    it("go on without a team whose candidates keep failing: given up on until its lines change, the other teams and the merge still make the opinion", async () => {
+      const ids = await company([3, 3, 3]);
+      const [finance = [], sales = [], it3 = []] = ids;
+      for (const person of finance) {
+        // oxlint-disable-next-line no-await-in-loop -- one interview at a time
+        await agree(person, [said("v1", "invoice", " in the ledger")]);
+      }
+      for (const person of [...sales, it3[0], it3[1]]) {
+        // oxlint-disable-next-line no-await-in-loop -- one interview at a time
+        await agree(person ?? "", [said("v1", "invoice")]);
+      }
+      await agree(it3[2] ?? "", [said("v1", "meeting")]);
+      await overTheHour((requests) => {
+        const lines = JSON.stringify(dataOf(requests.at(-1), "lines") ?? null);
+        return lines.includes("ledger")
+          ? { status: 400, errorType: "invalid_request_error" }
+          : invoicesModel(requests);
+      });
+      const backers = await backersOf(invoices.text);
+      const team =
+        finance[0] === undefined
+          ? ""
+          : (listed.roster?.people.find(({ id }) => id === finance[0])?.team ??
+            "");
+      const given = await rowsOf(
+        "SELECT input FROM opinion_inputs WHERE key = ?",
+        `team:${team}`
+      );
+      expect({
+        page: await pageOpinions(),
+        finance: backers.filter((person) => finance.includes(person)),
+        backers: backers.length,
+        givenUp: given.map(({ input }) =>
+          String(input).startsWith("given-up:")
+        ),
+      }).toStrictEqual({
+        page: [invoices.text],
+        finance: [],
+        backers: 5,
+        givenUp: [true],
+      });
+    });
+
+    /** The staff list with the team of `person` switched off by the admin. */
+    const offWith = (person: string): Roster => {
+      const { roster } = listed;
+      if (roster === null) {
+        throw new Error("No staff list was saved.");
+      }
+      const team = roster.people.find(({ id }) => id === person)?.team;
+      return {
+        ...roster,
+        teams: roster.teams.map((each) =>
+          each.id === team ? { ...each, off: true } : each
+        ),
+      };
+    };
+
+    it("count nobody of a team switched off: the company left under seven, the opinion is out as the save commits", async () => {
+      const { ids, everyone } = await threeTeamsTold();
+      await formOpinions(invoicesModel);
+      await handOverNow();
+      const reader = await accountOfPerson(everyone.at(-1) ?? "");
+      const before = await recalledCount(reader, "invoices");
+      await onboardingStore(env).saveRoster(offWith(ids[1]?.[0] ?? ""), by);
+      expect({
+        before,
+        after: await recalledCount(reader, "invoices"),
+        page: await pageOpinions(),
+      }).toStrictEqual({ before: 1, after: 0, page: [] });
+    });
+
+    it("keep nothing taken from anyone's lines while fewer than seven could back an opinion", async () => {
+      const { ids } = await threeTeamsTold();
+      await formOpinions(invoicesModel);
+      const kept = async () => ({
+        candidates: await rowCount("SELECT id FROM opinion_candidates"),
+        inputs: await rowCount("SELECT key FROM opinion_inputs"),
+        people: await rowCount("SELECT person FROM opinion_people"),
+      });
+      const before = await kept();
+      await onboardingStore(env).saveRoster(offWith(ids[1]?.[0] ?? ""), by);
+      await onboardingStore(env).opinionsNext();
+      expect({
+        before: Object.values(before).map((count) => count > 0),
+        after: await kept(),
+      }).toStrictEqual({
+        before: [true, true, true],
+        after: { candidates: 0, inputs: 0, people: 0 },
+      });
     });
   }
 );

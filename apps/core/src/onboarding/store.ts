@@ -201,7 +201,9 @@ import {
   candidateInputOf,
   companyMayHaveOpinions,
   companyOpinions,
-  mergeChecks,
+  givenUpPrefix,
+  OpinionTeamError,
+  opinionChecks,
   mergeInputOf,
   opinionBackersMin,
   teamCandidates,
@@ -620,7 +622,7 @@ const auditRetryMs = { first: 5000, most: 15 * 60 * 1000 };
 
 /** What one model call took, to count for the onboarding. */
 export interface Took {
-  purpose: "reading" | "interviews" | "drawing";
+  purpose: "reading" | "interviews" | "drawing" | "opinions";
   /** The model, or `voice` for Stephen's. */
   model: string;
   tokensIn?: number;
@@ -7311,9 +7313,29 @@ export class Onboarding extends DurableObject<Env> {
         error: error instanceof Error ? error.name : "unknown",
       });
       const wait = drawRetryMs[tries - 1];
+      if (wait === undefined && error instanceof OpinionTeamError) {
+        // One team given up on until its lines change: the run goes on
+        // with the other teams and the merge, never held up by it.
+        const { team, input } = error;
+        this.ctx.storage.transactionSync(() => {
+          this.#db
+            .delete(drawFailures)
+            .where(eq(drawFailures.item, opinionsItem))
+            .run();
+          this.#db
+            .insert(opinionInputs)
+            .values({ key: `team:${team}`, input: `${givenUpPrefix}${input}` })
+            .onConflictDoUpdate({
+              target: opinionInputs.key,
+              set: { input: `${givenUpPrefix}${input}` },
+            })
+            .run();
+        });
+        return `${opinionsItem}:${team}`;
+      }
       if (wait === undefined) {
-        // Given up until five more change: what it took in counts as
-        // merged, so the next run starts from them.
+        // The merge given up until five more change: what it took in
+        // counts as merged, so the next run starts from them.
         this.#opinionsRunEnded();
         return opinionsItem;
       }
@@ -7393,7 +7415,10 @@ export class Onboarding extends DurableObject<Env> {
       };
       // oxlint-disable-next-line no-await-in-loop -- a hash a team, until one changed
       const input = await candidateInputOf(brief);
-      if (formed.get(`team:${team}`) === input) {
+      const held = formed.get(`team:${team}`);
+      // Put together from this input already, or given up on for it after
+      // its tries: either way nothing to ask until its lines change.
+      if (held === input || held === `${givenUpPrefix}${input}`) {
         continue;
       }
       // Whose interviews it is put together from, before anything is
@@ -7401,13 +7426,18 @@ export class Onboarding extends DurableObject<Env> {
       const began = this.#interviewsOf(
         brief.tellers.map(({ person }) => person)
       );
-      // oxlint-disable-next-line no-await-in-loop -- one team a run
-      const candidates = await teamCandidates(
-        brief,
-        checksFor(this.env, (took) => {
-          this.meter(took, at);
-        })
-      );
+      let candidates: Awaited<ReturnType<typeof teamCandidates>>;
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- one team a run
+        candidates = await teamCandidates(
+          brief,
+          opinionChecks(this.env, (took) => {
+            this.meter(took, at);
+          })
+        );
+      } catch (error) {
+        throw new OpinionTeamError(team, input, error);
+      }
       // oxlint-disable-next-line no-await-in-loop -- one team a run
       const ids = await Promise.all(
         candidates.map(async ({ text }) => await candidateId(team, text))
@@ -7493,7 +7523,7 @@ export class Onboarding extends DurableObject<Env> {
     ]);
     const opinions = await companyOpinions(
       brief,
-      mergeChecks(this.env, (took) => {
+      opinionChecks(this.env, (took) => {
         this.meter(took, at);
       })
     );

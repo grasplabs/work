@@ -259,7 +259,7 @@ const askCareful = async <T>(
     maxTokens: 8000,
   });
   count({
-    purpose: "drawing",
+    purpose: "opinions",
     model,
     tokensIn: usage.inputTokens,
     tokensCached: usage.cacheRead,
@@ -417,12 +417,43 @@ const saysOnlyWhatFiveSaid = (
   );
 };
 
-/** The checks a merge makes: the quick model, how what it took is counted, and no fixed most (pruned by what can reach five). */
-export const mergeChecks = (env: Env, count: Checks["count"]): Checks => ({
+/**
+ * The checks putting the company's opinions together makes: the quick
+ * model, what it took counted as the opinions' (`opinions`), and no fixed
+ * most. A team's step checks each line the model cited once for each view
+ * citing it; the merge each candidate cited, never one whose opinion can't
+ * reach five. A fixed most stopped every opinion of the company whenever
+ * one team said much (review of #2379).
+ */
+export const opinionChecks = (env: Env, count: Checks["count"]): Checks => ({
   env,
-  count,
+  count: (took) => {
+    count({ ...took, purpose: "opinions" });
+  },
   left: Number.POSITIVE_INFINITY,
 });
+
+/** What a run of the opinions keeps for a team it gave up on (`opinion_inputs`): skipped until its lines change. */
+export const givenUpPrefix = "given-up:";
+
+/**
+ * Thrown when one team's candidates can't be put together: which team,
+ * and the input it was given, so the run can give up on that team alone
+ * once it has been tried enough, and go on with the others and the merge.
+ */
+export class OpinionTeamError extends Error {
+  override name = "OpinionTeamError";
+
+  readonly team: string;
+
+  readonly input: string;
+
+  constructor(team: string, input: string, cause: unknown) {
+    super("A team's candidates for the company's opinions failed.", { cause });
+    this.team = team;
+    this.input = input;
+  }
+}
 
 /**
  * The company's opinions, merged by the careful model from every team's
