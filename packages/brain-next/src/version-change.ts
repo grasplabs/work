@@ -1,10 +1,11 @@
-import { factSidesShown } from "./contract.ts";
+import { factSidesShown, versionChangeParts } from "./contract.ts";
 import type {
   ChangedEntity,
   ChangedMemory,
   Reader,
   VersionChange,
   VersionChangeCursor,
+  VersionChangePart,
 } from "./contract.ts";
 import { namedOf } from "./entities.ts";
 import {
@@ -12,6 +13,8 @@ import {
   memoriesSql,
   memoryOf,
   memoryRows,
+  outOnlySql,
+  readableKeysSql,
   retiredSql,
   versionVisibleSql,
   visibleSql,
@@ -32,22 +35,124 @@ import { readableSql } from "./reader-sets.ts";
 // nothing, contests nothing and names nothing.
 
 /**
+ * `?1` the source, `?6` the version: the version from which an earlier
+ * memory can still be this version's to replace (`since`), as the reader
+ * sees it as of `?4`: the latest earlier version of the source marked
+ * fully extracted that they may read (memories.ts `extractedSql`), since
+ * that mark ended every memory before it, before this version was added
+ * (a mark is written only while its version is current); 0 for a thread,
+ * whose marks end nothing, and for a source with no such mark.
+ */
+const sinceSql = `since AS MATERIALIZED (
+  SELECT coalesce((
+    SELECT mark.version FROM memory_extractions AS mark
+    WHERE mark.source = ?1 AND mark.version < ?6 AND mark.at <= ?4
+      AND mark.readers IN (${readableKeysSql})
+      AND ${versionVisibleSql("mark.source", "mark.version")}
+      AND NOT EXISTS (
+        SELECT 1 FROM source_subjects AS kept
+        WHERE kept.source = ?1 AND kept.thread = 1
+      )
+    ORDER BY mark.version DESC
+    LIMIT 1
+  ), 0) AS version
+),
+-- The first row of the source's memories since then: every one of them is
+-- at or after it, so a seek of a lineage's memories starts there.
+since_row AS MATERIALIZED (
+  SELECT coalesce(min(row), 0) AS row FROM memories
+  WHERE source = ?1 AND version >= (SELECT version FROM since)
+)`;
+
+/**
+ * `?1` the source, `?6` the version: the memories the version may have
+ * changed, bounded by what it touched, never the source's whole history:
+ * its own; the earlier ones of its source each of its own can end (a
+ * newer memory of the lineage, `newerSql`: the same entity and attribute,
+ * and for one of many or of none the same value, one seek of
+ * `memories_lineage_value_idx` each); when it is marked fully extracted,
+ * every earlier one; and while it is its source's current version, judged,
+ * its source's out memories (`memory_outs`). Of the earlier ones, those
+ * since `since` alone. None when the reader may not read the version.
+ * Which of them it changed is decided per reader (`partSql`).
+ */
+const touchedSql = `
+SELECT row FROM (
+  SELECT row FROM memories WHERE source = ?1 AND version = ?6
+  UNION
+  SELECT earlier.row FROM memories AS mine
+  CROSS JOIN memories AS earlier
+    ON earlier.entity = mine.entity AND earlier.attribute = mine.attribute
+    AND earlier.lineage = mine.lineage
+    AND earlier.row >= (SELECT row FROM since_row)
+  WHERE mine.source = ?1 AND mine.version = ?6 AND mine.one_value = 1
+    AND earlier.lineage_order < ?6
+    AND earlier.lineage_order >= (SELECT version FROM since)
+  UNION
+  SELECT earlier.row FROM memories AS mine
+  CROSS JOIN memories AS earlier
+    ON earlier.entity = mine.entity AND earlier.attribute IS mine.attribute
+    AND earlier.lineage = mine.lineage AND earlier.value_key = mine.value_key
+    AND earlier.row >= (SELECT row FROM since_row)
+  WHERE mine.source = ?1 AND mine.version = ?6 AND mine.one_value = 0
+    AND earlier.lineage_order < ?6
+    AND earlier.lineage_order >= (SELECT version FROM since)
+  UNION
+  SELECT row FROM memories
+  WHERE source = ?1 AND version < ?6
+    AND version >= (SELECT version FROM since)
+    AND EXISTS (
+      SELECT 1 FROM memory_extractions WHERE source = ?1 AND version = ?6
+    )
+  UNION
+  SELECT gone.row FROM memories AS gone
+  CROSS JOIN memory_outs AS out ON out.memory = gone.row
+  WHERE gone.source = ?1 AND gone.version < ?6
+    AND gone.version >= (SELECT version FROM since)
+    AND EXISTS (
+      SELECT 1 FROM current_versions AS pointer
+      CROSS JOIN source_versions AS current ON current.row = pointer.version_row
+      WHERE pointer.source = ?1 AND pointer.judged_row = pointer.version_row
+        AND current.version = ?6
+    )
+)
+WHERE ${versionVisibleSql("?1", "?6")}`;
+
+/** The parts of a change, by their place in a page: added, replaced, out. */
+const partOrder = { added: 0, ended: 1, out: 2 } as const;
+
+/**
+ * Which part of version `?6`'s change the memory `m` is, as the reader
+ * sees it: one of the version's own (added); an earlier one it replaced
+ * (memories.ts `endedByVersionSql`); while it is current, an earlier one
+ * that left only because its text no longer holds its quote
+ * (`outOnlySql`); or none.
+ */
+const partSql = `CASE
+  WHEN m.version = ?6 THEN ${partOrder.added}
+  WHEN judged.ended_at IS NOT NULL AND ${endedByVersionSql("?6")} THEN ${partOrder.ended}
+  WHEN judged.ended_at IS NOT NULL AND ${outOnlySql("?6")} THEN ${partOrder.out}
+END`;
+
+/**
  * `?1` the source, `?6` the version, `?7` 1 to go on after the memory
- * whose place is `?8` (0 added, 1 ended), `?9` (when it was learned) and
- * `?10` (its id): the version's memories, then the earlier memories of
- * its source it ended, as the reader sees them as of `?4`; none when they
- * may not read that version. Its cost grows with the source's history:
- * every earlier memory of it is judged.
+ * whose place is `?8` (its part's order), `?9` (when it was learned) and
+ * `?10` (its id): what the version changed, as the reader sees it as of
+ * `?4`, by part, then when each was learned, then id; at most `?5`.
  */
 const changeSql = memoriesSql({
-  base: `SELECT row FROM memories
-    WHERE source = ?1 AND version <= ?6 AND ${versionVisibleSql("?1", "?6")}`,
-  filter: `(m.version = ?6
-    OR (judged.ended_at IS NOT NULL AND ${endedByVersionSql("?6")}))
-  AND (?7 = 0 OR (m.version < ?6) > ?8 OR ((m.version < ?6) = ?8 AND (
-    m.learned_at > ?9 OR (m.learned_at = ?9 AND m.id > ?10)
-  )))`,
-  order: "(m.version < ?6), m.learned_at, m.id",
+  prelude: sinceSql,
+  base: touchedSql,
+  filter: "1",
+  order: "part, learned_at, id",
+  columns: `, ${partSql} AS part`,
+  outer: `SELECT * FROM rows
+WHERE part IS NOT NULL
+  AND (?7 = 0 OR part > ?8 OR (part = ?8 AND (
+    learned_at > ?9 OR (learned_at = ?9 AND id > ?10)
+  )))
+ORDER BY part, learned_at, id
+LIMIT ?5`,
 });
 
 /**
@@ -62,31 +167,56 @@ const rivalsSql = memoriesSql({
   order: "confirmation IS NULL, m.learned_at DESC, m.id DESC",
 });
 
+/** A memory `m` the reader may read, learned and not retired by `?4`. */
+const keptSql = `m.learned_at <= ?4 AND NOT ${retiredSql("m", "?4")} AND ${visibleSql("m")}`;
+
+/** A mention `m` before `first`'s (when learned, then id). */
+const beforeSql = `(m.learned_at < first.learned
+  OR (m.learned_at = first.learned AND m.id < first.id))`;
+
 /**
  * `?1` the entities' rows (JSON), `?4` the moment read at, `?5` the source
- * and `?6` the version: of each, whether the first memory the reader may
- * read that mentions it, learned and not retired by then (by when it was
- * learned, then its id: as entities.ts stands an entity by its first
- * mention), rests on that version.
+ * and `?6` the version: those whose first memory the reader may read that
+ * mentions them (learned and not retired by then; by when it was learned,
+ * then its id, as entities.ts stands an entity by its first mention)
+ * rests on that version: the version's own first such mention of each,
+ * and no such mention before it. Asked as "none before", which stops at
+ * the first found, never ordering every mention of an entity mentioned
+ * often.
  */
 const firstSeenSql = `
-WITH ${readableSql}
-SELECT asked.value AS entity, (
-  SELECT mention.source IS ?5 AND mention.version IS ?6 FROM (
-    SELECT m.source AS source, m.version AS version, m.learned_at AS learned,
-      m.id AS id
-    FROM memories AS m
-    WHERE m.entity = asked.value AND m.learned_at <= ?4
-      AND NOT ${retiredSql("m", "?4")} AND ${visibleSql("m")}
-    UNION ALL
-    SELECT m.source, m.version, m.learned_at, m.id FROM memories AS m
-    WHERE m.object = asked.value AND m.learned_at <= ?4
-      AND NOT ${retiredSql("m", "?4")} AND ${visibleSql("m")}
-  ) AS mention
-  ORDER BY mention.learned, mention.id
-  LIMIT 1
-) AS first_seen
-FROM json_each(?1) AS asked`;
+WITH ${readableSql},
+mentions AS (
+  SELECT asked.value AS entity, m.learned_at AS learned, m.id AS id
+  FROM json_each(?1) AS asked
+  CROSS JOIN memories AS m ON m.source = ?5 AND m.version = ?6
+  WHERE (m.entity = asked.value OR m.object = asked.value) AND ${keptSql}
+),
+first AS (
+  SELECT entity, learned, id FROM (
+    SELECT entity, learned, id, row_number() OVER (
+      PARTITION BY entity ORDER BY learned, id
+    ) AS place FROM mentions
+  ) WHERE place = 1
+)
+SELECT first.entity AS entity FROM first
+WHERE NOT EXISTS (
+    SELECT 1 FROM memories AS m
+    WHERE m.entity = first.entity AND ${beforeSql} AND ${keptSql}
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM memories AS m
+    WHERE m.object = first.entity AND ${beforeSql} AND ${keptSql}
+  )`;
+
+/** The part of a row of `changeSql`. */
+const partOf = (row: MemoryRow): VersionChangePart => {
+  const found = versionChangeParts.find((part) => partOrder[part] === row.part);
+  if (found === undefined) {
+    throw new Error("A memory of a change in no part");
+  }
+  return found;
+};
 
 /** What `readVersionChange` is asked with, checked. */
 export interface VersionChangeAsked {
@@ -153,7 +283,7 @@ const entitiesOf = (
     .toArray();
   const firstSeen = new Set(
     sql
-      .exec<{ entity: number; first_seen: number | null }>(
+      .exec<{ entity: number }>(
         firstSeenSql,
         JSON.stringify(found.map(({ row }) => row)),
         reader.person,
@@ -163,7 +293,7 @@ const entitiesOf = (
         version
       )
       .toArray()
-      .flatMap(({ entity, first_seen: first }) => (first === 1 ? [entity] : []))
+      .map(({ entity }) => entity)
   );
   const { entities } = namedOf(sql, found, reader, at);
   return entities.map((entity, index) => ({
@@ -203,15 +333,15 @@ export const readVersionChange = (
     limit + 1,
     version,
     after === undefined ? 0 : 1,
-    after?.part === "ended" ? 1 : 0,
+    after === undefined ? 0 : partOrder[after.part],
     after?.learnedAt.getTime() ?? 0,
     after?.memory ?? ""
   );
   const page = rows.slice(0, limit);
   const named: MemoryRow[] = [...page];
   const memories = page.map((row): ChangedMemory => {
-    const part = row.version === version ? "added" : "ended";
-    if (part === "ended" || row.contested !== 1) {
+    const part = partOf(row);
+    if (part !== "added" || row.contested !== 1) {
       return { part, memory: memoryOf(row), rivals: [], moreRivals: false };
     }
     const { rivals, more } = rivalsOf(sql, row, reader, at);

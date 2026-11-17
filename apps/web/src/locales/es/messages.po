@@ -90,10 +90,6 @@ msgstr "{about} tiene {open, plural, one {# decisión abierta} other {# decision
 msgid "{account} on {provider}"
 msgstr "{account} en {provider}"
 
-#: src/brain/learned-section.tsx
-msgid "{addedCount, plural, one {This version added # memory.} other {This version added # memories.}}"
-msgstr "{addedCount, plural, one {Esta versión añadió # recuerdo.} other {Esta versión añadió # recuerdos.}}"
-
 #: src/brain/brain.ts
 msgid "{ai, select, tool {An AI tool, as the team said it} builtIn {AI built in, as the team said it} other {No AI, as the team said it}}"
 msgstr "{ai, select, tool {Una herramienta de IA, según el equipo} builtIn {Con IA integrada, según el equipo} other {Sin IA, según el equipo}}"
@@ -245,10 +241,6 @@ msgstr "{connection}, {resource} ({tool})"
 #: src/projects/project-counts.tsx
 msgid "{connections, plural, one {# connection} other {# connections}}"
 msgstr "{connections, plural, one {# conexión} other {# conexiones}}"
-
-#: src/brain/learned-section.tsx
-msgid "{contestedCount, plural, one {Sources disagree on # memory this version added.} other {Sources disagree on # memories this version added.}}"
-msgstr "{contestedCount, plural, one {Las fuentes no coinciden en # recuerdo que añadió esta versión.} other {Las fuentes no coinciden en # recuerdos que añadió esta versión.}}"
 
 #: src/brain/brain-atlas.ts
 msgid "{conversations, plural, one {# conversation} other {# conversations}}"
@@ -516,10 +508,6 @@ msgstr "{each, plural, one {# hora a la semana} other {# horas a la semana}}"
 msgid "{each} a run"
 msgstr "{each} por ejecución"
 
-#: src/brain/learned-section.tsx
-msgid "{endedCount, plural, one {This version replaced # memory from an earlier version.} other {This version replaced # memories from earlier versions.}}"
-msgstr "{endedCount, plural, one {Esta versión sustituyó # recuerdo de una versión anterior.} other {Esta versión sustituyó # recuerdos de versiones anteriores.}}"
-
 #: src/workflows/trigger-description.ts
 msgid "{event}, at {account}"
 msgstr "{event}, en {account}"
@@ -693,6 +681,38 @@ msgstr "{live} de {count}"
 #: src/onboarding/setup-steps.tsx
 msgid "{mapped, plural, one {One piece of work is mapped and ready for you.} other {# pieces of work are mapped and ready for you.}}"
 msgstr "{mapped, plural, one {Un trabajo está mapeado y listo para ti.} other {# trabajos están mapeados y listos para ti.}}"
+
+#: src/brain/learned-section.tsx
+msgid "{memories, plural, one {# memory from an earlier version is no longer in this source.} other {# memories from earlier versions are no longer in this source.}}"
+msgstr "{memories, plural, one {# recuerdo de una versión anterior ya no está en esta fuente.} other {# recuerdos de versiones anteriores ya no están en esta fuente.}}"
+
+#: src/brain/learned-section.tsx
+msgid "{memories, plural, one {# memory this version added is contradicted elsewhere.} other {# memories this version added are contradicted elsewhere.}}"
+msgstr "{memories, plural, one {# recuerdo que añadió esta versión se contradice en otra parte.} other {# recuerdos que añadió esta versión se contradicen en otra parte.}}"
+
+#: src/brain/learned-section.tsx
+msgid "{memories, plural, one {So far, # memory from an earlier version is no longer in this source.} other {So far, # memories from earlier versions are no longer in this source.}}"
+msgstr "{memories, plural, one {Hasta ahora, # recuerdo de una versión anterior ya no está en esta fuente.} other {Hasta ahora, # recuerdos de versiones anteriores ya no están en esta fuente.}}"
+
+#: src/brain/learned-section.tsx
+msgid "{memories, plural, one {So far, # memory this version added is contradicted elsewhere.} other {So far, # memories this version added are contradicted elsewhere.}}"
+msgstr "{memories, plural, one {Hasta ahora, # recuerdo que añadió esta versión se contradice en otra parte.} other {Hasta ahora, # recuerdos que añadió esta versión se contradicen en otra parte.}}"
+
+#: src/brain/learned-section.tsx
+msgid "{memories, plural, one {So far, this version added # memory.} other {So far, this version added # memories.}}"
+msgstr "{memories, plural, one {Hasta ahora, esta versión añadió # recuerdo.} other {Hasta ahora, esta versión añadió # recuerdos.}}"
+
+#: src/brain/learned-section.tsx
+msgid "{memories, plural, one {So far, this version replaced # memory from an earlier version.} other {So far, this version replaced # memories from earlier versions.}}"
+msgstr "{memories, plural, one {Hasta ahora, esta versión sustituyó # recuerdo de una versión anterior.} other {Hasta ahora, esta versión sustituyó # recuerdos de versiones anteriores.}}"
+
+#: src/brain/learned-section.tsx
+msgid "{memories, plural, one {This version added # memory.} other {This version added # memories.}}"
+msgstr "{memories, plural, one {Esta versión añadió # recuerdo.} other {Esta versión añadió # recuerdos.}}"
+
+#: src/brain/learned-section.tsx
+msgid "{memories, plural, one {This version replaced # memory from an earlier version.} other {This version replaced # memories from earlier versions.}}"
+msgstr "{memories, plural, one {Esta versión sustituyó # recuerdo de una versión anterior.} other {Esta versión sustituyó # recuerdos de versiones anteriores.}}"
 
 #: src/workflows/saved-ago.tsx
 msgid "{minutes, plural, one {Saved # min ago} other {Saved # min ago}}"
@@ -2501,10 +2521,6 @@ msgstr "Otra plataforma"
 msgctxt "how search found a memory"
 msgid "Another side of a disputed fact"
 msgstr "Otra versión de un hecho en disputa"
-
-#: src/brain/learned-section.tsx
-msgid "Another source says: {said}"
-msgstr "Otra fuente dice: {said}"
 
 #: src/activity/pending.tsx
 msgid "Another version of this App was published since this list was read. The list now shows it: review that version, then approve again."
@@ -4331,6 +4347,10 @@ msgstr "Fin del contrato"
 msgctxt "what the Brain remembers about something"
 msgid "Contract value"
 msgstr "Valor del contrato"
+
+#: src/brain/learned-section.tsx
+msgid "Contradicted by: {said}"
+msgstr "Lo contradice: {said}"
 
 #. Folder of the sources that are conversations: the vision talk and the interviews by voice or chat
 #: src/brain/brain.ts
@@ -8441,6 +8461,10 @@ msgstr "Más para {title}"
 msgid "More for this chat"
 msgstr "Más opciones de este chat"
 
+#: src/brain/learned-section.tsx
+msgid "More memories contradict it."
+msgstr "Más recuerdos lo contradicen."
+
 #: src/interview/words.ts
 msgid "More of the steps."
 msgstr "Más pasos."
@@ -8460,10 +8484,6 @@ msgstr "En las próximas entrevistas se preguntará a más personas."
 #: src/brain/memories-page.tsx
 msgid "More sources say other things: open it to see them all."
 msgstr "Más fuentes dicen otras cosas: ábrelo para verlas todas."
-
-#: src/brain/learned-section.tsx
-msgid "More sources say something else."
-msgstr "Más fuentes dicen otra cosa."
 
 #: src/brain/brain-atlas.ts
 msgid "More teams"

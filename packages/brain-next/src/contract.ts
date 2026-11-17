@@ -2303,19 +2303,22 @@ export interface ContestedFact {
   more: boolean;
 }
 
-// What a version of a source changed (`readVersionChange`, memories.ts):
-// its change set, read from what the store keeps of it. Every add drawn
-// from a source names the version it rests on (`SourceVersionRef`), so
-// what a version added is the memories that rest on it; what it ended is
-// the earlier memories of its source's lineage whose first ending, as
-// the reader sees it, came from it (a memory of it, its `extracted`
-// mark, or its text no longer holding their quote while it is current);
-// and what it made contested is what it added that stands contested.
-// All as of one moment, as `readMemories` reads with `history`, and only
-// from what the reader may read: what they may not changes nothing in it.
+// What a version of a source changed (`readVersionChange`,
+// version-change.ts): its change set, read from what the store keeps of
+// it. Every add drawn from a source names the version it rests on
+// (`SourceVersionRef`), so what a version added is the memories that rest
+// on it; what it replaced is the earlier memories of its source's lineage
+// that the first thing to end them, as the reader sees it, was a memory of
+// it or its `extracted` mark; and what it made contested is what it added
+// that stands contested. A memory that left only because a version's text
+// no longer holds its quote is credited to no version: while a version is
+// its source's current one, such memories are listed with it as no longer
+// in the source (`out`), and with no other. All as of one moment, as
+// `readMemories` reads with `history`, and only from what the reader may
+// read: what they may not changes nothing in it.
 
-/** The two parts of a version's change, in the order a page gives them. */
-export const versionChangeParts = ["added", "ended"] as const;
+/** The parts of a version's change, in the order a page gives them. */
+export const versionChangeParts = ["added", "ended", "out"] as const;
 export type VersionChangePart = (typeof versionChangeParts)[number];
 
 /**
@@ -2347,7 +2350,9 @@ export type VersionChangeRequest = z.input<typeof versionChangeRequestSchema>;
 
 /**
  * A memory a version's change holds: one it added (current or, since,
- * history, as `readMemories` with `history` gives it) or one it ended.
+ * history, as `readMemories` with `history` gives it), one it replaced
+ * (`ended`), or, for the current version, one no longer in its text
+ * (`out`).
  * One it added that stands contested comes with its current rivals the
  * reader may read: the first `factSidesShown`, and whether more follow.
  */
@@ -2370,7 +2375,8 @@ export interface ChangedEntity extends Entity {
 
 /**
  * A page of a version's change (above): what it added, then what it
- * ended, each by when it was learned, then by id; the entities those
+ * replaced, then what is no longer in it, each by when it was learned,
+ * then by id; the entities those
  * memories and their rivals name; the moment it was read at; whether
  * more follow, and where to go on from.
  */

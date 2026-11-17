@@ -235,12 +235,13 @@ export interface BrainSharedUploadPage {
 
 /**
  * A memory of what a version changed: one it added (current, or history
- * since), or an earlier one it ended; one it added that another source
- * they may read disagrees with comes with those sources' memories (the
- * first few, and whether more follow).
+ * since), an earlier one a memory of it replaced (`ended`), or, for the
+ * current version, an earlier one no longer in its text (`out`); one it
+ * added that another memory they may read contradicts comes with those
+ * (the first few, and whether more follow).
  */
 export interface BrainLearnedMemory {
-  part: "added" | "ended";
+  part: "added" | "ended" | "out";
   memory: BrainMemoryShown;
   rivals: BrainMemoryShown[];
   moreRivals: boolean;

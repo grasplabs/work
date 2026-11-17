@@ -85,7 +85,7 @@ export const versionVisibleSql = (
  * what memories and extraction marks name their readers by. A key whose
  * set is no longer stored matches no one.
  */
-const readableKeysSql = `SELECT key FROM reader_sets
+export const readableKeysSql = `SELECT key FROM reader_sets
     WHERE id IN (SELECT reader_set FROM readable)`;
 
 /**
@@ -256,12 +256,15 @@ const extractedSql = (alias: string, only = ""): string => `
       WHERE kept.source = extracted.source AND kept.thread = 1
     )`;
 
-/** Every moment something ended `m` for the reader by `?4` (`endedAtSql`). */
-const endingsSql = `
+/**
+ * Every moment something other than its own text ended `m` for the reader
+ * by `?4`: retired, a newer memory of its lineage, a later version marked
+ * fully extracted (`endedAtSql`).
+ */
+const replacingsSql = `
   SELECT m.retired_at AS at WHERE m.retired_at IS NOT NULL AND m.retired_at <= ?4
   UNION ALL${newerSql("m", "?4", validSql, true)}
-  UNION ALL${extractedSql("m")}
-  UNION ALL${outSql("m", "?4")}`;
+  UNION ALL${extractedSql("m")}`;
 
 /**
  * When the reader saw `m` stop being believed, as of `?4`: retired then,
@@ -272,23 +275,33 @@ const endingsSql = `
  * older version's memory that came late is history from the start). Null
  * while believed.
  */
-export const endedAtSql = `max(m.learned_at, (SELECT min(at) FROM (${endingsSql}
+export const endedAtSql = `max(m.learned_at, (SELECT min(at) FROM (${replacingsSql}
+  UNION ALL${outSql("m", "?4")}
 )))`;
 
 /**
- * Whether the first thing that ended `m` for the reader as of `?4`
- * (`endedAtSql`, before it is held to when `m` was learned) came from
- * version `version` of its source: a memory of that version, its mark of
- * being fully extracted, or that version, current, no longer holding
- * `m`'s quote. What a version's change ended (version-change.ts): what the
- * reader may not read ends nothing here either.
+ * Whether version `version` of `m`'s source replaced `m` for the reader as
+ * of `?4`: the first thing other than its own text that ended it
+ * (`replacingsSql`) is a memory of that version or its mark of being fully
+ * extracted. A memory that left only because a version's text no longer
+ * holds its quote is credited to no version (`outOnlySql`). What the
+ * reader may not read ends nothing here either (version-change.ts).
  */
 export const endedByVersionSql = (version: string): string => `(
-  (SELECT min(at) FROM (${endingsSql}
+  (SELECT min(at) FROM (${replacingsSql}
   )) = (SELECT min(at) FROM (${newerSql("m", "?4", validSql, true, `AND newer.version = ${version}`)}
     UNION ALL${extractedSql("m", `AND extracted.version = ${version}`)}
-    UNION ALL${outSql("m", "?4", `AND current.version = ${version}`)}
   ))
+)`;
+
+/**
+ * Whether `m` stopped being believed for the reader as of `?4` only because
+ * its source's current version, which is version `version`, no longer
+ * holds its quote (`outSql`): nothing else ended it (`replacingsSql`).
+ */
+export const outOnlySql = (version: string): string => `(
+  EXISTS (${outSql("m", "?4", `AND current.version = ${version}`)})
+  AND NOT EXISTS (${replacingsSql})
 )`;
 
 /** A current rival of `m` the reader may read: judged current, same fact, another value. */

@@ -589,6 +589,13 @@ const handbookLearned: BrainLearned = {
       rivals: [],
       moreRivals: false,
     },
+    // The handbook's current text no longer says it, and nothing replaced it.
+    {
+      part: "out",
+      memory: memoryShown("m-o", "Invoices are checked by hand", "e-2"),
+      rivals: [],
+      moreRivals: false,
+    },
   ],
   entities: [
     {
@@ -1396,7 +1403,7 @@ describe(SourcesPage, () => {
     ).toStrictEqual(["sharedUploads"]);
   });
 
-  it("shows what the Brain learned from the version shown: what it added, replaced and what sources disagree on", async () => {
+  it("shows what the Brain learned from the version shown: what it added, replaced, what is no longer in it, and what contradicts it", async () => {
     await shown([], { learned: { "u-1@2": handbookLearned } });
     await press("Handbook");
     const learned = learnedSection() ?? "";
@@ -1410,9 +1417,11 @@ describe(SourcesPage, () => {
         "This version replaced 1 memory from an earlier version.",
         "Invoices are paid monthly",
         "Invoice",
-        "Sources disagree on 1 memory this version added.",
-        "Another source says: Invoices are paid on Mondays",
-        "More sources say something else.",
+        "1 memory from an earlier version is no longer in this source.",
+        "Invoices are checked by hand",
+        "1 memory this version added is contradicted elsewhere.",
+        "Contradicted by: Invoices are paid on Mondays",
+        "More memories contradict it.",
       ].filter((text) => !learned.includes(text))
     ).toStrictEqual([]);
   });
@@ -1515,7 +1524,7 @@ describe(SourcesPage, () => {
     }
   );
 
-  it("reads what the Brain learned a page at a time, counting each page in", async () => {
+  it("reads what the Brain learned a page at a time, its counts said to be so far while more follow", async () => {
     const [added] = handbookLearned.memories;
     await shown([], {
       learned: {
@@ -1554,7 +1563,7 @@ describe(SourcesPage, () => {
     const both = learnedSection() ?? "";
 
     expect({
-      first: first.includes("This version added 1 memory."),
+      first: first.includes("So far, this version added 1 memory."),
       both: [
         "This version added 2 memories.",
         "Invoices are paid on Fridays",

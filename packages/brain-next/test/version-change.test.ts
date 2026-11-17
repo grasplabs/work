@@ -64,10 +64,26 @@ const remember = async (
     memories,
   });
 
+/** Marks `version` fully extracted for `group`'s readers, as extraction marks its last piece. */
+const markExtracted = async (
+  version: { source: string; version: number },
+  group: string
+): Promise<void> => {
+  await shared().addMemories({
+    change: crypto.randomUUID(),
+    access: audience(group),
+    entities: [],
+    memories: [],
+    extracted: version,
+  });
+};
+
 /** What a change came to for a reader, by statements and names, in no order of its own. */
 interface Seen {
   added: string[];
   ended: string[];
+  /** No longer in the source's text, nothing having replaced them. */
+  out: string[];
   /** Each added memory that stands contested, with its rivals' statements. */
   contested: Record<string, string[]>;
   /** Each entity named, by its name, and whether this version made it seen. */
@@ -113,6 +129,7 @@ const seenOf = (pages: readonly VersionChange[]): Seen => {
   return {
     added: statements("added"),
     ended: statements("ended"),
+    out: statements("out"),
     contested: Object.fromEntries(
       memories
         .filter(({ part, memory }) => part === "added" && memory.contested)
@@ -253,6 +270,7 @@ describe("what a version changed", () => {
     await expect(changeOf(doc.second, reader)).resolves.toStrictEqual({
       added: ["Acme is churning", "Globex signed"],
       ended: ["Acme is active"],
+      out: [],
       contested: { "Acme is churning": ["Acme is paused"] },
       entities: { [doc.acmeName]: false, [doc.globexName]: true },
       pages: 1,
@@ -262,15 +280,77 @@ describe("what a version changed", () => {
     await expect(changeOf(doc.first, reader)).resolves.toStrictEqual({
       added: ["Acme is active", "Acme renews in March"],
       ended: [],
+      out: [],
       contested: {},
       entities: { [doc.acmeName]: true },
       pages: 1,
     });
   });
 
-  it("ends what a later version's text no longer says, as that version's change", async () => {
+  // A memory that left only because the text no longer says it is
+  // credited to no version: it is listed with the current version alone,
+  // as no longer in the document, and moves on with each new version.
+  it("lists what the current version's text no longer says as no longer in it, and on no older version", async () => {
+    const group = unique("group");
+    const source = unique("doc");
+    const acme = unique("Acme");
+    const reader = readerOf(unique("reader"), group);
+    const first = await addVersion(
+      source,
+      "Acme is Active. Acme renews in March.",
+      audience(group)
+    );
+    await remember(
+      audience(group),
+      [customer("c", acme)],
+      [drawn("c", first, "Acme renews in March", "Acme renews in March")]
+    );
+    const second = await addVersion(source, "Acme is Active.", audience(group));
+    const whileCurrent = await changeOf(second, reader);
+    const third = await addVersion(
+      source,
+      "Acme is Active. A small edit.",
+      audience(group)
+    );
+
+    expect({
+      whileCurrent,
+      second: await changeOf(second, reader),
+      third: await changeOf(third, reader),
+    }).toStrictEqual({
+      whileCurrent: {
+        added: [],
+        ended: [],
+        out: ["Acme renews in March"],
+        contested: {},
+        entities: { [acme]: false },
+        pages: 1,
+      },
+      second: {
+        added: [],
+        ended: [],
+        out: [],
+        contested: {},
+        entities: {},
+        pages: 1,
+      },
+      third: {
+        added: [],
+        ended: [],
+        out: ["Acme renews in March"],
+        contested: {},
+        entities: { [acme]: false },
+        pages: 1,
+      },
+    });
+  });
+
+  it("credits a replaced memory to the version whose memory replaced it, however its text changed after", async () => {
     const group = unique("group");
     const doc = await twoVersions(group);
+    // The second version's text dropped "Acme is Active" too, and its own
+    // memory replaced it: that is the second version's, never "no longer
+    // in the document"; and a third that drops the renewal lists that.
     const third = await addVersion(
       doc.second.source,
       "Acme is Churning. Globex signed.",
@@ -278,12 +358,17 @@ describe("what a version changed", () => {
     );
     const reader = readerOf(unique("reader"), group);
 
-    const seen = await changeOf(third, reader);
-    expect(seen?.ended).toStrictEqual(["Acme renews in March"]);
-    expect(seen?.added).toStrictEqual([]);
-    // The second version ended only what it replaced.
-    const second = await changeOf(doc.second, reader);
-    expect(second?.ended).toStrictEqual(["Acme is active"]);
+    const [second, last] = await Promise.all([
+      changeOf(doc.second, reader),
+      changeOf(third, reader),
+    ]);
+    expect({
+      second: { ended: second?.ended, out: second?.out },
+      third: { ended: last?.ended, out: last?.out },
+    }).toStrictEqual({
+      second: { ended: ["Acme is active"], out: [] },
+      third: { ended: [], out: ["Acme renews in March"] },
+    });
   });
 
   it("ends every earlier memory with a version marked fully extracted", async () => {
@@ -303,6 +388,49 @@ describe("what a version changed", () => {
       "Acme is active",
       "Acme renews in March",
     ]);
+  });
+
+  /**
+   * A document of three versions, each marked fully extracted as
+   * extraction marks its last piece: the first with a memory; the second's
+   * mark for `secondFor`'s readers. The third, as `reader` sees its change.
+   */
+  const marked = async (group: string, secondFor: string, reader: Reader) => {
+    const source = unique("doc");
+    const text = "Acme renews in March.";
+    const first = await addVersion(source, text, audience(group));
+    await remember(
+      audience(group),
+      [customer("c", "Acme")],
+      [drawn("c", first, "Acme renews in March", "Acme renews in March")]
+    );
+    const second = await addVersion(source, `${text} Second.`, audience(group));
+    await markExtracted(second, secondFor);
+    const third = await addVersion(source, `${text} Third.`, audience(group));
+    await markExtracted(third, group);
+    return {
+      second: await changeOf(second, reader),
+      third: await changeOf(third, reader),
+    };
+  };
+
+  // A mark ends every earlier memory; the first mark the reader may read
+  // that did is the one credited, and one they may not read is as absent.
+  it("credits an earlier memory to the first mark the reader sees that ended it", async () => {
+    const group = unique("group");
+    const reader = readerOf(unique("reader"), group);
+    const [seen, hidden] = await Promise.all([
+      marked(group, group, reader),
+      marked(group, unique("hidden"), reader),
+    ]);
+
+    expect({
+      seen: [seen.second?.ended, seen.third?.ended],
+      hidden: [hidden.second?.ended, hidden.third?.ended],
+    }).toStrictEqual({
+      seen: [["Acme renews in March"], []],
+      hidden: [[], ["Acme renews in March"]],
+    });
   });
 
   // Threat 10: paged by the store's paging, nothing repeated or skipped.
@@ -434,6 +562,115 @@ describe("who reads what a version changed", () => {
     expect(whole?.entities[globexName]).toBeFalsy();
   });
 
+  /**
+   * A document whose first version says Acme is active, and whose version
+   * `endsIn` says Acme is churning, which replaces it; each text keeps
+   * every quote, so nothing leaves the text. With `hidden`, a memory only
+   * that group may read says Acme is gone first: in a middle version only
+   * it may read (`"middle"`), or in the same version, learned before the
+   * churn (`"same"`). The version that replaces it, as `reader` sees its
+   * change.
+   */
+  const replacedWith = async (
+    group: string,
+    hidden: { group: string; where: "middle" | "same" } | undefined,
+    reader: Reader
+  ) => {
+    const source = unique("doc");
+    const first = await addVersion(source, "Acme is Active.", audience(group));
+    const { entities } = await remember(
+      audience(group),
+      [customer("c", "Acme")],
+      [
+        drawn("c", first, "Acme is Active", "Acme is active", {
+          attribute: "status",
+          value: "Active",
+        }),
+      ]
+    );
+    const acme = entities.c ?? "";
+    const gone = async (doc: { source: string; version: number }) => {
+      if (hidden === undefined) {
+        return;
+      }
+      await shared().addMemories({
+        change: crypto.randomUUID(),
+        access: audience(hidden.group),
+        reader: readerOf(unique("writer"), hidden.group, group),
+        entities: [customer("c", "Acme", { id: acme })],
+        memories: [
+          drawn("c", doc, "Acme is Gone", "Acme is gone", {
+            attribute: "status",
+            value: "Gone",
+          }),
+        ],
+      });
+    };
+    if (hidden?.where === "middle") {
+      await gone(
+        await addVersion(
+          source,
+          "Acme is Active. Acme is Gone.",
+          audience(hidden.group)
+        )
+      );
+    }
+    const last = await addVersion(
+      source,
+      "Acme is Active. Acme is Gone. Acme is Churning.",
+      audience(group)
+    );
+    if (hidden?.where === "same") {
+      await gone(last);
+    }
+    await remember(
+      audience(group),
+      [customer("c", "Acme", { id: acme })],
+      [
+        drawn("c", last, "Acme is Churning", "Acme is churning", {
+          attribute: "status",
+          value: "Churning",
+        }),
+      ]
+    );
+    return { seen: await changeOf(last, reader), acme };
+  };
+
+  // Threat 3: what ended a memory first, and what the reader may not read,
+  // decide nothing: a hidden memory that ended it earlier, of a version
+  // they may not read in between or of the same version, is as absent.
+  it.each(["middle", "same"] as const)(
+    "credits the replacement a reader sees, as without a hidden memory that ended it first (%s version)",
+    async (where) => {
+      const group = unique("group");
+      const reader = readerOf(unique("reader"), group);
+      const [partial, twin] = await Promise.all([
+        replacedWith(group, { group: unique("hidden"), where }, reader),
+        replacedWith(group, undefined, reader),
+      ]);
+      const history = async (entity: string) => {
+        const { memories } = await shared().readMemories({
+          entity,
+          reader,
+          history: true,
+        });
+        return memories.map(({ statement, endedAt }) => [
+          statement,
+          endedAt === null,
+        ]);
+      };
+
+      expect({
+        seen: partial.seen,
+        history: await history(partial.acme),
+      }).toStrictEqual({
+        seen: twin.seen,
+        history: await history(twin.acme),
+      });
+      expect(twin.seen?.ended).toStrictEqual(["Acme is active"]);
+    }
+  );
+
   it("adds nothing to a reader's answer when hidden memories come after it was read", async () => {
     const group = unique("group");
     const hidden = unique("hidden");
@@ -520,6 +757,7 @@ describe("what an erasure took from a version's change", () => {
     expect(after).toStrictEqual({
       added: [],
       ended: [],
+      out: [],
       contested: {},
       entities: {},
       pages: 1,

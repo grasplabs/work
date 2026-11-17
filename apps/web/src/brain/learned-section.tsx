@@ -23,8 +23,11 @@ import { useCore } from "../use-core.ts";
 
 // What the Brain learned from one version of a source (GRA-1991), on the
 // Sources page under the version's text: what it added, what it replaced
-// (memories of earlier versions it ended) and what it added that another
-// source disagrees with, with what that source says. Core reads it as the
+// (memories of earlier versions a memory of it ended), for the current
+// version what is no longer in the source's text (credited to no version),
+// and what it added that another memory contradicts, with what that one
+// says: another source's, or someone's own word, so the words name no
+// source. Core reads it as the
 // person may read it (`session.brainSources.learned`): what they may not
 // read is none of it. Each memory names the entity it is about, which
 // opens on the Memories page, marked New where this version is where the
@@ -151,7 +154,7 @@ const LearnedList = ({
                       return (
                         <span className="flex flex-col gap-1" key={rival.id}>
                           <span className="text-muted-foreground text-xs">
-                            <Trans>Another source says: {said}</Trans>
+                            <Trans>Contradicted by: {said}</Trans>
                           </span>
                           <EntityLinks entities={entities} memory={rival} />
                         </span>
@@ -160,7 +163,7 @@ const LearnedList = ({
                   : null}
                 {withRivals && moreRivals ? (
                   <span className="text-muted-foreground text-xs">
-                    <Trans>More sources say something else.</Trans>
+                    <Trans>More memories contradict it.</Trans>
                   </span>
                 ) : null}
               </ItemContent>
@@ -169,6 +172,76 @@ const LearnedList = ({
         ))}
       </ItemGroup>
     </div>
+  );
+};
+
+/** The heading of one list of the change, counting what is shown: "so far" while more pages follow. */
+const ListHeading = ({
+  list,
+  memories,
+  partial,
+}: {
+  list: "added" | "ended" | "out" | "contested";
+  memories: number;
+  partial: boolean;
+}) => {
+  if (list === "added") {
+    return partial ? (
+      <Plural
+        one="So far, this version added # memory."
+        other="So far, this version added # memories."
+        value={memories}
+      />
+    ) : (
+      <Plural
+        one="This version added # memory."
+        other="This version added # memories."
+        value={memories}
+      />
+    );
+  }
+  if (list === "ended") {
+    return partial ? (
+      <Plural
+        one="So far, this version replaced # memory from an earlier version."
+        other="So far, this version replaced # memories from earlier versions."
+        value={memories}
+      />
+    ) : (
+      <Plural
+        one="This version replaced # memory from an earlier version."
+        other="This version replaced # memories from earlier versions."
+        value={memories}
+      />
+    );
+  }
+  if (list === "out") {
+    return partial ? (
+      <Plural
+        one="So far, # memory from an earlier version is no longer in this source."
+        other="So far, # memories from earlier versions are no longer in this source."
+        value={memories}
+      />
+    ) : (
+      <Plural
+        one="# memory from an earlier version is no longer in this source."
+        other="# memories from earlier versions are no longer in this source."
+        value={memories}
+      />
+    );
+  }
+  return partial ? (
+    <Plural
+      one="So far, # memory this version added is contradicted elsewhere."
+      other="So far, # memories this version added are contradicted elsewhere."
+      value={memories}
+    />
+  ) : (
+    <Plural
+      one="# memory this version added is contradicted elsewhere."
+      other="# memories this version added are contradicted elsewhere."
+      value={memories}
+    />
   );
 };
 
@@ -220,11 +293,12 @@ export const LearnedSection = ({
   );
   const added = memories.filter(({ part }) => part === "added");
   const ended = memories.filter(({ part }) => part === "ended");
+  const out = memories.filter(({ part }) => part === "out");
   const contested = added.filter(({ memory }) => memory.contested);
   const next = pages.at(-1)?.next ?? null;
-  const addedCount = added.length;
-  const endedCount = ended.length;
-  const contestedCount = contested.length;
+  // While more pages follow, each count is of what is shown so far, and
+  // says so.
+  const partial = next !== null;
   return (
     <section aria-labelledby={heading} className="flex flex-col gap-2">
       <h4 className="text-muted-foreground text-xs font-medium" id={heading}>
@@ -248,40 +322,49 @@ export const LearnedSection = ({
           </Trans>
         </p>
       ) : null}
-      {addedCount > 0 ? (
+      {added.length > 0 ? (
         <LearnedList
           entities={entities}
           heading={
-            <Plural
-              one="This version added # memory."
-              other="This version added # memories."
-              value={addedCount}
+            <ListHeading
+              list="added"
+              memories={added.length}
+              partial={partial}
             />
           }
           memories={added}
         />
       ) : null}
-      {endedCount > 0 ? (
+      {ended.length > 0 ? (
         <LearnedList
           entities={entities}
           heading={
-            <Plural
-              one="This version replaced # memory from an earlier version."
-              other="This version replaced # memories from earlier versions."
-              value={endedCount}
+            <ListHeading
+              list="ended"
+              memories={ended.length}
+              partial={partial}
             />
           }
           memories={ended}
         />
       ) : null}
-      {contestedCount > 0 ? (
+      {out.length > 0 ? (
         <LearnedList
           entities={entities}
           heading={
-            <Plural
-              one="Sources disagree on # memory this version added."
-              other="Sources disagree on # memories this version added."
-              value={contestedCount}
+            <ListHeading list="out" memories={out.length} partial={partial} />
+          }
+          memories={out}
+        />
+      ) : null}
+      {contested.length > 0 ? (
+        <LearnedList
+          entities={entities}
+          heading={
+            <ListHeading
+              list="contested"
+              memories={contested.length}
+              partial={partial}
             />
           }
           memories={contested}
