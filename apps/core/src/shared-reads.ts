@@ -13,7 +13,7 @@ import { errorName, log } from "@grasp-os/shared/log";
 import { requireAdmin, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { waitUntil } from "cloudflare:workers";
-import { and, asc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
@@ -30,6 +30,7 @@ import {
   connectionBrainErasures,
   connectionBrainReads,
 } from "./db/core/schema.ts";
+import { inList } from "./db/d1.ts";
 
 // The records the Brain kept from what agents read through a shared
 // connection (GRA-1831; the threat model and the decisions are on the
@@ -60,12 +61,16 @@ import {
 const hashSchema = z.string().regex(/^[0-9a-f]{64}$/u);
 
 /**
- * How many records one erasure step erases at most: within Workers' own
- * bound of 1,000 subrequests an invocation (one call to the Brain's store
- * a record), with room for the clock's other tasks in its run. More are
- * erased by the next step, so any number is erased in the end.
+ * How many calls to the Brain's store one invocation spends on erasures
+ * at most, one a record: 400 of Workers' bound of 1,000 subrequests an
+ * invocation, leaving 600 for the clock's other tasks that run in the same
+ * one (the audit drain, the Brain's work queue and hand-overs, the
+ * onboarding's and the uploads' owed work, each a few dozen calls a
+ * tick), or for the request a step at once runs in. Every erasure under
+ * way shares it (`completeOwedErasures`); what is left is erased by the
+ * next tick, so any number is erased in the end.
  */
-const erasedPerStep = 400;
+export const brainCallsPerTick = 400;
 
 /** A page of keys erased and forgotten in one go. */
 const erasedPerPage = 100;
@@ -200,17 +205,80 @@ const erasedEvent = async (row: {
   at: row.requestedAt.toISOString(),
 });
 
+/** The erasure a step took on: its connection, its request, and its generation. */
+interface Stepping {
+  connectionId: string;
+  request: string;
+  generation: number;
+}
+
+/** What one invocation may still spend on erasures: calls to the Brain's store. */
+interface Budget {
+  left: number;
+}
+
 /**
- * Ends the erasure under way of `connectionId`, whose older records
- * (`older`) are all erased, with its one event, in one batch: its count as
- * the row has it now, and only if no older record was named since (none
- * can be, while it is under way).
+ * Ends the erasure `stepping` took on, whose older records (`older`) are
+ * all erased, with its one event, in one batch: its count as the row has
+ * it now, and only if it is still that erasure, under way, and no older
+ * record was named since (none can be, while it is under way).
  */
 const ended = async (
   env: Env,
-  connectionId: string,
+  { connectionId, request, generation }: Stepping,
   older: SQL
 ): Promise<void> => {
+  const db = drizzle(env.DB);
+  // The erasure this step took on, and only while it is still under way:
+  // never a newer one, whose own steps end it by its own records.
+  const thisErasure = and(
+    eq(connectionBrainErasures.connectionId, connectionId),
+    eq(connectionBrainErasures.request, request),
+    eq(connectionBrainErasures.generation, generation),
+    eq(connectionBrainErasures.erasing, true)
+  );
+  const row = await db
+    .select()
+    .from(connectionBrainErasures)
+    .where(thisErasure)
+    .get();
+  if (row === undefined) {
+    return;
+  }
+  const event = await erasedEvent(row);
+  await auditedBatch(env, db, [
+    db
+      .update(connectionBrainErasures)
+      .set({ erasing: false })
+      .where(
+        and(
+          thisErasure,
+          sql`NOT EXISTS (SELECT 1 FROM ${connectionBrainReads} WHERE ${older})`
+        )
+      ),
+    outboxedEventWhere(db, event, sql`changes() > 0`),
+  ]);
+};
+
+/**
+ * Takes the erasure under way of `connectionId`'s records a step on,
+ * spending at most what `budget` has left (each call to the Brain's store
+ * taken from it before it is made): keys of an older generation erased in
+ * the Brain and forgotten here, a page at a time, and, once none is left,
+ * the erasure ended with its one event, in one batch. Every read and
+ * write after its first read is of the erasure it read then, by its
+ * request and generation: should that one have ended meanwhile (another
+ * step, at the same time) and a newer one started, this step changes
+ * nothing of the newer one. Throws when the Brain or the database failed:
+ * what was erased is forgotten, and the rest is erased by the next try,
+ * which erases a key again without change.
+ */
+export const stepErasure = async (
+  env: Env,
+  connectionId: string,
+  given?: Budget
+): Promise<void> => {
+  const budget = given ?? { left: brainCallsPerTick };
   const db = drizzle(env.DB);
   const row = await db
     .select()
@@ -225,66 +293,29 @@ const ended = async (
   if (row === undefined) {
     return;
   }
-  const event = await erasedEvent(row);
-  await auditedBatch(env, db, [
-    db
-      .update(connectionBrainErasures)
-      .set({ erasing: false })
-      .where(
-        and(
-          eq(connectionBrainErasures.connectionId, connectionId),
-          eq(connectionBrainErasures.request, row.request),
-          eq(connectionBrainErasures.erasing, true),
-          sql`NOT EXISTS (SELECT 1 FROM ${connectionBrainReads} WHERE ${older})`
-        )
-      ),
-    outboxedEventWhere(db, event, sql`changes() > 0`),
-  ]);
-};
-
-/**
- * Takes the erasure under way of `connectionId`'s records a step on: up
- * to `erasedPerStep` keys of an older generation erased in the Brain and
- * forgotten here, a page at a time, and, once none is left, the erasure
- * ended with its one event, in one batch. Answers whether it ended (or
- * none was under way). Throws when the Brain or the database failed: what
- * was erased is forgotten, and the rest is erased by the next try, which
- * erases a key again without change.
- */
-export const stepErasure = async (
-  env: Env,
-  connectionId: string
-): Promise<boolean> => {
-  const db = drizzle(env.DB);
-  const row = await db
-    .select()
-    .from(connectionBrainErasures)
-    .where(
-      and(
-        eq(connectionBrainErasures.connectionId, connectionId),
-        eq(connectionBrainErasures.erasing, true)
-      )
-    )
-    .get();
-  if (row === undefined) {
-    return true;
-  }
+  const stepping: Stepping = {
+    connectionId,
+    request: row.request,
+    generation: row.generation,
+  };
   const older = sql`${connectionBrainReads.connectionId} = ${connectionId} AND ${connectionBrainReads.generation} < ${row.generation}`;
-  for (let done = 0; done < erasedPerStep; done += erasedPerPage) {
+  // Its erasure, still under way, as SQL for the statements that act.
+  const stillThis = sql`EXISTS (SELECT 1 FROM ${connectionBrainErasures} WHERE ${connectionBrainErasures.connectionId} = ${connectionId} AND ${connectionBrainErasures.request} = ${row.request} AND ${connectionBrainErasures.generation} = ${row.generation} AND ${connectionBrainErasures.erasing} = 1)`;
+  while (budget.left > 0) {
     // oxlint-disable-next-line no-await-in-loop -- a page at a time
     const page = await db
       .select({ sourceId: connectionBrainReads.sourceId })
       .from(connectionBrainReads)
-      .where(older)
+      .where(sql`${older} AND ${stillThis}`)
       .orderBy(asc(connectionBrainReads.sourceId))
-      .limit(erasedPerPage);
+      .limit(Math.min(erasedPerPage, budget.left));
     if (page.length === 0) {
       // oxlint-disable-next-line no-await-in-loop -- ends the loop
-      await ended(env, connectionId, older);
-      return true;
+      await ended(env, stepping, older);
+      return;
     }
-    db.update(connectionBrainErasures);
     const ids = page.map(({ sourceId }) => sourceId);
+    budget.left -= ids.length;
     // oxlint-disable-next-line no-await-in-loop -- a page at a time
     await eraseSources(
       env,
@@ -294,35 +325,55 @@ export const stepErasure = async (
       })),
       "deleted"
     );
+    // Counted for its own erasure only, and only while it is under way:
+    // a newer one counts its own records, these among them.
     // oxlint-disable-next-line no-await-in-loop -- a page at a time
     await db.batch([
       db
         .delete(connectionBrainReads)
-        .where(inArray(connectionBrainReads.sourceId, ids)),
+        .where(
+          sql`${inList(connectionBrainReads.sourceId, ids)} AND ${stillThis}`
+        ),
       db
         .update(connectionBrainErasures)
         .set({ erased: sql`${connectionBrainErasures.erased} + changes()` })
-        .where(eq(connectionBrainErasures.connectionId, connectionId)),
+        .where(
+          and(
+            eq(connectionBrainErasures.connectionId, connectionId),
+            eq(connectionBrainErasures.request, row.request),
+            eq(connectionBrainErasures.generation, row.generation),
+            eq(connectionBrainErasures.erasing, true)
+          )
+        ),
     ]);
   }
-  return false;
 };
 
 /**
- * Takes every erasure under way a step on (`stepErasure`), each on its
- * own: one that fails is logged with its connection and its error's name,
- * and tried again at the clock's next run. The clock runs it each minute.
+ * Takes every erasure under way a step on (`stepErasure`), oldest first,
+ * all of them out of one `budget` of calls to the Brain's store for this
+ * invocation (`brainCallsPerTick`): once it is spent, the rest wait for
+ * the next run. One that fails is logged with its connection and its
+ * error's name, and tried again at the clock's next run. The clock runs
+ * it each minute.
  */
-export const completeOwedErasures = async (env: Env): Promise<void> => {
+export const completeOwedErasures = async (
+  env: Env,
+  given?: Budget
+): Promise<void> => {
+  const budget = given ?? { left: brainCallsPerTick };
   const owed = await drizzle(env.DB)
     .select({ connectionId: connectionBrainErasures.connectionId })
     .from(connectionBrainErasures)
     .where(eq(connectionBrainErasures.erasing, true))
     .orderBy(asc(connectionBrainErasures.requestedAt));
   for (const { connectionId } of owed) {
+    if (budget.left <= 0) {
+      return;
+    }
     try {
       // oxlint-disable-next-line no-await-in-loop -- one erasure at a time
-      await stepErasure(env, connectionId);
+      await stepErasure(env, connectionId, budget);
     } catch (error) {
       log.warn("brain.shared_reads.erasure_owed", {
         connectionId,

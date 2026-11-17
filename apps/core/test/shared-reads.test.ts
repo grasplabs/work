@@ -14,7 +14,11 @@ import {
   eraseSharedReadsOfDisconnect,
   stepErasure,
 } from "../src/shared-reads.ts";
-import { erasuresFailing } from "./brain-erasures-failing.ts";
+import {
+  erasuresCounted,
+  erasuresFailing,
+  erasuresHeld,
+} from "./brain-erasures-failing.ts";
 import { newTeam } from "./brain-next-leaks-harness.ts";
 import { copyOfStore, restoreStore } from "./brain-next-store-copy.ts";
 import { mockIdp } from "./idp.ts";
@@ -394,6 +398,130 @@ describe("what the Brain kept from a shared connection", setUpTime, () => {
       },
       key: "erased",
       ended: [{ actor: { type: "system" }, detail: { sources: 1 } }],
+    });
+  });
+
+  it("ends an erasure only by the step of that same erasure: one held over the end of an older erasure never ends a newer one early", async () => {
+    const { admin, member, team, connectionId } = await sharedWithTeam();
+    const marker = uniqueWord();
+    await kept(connectionId, "deal 1", `Old deal ${marker}`);
+    await kept(connectionId, "deal 2", `Old deal two ${marker}`);
+    // The first erasure starts; its own step at once fails, so the test's
+    // steps alone run it.
+    await eraseSharedReadsOfDisconnect(erasuresFailing(), {
+      connectionId,
+      request: crypto.randomUUID(),
+      actor: { type: "system" },
+      at: new Date(),
+    });
+    // One step held at its erasure in the Brain (as the clock's and the
+    // one at once can run at the same time), while another ends it.
+    const held = erasuresHeld();
+    const stale = stepErasure(held.env, connectionId);
+    await held.reached;
+    await completeOwedErasures(env);
+    // An admin opens it again, two records are kept, and a second erasure
+    // starts, before the held step goes on.
+    await admin.api.connections.setBrainAudience(connectionId, {
+      kind: "team",
+      teamId: team,
+    });
+    const newer = [
+      await kept(connectionId, "deal 1", `New deal ${marker}`),
+      await kept(connectionId, "deal 3", `New deal three ${marker}`),
+    ];
+    const events = await auditedDuring(async () => {
+      await eraseSharedReadsOfDisconnect(erasuresFailing(), {
+        connectionId,
+        request: crypto.randomUUID(),
+        actor: { type: "system" },
+        at: new Date(),
+      });
+      held.release();
+      await outcome(stale);
+    });
+    const afterStale = {
+      ended: about(events, "brain.shared_reads.erased", connectionId),
+      found: await finds(member, `New deal ${marker}`),
+    };
+    const later = await auditedDuring(async () => {
+      await completeOwedErasures(env);
+    });
+
+    expect({
+      kept: newer.every((record) => typeof record !== "string"),
+      afterStale,
+      keys: await Promise.all(
+        newer.map(async (record) =>
+          typeof record === "string" ? record : await keyState(record)
+        )
+      ),
+      ended: about(later, "brain.shared_reads.erased", connectionId),
+    }).toStrictEqual({
+      kept: true,
+      // Not ended by the step of the erasure before it, and nobody reads
+      // its records meanwhile.
+      afterStale: { ended: [], found: false },
+      keys: ["erased", "erased"],
+      ended: [{ actor: { type: "system" }, detail: { sources: 2 } }],
+    });
+  });
+
+  it("shares one budget of calls to the Brain among every erasure under way: no run spends more, and each ends over the next runs", async () => {
+    const connections = await Promise.all([
+      sharedWithTeam(),
+      sharedWithTeam(),
+      sharedWithTeam(),
+    ]);
+    const records: SourceRef[] = [];
+    for (const { connectionId } of connections) {
+      for (const deal of ["1", "2", "3", "4"]) {
+        // oxlint-disable-next-line no-await-in-loop -- one record at a time
+        const record = await kept(connectionId, `deal ${deal}`, `Deal ${deal}`);
+        if (typeof record !== "string") {
+          records.push(record);
+        }
+      }
+      // Started, its own step at once failing: the clock's runs alone
+      // erase it.
+      // oxlint-disable-next-line no-await-in-loop -- one erasure at a time
+      await eraseSharedReadsOfDisconnect(erasuresFailing(), {
+        connectionId,
+        request: crypto.randomUUID(),
+        actor: { type: "system" },
+        at: new Date(),
+      });
+    }
+    // A run may spend 5 calls, where the clock's may spend
+    // `brainCallsPerTick`: twelve records take three runs at least.
+    const perRun = 5;
+    const spent: number[] = [];
+    const events = await auditedDuring(async () => {
+      for (let run = 0; run < 5; run += 1) {
+        const counted = erasuresCounted();
+        // oxlint-disable-next-line no-await-in-loop -- one run at a time
+        await completeOwedErasures(counted.env, { left: perRun });
+        spent.push(counted.count());
+      }
+    });
+
+    expect({
+      records: records.length,
+      overBudget: spent.filter((calls) => calls > perRun),
+      spent: spent.reduce((sum, calls) => sum + calls, 0),
+      keys: new Set(await Promise.all(records.map(keyState))),
+      ended: connections.map(({ connectionId }) =>
+        about(events, "brain.shared_reads.erased", connectionId)
+      ),
+    }).toStrictEqual({
+      records: 12,
+      overBudget: [],
+      // Each record once.
+      spent: 12,
+      keys: new Set(["erased"]),
+      ended: connections.map(() => [
+        { actor: { type: "system" }, detail: { sources: 4 } },
+      ]),
     });
   });
 
