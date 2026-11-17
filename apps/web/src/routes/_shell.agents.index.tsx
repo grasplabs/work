@@ -66,6 +66,21 @@ export const readManaged = async (session: Session): Promise<ManagedAgents> => {
 };
 
 /**
+ * The agents people offered the company, and the people to name them by:
+ * none where core won't say them, and the page still shows the rest.
+ */
+const readOffered = async (session: Session) => {
+  const [agents, people] = await Promise.allSettled([
+    session.connections.offeredAgents(),
+    session.members.list(),
+  ]);
+  return {
+    agents: agents.status === "fulfilled" ? agents.value : [],
+    people: people.status === "fulfilled" ? people.value : [],
+  };
+};
+
+/**
  * What an admin reads of people's own agents beside the switch: what
  * each person's cost, and the people to name them by. Either is left out
  * where core won't say it, and the page still shows the rest.
@@ -97,6 +112,7 @@ const AgentsPage = () => {
         makes={isMemberAdmin(identity)}
         makesOwn={!identity.staff && page.data.ownOn}
         managed={page.data.managed}
+        offered={page.data.offered}
         ownAdmin={page.data.ownAdmin}
         own={page.data.own}
         usable={page.data.usable}
@@ -111,20 +127,23 @@ export const Route = createFileRoute("/_shell/agents/")({
   loader: async ({ context: { core, identity } }) =>
     await loadFromCore(core, async (session) => {
       const admin = isAdmin(identity.role);
-      const [usable, own, setting, managed, ownAdmin] = await Promise.all([
-        session.chats.agents(),
-        // The person's own, which nobody else is ever listed.
-        session.connections.ownAgents(),
-        session.orgSettings.ownAgents(),
-        // Admins, Grasp's staff among them, who read and change nothing.
-        admin ? readManaged(session) : undefined,
-        admin ? readOwnAdmin(session) : undefined,
-      ]);
+      const [usable, own, setting, managed, ownAdmin, offered] =
+        await Promise.all([
+          session.chats.agents(),
+          // The person's own, which nobody else is ever listed.
+          session.connections.ownAgents(),
+          session.orgSettings.ownAgents(),
+          // Admins, Grasp's staff among them, who read and change nothing.
+          admin ? readManaged(session) : undefined,
+          admin ? readOwnAdmin(session) : undefined,
+          admin ? readOffered(session) : undefined,
+        ]);
       return {
         usable,
         own,
         ownOn: setting.on,
         managed,
+        offered,
         ownAdmin:
           ownAdmin === undefined ? undefined : { ...ownAdmin, on: setting.on },
       };

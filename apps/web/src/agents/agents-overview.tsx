@@ -5,6 +5,7 @@ import type {
   AgentWake,
 } from "@grasp-os/shared/agents";
 import type { ChatAgent } from "@grasp-os/shared/chat";
+import type { Member } from "@grasp-os/shared/members";
 import type { StephenReach } from "@grasp-os/shared/stephen-reach";
 import { buttonVariants } from "@grasp-os/ui/components/button";
 import {
@@ -48,6 +49,7 @@ import {
   useAudienceLine,
   wakesOn,
 } from "./agent-facts.tsx";
+import { OfferedAgents } from "./agent-share.tsx";
 import { OwnAgentsCard } from "./own-agents-admin.tsx";
 import type { OwnAgentsAdmin } from "./own-agents-admin.tsx";
 
@@ -353,6 +355,7 @@ export const AgentsOverview = ({
   own,
   makes,
   makesOwn,
+  offered,
   ownAdmin,
 }: {
   usable: readonly ChatAgent[];
@@ -363,6 +366,8 @@ export const AgentsOverview = ({
   makes: boolean;
   /** Whether the person may make one of their own: anyone of the company, while the company lets them. */
   makesOwn: boolean;
+  /** For admins: the agents people offered the company, and who they are. */
+  offered?: { agents: readonly Agent[]; people: readonly Member[] } | undefined;
   /** What an admin reads of people's own agents; undefined for anyone else. */
   ownAdmin?: OwnAgentsAdmin | undefined;
 }) => {
@@ -520,6 +525,13 @@ export const AgentsOverview = ({
             </section>
           )}
         </>
+      )}
+      {offered === undefined ? null : (
+        <OfferedAgents
+          editable={makes}
+          offered={offered.agents}
+          people={offered.people}
+        />
       )}
       {ownAdmin === undefined ? null : (
         <OwnAgentsCard admin={ownAdmin} editable={makes} />

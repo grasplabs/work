@@ -56,7 +56,7 @@ import {
   teamGroupsOf,
 } from "./brain-team-groups.ts";
 import { askMorePeople, workKnowledge } from "./brain-work.ts";
-import { keepsReadsOf } from "./connection-capture-key.ts";
+import { mayHoldCapturesOf } from "./connection-capture-key.ts";
 import { catalogEntries, personOf } from "./connections.ts";
 import { organizations } from "./db/core/schema.ts";
 import { intakeIds } from "./onboarding/brain-intake.ts";
@@ -647,7 +647,8 @@ const viaOf = (source: string): Connection["via"] =>
  * connections to entries an admin hid or the catalog doesn't list (a toolkit it no longer
  * lists, say). A native provider is connected directly; a toolkit through
  * Composio. A connection matches the tool names that are its name. One
- * the Brain keeps the person's reads from says so (`keepsReads`).
+ * the Brain may keep some of the person's reads from says so
+ * (`keepsReads`).
  */
 const connectionsOf = async (
   env: Env,
@@ -662,12 +663,13 @@ const connectionsOf = async (
   const active = new Set(
     activeListed.map(({ source, provider }) => entryKey(source, provider))
   );
-  // What capture keeps by (connection-capture.ts): a read through the
-  // person's own connection, of a native tool that answers one item. The
-  // same table, so the page cannot say more than the code keeps.
+  // What capture keeps by and disconnecting erases by
+  // (connection-capture-key.ts `mayHoldCapturesOf`): the person's own
+  // connection of a kind capture keeps reads from. The same rule, so the
+  // page never says nothing is kept from a connection that may hold some.
   const keeping = new Set(
     activeListed
-      .filter((connection) => keepsReadsOf(connection, connecting.userId))
+      .filter((connection) => mayHoldCapturesOf(connection, connecting.userId))
       .map(({ source, provider }) => entryKey(source, provider))
   );
   const keepsReads = (key: string): { keepsReads?: true } =>
