@@ -13,6 +13,7 @@ import {
   cancelAction,
   confirmAction,
   heldWritesCard,
+  heldWritesCards,
   maxValuesPerWrite,
   maxWritesOnCard,
   piecesOf,
@@ -287,20 +288,47 @@ const everyCard = channelLocales.flatMap((locale) => [
   },
   {
     name: `one held write (${locale})`,
-    card: heldWritesCard({ locale, writes: [write(1)] }),
+    card: heldWritesCard({ locale, platform: "teams", writes: [write(1)] }),
   },
   {
     name: `largest held writes (${locale})`,
     card: heldWritesCard({
       locale,
+      platform: "teams",
       writes: largest(),
       check: { read: "record", where: heavy(5000) },
     }),
   },
+  {
+    name: `largest held writes to an App (${locale})`,
+    card: heldWritesCard({
+      locale,
+      platform: "teams",
+      writes: largest().map((each) => ({
+        ...each,
+        chatId: crypto.randomUUID(),
+      })),
+    }),
+  },
+  ...platforms.flatMap((platform) =>
+    heldWritesCards({
+      locale,
+      platform,
+      writes: largest().map((each) => ({
+        ...each,
+        chatId: crypto.randomUUID(),
+      })),
+      check: { read: "mail" },
+    }).map((card, at) => ({
+      name: `largest held writes as a turn's cards, ${at} on ${platform} (${locale})`,
+      card,
+    }))
+  ),
   ...outcomes.map((outcome) => ({
     name: `largest held writes, ${outcome} (${locale})`,
     card: heldWritesCard({
       locale,
+      platform: "teams",
       writes: largest("unknown"),
       check: { read: "mail" },
       outcome,
@@ -326,7 +354,7 @@ describe("Stephen's cards in Teams", () => {
   it("asks for a press on held writes with exactly the writes it shows", () => {
     const writes = [write(1), write(2)];
     const { actions, texts, facts } = inTeams(
-      heldWritesCard({ locale: "nl", writes })
+      heldWritesCard({ locale: "nl", platform: "teams", writes })
     );
 
     expect({
@@ -363,12 +391,13 @@ describe("Stephen's cards in Teams", () => {
     });
   });
 
-  it("never asks for a press on values it couldn't show whole, or on writes that ran", () => {
+  it("never asks to confirm values it couldn't show whole, offers only Cancel then, and nothing on writes that ran", () => {
     const pressesOf = (postable: PostableCard) => {
       const { actions, texts } = inTeams(postable);
       return {
-        presses: actions.filter((action) => action.type === "Action.Submit")
-          .length,
+        presses: actions
+          .filter((action) => action.type === "Action.Submit")
+          .map((action) => action.data?.actionId),
         // A conversation in a chat app is no chat in Grasp (GRA-1919):
         // nothing on the card leads there.
         links: actions.filter((action) => action.type === "Action.OpenUrl")
@@ -381,12 +410,14 @@ describe("Stephen's cards in Teams", () => {
       tooLong: pressesOf(
         heldWritesCard({
           locale: "de",
+          platform: "teams",
           writes: [write(1, { value: "x".repeat(20_000) })],
         })
       ),
       tooMany: pressesOf(
         heldWritesCard({
           locale: "de",
+          platform: "teams",
           writes: Array.from({ length: maxWritesOnCard + 1 }, (_, index) =>
             write(index)
           ),
@@ -395,21 +426,54 @@ describe("Stephen's cards in Teams", () => {
       running: pressesOf(
         heldWritesCard({
           locale: "de",
+          platform: "teams",
           writes: [write(1, { state: "done" }), write(2, { state: "running" })],
         })
       ),
       ended: pressesOf(
         heldWritesCard({
           locale: "de",
+          platform: "teams",
           writes: [write(1)],
           outcome: "expired",
         })
       ),
     }).toStrictEqual({
-      tooLong: { presses: 0, links: 0, saysTooLong: true },
-      tooMany: { presses: 0, links: 0, saysTooLong: true },
-      running: { presses: 0, links: 0, saysTooLong: false },
-      ended: { presses: 0, links: 0, saysTooLong: false },
+      tooLong: { presses: [cancelAction], links: 0, saysTooLong: true },
+      tooMany: { presses: [cancelAction], links: 0, saysTooLong: true },
+      running: { presses: [], links: 0, saysTooLong: false },
+      ended: { presses: [], links: 0, saysTooLong: false },
+    });
+  });
+
+  it("says on each card to cancel why it can't be confirmed: after the card to confirm, a connection's write not coming back, or too long to show", () => {
+    /** Write `index` with a value of `chars` characters, an App's when held in `chatId`. */
+    const sized = (index: number, chars: number, chatId?: string) => ({
+      ...write(index, { value: "v".repeat(chars) }),
+      ...(chatId === undefined ? {} : { chatId }),
+    });
+    /** Which line each card says, of those that tell cards apart. */
+    const linesOf = (cards: PostableCard[]) =>
+      cards.map((card) => {
+        const { texts } = inTeams(card);
+        return {
+          later: texts.includes(say("heldLater", "en")),
+          laterConnections: texts.includes(say("heldLaterConnections", "en")),
+          tooLong: texts.includes(say("cardTooLong", "en")),
+        };
+      });
+    const none = { later: false, laterConnections: false, tooLong: false };
+    const of = (writes: HeldWriteView[]) =>
+      linesOf(heldWritesCards({ locale: "en", platform: "teams", writes }));
+
+    expect({
+      apps: of([sized(1, 9000, "c"), sized(2, 8000, "c"), sized(3, 100, "c")]),
+      connection: of([sized(1, 9000, "c"), sized(2, 8000)]),
+      tooLong: of([sized(1, 100, "c"), sized(2, 20_000, "c")]),
+    }).toStrictEqual({
+      apps: [none, { ...none, later: true }],
+      connection: [none, { ...none, laterConnections: true }],
+      tooLong: [none, { ...none, tooLong: true }],
     });
   });
 
@@ -445,6 +509,8 @@ const values = {
   pace: 380,
   included: 400,
   url: "https://acme.grasp.test/workflows/requests",
+  function: "tasks.add",
+  app: "Tasks",
   statement: "Wants answers in Dutch",
   about: "Acme",
   value: "Dutch",

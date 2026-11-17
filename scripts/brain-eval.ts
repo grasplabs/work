@@ -6,11 +6,11 @@
  * Outside the checks on each change: it is in no project the root runs,
  * so neither `vp test` nor CI runs it.
  *
- *   vp run brain:eval                      run it against a local Brain
+ *   BRAIN_EVAL_MODEL=<dir> vp run brain:eval   run it against a local Brain
+ *                                          running the model in <dir>
+ *                                          (apps/core/vite.brain-eval.config.ts)
  *   vp run brain:eval -- --against <file>  compare with that run instead of the last
  *   vp run brain:eval -- --out <dir>       keep results there (default .brain-eval/)
- *   BRAIN_EVAL_MODEL=<dir> vp run brain:eval   with vectors, by the model in <dir>
- *                                          (apps/core/vite.brain-eval.config.ts)
  *
  * (`node scripts/brain-eval.ts --out <dir>` works alike: the one `--` that
  * `vp run` passes on is dropped before the options are read.)

@@ -168,11 +168,16 @@ export class AppsApi extends WorkerEntrypoint<Env, AgentScope> {
                 // writes where the App's members read only once that
                 // person confirms it (private-reads.ts): held, nothing run.
                 if (await mustConfirmForOthers(this.env, scope)) {
-                  // Only Grasp's own chat shows the hold to confirm: in a
-                  // chat app's conversation it is refused, as a workflow's
-                  // start is, so nothing waits where nobody can decide it
-                  // (GRA-1929 adds the card that lifts this).
-                  if (scope.via !== undefined && scope.via !== "web") {
+                  // Held where its person is there to decide it: Grasp's
+                  // own chat, or their direct message on a chat app, asked
+                  // there and then (`ownChat`), whose turn shows it on its
+                  // card of held writes (channels/held.ts, GRA-1929). A
+                  // chat app's thread others share is offered no Apps at
+                  // all (agent-apis.ts); any other chat app's scope is
+                  // refused, so nothing waits where nobody can decide it.
+                  const inChatApp =
+                    scope.via !== undefined && scope.via !== "web";
+                  if (inChatApp && scope.ownChat !== true) {
                     throw agentErrors.create("agent.held_call_in_chat_app");
                   }
                   await admitEffect(this.env, scope);

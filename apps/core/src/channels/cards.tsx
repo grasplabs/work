@@ -1,4 +1,5 @@
 import type { ChatSavedMemory } from "@grasp-os/shared/brain-memories";
+import { shownVisibly } from "@grasp-os/shared/chat";
 import {
   convertEmojiPlaceholders,
   Actions,
@@ -58,6 +59,22 @@ const sectionChars = 3000;
  * actions block of thumbs: a card holds one section fewer than this.
  */
 const slackBlocksPerMessage = 50;
+
+/**
+ * The most characters of a field's label and value together on Slack, as
+ * its adapter measures them before it cuts one (`FIELD_TEXT_MAX_CHARS`,
+ * 2,000, less the 3 its `*label*` and line break take): Block Kit's limit
+ * for a section's field.
+ */
+const slackFieldChars = 2000 - 3;
+
+/**
+ * The most characters a button's value carries: Block Kit's limit for a
+ * button's `value`, past which Slack refuses the message. A press names
+ * its card's writes in it, so a card names no more than fit (Teams has no
+ * smaller limit, and a card is held to both).
+ */
+const buttonValueChars = 2000;
 
 /** The most held writes one card shows; more can't be confirmed on it. */
 export const maxWritesOnCard = 10;
@@ -452,10 +469,17 @@ export type WriteState =
 
 /** A held write, as the person sees it before it runs. */
 export interface HeldWriteView {
-  /** Its id in connect's held writes. */
+  /** Its id in connect's held writes, or in the chat's held App calls. */
   id: string;
   /** The hash of its exact input, which a press confirms. */
   inputHash: string;
+  /**
+   * For a write to an App (held-app-calls.ts): the chat it is held in,
+   * which a press decides it in. It is held because the chat used
+   * something only its person can read, which its card says. None for
+   * connect's.
+   */
+  chatId?: string;
   /** What it does, in the person's words. */
   title: string;
   /** Its exact values, as its connector describes them. */
@@ -483,21 +507,39 @@ export type PressOutcome = Extract<
 /** A turn's held writes on one card. */
 export interface HeldWritesCard {
   locale: ChannelLocale;
+  /** The platform it goes to, whose limits say what it shows whole. */
+  platform: string;
   /** In the order they run. */
   writes: readonly HeldWriteView[];
   check?: ReadCheck;
   /** Set once the press has ended; the card is edited in place. */
   outcome?: PressOutcome;
+  /**
+   * Writes this turn's cards can't confirm (`heldWritesCards`), so Cancel
+   * alone: `later`, each shown whole but asked after one the card to
+   * confirm couldn't take, so none runs ahead of the order asked; `tooLong`,
+   * each too long for any card to show whole.
+   */
+  cancelOnly?: "later" | "tooLong";
 }
 
 /** The buttons' action ids, for the channel layer's `onAction`. */
 export const confirmAction = "held-writes.confirm";
 export const cancelAction = "held-writes.cancel";
 
-/** What a press on the card's buttons carries: exactly the writes it showed. */
+/**
+ * What a press on the card's buttons carries: exactly the writes it
+ * showed, a write to an App with the chat it is held in.
+ */
 const pressSchema = z
   .array(
-    z.object({ id: z.string().min(1), inputHash: z.string().min(1) }).strict()
+    z
+      .object({
+        id: z.string().min(1),
+        inputHash: z.string().min(1),
+        chatId: z.string().min(1).optional(),
+      })
+      .strict()
   )
   .min(1)
   .max(maxWritesOnCard);
@@ -527,6 +569,18 @@ const stateLines = {
   skipped: "stepSkipped",
 } as const satisfies Record<Exclude<WriteState, "held">, LineName>;
 
+/**
+ * Whether a field of `label` and `value` shows whole on `platform`: on
+ * Slack within a field's characters, measured as its adapter is sent them
+ * (emoji named in full, which lengthens a text; its bold only shortens
+ * one). Teams cuts no field; the card's own budget holds there.
+ */
+const fieldWhole = (platform: string, label: string, value: string) =>
+  platform !== "slack" ||
+  convertEmojiPlaceholders(label, "slack").length +
+    convertEmojiPlaceholders(value, "slack").length <=
+    slackFieldChars;
+
 /** The card's warning about what the turn read, in the person's language. */
 const checkLine = (check: ReadCheck, locale: ChannelLocale, room: Room) =>
   check.read === "mail"
@@ -535,46 +589,118 @@ const checkLine = (check: ReadCheck, locale: ChannelLocale, room: Room) =>
         where: fit(check.where, maxTitleChars, room).text,
       });
 
+/** What a press on a card of `writes` carries: each write's id and hash, a write to an App's with its chat. */
+const pressOfWrites = (writes: readonly HeldWriteView[]): string =>
+  JSON.stringify(
+    writes.map(({ id, inputHash, chatId }) =>
+      chatId === undefined ? { id, inputHash } : { id, inputHash, chatId }
+    )
+  );
+
 /**
- * A turn's held writes on one card, in the order they run, each with its
- * exact values; nothing runs until the person presses Confirm. Confirm and
- * Cancel carry the writes' ids and input hashes, so a press confirms
- * exactly what the card showed. They are on the card only while every
- * write is held and every value is on it whole: otherwise the card says
- * it can't be confirmed, and to ask for fewer changes at a time.
+ * `writes` as a card on `platform` lays them out, in `locale`, within the
+ * card's room: what it shows of each, what a press carries (the writes it
+ * shows, a write to an App's with its chat), and whether every write is on
+ * it with every value whole, as `platform` shows it (`whole`).
  */
-export const heldWritesCard = ({
+const laidOut = ({
   locale,
+  platform,
   writes,
   check,
-  outcome,
-}: HeldWritesCard): PostableCard => {
-  if (writes.length === 0) {
-    throw new Error("A card of held writes needs at least one write");
-  }
+}: Pick<HeldWritesCard, "locale" | "platform" | "writes" | "check">) => {
   const room: Room = { left: outsideBytes };
   const shown = writes.slice(0, maxWritesOnCard);
-  const press = JSON.stringify(
-    shown.map(({ id, inputHash }) => ({ id, inputHash }))
-  );
+  const press = pressOfWrites(shown);
+  // A press that names more than a button carries can't be on the card.
+  const pressFits = press.length <= buttonValueChars;
   room.left -= sizeOf(press);
   const warning = check === undefined ? null : checkLine(check, locale, room);
-  let whole = shown.length === writes.length;
+  let whole = shown.length === writes.length && pressFits;
   const steps = shown.map((write, index) => {
     const title = fit(write.title, maxTitleChars, room);
     const values = write.values.slice(0, maxValuesPerWrite).map((each) => {
       const label = fit(each.label, maxLabelChars, room);
       const value = fit(each.value, Number.POSITIVE_INFINITY, room);
-      whole &&= label.whole && value.whole;
+      whole &&=
+        label.whole &&
+        value.whole &&
+        fieldWhole(platform, label.text, value.text);
       return { label: label.text, value: value.text };
     });
     whole &&= title.whole && values.length === write.values.length;
     return { write, number: index + 1, title: title.text, values };
   });
-  const pressable =
-    whole &&
+  return { shown, press, pressFits, warning, steps, whole };
+};
+
+/**
+ * The warning a card to confirm is measured with, whether or not it shows
+ * one (`heldWritesCards`, `confirmableOn`): the longest it can show, so a
+ * write never fits only because a turn had no warning, and a press, which
+ * can't tell whether its card had one, measures it the same.
+ */
+const measuredCheck: ReadCheck = { read: "mail" };
+
+/**
+ * Whether `writes` lay out whole on one card to confirm on `platform`:
+ * every one on it (at most `maxWritesOnCard`, named in one press) and
+ * every value whole, measured with a warning line (`measuredCheck`).
+ */
+export const confirmableOn = (
+  card: Pick<HeldWritesCard, "locale" | "platform" | "writes">
+): boolean => laidOut({ ...card, check: measuredCheck }).whole;
+
+/**
+ * Whether `write` can be shown whole on a card of its own on `platform`,
+ * with no warning line: one that can't is never confirmed on any card.
+ */
+export const wholeAlone = (
+  card: Pick<HeldWritesCard, "locale" | "platform">,
+  write: HeldWriteView
+): boolean => laidOut({ ...card, writes: [write] }).whole;
+
+/**
+ * A turn's held writes on one card, in the order they run, each with its
+ * exact values; nothing runs until the person presses Confirm. Confirm and
+ * Cancel carry the writes' ids and input hashes (a write to an App's with
+ * its chat), so a press decides exactly what the card showed. Cancel is on
+ * the card while every write it carries is held, whether or not they fit:
+ * cancelling runs nothing. Confirm only while, besides, every write is on
+ * the card and every value whole, as `platform` shows it: otherwise the
+ * card says it can't be confirmed, and to ask for fewer changes at a time.
+ */
+export const heldWritesCard = ({
+  locale,
+  platform,
+  writes,
+  check,
+  outcome,
+  cancelOnly,
+}: HeldWritesCard): PostableCard => {
+  if (writes.length === 0) {
+    throw new Error("A card of held writes needs at least one write");
+  }
+  const { shown, press, pressFits, warning, steps, whole } = laidOut({
+    locale,
+    platform,
+    writes,
+    check,
+  });
+  const cancellable =
+    pressFits &&
     outcome === undefined &&
-    writes.every((write) => write.state === "held");
+    shown.every((write) => write.state === "held");
+  const pressable = whole && cancellable && cancelOnly === undefined;
+  // Why a card to cancel can't be confirmed, said truly: written after the
+  // card to confirm (and, for a connection's write, which only the turn
+  // that held it lists, that it won't come back), or too long to show.
+  let why: LineName | null = whole ? null : "cardTooLong";
+  if (cancelOnly === "later" && whole) {
+    why = writes.some(({ chatId }) => chatId === undefined)
+      ? "heldLaterConnections"
+      : "heldLater";
+  }
   const card = (
     <Card>
       <CardText>
@@ -586,6 +712,9 @@ export const heldWritesCard = ({
       {steps.map(({ write, number, title, values }) => (
         <Section key={write.id}>
           <CardText style="bold">{`${number}. ${title}`}</CardText>
+          {write.chatId === undefined ? null : (
+            <CardText>{say("heldPrivate", locale)}</CardText>
+          )}
           {values.length === 0 ? null : (
             <Fields>
               {values.map(({ label, value }, at) => (
@@ -600,15 +729,17 @@ export const heldWritesCard = ({
           )}
         </Section>
       ))}
-      {whole ? null : <CardText>{say("cardTooLong", locale)}</CardText>}
+      {why === null ? null : <CardText>{say(why, locale)}</CardText>}
       {outcome === undefined ? null : (
         <CardText style="bold">{say(outcome, locale)}</CardText>
       )}
-      {pressable ? (
+      {cancellable ? (
         <Actions>
-          <Button id={confirmAction} style="primary" value={press}>
-            {say("confirm", locale)}
-          </Button>
+          {pressable ? (
+            <Button id={confirmAction} style="primary" value={press}>
+              {say("confirm", locale)}
+            </Button>
+          ) : null}
           <Button id={cancelAction} value={press}>
             {say("cancel", locale)}
           </Button>
@@ -617,6 +748,92 @@ export const heldWritesCard = ({
     </Card>
   );
   return { card: cardOf(card) };
+};
+
+/** `writes` in groups, in order, each as large as `fits` takes it, one at least. */
+const groupsOf = (
+  writes: readonly HeldWriteView[],
+  fits: (group: readonly HeldWriteView[]) => boolean
+): HeldWriteView[][] => {
+  const groups: HeldWriteView[][] = [];
+  for (const write of writes) {
+    const last = groups.at(-1);
+    if (last !== undefined && fits([...last, write])) {
+      last.push(write);
+    } else {
+      groups.push([write]);
+    }
+  }
+  return groups;
+};
+
+/**
+ * A turn's held writes on as few cards as it takes for each to be decided
+ * there, in the order asked: `writes` as held.ts lists them, exactly as
+ * asked among writes to an App, and by time across a connection's write
+ * and an App's (a connection's first on a tie). The card to confirm
+ * carries the longest prefix, in that order, of the writes that lay out
+ * whole together
+ * (`confirmableOn`: at most `maxWritesOnCard`, measured with a warning
+ * line, whether or not the turn has one). Once one write can't join it,
+ * every write after it waits too, so none is confirmed ahead of one asked
+ * before it: those go on cards with Cancel alone (`later`), each card shown
+ * whole. The only write the prefix steps over is one no card can show
+ * whole, even alone: it can never be confirmed, so it is on cards of its
+ * own, with Cancel alone (`tooLong`). Every waiting write has a Cancel.
+ * How many cards that is is bounded by what waits: a write held for an
+ * App lapses after a day, a connection's at the company's midnight. What
+ * the turn read is warned of on the card to confirm.
+ */
+export const heldWritesCards = ({
+  locale,
+  platform,
+  writes,
+  check,
+}: Omit<HeldWritesCard, "outcome" | "cancelOnly">): PostableCard[] => {
+  const confirmable: HeldWriteView[] = [];
+  const later: HeldWriteView[] = [];
+  const tooLong: HeldWriteView[] = [];
+  for (const write of writes) {
+    if (!wholeAlone({ locale, platform }, write)) {
+      tooLong.push(write);
+    } else if (
+      later.length === 0 &&
+      confirmableOn({ locale, platform, writes: [...confirmable, write] })
+    ) {
+      confirmable.push(write);
+    } else {
+      later.push(write);
+    }
+  }
+  const first =
+    confirmable.length === 0
+      ? []
+      : [
+          heldWritesCard({
+            locale,
+            platform,
+            writes: confirmable,
+            ...(check === undefined ? {} : { check }),
+          }),
+        ];
+  // Each card of later writes shown whole; each of those too long named in
+  // one press (one always fits).
+  const laterCards = groupsOf(
+    later,
+    (group) => laidOut({ locale, platform, writes: group }).whole
+  ).map((group) =>
+    heldWritesCard({ locale, platform, writes: group, cancelOnly: "later" })
+  );
+  const tooLongCards = groupsOf(
+    tooLong,
+    (group) =>
+      group.length <= maxWritesOnCard &&
+      pressOfWrites(group).length <= buttonValueChars
+  ).map((group) =>
+    heldWritesCard({ locale, platform, writes: group, cancelOnly: "tooLong" })
+  );
+  return [...first, ...laterCards, ...tooLongCards];
 };
 
 /**
@@ -738,11 +955,21 @@ export const startOfferCard = ({
 /** Undo's action id, for the channel layer's `onAction`. */
 export const undoAction = "memory.undo";
 
-/** What Stephen saved and how he says it: about the person, or another. */
+/**
+ * What Stephen saved and how he says it: about the person, or another.
+ * What the model wrote of it (the statement, whom it is about, its value)
+ * shows every character nobody sees as an escape (`shownVisibly`), as a
+ * held write's values do.
+ */
 const rememberedLine = (
   locale: ChannelLocale,
-  { statement, about, value }: ChatSavedMemory
+  saved: ChatSavedMemory
 ): string => {
+  const statement = shownVisibly(saved.statement);
+  const about =
+    saved.about === undefined ? undefined : shownVisibly(saved.about);
+  const value =
+    saved.value === undefined ? undefined : shownVisibly(saved.value);
   if (about === undefined) {
     return value === undefined
       ? say("remembered", locale, { statement })

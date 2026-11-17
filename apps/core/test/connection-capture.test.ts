@@ -46,9 +46,10 @@ import { connectDb, testBinding } from "./test-env.ts";
 // threat model and decisions on GRA-1730): someone else recalls what was
 // read in another's chat; a read of a shared connection, or of the
 // company's or others' things, outlives the person's access at the source;
-// a toolkit that forbids copies, a change, or an answer naming no item is
-// kept; one tool's view of an item replaces another's; a credential is
-// stored; a failing Brain fails or holds up the agent.
+// a toolkit that forbids copies, a change, or a native answer naming no
+// item is kept; one tool's view of an item replaces another's; a
+// credential is stored; a failing Brain fails or holds up the agent. A
+// toolkit's whole answers (GRA-1845): connection-capture-answers.test.ts.
 
 const idp = mockIdp();
 
@@ -214,13 +215,6 @@ const gmailMessage = (
           },
   };
 };
-
-/** A toolkit's answer naming the one item `id` it read, as `structured`. */
-const oneRead = (id: string, structured: Record<string, unknown>) => ({
-  content: [{ type: "text", text: JSON.stringify(structured) }],
-  structuredContent: structured,
-  _meta: { [provenanceMetaKey]: [id] },
-});
 
 /** A toolkit's answer naming the messages it read. */
 const messagesRead = (messages: { id: string; subject: string }[]) => ({
@@ -430,52 +424,9 @@ describe("what a chat's agent reads through a connection", setUpTime, () => {
     });
   });
 
-  it("keeps nothing a toolkit reads, even naming one item, as no toolkit tool is marked as answering one; nor a change", async () => {
+  it("keeps nothing from a shared connection, counted as skipped, nor from a toolkit that forbids copies", async () => {
     const person = await signedInApi(idp, "user");
-    const [named, sent] = [markerOf(), markerOf()];
-    const mail = await mailConnection([], mailWithSearch, {
-      provider: "mail_own",
-      owner: person.userId,
-    });
-    await mail.answer("mail.search", oneRead(`message-${named}`, { named }));
-    const chat = await chatOf(
-      person.userId,
-      step(
-        calling("MAIL", "mail.send", { to: "ben@acme.test", subject: sent })
-      ),
-      says("Waiting for you."),
-      step(calling("MAIL", "mail.search", { query: named })),
-      says("Found it.")
-    );
-    await grant(chat, mail.id, "MAIL", ["mail.send", "mail.search"]);
-
-    await chat.ask("Send it.");
-    await chat.ask("Find it.");
-    const events = await captures(mail.id);
-
-    expect({
-      events: events.map(shown),
-      recalled: await Promise.all(
-        [named, sent].map(
-          async (marker) => await recalled(person.userId, marker)
-        )
-      ),
-    }).toStrictEqual({
-      events: [
-        {
-          action: "brain.capture.skipped",
-          onBehalfOf: person.userId,
-          detail: { reason: "list", items: 1, kept: 0, failed: 0, skipped: 1 },
-        },
-      ],
-      recalled: [{ texts: [] }, { texts: [] }],
-    });
-  });
-
-  it("keeps nothing from a shared connection, counted as skipped, nor from a toolkit that forbids copies or an answer naming no item", async () => {
-    const person = await signedInApi(idp, "user");
-    const [sharedMarker, privateMarker, unnamed, witness] = [
-      markerOf(),
+    const [sharedMarker, privateMarker, witness] = [
       markerOf(),
       markerOf(),
       markerOf(),
@@ -485,11 +436,6 @@ describe("what a chat's agent reads through a connection", setUpTime, () => {
     });
     const forbidden = await mailConnection([], mailWithSearch, {
       provider: "mail_private",
-      owner: person.userId,
-    });
-    // Its search answers as the test server does, naming no item.
-    const plain = await mailConnection([], mailWithSearch, {
-      provider: "mail_own",
       owner: person.userId,
     });
     const own = await mailConnection([], mailWithSearch, {
@@ -513,39 +459,34 @@ describe("what a chat's agent reads through a connection", setUpTime, () => {
       step(
         calling("SHARED", "mail.search", { query: sharedMarker }),
         calling("PRIVATE", "mail.search", { query: privateMarker }),
-        calling("PLAIN", "mail.search", { query: unnamed }),
         calling("OWN", "mail.search", { query: witness })
       ),
       says("Found them.")
     );
     await grant(chat, shared.id, "SHARED", ["mail.search"]);
     await grant(chat, forbidden.id, "PRIVATE", ["mail.search"]);
-    await grant(chat, plain.id, "PLAIN", ["mail.search"]);
     await grant(chat, own.id, "OWN", ["mail.search"]);
 
     await chat.ask("Find them.");
     // Each capture starts as its call answers, the others' at once: once
     // the last call's is in, the earlier ones have ended.
-    const [sharedEvents] = await Promise.all([
+    const [sharedEvents, witnessed] = await Promise.all([
       captures(shared.id),
       captures(own.id),
     ]);
     const quiet = await allEvents();
-    // Its event, the last call's, in: the earlier calls' captures ended.
-    const witnessed = await captures(own.id);
 
     expect({
       shared: sharedEvents.map(shown),
       recalled: await Promise.all(
-        [sharedMarker, privateMarker, unnamed].map(
+        [sharedMarker, privateMarker].map(
           async (marker) => await recalled(person.userId, marker)
         )
       ),
       witnessed: witnessed.map(shown),
       quiet: quiet.filter(
         ({ action, target }) =>
-          action.startsWith("brain.capture.") &&
-          (target?.id === forbidden.id || target?.id === plain.id)
+          action.startsWith("brain.capture.") && target?.id === forbidden.id
       ),
     }).toStrictEqual({
       shared: [
@@ -561,12 +502,12 @@ describe("what a chat's agent reads through a connection", setUpTime, () => {
           },
         },
       ],
-      recalled: [{ texts: [] }, { texts: [] }, { texts: [] }],
+      recalled: [{ texts: [] }, { texts: [] }],
       witnessed: [
         {
-          action: "brain.capture.skipped",
+          action: "brain.capture.kept",
           onBehalfOf: person.userId,
-          detail: { reason: "list", items: 1, kept: 0, failed: 0, skipped: 1 },
+          detail: { items: 1, kept: 1, failed: 0, skipped: 0 },
         },
       ],
       quiet: [],
