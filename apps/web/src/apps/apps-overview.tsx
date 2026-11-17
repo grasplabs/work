@@ -1,60 +1,84 @@
 import type { AppOverview } from "@grasp-os/shared/apps";
-import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupInput,
-} from "@grasp-os/ui/components/input-group";
 import { Trans, useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { Link } from "@tanstack/react-router";
-import { LayoutGridIcon, SearchIcon } from "lucide-react";
 import { useState } from "react";
 
 import { formatDate } from "../format.ts";
 import { Page, PageHeading } from "../frame/page.tsx";
+import { Card, CardDescription, CardTitle } from "../grasp/card/index.ts";
 import { Empty } from "../grasp/empty/index.ts";
+import { Search } from "../grasp/icons/index.ts";
+import {
+  InputGroup,
+  InputGroupInput,
+  InputGroupText,
+} from "../grasp/input-group/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { MakeSomethingLink } from "../make/make-link.tsx";
 import { StatusBadge } from "./app-status.tsx";
 
 // The Apps page: every App the person can open, newest first, as a grid of
-// cards (its icon, name, where it stands and when it was made), each
-// opening the live App (/apps/$app). A search over their names, and Make
+// cards (its name, what it is for, where it stands and when it was made),
+// each opening the App (/apps/$app). A search over their names, and Make
 // something for who builds, which starts a chat to make an App
 // (make/make-link.tsx).
+
+// How wide a card grows before the grid adds a column: Grasp UI has no
+// token for a card's measure.
+const CARD_MIN = "16rem";
+
+const styles = stylex.create({
+  search: { maxWidth: "18rem" },
+  grid: {
+    display: "grid",
+    gridTemplateColumns: `repeat(auto-fill, minmax(min(${CARD_MIN}, 100%), 1fr))`,
+    gap: grasp.space4,
+    margin: 0,
+    padding: 0,
+  },
+  card: { position: "relative" },
+  // The name's link covers the whole card, so the card opens the App.
+  open: {
+    color: "inherit",
+    textDecoration: "none",
+    outline: "none",
+    "::after": { content: '""', position: "absolute", inset: 0 },
+  },
+  meta: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: grasp.space2,
+    marginTop: grasp.space3,
+  },
+});
 
 /** One App: its card, whose name opens it. */
 const AppCard = ({ overview: { app } }: { overview: AppOverview }) => {
   const made = formatDate(app.createdAt);
   return (
-    <li className="bg-card hover:border-ring/40 relative flex min-w-0 flex-col gap-3 rounded-xl border p-4 transition-colors">
-      <div className="flex items-start gap-3">
-        <span
-          aria-hidden="true"
-          className="bg-muted text-foreground inline-flex size-9 flex-none items-center justify-center rounded-lg"
+    <Card element="li" layout={styles.card}>
+      <CardTitle>
+        <Link
+          params={{ app: app.id }}
+          to="/apps/$app"
+          {...stylex.props(styles.open)}
         >
-          <LayoutGridIcon className="size-4" />
-        </span>
-        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <Link
-            className="truncate font-medium outline-none after:absolute after:inset-0 after:rounded-xl focus-visible:underline"
-            params={{ app: app.id }}
-            to="/apps/$app"
-          >
-            {app.name}
-          </Link>
-          {app.description === "" ? null : (
-            <p className="text-muted-foreground line-clamp-2 text-sm">
-              {app.description}
-            </p>
-          )}
-        </div>
-      </div>
-      <div className="text-muted-foreground mt-auto flex items-center gap-2 text-xs">
+          {app.name}
+        </Link>
+      </CardTitle>
+      {app.description === "" ? null : (
+        <CardDescription>{app.description}</CardDescription>
+      )}
+      <div {...stylex.props(styles.meta)}>
         <StatusBadge app={app} />
-        <span className="truncate">
+        <Text element="span" size="xs" tone="muted">
           <Trans>Made {made}</Trans>
-        </span>
+        </Text>
       </div>
-    </li>
+    </Card>
   );
 };
 
@@ -106,30 +130,23 @@ export const AppsOverview = ({
         </Empty>
       ) : (
         <>
-          <div className="w-full sm:w-72">
-            <InputGroup>
-              <InputGroupInput
-                aria-label={t`Search the Apps`}
-                onChange={(event) => {
-                  setQuery(event.target.value);
-                }}
-                placeholder={t`Search`}
-                value={query}
-              />
-              <InputGroupAddon>
-                <SearchIcon />
-              </InputGroupAddon>
-            </InputGroup>
-          </div>
+          <InputGroup layout={styles.search}>
+            <InputGroupText icon={Search} />
+            <InputGroupInput
+              aria-label={t`Search the Apps`}
+              onValueChange={(value: string) => {
+                setQuery(value);
+              }}
+              placeholder={t`Search`}
+              value={query}
+            />
+          </InputGroup>
           {shown.length === 0 ? (
             <Empty picture="search">
               <Trans>No App is called “{asked}”</Trans>
             </Empty>
           ) : (
-            <ul
-              aria-label={t`Apps`}
-              className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
-            >
+            <ul aria-label={t`Apps`} {...stylex.props(styles.grid)}>
               {shown.map((overview) => (
                 <AppCard key={overview.app.id} overview={overview} />
               ))}

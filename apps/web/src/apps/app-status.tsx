@@ -9,13 +9,13 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@grasp-os/ui/components/alert-dialog";
-import { Badge } from "@grasp-os/ui/components/badge";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { useRouter } from "@tanstack/react-router";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
 import type { Session } from "../core.ts";
 import { formatList } from "../format.ts";
+import { Badge } from "../grasp/badge/index.ts";
 import { useCoreAction } from "../use-core-action.ts";
 
 // Where an App (core's App) is in its life, and its builders moving it,
@@ -75,20 +75,20 @@ export const StatusBadge = ({
   const status = statusOf(app);
   if (status === "archived") {
     return (
-      <Badge variant="outline">
+      <Badge>
         <Trans context="an App put away">Archived</Trans>
       </Badge>
     );
   }
   if (status === "draft" || who?.length === 0) {
     return (
-      <Badge variant="attention">
+      <Badge tone="attention">
         <Trans>Only you see this</Trans>
       </Badge>
     );
   }
   return (
-    <Badge variant="passed">
+    <Badge tone="success">
       <UsedBy who={who} />
     </Badge>
   );
