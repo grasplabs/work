@@ -57,7 +57,9 @@ export const ForgetTeams = ({
       await onErased();
     }
   };
-  if (erased) {
+  // Erased, until a confirmed save gives the Brain the teams again: then
+  // what core says now holds, and the erase is offered again.
+  if (erased && teamsInBrain === null) {
     return (
       <output aria-live="polite" className="text-muted-foreground text-sm">
         {t`Erased. Your Brain keeps nothing of your teams until you confirm them again.`}
