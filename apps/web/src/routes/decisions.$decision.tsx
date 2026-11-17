@@ -248,16 +248,28 @@ const DecisionCard = ({ decision }: { decision: DecisionView }) => {
                     />
                   </div>
                   <ErrorText>{failure}</ErrorText>
+                  {/* Nobody approves what they can't read: a withheld
+                      decision takes a rejection alone. */}
+                  {current.withheld === true ? (
+                    <p className="text-muted-foreground">
+                      <Trans>
+                        What this decision asks is withheld, so you can only
+                        decline it.
+                      </Trans>
+                    </p>
+                  ) : null}
                   <div className="flex gap-2">
-                    <Button
-                      disabled={busy}
-                      onClick={() => {
-                        void answer(true);
-                      }}
-                      size="sm"
-                    >
-                      <Trans>Approve</Trans>
-                    </Button>
+                    {current.withheld === true ? null : (
+                      <Button
+                        disabled={busy}
+                        onClick={() => {
+                          void answer(true);
+                        }}
+                        size="sm"
+                      >
+                        <Trans>Approve</Trans>
+                      </Button>
+                    )}
                     <Button
                       disabled={busy}
                       onClick={() => {

@@ -16267,6 +16267,11 @@ msgstr "Wat ze ons vertelden"
 msgid "What they want instead"
 msgstr "Wat ze liever willen"
 
+#: src/decision-confirmation.tsx
+#: src/routes/decisions.$decision.tsx
+msgid "What this decision asks is withheld, so you can only decline it."
+msgstr "Wat deze beslissing vraagt, wordt achtergehouden. Je kunt haar daarom alleen afwijzen."
+
 #: src/agents/agent-wakes.tsx
 msgid "What to ask it each time"
 msgstr "Wat hem elke keer gevraagd wordt"

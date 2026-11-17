@@ -194,6 +194,15 @@ export const DecisionConfirmDialog = ({
               Grasp records this answer only once you confirm it here. Check
               what is asked and what you answer.
             </Trans>
+            {decision?.withheld === true ? (
+              <>
+                {" "}
+                <Trans>
+                  What this decision asks is withheld, so you can only decline
+                  it.
+                </Trans>
+              </>
+            ) : null}
           </AlertDialogDescription>
         </AlertDialogHeader>
         {decision === undefined || pending === undefined ? null : (

@@ -5,18 +5,19 @@ import {
   permissionIdSchema,
   workspaceIdSchema,
 } from "@grasp-os/shared/ids";
+import { errorFields, log } from "@grasp-os/shared/log";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
-import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { readableMemoriesAs, readableVersionsAs } from "../brain-next.ts";
 import type { PinnedVersionRef } from "../brain-next.ts";
 import { runChatSources } from "../db/core/schema.ts";
+import { inList } from "../db/d1.ts";
 import { readableSources } from "../history-access.ts";
 import { authorize } from "../permissions.ts";
 import { runAuthority, runContext } from "./resource-authority.ts";
 import type { CallingRun } from "./resource-authority.ts";
-import { evidenceOf, memoryEvidenceOf } from "./run-evidence.ts";
+import { evidenceOfRuns, memoryEvidenceOfRuns } from "./run-evidence.ts";
 
 // What a run read, checked before anything of the run leaves it: the
 // Brain's versions its recalls pinned (run-evidence.ts) and what the chat
@@ -34,114 +35,268 @@ const revokedOr = (error: unknown): unknown =>
     ? workflowResourceErrors.create("brain.revoked")
     : error;
 
+/** A run whose evidence is checked: its ID, its workflow and its person. */
+type EvidenceRun = Pick<CallingRun, "runId" | "workflowId" | "principal">;
+
 /**
- * Refuses, as `brain.revoked`, run `runId` once the chat whose agent had
- * it started may no longer read, for its person, something it had read
- * then (GRA-1093, workflow-starts.ts): as the chat's own history check
- * decides it (`readableSources`), under the chat's agent and person as
- * they are now.
+ * What a check of runs found: those refused, and those whose check failed
+ * otherwise, each with why.
  */
-const requireChatPinsReadable = async (
+interface Checked {
+  readonly refused: Set<string>;
+  readonly failed: Map<string, unknown>;
+}
+
+/**
+ * Records `error`, thrown checking runs `runIds` together, against each of
+ * them: a refusal (`revokedOr`) refuses them; anything else fails their
+ * check, as `revokedOr` has it, and theirs alone.
+ */
+const settled = (
+  checked: Checked,
+  runIds: readonly string[],
+  error: unknown
+): void => {
+  const mapped = revokedOr(error);
+  for (const runId of runIds) {
+    if (workflowResourceErrors.codeOf(mapped) === "brain.revoked") {
+      checked.refused.add(runId);
+    } else if (!checked.failed.has(runId)) {
+      checked.failed.set(runId, mapped);
+    }
+  }
+};
+
+/** `items` grouped by `key`, each group in the order its items came. */
+const groupedBy = <T>(
+  items: readonly T[],
+  key: (item: T) => string
+): Map<string, T[]> => {
+  const groups = new Map<string, T[]>();
+  for (const item of items) {
+    groups.set(key(item), [...(groups.get(key(item)) ?? []), item]);
+  }
+  return groups;
+};
+
+/**
+ * Of `runs`, those the chat whose agent had one started may no longer
+ * read, for its person, something it had read then (GRA-1093,
+ * workflow-starts.ts): as the chat's own history check decides it
+ * (`readableSources`), under the chat's agent and person as they are
+ * now. One read of the pins, and one check per chat, however many runs
+ * it started.
+ */
+const chatPinsChecked = async (
   env: Env,
-  runId: string
+  runIds: readonly string[],
+  checked: Checked
 ): Promise<void> => {
   const rows = await drizzle(env.DB)
     .select()
     .from(runChatSources)
-    .where(eq(runChatSources.runId, runId));
-  const [first] = rows;
-  if (first === undefined) {
-    return;
-  }
-  const { readable } = await readableSources(
-    env,
-    {
-      workspaceId: workspaceIdSchema.parse(first.workspaceId),
-      chatId: chatIdSchema.parse(first.chatId),
-      agentId: first.agentId,
-      personId: first.personId,
-    },
-    rows.map(({ sourceId }) => sourceId)
-  ).catch((error: unknown) => {
-    throw revokedOr(error);
-  });
-  if (rows.some(({ sourceId }) => !readable.has(sourceId))) {
-    throw workflowResourceErrors.create("brain.revoked");
-  }
-};
-
-/** `requireResourceRunEvidenceReadable` for `run`'s own evidence alone. */
-const requireOwnEvidenceReadable = async (
-  env: Env,
-  run: Pick<CallingRun, "runId" | "workflowId" | "principal">
-): Promise<void> => {
-  await requireChatPinsReadable(env, run.runId);
-  const [rows, memoryRows] = await Promise.all([
-    evidenceOf(env, run.runId),
-    memoryEvidenceOf(env, run.runId),
-  ]);
-  if (rows.length === 0 && memoryRows.length === 0) {
-    return;
-  }
-  // SAFETY: core wrote each row from a pack's own item or a skill it
-  // handed the run (`skillVersionRefOf`); checked again, strictly, by
-  // `readableVersionsAs`, which refuses a producer it doesn't know, and
-  // the run with it.
-  const versions = rows.map(
-    ({ producer, sourceId, version }) =>
-      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-      ({ source: { producer, id: sourceId }, version }) as PinnedVersionRef
-  );
-  try {
-    for (const permissionId of new Set(
-      [...rows, ...memoryRows].map((row) => row.permissionId)
-    )) {
-      // oxlint-disable-next-line no-await-in-loop -- one per grant, few
-      await authorize(
-        env,
-        runAuthority(run),
-        { type: "platform" },
-        "brain",
-        permissionIdSchema.parse(permissionId),
-        runContext(run)
+    .where(inList(runChatSources.runId, runIds));
+  // Each run's pins are its one chat's: its first row names it.
+  const chatOf = new Map<string, string>();
+  for (const row of rows) {
+    if (!chatOf.has(row.runId)) {
+      chatOf.set(
+        row.runId,
+        JSON.stringify([row.workspaceId, row.chatId, row.agentId, row.personId])
       );
     }
-    // What its entity reads rested on, as they read: the company alone.
-    // One a person's erasure took, its writer retired or took back (a
-    // share), or resting on a source erased or narrowed away from the
-    // company, is no longer readable, as a chat's history decides it
-    // (history-access.ts): someone who takes a memory back wants others to
-    // stop getting it (GRA-1985). One a newer memory ended stays. Paged by
-    // the Brain's check, 500 a call.
-    const memories = [...new Set(memoryRows.map(({ memoryId }) => memoryId))];
-    const readableMemories = await readableMemoriesAs(
-      env,
-      run.principal,
-      memories.map((memory) => ({ store: "shared" as const, memory })),
-      { reach: "company" }
-    );
-    if (readableMemories.length < memories.length) {
-      throw workflowResourceErrors.create("brain.revoked");
-    }
-    // As the run's recalls read them: the company alone.
-    const readable = await readableVersionsAs(env, run.principal, versions, {
-      reach: "company",
-    });
-    const kept = new Set(
-      readable.map(({ source, version }) =>
-        JSON.stringify([source.producer, source.id, version])
-      )
-    );
-    if (
-      versions.some(
-        ({ source, version }) =>
-          !kept.has(JSON.stringify([source.producer, source.id, version]))
-      )
-    ) {
-      throw workflowResourceErrors.create("brain.revoked");
-    }
-  } catch (error) {
-    throw revokedOr(error);
+  }
+  const byChat = groupedBy(rows, (row) => chatOf.get(row.runId) ?? "");
+  await Promise.all(
+    [...byChat.values()].map(async (pins) => {
+      const [first] = pins;
+      if (first === undefined) {
+        return;
+      }
+      try {
+        const { readable } = await readableSources(
+          env,
+          {
+            workspaceId: workspaceIdSchema.parse(first.workspaceId),
+            chatId: chatIdSchema.parse(first.chatId),
+            agentId: first.agentId,
+            personId: first.personId,
+          },
+          [...new Set(pins.map(({ sourceId }) => sourceId))]
+        );
+        for (const { runId, sourceId } of pins) {
+          if (!readable.has(sourceId)) {
+            checked.refused.add(runId);
+          }
+        }
+      } catch (error) {
+        settled(
+          checked,
+          pins.map(({ runId }) => runId),
+          error
+        );
+      }
+    })
+  );
+};
+
+/** A version of a source, as one key. */
+const versionKey = (
+  producer: string,
+  sourceId: string,
+  version: number
+): string => JSON.stringify([producer, sourceId, version]);
+
+/**
+ * Of `runs`, those that may no longer read what they read (the header),
+ * and those whose check failed otherwise: checked together, so a list of
+ * them costs one read of each kind of evidence, a check per chat, one per
+ * permission of a workflow and person, and two of the Brain per person,
+ * however many runs and decisions it holds. A failure counts against the
+ * runs of the check it came from alone. A read of the evidence that fails
+ * throws.
+ */
+const evidenceChecked = async (
+  env: Env,
+  runs: readonly EvidenceRun[]
+): Promise<Checked> => {
+  const byId = new Map(runs.map((run) => [run.runId, run]));
+  const ids = [...byId.keys()];
+  const checked: Checked = { refused: new Set(), failed: new Map() };
+  if (ids.length === 0) {
+    return checked;
+  }
+  const [, rows, memoryRows] = await Promise.all([
+    chatPinsChecked(env, ids, checked),
+    evidenceOfRuns(env, ids),
+    memoryEvidenceOfRuns(env, ids),
+  ]);
+  // Each permission its recalls came through still the run's, active, now
+  // (`authorize`): decided by the run's workflow and person, once each.
+  const grants = groupedBy(
+    [...rows, ...memoryRows].flatMap(({ runId, permissionId }) => {
+      const run = byId.get(runId);
+      return run === undefined ? [] : [{ run, permissionId }];
+    }),
+    ({ run, permissionId }) =>
+      JSON.stringify([run.workflowId, run.principal, permissionId])
+  );
+  await Promise.all(
+    [...grants.values()].map(async (holders) => {
+      const [first] = holders;
+      if (first === undefined) {
+        return;
+      }
+      try {
+        await authorize(
+          env,
+          runAuthority(first.run),
+          { type: "platform" },
+          "brain",
+          permissionIdSchema.parse(first.permissionId),
+          runContext(first.run)
+        );
+      } catch (error) {
+        settled(
+          checked,
+          holders.map(({ run }) => run.runId),
+          error
+        );
+      }
+    })
+  );
+  // What they read, as their recalls and entity reads read it: the company
+  // alone (`company`), as each run's person reads as the company. A
+  // version erased or narrowed away from the company is no longer
+  // readable; nor is a memory a person's erasure took, its writer retired
+  // or took back (a share), or resting on a source erased or narrowed, as
+  // a chat's history decides it (history-access.ts): someone who takes a
+  // memory back wants others to stop getting it (GRA-1985). One a newer
+  // memory ended stays. Paged by the Brain's check, 500 a call.
+  const principalOf = (runId: string): string =>
+    byId.get(runId)?.principal ?? "";
+  const versionsBy = groupedBy(rows, ({ runId }) => principalOf(runId));
+  const memoriesBy = groupedBy(memoryRows, ({ runId }) => principalOf(runId));
+  await Promise.all(
+    [...new Set([...versionsBy.keys(), ...memoriesBy.keys()])].map(
+      async (principal) => {
+        const versionRows = versionsBy.get(principal) ?? [];
+        const memoryRowsOf = memoriesBy.get(principal) ?? [];
+        // SAFETY: core wrote each row from a pack's own item or a skill it
+        // handed the run (`skillVersionRefOf`); checked again, strictly, by
+        // `readableVersionsAs`, which refuses a producer it doesn't know,
+        // and the runs with it.
+        const versions = [
+          ...new Map(
+            versionRows.map(({ producer, sourceId, version }) => [
+              versionKey(producer, sourceId, version),
+              // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+              {
+                source: { producer, id: sourceId },
+                version,
+              } as PinnedVersionRef,
+            ])
+          ).values(),
+        ];
+        const memories = [
+          ...new Set(memoryRowsOf.map(({ memoryId }) => memoryId)),
+        ];
+        try {
+          const [readableMemories, readable] = await Promise.all([
+            readableMemoriesAs(
+              env,
+              principal,
+              memories.map((memory) => ({ store: "shared" as const, memory })),
+              { reach: "company" }
+            ),
+            readableVersionsAs(env, principal, versions, { reach: "company" }),
+          ]);
+          const keptMemories = new Set(
+            readableMemories.map(({ memory }) => memory)
+          );
+          const kept = new Set(
+            readable.map(({ source, version }) =>
+              versionKey(source.producer, source.id, version)
+            )
+          );
+          for (const { runId, memoryId } of memoryRowsOf) {
+            if (!keptMemories.has(memoryId)) {
+              checked.refused.add(runId);
+            }
+          }
+          for (const { runId, producer, sourceId, version } of versionRows) {
+            if (!kept.has(versionKey(producer, sourceId, version))) {
+              checked.refused.add(runId);
+            }
+          }
+        } catch (error) {
+          settled(
+            checked,
+            [...versionRows, ...memoryRowsOf].map(({ runId }) => runId),
+            error
+          );
+        }
+      }
+    )
+  );
+  return checked;
+};
+
+/**
+ * `requireResourceRunEvidenceReadable` for `run`'s own evidence alone: a
+ * refusal as `brain.revoked`, before any other failure, which throws as
+ * it is.
+ */
+const requireOwnEvidenceReadable = async (
+  env: Env,
+  run: EvidenceRun
+): Promise<void> => {
+  const { refused, failed } = await evidenceChecked(env, [run]);
+  if (refused.has(run.runId)) {
+    throw workflowResourceErrors.create("brain.revoked");
+  }
+  if (failed.has(run.runId)) {
+    throw failed.get(run.runId);
   }
 };
 
@@ -209,4 +364,58 @@ export const runEvidenceHolds = async (
     }
     return false;
   }
+};
+
+/** Logs that run `runId`'s evidence couldn't be checked: it holds nothing. */
+const unchecked = (runId: string, error: unknown): [] => {
+  log.error("workflow.run_evidence_unchecked", {
+    runId,
+    ...errorFields(error),
+  });
+  return [];
+};
+
+/**
+ * Of `runs`, the IDs of those that may still read what they read
+ * (`requireEndedRunEvidenceReadable`), checked together
+ * (`evidenceChecked`), for a reader that shows what each holds only while
+ * it holds (what a run's decisions ask: decisions.ts). A run whose check
+ * failed otherwise is checked again alone, so another run's failure in
+ * the same check never counts against it; one whose own check fails is
+ * left out (fails closed), logged, and so is every run when the evidence
+ * can't be read at all.
+ */
+export const runsWhoseEvidenceHolds = async (
+  env: Env,
+  runs: readonly EvidenceRun[]
+): Promise<Set<string>> => {
+  const unique = [...new Map(runs.map((run) => [run.runId, run])).values()];
+  /** `runs`' IDs that hold, each failed one checked again alone if `again`. */
+  const holding = async (
+    some: readonly EvidenceRun[],
+    again: boolean
+  ): Promise<string[]> => {
+    let checked: Checked;
+    try {
+      checked = await evidenceChecked(env, some);
+    } catch (error) {
+      return some.flatMap(({ runId }) => unchecked(runId, error));
+    }
+    const each = await Promise.all(
+      some.map(async (run) => {
+        const failure = checked.failed.get(run.runId);
+        if (checked.refused.has(run.runId)) {
+          return [];
+        }
+        if (failure === undefined) {
+          return [run.runId];
+        }
+        return again
+          ? await holding([run], false)
+          : unchecked(run.runId, failure);
+      })
+    );
+    return each.flat();
+  };
+  return new Set(await holding(unique, unique.length > 1));
 };

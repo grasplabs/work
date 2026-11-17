@@ -61,6 +61,8 @@ export const decisionErrors = defineErrorFamily({
     "This answer wasn't confirmed in Grasp, so it wasn't recorded. Answer again and confirm it.",
   "decision.conflict":
     "This decision changed since you opened it. Review it again before you answer.",
+  "decision.withheld":
+    "What this decision asks is withheld, so it can only be declined.",
   "decision.cancelled":
     "You didn't confirm the answer, so nothing was recorded.",
   "decision.asking_paused":
@@ -106,6 +108,12 @@ export interface DecisionView {
    * context. None once removed with its run's details.
    */
   input?: Json;
+  /**
+   * Present when what it asks is withheld: its run may no longer read
+   * what it read. Its description says so, it shows no input, and it
+   * takes a rejection alone.
+   */
+  withheld?: true;
   status: DecisionStatus;
   /** ISO 8601: no answer is taken from then on. */
   expiresAt: string;

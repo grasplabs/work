@@ -69,7 +69,7 @@ import { fakeProviderFor } from "./model-provider.ts";
 import { noProducers } from "./no-producers.ts";
 import { appWith, person, seal } from "./sealed-apps.ts";
 import type { Fixture } from "./sealed-apps.ts";
-import { routed, unique } from "./sign-in.ts";
+import { outcome, routed, unique } from "./sign-in.ts";
 import { testBinding } from "./test-env.ts";
 import { publishDefinition } from "./workflow-publishing.ts";
 
@@ -2024,7 +2024,7 @@ const askReadBy = async (
   const waiting = await waitingDecisions(env, reviewer);
   const inbox = waiting.filter(({ id }) => id === decision);
   const review = await reviewDecision(env, reviewer, decision, {
-    approved: true,
+    approved: false,
   });
   const today = await workflowsToday(env, reviewer);
   const asks = today.lanes
@@ -2042,16 +2042,28 @@ const askReadBy = async (
 };
 
 /**
- * `by`'s answer to `decision` through the trusted host decision UI:
- * reviewed, confirmed, then answered with that confirmation. Which of
- * `names` it shows.
+ * `by`'s answers to `decision` through the trusted host decision UI: an
+ * approval, at each step it could be given (reviewed, confirmed, then
+ * answered), each refused or not; then a rejection, reviewed, confirmed
+ * and answered. Which of `names` any of it shows, and the refusals the
+ * audit log keeps.
  */
 const answeredBy = async (
   by: Member,
   decision: string,
   names: readonly string[]
 ) => {
-  const review = await reviewDecision(env, by, decision, { approved: true });
+  const approval = { approved: true };
+  const { revision } = await decisionFor(env, by, decision);
+  const approve = {
+    review: await outcome(reviewDecision(env, by, decision, approval)),
+    confirm: await outcome(
+      confirmDecision(env, by, decision, revision, approval)
+    ),
+    // With no confirmation of it: none could be had.
+    answer: await outcome(answerDecision(env, by, decision, approval, "")),
+  };
+  const review = await reviewDecision(env, by, decision, { approved: false });
   if (review.state === "recorded") {
     throw new Error("Answered already");
   }
@@ -2069,18 +2081,39 @@ const answeredBy = async (
     review.response,
     confirmation
   );
+  const events = await allEvents();
   const text = JSON.stringify({ review, answered });
   return {
+    approve,
+    refusalsAudited: events.filter(
+      ({ action, target, detail }) =>
+        action === "workflow.decision.answer_refused" &&
+        target?.id === decision &&
+        detail?.errorCode === "decision.withheld"
+    ).length,
     status: answered.status,
     shows: names.filter((name) => text.includes(name)),
   };
+};
+
+/** What answering a withheld ask comes to: a rejection alone taken. */
+const declinedOnly = {
+  approve: {
+    review: "decision.withheld",
+    confirm: "decision.withheld",
+    answer: "decision.withheld",
+  },
+  // The confirmation's and the answer's, as any refusal of them is.
+  refusalsAudited: 2,
+  status: "rejected",
+  shows: [],
 };
 
 describe(
   "a decision's ask, once its run may no longer read it",
   setUpTime,
   () => {
-    it("is withheld from its recipient everywhere they read it once a source the card it asks about rests on is erased, and its answer is never taken", async () => {
+    it("is withheld from its recipient everywhere they read it once a source the card it asks about rests on is erased: it can only be declined, and its run never goes on", async () => {
       const admin = await person("admin");
       const ada = await person("builder");
       // An admin sees every run of the day, so the ask shows there too.
@@ -2118,12 +2151,12 @@ describe(
         after: { inbox: 1, today: 1, input: false, shows: [] },
         // What a reviewer confirms against holds nothing of what it asked.
         sameRevision: false,
-        answered: { status: "approved", shows: [] },
+        answered: declinedOnly,
         ending: { status: "failed", error: "brain.revoked" },
       });
     });
 
-    it("is withheld from its recipient everywhere they read it once a person's erasure took the card it asks about, and its answer is never taken", async () => {
+    it("is withheld from its recipient everywhere they read it once a person's erasure took the card it asks about: it can only be declined, and its run never goes on", async () => {
       const admin = await person("admin");
       const ada = await person("builder");
       const reviewer = await person("admin");
@@ -2152,7 +2185,7 @@ describe(
       }).toStrictEqual({
         before: { inbox: 1, today: 1, input: true, shows: names },
         after: { inbox: 1, today: 1, input: false, shows: [] },
-        answered: { status: "approved", shows: [] },
+        answered: declinedOnly,
         ending: { status: "failed", error: "brain.revoked" },
       });
     });

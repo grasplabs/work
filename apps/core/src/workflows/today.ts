@@ -35,7 +35,7 @@ import {
 } from "../decisions/decisions.ts";
 import { startOfCompanyDay } from "../organization.ts";
 import { listWorkflowResources } from "../workflow-resources.ts";
-import { runEvidenceHolds } from "./resource-reads.ts";
+import { runsWhoseEvidenceHolds } from "./resource-reads.ts";
 
 // The company's day at work (GRA-1255), for Runs › Today: every run
 // started since midnight in the organization's time zone, across the
@@ -125,24 +125,6 @@ const withWaits = <T extends { id: string }>(
   return [...rows, ...more.filter(({ id }) => !ids.has(id))];
 };
 
-/**
- * What `run`, waiting on the reader, asks them (`description`): withheld
- * once it may no longer read what it read, as its decision's page
- * withholds it (decisions.ts).
- */
-const askOf = async (
-  env: Env,
-  run: DayRun,
-  description: string
-): Promise<string> =>
-  (await runEvidenceHolds(env, {
-    runId: run.id,
-    workflowId: run.workflow,
-    principal: run.principal,
-  }))
-    ? description
-    : withheldAskText;
-
 /** The runs of the day, in the lanes of `lanes`, with their decisions. */
 const runsOf = async (
   env: Env,
@@ -180,33 +162,56 @@ const runsOf = async (
           .where(inList(teams.id, [...new Set(teamIds)]));
   const teamNames = new Map(named.map(({ id, name }) => [id, name]));
   const seen = new Set(ids);
-  const told = await Promise.all(
-    runs.map(async (run): Promise<TodayRun> => {
-      const own = decisions.filter(({ runId }) => runId === run.id);
-      const goesOn = run.endedAt === null;
-      const open = goesOn ? own.filter(({ open: isOpen }) => isOpen === 1) : [];
-      const mine = open.find(({ mine: answerable }) => answerable === 1);
-      return {
-        id: run.id,
-        startedAt: run.createdAt.toISOString(),
-        endedAt: ended(run.endedAt),
-        status: run.status,
-        went: own.length > 0 ? "people" : "alone",
-        waits:
-          mine === undefined
-            ? null
-            : {
-                decision: mine.id,
-                on: waitsOnOf(mine.deciders, teamNames),
-                since: mine.openedAt.toISOString(),
-                asks: await askOf(env, run, mine.description),
-              },
-        waitsOnOthers: mine === undefined && open.length > 0,
-        from: run.from !== null && seen.has(run.from) ? run.from : null,
-      };
-    })
+  const shown = runs.map((run) => {
+    const own = decisions.filter(({ runId }) => runId === run.id);
+    const goesOn = run.endedAt === null;
+    const open = goesOn ? own.filter(({ open: isOpen }) => isOpen === 1) : [];
+    return {
+      run,
+      own,
+      open,
+      mine: open.find(({ mine: answerable }) => answerable === 1),
+    };
+  });
+  // What a run waiting on the reader asks, withheld once it may no longer
+  // read what it read, or can't be checked, as its decision's page
+  // withholds it (decisions.ts): those runs checked together.
+  const holding = await runsWhoseEvidenceHolds(
+    env,
+    shown.flatMap(({ run, mine }) =>
+      mine === undefined
+        ? []
+        : [
+            {
+              runId: run.id,
+              workflowId: run.workflow,
+              principal: run.principal,
+            },
+          ]
+    )
   );
-  return new Map(told.map((run) => [run.id, run]));
+  const result = new Map<string, TodayRun>();
+  for (const { run, own, open, mine } of shown) {
+    result.set(run.id, {
+      id: run.id,
+      startedAt: run.createdAt.toISOString(),
+      endedAt: ended(run.endedAt),
+      status: run.status,
+      went: own.length > 0 ? "people" : "alone",
+      waits:
+        mine === undefined
+          ? null
+          : {
+              decision: mine.id,
+              on: waitsOnOf(mine.deciders, teamNames),
+              since: mine.openedAt.toISOString(),
+              asks: holding.has(run.id) ? mine.description : withheldAskText,
+            },
+      waitsOnOthers: mine === undefined && open.length > 0,
+      from: run.from !== null && seen.has(run.from) ? run.from : null,
+    });
+  }
+  return result;
 };
 
 /**

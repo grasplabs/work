@@ -16267,6 +16267,11 @@ msgstr "Ce qu’ils nous ont dit"
 msgid "What they want instead"
 msgstr "Ce qu’ils veulent à la place"
 
+#: src/decision-confirmation.tsx
+#: src/routes/decisions.$decision.tsx
+msgid "What this decision asks is withheld, so you can only decline it."
+msgstr "Ce que demande cette décision est retenu : vous ne pouvez donc que la refuser."
+
 #: src/agents/agent-wakes.tsx
 msgid "What to ask it each time"
 msgstr "Ce qu’on lui demande à chaque fois"
