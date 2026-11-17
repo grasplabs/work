@@ -130,13 +130,21 @@ const eraseEach = async (
   });
   const syncSettled = await Promise.allSettled(
     synced.map(async ({ disconnect, connectionId, personId }) => {
-      await closeSyncOfDisconnect(env, {
-        connectionId,
-        personId,
-        request: disconnect.id,
-        actor: disconnect.actor,
-        at: new Date(disconnect.at),
-      });
+      try {
+        await closeSyncOfDisconnect(env, {
+          connectionId,
+          personId,
+          request: disconnect.id,
+          actor: disconnect.actor,
+          at: new Date(disconnect.at),
+        });
+      } catch (error) {
+        // An owner the Brain refuses could never have had anything synced.
+        if (brainSourceErrors.codeOf(error) !== "brain.request_invalid") {
+          throw error;
+        }
+        log.error("brain.sync.erase_refused", { connectionId });
+      }
     })
   );
   const due = stopped.flatMap(({ disconnect, connectionId }) => {
