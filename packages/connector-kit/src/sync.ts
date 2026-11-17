@@ -138,3 +138,32 @@ export const defineSync = (definition: SyncDefinition): Sync => ({
       : { failure: { code: "failed" } };
   },
 });
+
+/**
+ * Sends one GET and reads its whole answer before `deadline` (ms since the
+ * epoch): the answer, its body already read, or "late" when the deadline
+ * cut it off, before its headers or while its body still came. A sync
+ * takes "late" as no room left on its page, so a page answers in time with
+ * what it has, and a file that always takes too long is passed over by a
+ * page that holds nothing else.
+ */
+export const fetchBefore = async (
+  url: URL,
+  deadline: number
+): Promise<Response | "late"> => {
+  try {
+    const response = await fetch(url, {
+      signal: AbortSignal.timeout(Math.max(deadline - Date.now(), 0)),
+    });
+    const body = await response.arrayBuffer();
+    return new Response(body, {
+      status: response.status,
+      headers: response.headers,
+    });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "TimeoutError") {
+      return "late";
+    }
+    throw error;
+  }
+};

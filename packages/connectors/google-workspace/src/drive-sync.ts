@@ -4,6 +4,7 @@ import { segment } from "@grasp-os/connector-kit/provider";
 import {
   RestartSyncError,
   defineSync,
+  fetchBefore,
   syncPageLimits,
 } from "@grasp-os/connector-kit/sync";
 import type {
@@ -279,22 +280,13 @@ const sizeOf = (content: SyncContent): number =>
 const noRoom = (room: Room): Read =>
   room.empty ? { content: null } : { full: true };
 
-/** Fetches a file's content, given up at the page's deadline. */
+/** Fetches a file's content, headers and bytes, given up at the page's deadline. */
 const fetchContent = async (
   room: Room,
   url: URL
 ): Promise<Response | "late"> => {
   room.requests -= 1;
-  try {
-    return await fetch(url, {
-      signal: AbortSignal.timeout(Math.max(room.deadline - Date.now(), 0)),
-    });
-  } catch (error) {
-    if (error instanceof DOMException && error.name === "TimeoutError") {
-      return "late";
-    }
-    throw error;
-  }
+  return await fetchBefore(url, room.deadline);
 };
 
 /** The content an answer holds, as the file is read. */
