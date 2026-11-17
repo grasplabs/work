@@ -60,7 +60,11 @@ import {
   workOutAgentApps,
 } from "./agent-app-access.ts";
 import {
+  adoptAgent,
   changeAgent,
+  declineAgent,
+  listOfferedAgents,
+  offerOwnAgent,
   listAgents,
   listOwnAgents,
   deleteAgent,
@@ -827,6 +831,31 @@ export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
       this.#check,
       async (identity) => await makeOwnAgent(this.#env, identity, input)
     );
+  }
+
+  async offerOwnAgent(agentId: unknown, offered: unknown): Promise<void> {
+    await withPerson(this.#check, async (identity) => {
+      await offerOwnAgent(this.#env, identity, agentId, offered);
+    });
+  }
+
+  async offeredAgents(): Promise<Agent[]> {
+    return await withPerson(
+      this.#check,
+      async (identity) => await listOfferedAgents(this.#env, identity)
+    );
+  }
+
+  async adoptAgent(agentId: unknown): Promise<void> {
+    await withPerson(this.#check, async (identity) => {
+      await adoptAgent(this.#env, identity, agentId);
+    });
+  }
+
+  async declineAgent(agentId: unknown): Promise<void> {
+    await withPerson(this.#check, async (identity) => {
+      await declineAgent(this.#env, identity, agentId);
+    });
   }
 
   async ownAgentsUsage(): Promise<OwnAgentsUsage[]> {

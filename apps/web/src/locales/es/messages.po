@@ -2143,6 +2143,10 @@ msgstr "Agente no encontrado"
 msgid "Agents"
 msgstr "Agentes"
 
+#: src/agents/agent-share.tsx
+msgid "Agents people made for themselves and offered to the company. Taking one on makes it the company's: it starts reaching nobody, with nothing it may do, until you say so."
+msgstr "Agentes que las personas crearon para sí mismas y ofrecieron a la empresa. Si adoptas uno, pasa a ser de la empresa: empieza sin llegar a nadie y sin poder hacer nada, hasta que tú lo decidas."
+
 #: src/agents/own-agents-admin.tsx
 msgid "Agents people make for themselves. Only their owner sees and asks them, and they do at most what Grasp may do for that person. You see how many each person has and what they cost, never what they are told."
 msgstr "Agentes que las personas crean para sí mismas. Solo su propietario los ve y les pregunta, y hacen como mucho lo que Grasp puede hacer por esa persona. Ves cuántos tiene cada persona y lo que cuestan, nunca lo que se les dice."
@@ -4551,6 +4555,7 @@ msgstr "Decisión no encontrada"
 msgid "Decisions"
 msgstr "Decisiones"
 
+#: src/agents/agent-share.tsx
 #: src/brain/skills-page.tsx
 #: src/inbox/item-detail.tsx
 msgid "Decline"
@@ -6000,6 +6005,14 @@ msgstr "De"
 msgctxt "where a decision comes from"
 msgid "From"
 msgstr "De"
+
+#: src/agents/agent-share.tsx
+msgid "From {from}"
+msgstr "De {from}"
+
+#: src/agents/agent-share.tsx
+msgid "From {from} · {job}"
+msgstr "De {from} · {job}"
 
 #: src/brain/memories-page.tsx
 msgid "From a chat, version {version}"
@@ -9543,6 +9556,22 @@ msgstr "Desactivado, nadie puede conectarlo, tampoco los administradores. Las co
 msgid "Offer {name}"
 msgstr "Ofrecer {name}"
 
+#: src/agents/agent-share.tsx
+msgid "Offer {name} to your company's admins. If they take it on, it becomes one of the company's agents: they choose who may ask it and what it may do, and you no longer change it."
+msgstr "Ofrece {name} a los administradores de tu empresa. Si lo adoptan, pasa a ser un agente de la empresa: ellos eligen quién puede preguntarle y qué puede hacer, y tú ya no lo cambias."
+
+#: src/agents/agent-share.tsx
+msgid "Offer to the company"
+msgstr "Ofrecer a la empresa"
+
+#: src/agents/agent-share.tsx
+msgid "Offered on {since}. Your company's admins may take {name} on. What you told it stays yours alone and doesn't go with it."
+msgstr "Ofrecido el {since}. Los administradores de tu empresa pueden adoptar a {name}. Lo que le dijiste sigue siendo solo tuyo y no se va con él."
+
+#: src/agents/agent-share.tsx
+msgid "Offered to the company"
+msgstr "Ofrecidos a la empresa"
+
 #: src/connections/offer-switch.tsx
 msgid "Offered to your organization"
 msgstr "Ofrecido a tu organización"
@@ -12365,6 +12394,7 @@ msgstr "Compartir esta versión en su lugar"
 msgid "Share with a team"
 msgstr "Compartir con un equipo"
 
+#: src/agents/agent-share.tsx
 #: src/brain/skills-page.tsx
 msgid "Share with the company"
 msgstr "Compartir con la empresa"
@@ -12750,6 +12780,7 @@ msgstr "Alguien con quien ya no se comparte"
 msgid "Someone no longer here"
 msgstr "Alguien que ya no está"
 
+#: src/agents/agent-share.tsx
 #: src/agents/agent-wakes.tsx
 #: src/agents/own-agents-admin.tsx
 msgid "Someone no longer in the company"
@@ -13231,6 +13262,10 @@ msgstr "¿Quitar {itemName} de {projectName}?"
 msgid "Take {itemName} out of the project"
 msgstr "Quitar {itemName} del proyecto"
 
+#: src/agents/agent-share.tsx
+msgid "Take {name} on for the company"
+msgstr "Adoptar {name} para la empresa"
+
 #: src/projects/project-people.tsx
 msgid "Take {name} out of {projectName}?"
 msgstr "¿Quitar a {name} de {projectName}?"
@@ -13251,6 +13286,10 @@ msgstr "Quitar"
 msgid "Take off the dashboard"
 msgstr "Quitar del panel"
 
+#: src/agents/agent-share.tsx
+msgid "Take on"
+msgstr "Adoptar"
+
 #: src/projects/project-people.tsx
 #: src/projects/project-view.tsx
 msgid "Take out"
@@ -13263,6 +13302,10 @@ msgstr "Quitar: {text}"
 #: src/onboarding/hr-leads.tsx
 msgid "Take the leads from {name}"
 msgstr "Tomar los responsables de {name}"
+
+#: src/agents/agent-share.tsx
+msgid "Take the offer back"
+msgstr "Retirar la oferta"
 
 #: src/frame/person-menu.tsx
 msgid "Take the tour"
