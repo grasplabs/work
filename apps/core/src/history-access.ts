@@ -153,6 +153,15 @@ const brainCompanyMemoryPrefix = "brain-company-memory:";
  * is.
  */
 const brainProfileMemoryPrefix = "brain-profile-memory:";
+/**
+ * A memory what a chat's code read of the Brain's entities rests on but
+ * didn't hand over (agent-brain.ts): the one that gave an entity its
+ * name, made it seen, a contested fact's rival, what a confirmation was
+ * made over, the one past the page. Read again as a memory the person
+ * recalled is, but never their use of it (`memory_uses`): they never saw
+ * it (GRA-1982).
+ */
+const brainRestingMemoryPrefix = "brain-resting-memory:";
 
 /** Whether `source` is a pin of a recall as the company. */
 const isCompanyPin = (source: string): boolean =>
@@ -316,6 +325,10 @@ export const brainMemoryRead = ({ store, memory, basis }: MemoryPin): string =>
 export const brainProfileMemoryRead = (pin: MemoryPin): string =>
   `${brainProfileMemoryPrefix}${brainMemoryRead(pin).slice(brainMemoryPrefix.length)}`;
 
+/** The source a memory code's read rests on but didn't hand over is recorded as, in its person's own chat. */
+export const brainRestingMemoryRead = (pin: MemoryPin): string =>
+  `${brainRestingMemoryPrefix}${brainMemoryRead(pin).slice(brainMemoryPrefix.length)}`;
+
 /** The source a memory a recall as the company handed a run is recorded as. */
 export const brainCompanyMemoryRead = (pin: MemoryPin): string =>
   `${brainCompanyMemoryPrefix}${brainMemoryRead(pin).slice(brainMemoryPrefix.length)}`;
@@ -418,13 +431,13 @@ const readableBrainMemories = async (
   scope: Omit<AgentScope, "runId">,
   sources: readonly string[]
 ): Promise<string[]> => {
-  const [recalled, profile] = await Promise.all(
-    [brainMemoryPrefix, brainProfileMemoryPrefix].map(
+  const read = await Promise.all(
+    [brainMemoryPrefix, brainProfileMemoryPrefix, brainRestingMemoryPrefix].map(
       async (prefix) =>
         await readableMemoriesAt(env, scope, sources, prefix, "person")
     )
   );
-  return [...(recalled ?? []), ...(profile ?? [])];
+  return read.flat();
 };
 
 /**
@@ -535,6 +548,7 @@ const withheldKindOf = (source: string): WithheldKind => {
   if (
     source.startsWith(brainMemoryPrefix) ||
     source.startsWith(brainProfileMemoryPrefix) ||
+    source.startsWith(brainRestingMemoryPrefix) ||
     source.startsWith(brainCompanyMemoryPrefix)
   ) {
     return "memories";
@@ -770,6 +784,7 @@ const versionPinOf = (source: string): SourceVersionRef | undefined => {
 const memoryPinOf = (source: string): MemoryPin | undefined =>
   brainMemoryOf(source, brainMemoryPrefix) ??
   brainMemoryOf(source, brainProfileMemoryPrefix) ??
+  brainMemoryOf(source, brainRestingMemoryPrefix) ??
   brainMemoryOf(source, brainCompanyMemoryPrefix);
 
 /** A pinned version's source, as one string. */
