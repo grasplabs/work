@@ -2901,7 +2901,6 @@ msgstr "Pedir a un administrador"
 
 #: src/chat/chat-composer.tsx
 #: src/chat/global-chat.tsx
-#: src/routes/_shell.lab.chat-start.tsx
 msgid "Ask anything, or describe a process"
 msgstr "Pregunta lo que quieras o describe un proceso"
 
@@ -4554,7 +4553,6 @@ msgstr "No se pudo eliminar"
 #: src/chat/asked-questions.tsx
 #: src/chat/chat-bar.tsx
 #: src/chat/chat-composer.tsx
-#: src/routes/_shell.lab.chat-start.tsx
 msgid "Could not send"
 msgstr "No se pudo enviar"
 
@@ -7083,6 +7081,7 @@ msgstr "En tus documentos vi {tools}."
 msgid "In your inbox"
 msgstr "En tu bandeja de entrada"
 
+#: src/grasp/frame/grasp-sidebar.tsx
 #: src/inbox/inbox-page.tsx
 msgid "Inbox"
 msgstr "Bandeja de entrada"
@@ -16114,7 +16113,6 @@ msgid "What should this App do?"
 msgstr "¿Qué debe hacer esta app?"
 
 #: src/chat/chat-start.tsx
-#: src/routes/_shell.lab.chat-start.tsx
 #: src/settings/backdrop-settings.tsx
 msgid "What should we look at today?"
 msgstr "¿Qué miramos hoy?"

@@ -27,6 +27,7 @@ import {
   AgentPerson,
   AppPanels,
   AppWindow,
+  Bell,
   Brain,
   Cable,
   Conversation,
@@ -64,7 +65,7 @@ const workflowsWaitingLabel = (waiting: number): string =>
   });
 
 /** The sidebar's two views, chosen with the switch under its head. */
-type SidebarView = "home" | "chats";
+type SidebarView = "home" | "inbox";
 
 /** The product's sections, and the Apps' own entries after them. */
 const useGroups = (
@@ -194,8 +195,7 @@ const useGroups = (
           },
         ];
   // The person's recent chats: a group of their own under the product's
-  // sections, named, so they never stand between the sections. The Chats
-  // tab holds the same list alone.
+  // sections, named, so they never stand between the sections.
   const chats: SidebarGroup[] =
     recent.length === 0
       ? []
@@ -209,8 +209,22 @@ const useGroups = (
             rows: recent,
           },
         ];
-  return tab === "chats"
-    ? [{ rows: recent }]
+  // The Inbox tab: what waits for the person, on its own page for now.
+  return tab === "inbox"
+    ? [
+        {
+          rows: [
+            {
+              label: t`Inbox`,
+              icon: Bell,
+              render: <Link to="/inbox" />,
+              current: at("/inbox"),
+              count: waiting,
+              countLabel: thingsWaiting(waiting ?? 0),
+            },
+          ],
+        },
+      ]
     : [sections, ...chats, ...fromApps];
 };
 
@@ -353,6 +367,7 @@ export const useGraspSidebar = ({
   const { t } = useLingui();
   const openChats = useChatsWindow();
   const [tab, setTab] = useState<SidebarView>("home");
+  const waiting = useWaitingCount();
   const groups = useGroups(core, identity, tab);
   const profile = useProfile(core, identity);
   const section = useSettingsSection(identity);
@@ -373,11 +388,18 @@ export const useGraspSidebar = ({
       ? {
           tabs: [
             { value: "home", label: t`Home`, icon: Home },
-            { value: "chats", label: t`Chats`, icon: Conversation },
+            {
+              value: "inbox",
+              label: t`Inbox`,
+              icon: Bell,
+              // The red dot on the bell: something waits for the person.
+              count: waiting ?? 0,
+              countLabel: thingsWaiting(waiting ?? 0),
+            },
           ],
           tab,
           onTabChange: (next: string) => {
-            setTab(next === "chats" ? "chats" : "home");
+            setTab(next === "inbox" ? "inbox" : "home");
           },
           tabsLabel: t`Views`,
         }

@@ -2901,7 +2901,6 @@ msgstr "Demander à un administrateur"
 
 #: src/chat/chat-composer.tsx
 #: src/chat/global-chat.tsx
-#: src/routes/_shell.lab.chat-start.tsx
 msgid "Ask anything, or describe a process"
 msgstr "Posez une question ou décrivez un processus"
 
@@ -4554,7 +4553,6 @@ msgstr "Impossible de retirer"
 #: src/chat/asked-questions.tsx
 #: src/chat/chat-bar.tsx
 #: src/chat/chat-composer.tsx
-#: src/routes/_shell.lab.chat-start.tsx
 msgid "Could not send"
 msgstr "Envoi impossible"
 
@@ -7083,6 +7081,7 @@ msgstr "Dans vos documents, j’ai vu {tools}."
 msgid "In your inbox"
 msgstr "Dans votre boîte de réception"
 
+#: src/grasp/frame/grasp-sidebar.tsx
 #: src/inbox/inbox-page.tsx
 msgid "Inbox"
 msgstr "Boîte de réception"
@@ -16114,7 +16113,6 @@ msgid "What should this App do?"
 msgstr "Que doit faire cette app ?"
 
 #: src/chat/chat-start.tsx
-#: src/routes/_shell.lab.chat-start.tsx
 #: src/settings/backdrop-settings.tsx
 msgid "What should we look at today?"
 msgstr "Que regardons-nous aujourd’hui ?"

@@ -2901,7 +2901,6 @@ msgstr "Een beheerder vragen"
 
 #: src/chat/chat-composer.tsx
 #: src/chat/global-chat.tsx
-#: src/routes/_shell.lab.chat-start.tsx
 msgid "Ask anything, or describe a process"
 msgstr "Vraag wat je wilt, of beschrijf een proces"
 
@@ -4554,7 +4553,6 @@ msgstr "Verwijderen mislukt"
 #: src/chat/asked-questions.tsx
 #: src/chat/chat-bar.tsx
 #: src/chat/chat-composer.tsx
-#: src/routes/_shell.lab.chat-start.tsx
 msgid "Could not send"
 msgstr "Kon niet versturen"
 
@@ -7083,6 +7081,7 @@ msgstr "In je documenten zag ik {tools}."
 msgid "In your inbox"
 msgstr "In je inbox"
 
+#: src/grasp/frame/grasp-sidebar.tsx
 #: src/inbox/inbox-page.tsx
 msgid "Inbox"
 msgstr "Inbox"
@@ -16114,7 +16113,6 @@ msgid "What should this App do?"
 msgstr "Wat moet deze app doen?"
 
 #: src/chat/chat-start.tsx
-#: src/routes/_shell.lab.chat-start.tsx
 #: src/settings/backdrop-settings.tsx
 msgid "What should we look at today?"
 msgstr "Waar kijken we vandaag naar?"
