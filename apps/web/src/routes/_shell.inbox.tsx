@@ -13,7 +13,8 @@ import { loadFromCore } from "../load-from-core.tsx";
 // waits on the person, read as the dashboard reads it, each item with
 // its actions; and, for admins, the latest of the audit trail. Like the
 // prototype's, the sidebar doesn't list it: the dashboard holds what waits,
-// and leads here to an item (`?item=`) only the inbox settles.
+// and leads here to an item (`?item=`) only the inbox settles. The
+// sidebar's Inbox view links each of its rows here the same way.
 
 /** How many of the trail's latest events the activity tab shows at most. */
 const activityShown = 100;
