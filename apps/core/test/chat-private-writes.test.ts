@@ -423,6 +423,90 @@ describe("what a chat writes for others once it used something only its person m
   );
 
   it(
+    "holds a write after a turn whose recall found nothing of the person's own but handed over their profile (GRA-1745)",
+    slow,
+    async () => {
+      const marker = `profile-${unique()}`;
+      const notes = await notesChat((app, release) => [
+        writesNote(app, release, marker),
+        says("It waits for you."),
+      ]);
+      const { builder, chats, chat, ask, titles } = notes;
+      // What they said about themselves: their profile, from their own store.
+      const statement = `Leads the ${word()} depot`;
+      await rememberAs(env, builder.userId, {
+        change: crypto.randomUUID(),
+        about: { kind: "person", own: true },
+        type: "fact",
+        statement,
+        quote: statement,
+      });
+
+      // A question whose words nothing of theirs holds.
+      await ask(`Add a note about the ${word()} keys.`);
+
+      expect({
+        answers: await answers(chats.stub, chat.id),
+        handed: JSON.stringify(
+          chats.provider.requests.map(({ body }) => body)
+        ).includes(statement),
+        after: await titles(),
+      }).toStrictEqual({ answers: ["held"], handed: true, after: [] });
+      await eventsOf("chat.private_read", chat.id, 1);
+    }
+  );
+
+  it(
+    "writes at once after a turn whose recall read the person's profile but had no room left to hand it over (GRA-1745)",
+    slow,
+    async () => {
+      const marker = `no-room-${unique()}`;
+      const notes = await notesChat((app, release) => [
+        writesNote(app, release, marker),
+        says("Written."),
+      ]);
+      const { builder, chats, chat, ask, titles } = notes;
+      // Company passages that fill the turn's budget on their own.
+      const filler = word();
+      const sentence = (index: number) =>
+        `The ${filler} procedure step ${index} says that every ${filler} case is checked by two people before it is closed and archived in the register.`;
+      for (let source = 0; source < 6; source += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- one at a time
+        await sharedSource(
+          Array.from({ length: 120 }, (_, index) =>
+            sentence(source * 1000 + index)
+          ).join(" ")
+        );
+      }
+      // A memory about themselves too long for what the search leaves.
+      const long = Array.from({ length: 60 }, () => word()).join(" ");
+      await rememberAs(env, builder.userId, {
+        change: crypto.randomUUID(),
+        about: { kind: "person", own: true },
+        type: "fact",
+        statement: long,
+        quote: long,
+      });
+
+      await ask(`Add a note about what the ${filler} procedure says.`);
+
+      expect({
+        answers: await answers(chats.stub, chat.id),
+        handed: JSON.stringify(
+          chats.provider.requests.map(({ body }) => body)
+        ).includes(long),
+        marked: await chats.stub.isChatPrivateRead(chat.id),
+        after: await titles(),
+      }).toStrictEqual({
+        answers: ["written"],
+        handed: false,
+        marked: false,
+        after: [marker],
+      });
+    }
+  );
+
+  it(
     "writes at once while the chat read nothing of the person's own, and holds every write after a turn that did, also from a turn that recalls nothing",
     slow,
     async () => {

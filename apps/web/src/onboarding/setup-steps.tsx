@@ -83,6 +83,7 @@ import {
 import { DocumentDrop } from "./document-drop.tsx";
 import type { DocumentRow } from "./document-drop.tsx";
 import { ForgetKickoff } from "./forget-kickoff.tsx";
+import { ForgetTeams } from "./forget-teams.tsx";
 import { HrLeads } from "./hr-leads.tsx";
 import { InterviewsProgress } from "./interviews-progress.tsx";
 import { LanguageChoice } from "./language-choice.tsx";
@@ -1659,6 +1660,10 @@ const ConfirmOrg = (props: StepProps & { roster: Roster }) => {
           redraft(roster);
         }}
         roster={draft}
+      />
+      <ForgetTeams
+        onErased={refresh}
+        teamsInBrain={props.data.view.teamsInBrain}
       />
     </>
   );

@@ -76,7 +76,19 @@ export const teams = sqliteTable("teams", {
   name: text().notNull(),
   /** Its lead, by person. */
   lead: text(),
+  /**
+   * What it does, as the admin described it on the roster they saved: only
+   * ever the admin's own words, which every member reads once confirmed
+   * (GRA-1748). Never the lead's map (`mappedDoes`).
+   */
   does: text().notNull(),
+  /**
+   * What it does, as its lead's map drew it (team-map.ts): a model's answer
+   * from the lead's own interview. Read by Grasp's staff alone, as before;
+   * never handed to the Brain nor shown to members (GRA-1748). None before
+   * a map said it.
+   */
+  mappedDoes: text("mapped_does"),
   off: integer({ mode: "boolean" }).notNull(),
   /**
    * When its lead's map of the team's work was drawn (ISO 8601): its links

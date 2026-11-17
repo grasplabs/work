@@ -296,6 +296,9 @@ const kindsWithoutColon = <const K extends string>(
 // readable by that team (onboarding/new-brain.ts, GRA-1790, GRA-1741).
 // `kickoff`: what every member reads of the onboarding's kickoff, readable
 // by everyone (onboarding/new-brain.ts, GRA-1748).
+// `roster`: the company's confirmed teams, as the admin described them,
+// and their head counts, readable by everyone (onboarding/new-brain.ts,
+// GRA-1748).
 const producerKinds = kindsWithoutColon([
   "upload",
   "chat",
@@ -304,6 +307,7 @@ const producerKinds = kindsWithoutColon([
   "interview",
   "claim",
   "kickoff",
+  "roster",
 ]);
 
 /**
@@ -4453,6 +4457,45 @@ export const ownEntityIdAs = async (
 ): Promise<EntityId | null> => {
   const reader = await personReaderOf(env, personId);
   return await ownBrain(env, reader.person).ownEntity({ reader });
+};
+
+/**
+ * The member `personId`'s profile (the Brain's `readProfile`, GRA-1745):
+ * the current memories about their own entity in their own word, from
+ * their own store, as their recall hands memories over (each with its
+ * store, source and whose word), newest first, as many as fit
+ * `budget.tokens`, stopping at the first that doesn't. Built now from what they
+ * may read, never kept. Each is `found` along their own entity
+ * (`entities`). Refused once they are no longer a member.
+ */
+export const profileAs = async (
+  env: BrainEnv & ReaderEnv,
+  personId: string,
+  budget: { tokens: number }
+): Promise<{ memories: RecalledMemory[] }> => {
+  const reader = await personReaderOf(env, personId);
+  const { memories } = await ownBrain(env, reader.person).readProfile({
+    reader,
+    budget,
+  });
+  return {
+    memories: memories.map((memory) => {
+      const { id, value: _value, endedAt: _endedAt, ...held } = memory;
+      const packed: PackMemory = {
+        ...held,
+        memory: id,
+        context: null,
+        confirmed: memory.confirmed !== null,
+        found: "entities",
+      };
+      return {
+        ...packed,
+        store: "own",
+        source: versionRefOf(memory.source),
+        said: saidOf(packed, personId),
+      };
+    }),
+  };
 };
 
 /**

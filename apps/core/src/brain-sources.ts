@@ -37,7 +37,13 @@ import {
 } from "./brain-run-sources.ts";
 import { brainHandOvers, workflowStartReceipts } from "./db/core/schema.ts";
 import { workspace } from "./durable-objects.ts";
-import { claimOf, kickoffOf, kickoffSource } from "./onboarding/new-brain.ts";
+import {
+  claimOf,
+  kickoffOf,
+  kickoffSource,
+  rosterOf,
+  rosterSource,
+} from "./onboarding/new-brain.ts";
 import { claimSource } from "./onboarding/team-claims.ts";
 import { personalWorkspaceId } from "./personal-workspace.ts";
 import { resultOf, runOf } from "./workflows/resource-runs.ts";
@@ -251,6 +257,8 @@ const producers: Record<
   // The kickoff's id is minted by the onboarding, one a kickoff, and names
   // nobody.
   kickoff: { source: kickoffSource, read: kickoffOf, ofPerson: null },
+  // The company's teams: one source, named by the store, naming nobody.
+  roster: { source: rosterSource, read: rosterOf, ofPerson: null },
 };
 
 /** Whether `kind` is a producer's: a source of any other has nothing to hand over. */
