@@ -3545,6 +3545,14 @@ msgid "Change something"
 msgstr "Etwas ändern"
 
 #: src/chat/chat-panel.tsx
+msgid "Change something about the agent"
+msgstr "Etwas am Agenten ändern"
+
+#: src/chat/chat-panel.tsx
+msgid "Change something about the change"
+msgstr "Etwas an der Änderung ändern"
+
+#: src/chat/chat-panel.tsx
 msgid "Change something about the plan"
 msgstr "Etwas am Plan ändern"
 
