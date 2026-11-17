@@ -8964,7 +8964,6 @@ msgid "No owner yet"
 msgstr "Noch niemand verantwortlich"
 
 #: src/apps/app-page.tsx
-#: src/apps/apps-overview.tsx
 msgid "No page yet"
 msgstr "Noch keine Seite"
 

@@ -61,15 +61,6 @@ const shown = async (listed: AppOverview[], builds = true): Promise<void> => {
       component: () => <AppsOverview builds={builds} listed={listed} />,
     }),
     history: createMemoryHistory(),
-    // A live App runs in its card over the tab's connection, which never
-    // answers here: it stays on its way.
-    context: {
-      core: {
-        onEnded: () => () => {},
-        session: async () => await Promise.withResolvers<never>().promise,
-        person: async () => await Promise.withResolvers<never>().promise,
-      },
-    },
   });
   const host = document.createElement("div");
   document.body.append(host);

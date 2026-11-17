@@ -21,13 +21,12 @@ import {
   InputGroupText,
 } from "../grasp/input-group/index.ts";
 import { MakeSomethingLink } from "../make/make-link.tsx";
-import { PageFrame } from "../pages/page-frame.tsx";
 import { statusOf } from "./app-status.tsx";
 
 // The Apps page: every App the person can open, newest first, as Grasp
-// UI's App cards: each App seen running in its window (its current
-// version, as the person, read-only and out of reach), its name, what it
-// is for and where it stands; the card opens the App (/apps/$app). A
+// UI's App cards: its window (quiet, naming the App, until each version
+// has a picture of its own), its name, what it is for and where it
+// stands; the card opens the App (/apps/$app). A
 // search over their names, and Make something for who builds, which
 // starts a chat to make an App (make/make-link.tsx).
 
@@ -73,12 +72,11 @@ const useRoutedCardLinks = (): ((
   };
 };
 
-/** One App: its card, the App running in its window when it has a page to show. */
-const OneApp = ({ overview: { app, contents } }: { overview: AppOverview }) => {
+/** One App: its card. */
+const OneApp = ({ overview: { app } }: { overview: AppOverview }) => {
   const { t } = useLingui();
   const navigate = useNavigate();
   const status = statusOf(app);
-  const runs = status === "live" && contents.pages;
   const metaOf = {
     live: t`Your team uses it`,
     draft: t`Only you see this`,
@@ -99,9 +97,10 @@ const OneApp = ({ overview: { app, contents } }: { overview: AppOverview }) => {
         },
       ]}
       href={`/apps/${app.id}`}
-      labels={{ more: t`More`, empty: t`No page yet` }}
+      // Until each version has its picture, the window is quiet and
+      // names the App.
+      labels={{ more: t`More`, empty: app.name }}
       meta={metaOf[status]}
-      preview={runs ? <PageFrame app={app.id} bare embedded /> : undefined}
       title={app.name}
       {...(app.description === "" ? {} : { description: app.description })}
     />
