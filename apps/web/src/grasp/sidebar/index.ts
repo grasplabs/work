@@ -6,6 +6,7 @@ export type {
   SidebarLayoutStyle,
   SidebarProps,
   SidebarRow,
+  SidebarMore,
   SidebarSection,
   SidebarSubRow,
   SidebarTab,

@@ -484,6 +484,8 @@ interface NavProps<Row extends NavRow> {
   keys?: "tab" | "list";
   /** Draws a row; `item` marks it as one of the list's items, for `keys="list"`. */
   renderRow: (row: Row, item: boolean) => ReactElement;
+  /** Draws the last quiet row of the group at `index` ("All chats"), or nothing. Not while filtering. */
+  renderMore?: (index: number, item: boolean) => ReactElement | null;
 }
 
 /** The filter field, the system's own (InputGroup): Escape clears it, ↓ moves into the rows. */
@@ -647,6 +649,7 @@ export const SidebarNav = <Row extends NavRow>({
   storageKey,
   keys = "tab",
   renderRow,
+  renderMore,
 }: NavProps<Row>) => {
   const nav = useRef<HTMLElement>(null);
   const ownField = useRef<HTMLInputElement>(null);
@@ -863,6 +866,7 @@ export const SidebarNav = <Row extends NavRow>({
               )}
             >
               {rows.map((row) => renderRow(row, list))}
+              {needle === "" && renderMore?.(index, list)}
             </ul>
           </div>
         );

@@ -62,6 +62,12 @@ export interface ThemeSwitchProps {
    * @default "md"
    */
   size?: "sm" | "md";
+  /**
+   * How wide the picker's tiles grow: `fill` shares the row out among them; `md` stops each at
+   * picker-tile (8rem), from the row's start, for a settings column.
+   * @default "fill"
+   */
+  tileSize?: "fill" | "md";
   /** Each mode's name and the line under its tile, in the page's language. */
   modeWords?: Partial<Record<ThemeMode, ModeWords>>;
   /** Each theme's name and the line under its tile, in the page's language. */
@@ -84,6 +90,7 @@ export const ThemeSwitch = ({
   themesLabel = "Colours",
   showThemes = true,
   size = "md",
+  tileSize = "fill",
   modeWords,
   themeWords,
   iconLabel,
@@ -152,6 +159,7 @@ export const ThemeSwitch = ({
           modeLabel={label}
           themeLabel={themesLabel}
           showThemes={showThemes}
+          tileSize={tileSize}
           modeWords={wordsOfMode}
           themeWords={wordsOfTheme}
           onChooseMode={chooseMode}

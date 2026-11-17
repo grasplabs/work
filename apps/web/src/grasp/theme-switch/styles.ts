@@ -166,6 +166,11 @@ export const switchStyles = stylex.create({
     gap: grasp.space4,
     minWidth: 0,
   },
+  // Tiles that stop at picker-tile, from the row's start (tileSize="md").
+  tilesMd: {
+    gridTemplateColumns: `repeat(auto-fill, minmax(min(100%, 7.5rem), ${grasp.pickerTile}))`,
+    justifyContent: "start",
+  },
   tile: {
     // Its radio covers it, and only it.
     position: "relative",

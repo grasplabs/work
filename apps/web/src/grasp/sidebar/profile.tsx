@@ -35,6 +35,8 @@ import { iconVars } from "../icons/icon.stylex";
 import { switchStyles } from "../theme-switch/styles";
 import { grasp, media } from "../tokens/tokens.stylex";
 import { popup } from "../tokens/tokens.values";
+import { useWords } from "../words/words";
+import { sidebarWords } from "./words";
 
 /** One option in a submenu of choices. */
 export interface SidebarChoice {
@@ -581,8 +583,10 @@ export const SidebarProfile = ({
   theme,
   onThemeChange,
   themes = defaultThemes,
-  themeLabel = "Appearance",
+  themeLabel: themeGiven,
 }: SidebarProfileProps) => {
+  const words = useWords("sidebar", sidebarWords);
+  const themeLabel = themeGiven ?? words.appearance;
   // The theme's submenu stands where `items` says "appearance", or else before the first
   // separator, or at the end when there is none.
   const entries: SidebarMenuEntry[] = [...items];

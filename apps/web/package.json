@@ -25,6 +25,7 @@
     "@pierre/diffs": "catalog:",
     "@stylexjs/stylex": "catalog:",
     "@tanstack/react-router": "catalog:",
+    "@tanstack/react-table": "catalog:",
     "@ui-sdk/core": "catalog:",
     "@ui-sdk/react": "catalog:",
     "capnweb": "catalog:",

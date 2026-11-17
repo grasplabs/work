@@ -3,6 +3,7 @@ import type { Invitation } from "@grasp-os/shared/members";
 import { roleSchema } from "@grasp-os/shared/roles";
 import type { Role } from "@grasp-os/shared/roles";
 import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { useRouter } from "@tanstack/react-router";
 import { useId, useState } from "react";
 
@@ -19,12 +20,7 @@ import {
   DialogContent,
   DialogTitle,
 } from "../grasp/dialog/index.ts";
-import {
-  Field,
-  FieldDescription,
-  FieldError,
-  FieldLabel,
-} from "../grasp/field/index.ts";
+import { Field, FieldError, FieldLabel } from "../grasp/field/index.ts";
 import { Form } from "../grasp/form/index.ts";
 import { Plus } from "../grasp/icons/index.ts";
 import { Input } from "../grasp/input/index.ts";
@@ -56,6 +52,11 @@ const isRole = (value: unknown): value is Role =>
   roleSchema.safeParse(value).success;
 
 /** The Invite button, and its dialog. */
+const styles = stylex.create({
+  // The role's choice as wide as the address over it.
+  full: { width: "100%" },
+});
+
 export const InviteButton = () => {
   const { t } = useLingui();
   const core = useCore();
@@ -119,7 +120,7 @@ export const InviteButton = () => {
         <DialogContent closeLabel={t`Close`}>
           <DialogTitle>{t`Invite someone`}</DialogTitle>
           <DialogDescription>
-            {t`They get this role when they first sign in with your organization’s account. Grasp sends no email, so let them know.`}
+            {t`Grasp sends no email, so let them know.`}
           </DialogDescription>
           <DialogBody>
             <Form
@@ -164,14 +165,12 @@ export const InviteButton = () => {
                   }}
                   value={role}
                 >
-                  <SelectTrigger>
+                  {/* As wide as the address above it. */}
+                  <SelectTrigger layout={styles.full}>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent />
                 </Select>
-                <FieldDescription>
-                  {t`Roles, at the foot of this page, say what each may do.`}
-                </FieldDescription>
               </Field>
             </Form>
           </DialogBody>

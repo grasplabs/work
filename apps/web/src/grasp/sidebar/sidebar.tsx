@@ -2,6 +2,7 @@
 
 /* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
+import { mergeProps } from "@ui-sdk/react/primitive";
 import {
   createElement,
   isValidElement,
@@ -13,6 +14,7 @@ import {
 } from "react";
 import type { MouseEvent, ReactElement, ReactNode, RefObject } from "react";
 
+import { AgentIndicator } from "../agent-indicator";
 import { focus } from "../focus/focus";
 import { visuallyHidden } from "../hidden/hidden";
 import { ChevronLeft, Icon, Search, SidebarToggle } from "../icons";
@@ -22,13 +24,16 @@ import { layoutOf } from "../layout/layout";
 import type { LayoutStyle } from "../layout/layout";
 import { simply } from "../motion/simply.stylex";
 import { grasp, media } from "../tokens/tokens.stylex";
+import { useWords } from "../words/words";
 import { useFoldKeys } from "./fold-keys";
 import { SidebarNav } from "./nav";
 import type { SidebarFilter } from "./nav";
 import { SidebarProfile } from "./profile";
 import type { SidebarProfileProps } from "./profile";
 import { RowActions, rowActionsRoom } from "./row-actions";
-import type { RowActionProps } from "./row-actions";
+import type { RowActionProps, RowLinkExtras } from "./row-actions";
+import { rowActionsMarker } from "./row-actions.stylex";
+import { RowTip } from "./row-tip";
 import {
   SectionHead,
   SidebarTabs,
@@ -40,6 +45,7 @@ import {
 import type { SidebarBack, SidebarTab } from "./section";
 import { useSidebarInShell } from "./shell";
 import type { SidebarInShell } from "./shell";
+import { sidebarWords } from "./words";
 
 /**
  * One of a row's own rows, under its name: a link to a page within it. With `actions` it has three
@@ -90,6 +96,25 @@ export interface SidebarRow extends SidebarSubRow {
    * @default `end`
    */
   endLabel?: string;
+  /** An agent works there now: the Working mark at the row's end, and said after its name. */
+  working?: boolean;
+  /**
+   * What a screen reader hears after the row's name while it works.
+   * @default "Working"
+   */
+  workingLabel?: string;
+}
+
+/** The last, quiet row of a group: the way to all of them ("All chats"). */
+export interface SidebarMore {
+  /** Its words ("All chats"). */
+  label: string;
+  /** Where it goes. Leave it out when `render` gives the link. */
+  href?: string;
+  /** The link itself, when a router draws it. It takes the row's look and words. */
+  render?: ReactElement;
+  /** Runs when it is pressed. With neither `href` nor `render` it is a button. */
+  onClick?: (event: MouseEvent<HTMLElement>) => void;
 }
 
 /** A run of rows, with a label over it when it is not the main one. */
@@ -120,6 +145,8 @@ export interface SidebarGroup {
   onCollapsedChange?: (collapsed: boolean) => void;
   /** A number beside its label (how many rows). While filtering, the number that match instead. */
   count?: number;
+  /** A last, quiet row after its rows, to all of them ("All chats"). Not shown while filtering. */
+  more?: SidebarMore;
 }
 
 /**
@@ -301,6 +328,8 @@ const LEAVE_AFTER = 240;
 const HOVER = media.hover;
 const COARSE = media.coarse;
 const FORCED = media.forced;
+// A row whose dots' menu is open.
+const HELD_OPEN = ":has([data-row-dots] [aria-expanded='true'])";
 
 // The fade past a peek's end (F85): twice the page's room wide; the card's ground whole for its first
 // 12px, three quarters at 24px, clear at its end.
@@ -599,13 +628,25 @@ const styles = stylex.create({
     // button and the sheet's close beside these (App shell FLAWS.md F35).
     borderRadius: `min(${grasp.corner}, calc(${grasp.shellIconButton} / 2))`,
     cornerShape: grasp.cornerShape,
+    // A row with its own menu (row-actions.tsx) keeps its hover while the pointer is anywhere on it,
+    // its dots too, and while their menu is open: the dots' own fill stands inside the row's.
     color: {
       default: grasp.shellTextSecondary,
-      [HOVER]: { default: grasp.shellTextSecondary, ":hover": grasp.shellText },
+      [HOVER]: { default: null, ":hover": grasp.shellText },
+      [stylex.when.ancestor(":hover", rowActionsMarker)]: {
+        default: null,
+        [HOVER]: grasp.shellText,
+      },
+      [stylex.when.ancestor(HELD_OPEN, rowActionsMarker)]: grasp.shellText,
     },
     backgroundColor: {
       default: "transparent",
-      [HOVER]: { default: "transparent", ":hover": grasp.shellHover },
+      [HOVER]: { default: null, ":hover": grasp.shellHover },
+      [stylex.when.ancestor(":hover", rowActionsMarker)]: {
+        default: null,
+        [HOVER]: grasp.shellHover,
+      },
+      [stylex.when.ancestor(HELD_OPEN, rowActionsMarker)]: grasp.shellHover,
     },
     cursor: "pointer",
     transitionProperty: "color, background-color",
@@ -709,13 +750,25 @@ const styles = stylex.create({
     lineHeight: grasp.textSmLine,
     fontWeight: grasp.weightMedium,
     letterSpacing: grasp.shellTracking,
+    // A row with its own menu (row-actions.tsx) keeps its hover while the pointer is anywhere on it,
+    // its dots too, and while their menu is open: the dots' own fill stands inside the row's.
     color: {
       default: grasp.shellTextSecondary,
-      [HOVER]: { default: grasp.shellTextSecondary, ":hover": grasp.shellText },
+      [HOVER]: { default: null, ":hover": grasp.shellText },
+      [stylex.when.ancestor(":hover", rowActionsMarker)]: {
+        default: null,
+        [HOVER]: grasp.shellText,
+      },
+      [stylex.when.ancestor(HELD_OPEN, rowActionsMarker)]: grasp.shellText,
     },
     backgroundColor: {
       default: "transparent",
-      [HOVER]: { default: "transparent", ":hover": grasp.shellHover },
+      [HOVER]: { default: null, ":hover": grasp.shellHover },
+      [stylex.when.ancestor(":hover", rowActionsMarker)]: {
+        default: null,
+        [HOVER]: grasp.shellHover,
+      },
+      [stylex.when.ancestor(HELD_OPEN, rowActionsMarker)]: grasp.shellHover,
     },
     textDecoration: "none",
     textAlign: "start",
@@ -788,6 +841,22 @@ const styles = stylex.create({
     letterSpacing: "normal",
     fontVariantNumeric: "tabular-nums",
     color: grasp.muted,
+  },
+  // The Working mark at the row's end, in an icon's room, never squeezed.
+  working: {
+    display: "inline-flex",
+    flexShrink: 0,
+    alignItems: "center",
+    marginInlineStart: "auto",
+  },
+  // A group's last row, to all of its kind: quieter than the rows, in the muted ink and regular
+  // weight, its words where the rows' names start.
+  more: {
+    color: {
+      default: grasp.muted,
+      [HOVER]: { default: grasp.muted, ":hover": grasp.shellText },
+    },
+    fontWeight: grasp.weightRegular,
   },
   // One quiet sentence where the rows would be.
   empty: {
@@ -880,6 +949,7 @@ interface LinkProps {
   style?: ReturnType<typeof stylex.props>["style"];
   children?: ReactNode;
   "aria-current"?: "page";
+  "aria-describedby"?: string;
   "data-sidebar-item"?: string;
   onClick?: (event: MouseEvent<HTMLElement>) => void;
 }
@@ -890,18 +960,25 @@ const Linked = ({
   look,
   children,
   onClick,
+  extras,
+  trigger,
 }: {
   row: SidebarSubRow;
   item: boolean;
   look: ReturnType<typeof stylex.props>;
   children: ReactNode;
   onClick?: (event: MouseEvent<HTMLElement>) => void;
+  /** What the row's actions give its link: the rename hint as its description. */
+  extras?: RowLinkExtras;
+  /** The tooltip trigger's props (row-tip.tsx): its ref and its pointer and focus handlers. */
+  trigger?: Record<string, unknown>;
 }) => {
-  const shared = {
+  const shared: LinkProps = mergeProps(trigger ?? {}, {
     "aria-current": row.current === true ? ("page" as const) : undefined,
+    "aria-describedby": extras?.["aria-describedby"],
     "data-sidebar-item": item ? "" : undefined,
     onClick,
-  };
+  });
   if (row.render !== undefined && isValidElement<LinkProps>(row.render)) {
     const own = row.render.props.className;
     const props: LinkProps = {
@@ -938,11 +1015,17 @@ const RowWords = ({
   detail: string | undefined;
 }) => {
   if (detail === undefined || detail === "") {
-    return <span {...stylex.props(styles.name)}>{label}</span>;
+    return (
+      <span data-row-name="" {...stylex.props(styles.name)}>
+        {label}
+      </span>
+    );
   }
   return (
     <span {...stylex.props(styles.name, styles.words)}>
-      <span {...stylex.props(styles.wordsLine)}>{label}</span>
+      <span data-row-name="" {...stylex.props(styles.wordsLine)}>
+        {label}
+      </span>
       <span {...stylex.props(styles.detail)}>{detail}</span>
     </span>
   );
@@ -1002,51 +1085,159 @@ const SubRow = ({ sub, item }: { sub: SidebarSubRow; item: boolean }) => {
   const look = stylex.props(
     styles.row,
     styles.subRow,
-    sub.current === true && styles.current,
     hasActions(sub) && rowActionsRoom,
+    sub.current === true && styles.current,
     focus.inside
   );
   return (
-    <RowActions {...sub} look={look}>
-      <Linked row={sub} item={item} look={look}>
-        <span {...stylex.props(styles.name)}>{sub.label}</span>
-      </Linked>
+    <RowActions {...sub} look={look} inList={item}>
+      {(extras) => (
+        <RowTip
+          label={sub.label}
+          render={(trigger) => (
+            <Linked
+              row={sub}
+              item={item}
+              look={look}
+              extras={extras}
+              trigger={trigger}
+            >
+              <span data-row-name="" {...stylex.props(styles.name)}>
+                {sub.label}
+              </span>
+            </Linked>
+          )}
+        />
+      )}
     </RowActions>
   );
 };
 
-const Row = ({ row, item }: { row: SidebarRow; item: boolean }) => {
+/** The Working mark at a row's end while an agent works there, said after the row's name. */
+const RowWorking = ({
+  working,
+  label,
+}: {
+  working: boolean | undefined;
+  label: string | undefined;
+}) => {
+  const words = useWords("sidebar", sidebarWords);
+  if (working !== true) {
+    return null;
+  }
+  return (
+    <>
+      <span data-slot="sidebar-row-working" {...stylex.props(styles.working)}>
+        <AgentIndicator />
+      </span>
+      <Unseen>{` ${label ?? words.working}`}</Unseen>
+    </>
+  );
+};
+
+const RowLinked = ({
+  row,
+  item,
+  look,
+  extras,
+  trigger,
+}: {
+  row: SidebarRow;
+  item: boolean;
+  look: ReturnType<typeof stylex.props>;
+  extras: RowLinkExtras;
+  trigger: Record<string, unknown>;
+}) => {
   const counted = row.count !== undefined && row.count > 0;
   const { onClick: handleClick } = row;
+  return (
+    <Linked
+      row={row}
+      item={item}
+      onClick={handleClick}
+      look={look}
+      extras={extras}
+      trigger={trigger}
+    >
+      <RowIcon icon={row.icon} tall={hasDetail(row)} />
+      <RowWords label={row.label} detail={row.detail} />
+      <RowEnd end={row.end} label={row.endLabel} />
+      <RowWorking working={row.working} label={row.workingLabel} />
+      {counted && (
+        <>
+          <span aria-hidden="true" {...stylex.props(styles.count)}>
+            {row.count}
+          </span>
+          <Unseen>{` ${row.countLabel ?? String(row.count)}`}</Unseen>
+        </>
+      )}
+    </Linked>
+  );
+};
+
+/** A row's link and what it holds: its icon, its words, its end, its Working mark and its count. */
+const RowLink = ({
+  row,
+  item,
+  look,
+  extras,
+}: {
+  row: SidebarRow;
+  item: boolean;
+  look: ReturnType<typeof stylex.props>;
+  extras: RowLinkExtras;
+}) => (
+  <RowTip
+    label={row.label}
+    render={(trigger) => (
+      <RowLinked
+        row={row}
+        item={item}
+        look={look}
+        extras={extras}
+        trigger={trigger}
+      />
+    )}
+  />
+);
+
+/** A group's last, quiet row, to all of its kind ("All chats"). */
+const MoreRow = ({ more, item }: { more: SidebarMore; item: boolean }) => {
+  const { onClick: handleClick } = more;
+  return (
+    <li>
+      <Linked
+        row={more}
+        item={item}
+        onClick={handleClick}
+        look={stylex.props(styles.row, styles.more, focus.inside)}
+      >
+        <span {...stylex.props(styles.name)}>{more.label}</span>
+      </Linked>
+    </li>
+  );
+};
+
+const Row = ({ row, item }: { row: SidebarRow; item: boolean }) => {
   const look = stylex.props(
     styles.row,
     hasDetail(row) && styles.rowTall,
-    row.current === true && styles.current,
     hasActions(row) && rowActionsRoom,
+    row.current === true && styles.current,
     focus.inside
   );
   return (
     <li>
-      <RowActions {...row} look={look}>
-        <Linked row={row} item={item} onClick={handleClick} look={look}>
-          <RowIcon icon={row.icon} tall={hasDetail(row)} />
-          <RowWords label={row.label} detail={row.detail} />
-          <RowEnd end={row.end} label={row.endLabel} />
-          {counted && (
-            <>
-              <span aria-hidden="true" {...stylex.props(styles.count)}>
-                {row.count}
-              </span>
-              <Unseen>{` ${row.countLabel ?? String(row.count)}`}</Unseen>
-            </>
-          )}
-        </Linked>
+      <RowActions {...row} look={look} inList={item}>
+        {(extras) => (
+          <RowLink row={row} item={item} look={look} extras={extras} />
+        )}
       </RowActions>
       {row.rows !== undefined && row.rows.length > 0 && (
         <ul {...stylex.props(styles.list, styles.sub)}>
           {row.rows.map((sub) => (
             <li key={sub.id ?? `${sub.label}-${sub.href ?? ""}`}>
-              <SubRow item={item} sub={sub} />
+              <SubRow sub={sub} item={item} />
             </li>
           ))}
         </ul>
@@ -1167,8 +1358,11 @@ const HeadMark = ({ head }: { head: ReactNode }) =>
 /** Search, at the head's end, with the keys that open it elsewhere in its title. App shell stands
  * the same button in its bar while the sidebar is folded (`brandIn="sidebar"`). */
 /** The landmark's name by its new name, else the deprecated old one (the breaking release's step 1). */
-const nameOf = (named: string | undefined, label: string | undefined) =>
-  named ?? label ?? "Sidebar";
+const nameOf = (
+  named: string | undefined,
+  label: string | undefined,
+  fallback: string
+) => named ?? label ?? fallback;
 
 export const SearchButton = ({
   onSearch,
@@ -1372,7 +1566,7 @@ interface ListAreaProps {
   tabs: readonly SidebarTab[] | undefined;
   tab: string | undefined;
   onTabChange: ((value: string) => void) | undefined;
-  tabsLabel: string | undefined;
+  tabsLabel: string;
   navLabel: string;
   filter: SidebarFilter | undefined;
   filterRef: RefObject<HTMLInputElement | null> | undefined;
@@ -1391,7 +1585,7 @@ const ListArea = ({
   tabs,
   tab,
   onTabChange,
-  tabsLabel = "Views",
+  tabsLabel,
   navLabel,
   filter,
   filterRef,
@@ -1425,6 +1619,12 @@ const ListArea = ({
             item={item}
           />
         )}
+        renderMore={(index, item) => {
+          const more = shown[index]?.more;
+          return more === undefined ? null : (
+            <MoreRow key="more" more={more} item={item} />
+          );
+        }}
       />
     </>
   );
@@ -1530,18 +1730,18 @@ const SidebarDrawn = ({
   headEnd,
   headBelow,
   onSearch,
-  searchLabel = "Search",
+  searchLabel: searchGiven,
   searchShortcut,
   searchKeyShortcuts,
   profile,
   defaultOpen = true,
   open: given,
   onOpenChange,
-  foldLabel = "Show or hide the sidebar",
+  foldLabel: foldGiven,
   foldShortcut,
   label: labelDeprecated,
   "aria-label": named,
-  navLabel = "Main",
+  navLabel: navGiven,
   reopen = true,
   reopenLook = "raised",
   fill = false,
@@ -1554,7 +1754,7 @@ const SidebarDrawn = ({
   tabs,
   tab,
   onTabChange,
-  tabsLabel,
+  tabsLabel: tabsGiven,
   empty,
   style: styleProp,
   layout,
@@ -1562,7 +1762,12 @@ const SidebarDrawn = ({
   onPeek,
   beside,
 }: SidebarProps & ShellExtras) => {
-  const label = nameOf(named, labelDeprecated);
+  const words = useWords("sidebar", sidebarWords);
+  const label = nameOf(named, labelDeprecated, words.name);
+  const searchLabel = searchGiven ?? words.search;
+  const foldLabel = foldGiven ?? words.fold;
+  const navLabel = navGiven ?? words.main;
+  const tabsLabel = tabsGiven ?? words.views;
   const [own, setOwn] = useState(defaultOpen);
   const open = given ?? own;
   // Whether the person has folded or opened it on this page: only then does the reopen button fade

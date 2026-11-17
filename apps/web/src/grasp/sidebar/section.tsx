@@ -21,6 +21,8 @@ import { tabStyles } from "../tabs/tabs";
 import { rowMarker } from "../tabs/tabs.stylex";
 import { grasp, media } from "../tokens/tokens.stylex";
 import { ms } from "../tokens/tokens.values";
+import { useWords } from "../words/words";
+import { sidebarWords } from "./words";
 
 const HOVER = media.hover;
 const COARSE = media.coarse;
@@ -296,9 +298,11 @@ export const SectionHead = ({
   icon,
   mark,
   back,
-  backLabel = "Back",
+  backLabel: backGiven,
   renderBack,
 }: SectionHeadProps) => {
+  const words = useWords("sidebar", sidebarWords);
+  const backLabel = backGiven ?? words.back;
   let lead: ReactNode = null;
   if (mark !== undefined) {
     lead = (

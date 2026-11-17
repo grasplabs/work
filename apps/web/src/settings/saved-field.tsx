@@ -1,14 +1,15 @@
 import { useState } from "react";
 
 import { Input } from "../grasp/input/index.ts";
+import type { SettingField } from "../grasp/setting-row/index.ts";
 import { Textarea } from "../grasp/textarea/index.ts";
-import type { SettingField } from "./section.tsx";
+import { controlStyles } from "./workspace-name.tsx";
 
 // A setting's text, saved as the person leaves the field (or presses
 // Enter in a one-line field): an emptied field saves none, Escape puts
 // back what was saved, and nothing is sent while it is what was saved.
 // Read-only for whoever may not change it. The control alone: a
-// SettingRow (settings/section.tsx) names it and says what it is for.
+// SettingRow (grasp/setting-row) names it and says what it is for.
 
 /** What a field is saved as: its text, trimmed; null when emptied. */
 const savedAs = (draft: string): string | null => {
@@ -58,6 +59,7 @@ export const SavedField = ({
       }}
       onValueChange={setDraft}
       readOnly={readOnly}
+      layout={controlStyles.fill}
       rows={2}
       value={shown}
       {...field}
@@ -75,6 +77,7 @@ export const SavedField = ({
         }
       }}
       onValueChange={setDraft}
+      layout={controlStyles.fill}
       readOnly={readOnly}
       {...(type === undefined ? {} : { type })}
       value={shown}

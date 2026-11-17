@@ -209,7 +209,7 @@ const AccountRow = ({ account }: { account: ChannelAccount }) => {
         <ItemMedia icon={Chat} iconLook="inline" />
       ) : (
         <ItemMedia>
-          <BrandIcon brand={brand} tile={false} />
+          <BrandIcon brand={brand} decorative size="md" tile={false} />
         </ItemMedia>
       )}
       <ItemContent>

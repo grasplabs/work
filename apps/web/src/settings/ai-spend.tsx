@@ -10,15 +10,23 @@ import * as stylex from "@stylexjs/stylex";
 
 import {
   Chart,
+  ChartArea,
   ChartAxis,
-  ChartBar,
-  ChartBarList,
   ChartGrid,
   ChartTooltip,
 } from "../grasp/chart/index.ts";
+import { Progress } from "../grasp/progress/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
 import { RowAlert } from "../grasp/setting-row/index.ts";
 import { Stat } from "../grasp/stats/index.ts";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "../grasp/table/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import type { Loaded } from "../load-from-core.tsx";
@@ -28,8 +36,8 @@ import { SectionNotLoaded } from "./section.tsx";
 // Settings › AI and spend, its last card: what the models cost this month
 // on the organization's keys (core's `models.spend()` and the Apps' model
 // bindings from `models.settings()`). The month's total as the key figure,
-// with where it ends at this pace; each day's spend as bars; then where it
-// went, chat, each workflow and each App, as a list of bars. Read-only:
+// with where it ends at this pace; the month so far as one area, day by
+// day; then where it went, chat, each workflow and each App, as a list of bars. Read-only:
 // nothing in Grasp limits what an organization spends on its own keys.
 
 const styles = stylex.create({
@@ -38,7 +46,19 @@ const styles = stylex.create({
     gap: grasp.space4,
   },
   chart: { width: "100%" },
+  share: { width: "100%", minWidth: "6rem" },
 });
+
+/** Dollars short enough for the chart's value axis: cents under a dollar, then compact. */
+const axisDollars = (value: string | number): string => {
+  const amount = Number(value);
+  return new Intl.NumberFormat(undefined, {
+    style: "currency",
+    currency: "USD",
+    notation: amount < 1 ? "standard" : "compact",
+    maximumFractionDigits: amount < 1 ? 2 : 1,
+  }).format(amount);
+};
 
 /** A workflow's name, with its App's for an App's workflow. */
 const workflowName = (of: SpendingWorkflow, i18n: I18n): string => {
@@ -85,7 +105,70 @@ const whereItWent = (
     ...(whole && left > leftOverMin
       ? [{ name: names.other, spend: left }]
       : []),
-  ].filter((row) => row.spend > 0);
+  ]
+    .filter((row) => row.spend > 0)
+    .toSorted((a, b) => b.spend - a.spend);
+};
+
+/**
+ * The month so far as a running total, day by day: one calm line that
+ * ends at the key figure above it, never a spike for a busy day.
+ */
+const runningTotal = (
+  days: readonly number[]
+): { day: string; spend: number }[] => {
+  const points: { day: string; spend: number }[] = [];
+  let sofar = 0;
+  for (const [at, amount] of days.entries()) {
+    sofar += amount;
+    points.push({ day: String(at + 1), spend: sofar });
+  }
+  return points;
+};
+
+/**
+ * The month's spend at a glance: the total, where it ends at this pace,
+ * and the month so far as one area, day by day; one line when nothing was
+ * spent. The Spend card shows it over where it went, Billing on its own.
+ */
+export const SpendSummary = ({ spend }: { spend: ModelMonthSpend }) => {
+  const { t } = useLingui();
+  const end = monthEnd(spend.total, spend.month, new Date());
+  const ending = end === null ? null : dollars(end);
+  const total = dollars(spend.total);
+  return (
+    <>
+      <Stat
+        change={
+          ending === null ? "" : t`About ${ending} by the end of the month`
+        }
+        title={t`Spent this month`}
+        tone="neutral"
+        value={total}
+      />
+      {spend.total === 0 ? (
+        <Text size="sm" tone="muted">
+          {t`Nothing spent on AI this month yet.`}
+        </Text>
+      ) : (
+        <Chart
+          aria-label={t`Spend so far this month, day by day`}
+          config={{ spend: { label: t`Spend` } }}
+          data={runningTotal(spend.days)}
+          height={220}
+          layout={styles.chart}
+          summary={t`${total} so far this month.`}
+          xKey="day"
+        >
+          <ChartGrid />
+          <ChartAxis side="x" />
+          <ChartAxis format={axisDollars} side="y" />
+          <ChartArea fill="plain" series="spend" />
+          <ChartTooltip format={dollars} />
+        </Chart>
+      )}
+    </>
+  );
 };
 
 /** The month's spend: the total, each day's, and where it went. */
@@ -106,17 +189,10 @@ export const SpendCard = ({
   }
   const month = spend.data;
   const bound = settings.state === "ready" ? settings.data : undefined;
-  const end = monthEnd(month.total, month.month, new Date());
-  const ending = end === null ? null : dollars(end);
-  const total = dollars(month.total);
   const rows = whereItWent(month, bound, i18n, {
     chat: t`Chat`,
     other: t`Other`,
   });
-  const days = month.days.map((amount, at) => ({
-    day: String(at + 1),
-    spend: amount,
-  }));
   // An App's binding whose target can't be read serves nothing: worth a look.
   const unreadable = (bound?.bindings.listed ?? []).filter(
     ({ model }) => model === null
@@ -124,43 +200,34 @@ export const SpendCard = ({
   return (
     <SectionCard density="compact" title={t`Spend`}>
       <div {...stylex.props(styles.body)}>
-        <Stat
-          {...(ending === null
-            ? {}
-            : { change: t`About ${ending} by the end of the month` })}
-          title={t`This month`}
-          tone="neutral"
-          value={total}
-        />
-        {month.total === 0 ? (
-          <Text size="sm" tone="muted">
-            {t`Nothing spent on AI this month yet.`}
-          </Text>
-        ) : (
+        <SpendSummary spend={month} />
+        {month.total === 0 ? null : (
           <>
-            <Chart
-              aria-label={t`Spend per day this month`}
-              config={{ spend: { label: t`Spend` } }}
-              data={days}
-              height={160}
-              layout={styles.chart}
-              summary={t`${total} so far this month.`}
-              xKey="day"
-            >
-              <ChartGrid />
-              <ChartAxis side="x" />
-              <ChartBar fill="plain" series="spend" />
-              <ChartTooltip format={dollars} />
-            </Chart>
-            <ChartBarList
-              aria-label={t`Where it went this month`}
-              config={{ spend: { label: t`Spend` } }}
-              data={rows}
-              format={dollars}
-              layout={styles.chart}
-              nameKey="name"
-              summary={t`Chat, each workflow and each App, most first.`}
-            />
+            <Table aria-label={t`Where it went this month`} density="compact">
+              <TableHeader>
+                <TableRow>
+                  <TableHead>{t`Where it went`}</TableHead>
+                  <TableHead>{t`Share`}</TableHead>
+                  <TableHead align="end">{t`This month`}</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {rows.map((row) => (
+                  <TableRow key={row.name}>
+                    <TableCell lead>{row.name}</TableCell>
+                    <TableCell>
+                      <Progress
+                        label={t`Share of this month`}
+                        layout={styles.share}
+                        size="sm"
+                        value={Math.round((row.spend / month.total) * 100)}
+                      />
+                    </TableCell>
+                    <TableCell align="end">{dollars(row.spend)}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
             {month.more ? (
               <Text size="xs" tone="muted">
                 {t`More workflows spent less.`}

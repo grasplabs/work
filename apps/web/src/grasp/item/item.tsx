@@ -30,6 +30,8 @@
 
 /* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
+import { renderElement } from "@ui-sdk/react/primitive";
+import type { RenderProp } from "@ui-sdk/react/primitive";
 import { createContext, isValidElement, useContext } from "react";
 import type { ReactNode } from "react";
 
@@ -74,6 +76,12 @@ interface ItemBase {
    */
   variant?: ItemVariant;
   /**
+   * The open one of a list beside its detail: the selected fill, said as the current page for a
+   * link (`aria-current="page"`) and as the current one otherwise.
+   * @default false
+   */
+  current?: boolean;
+  /**
    * The room round it: `md` for a list someone reads, `sm` for a dense one, `xs` for a list
    * among setting rows (members, providers): their row height (setting-row, 48px; 56px with a
    * description) and their inset, so a page has one rhythm.
@@ -93,16 +101,23 @@ interface WithActions {
   /** @deprecated Use `ItemActions`. */
   actions?: ReactNode;
   href?: never;
+  render?: never;
 }
 
 /**
  * An item that is a link: the whole row goes there, with a chevron at its end.
  */
-interface AsLink {
+type AsLink = {
   /** Where the whole row leads. It is then one link, so it holds no buttons of its own. */
-  href: string;
+  href?: string;
+  /**
+   * The element the row is drawn as, for a router's link (`render={<Link to="/billing" />}`): it
+   * takes the row's look, its words and `aria-current`, and keeps its own props. Without it, an
+   * `<a href>`. Leave `href` out when the router's link carries the address.
+   */
+  render?: RenderProp;
   actions?: never;
-}
+} & ({ href: string } | { render: RenderProp });
 
 /** Every prop an Item takes. */
 export type ItemProps = ItemBase & (WithActions | AsLink);
@@ -152,6 +167,12 @@ const styles = stylex.create({
   },
   soft: { backgroundColor: grasp.soft },
   // A link lights under a pointer, as a ghost button does.
+  // The open one of a list: the selected fill (a border in forced colours, where fills drop).
+  current: {
+    backgroundColor: grasp.ghostFillPress,
+    outlineStyle: { default: "none", [FORCED]: "solid" },
+    outlineWidth: { default: null, [FORCED]: grasp.hairline },
+  },
   link: {
     cursor: "pointer",
     transitionProperty: "background-color",
@@ -226,6 +247,8 @@ const styles = stylex.create({
     height: grasp.textSmLine,
   },
   leadAlone: { alignSelf: "center" },
+  // align="center": the mark in the middle of the title and its line, at its own height.
+  mediaCentred: { alignSelf: "center", height: "auto" },
   // In the parts shape: centred when the row has no description, read from the row.
   leadAuto: {
     alignSelf: {
@@ -356,6 +379,12 @@ export interface ItemMediaProps {
    * Centred on the title's line, with the row's gap after it.
    */
   children?: ReactNode;
+  /**
+   * Where a mark stands: on the title's line, or centred on the title and the line under it
+   * together, as a person's face beside their name and email.
+   * @default "title"
+   */
+  align?: "title" | "center";
 }
 
 /** Every prop an ItemContent, ItemTitle, ItemDetail, ItemDescription or ItemActions takes. */
@@ -371,12 +400,19 @@ const RowSize = createContext<ItemSize>("md");
 export const ItemMedia = ({
   icon,
   iconLook = "square",
+  align = "title",
   children,
 }: ItemMediaProps) => {
   const size = useContext(RowSize);
   if (children !== undefined && children !== null) {
     return (
-      <span {...stylex.props(styles.mediaSlot, styles.leadAuto)}>
+      <span
+        {...stylex.props(
+          styles.mediaSlot,
+          styles.leadAuto,
+          align === "center" && styles.mediaCentred
+        )}
+      >
         {children}
       </span>
     );
@@ -453,15 +489,54 @@ const holdsActions = (children: ReactNode) =>
       !isBlank(child.props.children)
   );
 
+/** Whether the row is a link: an address, or a router's link of the caller's. */
+const isLinked = (href: string | undefined, render: RenderProp | undefined) =>
+  (href !== undefined && href !== "") || render !== undefined;
+
+/** Whether a line under the title is there to show. */
+const hasLine = (line: ReactNode) =>
+  line !== undefined && line !== null && line !== false && line !== "";
+
+/** The row as a link: an `<a href>`, or the caller's router link through `render`. */
+const RowLink = ({
+  href,
+  render,
+  current,
+  className,
+  children,
+}: {
+  href: string | undefined;
+  render: RenderProp | undefined;
+  current: boolean;
+  className: string | undefined;
+  children: ReactNode;
+}) =>
+  renderElement(
+    "a",
+    {
+      href,
+      "data-slot": "item",
+      "aria-current": current ? "page" : undefined,
+      className,
+      children,
+    },
+    render
+  );
+
 /** A row in the parts shape: its parts, and a link's chevron at the end. */
 const PartsRow = ({
   children,
   variant = "plain",
   size = "md",
   href,
+  render,
+  current = false,
   layout,
-}: Pick<ItemProps, "children" | "variant" | "size" | "href" | "layout">) => {
-  const linked = href !== undefined && href !== "";
+}: Pick<
+  ItemProps,
+  "children" | "variant" | "size" | "href" | "render" | "current" | "layout"
+>) => {
+  const linked = isLinked(href, render);
   const inside = (
     <RowSize value={size}>
       {children}
@@ -474,33 +549,39 @@ const PartsRow = ({
   );
   if (linked) {
     return (
-      <a
+      <RowLink
         href={href}
-        data-slot="item"
-        {...stylex.props(
-          itemMarker,
-          styles.item,
-          styles[size],
-          styles[variant],
-          styles.link,
-          linkLook[variant],
-          focus.ring,
-          layout
-        )}
+        render={render}
+        current={current}
+        className={
+          stylex.props(
+            itemMarker,
+            styles.item,
+            styles[size],
+            styles[variant],
+            styles.link,
+            linkLook[variant],
+            current && styles.current,
+            focus.ring,
+            layout
+          ).className
+        }
       >
         {inside}
-      </a>
+      </RowLink>
     );
   }
   return (
     <div
       data-slot="item"
+      aria-current={current ? "true" : undefined}
       {...stylex.props(
         itemMarker,
         styles.item,
         styles[size],
         styles[variant],
         holdsActions(children) && styles.wraps,
+        current && styles.current,
         layout
       )}
     >
@@ -520,10 +601,12 @@ const ItemRow = ({
   size = "md",
   actions,
   href,
+  render,
+  current = false,
   style: styleProp,
   layout,
 }: ItemProps) => {
-  const linked = href !== undefined && href !== "";
+  const linked = isLinked(href, render);
   const acting = Boolean(actions);
   const inside = (
     <>
@@ -532,12 +615,7 @@ const ItemRow = ({
         iconLook={iconLook}
         media={mark}
         size={size}
-        alone={
-          description === undefined ||
-          description === null ||
-          description === false ||
-          description === ""
-        }
+        alone={!hasLine(description)}
       />
       <span {...stylex.props(styles.words, size === "xs" && styles.wordsXs)}>
         <Title title={title} detail={detail} />
@@ -559,31 +637,37 @@ const ItemRow = ({
   );
   if (linked) {
     return (
-      <a
+      <RowLink
         href={href}
-        data-slot="item"
-        {...stylex.props(
-          styles.item,
-          styles[size],
-          styles[variant],
-          styles.link,
-          linkLook[variant],
-          focus.ring,
-          layout ?? styleProp
-        )}
+        render={render}
+        current={current}
+        className={
+          stylex.props(
+            styles.item,
+            styles[size],
+            styles[variant],
+            styles.link,
+            linkLook[variant],
+            current && styles.current,
+            focus.ring,
+            layout ?? styleProp
+          ).className
+        }
       >
         {inside}
-      </a>
+      </RowLink>
     );
   }
   return (
     <div
       data-slot="item"
+      aria-current={current ? "true" : undefined}
       {...stylex.props(
         styles.item,
         styles[size],
         styles[variant],
         acting && styles.wraps,
+        current && styles.current,
         layout ?? styleProp
       )}
     >
