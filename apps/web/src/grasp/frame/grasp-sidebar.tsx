@@ -305,7 +305,10 @@ const useProfile = (
     {
       label: t`Switch organization`,
       icon: Swap,
-      choices: [{ label: organization ?? "Grasp", value: "current" }],
+      // Its logo once the workspace has one (Settings); its initials until then.
+      choices: [
+        { label: organization ?? "Grasp", value: "current", avatar: true },
+      ],
       value: "current",
     },
     {

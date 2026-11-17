@@ -47,6 +47,11 @@ export interface SidebarChoice {
    * shows (its words are then its name). From the icons entry (`@/components/grasp/icons`).
    */
   icon?: IconData;
+  /**
+   * Who or what the choice is, shown as a small avatar before its words: an organisation in a
+   * list of organisations. `true` draws its initials from `label`; a string is its picture (a logo).
+   */
+  avatar?: boolean | string;
 }
 
 /** An item in the person's menu that does something, or goes somewhere. */
@@ -139,7 +144,8 @@ const defaultThemes: readonly SidebarChoice[] = [
 // How far the menu stands off the button: the frame's inset, as his. A submenu overlaps its menu
 // by the panel's padding, so its first item lines up with the item that opened it.
 const MENU_GAP = 6;
-const SUB_GAP = -popup.gap;
+// A submenu stands a hair beside its row, never over it.
+const SUB_GAP = popup.gap;
 
 const HOVER = media.hover;
 const COARSE = media.coarse;
@@ -417,7 +423,7 @@ const Choices = ({ entry }: { entry: SidebarMenuChoices }) => {
       </MenuSubTrigger>
       <MenuSubContent
         sideOffset={SUB_GAP}
-        alignOffset={SUB_GAP}
+        alignOffset={-popup.gap}
         collisionPadding={popup.gutter}
         {...stylex.props(menuStyles.panel, menuStyles.motion, styles.subPanel)}
       >
@@ -439,6 +445,18 @@ const Choices = ({ entry }: { entry: SidebarMenuChoices }) => {
                 <span aria-hidden="true" {...stylex.props(styles.icon)}>
                   <Icon icon={choice.icon} />
                 </span>
+              )}
+              {choice.avatar !== undefined && choice.avatar !== false && (
+                <Avatar
+                  decorative
+                  name={choice.label}
+                  size="xs"
+                  src={
+                    typeof choice.avatar === "string"
+                      ? choice.avatar
+                      : undefined
+                  }
+                />
               )}
               <span {...stylex.props(styles.words)}>{choice.label}</span>
               <MenuItemIndicator {...stylex.props(styles.tick)}>
