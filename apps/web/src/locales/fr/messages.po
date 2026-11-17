@@ -9339,6 +9339,10 @@ msgstr "Pas encore exécuté"
 msgid "Not saved yet. Trying again."
 msgstr "Pas encore enregistré. Nouvel essai en cours."
 
+#: src/interview/destination.tsx
+msgid "Not saved yet. Until it is, your lines still go where they went before."
+msgstr "Pas encore enregistré. D’ici là, vos lignes vont toujours là où elles allaient avant."
+
 #: src/apps/resource-bindings.tsx
 msgid "Not served"
 msgstr "Non servi"
@@ -12050,6 +12054,7 @@ msgid "Save where they go"
 msgstr "Enregistrer où elles vont"
 
 #: src/interview/composer.tsx
+#: src/interview/destination.tsx
 msgid "Saved"
 msgstr "Enregistré"
 
@@ -12088,6 +12093,7 @@ msgid "Saving to your memory"
 msgstr "Enregistrement dans votre mémoire"
 
 #: src/interview/composer.tsx
+#: src/interview/destination.tsx
 msgid "Saving…"
 msgstr "Enregistrement…"
 
@@ -15158,6 +15164,7 @@ msgstr "Essayer"
 #: src/chat/thread.tsx
 #: src/frame/page-states.tsx
 #: src/frame/setting-up.tsx
+#: src/interview/destination.tsx
 #: src/interview/sound-check.tsx
 #: src/pages/frame-failure.tsx
 msgid "Try again"

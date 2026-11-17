@@ -32,6 +32,13 @@ interface Kept {
   secret: string;
   version: number;
   progress: InterviewProgress;
+  /**
+   * The interview as core is known to hold it: as it opened, then as each
+   * save core kept, once what was to be approved with it was approved too.
+   * What the page shows as done (where a line goes) is read from this,
+   * never from `progress`, which holds what was asked for (GRA-1987).
+   */
+  held: InterviewProgress;
   /** A save on its way, and whether a change came in meanwhile. */
   saving: boolean;
   /**
@@ -130,7 +137,12 @@ const saveOnce = async (mine: Kept): Promise<void> => {
   mine.failed = 0;
   mine.version = answer.version;
   if (answer.saved) {
-    if (!mine.dirty) {
+    if (!mine.approving) {
+      mine.held = sent;
+    }
+    if (mine.dirty) {
+      notify();
+    } else {
       setSaveState({ state: "saved" });
     }
     return;
@@ -142,6 +154,7 @@ const saveOnce = async (mine: Kept): Promise<void> => {
   }
   // Another copy went on meanwhile: that one is the interview now.
   mine.progress = answer.progress;
+  mine.held = answer.progress;
   mine.dirty = false;
   setSaveState({ state: "elsewhere" });
   for (const taker of takers) {
@@ -151,6 +164,7 @@ const saveOnce = async (mine: Kept): Promise<void> => {
 
 /** Tells core they approve the facts read back, as kept now: each at its revision. */
 const approveOnce = async (mine: Kept): Promise<void> => {
+  const approving = mine.progress;
   const facts = await Promise.all(
     mine.progress.facts
       .filter(({ out }) => out !== true)
@@ -186,6 +200,7 @@ const approveOnce = async (mine: Kept): Promise<void> => {
   mine.approving = false;
   mine.failed = 0;
   if (answer.approved) {
+    mine.held = approving;
     setSaveState({ state: "saved" });
     return;
   }
@@ -194,6 +209,7 @@ const approveOnce = async (mine: Kept): Promise<void> => {
   mine.version = answer.version;
   if (answer.progress !== null) {
     mine.progress = answer.progress;
+    mine.held = answer.progress;
     setSaveState({ state: "elsewhere" });
     for (const taker of takers) {
       taker();
@@ -248,6 +264,19 @@ export const keepNow = (): void => {
   }
 };
 
+/**
+ * Tries what isn't kept yet again now, as they asked, instead of waiting
+ * for the next try: nothing when nothing waits, or saving stopped for good.
+ */
+export const saveAgainNow = (): void => {
+  if (kept === null || kept.gone || !(kept.dirty || kept.approving)) {
+    return;
+  }
+  kept.failed = 0;
+  setSaveState({ state: "saving" });
+  void save(kept);
+};
+
 /** They agreed to the read-back: core is told, once what was read back is kept. */
 export const approveWhenKept = (): void => {
   if (kept === null || kept.gone) {
@@ -298,6 +327,7 @@ export const holdInterview = ({
     secret,
     version,
     progress: progress ?? freshProgress,
+    held: progress ?? freshProgress,
     saving: false,
     page: { id: crypto.randomUUID(), saves: 0 },
     again: false,
@@ -371,6 +401,10 @@ export const onTaken = (taker: () => void): (() => void) => {
 /** The interview, as the page shows it. */
 export const useProgress = (): InterviewProgress =>
   useSyncExternalStore(subscribe, progressNow);
+
+/** The interview as core is known to hold it (`Kept.held`). */
+export const useHeld = (): InterviewProgress =>
+  useSyncExternalStore(subscribe, () => kept?.held ?? freshProgress);
 
 /** Where saving stands. */
 export const useSaveState = (): SaveState =>

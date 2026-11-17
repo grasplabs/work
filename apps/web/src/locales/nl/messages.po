@@ -9339,6 +9339,10 @@ msgstr "Nog niet gedraaid"
 msgid "Not saved yet. Trying again."
 msgstr "Nog niet opgeslagen. Nieuwe poging volgt."
 
+#: src/interview/destination.tsx
+msgid "Not saved yet. Until it is, your lines still go where they went before."
+msgstr "Nog niet opgeslagen. Tot dan gaan je regels nog waar ze eerst heen gingen."
+
 #: src/apps/resource-bindings.tsx
 msgid "Not served"
 msgstr "Niet bediend"
@@ -12050,6 +12054,7 @@ msgid "Save where they go"
 msgstr "Opslaan waar ze naartoe gaan"
 
 #: src/interview/composer.tsx
+#: src/interview/destination.tsx
 msgid "Saved"
 msgstr "Opgeslagen"
 
@@ -12088,6 +12093,7 @@ msgid "Saving to your memory"
 msgstr "Opslaan in je geheugen"
 
 #: src/interview/composer.tsx
+#: src/interview/destination.tsx
 msgid "Saving…"
 msgstr "Opslaan…"
 
@@ -15158,6 +15164,7 @@ msgstr "Proberen"
 #: src/chat/thread.tsx
 #: src/frame/page-states.tsx
 #: src/frame/setting-up.tsx
+#: src/interview/destination.tsx
 #: src/interview/sound-check.tsx
 #: src/pages/frame-failure.tsx
 msgid "Try again"

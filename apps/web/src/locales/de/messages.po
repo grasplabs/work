@@ -9339,6 +9339,10 @@ msgstr "Noch nicht gelaufen"
 msgid "Not saved yet. Trying again."
 msgstr "Noch nicht gespeichert. Neuer Versuch folgt."
 
+#: src/interview/destination.tsx
+msgid "Not saved yet. Until it is, your lines still go where they went before."
+msgstr "Noch nicht gespeichert. Bis dahin gehen Ihre Zeilen noch dorthin, wohin sie vorher gingen."
+
 #: src/apps/resource-bindings.tsx
 msgid "Not served"
 msgstr "Nicht bedient"
@@ -12050,6 +12054,7 @@ msgid "Save where they go"
 msgstr "Speichern, wohin sie gehen"
 
 #: src/interview/composer.tsx
+#: src/interview/destination.tsx
 msgid "Saved"
 msgstr "Gespeichert"
 
@@ -12088,6 +12093,7 @@ msgid "Saving to your memory"
 msgstr "Wird in Ihrem Gedächtnis gespeichert"
 
 #: src/interview/composer.tsx
+#: src/interview/destination.tsx
 msgid "Saving…"
 msgstr "Wird gespeichert…"
 
@@ -15158,6 +15164,7 @@ msgstr "Versuchen"
 #: src/chat/thread.tsx
 #: src/frame/page-states.tsx
 #: src/frame/setting-up.tsx
+#: src/interview/destination.tsx
 #: src/interview/sound-check.tsx
 #: src/pages/frame-failure.tsx
 msgid "Try again"
