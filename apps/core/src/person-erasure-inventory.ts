@@ -182,8 +182,13 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "core.preview_fixture_stores": {
     none: "nothing writes or reads it; dropped by the next contract migration",
   },
+  // A source is a pin (history-access.ts): a memory's pin names other
+  // people by ID, its writer and the person whose word it is. Their
+  // erasure removes neither; the IDs stay, as the company's records keep
+  // an erased person's ID (D3).
   "core.run_chat_sources": {
-    company: "what a run's chat had read, with the run (D3)",
+    company:
+      "what a run's chat had read, with the run; its pins keep other people's IDs after their erasure (D3)",
   },
   "core.org_settings": {
     none: "the organization's billing and Pulse settings",
@@ -409,6 +414,10 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "workspace.chat_drafts": { erased: "workspace" },
   "workspace.chat_files": { erased: "workspace" },
   "workspace.chat_messages": { erased: "workspace" },
+  // Its person's alone, erased with their workspace. A memory's pin also
+  // names other people by ID (its writer, the person whose word it is):
+  // their erasure removes neither, and the IDs stay in this person's chat,
+  // as the company's records keep an erased person's ID (D3).
   "workspace.chat_run_sources": { erased: "workspace" },
   "workspace.chat_search_text": { erased: "workspace" },
   "workspace.chat_sources": { erased: "workspace" },

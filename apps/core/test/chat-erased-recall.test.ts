@@ -803,6 +803,7 @@ describe("what a chat shows of what it read from the Brain", () => {
       const mark = {
         word: word(),
         card: word(),
+        relation: word(),
         kept: word(),
         written: word(),
         twin: word(),
@@ -811,6 +812,7 @@ describe("what a chat shows of what it read from the Brain", () => {
       const topic = {
         word: word(),
         card: word(),
+        relation: word(),
         kept: word(),
         written: word(),
         twin: word(),
@@ -827,6 +829,7 @@ describe("what a chat shows of what it read from the Brain", () => {
             identifiers: [{ type: "email", value: address }],
           },
           { key: "depot", kind: "project", names: [`Depot ${word()}`] },
+          { key: "desk", kind: "team", names: [`Desk ${word()}`] },
         ],
         memories: [
           // In her word, from the note she wrote for the team.
@@ -842,6 +845,16 @@ describe("what a chat shows of what it read from the Brain", () => {
             about: "anna",
             type: "fact",
             statement: `${name} leads depot ${topic.card} ${mark.card}`,
+            speaker: saidBy(ben),
+            basis: on(bensNote, "leads the depot"),
+          },
+          // Relating to her card, about a team she leads, in Ben's word.
+          {
+            about: "desk",
+            attribute: "lead",
+            object: "anna",
+            type: "fact",
+            statement: `Desk ${topic.relation} ${mark.relation} is led by her`,
             speaker: saidBy(ben),
             basis: on(bensNote, "leads the depot"),
           },
@@ -891,6 +904,7 @@ describe("what a chat shows of what it read from the Brain", () => {
       const inHerWord = await recalled("word");
       const card = await recalled("card");
       const cardLost = await recalled("card");
+      const relation = await recalled("relation");
       const restoring = await recalled("word");
       const kept = await recalled("kept");
       const written = await recalled("written");
@@ -930,6 +944,7 @@ describe("what a chat shows of what it read from the Brain", () => {
         resultsOf(await opened(chats.person, chatId));
       const afterTick = {
         word: await openedAfter(inHerWord.chat.id),
+        relation: await openedAfter(relation.chat.id),
         kept: await openedAfter(kept.chat.id),
         written: await openedAfter(written.chat.id),
       };
@@ -972,9 +987,16 @@ describe("what a chat shows of what it read from the Brain", () => {
       };
 
       expect({
-        before: [inHerWord, card, cardLost, restoring, kept, written, twin].map(
-          ({ shown }) => shown
-        ),
+        before: [
+          inHerWord,
+          card,
+          cardLost,
+          relation,
+          restoring,
+          kept,
+          written,
+          twin,
+        ].map(({ shown }) => shown),
         teamsBefore,
         left,
         afterTick,
@@ -984,17 +1006,18 @@ describe("what a chat shows of what it read from the Brain", () => {
         olderCopy,
         lost,
         held: await Promise.all(
-          [mark.word, mark.card, mark.teams].map(
+          [mark.word, mark.card, mark.relation, mark.teams].map(
             async (marker) => await objectHolds(chats.stub, marker)
           )
         ),
         sentAgain: await sentNext(),
       }).toStrictEqual({
-        before: [true, true, true, true, true, true, true],
+        before: [true, true, true, true, true, true, true, true],
         teamsBefore: true,
         left: 0,
         afterTick: {
           word: [withheldResult],
+          relation: [withheldResult],
           kept: [expect.stringContaining(mark.kept)],
           written: [expect.stringContaining(mark.written)],
         },
@@ -1004,7 +1027,7 @@ describe("what a chat shows of what it read from the Brain", () => {
         restored: [withheldResult],
         olderCopy: [withheldResult],
         lost: [withheldResult],
-        held: [false, false, false],
+        held: [false, false, false, false],
         sentAgain: false,
       });
     }
