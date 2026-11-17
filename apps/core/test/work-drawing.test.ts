@@ -8,7 +8,7 @@ import type { FactTag } from "@grasp-os/shared/interview-turn";
 import type { Roster, SettleChoice } from "@grasp-os/shared/onboarding";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vite-plus/test";
+import { beforeEach, describe, expect, it } from "vite-plus/test";
 
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { drawnOf, knownOf } from "../src/onboarding/work-drawing.ts";
@@ -21,6 +21,7 @@ import {
   onLink,
   openLinkAs,
   participate,
+  holdAlarm,
   quick,
   signedInAs,
 } from "./interview-link.ts";
@@ -271,6 +272,10 @@ const refused: ProviderReply = {
 };
 
 describe("a piece of work, drawn", { timeout: 60_000 }, () => {
+  // The test draws itself, each with the model's answer it gives: the
+  // store's own alarm, set whenever a team falls due, would try first.
+  beforeEach(holdAlarm);
+
   it("is drawn from three agreed interviews, keeps each person's numbers apart, and tells the next interview only what nobody has said yet, never a colleague's words", async () => {
     const store = onboardingStore(env);
     const ids = await team();

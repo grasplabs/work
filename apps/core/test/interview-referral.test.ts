@@ -1,9 +1,9 @@
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vite-plus/test";
+import { beforeEach, describe, expect, it } from "vite-plus/test";
 
 import { referred } from "../src/onboarding/referral.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
-import { answering } from "./interview-link.ts";
+import { answering, holdAlarm } from "./interview-link.ts";
 import { onboardingLog } from "./onboarding-log.ts";
 import { agree, fact, mapped, team } from "./onboarding-team.ts";
 
@@ -22,6 +22,10 @@ const referralReply = (does: string, person: string) => ({
 });
 
 describe("work someone says isn't theirs", () => {
+  // The test draws itself, each with the model's answer it gives: the
+  // store's own alarm, set whenever a team falls due, would try first.
+  beforeEach(holdAlarm);
+
   it("moves them onto their own work, puts the colleague they named on it, and logs who named whom", async () => {
     const store = onboardingStore(env);
     const ids = await team(["lea", "max", "mia", "mo", "pim"]);
