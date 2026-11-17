@@ -54,6 +54,43 @@ const TeamsWords = ({ teams }: { teams: readonly string[] }) => {
   return <Trans>People in these teams: {named}</Trans>;
 };
 
+/**
+ * The apps a card names, each by what it grants: the company's own name
+ * for it (Google Workspace for Gmail), beside the model's words for it
+ * where they differ, and by the model's words alone while the catalog
+ * isn't read.
+ */
+export const AppNames = ({
+  apps,
+}: {
+  apps: readonly { source: string; provider: string; name: string }[];
+}) => {
+  const key = apps
+    .map(({ source, provider }) => `${source}:${provider}`)
+    .join(",");
+  const read = useCoreRead(
+    key,
+    async (session) => await session.connections.catalog(),
+    key
+  );
+  const named = new Map(
+    read?.state === "ready"
+      ? read.data.entries.map(({ source, id, name }) => [
+          `${source}:${id}`,
+          name,
+        ])
+      : []
+  );
+  return apps
+    .map(({ source, provider, name }) => {
+      const granted = named.get(`${source}:${provider}`);
+      return granted === undefined || granted === name
+        ? name
+        : `${granted} (${name})`;
+    })
+    .join(", ");
+};
+
 /** Who may ask it, as the card says it. */
 const AudienceWords = ({
   audience,
@@ -86,7 +123,15 @@ export const AgentDraftCard = ({
   actions?: ReactNode;
 }) => {
   const { t, i18n } = useLingui();
-  const { name, job, instructions, whose, classes = [], schedule } = draft;
+  const {
+    name,
+    job,
+    instructions,
+    whose,
+    classes = [],
+    schedule,
+    apps = [],
+  } = draft;
   const company = whose === "company";
   return (
     <Card aria-label={t`An agent to make: ${name}`} render={<section />}>
@@ -116,6 +161,13 @@ export const AgentDraftCard = ({
               <AudienceWords audience={draft.audience} />
             </Line>
           ) : null}
+          <Line label={t`Apps it uses`}>
+            {apps.length === 0 ? (
+              <Trans>Any app its kinds of work allow</Trans>
+            ) : (
+              <AppNames apps={apps} />
+            )}
+          </Line>
           {company ? (
             <Line label={t`What it may do`}>
               {classes.length === 0 ? (
