@@ -194,6 +194,26 @@ const recalledAs = async (
   return items.map(({ text }) => text);
 };
 
+/**
+ * What `personId` recalls for `question`, each chunk's text, its source's
+ * id and the way it was found: by words, an exact part or meaning.
+ */
+const foundAs = async (
+  personId: string,
+  question: string
+): Promise<{ text: string; source: string; found: string }[]> => {
+  const { items } = await recallAs(env, personId, {
+    personal: true,
+    question,
+    budget: { tokens: recallBudgetMax },
+  });
+  return items.map(({ text, source, found }) => ({
+    text,
+    source: source.id,
+    found,
+  }));
+};
+
 /** `source`'s `version` as `personId` reads it: null if not. */
 const historyAs = async (
   personId: string,
@@ -644,14 +664,26 @@ describe("erasing a source", { timeout: 120_000 }, () => {
       await tickPastGrace();
     }
 
+    const keptFound = await foundAs(reader, wordOf(keptMark));
     expect({
       tables: await tablesHolding([erasedMark]),
       vectors: await vectorsOf(erasedRows, []),
-      kept: await recalledAs(reader, wordOf(keptMark)),
+      // By its word (an exact part: it holds digits), the kept source
+      // alone; by meaning, other passages the reader may read, never one
+      // of the erased source.
+      byWords: keptFound.filter(({ found }) => found !== "meaning"),
+      erasedBack: keptFound.filter(({ source }) => source === erased.id),
     }).toStrictEqual({
       tables: [],
       vectors: { codes: 0, inBlocks: 0, kept: 0 },
-      kept: [`Staying ${wordOf(keptMark)}`],
+      byWords: [
+        {
+          text: `Staying ${wordOf(keptMark)}`,
+          source: kept.id,
+          found: "exact",
+        },
+      ],
+      erasedBack: [],
     });
   });
 
@@ -1738,7 +1770,12 @@ const addAt = async (
   }
 };
 
-/** Every version `personId`'s packs cite for the questions, as of each moment. */
+/**
+ * Every version `personId`'s packs cite for the questions, as of each
+ * moment, by words, an exact part or a phrase. What a pack cites by
+ * meaning besides is whatever else they may read; an erased source's
+ * vectors are held by the leak harness, which embeds it first.
+ */
 const citedBy = async (
   personId: string,
   questions: readonly string[],
@@ -1758,7 +1795,9 @@ const citedBy = async (
     )
   );
   return packs.flatMap(({ items }) =>
-    items.map(({ source, version }) => `${source.id} v${version}`)
+    items.flatMap(({ source, version, found }) =>
+      found === "meaning" ? [] : [`${source.id} v${version}`]
+    )
   );
 };
 

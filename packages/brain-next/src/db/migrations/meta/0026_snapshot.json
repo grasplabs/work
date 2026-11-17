@@ -1,9 +1,49 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "30a4f2de-fc42-4248-b311-23c4fe40f869",
+  "id": "294a4b9a-6999-43c1-92b5-14d688e029f4",
   "prevId": "44ec4096-f43d-40c2-a038-2fe584d43f87",
   "tables": {
+    "chunk_blocks": {
+      "name": "chunk_blocks",
+      "columns": {
+        "reader_set": {
+          "name": "reader_set",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "block": {
+          "name": "block",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "chunk_blocks_block_idx": {
+          "name": "chunk_blocks_block_idx",
+          "columns": [
+            "block"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "chunk_blocks_reader_set_block_pk": {
+          "columns": [
+            "reader_set",
+            "block"
+          ],
+          "name": "chunk_blocks_reader_set_block_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
     "chunk_days": {
       "name": "chunk_days",
       "columns": {
@@ -33,6 +73,14 @@
         "chunk_days_chunk_idx": {
           "name": "chunk_days_chunk_idx",
           "columns": [
+            "chunk"
+          ],
+          "isUnique": false
+        },
+        "chunk_days_day_chunk_idx": {
+          "name": "chunk_days_day_chunk_idx",
+          "columns": [
+            "month_day",
             "chunk"
           ],
           "isUnique": false
@@ -1275,14 +1323,6 @@
             "learned_at"
           ],
           "isUnique": false
-        },
-        "memories_speaker_idx": {
-          "name": "memories_speaker_idx",
-          "columns": [
-            "(speaker ->> 'person')"
-          ],
-          "isUnique": false,
-          "where": "speaker ->> 'kind' = 'internal'"
         }
       },
       "foreignKeys": {
@@ -1385,13 +1425,6 @@
           "name": "memory_confirmations_memory_idx",
           "columns": [
             "memory"
-          ],
-          "isUnique": false
-        },
-        "memory_confirmations_person_idx": {
-          "name": "memory_confirmations_person_idx",
-          "columns": [
-            "person"
           ],
           "isUnique": false
         }
@@ -1902,76 +1935,6 @@
           "value": "id = 1"
         }
       }
-    },
-    "person_erasure_memories": {
-      "name": "person_erasure_memories",
-      "columns": {
-        "memory": {
-          "name": "memory",
-          "type": "integer",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "erasure": {
-          "name": "erasure",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "person_erasure_memories_memory_memories_row_fk": {
-          "name": "person_erasure_memories_memory_memories_row_fk",
-          "tableFrom": "person_erasure_memories",
-          "tableTo": "memories",
-          "columnsFrom": [
-            "memory"
-          ],
-          "columnsTo": [
-            "row"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "person_erasure_subjects": {
-      "name": "person_erasure_subjects",
-      "columns": {
-        "subject": {
-          "name": "subject",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "erasure": {
-          "name": "erasure",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "person_erasure_subjects_erasure_idx": {
-          "name": "person_erasure_subjects_erasure_idx",
-          "columns": [
-            "erasure"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
     },
     "reader_set_members": {
       "name": "reader_set_members",
@@ -3165,14 +3128,6 @@
     "columns": {}
   },
   "internal": {
-    "indexes": {
-      "memories_speaker_idx": {
-        "columns": {
-          "(speaker ->> 'person')": {
-            "isExpression": true
-          }
-        }
-      }
-    }
+    "indexes": {}
   }
 }
