@@ -413,8 +413,6 @@ export interface BrainForgetPreview {
   source: string | null;
   /** The statements that go. */
   statements: string[];
-  /** The workflows whose numbers rest on the source: they keep them, and say their source was removed. */
-  workflows: string[];
 }
 
 /**

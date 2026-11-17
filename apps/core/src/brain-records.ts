@@ -1,4 +1,4 @@
-import { actorOf, auditProvenanceMaxItems } from "@grasp-os/shared/audit";
+import { actorOf } from "@grasp-os/shared/audit";
 import type { AuditActor } from "@grasp-os/shared/audit";
 import type {
   Candidate,
@@ -18,10 +18,8 @@ import {
   brainGapSubjects,
   brainRecordErrors,
   brainRecordSchema,
-  brainRecordsMaxPerCall,
   brainRecordsMaxPerType,
   brainRecordsSchema,
-  onboardingIdPrefix,
   onboardingSourceIds,
 } from "@grasp-os/shared/brain-records";
 import type {
@@ -64,18 +62,15 @@ import { inList, statementsWithin } from "./db/d1.ts";
 //   bounded.
 // - A change without its record: the records and their audit event are one
 //   batch, kept together or not at all.
-// - The onboarding's records taken or forged: only the onboarding adds a
-//   workflow, a roster team's record or an `onb-` id
-//   (`keepOnboardingRecords`, as the system); `brain.addRecords` refuses
-//   them (`brainRecordInputSchema`).
-// - A deleted interview left in the brain: the onboarding alone takes its
-//   own records out (`purgeOnboardingRecords`, as the system), whole.
-// - A removed document left in the brain: the onboarding alone takes its
-//   own drawings out (`purgeOnboardingDrawings`, as the system), whole.
+// - The onboarding's ids taken or forged: the Brain page shows the
+//   onboarding's teams, claims, drawings and sources under a roster
+//   team's id (`team-<id>`) or an `onb-` one, and a workflow is only ever
+//   the onboarding's; `brain.addRecords` refuses all of them
+//   (`brainRecordInputSchema`). The onboarding keeps what it learned
+//   itself (GRA-1748): none of it is a record here.
 // - A record's words put back: a record an earlier release's term purge
 //   rewrote (`purged_at`) is left as purged when it is sent again under
-//   its id (the onboarding giving a team's intake again), never its words
-//   put back.
+//   its id, never its words put back.
 
 /** A record's key across types, as its audit event names it. */
 const keyOf = ({ type, id }: { type: string; id: string }): string =>
@@ -528,78 +523,6 @@ export const addBrainRecords = async (
     records,
     await onboardingHeld(records, onboarding)
   );
-};
-
-/**
- * Keeps the onboarding's own records (GRA-367, GRA-528), as the system:
- * its team records, statements and drawn workflows, the last type only
- * it adds. They
- * may name `held`, the onboarding's sources and teams. In calls of at
- * most `brainRecordsMaxPerCall`, in order, so a record finds what an
- * earlier call kept; each call all or none, and a retry keeps what is
- * left.
- */
-export const keepOnboardingRecords = async (
-  env: Env,
-  records: readonly BrainRecord[],
-  held: OnboardingHeld
-): Promise<BrainRecordsAdded> => {
-  const kept: BrainRecordsAdded = { added: 0, unchanged: 0 };
-  for (let at = 0; at < records.length; at += brainRecordsMaxPerCall) {
-    // oxlint-disable-next-line no-await-in-loop -- each call names what the one before kept
-    const { added, unchanged } = await keepRecords(
-      env,
-      { type: "system" },
-      records.slice(at, at + brainRecordsMaxPerCall),
-      held
-    );
-    kept.added += added;
-    kept.unchanged += unchanged;
-  }
-  return kept;
-};
-
-/**
- * Takes the onboarding's records `ids` out of the brain, for good, as the
- * system (GRA-368): what rested on an interview that was deleted. Nothing
- * else is ever taken out, and nothing is written over: a record goes
- * whole, with every drawing that is a version of its own. One batch with
- * its audit event, which names the records by id and counts them, never
- * what they said. Ids the brain doesn't hold are left; returns how many
- * it took out.
- */
-export const purgeOnboardingRecords = async (
-  env: Env,
-  ids: readonly string[]
-): Promise<number> => {
-  // One an admin took out of the brain holds no words, and stays: its id
-  // keeps the same claim, given again, from coming back.
-  const held = new Map(
-    [
-      ...(await heldOf(
-        env,
-        ids.filter((id) => id.startsWith(onboardingIdPrefix))
-      )),
-    ].filter(([, { forgotten }]) => !forgotten)
-  );
-  if (held.size === 0) {
-    return 0;
-  }
-  const db = drizzle(env.DB);
-  const gone = [...held.keys()];
-  await auditedBatch(env, db, [
-    db.delete(brainRecords).where(inList(brainRecords.id, gone)),
-    outboxed(db, {
-      actor: { type: "system" },
-      action: "brain.records.purged",
-      target: { type: "brain", id: "records" },
-      provenance: [...held]
-        .slice(0, auditProvenanceMaxItems)
-        .map(([id, { type }]) => keyOf({ type, id })),
-      detail: { purged: held.size },
-    }),
-  ]);
-  return held.size;
 };
 
 /** A stored body as JSON; `undefined` when it isn't. */
