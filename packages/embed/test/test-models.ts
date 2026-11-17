@@ -18,32 +18,44 @@ import {
 import type { EmbedModel, ModelIdentity } from "../src/model-files.ts";
 import encoderFloat from "./fixtures/encoder-float.bin";
 import encoderInt8 from "./fixtures/encoder-int8.bin";
-import files from "./fixtures/files.json";
 import tokenizer from "./fixtures/tokenizer.bin";
 import tokensFloat from "./fixtures/tokens-float.bin";
 import tokensInt8 from "./fixtures/tokens-int8.bin";
+import { floatModel, int8Model } from "./test-model-files.ts";
 
-export const floatModel: EmbedModel = {
-  name: "fixture-float",
-  tokenizer: files["tokenizer.bin"],
-  encoder: files["encoder-float.bin"],
-  tokens: files["tokens-float.bin"],
-};
-
-export const int8Model: EmbedModel = {
-  name: "fixture-int8",
-  tokenizer: files["tokenizer.bin"],
-  encoder: files["encoder-int8.bin"],
-  tokens: files["tokens-int8.bin"],
-};
+export { floatModel, int8Model } from "./test-model-files.ts";
 
 type Which = "tokenizer" | "encoder" | "tokens";
 
-/** Each test model's files, as bytes. */
-const bytesOf = new Map<EmbedModel, Record<Which, ArrayBuffer>>([
-  [floatModel, { tokenizer, encoder: encoderFloat, tokens: tokensFloat }],
-  [int8Model, { tokenizer, encoder: encoderInt8, tokens: tokensInt8 }],
-]);
+const which: Which[] = ["tokenizer", "encoder", "tokens"];
+
+/** Each test model, with its files as bytes. */
+const testModels: { model: EmbedModel; bytes: Record<Which, ArrayBuffer> }[] = [
+  {
+    model: floatModel,
+    bytes: { tokenizer, encoder: encoderFloat, tokens: tokensFloat },
+  },
+  {
+    model: int8Model,
+    bytes: { tokenizer, encoder: encoderInt8, tokens: tokensInt8 },
+  },
+];
+
+/** The files of `model` as bytes, when its files are a test model's. */
+const testFilesOf = (
+  model: EmbedModel
+): Record<Which, ArrayBuffer> | undefined =>
+  testModels.find(({ model: test }) =>
+    which.every(
+      (file) =>
+        test[file].sha256 === model[file].sha256 &&
+        test[file].size === model[file].size
+    )
+  )?.bytes;
+
+/** Whether `model`'s files are a test model's, which `putTestModel` puts. */
+export const isTestModel = (model: EmbedModel): boolean =>
+  testFilesOf(model) !== undefined;
 
 /**
  * How a test breaks a `BreakableEmbedder`: its object ends on every call
@@ -199,9 +211,9 @@ const whole = (bytes: ArrayBuffer): FileBytes => ({
 
 /**
  * `texts` embedded by the int8 test model run in the caller's own isolate,
- * with no embedder object: for tests whose Worker binds no embedder of a
- * test model (core's). Each text's vector, and the model and build, as an
- * embedder of it would give them.
+ * with no embedder object: for tests that need the vectors themselves
+ * (core's). Each text's vector, and the model and build, as an embedder
+ * of it would give them.
  */
 export const embedInProcess = async (
   texts: readonly string[]
@@ -236,11 +248,10 @@ export const putTestModel = async (
   bucket: R2Bucket,
   model: EmbedModel
 ): Promise<void> => {
-  const bytes = bytesOf.get(model);
+  const bytes = testFilesOf(model);
   if (bytes === undefined) {
     throw new Error("Not a test model");
   }
-  const which: Which[] = ["tokenizer", "encoder", "tokens"];
   await Promise.all(
     which.map(
       async (file) => await bucket.put(modelFileKey(model[file]), bytes[file])

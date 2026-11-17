@@ -239,6 +239,42 @@ describe("the agent remembering in a person's Teams direct message", () => {
   );
 
   it(
+    "shows on the notice every character nobody sees in what the model saved as an escape: the statement and whom it is about",
+    slow,
+    async () => {
+      const depot = `d${unique()}`;
+      // A Hangul filler in the name, a selector payload and a zero-width
+      // space in the statement.
+      const name = `Depot ${depot}\u3164`;
+      const statement = `Depot ${depot} opens at seven\u{E0101}\u{E0142}\u200B`;
+      const ann = await member(
+        idp,
+        toolStep("remember", {
+          about: { kind: "customer", name },
+          type: "fact",
+          statement,
+          quote: statement,
+        }),
+        checked(true),
+        says("Noted.")
+      );
+
+      await post(messageFrom(ann.teams, { text: `${statement} from now on.` }));
+      const { card } = await noticeIn(ann.teams.conversation);
+      const shown = say("rememberedAbout", "en", {
+        about: String.raw`Depot ${depot}\u{3164}`,
+        statement: String.raw`Depot ${depot} opens at seven\u{E0101}\u{E0142}\u{200B}`,
+      });
+
+      expect({
+        // As JSON, as Teams was sent it.
+        shown: card.includes(JSON.stringify(shown).slice(1, -1)),
+        unseen: /\u3164|\u200B|\u{E0101}/u.test(card),
+      }).toStrictEqual({ shown: true, unseen: false });
+    }
+  );
+
+  it(
     "retires it on the person's own Undo, once: another member's press and a second press retire nothing more",
     slow,
     async () => {
