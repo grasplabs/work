@@ -9,7 +9,7 @@
  * passed a test's 5 s, and twice cut `restatements.test.ts`'s first test
  * at it, its retry too (the first attempt still held the start-up), while
  * the shard imported a long file beside it (November 2026). The hook has a
- * time of its own for that start-up alone; every test keeps the default.
+ * time of its own for that start-up alone, as a hook's default is 10 s.
  */
 import { env } from "cloudflare:workers";
 import { beforeAll } from "vite-plus/test";
