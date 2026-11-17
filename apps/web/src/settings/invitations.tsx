@@ -8,6 +8,7 @@ import { useId, useState } from "react";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
 import { formatDate } from "../format.ts";
+import { Avatar, AvatarFallback } from "../grasp/avatar/index.ts";
 import { Button, useAction } from "../grasp/button/index.ts";
 import {
   Dialog,
@@ -30,6 +31,8 @@ import { Input } from "../grasp/input/index.ts";
 import {
   Item,
   ItemContent,
+  ItemDescription,
+  ItemMedia,
   ItemTitle,
   ItemActions,
 } from "../grasp/item/index.ts";
@@ -42,7 +45,7 @@ import {
 import { roleLabel } from "../labels.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
-import { RowNote, TitleLine } from "./section.tsx";
+import { RowNote } from "./section.tsx";
 
 // Invitations: an admin names someone's address and the role they get
 // when they first sign in with the organization's account. Grasp sends no
@@ -199,19 +202,19 @@ export const InvitationRow = ({ invitation }: { invitation: Invitation }) => {
   const role = roleLabel(invitation.role);
   const inviter = invitation.invitedBy;
   return (
-    <Item size="sm">
+    <Item size="xs">
+      <ItemMedia>
+        <Avatar decorative name={email} size="xs">
+          <AvatarFallback />
+        </Avatar>
+      </ItemMedia>
       <ItemContent>
-        <ItemTitle>
-          <TitleLine
-            detail={
-              <RowNote failure={failure}>
-                {t`Invited as ${role} by ${inviter} on ${date}`}
-              </RowNote>
-            }
-          >
-            {email}
-          </TitleLine>
-        </ItemTitle>
+        <ItemTitle>{email}</ItemTitle>
+        <ItemDescription>
+          <RowNote failure={failure}>
+            {t`Invited as ${role} by ${inviter} on ${date}`}
+          </RowNote>
+        </ItemDescription>
       </ItemContent>
       <ItemActions>
         <Button

@@ -1,7 +1,11 @@
 import { failureText } from "@grasp-os/shared/errors";
 import { memberErrors } from "@grasp-os/shared/members";
-import type { Invitation, Member } from "@grasp-os/shared/members";
-import { roleSchema } from "@grasp-os/shared/roles";
+import type {
+  Invitation,
+  Member,
+  RemovedPeoplePage,
+} from "@grasp-os/shared/members";
+import { isMemberAdmin, roleSchema } from "@grasp-os/shared/roles";
 import type { Role } from "@grasp-os/shared/roles";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg, plural } from "@lingui/core/macro";
@@ -21,7 +25,9 @@ import {
   AlertDialogTitle,
 } from "../grasp/alert-dialog/index.ts";
 import { Alert } from "../grasp/alert/index.ts";
+import { Avatar, AvatarFallback } from "../grasp/avatar/index.ts";
 import { Badge } from "../grasp/badge/index.ts";
+import { Button } from "../grasp/button/index.ts";
 import {
   DropdownMenu,
   DropdownMenuItem,
@@ -38,13 +44,20 @@ import {
   Tick,
   Trash,
 } from "../grasp/icons/index.ts";
-import { Input } from "../grasp/input/index.ts";
+import {
+  InputGroup,
+  InputGroupInput,
+  InputGroupText,
+} from "../grasp/input-group/index.ts";
 import {
   Item,
-  ItemGroup,
-  ItemContent,
-  ItemTitle,
   ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemDetail,
+  ItemGroup,
+  ItemMedia,
+  ItemTitle,
 } from "../grasp/item/index.ts";
 import { KeyValueList } from "../grasp/key-value/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
@@ -66,23 +79,24 @@ import { Text } from "../grasp/text/index.ts";
 import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
 import { roleLabel } from "../labels.ts";
 import { loadFromCore } from "../load-from-core.tsx";
-import { RemovedPeople } from "../settings/erasures.tsx";
+import { RemovedRow, useRemovedPeople } from "../settings/erasures.tsx";
 import { InvitationRow, InviteButton } from "../settings/invitations.tsx";
-import { MembersTabs } from "../settings/members-tabs.tsx";
 import {
   SectionNotLoaded,
   SettingsError,
   SettingsLoading,
-  TitleLine,
 } from "../settings/section.tsx";
+import { TeamsPanel } from "../settings/teams.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
 
-// Settings → Members and roles, for admins: the organization's members,
-// each with their role, a way to end their sessions, and a way to remove
-// them for good; the invitations nobody has taken up yet; then the people
-// removed, and a way to erase them (settings/erasures.tsx); and, last,
-// what each role may do. Core checks the role on every call; anyone else
+// Settings → Members and roles, on one page as the library's Settings
+// pattern has it: one compact card of people, each with their face, their
+// email, their role on one edge and a menu to end their sessions or remove
+// them for good; the invitations nobody has taken up yet; and at its foot
+// the people removed, quiet, and a way to erase them
+// (settings/erasures.tsx). Then the teams, for the organization's own
+// admins (settings/teams.tsx), and, last, what each role may do. Core checks the role on every call; anyone else
 // sees why they can't. The admin's own row has no actions: core refuses
 // removing yourself or ending your own sessions, and demoting yourself
 // (which core allows while another admin exists) is left out so nobody
@@ -92,17 +106,14 @@ import { useCore } from "../use-core.ts";
 const roleWidth = "8rem";
 
 const styles = stylex.create({
-  tools: { display: "flex", alignItems: "center", gap: grasp.space2 },
+  page: { display: "flex", flexDirection: "column", gap: grasp.space5 },
   // Narrower on a phone: Section card's actions never shrink, so Invite would run past its edge.
   search: { width: { default: "14rem", [media.belowPhone]: "8rem" } },
   notice: { padding: grasp.space4 },
   rowEnd: { display: "flex", alignItems: "center", gap: grasp.space1 },
   role: { width: roleWidth },
-  // Your own row has no menu: its role sits where the others' Selects start.
-  own: {
-    display: "flex",
-    width: `calc(${roleWidth} + ${grasp.space1} + ${grasp.controlSm})`,
-  },
+  // Your own row has no menu: its room is kept, so every role stands on one edge.
+  menuRoom: { width: grasp.controlSm, flexShrink: 0 },
   rolesNarrow: {
     display: { default: "none", [media.belowPhone]: "block" },
     padding: grasp.space5,
@@ -197,25 +208,27 @@ const MemberActions = ({
   };
   return (
     <div {...stylex.props(styles.rowEnd)}>
-      <div {...stylex.props(styles.role)}>
-        <Select
-          disabled={busy}
-          items={roleItems()}
-          onValueChange={(role) => {
-            if (role === "admin") {
-              setAsking("promote");
-            } else if (roleSchema.safeParse(role).success && role !== null) {
-              void setRole(roleSchema.parse(role));
-            }
-          }}
-          value={member.role}
+      <Select
+        disabled={busy}
+        items={roleItems()}
+        onValueChange={(role) => {
+          if (role === "admin") {
+            setAsking("promote");
+          } else if (roleSchema.safeParse(role).success && role !== null) {
+            void setRole(roleSchema.parse(role));
+          }
+        }}
+        value={member.role}
+      >
+        <SelectTrigger
+          aria-label={t`Role of ${who}`}
+          layout={styles.role}
+          size="sm"
         >
-          <SelectTrigger size="sm" aria-label={t`Role of ${who}`}>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent />
-        </Select>
-      </div>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent />
+      </Select>
       <DropdownMenu>
         <DropdownMenuTrigger
           icon={More}
@@ -338,7 +351,7 @@ const Roles = () => {
   const { t, i18n } = useLingui();
   const roles = roleSchema.options;
   return (
-    <SectionCard flush title={t`Roles`}>
+    <SectionCard density="compact" flush title={t`Roles`}>
       {/* On a phone, what each may do with the roles that may under it: four columns don't fit. */}
       <div {...stylex.props(styles.rolesNarrow)}>
         <KeyValueList
@@ -401,49 +414,138 @@ const matches = (
   );
 };
 
-/** The members and the invitations not yet taken up, found by name or email. */
+/**
+ * One's own role, which one doesn't change here (core allows it while
+ * another admin exists, but nobody should lose this page by accident): on
+ * the same edge as the others', with the room their menu takes.
+ */
+const OwnRole = ({ role }: { role: Role }) => {
+  const { t } = useLingui();
+  return (
+    <div {...stylex.props(styles.rowEnd)}>
+      <Select disabled items={roleItems()} value={role}>
+        <SelectTrigger aria-label={t`Your role`} layout={styles.role} size="sm">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent />
+      </Select>
+      <span {...stylex.props(styles.menuRoom)} />
+    </div>
+  );
+};
+
+/** One member: their face, their name (a quiet "You" on one's own), their email, their role and their menu. */
+const MemberRow = ({
+  member,
+  me,
+  onNotice,
+  onRemoved,
+}: {
+  member: Member;
+  me: boolean;
+  onNotice: (notice: Notice) => void;
+  onRemoved: () => void;
+}) => {
+  const { t } = useLingui();
+  return (
+    <Item size="xs">
+      <ItemMedia>
+        <Avatar decorative name={member.name} size="xs">
+          <AvatarFallback />
+        </Avatar>
+      </ItemMedia>
+      <ItemContent>
+        <ItemTitle>
+          {member.name}
+          {me ? <ItemDetail>{t`You`}</ItemDetail> : null}
+        </ItemTitle>
+        <ItemDescription>{member.email}</ItemDescription>
+      </ItemContent>
+      <ItemActions>
+        {me ? (
+          <OwnRole role={member.role} />
+        ) : (
+          <MemberActions
+            member={member}
+            onNotice={onNotice}
+            onRemoved={onRemoved}
+          />
+        )}
+      </ItemActions>
+    </Item>
+  );
+};
+
+/**
+ * The members, the invitations not yet taken up and, at the foot, the
+ * people removed, in one list found by name or email.
+ */
 const MembersList = ({
   members,
   invitations,
+  removed,
   me,
 }: {
   members: Member[];
   invitations: Invitation[];
+  removed: RemovedPeoplePage;
   me: string;
 }) => {
   const { t } = useLingui();
   const [notice, setNotice] = useState<Notice>({});
   const [search, setSearch] = useState("");
   const searchField = useRef<HTMLInputElement>(null);
+  const gone = useRemovedPeople(removed);
   const people = members.length;
   const shown = members.filter((member) => matches(member, search));
   const invited = invitations.filter((invitation) =>
     matches(invitation, search)
   );
+  const left = gone.people.filter((person) =>
+    matches({ name: person.name, email: person.email ?? "" }, search)
+  );
+  const nobody =
+    shown.length === 0 && invited.length === 0 && left.length === 0;
   return (
     <SectionCard
       actions={
-        <div {...stylex.props(styles.tools)}>
-          <div {...stylex.props(styles.search)}>
-            <Input
+        <>
+          <InputGroup layout={styles.search}>
+            <InputGroupText icon={Search} />
+            <InputGroupInput
               aria-label={t`Search members`}
-              icon={Search}
               onValueChange={setSearch}
-              placeholder={t`Search`}
+              placeholder={t`Search members`}
               ref={searchField}
-              size="sm"
+              type="search"
               value={search}
             />
-          </div>
+          </InputGroup>
           <InviteButton />
-        </div>
+        </>
       }
-      description={t`${plural(people, {
-        one: "# person has access. Invite someone to set their role up front.",
-        other:
-          "# people have access. Invite someone to set their role up front.",
-      })}`}
+      aside={<Badge size="sm">{people}</Badge>}
+      density="compact"
       flush
+      footer={
+        gone.more ? (
+          <>
+            <Button
+              disabled={gone.busy}
+              onClick={() => {
+                void gone.showMore();
+              }}
+              size="sm"
+              variant="ghost"
+            >
+              {t`Show older`}
+            </Button>
+            {gone.failure === undefined ? null : (
+              <Alert tone="danger">{gone.failure}</Alert>
+            )}
+          </>
+        ) : undefined
+      }
       title={t`Members`}
     >
       {notice.failure === undefined && notice.done === undefined ? null : (
@@ -455,43 +557,28 @@ const MembersList = ({
           )}
         </div>
       )}
-      {shown.length === 0 && invited.length === 0 ? (
+      {nobody ? (
         <div {...stylex.props(styles.notice)}>
           <Text tone="muted">{t`Nobody matches.`}</Text>
         </div>
       ) : (
         <ItemGroup aria-label={t`Members`} separated>
           {shown.map((member) => (
-            <Item key={member.userId} size="sm">
-              <ItemContent>
-                <ItemTitle>
-                  <TitleLine detail={member.email}>
-                    {member.name}
-                    {member.userId === me ? (
-                      <Badge size="sm">{t`You`}</Badge>
-                    ) : null}
-                  </TitleLine>
-                </ItemTitle>
-              </ItemContent>
-              <ItemActions>
-                {member.userId === me ? (
-                  <div {...stylex.props(styles.own)}>
-                    <Badge>{roleLabel(member.role)}</Badge>
-                  </div>
-                ) : (
-                  <MemberActions
-                    member={member}
-                    onNotice={setNotice}
-                    onRemoved={() => {
-                      searchField.current?.focus();
-                    }}
-                  />
-                )}
-              </ItemActions>
-            </Item>
+            <MemberRow
+              key={member.userId}
+              me={member.userId === me}
+              member={member}
+              onNotice={setNotice}
+              onRemoved={() => {
+                searchField.current?.focus();
+              }}
+            />
           ))}
           {invited.map((invitation) => (
             <InvitationRow invitation={invitation} key={invitation.id} />
+          ))}
+          {left.map((person) => (
+            <RemovedRow key={person.userId} person={person} />
           ))}
         </ItemGroup>
       )}
@@ -499,32 +586,34 @@ const MembersList = ({
   );
 };
 
-const Members = () => {
+/**
+ * Settings › Members and roles on one page: the people, then (for the
+ * organization's own admins) their teams, then what each role may do.
+ */
+const MembersPage = () => {
   const { t } = useLingui();
   const page = Route.useLoaderData();
   const { identity } = Route.useRouteContext();
-  return page.state === "ready" ? (
-    <>
-      <MembersList
-        invitations={page.data.invitations}
-        me={identity.userId}
-        members={page.data.members}
-      />
-      <RemovedPeople page={page.data.removed} />
-    </>
-  ) : (
-    <SectionCard title={t`Members`}>
-      <SectionNotLoaded page={page} />
-    </SectionCard>
+  return (
+    <div {...stylex.props(styles.page)}>
+      {page.state === "ready" ? (
+        <MembersList
+          invitations={page.data.invitations}
+          me={identity.userId}
+          members={page.data.members}
+          removed={page.data.removed}
+        />
+      ) : (
+        <SectionCard density="compact" title={t`Members`}>
+          <SectionNotLoaded page={page} />
+        </SectionCard>
+      )}
+      {/* Core refuses the teams to anyone else. */}
+      {isMemberAdmin(identity) ? <TeamsPanel /> : null}
+      <Roles />
+    </div>
   );
 };
-
-/** The members, and for the organization's admins tabs of their teams and of what each role may do. */
-const MembersPage = () => (
-  <MembersTabs roles={<Roles />}>
-    <Members />
-  </MembersTabs>
-);
 
 export const Route = createFileRoute("/_shell/settings/members")({
   pendingComponent: SettingsLoading,
