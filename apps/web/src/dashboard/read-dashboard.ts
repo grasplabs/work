@@ -25,6 +25,7 @@ import type { WorkflowSummary } from "@grasp-os/shared/workflows";
 import { readRequestNames } from "../activity/pending.tsx";
 import type { CoreConnection } from "../core-connection.ts";
 import type { Session } from "../core.ts";
+import { readOutcomes } from "../inbox/everyones-outcomes.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { listWorkflows, openableApps } from "../workflows/reads.ts";
@@ -147,8 +148,13 @@ export const readWaiting = async (
         return { view, links, stage: programme?.stage ?? null };
       })
     : undefined;
+  // Everyone's, for the organization's own admins, as Settings › Unknown outcomes was.
+  const everyonesOutcomes = decidesRequests(identity)
+    ? await readOutcomes(core)
+    : undefined;
   return {
     ...(interviews === undefined ? {} : { interviews }),
+    ...(everyonesOutcomes === undefined ? {} : { everyonesOutcomes }),
     held: partOf(feed, "held", (read) =>
       ofKind(read, "heldWrite").map(({ action }) => action)
     ),

@@ -16,6 +16,7 @@ import type {
 } from "@grasp-os/shared/waiting";
 
 import type { PendingRequests } from "../activity/pending.tsx";
+import type { Outcomes } from "../inbox/everyones-outcomes.ts";
 import type { Loaded } from "../load-from-core.tsx";
 import type { NotificationsPage } from "./notifications-page.ts";
 
@@ -49,6 +50,8 @@ export interface Waiting {
   gaps?: Loaded<Gap[]>;
   /** Where the onboarding's interviews stand, and the links to send. Admins, Grasp's staff included. */
   interviews?: Loaded<Interviews>;
+  /** Everyone's open calls of unknown outcome, to follow up. The organization's own admins only. */
+  everyonesOutcomes?: Loaded<Outcomes>;
 }
 
 /** The onboarding as the inbox's Interviews item reads it, as Settings, Onboarding did. */

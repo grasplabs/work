@@ -13,7 +13,6 @@ import {
   Lock,
   People,
   Person,
-  Question,
 } from "../grasp/icons/index.ts";
 import type { IconData } from "../grasp/icons/index.ts";
 
@@ -30,7 +29,6 @@ export type SettingsHref =
   | "/settings/ai-providers"
   | "/settings/audit"
   | "/settings/webhooks"
-  | "/settings/outcomes"
   | "/settings/billing"
   | "/settings/profile"
   | "/settings/appearance"
@@ -137,14 +135,6 @@ export const settingsSections: readonly SettingsSection[] = [
     href: "/settings/webhooks",
     group: "workspace",
     icon: Link,
-    audience: "own-admins",
-  },
-  {
-    id: "outcomes",
-    label: msg`Unknown outcomes`,
-    href: "/settings/outcomes",
-    group: "workspace",
-    icon: Question,
     audience: "own-admins",
   },
   {

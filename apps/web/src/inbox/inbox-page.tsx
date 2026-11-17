@@ -3,7 +3,7 @@ import type { MessageDescriptor } from "@lingui/core";
 import { msg, plural } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { Await, useNavigate, useRouter } from "@tanstack/react-router";
+import { Await, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 
 import { actorOf } from "../activity/audit-log.tsx";
@@ -16,7 +16,9 @@ import { LoadingLines } from "../frame/page-states.tsx";
 import { RouterLink } from "../frame/router-link.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { Alert } from "../grasp/alert/index.ts";
+import { Avatar } from "../grasp/avatar/index.ts";
 import { Badge } from "../grasp/badge/index.ts";
+import { BrandIcon } from "../grasp/brand-icon/index.ts";
 import {
   Empty,
   EmptyDescription,
@@ -44,6 +46,7 @@ import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { notLoadedText } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
+import { brandOf } from "./brand-of.ts";
 import { kindLabel, kindMark } from "./inbox-kind.tsx";
 import { ItemDetail } from "./item-detail.tsx";
 import { groupOf, listed } from "./items.ts";
@@ -118,10 +121,11 @@ const groupLabel: Record<Group, MessageDescriptor> = {
   workflows: msg({ message: "Workflows", context: "inbox filter" }),
   asked: msg({ message: "Asked of you", context: "inbox filter" }),
   brain: msg({ message: "Brain", context: "inbox filter, short" }),
+  outcomes: msg({ message: "Unknown outcomes", context: "inbox filter" }),
   apps: msg({ message: "Apps", context: "inbox filter, short" }),
 };
 
-const groupOrder = ["asked", "brain", "workflows", "apps"] as const;
+const groupOrder = ["asked", "brain", "outcomes", "workflows", "apps"] as const;
 
 const isGroup = (value: string | null): value is Group =>
   value === "all" || groupOrder.some((each) => each === value);
@@ -134,13 +138,15 @@ const rowLine = (item: InboxItem, kind: string): string => {
   return item.date === "" ? kind : `${kind} · ${formatDayMonth(item.date)}`;
 };
 
-/** Where a row of the list leads: the inbox, with the item open. */
-const itemHref = (router: ReturnType<typeof useRouter>, id: string): string =>
-  router.buildLocation({ to: "/inbox", search: { item: id } }).href;
-
-/** The item a row's link opens, from its address. */
-const itemOf = (anchor: HTMLAnchorElement): string | undefined =>
-  new URL(anchor.href).searchParams.get("item") ?? undefined;
+/** The brand of what an item is about, beside its name, when its name names one. */
+const BrandMark = ({ name }: { name: string | undefined }) => {
+  const brand = name === undefined ? undefined : brandOf(name);
+  return brand === undefined ? null : (
+    <ItemNote>
+      <BrandIcon brand={brand} decorative size="xs" tile={false} />
+    </ItemNote>
+  );
+};
 
 /** Whether a key press belongs to something being typed, not to the inbox. */
 const typing = (target: EventTarget | null): boolean =>
@@ -150,7 +156,7 @@ const typing = (target: EventTarget | null): boolean =>
 
 /**
  * What waits, grouped as the filter offers it, with the item that is open
- * marked; a press on a row opens it here, without leaving the page.
+ * marked as the current one; each row a router link to its place.
  */
 const ItemList = ({
   list,
@@ -162,28 +168,6 @@ const ItemList = ({
   onOpen: (id: string, focus: boolean) => void;
 }) => {
   const { t, i18n } = useLingui();
-  const router = useRouter();
-  // Grasp UI's Item takes an `href` and draws a plain link: the router
-  // follows a plain press here instead of loading the page again.
-  const follow = useEffectEvent((event: globalThis.MouseEvent) => {
-    const anchor =
-      event.target instanceof Element ? event.target.closest("a") : null;
-    if (
-      anchor === null ||
-      event.button !== 0 ||
-      event.metaKey ||
-      event.ctrlKey ||
-      event.shiftKey ||
-      event.altKey
-    ) {
-      return;
-    }
-    const id = itemOf(anchor);
-    if (id !== undefined) {
-      event.preventDefault();
-      onOpen(id, false);
-    }
-  });
   const step = useEffectEvent((event: globalThis.KeyboardEvent) => {
     if (event.key !== "ArrowDown" && event.key !== "ArrowUp") {
       return;
@@ -199,16 +183,11 @@ const ItemList = ({
   const element = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const box = element.current;
-    const click = (event: globalThis.MouseEvent) => {
-      follow(event);
-    };
     const key = (event: globalThis.KeyboardEvent) => {
       step(event);
     };
-    box?.addEventListener("click", click, { capture: true });
     box?.addEventListener("keydown", key);
     return () => {
-      box?.removeEventListener("click", click, { capture: true });
       box?.removeEventListener("keydown", key);
     };
   }, []);
@@ -217,15 +196,22 @@ const ItemList = ({
       <ItemGroup aria-label={t`What waits on you`} separated>
         {list.map((item) => (
           <Item
-            href={itemHref(router, item.id)}
+            current={item.id === selected?.id}
             key={item.id}
+            render={<Link replace search={{ item: item.id }} to="/inbox" />}
             size="xs"
-            variant={item.id === selected?.id ? "soft" : "plain"}
           >
-            <ItemMedia icon={kindMark[item.kind]} iconLook="inline" />
+            {item.face === undefined ? (
+              <ItemMedia icon={kindMark[item.kind]} iconLook="inline" />
+            ) : (
+              <ItemMedia>
+                <Avatar name={item.face} size="xs" />
+              </ItemMedia>
+            )}
             <ItemContent>
               <ItemTitle>
                 {item.context}
+                <BrandMark name={item.logo?.name} />
                 {item.urgent ? (
                   <ItemNote>
                     <Badge size="sm" tone="attention">
@@ -251,19 +237,22 @@ const ItemList = ({
 const ToDo = ({
   items,
   chosen,
+  initialGroup,
   notLoaded,
   olderFailures,
   onSaid,
 }: {
   items: readonly InboxItem[];
   chosen: string | undefined;
+  /** The group in view first, as an address may ask. */
+  initialGroup?: Group;
   notLoaded: readonly Loaded<unknown>[];
   olderFailures: boolean;
   onSaid: (said: string) => void;
 }) => {
   const { t, i18n } = useLingui();
   const navigate = useNavigate();
-  const [group, setGroup] = useState<Group>("all");
+  const [group, setGroup] = useState<Group>(initialGroup ?? "all");
   // Where the open item stood, so the one after it opens once it is settled.
   const [at, setAt] = useState(0);
   const counts = new Map<Group, number>();
@@ -529,6 +518,7 @@ const ActivityList = ({ activity }: { activity: InboxActivity }) => {
 export const InboxPage = ({
   items,
   chosen,
+  group,
   notLoaded,
   olderFailures,
   activity,
@@ -536,6 +526,8 @@ export const InboxPage = ({
   items: readonly InboxItem[];
   /** The item open, by its ID: the list's first when none is, or it waits no more. */
   chosen?: string;
+  /** The group in view first, as an address may ask. */
+  group?: Group;
   notLoaded: readonly Loaded<unknown>[];
   /** Whether core has failed workflows older than the ones listed: the dashboard shows them. */
   olderFailures: boolean;
@@ -546,6 +538,7 @@ export const InboxPage = ({
   const toDo = (
     <ToDo
       chosen={chosen}
+      initialGroup={group}
       items={items}
       notLoaded={notLoaded}
       olderFailures={olderFailures}

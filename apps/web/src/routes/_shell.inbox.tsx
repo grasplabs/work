@@ -22,11 +22,12 @@ const activityShown = 100;
 const Inbox = () => {
   const { waiting, readAt, activity } = Route.useLoaderData();
   const { identity } = Route.useRouteContext();
-  const { item } = Route.useSearch();
+  const { item, group } = Route.useSearch();
   return (
     <InboxPage
       activity={activity}
       chosen={item}
+      group={group}
       items={inboxItems(waiting, identity, readAt)}
       notLoaded={unread(waiting)}
       olderFailures={
@@ -38,7 +39,11 @@ const Inbox = () => {
 };
 
 export const Route = createFileRoute("/_shell/inbox")({
-  validateSearch: z.object({ item: z.string().optional() }),
+  // `group`: the group in view first, as Settings › Unknown outcomes leads here.
+  validateSearch: z.object({
+    item: z.string().optional(),
+    group: z.enum(["asked", "brain", "outcomes"]).optional(),
+  }),
   pendingComponent: PageLoading,
   loader: async ({ context: { core, identity } }) => {
     // Not awaited: the activity tab waits for it.

@@ -1,5 +1,9 @@
 import type { Gap } from "@grasp-os/shared/brain";
-import type { PendingAction, UnknownOutcome } from "@grasp-os/shared/connect";
+import type {
+  PendingAction,
+  UnknownOutcome,
+  UnknownOutcomeListing,
+} from "@grasp-os/shared/connect";
 import type { DecisionView } from "@grasp-os/shared/decisions";
 import type { HeldStart } from "@grasp-os/shared/held-starts";
 import type {
@@ -47,6 +51,7 @@ export type InboxKind =
   | "openQuestion"
   | "brainQuestion"
   | "interviews"
+  | "everyonesOutcome"
   | "unknownAiTool"
   | "signInAgain"
   | "externalDomain"
@@ -90,6 +95,7 @@ export type InboxSource =
   | { type: "asked"; notification: GapAskedNotification }
   | { type: "gap"; gap: Gap }
   | { type: "interviews"; interviews: Interviews; today: string }
+  | { type: "everyonesOutcome"; listing: UnknownOutcomeListing; person: string }
   | { type: "stopped"; notification: TriggerStoppedNotification }
   | { type: "packageNotice"; notification: PackageNotification }
   | { type: "stoppedEvents"; notification: EventsStoppedNotification }
@@ -123,11 +129,19 @@ export interface InboxItem {
   calm?: boolean;
   /** What the list says under its name, in place of its kind and date. */
   summary?: string;
+  /** Whose it is, when it is someone's: their face stands for it in the list. */
+  face?: string;
   source: InboxSource;
 }
 
 /** The kinds, grouped as the filter offers them. */
-export type Group = "all" | "asked" | "workflows" | "brain" | "apps";
+export type Group =
+  | "all"
+  | "asked"
+  | "workflows"
+  | "brain"
+  | "outcomes"
+  | "apps";
 
 export const groupOf: Record<InboxKind, Exclude<Group, "all">> = {
   checkDrawing: "workflows",
@@ -139,6 +153,7 @@ export const groupOf: Record<InboxKind, Exclude<Group, "all">> = {
   openQuestion: "asked",
   brainQuestion: "brain",
   interviews: "brain",
+  everyonesOutcome: "outcomes",
   unknownAiTool: "apps",
   signInAgain: "apps",
   externalDomain: "apps",
@@ -540,6 +555,55 @@ const interviewsItems = (
   ];
 };
 
+/** What is ready of a part of what waits; nothing of one that couldn't be read. */
+const readyOf = <T>(part: Loaded<T> | undefined): T | undefined =>
+  part?.state === "ready" ? part.data : undefined;
+
+/**
+ * Everyone's open calls of unknown outcome, for the organization's own
+ * admins to follow up with each person: only that person can say what
+ * became of it, so there is nothing here to decide. The admin's own are
+ * theirs to answer already (`outcomeItems`), so they aren't listed twice.
+ * Only to follow: never counted where the inbox is counted.
+ */
+const everyonesOutcomeItems = (
+  waiting: Waiting,
+  viewer: Viewer,
+  own: readonly UnknownOutcome[]
+): InboxItem[] => {
+  // The organization's own admins alone, as `readWaiting` reads them for.
+  const everyones = decidesRequests(viewer)
+    ? readyOf(waiting.everyonesOutcomes)
+    : undefined;
+  if (everyones === undefined) {
+    return [];
+  }
+  const mine = new Set(own.map(({ cursor }) => JSON.stringify(cursor)));
+  return everyones.listed
+    .filter(({ cursor }) => !mine.has(JSON.stringify(cursor)))
+    .map((listing) => {
+      const person =
+        everyones.people.get(listing.onBehalfOf) ?? listing.onBehalfOf;
+      const change = listing.title ?? listing.action;
+      const connection = listing.connectionName ?? listing.connectionId;
+      return {
+        id: `everyonesOutcome:${listing.id}`,
+        kind: "everyonesOutcome",
+        title: change,
+        context: change,
+        summary: t`${person} · ${connection}`,
+        face: person,
+        logo: { name: connection },
+        body: [],
+        facts: [],
+        date: listing.sentAt,
+        urgent: false,
+        calm: true,
+        source: { type: "everyonesOutcome", listing, person },
+      };
+    });
+};
+
 /** What core's rescan found of an App's approved packages. */
 type PackageNotification = Extract<
   NotificationsPage["page"]["notifications"][number],
@@ -753,10 +817,6 @@ const decisionItems = (
     };
   });
 
-/** What is ready of a part of what waits; nothing of one that couldn't be read. */
-const readyOf = <T>(part: Loaded<T> | undefined): T | undefined =>
-  part?.state === "ready" ? part.data : undefined;
-
 /**
  * Every item that waits on the person, in the inbox's order: what blocks
  * something first, then the newest. `readAt` dates what core lists
@@ -828,6 +888,7 @@ export const inboxItems = (
     ...(notifications === undefined ? [] : askedItems(notifications, me)),
     ...gapItems(gaps, askedGaps),
     ...interviewsItems(readyOf(waiting.interviews), readAt),
+    ...everyonesOutcomeItems(waiting, viewer, outcomes),
     ...(notifications === undefined ? [] : stoppedItems(notifications, me)),
     ...(notifications === undefined
       ? []
@@ -854,6 +915,7 @@ export const unread = (waiting: Waiting): Loaded<unknown>[] => {
     waiting.bindings,
     waiting.gaps,
     waiting.interviews,
+    waiting.everyonesOutcomes,
   ];
   return parts.filter(
     (part): part is Loaded<unknown> =>

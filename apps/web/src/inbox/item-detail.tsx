@@ -16,7 +16,7 @@ import {
 import type { Session } from "../core.ts";
 import { isUnresolvable, OutcomeDetails } from "../dashboard/outcome-card.tsx";
 import { RequestDetails } from "../dashboard/pile-cards.tsx";
-import { formatDate } from "../format.ts";
+import { formatDate, formatDateTime } from "../format.ts";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -27,6 +27,8 @@ import {
   AlertDialogTrigger,
 } from "../grasp/alert-dialog/index.ts";
 import { Alert } from "../grasp/alert/index.ts";
+import { ApprovalRequest } from "../grasp/approval-request/index.ts";
+import type { ApprovalWords } from "../grasp/approval-request/index.ts";
 import { Badge } from "../grasp/badge/index.ts";
 import { Button } from "../grasp/button/index.ts";
 import { CodeBlock } from "../grasp/code-block/index.ts";
@@ -349,10 +351,119 @@ const HeldItem = ({
   );
 };
 
+/** Every word the Approval request card shows, in the page's language. */
+const useApprovalWords = (): Partial<ApprovalWords> => {
+  const { t } = useLingui();
+  return {
+    theAgent: t`Someone`,
+    details: t`Details`,
+    askForChanges: t`Ask for changes`,
+    whatShouldChange: t`What should change`,
+    back: t`Back`,
+    send: t`Send`,
+    decline: t`Decline`,
+    final: t`cannot be undone`,
+    sure: t`Approve it?`,
+    sureFinal: t`Approve it? This cannot be undone.`,
+    notYet: t`Not yet`,
+    yes: t`Yes`,
+    // The second ask says only what Approve does: joining it to "Yes" differs by language.
+    confirm: (_yes, approve) => approve,
+    signed: (decided, by) => t`${decided} by ${by}`,
+    you: t`you`,
+    undo: t`Undo`,
+    approving: t`Approving`,
+    declining: t`Declining`,
+    sending: t`Sending`,
+    couldNotApprove: t`Could not approve`,
+    couldNotDecline: t`Could not decline`,
+    couldNotSend: t`Could not send`,
+    approved: t`Approved`,
+    declined: t`Declined`,
+    changes: t`Changes asked`,
+    expired: t`Expired`,
+    superseded: t`Replaced by a newer request`,
+    undone: t`Undone, waiting again`,
+  };
+};
+
 /**
- * A start of a workflow a chat's agent asked for: confirming starts it,
- * as the agent acting for the person, with exactly the input shown, which
- * is all shown before either button.
+ * An ask for the person's yes (a start an agent asked for, a permission,
+ * a version to go live), on Grasp UI's Approval request: what it is, who
+ * asks, what to read under Details, Approve and Decline. Each answer goes
+ * to core as the person; one core refuses fails on the card itself, with
+ * why, and the item stays. Once it is through, the inbox is read again,
+ * so the item leaves.
+ */
+const ApprovalFrame = ({
+  frame,
+  who,
+  summary,
+  details,
+  approveLabel,
+  grave = false,
+  onApprove,
+  onDecline,
+}: {
+  frame: Frame;
+  /** Who asks: the App, agent or person. */
+  who?: string;
+  /** The one fact that decides it, in the card's quiet line. */
+  summary?: string;
+  /** What to read before answering, under Details. */
+  details?: ReactNode;
+  approveLabel?: string;
+  grave?: boolean;
+  onApprove: (session: Session) => Promise<unknown>;
+  onDecline: (session: Session) => Promise<unknown>;
+}) => {
+  const { t } = useLingui();
+  const router = useRouter();
+  const core = useCore();
+  const words = useApprovalWords();
+  const { item, onBack } = frame;
+  const answer =
+    (change: (session: Session) => Promise<unknown>, said: string) =>
+    async () => {
+      await core.withSession(change);
+      frame.onSaid(said);
+      await router.invalidate({ sync: true });
+    };
+  const { title } = item;
+  return (
+    <div {...stylex.props(styles.item)}>
+      {onBack === undefined ? null : (
+        <Button
+          icon={ArrowLeft}
+          layout={styles.back}
+          onClick={onBack}
+          size="sm"
+          variant="ghost"
+        >
+          {t`All items`}
+        </Button>
+      )}
+      <ApprovalRequest
+        {...(who === undefined ? {} : { agent: who })}
+        {...(summary === undefined ? {} : { summary })}
+        {...(approveLabel === undefined ? {} : { approveLabel })}
+        askedAt={item.date === "" ? undefined : formatDate(item.date)}
+        grave={grave}
+        headingLevel={2}
+        onApprove={answer(onApprove, t`Approved: ${title}`)}
+        onDecline={answer(onDecline, t`Declined: ${title}`)}
+        title={title}
+        words={words}
+      >
+        {details}
+      </ApprovalRequest>
+    </div>
+  );
+};
+
+/**
+ * A start of a workflow a chat's agent asked for: approving starts it, as
+ * the agent acting for the person, with exactly the input shown.
  */
 const HeldStartItem = ({
   frame,
@@ -363,46 +474,89 @@ const HeldStartItem = ({
 }) => {
   const { t } = useLingui();
   const { start } = source;
-  const { busy, failure, decide } = useDecide(frame.onSaid);
-  const name = start.workflowName;
   return (
-    <ItemFrame
-      acts={[
-        {
-          label: t`Start`,
-          name: t`Start ${name}`,
-          onPress: async () => {
-            await decide(
-              async (session) => {
-                await session.heldStarts.confirm(start.id, start.argsHash);
-              },
-              t`Started: ${name}.`
-            );
-          },
-        },
-        {
-          label: t`Decline`,
-          name: t`Decline starting ${name}`,
-          onPress: async () => {
-            await decide(
-              async (session) => {
-                await session.heldStarts.decline(start.id);
-              },
-              t`Declined: ${name}.`
-            );
-          },
-        },
-      ]}
-      busy={busy}
-      extra={
+    <ApprovalFrame
+      approveLabel={t`Start it`}
+      details={
         <CodeBlock
           code={JSON.stringify(start.args, null, 2)}
           fileName={t`What it starts with`}
           language="json"
         />
       }
-      failure={failure}
       frame={frame}
+      onApprove={async (session) => {
+        await session.heldStarts.confirm(start.id, start.argsHash);
+      }}
+      onDecline={async (session) => {
+        await session.heldStarts.decline(start.id);
+      }}
+      summary={frame.item.context}
+    />
+  );
+};
+
+/** A permission request: approving grants it for the version of its App that was reviewed. */
+const RequestItem = ({
+  frame,
+  source,
+}: {
+  frame: Frame;
+  source: Extract<InboxSource, { type: "request" }>;
+}) => {
+  const { t } = useLingui();
+  const { request, pending } = source;
+  return (
+    <ApprovalFrame
+      approveLabel={t`Grant it`}
+      details={
+        <RequestDetails directory={pending.directory} request={request} />
+      }
+      frame={frame}
+      onApprove={async (session) =>
+        await grantReviewed(
+          session.permissions,
+          request,
+          reviewedVersion(request, pending.directory)
+        )
+      }
+      onDecline={async (session) =>
+        await session.permissions.revoke(request.id)
+      }
+      who={frame.item.context}
+    />
+  );
+};
+
+/**
+ * A version of a workflow asked to go live: approved or sent back here,
+ * through the workflow's lifecycle, which checks again that the person
+ * may and that it is still the version waiting.
+ */
+const WorkflowGoLiveDetail = ({
+  frame,
+  source,
+}: {
+  frame: Frame;
+  source: Extract<InboxSource, { type: "workflowGoLive" }>;
+}) => {
+  const { t } = useLingui();
+  const { item } = source;
+  const { version } = item;
+  const decide = (verdict: "approve" | "reject") => async (session: Session) =>
+    await session.workflowResources.lifecycle.decideGoLive(item.workflow.id, {
+      version,
+      verdict,
+      revision: item.revision,
+    });
+  return (
+    <ApprovalFrame
+      approveLabel={t`Let it go live`}
+      frame={frame}
+      grave
+      onApprove={decide("approve")}
+      onDecline={decide("reject")}
+      summary={t`Version ${version}`}
     />
   );
 };
@@ -498,117 +652,6 @@ const OutcomeItem = ({
           unresolvableId={unresolvableId}
         />
       }
-      failure={failure}
-      frame={frame}
-    />
-  );
-};
-
-/** A permission request: approving grants it for the version of its App that was reviewed. */
-const RequestItem = ({
-  frame,
-  source,
-}: {
-  frame: Frame;
-  source: Extract<InboxSource, { type: "request" }>;
-}) => {
-  const { t } = useLingui();
-  const { request, pending } = source;
-  const { busy, failure, decide } = useDecide(frame.onSaid);
-  const who = frame.item.context;
-  return (
-    <ItemFrame
-      acts={[
-        {
-          label: t`Approve`,
-          name: t`Approve ${who}`,
-          onPress: async () => {
-            await decide(
-              async (session) =>
-                await grantReviewed(
-                  session.permissions,
-                  request,
-                  reviewedVersion(request, pending.directory)
-                ),
-              t`Approved: ${who}.`
-            );
-          },
-        },
-        {
-          label: t`Reject`,
-          name: t`Reject ${who}`,
-          confirm: {
-            title: t`Reject this request?`,
-            description: t`${who} can't be granted later: it has to ask again.`,
-          },
-          onPress: async () => {
-            await decide(
-              async (session) => await session.permissions.revoke(request.id),
-              t`Rejected: ${who}.`
-            );
-          },
-        },
-      ]}
-      busy={busy}
-      extra={<RequestDetails directory={pending.directory} request={request} />}
-      failure={failure}
-      frame={frame}
-    />
-  );
-};
-
-/**
- * A version of a workflow asked to go live: approved or sent back here,
- * through the workflow's lifecycle, which checks again that the person
- * may and that it is still the version waiting.
- */
-const WorkflowGoLiveDetail = ({
-  frame,
-  source,
-}: {
-  frame: Frame;
-  source: Extract<InboxSource, { type: "workflowGoLive" }>;
-}) => {
-  const { t } = useLingui();
-  const router = useRouter();
-  const { item } = source;
-  const { busy, failure, run } = useCoreAction();
-  const who = frame.item.context;
-  const { version } = item;
-  // Read again once it is decided. A refused decision stays, with why.
-  const decide = async (
-    verdict: "approve" | "reject",
-    said: string
-  ): Promise<void> => {
-    await run(async (session) => {
-      await session.workflowResources.lifecycle.decideGoLive(item.workflow.id, {
-        version,
-        verdict,
-        revision: item.revision,
-      });
-      frame.onSaid(said);
-      await router.invalidate({ sync: true });
-    });
-  };
-  return (
-    <ItemFrame
-      acts={[
-        {
-          label: t`Approve`,
-          name: t`Let version ${version} of ${who} go live`,
-          onPress: async () => {
-            await decide("approve", t`Live: ${who}, version ${version}.`);
-          },
-        },
-        {
-          label: t`Send back`,
-          name: t`Send version ${version} of ${who} back`,
-          onPress: async () => {
-            await decide("reject", t`Sent back: ${who}, version ${version}.`);
-          },
-        },
-      ]}
-      busy={busy}
       failure={failure}
       frame={frame}
     />
@@ -831,11 +874,80 @@ const InterviewsFrame = ({
   );
 };
 
+/**
+ * Someone else's change whose answer was lost, for the organization's own
+ * admin to follow up with them: what it was, for whom, where and when, and
+ * its receipt, by which its trail is found in the audit log. Read only:
+ * only that person can say what became of it, and only they see what was
+ * sent.
+ */
+const EveryonesOutcomeItem = ({
+  frame,
+  source,
+}: {
+  frame: Frame;
+  source: Extract<InboxSource, { type: "everyonesOutcome" }>;
+}) => {
+  const { t } = useLingui();
+  const { onBack } = frame;
+  const { listing, person } = source;
+  const connection = listing.connectionName ?? listing.connectionId;
+  return (
+    <div {...stylex.props(styles.item)}>
+      {onBack === undefined ? null : (
+        <Button
+          icon={ArrowLeft}
+          layout={styles.back}
+          onClick={onBack}
+          size="sm"
+          variant="ghost"
+        >
+          {t`All items`}
+        </Button>
+      )}
+      <SectionCard
+        density="compact"
+        description={t`Its answer was lost: nobody can tell whether it took effect.`}
+        title={frame.item.title}
+      >
+        <div {...stylex.props(styles.body)}>
+          <KeyValueList
+            items={[
+              { key: t`For`, value: person },
+              {
+                key: t`Connection`,
+                value:
+                  listing.resource === null
+                    ? connection
+                    : `${connection} · ${listing.resource}`,
+              },
+              { key: t`Sent`, value: formatDateTime(listing.sentAt) },
+              {
+                key: t`Receipt`,
+                value: listing.effectKeyHash,
+                mono: true,
+                copy: true,
+              },
+            ]}
+            variant="inline"
+          />
+          <Text size="sm" tone="muted">
+            {t`Only ${person} can say whether it happened.`}
+          </Text>
+        </div>
+      </SectionCard>
+    </div>
+  );
+};
+
 /** The item, by what it was made from. */
 export const ItemDetail = (frame: Frame) => {
   const { source } = frame.item;
   if (source.type === "interviews") {
     return <InterviewsFrame frame={frame} source={source} />;
+  }
+  if (source.type === "everyonesOutcome") {
+    return <EveryonesOutcomeItem frame={frame} source={source} />;
   }
   if (source.type === "held") {
     return <HeldItem frame={frame} source={source} />;
