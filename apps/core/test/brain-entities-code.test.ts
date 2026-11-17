@@ -1,5 +1,6 @@
 import { brainOf } from "@grasp-os/brain-next/contract";
 import type { FunctionResult } from "@grasp-os/shared/functions";
+import { httpContract } from "@grasp-os/shared/http-contract";
 import { teamIdSchema } from "@grasp-os/shared/ids";
 import type { PermissionRequest } from "@grasp-os/shared/permissions";
 import type { Identity } from "@grasp-os/shared/rpc";
@@ -23,21 +24,25 @@ import {
   workBrain,
 } from "../src/brain-next.ts";
 import type { SourceRef } from "../src/brain-next.ts";
+import { builtins, fingerprintOf, thisRelease } from "../src/builtins.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
 import { grantPermission, requestPermission } from "../src/permissions.ts";
 import { rollback } from "../src/publish.ts";
+import { httpCatalogContract } from "../src/release-contracts.ts";
 import { approveResourceBinding } from "../src/resource-bindings.ts";
 import { approveWorkflowBinding } from "../src/workflow-bindings.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
 import { editWorkflowDraft, workflowDraft } from "../src/workflow-editor.ts";
 import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
+import { workflowStateOf } from "../src/workflow-state.ts";
 import {
   candidateRunFor,
   startCandidateRun,
 } from "../src/workflows/candidate-runs.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
+import { runFilesFor } from "../src/workflows/run-file-downloads.ts";
 import { testApp } from "./app-definitions.ts";
 import { allEvents } from "./audit-events.ts";
 import {
@@ -45,11 +50,16 @@ import {
   killStore,
   restoreStore,
 } from "./brain-next-store-copy.ts";
+import { httpApiOrigin, httpApiReceivedUrl } from "./connect-providers.ts";
+import { mockIdp } from "./idp.ts";
+import { askedModel, jsonWorkflowAppsOf } from "./json-workflow-apps.ts";
 import { runQuarterHourTasks } from "./maintenance.ts";
+import { fakeProviderFor } from "./model-provider.ts";
 import { noProducers } from "./no-producers.ts";
 import { appWith, person, seal } from "./sealed-apps.ts";
 import type { Fixture } from "./sealed-apps.ts";
 import { unique } from "./sign-in.ts";
+import { testBinding } from "./test-env.ts";
 import { publishDefinition } from "./workflow-publishing.ts";
 
 // The Brain's entities for code (GRA-1837; the threat model is on the
@@ -661,7 +671,7 @@ describe("entities, as a workflow reads them", setUpTime, () => {
     });
   });
 
-  it("keeps every name a run is handed with the run: a related entity's and one found, each withheld once the source that named it is erased; a name in a person's own word stands once its memory is retired", async () => {
+  it("keeps every name a run is handed with the run: a related entity's and one found, each withheld once the source that named it is erased, and a name in a person's own word once its memory is retired", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
     const workflow = await entitiesWorkflow(ada, admin);
@@ -770,10 +780,9 @@ describe("entities, as a workflow reads them", setUpTime, () => {
       after: {
         relation: { status: "completed", error: "brain.revoked", shows: [] },
         found: { status: "completed", error: "brain.revoked", shows: [] },
-        // A retired memory stays as history and still names its entity
-        // for everyone who may read it: nothing a run passed on is now
-        // hidden from them.
-        said: { status: "completed", error: null, shows: [said] },
+        // A memory its writer retired (or a share taken back) is no longer
+        // passed on, as a chat withholds it (GRA-1985).
+        said: { status: "completed", error: "brain.revoked", shows: [] },
       },
     });
   });
@@ -1462,6 +1471,368 @@ describe(
         kept: kept > 0,
         after: await memoriesKeptBy(runId),
       }).toStrictEqual({ kept: true, after: 0 });
+    });
+  }
+);
+
+/**
+ * A workflow of `by`'s that reads entity `args.entity`'s card, waits a
+ * moment, then runs `after` (steps reading the card as `card`), with
+ * `permissions` beside its Brain's, and its state `state` if any: bound
+ * by `admin` to a grant of its own to read the Brain.
+ */
+const readThenWorkflow = async (
+  by: Member,
+  admin: Member,
+  {
+    after,
+    permissions = {},
+    state,
+    first = {
+      id: "card",
+      type: "call",
+      brain: "docs",
+      action: "entities.get",
+      args: { entity: { $expr: "args.entity" } },
+    },
+  }: {
+    after: unknown[];
+    permissions?: Record<string, unknown>;
+    state?: Record<string, unknown>;
+    first?: unknown;
+  }
+) => {
+  const key = `brain-${unique()}`;
+  await publishCatalogContract(env, admin, { key, kind: "brain" });
+  const workflow = await createWorkflowResource(env, by, `then-${unique()}`);
+  await publishDefinition(
+    env,
+    by,
+    workflow.id,
+    JSON.stringify({
+      $schema: workflowSchemaUrl,
+      args: {
+        kind: "object",
+        fields: { entity: { kind: "string" }, name: { kind: "string" } },
+      },
+      permissions: { ...permissions, brain: { docs: { contract: key } } },
+      ...(state === undefined ? {} : { state }),
+      steps: [first, { id: "hold", type: "wait", for: "5 seconds" }, ...after],
+    })
+  );
+  const permissionId = await granted(
+    by,
+    admin,
+    brainGrant({ type: "workflow", workflowId: workflow.id })
+  );
+  await approveWorkflowBinding(env, admin, workflow.id, {
+    alias: "docs",
+    target: { kind: "brain", permissionId },
+    reviewed: { version: 1 },
+  });
+  return workflow;
+};
+
+/** Waits until run `runId` keeps what its first read rested on: memories or versions. */
+const hasRead = async (runId: string): Promise<void> => {
+  await vi.waitFor(
+    async () => {
+      const kept = await env.DB.prepare(
+        `SELECT (SELECT count(*) FROM run_brain_memories WHERE run_id = ?1)
+        + (SELECT count(*) FROM run_brain_versions WHERE run_id = ?1) AS n`
+      )
+        .bind(runId)
+        .first<number>("n");
+      expect(kept).toBeGreaterThan(0);
+    },
+    { timeout: 10_000, interval: 50 }
+  );
+};
+
+/** What reached the outside API so far, by its body. */
+const receivedBodies = async (): Promise<string[]> => {
+  const providers = testBinding("CONNECT_PROVIDERS");
+  if (
+    typeof providers !== "object" ||
+    providers === null ||
+    !("fetch" in providers)
+  ) {
+    throw new TypeError("Expected the providers Worker as CONNECT_PROVIDERS");
+  }
+  // SAFETY: checked just above to have `fetch`, as a Fetcher does.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  const response = await (providers as Fetcher).fetch(httpApiReceivedUrl);
+  return z
+    .array(z.object({ body: z.string() }))
+    .parse(await response.json())
+    .map(({ body }) => body);
+};
+
+const idp = mockIdp();
+
+describe(
+  "what a run passes on once a person's erasure took what it read",
+  setUpTime,
+  () => {
+    it("keeps nothing in the workflow's state of her card once her erasure landed after the read, and nothing of a recalled passage once its source is erased", async () => {
+      const admin = await person("admin");
+      const ada = await person("builder");
+      const anna = await annasCard();
+      const card = await readThenWorkflow(ada, admin, {
+        state: { kept: { kind: "string" } },
+        after: [
+          {
+            id: "found",
+            type: "call",
+            brain: "docs",
+            action: "entities.find",
+            args: { name: { $expr: "args.name" } },
+            state: { kept: { $expr: 'card?.entity.name ?? ""' } },
+          },
+        ],
+      });
+      const word = `ledger${unique().replaceAll(/\W/gu, "")}`;
+      const passage = `The ${word} closes on Friday.`;
+      const note = await sourceForEveryone(passage);
+      const recalled = await readThenWorkflow(ada, admin, {
+        state: { kept: { kind: "string" } },
+        first: {
+          id: "recalled",
+          type: "call",
+          brain: "docs",
+          action: "recall",
+          args: {
+            question: { $expr: "args.name" },
+            budget: { tokens: 800 },
+          },
+        },
+        after: [
+          {
+            id: "found",
+            type: "call",
+            brain: "docs",
+            action: "entities.find",
+            args: { name: { $expr: "args.name" } },
+            state: { kept: { $expr: 'recalled.items[0]?.text ?? ""' } },
+          },
+        ],
+      });
+      const runs = {
+        card: await startedRun(ada, card.id, {
+          entity: anna.card,
+          name: unique(),
+        }),
+        recalled: await startedRun(ada, recalled.id, {
+          entity: crypto.randomUUID(),
+          name: word,
+        }),
+      };
+      await hasRead(runs.card);
+      await hasRead(runs.recalled);
+
+      await erasePersonShared(env, {
+        personId: anna.personId,
+        email: anna.address,
+      });
+      await eraseSource(env, {
+        source: note,
+        readers: { kind: "none" },
+        reason: "deleted",
+      });
+
+      expect({
+        card: await endingOf(ada, card.id, runs.card),
+        recalled: await endingOf(ada, recalled.id, runs.recalled),
+        state: {
+          card: await workflowStateOf(env, card.id),
+          recalled: await workflowStateOf(env, recalled.id),
+        },
+      }).toStrictEqual({
+        card: { status: "failed", error: "brain.revoked" },
+        recalled: { status: "failed", error: "brain.revoked" },
+        state: { card: {}, recalled: {} },
+      });
+    });
+
+    it("withholds a run's files that hold her card once her erasure lands, though they were written before it", async () => {
+      const admin = await person("admin");
+      const ada = await person("builder");
+      const anna = await annasCard();
+      const filesKey = `files-${unique()}`;
+      await publishCatalogContract(env, admin, {
+        key: filesKey,
+        kind: "files",
+      });
+      const workflow = await readThenWorkflow(ada, admin, {
+        permissions: { files: { runFiles: { contract: filesKey } } },
+        after: [
+          {
+            id: "written",
+            type: "call",
+            files: "runFiles",
+            action: "write",
+            args: {
+              name: "card.md",
+              type: "text/markdown",
+              text: { $expr: 'card?.entity.name ?? ""' },
+            },
+          },
+        ],
+      });
+      await approveWorkflowBinding(env, admin, workflow.id, {
+        alias: "runFiles",
+        target: { kind: "files" },
+        reviewed: { version: 1 },
+      });
+      const runId = await startedRun(ada, workflow.id, {
+        entity: anna.card,
+        name: unique(),
+      });
+      const ended = await endingOf(ada, workflow.id, runId);
+      const listed = async () => {
+        const files = await runFilesFor(env, ada, workflow.id, runId);
+        return files?.map(({ name }) => name) ?? null;
+      };
+      const before = await listed();
+
+      await erasePersonShared(env, {
+        personId: anna.personId,
+        email: anna.address,
+      });
+
+      expect({ ended, before, after: await listed() }).toStrictEqual({
+        ended: { status: "completed", error: null },
+        before: ["card.md"],
+        // Listed and downloaded by no one, as its result is withheld.
+        after: null,
+      });
+    });
+
+    it("asks no model with her card once her erasure landed after the read", async () => {
+      const admin = await person("admin");
+      const ada = await person("builder");
+      const anna = await annasCard();
+      const modelKey = `reader-${unique()}`;
+      await publishCatalogContract(env, admin, {
+        key: modelKey,
+        kind: "model",
+      });
+      const workflow = await readThenWorkflow(ada, admin, {
+        permissions: { ai: { contract: modelKey } },
+        after: [
+          {
+            id: "ask",
+            type: "generate",
+            instructions: "Greet them.",
+            input: { who: { $expr: 'card?.entity.name ?? ""' } },
+            returns: { kind: "object", fields: { line: { kind: "string" } } },
+          },
+        ],
+      });
+      // Connected first: a model binding needs its model to be.
+      const provider = await fakeProviderFor([askedModel], {
+        text: '{"line": "Hello"}',
+        inputTokens: 1,
+        outputTokens: 1,
+      });
+      await approveWorkflowBinding(env, admin, workflow.id, {
+        alias: "ai",
+        target: { kind: "model", model: askedModel },
+        reviewed: { version: 1 },
+      });
+      const runId = await startedRun(ada, workflow.id, {
+        entity: anna.card,
+        name: unique(),
+      });
+      await hasRead(runId);
+
+      await erasePersonShared(env, {
+        personId: anna.personId,
+        email: anna.address,
+      });
+
+      expect({
+        ending: await endingOf(ada, workflow.id, runId),
+        asked: provider.requests.length,
+      }).toStrictEqual({
+        ending: { status: "failed", error: "brain.revoked" },
+        asked: 0,
+      });
+    });
+
+    it("sends nothing of her card through a connection once her erasure landed after the read", async () => {
+      const people = jsonWorkflowAppsOf(idp);
+      const admin = await people.signedIn("admin");
+      const builder = await people.signedIn("builder");
+      const anna = await annasCard();
+      await builtins(env).ensureInstalled(await fingerprintOf(thisRelease));
+      const { connectionId } = await admin.api.connections.createHttp({
+        name: "Billing API",
+        origin: httpApiOrigin,
+        pathPrefixes: ["/v1/invoices"],
+        methods: ["GET", "POST"],
+        credential: {
+          kind: "header",
+          header: "x-api-key",
+          secret: "the-billing-api-test-credential",
+        },
+      });
+      const workflow = await readThenWorkflow(builder.acting, admin.acting, {
+        permissions: {
+          connections: { api: { contract: httpCatalogContract } },
+        },
+        after: [
+          {
+            id: "send",
+            type: "call",
+            connection: "api",
+            action: "send",
+            args: {
+              method: "POST",
+              path: "/v1/invoices",
+              headers: { "content-type": "application/json" },
+              body: { $expr: "JSON.stringify({ who: card?.entity.name })" },
+            },
+          },
+        ],
+      });
+      const requested = await builder.api.permissions.request({
+        subject: { type: "workflow", workflowId: workflow.id },
+        object: { type: "connection", connectionId },
+        actions: ["get", "send"],
+        binding: `API_${unique().toUpperCase().replaceAll("-", "_")}`,
+      });
+      await admin.api.permissions.grant(requested.id, { version: null });
+      await admin.api.workflowResources.approveBinding(workflow.id, {
+        alias: "api",
+        target: {
+          kind: "connector",
+          permissionId: requested.id,
+          contract: httpContract,
+        },
+        reviewed: { version: 1 },
+      });
+      const runId = await startedRun(builder.acting, workflow.id, {
+        entity: anna.card,
+        name: unique(),
+      });
+      await hasRead(runId);
+
+      await erasePersonShared(env, {
+        personId: anna.personId,
+        email: anna.address,
+      });
+
+      const ending = await endingOf(builder.acting, workflow.id, runId);
+      const sentBodies = await receivedBodies();
+
+      expect({
+        ending,
+        sent: sentBodies.filter((body) => body.includes(anna.name)),
+      }).toStrictEqual({
+        ending: { status: "failed", error: "brain.revoked" },
+        sent: [],
+      });
     });
   }
 );

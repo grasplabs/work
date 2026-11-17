@@ -2306,14 +2306,11 @@ export interface ContestedFact {
 /**
  * Memories to check a reader may still read, by id, and who reads them:
  * what a host checks before it sends again a memory it once recalled (a
- * chat's earlier recall). With `history`, one its writer retired counts as
- * readable, as `readMemories` with `history` reads it: a run that passed a
- * memory on doesn't withhold it for that (GRA-1985).
+ * chat's earlier recall).
  */
 export const readableMemoriesRequestSchema = z.strictObject({
   memories: z.array(memoryIdSchema).max(readableCheckMax),
   reader: readerSchema,
-  history: z.boolean().optional(),
 });
 export type ReadableMemoriesRequest = z.infer<
   typeof readableMemoriesRequestSchema
@@ -3243,8 +3240,7 @@ export interface Brain {
   /**
    * Of the memories asked for, by id, those the reader may read now (as
    * `readMemories` decides who may read one) and their writer has not
-   * retired (retired or not, with `history`), in the order asked and each
-   * once: what a host checks before
+   * retired, in the order asked and each once: what a host checks before
    * it sends again a memory it once recalled (a chat's earlier recall).
    * Each left out alike, whether it doesn't exist, was erased, rests on a
    * version the reader may no longer read, or was retired. One ended by a

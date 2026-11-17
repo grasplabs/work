@@ -942,10 +942,9 @@ ORDER BY fact_first, about, attribute, side`,
 
 /**
  * `?1` the memory ids asked about (JSON), `?2` and `?3` the reader
- * (`readableSql`), `?4` the moment, `?5` 1 to count a retired one as
- * history: the ids of those learned by then that the reader may read
- * (`visibleSql`, as every read decides it) and that their writer had not
- * retired by then (or had, with `?5`), a seek by id each. Whether a
+ * (`readableSql`), `?4` the moment: the ids of those learned by then that
+ * the reader may read (`visibleSql`, as every read decides it) and that
+ * their writer had not retired by then, a seek by id each. Whether a
  * newer memory ended one, or its time is over, is not asked: a memory
  * once recalled stays as readable as a passage of an older version does.
  */
@@ -954,21 +953,16 @@ WITH ${readableSql}
 SELECT m.id AS id FROM json_each(?1) AS asked
 CROSS JOIN memories AS m ON m.id = asked.value
 WHERE m.learned_at <= ?4
-  AND (?5 = 1 OR m.retired_at IS NULL OR m.retired_at > ?4)
+  AND (m.retired_at IS NULL OR m.retired_at > ?4)
   AND ${visibleSql("m")}`;
 
 /**
  * Of `memories`, those the reader may read now and their writer has not
- * retired, or retired too with `history` (contract.ts `readableMemories`),
- * in the order asked, each once.
+ * retired (contract.ts `readableMemories`), in the order asked, each once.
  */
 export const readableMemories = (
   sql: SqlStorage,
-  {
-    memories,
-    reader,
-    history = false,
-  }: { memories: readonly MemoryId[]; reader: Reader; history?: boolean }
+  { memories, reader }: { memories: readonly MemoryId[]; reader: Reader }
 ): MemoryId[] => {
   const asked = [...new Set(memories)];
   if (asked.length === 0) {
@@ -981,8 +975,7 @@ export const readableMemories = (
         JSON.stringify(asked),
         reader.person,
         JSON.stringify(reader.groups),
-        readMoment(sql),
-        history ? 1 : 0
+        readMoment(sql)
       )
       .toArray()
       .map(({ id }) => id)

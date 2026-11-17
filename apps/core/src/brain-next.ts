@@ -2646,17 +2646,11 @@ const memoryPlacesSchema = z.array(
 const readableMemoriesIn = async (
   store: Brain,
   reader: Reader,
-  memories: readonly string[],
-  history: boolean
+  memories: readonly string[]
 ): Promise<string[]> =>
   await checkedInParts(
     memories,
-    async (part) =>
-      await store.readableMemories({
-        memories: part,
-        reader,
-        ...(history ? { history } : {}),
-      })
+    async (part) => await store.readableMemories({ memories: part, reader })
   );
 
 /**
@@ -2669,19 +2663,14 @@ const readableMemoriesIn = async (
  * readable, as that store is never asked. For core to check what a chat
  * once handed over before it sends it again (history-access.ts). Each is asked of the store it names, and of
  * no other: the shared one, or their own. Their own store failing answers
- * none of its own (`ownOr`): what can't be checked is withheld. With
- * `history`, one its writer retired stays readable (a workflow run's
- * check, workflows/resource-reads.ts). Refused once they are no longer a
- * member. For the server only, as `addSource`.
+ * none of its own (`ownOr`): what can't be checked is withheld. Refused
+ * once they are no longer a member. For the server only, as `addSource`.
  */
 export const readableMemoriesAs = async (
   env: BrainEnv & ReaderEnv,
   personId: string,
   memories: readonly StoredMemoryPlace[],
-  {
-    reach = "person",
-    history = false,
-  }: { reach?: Reach; history?: boolean } = {}
+  { reach = "person" }: { reach?: Reach } = {}
 ): Promise<StoredMemoryPlace[]> => {
   const asked = checked(memoryPlacesSchema, memories);
   if (asked.length === 0) {
@@ -2697,15 +2686,10 @@ export const readableMemoriesAs = async (
   const shared = idsIn("shared");
   const ownIds = idsIn("own");
   const [inShared, inOwn] = await Promise.all([
-    shared.length === 0
-      ? []
-      : readableMemoriesIn(brain(env), reader, shared, history),
+    shared.length === 0 ? [] : readableMemoriesIn(brain(env), reader, shared),
     ownIds.length === 0 || own === undefined
       ? []
-      : ownOr(
-          async () => await readableMemoriesIn(own, reader, ownIds, history),
-          []
-        ),
+      : ownOr(async () => await readableMemoriesIn(own, reader, ownIds), []),
   ]);
   const kept = new Set([
     ...inShared.map((memory) => memoryKeyOf({ store: "shared", memory })),

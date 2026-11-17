@@ -106,17 +106,19 @@ const requireOwnEvidenceReadable = async (
         runContext(run)
       );
     }
-    // What its entity reads rested on, as they read: the company alone, a
-    // memory its writer retired since still readable, as history; one a
-    // person's erasure took, or resting on a source erased or narrowed
-    // away from the company, is not (GRA-1985). Paged by the Brain's
-    // check, 500 a call.
+    // What its entity reads rested on, as they read: the company alone.
+    // One a person's erasure took, its writer retired or took back (a
+    // share), or resting on a source erased or narrowed away from the
+    // company, is no longer readable, as a chat's history decides it
+    // (history-access.ts): someone who takes a memory back wants others to
+    // stop getting it (GRA-1985). One a newer memory ended stays. Paged by
+    // the Brain's check, 500 a call.
     const memories = [...new Set(memoryRows.map(({ memoryId }) => memoryId))];
     const readableMemories = await readableMemoriesAs(
       env,
       run.principal,
       memories.map((memory) => ({ store: "shared" as const, memory })),
-      { reach: "company", history: true }
+      { reach: "company" }
     );
     if (readableMemories.length < memories.length) {
       throw workflowResourceErrors.create("brain.revoked");
@@ -149,7 +151,14 @@ const requireOwnEvidenceReadable = async (
  * recalls came through still the run's, active, now (`authorize`), and
  * each version they handed it still one the whole company may read
  * (`readableVersionsAs`, as `company`, as its recalls read): not erased,
- * nor its readers narrowed away from the company. A test run recalls nothing, so has nothing to check.
+ * nor its readers narrowed away from the company; and each memory its
+ * entity reads rested on still one the company may read
+ * (`readableMemoriesAs`): not taken by a person's erasure, retired, or
+ * resting on a source erased or narrowed (GRA-1985). A test run recalls
+ * nothing, so has nothing to check. Asked before a model, connection,
+ * App or files-write call, a decision, its output, and before a step's
+ * state is written (sealed-run.ts `stepRecording`); its files are listed
+ * and downloaded only while it holds (run-file-downloads.ts).
  *
  * What a running run shows needs no check: its details (`resourceRunFor`)
  * hold its output or failure only once it ended, which this checks first,

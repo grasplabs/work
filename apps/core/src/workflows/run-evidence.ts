@@ -29,8 +29,9 @@ import { runBrainMemories, runBrainVersions } from "../db/core/schema.ts";
 // documents they were drawn from stay. So every memory an entity read
 // rests on (the Brain's `restsOnMemories`) is kept with the run as well,
 // by id (`runBrainMemories`), and checked the same way: still one the
-// company may read, a retired one counting as history, as a run passed it
-// on. No bound of its own: the check pages through them, 500 a Brain call.
+// company may read and its writer hasn't retired, as a chat's history
+// checks it. No bound of its own: the check pages through them, 500 a
+// Brain call.
 
 /**
  * Most versions one run keeps (one per version and permission). A recall's

@@ -2641,9 +2641,10 @@ export const runBrainVersions = sqliteTable(
  * person's. An id is never used again, so a row means the same memory for
  * as long as it is kept. It only grows while the run lives, and before
  * the run's next model, connection or App call, decision or output, the
- * host checks the company may still read them all (a retired one stays,
- * as history): one a person's erasure took, or whose source was erased or
- * narrowed, refuses the run from then on. Goes with the run's details.
+ * host checks the company may still read them all and their writers
+ * haven't retired them: one a person's erasure took, retired or taken
+ * back, or whose source was erased or narrowed, refuses the run from then
+ * on. Goes with the run's details.
  */
 export const runBrainMemories = sqliteTable(
   "run_brain_memories",

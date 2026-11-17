@@ -161,9 +161,8 @@ export const callBrain = async (
         // Pinned with the run before it gets them, as a recall's pack: each
         // version of a source, and each memory the answer rests on, so a
         // person's erasure of one (their card, their word) refuses the run
-        // though the documents stay (GRA-1985). Retiring a memory leaves it
-        // as history, still naming its entity to everyone who may read it,
-        // so it refuses nothing (Known on #2245).
+        // though the documents stay, and so does its writer retiring or
+        // taking it back, as a chat withholds it (GRA-1985).
         keep: async ({ versions, memories }) => {
           await recordRunVersions(env, run.runId, permissionId, versions);
           await recordRunMemories(
