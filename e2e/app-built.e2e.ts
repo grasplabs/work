@@ -41,17 +41,21 @@ test("a builder makes an App from what they want done, shares it with their team
   const { builder, user } = peopleIn("appBuilt");
   const { opener } = modelScripts.buildsApp;
   const page = await pageOf(builder);
-  // The builder's connections to core (the tab's, and the preview's own),
-  // dropped once, as a blip does, the moment the page reads the App again
-  // once core answered the share (its first read of the App's contents
-  // after that), and refused until the page says Grasp can't be reached;
-  // the page then reads the App again by itself. Calls as Cap'n Web sends
-  // them: a push, then a pull naming its answer, which core resolves.
+  // A blip of the builder's network, the moment the page reads the App
+  // again once core answered the share (its first read of the App's
+  // contents after that): the browser goes offline, the page's
+  // connections to core (the tab's, and the preview's own) drop, and each
+  // it makes again is refused until the test brings the network back.
+  // Whatever the test did to the page meanwhile is in `done`, to be over
+  // before then. Calls as Cap'n Web sends them: a push, then a pull
+  // naming its answer, which core resolves.
+  const context = page.context();
   const sockets = new Set<WebSocketRoute>();
   const blip = { sharing: false, armed: false, down: false };
+  const done: Promise<void>[] = [];
   await page.routeWebSocket("**/rpc", (socket) => {
     if (blip.down) {
-      void socket.close();
+      done.push(socket.close());
       return;
     }
     const core = socket.connectToServer();
@@ -72,8 +76,9 @@ test("a builder makes an App from what they want done, shares it with their team
       if (blip.armed && sent.includes('["apps","contents"]')) {
         blip.armed = false;
         blip.down = true;
+        done.push(context.setOffline(true));
         for (const open of sockets) {
-          void open.close();
+          done.push(open.close());
         }
         return;
       }
@@ -170,7 +175,14 @@ test("a builder makes an App from what they want done, shares it with their team
     page.getByRole("heading", { level: 1, name: "This page didn't load" })
   ).toBeVisible(built);
   await expect(unreachable).toBeVisible();
+  // The network is back: core takes connections again, and the browser
+  // says so (`online`), when the tab connects at once rather than at the
+  // end of its pause between tries, which the refused ones lengthened (up
+  // to 30 s, core.ts `reconnectDelay`). Each refusal reached the page
+  // before, so none is still on its way to put a try back in a pause.
   blip.down = false;
+  await Promise.all(done);
+  await context.setOffline(false);
   await expect(
     page.getByRole("heading", { level: 1, name: appPlanned })
   ).toBeAttached(built);
