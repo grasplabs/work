@@ -92,7 +92,7 @@ export const routineLines = ({
   lines: readonly { line: string; fact?: RoutineFact }[];
 } => {
   const called = `${name}${local === undefined ? "" : ` (${local})`}`;
-  const title = `How a team does ${called}, as its people told it.`;
+  const title = `How a team does ${called}, as its people told it`;
   const steps = drawing.steps.map(({ text, who, tool, minutes }, at) => {
     const about = [
       who,
