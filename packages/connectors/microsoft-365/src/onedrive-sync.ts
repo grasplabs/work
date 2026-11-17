@@ -35,11 +35,23 @@ import {
 // How it reads: driveItem delta, the only way Microsoft says reads a whole
 // drive and its changes ("Using delta is the only way to guarantee that
 // you've read all of the data you need to"), first without a token (the
-// whole drive), then from the token of its last link
+// whole drive), then from a token
 // (https://learn.microsoft.com/en-us/graph/api/driveitem-delta?view=graph-rest-1.0).
 // Graph's `@odata.nextLink` and `@odata.deltaLink` are never followed:
 // only their `token` is kept, and every request is built here, on the
 // sync's own routes.
+//
+// The first listing's first page has no token, so reading it again starts
+// a new listing, in which a file made meanwhile can come before where the
+// read goes on. So once the listing is done, the feed is read once more
+// from when the listing began, as a timestamp token, which Microsoft
+// documents for OneDrive for Business and SharePoint (the same page,
+// "Retrieving delta results using a timestamp"), with the time Graph's own
+// `Date` header gave its first page. A personal Microsoft account's
+// OneDrive has no timestamp tokens: it goes on from the listing's own
+// delta link, and a file made during its listing's first page can be
+// missed until it next changes. Connect's Microsoft connections are work
+// or school accounts.
 //
 // What goes away: an entry with the `deleted` facet; an entry that isn't
 // the person's own (a shortcut to someone else's item, `remoteItem`, or
@@ -53,24 +65,41 @@ import {
 // version includes them, so changed readers are always a new version,
 // whether or not Graph's eTag moves with them.
 //
+// A folder's sharing: under `Prefer: hierarchicalsharing` sharing comes
+// back only "for the root of the permissions hierarchy, as well as items
+// that explicitly have sharing changes", and delta returns "only items
+// with direct changes … and the parent hierarchy of the changed items"
+// (https://learn.microsoft.com/en-us/onedrive/developer/rest-api/concepts/scan-guidance):
+// when a folder is unshared, the folder comes back, not its files. So a
+// folder (not the drive's root) that comes after the first listing with a
+// `sharing` facet lists the drive again (`sync.restart`): delta has no
+// documented read of one folder's files, and walking its children would
+// need a stack no cursor holds. The cost is a whole relisting, every
+// file's permissions and content again, each time a shared folder itself
+// changes. Parents of a changed file are asked to stay out of the feed
+// (`deltaExcludeParent`, a request header the same page documents), so a
+// change to a file inside a shared folder doesn't relist the drive.
+//
+// Where Microsoft gives no signal (below), the sync run in core relists
+// every connection in full once a day (PR I), so a reader list is at most
+// a day stale.
+//
 // NEEDS A REAL TENANT TO CONFIRM (not documented by Microsoft):
-// - Whether a change to an item's sharing alone puts it in the delta feed.
-//   Microsoft documents a marker for sharing changes only with
+// - Whether a change to one file's sharing alone puts it in the delta
+//   feed. Microsoft documents a marker for sharing changes only with
 //   `Prefer: deltashowsharingchanges`, which needs `Sites.FullControl.All`,
-//   which we don't ask for. We send `Prefer: hierarchicalsharing`, under
-//   which Microsoft says sharing information comes for "items that
-//   explicitly have sharing changes"; whether such an item comes at all
-//   when nothing else of it changed is not stated. If it doesn't, an
-//   unshared file keeps its old readers until it next changes.
+//   which we don't ask for. If it doesn't come, its readers are at most a
+//   day stale (the daily relisting above).
 // - How an item the account lost access to shows in the feed (a `deleted`
-//   facet, or nothing). If nothing, it is never reported gone here. In a
+//   facet, or nothing). If nothing, it goes at the daily relisting. In a
 //   person's own drive the person owns every item, so this needs an admin
 //   to take the drive's ownership away.
-// - Microsoft documents that descendants don't come in the feed when a
-//   folder is renamed ("renaming a folder doesn't result in any
-//   descendants of the folder being returned"). The same is likely for a
-//   folder that moves or whose sharing changes, which changes the readers
-//   its files inherit, unseen until each file next changes.
+// - A folder that moves changes the readers its files inherit; it comes
+//   without a `sharing` facet when it inherits, and its files don't come
+//   ("renaming a folder doesn't result in any descendants of the folder
+//   being returned"): at most a day stale.
+// - Whether Graph honours `deltaExcludeParent`. If not, every change in a
+//   shared folder relists the drive: correct, and costly.
 // - That a delta token read again answers the same entries in the same
 //   order, less those changed since, which moved to later. A page that
 //   stopped part-way goes on after the last entry it handled, matched by
@@ -126,9 +155,13 @@ const permissionsSchema = z.object({
   "@odata.nextLink": z.string().optional(),
 });
 
-/** The person's drive: its ID, and its owner's Entra object ID. */
+/**
+ * The person's drive: its ID, its owner's Entra object ID, and whether it
+ * is a personal account's (`personal`), which has no timestamp tokens.
+ */
 const driveSchema = z.object({
   id: z.string().min(1),
+  driveType: z.string().nullish(),
   owner: z.object({ user: z.object({ id: z.string().min(1) }) }),
 });
 
@@ -146,13 +179,16 @@ const entrySchema = z.object({
   file: z.object({ mimeType: z.string().nullish() }).nullish(),
   deleted: z.unknown().optional(),
   remoteItem: z.unknown().optional(),
+  folder: z.unknown().optional(),
+  root: z.unknown().optional(),
+  sharing: z.unknown().optional(),
   parentReference: z.object({ driveId: z.string().nullish() }).nullish(),
   lastModifiedBy: z.object({ user: identitySchema }).nullish(),
 });
 type Entry = z.infer<typeof entrySchema>;
 
 const entryFields =
-  "id,name,eTag,lastModifiedDateTime,size,file,deleted,remoteItem,parentReference,lastModifiedBy";
+  "id,name,eTag,lastModifiedDateTime,size,file,folder,root,sharing,deleted,remoteItem,parentReference,lastModifiedBy";
 
 const feedSchema = z.object({
   value: z.array(entrySchema),
@@ -167,15 +203,24 @@ interface Handled {
 }
 
 /**
- * Where a read is: the delta token to read from (none: the whole drive
- * from the start), and the entry of that token's page already handled.
+ * Where a read is: listing the drive, with the delta token to read from
+ * (none: from the start), and when the listing began, as Graph's clock
+ * said; or reading its changes from a token. Either way, the entry of
+ * that token's page already handled.
  */
-interface Position {
-  token: string | null;
-  after: Handled | null;
-}
+type Position =
+  | {
+      phase: "list";
+      token: string | null;
+      began: string | null;
+      after: Handled | null;
+    }
+  | { phase: "changes"; token: string; after: Handled | null };
 
 const base64url = /^[\w-]*$/u;
+
+const notOurs = (): RestartSyncError =>
+  new RestartSyncError("Not a cursor this sync wrote");
 
 const encode = (value: string): string =>
   btoa(String.fromCodePoint(...new TextEncoder().encode(value)))
@@ -185,7 +230,7 @@ const encode = (value: string): string =>
 
 const decode = (value: string): string => {
   if (!base64url.test(value)) {
-    throw new RestartSyncError("Not a cursor this sync wrote");
+    throw notOurs();
   }
   try {
     const binary = atob(value.replaceAll("-", "+").replaceAll("_", "/"));
@@ -193,40 +238,68 @@ const decode = (value: string): string => {
       Uint8Array.from(binary, (char) => char.codePointAt(0) ?? 0)
     );
   } catch {
-    throw new RestartSyncError("Not a cursor this sync wrote");
+    throw notOurs();
   }
 };
 
-/** The cursor of a position: `d.<token>` and, inside a page, `.<id>.<eTag>`. */
-const cursorOf = ({ token, after }: Position): string => {
-  const at = `d.${encode(token ?? "")}`;
+/**
+ * The cursor of a position: `l.<token>.<began>` while listing,
+ * `c.<token>` after, and, inside a page, `.<id>.<eTag>`.
+ */
+const cursorOf = (position: Position): string => {
+  const at =
+    position.phase === "list"
+      ? `l.${encode(position.token ?? "")}.${encode(position.began ?? "")}`
+      : `c.${encode(position.token)}`;
+  const { after } = position;
   return after === null
     ? at
     : `${at}.${encode(after.id)}.${encode(after.eTag)}`;
 };
 
+/** The entry handled, from a cursor's last two parts, if it has them. */
+const handledOf = (parts: readonly string[]): Handled | null => {
+  if (parts.length === 0) {
+    return null;
+  }
+  const [id = "", eTag, ...rest] = parts;
+  if (id === "" || eTag === undefined || rest.length > 0) {
+    throw notOurs();
+  }
+  return { id: decode(id), eTag: decode(eTag) };
+};
+
 /** The position a cursor this sync wrote names; any other starts over. */
 const positionOf = (cursor: string): Position => {
-  const [tag, token, id, eTag, ...rest] = cursor.split(".");
-  if (tag !== "d" || token === undefined || rest.length > 0) {
-    throw new RestartSyncError("Not a cursor this sync wrote");
+  const [phase, token, ...rest] = cursor.split(".");
+  if (phase === "l" && token !== undefined) {
+    const [began, ...handled] = rest;
+    const decoded = decode(token);
+    const since = decode(began ?? "");
+    return {
+      phase: "list",
+      token: decoded === "" ? null : decoded,
+      began: since === "" ? null : since,
+      after: handledOf(handled),
+    };
   }
-  const decoded = decode(token);
-  const at = decoded === "" ? null : decoded;
-  if (id === undefined && eTag === undefined) {
-    return { token: at, after: null };
+  if (phase === "c" && token !== undefined) {
+    const decoded = decode(token);
+    if (decoded === "") {
+      throw notOurs();
+    }
+    return { phase: "changes", token: decoded, after: handledOf(rest) };
   }
-  if (id === undefined || eTag === undefined || id === "") {
-    throw new RestartSyncError("Not a cursor this sync wrote");
-  }
-  return { token: at, after: { id: decode(id), eTag: decode(eTag) } };
+  throw notOurs();
 };
 
 /**
- * The delta token a link Graph handed back carries, in either form Graph
- * writes it: `?token=…`, or `delta(token='…')`. The link itself is never
- * followed.
+ * The delta token a link Graph handed back carries, in each form Graph
+ * writes it: `delta(token='…')`, `delta?(token='…')` (the delta page's own
+ * example), or `?token=…`. The link itself is never followed.
  */
+const quotedToken = /\(token='(?<token>[^']+)'\)/u;
+
 const tokenOf = (link: string): string => {
   let url: URL;
   try {
@@ -235,20 +308,23 @@ const tokenOf = (link: string): string => {
     throw new ToolError("Graph's delta link isn't a URL", { code: "failed" });
   }
   const token =
+    quotedToken.exec(decodeURIComponent(url.href))?.groups?.token ??
     url.searchParams.get("token") ??
-    /token='(?<token>[^']+)'/u.exec(decodeURIComponent(url.pathname))?.groups
-      ?.token;
+    undefined;
   if (url.hostname !== graphHost || token === undefined || token === "") {
     throw new ToolError("Graph's delta link has no token", { code: "failed" });
   }
   return token;
 };
 
-/** What a page has left: requests, content bytes, and when it stops filling. */
+/**
+ * What a page has left: requests, content bytes, and when it stops taking
+ * more (`deadline`, from the connector kit's `syncPageLimits.millis`).
+ */
 interface Room {
   requests: number;
   bytes: number;
-  until: number;
+  deadline: number;
 }
 
 /** A GET to Graph: its answer, or the ToolError a failure stands for. */
@@ -278,12 +354,22 @@ const getJson = async <Schema extends z.ZodType>(
 const isUnreadable = (response: Response): boolean =>
   response.status === 403 || response.status === 404;
 
+/** Graph's own time of an answer (its `Date` header), as a timestamp token. */
+const timeOf = (response: Response): string => {
+  const time = Date.parse(response.headers.get("date") ?? "");
+  if (Number.isNaN(time)) {
+    throw new ToolError("Graph's answer has no Date", { code: "failed" });
+  }
+  // Whole seconds, as the delta page's own example writes it.
+  return new Date(time).toISOString().replace(/\.\d+Z$/u, "Z");
+};
+
 /**
- * One page of the delta feed from `token`. A token Graph no longer knows
- * answers 410 with a resync code: the drive is listed again from the
- * start (core compares, as Microsoft asks). A 404 to a token is the same;
- * to the first listing, the drive isn't there (a person without a
- * OneDrive licence), which is a failure.
+ * One page of the delta feed from `token`, and Graph's time of it. A token
+ * Graph no longer knows answers 410 with a resync code: the drive is
+ * listed again from the start (core compares, as Microsoft asks). A 404
+ * to a token is the same; to the first listing, the drive isn't there (a
+ * person without a OneDrive licence), which is a failure.
  */
 const feedPage = async (room: Room, token: string | null) => {
   const response = await get(
@@ -293,9 +379,15 @@ const feedPage = async (room: Room, token: string | null) => {
       $select: entryFields,
       $top: String(graphPageSize),
     }),
-    // Sharing information for "items that explicitly have sharing
-    // changes" (driveitem-delta, "Scanning permissions hierarchies").
-    { headers: { prefer: "hierarchicalsharing" } }
+    {
+      headers: {
+        // Sharing information for the roots of permission hierarchies and
+        // "items that explicitly have sharing changes", and no parents of
+        // changed items (driveitem-delta).
+        prefer: "hierarchicalsharing",
+        deltaExcludeParent: "true",
+      },
+    }
   );
   if (response.status === 410 || (response.status === 404 && token !== null)) {
     await response.body?.cancel();
@@ -304,7 +396,10 @@ const feedPage = async (room: Room, token: string | null) => {
   if (!response.ok) {
     throw await graphFailure(response);
   }
-  return feedSchema.parse(await response.json());
+  return {
+    time: timeOf(response),
+    feed: feedSchema.parse(await response.json()),
+  };
 };
 
 /** A Graph ID as a reader's: Entra object IDs are GUIDs, in lower case. */
@@ -406,6 +501,38 @@ const sizeOf = (content: SyncContent): number =>
 const isEmpty = (room: Room): boolean =>
   room.bytes === syncPageLimits.contentBytes;
 
+/**
+ * No room left for an entry's content: the page stops before it, or, if
+ * it holds nothing yet, takes it without its content, so every read moves
+ * on.
+ */
+const noRoom = (room: Room): Read =>
+  isEmpty(room) ? { content: null } : "full";
+
+/**
+ * A file's download and its bytes, given up at the page's deadline: a slow
+ * file never holds a page past it.
+ */
+const download = async (
+  room: Room,
+  url: URL
+): Promise<Response | Uint8Array | "late"> => {
+  room.requests -= 1;
+  try {
+    const response = await fetch(url, {
+      signal: AbortSignal.timeout(Math.max(room.deadline - Date.now(), 0)),
+    });
+    return response.ok
+      ? new Uint8Array(await response.arrayBuffer())
+      : response;
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "TimeoutError") {
+      return "late";
+    }
+    throw error;
+  }
+};
+
 /** Whether a file of `size` bytes may fit what's left of the page. */
 const mayFit = (room: Room, size: number): boolean =>
   // Base64 is a third larger than the bytes.
@@ -423,18 +550,23 @@ const contentOf = async (room: Room, entry: Entry): Promise<Read> => {
   if (size === 0 || size > maxReadBytes) {
     return { content: null };
   }
-  const response = await get(
+  if (Date.now() >= room.deadline) {
+    return noRoom(room);
+  }
+  const bytes = await download(
     room,
     graphUrl(`${drive}/items/${segment(entry.id)}/content`)
   );
-  if (isUnreadable(response)) {
-    await response.body?.cancel();
-    return "gone";
+  if (bytes === "late") {
+    return noRoom(room);
   }
-  if (!response.ok) {
-    throw await graphFailure(response);
+  if (bytes instanceof Response) {
+    if (isUnreadable(bytes)) {
+      await bytes.body?.cancel();
+      return "gone";
+    }
+    throw await graphFailure(bytes);
   }
-  const bytes = new Uint8Array(await response.arrayBuffer());
   if (bytes.byteLength > maxReadBytes) {
     return { content: null };
   }
@@ -445,7 +577,7 @@ const contentOf = async (room: Room, entry: Entry): Promise<Read> => {
   };
   const used = sizeOf(content);
   if (used > room.bytes) {
-    return isEmpty(room) ? { content: null } : "full";
+    return noRoom(room);
   }
   room.bytes -= used;
   return { content };
@@ -559,27 +691,85 @@ const lastOfEach = (items: readonly SyncItem[]): SyncItem[] => {
   return items.filter((item, index) => last.get(item.id) === index);
 };
 
+/**
+ * Whether an entry says the readers its files inherit may have changed: a
+ * folder, not the drive's root, with a `sharing` facet (see above).
+ */
+const isSharedFolder = (entry: Entry): boolean =>
+  entry.folder !== undefined &&
+  entry.folder !== null &&
+  (entry.root === undefined || entry.root === null) &&
+  entry.sharing !== undefined &&
+  entry.sharing !== null;
+
+/**
+ * Where the feed goes on once Graph's page is done: its next page, or,
+ * after the listing, from when the listing began (a personal account's
+ * drive: from the listing's delta link), or, after changes, from the
+ * delta link.
+ */
+const nextOf = (
+  position: Position,
+  own: Drive,
+  feed: z.infer<typeof feedSchema>,
+  began: string | null
+): { position: Position; more: boolean } => {
+  const next = feed["@odata.nextLink"];
+  if (next !== undefined) {
+    return {
+      position: { ...position, token: tokenOf(next), after: null },
+      more: true,
+    };
+  }
+  const end = feed["@odata.deltaLink"];
+  if (end === undefined) {
+    throw new ToolError("Graph's delta page has no link on", {
+      code: "failed",
+    });
+  }
+  if (position.phase === "list" && own.driveType !== "personal") {
+    return {
+      position: { phase: "changes", token: began ?? "", after: null },
+      more: true,
+    };
+  }
+  return {
+    position: { phase: "changes", token: tokenOf(end), after: null },
+    more: false,
+  };
+};
+
 /** One page of the person's own drive from `position` on. */
-const readPage = async (position: Position): Promise<SyncPage> => {
+const readPage = async (
+  position: Position,
+  deadline: number
+): Promise<SyncPage> => {
   const room: Room = {
     requests: syncPageLimits.requests,
     bytes: syncPageLimits.contentBytes,
-    until: Date.now() + syncPageLimits.fillMs,
+    deadline,
   };
   // https://learn.microsoft.com/en-us/graph/api/drive-get?view=graph-rest-1.0
   const own = await getJson(
     room,
-    graphUrl(drive, { $select: "id,owner" }),
+    graphUrl(drive, { $select: "id,driveType,owner" }),
     driveSchema
   );
-  const feed = await feedPage(room, position.token);
+  const { time, feed } = await feedPage(room, position.token);
   const entries = feed.value;
+  if (position.phase === "changes" && entries.some(isSharedFolder)) {
+    throw new RestartSyncError("A folder's sharing changed");
+  }
+  // The listing began with its first page: Graph's time of that.
+  const began = position.phase === "list" ? (position.began ?? time) : null;
+  const here: Position =
+    position.phase === "list" ? { ...position, began } : position;
   const start = startOf(entries, position.after);
   const items: SyncItem[] = [];
   let handled: Entry | null = null;
   for (const entry of entries.slice(start)) {
     // A page takes at least one entry, so every read moves on.
-    if (handled !== null && Date.now() >= room.until) {
+    if (handled !== null && Date.now() >= room.deadline) {
       break;
     }
     // oxlint-disable-next-line no-await-in-loop -- one entry after another, within the page's room
@@ -598,26 +788,17 @@ const readPage = async (position: Position): Promise<SyncPage> => {
       items: lastOfEach(items),
       cursor: cursorOf(
         handled === null
-          ? position
-          : {
-              token: position.token,
-              after: { id: handled.id, eTag: handled.eTag ?? "" },
-            }
+          ? here
+          : { ...here, after: { id: handled.id, eTag: handled.eTag ?? "" } }
       ),
       more: true,
     };
   }
-  const next = feed["@odata.nextLink"];
-  const end = feed["@odata.deltaLink"];
-  if (next === undefined && end === undefined) {
-    throw new ToolError("Graph's delta page has no link on", {
-      code: "failed",
-    });
-  }
+  const next = nextOf(here, own, feed, began);
   return {
     items: lastOfEach(items),
-    cursor: cursorOf({ token: tokenOf(next ?? end ?? ""), after: null }),
-    more: next !== undefined,
+    cursor: cursorOf(next.position),
+    more: next.more,
   };
 };
 
@@ -640,7 +821,7 @@ export const onedriveSync = defineSync({
       redirects: downloadHosts,
     },
   ],
-  read: async ({ place, cursor }) => {
+  read: async ({ place, cursor, deadline }) => {
     if (place !== ownPlace) {
       // SharePoint sites and picked folders come with picks (PR J).
       throw new ToolError("This sync reads the person's own OneDrive only", {
@@ -648,7 +829,10 @@ export const onedriveSync = defineSync({
       });
     }
     return await readPage(
-      cursor === null ? { token: null, after: null } : positionOf(cursor)
+      cursor === null
+        ? { phase: "list", token: null, began: null, after: null }
+        : positionOf(cursor),
+      deadline
     );
   },
 });

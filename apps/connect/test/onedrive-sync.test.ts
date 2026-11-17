@@ -30,6 +30,12 @@ type Entry = Record<string, unknown> & { id: string };
 /** What the person's OneDrive holds, for each test to set. */
 interface Drive {
   owner: string;
+  /** Its `driveType`: a work account's `business`, or `personal`. */
+  type: string;
+  /** How the feed's delta link carries its token. */
+  deltaLinkForm: "parenthesised" | "query";
+  /** A path answered only after `ms`. */
+  slow?: { path: string; ms: number };
   /** The delta feed: each token's entries, and the token after them. */
   feed: Record<string, { entries: Entry[]; end: string }>;
   /** Each item's permissions, by ID; none: Graph has no such item. */
@@ -40,10 +46,20 @@ interface Drive {
   answer?: (url: URL) => Response | Promise<Response | undefined> | undefined;
 }
 
-const drive: Drive = { owner: "", feed: {}, permissions: {}, contents: {} };
+const drive: Drive = {
+  owner: "",
+  type: "business",
+  deltaLinkForm: "parenthesised",
+  feed: {},
+  permissions: {},
+  contents: {},
+};
 
 const reset = (owner: string): void => {
   drive.owner = owner;
+  drive.type = "business";
+  drive.deltaLinkForm = "parenthesised";
+  drive.slow = undefined;
   drive.feed = {};
   drive.permissions = {};
   drive.contents = {};
@@ -53,11 +69,18 @@ const reset = (owner: string): void => {
 /** The first listing's token: none. */
 const start = "";
 
+/** Graph's clock, as its `Date` header gives it. */
+const graphDate = "Tue, 17 Nov 2026 10:00:00 GMT";
+
+/** The timestamp token of when a listing began, by Graph's clock. */
+const listedAt = "2026-11-17T10:00:00Z";
+
 /**
  * One page of the feed from a token: up to `$top` entries from where the
  * token's `skip` says, with a next link while more are left, in the
- * `delta(token='…')` form Graph writes, and the delta link, in the
- * `?token=` form, at the end.
+ * `delta(token='…')` form Graph writes, and the delta link at the end, in
+ * the `delta?(token='…')` form of Microsoft's delta page or the `?token=`
+ * form.
  */
 const feedPage = (url: URL): Response => {
   const [token = "", skip = "0"] = (url.searchParams.get("token") ?? "").split(
@@ -74,19 +97,27 @@ const feedPage = (url: URL): Response => {
   const from = Number(skip);
   const value = at.entries.slice(from, from + top);
   const more = from + top < at.entries.length;
-  return Response.json({
-    value,
-    ...(more
-      ? {
-          "@odata.nextLink": `https://${graphHost}${deltaPath}(token='${token}~${from + top}')`,
-        }
-      : {
-          "@odata.deltaLink": `https://${graphHost}${deltaPath}?token=${at.end}`,
-        }),
-  });
+  const endLink =
+    drive.deltaLinkForm === "query"
+      ? `https://${graphHost}${deltaPath}?token=${at.end}`
+      : `https://${graphHost}${deltaPath}?(token='${at.end}')`;
+  return Response.json(
+    {
+      value,
+      ...(more
+        ? {
+            "@odata.nextLink": `https://${graphHost}${deltaPath}(token='${token}~${from + top}')`,
+          }
+        : { "@odata.deltaLink": endLink }),
+    },
+    { headers: { date: graphDate } }
+  );
 };
 
 const internet = fakeInternet(async (_request, url) => {
+  if (drive.slow?.path === url.pathname) {
+    await scheduler.wait(drive.slow.ms);
+  }
   const answered = await drive.answer?.(url);
   if (answered !== undefined) {
     return answered;
@@ -105,6 +136,7 @@ const internet = fakeInternet(async (_request, url) => {
   if (path === drivePath) {
     return Response.json({
       id: driveId,
+      driveType: drive.type,
       owner: { user: { id: drive.owner, displayName: "Owner" } },
     });
   }
@@ -190,7 +222,13 @@ describe("syncing a person's own OneDrive", () => {
     drive.feed[start] = {
       entries: [
         { id: "root-id", name: "root", root: {}, folder: { childCount: 3 } },
-        { id: "folder-1", name: "Plans", folder: { childCount: 1 } },
+        // A shared folder in the listing is no reason to list again.
+        {
+          id: "folder-1",
+          name: "Plans",
+          folder: { childCount: 1 },
+          sharing: { owner: {} },
+        },
         file("price-list", { name: "Price list.docx" }),
         file("video", { size: 5 * 1024 * 1024 }),
       ],
@@ -262,7 +300,8 @@ describe("syncing a person's own OneDrive", () => {
       // Larger than a read takes: without its content, never downloaded.
       expect.objectContaining({ id: "video", content: null }),
     ]);
-    expect(page.more).toBeFalsy();
+    // The listing done, the feed is read again from when it began.
+    expect(page.more).toBeTruthy();
 
     // Only the person's own drive was read, with the sync's own query and
     // no link of Graph's followed, and nothing of the video's content; the
@@ -310,8 +349,11 @@ describe("syncing a person's own OneDrive", () => {
     const first = await read(connectionId, null);
     const before = first.items.find(({ id }) => id === "plan");
 
-    drive.feed.t1 = {
+    drive.feed[listedAt] = {
       entries: [
+        // The drive's root, shared at the top of its hierarchy: no reason
+        // to list again.
+        { id: "root-id", root: {}, folder: {}, sharing: {} },
         // Unshared, its eTag the same: still a new version, as its
         // readers were read again.
         file("plan"),
@@ -378,6 +420,7 @@ describe("syncing a person's own OneDrive", () => {
       ),
     ];
     drive.feed[start] = { entries: many, end: "t1" };
+    drive.feed[listedAt] = { entries: [], end: "t1" };
     drive.permissions = Object.fromEntries(
       many.map(({ id }) => [id, ownerOnly])
     );
@@ -394,7 +437,7 @@ describe("syncing a person's own OneDrive", () => {
       // oxlint-disable-next-line no-await-in-loop -- pages come one after another
       page = await read(connectionId, cursor);
       // Within what a page may send.
-      expect(sentToGraph().length - sent).toBeLessThanOrEqual(45);
+      expect(sentToGraph().length - sent).toBeLessThanOrEqual(50);
       seen.push(...page.items);
       ({ cursor } = page);
       reads += 1;
@@ -436,31 +479,104 @@ describe("syncing a person's own OneDrive", () => {
   });
 
   it(
-    "ends a page after a slow file, so it can never stall the sync",
+    "gives up a download at the page's deadline, so a slow file can never stall the sync",
     { timeout: 60_000 },
     async () => {
       const connectionId = await connected();
       drive.feed[start] = { entries: [file("slow"), file("next")], end: "t1" };
       drive.permissions = { slow: ownerOnly, next: ownerOnly };
       drive.contents = { slow: "slow", next: "next" };
-      // Past the time a page goes on taking files.
-      const slowly = async (): Promise<Response> => {
-        await scheduler.wait(15_500);
-        return Response.json({ value: ownerOnly });
-      };
-      drive.answer = async (url) =>
-        url.pathname.endsWith("/items/slow/permissions")
-          ? await slowly()
-          : undefined;
+      // Past the page's deadline, and past the 30 s connect waits.
+      drive.slow = { path: "/download/slow", ms: 35_000 };
       const first = await read(connectionId, null);
-      expect(first.items.map(({ id }) => id)).toStrictEqual(["slow"]);
-      expect(first.more).toBeTruthy();
+      expect(first).toMatchObject({
+        items: [{ id: "slow", content: null }],
+        more: true,
+      });
 
-      drive.answer = undefined;
+      drive.slow = undefined;
       const next = await read(connectionId, first.cursor);
       expect(next.items.map(({ id }) => id)).toStrictEqual(["next"]);
     }
   );
+
+  it("relists the drive when a folder's sharing changes, as its files don't come", async () => {
+    const connectionId = await connected();
+    const plans = { id: "plans", name: "Plans", folder: { childCount: 1 } };
+    drive.feed[start] = { entries: [plans, file("plan")], end: "t1" };
+    // The colleague reads it through the folder's sharing.
+    drive.permissions = {
+      plan: [
+        ...ownerOnly,
+        { id: "1", roles: ["read"], grantedToV2: { user: { id: colleague } } },
+      ],
+    };
+    drive.contents = { plan: "plan" };
+    const listed = await read(connectionId, null);
+
+    // The folder is unshared: only it comes back, with an emptied facet.
+    drive.feed[listedAt] = {
+      entries: [{ ...plans, sharing: {} }],
+      end: "t2",
+    };
+    drive.permissions = { plan: ownerOnly };
+    await expect(read(connectionId, listed.cursor)).rejects.toMatchObject({
+      code: "sync.restart",
+    });
+    const relisted = await read(connectionId, null);
+    expect(readersById(relisted.items)).toStrictEqual({
+      plan: [{ kind: "account", id: ownerId }],
+    });
+  });
+
+  it("reads the feed again from when the listing began, so nothing made during it is missed", async () => {
+    const connectionId = await connected();
+    const large = "x".repeat(3 * 1024 * 1024);
+    const big = (id: string) => file(id, { size: large.length });
+    drive.feed[start] = { entries: [big("a"), big("b")], end: "t1" };
+    drive.permissions = { a: ownerOnly, b: ownerOnly, made: ownerOnly };
+    drive.contents = { a: large, b: large, made: "made" };
+    const first = await read(connectionId, null);
+
+    // Made meanwhile: a new listing has it before where the read goes on.
+    drive.feed[start] = {
+      entries: [file("made"), big("a"), big("b")],
+      end: "t1",
+    };
+    drive.feed.t1 = { entries: [], end: "t1" };
+    drive.feed[listedAt] = { entries: [file("made")], end: "t1" };
+    const seen = [...first.items];
+    let page = await read(connectionId, first.cursor);
+    seen.push(...page.items);
+    page = await read(connectionId, page.cursor);
+    seen.push(...page.items);
+    expect(seen.map(({ id }) => id)).toStrictEqual(["a", "b", "made"]);
+    expect(
+      sentToGraph().some(({ path }) =>
+        path.includes(`token=${encodeURIComponent(listedAt)}`)
+      )
+    ).toBeTruthy();
+  });
+
+  it("goes on from the delta link in each form Graph writes it, and a personal drive from its listing's own", async () => {
+    const connectionId = await connected();
+    drive.type = "personal";
+    drive.deltaLinkForm = "query";
+    drive.feed[start] = { entries: [file("plan")], end: "t1" };
+    drive.permissions = { plan: ownerOnly };
+    drive.contents = { plan: "plan" };
+    const listed = await read(connectionId, null);
+    expect(listed.more).toBeFalsy();
+
+    drive.feed.t1 = {
+      entries: [{ id: "plan", deleted: {} }],
+      end: "t2",
+    };
+    const changes = await read(connectionId, listed.cursor);
+    expect(changes.items).toStrictEqual([
+      { gone: true, id: "plan", kind: "file" },
+    ]);
+  });
 
   it("lists again when Graph no longer knows the token, or the cursor isn't one the sync wrote", async () => {
     const connectionId = await connected();
@@ -472,7 +588,7 @@ describe("syncing a person's own OneDrive", () => {
     await expect(read(connectionId, cursor)).rejects.toMatchObject({
       code: "sync.restart",
     });
-    await expect(read(connectionId, "d.bWFkZS11cA.x")).rejects.toMatchObject({
+    await expect(read(connectionId, "x.bWFkZS11cA")).rejects.toMatchObject({
       code: "sync.restart",
     });
   });
