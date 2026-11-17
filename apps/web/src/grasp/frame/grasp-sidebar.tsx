@@ -195,9 +195,14 @@ const useGroups = (
             })),
           },
         ];
-  // The Chats tab: the recent chats alone, so they never push the
-  // product's sections down the Home tab.
-  return tab === "chats" ? [{ rows: recent.rows }] : [sections, ...fromApps];
+  // The person's recent chats: a group of their own under the product's
+  // sections, named, so they never stand between the sections. The Chats
+  // tab holds the same list alone.
+  const chats: SidebarGroup[] =
+    recent.rows.length === 0 ? [] : [{ label: t`Chats`, rows: recent.rows }];
+  return tab === "chats"
+    ? [{ rows: recent.rows }]
+    : [sections, ...chats, ...fromApps];
 };
 
 /** A page outside Settings, to go back to: its path and its search. */
