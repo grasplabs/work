@@ -1,4 +1,7 @@
-import type { BrainEntityListed } from "@grasp-os/shared/brain-memories";
+import type {
+  BrainEntityListed,
+  BrainMemoryShown,
+} from "@grasp-os/shared/brain-memories";
 import type {
   BrainLearned,
   BrainLearnedMemory,
@@ -27,12 +30,19 @@ import { useCore } from "../use-core.ts";
 // opens on the Memories page, marked New where this version is where the
 // person first saw it.
 
-/** What reading it came to: loading, refused, or its pages so far. */
+/**
+ * What reading it came to: loading, refused, its pages so far; none (core
+ * answers none of the version: the section isn't shown); or gone (a later
+ * page answered none: the source was erased, or the reader may no longer
+ * read it, since the first page, which core can't tell apart and neither
+ * does the page: what was loaded goes too).
+ */
 type Learned =
   | { state: "loading" }
   | { state: "refused"; message: string }
   | { state: "ready"; pages: BrainLearned[] }
-  | { state: "none" };
+  | { state: "none" }
+  | { state: "gone" };
 
 /** A page of it after `next`, or why not. Outside the component, as the React Compiler can't compile `try`. */
 const pageOf = async (
@@ -94,6 +104,22 @@ const EntityLink = ({
   );
 };
 
+/** The entities a memory names, about and related to, as links. */
+const EntityLinks = ({
+  memory,
+  entities,
+}: {
+  memory: BrainMemoryShown;
+  entities: ReadonlyMap<string, BrainEntityListed & { firstSeen: boolean }>;
+}) => (
+  <span className="flex flex-wrap items-center gap-3">
+    <EntityLink entities={entities} id={memory.about} />
+    {memory.object === null ? null : (
+      <EntityLink entities={entities} id={memory.object.id} />
+    )}
+  </span>
+);
+
 /** One list of the change: memories with their entities, and for a contested one what another source says. */
 const LearnedList = ({
   heading,
@@ -118,21 +144,16 @@ const LearnedList = ({
             <Item size="xs" variant="outline">
               <ItemContent>
                 <span className="text-sm">{memory.statement}</span>
-                <span className="flex flex-wrap items-center gap-3">
-                  <EntityLink entities={entities} id={memory.about} />
-                  {memory.object === null ? null : (
-                    <EntityLink entities={entities} id={memory.object.id} />
-                  )}
-                </span>
+                <EntityLinks entities={entities} memory={memory} />
                 {withRivals
                   ? rivals.map((rival) => {
                       const said = rival.statement;
                       return (
-                        <span
-                          className="text-muted-foreground text-xs"
-                          key={rival.id}
-                        >
-                          <Trans>Another source says: {said}</Trans>
+                        <span className="flex flex-col gap-1" key={rival.id}>
+                          <span className="text-muted-foreground text-xs">
+                            <Trans>Another source says: {said}</Trans>
+                          </span>
+                          <EntityLinks entities={entities} memory={rival} />
                         </span>
                       );
                     })
@@ -209,6 +230,13 @@ export const LearnedSection = ({
       <h4 className="text-muted-foreground text-xs font-medium" id={heading}>
         <Trans>What the Brain learned from this version</Trans>
       </h4>
+      {learned.state === "gone" ? (
+        <p className="text-muted-foreground text-sm">
+          <Trans>
+            You can no longer read what the Brain learned from this version.
+          </Trans>
+        </p>
+      ) : null}
       {learned.state === "loading" ? <Spinner /> : null}
       {learned.state === "refused" ? (
         <ErrorText>{learned.message}</ErrorText>
@@ -275,11 +303,17 @@ export const LearnedSection = ({
               }
               setMore(undefined);
               const { page } = answer;
-              setLearned((before) =>
-                before.state === "ready" && page !== null
+              // None now, after a page before: erased, or no longer theirs
+              // to read, since. What was loaded goes with it, and so does
+              // the cursor that would ask for it again.
+              setLearned((before) => {
+                if (page === null) {
+                  return { state: "gone" };
+                }
+                return before.state === "ready"
                   ? { state: "ready", pages: [...before.pages, page] }
-                  : before
-              );
+                  : before;
+              });
             })();
           }}
           type="button"

@@ -573,7 +573,14 @@ const handbookLearned: BrainLearned = {
         attribute: "owner",
         object: { id: "e-3", name: "Ada" },
       },
-      rivals: [memoryShown("m-r", "Invoices are paid on Mondays", "e-1")],
+      rivals: [
+        {
+          ...memoryShown("m-r", "Invoices are paid on Mondays", "e-1"),
+          // Another source names Grace as the owner.
+          attribute: "owner",
+          object: { id: "e-4", name: "Grace" },
+        },
+      ],
       moreRivals: true,
     },
     {
@@ -599,6 +606,14 @@ const handbookLearned: BrainLearned = {
       unreadable: false,
       borrowed: false,
       firstSeen: true,
+    },
+    {
+      entity: { store: "shared", id: "e-4" },
+      kind: "person",
+      name: "Grace Hopper",
+      unreadable: false,
+      borrowed: false,
+      firstSeen: false,
     },
     {
       entity: { store: "shared", id: "e-2" },
@@ -1403,27 +1418,33 @@ describe(SourcesPage, () => {
   });
 
   it.each([
-    ["is about", "Invoice", "entity=e-2&kind=term"],
-    ["relates to", "Ada Lovelace", "entity=e-3&kind=person"],
-  ])(
-    "opens the entity a memory of the version %s on the Memories page",
-    async (_how, name, opens) => {
-      await shown([], { learned: { "u-1@2": handbookLearned } });
-      await press("Handbook");
-      const link = [...document.querySelectorAll("a")].find(
-        (each) => each.textContent === name
-      );
-      await act(async () => {
-        link?.click();
-        await Promise.resolve();
-      });
-      await settle();
+    ["a memory of the version is about", "Invoice", "entity=e-2&kind=term"],
+    [
+      "a memory of the version relates to",
+      "Ada Lovelace",
+      "entity=e-3&kind=person",
+    ],
+    [
+      "another source's disagreeing memory relates to",
+      "Grace Hopper",
+      "entity=e-4&kind=person",
+    ],
+  ])("opens on the Memories page the entity %s", async (_how, name, opens) => {
+    await shown([], { learned: { "u-1@2": handbookLearned } });
+    await press("Handbook");
+    const link = [...document.querySelectorAll("a")].find(
+      (each) => each.textContent === name
+    );
+    await act(async () => {
+      link?.click();
+      await Promise.resolve();
+    });
+    await settle();
 
-      expect(document.body.textContent).toContain(
-        `Memories page ?store=shared&${opens}`
-      );
-    }
-  );
+    expect(document.body.textContent).toContain(
+      `Memories page ?store=shared&${opens}`
+    );
+  });
 
   it("says when the Brain learned nothing from a version, shows nothing for one core answers none of, and says why core refused", async () => {
     await shown([], {
@@ -1446,6 +1467,53 @@ describe(SourcesPage, () => {
       refused: "What the Brain learned from this versionThe Brain is busy.",
     });
   });
+
+  // Erased, or the reader taken off it, since the first page: core answers
+  // none alike, and the page says the one thing that is true of both.
+  it.each(["erased", "no longer the reader's to read"])(
+    "says once, in place of what it showed, that what the Brain learned is no longer theirs to read when a later page answers none (%s)",
+    async () => {
+      const [added] = handbookLearned.memories;
+      await shown([], {
+        learned: {
+          "u-1@2": {
+            ...handbookLearned,
+            memories: added === undefined ? [] : [added],
+            next: { at: "2026-11-10T09:00:00.000Z", memory: "m-a" },
+          },
+          "u-1@2#m-a": null,
+        },
+      });
+      await press("Handbook");
+      const pressMore = async () => {
+        const more = [
+          ...document.querySelectorAll<HTMLButtonElement>("section button"),
+        ].find(
+          (each) =>
+            each.textContent === "Show more" &&
+            each.closest("[data-slot=card]") !== null
+        );
+        await act(async () => {
+          more?.click();
+          await Promise.resolve();
+        });
+        await settle();
+        return more !== undefined;
+      };
+      const offered = await pressMore();
+
+      expect({
+        offered,
+        section: learnedSection(),
+        offeredAgain: await pressMore(),
+      }).toStrictEqual({
+        offered: true,
+        section:
+          "What the Brain learned from this versionYou can no longer read what the Brain learned from this version.",
+        offeredAgain: false,
+      });
+    }
+  );
 
   it("reads what the Brain learned a page at a time, counting each page in", async () => {
     const [added] = handbookLearned.memories;

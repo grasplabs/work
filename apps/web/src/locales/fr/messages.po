@@ -17019,6 +17019,10 @@ msgstr "Vous pouvez fermer cette page. Revenez ici pour voir où j’en suis."
 msgid "You can no longer read this memory."
 msgstr "Vous ne pouvez plus lire ce souvenir."
 
+#: src/brain/learned-section.tsx
+msgid "You can no longer read what the Brain learned from this version."
+msgstr "Vous ne pouvez plus lire ce que le Brain a appris de cette version."
+
 #: src/brain/memories-page.tsx
 msgid "You can share with a team of yours, or with everyone, once it has three people or more."
 msgstr "Vous pourrez partager avec l’une de vos équipes, ou avec tout le monde, dès qu’elle compte trois personnes ou plus."
