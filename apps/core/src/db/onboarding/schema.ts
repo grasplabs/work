@@ -2,6 +2,7 @@
  * The onboarding's Durable Object SQLite (onboarding/store.ts): one per
  * deployment. Migrates itself on first wake-up after a release.
  */
+import type { StatementKind } from "@grasp-os/shared/brain";
 import { sql } from "drizzle-orm";
 import {
   check,
@@ -737,6 +738,16 @@ export const brainClaims = sqliteTable(
     /** The intake's statement record it stands for. */
     record: text().notNull(),
     team: text().notNull(),
+    /**
+     * What kind of thing was said (a goal, a blocker, ...), as the Brain
+     * page groups the team's claims (GRA-1748). None on a row from before
+     * it was kept: onboarding migration 0040 owes those an erasure. None
+     * also on a claim noted while the admin rolled back past 0040 and
+     * rolled forward again: such a claim stays off the page for good
+     * (hidden, never shown wrongly) until its team's claims are put
+     * together anew.
+     */
+    kind: text().$type<StatementKind>(),
     text: text().notNull(),
     /** Whether it is to be erased: set once, never cleared. */
     erase: integer({ mode: "boolean" }).notNull().default(false),

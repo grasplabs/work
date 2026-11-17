@@ -12,6 +12,7 @@ import type {
 } from "@grasp-os/shared/admin/org-record";
 import { createAuditEvent } from "@grasp-os/shared/audit";
 import type { AuditActor, AuditDetailValue } from "@grasp-os/shared/audit";
+import type { StatementKind } from "@grasp-os/shared/brain";
 import { randomToken, sha256Hex } from "@grasp-os/shared/encoding";
 import {
   erasedFact,
@@ -128,7 +129,6 @@ import {
   keepOnboardingRecords,
   purgeOnboardingDrawings,
   onboardingDrawingsOf,
-  onboardingStatementsOf,
   purgeOnboardingRecords,
 } from "../brain-records.ts";
 import { organizations } from "../db/core/schema.ts";
@@ -194,7 +194,7 @@ import {
   rosterSource,
   withoutNames,
 } from "./brain-intake.ts";
-import type { TeamIntake } from "./brain-intake.ts";
+import type { IntakeClaim, TeamIntake } from "./brain-intake.ts";
 import { ClaimsFallError } from "./claims-fall.ts";
 import type { ClaimRemover } from "./claims-fall.ts";
 import { companyTeamsText } from "./company-teams.ts";
@@ -737,6 +737,27 @@ const foldedAddress = (email: string): string => email.trim().toLowerCase();
  * core to do with `eraseSource` (onboarding/new-brain.ts): a source it
  * gave that no longer stands.
  */
+/**
+ * A team claim that stands now: not owed an erasure. The one rule, for
+ * the hand-over (`claimToHand`) and the Brain page (`standingClaims`). A
+ * claim that stops standing (under five backers, its team under seven
+ * interviewed, or no longer made) is marked in the transaction of the
+ * change that drops it, before that change commits (`#recountClaims`,
+ * `#noteClaims`, `#claimsFirst`), so it leaves both before it is out of
+ * the Brain, and no unmarked claim is of a team under seven.
+ */
+const standingClaim = eq(brainClaims.erase, false);
+
+/** A team claim standing now, as the Brain page shows it (`standingClaims`). */
+export interface StandingClaim {
+  /** Its id in the Brain (`claim:<source>`). */
+  source: string;
+  /** The staff list's team. */
+  team: string;
+  kind: StatementKind;
+  text: string;
+}
+
 export type OwedErasure =
   | {
       kind: "interview";
@@ -6132,36 +6153,31 @@ export class Onboarding extends DurableObject<Env> {
       // oxlint-disable-next-line no-await-in-loop -- one drawing at a time
       supports.set(work.id, await checkedSupport(checks, work, factsOf, clean));
     }
-    const { records, rests } = await intakeOf(intake, claims, supports);
-    // The team's claims are these now: any statement given before that
-    // isn't one of them goes, so no earlier one outlives what it was put
-    // together from. Found both where it is noted whom each rests on and
-    // in the brain itself, so one given with no note of it goes too: read
+    const {
+      records,
+      claims: made,
+      rests,
+    } = await intakeOf(intake, claims, supports);
+    // The team's claims are these now: any claim noted before that isn't
+    // one of them goes, so no earlier one outlives what it was put
+    // together from, found where it is noted whom each rests on. Read
     // before anything is written.
-    const current = new Set(records.map(({ id }) => id));
+    const current = new Set([
+      ...records.map(({ id }) => id),
+      ...made.map(({ record }) => record),
+    ]);
     // And each piece of work's earlier drawings: only the one checked now
     // is the brain's (GRA-1084), never one drawn before with fewer than
     // five behind a part of it.
     const workflows = records.flatMap(({ type, id }) =>
       type === "workflow" ? [id] : []
     );
-    const givenStatements = await onboardingStatementsOf(
-      this.env,
-      intakeIds.team(teamId)
-    );
     const givenDrawings = await onboardingDrawingsOf(this.env, workflows);
-    const given = [
-      ...givenStatements.map((record) => ({
-        record,
-        type: "statement" as const,
-        parent: null,
-      })),
-      ...givenDrawings.map(({ id, workflowId }) => ({
-        record: id,
-        type: "workflowVersion" as const,
-        parent: workflowId,
-      })),
-    ];
+    const given = givenDrawings.map(({ id, workflowId }) => ({
+      record: id,
+      type: "workflowVersion" as const,
+      parent: workflowId,
+    }));
     const noted = this.#db
       .select({
         record: brainSent.record,
@@ -6351,19 +6367,12 @@ export class Onboarding extends DurableObject<Env> {
         if (since.length === 0 && !changed) {
           this.#noteClaims(
             teamId,
-            records.flatMap((record) =>
-              record.type === "statement"
-                ? [
-                    {
-                      record: record.id,
-                      text: record.text,
-                      people: rests.flatMap(({ record: of, person }) =>
-                        of === record.id ? [person] : []
-                      ),
-                    },
-                  ]
-                : []
-            )
+            made.map((claim) => ({
+              ...claim,
+              people: rests.flatMap(({ record: of, person }) =>
+                of === claim.record ? [person] : []
+              ),
+            }))
           );
         }
         // Whoever's interview went meanwhile no longer backs a claim of it.
@@ -6654,24 +6663,38 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /**
+   * The team claims standing now (`standingClaim`), as every member reads
+   * them on the Brain page (GRA-1748), by the rule the hand-over adds them
+   * by (`claimToHand`). Each with its kind, its team and its words; never
+   * who backs it.
+   */
+  standingClaims(): StandingClaim[] {
+    return this.#db
+      .select({
+        source: brainClaims.source,
+        team: brainClaims.team,
+        kind: brainClaims.kind,
+        text: brainClaims.text,
+      })
+      .from(brainClaims)
+      .where(and(standingClaim, isNotNull(brainClaims.kind)))
+      .all()
+      .flatMap(({ source, team, kind, text }) =>
+        kind === null ? [] : [{ source, team, kind, text }]
+      );
+  }
+
+  /**
    * The claim `source` as the hand-over adds it now: its sentence and its
-   * team, only while it stands (five or more back it, and its team may
-   * have claims shown, `teamMayClaim`). Null otherwise.
+   * team, only while it stands (`standingClaim`). Null otherwise.
    */
   claimToHand(source: string): { text: string; team: string } | null {
     const [row] = this.#db
       .select()
       .from(brainClaims)
-      .where(eq(brainClaims.source, source))
+      .where(and(eq(brainClaims.source, source), standingClaim))
       .all();
-    if (
-      row === undefined ||
-      row.erase ||
-      !teamMayClaim(this.#tellers(row.team).length)
-    ) {
-      return null;
-    }
-    return { text: row.text, team: row.team };
+    return row === undefined ? null : { text: row.text, team: row.team };
   }
 
   /**
@@ -6864,11 +6887,7 @@ export class Onboarding extends DurableObject<Env> {
    */
   #noteClaims(
     team: string,
-    claims: readonly {
-      record: string;
-      text: string;
-      people: readonly string[];
-    }[]
+    claims: readonly (IntakeClaim & { people: readonly string[] })[]
   ): void {
     // Noted only while it stands, by the recount's own rule
     // (`#claimStands`): one moved away while the claims were put together
@@ -6888,12 +6907,12 @@ export class Onboarding extends DurableObject<Env> {
       throw new ClaimsFallError(dropped.map(({ source }) => source));
     }
     const kept = new Set(held.map(({ record }) => record));
-    for (const { record, text } of shown) {
+    for (const { record, kind, text } of shown) {
       if (!kept.has(record)) {
         const source = crypto.randomUUID();
         this.#db
           .insert(brainClaims)
-          .values({ source, record, team, text })
+          .values({ source, record, team, kind, text })
           .run();
         this.#noteClaimSource(source);
       }
