@@ -1311,8 +1311,11 @@ export class Onboarding extends DurableObject<Env> {
   /**
    * Keeps the teams and people new on `roster`, while a plan is set, as
    * waiting for the admin to confirm the organization, with those that
-   * waited already and are still on it. Details of everyone else change
-   * at once; their ids and links stay.
+   * waited already and are still on it; and a team switched from off to
+   * on, so nothing of it shows again before the admin confirms it
+   * (GRA-1748: a team's results follow the stricter of what the admin
+   * confirmed and what they saved). Details of everyone else change at
+   * once; their ids and links stay.
    */
   #holdNew(before: Roster | null, roster: Roster): void {
     if (this.#row().plan === null) {
@@ -1321,10 +1324,16 @@ export class Onboarding extends DurableObject<Env> {
     const was = this.#unconfirmed();
     const teamsBefore = new Set(before?.teams.map(({ id }) => id));
     const peopleBefore = new Set(before?.people.map(({ id }) => id));
+    const offBefore = new Set(
+      before?.teams.flatMap(({ id, off }) => (off ? [id] : []))
+    );
     this.#keepUnconfirmed({
       teams: roster.teams
-        .map(({ id }) => id)
-        .filter((id) => waits(id, teamsBefore, was.teams)),
+        .filter(
+          ({ id, off }) =>
+            waits(id, teamsBefore, was.teams) || (offBefore.has(id) && !off)
+        )
+        .map(({ id }) => id),
       people: roster.people
         .map(({ id }) => id)
         .filter((id) => waits(id, peopleBefore, was.people)),
@@ -7215,7 +7224,8 @@ export class Onboarding extends DurableObject<Env> {
    * The one rule for whether `team` may have its results (its claims and
    * the drawings of its work) read at all (GRA-1748): it is on the list,
    * it takes part (an admin may switch a team off: then nothing of it is
-   * shown to members, #2344), and seven or more of its people tell their
+   * shown to members, #2344; one switched on again, or new, shows only
+   * once the admin confirms it), and seven or more of its people tell their
    * own work (`teamMayClaim`: five backers in a team of seven, the
    * owner's decision of 16 November). Both `#claimStands` and
    * `#drawingStands` ask it. A read of many passes the list read once, and
@@ -7232,8 +7242,11 @@ export class Onboarding extends DurableObject<Env> {
     if (known !== undefined) {
       return known;
     }
+    // Switched off, or switched on or new and still waiting for the admin
+    // to confirm it (`#holdNew`): nothing of it is shown.
     const takesPart =
-      roster?.teams.some(({ id, off }) => id === team && !off) === true;
+      roster?.teams.some(({ id, off }) => id === team && !off) === true &&
+      !this.#unconfirmed().teams.has(team);
     const may = takesPart && teamMayClaim(this.#tellers(team, roster).length);
     mayClaim.set(team, may);
     return may;

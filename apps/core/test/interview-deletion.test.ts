@@ -1312,8 +1312,15 @@ describe("the alarm, while something else fails", { timeout: 180_000 }, () => {
     expect({
       stuck,
       failed,
+      after: await owed(),
       claim: statements.includes("Tickets wait for the customer."),
       armed: alarm !== null,
-    }).toStrictEqual({ stuck: false, failed: true, claim: false, armed: true });
+    }).toStrictEqual({
+      stuck: false,
+      failed: true,
+      after: false,
+      claim: false,
+      armed: true,
+    });
   });
 });

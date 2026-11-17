@@ -2509,6 +2509,67 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
     });
   });
 
+  it("bring nothing of a switched-off team back while switching it on again waits for the admin's confirmation, and show it at the intake after", async () => {
+    const { ids, max } = await drawnTeam({ eight: true });
+    await intakeOf(ids, [zendeskClaim]);
+    await handOverNow();
+    const keys: Key[] = [...everyone, "sam", "ada"];
+    const listOf = () =>
+      rosterOf(
+        ids,
+        keys,
+        Object.fromEntries(keys.map((key) => [key, addressOf(ids[key])]))
+      );
+    const readNow = async () => {
+      const drawings = await recalled(max, "ticket", "drawing");
+      return {
+        claims: await recalled(max, "Zendesk", "claim"),
+        drawings: drawings.length,
+        page: await workOnPage(ids),
+      };
+    };
+    /** Sam agrees to more, the work is drawn again, and the team's next intake runs. */
+    const nextIntake = async (version: number) => {
+      await agree(
+        ids.sam,
+        [
+          fact("s1", "step", "Answers the phone."),
+          fact(`s${version + 1}`, "step", "Logs the call."),
+        ],
+        version
+      );
+      await answering(
+        [ticketsReply(ids)],
+        async () => await onboardingStore(env).drawNext()
+      );
+      await intakeOf(ids, [zendeskClaim]);
+      await handOverNow();
+    };
+    // Confirmed off; then switched on again in a save not confirmed.
+    await savedRoster(ids, keys, (roster) => ({
+      ...roster,
+      teams: roster.teams.map((each) => ({ ...each, off: true })),
+    }));
+    await onboardingStore(env).saveRoster(
+      listOf(),
+      { type: "system" },
+      { confirmed: false }
+    );
+    await nextIntake(1);
+    const unconfirmed = await readNow();
+    // The admin confirms it.
+    await onboardingStore(env).saveRoster(listOf(), { type: "system" });
+    await nextIntake(2);
+    expect({ unconfirmed, confirmed: await readNow() }).toStrictEqual({
+      unconfirmed: { claims: [], drawings: 0, page: [] },
+      confirmed: {
+        claims: [zendeskClaim.text],
+        drawings: 1,
+        page: [["handling new tickets", 1]],
+      },
+    });
+  });
+
   it("take a drawing out as a backer's withdrawal commits, for the Brain and the page alike", async () => {
     const { ids, max } = await drawnTeam({ eight: true });
     await intakeOf(ids, [zendeskClaim]);

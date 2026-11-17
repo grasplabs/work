@@ -551,7 +551,7 @@ describe(
       expect(state).toStrictEqual({ holding: true, deleted: true });
     });
 
-    it("takes a drawing made since the document was shared off the page and out of the new Brain as its removal answers", async () => {
+    it("takes a drawing made since the document was shared off the page and out of what the onboarding holds as its removal answers", async () => {
       const { api: admin } = await signedInApi(idp, "admin");
       const word = sentinelOf();
       const id = await share(admin, `removed-${unique()}.docx`, word);
