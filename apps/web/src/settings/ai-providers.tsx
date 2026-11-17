@@ -804,7 +804,7 @@ const Fallbacks = ({
   };
   return (
     <FactRow
-      help={t`Used in this order when the default's provider is down.`}
+      info={t`Used in this order when the default's provider is down.`}
       label={t`Fallbacks`}
     >
       <ol aria-label={t`Fallbacks`} {...stylex.props(styles.list)}>

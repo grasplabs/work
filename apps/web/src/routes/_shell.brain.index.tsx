@@ -29,7 +29,7 @@ import { beginNoteReveal } from "../brain/note-reveal.tsx";
 import { isRegion } from "../brain/region-id.ts";
 import { useBrainThinking } from "../brain/thinking/brain-thinking.ts";
 import { ThinkingDive } from "../brain/thinking/dive.tsx";
-import { floatingChatCover, useChatLayout } from "../chat/chat-layout.ts";
+import { useChatLayout } from "../chat/chat-layout.ts";
 import type { ChatLayout } from "../chat/chat-layout.ts";
 
 // The brain's own address: the brain as an atlas, as in the prototype
@@ -160,13 +160,22 @@ const atlasWith = (
   readAtlas: Atlas
 ): Atlas => (brain === read ? readAtlas : atlasOf(ws, brain));
 
+/** How far in from the end App shell first sets a floating window, in pixels. */
+const floatingInset = 12;
+
 /**
  * While Grasp thinks, its shape keeps clear of the chat floating over the
- * page, where the answer is written beside it. Open beside the page, the
- * chat narrows the page itself, so there is nothing to keep clear of.
+ * page, where the answer is written beside it: as wide as the chat, and as
+ * far in from the end as it was moved. Open beside the page, the chat
+ * narrows the page itself, so there is nothing to keep clear of.
  */
-const diveClearOf = ({ open, placement }: ChatLayout): number =>
-  open && placement === "floating" ? floatingChatCover : 0;
+const diveClearOf = ({
+  open,
+  placement,
+  width,
+  position,
+}: ChatLayout): number =>
+  open && placement === "floating" ? width + (position?.x ?? floatingInset) : 0;
 
 /** The part of the brain a thinking is about, as the way back names it. */
 const aboutOf = (

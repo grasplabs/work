@@ -52,6 +52,13 @@ const LanguageRow = () => {
     <SettingRow label={label}>
       <LanguageSwitch
         label={label}
+        searchLabel={t`Search languages`}
+        clearSearchLabel={t`Clear search`}
+        suggestedLabel={t`Suggested`}
+        allLabel={t`All languages`}
+        emptyLabel={t`No language found`}
+        helpTranslateLabel={t`Help translate`}
+        buttonLabel={(named, current) => t`${named}, ${current}`}
         layout={styles.control}
         size="sm"
         onValueChange={(code) => {

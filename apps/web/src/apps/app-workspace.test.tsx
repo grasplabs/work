@@ -440,7 +440,15 @@ const settled = async (): Promise<void> => {
 
 /** What a button or menu item is called: its text, or its label without one. */
 const nameOf = (element: HTMLElement): string => {
-  const text = element.textContent?.trim() ?? "";
+  // Its words as a screen reader hears them: a button's hidden result
+  // words (done, failed) left out.
+  const copy = element.cloneNode(true);
+  if (copy instanceof HTMLElement) {
+    for (const hidden of copy.querySelectorAll('[aria-hidden="true"]')) {
+      hidden.remove();
+    }
+  }
+  const text = copy.textContent?.trim() ?? "";
   return text === "" ? (element.getAttribute("aria-label") ?? "") : text;
 };
 

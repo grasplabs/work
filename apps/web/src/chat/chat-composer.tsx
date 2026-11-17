@@ -1,4 +1,5 @@
 import type { ModelEffort } from "@grasp-os/shared/models";
+import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useState } from "react";
@@ -252,6 +253,7 @@ export const ChatComposer = ({
               onAttach(chosen);
             }}
             uploadLabel={t`Attach a file`}
+            actionsLabel={t`This chat`}
           />
         )
       }
@@ -288,6 +290,15 @@ export const ChatComposer = ({
       mentionItems={mentioning?.items}
       mentionKinds={mentioning?.kinds}
       mentionsEmptyLabel={t`Nothing found`}
+      mentionsFoundLabel={(count) =>
+        t`${plural(count, { one: "# result", other: "# results" })}`
+      }
+      mentionsLabel={t({ message: "Mention", context: "the mention menu" })}
+      mentionsLoadingLabel={t`Looking`}
+      commandsLabel={t`Commands`}
+      dropLabel={t`Drop to add`}
+      successLabel={t({ message: "Done", context: "an answer is done" })}
+      uploadingLabel={t`Sending waits for the files to upload`}
       mentionsLoading={mentioning?.loading}
       onMention={(item) => {
         mentioning?.onMention(item);

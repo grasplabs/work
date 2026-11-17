@@ -116,6 +116,19 @@ const AnswerLink = ({
   return <span>{link.children}</span>;
 };
 
+/** What Markdown says itself, in the page's language: an answer's and its thoughts'. */
+export const useMarkdownWords = () => {
+  const { t } = useLingui();
+  return {
+    backLabel: (number: number) => t`Back to reference ${number}`,
+    doneLabel: t`Done`,
+    externalLabel: t`opens in a new tab`,
+    footnoteLabel: (number: number) => t`Footnote ${number}`,
+    notDoneLabel: t`Not done`,
+    tableLabel: t`Table`,
+  };
+};
+
 /** What Sources says, in the page's language. */
 const useSourcesLabels = (): Partial<SourcesLabels> => {
   const { t } = useLingui();
@@ -166,17 +179,14 @@ export const AnswerWords = ({
 }) => {
   const { t } = useLingui();
   const labels = useSourcesLabels();
+  const markdownWords = useMarkdownWords();
   const navigate = useNavigate();
   const words = (
     <Markdown
-      backLabel={(number) => t`Back to reference ${number}`}
-      doneLabel={t`Done`}
-      footnoteLabel={(number) => t`Footnote ${number}`}
-      notDoneLabel={t`Not done`}
+      {...markdownWords}
       renderLink={(link) => <AnswerLink cited={cited} link={link} />}
       source={text}
       streaming={writing}
-      tableLabel={t`Table`}
     />
   );
   if (cited === undefined || cited.length === 0) {

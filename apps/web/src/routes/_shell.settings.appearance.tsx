@@ -22,6 +22,9 @@ const Theme = () => {
       <ThemeSwitch
         variant="picker"
         label={t`Mode`}
+        iconLabel={(named, current, next) =>
+          t`${named}, ${current}. Switch to ${next}`
+        }
         // No line under a tile: each is drawn as what it is, and its name
         // says the rest (Ruben, 17 Nov: no subtitles unless needed).
         modeWords={{

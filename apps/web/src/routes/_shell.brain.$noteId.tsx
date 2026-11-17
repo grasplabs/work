@@ -63,6 +63,7 @@ import { AppLogo } from "../connections/app-logo.tsx";
 import { ExportMenu } from "../export/export-menu.tsx";
 import { formatDay, formatMonth } from "../format.ts";
 import { NotFoundState } from "../frame/page-states.tsx";
+import { Brain as BrainMark } from "../grasp/icons/index.ts";
 import { NotLoaded } from "../load-from-core.tsx";
 
 // One note, as the prototype has it (`routes/brain/$noteId.tsx`). Where the
@@ -942,7 +943,7 @@ const NotePage = () => {
   const note = brain.notes.find((candidate) => candidate.id === noteId);
 
   if (!note) {
-    return <NotFoundState icon={BrainIcon} title={t`Note not found`} />;
+    return <NotFoundState icon={BrainMark} title={t`Note not found`} />;
   }
   // The company note is the brain's home, a page to go on from, without a timeline beside it.
   if (note.kind === "company") {

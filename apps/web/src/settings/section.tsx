@@ -6,17 +6,10 @@ import { useId } from "react";
 import type { ReactNode } from "react";
 
 import { isFileGone } from "../error-reports.ts";
+import { ErrorState } from "../frame/page-states.tsx";
 import { Alert } from "../grasp/alert/index.ts";
 import { Button } from "../grasp/button/index.ts";
 import { Card } from "../grasp/card/index.ts";
-import {
-  Empty,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle,
-  EmptyDescription,
-  EmptyContent,
-} from "../grasp/empty/index.ts";
 import { Retry } from "../grasp/icons/index.ts";
 import { Label } from "../grasp/label/index.ts";
 import { Skeleton } from "../grasp/skeleton/index.ts";
@@ -352,34 +345,12 @@ export const SectionNotLoaded = ({
  * rather than a page of its own with a second header. Trying again reads
  * the page again, or loads Grasp anew when its file is gone.
  */
-export const SettingsError = ({ error }: ErrorComponentProps) => {
-  const { t } = useLingui();
-  const router = useRouter();
-  const trying = useRouterState({ select: (state) => state.isLoading });
-  const reason = useRouteErrorReason(error);
-  const reload = isFileGone(error);
-  return (
-    <Empty tone="danger">
-      <EmptyHeader>
-        <EmptyMedia />
-        <EmptyTitle headingLevel={2}>{t`This page didn't load`}</EmptyTitle>
-        <EmptyDescription>{reason ?? ""}</EmptyDescription>
-      </EmptyHeader>
-      <EmptyContent>
-        <Button
-          disabled={trying}
-          icon={Retry}
-          onClick={() => {
-            if (reload) {
-              window.location.reload();
-              return;
-            }
-            void router.invalidate();
-          }}
-        >
-          {trying ? t`Trying again…` : t`Try again`}
-        </Button>
-      </EmptyContent>
-    </Empty>
-  );
-};
+export const SettingsError = ({ error }: ErrorComponentProps) => (
+  // Grasp UI's failed page under the section's own heading: the page
+  // around it (Settings' sidebar) is the way on.
+  <ErrorState
+    heading="h2"
+    reason={useRouteErrorReason(error)}
+    reload={isFileGone(error)}
+  />
+);

@@ -2,7 +2,6 @@ import { isAdmin } from "@grasp-os/shared/roles";
 import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
 import { useLingui } from "@lingui/react/macro";
 import { createFileRoute, Link, useRouteContext } from "@tanstack/react-router";
-import { BrainIcon } from "lucide-react";
 
 import { BackButton } from "../brain/back-button.tsx";
 import { tintClass } from "../brain/brain-colors.ts";
@@ -20,6 +19,7 @@ import type { Note, NoteKind } from "../brain/brain.ts";
 import { GoalsEditor } from "../brain/goals-editor.tsx";
 import { AppLogo } from "../connections/app-logo.tsx";
 import { NotFoundState } from "../frame/page-states.tsx";
+import { Brain as BrainMark } from "../grasp/icons/index.ts";
 
 // One part of the brain on its own page, as the prototype has it
 // (`routes/brain/sections.$sectionId.tsx`). On the Vision page, admins
@@ -94,7 +94,7 @@ const SectionPage = () => {
 
   if (!section || !folder) {
     return (
-      <NotFoundState icon={BrainIcon} title={t`Part of the brain not found`} />
+      <NotFoundState icon={BrainMark} title={t`Part of the brain not found`} />
     );
   }
 

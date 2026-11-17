@@ -32,6 +32,8 @@ import type { PacedOptions } from "../motion/use-paced";
 import { Shimmer } from "../shimmer";
 import { grasp, media } from "../tokens/tokens.stylex";
 import { ChatMessageCopy } from "./copy";
+import { Thoughts } from "./thoughts";
+import type { ChatMessageThoughtsLook } from "./thoughts";
 
 /** What a caller may style: where the message sits. Never its look. */
 export type ChatMessageLayoutStyle = LayoutStyle;
@@ -124,10 +126,18 @@ export interface ChatMessageProps {
    */
   thoughtLabel?: (seconds: number) => string;
   /**
-   * The agent's thoughts, as much as has arrived: the thinking line then opens to them, in quiet
-   * words. Closed at first, and closed again when the answer starts.
+   * The agent's thoughts, as much as has arrived: the thinking line then opens to them, small and
+   * quiet, set apart from the answer. Closed at first, and closed again when the answer starts.
+   * Words are drawn through Markdown: a line that is only bold (the model's step title) becomes a
+   * small label over its note; lists and code in a sentence are drawn, never raw marks.
    */
   thoughts?: ReactNode;
+  /**
+   * How the opened thoughts stand apart from the answer: a hairline down their start edge, a soft
+   * sunken panel, or a slim timeline of steps. A study for Ruben to pick from; one stays.
+   * @default "rule"
+   */
+  thoughtsLook?: ChatMessageThoughtsLook;
   /**
    * How long the thinking took, in seconds, for a message that is drawn after it ended (from
    * history). While a message is on the page as it thinks, it times itself.
@@ -224,13 +234,6 @@ const styles = stylex.create({
     display: "flex",
     alignItems: "center",
     minHeight: grasp.collapsibleTrigger,
-  },
-  // The thoughts themselves: quiet beside the answer.
-  thoughts: {
-    color: grasp.muted,
-    fontSize: grasp.textSm,
-    lineHeight: grasp.textSmLine,
-    whiteSpace: "pre-wrap",
   },
   failed: {
     display: "flex",
@@ -482,6 +485,7 @@ const thoughtFor = (seconds: number) =>
 interface ThoughtProps {
   thinking: boolean;
   thoughts: ReactNode;
+  look: ChatMessageThoughtsLook | undefined;
   label: string | undefined;
   thoughtLabel: ((seconds: number) => string) | undefined;
   seconds: number | undefined;
@@ -494,6 +498,7 @@ interface ThoughtProps {
 const Thought = ({
   thinking,
   thoughts,
+  look = "rule",
   label = THINKING,
   thoughtLabel = thoughtFor,
   seconds,
@@ -531,7 +536,7 @@ const Thought = ({
   return (
     <div data-thought="" {...stylex.props(styles.thought)}>
       <Collapsible title={line} open={open} onOpenChange={setOpen} fit>
-        <div {...stylex.props(styles.thoughts)}>{thoughts}</div>
+        <Thoughts thoughts={thoughts} look={look} writing={thinking} />
       </Collapsible>
     </div>
   );
@@ -728,6 +733,7 @@ export const ChatMessage = ({
   thoughtLabel,
   thoughts,
   thoughtSeconds,
+  thoughtsLook,
   pace,
   style: styleProp,
   layout,
@@ -816,6 +822,7 @@ export const ChatMessage = ({
       <Thought
         thinking={status === "thinking"}
         thoughts={thoughts}
+        look={thoughtsLook}
         label={thinkingLabel}
         thoughtLabel={thoughtLabel}
         seconds={thoughtSeconds}

@@ -31,7 +31,7 @@ import {
   useOpenChat,
 } from "./chat-presence.ts";
 import type { ChatPresence } from "./chat-presence.ts";
-import { stageOf, useChatStage } from "./chat-stage.ts";
+import { stageOf } from "./chat-stage.ts";
 import { subjectOf, subjectWords, useSubjectChat } from "./chat-subject.ts";
 import { useFollowedChat } from "./chat-watch.ts";
 import type { SourceName } from "./sources.tsx";
@@ -41,8 +41,8 @@ import { useAsk } from "./use-ask.ts";
 // (active-chat.ts), so what is asked anywhere goes on there and shows in
 // their list, as on Chat. Closed, it is an idle bar at the foot of the page
 // (chat-bar.tsx); open, a panel docked beside the page or floating over it
-// (chat-panel.tsx, laid out by chat-layout.ts, shown step by step by
-// chat-stage.ts). The chat and what is typed
+// (chat-panel.tsx, laid out by chat-layout.ts, shown as chat-stage.ts
+// says). The chat and what is typed
 // in its box are held here, once, for the whole shell, so they stay as the
 // chat opens, closes or moves, and as the person moves between pages.
 //
@@ -265,15 +265,13 @@ const useGlobalChatValue = () => {
     ? (placementOn(presence, layout.placement) ?? layout.placement)
     : layout.placement;
   const open = (keptOpen || layout.open) && allows(presence, placement);
-  const { stage, delays, settled } = useChatStage(
-    stageOf({
-      available,
-      open,
-      placement,
-      roomBeside,
-      barHere: presence.bar,
-    })
-  );
+  const stage = stageOf({
+    available,
+    open,
+    placement,
+    roomBeside,
+    barHere: presence.bar,
+  });
   const { value: names } = useFrameRead(readChatNames, chats);
   return {
     ...session,
@@ -289,12 +287,8 @@ const useGlobalChatValue = () => {
     roomBeside,
     /** Where it opens, or is. */
     placement,
-    /** What of it shows now, on its way to the layout. */
+    /** What of it shows now. */
     stage,
-    /** Which parts move a beat after the other, in this step. */
-    delays,
-    /** For each part that shows it, once it has finished moving. */
-    settled,
     words,
     /** The tab's slot the chat is in: a subject's (chat-subject.ts), or the person's. */
     slot,

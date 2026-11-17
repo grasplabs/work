@@ -418,6 +418,31 @@ describe("the tab's one connection to core", () => {
     ]);
   });
 
+  it("says whether core can be reached as it finds out: checking, reachable, unreachable while it tries again, reachable once back", async () => {
+    const { core, opened } = tab([one, "down", one]);
+    const seen: string[] = [core.reach];
+    core.watchReach(() => {
+      seen.push(core.reach);
+    });
+    await core.session();
+    vi.spyOn(Math, "random").mockReturnValue(1);
+    opened[0]?.break();
+    // The first try after the drop fails; the one after its pause answers.
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(2000);
+    await core.session();
+
+    expect(seen).toStrictEqual([
+      "checking",
+      "reachable",
+      "unreachable",
+      "checking",
+      "unreachable",
+      "checking",
+      "reachable",
+    ]);
+  });
+
   it("tries at once when the page comes back, once per pause however often it does", async () => {
     const { core, opened, comeBack } = tab([one, "down", "down", one]);
     await core.session();

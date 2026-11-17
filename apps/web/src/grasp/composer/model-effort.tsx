@@ -1,15 +1,3 @@
-// ComposerModelEffort: the model and how hard it thinks, as one quiet control in a composer's
-// footer (composer.tsx). The chip shows the model's mark and name, and its effort as a scale of
-// dots. It opens one surface, effort first: the model as a row at its top, which opens the list
-// of models in its place, and under it the effort, a slider of the model's own levels. A model with
-// fewer levels has fewer stops; a model with none says so instead of a slider. At the strongest
-// level (a level's `top`) the light runs round the chip, as ComposerReasoning's does.
-//
-//   <ComposerModelEffort models={models} makers={makers} model={model} onModelChange={setModel}
-//     effort={effort} onEffortChange={setEffort} />
-//
-// ComposerModel and ComposerReasoning stay for a host that wants them apart: a long list of makers
-// to search, or effort that is not the model's. Every value is a token (src/tokens).
 "use client";
 
 /* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
@@ -28,9 +16,10 @@ import { popup } from "../tokens/tokens.values";
 import { useComposerDisabled } from "./context";
 import { controlStyles } from "./control";
 import { ComposerEffort } from "./effort";
+import type { ComposerEffortLook } from "./effort";
 import { stopEscape } from "./escape";
 import type { ComposerModelMaker, ComposerModelOption } from "./model";
-import { LitEdge, Scale } from "./reasoning";
+import { LitEdge } from "./reasoning";
 import type { ComposerReasoningOption } from "./reasoning";
 import { tabOutTarget } from "./tab-out";
 
@@ -76,6 +65,18 @@ export interface ComposerModelEffortProps {
    * @default "This model has one level of effort."
    */
   noEffortLabel?: string;
+  /**
+   * How the surface shows the levels: a list of rows (each name, its note, a tick on the chosen),
+   * or one segmented control with every level's name.
+   * @default "rows"
+   */
+  effortLook?: ComposerEffortLook;
+  /**
+   * At the strongest level (a level's `top`), the working light round the chip. Off, the word
+   * "Max" says it alone.
+   * @default false
+   */
+  topLight?: boolean;
 }
 
 const noMakers: ComposerModelMaker[] = [];
@@ -200,6 +201,30 @@ const styles = stylex.create({
   lit: {
     color: grasp.ink,
   },
+  // The model's name in the chip: in ink, and the first thing cut when room is short.
+  chipName: {
+    flexShrink: 1,
+    minWidth: 0,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    color: grasp.ink,
+  },
+  // The level in the chip: quieter, never cut.
+  chipLevel: {
+    flexShrink: 0,
+    whiteSpace: "nowrap",
+    color: grasp.muted,
+  },
+  // The chip's words can shrink, so the name is cut and the level and chevron keep their room.
+  chipValue: {
+    minWidth: 0,
+    flexShrink: 1,
+  },
+  chipShrinks: {
+    flexShrink: 1,
+    maxWidth: "100%",
+  },
 });
 
 /** Moves the focus among the list's rows with the arrow keys, Home and End. */
@@ -283,21 +308,19 @@ const ModelList = ({
   </ul>
 );
 
-/** The chip: the model's mark and name, its effort's scale, and the light round it at the top level. */
+/** The chip: the maker's mark, the model's name, its level in a word, and the chevron. */
 const Chip = ({
   props,
   mark,
   name,
-  at,
-  count,
+  level,
   lit,
   value,
 }: {
   props: Record<string, unknown>;
   mark: IconData | undefined;
   name: string;
-  at: number;
-  count: number;
+  level: string | undefined;
   lit: boolean;
   value: string;
 }) => (
@@ -306,16 +329,31 @@ const Chip = ({
     type="button"
     data-slot="composer-model-effort"
     data-top={lit || undefined}
-    {...stylex.props(controlStyles.control, focus.ring, lit && styles.lit)}
+    {...stylex.props(
+      controlStyles.control,
+      styles.chipShrinks,
+      focus.ring,
+      lit && styles.lit
+    )}
   >
     <span aria-hidden="true" {...stylex.props(controlStyles.reach)} />
     {lit ? <LitEdge /> : null}
-    <span key={value} {...stylex.props(controlStyles.value)}>
+    <span key={value} {...stylex.props(controlStyles.value, styles.chipValue)}>
       {mark === undefined ? null : <Icon icon={mark} />}
-      <span {...stylex.props(controlStyles.words, controlStyles.narrowWords)}>
+      <span
+        data-slot="composer-model-effort-name"
+        {...stylex.props(styles.chipName)}
+      >
         {name}
       </span>
-      {count > 1 && at !== -1 ? <Scale at={at} count={count} /> : null}
+      {level === undefined ? null : (
+        <span
+          data-slot="composer-model-effort-level"
+          {...stylex.props(styles.chipLevel)}
+        >
+          {level}
+        </span>
+      )}
     </span>
     <Icon icon={ChevronDown} />
   </button>
@@ -340,6 +378,7 @@ const readChoice = (
     levels,
     at,
     lit: level?.top === true,
+    level: levels.length > 1 ? level?.label : undefined,
     said:
       levels.length > 1 && level !== undefined
         ? `${name}, ${level.label}`
@@ -347,19 +386,21 @@ const readChoice = (
   };
 };
 
-/** The effort: its slider, or, for a model with one level, a line that says so. */
+/** The effort: every level by name, as rows or segments, or for a model with one level a line that says so. */
 const EffortPart = ({
   levels,
   value,
   onValueChange,
   label,
   noneLabel,
+  look,
 }: {
   levels: ComposerReasoningOption[];
   value: string;
   onValueChange: (value: string) => void;
   label: string;
   noneLabel: string;
+  look: ComposerEffortLook;
 }) => (
   <div {...stylex.props(styles.effort)}>
     {levels.length > 1 ? (
@@ -368,6 +409,7 @@ const EffortPart = ({
         value={value}
         onValueChange={onValueChange}
         label={label}
+        look={look}
       />
     ) : (
       <p {...stylex.props(styles.none)}>{noneLabel}</p>
@@ -388,18 +430,25 @@ export const ComposerModelEffort = ({
   modelLabel = "Model",
   effortLabel = "Effort",
   noEffortLabel = "This model has one level of effort.",
+  effortLook = "rows",
+  topLight = false,
 }: ComposerModelEffortProps) => {
   const disabled = useComposerDisabled();
   const [open, setOpen] = useState(false);
   const [listing, setListing] = useState(false);
   const header = useRef<HTMLButtonElement | null>(null);
   const listId = useId();
-  const { current, name, mark, levels, at, lit, said } = readChoice(
-    models,
-    makers,
-    model,
-    effort
-  );
+  const {
+    current,
+    name,
+    mark,
+    levels,
+    at,
+    lit: top,
+    level,
+    said,
+  } = readChoice(models, makers, model, effort);
+  const lit = topLight && top;
 
   const back = () => {
     setListing(false);
@@ -447,8 +496,7 @@ export const ComposerModelEffort = ({
             props={props}
             mark={mark}
             name={name}
-            at={at}
-            count={levels.length}
+            level={level}
             lit={lit}
             value={`${model} ${effort}`}
           />
@@ -510,6 +558,7 @@ export const ComposerModelEffort = ({
               onValueChange={onEffortChange}
               label={effortLabel}
               noneLabel={noEffortLabel}
+              look={effortLook}
             />
           )}
         </div>

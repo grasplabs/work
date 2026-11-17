@@ -14,6 +14,7 @@ import { Route as ChatLinkRouteImport } from './routes/chat-link'
 import { Route as GuestRouteImport } from './routes/guest'
 import { Route as InterviewRouteImport } from './routes/interview'
 import { Route as KitRouteImport } from './routes/kit'
+import { Route as KitFailedWholeRouteImport } from './routes/kit-failed-whole'
 import { Route as SetupRouteImport } from './routes/setup'
 import { Route as SignInRouteImport } from './routes/sign-in'
 import { Route as StaffRouteImport } from './routes/staff'
@@ -23,6 +24,7 @@ import { Route as ShellBrainRouteImport } from './routes/_shell.brain'
 import { Route as ShellConnectMicrosoftRouteImport } from './routes/_shell.connect-microsoft'
 import { Route as ShellDashboardRouteImport } from './routes/_shell.dashboard'
 import { Route as ShellInboxRouteImport } from './routes/_shell.inbox'
+import { Route as ShellKitFailedRouteImport } from './routes/_shell.kit-failed'
 import { Route as ShellSettingsRouteImport } from './routes/_shell.settings'
 import { Route as DecisionsDecisionRouteImport } from './routes/decisions.$decision'
 import { Route as ShellAgentsIndexRouteImport } from './routes/_shell.agents.index'
@@ -96,6 +98,11 @@ const KitRoute = KitRouteImport.update({
   path: '/kit',
   getParentRoute: () => rootRouteImport,
 } as any)
+const KitFailedWholeRoute = KitFailedWholeRouteImport.update({
+  id: '/kit-failed-whole',
+  path: '/kit-failed-whole',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SetupRoute = SetupRouteImport.update({
   id: '/setup',
   path: '/setup',
@@ -139,6 +146,11 @@ const ShellDashboardRoute = ShellDashboardRouteImport.update({
 const ShellInboxRoute = ShellInboxRouteImport.update({
   id: '/inbox',
   path: '/inbox',
+  getParentRoute: () => ShellRoute,
+} as any)
+const ShellKitFailedRoute = ShellKitFailedRouteImport.update({
+  id: '/kit-failed',
+  path: '/kit-failed',
   getParentRoute: () => ShellRoute,
 } as any)
 const ShellSettingsRoute = ShellSettingsRouteImport.update({
@@ -392,6 +404,7 @@ export interface FileRoutesByFullPath {
   '/guest': typeof GuestRoute
   '/interview': typeof InterviewRoute
   '/kit': typeof KitRoute
+  '/kit-failed-whole': typeof KitFailedWholeRoute
   '/setup': typeof SetupRoute
   '/sign-in': typeof SignInRoute
   '/staff': typeof StaffRoute
@@ -400,6 +413,7 @@ export interface FileRoutesByFullPath {
   '/connect-microsoft': typeof ShellConnectMicrosoftRoute
   '/dashboard': typeof ShellDashboardRoute
   '/inbox': typeof ShellInboxRoute
+  '/kit-failed': typeof ShellKitFailedRoute
   '/settings': typeof ShellSettingsRouteWithChildren
   '/decisions/$decision': typeof DecisionsDecisionRoute
   '/agents/$agent': typeof ShellAgentsAgentRoute
@@ -454,6 +468,7 @@ export interface FileRoutesByTo {
   '/guest': typeof GuestRoute
   '/interview': typeof InterviewRoute
   '/kit': typeof KitRoute
+  '/kit-failed-whole': typeof KitFailedWholeRoute
   '/setup': typeof SetupRoute
   '/sign-in': typeof SignInRoute
   '/staff': typeof StaffRoute
@@ -461,6 +476,7 @@ export interface FileRoutesByTo {
   '/connect-microsoft': typeof ShellConnectMicrosoftRoute
   '/dashboard': typeof ShellDashboardRoute
   '/inbox': typeof ShellInboxRoute
+  '/kit-failed': typeof ShellKitFailedRoute
   '/decisions/$decision': typeof DecisionsDecisionRoute
   '/': typeof ShellIndexRoute
   '/agents/$agent': typeof ShellAgentsAgentRoute
@@ -517,6 +533,7 @@ export interface FileRoutesById {
   '/guest': typeof GuestRoute
   '/interview': typeof InterviewRoute
   '/kit': typeof KitRoute
+  '/kit-failed-whole': typeof KitFailedWholeRoute
   '/setup': typeof SetupRoute
   '/sign-in': typeof SignInRoute
   '/staff': typeof StaffRoute
@@ -525,6 +542,7 @@ export interface FileRoutesById {
   '/_shell/connect-microsoft': typeof ShellConnectMicrosoftRoute
   '/_shell/dashboard': typeof ShellDashboardRoute
   '/_shell/inbox': typeof ShellInboxRoute
+  '/_shell/kit-failed': typeof ShellKitFailedRoute
   '/_shell/settings': typeof ShellSettingsRouteWithChildren
   '/decisions/$decision': typeof DecisionsDecisionRoute
   '/_shell/': typeof ShellIndexRoute
@@ -583,6 +601,7 @@ export interface FileRouteTypes {
     | '/guest'
     | '/interview'
     | '/kit'
+    | '/kit-failed-whole'
     | '/setup'
     | '/sign-in'
     | '/staff'
@@ -591,6 +610,7 @@ export interface FileRouteTypes {
     | '/connect-microsoft'
     | '/dashboard'
     | '/inbox'
+    | '/kit-failed'
     | '/settings'
     | '/decisions/$decision'
     | '/agents/$agent'
@@ -645,6 +665,7 @@ export interface FileRouteTypes {
     | '/guest'
     | '/interview'
     | '/kit'
+    | '/kit-failed-whole'
     | '/setup'
     | '/sign-in'
     | '/staff'
@@ -652,6 +673,7 @@ export interface FileRouteTypes {
     | '/connect-microsoft'
     | '/dashboard'
     | '/inbox'
+    | '/kit-failed'
     | '/decisions/$decision'
     | '/'
     | '/agents/$agent'
@@ -707,6 +729,7 @@ export interface FileRouteTypes {
     | '/guest'
     | '/interview'
     | '/kit'
+    | '/kit-failed-whole'
     | '/setup'
     | '/sign-in'
     | '/staff'
@@ -715,6 +738,7 @@ export interface FileRouteTypes {
     | '/_shell/connect-microsoft'
     | '/_shell/dashboard'
     | '/_shell/inbox'
+    | '/_shell/kit-failed'
     | '/_shell/settings'
     | '/decisions/$decision'
     | '/_shell/'
@@ -772,6 +796,7 @@ export interface RootRouteChildren {
   GuestRoute: typeof GuestRoute
   InterviewRoute: typeof InterviewRoute
   KitRoute: typeof KitRoute
+  KitFailedWholeRoute: typeof KitFailedWholeRoute
   SetupRoute: typeof SetupRoute
   SignInRoute: typeof SignInRoute
   StaffRoute: typeof StaffRoute
@@ -817,6 +842,13 @@ declare module '@tanstack/react-router' {
       path: '/kit'
       fullPath: '/kit'
       preLoaderRoute: typeof KitRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/kit-failed-whole': {
+      id: '/kit-failed-whole'
+      path: '/kit-failed-whole'
+      fullPath: '/kit-failed-whole'
+      preLoaderRoute: typeof KitFailedWholeRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/setup': {
@@ -880,6 +912,13 @@ declare module '@tanstack/react-router' {
       path: '/inbox'
       fullPath: '/inbox'
       preLoaderRoute: typeof ShellInboxRouteImport
+      parentRoute: typeof ShellRoute
+    }
+    '/_shell/kit-failed': {
+      id: '/_shell/kit-failed'
+      path: '/kit-failed'
+      fullPath: '/kit-failed'
+      preLoaderRoute: typeof ShellKitFailedRouteImport
       parentRoute: typeof ShellRoute
     }
     '/_shell/settings': {
@@ -1305,6 +1344,7 @@ interface ShellRouteChildren {
   ShellConnectMicrosoftRoute: typeof ShellConnectMicrosoftRoute
   ShellDashboardRoute: typeof ShellDashboardRoute
   ShellInboxRoute: typeof ShellInboxRoute
+  ShellKitFailedRoute: typeof ShellKitFailedRoute
   ShellSettingsRoute: typeof ShellSettingsRouteWithChildren
   ShellIndexRoute: typeof ShellIndexRoute
   ShellAgentsAgentRoute: typeof ShellAgentsAgentRoute
@@ -1331,6 +1371,7 @@ const ShellRouteChildren: ShellRouteChildren = {
   ShellConnectMicrosoftRoute: ShellConnectMicrosoftRoute,
   ShellDashboardRoute: ShellDashboardRoute,
   ShellInboxRoute: ShellInboxRoute,
+  ShellKitFailedRoute: ShellKitFailedRoute,
   ShellSettingsRoute: ShellSettingsRouteWithChildren,
   ShellIndexRoute: ShellIndexRoute,
   ShellAgentsAgentRoute: ShellAgentsAgentRoute,
@@ -1383,6 +1424,7 @@ const rootRouteChildren: RootRouteChildren = {
   GuestRoute: GuestRoute,
   InterviewRoute: InterviewRoute,
   KitRoute: KitRoute,
+  KitFailedWholeRoute: KitFailedWholeRoute,
   SetupRoute: SetupRoute,
   SignInRoute: SignInRoute,
   StaffRoute: StaffRoute,

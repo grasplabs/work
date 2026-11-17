@@ -36,7 +36,7 @@ let root: Root | undefined;
 const reason = "Grasp can't be reached right now. Reference: req-1";
 
 /** The app at `path`, in the frame or not, counting the broken page's reads. */
-const opened = async (path: string, inFrame = true) => {
+const opened = async (path: string, inFrame = true, core?: object) => {
   const reads = { broken: 0 };
   const rootRoute = createRootRoute({ component: Outlet });
   const routeTree = rootRoute.addChildren([
@@ -68,6 +68,7 @@ const opened = async (path: string, inFrame = true) => {
     routeTree,
     history: createMemoryHistory({ initialEntries: [path] }),
     defaultNotFoundComponent: () => <NotFound />,
+    ...(core === undefined ? {} : { context: { core } }),
   });
   const host = document.createElement("div");
   document.body.append(host);
@@ -96,10 +97,22 @@ const settled = async (): Promise<void> => {
   });
 };
 
-/** The link or button whose text is `name`, if there is one. */
+/** An element's words as a screen reader hears them: what is hidden from it left out. */
+const wordsOf = (element: HTMLElement): string => {
+  const copy = element.cloneNode(true);
+  if (!(copy instanceof HTMLElement)) {
+    return "";
+  }
+  for (const hidden of copy.querySelectorAll('[aria-hidden="true"]')) {
+    hidden.remove();
+  }
+  return copy.textContent?.trim() ?? "";
+};
+
+/** The link or button whose words are `name`, if there is one. */
 const control = (name: string): HTMLElement | undefined =>
   [...document.querySelectorAll<HTMLElement>("a, button")].find(
-    (element) => element.textContent?.trim() === name
+    (element) => wordsOf(element) === name
   );
 
 /** Clicks the control named `name`, then lets it settle. */
@@ -114,6 +127,12 @@ const click = async (name: string): Promise<void> => {
   });
   await settled();
 };
+
+/** Every paragraph's words, as shown. */
+const lines = (): string[] =>
+  [...document.querySelectorAll("p")].map(
+    (line) => line.textContent?.trim() ?? ""
+  );
 
 const heading = (): string | undefined =>
   document.querySelector("h1")?.textContent ?? undefined;
@@ -151,13 +170,53 @@ describe("where a page can't stand", () => {
   describe("the error page", () => {
     it("says why with the request ID, and reads the page again on Try again", async () => {
       const { router, reads } = await opened("/broken");
-      expect(heading()).toBe("This page didn't load");
-      expect(document.body.textContent).toContain(reason);
-      expect(reads.broken).toBe(1);
-
+      // Why, in its sentence; the reference apart, to copy for support.
+      const shown = {
+        heading: heading(),
+        why: lines().includes("Grasp can't be reached right now."),
+        reference: document.body.textContent?.includes("req-1"),
+        reads: reads.broken,
+      };
       await click("Try again");
-      expect(reads.broken).toBe(2);
-      expect(router.state.location.pathname).toBe("/broken");
+
+      expect({
+        ...shown,
+        readsAfter: reads.broken,
+        at: router.state.location.pathname,
+      }).toStrictEqual({
+        heading: "This page didn't load",
+        why: true,
+        reference: true,
+        reads: 1,
+        readsAfter: 2,
+        at: "/broken",
+      });
+    });
+
+    it("says whether Grasp can be reached, as the tab's connection finds it, as it changes", async () => {
+      const watchers = new Set<() => void>();
+      const core = {
+        reach: "unreachable",
+        watchReach: (changed: () => void) => {
+          watchers.add(changed);
+          return () => {
+            watchers.delete(changed);
+          };
+        },
+      };
+      await opened("/broken", true, core);
+      const before = lines();
+      act(() => {
+        core.reach = "reachable";
+        for (const changed of watchers) {
+          changed();
+        }
+      });
+
+      expect({
+        before: before.includes("No answer from Grasp yet"),
+        after: lines().includes("Grasp can be reached"),
+      }).toStrictEqual({ before: true, after: true });
     });
 
     it("goes to Chat", async () => {

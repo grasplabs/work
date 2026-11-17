@@ -14,6 +14,7 @@ import type { ChatPanels } from "../chat/chat-panel.tsx";
 import type { CoreConnection } from "../core-connection.ts";
 import { keepFolded, readFolded } from "../fold.ts";
 import { AppShell } from "../grasp/app-shell/index.ts";
+import type { AppShellProps } from "../grasp/app-shell/index.ts";
 import { useGraspSidebar } from "../grasp/frame/grasp-sidebar.tsx";
 import { Sidebar } from "../grasp/sidebar/index.ts";
 import { Toaster as GraspToaster } from "../grasp/toast/index.ts";
@@ -84,12 +85,38 @@ const useFoldKey = (toggle: () => void) => {
   }, []);
 };
 
+/** Grasp's chat as App shell's panel props take it: none outside the shell's pages. */
+const shellPanelsOf = (
+  panels: ChatPanels | undefined
+): Partial<AppShellProps> =>
+  panels === undefined
+    ? {}
+    : {
+        panels: panels.panels,
+        covered: panels.covered,
+        panelWidth: panels.width,
+        onPanelWidthChange: panels.onWidthChange,
+        minPanelWidth: panels.minWidth,
+        maxPanelWidth: panels.maxWidth,
+        panelPlacement: panels.placement,
+        ...(panels.onPlacementChange === undefined
+          ? {}
+          : { onPanelPlacementChange: panels.onPlacementChange }),
+        panelPosition: panels.position,
+        onPanelPositionChange: panels.onPositionChange,
+        panelHeight: panels.height,
+        onPanelHeightChange: panels.onHeightChange,
+        ...(panels.onClose === undefined
+          ? {}
+          : { onPanelsClose: panels.onClose }),
+      };
+
 /**
  * The signed-in product's frame, Grasp UI's App shell: the product's
  * sidebar beside the page, or in the menu on a phone; the page's card, its
  * bar drawn by each page (`SiteHeader`), or none (`bar="none"`, Chat's start);
  * over the card's foot what stays at hand on every page (`dock`); beside
- * the page, Grasp's chat (`panels`), or over it, floating (`floating`). A page outside the shell for someone
+ * the page, Grasp's chat (`panels`), docked or floating over it. A page outside the shell for someone
  * signed in, such as a decision opened from a link, has the frame with none
  * of them.
  *
@@ -107,7 +134,6 @@ export const AppFrame = ({
   dock,
   dockShown = true,
   panels,
-  floating,
   children,
 }: {
   core: CoreConnection;
@@ -120,10 +146,8 @@ export const AppFrame = ({
   dock?: ReactNode;
   /** Whether the dock stands at the foot now; off, the page keeps no room or fade for it. */
   dockShown?: boolean;
-  /** Beside the page, or over it full screen: Grasp's chat. */
+  /** Beside the page, floating over it, or over it full screen: Grasp's chat. */
   panels?: ChatPanels;
-  /** Over the frame, where it was put: the chat floating. */
-  floating?: ReactNode;
   children: ReactNode;
 }) => {
   const { t } = useLingui();
@@ -166,7 +190,7 @@ export const AppFrame = ({
     <PersonTheme userId={identity.userId}>
       <Toaster>
         <TooltipProvider>
-          {/* The floating chat inside it too, so the tour holds it as well. */}
+          {/* The chat inside it too, docked or floating, so the tour holds it as well. */}
           <div inert={touring} {...stylex.props(styles.shell)}>
             <AppShell
               banner={
@@ -178,18 +202,13 @@ export const AppFrame = ({
               dock={chatPage ? undefined : dock}
               dockShown={dockShown}
               {...(dockShown ? {} : { roomBelow: "page" as const })}
-              maxPanelWidth={panels?.maxWidth}
+              {...shellPanelsOf(panels)}
               menuCloseLabel={t`Close the menu`}
               menuLabel={t`Menu`}
               menuOpen={menuOpen}
-              minPanelWidth={panels?.minWidth}
               onMenuOpenChange={setMenuOpen}
-              onPanelWidthChange={panels?.onWidthChange}
-              onPanelsClose={panels?.onClose}
               page={chatPage ? "whole" : "padded"}
               panelResizeLabel={t`Resize the chat`}
-              panelWidth={panels?.width}
-              panels={panels?.panels}
               panelsCloseLabel={t`Close the chat`}
               panelsToggleLabel={t`Show or hide the chat`}
               sidebar={<Sidebar {...sidebar} />}
@@ -198,7 +217,6 @@ export const AppFrame = ({
                 <InFrame value>{children}</InFrame>
               </div>
             </AppShell>
-            {floating}
           </div>
           {/* Grasp UI's toasts, for what the page and the chat say of an action. */}
           <GraspToaster

@@ -11,7 +11,7 @@ import { Composer } from "../grasp/composer/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
 import { SettingRow, SettingsRows } from "../grasp/setting-row/index.ts";
 import { Toggle, ToggleGroup } from "../grasp/toggle/index.ts";
-import { SettingsStack } from "./section.tsx";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 
 // Settings → Appearance: how the chat's box draws Grasp at work (the
 // person's look, chat/composer-look.ts). One box, live and at work in the
@@ -20,8 +20,14 @@ import { SettingsStack } from "./section.tsx";
 // is pressed, and each choice is kept as it is made.
 
 const styles = stylex.create({
+  // The box, then the rows the card's width, as every settings card's.
+  body: {
+    display: "grid",
+    gap: grasp.space4,
+  },
   // The box at work: only to look at, never to type in.
   preview: {
+    maxWidth: grasp.formWidth,
     pointerEvents: "none",
   },
 });
@@ -34,7 +40,7 @@ export const ComposerSettings = ({ userId }: { userId: string }) => {
   const edges = { smooth: t`Smooth`, dither: t`Dither` };
   return (
     <SectionCard title={t`Chat box`}>
-      <SettingsStack>
+      <div {...stylex.props(styles.body)}>
         <div aria-hidden inert {...stylex.props(styles.preview)}>
           <Composer
             accent={look.accent}
@@ -89,7 +95,7 @@ export const ComposerSettings = ({ userId }: { userId: string }) => {
             </ToggleGroup>
           </SettingRow>
         </SettingsRows>
-      </SettingsStack>
+      </div>
     </SectionCard>
   );
 };
