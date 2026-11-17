@@ -2536,6 +2536,10 @@ msgstr "No responde a nadie en ningún sitio"
 msgid "Answers the people it is for"
 msgstr "Responde a las personas para las que está"
 
+#: src/chat/agent-draft-card.tsx
+msgid "Any app its kinds of work allow"
+msgstr "Cualquier app que permitan sus tipos de trabajo"
+
 #: src/workflows/binding-approvals.tsx
 msgid "Any event its webhook source sends of the types its contract admits"
 msgstr "Cualquier evento que envíe su fuente de webhook, de los tipos que admite su contrato"
@@ -2770,6 +2774,10 @@ msgstr "Apps y flujos de trabajo"
 #: src/routes/_shell.projects.index.tsx
 msgid "Apps and workflows grouped by process, team or goal. Putting something in a project shares it with nobody."
 msgstr "Apps y flujos de trabajo agrupados por proceso, equipo u objetivo. Poner algo en un proyecto no lo comparte con nadie."
+
+#: src/chat/agent-draft-card.tsx
+msgid "Apps it uses"
+msgstr "Apps que usa"
 
 #: src/workflows/files-and-apps.tsx
 msgid "Apps it works in"

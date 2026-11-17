@@ -342,6 +342,47 @@ describe("an agent made from the chat", { timeout: 120_000 }, () => {
     });
   });
 
+  it("gives the agent exactly the apps its card showed, and makes nothing of a card naming an app the company doesn't offer", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const name = `With apps ${unique()}`;
+    const withApps = await draftedChat(admin, {
+      ...hr(name),
+      whose: "company",
+      apps: [{ source: "native", provider: "google", name: "Gmail" }],
+    });
+    const made = await admin.api.chats.makeDraftedAgent(withApps.chat.id, {
+      draft: withApps.callId ?? "",
+      text: "Make it",
+      model,
+    });
+    await idle(admin, withApps.chat.id);
+    const apps = await admin.api.connections.agentApps(made.id);
+    const other = `Not offered ${unique()}`;
+    const notOffered = await draftedChat(admin, {
+      ...hr(other),
+      whose: "company",
+      apps: [{ source: "composio", provider: "nothing", name: "Nothing" }],
+    });
+    const refused = await outcome(
+      admin.api.chats.makeDraftedAgent(notOffered.chat.id, {
+        draft: notOffered.callId ?? "",
+        text: "Make it",
+        model,
+      })
+    );
+    const listed = await admin.api.connections.agents();
+
+    expect({
+      apps: apps.map(({ app, state, source }) => [app, state, source]),
+      refused,
+      madeOther: listed.some((agent) => agent.name === other),
+    }).toStrictEqual({
+      apps: [["native:google", "on", "person"]],
+      refused: "agent.app_unknown",
+      madeOther: false,
+    });
+  });
+
   it("is never drafted in a turn nobody asked for", async () => {
     const admin = await signedInApi(idp, "admin");
     const { stub, provider, newChat } = await personalChatsOf(
