@@ -1,7 +1,9 @@
 import type {
   ConnectionBrainAudience,
+  ConnectionBrainAudienceSetting,
   ListedConnection,
 } from "@grasp-os/shared/connect";
+import { connectionErrors } from "@grasp-os/shared/connect";
 import { failureText } from "@grasp-os/shared/errors";
 import { Button } from "@grasp-os/ui/components/button";
 import {
@@ -18,7 +20,7 @@ import {
   NativeSelectOption,
 } from "@grasp-os/ui/components/native-select";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { useEffect, useId, useState } from "react";
+import { useEffect, useEffectEvent, useId, useState } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
 import type { Session } from "../core.ts";
@@ -40,50 +42,132 @@ interface Team {
   name: string;
 }
 
-/**
- * What the card reads from core: the connection's audience now, whether
- * what the Brain kept of it is being erased, and the company's teams.
- */
-interface Loaded {
-  audience: ConnectionBrainAudience;
-  erasing: boolean;
+/** What the cards read from core once for all of them: every shared connection's audience, and the company's teams. */
+interface Audiences {
+  settings: ConnectionBrainAudienceSetting[];
   teams: Team[];
 }
 
-/** What a read from core came to. */
-type Read =
+/** What reading the audiences from core came to. */
+export type AudiencesRead =
   | { state: "loading" }
   | { state: "refused"; message: string }
-  | { state: "ready"; data: Loaded };
+  | { state: "ready"; data: Audiences };
 
 /**
- * The audience of `connectionId` and the company's teams, or why not.
- * Outside the components, as the React Compiler can't compile `try`.
+ * Every shared connection's audience, or why not: one read of core's
+ * list. Outside the components, as the React Compiler can't compile
+ * `try`.
  */
-const readAudience = async (
-  core: CoreConnection,
-  connectionId: string
-): Promise<Read> => {
+const readSettings = async (
+  core: CoreConnection
+): Promise<ConnectionBrainAudienceSetting[] | { refused: string }> => {
+  try {
+    return await core.withSession(
+      async (session: Session) => await session.connections.brainAudiences()
+    );
+  } catch (error) {
+    return { refused: failureText(error) };
+  }
+};
+
+/** Every shared connection's audience and the company's teams, or why not. */
+const readAudiences = async (core: CoreConnection): Promise<AudiencesRead> => {
   try {
     const data = await core.withSession(
-      async (session: Session): Promise<Loaded> => {
-        const [audiences, teams] = await Promise.all([
+      async (session: Session): Promise<Audiences> => {
+        const [settings, teams] = await Promise.all([
           session.connections.brainAudiences(),
           session.organization.teams(),
         ]);
-        const chosen = audiences.find(
-          (each) => each.connectionId === connectionId
-        );
-        return {
-          audience: chosen?.audience ?? { kind: "nobody" },
-          erasing: chosen?.erasing ?? false,
-          teams,
-        };
+        return { settings, teams };
       }
     );
     return { state: "ready", data };
   } catch (error) {
     return { state: "refused", message: failureText(error) };
+  }
+};
+
+/**
+ * The shared connections' audiences and the company's teams, read once
+ * for every card of a page when `wanted` (an admin who chooses on at
+ * least one), and `onChanged`, which reads the audiences again, once,
+ * after a change or an erase was asked for: the cards show only what core
+ * says, never a copy of their own. Read again too when the window comes
+ * back to the page, as other lists are (chat/build-progress.tsx): so an
+ * erasure that ended, or another admin's choice, shows without a reload.
+ */
+export const useBrainAudiences = (
+  wanted: boolean
+): { read: AudiencesRead; onChanged: () => void } => {
+  const core = useCore();
+  const [read, setRead] = useState<AudiencesRead>({ state: "loading" });
+  useEffect(() => {
+    let left = false;
+    const load = async (): Promise<void> => {
+      const answer = await readAudiences(core);
+      if (!left) {
+        setRead(answer);
+      }
+    };
+    if (wanted) {
+      void load();
+    }
+    return () => {
+      left = true;
+    };
+  }, [core, wanted]);
+  const onChanged = (): void => {
+    void (async () => {
+      const settings = await readSettings(core);
+      setRead((before) => {
+        if ("refused" in settings) {
+          return { state: "refused", message: settings.refused };
+        }
+        return before.state === "ready"
+          ? { state: "ready", data: { ...before.data, settings } }
+          : before;
+      });
+    })();
+  };
+  const back = useEffectEvent(onChanged);
+  useEffect(() => {
+    const returned = (): void => {
+      if (wanted) {
+        back();
+      }
+    };
+    window.addEventListener("focus", returned);
+    return () => {
+      window.removeEventListener("focus", returned);
+    };
+  }, [wanted]);
+  return { read, onChanged };
+};
+
+/**
+ * Chooses `next` for `connectionId` from `from`, the audience the admin
+ * was looking at: `changed` when core refused it as another was held
+ * meanwhile (nothing changed). Any other refusal is thrown. Outside the
+ * components, as the React Compiler can't compile `try`.
+ */
+const chosenFrom = async (
+  session: Session,
+  connectionId: string,
+  next: ConnectionBrainAudience,
+  from: ConnectionBrainAudience
+): Promise<"chosen" | "changed"> => {
+  try {
+    await session.connections.setBrainAudience(connectionId, next, from);
+    return "chosen";
+  } catch (error) {
+    if (
+      connectionErrors.codeOf(error) === "connection.brain_audience_changed"
+    ) {
+      return "changed";
+    }
+    throw error;
   }
 };
 
@@ -233,50 +317,55 @@ const EraseKept = ({
 };
 
 /**
- * The audience as core holds it now, read as it opens, and its choices:
- * `onChanged` once a change or an erase was asked for, so it is read
- * again.
+ * For an admin, on a shared connection's card: its Brain audience as
+ * core holds it (`audiences`, read once for every card), and erasing what
+ * was kept. `onChanged` once a change or an erase was asked for, whether
+ * it went through or was refused, so the audiences are read again; its
+ * own error stays on the card meanwhile.
  */
-const AudienceChoice = ({
+export const BrainAudience = ({
   connection,
   label,
+  audiences,
   onChanged,
 }: {
   connection: ListedConnection;
   label: string;
+  audiences: AudiencesRead;
   onChanged: () => void;
 }) => {
-  const core = useCore();
   const { t } = useLingui();
   const selectId = useId();
   const { busy, failure, change } = useChange();
-  const [read, setRead] = useState<Read>({ state: "loading" });
   const [asked, setAsked] = useState<ConnectionBrainAudience>();
-  useEffect(() => {
-    let left = false;
-    const load = async (): Promise<void> => {
-      const answer = await readAudience(core, connection.id);
-      if (!left) {
-        setRead(answer);
-      }
-    };
-    void load();
-    return () => {
-      left = true;
-    };
-  }, [core, connection.id]);
-  if (read.state === "loading") {
+  // Refused as the audience changed meanwhile: said until the next choice.
+  const [changedMeanwhile, setChangedMeanwhile] = useState(false);
+  if (audiences.state === "loading") {
     return null;
   }
-  if (read.state === "refused") {
-    return <ErrorText>{read.message}</ErrorText>;
+  if (audiences.state === "refused") {
+    return <ErrorText>{audiences.message}</ErrorText>;
   }
-  const { audience, erasing, teams } = read.data;
+  const { settings, teams } = audiences.data;
+  const setting = settings.find(
+    ({ connectionId }) => connectionId === connection.id
+  );
+  const audience: ConnectionBrainAudience = setting?.audience ?? {
+    kind: "nobody",
+  };
+  const erasing = setting?.erasing ?? false;
   const choose = (next: ConnectionBrainAudience): void => {
     setAsked(undefined);
+    setChangedMeanwhile(false);
     void (async () => {
       await change(async (session) => {
-        await session.connections.setBrainAudience(connection.id, next);
+        const outcome = await chosenFrom(
+          session,
+          connection.id,
+          next,
+          audience
+        );
+        setChangedMeanwhile(outcome === "changed");
       });
       onChanged();
     })();
@@ -328,6 +417,15 @@ const AudienceChoice = ({
           </Trans>
         </p>
       ) : null}
+      {changedMeanwhile ? (
+        <p className="text-muted-foreground">
+          <Trans>
+            Who may read what agents read through {label} was changed in the
+            meantime. This is who may read it now: choose again if you still
+            want to change it.
+          </Trans>
+        </p>
+      ) : null}
       <ErrorText>{failure}</ErrorText>
       {asked === undefined ? null : (
         <WidenDialog
@@ -347,30 +445,5 @@ const AudienceChoice = ({
         <EraseKept connection={connection} label={label} onErased={onChanged} />
       ) : null}
     </div>
-  );
-};
-
-/** For an admin, on a shared connection's card: its Brain audience, and erasing what was kept. */
-export const BrainAudience = ({
-  connection,
-  label,
-}: {
-  connection: ListedConnection;
-  label: string;
-}) => {
-  // Each change or erase asked for counts: the choice opens again and
-  // reads what core holds then, so it shows only what core says, never a
-  // copy of its own (an erase takes the audience away, and an erasure
-  // under way allows none).
-  const [changes, setChanges] = useState(0);
-  return (
-    <AudienceChoice
-      connection={connection}
-      key={changes}
-      label={label}
-      onChanged={() => {
-        setChanges((before) => before + 1);
-      }}
-    />
   );
 };

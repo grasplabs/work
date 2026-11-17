@@ -135,10 +135,12 @@ export interface KeptOf {
 /**
  * What the Brain keeps of each of the shared connections `connectionIds`
  * now, how many records and when the last was read; a connection with
- * none is left out. For connections a reader holds (brain-next.ts
- * `readableConnectionsOf`): each has an audience, which none being erased
- * or closed has, and a connection's records of an older generation exist
- * only while it is being erased, so all of its records are current.
+ * none is left out, and so is one with no audience, being erased or
+ * closed, decided in this statement as the reader's own audience read
+ * decides it (connection-audiences.ts `audiencesRead`): an erasure that
+ * starts after the reader's groups were read, and before this, shows
+ * nothing of what it erases. For connections a reader holds (brain-next.ts
+ * `readableConnectionsOf`).
  */
 export const keptOf = async (
   env: Pick<Env, "DB">,
@@ -154,7 +156,11 @@ export const keptOf = async (
       lastReadAt: sql<number>`max(${connectionBrainReads.readAt})`,
     })
     .from(connectionBrainReads)
-    .where(inList(connectionBrainReads.connectionId, connectionIds))
+    .where(
+      sql`${inList(connectionBrainReads.connectionId, connectionIds)}
+        AND EXISTS (SELECT 1 FROM ${connectionBrainAudiences} WHERE ${connectionBrainAudiences.connectionId} = ${connectionBrainReads.connectionId})
+        AND NOT EXISTS (SELECT 1 FROM ${connectionBrainErasures} WHERE ${connectionBrainErasures.connectionId} = ${connectionBrainReads.connectionId} AND (${connectionBrainErasures.erasing} = 1 OR ${connectionBrainErasures.closed} = 1))`
+    )
     .groupBy(connectionBrainReads.connectionId)
     .orderBy(asc(connectionBrainReads.connectionId));
   return rows.map(({ connectionId, records, lastReadAt }) => ({

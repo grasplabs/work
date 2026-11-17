@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { connectionErrors } from "@grasp-os/shared/connect";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
@@ -152,11 +153,34 @@ interface Held {
   erasing: boolean;
 }
 
+/** How often the page read the audiences and the teams of core. */
+interface Reads {
+  audiences: number;
+  teams: number;
+}
+
+/** What core refuses, as when the Brain is out of reach. */
+type Refusing = "erase" | "change" | undefined;
+
+/** The refusal's words, as core gives them. */
+const refusal = "The Brain is out of reach.";
+
 const asAdmin = async (
   shown: CatalogConnection,
   audience?: { kind: string; teamId?: string },
   /** What core holds, which a test changes as the clock would. */
-  holding?: Held
+  holding?: Held,
+  {
+    others = [],
+    refusing,
+    reads = { audiences: 0, teams: 0 },
+  }: {
+    /** More shared connections of the same integration, each with no audience. */
+    others?: CatalogConnection[];
+    refusing?: Refusing;
+    /** Counted as the page reads. */
+    reads?: Reads;
+  } = {}
 ): Promise<Asked> => {
   const held = holding ?? {
     audience: audience ?? { kind: "nobody" },
@@ -166,8 +190,9 @@ const asAdmin = async (
   const session = {
     connections: {
       // As core lists them: one with an audience or being erased.
-      brainAudiences: async () =>
-        await Promise.resolve(
+      brainAudiences: async () => {
+        reads.audiences += 1;
+        return await Promise.resolve(
           held.audience.kind === "nobody" && !held.erasing
             ? []
             : [
@@ -182,10 +207,20 @@ const asAdmin = async (
                       : "2026-11-17T08:00:00.000Z",
                 },
               ]
-        ),
+        );
+      },
       setBrainAudience: async (...given: unknown[]) => {
         asked.push(["setBrainAudience", ...given]);
-        const [, next] = given;
+        if (refusing === "change") {
+          await Promise.resolve();
+          throw new Error(refusal);
+        }
+        const [, next, from] = given;
+        // As core: only from the audience held now.
+        if (JSON.stringify(from) !== JSON.stringify(held.audience)) {
+          await Promise.resolve();
+          throw connectionErrors.create("connection.brain_audience_changed");
+        }
         if (typeof next === "object" && next !== null && "kind" in next) {
           held.audience = {
             kind: String(next.kind),
@@ -198,13 +233,20 @@ const asAdmin = async (
       // clock ends it.
       eraseBrainReads: async (...given: unknown[]) => {
         asked.push(["eraseBrainReads", ...given]);
+        if (refusing === "erase") {
+          await Promise.resolve();
+          throw new Error(refusal);
+        }
         held.audience = { kind: "nobody" };
         held.erasing = true;
         await Promise.resolve();
       },
     },
     organization: {
-      teams: async () => await Promise.resolve([{ id: "t1", name: "Sales" }]),
+      teams: async () => {
+        reads.teams += 1;
+        return await Promise.resolve([{ id: "t1", name: "Sales" }]);
+      },
     },
   };
   const core = {
@@ -216,7 +258,7 @@ const asAdmin = async (
       <ConnectionList
         held={undefined}
         identity={admin}
-        integration={integrationOf([shown])}
+        integration={integrationOf([shown, ...others])}
       />
     ),
   });
@@ -297,7 +339,9 @@ describe("a shared connection's Brain audience, for an admin", () => {
     }).toStrictEqual({
       asking: true,
       afterCancel: [],
-      asked: [["setBrainAudience", "c1", { kind: "everyone" }]],
+      asked: [
+        ["setBrainAudience", "c1", { kind: "everyone" }, { kind: "nobody" }],
+      ],
     });
   });
 
@@ -331,8 +375,18 @@ describe("a shared connection's Brain audience, for an admin", () => {
       fromNobody,
     }).toStrictEqual({
       asked: [
-        ["setBrainAudience", "c1", { kind: "team", teamId: "t1" }],
-        ["setBrainAudience", "c1", { kind: "nobody" }],
+        [
+          "setBrainAudience",
+          "c1",
+          { kind: "team", teamId: "t1" },
+          { kind: "everyone" },
+        ],
+        [
+          "setBrainAudience",
+          "c1",
+          { kind: "nobody" },
+          { kind: "team", teamId: "t1" },
+        ],
         ["eraseBrainReads", "c1"],
       ],
       erasing: true,
@@ -384,6 +438,107 @@ describe("a shared connection's Brain audience, for an admin", () => {
       // Not chosen until confirmed.
       asked: [],
     });
+  });
+
+  it("keeps a refused erase's reason on the page after the audience is read again, and a refused change's too", async () => {
+    const kept = connection({
+      scope: "shared",
+      ownerUserId: null,
+      keepsReads: true,
+    });
+    await asAdmin(kept, { kind: "everyone" }, undefined, {
+      refusing: "erase",
+    });
+    await press("Erase what the Brain kept");
+    await press("Erase for good");
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const afterErase = document.body.textContent.includes(refusal);
+    act(() => {
+      root?.unmount();
+    });
+    document.body.replaceChildren();
+    await asAdmin(kept, { kind: "everyone" }, undefined, {
+      refusing: "change",
+    });
+    await choose("nobody");
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect({
+      afterErase,
+      afterChange: document.body.textContent.includes(refusal),
+    }).toStrictEqual({ afterErase: true, afterChange: true });
+  });
+
+  it("reads the audiences and the teams once for all the shared connections shown, and once again after a change", async () => {
+    const reads: Reads = { audiences: 0, teams: 0 };
+    await asAdmin(shared, { kind: "everyone" }, undefined, {
+      others: [
+        connection({ id: "c2", scope: "shared", ownerUserId: null }),
+        connection({ id: "c3", scope: "shared", ownerUserId: null }),
+      ],
+      reads,
+    });
+    const opened = { ...reads };
+    // The first card's choice: narrowing, so no question.
+    await choose("nobody");
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect({ opened, changed: reads }).toStrictEqual({
+      opened: { audiences: 1, teams: 1 },
+      changed: { audiences: 2, teams: 1 },
+    });
+  });
+
+  it("says the audience changed meanwhile when a choice was made from an old one, shows the one held now, and asks before opening it from there", async () => {
+    const held: Held = { audience: { kind: "everyone" }, erasing: false };
+    await asAdmin(shared, undefined, held);
+    // Another admin closes it to nobody; this card still shows everyone.
+    held.audience = { kind: "nobody" };
+    // From everyone, a team narrows: no question, and core refuses it.
+    await choose("t1");
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const after = {
+      says: document.body.textContent.includes(
+        "Who may read what agents read through Notes was changed in the meantime. This is who may read it now: choose again if you still want to change it."
+      ),
+      shown: document.querySelector("select")?.value,
+      held: held.audience,
+    };
+    await choose("t1");
+
+    expect({
+      after,
+      asking: dialogText().includes(
+        "Everyone in Sales will be able to find what agents read through Notes, including what was kept before."
+      ),
+    }).toStrictEqual({
+      after: { says: true, shown: "nobody", held: { kind: "nobody" } },
+      asking: true,
+    });
+  });
+
+  it("reads the audience again when the window comes back, so an erasure that ended frees the choice", async () => {
+    const held: Held = { audience: { kind: "nobody" }, erasing: true };
+    await asAdmin(shared, undefined, held);
+    const whileErasing = document.querySelector("select")?.disabled;
+    held.erasing = false;
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+      await Promise.resolve();
+    });
+
+    expect({
+      whileErasing,
+      back: document.querySelector("select")?.disabled,
+    }).toStrictEqual({ whileErasing: true, back: false });
   });
 
   it("is never shown to someone who isn't an admin, nor on a person's own connection", async () => {

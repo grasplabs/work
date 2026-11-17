@@ -44,6 +44,7 @@ import { inJurisdiction, workspace } from "../src/durable-objects.ts";
 import { instructionFilesFor } from "../src/instruction-files.ts";
 import { codeStep, says, toolStep } from "./agent-chat.ts";
 import { published } from "./apps.ts";
+import { chooseAudience } from "./brain-audiences.ts";
 import {
   markerWord,
   surfaces,
@@ -662,7 +663,7 @@ describe(
         .bind(sharedConnection, readAtNow, readAtNow)
         .run();
       const sharingAdmin = await signedInApi(idp, "admin");
-      await sharingAdmin.api.connections.setBrainAudience(sharedConnection, {
+      await chooseAudience(sharingAdmin.api, sharedConnection, {
         kind: "team",
         teamId: secretTeam,
       });

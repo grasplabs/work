@@ -13,6 +13,7 @@ import {
 import type { SourceReaders, SourceRef } from "../src/brain-next.ts";
 import { setConnectionAudience } from "../src/connection-audiences.ts";
 import { teams } from "../src/db/core/schema.ts";
+import { chooseAudience } from "./brain-audiences.ts";
 import { join, leave, newTeam } from "./brain-next-leaks-harness.ts";
 import { afterFirstRead } from "./d1-after-first-read.ts";
 import { mockIdp } from "./idp.ts";
@@ -186,7 +187,7 @@ describe("a shared connection's Brain audience", setUpTime, () => {
 
     // Nobody, until an admin chooses.
     const before = await findsAt(seller, source, marker, [sales]);
-    await admin.api.connections.setBrainAudience(connectionId, {
+    await chooseAudience(admin.api, connectionId, {
       kind: "team",
       teamId: sales,
     });
@@ -262,7 +263,7 @@ describe("a shared connection's Brain audience", setUpTime, () => {
       ]);
       return { seller: bySeller[reach], newcomer: byNewcomer[reach] };
     };
-    await admin.api.connections.setBrainAudience(connectionId, {
+    await chooseAudience(admin.api, connectionId, {
       kind: "team",
       teamId: sales,
     });
@@ -270,16 +271,16 @@ describe("a shared connection's Brain audience", setUpTime, () => {
     await join(sales, newcomer);
     await leave(sales, seller);
     const membersMoved = await seen("person");
-    await admin.api.connections.setBrainAudience(connectionId, {
+    await chooseAudience(admin.api, connectionId, {
       kind: "everyone",
     });
     const everyone = await seen("company");
-    await admin.api.connections.setBrainAudience(connectionId, {
+    await chooseAudience(admin.api, connectionId, {
       kind: "nobody",
     });
     const nobody = await seen("person");
     // Kept meanwhile: the team's again once an admin says so.
-    await admin.api.connections.setBrainAudience(connectionId, {
+    await chooseAudience(admin.api, connectionId, {
       kind: "team",
       teamId: sales,
     });
@@ -314,7 +315,7 @@ describe("a shared connection's Brain audience", setUpTime, () => {
     const connectionId = await connection();
     const marker = uniqueWord();
     const source = await keptThrough(connectionId, marker);
-    await admin.api.connections.setBrainAudience(connectionId, {
+    await chooseAudience(admin.api, connectionId, {
       kind: "team",
       teamId: sales,
     });
@@ -369,26 +370,17 @@ describe("a shared connection's Brain audience", setUpTime, () => {
     const forSales = { kind: "team", teamId: sales } as const;
 
     const refused = {
-      member: await outcome(
-        member.api.connections.setBrainAudience(shared, forSales)
-      ),
-      staff: await outcome(
-        staff.connections.setBrainAudience(shared, forSales)
-      ),
-      personal: await outcome(
-        admin.api.connections.setBrainAudience(personal, forSales)
-      ),
+      member: await outcome(chooseAudience(member.api, shared, forSales)),
+      staff: await outcome(chooseAudience(staff, shared, forSales)),
+      personal: await outcome(chooseAudience(admin.api, personal, forSales)),
       disconnected: await outcome(
-        admin.api.connections.setBrainAudience(disconnected, forSales)
+        chooseAudience(admin.api, disconnected, forSales)
       ),
       unknown: await outcome(
-        admin.api.connections.setBrainAudience(
-          `connection-${unique()}`,
-          forSales
-        )
+        chooseAudience(admin.api, `connection-${unique()}`, forSales)
       ),
       unknownTeam: await outcome(
-        admin.api.connections.setBrainAudience(shared, {
+        chooseAudience(admin.api, shared, {
           kind: "team",
           teamId: crypto.randomUUID(),
         })
@@ -396,14 +388,14 @@ describe("a shared connection's Brain audience", setUpTime, () => {
       listedByMember: await outcome(member.api.connections.brainAudiences()),
     };
     const events = await auditedDuring(async () => {
-      await admin.api.connections.setBrainAudience(shared, forSales);
+      await chooseAudience(admin.api, shared, forSales);
       // The same again changes nothing, and records nothing.
-      await admin.api.connections.setBrainAudience(shared, forSales);
-      await admin.api.connections.setBrainAudience(shared, {
+      await chooseAudience(admin.api, shared, forSales);
+      await chooseAudience(admin.api, shared, {
         kind: "everyone",
       });
-      await admin.api.connections.setBrainAudience(shared, { kind: "nobody" });
-      await admin.api.connections.setBrainAudience(shared, { kind: "nobody" });
+      await chooseAudience(admin.api, shared, { kind: "nobody" });
+      await chooseAudience(admin.api, shared, { kind: "nobody" });
     });
     const audiences = await admin.api.connections.brainAudiences();
 
@@ -443,7 +435,7 @@ describe("a shared connection's Brain audience", setUpTime, () => {
     });
   });
 
-  it("records what each of two admins' changes at once replaced: the one that lost its race records nothing, and its retry what it really replaced", async () => {
+  it("refuses a change made from an audience that changed meanwhile, records nothing of it, and records what the other change replaced", async () => {
     const [first, second] = await Promise.all([
       signedInApi(idp, "admin"),
       signedInApi(idp, "admin"),
@@ -453,31 +445,49 @@ describe("a shared connection's Brain audience", setUpTime, () => {
       newTeam(second.userId),
     ]);
     const connectionId = await connection();
-    await first.api.connections.setBrainAudience(connectionId, {
+    await chooseAudience(first.api, connectionId, {
       kind: "team",
       teamId: sales,
     });
-    // The first admin reads Sales; before they write, the second admin
-    // opens it to everyone.
+    // The first admin looks at Sales and reads it; before they write, the
+    // second admin opens it to everyone.
     const racing: Env = {
       ...env,
       DB: afterFirstRead(env.DB, audienceRead, async () => {
-        await second.api.connections.setBrainAudience(connectionId, {
+        await chooseAudience(second.api, connectionId, {
           kind: "everyone",
         });
       }),
     };
     const identity = await first.api.whoami();
 
+    let refused = "";
     const events = await auditedDuring(async () => {
-      await setConnectionAudience(racing, identity, connectionId, {
-        kind: "team",
-        teamId: support,
-      });
+      refused = await outcome(
+        setConnectionAudience(
+          racing,
+          identity,
+          connectionId,
+          { kind: "team", teamId: support },
+          { kind: "team", teamId: sales }
+        )
+      );
     });
+    // A page left open on Sales, after another admin closed it to nobody:
+    // choosing a team from there is refused too, never a silent opening.
+    await chooseAudience(second.api, connectionId, { kind: "nobody" });
+    const stale = await outcome(
+      first.api.connections.setBrainAudience(
+        connectionId,
+        { kind: "team", teamId: support },
+        { kind: "team", teamId: sales }
+      )
+    );
     const audiences = await first.api.connections.brainAudiences();
 
     expect({
+      refused,
+      stale,
       events: events.flatMap(({ action, actor, detail }) =>
         action === "brain.connection_audience.changed"
           ? [{ actor, detail }]
@@ -487,19 +497,15 @@ describe("a shared connection's Brain audience", setUpTime, () => {
         .filter((each) => each.connectionId === connectionId)
         .map(({ audience }) => audience),
     }).toStrictEqual({
+      refused: "connection.brain_audience_changed",
+      stale: "connection.brain_audience_changed",
       events: [
         {
           actor: { type: "person", userId: second.userId },
           detail: { from: "team", fromTeam: sales, who: "everyone" },
         },
-        // Not "from Sales", which it read first: everyone is what it
-        // replaced.
-        {
-          actor: { type: "person", userId: first.userId },
-          detail: { from: "everyone", team: support, who: "team" },
-        },
       ],
-      now: [{ kind: "team", teamId: support }],
+      now: [],
     });
   });
 
@@ -511,7 +517,7 @@ describe("a shared connection's Brain audience", setUpTime, () => {
     const connectionId = await connection();
     const marker = uniqueWord();
     const source = await keptThrough(connectionId, marker);
-    await admin.api.connections.setBrainAudience(connectionId, {
+    await chooseAudience(admin.api, connectionId, {
       kind: "everyone",
     });
     const before = await findsAt(member, source, marker);
@@ -524,18 +530,18 @@ describe("a shared connection's Brain audience", setUpTime, () => {
       before: before.person,
       // Opening it again needs a connection connect holds; closing doesn't.
       everyoneAgain: await outcome(
-        admin.api.connections.setBrainAudience(connectionId, {
+        chooseAudience(admin.api, connectionId, {
           kind: "team",
           teamId: await newTeam(member),
         })
       ),
       nobody: await outcome(
-        admin.api.connections.setBrainAudience(connectionId, {
+        chooseAudience(admin.api, connectionId, {
           kind: "nobody",
         })
       ),
       gone: await outcome(
-        admin.api.connections.setBrainAudience(`connection-${unique()}`, {
+        chooseAudience(admin.api, `connection-${unique()}`, {
           kind: "nobody",
         })
       ),

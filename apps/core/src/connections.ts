@@ -820,10 +820,17 @@ export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
 
   async setBrainAudience(
     connectionId: unknown,
-    audience: unknown
+    audience: unknown,
+    from: unknown
   ): Promise<void> {
     await withPerson(this.#check, async (identity) => {
-      await setConnectionAudience(this.#env, identity, connectionId, audience);
+      await setConnectionAudience(
+        this.#env,
+        identity,
+        connectionId,
+        audience,
+        from
+      );
     });
   }
 

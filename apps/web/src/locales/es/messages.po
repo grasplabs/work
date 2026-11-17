@@ -16717,6 +16717,10 @@ msgstr "Quién puede leerlo"
 msgid "Who may read it is decided inside Grasp, not by the permissions in {label}: choose a team if not everyone should see it."
 msgstr "Quién puede leerlo se decide dentro de Grasp, no con los permisos de {label}: elige un equipo si no todos deben verlo."
 
+#: src/connections/brain-audience.tsx
+msgid "Who may read what agents read through {label} was changed in the meantime. This is who may read it now: choose again if you still want to change it."
+msgstr "Quién puede leer lo que los agentes leen a través de {label} cambió mientras tanto. Así está ahora: vuelve a elegir si aún quieres cambiarlo."
+
 #: src/agents/agent-page.tsx
 msgid "Who may use {name}"
 msgstr "Quién puede usar a {name}"
