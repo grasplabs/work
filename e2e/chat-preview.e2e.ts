@@ -33,11 +33,12 @@ const afterTurnCheck = { timeout: 30_000 };
  * `turnCheck`), and the chat takes no question meanwhile.
  */
 const askOnceIdle = async (chat: Locator, text: string): Promise<void> => {
-  await expect(
-    chat.getByRole("button", { name: "Send", exact: true })
-  ).toBeVisible({ timeout: 30_000 });
   const ask = chat.getByRole("textbox", { name: "Ask for a change" });
   await ask.fill(text);
+  // Send shows once the box holds words and no turn runs (Stop meanwhile).
+  await expect(
+    chat.getByRole("button", { name: "Send", exact: true })
+  ).toBeEnabled({ timeout: 30_000 });
   await ask.press("Enter");
 };
 
@@ -132,9 +133,10 @@ test("a chat building an App offers its workspace, whose preview changes none of
     // It makes this chat the App's, beside the draft it builds, and the
     // address lets it go.
     await expect(page).toHaveURL(new RegExp(`/apps/${app.id}$`, "u"));
-    const chatName = page.getByRole("button", {
-      name: `Chat name: Build ${tag}`,
-    });
+    // The chat's head names it, on its menu's button.
+    const chatName = page
+      .getByRole("button", { name: "More for this chat" })
+      .filter({ hasText: `Build ${tag}` });
     await expect(chatName).toBeVisible();
     // There, the draft this chat builds is the preview, not the live App.
     // Shared with nobody yet: Share with your team is on.
@@ -234,10 +236,10 @@ test("an App's own chat writes its page and server code, and its workspace previ
     await pageFrame?.evaluate(() => {
       Reflect.set(globalThis, "stillThisDocument", true);
     });
+    await ask.fill("Rename the button.");
     await expect(
       chat.getByRole("button", { name: "Send", exact: true })
-    ).toBeVisible({ timeout: 30_000 });
-    await ask.fill("Rename the button.");
+    ).toBeEnabled({ timeout: 30_000 });
     const asked = Date.now();
     await ask.press("Enter");
     await expect(chat.getByText("Renaming the button.")).toBeVisible({

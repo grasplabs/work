@@ -211,7 +211,8 @@ test("a builder draws an approval with Grasp, an admin names who answers it, the
     .getByRole("alertdialog", { name: "Confirm your approval" })
     .getByRole("button", { name: "Confirm" })
     .click(pageRead);
-  await expect(asDecider.getByRole("status")).toHaveText(
+  // The page says it, apart from the sidebar's own count of what waits.
+  await expect(asDecider.getByRole("main").getByRole("status")).toHaveText(
     /^Approved by Person on /u,
     pageRead
   );

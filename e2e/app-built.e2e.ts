@@ -67,10 +67,15 @@ test("a builder makes an App from what they want done, shares it with their team
 
   // The chat read how an App is written, wrote it, and said so.
   const chat = page.getByRole("region", { name: "Chat" });
-  await expect(chat.getByText("Read /guides/project in the docs")).toBeVisible(
-    agentTurn
-  );
   await expect(chat.getByText(appReady)).toBeVisible(agentTurn);
+  // Its steps fold under what it did, once its turn ends.
+  await chat
+    .getByRole("region", { name: "What Grasp did" })
+    .getByRole("button", { name: /^Took \d+ steps/u })
+    .click();
+  await expect(
+    chat.getByText("Read /guides/project in the docs")
+  ).toBeVisible();
   // Where it stands, in the bar: beside the docked chat it gives way to
   // the name and Share, so it is there, unseen.
   await expect(page.getByText("Only you see this")).toBeAttached();
