@@ -178,7 +178,6 @@ export const strippedOf = <
  * one is the erased person's card, left out with every memory about it or
  * relating to it; an entity no memory left names is left out too. So
  * nothing drawn again from a source that stays makes or feeds their card.
- * With it, the keys of the cards it left out (`erased`).
  */
 export const leavingOutCards = <
   Entity extends {
@@ -194,7 +193,7 @@ export const leavingOutCards = <
     memories,
   }: { entities: readonly Entity[]; memories: readonly Memory[] },
   identifiers: readonly string[][]
-): { entities: Entity[]; memories: Memory[]; erased: Set<string> } => {
+): { entities: Entity[]; memories: Memory[] } => {
   const stripped = strippedOf(sql, entities, identifiers);
   const kept = memories.filter(
     ({ about, object }) =>
@@ -211,7 +210,6 @@ export const leavingOutCards = <
   return {
     entities: stripped.entities.filter(({ key }) => named.has(key)),
     memories: kept,
-    erased: stripped.erased,
   };
 };
 
@@ -364,39 +362,6 @@ export const applyPerson = (
     );
   }
   return changed;
-};
-
-/**
- * Closes each card of `cards` (its id, and the subjects of the identifiers
- * it was given) under the erasure that closed one of those identifiers, as
- * that erasure takes a card of theirs (`applyPerson`): what of it the store
- * holds hidden, and its id closed, so what names it later is left out. For
- * a restore, where a card may come back only after the erasure (restore.ts).
- * In the caller's transaction.
- */
-export const closeCards = (
-  sql: SqlStorage,
-  cards: readonly { id: string; subjects: readonly string[] }[]
-): void => {
-  for (const { id, subjects } of cards) {
-    const [by] = sql
-      .exec<{ key: string; person: string }>(
-        `SELECT closed.erasure AS key, erasures.subject AS person
-        FROM person_erasure_subjects AS closed
-        JOIN erasures ON erasures.key = closed.erasure
-        WHERE closed.subject IN (SELECT value FROM json_each(?1))
-        LIMIT 1`,
-        JSON.stringify(subjects)
-      )
-      .toArray();
-    if (by !== undefined) {
-      applyPerson(
-        sql,
-        { key: by.key, subject: by.person },
-        { people: [], identifiers: [], subjects: [entityClosureOf(id)] }
-      );
-    }
-  }
 };
 
 /**

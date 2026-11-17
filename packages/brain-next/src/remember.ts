@@ -682,17 +682,14 @@ export const writeAdd = (
     const drawn =
       asked.extracted !== undefined ||
       asked.memories.some(({ basis }) => basis.kind === "source");
-    const left = drawn
-      ? leavingOutCards(sql, asked, naming.identifiers)
-      : {
-          entities: strippedOf(sql, asked.entities, naming.identifiers)
-            .entities,
-          memories: asked.memories,
-        };
     const adding: Adding = {
       ...asked,
-      entities: left.entities,
-      memories: left.memories,
+      ...(drawn
+        ? leavingOutCards(sql, asked, naming.identifiers)
+        : {
+            entities: strippedOf(sql, asked.entities, naming.identifiers)
+              .entities,
+          }),
     };
     const planned = planOf(adding);
     const identified = new Set(

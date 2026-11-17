@@ -1301,6 +1301,12 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     }
     await this.#changing(async () => {
       await this.#readyToWrite();
+      // Not while a restore writes the store back: the erasure runs once it
+      // is through (or given up), on the whole of what came back, so its
+      // ledger entry names every card of theirs. The host asks again.
+      if (isRestoring(this.ctx.storage.sql)) {
+        throw new Error(restoringNow);
+      }
       await erasePersonShared(this.#erasures, { person, identifiers, reason });
     });
   }

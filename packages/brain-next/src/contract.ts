@@ -3029,10 +3029,12 @@ export interface Brain {
    * write resting on a version, a restore of one) also leaves out a
    * person's card holding one, with what is about it or relates to it,
    * and their word. Closed for good: nothing opens one again, also once
-   * the host gives the address to someone else. The sources stay. Safe to repeat: the same person is the same erasure, its
-   * identifiers those of its first call. Returns only once its entry is in
-   * the ledger: one that throws must be repeated. The shared store's
-   * alone: a person's own store refuses.
+   * the host gives the address to someone else. The sources stay. Safe
+   * to repeat: the same person is the same erasure, its identifiers those
+   * of its first call. Refused while the store restores an export
+   * (`restoringNow`), to be asked again once it is through or given up.
+   * Returns only once its entry is in the ledger: one that throws must be
+   * repeated. The shared store's alone: a person's own store refuses.
    */
   erasePersonShared: (request: SharedPersonErasure) => Promise<void>;
   /**

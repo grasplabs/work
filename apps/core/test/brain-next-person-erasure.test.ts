@@ -314,6 +314,64 @@ describe(
       });
     });
 
+    it("keeps the Brain's part pending while the Brain restores an export, and erases them once the restore is through", async () => {
+      const at = await annaAndBob();
+      const question = `${at.marker} finance leave Atlas`;
+      const brainStore = inJurisdiction(env, env.BRAIN_STORE).getByName(
+        "brain"
+      );
+      const restoreId = crypto.randomUUID();
+      // A restore under way in the Brain, as its own run records one.
+      const restoring = async (running: boolean) => {
+        await runInDurableObject(brainStore, (_instance, state) => {
+          state.storage.sql.exec(
+            running
+              ? `INSERT INTO restores (export, checked, part, restored, state, started_at)
+                VALUES (?, 0, 0, 0, 'running', ?)`
+              : "DELETE FROM restores WHERE export = ?",
+            ...(running ? [restoreId, Date.now()] : [restoreId])
+          );
+        });
+      };
+      await restoring(true);
+      let meanwhile:
+        | Awaited<ReturnType<typeof at.admin.api.members.erasure>>
+        | undefined;
+      try {
+        await at.admin.api.members.remove(at.anna.userId);
+        await at.admin.api.members.erase(
+          at.anna.userId,
+          String(at.anna.person.name)
+        );
+        meanwhile = await at.admin.api.members.erasure(at.anna.userId);
+      } finally {
+        await restoring(false);
+      }
+      await finishedByTheClock(at.anna.userId);
+      await runMinuteTasks();
+      const done = await at.admin.api.members.erasure(at.anna.userId);
+      const bob = await seenBy(at.bob.userId, question);
+
+      expect({
+        meanwhile: meanwhile?.erasure?.areas.filter(({ area }) =>
+          ["brain_shared", "identity"].includes(area)
+        ),
+        done: done.erasure?.completedAt !== null,
+        herEntity: bob.people.includes(at.name),
+        herMemories: bob.memories.filter((statement) =>
+          statement.includes(at.name)
+        ),
+      }).toStrictEqual({
+        meanwhile: [
+          { area: "brain_shared", state: "pending" },
+          { area: "identity", state: "pending" },
+        ],
+        done: true,
+        herEntity: false,
+        herMemories: [],
+      });
+    });
+
     it("stays erased once an older copy of the shared store comes back", async () => {
       const at = await annaAndBob();
       const question = `${at.marker} finance leave Atlas`;

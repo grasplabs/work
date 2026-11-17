@@ -73,13 +73,12 @@ import {
   writerErasedAfterSql,
 } from "./memories.ts";
 import {
-  closeCards,
   closedOf,
   entityClosureOf,
   isErasedPerson,
-  leavingOutCards,
   namingOf,
   personSubjectOf,
+  strippedOf,
 } from "./people.ts";
 import type { Naming } from "./people.ts";
 import { readerSetKeyOf, readerSetOf } from "./reader-sets.ts";
@@ -123,8 +122,11 @@ import type { WorkContext } from "./work.ts";
 // key is closed), asked again in the transaction that writes it; and so as each memory and mark resting
 // on one is. That record is the whole ledger: the
 // store answers nothing until it has read the ledger through (store.ts),
-// and an erasure that lands during the restore covers what was restored
-// before it as it covers any content.
+// and an erasure of a source or a writer that lands during the restore
+// covers what was restored before it as it covers any content. A person's
+// erasure doesn't land during one: it is refused until the restore is
+// through or given up (store.ts `erasePersonShared`), then runs on the
+// whole of what came back.
 //
 // While it runs, nothing is added to the store (restoring.ts): no add can
 // meet a version it brings back. It never moves a current pointer that is
@@ -769,36 +771,6 @@ const restoreMemory = async (
     if (passesOverMemory(sql, line, subject, writerSubject, naming)) {
       return;
     }
-    // A card a person's erasure closed an identifier of is left out with
-    // what is about it or relates to it, as an add leaves it (people.ts
-    // `leavingOutCards`); and closed by its id, with what of it this
-    // restore wrote before the erasure landed, so no later line brings it
-    // back by its name alone.
-    const entities = line.entities.map((entity) => ({
-      ...entity,
-      key: entity.id,
-    }));
-    const left = leavingOutCards(
-      sql,
-      {
-        entities,
-        memories: [{ about: line.about, object: line.object ?? undefined }],
-      },
-      naming.identifiers
-    );
-    if (left.erased.size > 0) {
-      closeCards(
-        sql,
-        entities.flatMap(({ id }, index) =>
-          left.erased.has(id)
-            ? [{ id, subjects: naming.identifiers[index] ?? [] }]
-            : []
-        )
-      );
-    }
-    if (left.memories.length === 0) {
-      return;
-    }
     const rows = entityRowsOf(sql, line);
     const about = rows?.get(line.about);
     const kind = line.entities.find(({ id }) => id === line.about)?.kind;
@@ -848,7 +820,12 @@ const restoreMemory = async (
       .one();
     indexMemoryWords(sql, row, line.statement, new Map());
     // Without an identifier a person's erasure closed, as an add keeps it.
-    for (const { id, names, identifiers } of left.entities) {
+    const kept = strippedOf(
+      sql,
+      line.entities.map((entity) => ({ ...entity, key: entity.id })),
+      naming.identifiers
+    ).entities;
+    for (const { id, names, identifiers } of kept) {
       const entity = rows.get(id);
       if (entity !== undefined) {
         keepNames(sql, entity, row, names, identifiers);
