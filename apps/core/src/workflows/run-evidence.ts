@@ -3,7 +3,11 @@ import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import { and, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
-import { runBrainMemories, runBrainVersions } from "../db/core/schema.ts";
+import {
+  runBrainMemories,
+  runBrainVersions,
+  runStateWriters,
+} from "../db/core/schema.ts";
 import { inList } from "../db/d1.ts";
 
 // What a workflow run recalled stays pinned to the run (GRA-299, kept on
@@ -153,3 +157,17 @@ export const memoryEvidenceOfRuns = async (
     })
     .from(runBrainMemories)
     .where(inList(runBrainMemories.runId, runIds));
+
+/**
+ * The runs whose keys each of runs `runIds` started from
+ * (`runStateWriters`, GRA-1996): one statement, the list bound as one
+ * value.
+ */
+export const stateWritersOfRuns = async (env: Env, runIds: readonly string[]) =>
+  await drizzle(env.DB)
+    .select({
+      runId: runStateWriters.runId,
+      writerRunId: runStateWriters.writerRunId,
+    })
+    .from(runStateWriters)
+    .where(inList(runStateWriters.runId, runIds));

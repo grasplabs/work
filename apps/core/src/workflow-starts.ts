@@ -44,6 +44,8 @@ import {
   workflowResourceVersions,
   workflowStartReceipts,
   runChatSources,
+  keptRunEvidence,
+  runStateWriters,
 } from "./db/core/schema.ts";
 import { isUniqueViolation } from "./db/d1.ts";
 import { appHost, workspace } from "./durable-objects.ts";
@@ -222,13 +224,55 @@ const frozenState = async (
   id: string,
   principal: string,
   buildHash: string | null
-): Promise<(StateSnapshot & { withheld: number }) | null> => {
+): Promise<
+  (StateSnapshot & { withheld: number; writers: string[] }) | null
+> => {
   if (buildHash === null) {
     return null;
   }
-  const { values, withheld } = await readableStateOf(env, id, principal);
-  return { ...(await snapshotFrom(values)), withheld };
+  const { values, withheld, writers } = await readableStateOf(
+    env,
+    id,
+    principal
+  );
+  return { ...(await snapshotFrom(values)), withheld, writers };
 };
+
+/**
+ * That each of `state`'s writers, the runs that set the keys a start froze, still
+ * keeps its evidence, as SQL for the admitting statement: not past its
+ * details, or kept past them (`keptRunEvidence`). A writer released
+ * between the start's read and its admission would leave its copy
+ * unchecked in the run, so the start is refused, and the next freezes the
+ * state anew (GRA-1996).
+ */
+const writersHeldSql = (state: { writers: readonly string[] } | null): SQL =>
+  sql`NOT EXISTS (SELECT 1 FROM json_each(${JSON.stringify(state?.writers ?? [])}) AS writer
+    WHERE writer.value NOT IN (SELECT ${keptRunEvidence.runId} FROM ${keptRunEvidence})
+      AND EXISTS (SELECT 1 FROM ${workflowStartReceipts} AS done
+        WHERE done.id = writer.value AND done.details_removed_at IS NOT NULL))`;
+
+/**
+ * The statement recording `state`'s writers as the runs whose keys run
+ * `runId` started from (`runStateWriters`), for the batch that admits it,
+ * under `admitted`. None for no writers, or no state.
+ */
+const writersAdmitted = (
+  env: Env,
+  runId: string,
+  state: { writers: readonly string[] } | null,
+  admitted: SQL
+): BatchItem<"sqlite">[] =>
+  state === null || state.writers.length === 0
+    ? []
+    : [
+        drizzle(env.DB)
+          .insert(runStateWriters)
+          .select(
+            sql`SELECT ${runId}, value FROM json_each(${JSON.stringify(state.writers)}) WHERE ${admitted}`
+          )
+          .onConflictDoNothing(),
+      ];
 
 /**
  * A new start the host decided on: what it freezes, and what admitting it
@@ -255,10 +299,11 @@ export interface StartAuthorization {
   /**
    * What the workflow kept between its runs as it was decided
    * (workflows/state-snapshots.ts), which its run reads in every
-   * activation, with how many keys it left out as withheld (GRA-1996);
-   * null for a start that admits no run.
+   * activation, with how many keys it left out as withheld, and the runs
+   * that set the keys it holds (GRA-1996); null for a start that admits
+   * no run.
    */
-  state: (StateSnapshot & { withheld: number }) | null;
+  state: (StateSnapshot & { withheld: number; writers: string[] }) | null;
   /**
    * Whether it starts in restricted mode (`restrictedStart`): its run is
    * restricted for good.
@@ -1300,7 +1345,8 @@ export const decideWorkflowStart = async (
   const state = await frozenState(env, id, rule.principal, buildHash);
   // Read again as the admitting statement runs: the workflow live at the
   // same policy generation, parameter revision and live version, the same
-  // manifest, everything its bindings need, and the invoker's own rule.
+  // manifest, everything its bindings need, the invoker's own rule, and
+  // every run whose keys it froze still keeping its evidence.
   const holds = sql`(EXISTS (SELECT 1 FROM workflow_resources AS live
       WHERE live.id = ${id} AND live.deleted_at IS NULL
         AND live.current_version = ${version}
@@ -1310,7 +1356,8 @@ export const decideWorkflowStart = async (
       WHERE pinned.workflow_resource_id = ${id} AND pinned.version = ${version}
         AND pinned.manifest_hash = ${manifestHash})
     AND ${requiredSql(id, JSON.stringify(bindings.required))}
-    AND ${rule.holds})`;
+    AND ${rule.holds}
+    AND ${writersHeldSql(state)})`;
   const decided = await drizzle(env.DB).get<{ holds: number }>(
     sql`SELECT ${holds} AS holds`
   );
@@ -1342,6 +1389,7 @@ export const decideWorkflowStart = async (
       alsoAdmitted: (admitted) => [
         ...(handed.admitted?.(admitted) ?? []),
         ...pinsAdmitted(env, runId, pins, admitted),
+        ...writersAdmitted(env, runId, state, admitted),
         ...inboxes(admitted),
       ],
       workflowId: id,

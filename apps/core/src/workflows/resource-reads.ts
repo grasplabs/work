@@ -17,7 +17,11 @@ import { readableSources } from "../history-access.ts";
 import { authorize } from "../permissions.ts";
 import { runAuthority, runContext } from "./resource-authority.ts";
 import type { CallingRun } from "./resource-authority.ts";
-import { evidenceOfRuns, memoryEvidenceOfRuns } from "./run-evidence.ts";
+import {
+  evidenceOfRuns,
+  memoryEvidenceOfRuns,
+  stateWritersOfRuns,
+} from "./run-evidence.ts";
 
 // What a run read, checked before anything of the run leaves it: the
 // Brain's versions its recalls pinned (run-evidence.ts) and what the chat
@@ -157,7 +161,7 @@ const versionKey = (
  * throws. Without `grants`, what they read alone, not the grants it came
  * through (`copiesEvidence`).
  */
-const evidenceChecked = async (
+const ownEvidenceChecked = async (
   env: Env,
   runs: readonly EvidenceRun[],
   grants: boolean
@@ -282,6 +286,77 @@ const evidenceChecked = async (
         }
       }
     )
+  );
+  return checked;
+};
+
+/**
+ * `ownEvidenceChecked` for `runs`, and for the runs whose keys of their
+ * workflow's state each started from (`stateWritersOfRuns`, GRA-1996):
+ * a copy a run carries from that state follows what its writer read, so
+ * a writer refused refuses the run, and a writer's check failing fails
+ * the run's. Each writer's own evidence alone (one hop: not the runs
+ * whose keys it started from), read as copies are (`copiesEvidence`): as
+ * the run's person reads the company, never the writer's grants. Its
+ * writers are read in one statement, and checked together for each of
+ * the runs' persons.
+ */
+const evidenceChecked = async (
+  env: Env,
+  runs: readonly EvidenceRun[],
+  grants: boolean
+): Promise<Checked> => {
+  const [checked, writers] = await Promise.all([
+    ownEvidenceChecked(env, runs, grants),
+    stateWritersOfRuns(
+      env,
+      runs.map(({ runId }) => runId)
+    ),
+  ]);
+  const byId = new Map(runs.map((run) => [run.runId, run]));
+  const byPerson = groupedBy(
+    writers.flatMap((pair) => {
+      const run = byId.get(pair.runId);
+      return run === undefined ? [] : [{ ...pair, run }];
+    }),
+    ({ run }) => run.principal
+  );
+  await Promise.all(
+    [...byPerson.values()].map(async (pairs) => {
+      const [first] = pairs;
+      if (first === undefined) {
+        return;
+      }
+      let ofWriters: Checked;
+      try {
+        ofWriters = await ownEvidenceChecked(
+          env,
+          [...new Set(pairs.map(({ writerRunId }) => writerRunId))].map(
+            (writerRunId) => ({
+              runId: writerRunId,
+              workflowId: first.run.workflowId,
+              principal: first.run.principal,
+            })
+          ),
+          false
+        );
+      } catch (error) {
+        settled(
+          checked,
+          pairs.map(({ runId }) => runId),
+          error
+        );
+        return;
+      }
+      for (const { runId, writerRunId } of pairs) {
+        const failure = ofWriters.failed.get(writerRunId);
+        if (ofWriters.refused.has(writerRunId)) {
+          checked.refused.add(runId);
+        } else if (failure !== undefined && !checked.failed.has(runId)) {
+          checked.failed.set(runId, failure);
+        }
+      }
+    })
   );
   return checked;
 };

@@ -209,6 +209,7 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
       "which Brain versions a run recalled, identifiers only, as runs are (D3)",
   },
   "core.kept_run_evidence": noPerson,
+  "core.run_state_writers": noPerson,
   "core.run_brain_memories": {
     company:
       "which Brain memories a run's entity reads rested on, identifiers only, no person's, as runs are (D3)",

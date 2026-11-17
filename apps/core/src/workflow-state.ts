@@ -147,13 +147,19 @@ const checkedRowsOf = async (
  * starts, and keeps for every activation after. A key whose run read what
  * the company may no longer read is left out, read as unset, and counted
  * (`withheld`); one that can't be checked now fails the start, which
- * would otherwise read it as unset and may write over it.
+ * would otherwise read it as unset and may write over it. With the runs
+ * that set the keys it reads (`writers`), whose evidence the run's own
+ * checks then cover (`runStateWriters`, one hop).
  */
 export const readableStateOf = async (
   env: Env,
   workflowId: string,
   reader: string
-): Promise<{ values: Record<string, Json>; withheld: number }> => {
+): Promise<{
+  values: Record<string, Json>;
+  withheld: number;
+  writers: string[];
+}> => {
   const rows = await checkedRowsOf(env, workflowId, reader);
   if (rows.some(({ evidence }) => evidence === "unchecked")) {
     throw workflowResourceErrors.create("workflow.state_unchecked");
@@ -164,6 +170,7 @@ export const readableStateOf = async (
       kept.map(({ key, value }) => [key, z.json().parse(JSON.parse(value))])
     ),
     withheld: rows.length - kept.length,
+    writers: [...new Set(kept.map(({ runId }) => runId))],
   };
 };
 
