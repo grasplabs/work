@@ -1,7 +1,4 @@
-import type {
-  BrainEntityListed,
-  BrainMemoryShown,
-} from "@grasp-os/shared/brain-memories";
+import type { BrainEntityListed } from "@grasp-os/shared/brain-memories";
 import type {
   BrainLearned,
   BrainLearnedMemory,
@@ -55,15 +52,15 @@ const pageOf = async (
   }
 };
 
-/** The entity `memory` is about, as a link to its page, marked New when this version made it seen. */
-const AboutLink = ({
-  memory,
+/** An entity a memory names, as a link to its page, marked New when this version made it seen. */
+const EntityLink = ({
+  id,
   entities,
 }: {
-  memory: BrainMemoryShown;
+  id: string;
   entities: ReadonlyMap<string, BrainEntityListed & { firstSeen: boolean }>;
 }) => {
-  const about = entities.get(memory.about);
+  const about = entities.get(id);
   if (about === undefined || about.name === null) {
     return null;
   }
@@ -121,7 +118,12 @@ const LearnedList = ({
             <Item size="xs" variant="outline">
               <ItemContent>
                 <span className="text-sm">{memory.statement}</span>
-                <AboutLink entities={entities} memory={memory} />
+                <span className="flex flex-wrap items-center gap-3">
+                  <EntityLink entities={entities} id={memory.about} />
+                  {memory.object === null ? null : (
+                    <EntityLink entities={entities} id={memory.object.id} />
+                  )}
+                </span>
                 {withRivals
                   ? rivals.map((rival) => {
                       const said = rival.statement;

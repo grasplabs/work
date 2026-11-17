@@ -567,7 +567,12 @@ const handbookLearned: BrainLearned = {
   memories: [
     {
       part: "added",
-      memory: memoryShown("m-a", "Invoices are paid on Fridays", "e-1", true),
+      memory: {
+        ...memoryShown("m-a", "Invoices are paid on Fridays", "e-1", true),
+        // Owned by Ada, whom the Brain first saw here too.
+        attribute: "owner",
+        object: { id: "e-3", name: "Ada" },
+      },
       rivals: [memoryShown("m-r", "Invoices are paid on Mondays", "e-1")],
       moreRivals: true,
     },
@@ -583,6 +588,14 @@ const handbookLearned: BrainLearned = {
       entity: { store: "shared", id: "e-1" },
       kind: "routine",
       name: "Paying invoices",
+      unreadable: false,
+      borrowed: false,
+      firstSeen: true,
+    },
+    {
+      entity: { store: "shared", id: "e-3" },
+      kind: "person",
+      name: "Ada Lovelace",
       unreadable: false,
       borrowed: false,
       firstSeen: true,
@@ -1389,22 +1402,28 @@ describe(SourcesPage, () => {
     ).toStrictEqual([]);
   });
 
-  it("opens the entity a memory of the version is about on the Memories page", async () => {
-    await shown([], { learned: { "u-1@2": handbookLearned } });
-    await press("Handbook");
-    const link = [...document.querySelectorAll("a")].find(
-      (each) => each.textContent === "Invoice"
-    );
-    await act(async () => {
-      link?.click();
-      await Promise.resolve();
-    });
-    await settle();
+  it.each([
+    ["is about", "Invoice", "entity=e-2&kind=term"],
+    ["relates to", "Ada Lovelace", "entity=e-3&kind=person"],
+  ])(
+    "opens the entity a memory of the version %s on the Memories page",
+    async (_how, name, opens) => {
+      await shown([], { learned: { "u-1@2": handbookLearned } });
+      await press("Handbook");
+      const link = [...document.querySelectorAll("a")].find(
+        (each) => each.textContent === name
+      );
+      await act(async () => {
+        link?.click();
+        await Promise.resolve();
+      });
+      await settle();
 
-    expect(document.body.textContent).toContain(
-      "Memories page ?store=shared&entity=e-2&kind=term"
-    );
-  });
+      expect(document.body.textContent).toContain(
+        `Memories page ?store=shared&${opens}`
+      );
+    }
+  );
 
   it("says when the Brain learned nothing from a version, shows nothing for one core answers none of, and says why core refused", async () => {
     await shown([], {
