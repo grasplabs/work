@@ -193,7 +193,7 @@ interface Plan {
   store: Store;
   /** The readers of an item in the shared store; none in an own store. */
   readers: SourceReader[];
-  /** Its readers' groups, sorted, as JSON: how a row compares them. */
+  /** Its readers' groups, sorted, as JSON: what its change keys name. */
   readersKey: string | null;
 }
 
@@ -303,7 +303,8 @@ const planOf = (
   item: Extract<SyncItem, { gone: false }>
 ): Plan => {
   const own: Plan = { store: "own", readers: [], readersKey: null };
-  if (item.kind !== "file" || item.readers === null) {
+  // Mail is its mailbox's own person's alone, an attachment its message's.
+  if (item.kind !== "file" || item.partOf !== null || item.readers === null) {
     return own;
   }
   const readers = readersOf(source, item.readers);
@@ -454,14 +455,44 @@ const leave = async (applying: Applying, row: Item): Promise<Item> => {
   const [, counter] = await db.batch([
     db
       .update(brainSyncItems)
-      .set({ store: null, generation, key, change: null, readers: null })
+      .set({ store: null, generation, key, change: null, version: null })
       .where(
         sql`${itemWhere(applying, row.itemId)} AND ${brainSyncItems.generation} = ${row.generation} AND ${stillHeld(applying)}`
       ),
     counted(applying, "removed"),
   ]);
   heldAfter(counter);
-  return { ...row, store: null, generation, key, change: null, readers: null };
+  return { ...row, store: null, generation, key, change: null, version: null };
+};
+
+/**
+ * Takes out every attachment of the messages `gone` names: a mailbox
+ * reports only the message as gone, never its parts.
+ */
+const leaveParts = async (
+  applying: Applying,
+  gone: readonly string[]
+): Promise<void> => {
+  const { db, budget, source } = applying;
+  if (gone.length === 0) {
+    return;
+  }
+  spend(budget, 1);
+  const parts = await db
+    .select()
+    .from(brainSyncItems)
+    .where(
+      and(
+        eq(brainSyncItems.connectionId, source.connectionId),
+        eq(brainSyncItems.feed, source.feed),
+        isNotNull(brainSyncItems.store),
+        inList(brainSyncItems.partOf, gone)
+      )
+    );
+  for (const part of parts) {
+    // oxlint-disable-next-line no-await-in-loop -- in order, within the budget
+    await leave(applying, part);
+  }
 };
 
 /** A change key: a hash of what makes a version this one. */
@@ -472,16 +503,17 @@ const changeOf = async (parts: readonly unknown[]): Promise<string> =>
  * Gives `row`'s item in the shared store the readers `plan` names: a new
  * version with its current text (`changeSourceReaders`), so a narrowing
  * holds for everything the Brain answers before anything of the page is
- * added.
+ * added. Readers its current version has already write nothing, and the
+ * row doesn't change: so core keeps no reader list of its own.
  */
 const changeReaders = async (
   applying: Applying,
   row: Item,
   plan: Plan
-): Promise<void> => {
+): Promise<Item> => {
   const { env, db, budget, readAt } = applying;
   spend(budget, 1);
-  await changeSourceReaders(env, {
+  const made = await changeSourceReaders(env, {
     source: sourceRefOf(row.key),
     change: await changeOf([
       "readers",
@@ -492,17 +524,22 @@ const changeReaders = async (
     readers: { kind: "readers", readers: plan.readers },
     readAt,
   });
+  // Not held yet (an add under way): the page's add gives it its readers.
+  if (made === null || made.version === row.version) {
+    return row;
+  }
   spend(budget, 1);
   const [, counter] = await db.batch([
     db
       .update(brainSyncItems)
-      .set({ readers: plan.readersKey })
+      .set({ version: made.version })
       .where(
         sql`${itemWhere(applying, row.itemId)} AND ${brainSyncItems.generation} = ${row.generation} AND ${stillHeld(applying)}`
       ),
     counted(applying, "changed"),
   ]);
   heldAfter(counter);
+  return { ...row, version: made.version };
 };
 
 /**
@@ -513,9 +550,10 @@ const changeReaders = async (
 const claim = async (
   applying: Applying,
   row: Item | undefined,
-  itemId: string,
+  item: Extract<SyncItem, { gone: false }>,
   plan: Plan
 ): Promise<Item> => {
+  const itemId = item.id;
   const { db, budget, source } = applying;
   const generation = row?.generation ?? 1;
   const key =
@@ -525,7 +563,7 @@ const claim = async (
   const [claimed] = await db
     .insert(brainSyncItems)
     .select(
-      sql`SELECT ${source.connectionId}, ${source.feed}, ${itemId}, ${key}, ${generation}, ${plan.store}, NULL, ${plan.readersKey}, ${source.listing}
+      sql`SELECT ${source.connectionId}, ${source.feed}, ${itemId}, ${key}, ${generation}, ${plan.store}, NULL, NULL, ${item.partOf}, ${source.listing}
         WHERE ${stillHeld(applying)} AND NOT ${closed(source.connectionId)}`
     )
     .onConflictDoUpdate({
@@ -537,7 +575,7 @@ const claim = async (
       set: {
         store: plan.store,
         change: null,
-        readers: plan.readersKey,
+        partOf: item.partOf,
         listing: source.listing,
       },
       setWhere: sql`${brainSyncItems.generation} = ${generation}`,
@@ -579,7 +617,7 @@ const add = async (
   ) {
     row = await leave(applying, row);
   }
-  const claimed = await claim(applying, row, item.id, plan);
+  const claimed = await claim(applying, row, item, plan);
   // An item's own store's add asks the shared store about its key before
   // and after (brain-next.ts `keptIn`), and reads the time zone.
   spend(budget, plan.store === "own" ? 4 : 2);
@@ -615,16 +653,27 @@ const add = async (
     throw error;
   }
   spend(budget, 1);
+  const recorded = db
+    .update(brainSyncItems)
+    .set({ change, version })
+    .where(
+      sql`${itemWhere(applying, item.id)} AND ${brainSyncItems.generation} = ${claimed.generation} AND ${stillHeld(applying)}`
+    )
+    .returning({ key: brainSyncItems.key });
+  // Counted once, by the Brain's answer, the same on a repeat: a key's
+  // first version is the item added, a version the row didn't know yet
+  // changed it; the current one again (its readers given this page
+  // already) nothing.
+  if (version === claimed.version) {
+    heldAfter(await recorded);
+    return;
+  }
   const [, counter] = await db.batch([
-    db
-      .update(brainSyncItems)
-      .set({ change })
-      .where(
-        sql`${itemWhere(applying, item.id)} AND ${brainSyncItems.generation} = ${claimed.generation} AND ${stillHeld(applying)}`
-      ),
-    // A key's first version is the item added; any later one, changed.
-    // By the Brain's answer, the same on a repeat: counted once, here.
-    counted(applying, version === 1 ? "added" : "changed"),
+    recorded,
+    counted(
+      applying,
+      claimed.version === null && version === 1 ? "added" : "changed"
+    ),
   ]);
   heldAfter(counter);
 };
@@ -722,15 +771,17 @@ const apply = async (applying: Applying, page: SyncPage): Promise<void> => {
       continue;
     }
     const plan = planOf(source, item);
-    if (plan.store === "own") {
-      // oxlint-disable-next-line no-await-in-loop -- in order, within the budget
-      rows.set(item.id, await leave(applying, row));
-    } else if (plan.readersKey !== row.readers) {
-      // oxlint-disable-next-line no-await-in-loop -- in order, within the budget
-      await changeReaders(applying, row, plan);
-      rows.set(item.id, { ...row, readers: plan.readersKey });
-    }
+    // oxlint-disable-next-line no-await-in-loop -- in order, within the budget
+    const changed = await (plan.store === "own"
+      ? leave(applying, row)
+      : changeReaders(applying, row, plan));
+    rows.set(item.id, changed);
   }
+  // A gone message's attachments, which its mailbox doesn't name.
+  await leaveParts(
+    applying,
+    page.items.flatMap((item) => (item.gone ? [item.id] : []))
+  );
   for (const item of page.items) {
     if (item.gone) {
       continue;
@@ -1147,7 +1198,7 @@ const erasedEvent = async (
 ): Promise<AuditEvent> => ({
   ...createAuditEvent(
     {
-      actor: auditActorSchema.parse(JSON.parse(row.actor)),
+      actor: auditActorSchema.parse(JSON.parse(row.actor ?? "null")),
       action: "brain.sync.erased",
       target: { type: "connection", id: row.connectionId },
       detail: { sources: row.erased },
@@ -1243,7 +1294,8 @@ export const stepSyncErasure = async (
       .where(eq(brainSyncItems.connectionId, connectionId)),
     db
       .update(brainSyncDisconnects)
-      .set({ erasing: false })
+      // Its event holds who disconnected: the row no longer needs to.
+      .set({ erasing: false, actor: null })
       .where(
         and(
           eq(brainSyncDisconnects.connectionId, connectionId),

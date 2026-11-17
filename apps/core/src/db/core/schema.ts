@@ -3527,10 +3527,12 @@ export const brainSyncSources = sqliteTable(
  * (`key`, its `generation` the key's middle part, one up each time the
  * item leaves the Brain, so a key erased is never added to again), the
  * store it is in now (`own`, `shared`, or null when it is in neither),
- * the change last added (null while an add is under way), its readers as
- * the shared store has them (a JSON list of the Brain's groups), and the
- * listing that last named it. Core names a key here before the Brain is
- * given it, so a disconnect's erasure finds every key it gave.
+ * the change last added (null while an add is under way), the Brain's
+ * version of it as last answered, the item it is part of (an attachment's
+ * message), and the listing that last named it. Never its readers: each
+ * page gives them to the Brain again, so nothing here names a person.
+ * Core names a key here before the Brain is given it, so a disconnect's
+ * erasure finds every key it gave.
  */
 export const brainSyncItems = sqliteTable(
   "brain_sync_items",
@@ -3542,12 +3544,18 @@ export const brainSyncItems = sqliteTable(
     generation: integer().notNull(),
     store: text({ enum: ["own", "shared"] }),
     change: text(),
-    readers: text(),
+    version: integer(),
+    partOf: text("part_of"),
     listing: integer().notNull(),
   },
   (table) => [
     primaryKey({ columns: [table.connectionId, table.feed, table.itemId] }),
     index("brain_sync_items_store_idx").on(table.connectionId, table.store),
+    index("brain_sync_items_part_of_idx").on(
+      table.connectionId,
+      table.feed,
+      table.partOf
+    ),
   ]
 );
 
@@ -3555,7 +3563,8 @@ export const brainSyncItems = sqliteTable(
  * The connections a disconnect closed for native sync (brain-sync.ts),
  * one row each, kept for good: nothing is synced or named under one again.
  * The disconnect it serves (connect's event's id), who disconnected and
- * when (`actor`, an audit actor as JSON), whether erasing what it synced
+ * when (`actor`, an audit actor as JSON, cleared once the erasure it owed
+ * ended and its event was written), whether erasing what it synced
  * into the shared store is under way (`erasing`, which the clock
  * completes), and how many sources it erased.
  */
@@ -3564,7 +3573,7 @@ export const brainSyncDisconnects = sqliteTable(
   {
     connectionId: text("connection_id").primaryKey(),
     request: text().notNull(),
-    actor: text().notNull(),
+    actor: text(),
     requestedAt: timestamp("requested_at").notNull(),
     erasing: integer({ mode: "boolean" }).notNull(),
     erased: integer().notNull(),

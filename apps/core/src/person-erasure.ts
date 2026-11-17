@@ -71,6 +71,7 @@ import {
   users,
   workflowDecisionConfirmations,
   apps as appRegistry,
+  brainSyncSources,
 } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
 import { appPreview, workspace, inJurisdiction } from "./durable-objects.ts";
@@ -568,7 +569,14 @@ const connect: ErasureStep = {
   area: "connect",
   erase: async (env, userId) => {
     await env.CONNECT.erasePersonal({ ownerUserId: userId });
-    await completed(drizzle(env.DB), userId, "connect");
+    const db = drizzle(env.DB);
+    // What native sync read through their connections from (brain-sync.ts):
+    // whose they were and the account's address, gone with the area, not
+    // only with each disconnect's drain.
+    await db.batch([
+      db.delete(brainSyncSources).where(eq(brainSyncSources.personId, userId)),
+      completed(db, userId, "connect"),
+    ]);
   },
 };
 

@@ -146,9 +146,10 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "core.connection_brain_reads": noPerson,
   "core.connection_brain_erasures": { company: "erasures an admin asked for" },
   // Native sync (brain-sync.ts): a source names its connection's person
-  // and account address until the connect area disconnects their
-  // connections, whose drain deletes the rows; its items name only keys
-  // and the provider's IDs; a disconnect's record, who disconnected.
+  // and account address, deleted by the connect area (and by each
+  // disconnect's drain); its items name keys, the provider's IDs and the
+  // Brain's versions, never a reader; a disconnect's record names who
+  // disconnected only until the erasure it owed ends, its event written.
   "core.brain_sync_sources": { erased: "connect" },
   "core.brain_sync_items": noPerson,
   "core.brain_sync_disconnects": {

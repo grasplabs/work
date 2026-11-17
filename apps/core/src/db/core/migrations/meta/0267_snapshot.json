@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "f0ea3ef6-5fe7-4b65-b63e-5ad4f288aff7",
+  "id": "f411ff11-0a8e-4f85-a0a5-569796c5edf5",
   "prevId": "497d1679-ff5e-4895-8061-8537b94a61f5",
   "tables": {
     "access_revocations": {
@@ -4579,7 +4579,7 @@
           "name": "actor",
           "type": "text",
           "primaryKey": false,
-          "notNull": true,
+          "notNull": false,
           "autoincrement": false
         },
         "requested_at": {
@@ -4670,8 +4670,15 @@
           "notNull": false,
           "autoincrement": false
         },
-        "readers": {
-          "name": "readers",
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "part_of": {
+          "name": "part_of",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
@@ -4691,6 +4698,15 @@
           "columns": [
             "connection_id",
             "store"
+          ],
+          "isUnique": false
+        },
+        "brain_sync_items_part_of_idx": {
+          "name": "brain_sync_items_part_of_idx",
+          "columns": [
+            "connection_id",
+            "feed",
+            "part_of"
           ],
           "isUnique": false
         }

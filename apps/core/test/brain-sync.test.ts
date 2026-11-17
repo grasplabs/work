@@ -10,9 +10,10 @@ import { consentCode } from "./connect-providers.ts";
 import { driveSyncControlUrl } from "./drive-sync-fake.ts";
 import type { DriveFile, DriveWorld } from "./drive-sync-fake.ts";
 import { mockIdp } from "./idp.ts";
-import { signInConfig } from "./sign-in-config.ts";
+import { sampleSyncControlUrl } from "./sample-sync-fake.ts";
+import { acmeTenant, signInConfig } from "./sign-in-config.ts";
 import { routed, signedInApi, unique } from "./sign-in.ts";
-import { testBinding } from "./test-env.ts";
+import { connectDb, testBinding } from "./test-env.ts";
 
 // Native sync's run (src/brain-sync.ts, GRA-1758), through the real
 // connect and its Google Workspace connector, with Google Drive mocked at
@@ -54,6 +55,78 @@ const driveHolds = async (subject: string, drive: DriveWorld) => {
     body: JSON.stringify({ subject, drive }),
   });
 };
+
+/**
+ * `person`'s own Microsoft 365 account connected, read by connect's sample
+ * sync connector (built into core's test bundle, test/build-connect.ts),
+ * whose change feed is `pages` (test/sample-sync-fake.ts): a mailbox
+ * whose items name what they are part of.
+ */
+const connectSampleFeed = async (
+  person: Person,
+  pages: Record<string, unknown>
+) => {
+  const subject = String(person.person.oid);
+  const providers = testBinding("CONNECT_PROVIDERS");
+  if (!isFetcher(providers)) {
+    throw new TypeError("Expected the providers Worker");
+  }
+  const post = async (feed: Record<string, unknown>) => {
+    await providers.fetch(sampleSyncControlUrl, {
+      method: "POST",
+      body: JSON.stringify({ subject, pages: feed }),
+    });
+  };
+  await post(pages);
+  const { url } = await person.api.connections.start({
+    provider: "microsoft",
+    scope: "personal",
+  });
+  const authorization = new URL(url);
+  const query = new URLSearchParams({
+    code: consentCode(
+      authorization,
+      acmeTenant,
+      subject,
+      "openid profile email offline_access User.Read Mail.ReadWrite"
+    ),
+    state: authorization.searchParams.get("state") ?? "",
+  });
+  await routed(`/api/connections/callback?${query.toString()}`, {
+    headers: { cookie: person.session },
+  });
+  const listed = await person.api.connections.list();
+  const connection = listed.find(
+    ({ accountName }) => accountName === `${subject}@acme.test`
+  );
+  if (connection === undefined) {
+    throw new Error(`Expected ${subject}'s connection`);
+  }
+  // Read by the sample sync connector instead of the suite's own.
+  await connectDb()
+    .prepare("UPDATE connections SET server = 'sample-sync' WHERE id = ?")
+    .bind(connection.id)
+    .run();
+  return { connectionId: connection.id, post };
+};
+
+/** A message in a mailbox, or a part of one (`partOf`), as a sync item. */
+const mailItem = (
+  id: string,
+  text: string,
+  more: { kind?: "mail" | "file"; partOf?: string; readers?: unknown } = {}
+) => ({
+  gone: false,
+  id,
+  kind: more.kind ?? "mail",
+  version: "1",
+  changedAt: "2026-11-12T09:00:00.000Z",
+  title: id,
+  content: { type: "text", text },
+  readers: more.readers ?? null,
+  changedBy: null,
+  partOf: more.partOf ?? null,
+});
 
 /** A Drive nobody changes: nothing to list, nothing changing. */
 const emptyDrive = (): DriveWorld => ({
@@ -587,6 +660,124 @@ describe("native sync", () => {
   );
 
   it(
+    "keeps a message and its attachments for its mailbox's person alone, and takes the attachments out with a gone message",
+    setUpTime,
+    async () => {
+      const [owner, colleague] = await Promise.all([
+        signedInApi(idp, "user"),
+        signedInApi(idp, "user"),
+      ]);
+      // The colleague holds the company's Microsoft tenant by their own
+      // connection.
+      const quiet = { changes: [], next: "c", more: false };
+      await connectSampleFeed(colleague, { "": quiet, c: quiet });
+      const [message, attachment] = [markerOf(), markerOf()];
+      const first = {
+        changes: [
+          mailItem("message", `Invoice due ${message}`),
+          // An attachment whose readers would reach the whole tenant, were
+          // it not part of a message.
+          mailItem("attachment", `Invoice lines ${attachment}`, {
+            kind: "file",
+            partOf: "message",
+            readers: [{ kind: "tenant", id: acmeTenant }],
+          }),
+        ],
+        next: "p2",
+        more: false,
+      };
+      const { post } = await connectSampleFeed(owner, {
+        "": first,
+        p2: { changes: [], next: "p2", more: false },
+      });
+      later(pollMs);
+      await sync();
+      const before = {
+        owner: [
+          await finds(owner.userId, message),
+          await finds(owner.userId, attachment),
+        ],
+        colleague: await finds(colleague.userId, attachment),
+      };
+      // The mailbox names the message gone, never its attachment.
+      await post({
+        "": first,
+        p2: {
+          changes: [{ gone: true, id: "message", kind: "mail" }],
+          next: "p3",
+          more: false,
+        },
+        p3: { changes: [], next: "p3", more: false },
+      });
+      later(pollMs);
+      await sync();
+
+      expect({
+        before,
+        after: [
+          await finds(owner.userId, message),
+          await finds(owner.userId, attachment),
+        ],
+      }).toStrictEqual({
+        before: { owner: [true, true], colleague: false },
+        after: [false, false],
+      });
+    }
+  );
+
+  it(
+    "keeps nothing that names a person or their address past their erasure",
+    setUpTime,
+    async () => {
+      const [admin, person] = await Promise.all([
+        signedInApi(idp, "admin"),
+        signedInApi(idp, "builder"),
+      ]);
+      const oid = String(person.person.oid);
+      const email = `${oid}@acme.test`;
+      const page = {
+        changes: [
+          mailItem("rota", `Rota ${markerOf()}`, {
+            kind: "file",
+            readers: [
+              { kind: "account", id: oid },
+              { kind: "tenant", id: acmeTenant },
+            ],
+          }),
+          mailItem("note", `Note ${markerOf()}`),
+        ],
+        next: "n",
+        more: false,
+      };
+      await connectSampleFeed(person, {
+        "": page,
+        n: { changes: [], next: "n", more: false },
+      });
+      later(pollMs);
+      await sync();
+      await admin.api.members.remove(person.userId);
+
+      const erased = await admin.api.members.erase(
+        person.userId,
+        String(person.person.name)
+      );
+      const naming = await env.DB.prepare(
+        `SELECT
+          (SELECT count(*) FROM brain_sync_sources WHERE person_id = ?1 OR lower(account_email) = lower(?2))
+          + (SELECT count(*) FROM brain_sync_items WHERE instr(lower(coalesce(change, '') || item_id || key || coalesce(part_of, '')), lower(?2)) > 0 OR instr(item_id || key, ?1) > 0)
+          AS count`
+      )
+        .bind(person.userId, email)
+        .first<{ count: number }>();
+
+      expect({
+        connect: erased.areas.find(({ area }) => area === "connect")?.state,
+        naming: naming?.count,
+      }).toStrictEqual({ connect: "complete", naming: 0 });
+    }
+  );
+
+  it(
     "after a restart, takes out what the relist no longer names",
     setUpTime,
     async () => {
@@ -713,6 +904,12 @@ describe("native sync", () => {
       later(pollMs);
       await sync();
       const erasedEvents = await syncEvents(connectionId);
+      // Its event says who disconnected; nothing else keeps their ID.
+      const naming = await env.DB.prepare(
+        "SELECT count(*) AS count FROM brain_sync_disconnects WHERE instr(coalesce(actor, ''), ?) > 0"
+      )
+        .bind(owner.userId)
+        .first<{ count: number }>();
 
       expect({
         before,
@@ -725,11 +922,13 @@ describe("native sync", () => {
         erased: erasedEvents.filter(
           ({ action }) => action === "brain.sync.erased"
         ),
+        naming: naming?.count,
       }).toStrictEqual({
         before: [true, true],
         atDrain: false,
         after: [false, false, false],
         erased: [{ action: "brain.sync.erased", detail: { sources: 2 } }],
+        naming: 0,
       });
     }
   );

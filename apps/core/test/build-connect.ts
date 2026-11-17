@@ -6,11 +6,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import {
-  buildConnectors,
-  connectorEntries,
-  connectorsFile,
-} from "../../connect/build.ts";
+import { buildConnectors, connectorEntries } from "../../connect/build.ts";
 import { testComposioClassesFile } from "../../connect/test/global-setup.ts";
 import { runNode } from "./run-node.ts";
 import { testRun } from "./test-run.ts";
@@ -25,9 +21,23 @@ const wrangler = path.join(connect, "node_modules/wrangler/bin/wrangler.js");
  */
 export const connectBundle = path.join(testRun, "connect.js");
 
+/**
+ * The native connectors core's tests bundle: the release's, and connect's
+ * sample connector that syncs (its test/fixtures), whose items name what
+ * they are part of, as a mailbox's attachments do (brain-sync.test.ts).
+ * Written beside the bundle, never over connect's own build output.
+ */
+const testConnectors = path.join(testRun, "connectors.js");
+
 /** The connect Worker's bundle, as one ES module, its connectors in it. */
 export const bundleConnect = async (): Promise<string> => {
-  await buildConnectors(connectorEntries(), connectorsFile);
+  await buildConnectors(
+    [
+      ...connectorEntries(),
+      path.join(connect, "test/fixtures/sample-sync-connector.ts"),
+    ],
+    testConnectors
+  );
   const out = mkdtempSync(path.join(tmpdir(), "grasp-os-connect-"));
   try {
     // Its output is only shown if bundling fails, in the error. The fake
@@ -42,6 +52,8 @@ export const bundleConnect = async (): Promise<string> => {
         out,
         "--alias",
         `#composio-classes:${testComposioClassesFile}`,
+        "--alias",
+        `#connectors:${testConnectors}`,
       ],
       { cwd: connect, output: "quiet" }
     );
