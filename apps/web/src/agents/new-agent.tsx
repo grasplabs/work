@@ -1,3 +1,9 @@
+import { failureText } from "@grasp-os/shared/errors";
+import {
+  instructionFileErrors,
+  instructionsMaxLength,
+  instructionsTooLong,
+} from "@grasp-os/shared/instruction-files";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { useNavigate } from "@tanstack/react-router";
 import { useId, useState } from "react";
@@ -10,6 +16,7 @@ import { useCoreAction } from "../use-core-action.ts";
 import { workOutQuietly } from "./agent-apps-card.tsx";
 import { AgentForm } from "./agent-form.tsx";
 import type { Typed } from "./agent-form.tsx";
+import { keepUnsaved } from "./unsaved-instructions.ts";
 
 // A new agent: one of the company's, for its own admins, or one of the
 // person's own, for anyone (core's agents.ts). Its name, what it is for, its
@@ -17,9 +24,12 @@ import type { Typed } from "./agent-form.tsx";
 // nothing it may do (agent-builder.ts), so the page it then opens is the
 // agent's Access tab: an agent nobody may ask is not yet any use. One of
 // a person's own is theirs to ask at once, so its page opens as it is.
-// Its instructions are then saved as its instruction file's first
-// version; should that fail, the agent is made all the same, and its
-// page opens on Instructions, where nothing is saved yet.
+// Its instructions are measured as their save measures them first, so
+// ones it would refuse make nothing; then they are saved as its
+// instruction file's first version. Should that save fail all the same,
+// the agent is made, and its page opens on Instructions with what was
+// typed as an unsaved draft and why it wasn't saved
+// (unsaved-instructions.ts).
 
 /** A new agent before anything is said of it. */
 const blank: Typed = {
@@ -32,22 +42,28 @@ const blank: Typed = {
 
 /**
  * Saves `instructions` as the new agent `agentId`'s instruction file, and
- * then works out the apps they call for: whether they were saved.
+ * then works out the apps they call for: whether they were saved. Not
+ * saved, they are kept for its page with why (`keepUnsaved`).
  */
 const saveFirstInstructions = async (
   session: Session,
   agentId: string,
   instructions: string
 ): Promise<boolean> => {
+  const change = crypto.randomUUID();
   try {
     await session.instructions.save({
       file: { scope: "agent", agentId },
-      change: crypto.randomUUID(),
+      change,
       text: instructions,
       after: 0,
     });
-  } catch {
-    // Made without them: its Instructions tab shows none saved.
+  } catch (error) {
+    keepUnsaved(agentId, {
+      text: instructions,
+      change,
+      failure: failureText(error),
+    });
     return false;
   }
   await workOutQuietly(session, agentId);
@@ -163,6 +179,12 @@ export const NewAgent = ({
               modelRole: null,
             };
             await run(async (session) => {
+              // Refused before anything is made, as their save would be.
+              if (instructionsTooLong(instructions)) {
+                throw instructionFileErrors.create("instructions.too_large", {
+                  maxLength: instructionsMaxLength,
+                });
+              }
               const made =
                 whose === "own"
                   ? await session.connections.makeOwnAgent(typed)

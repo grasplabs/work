@@ -43,7 +43,7 @@ import { ErrorText } from "../error-text.tsx";
 import { Page, PageHeading, SectionTitle } from "../frame/page.tsx";
 import { InstructionFileEditor } from "../settings/instruction-file.tsx";
 import { dollars } from "../settings/money.ts";
-import { SettingsSection } from "../settings/settings-parts.tsx";
+import { SettingsBody, SettingsSection } from "../settings/settings-parts.tsx";
 import {
   AudienceControl,
   appAudienceOf,
@@ -70,6 +70,7 @@ import {
 } from "./agent-facts.tsx";
 import { AgentForm } from "./agent-form.tsx";
 import { AgentWakes } from "./agent-wakes.tsx";
+import type { UnsavedInstructions } from "./unsaved-instructions.ts";
 
 // One agent's page, for the company's admins: what it is, what it is
 // told, whom it answers and what it may do, and when it works on its own,
@@ -404,11 +405,14 @@ const AgentInstructions = ({
   agentId,
   first,
   saved,
+  unsaved,
 }: {
   agentId: string;
   first: boolean;
   /** Its file as it is now, null while never written; undefined where core didn't say. */
   saved: InstructionFileText | null | undefined;
+  /** What was typed as it was made and couldn't be saved (unsaved-instructions.ts). */
+  unsaved: UnsavedInstructions | undefined;
 }) => {
   const { t } = useLingui();
   if (saved === undefined) {
@@ -424,6 +428,7 @@ const AgentInstructions = ({
       label={t`Instructions`}
       onSaved={first ? undefined : workOut}
       saved={saved}
+      unsaved={unsaved}
     />
   );
 };
@@ -436,6 +441,7 @@ export const AgentPage = ({
   teams,
   wakes,
   instructions,
+  unsaved,
   documents,
   apps,
   people,
@@ -463,6 +469,8 @@ export const AgentPage = ({
    * undefined where core didn't say it.
    */
   instructions: InstructionFileText | null | undefined;
+  /** What was typed as it was made and couldn't be saved (unsaved-instructions.ts). */
+  unsaved?: UnsavedInstructions | undefined;
   /** The documents it answers from; undefined where core didn't say. */
   documents: readonly AgentDocument[] | undefined;
   /** The company's people, whom a wake-up can work for. */
@@ -720,11 +728,14 @@ export const AgentPage = ({
               description={t`What ${name} should know and how it should work, on top of Grasp's own rules. Those always hold over what is written here.`}
               title={t`Instructions`}
             >
-              <AgentInstructions
-                agentId={agent.id}
-                first={first}
-                saved={instructions}
-              />
+              <SettingsBody>
+                <AgentInstructions
+                  agentId={agent.id}
+                  first={first}
+                  saved={instructions}
+                  unsaved={unsaved}
+                />
+              </SettingsBody>
             </SettingsSection>
             <AgentAppsPanel
               agent={agent}

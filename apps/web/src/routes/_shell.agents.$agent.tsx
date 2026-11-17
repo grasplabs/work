@@ -5,6 +5,7 @@ import { BotIcon } from "lucide-react";
 
 import { AgentPage, agentTabOf } from "../agents/agent-page.tsx";
 import type { AgentTab, FirstAgentAccess } from "../agents/agent-page.tsx";
+import { takeUnsaved } from "../agents/unsaved-instructions.ts";
 import type { Session } from "../core.ts";
 import { PageLoading, PageNotLoaded } from "../frame/page-states.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
@@ -63,6 +64,7 @@ const AgentRoutePage = () => {
     models,
     firstAccess,
     instructions,
+    unsaved,
     documents,
     apps,
   } = page.data;
@@ -89,6 +91,7 @@ const AgentRoutePage = () => {
         documents={documents}
         editable={mine || isMemberAdmin(identity)}
         instructions={instructions}
+        unsaved={unsaved}
         first={!mine && agent.id === managed?.agents.at(0)?.id}
         key={agent.id}
         models={models}
@@ -157,6 +160,8 @@ export const Route = createFileRoute("/_shell/agents/$agent")({
         people: listed.status === "fulfilled" ? listed.value : [],
         models: chosen.status === "fulfilled" ? chosen.value : [],
         instructions: told.status === "fulfilled" ? told.value : undefined,
+        // What its New agent page couldn't save, once: its editor keeps it.
+        unsaved: takeUnsaved(params.agent),
         documents: kept.status === "fulfilled" ? kept.value : undefined,
         apps: {
           apps: apps.status === "fulfilled" ? apps.value : undefined,

@@ -1,4 +1,8 @@
 import { brainQuestionMaxLength } from "@grasp-os/shared/brain-sources";
+import {
+  instructionsMaxLength,
+  isOverInstructionsLimit,
+} from "@grasp-os/shared/instruction-files";
 import { z } from "zod";
 
 import type { BrainStore } from "./store.ts";
@@ -119,13 +123,6 @@ export const recallBudgetMax = 32_000;
 
 /** Most characters of a source's identity, and of a change's key. */
 export const sourceIdMaxLength = 256;
-
-/**
- * Most UTF-16 units (`.length`) of an instruction file's text: about 2000
- * tokens, so the few files a chat starts with leave it room for the
- * conversation.
- */
-export const instructionsMaxLength = 8000;
 
 /** Most sources one read of current versions names. */
 export const currentReadMax = 10;
@@ -319,10 +316,6 @@ export const newSourceSchema = z.strictObject({
   readAt: z.int().nonnegative().optional(),
 });
 export type NewSource = z.infer<typeof newSourceSchema>;
-
-/** Whether `text` is over `instructionsMaxLength` UTF-16 units. */
-export const isOverInstructionsLimit = (text: string): boolean =>
-  text.length > instructionsMaxLength;
 
 /**
  * An instruction file's text: at most `instructionsMaxLength` UTF-16

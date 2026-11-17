@@ -32,7 +32,6 @@ import {
   brainOf,
   currentReadMax,
   handOversMax,
-  instructionsMaxLength,
   listPageMax,
   listPrefixesMax,
   modelNameMaxLength,
@@ -73,6 +72,7 @@ import {
   permissionIdSchema,
   workspaceIdSchema,
 } from "@grasp-os/shared/ids";
+import { instructionsMaxLength } from "@grasp-os/shared/instruction-files";
 import type { Authority } from "@grasp-os/shared/permissions";
 import { authoritySchema } from "@grasp-os/shared/permissions";
 import type { Identity } from "@grasp-os/shared/rpc";

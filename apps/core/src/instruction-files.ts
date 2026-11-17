@@ -210,7 +210,11 @@ export const instructionFilesFor = async (
   ]);
   // An agent of someone's own is told what its owner wrote, only when it
   // acts for them; one of the company's, or an ID nobody made, what the
-  // company's admins wrote under its ID.
+  // company's admins wrote under its ID. The owner check is a second
+  // layer: the Brain's own isolation already holds, as the file is in
+  // its owner's store and read there only for them
+  // (`readInstructionFilesAs`); no turn reaches this check today, since
+  // an own agent runs in its owner's own chat alone.
   const ownerId = acting?.ownerId ?? null;
   const agent =
     ownerId === null || ownerId === member.userId

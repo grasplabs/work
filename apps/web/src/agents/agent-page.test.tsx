@@ -38,6 +38,8 @@ import { afterEach, describe, expect, it } from "vite-plus/test";
 import { AgentPage } from "./agent-page.tsx";
 import type { AgentTab, FirstAgentAccess } from "./agent-page.tsx";
 import { NewAgent } from "./new-agent.tsx";
+import { takeUnsaved } from "./unsaved-instructions.ts";
+import type { UnsavedInstructions } from "./unsaved-instructions.ts";
 
 // One agent's page and the new agent's page against core's connections
 // API as they reach it over RPC (the boundary from the web app), faked:
@@ -110,6 +112,8 @@ const fakeConnections = () => {
   // Each agent's instruction file, by its ID, as core's
   // `session.instructions` keeps it.
   const files = new Map<string, InstructionFileText>();
+  // Saves to refuse, as a Brain out of reach would, before any is kept.
+  const outOfReach = { saves: 0 };
   const instructions: InstructionsApi = {
     read: async (file) => {
       await Promise.resolve();
@@ -118,10 +122,13 @@ const fakeConnections = () => {
     save: async ({ file, text, after }) => {
       await Promise.resolve();
       asked.push(["told", agentOf(file), text]);
-      // As core refuses a save over a version it didn't start from, and
-      // one a test has it refuse.
+      if (outOfReach.saves > 0) {
+        outOfReach.saves -= 1;
+        throw new Error("The Brain can't be reached. Try again.");
+      }
+      // As core refuses a save over a version it didn't start from.
       const now = files.get(agentOf(file));
-      if ((now?.version ?? 0) !== after || text === "refuse this") {
+      if ((now?.version ?? 0) !== after) {
         throw new Error("Someone saved this instruction file since.");
       }
       const version = after + 1;
@@ -348,7 +355,7 @@ const fakeConnections = () => {
       }
     },
   };
-  return { connections, instructions, asked };
+  return { connections, instructions, outOfReach, asked };
 };
 
 type Fake = ReturnType<typeof fakeConnections>;
@@ -360,6 +367,7 @@ let root: Root | undefined;
 interface Shown {
   agents: Agent[];
   instructions: Record<string, InstructionFileText | null>;
+  unsaved: Record<string, UnsavedInstructions | undefined>;
   settings: Record<string, AgentSettings>;
   wakes: Record<string, AgentWake[]>;
   documents: Record<string, AgentDocument[]>;
@@ -403,6 +411,7 @@ const Page = ({
       editable={editable}
       // Read only for whoever may change it, as its route reads it.
       instructions={editable ? data.instructions[agent.id] : undefined}
+      unsaved={data.unsaved[agent.id]}
       first={agent.id === data.agents.at(0)?.id}
       firstAccess={agent.id === data.agents.at(0)?.id ? firstAccess : undefined}
       models={models}
@@ -469,6 +478,10 @@ const shown = async (
     return {
       agents,
       instructions: Object.fromEntries(told),
+      // What a New agent page couldn't save, once, as the route takes it.
+      unsaved: Object.fromEntries(
+        agents.map(({ id }) => [id, takeUnsaved(id)])
+      ),
       settings: Object.fromEntries(read),
       wakes: Object.fromEntries(woken),
       documents: Object.fromEntries(kept),
@@ -686,19 +699,76 @@ describe("an agent's page", () => {
     expect(router.state.location.href).toBe("/agents/agent-1?tab=access");
   });
 
-  it("makes the agent all the same when its instructions can't be saved, and opens it where they are written", async () => {
+  it("refuses instructions their save would refuse, counted as it counts them, before anything is made", async () => {
     const fake = fakeConnections();
     const { asked } = fake;
     const router = await shown(fake, "new");
+    // Under the limit as typed, over it once each & is escaped.
+    const typed = `${"&".repeat(10)}${"x".repeat(7980)}`;
     await set(field("Name"), "Claire", "input");
-    await set(field("Instructions"), "refuse this", "input");
+    await set(field("Instructions"), typed, "input");
     await press(button("Make agent"));
-    expect({ asked, at: router.state.location.href }).toStrictEqual({
+    expect({
+      length: typed.length,
+      asked,
+      at: router.state.location.href,
+      said: document.body.textContent.includes(
+        "This instruction file is over its size limit."
+      ),
+      kept: field("Instructions").value === typed,
+    }).toStrictEqual({
+      length: 7990,
+      asked: [],
+      at: "/",
+      said: true,
+      kept: true,
+    });
+  });
+
+  it("makes the agent all the same when its instructions can't be saved, opens them on its page unsaved with why, and saves them once on a press", async () => {
+    const fake = fakeConnections();
+    const { asked } = fake;
+    fake.outOfReach.saves = 1;
+    const router = await shown(fake, "new");
+    await set(field("Name"), "Claire", "input");
+    await set(field("Instructions"), claireTold, "input");
+    await press(button("Make agent"));
+    const at = router.state.location.href;
+    act(() => {
+      root?.unmount();
+    });
+    document.body.replaceChildren();
+    // Its page, as the address it was sent to opens it.
+    await shown(fake, { agent: "Claire", tab: "instructions" });
+    const shownThen = {
+      text: field("Instructions").value,
+      said: document.body.textContent.includes(
+        "The Brain can't be reached. Try again."
+      ),
+    };
+    await press(button("Save"));
+    expect({
+      at,
+      shownThen,
+      asked,
+      saved: await fake.instructions.read({
+        scope: "agent",
+        agentId: "agent-1",
+      }),
+      saidAfter: document.body.textContent.includes(
+        "The Brain can't be reached. Try again."
+      ),
+    }).toStrictEqual({
+      at: "/agents/agent-1?tab=instructions",
+      shownThen: { text: claireTold, said: true },
       asked: [
         ["make", { ...claire, job: "" }],
-        ["told", "agent-1", "refuse this"],
+        ["told", "agent-1", claireTold],
+        ["told", "agent-1", claireTold],
+        ["work out", "agent-1"],
       ],
-      at: "/agents/agent-1?tab=instructions",
+      saved: { version: 1, text: claireTold },
+      saidAfter: false,
     });
   });
 

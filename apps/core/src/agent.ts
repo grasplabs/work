@@ -11,6 +11,7 @@ import {
   chatPlanSchema,
 } from "@grasp-os/shared/chat";
 import type { ChatAsk, ChatMake, ChatPlan } from "@grasp-os/shared/chat";
+import { promptTextOf } from "@grasp-os/shared/instruction-files";
 import type { InstructionFileRef } from "@grasp-os/shared/instruction-files";
 import type { Role } from "@grasp-os/shared/roles";
 import { z } from "zod";
@@ -21,7 +22,6 @@ import type { ChannelText } from "./channels/stephen-rules.ts";
 import { describeRun, runCode, sourceHash } from "./code-mode.ts";
 import type { CodeRun } from "./code-mode.ts";
 import type { CodeRunStatus } from "./code-run-statuses.ts";
-import { promptTextOf } from "./instructions-text.ts";
 import type { CodeRunOpening } from "./workspace.ts";
 
 // The chat agent's parts, which its pi-durable extension puts together

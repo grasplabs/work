@@ -20,9 +20,7 @@ import {
   exportIdSchema,
   handOversMax,
   identifierSchema,
-  instructionsMaxLength,
   instructionsTextSchema,
-  isOverInstructionsLimit,
   memoriesCursorSchema,
   memoryIdSchema,
   memoryTypes,
@@ -121,7 +119,11 @@ import { withinTime } from "@grasp-os/shared/deadline";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
-import { instructionFileErrors } from "@grasp-os/shared/instruction-files";
+import {
+  instructionFileErrors,
+  instructionsMaxLength,
+  instructionsTooLong,
+} from "@grasp-os/shared/instruction-files";
 import type { InstructionFileRef } from "@grasp-os/shared/instruction-files";
 import { log } from "@grasp-os/shared/log";
 import { modelErrors } from "@grasp-os/shared/models";
@@ -145,7 +147,6 @@ import {
   questionVectorMs,
   questionVectorOf,
 } from "./embedder.ts";
-import { promptTextOf } from "./instructions-text.ts";
 import { parseModelRef } from "./model-catalog.ts";
 import { brainSpendByPurpose, spendMonth } from "./model-spend.ts";
 import { modelForRole, modelSettings, models } from "./models.ts";
@@ -2234,7 +2235,7 @@ export interface InstructionFileVersion {
  * its version `after` (0 for none), which every add names, so none
  * overwrites a version it never saw; the one before stays as history.
  * Refused over `instructionsMaxLength` UTF-16 units as a chat's prompt
- * holds it (`promptTextOf`, never shorter than the text), with
+ * holds it (`instructionsTooLong`, never shorter than the text), with
  * `instructions.too_large`, and with `instructions.changed` when `after`
  * is no longer the current version, and `brain.request_invalid` for an
  * add that isn't one, one without `after` among them. Every add that
@@ -2254,10 +2255,7 @@ export const addInstructionFile = async (
 ): Promise<{ file: InstructionFile; version: number; addedAt: Date }> => {
   // Counted as a chat's prompt holds it, escaped, which is never shorter
   // than the text: the limit bounds what reaches a model.
-  if (
-    typeof added.text === "string" &&
-    isOverInstructionsLimit(promptTextOf(added.text))
-  ) {
+  if (typeof added.text === "string" && instructionsTooLong(added.text)) {
     throw instructionFileErrors.create("instructions.too_large", {
       maxLength: instructionsMaxLength,
     });

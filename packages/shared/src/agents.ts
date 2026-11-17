@@ -5,6 +5,10 @@ import { companyToolClasses, toolClassAudienceSchema } from "./connect.ts";
 import type { CompanyToolClass, ToolClassAudience } from "./connect.ts";
 import { modelRoles } from "./deployment-config.ts";
 import type { ModelRole } from "./deployment-config.ts";
+import {
+  instructionsMaxLength,
+  instructionsTooLong,
+} from "./instruction-files.ts";
 import type { ModelEffort } from "./models.ts";
 import type { AppClassAudience } from "./stephen-reach.ts";
 
@@ -55,11 +59,6 @@ export interface Agent {
 /** Most characters an agent's name and job hold. */
 export const agentNameMax = 60;
 export const agentJobMax = 200;
-/**
- * Most characters a chat's draft of an agent's instructions holds: its
- * instruction file's own limit, which saving it holds again.
- */
-export const agentInstructionsMax = 8000;
 
 /**
  * The figures an agent can be drawn with, by name: the dotted head every
@@ -349,7 +348,17 @@ export const agentDraftSchema = z
   .strictObject({
     name: agentInputSchema.shape.name,
     job: agentInputSchema.shape.job,
-    instructions: z.string().trim().min(1).max(agentInstructionsMax),
+    // What its instruction file's save takes, measured as that save
+    // measures it: a draft it would refuse is refused as it is drafted,
+    // before Make it makes anything.
+    instructions: z
+      .string()
+      .trim()
+      .min(1)
+      .max(instructionsMaxLength)
+      .refine((text) => !instructionsTooLong(text), {
+        message: `At most ${instructionsMaxLength} characters, counting each &, < and > as its escape`,
+      }),
     whose: z.enum(["company", "own"]),
     audience: toolClassAudienceSchema.optional(),
     classes: z

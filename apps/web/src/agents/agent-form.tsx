@@ -1,10 +1,6 @@
-import {
-  agentFaces,
-  agentInstructionsMax,
-  agentJobMax,
-  agentNameMax,
-} from "@grasp-os/shared/agents";
+import { agentFaces, agentJobMax, agentNameMax } from "@grasp-os/shared/agents";
 import type { AgentFace } from "@grasp-os/shared/agents";
+import { instructionsMaxLength } from "@grasp-os/shared/instruction-files";
 import { Button } from "@grasp-os/ui/components/button";
 import { Field, FieldLabel } from "@grasp-os/ui/components/field";
 import { Input } from "@grasp-os/ui/components/input";
@@ -213,7 +209,7 @@ export const AgentForm = ({
           <Textarea
             disabled={!can}
             id={instructionsId}
-            maxLength={agentInstructionsMax}
+            maxLength={instructionsMaxLength}
             onChange={(event) => {
               setTyped({ ...typed, instructions: event.target.value });
             }}

@@ -1,9 +1,9 @@
 import {
   brainOf,
-  instructionsMaxLength,
   personalBrainOf,
   recallBudgetMax,
 } from "@grasp-os/brain-next/contract";
+import { instructionsMaxLength } from "@grasp-os/shared/instruction-files";
 import type { Authority } from "@grasp-os/shared/permissions";
 import { authoritySchema } from "@grasp-os/shared/permissions";
 import type { Identity } from "@grasp-os/shared/rpc";

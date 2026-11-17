@@ -1,8 +1,11 @@
 import type { AgentDraft } from "@grasp-os/shared/agents";
 import type { ChatMessage, ChatUpdate } from "@grasp-os/shared/chat";
+import { runInDurableObject } from "cloudflare:test";
+import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
+import { inJurisdiction } from "../src/durable-objects.ts";
 import {
   codeStep,
   model,
@@ -239,6 +242,103 @@ describe("an agent made from the chat", { timeout: 120_000 }, () => {
       tried: "agent.wake_invalid",
       made: false,
       again: "agent.wake_invalid",
+    });
+  });
+
+  it("refuses a draft whose instructions their save would refuse, counted as that save counts them, before anything is made", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const name = `Too long ${unique()}`;
+    // Under the limit as typed, over it once each & is escaped.
+    const instructions = `${"&".repeat(10)}${"x".repeat(7980)}`;
+    const { chat, callId, messages } = await draftedChat(admin, {
+      ...hr(name),
+      instructions,
+      whose: "company",
+    });
+    const made = await outcome(
+      admin.api.chats.makeDraftedAgent(chat.id, {
+        draft: callId ?? "",
+        text: "Make it",
+        model,
+      })
+    );
+    const agents = await admin.api.connections.agents();
+    expect({
+      length: instructions.length,
+      // The tool refused it back to the model: no card to press.
+      card: messages.some(
+        (message) =>
+          message.role === "assistant" && message.agentDraft !== undefined
+      ),
+      made,
+      agent: agents.some((agent) => agent.name === name),
+    }).toStrictEqual({
+      length: 7990,
+      card: false,
+      // No card, so no draft to name: nothing to make.
+      made: "agent.invalid_request",
+      agent: false,
+    });
+  });
+
+  it("keeps a draft's instructions on its card when they can't be saved once the agent is made, and tells that agent at the next press, making no second", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const name = `Kept ${unique()}`;
+    const { chat, callId } = await draftedChat(admin, {
+      ...hr(name),
+      whose: "company",
+    });
+    const press = async () =>
+      await admin.api.chats.makeDraftedAgent(chat.id, {
+        draft: callId ?? "",
+        text: "Make it",
+        model,
+      });
+    // The Brain refuses every shared write while it restores an export.
+    const store = inJurisdiction(env, env.BRAIN_STORE).getByName("brain");
+    const restoring = crypto.randomUUID();
+    await runInDurableObject(store, (_instance, state) => {
+      state.storage.sql.exec(
+        `INSERT INTO restores (export, checked, part, restored, state, started_at)
+        VALUES (?, 0, 0, 0, 'running', ?)`,
+        restoring,
+        Date.now()
+      );
+    });
+    let first: string;
+    try {
+      first = await outcome(press());
+    } finally {
+      await runInDurableObject(store, (_instance, state) => {
+        state.storage.sql.exec(
+          "DELETE FROM restores WHERE export = ?",
+          restoring
+        );
+      });
+    }
+    const madeFirst = await admin.api.connections.agents();
+    const again = await press();
+    await idle(admin, chat.id);
+    const madeAgain = await admin.api.connections.agents();
+    const told = await admin.api.instructions.read({
+      scope: "agent",
+      agentId: again.id,
+    });
+    const named = (agents: typeof madeFirst) =>
+      agents.filter((agent) => agent.name === name).map(({ id }) => id);
+    expect({
+      first,
+      madeFirst: named(madeFirst),
+      madeAgain: named(madeAgain),
+      told,
+      thirdPress: await outcome(press()),
+    }).toStrictEqual({
+      first: "brain.restoring",
+      // Made once, by the first press: the second told that one.
+      madeFirst: [again.id],
+      madeAgain: [again.id],
+      told: { version: 1, text: hr(name).instructions },
+      thirdPress: "agent.draft_not_found",
     });
   });
 
