@@ -37,7 +37,10 @@ interface Drive {
   contents: Record<string, string>;
   /** Answers every request instead, when it answers. */
   answer?: (url: URL) => Response | undefined;
-  /** A path Google is slow to answer, and how slow. */
+  /**
+   * A path whose answer Google starts at once but whose bytes stall, and
+   * for how long.
+   */
   slow?: { path: string; ms: number };
 }
 
@@ -62,9 +65,21 @@ const listing = (url: URL): Response => {
   });
 };
 
-const internet = fakeInternet(async (_request, url) => {
+/** An answer whose headers come at once and whose bytes stall for `ms`. */
+const stalled = (ms: number): Response =>
+  new Response(
+    new ReadableStream({
+      start: async (controller) => {
+        controller.enqueue(new TextEncoder().encode("Coffee"));
+        await scheduler.wait(ms);
+        controller.close();
+      },
+    })
+  );
+
+const internet = fakeInternet((_request, url) => {
   if (drive.slow?.path === url.pathname) {
-    await scheduler.wait(drive.slow.ms);
+    return stalled(drive.slow.ms);
   }
   const answered = drive.answer?.(url);
   if (answered !== undefined) {
@@ -357,7 +372,7 @@ describe("syncing a person's own Drive", () => {
     ]);
   });
 
-  it("answers in time when an export is slow, and goes on after the last file it handled", async () => {
+  it("answers in time with what it gathered when a file's bytes are slow, and goes on after the last file it handled", async () => {
     const connectionId = await connected();
     drive.owned = [
       ownedFile("quick"),
@@ -365,7 +380,7 @@ describe("syncing a person's own Drive", () => {
       ownedFile("next"),
     ];
     drive.contents = { quick: "q", slow: "s", next: "n" };
-    // Longer than a page may take: given up before connect does.
+    // Its headers come at once; its bytes take longer than a page may.
     drive.slow = { path: "/drive/v3/files/slow/export", ms: 20_000 };
     const first = await read(connectionId, null);
     expect(first.items.map(({ id }) => id)).toStrictEqual(["quick"]);
@@ -374,6 +389,23 @@ describe("syncing a person's own Drive", () => {
     drive.slow = undefined;
     const second = await read(connectionId, first.cursor);
     expect(second.items.map(({ id }) => id)).toStrictEqual(["slow", "next"]);
+  });
+
+  it("passes over a file that is always too slow, so the sync moves on", async () => {
+    const connectionId = await connected();
+    drive.owned = [
+      ownedFile("slow", { mimeType: doc, size: undefined }),
+      ownedFile("next"),
+    ];
+    drive.contents = { slow: "s", next: "n" };
+    // Slow on every read, and first in its page.
+    drive.slow = { path: "/drive/v3/files/slow/export", ms: 20_000 };
+    const first = await read(connectionId, null);
+    expect(first.items).toStrictEqual([
+      expect.objectContaining({ id: "slow", gone: false, content: null }),
+    ]);
+    const second = await read(connectionId, first.cursor);
+    expect(second.items.map(({ id }) => id)).toStrictEqual(["next"]);
   });
 
   it("lists again when Google no longer has the cursor, or it isn't one the sync wrote", async () => {
