@@ -1,5 +1,6 @@
 import { defineConnector } from "@grasp-os/connector-kit/connector";
 
+import { calendarSync } from "./calendar-sync.ts";
 import { calendarTools } from "./calendar.ts";
 import { chatTools } from "./chats.ts";
 import { documentTools } from "./documents.ts";
@@ -31,7 +32,9 @@ import { workbookTools } from "./workbook.ts";
  * `Files.ReadWrite.All`, which covers the sync's reads (driveItem delta,
  * permissions and content all take `Files.Read`), and their own mailbox
  * (mail-sync.ts), on `Mail.ReadWrite`, which covers listing messages, their
- * attachments and folders (`Mail.Read` at least).
+ * attachments and folders (`Mail.Read` at least), and their own calendar
+ * (calendar-sync.ts), on `Calendars.ReadWrite`, which covers calendarView
+ * delta (`Calendars.Read`).
  */
 export default defineConnector({
   name: "microsoft-365",
@@ -80,5 +83,5 @@ export default defineConnector({
     ...chatTools,
     ...meetingTools,
   ],
-  syncs: [onedriveSync, mailSync],
+  syncs: [onedriveSync, mailSync, calendarSync],
 });

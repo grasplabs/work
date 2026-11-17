@@ -1,0 +1,505 @@
+import { ToolError } from "@grasp-os/connector-kit/connector";
+import {
+  RestartSyncError,
+  defineSync,
+  syncPageLimits,
+} from "@grasp-os/connector-kit/sync";
+import type {
+  SyncContent,
+  SyncItem,
+  SyncPage,
+  SyncReader,
+} from "@grasp-os/shared/sync";
+import { ownPlace } from "@grasp-os/shared/sync";
+import { z } from "zod";
+
+import { graphFailure, graphHost, graphUrl, v1 } from "./graph.ts";
+
+// Native sync of a person's own Outlook calendar (GRA-1759, PR H): every
+// event of their primary calendar within a window, then what changed and
+// what went away. An event is readable only by the calendar's own person:
+// its only reader is them, and it lives in their own store.
+//
+// How it reads: calendarView delta, the change feed Graph v1.0 has for
+// events, which reads a window of the person's primary calendar
+// (https://learn.microsoft.com/en-us/graph/api/event-delta?view=graph-rest-1.0).
+// A calendar view holds each occurrence of a recurring event as an event
+// of its own. The window is one year back and one year ahead of when the
+// listing began: the window the plan on GRA-1719 (part 3) set, since v1.0
+// has no delta without one. The sync run's daily full relisting (PR I)
+// starts a new listing, and so moves the window, every day; a listing
+// older than a year lists again from the start (`sync.restart`) anyway.
+// Graph's next and delta links are never followed: only their
+// `$skiptoken` or `$deltatoken` is kept, which carry the window
+// ("Microsoft Graph automatically encodes any specified parameters into
+// the token portion"), and the request is built here.
+//
+// What goes away: an event under `@removed` (deleted, or "outside the date
+// range" and changed), and a cancelled event (`isCancelled`). A token
+// Graph no longer knows (410, `syncStateNotFound`) lists again.
+//
+// What is left out: calendars other than the primary one (calendarView
+// delta reads the primary calendar only in v1.0), events outside the
+// window, and events' attachments.
+//
+// Pages: an event comes whole in the feed, body and all, and calendarView
+// delta takes no `$select`, so Graph is asked for one event per page
+// (`Prefer: odata.maxpagesize=1`, event-delta): an answer of several
+// large events could pass what connect's egress reads of one answer
+// (10 MiB). Each of our pages follows Graph's pages, a request each, until
+// the round's delta link, its requests, its content or the kit's deadline;
+// it goes on from the next skip token, so it never stops inside Graph's
+// page. Should Graph send more than one event a page anyway, a page that
+// stops inside it goes on after the last event handled, by its ID and
+// `changeKey`, or at the top of Graph's page when that event isn't there
+// as it was.
+//
+// NEEDS A REAL TENANT TO CONFIRM (not documented by Microsoft):
+// - That a token read again answers the same events in the same order,
+//   less those changed since, should a page hold more than one.
+// - An event whose own answer is over the egress's 10 MiB fails its page
+//   every time; Exchange takes items larger than that.
+// - That `outlook.body-content-type` applies to calendarView delta, as it
+//   does to a calendar view; if not, a body comes as HTML, still text.
+
+const me = "/me";
+const delta = `${me}/calendarView/delta`;
+
+/** A year, in ms: the window's reach either side of the listing's start. */
+const year = 365 * 24 * 60 * 60 * 1000;
+
+/**
+ * One event per page, immutable IDs, bodies as text, times in UTC
+ * (event-delta, Prefer).
+ */
+const prefer =
+  'odata.maxpagesize=1, IdType="ImmutableId", outlook.body-content-type="text", outlook.timezone="UTC"';
+
+const dateTimeSchema = z
+  .object({ dateTime: z.string().nullish(), timeZone: z.string().nullish() })
+  .nullish();
+
+const addressSchema = z
+  .object({
+    emailAddress: z
+      .object({
+        name: z.string().nullish(),
+        address: z.string().nullish(),
+      })
+      .nullish(),
+  })
+  .nullish();
+
+/**
+ * One entry of the feed: an event as it now is, or one removed
+ * (https://learn.microsoft.com/en-us/graph/api/resources/event?view=graph-rest-1.0).
+ */
+const eventSchema = z.object({
+  id: z.string().min(1),
+  "@removed": z.unknown().optional(),
+  changeKey: z.string().nullish(),
+  lastModifiedDateTime: z.string().nullish(),
+  subject: z.string().nullish(),
+  body: z.object({ content: z.string().nullish() }).nullish(),
+  start: dateTimeSchema,
+  end: dateTimeSchema,
+  isAllDay: z.boolean().nullish(),
+  isCancelled: z.boolean().nullish(),
+  location: z.object({ displayName: z.string().nullish() }).nullish(),
+  organizer: addressSchema,
+  attendees: z.array(addressSchema).nullish(),
+});
+type Event = z.infer<typeof eventSchema>;
+
+const feedSchema = z.object({
+  value: z.array(eventSchema),
+  "@odata.nextLink": z.string().optional(),
+  "@odata.deltaLink": z.string().optional(),
+});
+
+const meSchema = z.object({ id: z.string().min(1) });
+
+/** An event a page stopped after: by its ID and `changeKey`. */
+interface Handled {
+  id: string;
+  changeKey: string;
+}
+
+/**
+ * Where a read is: when the listing began (its window's middle), Graph's
+ * token to read from (none: the listing's start), and the event of that
+ * token's page already handled.
+ */
+interface Position {
+  began: number;
+  token: { kind: "skip" | "delta"; value: string } | null;
+  after: Handled | null;
+}
+
+const base64url = /^[\w-]*$/u;
+
+const notOurs = (): RestartSyncError =>
+  new RestartSyncError("Not a cursor this sync wrote");
+
+const encode = (value: string): string =>
+  btoa(String.fromCodePoint(...new TextEncoder().encode(value)))
+    .replaceAll("+", "-")
+    .replaceAll("/", "_")
+    .replaceAll("=", "");
+
+const decode = (value: string): string => {
+  if (!base64url.test(value)) {
+    throw notOurs();
+  }
+  try {
+    const binary = atob(value.replaceAll("-", "+").replaceAll("_", "/"));
+    return new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(
+      Uint8Array.from(binary, (char) => char.codePointAt(0) ?? 0)
+    );
+  } catch {
+    throw notOurs();
+  }
+};
+
+const kinds: Readonly<Record<string, "skip" | "delta" | null>> = {
+  s: "skip",
+  d: "delta",
+  n: null,
+};
+
+/**
+ * The cursor of a position: `e.<began>.<s|d|n>.<token>` (a skip token, a
+ * delta token, or none) and, inside a page, `.<id>.<changeKey>`.
+ */
+const cursorOf = ({ began, token, after }: Position): string => {
+  const kind = token === null ? "n" : token.kind.charAt(0);
+  const at = `e.${began}.${kind}.${encode(token?.value ?? "")}`;
+  return after === null
+    ? at
+    : `${at}.${encode(after.id)}.${encode(after.changeKey)}`;
+};
+
+/** The position a cursor this sync wrote names; any other starts over. */
+const positionOf = (cursor: string): Position => {
+  const [tag, began = "", kind = "", token = "", ...rest] = cursor.split(".");
+  const time = Number(began);
+  const tokenKind = Object.hasOwn(kinds, kind) ? kinds[kind] : undefined;
+  if (
+    tag !== "e" ||
+    !/^\d{1,15}$/u.test(began) ||
+    tokenKind === undefined ||
+    (rest.length !== 0 && rest.length !== 2)
+  ) {
+    throw notOurs();
+  }
+  const value = decode(token);
+  if ((tokenKind === null) !== (value === "")) {
+    throw notOurs();
+  }
+  const [id = "", changeKey = ""] = rest;
+  return {
+    began: time,
+    token: tokenKind === null ? null : { kind: tokenKind, value },
+    after:
+      rest.length === 0
+        ? null
+        : { id: decode(id), changeKey: decode(changeKey) },
+  };
+};
+
+/** The token a link Graph handed back carries; the link is never followed. */
+const tokenOf = (
+  link: string,
+  kind: "skip" | "delta"
+): { kind: "skip" | "delta"; value: string } => {
+  let url: URL;
+  try {
+    url = new URL(link);
+  } catch {
+    throw new ToolError("Graph's link isn't a URL", { code: "failed" });
+  }
+  const value = url.searchParams.get(`$${kind}token`) ?? "";
+  if (url.hostname !== graphHost || value === "") {
+    throw new ToolError("Graph's link has no token", { code: "failed" });
+  }
+  return { kind, value };
+};
+
+/** An ISO 8601 time in UTC, to the second, as calendarView takes it. */
+const isoOf = (time: number): string =>
+  new Date(time).toISOString().replace(/\.\d+Z$/u, "Z");
+
+/** One page of the feed: from a token, or the listing's start. */
+const feedPage = async (room: Room, position: Position) => {
+  const { token, began } = position;
+  room.requests -= 1;
+  const url =
+    token === null
+      ? graphUrl(delta, {
+          startDateTime: isoOf(began - year),
+          endDateTime: isoOf(began + year),
+        })
+      : graphUrl(delta, { [`$${token.kind}token`]: token.value });
+  const response = await fetch(url, { headers: { prefer } });
+  if (response.status === 410 || (response.status === 404 && token !== null)) {
+    await response.body?.cancel();
+    throw new RestartSyncError();
+  }
+  if (!response.ok) {
+    throw await graphFailure(response);
+  }
+  return feedSchema.parse(await response.json());
+};
+
+/** A person, as an event's line writes them. */
+const addressOf = (person: z.infer<typeof addressSchema>): string => {
+  const name = person?.emailAddress?.name ?? "";
+  const address = person?.emailAddress?.address ?? "";
+  if (name === "" || name === address) {
+    return address;
+  }
+  return address === "" ? name : `${name} <${address}>`;
+};
+
+/** A start or end, as an event's line writes it. */
+const whenOf = (time: z.infer<typeof dateTimeSchema>): string =>
+  [time?.dateTime ?? "", time?.timeZone ?? ""].filter(Boolean).join(" ");
+
+/** An event's text: its lines, then its body as text. */
+const textOf = (event: Event): string => {
+  const lines = [
+    ["Subject", event.subject ?? ""],
+    ["Start", whenOf(event.start)],
+    ["End", whenOf(event.end)],
+    ["All day", event.isAllDay === true ? "yes" : ""],
+    ["Location", event.location?.displayName ?? ""],
+    ["Organizer", addressOf(event.organizer)],
+    ["Attendees", (event.attendees ?? []).map(addressOf).join(", ")],
+  ]
+    .filter(([, value]) => value !== "")
+    .map(([name, value]) => `${name}: ${value}`);
+  return `${lines.join("\n")}\n\n${event.body?.content ?? ""}`;
+};
+
+/** JSON bytes of `content` in a page. */
+const sizeOf = (content: SyncContent): number =>
+  new TextEncoder().encode(JSON.stringify(content)).byteLength;
+
+/** What a page has left: requests, content bytes, and its deadline. */
+interface Room {
+  requests: number;
+  bytes: number;
+  deadline: number;
+  /** Whether no event is handled yet: the first is always taken. */
+  first: boolean;
+}
+
+const goneOf = (id: string): SyncItem => ({ gone: true, id, kind: "event" });
+
+/**
+ * The item an event now is, gone, or "full" when the page has no room
+ * left for it (the page's first takes it without its content).
+ */
+const itemOf = (
+  room: Room,
+  owner: SyncReader[],
+  event: Event
+): SyncItem | "full" => {
+  if (event["@removed"] !== undefined || event.isCancelled === true) {
+    return goneOf(event.id);
+  }
+  const changedAt = event.lastModifiedDateTime ?? "";
+  const changeKey = event.changeKey ?? "";
+  if (changedAt === "" || changeKey === "") {
+    throw new ToolError("Graph's event has no change key or time", {
+      code: "failed",
+    });
+  }
+  let content: SyncContent | null = { type: "text", text: textOf(event) };
+  const size = sizeOf(content);
+  if (size > room.bytes) {
+    if (!room.first) {
+      return "full";
+    }
+    content = null;
+  } else {
+    room.bytes -= size;
+  }
+  return {
+    gone: false,
+    id: event.id,
+    kind: "event",
+    version: changeKey,
+    changedAt,
+    title: event.subject ?? "",
+    content,
+    readers: owner,
+    changedBy: null,
+    partOf: null,
+  };
+};
+
+/** Where in Graph's page to go on: after `after`, or at its top. */
+const startOf = (events: readonly Event[], after: Handled | null): number => {
+  if (after === null) {
+    return 0;
+  }
+  const index = events.findIndex(
+    ({ id, changeKey }) =>
+      id === after.id && (changeKey ?? "") === after.changeKey
+  );
+  return index + 1;
+};
+
+/**
+ * The last of each event's entries: an event that changed twice in a round
+ * may come twice; its last entry counts.
+ */
+const lastOfEach = (items: readonly SyncItem[]): SyncItem[] => {
+  const last = new Map(items.map((item, index) => [item.id, index]));
+  return items.filter((item, index) => last.get(item.id) === index);
+};
+
+/** The person's own Entra object ID, their events' only reader. */
+const ownerOf = async (room: Room): Promise<SyncReader[]> => {
+  room.requests -= 1;
+  const response = await fetch(graphUrl(me, { $select: "id" }), {
+    headers: { prefer },
+  });
+  if (!response.ok) {
+    throw await graphFailure(response);
+  }
+  const { id } = meSchema.parse(await response.json());
+  return [{ kind: "account", id: id.toLowerCase() }];
+};
+
+/** Where the feed goes on once Graph's page is done, and whether it's due. */
+const nextOf = (
+  position: Position,
+  feed: z.infer<typeof feedSchema>
+): { position: Position; more: boolean } => {
+  const next = feed["@odata.nextLink"];
+  const end = feed["@odata.deltaLink"];
+  if (next === undefined && end === undefined) {
+    throw new ToolError("Graph's page has no link on", { code: "failed" });
+  }
+  return {
+    position: {
+      began: position.began,
+      token:
+        next === undefined
+          ? tokenOf(end ?? "", "delta")
+          : tokenOf(next, "skip"),
+      after: null,
+    },
+    more: next !== undefined,
+  };
+};
+
+/**
+ * The events of one page of Graph's from `position` on, while the page has
+ * room: how far it got, the items, and where to go on.
+ */
+const takePage = async (
+  room: Room,
+  owner: SyncReader[],
+  position: Position
+): Promise<{
+  items: SyncItem[];
+  at: Position;
+  more: boolean;
+  done: boolean;
+}> => {
+  const feed = await feedPage(room, position);
+  const events = feed.value;
+  const start = startOf(events, position.after);
+  const items: SyncItem[] = [];
+  let handled: Event | null = null;
+  for (const event of events.slice(start)) {
+    if (!room.first && Date.now() >= room.deadline) {
+      break;
+    }
+    const item = itemOf(room, owner, event);
+    if (item === "full") {
+      break;
+    }
+    items.push(item);
+    handled = event;
+    room.first = false;
+  }
+  const reached = handled === null ? start : events.indexOf(handled) + 1;
+  if (reached < events.length) {
+    return {
+      items,
+      at:
+        handled === null
+          ? position
+          : {
+              ...position,
+              after: { id: handled.id, changeKey: handled.changeKey ?? "" },
+            },
+      more: true,
+      done: false,
+    };
+  }
+  const next = nextOf(position, feed);
+  return { items, at: next.position, more: next.more, done: true };
+};
+
+/** One page of the person's own calendar from `position` on. */
+const readPage = async (
+  position: Position,
+  deadline: number
+): Promise<SyncPage> => {
+  if (Date.now() - position.began > year) {
+    // The window has moved a year: list again from the start.
+    throw new RestartSyncError("The calendar's window moved");
+  }
+  const room: Room = {
+    requests: syncPageLimits.requests,
+    bytes: syncPageLimits.contentBytes,
+    deadline,
+    first: true,
+  };
+  const owner = await ownerOf(room);
+  const items: SyncItem[] = [];
+  let at = position;
+  for (;;) {
+    // oxlint-disable-next-line no-await-in-loop -- one page of Graph's after another
+    const page = await takePage(room, owner, at);
+    items.push(...page.items);
+    ({ at } = page);
+    const roomLeft =
+      room.requests > 0 && (room.first || Date.now() < room.deadline);
+    if (!page.done || !page.more || !roomLeft) {
+      return {
+        items: lastOfEach(items),
+        cursor: cursorOf(at),
+        more: page.more,
+      };
+    }
+  }
+};
+
+/** The person's own calendar: its events in the window, changes and removals. */
+export const calendarSync = defineSync({
+  name: "calendar",
+  kind: "event",
+  routes: [
+    { method: "GET", host: graphHost, path: `${v1}${me}` },
+    { method: "GET", host: graphHost, path: `${v1}${delta}` },
+  ],
+  read: async ({ place, cursor, deadline }) => {
+    if (place !== ownPlace) {
+      throw new ToolError("This sync reads the person's own calendar only", {
+        code: "failed",
+      });
+    }
+    return await readPage(
+      cursor === null
+        ? { began: Date.now(), token: null, after: null }
+        : positionOf(cursor),
+      deadline
+    );
+  },
+});
