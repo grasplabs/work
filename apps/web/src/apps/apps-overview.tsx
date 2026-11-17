@@ -1,7 +1,7 @@
 import type { AppOverview } from "@grasp-os/shared/apps";
 import { Trans, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { useNavigate } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 
 import { Page, PageHeading } from "../frame/page.tsx";
@@ -34,44 +34,6 @@ const styles = stylex.create({
   search: { maxWidth: "18rem" },
 });
 
-/**
- * App card links with a plain `<a href>`, which would load the whole
- * product again: a plain press on a card's link goes through the router
- * instead, and a press with a modifier (a new tab) stays the browser's.
- */
-const useRoutedCardLinks = (): ((
-  element: HTMLElement | null
-) => () => void) => {
-  const navigate = useNavigate();
-  return (element) => {
-    const onClick = (event: MouseEvent): void => {
-      const modified =
-        event.button !== 0 ||
-        event.metaKey ||
-        event.ctrlKey ||
-        event.shiftKey ||
-        event.altKey;
-      if (event.defaultPrevented || modified) {
-        return;
-      }
-      const link =
-        event.target instanceof Element
-          ? event.target.closest("a[data-card-link]")
-          : null;
-      const href = link?.getAttribute("href");
-      if (href === null || href === undefined) {
-        return;
-      }
-      event.preventDefault();
-      void navigate({ href });
-    };
-    element?.addEventListener("click", onClick);
-    return () => {
-      element?.removeEventListener("click", onClick);
-    };
-  };
-};
-
 /** One App: its card. */
 const OneApp = ({ overview: { app } }: { overview: AppOverview }) => {
   const { t } = useLingui();
@@ -96,7 +58,7 @@ const OneApp = ({ overview: { app } }: { overview: AppOverview }) => {
           },
         },
       ]}
-      href={`/apps/${app.id}`}
+      render={<Link params={{ app: app.id }} to="/apps/$app" />}
       // Until each version has its picture, the window is quiet and
       // names the App.
       labels={{ more: t`More`, empty: app.name }}
@@ -123,7 +85,6 @@ export const AppsOverview = ({
 }) => {
   const { t } = useLingui();
   const [query, setQuery] = useState("");
-  const room = useRoutedCardLinks();
   const apps = newestFirst(listed);
   const asked = query.trim();
   const needle = asked.toLocaleLowerCase();
@@ -185,7 +146,7 @@ export const AppsOverview = ({
               </EmptyHeader>
             </Empty>
           ) : (
-            <section aria-label={t`Apps`} ref={room}>
+            <section aria-label={t`Apps`}>
               <AppCardGrid>
                 {shown.map((overview) => (
                   <OneApp key={overview.app.id} overview={overview} />

@@ -21,6 +21,8 @@
 
 /* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
+import { renderElement } from "@ui-sdk/react/primitive";
+import type { RenderProp } from "@ui-sdk/react/primitive";
 import { useId } from "react";
 import type { ReactNode } from "react";
 
@@ -56,8 +58,13 @@ export interface AppCardOwner {
 export interface AppCardProps {
   /** The app's name: the card's title, and the link that opens it. */
   title: string;
-  /** Where the card goes: the app. */
-  href: string;
+  /** Where the card goes: the app. Leave it out when `render` is a router's link that carries it. */
+  href?: string;
+  /**
+   * The card's link drawn as a router's own (`render={<Link to="/apps/tickets" />}`): it takes the
+   * link's look, words and wiring, and keeps its own props. Without it, an `<a href>`.
+   */
+  render?: RenderProp;
   /** One or two sentences on what the app is for. Clamped to two lines. */
   description?: string;
   /**
@@ -166,6 +173,7 @@ const metaOf = (
 export const AppCard = ({
   title,
   href,
+  render,
   description,
   preview,
   owner,
@@ -217,18 +225,22 @@ export const AppCard = ({
       <div {...stylex.props(styles.words)}>
         <div {...stylex.props(styles.titleRow)}>
           <Heading level={level}>
-            <a
-              href={href}
-              title={title}
-              data-slot="app-card-link"
-              data-card-link=""
-              // The part that shows this link's focus: the frame (scripts/check-focus-ring.ts reads it).
-              data-ring-on={`${id}-frame`}
-              aria-describedby={describedBy === "" ? undefined : describedBy}
-              {...stylex.props(styles.link)}
-            >
-              {title}
-            </a>
+            {renderElement(
+              "a",
+              {
+                href,
+                title,
+                "data-slot": "app-card-link",
+                "data-card-link": "",
+                // The part that shows this link's focus: the frame (scripts/check-focus-ring.ts reads it).
+                "data-ring-on": `${id}-frame`,
+                "aria-describedby":
+                  describedBy === "" ? undefined : describedBy,
+                className: stylex.props(styles.link).className,
+                children: title,
+              },
+              render
+            )}
           </Heading>
           {actions === undefined || actions.length === 0 ? null : (
             <MoreMenu actions={actions} label={`${words.more}, ${title}`} />

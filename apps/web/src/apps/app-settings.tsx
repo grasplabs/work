@@ -203,7 +203,7 @@ const SectionHeading = ({
   description?: string | undefined;
 }) => (
   <PageHeader
-    size="sm"
+    size="md"
     title={title}
     {...(description === undefined ? {} : { description })}
   />
