@@ -27,7 +27,8 @@ import { auditedDuring, outcome, signedInApi, unique } from "./sign-in.ts";
 
 // The kickoff in the new Brain (GRA-1748): what every member reads of it,
 // the vision and the teams it named, as one source readable by everyone,
-// a new version at each save and answer; the admin's delete erases it,
+// a new version at each hand-over, holding every save and answer since the
+// last; the admin's delete erases it,
 // every version. The ways it can fail, from the threat model on the issue:
 //
 // - The transcript, or a field only staff and admins read (what the
@@ -202,6 +203,87 @@ describe("the kickoff in the new Brain", { timeout: 120_000 }, () => {
       versions: [1, 2],
       firstAnswered: false,
       logged: [],
+    });
+  });
+
+  it("gives changes between two hand-overs as one version holding all of them, with one event, and the next change as the next", async () => {
+    const member = await signedInApi(idp, "user");
+    await bringIn(markers());
+    await handOverNow();
+    const source = await kickoffNow();
+    // An earlier test's kickoff may be the same source: counted from here.
+    const versionsOf = async (): Promise<number[]> => {
+      const { versions } = await listVersionsAs(env, member.userId, {
+        source,
+      });
+      return versions.map(({ version }) => version).toSorted((a, b) => a - b);
+    };
+    const textOf = async (version: number): Promise<string> => {
+      const read = await readSourceVersionAs(env, member.userId, {
+        source,
+        version,
+      });
+      return read?.text.toLowerCase() ?? "";
+    };
+    const before = await versionsOf();
+    const last = before.at(-1) ?? 0;
+    /** What `run` audited of the kickoff's hand-over: each noting, and each end. */
+    const handOverAudited = async (run: () => Promise<void>) => {
+      const events = await auditedDuring(run);
+      const of = (action: string): number =>
+        events.filter(
+          (event) => event.action === action && event.target?.id === source.id
+        ).length;
+      return {
+        noted: of("onboarding.kickoff.brain_source"),
+        handedOver: of("brain.source.handed_over"),
+      };
+    };
+
+    // Two answers before the hand-over runs: one version, both in it.
+    const goals = markerOf("goal");
+    const pain = markerOf("pain");
+    const twoAnswers = await handOverAudited(async () => {
+      await adminKickoff().answerKickoff("goals", `Ovens in ${goals}.`);
+      await adminKickoff().answerKickoff("pain", `Night shifts at ${pain}.`);
+      await handOverNow();
+    });
+    const afterTwo = await versionsOf();
+    const both = await textOf(last + 1);
+    // Run again with no change: nothing new, no event.
+    const retried = await handOverAudited(handOverNow);
+    const afterRetry = await versionsOf();
+
+    // The next change after that hand-over: the next version.
+    const third = markerOf("pain");
+    const thirdAnswer = await handOverAudited(async () => {
+      await adminKickoff().answerKickoff("pain", `Night shifts at ${third}.`);
+      await handOverNow();
+    });
+    const afterThird = await versionsOf();
+    const next = await textOf(last + 2);
+
+    expect({
+      twoAnswers,
+      added: afterTwo.length - before.length,
+      both: [both.includes(goals), both.includes(pain)],
+      retried,
+      afterRetry: afterRetry.length - afterTwo.length,
+      thirdAnswer,
+      afterThird: afterThird.slice(before.length),
+      next: [next.includes(goals), next.includes(third), next.includes(pain)],
+    }).toStrictEqual({
+      // One noting per change, as each is one action; one end per hand-over.
+      twoAnswers: { noted: 2, handedOver: 1 },
+      added: 1,
+      both: [true, true],
+      retried: { noted: 0, handedOver: 0 },
+      afterRetry: 0,
+      thirdAnswer: { noted: 1, handedOver: 1 },
+      afterThird: [last + 1, last + 2],
+      // The third answer replaced the pain's: the earlier one is in the
+      // version before, still readable as history.
+      next: [true, true, false],
     });
   });
 

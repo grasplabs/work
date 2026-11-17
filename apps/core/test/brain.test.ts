@@ -604,6 +604,93 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
     });
   });
 
+  it("leaves out a team an admin's records name that the kickoff names no more, never showing it by its id", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const member = await signedInApi(idp, "user");
+    // The kickoff names Finance and Legal; an admin's records name Legal.
+    await bringInKickoff();
+    const { teams: named } = await member.api.brain.read();
+    const idOf = (name: string): string =>
+      named.find((team) => team.name === name)?.id ?? "";
+    const legal = idOf("Legal");
+    const finance = idOf("Finance");
+    const tag = unique();
+    const source = `src-${tag}`;
+    await admin.api.brain.addRecords([
+      {
+        type: "source",
+        id: source,
+        kind: "interview",
+        title: "Legal interview",
+        date: today(),
+        teamIds: [legal, finance],
+      },
+      {
+        type: "tool",
+        id: `tool-${tag}`,
+        name: `ledger ${tag}`,
+        teamIds: [legal],
+        sourceId: source,
+      },
+      {
+        type: "statement",
+        id: `st-${tag}`,
+        kind: "goal",
+        text: `Close the books in ${tag} days.`,
+        sourceId: source,
+        teamIds: [legal, finance],
+      },
+    ]);
+    // The next kickoff names Finance alone: Legal is gone, as an earlier
+    // release's kickoff teams are since migration 0258.
+    await bringInKickoff(
+      {},
+      {
+        ...kickoffReading,
+        teams: [{ name: "Finance", does: "Bookkeeping", people: 8 }],
+      }
+    );
+
+    /** Where `read` names Legal, by any record. */
+    const legalIn = (
+      read: Awaited<ReturnType<typeof admin.api.brain.read>>
+    ) => ({
+      team: read.teams.some(({ id }) => id === legal),
+      sources: read.sources
+        .filter(({ id }) => id === source)
+        .map(({ teamIds }) => teamIds),
+      tools: read.tools
+        .filter(({ id }) => id === `tool-${tag}`)
+        .map(({ teamIds }) => teamIds),
+      statements: read.statements
+        .filter(({ id }) => id === `st-${tag}`)
+        .map(({ teamIds }) => teamIds),
+      anywhere: JSON.stringify(read).includes(legal),
+    });
+
+    const asAdmin = await admin.api.brain.read();
+    // Finance as the admin reads it: the roster's, when a roster has it.
+    const financeNow =
+      asAdmin.teams.find(({ name }) => name === "Finance")?.id ?? "";
+
+    expect({
+      legal: legal === "" ? "" : "named",
+      admin: legalIn(asAdmin),
+      member: legalIn(await member.api.brain.read()).anywhere,
+    }).toStrictEqual({
+      legal: "named",
+      // Finance, which the kickoff still names, stays on each.
+      admin: {
+        team: false,
+        sources: [[financeNow]],
+        tools: [[]],
+        statements: [[financeNow]],
+        anywhere: false,
+      },
+      member: false,
+    });
+  });
+
   it("keeps a connection to an entry an admin hid, by its catalog name, and offers the entry no more", async () => {
     const admin = await signedInApi(idp, "admin");
     const member = await signedInApi(idp, "user");

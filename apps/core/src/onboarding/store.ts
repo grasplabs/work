@@ -300,9 +300,13 @@ const queuedKey = "forget_lines_queued";
 
 /**
  * How often the kickoff changed (a save or an answer), store-wide: the
- * key of each change the new Brain is given of it (`kickoffToHand`), so
- * a change back to earlier words is a new version, never a retry of an
- * old one.
+ * key the new Brain is given with its text at each hand-over
+ * (`kickoffToHand`). A version is that text as it stood when the
+ * hand-over ran: changes that land between two hand-overs are one
+ * version, the later text holding all of them, so nothing anyone could
+ * read is lost. A change back to earlier words still counts, so it is a
+ * new version, never a retry of an old one; a retry of a hand-over with
+ * no change since reads the same key and text and adds nothing.
  */
 const kickoffChangesKey = "kickoff_changes";
 
@@ -3998,9 +4002,10 @@ export class Onboarding extends DurableObject<Env> {
 
   /**
    * The kickoff `id` as the hand-over gives the new Brain now: its text
-   * for every member (kickoff-company.ts), under the key of the change it
-   * is (`kickoffChangesKey`). Null when `id` is not the kickoff kept now
-   * (deleted since).
+   * for every member as it stands (kickoff-company.ts), under the count of
+   * changes so far (`kickoffChangesKey`). Changes since the last hand-over
+   * are in this one text, one version. Null when `id` is not the kickoff
+   * kept now (deleted since).
    */
   kickoffToHand(id: string): { change: string; text: string } | null {
     const company = this.companyKickoff();
@@ -4014,8 +4019,11 @@ export class Onboarding extends DurableObject<Env> {
 
   /**
    * In the transaction of a change of the kickoff (a save or an answer):
-   * counts it (`kickoffChangesKey`) and notes it for the hand-over, which
-   * reads it here when it runs (`kickoffToHand`).
+   * counts it (`kickoffChangesKey`) and notes the kickoff for the
+   * hand-over, which reads its text here when it runs (`kickoffToHand`).
+   * A noting replaces one not yet handed over, and a hand-over that ends
+   * removes only its own noting, so a change after its read is handed
+   * over again.
    */
   #kickoffChanged(): void {
     const changes = this.ctx.storage.kv.get(kickoffChangesKey);
@@ -4055,8 +4063,9 @@ export class Onboarding extends DurableObject<Env> {
   /**
    * Keeps the kickoff's transcript and its reading, replacing any before
    * them; the sponsor's answers stay, for they answer the company, not one
-   * transcript. What every member reads of it goes to the new Brain as a
-   * new version of the kickoff's source (`#kickoffChanged`). A save whose
+   * transcript. What every member reads of it goes to the new Brain at the
+   * next hand-over, as a version of the kickoff's source
+   * (`#kickoffChanged`). A save whose
    * reading began before the kickoff was deleted (`mark`, `purgeMark` as
    * it began) is refused, `kickoff.purged`, so the erased words never come
    * back with it. In the log and the audit log without its words.
@@ -4138,8 +4147,8 @@ export class Onboarding extends DurableObject<Env> {
   /**
    * Keeps the sponsor's answer to what the kickoff left open about
    * `field`; an empty one takes it back. An answer about the vision, what
-   * every member reads of the kickoff, goes to the new Brain again
-   * (`#kickoffChanged`). False before
+   * every member reads of the kickoff, goes to the new Brain at the
+   * next hand-over (`#kickoffChanged`). False before
    * the kickoff is in, or after its delete: there is nothing to answer.
    */
   answerKickoff(field: VisionField, text: string, by: AuditActor): boolean {
