@@ -1,14 +1,15 @@
 import { actorOf } from "@grasp-os/shared/audit";
 import {
+  brainConnectionIdSchema,
   connectionBrainAudienceSchema,
   connectionErrors,
 } from "@grasp-os/shared/connect";
 import type { ConnectionBrainAudienceSetting } from "@grasp-os/shared/connect";
 import { requireAdmin, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
-import { z } from "zod";
+import type { DrizzleD1Database } from "drizzle-orm/d1";
 
 import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
 import { connectionBrainAudiences, teams } from "./db/core/schema.ts";
@@ -44,14 +45,14 @@ export interface ConnectionAudience {
 }
 
 /**
- * Every shared connection's Brain audience as core keeps it now: what
- * each read of the Brain puts its reader in the connections' groups by.
- * One row per shared connection with an audience, so few.
+ * The read of every shared connection's Brain audience as core keeps it,
+ * for one batch with the reader's own records (brain-next.ts
+ * `memberGroupsOf`): what each read of the Brain puts its reader in the
+ * connections' groups by. One row per shared connection with an audience,
+ * so few.
  */
-export const connectionAudiences = async (
-  database: D1Database
-): Promise<ConnectionAudience[]> =>
-  await drizzle(database)
+export const audiencesRead = (db: DrizzleD1Database) =>
+  db
     .select({
       connectionId: connectionBrainAudiences.connectionId,
       teamId: connectionBrainAudiences.teamId,
@@ -76,21 +77,82 @@ export const readConnectionAudiences = async (
   }));
 };
 
-const connectionIdSchema = z
-  .string()
-  .min(1)
-  .refine((id) => !(id.includes("/") || id.includes(":")), {
-    message: "Holds a / or a :",
-  });
+/**
+ * The audience a row holds: a team's ID, everyone (null), or nobody (no
+ * row, `undefined`).
+ */
+type Held = string | null | undefined;
+
+/** The audience `held`, as the audit log names it: who, and which team. */
+const audienceDetail = (
+  held: Held,
+  prefix: "" | "from"
+): Record<string, string> => {
+  const who = prefix === "" ? "who" : "from";
+  const team = prefix === "" ? "team" : "fromTeam";
+  if (held === undefined) {
+    return { [who]: "nobody" };
+  }
+  return held === null
+    ? { [who]: "everyone" }
+    : { [who]: "team", [team]: held };
+};
+
+/** The audience `connectionId` holds now. */
+const heldBy = async (
+  db: DrizzleD1Database,
+  connectionId: string
+): Promise<Held> => {
+  const row = await db
+    .select({ teamId: connectionBrainAudiences.teamId })
+    .from(connectionBrainAudiences)
+    .where(eq(connectionBrainAudiences.connectionId, connectionId))
+    .get();
+  return row?.teamId;
+};
+
+/**
+ * Refuses `chosen` for `connectionId` unless it is a shared connection
+ * connect holds and hasn't disconnected, never a person's own, whose
+ * reads are theirs alone, and a team it names is the company's. Only for
+ * an audience that reads: narrowing to nobody needs neither, so a
+ * connection disconnected or gone can always be closed.
+ */
+const requireOpenable = async (
+  env: Env,
+  db: DrizzleD1Database,
+  connectionId: string,
+  teamId: string | null
+): Promise<void> => {
+  const [[owner], team] = await Promise.all([
+    env.CONNECT.connectionOwners([connectionId]),
+    teamId === null
+      ? undefined
+      : db
+          .select({ id: teams.id })
+          .from(teams)
+          .where(eq(teams.id, teamId))
+          .get(),
+  ]);
+  if (
+    owner?.id !== connectionId ||
+    owner.ownerUserId !== null ||
+    owner.status === "disconnected" ||
+    (teamId !== null && team === undefined)
+  ) {
+    throw connectionErrors.create("connection.invalid");
+  }
+};
 
 /**
  * Chooses who may read in the Brain what agents read through the shared
  * connection `connectionId`: one team, everyone, or nobody (`audience`).
  * Admins only, never Grasp staff, who never decide what a client's people
- * connect. One audit event a change; the same audience again records
- * nothing. Throws `connection.invalid` for an audience that isn't one, a
- * team the company doesn't have, or a connection that isn't a shared one
- * connect holds and hasn't disconnected.
+ * connect. One audit event a change, with the audience before and after;
+ * the same audience again records nothing. Throws `connection.invalid`
+ * for an audience that isn't one, and, for one that reads, a team the
+ * company doesn't have or a connection that isn't a shared one connect
+ * holds and hasn't disconnected. Nobody is taken on any connection.
  */
 export const setConnectionAudience = async (
   env: Env,
@@ -102,68 +164,63 @@ export const setConnectionAudience = async (
   if (identity.staff) {
     throw roleErrors.create("role.forbidden");
   }
-  const id = connectionIdSchema.safeParse(connectionId);
+  const id = brainConnectionIdSchema.safeParse(connectionId);
   const chosen = connectionBrainAudienceSchema.safeParse(audience);
   if (!(id.success && chosen.success)) {
     throw connectionErrors.create("connection.invalid");
   }
   const db = drizzle(env.DB);
-  const [[owner], team] = await Promise.all([
-    env.CONNECT.connectionOwners([id.data]),
-    chosen.data.kind === "team"
-      ? db
-          .select({ id: teams.id })
-          .from(teams)
-          .where(eq(teams.id, chosen.data.teamId))
-          .get()
-      : undefined,
-  ]);
-  // A shared connection connect holds and hasn't disconnected: never a
-  // person's own, whose reads are theirs alone.
-  if (
-    owner?.id !== id.data ||
-    owner.ownerUserId !== null ||
-    owner.status === "disconnected" ||
-    (chosen.data.kind === "team" && team === undefined)
-  ) {
-    throw connectionErrors.create("connection.invalid");
-  }
-  const event = outboxedIfChanged(db, {
-    actor: actorOf(identity),
-    action: "brain.connection_audience.changed",
-    target: { type: "connection", id: id.data },
-    detail:
-      chosen.data.kind === "team"
-        ? { who: "team", team: chosen.data.teamId }
-        : { who: chosen.data.kind },
-  });
+  let wanted: Held;
   if (chosen.data.kind === "nobody") {
-    await auditedBatch(env, db, [
-      db
-        .delete(connectionBrainAudiences)
-        .where(eq(connectionBrainAudiences.connectionId, id.data)),
-      event,
-    ]);
-    return;
+    wanted = undefined;
+  } else {
+    wanted = chosen.data.kind === "team" ? chosen.data.teamId : null;
+    await requireOpenable(env, db, id.data, wanted);
   }
-  const teamId = chosen.data.kind === "team" ? chosen.data.teamId : null;
-  const changedAt = new Date();
-  await auditedBatch(env, db, [
-    db
-      .insert(connectionBrainAudiences)
-      .values({
-        connectionId: id.data,
-        teamId,
-        changedBy: identity.userId,
-        changedAt,
-      })
-      .onConflictDoUpdate({
-        target: connectionBrainAudiences.connectionId,
-        set: { teamId, changedBy: identity.userId, changedAt },
-        // Only another audience is a change: the same one again leaves the
-        // row, and so the log, as it was.
-        setWhere: sql`${connectionBrainAudiences.teamId} IS NOT ${teamId}`,
-      }),
-    event,
-  ]);
+  // Written only over the audience read just before, so the event says
+  // what it changed from; read again and written again if another change
+  // landed in between, until it holds what was chosen.
+  for (;;) {
+    // oxlint-disable-next-line no-await-in-loop -- again only after another change
+    const held = await heldBy(db, id.data);
+    if (held === wanted) {
+      return;
+    }
+    const event = outboxedIfChanged(db, {
+      actor: actorOf(identity),
+      action: "brain.connection_audience.changed",
+      target: { type: "connection", id: id.data },
+      detail: {
+        ...audienceDetail(held, "from"),
+        ...audienceDetail(wanted, ""),
+      },
+    });
+    const thisRow = eq(connectionBrainAudiences.connectionId, id.data);
+    const asRead = and(
+      thisRow,
+      sql`${connectionBrainAudiences.teamId} IS ${held ?? null}`
+    );
+    const changedAt = new Date();
+    let write;
+    if (wanted === undefined) {
+      write = db.delete(connectionBrainAudiences).where(asRead);
+    } else if (held === undefined) {
+      write = db
+        .insert(connectionBrainAudiences)
+        .values({
+          connectionId: id.data,
+          teamId: wanted,
+          changedBy: identity.userId,
+          changedAt,
+        })
+        .onConflictDoNothing();
+    } else {
+      write = db
+        .update(connectionBrainAudiences)
+        .set({ teamId: wanted, changedBy: identity.userId, changedAt })
+        .where(asRead);
+    }
+    // oxlint-disable-next-line no-await-in-loop -- again only after another change
+    await auditedBatch(env, db, [write, event]);
+  }
 };

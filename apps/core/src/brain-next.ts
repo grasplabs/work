@@ -119,6 +119,7 @@ import type {
   BrainWithoutMeaningReason,
 } from "@grasp-os/shared/brain-report";
 import { brainSourceErrors, firstLineOf } from "@grasp-os/shared/brain-sources";
+import { brainConnectionIdSchema } from "@grasp-os/shared/connect";
 import { withinTime } from "@grasp-os/shared/deadline";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { appIdSchema } from "@grasp-os/shared/ids";
@@ -134,9 +135,10 @@ import { modelErrors } from "@grasp-os/shared/models";
 import type { ModelErrorCode } from "@grasp-os/shared/models";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import { skillErrors } from "@grasp-os/shared/skills";
+import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { memberOf } from "./auth/identity.ts";
+import { memberFrom, memberOf, memberReads } from "./auth/identity.ts";
 import { erasureBegun } from "./brain-hand-overs.ts";
 import {
   forgetOwnStoreHealth,
@@ -145,7 +147,7 @@ import {
 } from "./brain-own-stores.ts";
 import type { OwnStoreHealth } from "./brain-own-stores.ts";
 import { largeEnoughAudiences } from "./brain-share-audiences.ts";
-import { connectionAudiences } from "./connection-audiences.ts";
+import { audiencesRead } from "./connection-audiences.ts";
 import type { ConnectionAudience } from "./connection-audiences.ts";
 import { inJurisdiction, workspace } from "./durable-objects.ts";
 import {
@@ -230,11 +232,13 @@ const membersGroup = "members";
 
 /**
  * A shared connection's group's name starts with this; the rest is the
- * connection's ID (`connectionGroup`). A member is in it while the
- * connection's Brain audience is a group they are in at the reach they
- * read at (`withConnections`), as core's records say at each read.
+ * connection's ID (`connectionGroup`), as `brainConnectionIdSchema` takes
+ * one, so the group's name fits a principal.
  */
 const connectionPrefix = "connection:";
+
+/** A shared connection's ID, as its group names it (`connectionGroup`). */
+const connectionIdSchema = brainConnectionIdSchema;
 
 /** What reading as a member needs: core's records. */
 type ReaderEnv = Pick<Env, "DB">;
@@ -244,12 +248,6 @@ const idSchema = wellFormedString()
   .min(1)
   .max(principalMaxLength - teamPrefix.length);
 
-/** A shared connection's ID, as its group names it (`connectionGroup`). */
-const connectionIdSchema = wellFormedString()
-  .min(1)
-  .max(principalMaxLength - connectionPrefix.length)
-  .refine((id) => !id.includes("/"), { message: "Holds a /" });
-
 const sourceReadersSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("owner"), personId: idSchema }),
   z.strictObject({ kind: z.literal("team"), teamId: idSchema }),
@@ -257,7 +255,7 @@ const sourceReadersSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("members") }),
   z.strictObject({ kind: z.literal("none") }),
   // Whoever the shared connection's Brain audience holds now (GRA-1831):
-  // only for what agents read through it (`shared`).
+  // only for what agents read through it (`connected`).
   z.strictObject({
     kind: z.literal("connection"),
     connectionId: connectionIdSchema,
@@ -333,7 +331,7 @@ const kindsWithoutColon = <const K extends string>(
 // `roster`: the company's confirmed teams, as the admin described them,
 // and their head counts, readable by everyone (onboarding/new-brain.ts,
 // GRA-1748).
-// `shared`: what agents read through a shared connection, readable by
+// `connected`: what agents read through a shared connection, readable by
 // whoever its Brain audience holds now (`connection` readers, GRA-1831),
 // keyed under the connection's ID; in the shared store alone.
 const producerKinds = kindsWithoutColon([
@@ -346,7 +344,7 @@ const producerKinds = kindsWithoutColon([
   "drawing",
   "kickoff",
   "roster",
-  "shared",
+  "connected",
 ]);
 
 /**
@@ -356,7 +354,7 @@ const producerKinds = kindsWithoutColon([
  * own. Recall still finds them, each naming its chat or its connection.
  */
 const listedKinds = producerKinds.filter(
-  (kind) => kind !== "chat" && kind !== "shared"
+  (kind) => kind !== "chat" && kind !== "connected"
 );
 
 /** Who adds a source: one of `producerKinds`. */
@@ -827,10 +825,13 @@ const memberGroupsOf = async (
   audiences: readonly ConnectionAudience[];
 }> => {
   const id = checked(idSchema, personId);
-  const [member, audiences] = await Promise.all([
-    memberOf(env.DB, id),
-    connectionAudiences(env.DB),
+  // One snapshot: their teams and the audiences, as one batch reads them.
+  const db = drizzle(env.DB);
+  const [membership, memberTeams, audiences] = await db.batch([
+    ...memberReads(db, id),
+    audiencesRead(db),
   ]);
+  const member = memberFrom(id, membership, memberTeams);
   if (member === undefined) {
     throw permissionErrors.create("permission.person_inactive");
   }
@@ -963,7 +964,7 @@ const refuseOtherConnectionReaders = (
 ): void => {
   const forConnection = readers.kind === "connection";
   if (
-    (source.producer === "shared") !== forConnection ||
+    (source.producer === "connected") !== forConnection ||
     (forConnection && !source.id.startsWith(`${readers.connectionId}/`))
   ) {
     throw new Error(

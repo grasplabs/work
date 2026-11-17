@@ -67,7 +67,7 @@ const keptThrough = async (
   marker: string
 ): Promise<SourceRef> => {
   const source: SourceRef = {
-    producer: "shared",
+    producer: "connected",
     id: `${connectionId}/${crypto.randomUUID()}`,
   };
   await addSource(env, {
@@ -421,10 +421,11 @@ describe("a shared connection's Brain audience", setUpTime, () => {
         unknownTeam: "connection.invalid",
         listedByMember: "role.forbidden",
       },
+      // Each with what it changed from.
       events: [
-        { team: sales, who: "team" },
-        { who: "everyone" },
-        { who: "nobody" },
+        { from: "nobody", team: sales, who: "team" },
+        { from: "team", fromTeam: sales, who: "everyone" },
+        { from: "everyone", who: "nobody" },
       ].map((detail) => ({
         action: "brain.connection_audience.changed",
         actor: { type: "person", userId: admin.userId },
@@ -432,6 +433,52 @@ describe("a shared connection's Brain audience", setUpTime, () => {
         detail,
       })),
       audiences: [],
+    });
+  });
+
+  it("is closed to nobody on any connection, one disconnected included, from the next read", async () => {
+    const [admin, { userId: member }] = await Promise.all([
+      signedInApi(idp, "admin"),
+      signedInWithRole(idp, "user"),
+    ]);
+    const connectionId = await connection();
+    const marker = uniqueWord();
+    const source = await keptThrough(connectionId, marker);
+    await admin.api.connections.setBrainAudience(connectionId, {
+      kind: "everyone",
+    });
+    const before = await findsAt(member, source, marker);
+    await connectDb()
+      .prepare("UPDATE connections SET status = 'disconnected' WHERE id = ?")
+      .bind(connectionId)
+      .run();
+
+    expect({
+      before: before.person,
+      // Opening it again needs a connection connect holds; closing doesn't.
+      everyoneAgain: await outcome(
+        admin.api.connections.setBrainAudience(connectionId, {
+          kind: "team",
+          teamId: await newTeam(member),
+        })
+      ),
+      nobody: await outcome(
+        admin.api.connections.setBrainAudience(connectionId, {
+          kind: "nobody",
+        })
+      ),
+      gone: await outcome(
+        admin.api.connections.setBrainAudience(`connection-${unique()}`, {
+          kind: "nobody",
+        })
+      ),
+      after: await findsAt(member, source, marker),
+    }).toStrictEqual({
+      before: true,
+      everyoneAgain: "connection.invalid",
+      nobody: "ok",
+      gone: "ok",
+      after: nowhere,
     });
   });
 
@@ -444,25 +491,34 @@ describe("a shared connection's Brain audience", setUpTime, () => {
       "Refused: only what agents read through a shared connection is for its audience, keyed under it";
 
     expect({
-      kept: await added({ producer: "shared", id: under() }, forConnection),
+      kept: await added({ producer: "connected", id: under() }, forConnection),
       forEveryone: await added(
-        { producer: "shared", id: under() },
+        { producer: "connected", id: under() },
         { kind: "everyone" }
       ),
       forOnePerson: await added(
-        { producer: "shared", id: under() },
+        { producer: "connected", id: under() },
         { kind: "owner", personId: person }
       ),
       anotherConnectionsKey: await added(
-        { producer: "shared", id: `connection-other/${crypto.randomUUID()}` },
+        {
+          producer: "connected",
+          id: `connection-other/${crypto.randomUUID()}`,
+        },
         forConnection
       ),
       aCaptureForIt: await added(
         { producer: "capture", id: under() },
         forConnection
       ),
+      // Under the connection's own key, so only the rule that nothing
+      // else is for a connection's audience can refuse them.
       anUploadForIt: await added(
-        { producer: "upload", id: crypto.randomUUID() },
+        { producer: "upload", id: under() },
+        forConnection
+      ),
+      aKickoffForIt: await added(
+        { producer: "kickoff", id: under() },
         forConnection
       ),
     }).toStrictEqual({
@@ -473,6 +529,7 @@ describe("a shared connection's Brain audience", setUpTime, () => {
       // A capture is one person's own, refused as such first.
       aCaptureForIt: "Error: Refused: a capture is for one person alone",
       anUploadForIt: `Error: ${refusedAs}`,
+      aKickoffForIt: `Error: ${refusedAs}`,
     });
   });
 });
