@@ -26,6 +26,8 @@ import { SidebarNav } from "./nav";
 import type { SidebarFilter } from "./nav";
 import { SidebarProfile } from "./profile";
 import type { SidebarProfileProps } from "./profile";
+import { RowActions, rowActionsRoom } from "./row-actions";
+import type { RowActionProps } from "./row-actions";
 import {
   SectionHead,
   SidebarTabs,
@@ -38,8 +40,13 @@ import type { SidebarBack, SidebarTab } from "./section";
 import { useSidebarInShell } from "./shell";
 import type { SidebarInShell } from "./shell";
 
-/** One of a row's own rows, under its name: a link to a page within it. */
-export interface SidebarSubRow {
+/**
+ * One of a row's own rows, under its name: a link to a page within it. With `actions` it has three
+ * dots at its end and their menu; with `onRename` it can be renamed in place (row-actions.tsx).
+ */
+export interface SidebarSubRow extends Omit<RowActionProps, "label"> {
+  /** What tells this row from the others in its list, when two may share a name. @default `label` and `href` */
+  id?: string;
   /** The page's name ("Requests"). It names the link. */
   label: string;
   /** Where it goes. Leave it out when `render` gives the link. */
@@ -983,50 +990,60 @@ const RowIcon = ({
   );
 };
 
+/** Whether a row has its own menu, so keeps room at its end for the dots. */
+const hasActions = (row: SidebarSubRow) =>
+  row.actions !== undefined && row.actions.length > 0;
+
+/** A row under a row, with its actions where it has them. */
+const SubRow = ({ sub, item }: { sub: SidebarSubRow; item: boolean }) => {
+  const look = stylex.props(
+    styles.row,
+    styles.subRow,
+    sub.current === true && styles.current,
+    hasActions(sub) && rowActionsRoom,
+    focus.inside
+  );
+  return (
+    <RowActions {...sub} look={look}>
+      <Linked row={sub} item={item} look={look}>
+        <span {...stylex.props(styles.name)}>{sub.label}</span>
+      </Linked>
+    </RowActions>
+  );
+};
+
 const Row = ({ row, item }: { row: SidebarRow; item: boolean }) => {
   const counted = row.count !== undefined && row.count > 0;
   const { onClick: handleClick } = row;
+  const look = stylex.props(
+    styles.row,
+    hasDetail(row) && styles.rowTall,
+    row.current === true && styles.current,
+    hasActions(row) && rowActionsRoom,
+    focus.inside
+  );
   return (
     <li>
-      <Linked
-        row={row}
-        item={item}
-        onClick={handleClick}
-        look={stylex.props(
-          styles.row,
-          hasDetail(row) && styles.rowTall,
-          row.current === true && styles.current,
-          focus.inside
-        )}
-      >
-        <RowIcon icon={row.icon} tall={hasDetail(row)} />
-        <RowWords label={row.label} detail={row.detail} />
-        <RowEnd end={row.end} label={row.endLabel} />
-        {counted && (
-          <>
-            <span aria-hidden="true" {...stylex.props(styles.count)}>
-              {row.count}
-            </span>
-            <Unseen>{` ${row.countLabel ?? String(row.count)}`}</Unseen>
-          </>
-        )}
-      </Linked>
+      <RowActions {...row} look={look}>
+        <Linked row={row} item={item} onClick={handleClick} look={look}>
+          <RowIcon icon={row.icon} tall={hasDetail(row)} />
+          <RowWords label={row.label} detail={row.detail} />
+          <RowEnd end={row.end} label={row.endLabel} />
+          {counted && (
+            <>
+              <span aria-hidden="true" {...stylex.props(styles.count)}>
+                {row.count}
+              </span>
+              <Unseen>{` ${row.countLabel ?? String(row.count)}`}</Unseen>
+            </>
+          )}
+        </Linked>
+      </RowActions>
       {row.rows !== undefined && row.rows.length > 0 && (
         <ul {...stylex.props(styles.list, styles.sub)}>
           {row.rows.map((sub) => (
-            <li key={`${sub.label}-${sub.href ?? ""}`}>
-              <Linked
-                row={sub}
-                item={item}
-                look={stylex.props(
-                  styles.row,
-                  styles.subRow,
-                  sub.current === true && styles.current,
-                  focus.inside
-                )}
-              >
-                <span {...stylex.props(styles.name)}>{sub.label}</span>
-              </Linked>
+            <li key={sub.id ?? `${sub.label}-${sub.href ?? ""}`}>
+              <SubRow item={item} sub={sub} />
             </li>
           ))}
         </ul>
@@ -1395,7 +1412,11 @@ const ListArea = ({
         storageKey={section === undefined ? storageKey : section.storageKey}
         keys={keys}
         renderRow={(row, item) => (
-          <Row key={`${row.label}-${row.href ?? ""}`} row={row} item={item} />
+          <Row
+            key={row.id ?? `${row.label}-${row.href ?? ""}`}
+            row={row}
+            item={item}
+          />
         )}
       />
     </>

@@ -22,6 +22,14 @@ describe("Settings sections", () => {
     ).toStrictEqual(["account"]);
   });
 
+  it("lists the person's own account first, its profile first in it", () => {
+    const admin = { role: "admin", staff: false } as const;
+    expect({
+      groups: groupedSectionsFor(admin).map(({ group }) => group.id),
+      first: sectionsFor(admin)[0]?.id,
+    }).toStrictEqual({ groups: ["account", "workspace"], first: "profile" });
+  });
+
   it("shows the organization's own admin the sections kept from Grasp staff", () => {
     const own = ids({ role: "admin", staff: false });
     expect({

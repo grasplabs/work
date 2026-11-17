@@ -418,6 +418,7 @@ export const rpcParamNames: ParamNames = {
     "revoke": ["id"],
   },
   "SessionRpc": {
+    "setName": ["name"],
     "whoami": [],
   },
   "SessionsRpc": {

@@ -80,6 +80,7 @@ export const useInboxGroups = (
   }
   const chosen = pathname === "/inbox" ? search.item : undefined;
   const rowOf = (item: InboxItem) => ({
+    id: item.id,
     label: item.context,
     detail: i18n._(kindLabel[item.kind]),
     render: <Link search={{ item: item.id }} to="/inbox" />,
