@@ -855,7 +855,7 @@ const Models = ({
     defaultName = nameOf(defaultModel, providers);
   }
   return (
-    <SectionCard density="compact" flush title={t`Default and fallbacks`}>
+    <SectionCard density="compact" flush title={t`Models`}>
       <SettingsRows>
         {editable && custom ? (
           <NameModel

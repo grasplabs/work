@@ -17,6 +17,7 @@ import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
+import type { ReactNode } from "react";
 
 import type { Session } from "../core.ts";
 import { appName, personName, readDirectory } from "../directory.ts";
@@ -598,6 +599,135 @@ const RecordDetails = ({
 const pageSize = 25;
 
 /**
+ * One column of the events table, as the library's Data table takes one:
+ * its stable id, its header's words, and how a record fills its cell.
+ * `EventsTable` draws them; swapping it for Data table keeps the columns.
+ */
+interface EventColumn {
+  id: string;
+  header: string;
+  /** The header is said, not seen: an actions column. */
+  headerHidden?: boolean;
+  align?: "end";
+  /** The cell that names the row. */
+  lead?: boolean;
+  cell: (record: AuditRecord) => ReactNode;
+}
+
+/** The words the columns say, translated where they are made. */
+interface EventColumnWords {
+  when: string;
+  event: string;
+  by: string;
+  actions: string;
+  notVerified: string;
+  details: string;
+  detailsOf: (seq: number) => string;
+}
+
+/** The events table's columns: when, what, by whom, and its marks and details. */
+const columns = ({
+  directory,
+  onDetails,
+  words,
+}: {
+  directory: Directory;
+  onDetails: (record: AuditRecord) => void;
+  words: EventColumnWords;
+}): EventColumn[] => [
+  {
+    id: "when",
+    header: words.when,
+    cell: (record) => entryTime(record.receivedAt),
+  },
+  {
+    id: "event",
+    header: words.event,
+    lead: true,
+    cell: (record) => entryWords(record.event?.action),
+  },
+  {
+    id: "by",
+    header: words.by,
+    cell: (record) => <EntryWho directory={directory} record={record} />,
+  },
+  {
+    id: "actions",
+    header: words.actions,
+    headerHidden: true,
+    align: "end",
+    cell: (record) => (
+      <span {...stylex.props(styles.marks)}>
+        {record.verified ? null : (
+          <Badge tone="attention">{words.notVerified}</Badge>
+        )}
+        {record.type === null ? null : (
+          <Badge>{i18n._(typeLabels[record.type])}</Badge>
+        )}
+        <Button
+          aria-label={words.detailsOf(record.seq)}
+          onClick={() => {
+            onDetails(record);
+          }}
+          size="sm"
+          variant="ghost"
+        >
+          {words.details}
+        </Button>
+      </span>
+    ),
+  },
+];
+
+/**
+ * The events as a table, one row a record, from `columns`: the one place
+ * that draws them, so the library's Data table takes its place alone.
+ */
+const EventsTable = ({
+  columns: shownColumns,
+  rows,
+  label,
+}: {
+  columns: readonly EventColumn[];
+  rows: readonly AuditRecord[];
+  label: string;
+}) => (
+  <Table aria-label={label} density="compact">
+    <TableHeader>
+      <TableRow>
+        {shownColumns.map((column) => (
+          <TableHead
+            key={column.id}
+            {...(column.align === undefined ? {} : { align: column.align })}
+          >
+            {column.headerHidden === true ? (
+              <span {...stylex.props(styles.hidden)}>{column.header}</span>
+            ) : (
+              column.header
+            )}
+          </TableHead>
+        ))}
+      </TableRow>
+    </TableHeader>
+    <TableBody>
+      {rows.map((record) => (
+        <TableRow key={record.seq}>
+          {shownColumns.map((column) => (
+            <TableCell
+              key={column.id}
+              {...(column.align === undefined ? {} : { align: column.align })}
+              {...(column.lead === true ? { lead: true } : {})}
+            >
+              {column.cell(record)}
+            </TableCell>
+          ))}
+        </TableRow>
+      ))}
+    </TableBody>
+  </Table>
+);
+
+/**
  * The events that match, newest first, 25 a page with Newer and Older:
  * the first of core's pages as the page read it, then each older one asked
  * for once Older reaches past what is here. Keyed by the filters and the
@@ -665,56 +795,24 @@ export const LogRecords = ({
       </div>
     );
   }
+  const eventColumns = columns({
+    directory,
+    onDetails: setOpen,
+    words: {
+      when: t`When`,
+      event: t`Event`,
+      by: t`By`,
+      actions: t`Actions`,
+      notVerified: t`Not verified`,
+      details: t`Details`,
+      detailsOf: (seq) => t`Details of event ${seq}`,
+    },
+  });
   const firstShown = at * pageSize + 1;
   const lastShown = at * pageSize + shown.length;
   return (
     <>
-      <Table density="compact" aria-label={t`Events`}>
-        <TableHeader>
-          <TableRow>
-            <TableHead>{t`When`}</TableHead>
-            <TableHead>{t`Event`}</TableHead>
-            <TableHead>{t`By`}</TableHead>
-            <TableHead align="end">
-              <span {...stylex.props(styles.hidden)}>{t`Actions`}</span>
-            </TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {shown.map((record) => {
-            const { seq } = record;
-            return (
-              <TableRow key={record.seq}>
-                <TableCell>{entryTime(record.receivedAt)}</TableCell>
-                <TableCell lead>{entryWords(record.event?.action)}</TableCell>
-                <TableCell>
-                  <EntryWho directory={directory} record={record} />
-                </TableCell>
-                <TableCell align="end">
-                  <span {...stylex.props(styles.marks)}>
-                    {record.verified ? null : (
-                      <Badge tone="attention">{t`Not verified`}</Badge>
-                    )}
-                    {record.type === null ? null : (
-                      <Badge>{i18n._(typeLabels[record.type])}</Badge>
-                    )}
-                    <Button
-                      aria-label={t`Details of event ${seq}`}
-                      onClick={() => {
-                        setOpen(record);
-                      }}
-                      size="sm"
-                      variant="ghost"
-                    >
-                      {t`Details`}
-                    </Button>
-                  </span>
-                </TableCell>
-              </TableRow>
-            );
-          })}
-        </TableBody>
-      </Table>
+      <EventsTable columns={eventColumns} label={t`Events`} rows={shown} />
       <nav aria-label={t`Pages of events`} {...stylex.props(styles.pager)}>
         <Text size="sm" tone="muted">
           {t`${firstShown}–${lastShown}`}

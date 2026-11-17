@@ -20,7 +20,7 @@ import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { LogExport } from "../activity/audit-log.tsx";
-import { ArchiveSearch, RetentionCard } from "./audit-archive.tsx";
+import { ArchiveSearch, RetentionRows } from "./audit-archive.tsx";
 
 // Settings › Audit trail › Archived events and Retention against core's
 // audit API as the page reaches it over RPC (the boundary from the web
@@ -124,7 +124,7 @@ const shown = async (
           search={action === undefined ? {} : { action }}
         />
         <LogExport search={action === undefined ? {} : { action }} />
-        <RetentionCard />
+        <RetentionRows />
       </>
     ),
   });

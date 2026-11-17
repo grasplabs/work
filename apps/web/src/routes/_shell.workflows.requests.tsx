@@ -257,7 +257,7 @@ const RequestsRoute = () => {
       <SiteHeader
         crumbs={[{ label: t`Workflows`, to: "/workflows" }, { label: title }]}
       />
-      <Page wide>
+      <Page>
         {read.state === "ready" ? (
           <RequestsView page={read.data} />
         ) : (

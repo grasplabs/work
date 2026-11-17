@@ -146,6 +146,32 @@ const named = (name: string): HTMLButtonElement | undefined =>
     (each) => each.getAttribute("aria-label") === name
   );
 
+/** The items of an open menu whose words are `text`. */
+const menuItems = (text: string): HTMLElement[] =>
+  [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].filter(
+    (each) => wordsOf(each) === text
+  );
+
+/** Opens source `name`'s menu, and chooses its item `text`. */
+const choose = async (name: string, text: string): Promise<void> => {
+  await act(async () => {
+    named(`More for ${name}`)?.click();
+    await settled();
+  });
+  await act(async () => {
+    menuItems(text)[0]?.click();
+    await settled();
+  });
+};
+
+/** Opens the dialog for a new source. */
+const openAdd = async (): Promise<void> => {
+  await act(async () => {
+    buttons("Add a source")[0]?.click();
+    await settled();
+  });
+};
+
 /** Presses the `index`th button whose text is `text`, and lets it settle. */
 const press = async (text: string, index = 0): Promise<void> => {
   await act(async () => {
@@ -194,7 +220,7 @@ describe("the Webhooks settings", () => {
     document.body.replaceChildren();
   });
 
-  it("shows a source's URL with a way to copy it, and how a sender signs an event", async () => {
+  it("shows a source's URL with a way to copy it", async () => {
     await shown();
     const url = copyValue("Copy the URL of Shop system");
     await act(async () => {
@@ -205,37 +231,40 @@ describe("the Webhooks settings", () => {
     expect({
       url,
       clipboard: await navigator.clipboard.readText(),
-      signing: document.body.textContent.includes("Standard Webhooks"),
     }).toStrictEqual({
       url: `${globalThis.location.origin}/api/hooks/token-0b7c`,
       clipboard: `${globalThis.location.origin}/api/hooks/token-0b7c`,
-      signing: true,
     });
   });
 
-  it("adds a source by the name typed, trimmed, and shows its secret once, never again once closed", async () => {
+  it("adds a source in a dialog by the name typed, trimmed, and shows its secret once, with how a sender signs, never again once closed", async () => {
     const asked = await shown([]);
+    await openAdd();
     await typeName("  Stripe ");
     await submit();
     const shownOnce = copyValue("Copy the secret");
     const warned = document.body.textContent.includes("you won't see it again");
+    const signing = document.body.textContent.includes("Standard Webhooks");
     await press("Done");
 
     expect({
       asked,
       shownOnce,
       warned,
+      signing,
       afterClosing: copyValue("Copy the secret"),
     }).toStrictEqual({
       asked: [{ create: { name: "Stripe" } }],
       shownOnce: secret,
       warned: true,
+      signing: true,
       afterClosing: undefined,
     });
   });
 
   it("keeps a new source's secret shown when reading the list again after it fails, and says why in the list's place", async () => {
     await shown([], false, true);
+    await openAdd();
     await typeName("Stripe");
     await submit();
 
@@ -247,28 +276,26 @@ describe("the Webhooks settings", () => {
 
   it("rotates a secret only once confirmed, and shows the new one once", async () => {
     const asked = await shown();
-    await press("Rotate the secret");
+    await choose("Shop system", "Rotate the secret");
     const beforeConfirming = asked.length;
     await press("Rotate");
 
     expect({
       beforeConfirming,
       asked,
-      left: buttons("Rotate the secret").length,
       shown: copyValue("Copy the secret"),
     }).toStrictEqual({
       beforeConfirming: 0,
       asked: [{ rotateSecret: shop.id }],
-      left: 1,
       shown: `${secret}-rotated`,
     });
   });
 
   it("revokes a secret and deletes a source only once confirmed", async () => {
     const asked = await shown();
-    await press("Revoke the secret");
+    await choose("Shop system", "Revoke the secret");
     await press("Revoke");
-    await press("Delete");
+    await choose("Shop system", "Delete");
     const beforeDeleting = asked.length;
     await press("Delete the source");
 
@@ -282,25 +309,29 @@ describe("the Webhooks settings", () => {
     await shown([
       { ...shop, delivery: { token: "token-0b7c", secret: "revoked" } },
     ]);
+    await act(async () => {
+      named("More for Shop system")?.click();
+      await settled();
+    });
 
     expect({
       revoked: document.body.textContent.includes("Secret revoked"),
-      newOne: buttons("Make a new secret").length,
-      revoke: buttons("Revoke the secret").length,
+      newOne: menuItems("Make a new secret").length,
+      revoke: menuItems("Revoke the secret").length,
     }).toStrictEqual({ revoked: true, newOne: 1, revoke: 0 });
   });
 
   it("closes the confirmation and says why in the row when a change fails, showing no secret", async () => {
     await shown([shop], true);
-    await press("Rotate the secret");
+    await choose("Shop system", "Rotate the secret");
     await press("Rotate");
 
     expect({
-      left: buttons("Rotate the secret").length,
+      confirming: buttons("Rotate").length,
       said: document.body.textContent.includes(
         "Core couldn't make the change."
       ),
       secret: copyValue("Copy the secret"),
-    }).toStrictEqual({ left: 1, said: true, secret: undefined });
+    }).toStrictEqual({ confirming: 0, said: true, secret: undefined });
   });
 });
