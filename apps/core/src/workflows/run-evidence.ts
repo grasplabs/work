@@ -3,7 +3,11 @@ import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import { and, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
-import { runBrainMemories, runBrainVersions } from "../db/core/schema.ts";
+import {
+  runBrainMemories,
+  runBrainVersions,
+  runChatSources,
+} from "../db/core/schema.ts";
 import { inList } from "../db/d1.ts";
 
 // What a workflow run recalled stays pinned to the run (GRA-299, kept on
@@ -109,10 +113,6 @@ export const evidenceOfRuns = async (env: Env, runIds: readonly string[]) =>
     .from(runBrainVersions)
     .where(inList(runBrainVersions.runId, runIds));
 
-/** What run `runId` was handed, as its evidence keeps it. */
-export const evidenceOf = async (env: Env, runId: string) =>
-  await evidenceOfRuns(env, [runId]);
-
 /**
  * Adds `memories` (of the shared store), what an entity read handed run
  * `runId` through the permission `permissionId` rests on, to the run's
@@ -153,3 +153,23 @@ export const memoryEvidenceOfRuns = async (
     })
     .from(runBrainMemories)
     .where(inList(runBrainMemories.runId, runIds));
+
+/**
+ * Whether run `runId` keeps any evidence of what it read: a version its
+ * recalls were handed, a memory its entity reads rested on (GRA-1985), or
+ * what the chat that started it had read (`runChatSources`). What it
+ * returned may then copy what can later be erased or narrowed, so the
+ * Brain keeps only how it ended (brain-sources.ts, GRA-1996). One
+ * statement.
+ */
+export const readAnything = async (
+  env: Env,
+  runId: string
+): Promise<boolean> => {
+  const [row] = await drizzle(env.DB).all<{ read: number }>(
+    sql`SELECT (EXISTS (SELECT 1 FROM ${runBrainVersions} WHERE ${runBrainVersions.runId} = ${runId})
+      OR EXISTS (SELECT 1 FROM ${runBrainMemories} WHERE ${runBrainMemories.runId} = ${runId})
+      OR EXISTS (SELECT 1 FROM ${runChatSources} WHERE ${runChatSources.runId} = ${runId})) AS read`
+  );
+  return row?.read === 1;
+};
