@@ -51,11 +51,6 @@ msgstr "{0, plural, one {# row to import.} other {# rows to import.}}"
 msgid "{0, plural, one {# thing that was said in it goes with it.} other {# things that were said in it go with it.}}"
 msgstr "{0, plural, one {# thing that was said in it goes with it.} other {# things that were said in it go with it.}}"
 
-#. placeholder {0}: effect.workflows.length
-#: src/brain/forget.tsx
-msgid "{0, plural, one {# workflow keeps its numbers, which will say their source was removed.} other {# workflows keep their numbers, which will say their source was removed.}}"
-msgstr "{0, plural, one {# workflow keeps its numbers, which will say their source was removed.} other {# workflows keep their numbers, which will say their source was removed.}}"
-
 #. placeholder {0}: held.length
 #: src/onboarding/send-plan-form.tsx
 msgid "{0, plural, one {The team you left out} other {The # teams you left out}}"
