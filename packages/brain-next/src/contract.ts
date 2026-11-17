@@ -2502,6 +2502,18 @@ export interface EntityPage {
    * it has no version for. For the host to keep as `restsOn`.
    */
   restsOnWords: MemoryId[];
+  /**
+   * Every memory what it says rests on, the same as `restsOn` and
+   * `restsOnWords` name, each once, with its record as `erasedOf` is
+   * asked by it (`ErasedMemory`): its id, its source's key or writer, when
+   * the store learned it, whose word it is, and its entities' ids. Each is
+   * a memory the reader may read through this answer, so it tells no
+   * reader anything they may not know; for the host to keep with what it
+   * hands on (a run's pins), so what an erasure took of it is told by the
+   * ledger alone (a person's erasure takes a memory by its speaker and
+   * entities); never shown to anyone.
+   */
+  restsOnMemories: ErasedMemory[];
 }
 
 /** An entity to read, for a reader. */
@@ -2719,6 +2731,18 @@ export interface Card {
    * it has no version for. For the host to keep as `restsOn`.
    */
   restsOnWords: MemoryId[];
+  /**
+   * Every memory what it says rests on, the same as `restsOn` and
+   * `restsOnWords` name, each once, with its record as `erasedOf` is
+   * asked by it (`ErasedMemory`): its id, its source's key or writer, when
+   * the store learned it, whose word it is, and its entities' ids. Each is
+   * a memory the reader may read through this answer, so it tells no
+   * reader anything they may not know; for the host to keep with what it
+   * hands on (a run's pins), so what an erasure took of it is told by the
+   * ledger alone (a person's erasure takes a memory by its speaker and
+   * entities); never shown to anyone.
+   */
+  restsOnMemories: ErasedMemory[];
 }
 
 // Memories in a recall's pack (recall-memories.ts, pack.ts).
