@@ -30,6 +30,7 @@ import {
   vi,
 } from "vite-plus/test";
 
+import { formatDateTime } from "../format.ts";
 import { SourcesPage } from "./sources-page.tsx";
 
 // The Brain's Sources page, against core's `brainSources` as the page
@@ -69,6 +70,9 @@ const listed = (
   personal,
   versions,
 });
+
+/** When the source read through a connection was last read. */
+const lastReadAt = "2026-11-12T10:00:00.000Z";
 
 const texts: Record<string, string> = {
   "u-1@2": "Handbook\nInvoices are paid on Fridays.",
@@ -234,7 +238,11 @@ const shown = async (
             ],
             next: { addedAt: "2026-11-10T09:00:00.000Z", source: minutes },
           }
-        : { sources: [listed(older, "")], next: null };
+        : {
+            // Read through a connection: core says when it was last read.
+            sources: [{ ...listed(older, ""), readAt: lastReadAt }],
+            next: null,
+          };
     },
     versions: async (source: BrainSourceRef) => {
       await Promise.resolve();
@@ -514,7 +522,7 @@ describe(SourcesPage, () => {
     vi.unstubAllGlobals();
   });
 
-  it("lists the sources core gives a page at a time, and opens one at its newest version, then an older one", async () => {
+  it("lists the sources core gives a page at a time, says when one read through a connection was last read, and opens one at its newest version, then an older one", async () => {
     const { calls } = await shown([]);
     await press("Show more");
     const listedText = document.body.textContent;
@@ -533,12 +541,17 @@ describe(SourcesPage, () => {
         "Those marked Only you are yours alone",
       ].map((text) => listedText.includes(text)),
       moreGone: listedText.includes("Show more"),
+      // Once, for the one source core gave a read time, in the page's
+      // own date format.
+      lastRead: listedText.split(`Last read ${formatDateTime(lastReadAt)}`)
+        .length,
       newest: newest.includes("Invoices are paid on Fridays."),
       oldest: oldest.includes("Invoices are paid monthly."),
       calls,
     }).toStrictEqual({
       listed: [true, true, true, true, true, true],
       moreGone: false,
+      lastRead: 2,
       newest: true,
       oldest: true,
       calls: [

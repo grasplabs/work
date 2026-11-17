@@ -122,6 +122,9 @@ const grant = async (
   });
 };
 
+/** The day (UTC) of `date`. */
+const day = (date: Date): string => date.toISOString().slice(0, 10);
+
 /** A toolkit's answer as structured content, its text beside it. */
 const structured = (content: Record<string, unknown>) => ({
   content: [{ type: "text", text: JSON.stringify(content) }],
@@ -500,19 +503,17 @@ describe("what a chat's agent reads through a toolkit", setUpTime, () => {
     });
   });
 
-  it("keeps a company read without the credentials inside its JSON, says on the Sources page when and through what it was read, and a read again on a later day replaces it", async () => {
+  it("keeps a company read without the credentials inside its JSON, and a read again of it unchanged on a later day adds that read time and no version", async () => {
     const person = await signedInApi(idp, "user");
     const marker = markerOf();
     const session = ["s3ss", "10n", crypto.randomUUID().slice(0, 8)].join("");
     const own = await ownToolkit(person, "mail");
     // The reviewer's shape (GRA-1880): a session ID on the line after a
     // password, inside a JSON string, where a line break is `\n`.
-    await own.answer(
-      "mail.search",
-      structured({
-        body: `password: hunter2\nCookie: sid=${session}\nQuote ${marker}`,
-      })
-    );
+    const answer = {
+      body: `password: hunter2\nCookie: sid=${session}\nQuote ${marker}`,
+    };
+    await own.answer("mail.search", structured(answer));
     const input = { query: marker };
     const chat = await chatOf(
       person.userId,
@@ -520,48 +521,65 @@ describe("what a chat's agent reads through a toolkit", setUpTime, () => {
       says("Found it.")
     );
     await grant(chat, own.id, "MAIL", ["mail.search"]);
-
-    await chat.ask("Find it.");
-    await captures(own.id);
     const id = await answerCaptureIdOf(
       own.id,
       person.userId,
       "mail.search",
       input
     );
-    const listedFirst = async () => {
+    /** The source as the person's Sources page lists it. */
+    const onSourcesPage = async () => {
       const { sources } = await person.api.brainSources.list();
       return sources
         .filter(({ source }) => source.id === id)
-        .map(({ firstLine, versions }) => ({ firstLine, versions }));
+        .map(({ firstLine, versions, readAt }) => ({
+          readOn: readAt?.slice(0, 10),
+          versions,
+          firstLine,
+        }));
     };
-    const today = new Date().toISOString().slice(0, 10);
-    const first = await listedFirst();
-    const kept = await recalled(person.userId, marker);
-    // The same call again, read the next day: its next version, its day.
-    const tomorrow = new Date(Date.now() + 86_400_000);
-    await captureRead(
-      env,
-      {
-        workspaceId: personalWorkspaceId(person.userId),
-        agentId: chatAgentId,
-        chatId: chatIdSchema.parse(crypto.randomUUID()),
-        personId: person.userId,
-        runId: crypto.randomUUID(),
-      },
-      own.id,
-      "mail.search",
-      input,
-      {
-        result: {
-          output: JSON.stringify({ body: `Quote ${marker}, signed` }),
-          provenance: [],
-          keep: true,
+    /** Captures `output` of the same call, as read at `readAt`. */
+    const readAgain = async (output: unknown, readAt: Date) => {
+      await captureRead(
+        env,
+        {
+          workspaceId: personalWorkspaceId(person.userId),
+          agentId: chatAgentId,
+          chatId: chatIdSchema.parse(crypto.randomUUID()),
+          personId: person.userId,
+          runId: crypto.randomUUID(),
         },
-        readAt: tomorrow,
-      }
-    );
-    const again = await recalled(person.userId, marker);
+        own.id,
+        "mail.search",
+        input,
+        {
+          result: {
+            output: JSON.stringify(output),
+            provenance: [],
+            keep: true,
+          },
+          readAt,
+        }
+      );
+    };
+    const now = Date.now();
+    const tomorrow = new Date(now + 86_400_000);
+    const later = new Date(now + 2 * 86_400_000);
+
+    await chat.ask("Find it.");
+    await captures(own.id);
+    const first = await onSourcesPage();
+    const kept = await recalled(person.userId, marker);
+    // The same answer, read again the next day.
+    await readAgain(answer, tomorrow);
+    const unchanged = await onSourcesPage();
+    const recalledUnchanged = await recallAs(env, person.userId, {
+      personal: true,
+      question: marker,
+      budget: { tokens: 4000 },
+    });
+    // A changed answer, the day after.
+    await readAgain({ body: `Quote ${marker}, signed` }, later);
 
     expect({
       first,
@@ -570,73 +588,36 @@ describe("what a chat's agent reads through a toolkit", setUpTime, () => {
         password: text.includes("password: [redacted]"),
         secret: text.includes(session) || text.includes("hunter2"),
       })),
-      later: await listedFirst(),
-      again: again.map(({ id: source, version, text }) => ({
-        source: source === id,
-        version,
-        signed: text.includes("signed"),
-      })),
+      unchanged,
+      // The model gets when it was last read, beside the passage.
+      readAt: recalledUnchanged.items
+        .filter(({ source }) => source.id === id)
+        .map(({ readAt }) =>
+          readAt === undefined ? undefined : day(new Date(readAt))
+        ),
+      changed: await onSourcesPage(),
     }).toStrictEqual({
-      first: [{ firstLine: `Read on ${today} through mail.`, versions: 1 }],
+      first: [
+        {
+          readOn: day(new Date(now)),
+          versions: 1,
+          firstLine:
+            '{"body":"password: [redacted]\\nCookie: [redacted]\\nQuote ' +
+            `${marker}"}`,
+        },
+      ],
       kept: [{ cookie: true, password: true, secret: false }],
-      later: [
+      unchanged: [
+        { readOn: day(tomorrow), versions: 1, firstLine: first[0]?.firstLine },
+      ],
+      readAt: [day(tomorrow)],
+      changed: [
         {
-          firstLine: `Read on ${tomorrow.toISOString().slice(0, 10)} through mail.`,
+          readOn: day(later),
           versions: 2,
+          firstLine: `{"body":"Quote ${marker}, signed"}`,
         },
       ],
-      again: [{ source: true, version: 2, signed: true }],
-    });
-  });
-
-  it("keeps nothing of an answer whose redaction cannot finish", async () => {
-    const person = await signedInApi(idp, "user");
-    const own = await ownToolkit(person, "mail");
-    // Ten thousand arrays deep: parsed, but too deep to walk for its values.
-    const deep = `{"deep":${"[".repeat(10_000)}"password: hunter2"${"]".repeat(10_000)}}`;
-    await captureRead(
-      env,
-      {
-        workspaceId: personalWorkspaceId(person.userId),
-        agentId: chatAgentId,
-        chatId: chatIdSchema.parse(crypto.randomUUID()),
-        personId: person.userId,
-        runId: crypto.randomUUID(),
-      },
-      own.id,
-      "mail.search",
-      { query: "deep" },
-      {
-        result: { output: deep, provenance: [], keep: true },
-        readAt: new Date(),
-      }
-    );
-    const events = await captures(own.id);
-    const id = await answerCaptureIdOf(own.id, person.userId, "mail.search", {
-      query: "deep",
-    });
-
-    expect({
-      events: events.map(shown),
-      state: await personalBrainOf(
-        inJurisdiction(env, env.BRAIN_STORE),
-        person.userId
-      ).keyState(`capture:${id}`),
-    }).toStrictEqual({
-      events: [
-        {
-          action: "brain.capture.skipped",
-          onBehalfOf: person.userId,
-          detail: {
-            reason: "credential",
-            items: 1,
-            kept: 0,
-            failed: 0,
-            skipped: 1,
-          },
-        },
-      ],
-      state: "free",
     });
   });
 

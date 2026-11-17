@@ -47,7 +47,7 @@ import { classOf } from "./tool-classes.ts";
 // - Only a tool that answers one item's content, as its manifest declares
 //   (`answersItem`: Gmail's message and attachment reads, OneNote's page
 //   read), kept whole as that item's source for the tool, in the person's
-//   own store (owner content), credentials redacted (`redact`); never the
+//   own store (owner content), credentials redacted (`redactJsonText`); never the
 //   call's input. What a tool is decides it, never how many items came
 //   back: a list or a search is never kept, even with one hit (a snippet
 //   beside the full copy is noise in recall, and every changed summary
@@ -79,18 +79,18 @@ import { classOf } from "./tool-classes.ts";
 //   chooses (GRA-1831), under their own connection's keys, so the two
 //   never meet. Not a native connector's, which is kept item by item as
 //   above, its own things only.
-// - Each kept text starts with when and through what it was read ("Read
-//   on <day> through <toolkit or provider>."), so the person sees it on
-//   the Sources page and the model in the passage: a read again on a later
-//   day is the next version, with its day.
-// - Credentials are redacted inside the answer's JSON as well as over its
-//   text (connection-answer.ts `redactedAnswer`); an answer whose
-//   redaction cannot finish is not kept (`credential`).
+// - When it was read is the version's, not its text's: each capture
+//   carries when its tool answered (`readAt`), which the Brain keeps per
+//   read and gives as the version's latest read time, on the person's
+//   Sources page and in the passage the model reads. A read again of the
+//   same text adds that read time to its version, and no version.
+// - Credentials are redacted inside every JSON string the text holds as
+//   well as over the rest of it (`redactJsonText`, GRA-1880).
 // - Capturing never holds up or fails the call: it runs once the agent
 //   has its answer (`waitUntil`). Every call ends in one audit event, of
 //   IDs and counts alone (items, kept, failed, skipped, adding up to
 //   items): kept, failed, or skipped with the reason (`shared`, `reach`,
-//   `list`, `file`, `no_text`, `credential`, `erased`, `stale`). Captures of one item run
+//   `list`, `file`, `no_text`, `erased`, `stale`). Captures of one item run
 //   independently and may land out of order: each carries when its tool
 //   answered (`readAt`), and the Brain, in the transaction that would make
 //   it current, writes nothing for a read older than the current version's
@@ -194,36 +194,8 @@ const skippedAll = (reason: string, items: number): Ended => [
 ];
 
 /**
- * The line a kept text starts with: the day it was read (UTC) and what it
- * was read through, a toolkit or a native provider. In the person's
- * Sources page as the source's first line, and in the passage the model
- * reads.
- */
-const readLine = (readAt: Date, through: string): string =>
-  `Read on ${readAt.toISOString().slice(0, 10)} through ${through}.`;
-
-/**
- * `texts` with their credentials redacted, inside JSON as well as over
- * text (`redactJsonText`), joined; `undefined` when that cannot finish (a
- * JSON nesting too deep to walk) or a second pass would still change one:
- * a credential may be left, so nothing is kept.
- */
-const redactedFor = (texts: readonly string[]): string | undefined => {
-  try {
-    const redacted = texts.map((text) => redactJsonText(text));
-    return redacted.every((text) => redactJsonText(text) === text)
-      ? redacted.join("\n\n")
-      : undefined;
-  } catch {
-    return undefined;
-  }
-};
-
-/**
- * Keeps `text` (redacted, `redactedFor`), read through `through`, under
- * `id` for the chat's person alone, after the line saying when and
- * through what it was read (`readLine`): what it
- * ended in, kept, or skipped as `stale` or `erased`. Throws when the Brain
+ * Keeps `text` (redacted) under `id` for the chat's person alone, read at
+ * `readAt`: what it ended in, kept, or skipped as `stale` or `erased`. Throws when the Brain
  * refused it otherwise (a text past its limit) or couldn't be reached.
  */
 const keptAs = async (
@@ -231,7 +203,7 @@ const keptAs = async (
   scope: AgentScope,
   connectionId: string,
   id: string,
-  { text, through }: { text: string; through: string },
+  text: string,
   readAt: Date
 ): Promise<Ended> => {
   try {
@@ -243,10 +215,11 @@ const keptAs = async (
       // from then on.
       group: captureGroupOf(connectionId),
       // A change of its own each time: the same text again is the current
-      // version (the Brain's rule), so reading an unchanged item adds
-      // nothing, and an item that changed back is a version again.
+      // version (the Brain's rule), so reading an unchanged item adds no
+      // version, only its read time, and an item that changed back is a
+      // version again.
       change: crypto.randomUUID(),
-      text: `${readLine(readAt, through)}\n\n${text}`,
+      text,
       readers: { kind: "owner", personId: scope.personId },
       readAt,
     });
@@ -275,8 +248,7 @@ const answerCaptured = async (
   connectionId: string,
   action: string,
   input: unknown,
-  { result, readAt }: Read,
-  through: string
+  { result, readAt }: Read
 ): Promise<Ended> => {
   const { texts, leftOut } = answerText(result.output);
   const counted: Record<string, number> = leftOut === 0 ? {} : { leftOut };
@@ -284,11 +256,7 @@ const answerCaptured = async (
     const [event, detail] = skippedAll("no_text", 1);
     return [event, { ...detail, ...counted }];
   }
-  const text = redactedFor(texts);
-  if (text === undefined) {
-    const [event, detail] = skippedAll("credential", 1);
-    return [event, { ...detail, ...counted }];
-  }
+  const text = texts.map((each) => redactJsonText(each)).join("\n\n");
   let ended: Ended;
   try {
     const id = await answerCaptureIdOf(
@@ -297,14 +265,7 @@ const answerCaptured = async (
       action,
       input
     );
-    ended = await keptAs(
-      env,
-      scope,
-      connectionId,
-      id,
-      { text, through },
-      readAt
-    );
+    ended = await keptAs(env, scope, connectionId, id, text, readAt);
   } catch (error) {
     // The Brain refused it (a text past its limit) or couldn't be
     // reached: the one item failed.
@@ -351,15 +312,10 @@ const captured = async (
     return skippedAll("reach", named);
   }
   if (answers) {
-    return await answerCaptured(
-      env,
-      scope,
-      connectionId,
-      action,
-      input,
-      { result, readAt },
-      owner.provider
-    );
+    return await answerCaptured(env, scope, connectionId, action, input, {
+      result,
+      readAt,
+    });
   }
   const itemRead = itemReadOf(owner.provider, action);
   const [itemId] = result.provenance;
@@ -371,16 +327,12 @@ const captured = async (
     return skippedAll("file", 1);
   }
   const id = await captureIdOf(connectionId, scope.personId, action, itemId);
-  const text = redactedFor([result.output]);
-  if (text === undefined) {
-    return skippedAll("credential", 1);
-  }
   return await keptAs(
     env,
     scope,
     connectionId,
     id,
-    { text, through: owner.provider },
+    redactJsonText(result.output),
     readAt
   );
 };

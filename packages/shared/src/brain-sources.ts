@@ -51,6 +51,13 @@ export interface BrainSourceListed {
   firstLine: string;
   personal: boolean;
   versions: number;
+  /**
+   * When its current version was last read where it lives (ISO 8601), for
+   * a source whose producer said: what an agent read through a
+   * connection. A read again of the same text moves it on, with no new
+   * version.
+   */
+  readAt?: string;
 }
 
 /** Where the next page of sources starts: after this one. */

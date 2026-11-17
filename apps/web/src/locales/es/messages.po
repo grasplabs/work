@@ -7819,6 +7819,10 @@ msgstr "El mes pasado"
 msgid "Last ran {when}"
 msgstr "Última ejecución: {when}"
 
+#: src/brain/sources-page.tsx
+msgid "Last read {lastRead}"
+msgstr "Leído por última vez {lastRead}"
+
 #: src/workflows/workflows-table.tsx
 msgid "Last run"
 msgstr "Última ejecución"

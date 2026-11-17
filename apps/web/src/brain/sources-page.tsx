@@ -868,6 +868,8 @@ const SourceLine = ({
   onPick: () => void;
 }) => {
   const { versions } = listed;
+  const lastRead =
+    listed.readAt === undefined ? undefined : formatDateTime(listed.readAt);
   return (
     <Item
       onClick={onPick}
@@ -895,6 +897,11 @@ const SourceLine = ({
             </Badge>
           ) : null}
           <span>{formatDateTime(listed.addedAt)}</span>
+          {lastRead === undefined ? null : (
+            <span>
+              <Trans>Last read {lastRead}</Trans>
+            </span>
+          )}
           <span>
             <Plural one="# version" other="# versions" value={versions} />
           </span>
