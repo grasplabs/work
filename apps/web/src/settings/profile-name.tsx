@@ -36,7 +36,8 @@ export const ProfileName = ({ name }: { name: string }) => {
       if (done === true) {
         setSaved(next);
         setTried(undefined);
-        setState("saved");
+        // Success is silent for now: the row's "Saved" line under the label was rejected (Ruben, 17 Nov 2026); the library shows it beside the control from its main 0ebd48bd, not yet in its registry.
+        setState("idle");
       } else {
         setTried(next);
         setState("failed");
@@ -89,6 +90,7 @@ export const ProfileName = ({ name }: { name: string }) => {
           }}
           // Read-only while its save runs, not disabled: a disabled field drops the keyboard's focus.
           readOnly={busy}
+          size="sm"
           value={draft ?? saved}
         />
       )}

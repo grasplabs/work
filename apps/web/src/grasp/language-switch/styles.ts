@@ -84,6 +84,8 @@ export const styles = stylex.create({
 
   // ---- The compact button: the Button's quiet look, with a flag ----
   trigger: {
+    // As wide as its root: its own width with none given, the column's when the root is given one.
+    width: "100%",
     [iconVars.size]: grasp.iconSm,
     [iconVars.stroke]: grasp.iconStroke,
     position: "relative",
@@ -140,10 +142,17 @@ export const styles = stylex.create({
 
   // Every option's flag and name stacked in one cell, only the chosen one seen: the button keeps the
   // width of the widest and never shifts. They change by the Button's blur and fade.
+  // It grows when the button is given more room, so the chevron stands at the end.
   stack: {
     display: "inline-grid",
     alignItems: "center",
     justifyItems: "start",
+    flexGrow: 1,
+  },
+  // The popup at least as wide as the button (less the menu panel's own padding, for the menu).
+  popupAtLeastTrigger: { minWidth: "var(--anchor-width)" },
+  menuAtLeastTrigger: {
+    minWidth: `calc(var(--anchor-width) - 2 * ${grasp.popupPadding})`,
   },
   layer: {
     gridArea: "1 / 1",

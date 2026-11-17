@@ -8,31 +8,40 @@ import { msg } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useState } from "react";
+import type { ReactNode } from "react";
 
 import type { Session } from "../core.ts";
 import { formatDateTime } from "../format.ts";
+import { Alert } from "../grasp/alert/index.ts";
 import { Badge } from "../grasp/badge/index.ts";
 import { Button } from "../grasp/button/index.ts";
-import { SectionCard } from "../grasp/section-card/index.ts";
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogTitle,
+  DialogTrigger,
+} from "../grasp/dialog/index.ts";
+import { Info } from "../grasp/icons/index.ts";
+import { FactRow, RowAlert, SettingsRows } from "../grasp/setting-row/index.ts";
 import { Spinner } from "../grasp/spinner/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
-import {
-  FactRow,
-  RowAlert,
-  SectionNotLoaded,
-  SettingsRows,
-} from "./section.tsx";
+import { SectionNotLoaded } from "./section.tsx";
 
 const styles = stylex.create({
   running: { display: "flex", alignItems: "center", gap: grasp.space2 },
 });
 
-// Settings › Audit trail › Chain check: verifies the whole hash chain of
-// the audit log, archived stretches included, from its first entry to its
-// head. Core checks a stretch per call (`audit.verify`), so the page asks
+// Settings › Audit trail › Integrity and archive: verifies the whole hash
+// chain of the audit log, archived stretches included, from its first
+// entry to its head, in a Dialog from the events card's head, beside how
+// long Grasp keeps events (audit-archive.tsx). A broken chain never hides
+// in the dialog: the page says so above the events (`ChainBroken`). Core checks a stretch per call (`audit.verify`), so the page asks
 // for the next stretch from where the last one ended, and says how far it
 // got, until core says it reached the head or names the first entry where
 // the chain breaks. Core keeps a pass that runs from the first entry
@@ -136,62 +145,108 @@ const Outcome = ({
   );
 };
 
+/** What the last pass found, from the page's own check or core's last. */
+export const endedOf = (
+  own: FullVerification | null,
+  last: Loaded<FullVerification | null>
+): FullVerification | null =>
+  own ?? (last.state === "ready" ? last.data : null);
+
 /**
- * The chain check, for an admin: `last`, the last full pass core kept,
- * until the page runs one of its own. One card, its result as a row, and
- * Verify now in its head.
+ * A broken chain, on the page itself above the events: where it broke and
+ * why, never only in the dialog.
  */
-export const AuditChainCheck = ({
+export const ChainBroken = ({ ended }: { ended: FullVerification | null }) => {
+  const { t, i18n } = useLingui();
+  if (ended === null || ended.ok) {
+    return null;
+  }
+  const time = formatDateTime(ended.finishedAt);
+  const entry = ended.brokenAt;
+  const reason = i18n._(breakReasons[ended.reason]);
+  return (
+    <Alert title={t`The audit trail's chain is broken`} tone="danger">
+      {t`On ${time}, the check found a break at event ${entry}: nothing from there on is verified. ${reason}`}
+    </Alert>
+  );
+};
+
+/**
+ * Integrity and archive, behind one quiet button in the events card's
+ * head: what the chain is, when it was last checked and whether it holds,
+ * Check now, and how long Grasp keeps events. `onChecked` hears a check
+ * the page ran, so a break shows on the page too.
+ */
+export const IntegrityDialog = ({
   last,
+  own,
+  onChecked,
+  children,
 }: {
   last: Loaded<FullVerification | null>;
+  /** The check the page ran, if it ran one. */
+  own: FullVerification | null;
+  onChecked: (ended: FullVerification) => void;
+  /** How long Grasp keeps events, as rows after the check's. */
+  children?: ReactNode;
 }) => {
   const { t } = useLingui();
   const { busy, failure, run } = useCoreAction();
   const [through, setThrough] = useState(0);
-  const [own, setOwn] = useState<FullVerification | null>(null);
   const verify = async (): Promise<void> => {
     setThrough(0);
     const result = await run(
       async (session) => await verifyChain(session, setThrough)
     );
     if (result !== undefined) {
-      setOwn(result);
+      onChecked(result);
     }
   };
   return (
-    <SectionCard
-      actions={
-        <Button
-          disabled={busy}
-          onClick={() => {
-            void verify();
-          }}
-          size="sm"
-        >
-          {t`Verify now`}
-        </Button>
-      }
-      description={t`Checks that no entry was removed or changed since it was written.`}
-      flush
-      title={t`Chain check`}
-    >
-      <div aria-live="polite">
-        {own === null && !busy && last.state !== "ready" ? (
-          <SectionNotLoaded page={last} />
-        ) : (
-          <SettingsRows>
-            <Outcome
-              ended={own ?? (last.state === "ready" ? last.data : null)}
-              running={busy}
-              through={through}
-            />
-            {failure === undefined ? null : (
-              <RowAlert variant="danger">{failure}</RowAlert>
+    <Dialog>
+      <DialogTrigger
+        aria-label={t`Integrity and archive`}
+        icon={Info}
+        size="sm"
+        tooltip={t`Integrity and archive`}
+        variant="ghost"
+      />
+      <DialogContent closeLabel={t`Close`}>
+        <DialogTitle>{t`Integrity and archive`}</DialogTitle>
+        <DialogDescription>
+          {t`Every event is chained to the one before it, so an event removed or changed later shows as a break in the chain.`}
+        </DialogDescription>
+        <DialogBody>
+          <div aria-live="polite">
+            {own === null && !busy && last.state !== "ready" ? (
+              <SectionNotLoaded page={last} />
+            ) : (
+              <SettingsRows>
+                <Outcome
+                  ended={endedOf(own, last)}
+                  running={busy}
+                  through={through}
+                />
+                {failure === undefined ? null : (
+                  <RowAlert variant="danger">{failure}</RowAlert>
+                )}
+                {children}
+              </SettingsRows>
             )}
-          </SettingsRows>
-        )}
-      </div>
-    </SectionCard>
+          </div>
+        </DialogBody>
+        <DialogFooter>
+          <Button
+            disabled={busy}
+            onClick={() => {
+              void verify();
+            }}
+            size="sm"
+          >
+            {t`Check now`}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 };

@@ -47,11 +47,11 @@ import {
 } from "../grasp/field/index.ts";
 import { Form } from "../grasp/form/index.ts";
 import {
+  Cable,
   ChevronDown,
   ChevronUp,
   Cross,
   Icon,
-  Key,
   Plus,
 } from "../grasp/icons/index.ts";
 import { Input } from "../grasp/input/index.ts";
@@ -60,6 +60,7 @@ import {
   ItemActions,
   ItemContent,
   ItemDescription,
+  ItemDetail,
   ItemGroup,
   ItemMedia,
   ItemTitle,
@@ -114,8 +115,8 @@ const keyStarts: Readonly<Record<OrganizationProviderId, string | undefined>> =
 const marks: Readonly<Record<OrganizationProviderId, Brand | undefined>> = {
   anthropic: "claude",
   openai: "chatgpt",
-  mistral: undefined,
-  openrouter: undefined,
+  mistral: "mistral",
+  openrouter: "openrouter",
   "openai-compatible": undefined,
 };
 
@@ -160,15 +161,24 @@ const styles = stylex.create({
 
 type Change = (session: Session) => Promise<unknown>;
 
-/** A provider's mark: its brand's, or a key where the Brand icons have none. */
+/**
+ * A provider's mark, one size in every row of Settings (the library's
+ * answer, 17 Nov 2026): its brand's mark alone at 20px, no tile; a plug
+ * for a custom endpoint, which is no brand.
+ */
 const Mark = ({ provider }: { provider: OrganizationProviderId }) => {
+  if (provider === "openai-compatible") {
+    return <Icon icon={Cable} />;
+  }
   const brand = marks[provider];
-  return brand === undefined ? (
-    <Icon icon={Key} />
-  ) : (
-    <BrandIcon brand={brand} decorative size="xs" />
+  return brand === undefined ? null : (
+    <BrandIcon brand={brand} decorative size="md" tile={false} />
   );
 };
+
+/** Whether `provider` shows a mark, so a row with none has no empty media. */
+const hasMark = (provider: OrganizationProviderId): boolean =>
+  provider === "openai-compatible" || marks[provider] !== undefined;
 
 /** How a provider's calls went lately: a word for its badge, and why where they fail. */
 const useStatus = () => {
@@ -253,19 +263,56 @@ const KeyInput = ({
 /** Why a change failed, in the person's words. */
 const reasonOf = (error: unknown): string => failureText(error);
 
-/** A provider's key: replace it, or delete it with a hold. */
+/** Test: one tiny call; working, then Works, or Failed and why under the name. */
+const useTest = (
+  provider: OrganizationProviderId,
+  model: string | undefined
+) => {
+  const { t, i18n } = useLingui();
+  const core = useCore();
+  const router = useRouter();
+  return useAction(
+    async () => {
+      const outcome = await core.withSession(
+        async (session) => await session.aiProviders.test(provider, model)
+      );
+      // How its calls go is read again: the test was one.
+      void router.invalidate();
+      if (!outcome.ok) {
+        const short = Object.hasOwn(testFailures, outcome.code)
+          ? testFailures[outcome.code]
+          : undefined;
+        throw new Error(
+          short === undefined
+            ? failureMessage(outcome.code, i18n)
+            : i18n._(short)
+        );
+      }
+    },
+    { working: t`Testing`, done: t`Works`, failed: t`Failed` }
+  );
+};
+
+/** Managing a provider: test it, replace its key, or delete it with a hold. */
 const KeyDialog = ({
   provider,
   open,
   onOpenChange,
   onReplace,
   onDelete,
+  test,
+  testModel,
+  testFailure,
 }: {
   provider: AiProviderListed;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onReplace: (key: string) => Promise<void>;
   onDelete: () => Promise<void>;
+  /** Test, one tiny call: its button's state lives with the row, so the row says how it went. */
+  test: ReturnType<typeof useTest>;
+  testModel: string | undefined | null;
+  testFailure: string | undefined;
 }) => {
   const { t } = useLingui();
   const formId = useId();
@@ -296,8 +343,27 @@ const KeyDialog = ({
       open={open}
     >
       <DialogContent closeLabel={t`Close`}>
-        <DialogTitle>{t`${label} key`}</DialogTitle>
+        <DialogTitle>
+          <span {...stylex.props(styles.named)}>
+            <Mark provider={provider.provider} />
+            {label}
+          </span>
+        </DialogTitle>
         <DialogBody>
+          <SettingsRows>
+            <SettingRow
+              help={
+                testModel === null
+                  ? t`Name a model it serves, under Models, to test it.`
+                  : testFailure
+              }
+              label={t`Connection`}
+            >
+              <Button disabled={testModel === null} size="sm" {...test.props}>
+                {t`Test`}
+              </Button>
+            </SettingRow>
+          </SettingsRows>
           <Form
             aria-label={t`Replace the key for ${label}`}
             id={formId}
@@ -344,37 +410,7 @@ const KeyDialog = ({
   );
 };
 
-/** Test: one tiny call; working, then Works, or Failed and why under the name. */
-const useTest = (
-  provider: OrganizationProviderId,
-  model: string | undefined
-) => {
-  const { t, i18n } = useLingui();
-  const core = useCore();
-  const router = useRouter();
-  return useAction(
-    async () => {
-      const outcome = await core.withSession(
-        async (session) => await session.aiProviders.test(provider, model)
-      );
-      // How its calls go is read again: the test was one.
-      void router.invalidate();
-      if (!outcome.ok) {
-        const short = Object.hasOwn(testFailures, outcome.code)
-          ? testFailures[outcome.code]
-          : undefined;
-        throw new Error(
-          short === undefined
-            ? failureMessage(outcome.code, i18n)
-            : i18n._(short)
-        );
-      }
-    },
-    { working: t`Testing`, done: t`Works`, failed: t`Failed` }
-  );
-};
-
-/** One connected provider: its mark and name, its key as dots, how its calls go, Test, and its key. */
+/** One connected provider, on one line: its mark, its name and its key's last four, how its calls go, and Manage. */
 const ProviderRow = ({
   provider,
   testModel,
@@ -391,29 +427,31 @@ const ProviderRow = ({
 }) => {
   const { t } = useLingui();
   const statusOf = useStatus();
-  const [keying, setKeying] = useState(false);
+  const [managing, setManaging] = useState(false);
   const test = useTest(provider.provider, testModel ?? undefined);
   const { label } = provider;
   const last = provider.mask.replace("…", "");
   const status = statusOf(provider.status);
   const testFailure =
     test.error instanceof Error ? test.error.message : undefined;
-  let line = t`Key •••• ${last}`;
-  if (testFailure !== undefined) {
-    line = t`Test failed: ${testFailure}`;
-  } else if (editable && testModel === null) {
-    line = t`Name a model it serves, below, to test it.`;
-  } else if (status.why !== undefined) {
-    line = status.why;
-  }
+  // A second line only where something is wrong.
+  const trouble =
+    testFailure === undefined ? status.why : t`Test failed: ${testFailure}`;
   return (
     <Item size="xs">
-      <ItemMedia>
-        <Mark provider={provider.provider} />
-      </ItemMedia>
+      {hasMark(provider.provider) ? (
+        <ItemMedia>
+          <Mark provider={provider.provider} />
+        </ItemMedia>
+      ) : null}
       <ItemContent>
-        <ItemTitle>{label}</ItemTitle>
-        <ItemDescription>{line}</ItemDescription>
+        <ItemTitle>
+          {label}
+          <ItemDetail>{`•••• ${last}`}</ItemDetail>
+        </ItemTitle>
+        {trouble === undefined ? null : (
+          <ItemDescription>{trouble}</ItemDescription>
+        )}
       </ItemContent>
       <ItemActions>
         <span {...stylex.props(styles.ends)}>
@@ -423,28 +461,24 @@ const ProviderRow = ({
           {editable ? (
             <>
               <Button
-                aria-label={t`Test ${label}`}
-                disabled={testModel === null}
-                size="sm"
-                {...test.props}
-              >
-                {t`Test`}
-              </Button>
-              <Button
-                aria-label={t`${label} key`}
-                icon={Key}
+                aria-label={t`Manage ${label}`}
                 onClick={() => {
-                  setKeying(true);
+                  setManaging(true);
                 }}
                 size="sm"
                 variant="ghost"
-              />
+              >
+                {t`Manage`}
+              </Button>
               <KeyDialog
                 onDelete={onDelete}
-                onOpenChange={setKeying}
+                onOpenChange={setManaging}
                 onReplace={onReplace}
-                open={keying}
+                open={managing}
                 provider={provider}
+                test={test}
+                testModel={testModel}
+                testFailure={testFailure}
               />
             </>
           ) : null}
@@ -541,32 +575,30 @@ const AddProviderDialog = ({
                 void add.run();
               }}
             >
-              <Field>
-                <FieldLabel>{t`Provider`}</FieldLabel>
-                <RadioGroup
-                  onValueChange={(value) => {
-                    setChosen(
-                      offered.find((each) => each.provider === value)?.provider
-                    );
-                  }}
-                  value={provider.provider}
-                >
-                  {offered.map((each) => (
-                    <Field key={each.provider} orientation="horizontal">
-                      <RadioGroupItem value={each.provider} />
-                      <FieldContent>
-                        <FieldLabel>
-                          <ProviderChoice
-                            label={each.label}
-                            provider={each.provider}
-                          />
-                        </FieldLabel>
-                        <FieldDescription>{each.whereItRuns}</FieldDescription>
-                      </FieldContent>
-                    </Field>
-                  ))}
-                </RadioGroup>
-              </Field>
+              <RadioGroup
+                aria-label={t`Provider`}
+                onValueChange={(value) => {
+                  setChosen(
+                    offered.find((each) => each.provider === value)?.provider
+                  );
+                }}
+                value={provider.provider}
+              >
+                {offered.map((each) => (
+                  <Field key={each.provider} orientation="horizontal">
+                    <RadioGroupItem value={each.provider} />
+                    <FieldContent>
+                      <FieldLabel>
+                        <ProviderChoice
+                          label={each.label}
+                          provider={each.provider}
+                        />
+                      </FieldLabel>
+                      <FieldDescription>{each.whereItRuns}</FieldDescription>
+                    </FieldContent>
+                  </Field>
+                ))}
+              </RadioGroup>
               {custom ? (
                 <Field>
                   <FieldLabel>{t`Address`}</FieldLabel>
@@ -690,7 +722,7 @@ const NameModel = ({ onName }: { onName: (model: string) => void }) => {
   };
   return (
     <SettingRow
-      help={t`As your endpoint names it, such as llama-3.3-70b.`}
+      info={t`As your endpoint names it, such as llama-3.3-70b.`}
       label={t`Your endpoint's model`}
     >
       {(field) => (
@@ -838,7 +870,8 @@ const Models = ({
     setLast(next);
     setStatus("saving");
     void (async () => {
-      setStatus((await onChoose(next)) ? "saved" : "failed");
+      // Success is silent for now: the row's "Saved" line under the label was rejected (Ruben, 17 Nov 2026); the library shows it beside the control from its main 0ebd48bd, not yet in its registry.
+      setStatus((await onChoose(next)) ? "idle" : "failed");
     })();
   };
   const chooseFallbacks = (next: string[]): void => {
@@ -855,7 +888,7 @@ const Models = ({
     defaultName = nameOf(defaultModel, providers);
   }
   return (
-    <SectionCard density="compact" flush title={t`Default and fallbacks`}>
+    <SectionCard density="compact" flush title={t`Models`}>
       <SettingsRows>
         {editable && custom ? (
           <NameModel

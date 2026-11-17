@@ -383,7 +383,6 @@ const TeamsList = ({
   return (
     <SectionCard
       actions={<NewTeamButton onChanged={onChanged} teams={teams} />}
-      description={t`Share Apps, Knowledge and workflows with a whole team at once.`}
       flush={teams.length > 0}
       title={t`Teams`}
     >

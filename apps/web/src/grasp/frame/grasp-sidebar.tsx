@@ -88,6 +88,7 @@ const useGroups = (
   const recent = useRecentChats({
     enabled: identity.onboardingOnly !== true,
   });
+  const openChats = useChatsWindow();
   if (identity.onboardingOnly === true) {
     return [];
   }
@@ -213,6 +214,13 @@ const useGroups = (
             collapsible: true,
             count: recent.length,
             rows: recent,
+            // The way to every chat, past the recent ones: the chats window.
+            more: {
+              label: t`All chats`,
+              onClick: () => {
+                openChats(true);
+              },
+            },
           },
         ];
   // The Inbox tab: what waits for the person, each to its place in the inbox.

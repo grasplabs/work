@@ -1,7 +1,7 @@
 // The backdrop itself: one canvas, behind what stands in the box it fills. Light on purpose: what
 // draws (sand.ts, shader.ts) is loaded the first time the canvas comes into view, and the scene
 // pictures only when a scene draws. It draws while it is in view and the tab is seen, and holds its
-// last picture otherwise. With reduced motion it is one still picture.
+// last picture otherwise. With reduced motion, or `still` (a picker's tile at rest), it is one still picture.
 "use client";
 
 import * as stylex from "@stylexjs/stylex";
@@ -65,6 +65,8 @@ interface CanvasProps {
   scenes: string;
   /** A small window on the look (a preview tile): its scene from the small picture. */
   small?: boolean;
+  /** One picture and no more, as with reduced motion: a picker's tile at rest. */
+  still?: boolean;
   /** How far the page has gone (Backdrop's `progress`). */
   progress?: BackdropProgress;
 }
@@ -137,11 +139,12 @@ const watch = (
   clear: RefObject<HTMLElement | null> | undefined,
   scenes: string,
   small: boolean,
-  progress: () => number
+  progress: () => number,
+  still: boolean
 ): (() => void) => {
   const options: DrawOptions = {
     clear: () => clear?.current?.getBoundingClientRect(),
-    still: matchMedia(REDUCED).matches,
+    still: still || matchMedia(REDUCED).matches,
     progress,
   };
   let drawing: Drawing | undefined;
@@ -189,6 +192,7 @@ const Canvas = ({
   clear,
   scenes,
   small = false,
+  still = false,
   progress,
 }: CanvasProps) => {
   const canvas = useRef<HTMLCanvasElement>(null);
@@ -206,8 +210,16 @@ const Canvas = ({
       box === null ? given.current : scrolledShare(box);
     return element === null
       ? undefined
-      : watch(element, { backdrop, pattern, tone }, clear, scenes, small, read);
-  }, [backdrop, pattern, tone, clear, scenes, small, follows]);
+      : watch(
+          element,
+          { backdrop, pattern, tone },
+          clear,
+          scenes,
+          small,
+          read,
+          still
+        );
+  }, [backdrop, pattern, tone, clear, scenes, small, follows, still]);
   return (
     <canvas
       aria-hidden="true"
@@ -231,6 +243,7 @@ export const BackdropField = ({
   clear,
   scenes,
   small = false,
+  still = false,
   progress,
 }: CanvasProps) => {
   if (look.backdrop === "none") {
@@ -246,6 +259,7 @@ export const BackdropField = ({
       look={look}
       scenes={scenes}
       small={small}
+      still={still}
       progress={progress}
     />
   );

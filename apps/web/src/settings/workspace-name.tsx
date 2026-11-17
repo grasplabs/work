@@ -8,18 +8,20 @@ import type { Organization } from "@grasp-os/shared/organization";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useRouter } from "@tanstack/react-router";
-import { useRef, useState } from "react";
+import { useState } from "react";
 
 import type { Session } from "../core.ts";
 import {
   organizationLogoChanged,
   organizationRenamed,
 } from "../frame/organization-name.tsx";
-import { Avatar, AvatarFallback, AvatarImage } from "../grasp/avatar/index.ts";
 import { Button } from "../grasp/button/index.ts";
+import { focus } from "../grasp/focus/focus.ts";
 import { Input } from "../grasp/input/index.ts";
 import { SettingRow } from "../grasp/setting-row/index.ts";
 import type { SettingRowState } from "../grasp/setting-row/index.ts";
+import { Spinner } from "../grasp/spinner/index.ts";
+import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { useCoreAction } from "../use-core-action.ts";
 
@@ -38,15 +40,6 @@ type Change = (
 export const controlStyles = stylex.create({
   // Every control fills the rows' shared control column.
   fill: { width: "100%" },
-  // The logo, then its buttons, in the control column.
-  logo: {
-    display: "flex",
-    alignItems: "center",
-    gap: grasp.space2,
-    width: "100%",
-  },
-  // The file picker the Change button opens: never seen.
-  picker: { display: "none" },
 });
 
 /**
@@ -71,7 +64,8 @@ export const useOrganizationChange = () => {
         setStatus("failed");
         return;
       }
-      setStatus("saved");
+      // Success is silent for now: the row's "Saved" line under the label was rejected (Ruben, 17 Nov 2026); the library shows it beside the control from its main 0ebd48bd, not yet in its registry.
+      setStatus("idle");
       onSaved?.(saved);
       // The page reads again behind the field, which stays free meanwhile.
       void router.invalidate();
@@ -141,11 +135,7 @@ export const NameField = ({
     <SettingRow
       {...words}
       {...(failure === undefined ? {} : { error: failure })}
-      help={
-        canChange
-          ? t`Your company’s name in Grasp.`
-          : t`Your company’s name in Grasp. An admin changes it.`
-      }
+      {...(canChange ? {} : { info: t`An admin changes it.` })}
       label={t`Name`}
       onRetry={() => {
         if (tried !== undefined) {
@@ -182,11 +172,77 @@ export const NameField = ({
   );
 };
 
+/** The initials a company without a logo is shown by: its first two words'. */
+const initialsOf = (name: string): string =>
+  name
+    .split(/\s+/u)
+    .filter((word) => word !== "")
+    .slice(0, 2)
+    .map((word) => word.slice(0, 1))
+    .join("")
+    .toUpperCase();
+
+const logoStyles = stylex.create({
+  // The logo first in the card, above the rows: the well, then its words.
+  block: {
+    display: "flex",
+    alignItems: "center",
+    gap: grasp.space4,
+    paddingInline: grasp.space4,
+    paddingBlock: grasp.space4,
+    borderBlockEndWidth: grasp.hairline,
+    borderBlockEndStyle: "solid",
+    borderBlockEndColor: grasp.line,
+  },
+  // The well: the logo, or the initials, square, larger than a row's
+  // control; itself the way to change it (a press or a dropped file).
+  well: {
+    position: "relative",
+    display: "grid",
+    placeItems: "center",
+    flexShrink: 0,
+    width: grasp.space16,
+    height: grasp.space16,
+    overflow: "hidden",
+    borderRadius: grasp.corner,
+    cornerShape: grasp.cornerShape,
+    backgroundColor: grasp.soft,
+    boxShadow: grasp.edge,
+    color: grasp.muted,
+    fontFamily: grasp.fontSans,
+    fontSize: grasp.textLg,
+    fontWeight: grasp.weightMedium,
+  },
+  changeable: { cursor: "pointer" },
+  // A file held over it: the well says it will take it.
+  over: { boxShadow: `0 0 0 2px ${grasp.ink}` },
+  image: { width: "100%", height: "100%", objectFit: "contain" },
+  // The file picker covers the well, so a press anywhere on it opens it.
+  input: {
+    position: "absolute",
+    inset: 0,
+    opacity: 0,
+    cursor: "pointer",
+  },
+  // Saving: a spinner over the logo.
+  veil: {
+    position: "absolute",
+    inset: 0,
+    display: "grid",
+    placeItems: "center",
+    backgroundColor: grasp.soft,
+  },
+  words: { display: "grid", gap: grasp.space1, minWidth: 0 },
+  line: { display: "flex", alignItems: "center", gap: grasp.space2 },
+});
+
 /**
- * The organization's logo, as a setting's row: the logo, or its initials
- * while it has none; Change picks an image (PNG, JPEG or WebP, at most
- * 512 KB, which core checks again by its bytes), Remove takes it away.
- * The sidebar shows the new one at once.
+ * The organization's logo, first in the Organization card: a square well
+ * with the logo, or its initials while it has none, which is itself the
+ * control. A press or a dropped image changes it (PNG, JPEG or WebP, at
+ * most 512 KB, which core checks again by its bytes); Remove takes it
+ * away. Saving shows on the well; a failure under it, with Try again. The
+ * sidebar shows the new one at once.
  */
 export const LogoField = ({
   name,
@@ -198,15 +254,14 @@ export const LogoField = ({
   canChange: boolean;
 }) => {
   const { t } = useLingui();
-  const words = useSaveWords();
   const { busy, failure, status, change } = useOrganizationChange();
-  const picker = useRef<HTMLInputElement>(null);
   // What core last took: the page's read catches up behind it.
   const [saved, setSaved] = useState(logo);
   // An image refused before it was sent: too large for core to take.
   const [problem, setProblem] = useState<string>();
   // The last change asked for, kept for Try again.
   const [tried, setTried] = useState<Uint8Array | null>();
+  const [over, setOver] = useState(false);
   const send = (image: Uint8Array | null): void => {
     setTried(image);
     change(
@@ -235,63 +290,92 @@ export const LogoField = ({
     })();
   };
   const reason = problem ?? failure;
+  const shown =
+    saved === null ? (
+      <span aria-hidden="true">{initialsOf(name)}</span>
+    ) : (
+      <img alt="" src={saved} {...stylex.props(logoStyles.image)} />
+    );
   return (
-    <SettingRow
-      {...words}
-      {...(reason === undefined ? {} : { error: reason })}
-      help={t`Shown beside your company’s name in Grasp.`}
-      label={t`Logo`}
-      onRetry={() => {
-        if (tried !== undefined) {
-          send(tried);
-        }
-      }}
-      status={status}
-    >
-      <span {...stylex.props(controlStyles.logo)}>
-        <Avatar name={name} size="sm">
-          {saved === null ? null : <AvatarImage src={saved} />}
-          <AvatarFallback />
-        </Avatar>
+    <div {...stylex.props(logoStyles.block)}>
+      <label
+        {...stylex.props(
+          logoStyles.well,
+          canChange && logoStyles.changeable,
+          over && logoStyles.over,
+          focus.within
+        )}
+      >
+        {shown}
         {canChange ? (
-          <>
-            <input
-              accept={organizationLogoTypes.join(",")}
-              aria-hidden
-              onChange={(event) => {
-                choose(event.currentTarget.files?.[0]);
-                // The same file chosen again is a change again.
-                event.currentTarget.value = "";
-              }}
-              ref={picker}
-              tabIndex={-1}
-              type="file"
-              {...stylex.props(controlStyles.picker)}
-            />
+          <input
+            accept={organizationLogoTypes.join(",")}
+            aria-label={saved === null ? t`Add a logo` : t`Change the logo`}
+            disabled={busy}
+            // A file dropped on the well lands on this field, which covers it.
+            onDragEnter={() => {
+              setOver(true);
+            }}
+            onDragLeave={() => {
+              setOver(false);
+            }}
+            onChange={(event) => {
+              setOver(false);
+              choose(event.currentTarget.files?.[0]);
+              // The same file chosen again is a change again.
+              event.currentTarget.value = "";
+            }}
+            type="file"
+            {...stylex.props(logoStyles.input)}
+          />
+        ) : null}
+        {status === "saving" ? (
+          <span {...stylex.props(logoStyles.veil)}>
+            <Spinner aria-label={t`Saving`} />
+          </span>
+        ) : null}
+      </label>
+      <div {...stylex.props(logoStyles.words)}>
+        <span {...stylex.props(logoStyles.line)}>
+          <Text size="sm" weight="medium">
+            {t`Logo`}
+          </Text>
+          {canChange && saved !== null ? (
             <Button
               disabled={busy}
               onClick={() => {
-                picker.current?.click();
+                send(null);
               }}
-              size="sm"
+              size="xs"
+              variant="ghost"
             >
-              {saved === null ? t`Add a logo` : t`Change`}
+              {t`Remove`}
             </Button>
-            {saved === null ? null : (
+          ) : null}
+        </span>
+        {reason === undefined ? (
+          <Text size="xs" tone="muted">
+            {canChange
+              ? t`Click or drop an image: PNG, JPEG or WebP, up to 512 KB.`
+              : t`An admin changes it.`}
+          </Text>
+        ) : (
+          <span {...stylex.props(logoStyles.line)}>
+            <Text size="xs">{reason}</Text>
+            {tried === undefined ? null : (
               <Button
-                disabled={busy}
                 onClick={() => {
-                  send(null);
+                  send(tried);
                 }}
-                size="sm"
+                size="xs"
                 variant="ghost"
               >
-                {t`Remove`}
+                {t`Try again`}
               </Button>
             )}
-          </>
-        ) : null}
-      </span>
-    </SettingRow>
+          </span>
+        )}
+      </div>
+    </div>
   );
 };

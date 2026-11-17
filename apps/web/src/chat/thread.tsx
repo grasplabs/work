@@ -30,18 +30,19 @@ import {
   ChatMessageAction,
 } from "../grasp/chat-message/index.ts";
 import { Retry } from "../grasp/icons/index.ts";
+import { Markdown } from "../grasp/markdown/index.ts";
 import { Spinner } from "../grasp/spinner/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { Thread } from "../grasp/thread/index.ts";
 import type { ThreadWords } from "../grasp/thread/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { useMemberAdmin } from "../use-member-admin.ts";
-import { AnswerMarkdown } from "./answer-markdown.tsx";
 import {
   SeeInBrain,
   useAnswerThinking,
   useThinkingStep,
 } from "./answer-thinking.tsx";
+import { AnswerWords } from "./answer-words.tsx";
 import { answeredOf } from "./answered.ts";
 import { AskedLine } from "./asked-questions.tsx";
 import { pendingPlan, ThreadPlan } from "./build-progress.tsx";
@@ -53,7 +54,7 @@ import { recoveredSteps } from "./recovered.ts";
 import { SavedMemoryLine } from "./saved-memory.tsx";
 import { readingFileOf, signOf } from "./sign.ts";
 import type { WorkState } from "./sign.ts";
-import { AnswerCited, AnswerSources, useCitedDocuments } from "./sources.tsx";
+import { AnswerCited, useCitedDocuments } from "./sources.tsx";
 import { turnsOf, workedFor } from "./turns.ts";
 import { widgetLinesOf } from "./widget-lines.ts";
 
@@ -492,29 +493,12 @@ const KeyFailed = () => (
 );
 
 /**
- * A stored reply's words that cite documents: until sources move onto
- * Grasp UI's Sources, its own Markdown with each cited span marked, and
- * "Based on N sources" under it.
+ * A stored reply's words that cite documents: each cited span marked, and
+ * the documents (read by AnswerCited around it) listed under them.
  */
-const CitedWords = ({
-  text,
-  cited,
-}: {
-  text: string;
-  cited: readonly string[];
-}) => {
+const CitedWords = ({ text }: { text: string }) => {
   const sources = useCitedDocuments();
-  return (
-    <>
-      <AnswerMarkdown
-        cited={cited}
-        sources={sources}
-        text={text}
-        written={false}
-      />
-      <AnswerSources cited={sources} />
-    </>
-  );
+  return <AnswerWords cited={sources} text={text} writing={false} />;
 };
 
 /** One reply's words, its citations inline where it cites documents. */
@@ -535,17 +519,11 @@ const ReplyWords = ({
     reply.citations === undefined ||
     reply.citations.length === 0
   ) {
-    // Model output, so work's own renderer: a link out of Grasp asks first
-    // and carries no address, until the library's Markdown takes a link
-    // renderer (`renderLink`).
-    return <AnswerMarkdown text={reply.text} written={writing} />;
+    return <AnswerWords text={reply.text} writing={writing} />;
   }
   return (
     <AnswerCited cited={{ chatId, messageId: reply.id }}>
-      <CitedWords
-        cited={reply.citations.map(({ documentId }) => documentId)}
-        text={reply.text}
-      />
+      <CitedWords text={reply.text} />
     </AnswerCited>
   );
 };
@@ -1038,7 +1016,6 @@ const AnswerRow = ({
           : failureMessage(last?.failure, i18n)
       }
       from="agent"
-      name="Grasp"
       onRetry={ending.providerMissing ? undefined : retry}
       retryLabel={t`Try again`}
       status={ending.providerMissing ? "done" : status}
@@ -1047,7 +1024,15 @@ const AnswerRow = ({
       thoughtLabel={(time) =>
         t`${plural(time, { one: "Thought for # second", other: "Thought for # seconds" })}`
       }
-      thoughts={thought.thoughts}
+      thoughts={
+        thought.thoughts === undefined ? undefined : (
+          <Markdown
+            size="sm"
+            source={thought.thoughts}
+            streaming={status === "thinking"}
+          />
+        )
+      }
       thoughtSeconds={thought.seconds}
     >
       {status === "thinking" ? undefined : (

@@ -1,6 +1,5 @@
 import type { SignInOption } from "@grasp-os/shared/rpc";
 import type { OwnSession, SessionDevice } from "@grasp-os/shared/sign-in";
-import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { createFileRoute, useRouter } from "@tanstack/react-router";
@@ -10,6 +9,14 @@ import { changeThenRefresh } from "../change-then-refresh.ts";
 import type { CoreConnection } from "../core-connection.ts";
 import { deadline, unlessAborted } from "../core.ts";
 import { formatDateTime } from "../format.ts";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogContent,
+  AlertDialogFooter,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "../grasp/alert-dialog/index.ts";
 import { Badge } from "../grasp/badge/index.ts";
 import { BrandIcon, brands } from "../grasp/brand-icon/index.ts";
 import type { Brand } from "../grasp/brand-icon/index.ts";
@@ -25,7 +32,7 @@ import {
   ItemTitle,
 } from "../grasp/item/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
-import { FactRow, SettingsRows } from "../grasp/setting-row/index.ts";
+import { SettingRow, SettingsRows } from "../grasp/setting-row/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
@@ -36,13 +43,12 @@ import {
 import type { ChatAccounts } from "../settings/chat-accounts.tsx";
 import { pendingChatLink } from "../settings/chat-link.ts";
 import {
-  RowNote,
   SectionNotLoaded,
   SettingsError,
   SettingsLoading,
   TitleLine,
 } from "../settings/section.tsx";
-import { useCoreAction } from "../use-core-action.ts";
+import { useCore } from "../use-core.ts";
 
 // Settings › Security, as the library's Settings pattern has it (like
 // Profile): one compact card that says what the person signs in with, the
@@ -100,7 +106,12 @@ const SignedInWith = ({
   return (
     <span {...stylex.props(styles.signedInWith)}>
       {provider !== undefined && isBrand(provider.providerId) ? (
-        <BrandIcon brand={provider.providerId} tile={false} />
+        <BrandIcon
+          brand={provider.providerId}
+          decorative
+          size="md"
+          tile={false}
+        />
       ) : null}
       {name}
     </span>
@@ -116,31 +127,53 @@ const useDeviceName = ({ browser, system }: SessionDevice): string => {
   return browser ?? system ?? t`Unknown device`;
 };
 
-/** One device the person is signed in on, and a way to sign it out unless it is this one. */
+/**
+ * The browsers with a mark of their own, by the name core gives them
+ * (core's user-agent.ts); any other (Edge, Opera) keeps the device's icon.
+ */
+const browserMarks: Partial<Record<string, Brand>> = {
+  Chrome: "chrome",
+  Firefox: "firefox",
+  Safari: "safari",
+};
+
+const browserMark = (browser: string | null): Brand | undefined =>
+  browser === null ? undefined : browserMarks[browser];
+
+/** One device the person is signed in on, and a way to sign it out, after a yes, unless it is this one. */
 const DeviceRow = ({ session }: { session: OwnSession }) => {
   const { t } = useLingui();
+  const core = useCore();
   const router = useRouter();
-  const { busy, failure, run } = useCoreAction();
   const time = formatDateTime(session.signedInAt);
   const device = useDeviceName(session.device);
+  const mark = browserMark(session.device.browser);
   const signOut = async (): Promise<void> => {
     // Gone either way once core answers: ended now, or ended already.
-    await run(async ({ sessions }) => {
-      // `sync` waits for the loader, so the row goes with its session.
-      await changeThenRefresh(
-        async () => await sessions.end(session.id),
-        async () => {
-          await router.invalidate({ sync: true });
-        }
-      );
-    });
+    // `sync` waits for the loader, so the row goes with its session.
+    await changeThenRefresh(
+      async () => {
+        await core.withSession(
+          async ({ sessions }) => await sessions.end(session.id)
+        );
+      },
+      async () => {
+        await router.invalidate({ sync: true });
+      }
+    );
   };
   return (
     <Item size="xs">
-      <ItemMedia
-        icon={session.device.mobile ? Phone : Desktop}
-        iconLook="inline"
-      />
+      {mark === undefined ? (
+        <ItemMedia
+          icon={session.device.mobile ? Phone : Desktop}
+          iconLook="inline"
+        />
+      ) : (
+        <ItemMedia>
+          <BrandIcon brand={mark} decorative size="md" tile={false} />
+        </ItemMedia>
+      )}
       <ItemContent>
         <ItemTitle>
           <TitleLine>
@@ -148,23 +181,32 @@ const DeviceRow = ({ session }: { session: OwnSession }) => {
             {session.current ? <Badge size="sm">{t`This device`}</Badge> : null}
           </TitleLine>
         </ItemTitle>
-        <ItemDescription>
-          <RowNote failure={failure}>{t`Signed in ${time}`}</RowNote>
-        </ItemDescription>
+        <ItemDescription>{t`Signed in ${time}`}</ItemDescription>
       </ItemContent>
       {session.current ? null : (
         <ItemActions>
-          <Button
-            aria-label={t`Sign out ${device}, signed in ${time}`}
-            disabled={busy}
-            onClick={() => {
-              void signOut();
-            }}
-            size="sm"
-            variant="ghost"
-          >
-            {t`Sign out`}
-          </Button>
+          <AlertDialog>
+            <AlertDialogTrigger
+              aria-label={t`Sign out ${device}, signed in ${time}`}
+              size="sm"
+              variant="ghost"
+            >
+              {t`Sign out`}
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogTitle>{t`Sign out this device?`}</AlertDialogTitle>
+              <AlertDialogFooter>
+                <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
+                <AlertDialogAction
+                  action={signOut}
+                  failedLabel={t`Could not sign out`}
+                  variant="danger"
+                >
+                  {t`Sign out`}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         </ItemActions>
       )}
     </Item>
@@ -199,10 +241,6 @@ const Devices = ({ sessions }: { sessions: Loaded<OwnSession[]> }) => {
   return (
     <SectionCard
       density="compact"
-      description={t`${plural(devices, {
-        one: "Signed in on # device. Sign out any you do not recognise.",
-        other: "Signed in on # devices. Sign out any you do not recognise.",
-      })}`}
       flush
       footer={
         shown.length < devices ? (
@@ -237,8 +275,9 @@ const Security = () => {
     <>
       <SectionCard density="compact" flush title={t`Sign-in`}>
         <SettingsRows>
-          <FactRow
-            help={t`Passwords and two-step sign-in live with your organization’s account.`}
+          <SettingRow
+            info={t`Passwords and two-step sign-in live with your organization’s account.`}
+            infoLabel={t`More about signing in`}
             label={t`Signed in with`}
           >
             <SignedInWith
@@ -246,7 +285,7 @@ const Security = () => {
               organization={organization}
               staff={identity.staff}
             />
-          </FactRow>
+          </SettingRow>
         </SettingsRows>
         {chat?.state === "ready" ? (
           <LinkedChatAccounts accounts={chat.data.accounts} />

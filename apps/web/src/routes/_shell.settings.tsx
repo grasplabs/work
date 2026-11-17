@@ -32,7 +32,7 @@ const SettingsLayout = () => {
       <Page>
         {/* One header: the section's own name; the crumbs above already say Settings. */}
         <PageHeader
-          size="sm"
+          size="md"
           title={current === undefined ? t`Settings` : i18n._(current.label)}
         />
         <Outlet />

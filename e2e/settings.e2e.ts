@@ -116,13 +116,19 @@ test("someone signs out a device of theirs from Security, and its session ends",
   await page.goto("/settings/security");
   const devices = sectionOf(page, "Devices");
   const signOuts = devices.getByRole("button", { name: /^Sign out/u });
-  await expect(devices).toContainText("Signed in on 2 devices.");
+  const rows = devices.getByRole("listitem");
+  await expect(rows).toHaveCount(2);
   await expect(devices.getByText("This device", { exact: true })).toBeVisible();
   // This one signs out from the person menu, not here.
   await expect(signOuts).toHaveCount(1);
 
+  // It asks first.
   await signOuts.click();
-  await expect(devices).toContainText("Signed in on 1 device.");
+  await page
+    .getByRole("alertdialog", { name: "Sign out this device?" })
+    .getByRole("button", { name: "Sign out" })
+    .click();
+  await expect(rows).toHaveCount(1);
   await expect(signOuts).toHaveCount(0);
   await expect(devices.getByText("This device", { exact: true })).toBeVisible();
   const { core, api } = apiOf({ cookie: elsewhere });

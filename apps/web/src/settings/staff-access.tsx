@@ -111,7 +111,6 @@ export const StaffAccessSection = ({
         ? { actions: <EndStaffAccess onFailure={setFailure} /> }
         : {})}
       density="compact"
-      description={t`Grasp’s team can sign in to help only when Grasp opens a time-limited window, at most 7 days. You can end it at any time.`}
       flush
       title={t`Grasp staff access`}
     >
@@ -119,14 +118,7 @@ export const StaffAccessSection = ({
         {failure === undefined ? null : (
           <RowAlert variant="danger">{failure}</RowAlert>
         )}
-        <FactRow
-          help={
-            staff.scope === "onboarding"
-              ? t`They reach the onboarding alone.`
-              : t`They reach everything their role allows.`
-          }
-          label={t`Open until ${until}`}
-        >
+        <FactRow label={t`Open until ${until}`}>
           <Badge tone="attention">
             {staff.scope === "onboarding" ? t`Onboarding only` : t`Full access`}
           </Badge>

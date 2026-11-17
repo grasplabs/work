@@ -92,7 +92,7 @@ const SpendView = ({ spend }: { spend: ModelMonthSpend }) => {
       )}
       <Link
         className="text-muted-foreground hover:text-foreground mt-auto flex items-center gap-1"
-        to="/settings/spend"
+        to="/settings/ai-providers"
       >
         <Trans>AI spend in Settings</Trans>
         <ChevronRightIcon aria-hidden="true" className="size-4" />

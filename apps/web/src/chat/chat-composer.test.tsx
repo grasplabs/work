@@ -21,8 +21,10 @@ import type { Mentionable } from "./mentions.tsx";
 // The running chat's box: what is typed goes with Send, Stop stops the
 // answer while Grasp writes it, the files a question carries show with a
 // way to take each off, a pick after `@` goes with the question for as
-// long as its `@name` stays in the text, and with no AI provider to call
-// it takes nothing and says how to connect one.
+// long as its `@name` stays in the text, with no AI provider to call it
+// takes nothing and says how to connect one, and what a member dictates
+// goes after what they typed, through the browser's own recognition,
+// faked here: the browser's, not the page's.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -34,31 +36,52 @@ let held: readonly Mentionable[] = [];
 /** What the page heard from the box. */
 const heard: string[] = [];
 
-/** The box, its text and mentions kept as a page keeps them; `props` over a ready box. */
+/** Where the box says Grasp is. */
+const activity = (): string | null =>
+  document.querySelector<HTMLElement>("[data-activity]")?.dataset.activity ??
+  null;
+
+/**
+ * The box, its text and mentions kept as a page keeps them; `props` over a
+ * ready box. Answering, beside it, is the page saying Grasp started or
+ * finished an answer.
+ */
 const Box = ({ props }: { props: Partial<ChatComposerProps> }) => {
   const [text, setText] = useState("");
+  const [running, setRunning] = useState(props.running ?? false);
   const [mentions, setMentions] = useState<readonly Mentionable[]>([]);
   return (
-    <ChatComposer
-      busy={false}
-      mentions={mentions}
-      model="openai/gpt-5"
-      models={["openai/gpt-5"]}
-      onMentions={(next) => {
-        held = next;
-        setMentions(next);
-      }}
-      onSend={() => {
-        heard.push(`send ${text}`);
-      }}
-      onStop={() => {
-        heard.push("stop");
-      }}
-      onText={setText}
-      running={false}
-      text={text}
-      {...props}
-    />
+    <>
+      <button
+        aria-label="Answering"
+        onClick={() => {
+          setRunning((now) => !now);
+        }}
+        type="button"
+      >
+        Answering
+      </button>
+      <ChatComposer
+        busy={false}
+        mentions={mentions}
+        model="openai/gpt-5"
+        models={["openai/gpt-5"]}
+        onMentions={(next) => {
+          held = next;
+          setMentions(next);
+        }}
+        onSend={() => {
+          heard.push(`send ${text}`);
+        }}
+        onStop={() => {
+          heard.push("stop");
+        }}
+        onText={setText}
+        text={text}
+        {...props}
+        running={running}
+      />
+    </>
   );
 };
 
@@ -90,13 +113,63 @@ const identity: Identity = {
   expiresAt: "2026-10-23T00:00:00.000Z",
 };
 
-/** The box on a page of the app's frame, as `props` set it. */
-const shown = async (props: Partial<ChatComposerProps> = {}): Promise<void> => {
+/** A member: the browser's recognition writes down what they say. */
+const member: Identity = { ...identity, userId: "grace", role: "user" };
+
+/** The browser's speech recognition, as the one recognition made last hears. */
+class Recognition extends EventTarget {
+  static made: Recognition | undefined;
+  lang = "";
+  continuous = false;
+  interimResults = false;
+  listening = false;
+  constructor() {
+    super();
+    Recognition.made = this;
+  }
+  start(): void {
+    this.listening = true;
+    this.results = [];
+    this.dispatchEvent(new Event("start"));
+  }
+  stop(): void {
+    this.listening = false;
+    this.dispatchEvent(new Event("end"));
+  }
+  abort(): void {
+    this.stop();
+  }
+  /** What this run has heard: each result settled or still being heard. */
+  results: { transcript: string; isFinal: boolean }[] = [];
+  /** It heard `words`, settled or still being heard: all of the run's results, as a browser sends them. */
+  hears(words: string, isFinal: boolean): void {
+    if (this.results.at(-1)?.isFinal === false) {
+      this.results.pop();
+    }
+    this.results.push({ transcript: words, isFinal });
+    this.dispatchEvent(
+      Object.assign(new Event("result"), {
+        results: this.results.map(({ transcript, isFinal: final }) =>
+          Object.assign([{ transcript }], { isFinal: final })
+        ),
+      })
+    );
+  }
+}
+
+/** The recognition the page made last, if any. */
+const made = (): Recognition | undefined => Recognition.made;
+
+/** The box on a page of the app's frame, as `props` set it, for `who`. */
+const shown = async (
+  props: Partial<ChatComposerProps> = {},
+  who: Identity = identity
+): Promise<void> => {
   const rootRoute = createRootRoute();
   const shell = createRoute({
     getParentRoute: () => rootRoute,
     id: "_shell",
-    beforeLoad: () => ({ identity }),
+    beforeLoad: () => ({ identity: who }),
   });
   const page = createRoute({
     getParentRoute: () => shell,
@@ -229,6 +302,20 @@ describe(ChatComposer, () => {
     });
   });
 
+  it("says an answer is done once Grasp finishes it, and works again with the next", async () => {
+    await shown({ running: true });
+    const working = activity();
+    await press(button("Answering"));
+    const done = activity();
+    await press(button("Answering"));
+
+    expect({ working, done, again: activity() }).toStrictEqual({
+      working: "working",
+      done: "success",
+      again: "working",
+    });
+  });
+
   it("shows the files a question carries by name and size, none said uploaded before it is sent, each to take off", async () => {
     const removed: string[] = [];
     await shown({
@@ -287,6 +374,63 @@ describe(ChatComposer, () => {
       typing: field().disabled || field().readOnly,
       way: document.querySelector('a[href="/settings/ai-providers"]') !== null,
     }).toStrictEqual({ typing: true, way: true });
+  });
+
+  it("writes what a member dictates after what they typed, across a pause, once they say Done", async () => {
+    window.SpeechRecognition = Recognition;
+    localStorage.setItem("grasp-dictation-told:grace", "1");
+    await shown({}, member);
+    type("Book the room");
+    await press(button("Dictate"));
+    const recognition = made();
+    act(() => {
+      recognition?.hears("for Friday", true);
+      // A pause: the browser stops by itself, and starts a new run.
+      recognition?.dispatchEvent(new Event("end"));
+      recognition?.hears("at ten", false);
+    });
+    const heardWhile = document.body.textContent.includes("for Friday");
+    await press(button("Done"));
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect({
+      language: recognition?.lang,
+      heardWhile,
+      text: field().value,
+      listening: recognition?.listening,
+    }).toStrictEqual({
+      language: "en",
+      heardWhile: true,
+      text: "Book the room for Friday at ten",
+      listening: false,
+    });
+  });
+
+  it("tells a member, the first time they dictate, that their browser's maker writes it down", async () => {
+    Recognition.made = undefined;
+    window.SpeechRecognition = Recognition;
+    localStorage.removeItem("grasp-dictation-told:grace");
+    await shown({}, member);
+    await press(button("Dictate"));
+
+    expect({
+      told: document.body.textContent.includes(
+        "Your browser's maker writes down what you say."
+      ),
+      listening: made()?.listening ?? false,
+    }).toStrictEqual({ told: true, listening: false });
+  });
+
+  it("draws Grasp at work in the look the person chose in Appearance", async () => {
+    localStorage.setItem("grasp-composer:ada", "lavender:dither");
+    await shown({ running: true });
+    const edge =
+      document.querySelector<HTMLElement>("[data-edge]")?.dataset.edge;
+    localStorage.removeItem("grasp-composer:ada");
+
+    expect(edge).toBe("dither");
   });
 
   it("mentions what is picked after @, until its name is gone from the text", async () => {

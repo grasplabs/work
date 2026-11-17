@@ -9,6 +9,7 @@ import { useMatch, useRouteContext, useRouter } from "@tanstack/react-router";
 import { useEffect, useEffectEvent, useRef } from "react";
 import type { ReactNode } from "react";
 
+import { AppShellPanelBody } from "../grasp/app-shell/index.ts";
 import { AppWindow, Cross, Edit, Expand } from "../grasp/icons/index.ts";
 import type { IconData } from "../grasp/icons/index.ts";
 import { Text } from "../grasp/text/index.ts";
@@ -105,14 +106,12 @@ const panelStyles = stylex.create({
     flexGrow: 1,
     minHeight: 0,
   },
-  // The room under the head's line, as the page's words have under the
-  // bar. App shell draws the line but not this room yet (asked of Grasp
-  // UI: the panel's head part will own it; remove this then).
-  column: {
-    boxSizing: "border-box",
-    width: "100%",
-    marginInline: "auto",
-    paddingBlockStart: grasp.space7,
+  // The thread's box in App shell's panel body: the body's whole height,
+  // so the library's Thread keeps its own scroll (it is as tall as its box).
+  fill: {
+    display: "flex",
+    flexDirection: "column",
+    height: "100%",
   },
   notice: {
     display: "flex",
@@ -367,15 +366,19 @@ const Body = ({ open }: { open: boolean }) => {
       {/* The conversation, named by its chat. */}
       <section
         aria-label={summary?.title ?? words.title}
-        {...stylex.props(panelStyles.body, panelStyles.column)}
+        {...stylex.props(panelStyles.body)}
       >
-        <ChatConversation
-          chat={chat}
-          compact
-          focusBox={() => {
-            boxOf(body.current)?.focus();
-          }}
-        />
+        <AppShellPanelBody>
+          <div {...stylex.props(panelStyles.fill)}>
+            <ChatConversation
+              chat={chat}
+              compact
+              focusBox={() => {
+                boxOf(body.current)?.focus();
+              }}
+            />
+          </div>
+        </AppShellPanelBody>
         <BrainGaps />
         <ChatFooter chat={chat} />
       </section>
