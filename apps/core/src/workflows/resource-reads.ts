@@ -80,22 +80,57 @@ const groupedBy = <T>(
 };
 
 /**
+ * What runs read, as their evidence keeps it: the pins of the chats that
+ * started them (`runChatSources`), the versions their recalls were handed
+ * and the memories their entity reads rested on (run-evidence.ts).
+ */
+export interface EvidenceRead {
+  readonly pins: readonly (typeof runChatSources.$inferSelect)[];
+  readonly versions: Awaited<ReturnType<typeof evidenceOfRuns>>;
+  readonly memories: Awaited<ReturnType<typeof memoryEvidenceOfRuns>>;
+}
+
+/** What runs `runIds` read, as their evidence keeps it: a read of each kind. */
+const evidenceReadOf = async (
+  env: Env,
+  runIds: readonly string[]
+): Promise<EvidenceRead> => {
+  const [pins, versions, memories] = await Promise.all([
+    drizzle(env.DB)
+      .select()
+      .from(runChatSources)
+      .where(inList(runChatSources.runId, runIds)),
+    evidenceOfRuns(env, runIds),
+    memoryEvidenceOfRuns(env, runIds),
+  ]);
+  return { pins, versions, memories };
+};
+
+/** Of `read`, what runs `runIds` read alone. */
+const readOf = (
+  read: EvidenceRead,
+  runIds: readonly string[]
+): EvidenceRead => {
+  const ids = new Set(runIds);
+  return {
+    pins: read.pins.filter(({ runId }) => ids.has(runId)),
+    versions: read.versions.filter(({ runId }) => ids.has(runId)),
+    memories: read.memories.filter(({ runId }) => ids.has(runId)),
+  };
+};
+
+/**
  * Of `runs`, those the chat whose agent had one started may no longer
  * read, for its person, something it had read then (GRA-1093,
  * workflow-starts.ts): as the chat's own history check decides it
  * (`readableSources`), under the chat's agent and person as they are
- * now. One read of the pins, and one check per chat, however many runs
- * it started.
+ * now: one check per chat, however many runs it started.
  */
 const chatPinsChecked = async (
   env: Env,
-  runIds: readonly string[],
+  rows: EvidenceRead["pins"],
   checked: Checked
 ): Promise<void> => {
-  const rows = await drizzle(env.DB)
-    .select()
-    .from(runChatSources)
-    .where(inList(runChatSources.runId, runIds));
   // Each run's pins are its one chat's: its first row names it.
   const chatOf = new Map<string, string>();
   for (const row of rows) {
@@ -155,12 +190,14 @@ const versionKey = (
  * however many runs and decisions it holds. A failure counts against the
  * runs of the check it came from alone. A read of the evidence that fails
  * throws. Without `grants`, what they read alone, not the grants it came
- * through (`copiesEvidence`).
+ * through (`copiesEvidence`). Given `read`, what they read as a caller
+ * read it, never read again (`EvidenceRead`).
  */
 const evidenceChecked = async (
   env: Env,
   runs: readonly EvidenceRun[],
-  grants: boolean
+  grants: boolean,
+  read?: EvidenceRead
 ): Promise<Checked> => {
   const byId = new Map(runs.map((run) => [run.runId, run]));
   const ids = [...byId.keys()];
@@ -168,11 +205,10 @@ const evidenceChecked = async (
   if (ids.length === 0) {
     return checked;
   }
-  const [, rows, memoryRows] = await Promise.all([
-    chatPinsChecked(env, ids, checked),
-    evidenceOfRuns(env, ids),
-    memoryEvidenceOfRuns(env, ids),
-  ]);
+  const evidence =
+    read === undefined ? await evidenceReadOf(env, ids) : readOf(read, ids);
+  const { versions: rows, memories: memoryRows } = evidence;
+  await chatPinsChecked(env, evidence.pins, checked);
   // Each permission its recalls came through still the run's, active, now
   // (`authorize`): decided by the run's workflow and person, once each.
   const granted = groupedBy(
@@ -396,12 +432,13 @@ const unchecked = (runId: string, error: unknown): EvidenceState => {
  * run's failure in the same check never counts against it; one whose own
  * check fails is unchecked, logged, and so is every run when the evidence
  * can't be read at all. Without `grants`, what they read alone, not the
- * grants it came through (`copiesEvidence`).
+ * grants it came through (`copiesEvidence`). Given `read`, every check,
+ * a run's check alone included, holds to what it read (`EvidenceRead`).
  */
 export const runsEvidence = async (
   env: Env,
   runs: readonly EvidenceRun[],
-  { grants = true }: { grants?: boolean } = {}
+  { grants = true, read }: { grants?: boolean; read?: EvidenceRead } = {}
 ): Promise<Map<string, EvidenceState>> => {
   const unique = [...new Map(runs.map((run) => [run.runId, run])).values()];
   /** How `some` stand, each failed one checked again alone if `again`. */
@@ -411,7 +448,7 @@ export const runsEvidence = async (
   ): Promise<[string, EvidenceState][]> => {
     let checked: Checked;
     try {
-      checked = await evidenceChecked(env, some, grants);
+      checked = await evidenceChecked(env, some, grants, read);
     } catch (error) {
       return some.map(({ runId }) => [runId, unchecked(runId, error)]);
     }
@@ -444,12 +481,15 @@ export const runsEvidence = async (
  * them, all read by `reader` at company reach. Never the grants it came
  * through, nor whether the writer's person is still a member: a copy is
  * the company's, and pulling a workflow's grant or someone leaving
- * protects no one by hiding it (GRA-1996, decision Q4).
+ * protects no one by hiding it (GRA-1996, decision Q4). Their evidence
+ * as `read` holds it, read in one snapshot with the copies that name
+ * them: read after, a release in between would leave none to refuse.
  */
 export const copiesEvidence = async (
   env: Env,
   writers: readonly Pick<EvidenceRun, "runId" | "workflowId">[],
-  reader: string
+  reader: string,
+  read: EvidenceRead
 ): Promise<Map<string, EvidenceState>> =>
   await runsEvidence(
     env,
@@ -458,5 +498,5 @@ export const copiesEvidence = async (
       workflowId,
       principal: reader,
     })),
-    { grants: false }
+    { grants: false, read }
   );

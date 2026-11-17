@@ -15,11 +15,13 @@ import type {
 import { runOfStepKey } from "@grasp-os/shared/workflows";
 import { asc, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
+import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { auditedBatch, outboxed, outboxedWhere } from "./audit-outbox.ts";
 import type { Acting } from "./auth/identity.ts";
 import {
+  runChatSources,
   workflowResourceRuns,
   workflowState,
   workflowStateWrites,
@@ -29,6 +31,10 @@ import { requireNotStaff } from "./sharing.ts";
 import { requireWorkflowRole } from "./workflow-resources.ts";
 import { copiesEvidence } from "./workflows/resource-reads.ts";
 import type { EvidenceState } from "./workflows/resource-reads.ts";
+import {
+  memoryEvidenceQuery,
+  versionEvidenceQuery,
+} from "./workflows/run-evidence.ts";
 
 // What an independent workflow keeps between its runs (GRA-1552): a few
 // JSON values by key, which a run reads once as it starts (its `state`)
@@ -100,9 +106,9 @@ const valuesSchema = z.record(workflowStateKeySchema, z.json());
 const bytesOf = (text: string): number =>
   new TextEncoder().encode(text).byteLength;
 
-/** The state's rows of workflow `workflowId`, by key. */
-const rowsOf = async (env: Env, workflowId: string) =>
-  await drizzle(env.DB)
+/** The query of the state's rows of workflow `workflowId`, by key. */
+const rowsQuery = (db: DrizzleD1Database, workflowId: string) =>
+  db
     .select({
       key: workflowState.key,
       value: workflowState.value,
@@ -113,27 +119,42 @@ const rowsOf = async (env: Env, workflowId: string) =>
     .where(eq(workflowState.workflowResourceId, workflowId))
     .orderBy(asc(workflowState.key));
 
-type StateRow = Awaited<ReturnType<typeof rowsOf>>[number];
+type StateRow = Awaited<ReturnType<typeof rowsQuery>>[number];
 
 /**
  * The state's rows of workflow `workflowId`, by key, each with how what
  * the run that set it read stands as `reader` reads the company
  * (`copiesEvidence`): one check of every run that set a key, however many
- * keys each set.
+ * keys each set. The rows and the evidence of the runs that set them are
+ * read in one batch, one snapshot of the database: read after, a reset or
+ * an overwrite and a release of a writer past its details landing between
+ * would leave its value with no evidence to refuse it (GRA-1996).
  */
 const checkedRowsOf = async (
   env: Env,
   workflowId: string,
   reader: string
 ): Promise<(StateRow & { evidence: EvidenceState })[]> => {
-  const rows = await rowsOf(env, workflowId);
+  const db = drizzle(env.DB);
+  const writers = sql`(SELECT ${workflowState.runId} FROM ${workflowState}
+    WHERE ${workflowState.workflowResourceId} = ${workflowId})`;
+  const [rows, pins, versions, memories] = await db.batch([
+    rowsQuery(db, workflowId),
+    db
+      .select()
+      .from(runChatSources)
+      .where(sql`${runChatSources.runId} IN ${writers}`),
+    versionEvidenceQuery(db, (runId) => sql`${runId} IN ${writers}`),
+    memoryEvidenceQuery(db, (runId) => sql`${runId} IN ${writers}`),
+  ]);
   const evidence = await copiesEvidence(
     env,
     [...new Set(rows.map(({ runId }) => runId))].map((runId) => ({
       runId,
       workflowId,
     })),
-    reader
+    reader,
+    { pins, versions, memories }
   );
   return rows.map((row) => ({
     ...row,
@@ -250,16 +271,10 @@ export const writeWorkflowState = async (
         )
         .onConflictDoUpdate({
           target: [workflowState.workflowResourceId, workflowState.key],
-          // The same value written again keeps the run that wrote it, and
-          // when: a step that carries a key forward unchanged copies
-          // nothing it read, and must not lift its writer's check
-          // (GRA-1996). Decided by the row as this statement finds it.
           set: {
             value: sql`excluded.value`,
-            runId: sql`CASE WHEN ${workflowState.value} = excluded.value
-              THEN ${workflowState.runId} ELSE excluded.run_id END`,
-            updatedAt: sql`CASE WHEN ${workflowState.value} = excluded.value
-              THEN ${workflowState.updatedAt} ELSE excluded.updated_at END`,
+            runId: sql`excluded.run_id`,
+            updatedAt: sql`excluded.updated_at`,
           },
         }),
       // The cap, over what this write left with every other's: NULL past
