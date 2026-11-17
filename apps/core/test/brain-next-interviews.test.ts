@@ -412,9 +412,11 @@ describe("interviews in the new Brain", { timeout: 120_000 }, () => {
       budget: { tokens: 2000 },
       personal: true,
     });
-    expect(stillFound.map(({ text }) => text)).toStrictEqual([
-      expect.stringContaining(marker),
-    ]);
+    // Only what holds the word, as `recalled` reads: the company's teams,
+    // readable by everyone, may come back with it (GRA-1748).
+    expect(
+      stillFound.map(({ text }) => text).filter((text) => text.includes(marker))
+    ).toStrictEqual([expect.stringContaining(marker)]);
     // She withdraws: her interview is gone from the Brain as the
     // withdrawal answers.
     await onLink({ action: "withdraw", ...(await openLink(ids.lea)) });

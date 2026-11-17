@@ -219,9 +219,15 @@ const kickoffAs = <T extends { id: string }>(teams: T[]): T[] =>
     team.id.startsWith("onb-kt-") ? { ...team, id: "kickoff" } : team
   );
 
-/** The names of the teams the kickoff named. */
-const kickoffTeams = (teams: { id: string; name: string }[]) =>
-  teams.flatMap(({ id, name }) => (id.startsWith("onb-kt-") ? [name] : []));
+/**
+ * The names of the teams the kickoff named: found in it first, alone or
+ * joined to the confirmed roster's team of their name, which every member
+ * reads too (GRA-1748).
+ */
+const kickoffTeams = (teams: { sourceId: string; name: string }[]) =>
+  teams.flatMap(({ sourceId, name }) =>
+    sourceId === "src-kickoff" ? [name] : []
+  );
 
 describe("the brain's workspace", { timeout: 120_000 }, () => {
   it("is a valid empty workspace while the deployment holds nothing for it", async () => {
@@ -262,7 +268,7 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
     // The sponsor answers what the kickoff already said something about:
     // the brain keeps both.
     await bringInKickoff({ pain: "Clients wait weeks for their numbers." });
-    await admin.api.onboarding.saveRoster(roster);
+    await admin.api.onboarding.confirmRoster(roster);
     await mailConnection();
 
     const workspace = await admin.api.brain.read();
@@ -365,11 +371,14 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
       others: true,
     });
 
-    // Someone who isn't an admin gets the connections and the kickoff's
-    // vision and teams, which are the company's, never the rest of the
-    // onboarding: no roster, no business, no head count.
-    const kickoffSource = workspace.sources.filter(
-      ({ id }) => id === "src-kickoff"
+    // Someone who isn't an admin gets the connections, the kickoff's
+    // vision and teams with the sizes the sponsor gave them, and the
+    // confirmed roster's teams taking part with their head counts (GRA-1748,
+    // the owner on 17 November): never anyone on the roster, its roles or
+    // leads, a team switched off (Operations), the business, or the
+    // company's head count (`company.people`).
+    const companySources = workspace.sources.filter(
+      ({ id }) => id === "src-kickoff" || id === "src-roster"
     );
     expect({
       company: asMember.company,
@@ -382,15 +391,18 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
       vision: { ...workspace.vision, inviteTeamIds: [] },
       teams: [
         {
-          id: "kickoff",
+          id: "team-finance",
           name: "Finance",
           sourceId: "src-kickoff",
-          counts: [{ sourceId: "src-kickoff", date: today(), people: 8 }],
+          counts: [
+            { sourceId: "src-kickoff", date: today(), people: 8 },
+            { sourceId: "src-roster", date: today(), people: 3 },
+          ],
           stakeholders: [],
         },
         kickoffAs(workspace.teams).find(({ name }) => name === "Legal"),
       ],
-      sources: kickoffSource,
+      sources: companySources,
       mail: workspace.connections.filter(({ name }) => name === "mail"),
     });
   });
@@ -966,7 +978,7 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
   it("shows no team of the kickoff once the admin deletes it, the roster's teams alone", async () => {
     const admin = await signedInApi(idp, "admin");
     const member = await signedInApi(idp, "user");
-    await admin.api.onboarding.saveRoster(roster);
+    await admin.api.onboarding.confirmRoster(roster);
     await bringInKickoff();
     const before = await member.api.brain.read();
 
@@ -981,7 +993,11 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
         sourceId,
         sources: [...new Set(counts.map((count) => count.sourceId))],
       })),
-      member: asMember.teams,
+      member: asMember.teams.map(({ name, sourceId, counts }) => ({
+        name,
+        sourceId,
+        sources: [...new Set(counts.map((count) => count.sourceId))],
+      })),
       vision: asMember.vision.sourceId,
     }).toStrictEqual({
       before: ["Finance", "Legal"],
@@ -993,7 +1009,10 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
           sources: ["src-roster"],
         },
       ],
-      member: [],
+      // The confirmed roster's team taking part, not the one switched off.
+      member: [
+        { name: "Finance", sourceId: "src-roster", sources: ["src-roster"] },
+      ],
       vision: "",
     });
   });

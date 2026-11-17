@@ -68,6 +68,7 @@ const view = (
   agreed: true,
   paused,
   kickoff,
+  teamsInBrain: null,
   sponsor,
   context,
   waiting: 0,
