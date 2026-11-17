@@ -7,7 +7,11 @@ import { z } from "zod";
 
 import { withheldResult } from "../src/agent.ts";
 import { organizationId } from "../src/auth/auth.ts";
-import { brainWorkOverview, workBrain } from "../src/brain-next.ts";
+import {
+  brainWorkOverview,
+  recallPassagesAs,
+  workBrain,
+} from "../src/brain-next.ts";
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import {
   brainUploads,
@@ -27,24 +31,25 @@ import { signedInApi, unique } from "./sign-in.ts";
 
 // Who knows about a topic, for a chat's code (GRA-1744; the design note
 // and threat model are on the issue): `env.brain.whoKnows` names the
-// people who uploaded the documents about it that the chat's person may
-// read, each with the one version that says so best. How it can fail,
-// and what each test holds it to:
+// people whose uploads a recall for it finds for the chat's person, each
+// with the one passage of theirs it found first, exactly as recall hands
+// it over, for the chat's model to judge by. How it can fail, and what
+// each test holds it to:
 // 1. A person is named on the strength of a document the asker may not
 //    read: a team's they aren't in, one its uploader alone reads, or one
 //    removed (its removal still owed by the Brain, too). None names
-//    anyone.
+//    anyone, and each passage handed over is one of recall's own items
+//    for the asker, so a hidden better match changes nothing.
 // 2. What only one person may read becomes evidence: the asker's own
 //    upload for themselves alone names nobody, them included.
 // 3. An erased or removed person is named, or one named for a team's
 //    document they may no longer read themselves: never.
-// 4. Monitoring: one citation a person, never how much they uploaded,
+// 4. Monitoring: one passage a person, never how much they uploaded,
 //    and people in the order of their names, never ranked.
-// 4b. A person is named for a document that matched only the question's
-//    commonest words, which recall says are no answer by themselves.
-// 4c. Someone whose document recall found by meaning (one in another
-//    language) goes unnamed, also when it shares a common word with the
-//    question: they are named, and a hidden better match changes nothing.
+// 4b. A person passes for knowing what their document doesn't say: never
+//    without the passage that matched, labelled as recall found it
+//    (common words alone included), for the model to judge; and within
+//    the budget, as recall packs it.
 // 5. It reads wider than its recall: in Grasp and in a chat app's direct
 //    message, their teams and the company; in a turn nobody started, the
 //    company alone.
@@ -122,10 +127,13 @@ const uploaded = async (
   return source.id;
 };
 
+/** The budget the tests' questions ask within, unless one says otherwise. */
+const defaultTokens = 4000;
+
 /** Code that returns what `env.brain.whoKnows` answers for `question`, or why it failed. */
-const askingCode = (question: string) =>
+const askingCode = (question: string, tokens = defaultTokens) =>
   codeStep(
-    `export default async (self, env) => { try { return await env.brain.whoKnows({ question: ${JSON.stringify(question)}, budget: { tokens: 4000 } }); } catch (error) { return { failed: error.code ?? error.message }; } };`
+    `export default async (self, env) => { try { return await env.brain.whoKnows({ question: ${JSON.stringify(question)}, budget: { tokens: ${tokens} } }); } catch (error) { return { failed: error.code ?? error.message }; } };`
   );
 
 const answerSchema = z.union([
@@ -134,12 +142,17 @@ const answerSchema = z.union([
       z.strictObject({
         id: z.string(),
         name: z.string(),
-        source: z.strictObject({
-          producer: z.literal("upload"),
-          id: z.string(),
+        passage: z.strictObject({
+          source: z.strictObject({
+            producer: z.literal("upload"),
+            id: z.string(),
+          }),
+          version: z.number(),
+          position: z.number(),
+          text: z.string(),
+          whole: z.boolean(),
+          found: z.enum(["exact", "words", "stop words", "meaning"]),
         }),
-        version: z.number(),
-        found: z.enum(["exact", "words", "meaning"]),
       })
     ),
     notFound: z.array(z.string()),
@@ -179,7 +192,7 @@ const of = (
   people: Readonly<Record<string, Person>>
 ) => {
   const cited = new Map(
-    peopleIn(answer).map(({ id, source }) => [id, source.id])
+    peopleIn(answer).map(({ id, passage }) => [id, passage.source.id])
   );
   return Object.fromEntries(
     Object.entries(people).map(([key, { userId }]) => [
@@ -209,17 +222,49 @@ const ownChatOf = async (
 const askedInOwnChat = async (
   admin: Person,
   person: Person,
-  question: string
+  question: string,
+  tokens = defaultTokens
 ): Promise<WhoKnowsAnswer | undefined> => {
   const chat = await ownChatOf(
     admin,
     person,
-    askingCode(question),
+    askingCode(question, tokens),
     says("Asked.")
   );
   await chat.ask(word());
   const [answer] = await answersIn(chat.stub, chat.chat.id);
   return answer;
+};
+
+/**
+ * What recall itself packs for `person` for `question`, as their own
+ * chat's code reads (their teams and the company, never their own store),
+ * and whether each person `answer` names comes with exactly one of its
+ * items, and its `truncated`.
+ */
+const recallsAs = async (
+  person: Person,
+  question: string,
+  answer: WhoKnowsAnswer | undefined,
+  tokens = defaultTokens
+) => {
+  const pack = await recallPassagesAs(env, person.userId, {
+    question,
+    budget: { tokens },
+    personal: false,
+  });
+  return {
+    pack,
+    eachRecalls: peopleIn(answer).every(({ passage }) =>
+      pack.items.some(
+        (item) => JSON.stringify(item) === JSON.stringify(passage)
+      )
+    ),
+    truncated:
+      answer !== undefined &&
+      "truncated" in answer &&
+      answer.truncated === pack.truncated,
+  };
 };
 
 /** What `person` asks in their direct message with a new agent of theirs on Teams. */
@@ -421,7 +466,7 @@ describe("a chat's code asking who knows about a topic", setUpTime, () => {
     ).toStrictEqual(String(mate.person.name));
   });
 
-  it("names nobody for a document that matched only the question's common words, which are no answer by themselves", async () => {
+  it("hands each person over with the passage that matched, labelled as recall found it, common words alone included, embedded or not", async () => {
     const admin = await signedInApi(idp, "admin");
     const [asker, expert, bystander] = await Promise.all([
       signedInApi(idp, "user"),
@@ -438,36 +483,86 @@ describe("a chat's code asking who knows about a topic", setUpTime, () => {
     );
     const bystandersUpload = await uploaded(
       bystander,
-      `The minutes of the meeting, and the plan for the office`,
+      "The minutes of the meeting, and the plan for the office",
       { kind: "everyone" }
     );
-    const telling = await askedInOwnChat(
-      admin,
-      asker,
-      `the ${topic} of the north`
-    );
-    // A question of common words alone is all telling, as recall reads
-    // such a question (a quoted line of a play, say): a passage holding
-    // them answers it, found by its words.
-    const common = await askedInOwnChat(
-      admin,
-      asker,
-      "the minutes of the meeting"
-    );
-    const bystanderIn = peopleIn(common).find(
-      ({ id }) => id === bystander.userId
-    );
+    const question = `the ${topic} of the north`;
+    /** What the answer hands over of each, and whether it is recall's own. */
+    const handed = async () => {
+      const answer = await askedInOwnChat(admin, asker, question);
+      const passageOf = ({ userId }: Person) =>
+        peopleIn(answer).find(({ id }) => id === userId)?.passage;
+      const ofExpert = passageOf(expert);
+      const ofBystander = passageOf(bystander);
+      const { eachRecalls } = await recallsAs(asker, question, answer);
+      return {
+        expert: { source: ofExpert?.source.id, found: ofExpert?.found },
+        // Never named without the passage that says why, for the model.
+        bystander: {
+          source: ofBystander?.source.id,
+          text: ofBystander?.text.includes("minutes of the meeting"),
+          found: ofBystander?.found,
+        },
+        eachRecalls,
+      };
+    };
+    const unembedded = await handed();
+    await embedEverything();
+    await askedInOwnChat(admin, asker, "Warm-up.");
+    const embedded = await handed();
+    const expected = {
+      expert: { source: expertsUpload, found: "words" },
+      // Found by its common words first, so labelled so, as recall's
+      // contract says of a passage several ways found: once embedded too.
+      bystander: { source: bystandersUpload, text: true, found: "stop words" },
+      eachRecalls: true,
+    };
 
-    expect({
-      telling: of(telling, { expert, bystander }),
-      common: { source: bystanderIn?.source.id, found: bystanderIn?.found },
-    }).toStrictEqual({
-      telling: { expert: expertsUpload, bystander: null },
-      common: { source: bystandersUpload, found: "words" },
+    expect({ unembedded, embedded }).toStrictEqual({
+      unembedded: expected,
+      embedded: expected,
     });
   });
 
-  it("names who uploaded a document found by its meaning alone, in another language, and nothing hidden changes the answer", async () => {
+  it("hands over only what recall packs within the budget: someone whose passage didn't fit isn't named", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const [asker, first, second] = await Promise.all([
+      signedInApi(idp, "user"),
+      signedInApi(idp, "user"),
+      signedInApi(idp, "user"),
+    ]);
+    const topic = word();
+    const long = (title: string) =>
+      `${title} on ${topic}: ${Array.from({ length: 60 }, (_, at) => `point ${at} of the plan`).join(", ")}.`;
+    await uploaded(first, long("Notes"), { kind: "everyone" });
+    await uploaded(second, long("Minutes"), { kind: "everyone" });
+    // Room for about one passage of either.
+    const tokens = 120;
+    const answer = await askedInOwnChat(admin, asker, topic, tokens);
+    const { pack, eachRecalls, truncated } = await recallsAs(
+      asker,
+      topic,
+      answer,
+      tokens
+    );
+    const named = peopleIn(answer).filter(
+      ({ id }) => id === first.userId || id === second.userId
+    ).length;
+
+    expect({
+      eachRecalls,
+      truncated,
+      cut: pack.truncated,
+      named: named < 2,
+    }).toStrictEqual({
+      eachRecalls: true,
+      truncated: true,
+      cut: true,
+      named: true,
+    });
+  });
+
+  it("names who uploaded a document found by its meaning alone, in another language, with its passage, and nothing hidden changes the answer", async () => {
     const admin = await signedInApi(idp, "admin");
     const [asker, colleague, stranger] = await Promise.all([
       signedInApi(idp, "user"),
@@ -494,8 +589,8 @@ describe("a chat's code asking who knows about a topic", setUpTime, () => {
     );
     await embedEverything();
     const after = await askedInOwnChat(admin, asker, question);
-    // The same question sharing one common word with it ("is"): its
-    // meaning found it as well, so it answers all the same.
+    // The same question sharing one common word with it ("is"): found by
+    // that word and by its meaning, handed over all the same.
     const sharing = await askedInOwnChat(
       admin,
       asker,
@@ -503,19 +598,76 @@ describe("a chat's code asking who knows about a topic", setUpTime, () => {
     );
     /** How `answer` cites the colleague, if it names them. */
     const citedIn = (answer: WhoKnowsAnswer | undefined) => {
-      const cited = peopleIn(answer).find(({ id }) => id === colleague.userId);
-      return { source: cited?.source.id, found: cited?.found };
+      const cited = peopleIn(answer).find(
+        ({ id }) => id === colleague.userId
+      )?.passage;
+      return {
+        source: cited?.source.id,
+        text: cited?.text.includes("The supplier sends the invoice"),
+        found: cited?.found,
+      };
     };
+    const recalled = await recallsAs(asker, question, before);
 
     expect({
       cited: citedIn(before),
       sharing: citedIn(sharing),
       after,
+      recalled: recalled.eachRecalls,
     }).toStrictEqual({
-      cited: { source: upload, found: "meaning" },
-      sharing: { source: upload, found: "meaning" },
+      cited: { source: upload, text: true, found: "meaning" },
+      // Its common word found it first: labelled so, as recall's pack says.
+      sharing: { source: upload, text: true, found: "stop words" },
       after: before,
+      recalled: true,
     });
+  });
+
+  it("answers alike whatever the asker may not read matches better, by words, common words or meaning", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const [asker, colleague, other, stranger] = await Promise.all([
+      signedInApi(idp, "user"),
+      signedInApi(idp, "user"),
+      signedInApi(idp, "user"),
+      signedInApi(idp, "user"),
+    ]);
+    const otherTeam = await teamOf(stranger);
+    const topic = word();
+    await uploaded(
+      colleague,
+      `The supplier ${topic} is paid thirty days after the invoice.`,
+      { kind: "everyone" }
+    );
+    await uploaded(
+      other,
+      "The minutes of the meeting, and the plan for the office",
+      { kind: "everyone" }
+    );
+    const question = `When is the supplier ${topic} paid?`;
+    await embedEverything();
+    await askedInOwnChat(admin, asker, "Warm-up.");
+    const before = await askedInOwnChat(admin, asker, question);
+    const hidden: BrainUploadReaders = { kind: "team", teamId: otherTeam };
+    // By its words, by its common words alone, and by its meaning.
+    await uploaded(
+      stranger,
+      `When is the supplier ${topic} paid? The supplier ${topic} is paid when the supplier ${topic} invoice is paid.`,
+      hidden
+    );
+    await uploaded(
+      stranger,
+      "When is it the time of the year when the is of the was",
+      hidden
+    );
+    await uploaded(
+      stranger,
+      "Vendors receive payment one month after billing.",
+      hidden
+    );
+    await embedEverything();
+    const after = await askedInOwnChat(admin, asker, question);
+
+    expect(after).toStrictEqual(before);
   });
 
   it("lists people in the order of their names, never by how well their documents answer", async () => {

@@ -378,7 +378,7 @@ describe(
         codeTeams: [readersTeam, secretTeam],
       };
       // Who knows (`recall whoKnowsFor`) is left out: it names the
-      // uploaders of `answeringPassagesAs`'s passages (held here) through
+      // uploaders of `recallPassagesAs`'s passages (held here) through
       // core's records of uploads, and this world's sources, added to the
       // store straight, have none, so it would name nobody either way.
       const among = surfaces.filter(
@@ -667,7 +667,6 @@ describe(
 
       // What a member's recall answers through, each by meaning.
       const everyMember = [
-        "core answeringPassagesAs",
         "core mergeRecalled",
         "core recallAs",
         "core recallOwnedAs",

@@ -26,7 +26,6 @@ import {
   codeEntitiesAs,
   codeRecallOf,
   isCodeEntitiesRequest,
-  answeringPassagesAs,
   recallPassagesAs,
   skillVersionRefOf,
 } from "./brain-next.ts";
@@ -246,9 +245,10 @@ export const recallFor = async (
 };
 
 // Who knows about a topic (GRA-1744; the design note and threat model are
-// on the issue): the people who uploaded the documents about it that the
-// asker may read, each with the one that answers best, pinned with it.
-// For a chat's code alone
+// on the issue): the people who uploaded the documents that a recall for
+// it finds for the asker, each with the one passage of theirs that recall
+// found first, its text as recall packs it, pinned with it. For a chat's
+// code alone
 // (agent-brain.ts `whoKnows`), never an App's or a workflow's, whose data
 // can reach people the asker isn't. How it can fail, and how it fails
 // closed:
@@ -266,14 +266,17 @@ export const recallFor = async (
 // - An erased or removed person is named, or one named for a team's
 //   document they may no longer read themselves: only an uploader who is
 //   an active member now, in that team still.
-// - A person is named for what doesn't answer the question: never for a
-//   passage found by its commonest words and nothing else (`stop words`),
-//   which recall says is no answer by itself; one its meaning found too
-//   answers (`answeringPassagesAs`).
+// - A person is taken to know about what their document doesn't answer.
+//   Nothing here judges relevance: each person comes with the passage
+//   that matched, as recall found it for this reader (`found` as recall
+//   says it, common words alone included), and the caller (the chat's
+//   model, which reads the text) judges, as with every other recall. No
+//   threshold of our own, and no passage the reader may not read: each is
+//   one of recall's own items for them.
 // - Monitoring of individuals: people one at a time, in the order of
-//   their names, never ranked, scored or counted (one citation each,
-//   never how many of their documents answer), and never two related to
-//   each other. No passage's text is handed over.
+//   their names, never ranked, scored or counted (one passage each, never
+//   how many of their documents answer), and never two related to each
+//   other.
 // - What the answer rests on reaches the chat's history unpinned: every
 //   version cited, and every person named, is kept with the run (`keep`)
 //   before the code gets it, so a later turn withholds it once the reach
@@ -288,21 +291,26 @@ export interface UploadVersion {
   version: number;
 }
 
+/** A passage of an upload, as a recall's pack hands it over (`BrainPack`). */
+export type UploadPassage = BrainPack["items"][number] & UploadVersion;
+
 /**
- * A person who knows about the topic: who they are, the one version they
- * uploaded that the asker may read and that answers best, and how its
- * passage was found, as a pack's item says (`BrainPack`).
+ * A person a recall for the topic found an upload of: who they are, and
+ * the one passage of theirs recall found first for the asker, exactly as
+ * its pack holds it (its text, and how it was `found`): what the caller
+ * judges by whether they know about it.
  */
-export interface PersonWhoKnows extends UploadVersion {
+export interface PersonWhoKnows {
   id: string;
   name: string;
-  found: Exclude<BrainPack["items"][number]["found"], "stop words">;
+  passage: UploadPassage;
 }
 
 /**
  * Who knows about a topic, as code reads it: the people, by name; the
  * parts of the question nothing the asker may read holds; and whether the
- * budget left a passage out.
+ * budget left a passage out, as recall's pack says: someone whose only
+ * passage didn't fit is not named.
  */
 export interface WhoKnows {
   people: PersonWhoKnows[];
@@ -328,8 +336,9 @@ const byName = (one: PersonWhoKnows, other: PersonWhoKnows): number =>
   one.name.localeCompare(other.name) || one.id.localeCompare(other.id);
 
 /**
- * Who uploaded the documents that answer `input`'s question, of those
- * `caller`'s person may read at its reach (`WhoKnows`). Refused as
+ * Who uploaded the documents a recall for `input`'s question finds for
+ * `caller`'s person at its reach, each with that passage (`WhoKnows`), for
+ * the caller to judge by. Refused as
  * `permission.invalid_args` when `input` isn't a request, as
  * `permission.denied` without the grant, and as `permission.unavailable`
  * once the person is no longer a member. Audited, answered or refused,
@@ -371,47 +380,39 @@ export const whoKnowsFor = async (
     // their own store (`personal: false`): a second layer, as the shared
     // store keeps nothing only one person may read.
     const reachesTeams = caller.reach === "teams";
-    const passages = await answeringPassagesAs(
-      env,
-      caller.authority.onBehalfOf,
-      {
-        question: asked.question,
-        budget: asked.budget,
-        personal: false,
-        company: !reachesTeams,
-      }
-    );
-    // Only what answers the question names anyone (`answeringPassagesAs`):
-    // never a passage found by the question's commonest words and nothing
-    // else, which recall says is no answer by itself, and whose text code
-    // never sees here to judge.
-    const uploads = passages.items.flatMap(({ source, version, found }) =>
-      source.producer === "upload" && found !== "stop words"
-        ? [{ id: source.id, version, found }]
-        : []
+    // Recall's own pack, within the budget the caller gave: the passages
+    // handed over are its items, so the answer never holds more text.
+    const passages = await recallPassagesAs(env, caller.authority.onBehalfOf, {
+      question: asked.question,
+      budget: asked.budget,
+      personal: false,
+      company: !reachesTeams,
+    });
+    const uploads = passages.items.flatMap(
+      ({ source, ...item }): UploadPassage[] =>
+        source.producer === "upload"
+          ? [{ ...item, source: { producer: "upload", id: source.id } }]
+          : []
     );
     // A team's upload as the person reads it now, in the same statement
     // as its uploader (`uploadersOf`); none as the company alone.
     const found = await uploadersOf(
       env,
-      [...new Set(uploads.map(({ id }) => id))],
+      [...new Set(uploads.map(({ source }) => source.id))],
       { person: reachesTeams ? caller.authority.onBehalfOf : null }
     );
     const uploaders = new Map(
       found.map((uploader) => [uploader.uploadId, uploader])
     );
-    // Each person once, with their first upload in the pack's order: the
-    // one that answers best.
+    // Each person once, with their first passage in the pack's order.
     const people = new Map<string, PersonWhoKnows>();
-    for (const { id, version, found: how } of uploads) {
-      const uploader = uploaders.get(id);
+    for (const passage of uploads) {
+      const uploader = uploaders.get(passage.source.id);
       if (uploader !== undefined && !people.has(uploader.userId)) {
         people.set(uploader.userId, {
           id: uploader.userId,
           name: uploader.name,
-          source: { producer: "upload", id },
-          version,
-          found: how,
+          passage,
         });
       }
     }
@@ -421,7 +422,7 @@ export const whoKnowsFor = async (
       truncated: passages.truncated,
     };
     await caller.keep({
-      versions: answer.people.map(({ source, version }) => ({
+      versions: answer.people.map(({ passage: { source, version } }) => ({
         source,
         version,
       })),

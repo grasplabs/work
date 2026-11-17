@@ -2422,9 +2422,6 @@ export const coreProbes = {
     return { ...pack, fromOwn };
   }),
   recallPassagesAs: recallProbe(coreBrain.recallPassagesAs),
-  // `recallPassagesAs`'s, less what only the question's commonest words
-  // found (brain-recall.ts `whoKnowsFor`): held as recall is.
-  answeringPassagesAs: recallProbe(coreBrain.answeringPassagesAs),
   // Adds without a check of who writes (instruction-files.ts checks
   // first): only to files no reader is, and its refusals.
   addInstructionFile: async ({ markers }) => {
@@ -5257,21 +5254,38 @@ const codeRecallProbe =
 export const chatCodeRecallProbe = codeRecallProbe("agent");
 
 /**
- * Who knows's answer as a pack (`items`, each its person, with how its
- * passage was found), so the harness reads what meaning found as it reads
- * a recall's (`apartFromMeaning`): only the people named on the strength
- * of words, an exact part or nothing at all are held to the twins'.
+ * Who knows's answer as a pack (`items`, each its person with their
+ * passage, how it was found among it), so the harness reads what meaning
+ * found as it reads a recall's (`apartFromMeaning`): only the people named
+ * for a passage found by words, an exact part or common words are held to
+ * the twins'.
  */
 const inPackShape = (answered: unknown): unknown => {
   if (
     typeof answered !== "object" ||
     answered === null ||
-    !("people" in answered)
+    !("people" in answered) ||
+    !Array.isArray(answered.people)
   ) {
     return answered;
   }
   const { people, ...rest } = answered;
-  return { ...rest, items: people };
+  return {
+    ...rest,
+    items: people.map((person: unknown) => {
+      if (
+        typeof person !== "object" ||
+        person === null ||
+        !("passage" in person)
+      ) {
+        return person;
+      }
+      const { passage, ...named } = person;
+      return typeof passage === "object" && passage !== null
+        ? { ...named, ...passage }
+        : person;
+    }),
+  };
 };
 
 /** One probe per export of core's brain-recall.ts. */
@@ -5658,7 +5672,7 @@ export const recallProbes = {
   // Who knows (GRA-1744), as a chat's code asks anywhere but its person's
   // own chat: under an agent's grant, acting for the reader, as the
   // company, as code's recall is probed (its teams' reach is recall's,
-  // probed through `answeringPassagesAs`, and the uploads it names are held
+  // probed through `recallPassagesAs`, and the uploads it names are held
   // in agent-brain-who-knows.test.ts). Asked of the markers and of their
   // twins, whose answers must match: an upload the reader may not read
   // names nobody. Then every way it refuses, the markers in what is
