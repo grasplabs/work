@@ -33,6 +33,7 @@ import {
   contestedAs,
   entitiesAs,
   memoriesAs,
+  ownEntityIdAs,
   sharedAs,
   shareTeamsAs,
 } from "./brain-next.ts";
@@ -245,6 +246,13 @@ export class BrainMemoriesRpc
   async confirm(memory: BrainMemoryPlace): Promise<BrainMemoryOutcome> {
     return await this.#asCaller(
       async (caller) => await confirmFor(this.#env, caller, memory)
+    );
+  }
+
+  async ownEntity(): Promise<string | null> {
+    return await withPerson(
+      this.#check,
+      async (person) => await ownEntityIdAs(this.#env, person.userId)
     );
   }
 

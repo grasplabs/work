@@ -12,7 +12,7 @@ import type { Identity } from "@grasp-os/shared/rpc";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { companyAgent } from "./agents.ts";
+import { agentInstructionFile, changeableAgent, readAgent } from "./agents.ts";
 import { editableApp } from "./apps.ts";
 import { keepEvent, uuidFromHash } from "./audit-outbox.ts";
 import { memberOf } from "./auth/identity.ts";
@@ -40,6 +40,9 @@ import type { InstructionFile, InstructionFileVersion } from "./brain-next.ts";
 //   in a turn whose answer reaches them alone (`personal`), their own;
 // - an agent in a shared channel: the company's and the agent's, never a
 //   person's, which others there would read through the agent;
+// - an agent of the person's own (agents.ts) is told what they wrote for
+//   it, which only they read: its file is theirs as their own file is,
+//   kept in their own store and given only where their own file is.
 // - an AI step of a workflow: none, so a run does the same whoever's
 //   files changed.
 //
@@ -52,9 +55,10 @@ import type { InstructionFile, InstructionFileVersion } from "./brain-next.ts";
 // Shared files first, so the part many chats share comes first and stays
 // the same.
 //
-// Who writes: a person their own file; an admin the company's and each
-// agent's (as today's Memory collection); one of an App's builders its
-// App's (as its code). Never code (an agent, App or workflow), whoever it
+// Who writes: a person their own file; an admin the company's; whoever
+// may change an agent its agent's (`changeableAgent`: the company's own
+// admins one of the company's, its owner a person's own); one of an
+// App's builders its App's (as its code). Never code (an agent, App or workflow), whoever it
 // acts for: a file an agent could write is an instruction a document it
 // read could plant.
 
@@ -128,16 +132,23 @@ const filesOf = async (
   env: Env,
   member: Member,
   context: z.output<typeof instructionContextSchema>,
-  { agent, person }: { agent: InstructionFile; person: InstructionFile }
+  {
+    agent,
+    person,
+  }: { agent: InstructionFile | undefined; person: InstructionFile }
 ): Promise<InstructionFileVersion[]> => {
+  // What only they read (their file, their own agent's) only where the
+  // answer reaches them alone (above).
+  const alone = context.conversation === "own" && context.personal;
+  const agentFiles =
+    agent === undefined || ("ownerId" in agent && !alone) ? [] : [agent];
   if (context.conversation === "channel") {
     return await readInstructionFilesAs(env, member.userId, [
       ...companyFiles,
-      agent,
+      ...agentFiles,
     ]);
   }
-  // Theirs only where the answer reaches them alone (above).
-  const own = context.personal ? [person] : [];
+  const own = alone ? [person] : [];
   const { appId } = context;
   // An App's file is for those who may change it, while it isn't
   // archived. A chat about an App they no longer build, or one put away,
@@ -146,14 +157,14 @@ const filesOf = async (
   if (appId === undefined || !(await buildsApp(env, member, appId))) {
     return await readInstructionFilesAs(env, member.userId, [
       ...companyFiles,
-      agent,
+      ...agentFiles,
       ...own,
     ]);
   }
   return await readInstructionFilesAs(
     env,
     member.userId,
-    [...companyFiles, agent, { scope: "app", appId }, ...own],
+    [...companyFiles, ...agentFiles, { scope: "app", appId }, ...own],
     appId
   );
 };
@@ -192,11 +203,23 @@ export const instructionFilesFor = async (
     instructionContextSchema,
     input
   );
-  const member = await memberNamed(env, authority.onBehalfOf);
-  const agent: InstructionFile = {
-    scope: "agent",
-    agentId: authority.subject.agentId,
-  };
+  const { agentId } = authority.subject;
+  const [member, acting] = await Promise.all([
+    memberNamed(env, authority.onBehalfOf),
+    readAgent(env, agentId),
+  ]);
+  // An agent of someone's own is told what its owner wrote, only when it
+  // acts for them; one of the company's, or an ID nobody made, what the
+  // company's admins wrote under its ID. The owner check is a second
+  // layer: the Brain's own isolation already holds, as the file is in
+  // its owner's store and read there only for them
+  // (`readInstructionFilesAs`); no turn reaches this check today, since
+  // an own agent runs in its owner's own chat alone.
+  const ownerId = acting?.ownerId ?? null;
+  const agent =
+    ownerId === null || ownerId === member.userId
+      ? agentInstructionFile({ id: agentId, ownerId })
+      : undefined;
   const person: InstructionFile = { scope: "person", personId: member.userId };
   const read = await filesOf(env, member, context, { agent, person });
   // An emptied file is a version of its own, which nothing loads.
@@ -240,36 +263,40 @@ const signedInMember = async (
   return await memberNamed(env, person.userId);
 };
 
-/** Refuses `member` writing `file`, unless the rule above lets them. */
-const requireWriter = async (
+/**
+ * `file`, placed, once `member` may write it by the rule above: refused
+ * otherwise. An agent's is placed with its owner when it is a person's
+ * own, so the Brain keeps it in their store.
+ */
+const writable = async (
   env: Env,
   member: Member,
   file: InstructionFile
-): Promise<void> => {
+): Promise<InstructionFile> => {
   switch (file.scope) {
     case "person": {
       if (file.personId !== member.userId) {
         throw roleErrors.create("role.forbidden");
       }
-      return;
+      return file;
     }
     case "company": {
       requireAdmin(member);
-      return;
+      return file;
     }
     case "agent": {
-      requireAdmin(member);
-      // Only an agent the company has has a file: none is kept under an
-      // ID nobody made, one an admin deleted, or a person's own agent's
-      // (agents.ts), which is its owner's to instruct; each answers alike,
-      // so an admin who learnt an own agent's ID from the audit log learns
-      // nothing more and tells it nothing.
-      await companyAgent(env, file.agentId);
-      return;
+      // Only an agent someone may change has a file they may write: none
+      // is kept under an ID nobody made or one deleted, and another
+      // person's own agent answers an admin as such an ID does
+      // (`agent.unknown`), so one who learnt its ID from the audit log
+      // learns nothing more and tells it nothing.
+      return agentInstructionFile(
+        await changeableAgent(env, member, file.agentId)
+      );
     }
     case "app": {
       await editableApp(env, member, file.appId);
-      return;
+      return file;
     }
     default: {
       throw roleErrors.create("role.forbidden");
@@ -344,9 +371,9 @@ export const saveInstructionFile = async (
     savedSchema,
     saved
   );
-  const file = instructionFileOf(named.file);
+  const asked = instructionFileOf(named.file);
   const member = await signedInMember(env, by, "write");
-  await requireWriter(env, member, file);
+  const file = await writable(env, member, asked);
   const { addedAt, ...added } = await addInstructionFile(env, {
     file,
     change,
@@ -396,11 +423,11 @@ export const instructionFileToEdit = async (
   by: Identity | Authority,
   input: unknown
 ): Promise<{ version: number; text: string } | null> => {
-  const file = instructionFileOf(input);
+  const named = instructionFileOf(input);
   const member = await signedInMember(env, by, "read");
-  await requireWriter(env, member, file);
-  // An App's file is read as one of its builders, which `requireWriter`
-  // has just checked.
+  const file = await writable(env, member, named);
+  // An App's file is read as one of its builders, which `writable` has
+  // just checked.
   const [found] = await readInstructionFilesAs(
     env,
     member.userId,

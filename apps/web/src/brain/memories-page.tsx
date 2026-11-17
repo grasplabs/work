@@ -51,7 +51,7 @@ import {
 import { Textarea } from "@grasp-os/ui/components/textarea";
 import { toast } from "@grasp-os/ui/components/toast";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { useId, useRef, useState } from "react";
+import { createContext, use, useId, useRef, useState } from "react";
 
 import { useHeldCoreRead } from "../apps/use-core-read.ts";
 import { ErrorText } from "../error-text.tsx";
@@ -77,6 +77,13 @@ interface Team {
   id: string;
   name: string;
 }
+
+/**
+ * The id of the entity that is the person themselves, in their own store
+ * (`brainMemories.ownEntity`), for the names the page shows: null while
+ * unknown.
+ */
+const OwnEntity = createContext<string | null>(null);
 
 /** A memory's key, for React and for `usePaged`. */
 const memoryKeyOf = ({ store, id }: BrainMemoryShown): string =>
@@ -353,6 +360,7 @@ const MemoryOrigin = ({ memory }: { memory: BrainMemoryShown }) => {
     capture: <Trans>Fetched from a connection, version {version}</Trans>,
     interview: <Trans>From your interview, version {version}</Trans>,
     claim: <Trans>From what your team said, version {version}</Trans>,
+    kickoff: <Trans>From the company&apos;s vision, version {version}</Trans>,
   }[source.source.producer];
   return label;
 };
@@ -852,6 +860,51 @@ const MemoryMarks = ({ memory }: { memory: BrainMemoryShown }) => {
   );
 };
 
+/**
+ * What the person can do about sharing `memory`: share one of their own
+ * that may be shared (`onShare`, where what it is about is named), or take
+ * back one they shared.
+ */
+const ShareActions = ({
+  memory,
+  read,
+  onShare,
+  onTakenBack,
+}: {
+  memory: BrainMemoryShown;
+  read: number;
+  onShare?: (memory: BrainMemoryShown, opener: HTMLElement) => void;
+  onTakenBack: () => void;
+}) => {
+  const { t } = useLingui();
+  const { statement } = memory;
+  return (
+    <>
+      {onShare !== undefined && isShareable(memory) ? (
+        <Button
+          aria-label={t`Share with others: ${statement}`}
+          onClick={(event) => {
+            onShare(memory, event.currentTarget);
+          }}
+          size="sm"
+          type="button"
+          variant="outline"
+        >
+          <Trans>Share…</Trans>
+        </Button>
+      ) : null}
+      {memory.store === "shared" && memory.yours ? (
+        <TakeBackButton
+          id={memory.id}
+          onTakenBack={onTakenBack}
+          read={read}
+          statement={statement}
+        />
+      ) : null}
+    </>
+  );
+};
+
 /** One memory: what it says, where it came from, its marks, and what the person can do. */
 const MemoryLine = ({
   memory,
@@ -874,10 +927,18 @@ const MemoryLine = ({
   const attributeLabel = useAttributeLabel();
   const { attribute, object, value, endedAt, confirmed } = memory;
   const label = attribute === null ? null : attributeLabel(attribute);
-  // What it holds: its value, or the entity a relation names.
+  const own = use(OwnEntity);
+  // What it holds: its value, or the entity a relation names (the person
+  // themselves, for their own entity in their own store).
   let held: string | null = value;
   if (object !== null) {
-    held = object.name ?? t`something without a name`;
+    held =
+      memory.store === "own" && object.id === own
+        ? t({
+            context: "the person themselves, as the Brain names them",
+            message: "You",
+          })
+        : (object.name ?? t`something without a name`);
   }
   const current = endedAt === null;
   // Offered on a side that disagrees with another until the person said
@@ -942,30 +1003,15 @@ const MemoryLine = ({
                 <Trans>It&apos;s wrong</Trans>
               </Button>
             ) : null}
-            {onShare !== undefined && isShareable(memory) ? (
-              <Button
-                aria-label={t`Share with others: ${statement}`}
-                onClick={(event) => {
-                  onShare(memory, event.currentTarget);
-                }}
-                size="sm"
-                type="button"
-                variant="outline"
-              >
-                <Trans>Share…</Trans>
-              </Button>
-            ) : null}
-            {memory.store === "shared" && memory.yours ? (
-              <TakeBackButton
-                id={memory.id}
-                onTakenBack={() => {
-                  said.current?.focus();
-                  onChanged();
-                }}
-                read={read}
-                statement={statement}
-              />
-            ) : null}
+            <ShareActions
+              memory={memory}
+              onShare={onShare}
+              onTakenBack={() => {
+                said.current?.focus();
+                onChanged();
+              }}
+              read={read}
+            />
           </span>
         ) : null}
       </ItemContent>
@@ -974,10 +1020,19 @@ const MemoryLine = ({
 };
 
 /**
- * An entity's name, or a word for one without: one a correction of theirs
- * stands for that they may no longer read, or one with no name.
+ * An entity's name, or a word for one without: the person themselves,
+ * one a correction of theirs stands for that they may no longer read, or
+ * one with no name.
  */
 const EntityName = ({ entity }: { entity: BrainEntityListed }) => {
+  const own = use(OwnEntity);
+  if (entity.entity.store === "own" && entity.entity.id === own) {
+    return (
+      <Trans context="the person themselves, as the Brain names them">
+        You
+      </Trans>
+    );
+  }
   if (entity.unreadable) {
     return (
       <span className="text-muted-foreground">
@@ -1508,146 +1563,156 @@ export const MemoriesPage = ({ teams }: { teams: Team[] }) => {
   const contested = useContested(changes);
   const entities = useEntities(kind, changes);
   const shared = useShared(changes);
+  // Which entity is the person themselves: theirs to ask alone. Read again
+  // with each change, as their first memory about themselves makes it.
+  const { loaded: ownRead } = useHeldCoreRead(
+    `own-entity#${changes}`,
+    async (session) => await session.brainMemories.ownEntity(),
+    "own-entity"
+  );
+  const own = ownRead?.state === "ready" ? ownRead.data : null;
   const contestedHeading = useId();
   const sharedHeading = useId();
   const entitiesHeading = useId();
   const kindId = useId();
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto">
-      <div className="pb-chat mx-auto flex w-full max-w-5xl flex-col gap-8 px-6 pt-8 md:px-12">
-        <PageHeader>
-          <PageHeaderTitle>
-            <Trans context="the Brain's memories page">Memories</Trans>
-          </PageHeaderTitle>
-          <PageHeaderDescription>
+    <OwnEntity value={own}>
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="pb-chat mx-auto flex w-full max-w-5xl flex-col gap-8 px-6 pt-8 md:px-12">
+          <PageHeader>
+            <PageHeaderTitle>
+              <Trans context="the Brain's memories page">Memories</Trans>
+            </PageHeaderTitle>
+            <PageHeaderDescription>
+              <Trans>
+                What the Brain remembers that you may read, where each memory
+                came from, and where sources disagree.
+              </Trans>
+            </PageHeaderDescription>
+          </PageHeader>
+          <p className="text-muted-foreground text-sm">
             <Trans>
-              What the Brain remembers that you may read, where each memory came
-              from, and where sources disagree.
+              Those marked Only you are yours alone: nobody else sees them,
+              admins included.
             </Trans>
-          </PageHeaderDescription>
-        </PageHeader>
-        <p className="text-muted-foreground text-sm">
-          <Trans>
-            Those marked Only you are yours alone: nobody else sees them, admins
-            included.
-          </Trans>
-        </p>
-        <section
-          aria-labelledby={contestedHeading}
-          className="flex flex-col gap-3"
-        >
-          <h2 className="text-sm font-medium" id={contestedHeading}>
-            <Trans>Where sources disagree</Trans>
-          </h2>
-          <ContestedList
-            contested={contested}
-            onChanged={changed}
-            onCorrect={correct}
-            onOpen={(entity) => {
-              setKind(entity.kind);
-              setOpened(entity.entity);
-            }}
-            read={changes}
-          />
-        </section>
-        <section
-          aria-labelledby={entitiesHeading}
-          className="flex flex-col gap-3"
-        >
-          <h2 className="text-sm font-medium" id={entitiesHeading}>
-            <Trans>What the Brain remembers</Trans>
-          </h2>
-          <div className="flex flex-col gap-1.5">
-            <FieldLabel htmlFor={kindId}>
-              <Trans>Kind</Trans>
-            </FieldLabel>
-            <NativeSelect
-              id={kindId}
-              onChange={(event) => {
-                const picked = brainEntityKinds.find(
-                  (each) => each === event.target.value
-                );
-                if (picked !== undefined) {
-                  setKind(picked);
-                  setOpened(undefined);
-                }
-              }}
-              value={kind}
-            >
-              {brainEntityKinds.map((each) => (
-                <NativeSelectOption key={each} value={each}>
-                  {kindLabel(each)}
-                </NativeSelectOption>
-              ))}
-            </NativeSelect>
-          </div>
-          <div className="grid min-h-0 gap-6 lg:grid-cols-2">
-            <EntityList
-              entities={entities}
-              onPick={(entity) => {
+          </p>
+          <section
+            aria-labelledby={contestedHeading}
+            className="flex flex-col gap-3"
+          >
+            <h2 className="text-sm font-medium" id={contestedHeading}>
+              <Trans>Where sources disagree</Trans>
+            </h2>
+            <ContestedList
+              contested={contested}
+              onChanged={changed}
+              onCorrect={correct}
+              onOpen={(entity) => {
+                setKind(entity.kind);
                 setOpened(entity.entity);
               }}
-              picked={opened}
+              read={changes}
             />
-            {opened === undefined ? null : (
-              <EntityPanel
-                changes={changes}
-                entity={opened}
-                key={keyOf(opened)}
-                onChanged={changed}
-                onCorrect={correct}
-                onShare={(memory, about, opener) => {
-                  setSharing({
-                    memory,
-                    about,
-                    opening: crypto.randomUUID(),
-                    returnTo: opener,
-                  });
+          </section>
+          <section
+            aria-labelledby={entitiesHeading}
+            className="flex flex-col gap-3"
+          >
+            <h2 className="text-sm font-medium" id={entitiesHeading}>
+              <Trans>What the Brain remembers</Trans>
+            </h2>
+            <div className="flex flex-col gap-1.5">
+              <FieldLabel htmlFor={kindId}>
+                <Trans>Kind</Trans>
+              </FieldLabel>
+              <NativeSelect
+                id={kindId}
+                onChange={(event) => {
+                  const picked = brainEntityKinds.find(
+                    (each) => each === event.target.value
+                  );
+                  if (picked !== undefined) {
+                    setKind(picked);
+                    setOpened(undefined);
+                  }
                 }}
+                value={kind}
+              >
+                {brainEntityKinds.map((each) => (
+                  <NativeSelectOption key={each} value={each}>
+                    {kindLabel(each)}
+                  </NativeSelectOption>
+                ))}
+              </NativeSelect>
+            </div>
+            <div className="grid min-h-0 gap-6 lg:grid-cols-2">
+              <EntityList
+                entities={entities}
+                onPick={(entity) => {
+                  setOpened(entity.entity);
+                }}
+                picked={opened}
               />
-            )}
-          </div>
-        </section>
-        <section
-          aria-labelledby={sharedHeading}
-          className="flex flex-col gap-3"
-        >
-          <h2 className="text-sm font-medium" id={sharedHeading}>
-            <Trans>What you shared</Trans>
-          </h2>
-          <SharedList
-            onChanged={changed}
-            read={changes}
-            shared={shared}
-            teams={teams}
+              {opened === undefined ? null : (
+                <EntityPanel
+                  changes={changes}
+                  entity={opened}
+                  key={keyOf(opened)}
+                  onChanged={changed}
+                  onCorrect={correct}
+                  onShare={(memory, about, opener) => {
+                    setSharing({
+                      memory,
+                      about,
+                      opening: crypto.randomUUID(),
+                      returnTo: opener,
+                    });
+                  }}
+                />
+              )}
+            </div>
+          </section>
+          <section
+            aria-labelledby={sharedHeading}
+            className="flex flex-col gap-3"
+          >
+            <h2 className="text-sm font-medium" id={sharedHeading}>
+              <Trans>What you shared</Trans>
+            </h2>
+            <SharedList
+              onChanged={changed}
+              read={changes}
+              shared={shared}
+              teams={teams}
+            />
+          </section>
+        </div>
+        {correcting === undefined ? null : (
+          <CorrectDialog
+            key={correcting.opening}
+            memory={correcting.memory}
+            onClose={() => {
+              setCorrecting(undefined);
+            }}
+            onCorrected={changed}
+            opening={correcting.opening}
+            returnTo={correcting.returnTo}
           />
-        </section>
+        )}
+        {sharing === undefined ? null : (
+          <ShareDialog
+            about={sharing.about}
+            key={sharing.opening}
+            memory={sharing.memory}
+            onClose={() => {
+              setSharing(undefined);
+            }}
+            onShared={changed}
+            opening={sharing.opening}
+            returnTo={sharing.returnTo}
+          />
+        )}
       </div>
-      {correcting === undefined ? null : (
-        <CorrectDialog
-          key={correcting.opening}
-          memory={correcting.memory}
-          onClose={() => {
-            setCorrecting(undefined);
-          }}
-          onCorrected={changed}
-          opening={correcting.opening}
-          returnTo={correcting.returnTo}
-        />
-      )}
-      {sharing === undefined ? null : (
-        <ShareDialog
-          about={sharing.about}
-          key={sharing.opening}
-          memory={sharing.memory}
-          onClose={() => {
-            setSharing(undefined);
-          }}
-          onShared={changed}
-          opening={sharing.opening}
-          returnTo={sharing.returnTo}
-        />
-      )}
-    </div>
+    </OwnEntity>
   );
 };

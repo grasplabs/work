@@ -16,8 +16,10 @@ import { useCoreAction } from "../use-core-action.ts";
 // `offerOwnAgent`, `adoptAgent`): its owner offers it from its page, and
 // the company's admins take it on or decline it from the Agents page.
 // Taken on, it is one of the company's, reaching nobody and doing nothing
-// until an admin says so, and its owner no longer changes it. Until its
-// owner offers it, nobody but them reads what it is told.
+// until an admin says so, and its owner no longer changes it. What it is
+// told is its instruction file, which stays in its owner's own store,
+// read by them alone: neither the offer nor taking it on carries it
+// (core's instruction-files.ts).
 
 /** What a page change asks of core, then the page read again. */
 type Change = (action: (session: Session) => Promise<unknown>) => Promise<void>;
@@ -66,7 +68,7 @@ export const ShareAgent = ({
       }
       description={
         offered
-          ? t`Offered on ${since}. Your company's admins can now read what ${name} is told, and may take it on.`
+          ? t`Offered on ${since}. Your company's admins may take ${name} on. What you told it doesn't go with it, and once they take it on, you can no longer open it.`
           : t`Offer ${name} to your company's admins. If they take it on, it becomes one of the company's agents: they choose who may ask it and what it may do, and you no longer change it.`
       }
       title={t`Share with the company`}
@@ -141,16 +143,6 @@ export const OfferedAgents = ({
                 key={agent.id}
                 name={name}
               >
-                <details className="text-sm sm:max-w-80">
-                  <summary className="cursor-pointer">
-                    <Trans>What it is told</Trans>
-                  </summary>
-                  <p className="text-muted-foreground mt-2 whitespace-pre-wrap">
-                    {agent.instructions === ""
-                      ? t`Nothing beyond Grasp's own rules.`
-                      : agent.instructions}
-                  </p>
-                </details>
                 {editable ? (
                   <span className="flex gap-2">
                     <Button

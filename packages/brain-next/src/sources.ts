@@ -3,6 +3,7 @@ import { and, eq, max } from "drizzle-orm";
 import type { DrizzleSqliteDODatabase } from "drizzle-orm/durable-sqlite";
 
 import type { BrainBucket } from "./bucket.ts";
+import { placeChunks } from "./chunk-blocks.ts";
 import { chunksOf } from "./chunks.ts";
 import {
   changeTaken,
@@ -337,23 +338,32 @@ const record = (
   // one (a late vector put, a citation) ever meets new text under it: only
   // an erasure deletes a version, and it closes the source's key.
   const version = (last?.version ?? 0) + 1;
+  const readerSet = readerSetOf(db, added.access);
   const { row } = db
     .insert(sourceVersions)
     .values({
       source: added.source,
       version,
       file: hash,
-      readerSet: readerSetOf(db, added.access),
+      readerSet,
       addedAt: new Date(),
     })
     .returning({ row: sourceVersions.row })
     .get();
   // Each word as written is stemmed once per add, however many chunks hold it.
   const memo: WordMemo = new Map();
+  // In its set of readers' own block (chunk-blocks.ts).
+  const first = placeChunks(storage.sql, readerSet, adding.chunks.length);
   for (const [position, chunk] of adding.chunks.entries()) {
     const written = db
       .insert(chunks)
-      .values({ versionRow: row, position, text: chunk.text, hash: chunk.hash })
+      .values({
+        row: first + position,
+        versionRow: row,
+        position,
+        text: chunk.text,
+        hash: chunk.hash,
+      })
       .returning({ row: chunks.row })
       .get();
     indexWords(storage.sql, written.row, chunk.text, memo);

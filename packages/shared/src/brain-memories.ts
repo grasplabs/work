@@ -339,6 +339,12 @@ export interface BrainMemoriesApi {
   /** Says a memory is wrong, with what is right: saved as their own word, for them alone, and confirmed. */
   correct: (correction: BrainCorrection) => Promise<BrainCorrected>;
   /**
+   * The id of the entity that is the person themselves, in their own
+   * store (what they said about themselves is filed under it); null until
+   * they said anything about themselves. Theirs alone to ask.
+   */
+  ownEntity: () => Promise<string | null>;
+  /**
    * Shares a fact or decision of their own store with a team they are in
    * or the company, as a new memory in their own word: theirs stays as it
    * is, for them alone.
