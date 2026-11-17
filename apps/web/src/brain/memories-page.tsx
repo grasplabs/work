@@ -6,12 +6,16 @@ import type {
   BrainMemoryAttribute,
   BrainMemoryPageNext,
   BrainMemoryShown,
+  BrainShareAudience,
+  BrainShareAudiences,
+  BrainSharedListed,
   BrainStoreCursor,
 } from "@grasp-os/shared/brain-memories";
 import {
   brainCorrectionMaxLength,
   brainEntityKinds,
 } from "@grasp-os/shared/brain-memories";
+import { shownVisibly } from "@grasp-os/shared/chat";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
 import { Card, CardContent } from "@grasp-os/ui/components/card";
@@ -54,6 +58,7 @@ import { useHeldCoreRead } from "../apps/use-core-read.ts";
 import { ErrorText } from "../error-text.tsx";
 import { formatDateTime } from "../format.ts";
 import { NotLoaded } from "../load-from-core.tsx";
+import type { Loaded } from "../load-from-core.tsx";
 import { useAsk, usePaged } from "./memories-asks.ts";
 
 // The Brain's memories, from the new Brain (GRA-1746): the facts sources
@@ -62,7 +67,18 @@ import { useAsk, usePaged } from "./memories-asks.ts";
 // remembers about one, history included, each memory with where it came
 // from, and a way to say it is wrong. Core answers each from what they
 // may read alone; what is theirs alone is marked so, as on the Sources
-// page. Texts are shown as text, never markup.
+// page. Texts are shown as text, never markup. A fact or decision of
+// their own about something named that isn't a person they can share
+// with a team of theirs or everyone (GRA-1815): a copy, read as someone's
+// own word, exactly as the dialog shows it, which they can take back from
+// the list of what they shared, also once they can no longer read it;
+// theirs stays theirs alone.
+
+/** A team the person is in, whom they may share with. */
+interface Team {
+  id: string;
+  name: string;
+}
 
 /**
  * The id of the entity that is the person themselves, in their own store
@@ -493,6 +509,350 @@ const CorrectDialog = ({
   );
 };
 
+/**
+ * Whether `memory` is one the person may share: a current fact or decision
+ * of their own store that names no second entity, never how Grasp acts
+ * for them (core's `publishAs` takes no other).
+ */
+const isShareable = ({
+  store,
+  endedAt,
+  object,
+  type,
+  attribute,
+}: BrainMemoryShown): boolean =>
+  store === "own" &&
+  endedAt === null &&
+  object === null &&
+  (type === "fact" || type === "decision") &&
+  attribute !== "instruction" &&
+  attribute !== "preference";
+
+/** The audience a choice of the dialog's names: `everyone`, or a team's id. */
+const audienceOf = (choice: string): BrainShareAudience =>
+  choice === "everyone" ? "company" : { team: choice };
+
+/**
+ * The attribute and value a share copies, as the dialog shows them: the
+ * attribute's label with the value, the label alone, or the value alone
+ * (a memory may hold one without an attribute). Nothing for neither.
+ */
+const SharedValue = ({
+  label,
+  held,
+}: {
+  label: string | null;
+  held: string | null;
+}) => {
+  if (label === null) {
+    return held === null ? null : (
+      <span className="break-words whitespace-pre-wrap">
+        <Trans>Value: {held}</Trans>
+      </span>
+    );
+  }
+  return (
+    <span className="break-words whitespace-pre-wrap">
+      {held === null ? (
+        label
+      ) : (
+        <Trans>
+          {label}: {held}
+        </Trans>
+      )}
+    </span>
+  );
+};
+
+/**
+ * Whom a share is for: the teams and everyone core lets the person share
+ * with (`loaded`), `choice` picked; a hint when there is no one yet, and
+ * why when that couldn't be read, offering no one then.
+ */
+const AudienceField = ({
+  loaded,
+  choice,
+  busy,
+  onPick,
+}: {
+  loaded: Loaded<BrainShareAudiences> | undefined;
+  choice: string | undefined;
+  busy: boolean;
+  onPick: (picked: string) => void;
+}) => {
+  const { t } = useLingui();
+  const fieldId = useId();
+  const audiences = loaded?.state === "ready" ? loaded.data : undefined;
+  return (
+    <>
+      <Field>
+        <FieldLabel htmlFor={fieldId}>
+          <Trans context="a memory shared with others">Who may read it</Trans>
+        </FieldLabel>
+        <NativeSelect
+          disabled={busy}
+          id={fieldId}
+          onChange={(event) => {
+            onPick(event.target.value);
+          }}
+          value={choice ?? ""}
+        >
+          {(audiences?.teams ?? []).map(({ id, name }) => (
+            <NativeSelectOption key={id} value={id}>
+              {t`Team ${name}`}
+            </NativeSelectOption>
+          ))}
+          {audiences?.company === true ? (
+            <NativeSelectOption value="everyone">
+              {t`Everyone`}
+            </NativeSelectOption>
+          ) : null}
+        </NativeSelect>
+        {audiences !== undefined && choice === undefined ? (
+          <FieldDescription>
+            <Trans>
+              You can share with a team of yours, or with everyone, once it has
+              three people or more.
+            </Trans>
+          </FieldDescription>
+        ) : null}
+      </Field>
+      {loaded === undefined || loaded.state === "ready" ? null : (
+        <NotLoaded page={loaded} />
+      )}
+    </>
+  );
+};
+
+/**
+ * Shares `memory`, what `about` names, with a team of the person's or
+ * everyone: core keeps a copy in their own word, exactly as shown here,
+ * for those readers. One opening of it (`opening`) is one share, so a
+ * retry shares it once; another audience after a try is another share.
+ * While it shares, it can't be closed.
+ */
+const ShareDialog = ({
+  memory,
+  about,
+  opening,
+  returnTo,
+  onClose,
+  onShared,
+}: {
+  memory: BrainMemoryShown;
+  /** The name the page showed for what it is about. */
+  about: string;
+  opening: string;
+  returnTo: HTMLElement;
+  onClose: () => void;
+  onShared: () => void;
+}) => {
+  const { t } = useLingui();
+  const attributeLabel = useAttributeLabel();
+  // Whom core lets them share with: everyone and their teams, each of
+  // three people or more (with fewer, the others would know who shared
+  // it). Nothing is shared until that is read; a read that failed offers
+  // no one, never "Everyone" alone.
+  const { loaded } = useHeldCoreRead(
+    `share-audiences#${opening}`,
+    async (session) => await session.brainMemories.shareAudiences()
+  );
+  const audiences = loaded?.state === "ready" ? loaded.data : undefined;
+  const [chosen, setChosen] = useState<string>();
+  const offered = [
+    ...(audiences?.teams ?? []).map(({ id }) => id),
+    ...(audiences?.company === true ? ["everyone"] : []),
+  ];
+  const choice =
+    chosen !== undefined && offered.includes(chosen) ? chosen : offered[0];
+  const [change, setChange] = useState(opening);
+  // The audience of a share that failed: another is a new share, with a
+  // new id, while the same retries the same one.
+  const [tried, setTried] = useState<string>();
+  const { busy, failure, ask } = useAsk(`share#${change}`);
+  const changedText = t`This memory has changed or is no longer yours to share. Look at it again first.`;
+  const sharedText = t`Shared. It shows under the same name for those you shared it with.`;
+  const { attribute, value, statement, validFrom, validUntil } = memory;
+  const label = attribute === null ? null : attributeLabel(attribute);
+  // What is shared, as shown: whole, never cut short, every character
+  // nobody sees as an escape (`shownVisibly`), so a statement a model
+  // was steered to hide something in shows what it holds. What is sent
+  // is the text as stored, which core checks is exactly this.
+  const aboutShown = shownVisibly(about);
+  const held = value === null ? null : shownVisibly(value);
+  const said = shownVisibly(statement);
+  const from = validFrom === null ? null : formatDateTime(validFrom);
+  const until = validUntil === null ? null : formatDateTime(validUntil);
+  const share = async (to: string): Promise<void> => {
+    setTried(to);
+    await ask(
+      async (memories) =>
+        await memories.publish({
+          memory: { entity: memory.about, memory: memory.id },
+          shown: {
+            about,
+            attribute: memory.attribute,
+            type: memory.type,
+            value,
+            statement,
+            validFrom,
+            validUntil,
+          },
+          audience: audienceOf(to),
+          change,
+        }),
+      (shared) => {
+        setTried(undefined);
+        onClose();
+        if (shared === null) {
+          sayChanged(changedText);
+        } else {
+          toast.add({ type: "success", title: sharedText });
+        }
+        onShared();
+      }
+    );
+  };
+  return (
+    <Dialog
+      disablePointerDismissal={busy}
+      onOpenChange={(open) => {
+        if (!open && !busy) {
+          onClose();
+        }
+      }}
+      open
+    >
+      <DialogContent
+        closeLabel={t`Close`}
+        finalFocus={() => (returnTo.isConnected ? returnTo : null)}
+        showCloseButton={!busy}
+      >
+        <form
+          className="flex flex-col gap-5"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (!busy && choice !== undefined) {
+              void share(choice);
+            }
+          }}
+        >
+          <DialogHeader>
+            <DialogTitle>
+              <Trans>Share this memory?</Trans>
+            </DialogTitle>
+            <DialogDescription>
+              <Trans>
+                They will read exactly what is below, as someone&apos;s own
+                word, without your name. Your own memory stays yours alone, and
+                you can take the copy back.
+              </Trans>
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col gap-1 text-sm">
+            <span className="font-medium">
+              <Trans>About {aboutShown}</Trans>
+            </span>
+            {/* Every text a share copies shows, whatever else it has: the
+                value with its attribute or on its own, and the statement
+                unless it is the value shown right above. */}
+            <SharedValue held={held} label={label} />
+            {held !== null && statement === value ? null : (
+              <span className="break-words whitespace-pre-wrap">{said}</span>
+            )}
+            {from === null ? null : (
+              <span>
+                <Trans>True from {from}</Trans>
+              </span>
+            )}
+            {until === null ? null : (
+              <span>
+                <Trans>True until {until}</Trans>
+              </span>
+            )}
+          </div>
+          <AudienceField
+            busy={busy}
+            choice={choice}
+            loaded={loaded}
+            onPick={(picked) => {
+              if (tried !== undefined && picked !== tried) {
+                setChange(crypto.randomUUID());
+                setTried(undefined);
+              }
+              setChosen(picked);
+            }}
+          />
+          <ErrorText>{failure}</ErrorText>
+          <DialogFooter>
+            <DialogClose
+              disabled={busy}
+              render={<Button type="button" variant="outline" />}
+            >
+              <Trans>Cancel</Trans>
+            </DialogClose>
+            <Button disabled={busy || choice === undefined} type="submit">
+              <Trans>Share</Trans>
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+};
+
+/**
+ * Takes back `memory`, one the person shared: it stops being current for
+ * everyone, and stays as history for those it was shared with.
+ */
+const TakeBackButton = ({
+  id,
+  statement,
+  read,
+  onTakenBack,
+}: {
+  /** The shared memory's id. */
+  id: string;
+  /** What it says, or null when the person may no longer read it. */
+  statement: string | null;
+  /** The read of the page it is on: a failure shows until the next. */
+  read: number;
+  onTakenBack: () => void;
+}) => {
+  const { t } = useLingui();
+  const { busy, failure, ask } = useAsk(`unpublish#${id}`, `${read}`);
+  const changedText = t`This memory has changed or is no longer yours to read. Look at it again first.`;
+  return (
+    <>
+      <Button
+        aria-label={
+          statement === null
+            ? t`Take back what you shared`
+            : t`Take back what you shared: ${statement}`
+        }
+        disabled={busy}
+        onClick={() => {
+          void ask(
+            async (memories) => await memories.unpublish(id),
+            (outcome) => {
+              if (outcome === "nothing") {
+                sayChanged(changedText);
+              }
+              onTakenBack();
+            }
+          );
+        }}
+        size="sm"
+        type="button"
+        variant="outline"
+      >
+        <Trans>Take back</Trans>
+      </Button>
+      <ErrorText>{failure}</ErrorText>
+    </>
+  );
+};
+
 /** Confirms `memory` over the sides that say otherwise. */
 const ConfirmButton = ({
   memory,
@@ -585,12 +945,58 @@ const MemoryMarks = ({ memory }: { memory: BrainMemoryShown }) => {
   );
 };
 
+/**
+ * What the person can do about sharing `memory`: share one of their own
+ * that may be shared (`onShare`, where what it is about is named), or take
+ * back one they shared.
+ */
+const ShareActions = ({
+  memory,
+  read,
+  onShare,
+  onTakenBack,
+}: {
+  memory: BrainMemoryShown;
+  read: number;
+  onShare?: (memory: BrainMemoryShown, opener: HTMLElement) => void;
+  onTakenBack: () => void;
+}) => {
+  const { t } = useLingui();
+  const { statement } = memory;
+  return (
+    <>
+      {onShare !== undefined && isShareable(memory) ? (
+        <Button
+          aria-label={t`Share with others: ${statement}`}
+          onClick={(event) => {
+            onShare(memory, event.currentTarget);
+          }}
+          size="sm"
+          type="button"
+          variant="outline"
+        >
+          <Trans>Share…</Trans>
+        </Button>
+      ) : null}
+      {memory.store === "shared" && memory.yours ? (
+        <TakeBackButton
+          id={memory.id}
+          onTakenBack={onTakenBack}
+          read={read}
+          statement={statement}
+        />
+      ) : null}
+    </>
+  );
+};
+
 /** One memory: what it says, where it came from, its marks, and what the person can do. */
 const MemoryLine = ({
   memory,
   read,
   onChanged,
   onCorrect,
+  onShare,
 }: {
   memory: BrainMemoryShown;
   /** The read of the page it is on. */
@@ -598,6 +1004,8 @@ const MemoryLine = ({
   onChanged: () => void;
   /** Opens the correction of `memory`, which the page holds, from `opener`. */
   onCorrect: (memory: BrainMemoryShown, opener: HTMLElement) => void;
+  /** Opens the share of `memory`, from `opener`: where what it is about is named. */
+  onShare?: (memory: BrainMemoryShown, opener: HTMLElement) => void;
 }) => {
   const { t } = useLingui();
   const { statement } = memory;
@@ -680,6 +1088,15 @@ const MemoryLine = ({
                 <Trans>It&apos;s wrong</Trans>
               </Button>
             ) : null}
+            <ShareActions
+              memory={memory}
+              onShare={onShare}
+              onTakenBack={() => {
+                said.current?.focus();
+                onChanged();
+              }}
+              read={read}
+            />
           </span>
         ) : null}
       </ItemContent>
@@ -933,12 +1350,44 @@ const EntityList = ({
   );
 };
 
+/**
+ * Opens a share of a memory about `entity` (`onShare`), named as the
+ * panel names it: none for an entity it can't name as the person may
+ * read it now, nor one about a person (core's `publishAs` takes neither).
+ */
+const shareFor = (
+  entity: BrainEntityListed | null | undefined,
+  onShare: (
+    memory: BrainMemoryShown,
+    about: string,
+    opener: HTMLElement
+  ) => void
+): ((memory: BrainMemoryShown, opener: HTMLElement) => void) | undefined => {
+  const name = entity?.name ?? null;
+  // Named by a shared entity it stands for (a correction made it): a name
+  // others said, never shared (core's `publishAs`).
+  if (
+    entity === undefined ||
+    entity === null ||
+    name === null ||
+    entity.unreadable ||
+    entity.borrowed ||
+    entity.kind === "person"
+  ) {
+    return undefined;
+  }
+  return (memory, opener) => {
+    onShare(memory, name, opener);
+  };
+};
+
 /** What the Brain remembers about one entity that the person may read, history included. */
 const EntityPanel = ({
   changes,
   entity: ref,
   onChanged,
   onCorrect,
+  onShare,
 }: {
   /** How many changes the person made: each reads the panel again. */
   changes: number;
@@ -946,6 +1395,12 @@ const EntityPanel = ({
   entity: BrainEntityRef;
   onChanged: () => void;
   onCorrect: (memory: BrainMemoryShown, opener: HTMLElement) => void;
+  /** Opens the share of `memory`, about what the panel names `about`. */
+  onShare: (
+    memory: BrainMemoryShown,
+    about: string,
+    opener: HTMLElement
+  ) => void;
 }) => {
   const kindLabel = useKindLabel();
   const opened = keyOf(ref);
@@ -1010,6 +1465,10 @@ const EntityPanel = ({
                   memory={memory}
                   onChanged={onChanged}
                   onCorrect={onCorrect}
+                  // Shared only as named here, by the panel's own read: one
+                  // it can't name as the person may read it now, or one
+                  // about a person, never (core's `publishAs`).
+                  onShare={shareFor(entity, onShare)}
                   read={changes}
                 />
               </li>
@@ -1022,8 +1481,142 @@ const EntityPanel = ({
   );
 };
 
+/** What the person shared and hasn't taken back, as read at `changes`. */
+const useShared = (changes: number) =>
+  usePaged(
+    `shared#${changes}`,
+    "shared",
+    async (memories, next?: BrainStoreCursor) => {
+      const page = await memories.shared(next);
+      return { items: page.memories, next: page.next };
+    },
+    ({ id }: BrainSharedListed) => id
+  );
+
+/** Whom a shared memory is read by, in words: everyone, a team of theirs by name, or a team they've left. */
+const AudienceLine = ({
+  audience,
+  teams,
+}: {
+  audience: BrainSharedListed["audience"];
+  teams: Team[];
+}) => {
+  if (audience === "company") {
+    return <Trans>Shared with everyone.</Trans>;
+  }
+  const team =
+    audience === null
+      ? undefined
+      : teams.find(({ id }) => id === audience.team)?.name;
+  return team === undefined ? (
+    <Trans>Shared with a team you are no longer in.</Trans>
+  ) : (
+    <Trans>Shared with team {team}.</Trans>
+  );
+};
+
+/** One memory the person shared: what it says while they may read it, whom with, when, and Take back. */
+const SharedLine = ({
+  id,
+  audience,
+  sharedAt,
+  memory,
+  teams,
+  read,
+  onChanged,
+}: BrainSharedListed & {
+  teams: Team[];
+  read: number;
+  onChanged: () => void;
+}) => {
+  const when = formatDateTime(sharedAt);
+  return (
+    <Item size="sm">
+      <ItemContent>
+        {memory === null ? (
+          <span className="text-muted-foreground text-sm">
+            <Trans>You can no longer read this memory.</Trans>
+          </span>
+        ) : (
+          <span className="text-sm whitespace-pre-wrap">
+            {memory.statement}
+          </span>
+        )}
+        <span className="text-muted-foreground flex flex-wrap gap-2 text-xs">
+          <span>
+            <AudienceLine audience={audience} teams={teams} />
+          </span>
+          <span>
+            <Trans>Shared {when}</Trans>
+          </span>
+        </span>
+        <span className="flex">
+          <TakeBackButton
+            id={id}
+            onTakenBack={onChanged}
+            read={read}
+            statement={memory?.statement ?? null}
+          />
+        </span>
+      </ItemContent>
+    </Item>
+  );
+};
+
+/**
+ * What the person shared and hasn't taken back, each with whom it is
+ * shared with and Take back: what it says only while they may read it.
+ */
+const SharedList = ({
+  shared,
+  teams,
+  read,
+  onChanged,
+}: {
+  shared: ReturnType<typeof useShared>;
+  teams: Team[];
+  /** The read of the page it is on. */
+  read: number;
+  onChanged: () => void;
+}) => {
+  const { first, items, next } = shared;
+  if (first === undefined) {
+    return null;
+  }
+  if (first.state !== "ready") {
+    return <NotLoaded page={first} />;
+  }
+  if (items.length === 0 && next === null) {
+    return (
+      <p className="text-muted-foreground text-sm">
+        <Trans>You haven&apos;t shared any of your memories.</Trans>
+      </p>
+    );
+  }
+  return (
+    <div className="flex flex-col gap-3">
+      <ItemGroup render={<ul />} spacing="tight">
+        {items.map(({ id, audience, sharedAt, memory }) => (
+          <li key={id}>
+            <SharedLine
+              audience={audience}
+              id={id}
+              memory={memory}
+              onChanged={onChanged}
+              read={read}
+              sharedAt={sharedAt}
+              teams={teams}
+            />
+          </li>
+        ))}
+      </ItemGroup>
+      <ShowMore listing={shared} />
+    </div>
+  );
+};
+
 /** The Brain's memories page: what sources disagree on, and what the Brain remembers, by kind. */
-export const MemoriesPage = () => {
+export const MemoriesPage = ({ teams }: { teams: Team[] }) => {
   const kindLabel = useKindLabel();
   const [kind, setKind] = useState<BrainEntityKind>("customer");
   // The open entity, by its store and id alone: its panel names it from
@@ -1039,6 +1632,14 @@ export const MemoriesPage = () => {
   const correct = (memory: BrainMemoryShown, opener: HTMLElement) => {
     setCorrecting({ memory, opening: crypto.randomUUID(), returnTo: opener });
   };
+  // The share being made, apart from the row that opened it: each opening
+  // is one share (`ShareDialog`).
+  const [sharing, setSharing] = useState<{
+    memory: BrainMemoryShown;
+    about: string;
+    opening: string;
+    returnTo: HTMLElement;
+  }>();
   // Each change the person makes reads everything again, in place, so
   // what they confirmed or corrected shows where it now stands, and an
   // action still running elsewhere on the page keeps its state. Counted
@@ -1049,6 +1650,7 @@ export const MemoriesPage = () => {
   };
   const contested = useContested(changes);
   const entities = useEntities(kind, changes);
+  const shared = useShared(changes);
   // Which entity is the person themselves: theirs to ask alone. Read again
   // with each change, as their first memory about themselves makes it.
   const { loaded: ownRead } = useHeldCoreRead(
@@ -1058,6 +1660,7 @@ export const MemoriesPage = () => {
   );
   const own = ownRead?.state === "ready" ? ownRead.data : null;
   const contestedHeading = useId();
+  const sharedHeading = useId();
   const entitiesHeading = useId();
   const kindId = useId();
   return (
@@ -1145,9 +1748,31 @@ export const MemoriesPage = () => {
                   key={keyOf(opened)}
                   onChanged={changed}
                   onCorrect={correct}
+                  onShare={(memory, about, opener) => {
+                    setSharing({
+                      memory,
+                      about,
+                      opening: crypto.randomUUID(),
+                      returnTo: opener,
+                    });
+                  }}
                 />
               )}
             </div>
+          </section>
+          <section
+            aria-labelledby={sharedHeading}
+            className="flex flex-col gap-3"
+          >
+            <h2 className="text-sm font-medium" id={sharedHeading}>
+              <Trans>What you shared</Trans>
+            </h2>
+            <SharedList
+              onChanged={changed}
+              read={changes}
+              shared={shared}
+              teams={teams}
+            />
           </section>
         </div>
         {correcting === undefined ? null : (
@@ -1160,6 +1785,19 @@ export const MemoriesPage = () => {
             onCorrected={changed}
             opening={correcting.opening}
             returnTo={correcting.returnTo}
+          />
+        )}
+        {sharing === undefined ? null : (
+          <ShareDialog
+            about={sharing.about}
+            key={sharing.opening}
+            memory={sharing.memory}
+            onClose={() => {
+              setSharing(undefined);
+            }}
+            onShared={changed}
+            opening={sharing.opening}
+            returnTo={sharing.returnTo}
           />
         )}
       </div>

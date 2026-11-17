@@ -140,6 +140,12 @@ export interface BrainEntityListed {
   kind: BrainEntityKind;
   name: string | null;
   unreadable: boolean;
+  /**
+   * One of their own named by the shared entity it stands for (a
+   * correction made it): a name others said, so what is about it is never
+   * shared.
+   */
+  borrowed: boolean;
 }
 
 /**
@@ -181,6 +187,9 @@ export interface BrainMemoryShown {
   endedAt: string | null;
   /** A confirmation they may see: when, and whether it was theirs. */
   confirmed: { at: string; byYou: boolean } | null;
+  /** When it starts and stops being true, when it says (ISO 8601); null for no such bound. */
+  validFrom: string | null;
+  validUntil: string | null;
   /** Another source they may read says something else. */
   contested: boolean;
 }
@@ -254,6 +263,79 @@ export interface BrainCorrection {
  */
 export type BrainCorrected = { memory: string; entity: string } | null;
 
+/**
+ * Whom a person shares one of their own memories with: a team they are
+ * in, by its id, or everyone in the company.
+ */
+export type BrainShareAudience = { team: string } | "company";
+
+/**
+ * A memory of the person's own store to share (GRA-1815): which one, the
+ * fields they were shown of it (the name of what it is about, its
+ * attribute and type, the value it holds, its statement, and when it
+ * starts and stops being true, as the page received them), whom with, and the id of this one share, minted
+ * once when they open it, so a retry shares it once. Core shares it only
+ * while the memory still says exactly what was shown.
+ */
+export interface BrainShare {
+  memory: { entity: string; memory: string };
+  shown: {
+    about: string;
+    attribute: BrainMemoryAttribute | null;
+    type: BrainMemoryShown["type"];
+    value: string | null;
+    statement: string;
+    validFrom: string | null;
+    validUntil: string | null;
+  };
+  audience: BrainShareAudience;
+  change: string;
+}
+
+/**
+ * What a share made: a new memory in the shared store, the person's own
+ * word, which the audience reads as someone's own word (no name), and the
+ * entity it is about there; the same again for a retry of it. Null alike
+ * when the memory isn't one of theirs they may share, and when it no
+ * longer says what they were shown.
+ */
+export type BrainShared = { memory: string; entity: string } | null;
+
+/**
+ * A memory the person shared and hasn't taken back: its id, whom it is
+ * shared with (null for readers the page can't name), when (ISO 8601),
+ * and the memory as they read it now, or null when they may no longer
+ * read it (out of the team): then nothing of what it says.
+ */
+export interface BrainSharedListed {
+  id: string;
+  audience: BrainShareAudience | null;
+  sharedAt: string;
+  memory: BrainMemoryShown | null;
+}
+
+/** A team the person may share a memory with: theirs, large enough that nobody can tell who shared it. */
+export interface BrainShareTeam {
+  id: string;
+  name: string;
+}
+
+/**
+ * Whom the person may share a memory with: everyone, when the company has
+ * three people or more, and their teams of three people or more (with
+ * fewer, the others would know who shared it).
+ */
+export interface BrainShareAudiences {
+  company: boolean;
+  teams: BrainShareTeam[];
+}
+
+/** A page of what the person shared, and where the next goes on: null at the last. */
+export interface BrainSharedPage {
+  memories: BrainSharedListed[];
+  next: BrainStoreCursor | null;
+}
+
 /** The person's memories, over `/rpc` as `session.brainMemories`. */
 export interface BrainMemoriesApi {
   /** Undoes a memory saved for them in their own word: it stops being current, and stays as history. */
@@ -280,10 +362,32 @@ export interface BrainMemoriesApi {
    * they said anything about themselves. Theirs alone to ask.
    */
   ownEntity: () => Promise<string | null>;
+  /**
+   * Shares a fact or decision of their own store with a team they are in
+   * or the company, as a new memory in their own word: theirs stays as it
+   * is, for them alone.
+   */
+  publish: (share: BrainShare) => Promise<BrainShared>;
+  /**
+   * Takes back a memory they shared, also once they may no longer read
+   * it: it stops being current for everyone, and stays as history for
+   * those who may read it.
+   */
+  unpublish: (memory: string) => Promise<BrainMemoryOutcome>;
+  /** A page of what they shared and haven't taken back, the oldest first. */
+  shared: (next?: BrainStoreCursor | null) => Promise<BrainSharedPage>;
+  /** Whom they may share a memory with (`BrainShareAudiences`). */
+  shareAudiences: () => Promise<BrainShareAudiences>;
 }
 
 /** What core answers a correction it can't take as it is. */
 export const brainMemoryErrors = defineErrorFamily({
   "brain.correction_reused":
     "This correction was saved before with other words. Start it again.",
+  "brain.audience_not_yours":
+    "You can share only with a team of yours, or with everyone, of three people or more.",
+  "brain.share_reused":
+    "This was shared before with other readers. Start it again.",
+  "brain.share_taken_back":
+    "This share was taken back or replaced since. Start it again to share it.",
 });

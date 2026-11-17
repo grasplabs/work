@@ -1660,6 +1660,10 @@ const leavingNone = [
   "repackVectors",
   "restoreStatus",
   "retireMemory",
+  // A writer's own word, listed and retired in one statement each
+  // (written.ts).
+  "listWritten",
+  "retireWritten",
   "searchVectors",
   "startExport",
   // A person's own store refuses the company's export and every restore.

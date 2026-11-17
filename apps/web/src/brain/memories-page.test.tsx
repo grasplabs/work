@@ -42,18 +42,21 @@ const acme: BrainEntityListed = {
   kind: "customer",
   name: "Acme",
   unreadable: false,
+  borrowed: false,
 };
 const mine: BrainEntityListed = {
   entity: { store: "own", id: "e-mine" },
   kind: "customer",
   name: "Globex",
   unreadable: false,
+  borrowed: false,
 };
 const later: BrainEntityListed = {
   entity: { store: "shared", id: "e-later" },
   kind: "customer",
   name: null,
   unreadable: false,
+  borrowed: false,
 };
 /** The person themselves, in their own store: no name of its own. */
 const me: BrainEntityListed = {
@@ -61,6 +64,7 @@ const me: BrainEntityListed = {
   kind: "person",
   name: null,
   unreadable: false,
+  borrowed: false,
 };
 /** Another person of their own store, with no name either. */
 const someone: BrainEntityListed = {
@@ -68,6 +72,7 @@ const someone: BrainEntityListed = {
   kind: "person",
   name: null,
   unreadable: false,
+  borrowed: false,
 };
 /** One a correction made, whose shared entity they may no longer read. */
 const lost: BrainEntityListed = {
@@ -75,6 +80,7 @@ const lost: BrainEntityListed = {
   kind: "customer",
   name: null,
   unreadable: true,
+  borrowed: true,
 };
 
 /** A memory about Acme, as core shows it. */
@@ -98,6 +104,8 @@ const memory = (
   endedAt: null,
   confirmed: null,
   contested: false,
+  validFrom: null,
+  validUntil: null,
   ...more,
 });
 
@@ -233,6 +241,8 @@ const shown = async (refusal?: string, failedSaves = 0) => {
         }
         return { memory: "m-new", entity: "e-mine" };
       }),
+    // Nothing shared: the page's list of what they shared is empty.
+    shared: async () => await Promise.resolve({ memories: [], next: null }),
   };
   const core = {
     withSession: async <T,>(
@@ -243,7 +253,7 @@ const shown = async (refusal?: string, failedSaves = 0) => {
   const page = createRoute({
     getParentRoute: () => rootRoute,
     path: "/",
-    component: MemoriesPage,
+    component: () => <MemoriesPage teams={[]} />,
   });
   const router = createRouter({
     routeTree: rootRoute.addChildren([page]),
