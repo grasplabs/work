@@ -108,7 +108,7 @@ export interface InboxItem {
   about?: Target;
   /** Who it is for, as a role or a person; none means an admin. */
   forWhom?: { role: string } | { person: string };
-  /** ISO 8601, when it came in. */
+  /** ISO 8601, when it came in; empty when nothing says (a question the Brain noticed and nobody was asked). */
   date: string;
   /** Something waits or stops until this is decided. */
   urgent: boolean;
@@ -430,8 +430,7 @@ const askedItems = (
  */
 const gapItems = (
   gaps: readonly Gap[],
-  asked: ReadonlySet<string>,
-  readAt: string
+  asked: ReadonlySet<string>
 ): InboxItem[] =>
   gaps
     .filter(({ id }) => !asked.has(id))
@@ -450,7 +449,7 @@ const gapItems = (
             : [{ label: t`Asked`, value: formatDate(askedAt) }]),
         ],
         about: { kind: "brain" },
-        date: askedAt ?? readAt,
+        date: askedAt ?? "",
         urgent: false,
         source: { type: "gap", gap },
       };
@@ -742,7 +741,7 @@ export const inboxItems = (
     ...workflowGoLiveItems(workflowGoLives, me),
     ...bindingItems(bindings, readAt),
     ...(notifications === undefined ? [] : askedItems(notifications, me)),
-    ...gapItems(gaps, askedGaps, readAt),
+    ...gapItems(gaps, askedGaps),
     ...(notifications === undefined ? [] : stoppedItems(notifications, me)),
     ...(notifications === undefined
       ? []

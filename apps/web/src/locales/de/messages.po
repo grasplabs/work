@@ -2285,6 +2285,11 @@ msgctxt "filter: nothing narrowed"
 msgid "All"
 msgstr "Alle"
 
+#: src/inbox/inbox-page.tsx
+msgctxt "inbox filter, short"
+msgid "All"
+msgstr "Alle"
+
 #: src/routes/_shell.workflows.index.tsx
 msgctxt "tab listing every workflow"
 msgid "All"
@@ -2776,11 +2781,15 @@ msgstr "Freigabe für neue Tools benannt"
 msgid "Apps"
 msgstr "Apps"
 
+#: src/inbox/inbox-page.tsx
+msgctxt "inbox filter, short"
+msgid "Apps"
+msgstr "Apps"
+
 #: src/connections/connection-list.tsx
 msgid "Apps and agents with a permission"
 msgstr "Apps und Agenten mit einer Berechtigung"
 
-#: src/inbox/inbox-page.tsx
 #: src/inbox/sidebar-inbox.tsx
 msgctxt "inbox filter"
 msgid "Apps and connections"
@@ -3323,6 +3332,11 @@ msgstr "Gebunden an"
 #: src/settings/sections.ts
 msgid "Brain"
 msgstr "Gehirn"
+
+#: src/inbox/inbox-page.tsx
+msgctxt "inbox filter, short"
+msgid "Brain"
+msgstr "Brain"
 
 #: src/inbox/inbox-kind.tsx
 msgctxt "inbox item kind"
@@ -5661,11 +5675,6 @@ msgstr "Alle mit Grasp"
 #: src/people/people-teams-picker.tsx
 msgid "Everyone with the {name} role"
 msgstr "Alle mit der Rolle {name}"
-
-#: src/inbox/inbox-page.tsx
-msgctxt "inbox filter"
-msgid "Everything"
-msgstr "Alles"
 
 #: src/workflows/business-process.tsx
 msgid "Everything around employees, from hiring to leaving."
@@ -10021,7 +10030,6 @@ msgstr "Als ganze Seite öffnen"
 msgid "Open in full"
 msgstr "Vollständig öffnen"
 
-#: src/inbox/inbox-page.tsx
 #: src/inbox/sidebar-inbox.tsx
 msgctxt "inbox filter"
 msgid "Open in the Brain"
@@ -10826,6 +10834,10 @@ msgstr "Abfragen von {app}"
 #: src/activity/pending.tsx
 msgid "Queries, mutations and actions of {app}"
 msgstr "Abfragen, Mutationen und Aktionen von {app}"
+
+#: src/inbox/item-detail.tsx
+msgid "Question"
+msgstr "Frage"
 
 #: src/chat/suggestions.tsx
 msgid "Questions to start with"
@@ -17032,7 +17044,6 @@ msgid "Your AI runs on your own keys"
 msgstr "Ihre KI läuft mit Ihren eigenen Schlüsseln"
 
 #: src/chat/brain-questions.tsx
-#: src/inbox/item-detail.tsx
 #: src/interview/composer.tsx
 msgid "Your answer"
 msgstr "Ihre Antwort"

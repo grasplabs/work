@@ -51,6 +51,9 @@ import { TargetLink } from "./target-link.tsx";
 // brain asked the person is answered here, in their own words, on the
 // Question tool (`brain.answerGap`); core then lists it no more.
 
+/** The inbox's own width at which the list and the item stand side by side, as inbox-page.tsx has it. */
+const WIDE = "@container inbox (width >= 52rem)";
+
 const styles = stylex.create({
   item: {
     display: "flex",
@@ -58,7 +61,11 @@ const styles = stylex.create({
     gap: grasp.space2,
     minWidth: 0,
   },
-  back: { alignSelf: "flex-start" },
+  // Only where the item takes the list's place: beside it, the list is the way back.
+  back: {
+    alignSelf: "flex-start",
+    display: { default: null, [WIDE]: "none" },
+  },
   marks: {
     display: "flex",
     flexWrap: "wrap",
@@ -232,7 +239,7 @@ const ItemFrame = ({
           </span>
         }
         density="compact"
-        description={formatDate(item.date)}
+        description={item.date === "" ? undefined : formatDate(item.date)}
         title={item.title}
       >
         <div {...stylex.props(styles.body)}>
@@ -693,7 +700,7 @@ const AskedItem = ({
           embedded
           failedLabel={t`Your answer wasn't saved. Try again.`}
           kind="text"
-          label={t`Your answer`}
+          label={t`Question`}
           onSubmit={answer}
           question={notification.question}
           submitLabel={t`Answer`}
@@ -759,7 +766,7 @@ const GapItem = ({
           embedded
           failedLabel={t`Your answer wasn't saved. Try again.`}
           kind="text"
-          label={t`Your answer`}
+          label={t`Question`}
           onSubmit={answer}
           question={question}
           submitLabel={t`Answer`}

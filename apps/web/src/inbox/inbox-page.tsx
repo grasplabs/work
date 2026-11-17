@@ -60,7 +60,11 @@ import type { Group, InboxItem } from "./items.ts";
 // holds the latest of the audit trail. Items come from items.ts; each
 // action goes through the same calls as the dashboard's pile.
 
-/** The page's own width, by which the list and the item stand side by side. */
+/**
+ * The page's own width at which the list and the item stand side by side.
+ * Written out here as in item-detail.tsx: StyleX reads a key only from
+ * the file it is in.
+ */
 const WIDE = "@container inbox (width >= 52rem)";
 
 const styles = stylex.create({
@@ -110,12 +114,13 @@ const styles = stylex.create({
   },
 });
 
+/** The groups, short enough that the filter fits beside the list. */
 const groupLabel: Record<Group, MessageDescriptor> = {
-  all: msg({ message: "Everything", context: "inbox filter" }),
+  all: msg({ message: "All", context: "inbox filter, short" }),
   workflows: msg({ message: "Workflows", context: "inbox filter" }),
   asked: msg({ message: "Asked of you", context: "inbox filter" }),
-  brain: msg({ message: "Open in the Brain", context: "inbox filter" }),
-  apps: msg({ message: "Apps and connections", context: "inbox filter" }),
+  brain: msg({ message: "Brain", context: "inbox filter, short" }),
+  apps: msg({ message: "Apps", context: "inbox filter, short" }),
 };
 
 const groupOrder = ["asked", "brain", "workflows", "apps"] as const;
@@ -226,7 +231,9 @@ const ItemList = ({
                 ) : null}
               </ItemTitle>
               <ItemDescription>
-                {`${i18n._(kindLabel[item.kind])} · ${formatDayMonth(item.date)}`}
+                {item.date === ""
+                  ? i18n._(kindLabel[item.kind])
+                  : `${i18n._(kindLabel[item.kind])} · ${formatDayMonth(item.date)}`}
               </ItemDescription>
             </ItemContent>
           </Item>
@@ -349,28 +356,26 @@ const ToDo = ({
             {text}
           </Alert>
         ))}
+        {shownGroups.length < 2 ? null : (
+          <Tabs
+            onValueChange={(value) => {
+              if (isGroup(value)) {
+                setGroup(value);
+              }
+            }}
+            value={current}
+            variant="segmented"
+          >
+            <TabsList aria-label={t`Show`}>
+              {(["all", ...shownGroups] as const).map((each) => (
+                <TabsTrigger key={each} value={each}>
+                  {i18n._(groupLabel[each])}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </Tabs>
+        )}
         <SectionCard
-          actions={
-            shownGroups.length < 2 ? undefined : (
-              <Tabs
-                onValueChange={(value) => {
-                  if (isGroup(value)) {
-                    setGroup(value);
-                  }
-                }}
-                value={current}
-                variant="segmented"
-              >
-                <TabsList aria-label={t`Show`}>
-                  {(["all", ...shownGroups] as const).map((each) => (
-                    <TabsTrigger key={each} value={each}>
-                      {i18n._(groupLabel[each])}
-                    </TabsTrigger>
-                  ))}
-                </TabsList>
-              </Tabs>
-            )
-          }
           density="compact"
           flush
           title={t`${plural(count, { one: "# item", other: "# items" })}`}

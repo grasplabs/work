@@ -2285,6 +2285,11 @@ msgctxt "filter: nothing narrowed"
 msgid "All"
 msgstr "Alle"
 
+#: src/inbox/inbox-page.tsx
+msgctxt "inbox filter, short"
+msgid "All"
+msgstr "Alles"
+
 #: src/routes/_shell.workflows.index.tsx
 msgctxt "tab listing every workflow"
 msgid "All"
@@ -2776,11 +2781,15 @@ msgstr "Goedkeurder voor nieuwe tools benoemd"
 msgid "Apps"
 msgstr "Apps"
 
+#: src/inbox/inbox-page.tsx
+msgctxt "inbox filter, short"
+msgid "Apps"
+msgstr "Apps"
+
 #: src/connections/connection-list.tsx
 msgid "Apps and agents with a permission"
 msgstr "Apps en agents met een toestemming"
 
-#: src/inbox/inbox-page.tsx
 #: src/inbox/sidebar-inbox.tsx
 msgctxt "inbox filter"
 msgid "Apps and connections"
@@ -3323,6 +3332,11 @@ msgstr "Gekoppeld aan"
 #: src/settings/sections.ts
 msgid "Brain"
 msgstr "Brein"
+
+#: src/inbox/inbox-page.tsx
+msgctxt "inbox filter, short"
+msgid "Brain"
+msgstr "Brain"
 
 #: src/inbox/inbox-kind.tsx
 msgctxt "inbox item kind"
@@ -5661,11 +5675,6 @@ msgstr "Iedereen met Grasp"
 #: src/people/people-teams-picker.tsx
 msgid "Everyone with the {name} role"
 msgstr "Iedereen met de rol {name}"
-
-#: src/inbox/inbox-page.tsx
-msgctxt "inbox filter"
-msgid "Everything"
-msgstr "Alles"
 
 #: src/workflows/business-process.tsx
 msgid "Everything around employees, from hiring to leaving."
@@ -10021,7 +10030,6 @@ msgstr "Volledige pagina openen"
 msgid "Open in full"
 msgstr "Volledig openen"
 
-#: src/inbox/inbox-page.tsx
 #: src/inbox/sidebar-inbox.tsx
 msgctxt "inbox filter"
 msgid "Open in the Brain"
@@ -10826,6 +10834,10 @@ msgstr "Queries van {app}"
 #: src/activity/pending.tsx
 msgid "Queries, mutations and actions of {app}"
 msgstr "Queries, mutaties en acties van {app}"
+
+#: src/inbox/item-detail.tsx
+msgid "Question"
+msgstr "Vraag"
 
 #: src/chat/suggestions.tsx
 msgid "Questions to start with"
@@ -17032,7 +17044,6 @@ msgid "Your AI runs on your own keys"
 msgstr "Je AI draait op je eigen sleutels"
 
 #: src/chat/brain-questions.tsx
-#: src/inbox/item-detail.tsx
 #: src/interview/composer.tsx
 msgid "Your answer"
 msgstr "Je antwoord"
