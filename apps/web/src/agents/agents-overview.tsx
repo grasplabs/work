@@ -316,7 +316,7 @@ export const AgentsOverview = ({
     (agent) => agent.managed?.state === "paused"
   ).length;
   return (
-    <Page wide>
+    <Page>
       <PageHeading
         action={makes ? <NewAgentLink /> : undefined}
         description={
