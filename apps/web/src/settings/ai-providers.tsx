@@ -1,4 +1,5 @@
 import {
+  aiProviders,
   compatibleModelNamePattern,
   featuredModels,
 } from "@grasp-os/shared/ai-providers";
@@ -12,6 +13,7 @@ import type {
   OrganizationProviderId,
 } from "@grasp-os/shared/ai-providers";
 import { failureText } from "@grasp-os/shared/errors";
+import { i18n as active } from "@lingui/core";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
@@ -23,6 +25,7 @@ import { changeThenRefresh } from "../change-then-refresh.ts";
 import { failureMessage } from "../chat/failure.ts";
 import type { Session } from "../core.ts";
 import { formatDollars } from "../format.ts";
+import { tellProvidersChanged } from "../frame/ai-key-banner.tsx";
 import { Alert } from "../grasp/alert/index.ts";
 import { Badge } from "../grasp/badge/index.ts";
 import { BrandIcon } from "../grasp/brand-icon/index.ts";
@@ -45,6 +48,7 @@ import {
   FieldError,
   FieldLabel,
 } from "../grasp/field/index.ts";
+import { EU, Flag, US } from "../grasp/flags/index.ts";
 import { Form } from "../grasp/form/index.ts";
 import {
   Cable,
@@ -115,8 +119,8 @@ const keyStarts: Readonly<Record<OrganizationProviderId, string | undefined>> =
 const marks: Readonly<Record<OrganizationProviderId, Brand | undefined>> = {
   anthropic: "claude",
   openai: "chatgpt",
-  mistral: undefined,
-  openrouter: undefined,
+  mistral: "mistral",
+  openrouter: "openrouter",
   "openai-compatible": undefined,
 };
 
@@ -137,6 +141,12 @@ const testFailures: Readonly<Record<string, MessageDescriptor>> = {
 };
 
 const styles = stylex.create({
+  // A flag, then the place it stands for.
+  place: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: grasp.space2,
+  },
   // Every control fills the rows' shared control column.
   control: { width: "100%" },
   ends: { display: "flex", alignItems: "center", gap: grasp.space2 },
@@ -164,9 +174,7 @@ type Change = (session: Session) => Promise<unknown>;
 /**
  * A provider's mark, one size in every row of Settings (the library's
  * answer, 17 Nov 2026): its brand's mark alone at 20px, no tile; a plug
- * for a custom endpoint, which is no brand; and no mark at all where the
- * Brand icons have none yet (Mistral, OpenRouter: asked of the library),
- * never one drawn here.
+ * for a custom endpoint, which is no brand.
  */
 const Mark = ({ provider }: { provider: OrganizationProviderId }) => {
   if (provider === "openai-compatible") {
@@ -197,7 +205,10 @@ const useStatus = () => {
       lastOkAt !== null &&
       (lastFailedAt === null || lastOkAt >= lastFailedAt)
     ) {
-      return { word: t`Working`, tone: "success" };
+      return {
+        word: t({ message: "Working", context: "a provider's key works" }),
+        tone: "success",
+      };
     }
     if (lastFailedAt === null) {
       return unused;
@@ -239,6 +250,17 @@ const nameOf = (
     ? model.slice(compatiblePrefix.length)
     : model;
 };
+
+// A custom endpoint has no name of its own: core's label for it is English
+// words, so the page says them in its own language.
+const customEndpoint = msg`OpenAI-compatible endpoint`;
+
+/** A provider's name, in the page's language for a custom endpoint. */
+const providerName = (
+  provider: OrganizationProviderId,
+  label: string
+): string =>
+  provider === "openai-compatible" ? active._(customEndpoint) : label;
 
 /** A key field: a password field, never shown, nor offered by the browser later; its placeholder how the provider's keys start. */
 const KeyInput = ({
@@ -319,7 +341,7 @@ const KeyDialog = ({
   const { t } = useLingui();
   const formId = useId();
   const [key, setKey] = useState("");
-  const { label } = provider;
+  const label = providerName(provider.provider, provider.label);
   const save = useAction(
     async () => {
       await onReplace(key);
@@ -336,6 +358,11 @@ const KeyDialog = ({
     { working: t`Deleting`, done: t`Deleted`, failed: t`Could not delete` }
   );
   const failed = save.error ?? remove.error;
+  // Why it can't be tested, or why its test failed: nothing while all is well.
+  const testHelp =
+    testModel === null
+      ? t`Name a model it serves, under Models, to test it.`
+      : testFailure;
   return (
     <Dialog
       onOpenChange={(next) => {
@@ -352,20 +379,18 @@ const KeyDialog = ({
           </span>
         </DialogTitle>
         <DialogBody>
-          <SettingsRows>
-            <SettingRow
-              help={
-                testModel === null
-                  ? t`Name a model it serves, under Models, to test it.`
-                  : testFailure
-              }
-              label={t`Connection`}
-            >
-              <Button disabled={testModel === null} size="sm" {...test.props}>
-                {t`Test`}
-              </Button>
-            </SettingRow>
-          </SettingsRows>
+          {/* Whether the key works, then a new one: a dialog's fields, not a card's rows. */}
+          <Field orientation="horizontal">
+            <FieldContent>
+              <FieldLabel>{t`Connection`}</FieldLabel>
+              {testHelp === undefined ? null : (
+                <FieldDescription>{testHelp}</FieldDescription>
+              )}
+            </FieldContent>
+            <Button disabled={testModel === null} size="sm" {...test.props}>
+              {t`Test`}
+            </Button>
+          </Field>
           <Form
             aria-label={t`Replace the key for ${label}`}
             id={formId}
@@ -431,7 +456,7 @@ const ProviderRow = ({
   const statusOf = useStatus();
   const [managing, setManaging] = useState(false);
   const test = useTest(provider.provider, testModel ?? undefined);
-  const { label } = provider;
+  const label = providerName(provider.provider, provider.label);
   const last = provider.mask.replace("…", "");
   const status = statusOf(provider.status);
   const testFailure =
@@ -503,6 +528,24 @@ const ProviderChoice = ({
     {label}
   </span>
 );
+
+/**
+ * Where a provider runs, as the page's language says it, with its flag: the
+ * name is on the line above, so this says only the place.
+ */
+const WhereItRuns = ({ provider }: { provider: OrganizationProviderId }) => {
+  const { t } = useLingui();
+  const { region } = aiProviders[provider];
+  if (region === "custom") {
+    return t`Wherever your endpoint runs`;
+  }
+  return (
+    <span {...stylex.props(styles.place)}>
+      <Flag flag={region === "eu" ? EU : US} />
+      {region === "eu" ? t`European Union` : t`United States`}
+    </span>
+  );
+};
 
 /** Adding a provider, in a dialog: which one, by its mark; a custom endpoint's address; its key. */
 const AddProviderDialog = ({
@@ -592,11 +635,13 @@ const AddProviderDialog = ({
                     <FieldContent>
                       <FieldLabel>
                         <ProviderChoice
-                          label={each.label}
+                          label={providerName(each.provider, each.label)}
                           provider={each.provider}
                         />
                       </FieldLabel>
-                      <FieldDescription>{each.whereItRuns}</FieldDescription>
+                      <FieldDescription>
+                        <WhereItRuns provider={each.provider} />
+                      </FieldDescription>
                     </FieldContent>
                   </Field>
                 ))}
@@ -688,7 +733,7 @@ const modelItems = (
       : [
           {
             type: "group" as const,
-            label: provider.label,
+            label: providerName(provider.provider, provider.label),
             items: left.map(({ model, name }) => ({
               value: model,
               label: name,
@@ -724,7 +769,7 @@ const NameModel = ({ onName }: { onName: (model: string) => void }) => {
   };
   return (
     <SettingRow
-      help={t`As your endpoint names it, such as llama-3.3-70b.`}
+      info={t`As your endpoint names it, such as llama-3.3-70b.`}
       label={t`Your endpoint's model`}
     >
       {(field) => (
@@ -775,7 +820,7 @@ const Fallbacks = ({
   };
   return (
     <FactRow
-      help={t`Used in this order when the default's provider is down.`}
+      info={t`Used in this order when the default's provider is down.`}
       label={t`Fallbacks`}
     >
       <ol aria-label={t`Fallbacks`} {...stylex.props(styles.list)}>
@@ -927,6 +972,7 @@ const Models = ({
                   }
                 }}
                 placeholder={t`Search models`}
+                triggerLabel={t`Show the models`}
                 size="sm"
                 value={defaultModel}
               />
@@ -964,6 +1010,7 @@ const Models = ({
                   }
                 }}
                 placeholder={t`Search models`}
+                triggerLabel={t`Show the models`}
                 size="sm"
                 value={null}
               />
@@ -1090,6 +1137,7 @@ export const AiProvidersSettings = ({
         },
         async () => {
           await router.invalidate({ sync: true });
+          tellProvidersChanged();
         }
       );
       return true;
@@ -1105,6 +1153,7 @@ export const AiProvidersSettings = ({
         },
         async () => {
           await router.invalidate({ sync: true });
+          tellProvidersChanged();
         }
       );
     });

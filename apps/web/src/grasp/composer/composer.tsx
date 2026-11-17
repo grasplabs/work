@@ -91,6 +91,15 @@ export interface ComposerProps {
   /** The words when a send failed, shown under the card and given to an agent ("Could not send"). */
   failedLabel: string;
   /**
+   * Whether the last send failed, set from outside: for a failure learned after `onSend` settled,
+   * or a failed draft brought back (with its text in `value` or `defaultValue`). It shows as a send
+   * that failed here does: `failedLabel` under the card, the words kept. Leave it unset and the
+   * Composer keeps this itself; set it and call `onSendFailedChange` to follow its changes.
+   */
+  sendFailed?: boolean;
+  /** Called when the Composer would change `sendFailed`: true when a send fails, false on typing or a new send. */
+  onSendFailedChange?: (failed: boolean) => void;
+  /**
    * Where the assistant is. `working`: the light travels round the card, send turns into Stop, and
    * the text can still be written. `success`: one halo of mint, then rest; set it again to play it
    * again. `disabled`: nothing can be written or pressed; the card takes the soft fill and its words
@@ -355,6 +364,8 @@ const settled = async <T,>(
 
 const COARSE = media.coarse;
 const FORCED = media.forced;
+// The keyboard brought focus to the message field (src/focus/focus.ts tells a press apart).
+const KEY_IN_TEXT = ":has(textarea:focus-visible:not([data-focus-pointer]))";
 
 const styles = stylex.create({
   root: {
@@ -400,23 +411,34 @@ const styles = stylex.create({
     "--grasp-composer-first": grasp.corner,
     "--grasp-composer-last": grasp.corner,
     backgroundColor: { default: grasp.raised, ":disabled": grasp.soft },
-    // Medium lift at rest, as Palermo's; while the text has focus, a soft halo round it says so.
+    // Medium lift at rest, as Palermo's; while the text has focus from a press, a soft halo round
+    // it says so. The keyboard's focus shows the system's ring instead (C1, PROOF-2026-11-17.md):
+    // the halo gives way to rest, as on every field (src/focus/focus.ts).
     boxShadow: {
       default: grasp.liftMedium,
       ":has(textarea:focus-visible)": grasp.fieldFocus,
       ":has(textarea[aria-invalid=true]:focus-visible)":
         grasp.fieldFocusInvalid,
+      [KEY_IN_TEXT]: grasp.liftMedium,
     },
     color: grasp.ink,
     cursor: { default: "text", ":disabled": "not-allowed" },
+    // The ring stands just inside the card's edge, over the card's own fill, so it holds 3:1 on any
+    // ground round the card: paper, a scene, a dither. Never after a press (data-focus-pointer).
+    // In forced colours a press keeps a thin line and the keyboard the thick Highlight ring.
     outline: {
       default: "none",
+      [KEY_IN_TEXT]: `${grasp.ringWidth} solid ${grasp.ring}`,
       [FORCED]: {
         default: "none",
         ":has(textarea:focus-visible)": `${grasp.ringWidth} solid`,
+        [KEY_IN_TEXT]: `calc(2 * ${grasp.ringWidth}) solid Highlight`,
       },
     },
-    outlineOffset: grasp.ringOffset,
+    outlineOffset: {
+      default: `calc(-1 * ${grasp.ringWidth})`,
+      [FORCED]: `calc(-2 * ${grasp.ringWidth})`,
+    },
     transitionProperty: "box-shadow, background-color",
     transitionDuration: grasp.durationHover,
     transitionTimingFunction: grasp.ease,
@@ -547,6 +569,8 @@ const styles = stylex.create({
   footer: {
     containerType: "inline-size",
     containerName: "composer-footer",
+    // The count stands over its end edge on a narrow footer (count, below).
+    position: "relative",
     display: "flex",
     flexWrap: "nowrap",
     alignItems: "center",
@@ -628,10 +652,24 @@ const styles = stylex.create({
     color: grasp.danger,
   },
   // Read by a screen reader, never seen.
-  // The count near the limit: quiet, the small size, its figures of one width.
+  // The count near the limit: quiet, the small size, its figures of one width. On a footer with
+  // room it keeps its room in the row, so nothing moves when it shows. On a narrow footer it takes
+  // none from the controls: it stands over the row's end, on the field's bottom edge, above Send.
   count: {
     display: "inline-grid",
     flexShrink: 0,
+    position: {
+      default: "static",
+      "@container composer-footer (width < 30rem)": "absolute",
+    },
+    insetInlineEnd: {
+      default: null,
+      "@container composer-footer (width < 30rem)": grasp.space2,
+    },
+    bottom: {
+      default: null,
+      "@container composer-footer (width < 30rem)": "100%",
+    },
     paddingInline: grasp.space1,
     color: grasp.muted,
     fontFamily: grasp.fontSans,
@@ -935,6 +973,8 @@ interface SendInput {
   working: boolean;
   onSend: (text: string) => unknown;
   failedLabel: string;
+  sendFailed: boolean | undefined;
+  onSendFailedChange: ((failed: boolean) => void) | undefined;
 }
 
 /**
@@ -953,8 +993,23 @@ const useSend = ({
   working,
   onSend,
   failedLabel,
+  sendFailed,
+  onSendFailedChange,
 }: SendInput) => {
-  const [failed, setFailed] = useState(false);
+  const [ownFailed, setOwnFailed] = useState(false);
+  // Set from outside (`sendFailed`), else kept here.
+  const failed = sendFailed ?? ownFailed;
+  // A send's own result: always told, since the caller may have cleared it while the send ran.
+  const report = (next: boolean) => {
+    setOwnFailed(next);
+    onSendFailedChange?.(next);
+  };
+  // Typing clears it: told only when it was shown.
+  const setFailed = (next: boolean) => {
+    if (next !== failed) {
+      report(next);
+    }
+  };
   // The text as it is now, for a send that ends after the person typed on.
   const latest = useRef(text);
   useEffect(() => {
@@ -985,7 +1040,7 @@ const useSend = ({
             }
           },
           () => {
-            setFailed(true);
+            report(true);
             return new Error(failedLabel);
           }
         );
@@ -1715,7 +1770,11 @@ const ComposerInside = ({
       ) : null}
       {Boolean(above) && <div {...stylex.props(styles.above)}>{above}</div>}
       {editor}
-      <div onPointerDown={focusText} {...stylex.props(styles.footer)}>
+      <div
+        data-slot="composer-footer"
+        onPointerDown={focusText}
+        {...stylex.props(styles.footer)}
+      >
         <div {...stylex.props(styles.side, styles.startSide)}>
           {start}
           {Boolean(controls) && (
@@ -1912,6 +1971,8 @@ const ComposerForm = (props: Resolved) => {
     working,
     onSend: props.onSend,
     failedLabel: props.failedLabel,
+    sendFailed: props.sendFailed,
+    onSendFailedChange: props.onSendFailedChange,
   });
   const mentions = useMentions({
     text,

@@ -23,7 +23,7 @@ import { Button } from "../button";
 import { Collapsible } from "../collapsible";
 import { focus } from "../focus/focus";
 import { visuallyHidden } from "../hidden/hidden";
-import { Alert, Icon, Retry } from "../icons";
+import { Alert, Icon, Retry, Stop } from "../icons";
 import { iconVars } from "../icons/icon.stylex";
 import type { LayoutStyle } from "../layout/layout";
 import { useArriving } from "../motion/use-arriving";
@@ -31,13 +31,23 @@ import { ArrivingContext, usePaced } from "../motion/use-paced";
 import type { PacedOptions } from "../motion/use-paced";
 import { Shimmer } from "../shimmer";
 import { grasp, media } from "../tokens/tokens.stylex";
+import { useWords as useCatalogue, withGiven } from "../words/words";
 import { ChatMessageCopy } from "./copy";
+import { Thoughts } from "./thoughts";
+import type { ChatMessageThoughtsLook } from "./thoughts";
+import { chatMessageWords } from "./words";
+import type { ChatMessageWords } from "./words";
 
 /** What a caller may style: where the message sits. Never its look. */
 export type ChatMessageLayoutStyle = LayoutStyle;
 
-/** Where an agent's message is: being written, done, or failed. */
-export type ChatMessageStatus = "thinking" | "streaming" | "done" | "failed";
+/** Where an agent's message is: being written, done, stopped part way, or failed. */
+export type ChatMessageStatus =
+  | "thinking"
+  | "streaming"
+  | "done"
+  | "stopped"
+  | "failed";
 
 /** Every prop a ChatMessage takes. */
 export interface ChatMessageProps {
@@ -47,6 +57,13 @@ export interface ChatMessageProps {
   children?: ReactNode;
   /** The agent's name over its message ("Assistant"). A person's messages need none. */
   name?: string;
+  /**
+   * Keeps the name off the page while a screen reader still hears who speaks: the message stays
+   * named by `name`, and no name is drawn over it. For a chat with one agent, where its name on
+   * every answer is noise.
+   * @default false
+   */
+  nameHidden?: boolean;
   /** When it was sent, as people say it ("2 min ago"), small beside the name or under the bubble. */
   time?: string;
   /** When it was sent, for machines: an ISO date and time ("2026-11-13T14:02"). */
@@ -58,8 +75,9 @@ export interface ChatMessageProps {
   personLabel?: string;
   /**
    * For an agent's message: `thinking` while it works and has not begun to write, `streaming`
-   * while it is written, `done` once it is, `failed` if it could not be written. A person's
-   * message is always done.
+   * while it is written, `done` once it is, `stopped` when it was stopped part way (the words kept
+   * as written, `stoppedLabel` under them, the actions still offered), `failed` if it could not be
+   * written. A person's message is always done.
    * @default "done"
    */
   status?: ChatMessageStatus;
@@ -100,6 +118,11 @@ export interface ChatMessageProps {
    */
   doneLabel?: string;
   /**
+   * The words under a message that was stopped part way, said to a screen reader when it stops.
+   * @default "Stopped"
+   */
+  stoppedLabel?: string;
+  /**
    * A working mark under the words while the agent writes. Off by default: while text arrives
    * there is nothing but the text, and before the first word the thinking line stands in.
    * @default false
@@ -117,10 +140,18 @@ export interface ChatMessageProps {
    */
   thoughtLabel?: (seconds: number) => string;
   /**
-   * The agent's thoughts, as much as has arrived: the thinking line then opens to them, in quiet
-   * words. Closed at first, and closed again when the answer starts.
+   * The agent's thoughts, as much as has arrived: the thinking line then opens to them, small and
+   * quiet, set apart from the answer. Closed at first, and closed again when the answer starts.
+   * Words are drawn through Markdown: a line that is only bold (the model's step title) becomes a
+   * small label over its note; lists and code in a sentence are drawn, never raw marks.
    */
   thoughts?: ReactNode;
+  /**
+   * How the opened thoughts stand apart from the answer: a hairline down their start edge, a soft
+   * sunken panel, or a slim timeline of steps. A study for Ruben to pick from; one stays.
+   * @default "rule"
+   */
+  thoughtsLook?: ChatMessageThoughtsLook;
   /**
    * How long the thinking took, in seconds, for a message that is drawn after it ended (from
    * history). While a message is on the page as it thinks, it times itself.
@@ -218,13 +249,6 @@ const styles = stylex.create({
     alignItems: "center",
     minHeight: grasp.collapsibleTrigger,
   },
-  // The thoughts themselves: quiet beside the answer.
-  thoughts: {
-    color: grasp.muted,
-    fontSize: grasp.textSm,
-    lineHeight: grasp.textSmLine,
-    whiteSpace: "pre-wrap",
-  },
   failed: {
     display: "flex",
     alignItems: "center",
@@ -232,6 +256,17 @@ const styles = stylex.create({
     gap: grasp.space2,
     margin: 0,
     color: grasp.danger,
+    fontSize: grasp.textSm,
+    lineHeight: grasp.textSmLine,
+  },
+  // A stopped answer: one quiet line under its words, before its actions.
+  stopped: {
+    display: "inline-flex",
+    alignItems: "center",
+    justifySelf: "start",
+    gap: grasp.space1,
+    margin: 0,
+    color: grasp.muted,
     fontSize: grasp.textSm,
     lineHeight: grasp.textSmLine,
   },
@@ -276,8 +311,6 @@ const styles = stylex.create({
   },
 });
 
-const copyWords = { copy: "Copy", copied: "Copied", failed: "Could not copy" };
-
 /** A string with words in it: an empty one counts as none, as it always has. */
 const filled = (text: string | undefined): text is string =>
   text !== undefined && text !== "";
@@ -296,6 +329,7 @@ interface Heard {
   thinkingLabel: string | undefined;
   streamingLabel: string;
   doneLabel: string;
+  stoppedLabel: string;
 }
 
 const sameAs = (heard: Heard, now: Heard) =>
@@ -303,20 +337,26 @@ const sameAs = (heard: Heard, now: Heard) =>
   heard.status === now.status &&
   heard.thinkingLabel === now.thinkingLabel &&
   heard.streamingLabel === now.streamingLabel &&
-  heard.doneLabel === now.doneLabel;
-
-const THINKING = "Thinking";
+  heard.doneLabel === now.doneLabel &&
+  heard.stoppedLabel === now.stoppedLabel;
 
 /** What the status region says after a change, given the status before it. */
 const sayFor = (now: Heard, before: ChatMessageStatus) => {
   if (now.status === "thinking") {
-    return now.thinkingLabel ?? THINKING;
+    return now.thinkingLabel ?? "";
   }
   if (now.status === "streaming") {
     return now.streamingLabel;
   }
   if (now.status === "done" && before === "streaming") {
     return now.doneLabel;
+  }
+  // Stopped while it thought or wrote; a message drawn stopped (from history) says nothing.
+  if (
+    now.status === "stopped" &&
+    (before === "streaming" || before === "thinking")
+  ) {
+    return now.stoppedLabel;
   }
   return "";
 };
@@ -399,8 +439,8 @@ interface ActionRowProps {
   status: ChatMessageStatus;
   copyText: string | undefined;
   actions: ReactNode;
-  label: string | undefined;
-  copyLabels: ChatMessageProps["copyLabels"];
+  label: string;
+  copyLabels: { copy: string; copied: string; failed: string };
 }
 
 const ActionRow = ({
@@ -408,13 +448,13 @@ const ActionRow = ({
   status,
   copyText,
   actions,
-  label = "Message actions",
-  copyLabels = copyWords,
+  label,
+  copyLabels,
 }: ActionRowProps) => {
   const person = from === "person";
   if (
     !(filled(copyText) || present(actions)) ||
-    !(person || status === "done")
+    !(person || status === "done" || status === "stopped")
   ) {
     return null;
   }
@@ -438,17 +478,21 @@ const ActionRow = ({
 
 interface HeadProps {
   name: string | undefined;
+  nameHidden: boolean | undefined;
   time: string | undefined;
   dateTime: string | undefined;
 }
 
-const Head = ({ name, time, dateTime }: HeadProps) =>
-  filled(name) || filled(time) ? (
+const Head = ({ name: given, nameHidden, time, dateTime }: HeadProps) => {
+  // Hidden, the name is still the message's name for a screen reader (the article's), not drawn.
+  const name = nameHidden === true ? undefined : given;
+  return filled(name) || filled(time) ? (
     <div {...stylex.props(styles.head)}>
       {filled(name) && <h3 {...stylex.props(styles.name)}>{name}</h3>}
       <Stamp time={time} dateTime={dateTime} person={false} />
     </div>
   ) : null;
+};
 
 /** How long the thinking took, in whole seconds, once it has ended; null until then. */
 const useTook = (thinking: boolean) => {
@@ -464,15 +508,12 @@ const useTook = (thinking: boolean) => {
   return took;
 };
 
-// In English, the default of `thoughtLabel`.
-const thoughtFor = (seconds: number) =>
-  `Thought for ${seconds} ${seconds === 1 ? "second" : "seconds"}`;
-
 interface ThoughtProps {
   thinking: boolean;
   thoughts: ReactNode;
-  label: string | undefined;
-  thoughtLabel: ((seconds: number) => string) | undefined;
+  look: ChatMessageThoughtsLook | undefined;
+  label: string;
+  thoughtLabel: (seconds: number) => string;
   seconds: number | undefined;
 }
 
@@ -483,8 +524,9 @@ interface ThoughtProps {
 const Thought = ({
   thinking,
   thoughts,
-  label = THINKING,
-  thoughtLabel = thoughtFor,
+  look = "rule",
+  label,
+  thoughtLabel,
   seconds,
 }: ThoughtProps) => {
   const took = useTook(thinking);
@@ -520,23 +562,19 @@ const Thought = ({
   return (
     <div data-thought="" {...stylex.props(styles.thought)}>
       <Collapsible title={line} open={open} onOpenChange={setOpen} fit>
-        <div {...stylex.props(styles.thoughts)}>{thoughts}</div>
+        <Thoughts thoughts={thoughts} look={look} writing={thinking} />
       </Collapsible>
     </div>
   );
 };
 
 interface FailureProps {
-  label: string | undefined;
+  label: string;
   onRetry: (() => unknown) | undefined;
-  retryLabel: string | undefined;
+  retryLabel: string;
 }
 
-const Failure = ({
-  label = "Could not answer",
-  onRetry,
-  retryLabel = "Try again",
-}: FailureProps) => (
+const Failure = ({ label, onRetry, retryLabel }: FailureProps) => (
   <div {...stylex.props(styles.failed)}>
     <p role="alert" {...stylex.props(styles.failedWords)}>
       <Icon icon={Alert} />
@@ -555,6 +593,33 @@ const Failure = ({
     )}
   </div>
 );
+
+interface EndingProps extends Omit<FailureProps, "label"> {
+  status: ChatMessageStatus;
+  stoppedLabel: string;
+  failedLabel: FailureProps["label"];
+}
+
+/** How a message that did not end as done ends: Stopped under its words, or its failure. */
+const Ending = ({
+  status,
+  stoppedLabel,
+  failedLabel,
+  onRetry,
+  retryLabel,
+}: EndingProps) => {
+  if (status === "stopped") {
+    return (
+      <p data-slot="chat-message-stopped" {...stylex.props(styles.stopped)}>
+        <Icon icon={Stop} />
+        {stoppedLabel}
+      </p>
+    );
+  }
+  return status === "failed" ? (
+    <Failure label={failedLabel} onRetry={onRetry} retryLabel={retryLabel} />
+  ) : null;
+};
 
 /** Where the last whole sentence of `text` ends. */
 const sentencesEnd = (text: string): number => {
@@ -648,11 +713,11 @@ const useWaiting = (
 interface SignProps {
   waiting: boolean;
   mark: boolean;
-  label: string | undefined;
+  label: string;
 }
 
 /** What says the agent is at work beside the words: the thinking line before the first word, or the mark when asked for. */
-const Sign = ({ waiting, mark, label = THINKING }: SignProps) => (
+const Sign = ({ waiting, mark, label }: SignProps) => (
   <>
     {waiting && (
       <p aria-hidden="true" data-waiting="" {...stylex.props(styles.waiting)}>
@@ -674,10 +739,10 @@ const useWords = (
   const paced = usePaced(words ?? "", live, options);
   // A part inside that paces its own words says here while they are still arriving.
   const [inside, setInside] = useState(false);
+  // Done or stopped, the words already sent still come out at their pace before the end is said.
+  const ended = status === "done" || status === "stopped";
   const arriving =
-    from === "agent" &&
-    status === "done" &&
-    ((words !== null && !paced.done) || inside);
+    from === "agent" && ended && ((words !== null && !paced.done) || inside);
   useSaidSentences(paced.text, live || arriving);
   // What fades in as it arrives: words paced here, or a part inside that paces its own (Markdown
   // streaming). Text a caller simply puts in, chunk by chunk, is drawn as it comes.
@@ -693,14 +758,45 @@ const useWords = (
   };
 };
 
+/** The caller's text props, by their key in the catalogue's entry (words.ts). */
+const givenOf = (
+  props: Pick<
+    ChatMessageProps,
+    | "personLabel"
+    | "failedLabel"
+    | "retryLabel"
+    | "actionsLabel"
+    | "copyLabels"
+    | "streamingLabel"
+    | "doneLabel"
+    | "stoppedLabel"
+    | "thinkingLabel"
+    | "thoughtLabel"
+  >
+): Partial<ChatMessageWords> => ({
+  person: props.personLabel,
+  failed: props.failedLabel,
+  retry: props.retryLabel,
+  actions: props.actionsLabel,
+  copy: props.copyLabels?.copy,
+  copied: props.copyLabels?.copied,
+  copyFailed: props.copyLabels?.failed,
+  streaming: props.streamingLabel,
+  done: props.doneLabel,
+  stopped: props.stoppedLabel,
+  thinking: props.thinkingLabel,
+  thought: props.thoughtLabel,
+});
+
 /** One message in a conversation: a person's, or the agent's. */
 export const ChatMessage = ({
   from,
   children,
   name,
+  nameHidden,
   time,
   dateTime,
-  personLabel = "You",
+  personLabel,
   status = "done",
   failedLabel,
   onRetry,
@@ -709,18 +805,36 @@ export const ChatMessage = ({
   actions,
   actionsLabel,
   copyLabels,
-  streamingLabel = "Writing",
-  doneLabel = "Answer ready",
+  streamingLabel,
+  doneLabel,
+  stoppedLabel,
   streamingMark = false,
   thinkingLabel,
   thoughtLabel,
   thoughts,
   thoughtSeconds,
+  thoughtsLook,
   pace,
   style: styleProp,
   layout,
 }: ChatMessageProps) => {
   const root = useRef<HTMLElement | null>(null);
+  // Its own words: the product's, by its catalogue, else English; a text prop given still wins.
+  const text = withGiven(
+    useCatalogue("chatMessage", chatMessageWords),
+    givenOf({
+      personLabel,
+      failedLabel,
+      retryLabel,
+      actionsLabel,
+      copyLabels,
+      streamingLabel,
+      doneLabel,
+      stoppedLabel,
+      thinkingLabel,
+      thoughtLabel,
+    })
+  );
   const { words, paced, arriving, streaming, fades, setInside } = useWords(
     children,
     from,
@@ -731,9 +845,10 @@ export const ChatMessage = ({
   const said = useSaid({
     from,
     status: arriving ? "streaming" : status,
-    thinkingLabel,
-    streamingLabel,
-    doneLabel,
+    thinkingLabel: text.thinking,
+    streamingLabel: text.streaming,
+    doneLabel: text.done,
+    stoppedLabel: text.stopped,
   });
   useKeepFocus(root, from, status);
   const [wordsBox, setWordsBox] = useState<HTMLDivElement | null>(null);
@@ -756,8 +871,12 @@ export const ChatMessage = ({
       status={arriving ? "streaming" : status}
       copyText={copyText}
       actions={actions}
-      label={actionsLabel}
-      copyLabels={copyLabels}
+      label={text.actions}
+      copyLabels={{
+        copy: text.copy,
+        copied: text.copied,
+        failed: text.copyFailed,
+      }}
     />
   );
 
@@ -765,7 +884,7 @@ export const ChatMessage = ({
     return (
       <article
         ref={root}
-        aria-label={personLabel}
+        aria-label={text.person}
         data-slot="chat-message"
         data-from="person"
         {...stylex.props(styles.root, styles.person, layout ?? styleProp)}
@@ -795,12 +914,18 @@ export const ChatMessage = ({
         focus.words
       )}
     >
-      <Head name={name} time={time} dateTime={dateTime} />
+      <Head
+        name={name}
+        nameHidden={nameHidden}
+        time={time}
+        dateTime={dateTime}
+      />
       <Thought
         thinking={status === "thinking"}
         thoughts={thoughts}
-        label={thinkingLabel}
-        thoughtLabel={thoughtLabel}
+        look={thoughtsLook}
+        label={text.thinking}
+        thoughtLabel={text.thought}
         seconds={thoughtSeconds}
       />
       {children !== undefined && children !== null && children !== false && (
@@ -819,15 +944,15 @@ export const ChatMessage = ({
       <Sign
         waiting={waiting}
         mark={streaming && streamingMark}
-        label={thinkingLabel}
+        label={text.thinking}
       />
-      {status === "failed" && (
-        <Failure
-          label={failedLabel}
-          onRetry={onRetry}
-          retryLabel={retryLabel}
-        />
-      )}
+      <Ending
+        status={status}
+        stoppedLabel={text.stopped}
+        failedLabel={text.failed}
+        onRetry={onRetry}
+        retryLabel={text.retry}
+      />
       {row}
       <output {...stylex.props(visuallyHidden)}>{said}</output>
     </article>

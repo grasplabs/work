@@ -145,6 +145,16 @@ const seedPeople = async (): Promise<{
         "The core answering at localhost doesn't keep its state in this checkout: run the seed from the checkout `vp run dev` runs from."
       );
     }
+    // Someone of the seed's removed while the app was tried (Members ›
+    // Remove) can't sign in again, and the product keeps no way back: the
+    // seed brings its own people back, in this checkout's state only.
+    // Their teams are set again below.
+    const comeBack = core.prepare(
+      "DELETE FROM member_removals WHERE user_id IN (SELECT id FROM users WHERE email = ?)"
+    );
+    for (const { email } of people) {
+      comeBack.run(email);
+    }
     await mapLimited(people, signInsAtOnce, async ({ email }) => {
       await signInAs(email);
     });
@@ -629,6 +639,50 @@ const seedPermissions = async (
   }
 };
 
+/** The company's first agent, Stephen: core makes him for every organization. */
+const firstAgentId = "organization";
+
+/**
+ * Stephen's access to Knowledge: what the company shares with everyone
+ * and isn't sensitive, granted by an admin as an admin would, so the
+ * demo company's chats can cite it. An agent reads a collection only with
+ * a permission, and of it only what the person asking may read too.
+ */
+const seedAgentKnowledge = async (
+  adminSession: Session,
+  collectionIds: ReadonlyMap<string, string>
+): Promise<number> => {
+  const held = await adminSession.api.permissions.list({
+    type: "agent",
+    agentId: firstAgentId,
+  });
+  let granted = 0;
+  for (const seed of collections) {
+    const collectionId = collectionIds.get(seed.name);
+    const shared = seed.teams.length === 0 && seed.sensitive !== true;
+    const binding = seed.name.toUpperCase().replaceAll(/[^A-Z0-9]+/gu, "_");
+    if (
+      collectionId === undefined ||
+      !shared ||
+      held.some(({ binding: name }) => name === binding)
+    ) {
+      continue;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- one request at a time
+    const { id } = await adminSession.api.permissions.request({
+      subject: { type: "agent", agentId: firstAgentId },
+      object: { type: "collection", collectionId },
+      actions: ["read"],
+      binding,
+    });
+    // An agent's permission names no App version.
+    // oxlint-disable-next-line no-await-in-loop -- one grant at a time
+    await adminSession.api.permissions.grant(id, { version: null });
+    granted += 1;
+  }
+  return granted;
+};
+
 /**
  * How many whole weeks before this one the programme began: the
  * prototype's dashboard is in its fifth week of eight.
@@ -770,6 +824,15 @@ const main = async (): Promise<void> => {
       console.info(`App ${seed.name}: ${ran}`);
     }
     await seedPermissions(sessions, appIds, collectionIds);
+    const read = await seedAgentKnowledge(
+      sessionFor(sessions, admin.key),
+      collectionIds
+    );
+    console.info(
+      read === 0
+        ? "Stephen reads the shared Knowledge already"
+        : `Stephen reads ${read} more Knowledge collections`
+    );
 
     const created = await seedChats(sessions);
     console.info(`${created} new chats`);

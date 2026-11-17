@@ -287,29 +287,33 @@ test("invites someone with a role, says what each role may do, and withdraws the
   const { admin } = peopleIn("memberInvites");
   await signInTo(context, admin);
   await page.goto("/settings/members");
-  // What each role may do sits behind the Roles row over the members.
-  await page.getByRole("button", { name: "What each role may do" }).focus();
+  // What each role may do opens from Roles in the members' head.
+  await page.getByRole("button", { name: "Roles" }).click();
   await expect(
-    page.getByRole("tooltip").getByText(/^Admin: Manages people/u)
+    page.getByText(/^Manages people, teams and permissions/u)
   ).toBeVisible();
+  await page.keyboard.press("Escape");
 
   await page.getByRole("button", { name: "Invite", exact: true }).click();
-  const dialog = page.getByRole("dialog", { name: "Invite someone" });
-  await dialog
-    .getByRole("textbox", { name: "Email" })
-    .fill("someone@elsewhere.test");
-  await dialog.getByRole("button", { name: "Invite", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Invite people" });
+  const addresses = dialog.getByRole("textbox", { name: "Email addresses" });
+  // An address outside the organization's domains: core refuses it, and it stays marked.
+  await addresses.fill("someone@elsewhere.test");
+  await addresses.press("Enter");
+  await dialog.getByRole("button", { name: "Send invites" }).click();
   await expect(
     dialog.getByText(
       "Use an email address in one of the domains your organization signs in with."
     )
   ).toBeVisible();
+  await addresses.press("Backspace");
 
   const email = `invited-${crypto.randomUUID().slice(0, 8)}@acme.test`;
-  await dialog.getByRole("textbox", { name: "Email" }).fill(email);
+  await addresses.fill(email);
+  await addresses.press("Enter");
   await dialog.getByRole("combobox", { name: "Role" }).click();
-  await page.getByRole("option", { name: "Builder" }).click();
-  await dialog.getByRole("button", { name: "Invite", exact: true }).click();
+  await page.getByRole("option", { name: /^Builder/u }).click();
+  await dialog.getByRole("button", { name: "Send invites" }).click();
   await expect(dialog).toBeHidden();
 
   const members = page.getByRole("region", { name: "Members" });
@@ -317,9 +321,8 @@ test("invites someone with a role, says what each role may do, and withdraws the
   await expect(
     members.getByText(/^Invited as Builder by .+ · hasn’t signed in yet$/u)
   ).toBeVisible();
-  await members
-    .getByRole("button", { name: `Withdraw the invitation of ${email}` })
-    .click();
+  await members.getByRole("button", { name: `Actions for ${email}` }).click();
+  await page.getByRole("menuitem", { name: "Withdraw invitation" }).click();
   await expect(members.getByText(email)).toHaveCount(0);
 });
 
@@ -340,26 +343,22 @@ test("an admin makes a team, puts someone in it and takes them off, renames it a
   await expect(create).toBeHidden();
   await expect(teams.getByText(name, { exact: true })).toBeVisible();
 
-  await teams.getByRole("button", { name: `Members of ${name}` }).click();
-  const team = page.getByRole("dialog", { name: `Members of ${name}` });
-  await team.getByRole("combobox", { name: "Add a member" }).click();
-  await page
-    .getByRole("option", { name: `Person (${member.email})`, exact: true })
-    .click();
-  await team.getByRole("button", { name: "Add", exact: true }).click();
-  const inTeam = team.getByRole("list", { name: `Members of ${name}` });
-  await expect(inTeam.getByText(member.email)).toBeVisible();
-  await team.getByRole("button", { name: `Take Person off ${name}` }).click();
-  await expect(team.getByText("Nobody is in this team yet.")).toBeVisible();
-  await page.keyboard.press("Escape");
+  // The team's name opens its dialog: tick someone in, save.
+  await teams.getByRole("button", { name, exact: true }).click();
+  const team = page.getByRole("dialog", { name });
+  await team.getByRole("searchbox", { name: "Find people" }).fill(member.email);
+  await team.getByRole("checkbox", { name: "Person" }).check();
+  await team.getByRole("button", { name: "Save changes" }).click();
   await expect(team).toBeHidden();
+  await expect(teams.getByText("1 person")).toBeVisible();
 
+  // Untick them and rename it, in one save.
   const renamed = `${name} and legal`;
-  await teams.getByRole("button", { name: `Actions for ${name}` }).click();
-  await page.getByRole("menuitem", { name: "Rename" }).click();
-  const rename = page.getByRole("dialog", { name: `Rename ${name}` });
-  await rename.getByRole("textbox", { name: "Name" }).fill(renamed);
-  await rename.getByRole("button", { name: "Rename" }).click();
+  await teams.getByRole("button", { name, exact: true }).click();
+  await team.getByRole("checkbox", { name: "Person" }).uncheck();
+  await team.getByRole("textbox", { name: "Name" }).fill(renamed);
+  await team.getByRole("button", { name: "Save changes" }).click();
+  await expect(team).toBeHidden();
   await expect(teams.getByText(renamed, { exact: true })).toBeVisible();
 
   await teams.getByRole("button", { name: `Actions for ${renamed}` }).click();
@@ -417,7 +416,9 @@ test("shows the members page only to someone signed in, and never signs them out
   failing = Number.POSITIVE_INFINITY;
   await page.goto("/settings/members");
   await expect(
-    page.getByText("Grasp can't be reached right now. Try again in a moment.")
+    page.getByText(
+      "Grasp could not reach its servers. Nothing you saved is lost."
+    )
   ).toBeVisible({ timeout: reconnectMs });
   expect(new URL(page.url()).pathname).toBe("/settings/members");
   await expect(
@@ -427,11 +428,12 @@ test("shows the members page only to someone signed in, and never signs them out
   // Trying again shows it's trying, then says so again while core fails.
   const unreachable = page.getByRole("alert");
   await page.getByRole("button", { name: "Try again" }).click();
+  // Busy while it tries: a second press waits for the first.
   await expect(
     page.getByRole("button", { name: "Trying again…" })
-  ).toBeDisabled();
+  ).toHaveAttribute("aria-busy", "true");
   await expect(unreachable).toHaveText(
-    "Grasp can't be reached right now. Try again in a moment.",
+    "Grasp could not reach its servers. Nothing you saved is lost.",
     { timeout: reconnectMs }
   );
   expect(new URL(page.url()).pathname).toBe("/settings/members");

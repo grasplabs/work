@@ -8,9 +8,9 @@ import {
 import type { ErrorComponentProps } from "@tanstack/react-router";
 
 import { ChatBar } from "../chat/chat-bar.tsx";
-import { ChatPanel, useChatPanels } from "../chat/chat-panel.tsx";
+import { useChatPanels } from "../chat/chat-panel.tsx";
 import { ChatSwitcherProvider } from "../chat/chat-switcher.tsx";
-import { GlobalChatProvider } from "../chat/global-chat.tsx";
+import { GlobalChatProvider, useGlobalChat } from "../chat/global-chat.tsx";
 import { readWithin, shellStatus } from "../core-connection.ts";
 import { failingUpFront, providersOf } from "../frame/ai-key-banner.tsx";
 import { AppFrame } from "../frame/app-frame.tsx";
@@ -29,12 +29,16 @@ import { signInErrorSearch } from "../sign-in-errors.ts";
 
 /**
  * The frame, with Grasp's one chat (chat/global-chat.tsx): its idle bar over
- * the page, and the chat itself, docked beside the page, full screen over
- * it, or floating.
+ * the page, and the chat itself, docked beside the page, floating over it,
+ * or full screen.
  */
 const ShellFrame = () => {
   const { core, identity } = Route.useRouteContext();
   const panels = useChatPanels();
+  // The chat's idle bar stands at the card's foot only while the chat is
+  // closed: open beside the page or floating, the foot has no bar, so the
+  // page keeps no room or fade for one.
+  const { stage } = useGlobalChat();
   const { failing } = Route.useLoaderData();
   // Chat's start has no bar: its backdrop takes the whole card.
   const chatStart = useMatchRoute()({ to: "/" }) !== false;
@@ -43,9 +47,9 @@ const ShellFrame = () => {
       bar={chatStart ? "none" : "page"}
       core={core}
       dock={<ChatBar />}
+      dockShown={stage.bar}
       failing={failing}
       identity={identity}
-      floating={<ChatPanel />}
       panels={panels}
     >
       <Outlet />
@@ -99,7 +103,9 @@ const ShellError = ({ error, reset, info }: ErrorComponentProps) => {
   }
   return (
     <PageError
-      reason={t`Grasp can't be reached right now. Try again in a moment.`}
+      // The pattern's calm sentence: the dot under it says, live, whether
+      // Grasp can be reached again.
+      reason={t`Grasp could not reach its servers. Nothing you saved is lost.`}
     />
   );
 };

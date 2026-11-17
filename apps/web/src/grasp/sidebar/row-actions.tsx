@@ -98,23 +98,59 @@ const styles = stylex.create({
     transitionTimingFunction: grasp.ease,
   },
   open: { opacity: 1 },
-  // The rename field: the row's own words, in the row's box, so nothing jumps.
+  // The rename field: the row's own box (its fill's start, end, height and corner) over the row's
+  // link, which stays drawn under it, its words hidden; the row's own type, so nothing jumps.
   field: {
-    flexGrow: 1,
-    minWidth: 0,
+    position: "absolute",
+    inset: 0,
+    boxSizing: "border-box",
+    width: "100%",
+    height: "100%",
     margin: 0,
-    padding: 0,
+    paddingInlineEnd: grasp.shellRowInline,
     borderWidth: 0,
     borderRadius: grasp.shellCorner,
     backgroundColor: "transparent",
-    color: "inherit",
-    fontFamily: "inherit",
-    fontSize: "inherit",
-    fontWeight: "inherit",
-    lineHeight: "inherit",
-    letterSpacing: "inherit",
+    color: grasp.shellText,
+    fontFamily: grasp.fontSans,
+    fontSize: grasp.textSm,
+    lineHeight: grasp.textSmLine,
+    fontWeight: grasp.weightMedium,
+    letterSpacing: grasp.shellTracking,
   },
 });
+
+// Where the row's name stood when renaming started, so the field's words stand exactly there.
+const fieldAt = stylex.create({
+  at: (start: string, top: string, bottom: string) => ({
+    paddingInlineStart: start,
+    paddingBlockStart: top,
+    paddingBlockEnd: bottom,
+  }),
+});
+
+/** Where the name stands in the row's link: from its start, its top and its bottom, in pixels. */
+interface NameAt {
+  start: number;
+  top: number;
+  bottom: number;
+}
+
+/** Reads where the row's name stands in its link, as renaming starts. */
+const nameIn = (link: HTMLElement | null): NameAt | undefined => {
+  const name = link?.querySelector<HTMLElement>("[data-row-name]");
+  if (link === null || name === null || name === undefined) {
+    return undefined;
+  }
+  const box = link.getBoundingClientRect();
+  const words = name.getBoundingClientRect();
+  const rtl = getComputedStyle(link).direction === "rtl";
+  return {
+    start: rtl ? box.right - words.right : words.left - box.left,
+    top: words.top - box.top,
+    bottom: box.bottom - words.bottom,
+  };
+};
 
 /** Whether an event came from the row itself, not its dots. */
 const fromRow = (event: Event): boolean =>
@@ -213,10 +249,12 @@ const Dots = ({
 const RenameField = ({
   label,
   name,
+  at,
   onDone,
 }: {
   label: string;
   name: string;
+  at: NameAt;
   /** With the new name, or none to keep the old one; `byKey` when a key ended it. */
   onDone: (name: string | undefined, byKey: boolean) => void;
 }) => {
@@ -253,7 +291,16 @@ const RenameField = ({
           end(undefined, true);
         }
       }}
-      {...stylex.props(styles.field, focus.field)}
+      data-row-rename=""
+      {...stylex.props(
+        styles.field,
+        fieldAt.at(
+          `${String(at.start)}px`,
+          `${String(at.top)}px`,
+          `${String(at.bottom)}px`
+        ),
+        focus.fieldInside
+      )}
     />
   );
 };
@@ -261,6 +308,8 @@ const RenameField = ({
 /** What the row's link takes from its actions: the rename hint, as its description. */
 export interface RowLinkExtras {
   "aria-describedby"?: string;
+  /** While the row is renamed: its link stays drawn under the field, out of reach. */
+  inert?: boolean;
 }
 
 const rtl = (element: Element) => getComputedStyle(element).direction === "rtl";
@@ -274,7 +323,7 @@ const towardStart = (event: globalThis.KeyboardEvent, element: Element) =>
   event.key === (rtl(element) ? "ArrowRight" : "ArrowLeft");
 
 /**
- * A row's link (drawn by `children`, with `look`) with its three dots, its context menu and its
+ * A row's link (drawn by `children`) with its three dots, its context menu and its
  * rename. A row with neither actions nor `onRename` is its link alone.
  */
 export const RowActions = ({
@@ -285,12 +334,9 @@ export const RowActions = ({
   actionsLabel,
   renameLabel,
   renamedLabel,
-  look,
   inList,
   children,
 }: RowActionProps & {
-  /** The row's look, for the box the rename field stands in. */
-  look: ReturnType<typeof stylex.props>;
   /** The row is one of a list's items (`keys="list"`): one tab stop, the dots reached by → from it. */
   inList: boolean;
   /** Draws the row's link, with what it takes from its actions. */
@@ -300,6 +346,7 @@ export const RowActions = ({
   const said = useWords("rename", renameWords);
   const hint = useId();
   const [renaming, setRenaming] = useState(false);
+  const [at, setAt] = useState<NameAt>();
   const holder = useRef<HTMLDivElement>(null);
   const hasActions = actions !== undefined && actions.length > 0;
   const renames = onRename !== undefined;
@@ -310,7 +357,9 @@ export const RowActions = ({
     holder.current?.querySelector<HTMLElement>("[data-row-dots] button") ??
     null;
   const startRename = (): void => {
-    if (renames) {
+    const where = nameIn(linkOf());
+    if (renames && where !== undefined) {
+      setAt(where);
       setRenaming(true);
     }
   };
@@ -387,21 +436,23 @@ export const RowActions = ({
       });
     }
   };
-  // While it is a field, the row is not a link: the field stands in the row's own box.
-  const row = renaming ? (
-    <div {...look}>
-      <RenameField
-        label={renameLabel ?? said.field}
-        name={label}
-        onDone={done}
-      />
-    </div>
-  ) : (
-    children(renames ? { "aria-describedby": hint } : {})
+  // While it is renamed, the row's link stays under the field, its words hidden and out of reach,
+  // and the field takes the link's whole box.
+  const extras: RowLinkExtras = renaming ? { inert: true } : {};
+  const row = children(
+    renames && !renaming ? { "aria-describedby": hint } : extras
   );
   const held = (
     <div ref={holder} {...stylex.props(styles.holder, rowActionsMarker)}>
       {row}
+      {renaming && at !== undefined && (
+        <RenameField
+          label={renameLabel ?? said.field}
+          name={label}
+          at={at}
+          onDone={done}
+        />
+      )}
       {renames && (
         <span id={hint} {...stylex.props(visuallyHidden)}>
           {said.hint}

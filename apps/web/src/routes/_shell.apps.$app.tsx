@@ -1,6 +1,5 @@
 import { useLingui } from "@lingui/react/macro";
 import { createFileRoute } from "@tanstack/react-router";
-import { LayoutGridIcon } from "lucide-react";
 
 import { OpenedApp } from "../apps/app-page.tsx";
 import { settingsSectionOf } from "../apps/app-settings.tsx";
@@ -13,6 +12,7 @@ import {
   readItemProject,
 } from "../frame/item-shell.tsx";
 import { PageLoading, PageNotLoaded } from "../frame/page-states.tsx";
+import { AppWindow as AppWindowMark } from "../grasp/icons/index.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 
 // An App, at one address for everyone (apps/app-page.tsx): its workspace
@@ -42,7 +42,7 @@ const AppRoute = () => {
     return (
       <PageNotLoaded
         crumbs={[{ label: t`Apps`, to: "/apps" }, { label: t`App` }]}
-        icon={LayoutGridIcon}
+        icon={AppWindowMark}
         notFound={t`App not found`}
         page={page}
       />

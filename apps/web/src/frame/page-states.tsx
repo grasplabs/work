@@ -1,7 +1,10 @@
-// The kit's Empty, not Grasp UI's, in these four states alone: they head
-// the page (its h1) or a section, and Grasp UI's Empty has no heading level
-// for its title yet. Their icons are Lucide's for the same reason, as the
-// pages that name what wasn't found pass them.
+import { Trans, useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
+import { Link, useRouter } from "@tanstack/react-router";
+import { use } from "react";
+import type { ReactNode } from "react";
+
+import { Button } from "../grasp/button/index.ts";
 import {
   Empty,
   EmptyContent,
@@ -9,22 +12,15 @@ import {
   EmptyHeader,
   EmptyMedia,
   EmptyTitle,
-} from "@grasp-os/ui/components/empty";
-import { Trans, useLingui } from "@lingui/react/macro";
-import * as stylex from "@stylexjs/stylex";
-import { Link, useRouter, useRouterState } from "@tanstack/react-router";
-import { SearchXIcon, TriangleAlertIcon } from "lucide-react";
-import { use } from "react";
-import type { ComponentType, ReactNode, SVGProps } from "react";
-
-import { ErrorText } from "../error-text.tsx";
-import { Button } from "../grasp/button/index.ts";
-import { Retry } from "../grasp/icons/index.ts";
+} from "../grasp/empty/index.ts";
+import type { IconData } from "../grasp/icons/index.ts";
 import { Skeleton } from "../grasp/skeleton/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { notLoadedText } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { InFrame } from "./in-frame.ts";
+import { PageFailed, useCoreReach } from "./page-failed.tsx";
+import type { FailedHeading } from "./page-failed.tsx";
 import { SiteHeader } from "./site-header.tsx";
 import type { Crumb } from "./site-header.tsx";
 
@@ -40,12 +36,6 @@ const styles = stylex.create({
     display: "flex",
     flexDirection: "column",
     minHeight: "100svh",
-  },
-  ways: {
-    display: "flex",
-    flexWrap: "wrap",
-    justifyContent: "center",
-    gap: grasp.space2,
   },
   lines: {
     display: "flex",
@@ -69,17 +59,18 @@ const styles = stylex.create({
 });
 
 /** What wasn't found, drawn as its page draws it: a workflow's icon, say. */
-type StateIcon = ComponentType<SVGProps<SVGSVGElement>>;
+type StateIcon = IconData;
 
-// How every page finds nothing, fails and loads, the same on each: the
-// prototype's not-found pattern (an empty state under the page's crumbs
-// that says why it isn't there), the error with core's reason and its
-// request ID and a way to try again, and skeletons while a slow read
-// comes. Where one stands for the whole page in the frame, it also offers
-// the way to Chat, so nobody is left on it with nowhere to go. Inside the
-// frame each keeps the site header, and with it the way to the sidebar on
-// a phone; outside it (core out of reach, a page such as sign-in) the
-// state fills the window on its own.
+// How every page finds nothing, fails and loads, the same on each, on
+// Grasp UI's parts: not found as Grasp UI's Empty under the page's crumbs,
+// saying why it isn't there; a page that failed as Grasp UI's pattern
+// ("A page that failed", frame/page-failed.tsx), with core's reason, its
+// reference to copy, whether Grasp can be reached, and a way to try again;
+// and skeletons while a slow read comes. Where one stands for the whole
+// page in the frame, it also offers the way to Chat, so nobody is left on
+// it with nowhere to go. Inside the frame each keeps the site header, and
+// with it the way to the sidebar on a phone; outside it (core out of
+// reach, a page such as sign-in) the state fills the window on its own.
 
 /** The page's place: in the frame's <main> under its header, or a window of its own. */
 const Place = ({
@@ -103,7 +94,13 @@ const Place = ({
  * where it sits under the page's own heading (a settings section's `h3`,
  * under the page's and the section's).
  */
-type StateHeading = "h1" | "h2" | "h3";
+type StateHeading = FailedHeading;
+
+/** A heading's level, as Grasp UI's Empty takes it. */
+const levels = { h1: 1, h2: 2, h3: 3 } as const satisfies Record<
+  StateHeading,
+  number
+>;
 
 /**
  * Whether a state offers the way to Chat: where it stands for the page in
@@ -116,14 +113,18 @@ const offersChat = (heading: StateHeading, inFrame: boolean): boolean =>
 /** The way on from a page that isn't there or didn't load: Chat, the product's home. */
 const GoToChat = () => {
   const { t } = useLingui();
-  return <Button render={<Link to="/" />}>{t`Go to Chat`}</Button>;
+  return (
+    <Button render={<Link to="/" />} variant="ghost">
+      {t`Go to Chat`}
+    </Button>
+  );
 };
 
 /** Not found, in a page that keeps its own frame, such as Knowledge with its sidebar. */
 export const NotFoundState = ({
   title,
-  icon: Icon = SearchXIcon,
-  heading: Heading = "h1",
+  icon,
+  heading = "h1",
 }: {
   title?: string;
   /** What wasn't found, as the sidebar draws it: a workflow's icon, say. */
@@ -136,11 +137,13 @@ export const NotFoundState = ({
   return (
     <Empty>
       <EmptyHeader>
-        <EmptyMedia variant="icon">
-          <Icon />
-        </EmptyMedia>
-        <EmptyTitle>
-          <Heading>{title ?? t`This page is not here`}</Heading>
+        {icon === undefined ? (
+          <EmptyMedia picture="lost" />
+        ) : (
+          <EmptyMedia icon={icon} />
+        )}
+        <EmptyTitle headingLevel={levels[heading]}>
+          {title ?? t`This page is not here`}
         </EmptyTitle>
         <EmptyDescription>
           {/* An address no page has, or a named thing that went away. */}
@@ -153,7 +156,7 @@ export const NotFoundState = ({
           )}
         </EmptyDescription>
       </EmptyHeader>
-      {offersChat(Heading, inFrame) ? (
+      {offersChat(heading, inFrame) ? (
         <EmptyContent>
           <GoToChat />
         </EmptyContent>
@@ -185,35 +188,14 @@ export const NotFound = ({
 };
 
 /**
- * Asks for the page again (its loaders read from core once more), while
- * not already `trying`; or, to `reload`, loads Grasp anew.
+ * The error, in a page that keeps its own frame, such as Knowledge with
+ * its sidebar: Grasp UI's failed page, its Try again reading the page's
+ * loaders from core once more (or, to `reload`, loading Grasp anew).
  */
-const TryAgain = ({ trying, reload }: { trying: boolean; reload: boolean }) => {
-  const router = useRouter();
-  const { t } = useLingui();
-  return (
-    <Button
-      disabled={trying}
-      icon={Retry}
-      onClick={() => {
-        if (reload) {
-          window.location.reload();
-          return;
-        }
-        void router.invalidate();
-      }}
-      variant="ink"
-    >
-      {trying ? t`Trying again…` : t`Try again`}
-    </Button>
-  );
-};
-
-/** The error, in a page that keeps its own frame, such as Knowledge with its sidebar. */
 export const ErrorState = ({
   reason,
   title,
-  heading: Heading = "h1",
+  heading = "h1",
   reload = false,
 }: {
   reason: string | undefined;
@@ -225,29 +207,30 @@ export const ErrorState = ({
   reload?: boolean;
 }) => {
   const { t } = useLingui();
-  const trying = useRouterState({ select: (state) => state.isLoading });
+  const router = useRouter();
   const inFrame = use(InFrame);
+  const reach = useCoreReach();
   return (
-    <Empty>
-      <EmptyHeader>
-        <EmptyMedia variant="icon">
-          <TriangleAlertIcon />
-        </EmptyMedia>
-        <EmptyTitle>
-          <Heading>{title ?? t`This page didn't load`}</Heading>
-        </EmptyTitle>
-        <EmptyDescription>
-          {/* Gone while trying, so the alert is announced again if it fails again. */}
-          {trying ? null : <ErrorText>{reason}</ErrorText>}
-        </EmptyDescription>
-      </EmptyHeader>
-      <EmptyContent>
-        <div {...stylex.props(styles.ways)}>
-          <TryAgain reload={reload} trying={trying} />
-          {offersChat(Heading, inFrame) ? <GoToChat /> : null}
-        </div>
-      </EmptyContent>
-    </Empty>
+    <PageFailed
+      heading={heading}
+      onRetry={async () => {
+        if (reload) {
+          window.location.reload();
+          return;
+        }
+        // The page's loaders read from core once more; still failing, the
+        // button says so.
+        await router.invalidate();
+        if (router.state.matches.some(({ status }) => status === "error")) {
+          throw new Error("The page did not load.");
+        }
+      }}
+      reach={reach}
+      reason={reason}
+      title={title ?? t`This page didn't load`}
+      wayOn={offersChat(heading, inFrame) ? <GoToChat /> : undefined}
+      whole={!inFrame}
+    />
   );
 };
 

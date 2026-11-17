@@ -10,6 +10,7 @@ import { createRoot } from "react-dom/client";
 import { CoreConnection } from "./core-connection.ts";
 import { reportError, reportUncaughtErrors } from "./error-reports.ts";
 import { NotFound } from "./frame/page-states.tsx";
+import { PartWords } from "./frame/part-words.tsx";
 import { startI18n } from "./i18n.ts";
 import { RouteError } from "./route-error.tsx";
 import { routeTree } from "./routeTree.gen.ts";
@@ -34,7 +35,7 @@ const router = createRouter({
   context: { core },
   // The page's card scrolls on its own (frame/app-frame.tsx), so a new
   // page starts at the top of it, not only of the window.
-  scrollToTopSelectors: ['[data-slot="app-shell-content"]'],
+  scrollToTopSelectors: ['[data-slot="app-shell-page"]'],
   defaultErrorComponent: RouteError,
   defaultNotFoundComponent: () => <NotFound />,
 });
@@ -57,7 +58,12 @@ declare module "@tanstack/react-router" {
  */
 const Routes = () => {
   const { i18n: current } = useLingui();
-  return <RouterProvider key={current.locale} router={router} />;
+  return (
+    // The parts' own words in the page's language (frame/part-words.tsx).
+    <PartWords>
+      <RouterProvider key={current.locale} router={router} />
+    </PartWords>
+  );
 };
 
 const root = document.querySelector("#root");

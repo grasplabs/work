@@ -1,6 +1,8 @@
 import type { ModelEffort } from "@grasp-os/shared/models";
+import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
+import { useState } from "react";
 import type { ReactNode } from "react";
 
 import { formatNumber } from "../format.ts";
@@ -13,10 +15,12 @@ import {
 import type { ComposerFile } from "../grasp/composer/index.ts";
 import { accepted, useAttachmentWords } from "./chat-files.tsx";
 import type { CardFile } from "./chat-files.tsx";
+import { useOwnComposerLook } from "./composer-look.ts";
 import { useComposerMentions } from "./mentions.tsx";
 import type { Mentionable } from "./mentions.tsx";
 import { ModelControls } from "./model-controls.tsx";
 import { lacksModel, maxQuestionLength } from "./model-names.tsx";
+import { useDictation } from "./use-dictation.ts";
 
 // The box to ask in, everywhere work asks Grasp (Chat start, the chat's
 // page and the docked chat), as Grasp UI's reference for a chat product
@@ -66,8 +70,12 @@ export interface ChatComposerProps {
   failure?: string;
   /** Why a file the person chose stays out of the box. */
   fileProblem?: string;
-  /** Sends the question; rejects when it didn't go, which the box says (`failure`). */
+  /** Sends the question. */
   onSend: () => Promise<void> | void;
+  /** The last question didn't go: the box says Could not send, and why (`failure`), the words kept. */
+  sendFailed?: boolean;
+  /** Follows the box's own changes to `sendFailed`: typing again clears it. */
+  onSendFailedChange?: (failed: boolean) => void;
   onStop?: () => void;
   /** What the box is called, for a screen reader. */
   label?: string;
@@ -84,6 +92,14 @@ export interface ChatComposerProps {
   compact?: boolean;
   /** Glass over a backdrop: Chat start's. */
   surface?: "card" | "glass";
+  /** After send: a control not about this message, such as the idle bar's Open the chat. */
+  footer?: ReactNode;
+  /**
+   * Its working mark and words under it while Grasp answers: where no
+   * thread shows Grasp at work (the idle bar). Beside a thread, the
+   * thread's activity line is the one working mark.
+   */
+  showWorking?: boolean;
   /** Takes nothing for now, while something else is on its way to core. */
   disabled?: boolean;
   /** The longest message it takes; a question's by default. */
@@ -137,17 +153,35 @@ const useLengthWords = () => {
   };
 };
 
-/** Where the assistant is, as the Composer shows it: answering, out of use, or waiting. */
+/**
+ * Whether Grasp has just finished an answer here: from the moment it stops
+ * working until it works again. The Composer plays its halo once for it.
+ */
+const useJustAnswered = (running: boolean): boolean => {
+  const [was, setWas] = useState(running);
+  const [answered, setAnswered] = useState(false);
+  if (was !== running) {
+    setWas(running);
+    setAnswered(was);
+  }
+  return answered && !running;
+};
+
+/** Where the assistant is, as the Composer shows it: answering, just done, out of use, or waiting. */
 const activityOf = (
   running: boolean,
+  answered: boolean,
   off: boolean,
   /** What stands in the text's place: the questions say themselves when nothing can be sent. */
   takeover: ReactNode
-): "idle" | "working" | "disabled" => {
+): "idle" | "working" | "success" | "disabled" => {
   if (running) {
     return "working";
   }
-  return off && takeover === undefined ? "disabled" : "idle";
+  if (off && takeover === undefined) {
+    return "disabled";
+  }
+  return answered ? "success" : "idle";
 };
 
 /** The box to ask in. Controlled: the page keeps the text and the model. */
@@ -165,6 +199,8 @@ export const ChatComposer = ({
   failure,
   fileProblem,
   onSend,
+  sendFailed,
+  onSendFailedChange,
   onStop,
   label,
   placeholder,
@@ -177,6 +213,8 @@ export const ChatComposer = ({
   onMentions,
   compact = false,
   surface,
+  footer,
+  showWorking,
   disabled = false,
   maxLength = maxQuestionLength,
   takeover,
@@ -189,9 +227,17 @@ export const ChatComposer = ({
   // No AI provider to call yet: the box takes nothing. Not while the models
   // are still being read, so what is typed then stays.
   const noProvider = models !== undefined && lacksModel(model);
+  const answered = useJustAnswered(running);
+  const dictating = useDictation(text, onText);
+  const look = useOwnComposerLook();
   return (
     <Composer
-      activity={activityOf(running, noProvider || disabled, takeover)}
+      accent={look.accent}
+      activity={activityOf(running, answered, noProvider || disabled, takeover)}
+      edge={look.edge}
+      footer={footer}
+      {...dictating}
+      showWorking={showWorking}
       compact={compact}
       attachments={attachmentsOf(files)}
       attachmentsLabel={t`Files to send`}
@@ -206,6 +252,7 @@ export const ChatComposer = ({
               onAttach(chosen);
             }}
             uploadLabel={t`Attach a file`}
+            actionsLabel={t`This chat`}
           />
         )
       }
@@ -239,9 +286,20 @@ export const ChatComposer = ({
         }
       }}
       onStop={onStop}
+      sendFailed={sendFailed}
+      onSendFailedChange={onSendFailedChange}
       mentionItems={mentioning?.items}
       mentionKinds={mentioning?.kinds}
       mentionsEmptyLabel={t`Nothing found`}
+      mentionsFoundLabel={(count) =>
+        t`${plural(count, { one: "# result", other: "# results" })}`
+      }
+      mentionsLabel={t({ message: "Mention", context: "the mention menu" })}
+      mentionsLoadingLabel={t`Looking`}
+      commandsLabel={t`Commands`}
+      dropLabel={t`Drop to add`}
+      successLabel={t({ message: "Done", context: "an answer is done" })}
+      uploadingLabel={t`Sending waits for the files to upload`}
       mentionsLoading={mentioning?.loading}
       onMention={(item) => {
         mentioning?.onMention(item);

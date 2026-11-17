@@ -58,7 +58,6 @@ export const ProfileName = ({ name }: { name: string }) => {
     <SettingRow
       {...(failure === undefined ? {} : { error: failure })}
       failedLabel={t`Could not save. Your name is kept.`}
-      help={t`As your team sees it.`}
       label={t`Name`}
       onRetry={() => {
         if (tried !== undefined) {

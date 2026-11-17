@@ -8,11 +8,13 @@ export type {
 } from "./bar";
 export {
   AppShellPanelBody,
+  AppShellPanelFoot,
   AppShellPanelHead,
   AppShellPanelTitle,
 } from "./head";
 export type {
   AppShellPanelBodyProps,
+  AppShellPanelFootProps,
   AppShellPanelHeadProps,
   AppShellPanelTitleProps,
 } from "./head";

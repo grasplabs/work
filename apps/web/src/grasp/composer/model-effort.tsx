@@ -1,21 +1,10 @@
-// ComposerModelEffort: the model and how hard it thinks, as one quiet control in a composer's
-// footer (composer.tsx). The chip shows the model's mark and name, and its effort as a scale of
-// dots. It opens one surface, effort first: the model as a row at its top, which opens the list
-// of models in its place, and under it the effort, a slider of the model's own levels. A model with
-// fewer levels has fewer stops; a model with none says so instead of a slider. At the strongest
-// level (a level's `top`) the light runs round the chip, as ComposerReasoning's does.
-//
-//   <ComposerModelEffort models={models} makers={makers} model={model} onModelChange={setModel}
-//     effort={effort} onEffortChange={setEffort} />
-//
-// ComposerModel and ComposerReasoning stay for a host that wants them apart: a long list of makers
-// to search, or effort that is not the model's. Every value is a token (src/tokens).
 "use client";
 
 /* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
 import { Popover, PopoverContent, PopoverTrigger } from "@ui-sdk/react/popover";
-import { useId, useRef, useState } from "react";
+import { mergeProps } from "@ui-sdk/react/primitive";
+import { useEffect, useId, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 
 import { focus } from "../focus/focus";
@@ -25,13 +14,16 @@ import { iconVars } from "../icons/icon.stylex";
 import { popoverStyles } from "../popover/styles";
 import { grasp, media } from "../tokens/tokens.stylex";
 import { popup } from "../tokens/tokens.values";
+import { ChipTip } from "./chip-tip";
 import { useComposerDisabled } from "./context";
 import { controlStyles } from "./control";
 import { ComposerEffort } from "./effort";
+import type { ComposerEffortLook } from "./effort";
 import { stopEscape } from "./escape";
 import type { ComposerModelMaker, ComposerModelOption } from "./model";
-import { LitEdge, Scale } from "./reasoning";
+import { LitEdge } from "./reasoning";
 import type { ComposerReasoningOption } from "./reasoning";
+import { tabOutTarget } from "./tab-out";
 
 /** One model, with the levels of effort it offers. */
 export interface ComposerModelEffortOption extends ComposerModelOption {
@@ -75,6 +67,18 @@ export interface ComposerModelEffortProps {
    * @default "This model has one level of effort."
    */
   noEffortLabel?: string;
+  /**
+   * How the surface shows the levels: a list of rows (each name, its note, a tick on the chosen),
+   * or one segmented control with every level's name.
+   * @default "rows"
+   */
+  effortLook?: ComposerEffortLook;
+  /**
+   * At the strongest level (a level's `top`), the working light round the chip. Off, the word
+   * "Max" says it alone.
+   * @default false
+   */
+  topLight?: boolean;
 }
 
 const noMakers: ComposerModelMaker[] = [];
@@ -132,10 +136,11 @@ const styles = stylex.create({
     flexShrink: 0,
     color: grasp.muted,
   },
+  // No inset of its own: its heading, its levels' names and its note stand on the model row's
+  // mark, its tick under the model row's chevron, and its rows' fill spans as the model row's does.
   effort: {
     display: "grid",
     minWidth: 0,
-    paddingInline: grasp.space2,
     paddingBlockStart: grasp.space1,
     borderBlockStartWidth: grasp.hairline,
     borderBlockStartStyle: "solid",
@@ -144,6 +149,7 @@ const styles = stylex.create({
   none: {
     margin: 0,
     paddingBlock: grasp.space2,
+    paddingInline: grasp.space2,
     color: grasp.muted,
     fontFamily: grasp.fontSans,
     fontSize: grasp.textXs,
@@ -198,6 +204,65 @@ const styles = stylex.create({
   },
   lit: {
     color: grasp.ink,
+  },
+  // The chip's mark, words and nothing else: they can shrink, so the chevron keeps its room.
+  chipValue: {
+    minWidth: 0,
+    flexShrink: 1,
+  },
+  // The name and the level: one line tall, wrapping, so a level that no longer fits goes to a
+  // second line that is never seen (it is still in the chip's name, its tooltip and the surface).
+  // The name always stands first on the seen line. Never cut to one letter: the words keep 4ch,
+  // three letters and the ellipsis.
+  chipWords: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignContent: "flex-start",
+    alignItems: "center",
+    columnGap: grasp.space1,
+    rowGap: 0,
+    flexShrink: 1,
+    height: grasp.textXsLine,
+    overflow: "hidden",
+  },
+  // The words' floor: eight characters and the ellipsis (the whole name when shorter), so names
+  // alike in their start ("gpt-6-luna", "gpt-6-mini") stay apart. Below it only when the footer has
+  // nothing else to give (useChipRoom), and then never under three letters.
+  chipFloor: (floor: string) => ({ minWidth: floor }),
+  chipFloorLast: {
+    minWidth: "4ch",
+  },
+  // At the last floor the chip takes the room its own inset wastes, beside the mark and the chevron.
+  chipTight: {
+    paddingInline: grasp.space1,
+  },
+  // The model's name, in ink. Short of room, the level leaves first: the line breaks on the whole
+  // name (its basis), so the level wraps out of sight as soon as both do not fit. Then the name is
+  // cut, down to the words' floor.
+  chipName: {
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: "auto",
+    maxWidth: "max-content",
+    minWidth: 0,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    color: grasp.ink,
+  },
+  // The level: quieter, never cut; it leaves the line whole when the name needs the room.
+  chipLevel: {
+    flexShrink: 0,
+    whiteSpace: "nowrap",
+    color: grasp.muted,
+  },
+  // Gone for want of room: the chip closes up on the name (useChipRoom).
+  chipLevelGone: {
+    display: "none",
+  },
+  chipShrinks: {
+    flexShrink: 1,
+    maxWidth: "100%",
   },
 });
 
@@ -282,43 +347,176 @@ const ModelList = ({
   </ul>
 );
 
-/** The chip: the model's mark and name, its effort's scale, and the light round it at the top level. */
+/** The chip: the maker's mark, the model's name, its level in a word, and the chevron. */
+/** A computed length in pixels ("8px"), or 0 for one that is not ("normal"). */
+const pixels = (value: string) => Number(value.replace("px", "")) || 0;
+
+/** The room the footer has left over: its width less its parts' and the gaps between them. */
+const footerSpare = (footer: HTMLElement) => {
+  const style = getComputedStyle(footer);
+  const parts = [...footer.children].filter(
+    (part) =>
+      part.getClientRects().length > 0 &&
+      getComputedStyle(part).position !== "absolute"
+  );
+  const used = parts.reduce(
+    (sum, part) => sum + part.getBoundingClientRect().width,
+    0
+  );
+  const gaps = (parts.length - 1) * pixels(style.columnGap);
+  const inset =
+    pixels(style.paddingInlineStart) + pixels(style.paddingInlineEnd);
+  return footer.clientWidth - inset - used - gaps;
+};
+
+/**
+ * What the chip's words may show, from the room they have (their width, less what runs past the
+ * chip's own box, plus the footer's spare room): the level only beside the whole name (else it
+ * leaves, and the chip closes up on the name); under the floor only when the footer has nothing
+ * else to give. Read again as the chip or the footer changes size. The level's width and the floor
+ * are read while they show, so leaving and coming back happen at the same width: nothing flickers.
+ * Before this has read (the server's HTML), the level wraps out of sight by itself (chipWords).
+ */
+const useChipRoom = (chip: HTMLElement | null) => {
+  const [room, setRoom] = useState<{
+    last: boolean;
+    levelGone: boolean;
+    floor: number | null;
+  }>({ last: false, levelGone: false, floor: null });
+  const levelWidth = useRef(0);
+  useEffect(() => {
+    const footer = chip?.closest<HTMLElement>('[data-slot="composer-footer"]');
+    const read = () => {
+      // Found anew each time: a new choice draws the words anew (the value's key).
+      const words = chip?.querySelector<HTMLElement>("[data-chip-words]");
+      if (
+        chip === null ||
+        words === null ||
+        words === undefined ||
+        footer === null ||
+        footer === undefined
+      ) {
+        return;
+      }
+      const name = words.querySelector<HTMLElement>(
+        '[data-slot="composer-model-effort-name"]'
+      );
+      // The floor: eight characters and the ellipsis (nine of the font's figure width), never more
+      // than the whole name, whose letters may be narrower than that.
+      const whole = name?.scrollWidth ?? 0;
+      const context = document.createElement("canvas").getContext("2d");
+      if (context !== null && name !== null) {
+        context.font = getComputedStyle(name).font;
+      }
+      const floor = Math.min(whole, (context?.measureText("0").width ?? 0) * 9);
+      const level = words.querySelector<HTMLElement>(
+        '[data-slot="composer-model-effort-level"]'
+      );
+      if (level !== null && level.getClientRects().length > 0) {
+        levelWidth.current = level.getBoundingClientRect().width;
+      }
+      // What the words could have: their width, less what already runs past the chip's own box,
+      // plus the footer's spare room.
+      const value = words.parentElement ?? words;
+      const past = Math.max(
+        0,
+        value.scrollWidth - value.clientWidth,
+        chip.scrollWidth - chip.clientWidth
+      );
+      const have =
+        words.getBoundingClientRect().width - past + footerSpare(footer) + 0.5;
+      const gap = pixels(getComputedStyle(words).columnGap);
+      setRoom({
+        last: have < floor,
+        levelGone: level !== null && have < whole + gap + levelWidth.current,
+        floor,
+      });
+    };
+    // Watched once the chip is on the page in its footer; before that, nothing to read.
+    const observer = new ResizeObserver(read);
+    if (chip !== null && footer !== null && footer !== undefined) {
+      observer.observe(chip);
+      observer.observe(footer);
+    }
+    return () => {
+      observer.disconnect();
+    };
+  }, [chip]);
+  return room;
+};
+
 const Chip = ({
   props,
   mark,
   name,
-  at,
-  count,
+  level,
   lit,
   value,
 }: {
   props: Record<string, unknown>;
   mark: IconData | undefined;
   name: string;
-  at: number;
-  count: number;
+  level: string | undefined;
   lit: boolean;
   value: string;
-}) => (
-  <button
-    {...props}
-    type="button"
-    data-slot="composer-model-effort"
-    data-top={lit || undefined}
-    {...stylex.props(controlStyles.control, focus.ring, lit && styles.lit)}
-  >
-    <span aria-hidden="true" {...stylex.props(controlStyles.reach)} />
-    {lit ? <LitEdge /> : null}
-    <span key={value} {...stylex.props(controlStyles.value)}>
-      {mark === undefined ? null : <Icon icon={mark} />}
-      <span {...stylex.props(controlStyles.words, controlStyles.narrowWords)}>
-        {name}
+}) => {
+  const [node, setNode] = useState<HTMLElement | null>(null);
+  const { last, levelGone, floor } = useChipRoom(node);
+  return (
+    <button
+      {...mergeProps(props, { ref: setNode })}
+      type="button"
+      data-slot="composer-model-effort"
+      data-top={lit || undefined}
+      {...stylex.props(
+        controlStyles.control,
+        styles.chipShrinks,
+        focus.ring,
+        lit && styles.lit,
+        last && styles.chipTight
+      )}
+    >
+      <span aria-hidden="true" {...stylex.props(controlStyles.reach)} />
+      {lit ? <LitEdge /> : null}
+      <span
+        key={value}
+        {...stylex.props(controlStyles.value, styles.chipValue)}
+      >
+        {mark === undefined ? null : <Icon icon={mark} />}
+        <span
+          data-chip-words={last ? "last" : ""}
+          {...stylex.props(
+            styles.chipWords,
+            styles.chipFloor(
+              floor === null ? `${Math.min(9, name.length)}ch` : `${floor}px`
+            ),
+            last && styles.chipFloorLast
+          )}
+        >
+          <span
+            data-slot="composer-model-effort-name"
+            {...stylex.props(styles.chipName)}
+          >
+            {name}
+          </span>
+          {level === undefined ? null : (
+            <span
+              data-slot="composer-model-effort-level"
+              data-gone={levelGone || undefined}
+              {...stylex.props(
+                styles.chipLevel,
+                levelGone && styles.chipLevelGone
+              )}
+            >
+              {level}
+            </span>
+          )}
+        </span>
       </span>
-      {count > 1 && at !== -1 ? <Scale at={at} count={count} /> : null}
-    </span>
-    <Icon icon={ChevronDown} />
-  </button>
-);
+      <Icon icon={ChevronDown} />
+    </button>
+  );
+};
 
 /** What the chip and the surface show for the chosen model and level. */
 const readChoice = (
@@ -339,6 +537,7 @@ const readChoice = (
     levels,
     at,
     lit: level?.top === true,
+    level: levels.length > 1 ? level?.label : undefined,
     said:
       levels.length > 1 && level !== undefined
         ? `${name}, ${level.label}`
@@ -346,19 +545,21 @@ const readChoice = (
   };
 };
 
-/** The effort: its slider, or, for a model with one level, a line that says so. */
+/** The effort: every level by name, as rows or segments, or for a model with one level a line that says so. */
 const EffortPart = ({
   levels,
   value,
   onValueChange,
   label,
   noneLabel,
+  look,
 }: {
   levels: ComposerReasoningOption[];
   value: string;
   onValueChange: (value: string) => void;
   label: string;
   noneLabel: string;
+  look: ComposerEffortLook;
 }) => (
   <div {...stylex.props(styles.effort)}>
     {levels.length > 1 ? (
@@ -367,6 +568,7 @@ const EffortPart = ({
         value={value}
         onValueChange={onValueChange}
         label={label}
+        look={look}
       />
     ) : (
       <p {...stylex.props(styles.none)}>{noneLabel}</p>
@@ -387,18 +589,25 @@ export const ComposerModelEffort = ({
   modelLabel = "Model",
   effortLabel = "Effort",
   noEffortLabel = "This model has one level of effort.",
+  effortLook = "rows",
+  topLight = false,
 }: ComposerModelEffortProps) => {
   const disabled = useComposerDisabled();
   const [open, setOpen] = useState(false);
   const [listing, setListing] = useState(false);
   const header = useRef<HTMLButtonElement | null>(null);
   const listId = useId();
-  const { current, name, mark, levels, at, lit, said } = readChoice(
-    models,
-    makers,
-    model,
-    effort
-  );
+  const {
+    current,
+    name,
+    mark,
+    levels,
+    at,
+    lit: top,
+    level,
+    said,
+  } = readChoice(models, makers, model, effort);
+  const lit = topLight && top;
 
   const back = () => {
     setListing(false);
@@ -408,6 +617,17 @@ export const ComposerModelEffort = ({
   // One Escape does one thing: with the list open it goes back to the effort; otherwise it closes
   // the surface. Either way no listener of the host's hears it.
   const keys = (event: KeyboardEvent<HTMLElement>) => {
+    // Tab from the surface's last stop: on to the next stop after the chip, the surface closed.
+    const out =
+      event.key === "Tab"
+        ? tabOutTarget(event.currentTarget, event.target, event.shiftKey)
+        : undefined;
+    if (out !== undefined) {
+      event.preventDefault();
+      setOpen(false);
+      out.focus();
+      return;
+    }
     if (event.key === "Escape") {
       event.preventDefault();
       if (listing) {
@@ -430,15 +650,20 @@ export const ComposerModelEffort = ({
       <PopoverTrigger
         disabled={disabled}
         aria-label={`${label}: ${said}`}
+        // Too narrow for its words, the chip shows them whole in a tooltip.
         render={(props: Record<string, unknown>) => (
-          <Chip
-            props={props}
-            mark={mark}
-            name={name}
-            at={at}
-            count={levels.length}
-            lit={lit}
-            value={`${model} ${effort}`}
+          <ChipTip
+            label={said}
+            render={(tip) => (
+              <Chip
+                props={mergeProps(props, tip)}
+                mark={mark}
+                name={name}
+                level={level}
+                lit={lit}
+                value={`${model} ${effort}`}
+              />
+            )}
           />
         )}
       />
@@ -498,6 +723,7 @@ export const ComposerModelEffort = ({
               onValueChange={onEffortChange}
               label={effortLabel}
               noneLabel={noEffortLabel}
+              look={effortLook}
             />
           )}
         </div>

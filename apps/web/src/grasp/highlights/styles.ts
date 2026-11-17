@@ -33,6 +33,8 @@ export const highlightStyles = stylex.create({
     borderBottomStyle: "solid",
     borderBottomColor: { default: grasp.line, [FORCED]: "CanvasText" },
   },
+  // Bare, inside a card: the card's own room and ground serve, so none of its own.
+  bare: { padding: 0, backgroundColor: "transparent" },
   // The title row: the name, and an icon at the end, on the title's first line however many lines
   // it wraps to, so the icons of a row of highlights line up.
   head: {

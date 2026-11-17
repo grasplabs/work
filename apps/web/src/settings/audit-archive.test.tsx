@@ -19,10 +19,13 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { LogExport } from "../activity/audit-log.tsx";
-import { ArchiveSearch, RetentionRows } from "./audit-archive.tsx";
+import { auditFilterOf, LogBar, LogRecords } from "../activity/audit-log.tsx";
+import type { LogSearch } from "../activity/log-search.ts";
+import { RetentionRows } from "./audit-archive.tsx";
 
-// Settings › Audit trail › Archived events and Retention against core's
+// Settings › Audit trail › the archive (searched from the events' Filters,
+// read a stretch at a time, and exported with the log) and Retention (in
+// the Integrity and archive dialog), against core's
 // audit API as the page reaches it over RPC (the boundary from the web
 // app), faked: an archive of `stretches`, newest first, a stretch per
 // page as core reads it, filtered by action, and the deployment's
@@ -107,23 +110,39 @@ const settled = async (): Promise<void> => {
   });
 };
 
+const directory = { people: new Map(), apps: new Map() };
+
+/**
+ * The events as the page shows them for `search`: the bar over them, the
+ * first page read as the page's loader reads it, and the retention rows.
+ */
 const shown = async (
   session: ReturnType<typeof fakeAudit>["session"],
-  action?: string
+  search: LogSearch
 ): Promise<void> => {
   const core = {
     withSession: async <T,>(
       run: (reached: typeof session) => Promise<T>
     ): Promise<T> => await run(session),
   };
+  const first =
+    search.archive === true
+      ? await session.audit.searchArchive(auditFilterOf(search))
+      : undefined;
   const rootRoute = createRootRoute({
     component: () => (
       <>
-        <ArchiveSearch
-          directory={{ people: new Map(), apps: new Map() }}
-          search={action === undefined ? {} : { action }}
-        />
-        <LogExport search={action === undefined ? {} : { action }} />
+        <LogBar directory={directory} search={search} />
+        {first === undefined ? null : (
+          <LogRecords
+            directory={directory}
+            first={first}
+            onDetails={() => {
+              // Not under test.
+            }}
+            search={search}
+          />
+        )}
         <RetentionRows />
       </>
     ),
@@ -161,9 +180,8 @@ const press = async (name: string) => {
   await settled();
 };
 
-/** The events listed in the archive's dialog. */
-const listed = (): number =>
-  document.querySelectorAll('[role="dialog"] table tbody tr').length;
+/** The archived events listed. */
+const listed = (): number => document.querySelectorAll("table tbody tr").length;
 
 const text = (): string => document.body.textContent ?? "";
 
@@ -178,7 +196,7 @@ describe("Settings › Audit trail › Archive and retention", () => {
     document.body.innerHTML = "";
   });
 
-  it("searches the archive only when asked, with the page's filters, and pages through it a stretch at a time", async () => {
+  it("searches the archive with the page's filters, and pages through it a stretch at a time", async () => {
     const { session, asked } = fakeAudit({
       stretches: [
         [archived(7, "test.c"), archived(6, "test.b")],
@@ -186,15 +204,11 @@ describe("Settings › Audit trail › Archive and retention", () => {
       ],
       retention: kept,
     });
-    await shown(session, "test.b");
-    const before = asked.length;
-
-    await press("Search the archive");
+    await shown(session, { archive: true, action: "test.b" });
     const first = listed();
     await press("Older");
 
-    expect({ before, asked, first, older: listed() }).toStrictEqual({
-      before: 0,
+    expect({ asked, first, older: listed() }).toStrictEqual({
       asked: [
         { action: "test.b", before: undefined },
         { action: "test.b", before: 6 },
@@ -206,7 +220,7 @@ describe("Settings › Audit trail › Archive and retention", () => {
 
   it("downloads the audit trail with its archive, filtered as shown, as CSV or JSON", async () => {
     const { session } = fakeAudit({ stretches: [], retention: kept });
-    await shown(session, "test.b");
+    await shown(session, { archive: true, action: "test.b" });
     const opened: string[] = [];
     const assign = vi
       .spyOn(window.location, "assign")
@@ -218,8 +232,7 @@ describe("Settings › Audit trail › Archive and retention", () => {
         // oxlint-disable-next-line no-await-in-loop -- one menu at a time
         await press("Export");
         const item = [...document.querySelectorAll('[role="menuitem"]')].find(
-          (each) =>
-            each.textContent?.trim() === `Export ${format} with the archive`
+          (each) => each.textContent?.trim() === `${format}, with the archive`
         );
         // oxlint-disable-next-line no-await-in-loop -- as above
         await act(async () => {
@@ -241,7 +254,7 @@ describe("Settings › Audit trail › Archive and retention", () => {
 
   it("shows how long Grasp keeps events and run details", async () => {
     const { session } = fakeAudit({ stretches: [], retention: kept });
-    await shown(session);
+    await shown(session, {});
 
     expect({
       text: text().includes("180 days"),

@@ -46,7 +46,6 @@ import {
 } from "../connections/workflows-using.tsx";
 import { ErrorText } from "../error-text.tsx";
 import { formatDate, formatDayMonth } from "../format.ts";
-import { IntegrationsIcon } from "../frame/integrations-icon.tsx";
 import {
   LoadingLines,
   NotFound,
@@ -55,6 +54,7 @@ import {
 } from "../frame/page-states.tsx";
 import { Page } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
+import { Cable } from "../grasp/icons/index.ts";
 import { loadFromCore, notLoadedText } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 
@@ -745,7 +745,7 @@ const IntegrationRoute = () => {
     return (
       <PageNotLoaded
         crumbs={[integrations, { label: parsed?.id ?? t`Integration` }]}
-        icon={IntegrationsIcon}
+        icon={Cable}
         notFound={t`App not found`}
         page={catalog}
       />
@@ -755,7 +755,7 @@ const IntegrationRoute = () => {
     return (
       <NotFound
         crumbs={[integrations, { label: t`Not found` }]}
-        icon={IntegrationsIcon}
+        icon={Cable}
         title={t`App not found`}
       />
     );

@@ -86,7 +86,7 @@ const shown = async (
   const page = createRoute({
     getParentRoute: () => shell,
     path: "/",
-    component: () => <SignInSection organization="Noordkade Finance" />,
+    component: () => <SignInSection />,
   });
   const router = createRouter({
     routeTree: rootRoute.addChildren([shell.addChildren([page])]),
@@ -129,21 +129,16 @@ describe("Settings › Workspace › Sign-in", () => {
     await shown(session);
 
     expect({
-      microsoft: text().includes(
-        "Only accounts of the tenant 7f9a2c1e-0000-4000-8000-000000000001."
-      ),
-      google: text().includes(
-        "Only accounts of the Google Workspace acme.test."
-      ),
-      offered: text().includes("On the sign-in page"),
-      missing: text().includes("Not offered: its secret isn’t set"),
+      microsoft: text().includes("Only your organization’s work accounts."),
+      google: text().includes("Only work accounts at acme.test."),
+      // The one whose secret isn't set says so; the other says nothing.
+      notOffered: text().split("Not on the sign-in page yet").length - 1,
       noSecret:
         text().includes("client-ms") || text().includes("client-google"),
     }).toStrictEqual({
       microsoft: true,
       google: true,
-      offered: true,
-      missing: true,
+      notOffered: 1,
       noSecret: false,
     });
   });

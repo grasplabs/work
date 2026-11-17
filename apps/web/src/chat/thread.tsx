@@ -30,18 +30,17 @@ import {
   ChatMessageAction,
 } from "../grasp/chat-message/index.ts";
 import { Retry } from "../grasp/icons/index.ts";
-import { Spinner } from "../grasp/spinner/index.ts";
+import { Markdown } from "../grasp/markdown/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { Thread } from "../grasp/thread/index.ts";
-import type { ThreadWords } from "../grasp/thread/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { useMemberAdmin } from "../use-member-admin.ts";
-import { AnswerMarkdown } from "./answer-markdown.tsx";
 import {
   SeeInBrain,
   useAnswerThinking,
   useThinkingStep,
 } from "./answer-thinking.tsx";
+import { AnswerWords } from "./answer-words.tsx";
 import { answeredOf } from "./answered.ts";
 import { AskedLine } from "./asked-questions.tsx";
 import { pendingPlan, ThreadPlan } from "./build-progress.tsx";
@@ -53,7 +52,7 @@ import { recoveredSteps } from "./recovered.ts";
 import { SavedMemoryLine } from "./saved-memory.tsx";
 import { readingFileOf, signOf } from "./sign.ts";
 import type { WorkState } from "./sign.ts";
-import { AnswerCited, AnswerSources, useCitedDocuments } from "./sources.tsx";
+import { AnswerCited, useCitedDocuments } from "./sources.tsx";
 import { turnsOf, workedFor } from "./turns.ts";
 import { widgetLinesOf } from "./widget-lines.ts";
 
@@ -117,11 +116,6 @@ const styles = stylex.create({
   },
   start: {
     justifySelf: "start",
-  },
-  centre: {
-    display: "grid",
-    placeItems: "center",
-    paddingBlock: grasp.space8,
   },
 });
 
@@ -374,46 +368,16 @@ const useActivitySteps = (): ((
 /** Agent activity's own words, in the page's language. */
 const useActivityWords = (): Partial<AgentActivityWords> => {
   const { t } = useLingui();
+  // A step Grasp never finished because the answer stopped reads as
+  // stopped, where the library says skipped.
   return {
     states: {
-      waiting: t`Waiting`,
-      working: t`Working`,
-      done: t`Done`,
-      failed: t`Failed`,
+      waiting: t({ message: "Waiting", context: "a step's state" }),
+      working: t({ message: "Working", context: "a step's state" }),
+      done: t({ message: "Done", context: "a step's state" }),
+      failed: t({ message: "Failed", context: "a step's state" }),
       skipped: t`Stopped`,
     },
-    showMore: t`Show more`,
-    showLess: t`Show less`,
-    input: t`Input`,
-    result: t`Result`,
-    error: t`Error`,
-    stepFailed: (title) => t`${title} failed`,
-    summarize: (steps) => {
-      const count = steps.length;
-      return t`${plural(count, { one: "Took # step", other: "Took # steps" })}`;
-    },
-  };
-};
-
-/** The Thread's own words, in the page's language. */
-const useThreadWords = (): Partial<ThreadWords> => {
-  const { t, i18n } = useLingui();
-  return {
-    unread: t`Unread`,
-    unreadFrom: t`Unread messages from here`,
-    loadingOlder: t`Loading older messages`,
-    jumpToNew: () => t`Jump to latest, new messages`,
-    arrived: (count) =>
-      t`${plural(count, { one: "# new message", other: "# new messages" })}`,
-    today: t({ message: "Today", context: "a date line in a chat" }),
-    yesterday: t({ message: "Yesterday", context: "a date line in a chat" }),
-    day: (day, sameYear) =>
-      new Intl.DateTimeFormat(
-        i18n.locale,
-        sameYear
-          ? { weekday: "long", day: "numeric", month: "long" }
-          : { day: "numeric", month: "long", year: "numeric" }
-      ).format(day),
   };
 };
 
@@ -492,29 +456,12 @@ const KeyFailed = () => (
 );
 
 /**
- * A stored reply's words that cite documents: until sources move onto
- * Grasp UI's Sources, its own Markdown with each cited span marked, and
- * "Based on N sources" under it.
+ * A stored reply's words that cite documents: each cited span marked, and
+ * the documents (read by AnswerCited around it) listed under them.
  */
-const CitedWords = ({
-  text,
-  cited,
-}: {
-  text: string;
-  cited: readonly string[];
-}) => {
+const CitedWords = ({ text, cut }: { text: string; cut: boolean }) => {
   const sources = useCitedDocuments();
-  return (
-    <>
-      <AnswerMarkdown
-        cited={cited}
-        sources={sources}
-        text={text}
-        written={false}
-      />
-      <AnswerSources cited={sources} />
-    </>
-  );
+  return <AnswerWords cited={sources} cut={cut} text={text} writing={false} />;
 };
 
 /** One reply's words, its citations inline where it cites documents. */
@@ -523,11 +470,19 @@ const ReplyWords = ({
   chatId,
   writing,
 }: {
-  reply: { id?: number; text: string; citations?: Answer["citations"] };
+  reply: {
+    id?: number;
+    text: string;
+    citations?: Answer["citations"];
+    end?: Answer["end"];
+  };
   chatId: string;
   writing: boolean;
 }) => {
-  if (reply.text.trim() === "") {
+  const { text } = reply;
+  // Stopped part way: Markdown tidies what it was still writing.
+  const cut = reply.end === "cancelled";
+  if (text.trim() === "") {
     return null;
   }
   if (
@@ -535,17 +490,11 @@ const ReplyWords = ({
     reply.citations === undefined ||
     reply.citations.length === 0
   ) {
-    // Model output, so work's own renderer: a link out of Grasp asks first
-    // and carries no address, until the library's Markdown takes a link
-    // renderer (`renderLink`).
-    return <AnswerMarkdown text={reply.text} written={writing} />;
+    return <AnswerWords cut={cut} text={text} writing={writing} />;
   }
   return (
     <AnswerCited cited={{ chatId, messageId: reply.id }}>
-      <CitedWords
-        cited={reply.citations.map(({ documentId }) => documentId)}
-        text={reply.text}
-      />
+      <CitedWords cut={cut} text={text} />
     </AnswerCited>
   );
 };
@@ -554,17 +503,23 @@ const ReplyWords = ({
 const statusOf = ({
   live,
   failed,
+  stopped,
   shows,
 }: {
   live: boolean;
   failed: boolean;
+  /** The person stopped it part way: its words kept, said as stopped. */
+  stopped: boolean;
   /** It shows steps or words already. */
   shows: boolean;
-}): "thinking" | "streaming" | "done" | "failed" => {
+}): "thinking" | "streaming" | "done" | "stopped" | "failed" => {
   if (live) {
     return shows ? "streaming" : "thinking";
   }
-  return failed ? "failed" : "done";
+  if (failed) {
+    return "failed";
+  }
+  return stopped ? "stopped" : "done";
 };
 
 /** One answer of Grasp's in the thread: what it stood on while it worked. */
@@ -729,7 +684,6 @@ const Question = ({
   message: Asked;
   asked: Answer["asked"];
 }) => {
-  const { t } = useLingui();
   const answered =
     asked === undefined ? undefined : answeredOf(asked, message.text);
   return (
@@ -737,7 +691,7 @@ const Question = ({
       {message.files === undefined || message.files.length === 0 ? null : (
         <FileCards files={message.files} />
       )}
-      <Message dateTime={message.at} from="person" personLabel={t`You`}>
+      <Message dateTime={message.at} from="person">
         {answered === undefined ? (
           message.text
         ) : (
@@ -854,11 +808,6 @@ const AnswerEnding = ({
   const { t } = useLingui();
   return (
     <>
-      {ending.end === "cancelled" ? (
-        <Text element="p" size="sm" tone="muted">
-          <Trans>Stopped.</Trans>
-        </Text>
-      ) : null}
       {ending.end === "cut_off" ? (
         <Text element="p" size="sm" tone="muted">
           <Trans>The answer was cut off at the model&apos;s limit.</Trans>
@@ -878,7 +827,6 @@ const AnswerEnding = ({
           {t`Try again`}
         </Button>
       ) : null}
-      {ending.keyFailedForAdmin ? <KeyFailed /> : null}
     </>
   );
 };
@@ -981,7 +929,12 @@ const answerStateOf = (
     last,
     failed,
     ending,
-    status: statusOf({ live, failed, shows }),
+    status: statusOf({
+      live,
+      failed,
+      stopped: !live && last?.end === "cancelled",
+      shows,
+    }),
   };
 };
 
@@ -1012,53 +965,62 @@ const AnswerRow = ({
   const copyText = words.join("\n\n");
   const retry = context.onRetry;
   return (
-    <Message
-      actions={
-        retry === undefined || failed ? undefined : (
-          <ChatMessageAction
-            icon={Retry}
-            aria-label={t`Ask again`}
-            onClick={() => {
-              retry();
-            }}
+    <>
+      <Message
+        // An answer with no words (its turn asked the person instead) has
+        // nothing to act on.
+        actions={
+          retry === undefined || failed || copyText === "" ? undefined : (
+            <ChatMessageAction
+              icon={Retry}
+              aria-label={t`Ask again`}
+              onClick={() => {
+                retry();
+              }}
+            />
+          )
+        }
+        actionsLabel={t`Answer actions`}
+        copyLabels={{
+          copy: t`Copy the answer`,
+          copied: t`Copied`,
+          failed: t`Could not copy`,
+        }}
+        copyText={live || copyText === "" ? undefined : copyText}
+        failedLabel={
+          ending.keyFailedForAdmin
+            ? t`Your AI provider is refusing your key.`
+            : failureMessage(last?.failure, i18n)
+        }
+        from="agent"
+        name="Grasp"
+        nameHidden
+        onRetry={ending.providerMissing ? undefined : retry}
+        status={ending.providerMissing ? "done" : status}
+        thinkingLabel={context.workingLabel}
+        thoughts={
+          thought.thoughts === undefined ? undefined : (
+            <Markdown
+              size="sm"
+              source={thought.thoughts}
+              streaming={status === "thinking"}
+            />
+          )
+        }
+        thoughtSeconds={thought.seconds}
+      >
+        {status === "thinking" ? undefined : (
+          <AnswerBody
+            context={context}
+            ending={ending}
+            steps={steps}
+            turn={turn}
           />
-        )
-      }
-      actionsLabel={t`Answer actions`}
-      copyLabels={{
-        copy: t`Copy the answer`,
-        copied: t`Copied`,
-        failed: t`Could not copy`,
-      }}
-      copyText={live || copyText === "" ? undefined : copyText}
-      doneLabel={t`Answer ready`}
-      failedLabel={
-        ending.keyFailedForAdmin
-          ? t`Your AI provider is refusing your key.`
-          : failureMessage(last?.failure, i18n)
-      }
-      from="agent"
-      name="Grasp"
-      onRetry={ending.providerMissing ? undefined : retry}
-      retryLabel={t`Try again`}
-      status={ending.providerMissing ? "done" : status}
-      streamingLabel={t`Writing`}
-      thinkingLabel={context.workingLabel}
-      thoughtLabel={(time) =>
-        t`${plural(time, { one: "Thought for # second", other: "Thought for # seconds" })}`
-      }
-      thoughts={thought.thoughts}
-      thoughtSeconds={thought.seconds}
-    >
-      {status === "thinking" ? undefined : (
-        <AnswerBody
-          context={context}
-          ending={ending}
-          steps={steps}
-          turn={turn}
-        />
-      )}
-    </Message>
+        )}
+      </Message>
+      {/* Under the failure it fixes: the way to check or replace the key. */}
+      {ending.keyFailedForAdmin ? <KeyFailed /> : null}
+    </>
   );
 };
 
@@ -1110,7 +1072,6 @@ export const ChatThread = ({
   children?: ReactNode;
 }) => {
   const { t } = useLingui();
-  const threadWords = useThreadWords();
   const workingLabelOf = useWorkingLabel();
   const results = resultsOf(messages);
   const { lastAnswer, answersLast } = lastAnswerOf(messages);
@@ -1205,20 +1166,13 @@ export const ChatThread = ({
   const answerTo = running
     ? rows.findLast((row) => row.kind === "question")?.id
     : undefined;
-  if (!loaded) {
-    return (
-      <div {...stylex.props(styles.centre)}>
-        <Spinner aria-label={t`Loading…`} />
-      </div>
-    );
-  }
   return (
     <div {...stylex.props(styles.room)}>
       <Thread
         answerTo={answerTo}
         aria-label={t`Messages`}
         items={items}
-        jumpLabel={t`Jump to latest`}
+        loading={!loaded}
         renderItem={(row) => (
           <div {...stylex.props(!compact && styles.column)}>
             {row.kind === "question" ? (
@@ -1230,7 +1184,6 @@ export const ChatThread = ({
             {row.kind === "after" ? row.children : null}
           </div>
         )}
-        words={threadWords}
       />
     </div>
   );

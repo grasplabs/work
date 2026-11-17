@@ -1,9 +1,11 @@
 import type { Member, OrganizationTeam } from "@grasp-os/shared/members";
 import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { useEffect, useId, useState } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
+import { formatList } from "../format.ts";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -12,6 +14,7 @@ import {
   AlertDialogContent,
   AlertDialogTitle,
 } from "../grasp/alert-dialog/index.ts";
+import { AvatarGroup } from "../grasp/avatar/index.ts";
 import { Button } from "../grasp/button/index.ts";
 import {
   Dialog,
@@ -29,6 +32,7 @@ import {
   DropdownMenuTrigger,
 } from "../grasp/dropdown-menu/index.ts";
 import { Field, FieldError, FieldLabel } from "../grasp/field/index.ts";
+import { focus } from "../grasp/focus/focus.ts";
 import { Form } from "../grasp/form/index.ts";
 import { Edit, More, Plus, Trash } from "../grasp/icons/index.ts";
 import { Input } from "../grasp/input/index.ts";
@@ -36,22 +40,19 @@ import {
   Item,
   ItemGroup,
   ItemContent,
+  ItemDescription,
   ItemTitle,
   ItemActions,
 } from "../grasp/item/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
 import { Text } from "../grasp/text/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
-import {
-  LoadingLines,
-  RowNote,
-  SectionNotLoaded,
-  TitleLine,
-} from "./section.tsx";
-import { createTeam, deleteTeam, renameTeam } from "./team-changes.ts";
-import { TeamMembersDialog } from "./team-members-dialog.tsx";
+import { LoadingLines, RowNote, SectionNotLoaded } from "./section.tsx";
+import { createTeam, deleteTeam } from "./team-changes.ts";
+import { isTaken, TeamDialog } from "./team-members-dialog.tsx";
 import { useTeamChange } from "./use-team-change.ts";
 
 // Teams, for admins (GRA-1296): the organization's teams, each with how
@@ -60,6 +61,25 @@ import { useTeamChange } from "./use-team-change.ts";
 // They aren't the onboarding's roster teams, which are a list of their
 // own. Better Auth checks the role on every
 // change and core on every read; only admins see this tab at all.
+
+const styles = stylex.create({
+  // The team's name opens it: a button that looks like the row's title.
+  open: {
+    margin: 0,
+    padding: 0,
+    appearance: "none",
+    borderWidth: 0,
+    backgroundColor: "transparent",
+    color: "inherit",
+    font: "inherit",
+    textAlign: "start",
+    cursor: "pointer",
+    borderRadius: grasp.cornerMark,
+    textDecorationLine: { default: "none", ":hover": "underline" },
+    textUnderlineOffset: "0.2em",
+  },
+  ends: { display: "flex", alignItems: "center", gap: grasp.space3 },
+});
 
 /** What the tab shows: the teams, and the members to put in them. */
 interface TeamsData {
@@ -82,18 +102,6 @@ const readTeams = async (
     },
     left
   );
-
-/** Whether `name` is another team's already, whatever its case. */
-const isTaken = (
-  name: string,
-  teams: readonly OrganizationTeam[],
-  except?: string
-): boolean => {
-  const wanted = name.trim().toLocaleLowerCase();
-  return teams.some(
-    (team) => team.id !== except && team.name.toLocaleLowerCase() === wanted
-  );
-};
 
 /** A team's name, asked for in a dialog: for a new team, or a new name. */
 const TeamNameDialog = ({
@@ -206,7 +214,8 @@ const NewTeamButton = ({
           setOpen(true);
         }}
         size="sm"
-        variant="ink"
+        // Quiet: Invite is the page's one main action.
+        variant="quiet"
       >
         {t`New team`}
       </Button>
@@ -230,28 +239,41 @@ const NewTeamButton = ({
   );
 };
 
-/** One team: its name, how many are in it, and what an admin does with it. */
+/** How many are in a team, said under its name. */
+const useCounted = (count: number): string => {
+  const { t } = useLingui();
+  return count === 0
+    ? t`No one yet: open it to add people`
+    : t`${plural(count, { one: "# person", other: "# people" })}`;
+};
+
+/**
+ * One team: its name, which opens its dialog; how many are in it; its
+ * people as a stack of faces; and a menu to rename it (in its dialog) or
+ * delete it, which asks first.
+ */
 const TeamRow = ({
   team,
-  teams,
   members,
+  onOpen,
   onChanged,
 }: {
   team: OrganizationTeam;
-  teams: readonly OrganizationTeam[];
   members: readonly Member[];
+  onOpen: () => void;
   onChanged: () => Promise<void>;
 }) => {
   const { t } = useLingui();
-  const [open, setOpen] = useState<"rename" | "delete" | "members">();
+  const [deleting, setDeleting] = useState(false);
   const { busy, failure, run } = useTeamChange(onChanged);
   const { name } = team;
-  const count = team.memberIds.length;
-  const close = (next: boolean): void => {
-    if (!next) {
-      setOpen(undefined);
-    }
-  };
+  // Only the organization's members count: someone removed is no longer in it.
+  const byId = new Map(members.map((member) => [member.userId, member]));
+  const people = team.memberIds.flatMap((userId) => {
+    const member = byId.get(userId);
+    return member === undefined ? [] : [{ name: member.name }];
+  });
+  const counted = useCounted(people.length);
   const remove = async (): Promise<void> => {
     const refused = await run(
       async () => {
@@ -264,113 +286,89 @@ const TeamRow = ({
     }
   };
   return (
-    <>
-      <Item size="sm">
-        <ItemContent>
-          <ItemTitle>
-            <TitleLine
-              detail={
-                <RowNote failure={open === "delete" ? undefined : failure}>
-                  {t`${plural(count, { one: "# member", other: "# members" })}`}
-                </RowNote>
-              }
-            >
-              {name}
-            </TitleLine>
-          </ItemTitle>
-        </ItemContent>
-        <ItemActions>
-          <>
-            <Button
-              aria-label={t`Members of ${name}`}
-              onClick={() => {
-                setOpen("members");
+    <Item size="xs">
+      <ItemContent>
+        <ItemTitle>
+          {/* The name opens the team: the row holds a menu, so it can't be one link. */}
+          <button
+            onClick={onOpen}
+            type="button"
+            {...stylex.props(styles.open, focus.ring)}
+          >
+            {name}
+          </button>
+        </ItemTitle>
+        <ItemDescription>
+          <RowNote failure={deleting ? undefined : failure}>{counted}</RowNote>
+        </ItemDescription>
+      </ItemContent>
+      <ItemActions>
+        <span {...stylex.props(styles.ends)}>
+          {people.length > 0 ? (
+            <AvatarGroup
+              aria-label={t`People in ${name}`}
+              people={people}
+              words={{
+                more: (count) => `+${String(count)}`,
+                name: (shown, rest) => {
+                  const listed = formatList(shown);
+                  return rest === 0
+                    ? listed
+                    : t`${listed} and ${plural(rest, { one: "# other", other: "# others" })}`;
+                },
               }}
-              size="sm"
-            >
-              {t`Members`}
-            </Button>
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                icon={More}
-                aria-label={t`Actions for ${name}`}
-                size="sm"
-                variant="ghost"
-              />
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem
-                  disabled={busy}
-                  icon={Edit}
-                  onSelect={() => {
-                    setOpen("rename");
-                  }}
-                >
-                  {t`Rename`}
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  variant="danger"
-                  disabled={busy}
-                  icon={Trash}
-                  onSelect={() => {
-                    setOpen("delete");
-                  }}
-                >
-                  {t`Delete`}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </>
-        </ItemActions>
-      </Item>
-      <TeamNameDialog
-        except={team.id}
-        initial={name}
-        onOpenChange={close}
-        onSave={async (renamed) =>
-          await run(
-            async () => {
-              await renameTeam(team.id, renamed);
-            },
-            t`${name} couldn't be renamed. Try again.`
-          )
-        }
-        open={open === "rename"}
-        submit={t`Rename`}
-        teams={teams}
-        title={t`Rename ${name}`}
-      />
-      <AlertDialog onOpenChange={close} open={open === "delete"}>
-        <AlertDialogContent>
-          <AlertDialogTitle>{t`Delete ${name}?`}</AlertDialogTitle>
-          <AlertDialogDescription>
-            {t`What is shared with this team stops being shared with its members through it, and the workflows it owns no longer have a team. Its members stay in the organization.`}
-          </AlertDialogDescription>
-          <AlertDialogFooter>
-            <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
-            <AlertDialogAction
-              action={remove}
-              failedLabel={t`Could not delete`}
-              variant="danger"
-              workingLabel={t`Deleting`}
-            >
-              {t`Delete`}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-      <TeamMembersDialog
-        members={members}
-        onChanged={onChanged}
-        onOpenChange={close}
-        open={open === "members"}
-        team={team}
-      />
-    </>
+            />
+          ) : null}
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              aria-label={t`Actions for ${name}`}
+              disabled={busy}
+              icon={More}
+              size="xs"
+              variant="ghost"
+            />
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem icon={Edit} onSelect={onOpen}>
+                {t`Rename`}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                icon={Trash}
+                onSelect={() => {
+                  setDeleting(true);
+                }}
+                variant="danger"
+              >
+                {t`Delete`}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </span>
+        <AlertDialog onOpenChange={setDeleting} open={deleting}>
+          <AlertDialogContent>
+            <AlertDialogTitle>{t`Delete ${name}?`}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t`What is shared with this team stops being shared with its members through it, and the workflows it owns no longer have a team. Its members stay in the organization.`}
+            </AlertDialogDescription>
+            <AlertDialogFooter>
+              <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
+              <AlertDialogAction
+                action={remove}
+                failedLabel={t`Could not delete`}
+                variant="danger"
+                workingLabel={t`Deleting`}
+              >
+                {t`Delete`}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </ItemActions>
+    </Item>
   );
 };
 
-/** The organization's teams, once read. */
+/** The organization's teams, once read: a second card under the people. */
 const TeamsList = ({
   data,
   onChanged,
@@ -380,10 +378,12 @@ const TeamsList = ({
 }) => {
   const { t } = useLingui();
   const { teams, members } = data;
+  const [opened, setOpened] = useState<string>();
+  const open = teams.find(({ id }) => id === opened);
   return (
     <SectionCard
       actions={<NewTeamButton onChanged={onChanged} teams={teams} />}
-      description={t`Share Apps, Knowledge and workflows with a whole team at once.`}
+      density="compact"
       flush={teams.length > 0}
       title={t`Teams`}
     >
@@ -396,12 +396,25 @@ const TeamsList = ({
               key={team.id}
               members={members}
               onChanged={onChanged}
+              onOpen={() => {
+                setOpened(team.id);
+              }}
               team={team}
-              teams={teams}
             />
           ))}
         </ItemGroup>
       )}
+      {/* A new dialog for each team opened, so it starts from that team's name and people. */}
+      <TeamDialog
+        key={open?.id ?? "closed"}
+        members={members}
+        onChanged={onChanged}
+        onClose={() => {
+          setOpened(undefined);
+        }}
+        team={open}
+        teams={teams}
+      />
     </SectionCard>
   );
 };

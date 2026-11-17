@@ -25,11 +25,13 @@ import type { Group, InboxItem } from "./items.ts";
 /** The inbox's groups, under the names its filter gives them. */
 const groupLabel: Record<Exclude<Group, "all">, MessageDescriptor> = {
   workflows: msg({ message: "Workflows", context: "inbox filter" }),
-  brain: msg({ message: "Brain", context: "inbox filter" }),
+  asked: msg({ message: "Asked of you", context: "inbox filter" }),
+  brain: msg({ message: "Open in the Brain", context: "inbox filter" }),
+  outcomes: msg({ message: "Unknown outcomes", context: "inbox filter" }),
   apps: msg({ message: "Apps and connections", context: "inbox filter" }),
 };
 
-const groupOrder = ["workflows", "brain", "apps"] as const;
+const groupOrder = ["asked", "brain", "outcomes", "workflows", "apps"] as const;
 
 /** The frame's read of what waits, one for each person who signs in. */
 const reads = new WeakMap<
@@ -52,7 +54,12 @@ const readFor = (
     const waiting = await readWaiting(core, identity, {
       markShownRead: false,
     });
-    const items = inboxItems(waiting, identity, new Date().toISOString());
+    // What is only to follow (the interviews while nothing waits on the admin) isn't counted here.
+    const items = inboxItems(
+      waiting,
+      identity,
+      new Date().toISOString()
+    ).filter(({ calm }) => calm !== true);
     return items.length === 0 && unread(waiting).length > 0 ? undefined : items;
   };
   reads.set(identity, read);

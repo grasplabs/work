@@ -247,6 +247,29 @@ const styles = stylex.create({
     height: grasp.textSmLine,
   },
   leadAlone: { alignSelf: "center" },
+  // The default for a face (an Avatar): with a line under the title, centred on the title and that first line
+  // together, so a face sits between a person's name and email; when the words run longer (a long
+  // name, a wrapped line) it stays by the name rather than drifting to the block's middle.
+  mediaPair: {
+    height: {
+      default: grasp.textSmLine,
+      [stylex.when.ancestor(":has([data-slot=item-description])", itemMarker)]:
+        {
+          default: grasp.textSmLine,
+          ":has([data-slot=avatar])": `calc(2 * ${grasp.textSmLine} + ${grasp.space1})`,
+        },
+    },
+  },
+  mediaPairXs: {
+    height: {
+      default: grasp.textSmLine,
+      [stylex.when.ancestor(":has([data-slot=item-description])", itemMarker)]:
+        {
+          default: grasp.textSmLine,
+          ":has([data-slot=avatar])": `calc(2 * ${grasp.textSmLine})`,
+        },
+    },
+  },
   // align="center": the mark in the middle of the title and its line, at its own height.
   mediaCentred: { alignSelf: "center", height: "auto" },
   // In the parts shape: centred when the row has no description, read from the row.
@@ -380,9 +403,10 @@ export interface ItemMediaProps {
    */
   children?: ReactNode;
   /**
-   * Where a mark stands: on the title's line, or centred on the title and the line under it
-   * together, as a person's face beside their name and email.
-   * @default "title"
+   * Where a mark stands. By default a face (an Avatar), with a line under the title, is centred on
+   * the title and that line together (between a person's name and email), and stays by the name
+   * when the words run longer; any other mark, or a row without that line, on the title's line. `title` keeps it on the title's line;
+   * `center` centres it on all the words, however many lines they take.
    */
   align?: "title" | "center";
 }
@@ -400,16 +424,18 @@ const RowSize = createContext<ItemSize>("md");
 export const ItemMedia = ({
   icon,
   iconLook = "square",
-  align = "title",
+  align,
   children,
 }: ItemMediaProps) => {
   const size = useContext(RowSize);
   if (children !== undefined && children !== null) {
+    const pair = size === "xs" ? styles.mediaPairXs : styles.mediaPair;
     return (
       <span
         {...stylex.props(
           styles.mediaSlot,
           styles.leadAuto,
+          align === undefined && pair,
           align === "center" && styles.mediaCentred
         )}
       >

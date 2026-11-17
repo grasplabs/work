@@ -51,7 +51,6 @@ const LanguageRow = () => {
   return (
     <SettingRow label={label}>
       <LanguageSwitch
-        label={label}
         layout={styles.control}
         size="sm"
         onValueChange={(code) => {
@@ -80,7 +79,7 @@ const Profile = () => {
           <ProfileName name={identity.name} />
         )}
         <SettingRow
-          help={t`Your sign-in; your admin changes it.`}
+          info={t`Your sign-in; your admin changes it.`}
           label={t`Email`}
         >
           {(field) => (

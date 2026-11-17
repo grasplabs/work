@@ -24,6 +24,8 @@ export const FLOAT_MIN_HEIGHT = 280;
 export const FLOAT_MARGIN = 12;
 /** How near the shell's end edge, in pixels, a dragged window's pointer docks it when let go. */
 export const DOCK_ZONE = 64;
+/** How far, in pixels, the pointer may draw back from the end wall before the dock's ghost goes. */
+export const DOCK_SLACK = 24;
 /** How far, in pixels, a docked panel's head must be pulled before it lifts into a window. */
 export const PULL = 24;
 /** How far an arrow key moves or resizes it, in pixels; with Shift, five times as far. */

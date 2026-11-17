@@ -13,7 +13,7 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import type { MouseEvent, ReactNode, RefObject } from "react";
+import type { MouseEvent, ReactNode, RefObject, UIEvent } from "react";
 
 import { Button } from "../button";
 import { focus } from "../focus/focus";
@@ -23,6 +23,7 @@ import { simply } from "../motion/simply.stylex";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "../sheet";
 import { SidebarShellProvider } from "../sidebar/shell";
 import { grasp, media } from "../tokens/tokens.stylex";
+import { useWords, withGiven } from "../words/words";
 import { PageBar } from "./bar";
 import type { AppShellCrumb } from "./bar";
 import { CardLine } from "./card-line";
@@ -32,6 +33,7 @@ import type { PanelPosition } from "./floating";
 import { FOCUSABLE, placeOf } from "./focus-place";
 import { Panels, ShellCoverContext } from "./panels";
 import type { Cover } from "./panels";
+import { appShellWords } from "./words";
 
 /** What a caller may style: the shell's size and where it sits. Never its look. */
 export type AppShellLayoutStyle = LayoutStyle;
@@ -524,6 +526,11 @@ const styles = stylex.create({
     gridColumn: "1",
     minWidth: 0,
     minHeight: 0,
+    // The page scrolls down, never sideways: a child wider than the page is cut at its edge, as the
+    // card cuts what leaves it. A part that may be wide (a Table, a Code block, a Data grid) scrolls
+    // in its own box. (Beside a scroll down, a clip computes to hidden: no wheel, swipe or key moves
+    // it sideways, and handlePageScroll puts back what a focus or a script moved.)
+    overflowX: "hidden",
     overflowY: "auto",
     overscrollBehavior: "auto",
     // No bar (PRODUCT-RULES, src/scroll), the page's own scroller too.
@@ -1043,7 +1050,7 @@ const ShellMenu = ({
   bar,
   underBanner = false,
   label,
-  closeLabel = "Close the menu",
+  closeLabel: closeGiven,
   middle,
   phoneMiddle,
   open,
@@ -1065,6 +1072,10 @@ const ShellMenu = ({
   middle: ReactNode;
   phoneMiddle: "bar" | "sheet" | undefined;
 }) => {
+  const { closeMenu: closeLabel } = withGiven(
+    useWords("appShell", appShellWords),
+    { closeMenu: closeGiven }
+  );
   const top = phoneMiddle === "sheet" ? middle : undefined;
   // Opened by a press, focus goes to the layer itself, so no ring shows on its first item; by the
   // keyboard, to the first item, as it always did.
@@ -1452,6 +1463,16 @@ const isWhole = (
   page: "padded" | "whole" | undefined
 ) => bar === "none" || page === "whole";
 
+/**
+ * The page never stands scrolled sideways: a focus moved into a child wider than the page, or a
+ * script, can scroll a hidden axis, and the page goes back to its start at once.
+ */
+const handlePageScroll = (event: UIEvent<HTMLElement>) => {
+  if (event.currentTarget.scrollLeft !== 0) {
+    event.currentTarget.scrollLeft = 0;
+  }
+};
+
 /** The white card: the frame's bar or the floating Menu button, the page, and the dock. */
 const ShellCard = ({
   sidebar,
@@ -1481,7 +1502,7 @@ const ShellCard = ({
   page = "padded",
   roomBelow,
   breadcrumbLabel,
-  menuLabel = "Menu",
+  menuLabel,
   menuCloseLabel,
   dock,
   dockShown,
@@ -1490,6 +1511,9 @@ const ShellCard = ({
   setMenuOpen,
   banner,
 }: CardProps) => {
+  const menuWords = withGiven(useWords("appShell", appShellWords), {
+    menu: menuLabel,
+  });
   const room = roomBelow ?? (dock === undefined ? "page" : "chat");
   const whole = isWhole(bar, page);
   const framed =
@@ -1522,7 +1546,7 @@ const ShellCard = ({
       brand={brand}
       bar={bar}
       underBanner={underBanner}
-      label={menuLabel}
+      label={menuWords.menu}
       closeLabel={menuCloseLabel}
       middle={middle}
       phoneMiddle={phoneMiddle}
@@ -1594,6 +1618,7 @@ const ShellCard = ({
         data-slot="app-shell-page"
         data-page-whole={whole ? "" : undefined}
         inert={pageInert}
+        onScroll={handlePageScroll}
         {...stylex.props(
           styles.main,
           room === "chat" && styles.roomForChat,
@@ -1702,8 +1727,8 @@ export const AppShell = ({
   panelResizeLabel,
   panelsHeadLine,
   onPanelsClose,
-  panelsCloseLabel = "Close the panel",
-  panelsToggleLabel = "Show or hide the panel",
+  panelsCloseLabel,
+  panelsToggleLabel,
   covered = false,
   inert = false,
   sheetBelow,
@@ -1714,6 +1739,10 @@ export const AppShell = ({
   ...page
 }: AppShellProps) => {
   const sidebar = given;
+  const said = withGiven(useWords("appShell", appShellWords), {
+    closePanel: panelsCloseLabel,
+    togglePanel: panelsToggleLabel,
+  });
   const [sidebarOpen, setSidebarOpen] = useSidebarOpen(sidebar);
   const [sidebarPeeking, setSidebarPeeking] = useState(false);
   const look = shellLook(sheetBelow, sidebar, sidebarOpen);
@@ -1754,7 +1783,7 @@ export const AppShell = ({
       crowded={place.crowdedOver}
       aside={phone && aside}
       setAside={setAside}
-      panelsToggleLabel={panelsToggleLabel}
+      panelsToggleLabel={said.togglePanel}
       menuOpen={menuOpen}
       setMenuOpen={setMenuOpen}
     />
@@ -1814,7 +1843,7 @@ export const AppShell = ({
           onCrowdedChange={setCrowded}
           onClose={onPanelsClose}
           keep={keep}
-          closeLabel={panelsCloseLabel}
+          closeLabel={said.closePanel}
           headLine={panelsHeadLine}
         />
       </div>

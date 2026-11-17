@@ -111,10 +111,7 @@ const BillingPage = () => {
           {failure === undefined ? null : (
             <RowAlert variant="danger">{failure}</RowAlert>
           )}
-          <SettingRow
-            help={t`Invoices and receipts go here.`}
-            label={t`Billing email`}
-          >
+          <SettingRow label={t`Billing email`}>
             {(field) => (
               <SavedField
                 field={field}
@@ -155,7 +152,7 @@ const BillingPage = () => {
               />
             )}
           </SettingRow>
-          <SettingRow help={t`As invoices show it.`} label={t`VAT number`}>
+          <SettingRow label={t`VAT number`}>
             {(field) => (
               <SavedField
                 field={field}
@@ -168,10 +165,7 @@ const BillingPage = () => {
               />
             )}
           </SettingRow>
-          <SettingRow
-            help={t`Each invoice as a PDF.`}
-            label={t`Email invoices`}
-          >
+          <SettingRow label={t`Email invoices`}>
             <Switch
               checked={billing.emailInvoices}
               label={t`Email invoices`}
@@ -182,10 +176,7 @@ const BillingPage = () => {
               readOnly={readOnly}
             />
           </SettingRow>
-          <SettingRow
-            help={t`A receipt for each payment.`}
-            label={t`Email payment receipts`}
-          >
+          <SettingRow label={t`Email payment receipts`}>
             <Switch
               checked={billing.emailReceipts}
               label={t`Email payment receipts`}

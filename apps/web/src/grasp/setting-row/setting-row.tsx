@@ -8,7 +8,8 @@ import type { ReactNode } from "react";
 import { Alert } from "../alert";
 import type { AlertVariant } from "../alert";
 import { Button } from "../button";
-import { Info } from "../icons";
+import { visuallyHidden } from "../hidden/hidden";
+import { Icon, Info, Tick } from "../icons";
 import type { LayoutStyle } from "../layout/layout";
 import { Spinner } from "../spinner";
 import { grasp } from "../tokens/tokens.stylex";
@@ -72,6 +73,10 @@ export interface FactRowProps {
   label: string;
   /** One short line about it. */
   help?: string;
+  /** More about it behind an info mark, as a SettingRow's: anything longer than a short phrase. */
+  info?: string;
+  /** The info mark's name for a screen reader. @default "More about this setting" */
+  infoLabel?: string;
   /** Its value, in the control's place: words, a Badge, a Copy field. */
   children: ReactNode;
 }
@@ -106,6 +111,13 @@ export interface SettingsRowsProps {
 
 /** A row narrower than this puts its control under its words (the row's own width). */
 const NARROW = "@container setting-row (width < 34rem)";
+
+// Saved: the tick stands a moment, then leaves.
+const leave = stylex.keyframes({
+  "0%": { opacity: 1 },
+  "87%": { opacity: 1 },
+  "100%": { opacity: 0 },
+});
 
 const styles = stylex.create({
   rows: { display: "flex", flexDirection: "column", minWidth: 0 },
@@ -177,12 +189,39 @@ const styles = stylex.create({
     color: grasp.muted,
   },
   failed: { color: grasp.danger },
-  status: { display: "inline-flex", alignItems: "center", gap: grasp.space1 },
   control: {
+    position: "relative",
     display: "flex",
     alignItems: "center",
     justifyContent: "flex-end",
     minWidth: 0,
+  },
+  // Where the save is, beside the control and never under the name: a spinner while it saves, a
+  // tick once it has, in the room between the words and the control, so no row changes size. In a
+  // narrow row, where the control stands under the words, it stands over the control's end.
+  mark: {
+    position: "absolute",
+    insetInlineEnd: { default: "100%", [NARROW]: 0 },
+    insetBlockStart: { default: "50%", [NARROW]: "auto" },
+    insetBlockEnd: {
+      default: "auto",
+      [NARROW]: `calc(100% + ${grasp.space2})`,
+    },
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: grasp.iconSm,
+    height: grasp.iconSm,
+    marginInlineEnd: { default: grasp.space1, [NARROW]: 0 },
+    transform: { default: "translateY(-50%)", [NARROW]: "none" },
+    color: grasp.success,
+    pointerEvents: "none",
+  },
+  markLeaves: {
+    animationName: leave,
+    animationDuration: "2300ms",
+    animationTimingFunction: grasp.ease,
+    animationFillMode: "forwards",
   },
   value: {
     display: "flex",
@@ -221,16 +260,17 @@ const Line = ({
   failedLabel,
   retryLabel,
 }: LineProps) => {
-  if (state === "saving") {
+  // Saving and saved are drawn beside the control (the row's mark); here they are only said, and
+  // the help keeps its place, so nothing under the name changes.
+  if (state === "saving" || state === "saved") {
     return (
-      <span {...stylex.props(styles.status)}>
-        <Spinner size="sm" />
-        {savingLabel}
-      </span>
+      <>
+        {help !== undefined && <span id={id}>{help}</span>}
+        <span {...stylex.props(visuallyHidden)}>
+          {state === "saving" ? savingLabel : savedLabel}
+        </span>
+      </>
     );
-  }
-  if (state === "saved") {
-    return <span>{savedLabel}</span>;
   }
   if (state === "failed") {
     return (
@@ -321,6 +361,24 @@ export const SettingRow = ({
           </p>
         </div>
         <div {...stylex.props(styles.control)}>
+          {state === "saving" && (
+            <span
+              aria-hidden="true"
+              data-slot="setting-row-mark"
+              {...stylex.props(styles.mark)}
+            >
+              <Spinner size="sm" />
+            </span>
+          )}
+          {state === "saved" && (
+            <span
+              aria-hidden="true"
+              data-slot="setting-row-mark"
+              {...stylex.props(styles.mark, styles.markLeaves)}
+            >
+              <Icon icon={Tick} />
+            </span>
+          )}
           {typeof children === "function" ? children(field) : children}
         </div>
         {error !== undefined && (
@@ -334,17 +392,44 @@ export const SettingRow = ({
 };
 
 /** A fact nobody changes here, in a setting's columns: its value in place of a control. */
-export const FactRow = ({ label, help, children }: FactRowProps) => (
-  <div data-slot="fact-row" {...stylex.props(styles.box)}>
-    <div {...stylex.props(styles.row)}>
-      <div {...stylex.props(styles.words)}>
-        <span {...stylex.props(styles.name)}>{label}</span>
-        {help !== undefined && <p {...stylex.props(styles.help)}>{help}</p>}
+export const FactRow = ({
+  label,
+  help,
+  info,
+  infoLabel: infoLabelGiven,
+  children,
+}: FactRowProps) => {
+  const { info: infoLabel } = withGiven(
+    useWords("settingRow", settingRowWords),
+    { info: infoLabelGiven }
+  );
+  return (
+    <div data-slot="fact-row" {...stylex.props(styles.box)}>
+      <div {...stylex.props(styles.row)}>
+        <div {...stylex.props(styles.words)}>
+          <span {...stylex.props(styles.name)}>
+            {label}
+            {info !== undefined && (
+              <span {...stylex.props(styles.info)}>
+                <Tooltip>
+                  <TooltipTrigger
+                    icon={Info}
+                    aria-label={infoLabel}
+                    variant="ghost"
+                    size="xs"
+                  />
+                  <TooltipContent>{info}</TooltipContent>
+                </Tooltip>
+              </span>
+            )}
+          </span>
+          {help !== undefined && <p {...stylex.props(styles.help)}>{help}</p>}
+        </div>
+        <div {...stylex.props(styles.value)}>{children}</div>
       </div>
-      <div {...stylex.props(styles.value)}>{children}</div>
     </div>
-  </div>
-);
+  );
+};
 
 /** Something to know about a card's rows, a failure or a warning, as a row of its own. */
 export const RowAlert = ({ variant = "neutral", children }: RowAlertProps) => (

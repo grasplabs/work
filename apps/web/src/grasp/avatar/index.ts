@@ -5,3 +5,9 @@ export type {
   AvatarProps,
   AvatarSize,
 } from "./avatar";
+export { AvatarGroup } from "./group";
+export type {
+  AvatarGroupPerson,
+  AvatarGroupProps,
+  AvatarGroupWords,
+} from "./group";

@@ -6,7 +6,7 @@
 "use client";
 
 import * as stylex from "@stylexjs/stylex";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   Tooltip,
@@ -137,6 +137,23 @@ export const ChartTooltip = ({
   format,
   order = "given",
 }: ChartTooltipProps) => {
+  const { setValueFormat } = useChart();
+  // The tooltip writes the values: the chart's table writes them the same way, through one wrapper
+  // for good that reads the latest format.
+  const latest = useRef(format);
+  useEffect(() => {
+    latest.current = format;
+  });
+  // oxlint-disable-next-line react/hook-use-state -- a writer made once, never replaced
+  const [written] = useState(
+    () => (value: number) => latest.current?.(value) ?? String(value)
+  );
+  const writes = format !== undefined;
+  useEffect(() => {
+    if (writes) {
+      setValueFormat?.(written);
+    }
+  }, [writes, written, setValueFormat]);
   const { config, bars } = useChart();
   const reduced = useReducedMotion();
   const plot = usePlotArea();

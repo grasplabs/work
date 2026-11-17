@@ -66,10 +66,21 @@ const watchPointerFocus = (root: Document) => {
   }
   root.documentElement.dataset[flag] = "";
   let pointer = false;
+  // A press on what already has focus moves no focus, so focusin never hears it: the element is
+  // marked here, so a ring the keyboard drew earlier goes with the press (a press never shows the
+  // ring). A key on it brings the ring back.
   root.addEventListener(
     "pointerdown",
-    () => {
+    (event) => {
       pointer = true;
+      const active = root.activeElement;
+      if (
+        active instanceof HTMLElement &&
+        event.target instanceof Node &&
+        active.contains(event.target)
+      ) {
+        active.dataset.focusPointer = "";
+      }
     },
     { capture: true, passive: true }
   );
@@ -77,6 +88,10 @@ const watchPointerFocus = (root: Document) => {
     "keydown",
     () => {
       pointer = false;
+      const active = root.activeElement;
+      if (active instanceof HTMLElement) {
+        delete active.dataset.focusPointer;
+      }
     },
     { capture: true, passive: true }
   );
@@ -104,10 +119,12 @@ if (typeof document !== "undefined") {
 }
 
 export const focus = stylex.create({
+  // The keyboard's focus only: never after a press (data-focus-pointer), even on an element the
+  // keyboard focused before it was pressed.
   ring: {
     outline: {
       default: "none",
-      ":focus-visible": { default: line, [media.forced]: forcedLine },
+      [KEY]: { default: line, [media.forced]: forcedLine },
     },
     outlineOffset: {
       default: grasp.ringOffset,
@@ -119,7 +136,7 @@ export const focus = stylex.create({
   mark: {
     outline: {
       default: "none",
-      ":focus-visible": { default: line, [media.forced]: forcedLine },
+      [KEY]: { default: line, [media.forced]: forcedLine },
     },
     outlineOffset: grasp.ringOffsetMark,
   },
@@ -144,12 +161,12 @@ export const focus = stylex.create({
     },
   },
   words: {
-    outline: { default: "none", ":focus-visible": line },
+    outline: { default: "none", [KEY]: line },
     // 1px off the words, a pixel in from ring-offset-words: clears the letters and the next word.
     outlineOffset: `calc(${grasp.ringOffsetWords} - 1px)`,
   },
   inside: {
-    outline: { default: "none", ":focus-visible": line },
+    outline: { default: "none", [KEY]: line },
     outlineOffset: `calc(-1 * ${grasp.ringWidth})`,
   },
   field: {
@@ -245,7 +262,7 @@ export const focus = stylex.create({
     cornerShape: grasp.cornerShape,
     outline: {
       default: "none",
-      [stylex.when.ancestor(":focus-visible", focusMarker)]: line,
+      [stylex.when.ancestor(KEY, focusMarker)]: line,
     },
     outlineOffset: grasp.ringOffsetWords,
   },

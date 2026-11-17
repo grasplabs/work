@@ -897,6 +897,8 @@
   --grasp-avatar-xl: 64px;
   /* The system's edge, drawn inside an avatar and over its picture, so a white photo keeps its rim. */
   --grasp-avatar-edge: inset 0 0 0 1px var(--grasp-edge-tone);
+  /* An avatar in a control's own line: the agent a Composer asks. */
+  --grasp-avatar-2xs: 16px;
   /* Alert: alert. */
   /* The tint of a neutral alert: ink at a few per cent, so it reads on any ground, soft and night included. */
   --grasp-alert-fill-neutral: var(--grasp-ghost-fill-hover);
@@ -1507,10 +1509,10 @@
     var(--grasp-shell-ground),
     color-mix(in oklch, var(--grasp-shell-card) 94%, var(--grasp-shell-text))
   );
-  /* The peeking sidebar's lift: the card's in light, deeper in dark so it reads over a dark card. */
+  /* The peeking sidebar's lift: the card's shapes, deeper, so it reads lifted over a white or a dark card. */
   --grasp-shell-peek-shadow:
-    0 4px 4px 0 light-dark(oklch(0 0 0 / 0.02), oklch(0 0 0 / 0.3)),
-    0 4px 80px 8px light-dark(oklch(0 0 0 / 0.02), oklch(0 0 0 / 0.45)),
+    0 4px 4px 0 light-dark(oklch(0 0 0 / 0.05), oklch(0 0 0 / 0.3)),
+    0 4px 80px 8px light-dark(oklch(0 0 0 / 0.07), oklch(0 0 0 / 0.45)),
     0 0 0 1px light-dark(oklch(0 0 0 / 0.05), oklch(1 0 0 / 0.1));
   /* The ground of a menu opened from the sidebar or the bar: the card in light, a step above the card in dark. */
   --grasp-shell-popup: light-dark(var(--grasp-shell-card), oklch(0.26 0 0));
@@ -1648,8 +1650,11 @@
   --grasp-chart-line: var(--grasp-mint-deep);
   /* A plain bar's fill. */
   --grasp-chart-plain: var(--grasp-mint-deep);
-  /* The chart's faint grid. */
-  --grasp-chart-grid: var(--grasp-line);
+  /* The chart's grid: its own value, a step above the hairline (line), so the axes' lines read on a white card (Ruben: "no visible axes"). */
+  --grasp-chart-grid: light-dark(
+    oklch(0.29 0.05 162 / 0.18),
+    oklch(0.96 0.02 150 / 0.2)
+  );
   /* The lit cells of a dither fill, near the value. */
   --grasp-chart-dither-lit: var(--grasp-light-mint);
   /* The ground of a dither fill, at the floor: evergreen. */

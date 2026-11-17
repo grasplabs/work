@@ -1,13 +1,13 @@
 import { isAdmin, isMemberAdmin } from "@grasp-os/shared/roles";
 import { useLingui } from "@lingui/react/macro";
 import { createFileRoute, redirect } from "@tanstack/react-router";
-import { BotIcon } from "lucide-react";
 
 import { AgentPage, agentTabOf } from "../agents/agent-page.tsx";
 import type { AgentTab, FirstAgentAccess } from "../agents/agent-page.tsx";
 import type { Session } from "../core.ts";
 import { PageLoading, PageNotLoaded } from "../frame/page-states.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
+import { Agent as AgentMark } from "../grasp/icons/index.ts";
 import { loadFromCore, orNull } from "../load-from-core.tsx";
 import { readManaged } from "./_shell.agents.index.tsx";
 
@@ -44,7 +44,7 @@ const AgentRoutePage = () => {
     return (
       <PageNotLoaded
         crumbs={[...crumbs, { label: t`Agent` }]}
-        icon={BotIcon}
+        icon={AgentMark}
         notFound={t`Agent not found`}
         page={page}
       />
@@ -56,7 +56,7 @@ const AgentRoutePage = () => {
     return (
       <PageNotLoaded
         crumbs={[...crumbs, { label: t`Agent` }]}
-        icon={BotIcon}
+        icon={AgentMark}
         notFound={t`Agent not found`}
         page={{ state: "missing" }}
       />

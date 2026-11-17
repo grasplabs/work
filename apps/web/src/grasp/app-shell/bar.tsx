@@ -9,7 +9,10 @@ import { focus } from "../focus/focus";
 import { simply } from "../motion/simply.stylex";
 import { Skeleton } from "../skeleton";
 import { grasp, media } from "../tokens/tokens.stylex";
+import { useWords, withGiven } from "../words/words";
 import { cardLine } from "./card-line.stylex";
+import { RenamableName } from "./rename";
+import { appShellWords } from "./words";
 
 /** A step on the way to the page, in the page bar. The last is the page itself. */
 export interface AppShellCrumb {
@@ -19,6 +22,19 @@ export interface AppShellCrumb {
   href?: string;
   /** The link itself, when a router draws it: `<Link to="/projects" />`. It takes the crumb's look and name. */
   render?: ReactElement;
+  /**
+   * The page's own name only (the last crumb, with no `href`): runs with its new name when the person
+   * renames it in place, by a double-click, F2 or Enter, in a small popup (Enter keeps it, Escape
+   * the old one). Without it, the name cannot be renamed. Keep the name in your own state.
+   */
+  onRename?: (name: string) => void;
+  /**
+   * Whether the rename popup is open, when you open it yourself (a menu's Rename): keep it with
+   * `onRenamingChange`. Leave it out and the name opens it on its own keys.
+   */
+  renaming?: boolean;
+  /** Runs when the rename popup opens or closes. */
+  onRenamingChange?: (renaming: boolean) => void;
 }
 
 /** Every prop an AppShellBar takes: what the page bar says. */
@@ -631,6 +647,20 @@ const CrumbStep = ({
   if (crumb.href !== undefined || crumb.render !== undefined) {
     return <CrumbLink crumb={crumb} />;
   }
+  const { onRename: handleRename, onRenamingChange: handleRenamingChange } =
+    crumb;
+  if (current && handleRename !== undefined) {
+    return (
+      <RenamableName
+        name={crumb.label}
+        onRename={handleRename}
+        open={crumb.renaming}
+        onOpenChange={handleRenamingChange}
+        look={styles.page}
+        current
+      />
+    );
+  }
   return (
     <span
       aria-current={current ? "page" : undefined}
@@ -943,7 +973,7 @@ export const PageBar = ({
   middle,
   phoneMiddle = "bar",
   actions,
-  breadcrumbLabel = "Breadcrumb",
+  breadcrumbLabel,
   loading = false,
   barEnd,
 }: AppShellBarProps & {
@@ -952,13 +982,11 @@ export const PageBar = ({
   barEnd?: ReactNode;
 }) => {
   const [bar, setBar] = useState<HTMLElement | null>(null);
-  useFitBar(bar);
-  const where = whereOf({
-    loading,
-    crumbs,
-    phoneCrumbs,
-    label: breadcrumbLabel,
+  const { breadcrumb } = withGiven(useWords("appShell", appShellWords), {
+    breadcrumb: breadcrumbLabel,
   });
+  useFitBar(bar);
+  const where = whereOf({ loading, crumbs, phoneCrumbs, label: breadcrumb });
   const head =
     brand === undefined ? null : (
       <div

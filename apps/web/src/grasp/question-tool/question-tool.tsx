@@ -618,8 +618,11 @@ const ChoiceList = ({
     return element === null ? undefined : watchEdges(element);
   }, []);
   return (
+    // Out of the tab order (Q1, PROOF-2026-11-17.md): Firefox makes a list that scrolls a Tab stop
+    // of its own, with no ring; each answer takes the keys and scrolls into view.
     <div
       ref={box}
+      tabIndex={-1}
       {...stylex.props(
         styles.list,
         columns === 2 && styles.twoColumnList,

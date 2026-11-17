@@ -8,6 +8,7 @@ import * as stylex from "@stylexjs/stylex";
 import { useEffect, useRef } from "react";
 import type { RefObject } from "react";
 
+import { simply } from "../motion/simply.stylex";
 import { grasp } from "../tokens/tokens.stylex";
 import { nothingDrawn } from "./drawing";
 import type { DrawOptions, Drawing } from "./drawing";
@@ -40,6 +41,24 @@ const styles = stylex.create({
   dithered: {
     imageRendering: "pixelated",
     maskImage: grasp.backdropDitherMask,
+  },
+  // What the first paint shows, before the page's script has run and the canvas has drawn: a still
+  // of the look in the server's HTML, under the canvas, fading out once the canvas says it drew: a
+  // dither's, a soft glow of its own tone under its own mask. A drawer that fails to start leaves the still.
+  still: {
+    position: "absolute",
+    inset: 0,
+    zIndex: -1,
+    pointerEvents: "none",
+    backgroundSize: "cover",
+    backgroundPosition: "center",
+    opacity: { default: 1, ":has(+ canvas[data-drawn])": 0 },
+    transitionProperty: "opacity",
+    transitionDuration: simply.ui,
+  },
+  stillDither: {
+    backgroundImage:
+      "radial-gradient(130% 85% at 50% 0%, currentColor 0%, transparent 72%), radial-gradient(60% 60% at 92% 4%, currentColor 0%, transparent 70%)",
   },
 });
 
@@ -163,6 +182,12 @@ const watch = (
     }
     drawing = started;
     update();
+    // The still under the canvas fades out once the canvas has its first picture.
+    if (started !== undefined && started !== nothingDrawn) {
+      requestAnimationFrame(() => {
+        element.dataset.drawn = "";
+      });
+    }
   };
   // Loaded the first time it comes near the window; drawn only while it is in it.
   const seen = new IntersectionObserver(
@@ -237,6 +262,27 @@ const Canvas = ({
   );
 };
 
+/** The look's still, in the first HTML: a dither's glow in its own tone; a scene and sand have none. */
+// A scene has no still: its canvas is not opaque where it dims round its words, and a picture
+// under it would show through there, below the words' 4.5:1 (measured 2.56:1 on Aurora).
+const Still = ({ look }: { look: BackdropLook }) => {
+  if (isDither(look.backdrop)) {
+    return (
+      <span
+        aria-hidden="true"
+        data-slot="backdrop-still"
+        {...stylex.props(
+          styles.still,
+          styles.stillDither,
+          styles.dithered,
+          tones[look.tone]
+        )}
+      />
+    );
+  }
+  return null;
+};
+
 /** The look's canvas, or nothing for `"none"`; keyed by the look, so each look draws on a canvas of its own. */
 export const BackdropField = ({
   look,
@@ -253,14 +299,17 @@ export const BackdropField = ({
     ? `${look.backdrop}:${look.pattern}:${look.tone}`
     : look.backdrop;
   return (
-    <Canvas
-      key={key}
-      clear={clear}
-      look={look}
-      scenes={scenes}
-      small={small}
-      still={still}
-      progress={progress}
-    />
+    <>
+      <Still key={`still-${key}`} look={look} />
+      <Canvas
+        key={key}
+        clear={clear}
+        look={look}
+        scenes={scenes}
+        small={small}
+        still={still}
+        progress={progress}
+      />
+    </>
   );
 };

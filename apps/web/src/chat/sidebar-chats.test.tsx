@@ -16,11 +16,12 @@ import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { Sidebar } from "../grasp/sidebar/index.ts";
+import { tellChatsChanged } from "./chats-changed.ts";
 import { useRecentChats } from "./sidebar-chats.tsx";
 
 // The sidebar's recent chats against core's list as the page reaches it
 // over RPC, faked, in Grasp UI's own Sidebar: the most recent few, by
-// title, read again once a page resolves, each with its menu (archive) and
+// title, read again once a page resolves or an answer ends, each with its menu (archive) and
 // renamed in place (F2 or a double-click, Enter saves, Escape keeps), each a link
 // to its chat's page, marked there; none for someone who has no chats to
 // see.
@@ -113,6 +114,10 @@ const shown = async ({
   });
   return { router, renamed, archived };
 };
+
+/** How many rows show the Working mark. */
+const marked = (): number =>
+  document.querySelectorAll("[data-slot=sidebar-row-working]").length;
 
 /** The chats' rows: links to their pages. */
 const recentRows = (): HTMLElement[] => [
@@ -272,6 +277,25 @@ describe("recent chats in the sidebar", () => {
     });
     expect(renamed).not.toHaveBeenCalled();
     expect(titles()).toStrictEqual(["Chat number 0"]);
+  });
+
+  it("marks a chat working while its agent answers, and no more once the answer ends", async () => {
+    let answering = true;
+    await shown({
+      listed: () => [{ ...chat("chat-0", "Month-end"), running: answering }],
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const before = marked();
+
+    answering = false;
+    await act(async () => {
+      tellChatsChanged();
+      await Promise.resolve();
+    });
+
+    expect({ before, after: marked() }).toStrictEqual({ before: 1, after: 0 });
   });
 
   it("lists nothing when it is off, as for someone in onboarding only", async () => {

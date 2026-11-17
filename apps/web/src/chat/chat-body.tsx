@@ -6,8 +6,8 @@ import { Alert } from "../grasp/alert/index.ts";
 import { Button } from "../grasp/button/index.ts";
 import { Empty, EmptyHeader, EmptyDescription } from "../grasp/empty/index.ts";
 import { Retry } from "../grasp/icons/index.ts";
-import { Spinner } from "../grasp/spinner/index.ts";
 import { Text } from "../grasp/text/index.ts";
+import { Thread } from "../grasp/thread/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { NotLoaded } from "../load-from-core.tsx";
 import { agentModelOf } from "./agent-choice.tsx";
@@ -100,12 +100,17 @@ const Welcome = ({ text }: { text: string }) => (
   </div>
 );
 
-/** The chat loading, in the thread's place. */
+/** The chat loading, in the thread's place: Grasp UI's Thread, loading. */
 const Loading = () => {
   const { t } = useLingui();
   return (
-    <div {...stylex.props(styles.centre)}>
-      <Spinner aria-label={t`Loading…`} />
+    <div {...stylex.props(styles.grow)}>
+      <Thread
+        aria-label={t`Messages`}
+        items={[]}
+        loading
+        renderItem={() => null}
+      />
     </div>
   );
 };

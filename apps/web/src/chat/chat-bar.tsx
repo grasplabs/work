@@ -1,22 +1,15 @@
 import { useLingui } from "@lingui/react/macro";
-import * as stylex from "@stylexjs/stylex";
 import { useEffect, useRef } from "react";
 
-import {
-  Composer,
-  ComposerAction,
-  ComposerAdd,
-} from "../grasp/composer/index.ts";
+import { ComposerAction } from "../grasp/composer/index.ts";
 import { AppWindow, PanelToggle } from "../grasp/icons/index.ts";
-import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { shortcutLabel } from "../shortcuts.ts";
-import { accepted } from "./chat-files.tsx";
+import { ChatComposer } from "./chat-composer.tsx";
 import { useOpenChat } from "./chat-presence.ts";
 import { chatKey, useGlobalChat } from "./global-chat.tsx";
-import { useComposerMentions } from "./mentions.tsx";
 
-// Grasp's chat while it waits (global-chat.tsx): Grasp UI's Composer, in
-// one row, at the foot of the page, as one line to ask in. It mentions with
+// Grasp's chat while it waits (global-chat.tsx): the chat's one box to ask
+// in (chat-composer.tsx), in one row, at the foot of the page, as one line to ask in. It mentions with
 // `@` as the chat's box does, and its + adds a file or a mention; sending
 // opens the chat where it last was, with the answer coming in, and its
 // last button opens it without asking. What is typed here, mentions and
@@ -24,13 +17,8 @@ import { useComposerMentions } from "./mentions.tsx";
 // chat opens. While Grasp answers, its light runs round it and Stop stops
 // the answer. Back, it takes the cursor if the chat had it.
 
-const styles = stylex.create({
-  // The Composer's own width, as far as the frame's dock has room.
-  fill: {
-    width: grasp.composerWidth,
-    maxWidth: "100%",
-  },
-});
+/** How long the bar offers its box the cursor back as the chat closes: the dock's motion, in ms. */
+const returnWithinMs = 300;
 
 /** The chat's idle bar: on every page the chat shows on, while it is closed. */
 export const ChatBar = () => {
@@ -38,25 +26,45 @@ export const ChatBar = () => {
   const { placement, stage, composer, words, view } = useGlobalChat();
   const openHere = useOpenChat();
   const bar = useRef<HTMLDivElement>(null);
-  const mentioning = useComposerMentions(composer.mentions, (next) => {
-    composer.onMentions(next);
-  });
-  // Back as the chat closes: the chat had the cursor, which it lost as it
-  // went. Only then: a menu or window closing elsewhere leaves the cursor
-  // nowhere for a moment too, and it belongs to what opens next.
+  // Back as the chat closes: the chat had the cursor, which it loses as it
+  // goes. Only then: a menu or window closing elsewhere leaves the cursor
+  // nowhere for a moment too, and it belongs to what opens next. The cursor
+  // may still stand in the closing panel (its Close). App shell's dock
+  // rises back from hidden, so the box can take the cursor only once it is
+  // seen: it is offered it each frame until it holds it, for as long as the
+  // dock's motion lasts, and not once the cursor went somewhere else.
   const chatWasOpen = useRef(false);
   useEffect(() => {
     if (stage.card) {
       chatWasOpen.current = true;
       return;
     }
-    if (!stage.bar) {
+    if (!(stage.bar && chatWasOpen.current)) {
       return;
     }
-    if (chatWasOpen.current && document.activeElement === document.body) {
-      bar.current?.querySelector("textarea")?.focus();
-    }
     chatWasOpen.current = false;
+    let frame = 0;
+    const until = performance.now() + returnWithinMs;
+    const offer = () => {
+      const box = bar.current?.querySelector("textarea");
+      const { activeElement } = document;
+      const lost =
+        activeElement === null ||
+        activeElement === document.body ||
+        activeElement.closest("[data-slot=app-shell-panels]") !== null;
+      if (box === null || box === undefined || !lost) {
+        return;
+      }
+      box.focus();
+      if (document.activeElement !== box && performance.now() < until) {
+        frame = requestAnimationFrame(offer);
+      }
+    };
+    frame = requestAnimationFrame(offer);
+    // oxlint-disable-next-line consistent-return -- the cleanup of the offer just made
+    return () => {
+      cancelAnimationFrame(frame);
+    };
   }, [stage.bar, stage.card]);
   if (!stage.bar) {
     return null;
@@ -67,10 +75,9 @@ export const ChatBar = () => {
   const { onAttach } = composer;
   return (
     <div ref={bar}>
-      <Composer
-        activity={view.running ? "working" : "idle"}
-        compact
-        end={
+      <ChatComposer
+        {...composer}
+        footer={
           <ComposerAction
             icon={placement === "floating" ? AppWindow : PanelToggle}
             aria-label={t`Open the chat (${shortcut})`}
@@ -79,16 +86,17 @@ export const ChatBar = () => {
             }}
           />
         }
-        failedLabel={t`Could not send`}
-        aria-label={words.title}
-        layout={styles.fill}
-        mentionItems={mentioning?.items}
-        mentionKinds={mentioning?.kinds}
-        mentionsEmptyLabel={t`Nothing found`}
-        mentionsLoading={mentioning?.loading}
-        onMention={(item) => {
-          mentioning?.onMention(item);
-        }}
+        compact
+        label={words.title}
+        // Files show in the chat's box, which opens to show them.
+        onAttach={
+          onAttach === undefined
+            ? undefined
+            : (files) => {
+                onAttach(files);
+                openHere();
+              }
+        }
         // Opens the chat once the question went: one that didn't stays
         // here, said under the bar, to send again.
         onSend={async () => {
@@ -97,35 +105,9 @@ export const ChatBar = () => {
           }
           openHere();
         }}
-        onStop={() => {
-          composer.onStop();
-        }}
-        onValueChange={(value) => {
-          composer.onText(value);
-          mentioning?.onText(value);
-        }}
         placeholder={words.placeholder}
-        sendLabel={t({ message: "Send", context: "send the question" })}
-        start={
-          <ComposerAdd
-            accept={accepted}
-            kinds={mentioning?.kinds}
-            aria-label={t`Add to the question`}
-            // Files show in the chat's box, which opens to show them.
-            onAttach={
-              onAttach === undefined
-                ? undefined
-                : (files) => {
-                    onAttach(files);
-                    openHere();
-                  }
-            }
-            uploadLabel={t`Attach a file`}
-          />
-        }
-        stopLabel={t({ message: "Stop", context: "stop the answer" })}
-        value={composer.text}
-        workingLabel={t`Grasp is answering`}
+        running={view.running}
+        showWorking
       />
     </div>
   );

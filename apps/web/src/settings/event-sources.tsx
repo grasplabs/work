@@ -5,8 +5,8 @@ import type { EventSource } from "@grasp-os/shared/event-sources";
 import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { Link as RouterLink, useRouter } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useNavigate, useRouter } from "@tanstack/react-router";
+import { useEffect, useRef, useState } from "react";
 
 import { useCopy } from "../copy.ts";
 import type { CoreConnection } from "../core-connection.ts";
@@ -21,6 +21,8 @@ import {
 } from "../grasp/alert-dialog/index.ts";
 import { Alert } from "../grasp/alert/index.ts";
 import { Badge } from "../grasp/badge/index.ts";
+import { BrandIcon, brands } from "../grasp/brand-icon/index.ts";
+import type { Brand } from "../grasp/brand-icon/index.ts";
 import { Button } from "../grasp/button/index.ts";
 import { CodeBlock } from "../grasp/code-block/index.ts";
 import { CopyField } from "../grasp/copy-field/index.ts";
@@ -29,7 +31,6 @@ import {
   DialogAction,
   DialogBody,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogTitle,
 } from "../grasp/dialog/index.ts";
@@ -47,25 +48,31 @@ import {
   EmptyHeader,
 } from "../grasp/empty/index.ts";
 import { Field, FieldError, FieldLabel } from "../grasp/field/index.ts";
-import { Copy, Edit, More, Plus, Tick, Trash } from "../grasp/icons/index.ts";
+import {
+  Copy,
+  Edit,
+  Link,
+  More,
+  Play,
+  Plus,
+  Tick,
+  Trash,
+  Workflow,
+} from "../grasp/icons/index.ts";
 import { Input } from "../grasp/input/index.ts";
+import { InspectorPanel } from "../grasp/inspector-panel/index.ts";
+import type { InspectorSection } from "../grasp/inspector-panel/index.ts";
 import {
   Item,
   ItemActions,
   ItemContent,
   ItemDescription,
   ItemGroup,
+  ItemMedia,
   ItemTitle,
 } from "../grasp/item/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
-import {
-  Sheet,
-  SheetBody,
-  SheetDescription,
-  SheetContent,
-  SheetTitle,
-} from "../grasp/sheet/index.ts";
-import { Text } from "../grasp/text/index.ts";
+import { Sheet, SheetContent, SheetTitle } from "../grasp/sheet/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
@@ -84,9 +91,42 @@ import { SectionNotLoaded, SettingsStack } from "./section.tsx";
 // then what to give the sender, the secret shown that once. Core keeps no
 // record of deliveries, so nothing here speaks of them.
 
+/**
+ * The mark of a source named after a brand Grasp has one for ("Stripe"),
+ * by its name as the admin wrote it; none for any other.
+ */
+/** Whether a name is a brand's key. */
+const isBrand = (key: string): key is Brand => Object.hasOwn(brands, key);
+
+const markOf = (name: string): Brand | undefined => {
+  const key = name.trim().toLowerCase();
+  return isBrand(key) ? key : undefined;
+};
+
 const styles = stylex.create({
   form: { display: "grid", gap: grasp.space3 },
   rowEnd: { display: "flex", alignItems: "center", gap: grasp.space1 },
+  // A section's card holding the URL, the secret's state and the recipe.
+  setup: {
+    display: "grid",
+    rowGap: grasp.space3,
+    padding: grasp.space3,
+  },
+  cardWords: {
+    margin: 0,
+    paddingBlock: grasp.space3,
+    paddingInline: grasp.inspectorInset,
+    color: grasp.muted,
+    fontSize: grasp.inspectorText,
+    lineHeight: grasp.inspectorTextLine,
+  },
+  // The list and the source opened beside it, as wide as the page lets them be.
+  split: {
+    display: "grid",
+    gridTemplateColumns: `minmax(0, 1fr) ${grasp.inspectorWidth}`,
+    columnGap: grasp.space6,
+    alignItems: "start",
+  },
 });
 
 /**
@@ -366,8 +406,16 @@ const SourceRow = ({
   const url =
     source.delivery === null ? undefined : urlOf(source.delivery.token);
   const line = useStartsLine(starts);
+  const mark = markOf(name);
   return (
     <Item size="xs">
+      {mark === undefined ? (
+        <ItemMedia icon={Link} iconLook="inline" />
+      ) : (
+        <ItemMedia>
+          <BrandIcon brand={mark} decorative size="md" tile={false} />
+        </ItemMedia>
+      )}
       <ItemContent>
         <ItemTitle>
           {name}{" "}
@@ -487,15 +535,8 @@ const readRuns = async (
   }
 };
 
-/** The runs a source started, newest first, read as it opens. */
-const RecentRuns = ({
-  sourceId,
-  names,
-}: {
-  sourceId: string;
-  names: ReadonlyMap<string, string>;
-}) => {
-  const { t } = useLingui();
+/** The runs source `sourceId` started, newest first, read as it opens. */
+const useRecentRuns = (sourceId: string): RunsRead => {
   const core = useCore();
   const [read, setRead] = useState<RunsRead>({ state: "reading" });
   useEffect(() => {
@@ -505,129 +546,156 @@ const RecentRuns = ({
       current.live = false;
     };
   }, [core, sourceId]);
-  if (read.state === "reading") {
-    return <Text tone="muted">{t`Reading the runs…`}</Text>;
-  }
-  if (read.state === "failed") {
-    return <Text tone="muted">{t`The runs couldn't be read.`}</Text>;
-  }
-  if (read.runs.length === 0) {
-    return <Text tone="muted">{t`No run started from it lately.`}</Text>;
-  }
-  return (
-    <ItemGroup aria-label={t`Recent runs`} separated>
-      {read.runs.map((run) => (
-        <Item key={`${run.workflowId}-${run.at}`} size="xs">
-          <ItemContent>
-            <ItemTitle>
-              <RouterLink
-                params={{ workflow: run.workflowId }}
-                search={{ view: "runs" }}
-                to="/workflows/$workflow"
-              >
-                {names.get(run.workflowId) ?? t`A workflow`}
-              </RouterLink>
-            </ItemTitle>
-            <ItemDescription>{formatDateTime(run.at)}</ItemDescription>
-          </ItemContent>
-        </Item>
-      ))}
-    </ItemGroup>
-  );
+  return read;
 };
 
+/** Quiet words in a section's card, in its rows' inset. */
+const CardWords = ({ children }: { children: string }) => (
+  <p {...stylex.props(styles.cardWords)}>{children}</p>
+);
+
 /**
- * A source, opened beside the list: what the sender needs (its URL, its
- * secret's state and how to sign with it), the workflows it starts, and
- * the runs it started.
+ * A source, opened beside the list (in a Sheet on a narrow screen, where it
+ * isn't `framed`): what the sender needs (its URL, its secret's state and
+ * how to sign with it), the workflows it starts, and the runs it started.
  */
-const SourceDetails = ({
+const SourceInspector = ({
   source,
   starts,
+  framed,
+  onClose,
   onSecret,
   onChanged,
 }: {
   source: EventSource;
   starts: readonly { id: string; name: string }[] | undefined;
+  framed: boolean;
+  onClose: () => void;
   onSecret: (secret: string) => void;
   onChanged: () => Promise<void>;
 }) => {
   const { t } = useLingui();
+  const navigate = useNavigate();
   const changes = useSourceChanges(source, onSecret, onChanged);
+  const runs = useRecentRuns(source.id);
+  const { name } = source;
   const url =
     source.delivery === null ? undefined : urlOf(source.delivery.token);
-  const names = new Map((starts ?? []).map(({ id, name }) => [id, name]));
-  return (
-    <SettingsStack>
-      <SectionCard
-        actions={
-          <Button
-            onClick={() => {
-              changes.handleAsk("rotate");
-            }}
-            size="sm"
-            variant="ghost"
-          >
-            {changes.revoked ? t`Make a new secret` : t`Rotate the secret`}
-          </Button>
+  const names = new Map(
+    (starts ?? []).map((workflow) => [workflow.id, workflow.name])
+  );
+  const openWorkflow = (workflow: string, runsView: boolean): void => {
+    void navigate({
+      to: "/workflows/$workflow",
+      params: { workflow },
+      ...(runsView ? { search: { view: "runs" as const } } : {}),
+    });
+  };
+  const setup: InspectorSection = {
+    id: "setup",
+    label: t`Setup`,
+    hint: t`What the sender needs: the URL, and the secret it signs with.`,
+    action: (
+      <Button
+        onClick={() => {
+          changes.handleAsk("rotate");
+        }}
+        size="xs"
+        variant="ghost"
+      >
+        {changes.revoked ? t`Make a new secret` : t`Rotate the secret`}
+      </Button>
+    ),
+    content: (
+      <div {...stylex.props(styles.setup)}>
+        {url === undefined ? null : (
+          <CopyField aria-label={t`Copy the URL`} value={url} />
+        )}
+        {changes.revoked ? (
+          <Alert tone="attention">
+            {t`The secret is revoked: nothing this source sends starts a workflow until you make it a new one.`}
+          </Alert>
+        ) : null}
+        {url === undefined ? null : <Recipe url={url} />}
+        {changes.failure === undefined ? null : (
+          <Alert tone="danger">{changes.failure}</Alert>
+        )}
+      </div>
+    ),
+  };
+  const workflows: InspectorSection =
+    starts !== undefined && starts.length > 0
+      ? {
+          id: "workflows",
+          label: t`Workflows it starts`,
+          rows: starts.map((workflow) => ({
+            id: workflow.id,
+            name: workflow.name,
+            icon: Workflow,
+            onPress: () => {
+              openWorkflow(workflow.id, false);
+            },
+          })),
         }
-        density="compact"
-        headingLevel={3}
-        title={t`Setup`}
-      >
-        <SettingsStack>
-          {url === undefined ? null : (
-            <CopyField aria-label={t`Copy the URL`} value={url} />
-          )}
-          {changes.revoked ? (
-            <Alert tone="attention">
-              {t`The secret is revoked: nothing this source sends starts a workflow until you make it a new one.`}
-            </Alert>
-          ) : null}
-          {url === undefined ? null : <Recipe url={url} />}
-          {changes.failure === undefined ? null : (
-            <Alert tone="danger">{changes.failure}</Alert>
-          )}
-        </SettingsStack>
-      </SectionCard>
-      <SectionCard
-        density="compact"
-        flush={starts !== undefined && starts.length > 0}
-        headingLevel={3}
-        title={t`Workflows it starts`}
-      >
-        {starts === undefined ? (
-          <Text tone="muted">{t`The workflows couldn't be read.`}</Text>
-        ) : null}
-        {starts?.length === 0 ? (
-          <Text tone="muted">
-            {t`None yet: a workflow starts on its events from the workflow's Triggers tab.`}
-          </Text>
-        ) : null}
-        {starts !== undefined && starts.length > 0 ? (
-          <ItemGroup aria-label={t`Workflows it starts`} separated>
-            {starts.map((workflow) => (
-              <Item key={workflow.id} size="xs">
-                <ItemContent>
-                  <ItemTitle>
-                    <RouterLink
-                      params={{ workflow: workflow.id }}
-                      to="/workflows/$workflow"
-                    >
-                      {workflow.name}
-                    </RouterLink>
-                  </ItemTitle>
-                </ItemContent>
-              </Item>
-            ))}
-          </ItemGroup>
-        ) : null}
-      </SectionCard>
-      <SectionCard density="compact" headingLevel={3} title={t`Recent runs`}>
-        <RecentRuns names={names} sourceId={source.id} />
-      </SectionCard>
+      : {
+          id: "workflows",
+          label: t`Workflows it starts`,
+          content: (
+            <CardWords>
+              {starts === undefined
+                ? t`The workflows couldn't be read.`
+                : t`None yet: a workflow starts on its events from the workflow's Triggers tab.`}
+            </CardWords>
+          ),
+        };
+  let recent: InspectorSection;
+  if (runs.state === "read" && runs.runs.length > 0) {
+    recent = {
+      id: "runs",
+      label: t`Recent runs`,
+      rows: runs.runs.map((run) => ({
+        id: `${run.workflowId}-${run.at}`,
+        name: names.get(run.workflowId) ?? t`A workflow`,
+        icon: Play,
+        detail: formatDateTime(run.at),
+        onPress: () => {
+          openWorkflow(run.workflowId, true);
+        },
+      })),
+    };
+  } else {
+    const words = {
+      reading: t`Reading the runs…`,
+      read: t`No run started from it lately.`,
+      failed: t`The runs couldn't be read.`,
+    }[runs.state];
+    recent = {
+      id: "runs",
+      label: t`Recent runs`,
+      content: <CardWords>{words}</CardWords>,
+    };
+  }
+  return (
+    <>
+      <InspectorPanel
+        actions={
+          <SourceMenu
+            busy={changes.busy}
+            name={name}
+            onAsk={changes.handleAsk}
+            revoked={changes.revoked}
+          />
+        }
+        aria-label={t`Details of ${name}`}
+        framed={framed}
+        icon={Link}
+        onClose={onClose}
+        sections={[setup, workflows, recent]}
+        title={name}
+        words={{ close: t`Close` }}
+      />
       {changes.confirmation}
-    </SettingsStack>
+    </>
   );
 };
 
@@ -697,9 +765,6 @@ const AddSource = ({
       {made === undefined ? (
         <DialogContent closeLabel={t`Close`}>
           <DialogTitle>{t`Add a source`}</DialogTitle>
-          <DialogDescription>
-            {t`Name it after the system that sends the events.`}
-          </DialogDescription>
           <DialogBody>
             <form
               aria-label={t`Add a source`}
@@ -740,9 +805,6 @@ const AddSource = ({
       ) : (
         <DialogContent closeLabel={t`Close`}>
           <DialogTitle>{t`Give this to the sender`}</DialogTitle>
-          <DialogDescription>
-            {t`It sends each event to the URL, signed with the secret.`}
-          </DialogDescription>
           <DialogBody>
             <SettingsStack>
               <CopyField aria-label={t`Copy the URL`} value={made.url} />
@@ -784,9 +846,6 @@ const SecretDialog = ({
     >
       <DialogContent closeLabel={t`Close`}>
         <DialogTitle>{t`The new secret`}</DialogTitle>
-        <DialogDescription>
-          {t`Give it to the sender: it signs every event with it.`}
-        </DialogDescription>
         <DialogBody>
           <SettingsStack>
             {secret === undefined ? null : <SecretOnce secret={secret} />}
@@ -799,6 +858,9 @@ const SecretDialog = ({
     </Dialog>
   );
 };
+
+/** How wide the page must be for a source to open beside the list. */
+const besideFrom = 60 * 16;
 
 /**
  * The organization's event sources, for an admin, as their list's read
@@ -819,6 +881,24 @@ export const EventSourcesSettings = ({
   const [secret, setSecret] = useState<string>();
   const [opened, setOpened] = useState<string>();
   const [adding, setAdding] = useState(false);
+  // Beside the list where the page has room for both; in a Sheet otherwise.
+  const holder = useRef<HTMLDivElement>(null);
+  const [wide, setWide] = useState(true);
+  useEffect(() => {
+    const element = holder.current;
+    const watch =
+      element === null || typeof ResizeObserver === "undefined"
+        ? undefined
+        : new ResizeObserver(([entry]) => {
+            setWide((entry?.contentRect.width ?? 0) >= besideFrom);
+          });
+    if (element !== null) {
+      watch?.observe(element);
+    }
+    return () => {
+      watch?.disconnect();
+    };
+  }, []);
   const addButton = (variant: "quiet" | "ink") => (
     <Button
       icon={Plus}
@@ -838,7 +918,21 @@ export const EventSourcesSettings = ({
     starts.state === "ready" ? (starts.data[id] ?? []) : undefined;
   const sources = page.state === "ready" ? page.data : [];
   const open = sources.find(({ id }) => id === opened);
-  return (
+  const inspector = (framed: boolean) =>
+    open === undefined ? null : (
+      <SourceInspector
+        framed={framed}
+        key={open.id}
+        onChanged={changed}
+        onClose={() => {
+          setOpened(undefined);
+        }}
+        onSecret={setSecret}
+        source={open}
+        starts={startsOf(open.id)}
+      />
+    );
+  const list = (
     <SectionCard
       actions={sources.length > 0 ? addButton("quiet") : null}
       density="compact"
@@ -880,32 +974,32 @@ export const EventSourcesSettings = ({
           ))}
         </ItemGroup>
       ) : null}
+    </SectionCard>
+  );
+  return (
+    <div ref={holder}>
+      {wide && open !== undefined ? (
+        <div {...stylex.props(styles.split)}>
+          {list}
+          {inspector(true)}
+        </div>
+      ) : (
+        list
+      )}
       <Sheet
-        size="md"
         onOpenChange={(next) => {
           if (!next) {
             setOpened(undefined);
           }
         }}
-        open={open !== undefined}
+        open={!wide && open !== undefined}
+        size="md"
       >
         <SheetContent>
           <SheetTitle>{open?.name ?? ""}</SheetTitle>
-          <SheetDescription>
-            {t`What its sender needs, and what it starts.`}
-          </SheetDescription>
-          <SheetBody>
-            {open === undefined ? null : (
-              <SourceDetails
-                onChanged={changed}
-                onSecret={setSecret}
-                source={open}
-                starts={startsOf(open.id)}
-              />
-            )}
-          </SheetBody>
+          {inspector(false)}
         </SheetContent>
       </Sheet>
-    </SectionCard>
+    </div>
   );
 };

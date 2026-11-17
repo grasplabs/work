@@ -46,6 +46,24 @@ const asked: ChatMessage = {
   at: "2026-10-27T09:00:00.000Z",
 };
 
+/** A finished answer, `text`. */
+const answer = (id: number, text: string): ChatMessage => ({
+  id,
+  role: "assistant",
+  text,
+  citations: [],
+  code: [],
+  tools: [],
+  end: "done",
+  at: "2026-10-27T09:00:05.000Z",
+});
+
+/** How many Ask again buttons show. */
+const askAgain = (): number =>
+  [...document.querySelectorAll("button")].filter(
+    (button) => button.getAttribute("aria-label") === "Ask again"
+  ).length;
+
 /**
  * The thread of `messages`, with `partial` being written while it runs,
  * and the calls its code made (`tools`), on a page of its own.
@@ -440,6 +458,10 @@ describe(ChatThread, () => {
     });
     const closed = thoughtLine();
     await press(thoughtButton());
+    // The thoughts come in at the pace an answer's words do.
+    await vi.waitFor(() => {
+      expect(thoughtLine().shows).toBe("Add two to two.");
+    });
 
     expect([closed, thoughtLine()]).toStrictEqual([
       { line: "Thinking", open: false, shows: undefined },
@@ -614,6 +636,50 @@ describe(ChatThread, () => {
     });
   });
 
+  it("says an answer was stopped part way, keeping its words without a link it was still writing", async () => {
+    await thread([
+      asked,
+      {
+        id: 2,
+        role: "assistant",
+        text: "Four, as the [policy](https://exam",
+        citations: [],
+        code: [],
+        tools: [],
+        end: "cancelled",
+        at: "2026-10-27T09:00:05.000Z",
+      },
+    ]);
+    const stopped = document.querySelector<HTMLElement>(
+      'article[data-from="agent"]'
+    );
+
+    await vi.waitFor(() => {
+      expect(document.querySelector("[data-slot=markdown]")?.textContent).toBe(
+        "Four, as the"
+      );
+    });
+    expect({
+      status: stopped?.dataset.status,
+      said: stopped?.textContent.includes("Stopped"),
+    }).toStrictEqual({ status: "stopped", said: true });
+  });
+
+  it("offers to ask again under an answer with words, and nothing under one without", async () => {
+    await thread([asked, answer(2, "Four.")]);
+    const worded = askAgain();
+    act(() => {
+      root?.unmount();
+    });
+    document.body.replaceChildren();
+    await thread([asked, answer(2, "")]);
+
+    expect({ worded, wordless: askAgain() }).toStrictEqual({
+      worded: 1,
+      wordless: 0,
+    });
+  });
+
   it("shows a response's tool calls and code steps in the order it made them", async () => {
     const at = "2026-10-27T09:00:05.000Z";
     const done = (id: number, callId: string): ChatMessage => ({
@@ -671,16 +737,15 @@ describe(ChatThread, () => {
     ]);
   });
 
-  it("fades each word of an answer in as it is written, where words come, and a kept answer stands still", async () => {
+  it("lets an answer's words out at a pace while it is written, and shows a kept answer whole", async () => {
+    const text = "It adds up. Four, as two and two, which is what you asked.";
     await thread([asked], {
-      text: "It adds up.\n\nFour, as **two** and two.",
+      text,
       code: [],
       tools: [],
       reasoning: "",
     });
-    const landing = [...document.querySelectorAll("span.animate-in")].map(
-      (word) => word.textContent
-    );
+    const writing = document.querySelector("[data-slot=markdown]")?.textContent;
     act(() => {
       root?.unmount();
     });
@@ -690,7 +755,7 @@ describe(ChatThread, () => {
       {
         id: 2,
         role: "assistant",
-        text: "Four, as **two** and two.",
+        text,
         citations: [],
         code: [],
         tools: [],
@@ -700,12 +765,9 @@ describe(ChatThread, () => {
     ]);
 
     expect({
-      landing,
-      kept: document.querySelectorAll("span.animate-in").length,
-    }).toStrictEqual({
-      landing: ["Four,", "as", "two", "and", "two."],
-      kept: 0,
-    });
+      paced: writing !== undefined && writing.length < text.length,
+      kept: document.querySelector("[data-slot=markdown]")?.textContent,
+    }).toStrictEqual({ paced: true, kept: text });
   });
 
   it("carries an answer's thinking as a picture that opens the brain, and the way there where it can't be drawn", async () => {

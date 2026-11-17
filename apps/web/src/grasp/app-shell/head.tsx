@@ -12,12 +12,23 @@
 
 import * as stylex from "@stylexjs/stylex";
 import { use, useEffect, useId, useState } from "react";
-import type { KeyboardEvent, ReactNode, SubmitEvent } from "react";
+import type {
+  KeyboardEvent,
+  ReactElement,
+  ReactNode,
+  SubmitEvent,
+} from "react";
 
 import { Button } from "../button";
 import { focus } from "../focus/focus";
 import { visuallyHidden } from "../hidden/hidden";
-import { AppWindow, Expand, PanelToggle } from "../icons";
+import {
+  AppWindow,
+  ExitFullScreen,
+  Expand,
+  External,
+  PanelToggle,
+} from "../icons";
 import { Input } from "../input";
 import {
   Popover,
@@ -29,9 +40,15 @@ import { grasp } from "../tokens/tokens.stylex";
 import { renameWords } from "../words/rename";
 import { useWords } from "../words/words";
 import { PanelPlaceContext } from "./float-window";
+import type { PanelPlacement } from "./float-window";
 import { appShellPanelWords } from "./words";
 
 const NARROW = "@container app-shell (width < 40rem)";
+// The panel's words and its Composer stand in one column: the page's room in from the panel's sides,
+// and, where the panel is wider than a chat's column (full screen), that column centred, the
+// Composer's width, as a chat's own page lays it out (patterns/chat-page). `cqi` is the panels'
+// card, a size container (panels.tsx `panels`).
+const COLUMN = `max(${grasp.shellPageInline}, calc((100cqi - ${grasp.composerWidth}) / 2))`;
 
 const styles = stylex.create({
   // One bar's height (shellBar), the name where the page's words begin and the last button's glyph
@@ -62,6 +79,9 @@ const styles = stylex.create({
     userSelect: "none",
   },
   dragging: { cursor: "grabbing" },
+  // While the head is the window's handle, a finger on any of it (the name too) drags it: the browser
+  // never takes it as a pan of the page, which would cancel the drag.
+  handle: { touchAction: "none" },
   // Its focus ring inside its own box: the window clips what stands outside it.
   ring: { outlineOffset: `calc(-1 * ${grasp.ringWidth})` },
   // The name and the buttons over the handle.
@@ -119,11 +139,24 @@ const styles = stylex.create({
     flexGrow: 1,
     overflowY: "auto",
     scrollbarWidth: "none",
-    paddingInline: grasp.shellPageInline,
+    paddingInline: COLUMN,
     paddingBlockStart: grasp.space7,
+  },
+  // The panel's foot (its Composer): the page's room round it, in the same column as the body.
+  foot: {
+    flexShrink: 0,
+    paddingBlock: grasp.shellPageInline,
+    paddingInline: COLUMN,
   },
   // Floating, the window is a layer over the page: its scroll keeps the wheel (PRODUCT-RULES 5).
   contained: { overscrollBehavior: "contain" },
+  // Filled by one thing that scrolls itself (a Thread): no scroll of its own, and that one thing the
+  // body's whole height, so its own scroll has a height to work in. The same room round it.
+  fill: {
+    display: "grid",
+    gridTemplateRows: "minmax(0, 1fr)",
+    overflowY: "hidden",
+  },
 });
 
 /** Every prop an AppShellPanelHead takes. */
@@ -134,13 +167,86 @@ export interface AppShellPanelHeadProps {
   actions?: ReactNode;
   /** The panel's own page: a link to it, "Open as a page", where you give one. */
   pageHref?: string;
+  /**
+   * The element that link is drawn as, for a router's link (`pageRender={<Link to="/chat/42" />}`),
+   * so opening the page does not load the whole app again. It takes the button's look and its
+   * name, and keeps its own props. Without it, an `<a href={pageHref}>`.
+   */
+  pageRender?: ReactElement;
+  /**
+   * Whether the panel is full screen: keep it with `onExpandedChange` and give it to AppShell's
+   * `covered`. Docked or floating, it goes full screen and comes back to where it was, in one move.
+   */
+  expanded?: boolean;
+  /** Runs when the person takes the panel full screen or back; without it, no full-screen control. */
+  onExpandedChange?: (expanded: boolean) => void;
 }
+
+/** The head's own controls: the switch between docked and floating, full screen, the page's link. */
+const HeadControls = ({
+  setPlacement,
+  next,
+  pageHref,
+  pageRender,
+  expanded,
+  onExpandedChange,
+}: {
+  setPlacement?: (placement: PanelPlacement) => void;
+  next: PanelPlacement;
+  pageHref?: string;
+  pageRender?: ReactElement;
+  expanded: boolean;
+  onExpandedChange?: (expanded: boolean) => void;
+}) => {
+  const words = useWords("app-shell-panel", appShellPanelWords);
+  return (
+    <>
+      {setPlacement !== undefined && (
+        <span {...stylex.props(styles.wideOnly)}>
+          <Button
+            variant="ghost"
+            size="sm"
+            icon={next === "floating" ? AppWindow : PanelToggle}
+            aria-label={next === "floating" ? words.float : words.dock}
+            onClick={() => {
+              setPlacement(next);
+            }}
+          />
+        </span>
+      )}
+      {onExpandedChange !== undefined && (
+        <Button
+          variant="ghost"
+          size="sm"
+          icon={expanded ? ExitFullScreen : Expand}
+          aria-label={expanded ? words.collapse : words.expand}
+          aria-pressed={expanded}
+          onClick={() => {
+            onExpandedChange(!expanded);
+          }}
+        />
+      )}
+      {(pageHref !== undefined || pageRender !== undefined) && (
+        <Button
+          variant="ghost"
+          size="sm"
+          icon={External}
+          aria-label={words.page}
+          render={pageRender ?? <a href={pageHref} aria-label={words.page} />}
+        />
+      )}
+    </>
+  );
+};
 
 /** The head of what stands in App shell's panels: its name, the placement switch, and your actions. */
 export const AppShellPanelHead = ({
   title,
   actions,
   pageHref,
+  pageRender,
+  expanded = false,
+  onExpandedChange,
 }: AppShellPanelHeadProps) => {
   const place = use(PanelPlaceContext);
   const words = useWords("app-shell-panel", appShellPanelWords);
@@ -151,7 +257,10 @@ export const AppShellPanelHead = ({
     <div
       data-slot="app-shell-panel-head"
       data-floating={place.floating ? "" : undefined}
-      {...stylex.props(styles.head)}
+      {...stylex.props(
+        styles.head,
+        (place.floating || place.pullable) && styles.handle
+      )}
     >
       {/* Floating, the head's ground is the window's handle: a control of its own under the name and
           the buttons, dragged, or focused and moved with the arrow keys. */}
@@ -188,28 +297,14 @@ export const AppShellPanelHead = ({
         {title}
       </div>
       <div {...stylex.props(styles.actions, styles.above)}>
-        {setPlacement !== undefined && (
-          <span {...stylex.props(styles.wideOnly)}>
-            <Button
-              variant="ghost"
-              size="sm"
-              icon={next === "floating" ? AppWindow : PanelToggle}
-              aria-label={next === "floating" ? words.float : words.dock}
-              onClick={() => {
-                setPlacement(next);
-              }}
-            />
-          </span>
-        )}
-        {pageHref !== undefined && (
-          <Button
-            variant="ghost"
-            size="sm"
-            icon={Expand}
-            aria-label={words.page}
-            render={<a href={pageHref} aria-label={words.page} />}
-          />
-        )}
+        <HeadControls
+          setPlacement={setPlacement}
+          next={next}
+          pageHref={pageHref}
+          pageRender={pageRender}
+          expanded={expanded}
+          onExpandedChange={onExpandedChange}
+        />
         {actions}
       </div>
     </div>
@@ -220,23 +315,53 @@ export const AppShellPanelHead = ({
 export interface AppShellPanelBodyProps {
   /** What the panel holds under its head: a thread, a page's words. */
   children: ReactNode;
+  /**
+   * For one thing that scrolls itself, such as a Thread: the body does not scroll, and that one thing
+   * takes its whole height, so its own scroll works. Without it the body scrolls what it holds.
+   * @default false
+   */
+  fill?: boolean;
 }
 
 /**
  * The panel's content under its head: the page's room under the head's line and at its sides, and
  * its own scroll with no bar. Put a Composer or a foot after it, not in it.
  */
-export const AppShellPanelBody = ({ children }: AppShellPanelBodyProps) => {
+export const AppShellPanelBody = ({
+  children,
+  fill = false,
+}: AppShellPanelBodyProps) => {
   const { floating } = use(PanelPlaceContext);
   return (
     <div
       data-slot="app-shell-panel-body"
-      {...stylex.props(styles.body, floating && styles.contained)}
+      data-fill={fill ? "" : undefined}
+      {...stylex.props(
+        styles.body,
+        floating && styles.contained,
+        fill && styles.fill
+      )}
     >
       {children}
     </div>
   );
 };
+
+/** Every prop an AppShellPanelFoot takes. */
+export interface AppShellPanelFootProps {
+  /** What stands at the panel's foot: its Composer. */
+  children: ReactNode;
+}
+
+/**
+ * The panel's foot, for its Composer: the page's room round it, in the same column as the body's
+ * words, centred at the Composer's width when the panel is full screen.
+ */
+export const AppShellPanelFoot = ({ children }: AppShellPanelFootProps) => (
+  <div data-slot="app-shell-panel-foot" {...stylex.props(styles.foot)}>
+    {children}
+  </div>
+);
 
 /** Every prop an AppShellPanelTitle takes. */
 export interface AppShellPanelTitleProps {

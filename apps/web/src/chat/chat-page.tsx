@@ -1,16 +1,18 @@
 import * as stylex from "@stylexjs/stylex";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { SiteHeader } from "../frame/site-header.tsx";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { setActiveChat } from "./active-chat.ts";
 import { boxOf, ChatConversation, ChatFooter } from "./chat-body.tsx";
 import type { ChatBodyValues } from "./chat-body.tsx";
+import { ChatMoreMenu, useRenameChat } from "./chat-more.tsx";
 import { useChatSession, useGlobalChat } from "./global-chat.tsx";
 import { reading } from "./reading.stylex.ts";
 
 // A chat as its own page (routes/_shell.chats.$chatId.tsx): its title in
-// the page's bar, the conversation in one reading column down the card,
+// the page's bar, renamed where it stands or from the chat's menu beside
+// it, the conversation in one reading column down the card,
 // and the box to ask in at its foot. The chat is the address's; what the
 // shell knows of asking (the models, the sources' names, Grasp's words)
 // is the one chat's of the frame (global-chat.tsx). The layout is kept
@@ -81,9 +83,34 @@ export const ChatPage = ({
   };
   // Renamed since, or named by its agent once a turn ended: the newer name.
   const name = session.summary?.title ?? title ?? words.title;
+  const rename = useRenameChat(chatId, session.retitle);
+  // The rename where the name stands, opened by its own keys or the menu's Rename.
+  const [renaming, setRenaming] = useState(false);
+  const { summary } = session;
   return (
     <div ref={page} {...stylex.props(styles.page)}>
-      <SiteHeader crumbs={[{ label: name }]} />
+      <SiteHeader
+        actions={
+          summary === undefined ? undefined : (
+            <ChatMoreMenu
+              chat={summary}
+              key={summary.id}
+              onRename={() => {
+                setRenaming(true);
+              }}
+              sourceNames={sourceNames}
+            />
+          )
+        }
+        crumbs={[
+          {
+            label: name,
+            onRename: rename,
+            renaming,
+            onRenamingChange: setRenaming,
+          },
+        ]}
+      />
       <section aria-label={name} {...stylex.props(styles.column)}>
         <ChatConversation
           chat={chat}

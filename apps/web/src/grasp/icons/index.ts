@@ -157,7 +157,7 @@ import {
 } from "@hugeicons/core-free-icons";
 
 import type { IconData } from "./icon";
-import { pointing } from "./icon";
+import { pointing, solidForm } from "./icon";
 
 export { Icon, type IconData, type IconProps } from "./icon";
 // Brand icons: other companies' own marks, filled and in their colours (brands.ts).
@@ -550,3 +550,7 @@ export const Scale: IconData = ScaleIcon;
 export const ExitFullScreen: IconData = ArrowShrink01Icon;
 /** A plan of the rooms: a layout, a workspace's map. FloorPlanIcon. */
 export const FloorPlan: IconData = FloorPlanIcon;
+/** A good answer given: ThumbsUp's own shapes filled in the ink, for an action that stays on. ThumbsUpIcon. */
+export const ThumbsUpFilled: IconData = solidForm(ThumbsUpIcon);
+/** A poor answer given: ThumbsDown's own shapes filled in the ink, for an action that stays on. ThumbsDownIcon. */
+export const ThumbsDownFilled: IconData = solidForm(ThumbsDownIcon);

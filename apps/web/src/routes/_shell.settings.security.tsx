@@ -1,6 +1,5 @@
 import type { SignInOption } from "@grasp-os/shared/rpc";
 import type { OwnSession, SessionDevice } from "@grasp-os/shared/sign-in";
-import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { createFileRoute, useRouter } from "@tanstack/react-router";
@@ -14,7 +13,6 @@ import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogContent,
-  AlertDialogDescription,
   AlertDialogFooter,
   AlertDialogTitle,
   AlertDialogTrigger,
@@ -73,6 +71,14 @@ const styles = stylex.create({
     alignItems: "center",
     gap: grasp.space2,
     minWidth: 0,
+    maxWidth: "100%",
+  },
+  // The organization's name on one line, cut short where it is long.
+  name: {
+    minWidth: 0,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
   },
 });
 
@@ -115,7 +121,7 @@ const SignedInWith = ({
           tile={false}
         />
       ) : null}
-      {name}
+      <span {...stylex.props(styles.name)}>{name}</span>
     </span>
   );
 };
@@ -197,9 +203,6 @@ const DeviceRow = ({ session }: { session: OwnSession }) => {
             </AlertDialogTrigger>
             <AlertDialogContent>
               <AlertDialogTitle>{t`Sign out this device?`}</AlertDialogTitle>
-              <AlertDialogDescription>
-                {t`${device} needs to sign in again to use Grasp.`}
-              </AlertDialogDescription>
               <AlertDialogFooter>
                 <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
                 <AlertDialogAction
@@ -243,13 +246,14 @@ const Devices = ({ sessions }: { sessions: Loaded<OwnSession[]> }) => {
           ...newest,
           ...(here === undefined || newest.includes(here) ? [] : [here]),
         ];
+  // This device first: it is the one a person looks for, and can't sign out.
+  const ordered =
+    here === undefined
+      ? shown
+      : [here, ...shown.filter((session) => session !== here)];
   return (
     <SectionCard
       density="compact"
-      description={t`${plural(devices, {
-        one: "Signed in on # device. Sign out any you do not recognise.",
-        other: "Signed in on # devices. Sign out any you do not recognise.",
-      })}`}
       flush
       footer={
         shown.length < devices ? (
@@ -267,7 +271,7 @@ const Devices = ({ sessions }: { sessions: Loaded<OwnSession[]> }) => {
       title={t`Devices`}
     >
       <ItemGroup aria-label={t`Devices`} separated>
-        {shown.map((session) => (
+        {ordered.map((session) => (
           <DeviceRow key={session.id} session={session} />
         ))}
       </ItemGroup>

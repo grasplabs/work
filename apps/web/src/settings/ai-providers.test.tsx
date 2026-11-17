@@ -391,7 +391,8 @@ describe("Settings › AI providers", () => {
 
     await press(button("Add a provider"));
     await chooseProvider("OpenAI");
-    expect(text()).toContain("OpenAI, United States");
+    // Where it runs, in place of the name said again.
+    expect(text()).toContain("United States");
     const key = textField("Key");
     expect({ type: key.type, placeholder: key.placeholder }).toStrictEqual({
       type: "password",
