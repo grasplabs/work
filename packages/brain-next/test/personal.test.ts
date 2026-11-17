@@ -2616,52 +2616,48 @@ describe("a group in a person's own store", () => {
   // they stopped, through a restart. A batch is `eraseChunksPerBatch`
   // chunks: turns of `chunksPerTurn` chunks each, so the call's own batch,
   // a tick's and a tick after a restart each take part of them.
-  it(
-    "erases a group of many sources in one call, and deletes them a bounded batch a tick, going on after a restart",
-    { timeout: 60_000 },
-    async () => {
-      const group = newGroup();
-      const chunksPerTurn = 10;
-      const turns = (2 * eraseChunksPerBatch) / chunksPerTurn + 1;
-      const atOnce = 50;
-      for (let at = 0; at < turns; at += atOnce) {
-        // oxlint-disable-next-line no-await-in-loop -- a few at a time
-        await Promise.all(
-          Array.from(
-            { length: Math.min(atOnce, turns - at) },
-            async (_, index) =>
-              await addIn(
-                group,
-                String(at + index),
-                turnOfChunks(at + index, chunksPerTurn)
-              )
-          )
-        );
-      }
-
-      await own().eraseSource({ source: group, reason: "deleted" });
-
-      await expect(foundFor("Echidna")).resolves.toStrictEqual([]);
-      // Each step deletes a bounded part, and the next goes on from there.
-      const held = [await versionsHeld()];
-      await tick();
-      held.push(await versionsHeld());
-      await kill(own());
-      await tick();
-      held.push(await versionsHeld());
-      const [afterCall = 0, afterTick = 0, afterRestart = 0] = held;
-      expect({
-        boundedCall: afterCall > 0 && afterCall < turns,
-        boundedTick: afterTick > 0 && afterTick < afterCall,
-        afterRestart,
-      }).toStrictEqual({
-        boundedCall: true,
-        boundedTick: true,
-        afterRestart: 0,
-      });
-      await expect(groupEntries()).resolves.toHaveLength(1);
+  it("erases a group of many sources in one call, and deletes them a bounded batch a tick, going on after a restart", async () => {
+    const group = newGroup();
+    const chunksPerTurn = 10;
+    const turns = (2 * eraseChunksPerBatch) / chunksPerTurn + 1;
+    const atOnce = 50;
+    for (let at = 0; at < turns; at += atOnce) {
+      // oxlint-disable-next-line no-await-in-loop -- a few at a time
+      await Promise.all(
+        Array.from(
+          { length: Math.min(atOnce, turns - at) },
+          async (_, index) =>
+            await addIn(
+              group,
+              String(at + index),
+              turnOfChunks(at + index, chunksPerTurn)
+            )
+        )
+      );
     }
-  );
+
+    await own().eraseSource({ source: group, reason: "deleted" });
+
+    await expect(foundFor("Echidna")).resolves.toStrictEqual([]);
+    // Each step deletes a bounded part, and the next goes on from there.
+    const held = [await versionsHeld()];
+    await tick();
+    held.push(await versionsHeld());
+    await kill(own());
+    await tick();
+    held.push(await versionsHeld());
+    const [afterCall = 0, afterTick = 0, afterRestart = 0] = held;
+    expect({
+      boundedCall: afterCall > 0 && afterCall < turns,
+      boundedTick: afterTick > 0 && afterTick < afterCall,
+      afterRestart,
+    }).toStrictEqual({
+      boundedCall: true,
+      boundedTick: true,
+      afterRestart: 0,
+    });
+    await expect(groupEntries()).resolves.toHaveLength(1);
+  });
 });
 
 /** A memory resting on version `version` of `source`. */
