@@ -266,6 +266,10 @@ const mapped = async (ids: Ids) => {
   return { lea, tickets: tickets?.id ?? "", rota: rota?.id ?? "" };
 };
 
+/** What the next interview is told to ask of a piece of work, as its brief says it. */
+const toAsk = (known: string): string | undefined =>
+  known.split("\n").find((line) => line.startsWith("Too few have said yet"));
+
 /** The text of every message a request sent, in one string. */
 const sentOf = (body: unknown): string => JSON.stringify(body);
 
@@ -279,7 +283,7 @@ describe("a piece of work, drawn", { timeout: 60_000 }, () => {
   // store's own alarm, set whenever a team falls due, would try first.
   beforeEach(aloneInTheStore);
 
-  it("is drawn from three agreed interviews, keeps each person's numbers apart, and tells the next interview only what nobody has said yet, never a colleague's words", async () => {
+  it("is drawn from three agreed interviews, keeps each person's numbers apart, and tells the next interview what its routine lacks, as too few said it, never a colleague's words", async () => {
     const store = onboardingStore(env);
     const ids = await team();
     const { tickets } = await mapped(ids);
@@ -300,10 +304,10 @@ describe("a piece of work, drawn", { timeout: 60_000 }, () => {
     ]);
     const noor = await openLink(ids.noor);
     await participate(noor);
-    const contextOf = async () => {
+    const contextOf = async (device = noor) => {
       const context = await store.turnContext(
-        await sha256Hex(noor.secret),
-        await accountOf(noor)
+        await sha256Hex(device.secret),
+        await accountOf(device)
       );
       return context.ok ? context.value.known : "";
     };
@@ -324,6 +328,8 @@ describe("a piece of work, drawn", { timeout: 60_000 }, () => {
     const due = await store.drawsDue();
     const usage = await store.usage();
     const after = await contextOf();
+    // Max, adding to what he said: asked nothing he gave himself.
+    const forMax = await contextOf(await openLink(ids.max));
     expect({
       drew: drew[1],
       models: requests.map(modelOf),
@@ -361,10 +367,9 @@ describe("a piece of work, drawn", { timeout: 60_000 }, () => {
       differs: work?.drawn?.differs,
       outOfTen: work?.drawn?.differently.map(({ outOfTen }) => outOfTen),
       known: { approved: work?.known.approved, state: work?.known.state },
-      before: before.includes("Nobody has said yet"),
-      after: after
-        .split("\n")
-        .find((line) => line.startsWith("Nobody has said yet")),
+      before: before.includes("Too few have said yet"),
+      after: toAsk(after),
+      forMax: toAsk(forMax),
       // The drawing's open questions are written from what as few as one
       // colleague said: none reaches another person's interview (GRA-330).
       openQuestions: work?.drawn?.open.filter((question) =>
@@ -410,8 +415,13 @@ describe("a piece of work, drawn", { timeout: 60_000 }, () => {
       // Noor does it too and hasn't talked: three of four.
       known: { approved: 3, state: "mapping" },
       before: false,
+      // A routine shows a figure only once five gave it: two or one gave
+      // these, so they are still asked (GRA-1749).
       after:
-        "Nobody has said yet, so ask when it comes up: where it waits, and for what; what they look at to decide; who gets it after them; what done right looks like.",
+        "Too few have said yet, so ask when it comes up: how many come in, in a week or a month; how long one takes; how many come in wrong or incomplete; where it waits, and for what.",
+      // Max gave his numbers and a case off the path himself.
+      forMax:
+        "Too few have said yet, so ask when it comes up: where it waits, and for what; what they look at to decide; who gets it after them; what done right looks like.",
       openQuestions: [],
       saidByMo: false,
       due: [],
