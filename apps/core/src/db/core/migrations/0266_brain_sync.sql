@@ -41,6 +41,9 @@ CREATE TABLE `brain_sync_sources` (
 	`added` integer NOT NULL,
 	`changed` integer NOT NULL,
 	`removed` integer NOT NULL,
+	`relist_cursor` text,
+	`relisting` integer NOT NULL,
+	`relist_at` integer NOT NULL,
 	PRIMARY KEY(`connection_id`, `feed`, `place`)
 );
 --> statement-breakpoint

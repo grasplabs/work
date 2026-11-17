@@ -145,6 +145,15 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   // names no one; who asked to erase it, an admin's act on the company's.
   "core.connection_brain_reads": noPerson,
   "core.connection_brain_erasures": { company: "erasures an admin asked for" },
+  // Native sync (brain-sync.ts): a source names its connection's person
+  // and account address until the connect area disconnects their
+  // connections, whose drain deletes the rows; its items name only keys
+  // and the provider's IDs; a disconnect's record, who disconnected.
+  "core.brain_sync_sources": { erased: "connect" },
+  "core.brain_sync_items": noPerson,
+  "core.brain_sync_disconnects": {
+    company: "disconnects and the erasures they owed, by IDs",
+  },
   "core.stephen_reach": { company: "settings an admin changed" },
   "core.stephen_places": { company: "settings an admin changed" },
   "core.app_tool_classes": { company: "settings an admin changed" },
@@ -723,6 +732,8 @@ export const reviewedPersonColumns: Readonly<
   "core.chat_workflow_offers": ["user_id"],
   "core.connection_brain_audiences": ["changed_by"],
   "core.connection_brain_erasures": ["actor"],
+  "core.brain_sync_sources": ["account_email", "person_id"],
+  "core.brain_sync_disconnects": ["actor"],
   "core.dependency_admission_refusals": ["subject_id", "subject_type"],
   "core.dependency_approvers": [
     "granted_by",

@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "390f0d9f-fac2-47d4-a976-c15c2ab05ce6",
+  "id": "22921fa1-9c09-4e55-bf67-afd72b2bfd1b",
   "prevId": "d5b26316-3a11-4754-930a-330a89e4d444",
   "tables": {
     "access_revocations": {
@@ -4826,6 +4826,27 @@
         },
         "removed": {
           "name": "removed",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "relist_cursor": {
+          "name": "relist_cursor",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "relisting": {
+          "name": "relisting",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "relist_at": {
+          "name": "relist_at",
           "type": "integer",
           "primaryKey": false,
           "notNull": true,

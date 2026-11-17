@@ -423,6 +423,170 @@ describe("native sync", () => {
   );
 
   it(
+    "never shows what a page adds before what the same page took away",
+    setUpTime,
+    async () => {
+      const [owner, colleague] = await Promise.all([
+        signedInApi(idp, "user"),
+        signedInApi(idp, "user"),
+      ]);
+      await connectDrive(colleague);
+      const { subject, email } = await connectDrive(owner);
+      const [unshared, added] = [markerOf(), markerOf()];
+      const contents = {
+        unshared: `Bonus plan ${unshared}`,
+        added: `Holiday rota ${added}`,
+      };
+      const at = "2026-11-12T09:00:00.000Z";
+      const shared = (id: string) => ({
+        fileId: id,
+        time: at,
+        file: docFile(id, email, { permissions: withDomain(email) }),
+      });
+      const first = 6;
+      await driveHolds(subject, {
+        start: `s${first}`,
+        owned: [docFile("unshared", email, { permissions: withDomain(email) })],
+        changes: {
+          [`s${first}`]: { changes: [], newStartPageToken: `s${first}` },
+        },
+        contents,
+      });
+      later(pollMs);
+      await sync();
+      // The page stopped at each step in turn, each time from the same
+      // state: the file shared with the domain, the new one not there.
+      // Its new file comes first in it, the one taken away after.
+      const both: number[] = [];
+      for (let left = first; left < 24; left += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- one step after another
+        await driveHolds(subject, {
+          start: `s${left}`,
+          owned: [],
+          changes: {
+            [`s${left}`]: {
+              changes: [
+                shared("unshared"),
+                { fileId: "added", time: at, removed: true },
+              ],
+              newStartPageToken: `m${left}`,
+            },
+            [`m${left}`]: {
+              changes: [
+                shared("added"),
+                {
+                  fileId: "unshared",
+                  time: at,
+                  file: docFile("unshared", email),
+                },
+              ],
+              newStartPageToken: `s${left + 1}`,
+            },
+          },
+          contents,
+        });
+        later(pollMs);
+        // oxlint-disable-next-line no-await-in-loop -- one step after another
+        await sync();
+        later(pollMs);
+        vi.useFakeTimers({ toFake: ["Date"], now: clockAt });
+        try {
+          // oxlint-disable-next-line no-await-in-loop -- one step after another
+          await runSync(env, { left });
+        } finally {
+          vi.useRealTimers();
+        }
+        if (
+          // oxlint-disable-next-line no-await-in-loop -- read after each stop
+          (await finds(colleague.userId, added)) &&
+          // oxlint-disable-next-line no-await-in-loop -- read after each stop
+          (await finds(colleague.userId, unshared))
+        ) {
+          both.push(left);
+        }
+        later(pollMs);
+        // oxlint-disable-next-line no-await-in-loop -- the rest of the page
+        await sync();
+      }
+
+      expect({
+        both,
+        end: {
+          added: await finds(colleague.userId, added),
+          unshared: await finds(colleague.userId, unshared),
+        },
+      }).toStrictEqual({
+        both: [],
+        end: { added: true, unshared: false },
+      });
+    }
+  );
+
+  it(
+    "takes away a reader removed with no change in the feed, and a file gone the same way, at the daily relist",
+    setUpTime,
+    async () => {
+      const [owner, colleague] = await Promise.all([
+        signedInApi(idp, "user"),
+        signedInApi(idp, "user"),
+      ]);
+      await connectDrive(colleague);
+      const { subject, email } = await connectDrive(owner);
+      const [quiet, vanished] = [markerOf(), markerOf()];
+      const contents = {
+        quiet: `Pay scales ${quiet}`,
+        vanished: `Pitch ${vanished}`,
+      };
+      const feed = { "80": { changes: [], newStartPageToken: "80" } };
+      await driveHolds(subject, {
+        start: "80",
+        owned: [
+          docFile("quiet", email, { permissions: withDomain(email) }),
+          docFile("vanished", email),
+        ],
+        changes: feed,
+        contents,
+      });
+      later(pollMs);
+      await sync();
+      const before = [
+        await finds(colleague.userId, quiet),
+        await finds(owner.userId, vanished),
+      ];
+      // Unshared and deleted at the source, and the feed says nothing.
+      await driveHolds(subject, {
+        start: "80",
+        owned: [docFile("quiet", email)],
+        changes: feed,
+        contents,
+      });
+      later(pollMs);
+      await sync();
+      const noSignal = [
+        await finds(colleague.userId, quiet),
+        await finds(owner.userId, vanished),
+      ];
+      // A day on: the relist has read every file and its readers again.
+      later(24 * 60 * 60 * 1000);
+      await sync();
+
+      expect({
+        before,
+        noSignal,
+        relisted: [
+          await finds(colleague.userId, quiet),
+          await finds(owner.userId, vanished),
+          await finds(owner.userId, quiet),
+        ],
+      }).toStrictEqual({
+        before: [true, true],
+        noSignal: [true, true],
+        relisted: [false, false, true],
+      });
+    }
+  );
+
+  it(
     "after a restart, takes out what the relist no longer names",
     setUpTime,
     async () => {
@@ -451,6 +615,9 @@ describe("native sync", () => {
         changes: { "50": { changes: [], newStartPageToken: "50" } },
         contents,
       });
+      // The run that meets the lost cursor, then the one that lists again.
+      later(pollMs);
+      await sync();
       later(pollMs);
       await sync();
 

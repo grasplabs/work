@@ -108,6 +108,39 @@ const leaseMs = clockLeaseMs;
  */
 const pollMs = clockPeriods.minute;
 
+/**
+ * How often every source is listed again in full, its readers read again,
+ * and what the listing didn't name taken out: once a day. A product
+ * choice, not a number derived from a limit: some sharing changes come
+ * with no signal at all (Microsoft gives none for unsharing one file;
+ * Google's feed isn't guaranteed either), so where a vendor gives none, a
+ * reader the source took off can read an item for at most a day.
+ */
+const relistMs = 24 * 60 * 60 * 1000;
+
+/**
+ * When `source` next starts its daily relist after `now`: at its own
+ * fixed time of day, from a hash of its connection, sync and place, so
+ * that many connections don't all relist in the same run.
+ */
+const nextRelistAt = async (
+  source: Pick<Source, "connectionId" | "feed" | "place">,
+  now: number
+): Promise<number> => {
+  const hash = await sha256Hex(
+    JSON.stringify([source.connectionId, source.feed, source.place])
+  );
+  const offset = Number.parseInt(hash.slice(0, 12), 16) % relistMs;
+  const since = (((now - offset) % relistMs) + relistMs) % relistMs;
+  return now - since + relistMs;
+};
+
+/**
+ * Which of a source's two cursors a read follows: its changes, or the
+ * daily relist beside them.
+ */
+type Stream = "changes" | "relist";
+
 /** A page of keys erased at once after a disconnect, or at a listing's end. */
 const erasedPerPage = 100;
 
@@ -187,19 +220,31 @@ const namedReader = (
   tenant: string,
   reader: SyncReader
 ): unknown => {
-  const id = reader.id.toLowerCase();
   switch (reader.kind) {
     case "account": {
-      return { kind: "account", provider, tenant, account: id };
+      return {
+        kind: "account",
+        provider,
+        tenant,
+        account: reader.id.toLowerCase(),
+      };
     }
     case "group": {
-      return { kind: "group", provider, tenant, group: id };
+      return {
+        kind: "group",
+        provider,
+        tenant,
+        group: reader.id.toLowerCase(),
+      };
     }
     case "tenant": {
-      return { kind: "tenant", provider, tenant: id };
+      return { kind: "tenant", provider, tenant: reader.id.toLowerCase() };
+    }
+    case "link": {
+      // Whoever has a link: nobody.
+      return { kind: "link" };
     }
     default: {
-      // A kind the Brain can't name (a link): nobody.
       return undefined;
     }
   }
@@ -332,7 +377,17 @@ interface Applying {
   readAt: Date;
   /** How many of the page's items this read found nothing of to keep. */
   skipped: number;
+  /** Which cursor the page was read from. */
+  stream: Stream;
 }
+
+/**
+ * Whether `applying`'s page is part of a listing: the relist's, or the
+ * changes' own after a restart (or the first), each until its first page
+ * with nothing more.
+ */
+const isListing = ({ source, stream }: Applying): boolean =>
+  stream === "relist" || source.listingOpen;
 
 /** That `applying`'s run still holds its source, as SQL. */
 const stillHeld = ({ source, leaseId }: Applying): SQL =>
@@ -544,7 +599,7 @@ const add = async (
         // A listing brings what was there before, "old documents and
         // archives"; later pages what changed since, "recent documents"
         // (the Brain's own classes).
-        priority: source.listingOpen ? "archive" : "recent",
+        priority: isListing(applying) ? "archive" : "recent",
       },
       ...(plan.store === "own"
         ? { group: syncGroupOf(source.connectionId) }
@@ -642,8 +697,9 @@ const sweep = async (applying: Applying): Promise<void> => {
 const apply = async (applying: Applying, page: SyncPage): Promise<void> => {
   const { db, budget, source } = applying;
   const rows = await rowsOf(applying, page.items);
-  if (source.listingOpen && rows.size > 0) {
-    // Named by this listing, whatever else the page does with them.
+  if ((source.listingOpen || source.relisting) && rows.size > 0) {
+    // Named while a listing is under way, by it or by a change since,
+    // whatever else the page does with them: there, so not swept.
     spend(budget, 1);
     await db
       .update(brainSyncItems)
@@ -696,7 +752,7 @@ const apply = async (applying: Applying, page: SyncPage): Promise<void> => {
     // oxlint-disable-next-line no-await-in-loop -- in order, within the budget
     await add(applying, row, item, planOf(source, item), text);
   }
-  if (source.listingOpen && !page.more) {
+  if (isListing(applying) && !page.more) {
     await sweep(applying);
   }
 };
@@ -747,12 +803,22 @@ const commit = async (applying: Applying, page: SyncPage): Promise<void> => {
     throw new SyncStoppedError("lost");
   }
   const now = Date.now();
+  const cursorMoved =
+    applying.stream === "changes"
+      ? {
+          cursor: page.cursor,
+          listingOpen: source.listingOpen && page.more,
+          dueAt: new Date(page.more ? now : now + pollMs),
+        }
+      : {
+          relistCursor: page.cursor,
+          relisting: page.more,
+          relistAt: new Date(page.more ? now : await nextRelistAt(source, now)),
+        };
   const moved = db
     .update(brainSyncSources)
     .set({
-      cursor: page.cursor,
-      listingOpen: source.listingOpen && page.more,
-      dueAt: new Date(page.more ? now : now + pollMs),
+      ...cursorMoved,
       leaseId: null,
       leaseUntil: null,
       lastSuccessAt: new Date(now),
@@ -779,17 +845,33 @@ const commit = async (applying: Applying, page: SyncPage): Promise<void> => {
   heldAfter(committed);
 };
 
-/** Gives up `applying`'s source: due at `dueAt`, its cursor as it was or as `set` says. */
+/**
+ * Gives up `applying`'s source: its `stream` due again at `at`, its
+ * cursors as they were or as `set` says.
+ */
 const release = async (
-  applying: Pick<Applying, "db" | "source" | "leaseId">,
-  dueAt: number,
+  applying: Pick<Applying, "db" | "source" | "leaseId" | "stream">,
+  at: number,
   set: Partial<
-    Pick<Source, "cursor" | "listing" | "listingOpen" | "lastError">
+    Pick<
+      Source,
+      | "cursor"
+      | "listing"
+      | "listingOpen"
+      | "lastError"
+      | "relistCursor"
+      | "relisting"
+      | "relistAt"
+    >
   > = {}
 ): Promise<void> => {
+  const due =
+    applying.stream === "changes"
+      ? { dueAt: new Date(at) }
+      : { relistAt: new Date(at) };
   await applying.db
     .update(brainSyncSources)
-    .set({ ...set, dueAt: new Date(dueAt), leaseId: null, leaseUntil: null })
+    .set({ ...due, ...set, leaseId: null, leaseUntil: null })
     .where(
       and(
         eq(brainSyncSources.connectionId, applying.source.connectionId),
@@ -816,17 +898,44 @@ const retryAfterOf = (error: unknown): number => {
 };
 
 /**
- * Reads the next page of `source`, which this run holds, and applies it;
- * a read that failed leaves the cursor where it was, due again when the
- * provider asked or at the next run; a "restart" lists it again from the
- * start.
+ * Starts `applying`'s daily relist, unless a listing is under way already
+ * (the first, or a restart's), which is one: then the relist waits for
+ * its next day. A relist is a listing of its own number, from the start.
+ * Whether it started.
+ */
+const startRelist = async (applying: Applying): Promise<boolean> => {
+  const { db, budget, source } = applying;
+  const now = Date.now();
+  spend(budget, 1);
+  if (source.listingOpen) {
+    await release(applying, await nextRelistAt(source, now));
+    return false;
+  }
+  const [started] = await db
+    .update(brainSyncSources)
+    .set({ relisting: true, relistCursor: null, listing: source.listing + 1 })
+    .where(heldSource(applying))
+    .returning();
+  if (started === undefined) {
+    throw new SyncStoppedError("lost");
+  }
+  applying.source = started;
+  return true;
+};
+
+/**
+ * Reads the next page of `source`'s `stream`, which this run holds, and
+ * applies it; a read that failed leaves the cursor where it was, due
+ * again when the provider asked or at the next run; a "restart" lists it
+ * again from the start.
  */
 const syncPage = async (
   env: Env,
   db: Database,
   source: Source,
   leaseId: string,
-  budget: Budget
+  budget: Budget,
+  stream: Stream
 ): Promise<void> => {
   const applying: Applying = {
     env,
@@ -836,7 +945,15 @@ const syncPage = async (
     budget,
     readAt: new Date(),
     skipped: 0,
+    stream,
   };
+  if (
+    stream === "relist" &&
+    !source.relisting &&
+    !(await startRelist(applying))
+  ) {
+    return;
+  }
   let page: SyncPage;
   spend(budget, 1);
   try {
@@ -844,19 +961,36 @@ const syncPage = async (
       connectionId: source.connectionId,
       feed: source.feed,
       place: source.place,
-      cursor: source.cursor,
+      cursor:
+        stream === "changes"
+          ? applying.source.cursor
+          : applying.source.relistCursor,
     });
   } catch (error) {
     const code = syncErrors.codeOf(error);
     const now = Date.now();
+    const { listing } = applying.source;
     spend(budget, 1);
     if (code === "sync.restart") {
-      await release(applying, now, {
-        cursor: null,
-        listing: source.listing + 1,
-        listingOpen: true,
-        lastError: code,
-      });
+      // Listed again from the next run on, not at once: a source that
+      // answers "restart" to every read spends one read a run, never the
+      // run's budget. The changes' own listing is a full one: a relist
+      // under way gives way to it.
+      await release(
+        applying,
+        now + pollMs,
+        stream === "changes"
+          ? {
+              cursor: null,
+              listing: listing + 1,
+              listingOpen: true,
+              relisting: false,
+              relistCursor: null,
+              relistAt: new Date(await nextRelistAt(source, now)),
+              lastError: code,
+            }
+          : { relistCursor: null, listing: listing + 1, lastError: code }
+      );
       return;
     }
     if (code === undefined) {
@@ -891,11 +1025,16 @@ const refreshSources = async (
     spend(budget, 1);
     // oxlint-disable-next-line no-await-in-loop -- a page at a time
     const page = await env.CONNECT.syncSources({ after });
-    const statements = page.sources.map((listed) =>
+    const now = Date.now();
+    // oxlint-disable-next-line no-await-in-loop -- a page at a time
+    const relists = await Promise.all(
+      page.sources.map(async (listed) => await nextRelistAt(listed, now))
+    );
+    const statements = page.sources.map((listed, index) =>
       db
         .insert(brainSyncSources)
         .select(
-          sql`SELECT ${listed.connectionId}, ${listed.feed}, ${listed.place}, ${listed.ownerUserId}, ${listed.provider}, ${listed.tenant}, ${listed.accountEmail}, NULL, 1, 1, ${Date.now()}, NULL, NULL, NULL, NULL, 0, 0, 0
+          sql`SELECT ${listed.connectionId}, ${listed.feed}, ${listed.place}, ${listed.ownerUserId}, ${listed.provider}, ${listed.tenant}, ${listed.accountEmail}, NULL, 1, 1, ${now}, NULL, NULL, NULL, NULL, 0, 0, 0, NULL, 0, ${relists[index] ?? now + relistMs}
             WHERE NOT ${closed(listed.connectionId)}`
         )
         .onConflictDoUpdate({
@@ -918,15 +1057,17 @@ const refreshSources = async (
 };
 
 /**
- * Claims the source due longest, unless its connection was closed by a
+ * Claims the next source to read, unless its connection was closed by a
  * disconnect or another run holds it: this run's until `leaseMs` from
- * now.
+ * now, with the cursor to follow. Every source whose changes are due
+ * comes first, the one due longest first, so a relist never holds up a
+ * change; then a relist's page, the one waiting longest first.
  */
 const claimNext = async (
   db: Database,
   budget: Budget,
   leaseId: string
-): Promise<Source | undefined> => {
+): Promise<{ source: Source; stream: Stream } | undefined> => {
   const now = Date.now();
   spend(budget, 1);
   const [claimed] = await db
@@ -934,14 +1075,21 @@ const claimNext = async (
     .set({ leaseId, leaseUntil: new Date(now + leaseMs) })
     .where(
       sql`rowid = (SELECT rowid FROM ${brainSyncSources} AS due
-        WHERE due.due_at <= ${now}
+        WHERE (due.due_at <= ${now} OR due.relist_at <= ${now})
           AND (due.lease_until IS NULL OR due.lease_until <= ${now})
           AND NOT ${closed(sql`due.connection_id`)}
-        ORDER BY due.due_at, due.connection_id, due.feed, due.place
+        ORDER BY due.due_at > ${now},
+          CASE WHEN due.due_at <= ${now} THEN due.due_at ELSE due.relist_at END,
+          due.connection_id, due.feed, due.place
         LIMIT 1)`
     )
     .returning();
-  return claimed;
+  return claimed === undefined
+    ? undefined
+    : {
+        source: claimed,
+        stream: claimed.dueAt.getTime() <= now ? "changes" : "relist",
+      };
 };
 
 /** A disconnect that stopped a person's own connection, for the sync's erasure. */
@@ -1153,18 +1301,19 @@ export const runSync = async (env: Env, given?: Budget): Promise<void> => {
     await refreshSources(env, db, budget);
     for (;;) {
       // oxlint-disable-next-line no-await-in-loop -- one source at a time
-      const source = await claimNext(db, budget, leaseId);
-      if (source === undefined) {
+      const claimed = await claimNext(db, budget, leaseId);
+      if (claimed === undefined) {
         return;
       }
+      const { source, stream } = claimed;
       try {
         // oxlint-disable-next-line no-await-in-loop -- one source at a time
-        await syncPage(env, db, source, leaseId, budget);
+        await syncPage(env, db, source, leaseId, budget, stream);
       } catch (error) {
         if (stoppedFor(error, "budget")) {
           // What was done is in its rows: the page is read again next run.
           // oxlint-disable-next-line no-await-in-loop -- ends the run
-          await release({ db, source, leaseId }, Date.now());
+          await release({ db, source, leaseId, stream }, Date.now());
           return;
         }
         if (!stoppedFor(error, "lost")) {
@@ -1173,7 +1322,7 @@ export const runSync = async (env: Env, given?: Budget): Promise<void> => {
             errorName: errorName(error),
           });
           // oxlint-disable-next-line no-await-in-loop -- one source at a time
-          await release({ db, source, leaseId }, Date.now() + pollMs, {
+          await release({ db, source, leaseId, stream }, Date.now() + pollMs, {
             lastError: "sync.failed",
           });
         }

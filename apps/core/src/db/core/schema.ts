@@ -3478,7 +3478,10 @@ export const connectionBrainErasures = sqliteTable(
  * that holds it (`leaseId` until `leaseUntil`), when a page last applied
  * and the code of the latest failure, and what the page under way did so
  * far in the Brain (`added`, `changed`, `removed`), counted once each,
- * whichever run did it, for the page's one audit event.
+ * whichever run did it, for the page's one audit event. Beside it, the
+ * daily full relist: its own cursor (`relistCursor`), whether one is under
+ * way (`relisting`), and when its next page is due, or the next one
+ * starts (`relistAt`).
  */
 export const brainSyncSources = sqliteTable(
   "brain_sync_sources",
@@ -3501,6 +3504,9 @@ export const brainSyncSources = sqliteTable(
     added: integer().notNull(),
     changed: integer().notNull(),
     removed: integer().notNull(),
+    relistCursor: text("relist_cursor"),
+    relisting: integer({ mode: "boolean" }).notNull(),
+    relistAt: timestamp("relist_at").notNull(),
   },
   (table) => [
     primaryKey({ columns: [table.connectionId, table.feed, table.place] }),
