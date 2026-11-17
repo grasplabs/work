@@ -231,20 +231,10 @@ export const takeContent = (
 
 /**
  * Whether a request may start: requests and time left. A request that
- * starts gets `requestSignal` so it is given up at the deadline.
+ * starts goes through `fetchInRoom`, so it is given up at the deadline.
  */
 export const mayRequest = (room: SyncRoom): boolean =>
   room.requests > 0 && Date.now() < room.deadline;
-
-/** Counts one request, and gives it up at the page's deadline. */
-export const requestSignal = (room: SyncRoom): AbortSignal => {
-  room.requests -= 1;
-  return AbortSignal.timeout(Math.max(room.deadline - Date.now(), 0));
-};
-
-/** Whether `error` is a request given up at the page's deadline. */
-export const isLate = (error: unknown): boolean =>
-  error instanceof DOMException && error.name === "TimeoutError";
 
 /**
  * The items of a provider's page `entries` after the one keyed `after`
@@ -276,4 +266,46 @@ export const fillPage = async <Entry>(
     last = keyOf(entry);
   }
   return { items, last, done: true };
+};
+
+/**
+ * Sends one GET and reads its whole answer before `deadline` (ms since the
+ * epoch): the answer, its body already read, or "late" when the deadline
+ * cut it off, before its headers or while its body still came. A sync
+ * takes "late" as no room left on its page, so a page answers in time with
+ * what it has, and a file that always takes too long is passed over by a
+ * page that holds nothing else.
+ */
+export const fetchBefore = async (
+  url: URL,
+  deadline: number
+): Promise<Response | "late"> => {
+  try {
+    const response = await fetch(url, {
+      signal: AbortSignal.timeout(Math.max(deadline - Date.now(), 0)),
+    });
+    const body = await response.arrayBuffer();
+    return new Response(body, {
+      status: response.status,
+      headers: response.headers,
+    });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "TimeoutError") {
+      return "late";
+    }
+    throw error;
+  }
+};
+
+/**
+ * Sends one GET of a page, counted against its requests, and reads its
+ * whole answer before the page's deadline (`fetchBefore`): "late" when the
+ * deadline cut it off, before its headers or while its body still came.
+ */
+export const fetchInRoom = async (
+  room: SyncRoom,
+  url: URL
+): Promise<Response | "late"> => {
+  room.requests -= 1;
+  return await fetchBefore(url, room.deadline);
 };

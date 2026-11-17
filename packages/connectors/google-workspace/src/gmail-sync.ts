@@ -9,11 +9,10 @@ import {
   RestartSyncError,
   cursorPart,
   defineSync,
+  fetchInRoom,
   fillPage,
   fromCursorPart,
-  isLate,
   mayRequest,
-  requestSignal,
   syncRoom,
   takeContent,
 } from "@grasp-os/connector-kit/sync";
@@ -162,14 +161,9 @@ const getJson = async <Schema extends z.ZodType>(
   url: URL,
   schema: Schema
 ): Promise<z.output<Schema> | "not-found" | "late"> => {
-  let response: Response;
-  try {
-    response = await fetch(url, { signal: requestSignal(room) });
-  } catch (error) {
-    if (isLate(error)) {
-      return "late";
-    }
-    throw error;
+  const response = await fetchInRoom(room, url);
+  if (response === "late") {
+    return "late";
   }
   if (response.status === 404) {
     await response.body?.cancel();
