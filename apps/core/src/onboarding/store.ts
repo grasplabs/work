@@ -828,74 +828,78 @@ const drawingOf = (stored: string | null): DrawnWork | null =>
     : (drawnWorkSchema.safeParse(JSON.parse(stored)).data ?? null);
 
 /**
- * What a piece of work's routine still lacks, each as a kind of answer in
- * words of the store's own (GRA-330, GRA-1749): the next interview asks
- * about these when they come up. A routine shows a part only once five or
- * more gave it (brain-intake.ts), so it is asked until five who told the
- * work gave it, never of someone who gave it themselves. Never the
- * drawing's own open questions, which the model writes from what as few
- * as one colleague said, so they could carry that colleague's words,
- * paraphrased, into someone else's interview; what fewer than five people
- * said reaches nobody but them. Only that an answer is missing is told,
- * never what anyone answered.
+ * What nobody who told a piece of work has said yet, each as a kind of
+ * answer in words of the store's own (GRA-330): what its routine lacks,
+ * as a drawing shows a part from the first person who told it (GRA-1749,
+ * GRA-1987). The next interview asks
+ * about these when they come up. Never the drawing's own open questions,
+ * which the model writes from what as few as one colleague said, so they
+ * could carry that colleague's words, paraphrased, into someone else's
+ * interview; what fewer than five people said reaches nobody but them.
+ * Only that an answer is missing is told, never what anyone answered.
  */
-const routineAnswers: readonly {
-  gave: (told: Told) => boolean;
+const unknownAnswers: readonly {
+  missing: (told: Told[]) => boolean;
   ask: string;
 }[] = [
+  // A routine shows how often only as the whole team's count: one someone
+  // gave as their own never shows (brain-intake.ts `volumesOf`), so it is
+  // asked until someone gives the team's (GRA-1749).
   {
-    gave: ({ volume }) => volume !== null,
-    ask: "how many come in, in a week or a month",
+    missing: (told) =>
+      told.every(
+        ({ volume, volumeOf }) => volume === null || volumeOf !== "team"
+      ),
+    ask: "how many the whole team does, in a week or a month",
   },
   {
-    gave: ({ takes, stepMinutes }) =>
-      takes !== null || (stepMinutes ?? []).length > 0,
+    missing: (told) =>
+      told.every(
+        ({ takes, stepMinutes }) =>
+          takes === null && (stepMinutes ?? []).length === 0
+      ),
     ask: "how long one takes",
   },
   {
-    gave: ({ wrong }) => wrong !== null,
+    missing: (told) => told.every(({ wrong }) => wrong === null),
     ask: "how many come in wrong or incomplete",
   },
   {
-    gave: (told) => told.waits.length > 0,
+    missing: (told) => told.every((said) => said.waits.length === 0),
     ask: "where it waits, and for what",
   },
   {
-    gave: ({ differently }) => differently.length > 0,
+    missing: (told) =>
+      told.every(({ differently }) => differently.length === 0),
     ask: "what is done when a case is off the normal path",
   },
   {
-    gave: ({ decides }) => decides,
+    missing: (told) => told.every(({ decides }) => !decides),
     ask: "what they look at to decide",
   },
   {
-    gave: ({ next }) => next,
+    missing: (told) => told.every(({ next }) => !next),
     ask: "who gets it after them",
   },
   {
-    gave: ({ right }) => right,
+    missing: (told) => told.every(({ right }) => !right),
     ask: "what done right looks like",
   },
 ];
 
-/** What a piece of work's routine still lacks, for Stephen to ask `person` when it comes up. */
-const stillUnknown = (drawn: DrawnWork | null, person: string): string[] => {
+/** What nobody has said yet of a piece of work, for Stephen to ask when it comes up. */
+const stillUnknown = (drawn: DrawnWork | null): string[] => {
   const told = Object.values(drawn?.told ?? {});
   if (told.length === 0) {
     return [];
   }
-  const own = drawn?.told[person];
-  const asks = routineAnswers
-    .filter(
-      ({ gave }) =>
-        (own === undefined || !gave(own)) &&
-        told.filter((each) => gave(each)).length < minTeamShown
-    )
+  const asks = unknownAnswers
+    .filter(({ missing }) => missing(told))
     .map(({ ask }) => ask)
     .slice(0, 4);
   return asks.length === 0
     ? []
-    : [`Too few have said yet, so ask when it comes up: ${asks.join("; ")}.`];
+    : [`Nobody has said yet, so ask when it comes up: ${asks.join("; ")}.`];
 };
 
 const doersSchema = z.array(z.string());
@@ -2411,9 +2415,7 @@ export class Onboarding extends DurableObject<Env> {
     const teamName = team?.name ?? "";
     const known = [
       ...(kind === "lead" ? teamKnown(person.name, teamName, members) : []),
-      ...(kind === "lead"
-        ? []
-        : stillUnknown(this.#drawingAskedOf(person.id), person.id)),
+      ...(kind === "lead" ? [] : stillUnknown(this.#drawingAskedOf(person.id))),
       ...(kind === "lead" ? [] : this.#insteadKnown(person)),
       this.interviewBrief(),
       this.documentsBrief(teamName),

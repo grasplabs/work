@@ -2162,7 +2162,7 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
       before,
       drawnBefore,
       drawnAfter: await openOfTickets(ids.team),
-      toldToAsk: known.includes("Too few have said yet"),
+      toldToAsk: known.includes("Nobody has said yet"),
       prompts: [...drawn.requests, ...given.requests].some(({ body }) =>
         holdsMapWords(JSON.stringify(body))
       ),
