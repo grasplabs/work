@@ -5,7 +5,8 @@ CREATE TABLE `connection_brain_erasures` (
 	`request` text NOT NULL,
 	`actor` text NOT NULL,
 	`requested_at` integer NOT NULL,
-	`erased` integer NOT NULL
+	`erased` integer NOT NULL,
+	`closed` integer DEFAULT false NOT NULL
 );
 --> statement-breakpoint
 CREATE INDEX `connection_brain_erasures_erasing_idx` ON `connection_brain_erasures` (`erasing`);--> statement-breakpoint

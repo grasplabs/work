@@ -7,6 +7,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { drainAuditOutboxes } from "../src/audit-drains.ts";
 import { addSource, recallAs, workBrain } from "../src/brain-next.ts";
 import type { SourceRef } from "../src/brain-next.ts";
+import { setConnectionAudience } from "../src/connection-audiences.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
 import {
   claimSharedRead,
@@ -21,6 +22,7 @@ import {
 } from "./brain-erasures-failing.ts";
 import { newTeam } from "./brain-next-leaks-harness.ts";
 import { copyOfStore, restoreStore } from "./brain-next-store-copy.ts";
+import { afterFirstRead, refusingWrites } from "./d1-after-first-read.ts";
 import { mockIdp } from "./idp.ts";
 import { noProducers } from "./no-producers.ts";
 import {
@@ -40,8 +42,12 @@ import { connectDb } from "./test-env.ts";
 // erasing it (GRA-1831): an admin's "Erase what the Brain kept", or the
 // connection's disconnect. These start from the ways it can fail: a
 // record kept after its erasure started, or brought back by a restore;
-// someone reading while it runs; an erasure that stops part-way read as
-// done, or recorded twice; a repeat erasing what was kept after it ended;
+// someone reading while it runs, or an audience opened meanwhile, or on a
+// connection a disconnect closed; an erasure that stops part-way read as
+// done, or recorded twice; one step ending another erasure; a disconnect
+// whose erasure could not start leaving connect's outbox, or one drained
+// again starting a finished erasure again; a run of the clock spending
+// more calls to the Brain than its budget; a key the Brain would refuse;
 // someone else erasing; lane 1's own captures touched.
 
 const idp = mockIdp();
@@ -354,16 +360,10 @@ describe("what the Brain kept from a shared connection", setUpTime, () => {
     const source: SourceRef =
       typeof record === "string" ? { producer: "connected", id: "" } : record;
     const failing = erasuresFailing();
-    const requestedAt = new Date();
 
     const events = await auditedDuring(async () => {
       // Started, and its first step failing in the Brain.
-      await eraseSharedReadsOfDisconnect(failing, {
-        connectionId,
-        request: crypto.randomUUID(),
-        actor: { type: "system" },
-        at: requestedAt,
-      });
+      await admin.api.connections.eraseBrainReads(connectionId);
       await outcome(stepErasure(failing, connectionId));
     });
     const whileOwed = {
@@ -397,7 +397,12 @@ describe("what the Brain kept from a shared connection", setUpTime, () => {
         claimed: "not claimed",
       },
       key: "erased",
-      ended: [{ actor: { type: "system" }, detail: { sources: 1 } }],
+      ended: [
+        {
+          actor: { type: "person", userId: admin.userId },
+          detail: { sources: 1 },
+        },
+      ],
     });
   });
 
@@ -406,14 +411,8 @@ describe("what the Brain kept from a shared connection", setUpTime, () => {
     const marker = uniqueWord();
     await kept(connectionId, "deal 1", `Old deal ${marker}`);
     await kept(connectionId, "deal 2", `Old deal two ${marker}`);
-    // The first erasure starts; its own step at once fails, so the test's
-    // steps alone run it.
-    await eraseSharedReadsOfDisconnect(erasuresFailing(), {
-      connectionId,
-      request: crypto.randomUUID(),
-      actor: { type: "system" },
-      at: new Date(),
-    });
+    // The first erasure starts: only steps run it.
+    await admin.api.connections.eraseBrainReads(connectionId);
     // One step held at its erasure in the Brain (as the clock's and the
     // one at once can run at the same time), while another ends it.
     const held = erasuresHeld();
@@ -431,12 +430,7 @@ describe("what the Brain kept from a shared connection", setUpTime, () => {
       await kept(connectionId, "deal 3", `New deal three ${marker}`),
     ];
     const events = await auditedDuring(async () => {
-      await eraseSharedReadsOfDisconnect(erasuresFailing(), {
-        connectionId,
-        request: crypto.randomUUID(),
-        actor: { type: "system" },
-        at: new Date(),
-      });
+      await admin.api.connections.eraseBrainReads(connectionId);
       held.release();
       await outcome(stale);
     });
@@ -463,7 +457,12 @@ describe("what the Brain kept from a shared connection", setUpTime, () => {
       // its records meanwhile.
       afterStale: { ended: [], found: false },
       keys: ["erased", "erased"],
-      ended: [{ actor: { type: "system" }, detail: { sources: 2 } }],
+      ended: [
+        {
+          actor: { type: "person", userId: admin.userId },
+          detail: { sources: 2 },
+        },
+      ],
     });
   });
 
@@ -482,16 +481,14 @@ describe("what the Brain kept from a shared connection", setUpTime, () => {
           records.push(record);
         }
       }
-      // Started, its own step at once failing: the clock's runs alone
-      // erase it.
-      // oxlint-disable-next-line no-await-in-loop -- one erasure at a time
-      await eraseSharedReadsOfDisconnect(erasuresFailing(), {
-        connectionId,
-        request: crypto.randomUUID(),
-        actor: { type: "system" },
-        at: new Date(),
-      });
+      // oxlint-disable-next-line no-await-in-loop -- one disconnect at a time
+      await disconnectRecorded(connectionId);
     }
+    // One drain starts all three, and spends nothing on the Brain: the
+    // clock's runs alone erase them.
+    const drain = erasuresCounted();
+    await drainAuditOutboxes(drain.env);
+    const drainSpent = drain.count();
     // A run may spend 5 calls, where the clock's may spend
     // `brainCallsPerTick`: twelve records take three runs at least.
     const perRun = 5;
@@ -506,6 +503,7 @@ describe("what the Brain kept from a shared connection", setUpTime, () => {
     });
 
     expect({
+      drainSpent,
       records: records.length,
       overBudget: spent.filter((calls) => calls > perRun),
       spent: spent.reduce((sum, calls) => sum + calls, 0),
@@ -514,6 +512,7 @@ describe("what the Brain kept from a shared connection", setUpTime, () => {
         about(events, "brain.shared_reads.erased", connectionId)
       ),
     }).toStrictEqual({
+      drainSpent: 0,
       records: 12,
       overBudget: [],
       // Each record once.
@@ -523,6 +522,182 @@ describe("what the Brain kept from a shared connection", setUpTime, () => {
         { actor: { type: "system" }, detail: { sources: 4 } },
       ]),
     });
+  });
+
+  it("leaves no audience when an erase starts between an audience change's read and its write", async () => {
+    const { admin, member, team, connectionId } = await sharedWithTeam();
+    const marker = uniqueWord();
+    await kept(connectionId, "deal", `Deal ${marker}`);
+    // Hidden and kept: nobody reads it.
+    await admin.api.connections.setBrainAudience(connectionId, {
+      kind: "nobody",
+    });
+    const other = await signedInApi(idp, "admin");
+    // The first admin reads that it may be opened; before they write,
+    // the other admin's erase starts.
+    const racing: Env = {
+      ...env,
+      DB: afterFirstRead(
+        env.DB,
+        'select "erasing", "closed" from "connection_brain_erasures"',
+        async () => {
+          await other.api.connections.eraseBrainReads(connectionId);
+        }
+      ),
+    };
+    const identity = await admin.api.whoami();
+    const opened = await outcome(
+      setConnectionAudience(racing, identity, connectionId, {
+        kind: "team",
+        teamId: team,
+      })
+    );
+    const audiences = await admin.api.connections.brainAudiences();
+
+    expect({
+      opened,
+      audiences: audiences.filter((each) => each.connectionId === connectionId),
+      found: await finds(member, marker),
+    }).toStrictEqual({
+      opened: "connection.brain_erasing",
+      audiences: [],
+      found: false,
+    });
+  });
+
+  it("is closed for good by a disconnect that lands between an audience change's check and its write", async () => {
+    const { admin, connectionId } = await sharedWithTeam();
+    await admin.api.connections.setBrainAudience(connectionId, {
+      kind: "nobody",
+    });
+    // Connect says the connection is connected; then, before the write,
+    // it is disconnected and the disconnect's erasure starts.
+    const racing: Env = {
+      ...env,
+      DB: afterFirstRead(
+        env.DB,
+        'select "erasing", "closed" from "connection_brain_erasures"',
+        async () => {
+          await connectDb()
+            .prepare(
+              "UPDATE connections SET status = 'disconnected' WHERE id = ?"
+            )
+            .bind(connectionId)
+            .run();
+          await eraseSharedReadsOfDisconnect(env, {
+            connectionId,
+            request: crypto.randomUUID(),
+            actor: { type: "system" },
+            at: new Date(),
+          });
+          // Its erasure may even have ended before the write lands.
+          await erasuresEnded();
+        }
+      ),
+    };
+    const identity = await admin.api.whoami();
+    const opened = await outcome(
+      setConnectionAudience(racing, identity, connectionId, {
+        kind: "everyone",
+      })
+    );
+    const audiences = await admin.api.connections.brainAudiences();
+
+    expect({
+      opened,
+      audiences: audiences.filter((each) => each.connectionId === connectionId),
+      // Nothing is kept under it from then on.
+      claimed: await kept(connectionId, "late", "Late deal"),
+    }).toStrictEqual({
+      opened: "connection.invalid",
+      audiences: [],
+      claimed: "not claimed",
+    });
+  });
+
+  it("holds a disconnect whose erasure could not start, and starts it at the next drain", async () => {
+    const { connectionId } = await sharedWithTeam();
+    const record = await kept(connectionId, "deal", "Deal");
+    const source: SourceRef =
+      typeof record === "string" ? { producer: "connected", id: "" } : record;
+    const disconnect = await disconnectRecorded(connectionId);
+    const leftInConnect = async () =>
+      await connectDb()
+        .prepare("SELECT count(*) AS left FROM audit_outbox WHERE id = ?")
+        .bind(disconnect)
+        .first<{ left: number }>();
+    // Core's database refuses the erasure's start.
+    await drainAuditOutboxes({
+      ...env,
+      DB: refusingWrites(env.DB, 'insert into "connection_brain_erasures"'),
+    });
+    const held = await leftInConnect();
+    await drainAuditOutboxes(env);
+    await erasuresEnded();
+
+    expect({
+      held,
+      after: await leftInConnect(),
+      key: await keyState(source),
+    }).toStrictEqual({
+      held: { left: 1 },
+      after: { left: 0 },
+      key: "erased",
+    });
+  });
+
+  it("never starts an erasure again for a disconnect drained again after it ended", async () => {
+    const { connectionId } = await sharedWithTeam();
+    await kept(connectionId, "deal", "Deal");
+    const request = crypto.randomUUID();
+    const disconnect = {
+      connectionId,
+      request,
+      actor: { type: "system" } as const,
+      at: new Date(),
+    };
+    await eraseSharedReadsOfDisconnect(env, disconnect);
+    await erasuresEnded();
+    const row = async () =>
+      await env.DB.prepare(
+        "SELECT generation, erasing, erased FROM connection_brain_erasures WHERE connection_id = ?"
+      )
+        .bind(connectionId)
+        .first<{ generation: number; erasing: number; erased: number }>();
+    const ended = await row();
+    // Connect's event drained again, as after a lost settle.
+    await eraseSharedReadsOfDisconnect(env, disconnect);
+
+    expect({ ended, again: await row() }).toStrictEqual({
+      ended: { generation: 1, erasing: 0, erased: 1 },
+      again: { generation: 1, erasing: 0, erased: 1 },
+    });
+  });
+
+  it("keeps a record only under a key the Brain takes: a connection's ID past the bound is refused", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const longest = `c${"x".repeat(169)}`;
+    const now = Date.now();
+    await connectDb()
+      .prepare(
+        "INSERT INTO connections (id, provider, scope, owner_user_id, status, server_kind, server, created_at, updated_at) VALUES (?, 'hubspot', 'shared', NULL, 'active', 'composio', 'hubspot', ?, ?)"
+      )
+      .bind(longest, now, now)
+      .run();
+    await admin.api.connections.setBrainAudience(longest, {
+      kind: "everyone",
+    });
+
+    const longestKept = await kept(longest, "deal", "Deal");
+    const tooLong = await outcome(
+      claimSharedRead(env, `${longest}x`, await hashOf("deal"), new Date())
+    );
+
+    expect({
+      // 170 characters, the most: its key fits the Brain's own bound.
+      longest: typeof longestKept,
+      tooLong: tooLong.includes("too_big"),
+    }).toStrictEqual({ longest: "object", tooLong: true });
   });
 
   it("is erased by the company's admins alone, on a shared connection, and never touches a person's own captures", async () => {

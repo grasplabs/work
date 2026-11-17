@@ -3419,8 +3419,9 @@ export const connectionBrainReads = sqliteTable(
  * generation the keys it keeps from now on are under (every older one is
  * erased or being erased), whether an erasure is under way (`erasing`,
  * which the clock completes), the request it serves (an audit event's
- * id), who asked and when (`actor`, an audit actor as JSON), and how many
- * records it has erased so far.
+ * id), who asked and when (`actor`, an audit actor as JSON), how many
+ * records it has erased so far, and whether a disconnect closed the
+ * connection for good (`closed`: no audience is opened on it again).
  */
 export const connectionBrainErasures = sqliteTable(
   "connection_brain_erasures",
@@ -3432,6 +3433,7 @@ export const connectionBrainErasures = sqliteTable(
     actor: text().notNull(),
     requestedAt: timestamp("requested_at").notNull(),
     erased: integer().notNull(),
+    closed: integer({ mode: "boolean" }).notNull().default(false),
   },
   (table) => [index("connection_brain_erasures_erasing_idx").on(table.erasing)]
 );

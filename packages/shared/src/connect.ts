@@ -1144,13 +1144,16 @@ export interface ConnectionBrainAudienceSetting {
 
 /**
  * A shared connection's ID, as the Brain's groups and keys take it
- * (GRA-1831): well-formed, never "/" nor ":", and at most 245 characters,
- * so its group (`connection:` and it) fits a Brain principal (256).
+ * (GRA-1831): well-formed, never "/" nor ":", and at most 170 characters,
+ * so every key of what is kept of it fits a Brain source's id: the kind
+ * `connected:` (10) and `<id>/<generation>/<SHA-256 in hex>` within 256,
+ * a generation of up to 10 digits. Its group (`connection:` and it) fits
+ * a Brain principal (256) too. Connect's IDs are far shorter.
  */
 export const brainConnectionIdSchema = z
   .string()
   .min(1)
-  .max(245)
+  .max(170)
   .refine(
     (id) => id.isWellFormed() && !(id.includes("/") || id.includes(":")),
     { message: "Not a connection's ID" }

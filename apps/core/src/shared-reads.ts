@@ -12,7 +12,6 @@ import { sha256Hex } from "@grasp-os/shared/encoding";
 import { errorName, log } from "@grasp-os/shared/log";
 import { requireAdmin, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { waitUntil } from "cloudflare:workers";
 import { and, asc, eq, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -53,9 +52,17 @@ import { inList } from "./db/d1.ts";
 // ledger (a late add refused, a restore replaying it), and forgotten
 // here, a page at a time; once none is left, the erasure ends, with its
 // one event, `brain.shared_reads.erased` and how many records it erased.
-// A started erasure is owed until then: tried at once, and again by the
-// clock each minute (`completeOwedErasures`), so a Worker that stopped
-// part-way, or a store out of reach, delays it and never drops it.
+// A started erasure is owed until then, and only the clock takes it on:
+// each minute, every erasure under way a step, out of one budget of calls
+// to the Brain (`completeOwedErasures`), so a Worker that stopped
+// part-way, or a store out of reach, delays it and never drops it, and
+// nothing races it in the background. Nobody reads its records from the
+// moment it starts, so waiting for the clock shows nobody anything.
+//
+// A disconnect also closes the connection here for good (`closed`): no
+// audience is opened on it again, whatever was checked before the
+// disconnect landed (connection-audiences.ts), so nothing claimed after
+// it can outlive its erasure.
 
 /** A record's key under its connection: its generation, then a hash. */
 const hashSchema = z.string().regex(/^[0-9a-f]{64}$/u);
@@ -66,7 +73,7 @@ const hashSchema = z.string().regex(/^[0-9a-f]{64}$/u);
  * invocation, leaving 600 for the clock's other tasks that run in the same
  * one (the audit drain, the Brain's work queue and hand-overs, the
  * onboarding's and the uploads' owed work, each a few dozen calls a
- * tick), or for the request a step at once runs in. Every erasure under
+ * tick). Every erasure under
  * way shares it (`completeOwedErasures`); what is left is erased by the
  * next tick, so any number is erased in the end.
  */
@@ -146,6 +153,7 @@ const startStatements = (
         actor: JSON.stringify(actor),
         requestedAt: at,
         erased: 0,
+        closed: false,
       })
       .onConflictDoUpdate({
         target: connectionBrainErasures.connectionId,
@@ -160,27 +168,6 @@ const startStatements = (
         setWhere: sql`${connectionBrainErasures.erasing} = 0 AND ${connectionBrainErasures.request} <> ${request}`,
       }),
   ] as const;
-
-/** Whether anything of `connectionId` is kept or may be: an audience, or a record. */
-const holdsAny = async (
-  db: DrizzleD1Database,
-  connectionId: string
-): Promise<boolean> => {
-  const [audience, read] = await Promise.all([
-    db
-      .select({ id: connectionBrainAudiences.connectionId })
-      .from(connectionBrainAudiences)
-      .where(eq(connectionBrainAudiences.connectionId, connectionId))
-      .get(),
-    db
-      .select({ id: connectionBrainReads.sourceId })
-      .from(connectionBrainReads)
-      .where(eq(connectionBrainReads.connectionId, connectionId))
-      .limit(1)
-      .get(),
-  ]);
-  return audience !== undefined || read !== undefined;
-};
 
 /** The event that ends the erasure `row` served: by who asked, when they asked. */
 const erasedEvent = async (row: {
@@ -383,39 +370,29 @@ export const completeOwedErasures = async (
   }
 };
 
-/** Takes the erasure of `connectionId` on now, in the background; the clock finishes what this doesn't. */
-const stepSoon = (env: Env, connectionId: string): void => {
-  const step = async (): Promise<void> => {
-    try {
-      await stepErasure(env, connectionId);
-    } catch (error) {
-      log.warn("brain.shared_reads.erasure_owed", {
-        connectionId,
-        errorName: errorName(error),
-      });
-    }
-  };
-  waitUntil(step());
-};
-
 /**
  * Starts erasing everything the Brain kept of the shared connection a
  * disconnect stopped (connect's `connection.disconnect` event `request`,
- * by its actor, at its moment), when anything of it is kept or may be:
- * for capture-erasures.ts, before connect's event leaves its outbox. A
- * repeat of the same disconnect starts nothing again. Throws when the
- * database failed: the disconnect is held for the next drain.
+ * by its actor, at its moment), and closes the connection here for good,
+ * in one batch: for capture-erasures.ts, before connect's event leaves
+ * its outbox. One under way already erases everything kept so far, and
+ * none can be added meanwhile. A repeat of the same disconnect starts
+ * nothing again. The clock does the erasing (`completeOwedErasures`).
+ * Throws when the database failed: the disconnect is held for the next
+ * drain.
  */
 export const eraseSharedReadsOfDisconnect = async (
-  env: Env,
+  env: Pick<Env, "DB">,
   request: ErasureRequest
 ): Promise<void> => {
   const db = drizzle(env.DB);
-  if (!(await holdsAny(db, request.connectionId))) {
-    return;
-  }
-  await db.batch([...startStatements(db, request)]);
-  stepSoon(env, request.connectionId);
+  await db.batch([
+    ...startStatements(db, request),
+    db
+      .update(connectionBrainErasures)
+      .set({ closed: true })
+      .where(eq(connectionBrainErasures.connectionId, request.connectionId)),
+  ]);
 };
 
 /**
@@ -480,5 +457,4 @@ export const eraseBrainReads = async (
     }),
     outboxedEventWhere(db, requested, sql`changes() > 0`),
   ]);
-  stepSoon(env, id.data);
 };
