@@ -1,13 +1,5 @@
 import type { AppOverview } from "@grasp-os/shared/apps";
 import {
-  Empty,
-  EmptyContent,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle,
-} from "@grasp-os/ui/components/empty";
-import {
   InputGroup,
   InputGroupAddon,
   InputGroupInput,
@@ -19,6 +11,7 @@ import { useState } from "react";
 
 import { formatDate } from "../format.ts";
 import { Page, PageHeading } from "../frame/page.tsx";
+import { Empty } from "../grasp/empty/index.ts";
 import { MakeSomethingLink } from "../make/make-link.tsx";
 import { StatusBadge } from "./app-status.tsx";
 
@@ -99,29 +92,17 @@ export const AppsOverview = ({
         title={<Trans>Apps</Trans>}
       />
       {apps.length === 0 ? (
-        <Empty>
-          <EmptyHeader>
-            <EmptyMedia variant="icon">
-              <LayoutGridIcon />
-            </EmptyMedia>
-            <EmptyTitle>
-              <Trans>No Apps yet</Trans>
-            </EmptyTitle>
-            <EmptyDescription>
-              {builds ? (
-                <Trans>Say what you want to build, and Grasp builds it.</Trans>
-              ) : (
-                <Trans>
-                  The Apps your colleagues share with you show here.
-                </Trans>
-              )}
-            </EmptyDescription>
-          </EmptyHeader>
+        <Empty
+          action={builds ? <MakeSomethingLink kind="app" /> : undefined}
+          picture="nothing"
+          size="page"
+          title={t`No Apps yet`}
+        >
           {builds ? (
-            <EmptyContent>
-              <MakeSomethingLink kind="app" />
-            </EmptyContent>
-          ) : null}
+            <Trans>Say what you want to build, and Grasp builds it.</Trans>
+          ) : (
+            <Trans>The Apps your colleagues share with you show here.</Trans>
+          )}
         </Empty>
       ) : (
         <>
@@ -141,12 +122,8 @@ export const AppsOverview = ({
             </InputGroup>
           </div>
           {shown.length === 0 ? (
-            <Empty>
-              <EmptyHeader>
-                <EmptyTitle>
-                  <Trans>No App is called “{asked}”</Trans>
-                </EmptyTitle>
-              </EmptyHeader>
+            <Empty picture="search">
+              <Trans>No App is called “{asked}”</Trans>
             </Empty>
           ) : (
             <ul
