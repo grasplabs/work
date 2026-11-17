@@ -1,8 +1,8 @@
 import { delegateActorOf } from "@grasp-os/shared/audit";
 import { brainSourceErrors } from "@grasp-os/shared/brain-sources";
-import type { ConnectResult } from "@grasp-os/shared/connect";
+import type { ConnectResult, ToolClass } from "@grasp-os/shared/connect";
 import { errorFields, log } from "@grasp-os/shared/log";
-import { redact } from "@grasp-os/shared/redact";
+import { redactJsonText } from "@grasp-os/shared/redact-json";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -34,15 +34,16 @@ import { classOf } from "./tool-classes.ts";
 //   read. Without its word nothing is kept: a change, a held call, a
 //   replay, a refusal. An error answer never reaches capture: the call
 //   throws it (`connect.action_failed`).
-// - Only the person's own connection, and only a tool that reaches the
-//   person's own things (classed `read-own`: its manifest's reach `own`,
-//   or a Composio tool its review classes so). Its items are theirs alone
+// - Only the person's own connection. What it keeps is theirs alone
 //   (`owner`), as the plan's Owner is "the one whose own connection
-//   brought it in". A shared connection's reads, and a tool that reaches
+//   brought it in". A native tool only when it reaches the person's own
+//   things (its manifest's reach `own`, classed `read-own`); a toolkit's
+//   as below. A shared connection's reads, and a native tool that reaches
 //   the company's or others' things (a SharePoint list, a shared drive,
-//   another mailbox), are kept by nothing yet: a copy readable by its
-//   person alone would outlive their access at the source. They come back
-//   with native sync, which brings each item's readers.
+//   another mailbox), are kept by nothing yet: a native connection may
+//   wait to be signed in again with its captures standing, so a copy
+//   could outlive the person's access at the source. They come back with
+//   native sync, which brings each item's readers.
 // - Only a tool that answers one item's content, as its manifest declares
 //   (`answersItem`: Gmail's message and attachment reads, OneNote's page
 //   read), kept whole as that item's source for the tool, in the person's
@@ -66,14 +67,30 @@ import { classOf } from "./tool-classes.ts";
 //   content, or its text, never an image, audio or another binary block,
 //   which is counted (`leftOut`); an answer with no text in it is skipped
 //   (`no_text`). Only for a tool connect takes to read the person's own
-//   things (`read-own`: its review's class of a read, and the admin's
-//   mark of one), as for a native tool. Not a native connector's, which
-//   is kept item by item as above.
+//   things or the company's (`read-own`, `read-company`: its review's
+//   class of a read, and the admin's mark of one), never others' things
+//   (`read-others`): Nick's decision on GRA-1845 (17 November), a
+//   person only ever gets back what they themselves opened with their own
+//   login at the time, for them alone, with no check against the source
+//   afterwards ("a person keeps what they read before losing access at
+//   the source"). Disconnecting the connection, the person's removal and
+//   their erasure erase it all (below). A shared connection's reads stay
+//   uncaptured: they are the shared Brain's, with the audience an admin
+//   chooses (GRA-1831), under their own connection's keys, so the two
+//   never meet. Not a native connector's, which is kept item by item as
+//   above, its own things only.
+// - Each kept text starts with when and through what it was read ("Read
+//   on <day> through <toolkit or provider>."), so the person sees it on
+//   the Sources page and the model in the passage: a read again on a later
+//   day is the next version, with its day.
+// - Credentials are redacted inside the answer's JSON as well as over its
+//   text (connection-answer.ts `redactedAnswer`); an answer whose
+//   redaction cannot finish is not kept (`credential`).
 // - Capturing never holds up or fails the call: it runs once the agent
 //   has its answer (`waitUntil`). Every call ends in one audit event, of
 //   IDs and counts alone (items, kept, failed, skipped, adding up to
 //   items): kept, failed, or skipped with the reason (`shared`, `reach`,
-//   `list`, `file`, `erased`, `stale`). Captures of one item run
+//   `list`, `file`, `no_text`, `credential`, `erased`, `stale`). Captures of one item run
 //   independently and may land out of order: each carries when its tool
 //   answered (`readAt`), and the Brain, in the transaction that would make
 //   it current, writes nothing for a read older than the current version's
@@ -177,7 +194,35 @@ const skippedAll = (reason: string, items: number): Ended => [
 ];
 
 /**
- * Keeps `text` under `id` for the chat's person alone, redacted: what it
+ * The line a kept text starts with: the day it was read (UTC) and what it
+ * was read through, a toolkit or a native provider. In the person's
+ * Sources page as the source's first line, and in the passage the model
+ * reads.
+ */
+const readLine = (readAt: Date, through: string): string =>
+  `Read on ${readAt.toISOString().slice(0, 10)} through ${through}.`;
+
+/**
+ * `texts` with their credentials redacted, inside JSON as well as over
+ * text (`redactJsonText`), joined; `undefined` when that cannot finish (a
+ * JSON nesting too deep to walk) or a second pass would still change one:
+ * a credential may be left, so nothing is kept.
+ */
+const redactedFor = (texts: readonly string[]): string | undefined => {
+  try {
+    const redacted = texts.map((text) => redactJsonText(text));
+    return redacted.every((text) => redactJsonText(text) === text)
+      ? redacted.join("\n\n")
+      : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * Keeps `text` (redacted, `redactedFor`), read through `through`, under
+ * `id` for the chat's person alone, after the line saying when and
+ * through what it was read (`readLine`): what it
  * ended in, kept, or skipped as `stale` or `erased`. Throws when the Brain
  * refused it otherwise (a text past its limit) or couldn't be reached.
  */
@@ -186,7 +231,7 @@ const keptAs = async (
   scope: AgentScope,
   connectionId: string,
   id: string,
-  text: string,
+  { text, through }: { text: string; through: string },
   readAt: Date
 ): Promise<Ended> => {
   try {
@@ -201,7 +246,7 @@ const keptAs = async (
       // version (the Brain's rule), so reading an unchanged item adds
       // nothing, and an item that changed back is a version again.
       change: crypto.randomUUID(),
-      text: redact(text),
+      text: `${readLine(readAt, through)}\n\n${text}`,
       readers: { kind: "owner", personId: scope.personId },
       readAt,
     });
@@ -230,12 +275,18 @@ const answerCaptured = async (
   connectionId: string,
   action: string,
   input: unknown,
-  { result, readAt }: Read
+  { result, readAt }: Read,
+  through: string
 ): Promise<Ended> => {
-  const { text, leftOut } = answerText(result.output);
+  const { texts, leftOut } = answerText(result.output);
   const counted: Record<string, number> = leftOut === 0 ? {} : { leftOut };
-  if (text.trim() === "") {
+  if (texts.join("").trim() === "") {
     const [event, detail] = skippedAll("no_text", 1);
+    return [event, { ...detail, ...counted }];
+  }
+  const text = redactedFor(texts);
+  if (text === undefined) {
+    const [event, detail] = skippedAll("credential", 1);
     return [event, { ...detail, ...counted }];
   }
   let ended: Ended;
@@ -246,7 +297,14 @@ const answerCaptured = async (
       action,
       input
     );
-    ended = await keptAs(env, scope, connectionId, id, text, readAt);
+    ended = await keptAs(
+      env,
+      scope,
+      connectionId,
+      id,
+      { text, through },
+      readAt
+    );
   } catch (error) {
     // The Brain refused it (a text past its limit) or couldn't be
     // reached: the one item failed.
@@ -264,6 +322,15 @@ const answerCaptured = async (
   return [event, { ...detail, ...counted }];
 };
 
+/** The classes of a native tool whose one item capture keeps. */
+const itemClasses: ReadonlySet<ToolClass | undefined> = new Set(["read-own"]);
+
+/** The classes of a tool whose whole answer capture keeps (GRA-1845). */
+const answerClasses: ReadonlySet<ToolClass | undefined> = new Set([
+  "read-own",
+  "read-company",
+]);
+
 /** What capturing `result` of `action` ended in. */
 const captured = async (
   env: Env,
@@ -280,14 +347,19 @@ const captured = async (
   if (owner?.ownerUserId !== scope.personId) {
     return skippedAll("shared", named);
   }
-  if (classOf(owner, action) !== "read-own") {
+  if (!(answers ? answerClasses : itemClasses).has(classOf(owner, action))) {
     return skippedAll("reach", named);
   }
   if (answers) {
-    return await answerCaptured(env, scope, connectionId, action, input, {
-      result,
-      readAt,
-    });
+    return await answerCaptured(
+      env,
+      scope,
+      connectionId,
+      action,
+      input,
+      { result, readAt },
+      owner.provider
+    );
   }
   const itemRead = itemReadOf(owner.provider, action);
   const [itemId] = result.provenance;
@@ -299,7 +371,18 @@ const captured = async (
     return skippedAll("file", 1);
   }
   const id = await captureIdOf(connectionId, scope.personId, action, itemId);
-  return await keptAs(env, scope, connectionId, id, result.output, readAt);
+  const text = redactedFor([result.output]);
+  if (text === undefined) {
+    return skippedAll("credential", 1);
+  }
+  return await keptAs(
+    env,
+    scope,
+    connectionId,
+    id,
+    { text, through: owner.provider },
+    readAt
+  );
 };
 
 /**

@@ -741,8 +741,8 @@ describe(SourcesPage, () => {
     expect({ feeds, none }).toStrictEqual({
       feeds:
         "How your connections feed the Brain" +
-        "The Brain keeps one Gmail message or attachment, one OneNote page, or the answer of a read in an app that holds your own things, when an agent reads it for you through an account you connected yourself, and keeps it for you alone. Everything else agents search live when you ask, and the Brain keeps nothing of it." +
-        "GmailThe Brain may keep some of what an agent reads for you from this." +
+        "When an agent reads for you through an account you connected yourself, the Brain keeps what it read for you alone, while that account stays connected: one Gmail message or attachment, one OneNote page, or the answer of a read in another app, the company’s records included. Everything else agents search live when you ask, and the Brain keeps nothing of it." +
+        "GmailThe Brain may keep, for you alone, some of what an agent reads for you through this connection, while it stays connected." +
         "Microsoft 365Searched live, nothing kept." +
         "HubSpotSearched live, nothing kept.",
       none: "How your connections feed the BrainYou have no connections yet.",

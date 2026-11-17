@@ -596,14 +596,14 @@ describe(
           capturedItem
         ),
       };
-      // Read in the holder's chat through their own toolkit connection,
-      // whose server names no item: its whole answer one source, keyed by
-      // the call (connection-capture.ts, GRA-1845), theirs alone, its
-      // connection's ID holding a marker too.
+      // Read in the holder's chat through their own toolkit connection, a
+      // read of the company's records, whose server names no item: its
+      // whole answer one source, keyed by the call (connection-capture.ts,
+      // GRA-1845), theirs alone, its connection's ID holding a marker too.
       const toolkitConnection = `connection-${toolkitCaptureMarker}`;
       await connectDb()
         .prepare(
-          "INSERT INTO connections (id, provider, scope, owner_user_id, status, server_kind, server, tools, created_at, updated_at) VALUES (?, 'mail_own', 'personal', ?, 'active', 'composio', 'https://mail.test/mcp', ?, ?, ?)"
+          "INSERT INTO connections (id, provider, scope, owner_user_id, status, server_kind, server, tools, created_at, updated_at) VALUES (?, 'mail', 'personal', ?, 'active', 'composio', 'https://mail.test/mcp', ?, ?, ?)"
         )
         .bind(
           toolkitConnection,
