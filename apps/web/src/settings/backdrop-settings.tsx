@@ -1,25 +1,24 @@
 import { useLingui } from "@lingui/react/macro";
 
-import { Button } from "../grasp/button/index.ts";
-import { BackdropPreview } from "../grasp/field/backdrop-preview.tsx";
-import { LookTiles } from "../grasp/field/look-tiles.tsx";
-import type { LookTilesWords } from "../grasp/field/look-tiles.tsx";
+import { chooseLook, useLook } from "../chat/backdrop-look.ts";
 import {
-  backdrops,
-  chooseLook,
+  backdropKinds as backdrops,
+  BackdropPreview,
   ditherPatterns,
   ditherTones,
-  useLook,
-} from "../grasp/field/look.ts";
-import type { Look } from "../grasp/field/look.ts";
+} from "../grasp/backdrop/index.ts";
+import type { BackdropLook as Look } from "../grasp/backdrop/index.ts";
+import { Button } from "../grasp/button/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
+import { LookTiles } from "./look-tiles.tsx";
+import type { LookTilesWords } from "./look-tiles.tsx";
 import { SettingsStack } from "./section.tsx";
 
 // Settings → Appearance: what stands behind Chat's start (the person's
-// look, grasp/field/look.ts), chosen by sight. The look live and large,
+// look, chat/backdrop-look.ts), chosen by sight. The look live and large,
 // then every background as a still picture to scroll through and click,
 // and for a dither its patterns and colours as pictures too
-// (grasp/field/look-tiles.tsx). Randomize picks any look. Each choice is
+// (settings/look-tiles.tsx). Randomize picks any look. Each choice is
 // kept as it is made.
 
 /** One of `items` by chance, else `fallback` (for no items). */
@@ -97,9 +96,10 @@ export const BackdropSettings = ({ userId }: { userId: string }) => {
     >
       <SettingsStack>
         <BackdropPreview
-          label={t`Preview of your chat background`}
-          look={look}
+          aria-label={t`Preview of your chat background`}
+          placeholder={t`Ask anything, or describe a process`}
           title={t`What should we look at today?`}
+          variant={look}
         />
         <LookTiles
           look={look}

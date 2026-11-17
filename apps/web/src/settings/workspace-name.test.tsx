@@ -31,6 +31,7 @@ const fakeOrganization = (first: string, refuses = false) => {
     timeZone: "UTC",
     dataRegion: "eu",
     signInDomains: [],
+    logo: null,
   };
   const asked: string[] = [];
   const organization = {
@@ -38,13 +39,14 @@ const fakeOrganization = (first: string, refuses = false) => {
       await Promise.resolve();
       return current;
     },
-    update: async ({ name }: { name?: string }): Promise<void> => {
+    update: async ({ name }: { name?: string }): Promise<Organization> => {
       await Promise.resolve();
       asked.push(name ?? "");
       if (refuses) {
         throw new Error("Your role doesn't allow that.");
       }
       current = { ...current, name: name ?? current.name };
+      return current;
     },
   };
   return { organization, asked };

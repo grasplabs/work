@@ -609,6 +609,7 @@ export const grasp = stylex.defineConsts({
   shellGutter: "var(--grasp-shell-gutter)",
   shellInset: "var(--grasp-shell-inset)",
   shellHead: "var(--grasp-shell-head)",
+  pickerTile: "var(--grasp-picker-tile)",
   shellRow: "var(--grasp-shell-row)",
   shellRowGap: "var(--grasp-shell-row-gap)",
   shellSwitchInset: "var(--grasp-shell-switch-inset)",

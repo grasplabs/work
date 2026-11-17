@@ -2,19 +2,30 @@ import * as stylex from "@stylexjs/stylex";
 import { useId } from "react";
 import type { ReactNode } from "react";
 
-import { focus } from "../focus/focus.ts";
-import { grasp } from "../tokens/tokens.stylex.ts";
+import {
+  backdropKinds as backdrops,
+  ditherPatterns,
+  ditherTones,
+  isDither as isDithered,
+} from "../grasp/backdrop/index.ts";
+import type {
+  BackdropKind as Backdrop,
+  BackdropLook as Look,
+  BackdropPattern as DitherPattern,
+  BackdropTone as DitherTone,
+} from "../grasp/backdrop/index.ts";
+import { focus } from "../grasp/focus/focus.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { LookPictureStage, useLookPicture } from "./look-picture.tsx";
-import { backdrops, ditherPatterns, ditherTones, isDithered } from "./look.ts";
-import type { Backdrop, DitherPattern, DitherTone, Look } from "./look.ts";
 
 // Choosing a look by sight (settings/backdrop-settings.tsx): every
 // backdrop as a small still picture in one row to scroll through, and for
 // a dither its patterns and colours as pictures of that dither too, so any
 // look is one or two clicks. Each row is a group of radios, one tab stop,
 // arrows to move. The pictures come from look-picture.tsx; only the big
-// preview above draws live. Its own part, so the library's Backdrop
-// picker can take its place.
+// preview above draws live. Grasp UI's Backdrop picker draws each tile
+// live and its patterns and colours as words, so work keeps this until it
+// draws pictures.
 
 const styles = stylex.create({
   rows: {

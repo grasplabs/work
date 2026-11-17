@@ -17,14 +17,13 @@ import {
 } from "../grasp/alert-dialog/index.ts";
 import { Badge } from "../grasp/badge/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
-import { Text } from "../grasp/text/index.ts";
+import { FactRow, RowAlert, SettingsRows } from "../grasp/setting-row/index.ts";
 import { useCore } from "../use-core.ts";
-import { FactRow, RowAlert, SettingsRows } from "./section.tsx";
 
-// Settings › Workspace › Grasp staff access, for the company's admins:
-// whether Grasp's staff may sign in now, what they reach and until when,
-// as core's onboarding gate tells it (`onboardingGate.view().staff`), and
-// a way to end it now, in the card's header. Ending it signs every staff member out at once,
+// Settings › Workspace › Grasp staff access, for the company's admins,
+// only while Grasp's staff may sign in: what they reach and until when, as
+// core's onboarding gate tells it (`onboardingGate.view().staff`), and a
+// way to end it now, in the card's header. Closed, there is no card. Ending it signs every staff member out at once,
 // and the window the admin opened lets nobody in again; only a new window
 // does. Core takes it only from the company's own admins, never from staff
 // (who see the section but no button), and records it in the audit log.
@@ -87,7 +86,11 @@ const EndStaffAccess = ({
   );
 };
 
-/** Grasp's staff access, as core answered the admin. */
+/**
+ * Grasp's staff access, as core answered the admin: a card only while a
+ * window is open, saying until when and what staff reach, with the way to
+ * end it now. While none is open, nothing: nobody from Grasp can sign in.
+ */
 export const StaffAccessSection = ({
   staff,
   editable,
@@ -98,13 +101,17 @@ export const StaffAccessSection = ({
 }) => {
   const { t } = useLingui();
   const [failure, setFailure] = useState<string>();
-  const open = staff?.open === true;
+  if (staff?.open !== true) {
+    return null;
+  }
+  const until = formatDateTime(staff.until);
   return (
     <SectionCard
-      {...(open && editable
+      {...(editable
         ? { actions: <EndStaffAccess onFailure={setFailure} /> }
         : {})}
-      description={t`Only while a window your organization opened lasts.`}
+      density="compact"
+      description={t`Grasp’s team can sign in to help only when Grasp opens a time-limited window, at most 7 days. You can end it at any time.`}
       flush
       title={t`Grasp staff access`}
     >
@@ -112,41 +119,18 @@ export const StaffAccessSection = ({
         {failure === undefined ? null : (
           <RowAlert variant="danger">{failure}</RowAlert>
         )}
-        {open ? (
-          <>
-            <FactRow
-              help={
-                staff.scope === "onboarding"
-                  ? t`They reach the onboarding alone.`
-                  : t`They reach everything their role allows.`
-              }
-              label={t`Grasp staff can sign in`}
-            >
-              <Badge tone="attention">
-                {staff.scope === "onboarding"
-                  ? t`Onboarding only`
-                  : t`Full access`}
-              </Badge>
-            </FactRow>
-            <FactRow
-              help={t`Their access ends on its own then.`}
-              label={t`Until`}
-            >
-              <Text element="span" size="sm">
-                <time dateTime={staff.until}>
-                  {formatDateTime(staff.until)}
-                </time>
-              </Text>
-            </FactRow>
-          </>
-        ) : (
-          <FactRow
-            help={t`Nobody from Grasp can sign in to this workspace now.`}
-            label={t`Grasp staff can sign in`}
-          >
-            <Badge>{t`No`}</Badge>
-          </FactRow>
-        )}
+        <FactRow
+          help={
+            staff.scope === "onboarding"
+              ? t`They reach the onboarding alone.`
+              : t`They reach everything their role allows.`
+          }
+          label={t`Open until ${until}`}
+        >
+          <Badge tone="attention">
+            {staff.scope === "onboarding" ? t`Onboarding only` : t`Full access`}
+          </Badge>
+        </FactRow>
       </SettingsRows>
     </SectionCard>
   );

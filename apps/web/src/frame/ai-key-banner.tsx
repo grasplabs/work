@@ -15,16 +15,13 @@ import type { CoreConnection } from "../core-connection.ts";
 import { formatSince } from "../format.ts";
 import { Alert } from "../grasp/alert/index.ts";
 import { Link } from "../grasp/link/index.ts";
-import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { RouterLink } from "./router-link.tsx";
 
 const styles = stylex.create({
-  // Over the page, under its bar's room, one line for each provider.
+  // Above the page's bar (App shell's `banner`), one banner for each provider.
   lines: {
     display: "flex",
     flexDirection: "column",
-    gap: grasp.space2,
-    marginBlockEnd: grasp.space4,
   },
 });
 
@@ -121,7 +118,7 @@ const FailingLine = ({ failing }: { failing: FailingProvider }) => {
   return (
     // Said when its words change, not over whatever the person is doing.
     // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- Alert's own prop, which sets its live role; not an element's role
-    <Alert role="status" title={title} tone="attention">
+    <Alert role="status" title={title} tone="attention" variant="banner">
       {description}
     </Alert>
   );
