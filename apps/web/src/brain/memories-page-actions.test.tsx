@@ -1310,4 +1310,25 @@ describe("the Memories page's paged lists, read again", () => {
       takenBack: ["m-left"],
     });
   });
+
+  it("shows every character nobody sees in what is shared as an escape, and sends the text as stored", async () => {
+    const sent: Readonly<Record<string, unknown>>[] = [];
+    const hidden = "Initech renews\u200B in March";
+    await initechOpen([ownFact("m-own", { statement: hidden })], {
+      publish: async (share: Readonly<Record<string, unknown>>) => {
+        sent.push(share);
+        return await Promise.resolve({ memory: "m-copy", entity: "e-copy" });
+      },
+    });
+    await press(buttons("Share…")[0]);
+    const dialogText =
+      document.querySelector("option[value=everyone]")?.closest("form")
+        ?.textContent ?? "";
+    await shareWith("everyone");
+    expect({
+      escaped: dialogText.includes("Initech renews\\u{200B} in March"),
+      raw: dialogText.includes(hidden),
+      sent: JSON.stringify(sent[0]?.shown).includes(JSON.stringify(hidden)),
+    }).toStrictEqual({ escaped: true, raw: false, sent: true });
+  });
 });

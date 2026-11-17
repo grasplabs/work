@@ -14,6 +14,7 @@ import {
   brainCorrectionMaxLength,
   brainEntityKinds,
 } from "@grasp-os/shared/brain-memories";
+import { shownVisibly } from "@grasp-os/shared/chat";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
 import { Card, CardContent } from "@grasp-os/ui/components/card";
@@ -556,6 +557,13 @@ const ShareDialog = ({
   const sharedText = t`Shared. It shows under the same name for those you shared it with.`;
   const { attribute, value, statement, validFrom, validUntil } = memory;
   const label = attribute === null ? null : attributeLabel(attribute);
+  // What is shared, as shown: whole, never cut short, every character
+  // nobody sees as an escape (`shownVisibly`), so a statement a model
+  // was steered to hide something in shows what it holds. What is sent
+  // is the text as stored, which core checks is exactly this.
+  const aboutShown = shownVisibly(about);
+  const held = value === null ? null : shownVisibly(value);
+  const said = shownVisibly(statement);
   const from = validFrom === null ? null : formatDateTime(validFrom);
   const until = validUntil === null ? null : formatDateTime(validUntil);
   const share = async (): Promise<void> => {
@@ -618,21 +626,21 @@ const ShareDialog = ({
           </DialogHeader>
           <div className="flex flex-col gap-1 text-sm">
             <span className="font-medium">
-              <Trans>About {about}</Trans>
+              <Trans>About {aboutShown}</Trans>
             </span>
             {label === null ? null : (
               <span>
-                {value === null ? (
+                {held === null ? (
                   label
                 ) : (
                   <Trans>
-                    {label}: {value}
+                    {label}: {held}
                   </Trans>
                 )}
               </span>
             )}
             {statement === value ? null : (
-              <span className="whitespace-pre-wrap">{statement}</span>
+              <span className="break-words whitespace-pre-wrap">{said}</span>
             )}
             {from === null ? null : (
               <span>

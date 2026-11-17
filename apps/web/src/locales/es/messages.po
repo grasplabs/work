@@ -664,8 +664,8 @@ msgid "{label}:"
 msgstr "{label}:"
 
 #: src/brain/memories-page.tsx
-msgid "{label}: {value}"
-msgstr "{label}: {value}"
+msgid "{label}: {held}"
+msgstr "{label}: {held}"
 
 #: src/onboarding/setup-steps.tsx
 msgid "{leads, plural, one {Thank you. I’ll start with this lead.} other {Thank you. I’ll start with these # leads.}}"
@@ -1740,8 +1740,8 @@ msgid "About"
 msgstr "Sobre"
 
 #: src/brain/memories-page.tsx
-msgid "About {about}"
-msgstr "Sobre {about}"
+msgid "About {aboutShown}"
+msgstr "Sobre {aboutShown}"
 
 #: src/workflows/requests/request-plan.tsx
 msgid "About {ahead} by {end}"
