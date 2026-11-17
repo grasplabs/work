@@ -10,8 +10,8 @@ import { monthSpend } from "../src/model-spend.ts";
 import { recordResponse } from "../src/model-usage.ts";
 import { models } from "../src/models.ts";
 import type { ModelCall } from "../src/models.ts";
+import { platformSpeech } from "../src/speech.ts";
 import { allEvents } from "./audit-events.ts";
-import { platformOpenAiKey } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import {
   askingWorkflow,
@@ -28,8 +28,6 @@ import {
   spentMicros,
   usageRows,
 } from "./model-usage.ts";
-import { plan } from "./platform-providers.ts";
-import { streamText } from "./provider-streams.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
 
 // Model spend, recorded after each response (src/model-usage.ts): the
@@ -237,42 +235,27 @@ describe("model spend", { timeout: 60_000 }, () => {
     const rulesEnv: Env = { ...env, SPEND_MONTH: month };
 
     await expect(outcome(call(hello({ trigger })))).resolves.toBe("ok");
-    await plan(platformOpenAiKey, [
-      {
-        sse: streamText("openai-responses", {
-          text: "# Expense policy",
-          inputTokens: 2000,
-          outputTokens: 100,
-        }),
-      },
-    ]);
-    const converted = await outcome(
-      models(rulesEnv).platformCall({
-        model: "openai/gpt-5.4-mini",
-        purpose: "upload.conversion",
-        trigger,
-        work: { platform: "document_conversion" },
-        input: "Write out this document as Markdown.",
-        document: {
-          name: "policy.pdf",
-          mediaType: "application/pdf",
-          bytes: new TextEncoder().encode("%PDF-1.4\n%%EOF\n"),
-        },
-      })
-    );
+    // One of Stephen's lines, said for the same person on Grasp's key.
+    await platformSpeech(rulesEnv, {
+      purpose: "onboarding.speech",
+      trigger,
+      work: { onboarding: true },
+    }).speak({
+      text: "Hello there.",
+      voice: "s3TPKV1kjDlVtZbl4Ksh",
+      language: "en",
+    });
     const [grasp] = await recordedUsage(month, 1, { credential: "platform" });
 
     expect({
-      converted,
       user: await spentBy(month, trigger.userId),
       organization: await spentMicros(month),
       grasp: [grasp?.feature, grasp?.model, (grasp?.cost ?? 0) > 0],
     }).toStrictEqual({
-      converted: "ok",
       // The organization's spend is what its own key cost: the call.
       user: pricedMicros,
       organization: pricedMicros,
-      grasp: ["conversion", "openai/gpt-5.4-mini", true],
+      grasp: ["speech", "elevenlabs/eleven_v4", true],
     });
   });
 

@@ -6,6 +6,10 @@
 
 /** Grasp's own AI features, as the gateway records them. */
 export const platformAiFeatures = [
+  /**
+   * Grasp's own conversion of uploaded PDFs, which no release does any
+   * more: its usage rows stay, so what it cost still reads by its name.
+   */
   "conversion",
   "transcription",
   "speech",
