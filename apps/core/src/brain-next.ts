@@ -4205,15 +4205,17 @@ export const memoryChoices = {
 const memoryText = (max: number) => wellFormedString().regex(/\S/u).max(max);
 
 /**
- * What a memory is about: an entity by its id in the person's own store,
- * or by its kind and the names and exact identifiers given, linked to one
- * the store holds on an identifier alone.
+ * What a memory is about: the person themselves (`own`, their own entity:
+ * `ownEntityIdAs`), an entity by its id in the person's own store, or by
+ * its kind and the names and exact identifiers given, linked to one the
+ * store holds on an identifier alone.
  */
 const memoryAboutSchema = z.strictObject({
   id: entityIdSchema.optional(),
   kind: z.enum(entityKinds),
   names: z.array(memoryText(valueMaxLength)).max(namesPerEntityMax).default([]),
   identifiers: z.array(identifierSchema).max(namesPerEntityMax).default([]),
+  own: z.literal(true).optional(),
 });
 
 const rememberedSchema = z.strictObject({
@@ -4426,6 +4428,21 @@ export const ownEntityAs = async (
     // What stands for a shared entity is core's own link, not one of it.
     identifiers: identifiers.filter((each) => !isSharedEntityRef(each)),
   };
+};
+
+/**
+ * The id of the member `personId`'s own entity: the person they are, in
+ * their own store, made fresh by the first memory of their own word about
+ * themselves ("me": `rememberAs` with `own`) and never found by a name or
+ * an identifier. Null until then. Refused once they are no longer a
+ * member.
+ */
+export const ownEntityIdAs = async (
+  env: BrainEnv & ReaderEnv,
+  personId: string
+): Promise<EntityId | null> => {
+  const reader = await personReaderOf(env, personId, { interviews: false });
+  return await ownBrain(env, reader.person).ownEntity({ reader });
 };
 
 /**
@@ -5277,7 +5294,8 @@ const codeAttributes = attributeNames.filter(
 
 /** A fact App code remembers (`rememberForAppAs`). */
 const codeRememberSchema = z.strictObject({
-  about: memoryAboutSchema,
+  // Never a person's own entity: App code writes to the shared store.
+  about: memoryAboutSchema.omit({ own: true }),
   attribute: z.enum(codeAttributes).optional(),
   value: memoryText(valueMaxLength).optional(),
   statement: memoryText(statementMaxLength),

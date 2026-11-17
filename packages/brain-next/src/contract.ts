@@ -1956,15 +1956,31 @@ export const nameSchema = someText(valueMaxLength).refine(
  * the add's readers ("Cards and links" below); or else a new one.
  * Its names and identifiers are kept as given by each memory of the add
  * that mentions it, so each is visible only to those who can read such a
- * memory.
+ * memory. Or the store's own entity (`own`, a `person` with no id, name
+ * or identifier: "The store's own entity" below), made by the first add
+ * that names it; the shared store refuses it.
  */
-export const newEntitySchema = z.strictObject({
-  key: wellFormedString().min(1).max(64),
-  id: entityIdSchema.optional(),
-  kind: z.enum(entityKinds),
-  names: z.array(nameSchema).max(namesPerEntityMax).default([]),
-  identifiers: z.array(identifierSchema).max(namesPerEntityMax).default([]),
-});
+export const newEntitySchema = z
+  .strictObject({
+    key: wellFormedString().min(1).max(64),
+    id: entityIdSchema.optional(),
+    kind: z.enum(entityKinds),
+    names: z.array(nameSchema).max(namesPerEntityMax).default([]),
+    identifiers: z.array(identifierSchema).max(namesPerEntityMax).default([]),
+    own: z.literal(true).optional(),
+  })
+  .refine(
+    ({ own, id, kind, names, identifiers }) =>
+      own === undefined ||
+      (id === undefined &&
+        kind === "person" &&
+        names.length === 0 &&
+        identifiers.length === 0),
+    {
+      message: "The own entity is a person named by nothing else",
+      path: ["own"],
+    }
+  );
 export type NewEntity = z.input<typeof newEntitySchema>;
 
 /**
@@ -2516,6 +2532,24 @@ export type MemoryChangeOutcome = "done" | "nothing";
 // card, and later adds of "Anna Smit" go on linking there. No reader sees
 // more than they may read (the readers are the same), but the evidence
 // for the join is gone, and nothing splits an entity.
+
+// The store's own entity (own-entity.ts, store.ts `ownEntity`).
+//
+// A person's own store holds at most one entity that is its person: made
+// fresh, of kind `person`, by the first add that names it as `own`, and
+// never one a name or an identifier found, so no source, mail or model can
+// make or choose it. The store is named by the person the host verified,
+// and only the host adds to it, for them. It holds no name or identifier
+// of its own, so linking by either never reaches it: an add names it only
+// as `own`. An entity that holds the person's email is another entity.
+// Kept while the store is (erasing its memories leaves it), and gone with
+// the store erased whole. The shared store holds none, and refuses `own`.
+
+/** The reader's own entity to read, in their own store. */
+export const ownEntityRequestSchema = z.strictObject({
+  reader: personReaderSchema,
+});
+export type OwnEntityRequest = z.input<typeof ownEntityRequestSchema>;
 
 /**
  * An entity's card to read, for a reader: as now, or as of a moment; a
@@ -3129,6 +3163,12 @@ export interface Brain {
   readEntityNames: (request: EntityNamesRequest) => Promise<EntityNamesPage>;
   /** An entity, if the reader may see it; null alike when there is none. */
   readEntity: (request: EntityRequest) => Promise<Entity | null>;
+  /**
+   * The id of the reader's own entity ("The store's own entity"), in their
+   * own store; null until an add names it, and once the store is erased
+   * whole. Only for that store's person; the shared store refuses.
+   */
+  ownEntity: (request: OwnEntityRequest) => Promise<EntityId | null>;
   /**
    * An entity's card as the reader sees it (`Card`), built now from the
    * memories they may read: null when they may see no such entity, alike

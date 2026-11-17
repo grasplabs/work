@@ -20,7 +20,7 @@ import {
   signedInAs,
 } from "./interview-link.ts";
 import { carrying } from "./platform-providers.ts";
-import { routed, signedInWithRole, unique } from "./sign-in.ts";
+import { routed, signedInWithRole, unique, uniqueLetters } from "./sign-in.ts";
 
 // The onboarding's lines said out loud (src/onboarding/speech.ts), over
 // the endpoint, as the page asks for them: on someone's interview link, or
@@ -62,12 +62,8 @@ const askedSchema = z.object({
 
 const isoDay = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 
-/**
- * A line no other test says, so the cache and the provider have never seen
- * it: each digit a letter of its own, so two lines never become the same.
- */
-const newLine = (): string =>
-  `Hello there, ${unique().replaceAll(/\d/gu, (digit) => "ghijklmnop".charAt(Number(digit)))}.`;
+/** A line no other test says, so the cache and the provider have never seen it. */
+const newLine = (): string => `Hello there, ${uniqueLetters()}.`;
 
 /**
  * An onboarding running since yesterday, with one person whose link is
