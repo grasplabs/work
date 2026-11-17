@@ -296,6 +296,8 @@ const kindsWithoutColon = <const K extends string>(
 // `interview`: a person's interview, theirs alone, in their own store;
 // `claim`: what five or more people of a staff-list team said in theirs,
 // readable by that team (onboarding/new-brain.ts, GRA-1790, GRA-1741).
+// `kickoff`: what every member reads of the onboarding's kickoff, readable
+// by everyone (onboarding/new-brain.ts, GRA-1748).
 const producerKinds = kindsWithoutColon([
   "upload",
   "chat",
@@ -303,6 +305,7 @@ const producerKinds = kindsWithoutColon([
   "capture",
   "interview",
   "claim",
+  "kickoff",
 ]);
 
 /**

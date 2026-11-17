@@ -6044,6 +6044,10 @@ msgid "From SharePoint or OneDrive. I read only the files you add."
 msgstr "Aus SharePoint oder OneDrive. Ich lese nur die Dateien, die Sie hinzufügen."
 
 #: src/brain/memories-page.tsx
+msgid "From the company's vision, version {version}"
+msgstr "Aus der Vision des Unternehmens, Version {version}"
+
+#: src/brain/memories-page.tsx
 msgid "From what your team said, version {version}"
 msgstr "Aus dem, was Ihr Team gesagt hat, Version {version}"
 
@@ -13883,6 +13887,11 @@ msgstr "Skills des Unternehmens"
 #: src/chat/agent-draft-card.tsx
 msgid "the company's time zone"
 msgstr "Zeitzone der Firma"
+
+#: src/brain/sources-page.tsx
+msgctxt "a source of the Brain"
+msgid "The company's vision"
+msgstr "Die Vision des Unternehmens"
 
 #: src/inbox/items.ts
 msgid "The connection stopped working. Workflows that use it wait until someone signs in again."
