@@ -1,5 +1,4 @@
 import { agentErrors } from "@grasp-os/shared/agent";
-import { agentAppOf } from "@grasp-os/shared/agents";
 import type { AgentApp, AgentAppsWorkedOut } from "@grasp-os/shared/agents";
 import { actorOf } from "@grasp-os/shared/audit";
 import { companyToolClasses } from "@grasp-os/shared/connect";
@@ -10,6 +9,8 @@ import { and, asc, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
+import { offeredApps } from "./agent-apps-offered.ts";
+import type { OfferedApp } from "./agent-apps-offered.ts";
 import {
   agentInstructionFile,
   changeableAgent,
@@ -18,12 +19,7 @@ import {
 } from "./agents.ts";
 import { auditedBatch, outboxed, outboxedIfChanged } from "./audit-outbox.ts";
 import { readInstructionFilesAs } from "./brain-next.ts";
-import {
-  agentApps,
-  agents,
-  agentToolClasses,
-  hiddenConnectors,
-} from "./db/core/schema.ts";
+import { agentApps, agents, agentToolClasses } from "./db/core/schema.ts";
 import { modelForRole, models, modelSettings } from "./models.ts";
 
 // The apps an agent may use (GRA-1852): each a catalog entry the company
@@ -90,33 +86,6 @@ export const listAgentApps = async (
   const agent = await readableAgent(env, identity, agentId);
   const rows = await rowsOf(env, agent.id);
   return rows.map(appOf);
-};
-
-/** An app the company offers: in its catalog, and not hidden by an admin. */
-interface OfferedApp {
-  app: string;
-  name: string;
-  description: string | null;
-}
-
-/** The apps the company offers now, by key. */
-const offeredApps = async (env: Env): Promise<Map<string, OfferedApp>> => {
-  const [catalog, hidden] = await Promise.all([
-    env.CONNECT.catalog(),
-    drizzle(env.DB)
-      .select({
-        source: hiddenConnectors.source,
-        id: hiddenConnectors.connectorId,
-      })
-      .from(hiddenConnectors),
-  ]);
-  const off = new Set(hidden.map(({ source, id }) => agentAppOf(source, id)));
-  return new Map(
-    catalog.entries.flatMap(({ source, id, name, description }) => {
-      const app = agentAppOf(source, id);
-      return off.has(app) ? [] : [[app, { app, name, description }] as const];
-    })
-  );
 };
 
 /**

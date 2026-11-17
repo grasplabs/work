@@ -1,4 +1,5 @@
 import { agentErrors } from "@grasp-os/shared/agent";
+import { agentAppOf } from "@grasp-os/shared/agents";
 import type {
   Agent,
   AgentDraft,
@@ -41,9 +42,12 @@ import { subjectSchema } from "@grasp-os/shared/subject";
 import type { Subject, SubjectKind } from "@grasp-os/shared/subject";
 import { z } from "zod";
 
+import { setAgentApp } from "./agent-app-access.ts";
+import { offeredApps } from "./agent-apps-offered.ts";
 import {
   makeAgent,
   makeOwnAgent,
+  setAgentPaused,
   setAgentReach,
   setAgentToolClass,
 } from "./agent-builder.ts";
@@ -621,7 +625,6 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
         person.userId,
         callId
       );
-      const company = draft.whose === "company";
       // The agent an earlier Make it made of this draft, whose instructions
       // it couldn't save; otherwise one made now.
       let agentId = made;
@@ -654,13 +657,19 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
       // Told: it stays made and the draft taken, whatever fails next, and
       // the person lands on its page to finish it there.
       try {
-        if (company) {
-          await this.#setDrafted(person, agent.id, draft);
-        }
-        await chats.send(id, person.userId, asked);
+        await this.#setDrafted(person, agent.id, draft);
       } catch (error) {
         log.warn("agent.drafted_unfinished", errorFields(error));
+        // Never left answering with less narrowed than its card: with no
+        // app saved it would use any app. Paused, it answers nothing until
+        // its page is finished.
+        await this.#pauseQuietly(person, agent.id);
         return { id: agent.id, name: agent.name, unfinished: true };
+      }
+      try {
+        await chats.send(id, person.userId, asked);
+      } catch (error) {
+        log.warn("agent.drafted_unanswered", errorFields(error));
       }
       return { id: agent.id, name: agent.name };
     });
@@ -678,15 +687,42 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
       job: draft.job,
       modelRole: null,
     };
+    await this.#checkDrafted(draft);
     if (draft.whose !== "company") {
       return await makeOwnAgent(this.#env, person, said, { from: "chat" });
     }
-    await this.#checkDrafted(draft);
     return await makeAgent(this.#env, person, said, { from: "chat" });
   }
 
-  /** Refuses what a company agent's card said that its page would refuse. */
-  async #checkDrafted({ audience, schedule }: AgentDraft): Promise<void> {
+  /** Pauses an agent whose card couldn't all be set; a failure is only logged. */
+  async #pauseQuietly(person: Identity, agentId: string): Promise<void> {
+    try {
+      await setAgentPaused(this.#env, person, agentId, true);
+    } catch (error) {
+      log.warn("agent.drafted_unpaused", errorFields(error));
+    }
+  }
+
+  /**
+   * Refuses what a card said that the agent's page would refuse: an app
+   * the company doesn't offer, and for a company agent teams it doesn't
+   * have or a schedule no wake-up takes.
+   */
+  async #checkDrafted({
+    apps = [],
+    audience,
+    schedule,
+  }: Pick<AgentDraft, "apps" | "audience" | "schedule">): Promise<void> {
+    if (apps.length > 0) {
+      const offered = await offeredApps(this.#env);
+      if (
+        apps.some(
+          ({ source, provider }) => !offered.has(agentAppOf(source, provider))
+        )
+      ) {
+        throw agentErrors.create("agent.app_unknown");
+      }
+    }
     if (audience?.who === "teams") {
       await requireKnownTeams(this.#env, JSON.stringify(audience.teams));
     }
@@ -695,12 +731,23 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
     }
   }
 
-  /** What a company agent's card said beyond itself, set as on its page. */
+  /** What a card said beyond the agent itself, set as on its page. */
   async #setDrafted(
     person: Identity,
     agentId: string,
-    { audience, classes = [], schedule }: AgentDraft
+    { apps = [], audience, classes = [], schedule }: AgentDraft
   ): Promise<void> {
+    // Exactly the apps the card showed, and no other.
+    for (const { source, provider } of apps) {
+      // oxlint-disable-next-line no-await-in-loop -- one at a time, each audited
+      await setAgentApp(
+        this.#env,
+        person,
+        agentId,
+        agentAppOf(source, provider),
+        true
+      );
+    }
     if (audience !== undefined) {
       await setAgentReach(this.#env, person, agentId, true, audience);
     }

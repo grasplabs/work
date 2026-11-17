@@ -2536,6 +2536,10 @@ msgstr "Answers nobody anywhere"
 msgid "Answers the people it is for"
 msgstr "Answers the people it is for"
 
+#: src/chat/agent-draft-card.tsx
+msgid "Any app its kinds of work allow"
+msgstr "Any app its kinds of work allow"
+
 #: src/workflows/binding-approvals.tsx
 msgid "Any event its webhook source sends of the types its contract admits"
 msgstr "Any event its webhook source sends of the types its contract admits"
@@ -2770,6 +2774,10 @@ msgstr "Apps and workflows"
 #: src/routes/_shell.projects.index.tsx
 msgid "Apps and workflows grouped by process, team or goal. Putting something in a project shares it with nobody."
 msgstr "Apps and workflows grouped by process, team or goal. Putting something in a project shares it with nobody."
+
+#: src/chat/agent-draft-card.tsx
+msgid "Apps it uses"
+msgstr "Apps it uses"
 
 #: src/workflows/files-and-apps.tsx
 msgid "Apps it works in"
