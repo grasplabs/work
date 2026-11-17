@@ -68,7 +68,7 @@ const KeptValue = ({
       </span>
     );
   }
-  return <code>{JSON.stringify(value)}</code>;
+  return <code className="break-all">{JSON.stringify(value)}</code>;
 };
 
 const KeptEntries = ({
@@ -138,7 +138,7 @@ const KeptEntries = ({
                 <TableCell>
                   <code>{key}</code>
                 </TableCell>
-                <TableCell className="break-all whitespace-normal">
+                <TableCell className="whitespace-normal">
                   <KeptValue value={value} withheld={withheld} />
                 </TableCell>
                 <TableCell>{formatTime(updatedAt)}</TableCell>
