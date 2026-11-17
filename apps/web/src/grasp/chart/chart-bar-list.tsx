@@ -9,6 +9,7 @@
 // It is its own figure, as Chart is, and it is a list: a screen reader reads each name and value.
 "use client";
 
+/* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
 import { Fragment, useId } from "react";
 
@@ -26,7 +27,9 @@ import { useWidth } from "./use-width";
 /** Every prop a ChartBarList takes. */
 export interface ChartBarListProps {
   /** What the chart shows, as a screen reader and an agent say it ("Spend by supplier"). */
-  label: string;
+  "aria-label"?: string;
+  /** @deprecated Use `aria-label`. */
+  label?: string;
   /** One sentence that says what the numbers mean ("Cloud hosting took a third"). */
   summary: string;
   /** The rows: one object per kind compared. */
@@ -49,6 +52,8 @@ export interface ChartBarListProps {
   /** Writes a value as people read it ("€12.4k", "−3%"). */
   format?: (value: number) => string;
   /** Its width and where it sits. */
+  layout?: ChartLayoutStyle;
+  /** @deprecated Use `layout`. */
   style?: ChartLayoutStyle;
 }
 
@@ -398,7 +403,8 @@ const BarRow = ({
 const plainNumber = (value: number) => value.toLocaleString();
 
 export const ChartBarList = ({
-  label,
+  label: labelDeprecated,
+  "aria-label": label = labelDeprecated ?? "",
   summary,
   data,
   nameKey,
@@ -406,7 +412,8 @@ export const ChartBarList = ({
   fill = "plain",
   order = "value",
   format = plainNumber,
-  style,
+  style: styleDeprecated,
+  layout: style = styleDeprecated,
 }: ChartBarListProps) => {
   const chart = `chart-${useId().replaceAll(/[^a-zA-Z0-9-]/gu, "")}`;
   const keys = Object.keys(config).slice(0, 2);

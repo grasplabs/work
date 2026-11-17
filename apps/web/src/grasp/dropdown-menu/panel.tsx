@@ -17,7 +17,7 @@ import { menuStyles as styles } from "./styles";
 type ContentPrimitiveProps = ComponentProps<typeof ContentPrimitive>;
 
 /** Every prop a DropdownMenuPanel takes: these, and the rest of UI SDK's MenuContent. */
-export interface DropdownMenuPanelProps extends Omit<
+export interface DropdownMenuContentProps extends Omit<
   ContentPrimitiveProps,
   | "children"
   | "className"
@@ -50,11 +50,11 @@ export interface DropdownMenuPanelProps extends Omit<
 }
 
 /** The panel, beside its trigger. */
-export const DropdownMenuPanel = ({
+export const DropdownMenuContent = ({
   children,
   align = "center",
   ...rest
-}: DropdownMenuPanelProps) => (
+}: DropdownMenuContentProps) => (
   <ContentPrimitive
     {...rest}
     align={align}
@@ -65,3 +65,8 @@ export const DropdownMenuPanel = ({
     {children}
   </ContentPrimitive>
 );
+
+/** @deprecated Use `DropdownMenuContent`. */
+export const DropdownMenuPanel = DropdownMenuContent;
+/** @deprecated Use `DropdownMenuContentProps`. */
+export type DropdownMenuPanelProps = DropdownMenuContentProps;

@@ -1,9 +1,10 @@
+/* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 export { Drawer } from "./drawer";
 export type { DrawerProps } from "./drawer";
 export { DrawerTrigger } from "./trigger";
 export type { DrawerTriggerProps } from "./trigger";
-export { DrawerPanel } from "./panel";
-export type { DrawerPanelProps } from "./panel";
+export { DrawerContent, DrawerPanel } from "./panel";
+export type { DrawerContentProps, DrawerPanelProps } from "./panel";
 export { DrawerTitle } from "./title";
 export type { DrawerTitleProps } from "./title";
 export { DrawerDescription } from "./description";

@@ -6,8 +6,10 @@
 
 import * as stylex from "@stylexjs/stylex";
 import { FieldError as FieldErrorPrimitive } from "@ui-sdk/react/field";
+import { useContext } from "react";
 import type { ComponentProps, ReactElement } from "react";
 
+import { ChoiceBox, ChoiceGrouped, choiceIds } from "../choice/row";
 import { noteStyles } from "./field";
 
 /** Every prop a FieldError takes. */
@@ -45,9 +47,23 @@ const isEmpty = (words: unknown): boolean =>
 
 /** The error under the control, while the field is wrong. A screen reader says it with the control. */
 export const FieldError = ({ children, ...rest }: FieldErrorProps) => {
+  const box = useContext(ChoiceBox);
+  const grouped = useContext(ChoiceGrouped);
   // Without words of its own, nothing: UI SDK would fill in the browser's sentence.
   if (isEmpty(children)) {
     return null;
+  }
+  // In a grouped row of a CheckboxGroup or RadioGroup: the row's own error, said with its control
+  // by id, as the group's field holds the group's.
+  if (box !== undefined && grouped) {
+    return (
+      <p
+        id={choiceIds(box).error}
+        {...stylex.props(noteStyles.note, noteStyles.error)}
+      >
+        {children}
+      </p>
+    );
   }
   return (
     <FieldErrorPrimitive

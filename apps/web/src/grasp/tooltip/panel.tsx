@@ -14,7 +14,7 @@ import { tooltipStyles as styles } from "./styles";
 type ContentPrimitiveProps = ComponentProps<typeof ContentPrimitive>;
 
 /** Every prop a TooltipPanel takes: these, and the rest of UI SDK's TooltipContent. */
-export interface TooltipPanelProps extends Omit<
+export interface TooltipContentProps extends Omit<
   ContentPrimitiveProps,
   | "children"
   | "className"
@@ -39,7 +39,7 @@ export interface TooltipPanelProps extends Omit<
 }
 
 /** The tooltip: a dark capsule beside its trigger, never wider than tooltip-width. */
-export const TooltipPanel = ({ children, ...rest }: TooltipPanelProps) => {
+export const TooltipContent = ({ children, ...rest }: TooltipContentProps) => {
   const still = useStill();
   if (still) {
     if (still.phase === "closed") {
@@ -68,3 +68,8 @@ export const TooltipPanel = ({ children, ...rest }: TooltipPanelProps) => {
     </ContentPrimitive>
   );
 };
+
+/** @deprecated Use `TooltipContent`. */
+export const TooltipPanel = TooltipContent;
+/** @deprecated Use `TooltipContentProps`. */
+export type TooltipPanelProps = TooltipContentProps;

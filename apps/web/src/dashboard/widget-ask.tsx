@@ -14,7 +14,7 @@ import { Field, FieldLabel } from "../grasp/field/index.ts";
 import { Thought } from "../grasp/icons/index.ts";
 import {
   Popover,
-  PopoverPanel,
+  PopoverContent,
   PopoverTitle,
   PopoverTrigger,
 } from "../grasp/popover/index.ts";
@@ -160,8 +160,13 @@ export const ChangeWidget = ({
   const { title } = widget.view;
   return (
     <Popover onOpenChange={setOpen} open={open}>
-      <PopoverTrigger icon={Thought} label={label} size="xs" variant="ghost" />
-      <PopoverPanel>
+      <PopoverTrigger
+        icon={Thought}
+        aria-label={label}
+        size="xs"
+        variant="ghost"
+      />
+      <PopoverContent>
         <PopoverTitle>{t`Change ${title}`}</PopoverTitle>
         <WidgetAsk
           ask={async (session, asked, progress) =>
@@ -176,7 +181,7 @@ export const ChangeWidget = ({
           onProgress={onProgress}
           placeholder={t`Show only the failed runs.`}
         />
-      </PopoverPanel>
+      </PopoverContent>
     </Popover>
   );
 };

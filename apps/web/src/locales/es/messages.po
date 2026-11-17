@@ -11768,6 +11768,7 @@ msgid "Rocket"
 msgstr "Cohete"
 
 #: src/apps/app-sharing.tsx
+#: src/routes/_shell.settings.profile.tsx
 #: src/settings/invitations.tsx
 msgid "Role"
 msgstr "Rol"
@@ -17097,6 +17098,10 @@ msgstr "El nombre de tu empresa en Grasp."
 #: src/settings/workspace-name.tsx
 msgid "Your company’s name in Grasp. An admin changes it."
 msgstr "El nombre de tu empresa en Grasp. Lo cambia un administrador."
+
+#: src/routes/_shell.settings.profile.tsx
+msgid "Your details"
+msgstr "Tus datos"
 
 #: src/settings/ai-providers.tsx
 msgid "Your endpoint's public HTTPS address, such as https://models.example.com/v1."

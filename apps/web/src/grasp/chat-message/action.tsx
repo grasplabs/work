@@ -2,6 +2,7 @@
 // a thumbs up. It is UI SDK's Button drawn as a small ghost Grasp Button, so an agent finds it by name.
 "use client";
 
+/* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import { Button as PressPrimitive } from "@ui-sdk/react/button";
 import type { MouseEvent } from "react";
 
@@ -13,7 +14,9 @@ export interface ChatMessageActionProps {
   /** The icon. Import it from the icons entry (`@/components/grasp/icons`). */
   icon: IconData;
   /** Its name, for a screen reader and an agent ("Good answer"). */
-  label: string;
+  "aria-label"?: string;
+  /** @deprecated Use `aria-label`. */
+  label?: string;
   /** What a press does. Return a Promise and an agent waits for it. */
   onClick?: (event: MouseEvent<HTMLElement>) => unknown;
   /**
@@ -26,7 +29,8 @@ export interface ChatMessageActionProps {
 /** A quiet icon button for a message's actions. */
 export const ChatMessageAction = ({
   icon,
-  label,
+  label: labelDeprecated,
+  "aria-label": label = labelDeprecated ?? "",
   onClick,
   pressed,
 }: ChatMessageActionProps) => (
@@ -40,7 +44,7 @@ export const ChatMessageAction = ({
         variant={pressed === true ? "quiet" : "ghost"}
         size="sm"
         icon={icon}
-        label={label}
+        aria-label={label}
       />
     )}
   />

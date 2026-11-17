@@ -3,7 +3,13 @@ import { chatPlatformName } from "@grasp-os/shared/chat";
 import { useLingui } from "@lingui/react/macro";
 
 import { Button } from "../grasp/button/index.ts";
-import { Item, ItemGroup } from "../grasp/item/index.ts";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemGroup,
+  ItemTitle,
+} from "../grasp/item/index.ts";
 import { TitleLine } from "./section.tsx";
 
 // Settings › Security › Chat apps: where the person reaches Stephen, in
@@ -25,29 +31,30 @@ const ReachRow = ({ reach }: { reach: ChannelReach }) => {
   const app = chatPlatformName(reach.platform);
   const find = useFindText(reach.platform);
   return (
-    <Item
-      {...(reach.href === null
-        ? {}
-        : {
-            actions: (
-              <Button
-                render={
-                  <a
-                    aria-label={t`Open Stephen in ${app}, in a new tab`}
-                    href={reach.href}
-                    rel="noopener noreferrer"
-                    target="_blank"
-                  />
-                }
-                size="sm"
-              >
-                {t`Open`}
-              </Button>
-            ),
-          })}
-      size="sm"
-      title={<TitleLine detail={find}>{app}</TitleLine>}
-    />
+    <Item size="sm">
+      <ItemContent>
+        <ItemTitle>
+          <TitleLine detail={find}>{app}</TitleLine>
+        </ItemTitle>
+      </ItemContent>
+      {reach.href === null ? null : (
+        <ItemActions>
+          <Button
+            render={
+              <a
+                aria-label={t`Open Stephen in ${app}, in a new tab`}
+                href={reach.href}
+                rel="noopener noreferrer"
+                target="_blank"
+              />
+            }
+            size="sm"
+          >
+            {t`Open`}
+          </Button>
+        </ItemActions>
+      )}
+    </Item>
   );
 };
 

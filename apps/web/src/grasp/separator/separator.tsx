@@ -11,6 +11,7 @@
 // around the line belongs to the layout it sits in.
 "use client";
 
+/* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
 import { Separator as SeparatorPrimitive } from "@ui-sdk/react/separator";
 
@@ -36,13 +37,13 @@ export interface SeparatorProps {
    * @default false
    */
   decorative?: boolean;
+  /** @deprecated Use `layout`. */
+  style?: SeparatorLayoutStyle;
   /**
    * Layout only: the room around the line, and where it sits. In a row beside words, give a
    * horizontal line `flexGrow: 1`, `flexBasis: 0` and `alignSelf: "center"`, so it takes the
    * room the words leave, through their middle.
    */
-  style?: SeparatorLayoutStyle;
-  /** The same as `style`, by a name a style lint does not take for an inline style attribute. */
   layout?: SeparatorLayoutStyle;
 }
 

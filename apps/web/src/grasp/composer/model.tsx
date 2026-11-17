@@ -15,6 +15,7 @@
 // brand marks); nothing is drawn here. Every value is a token (src/tokens).
 "use client";
 
+/* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
 import {
   Command,
@@ -81,6 +82,8 @@ export interface ComposerModelProps {
    * The control's name for a screen reader, before the model's own name.
    * @default "Model"
    */
+  "aria-label"?: string;
+  /** @deprecated Use `aria-label`. */
   label?: string;
   /**
    * The search field's name and placeholder.
@@ -302,7 +305,8 @@ export const ComposerModel = ({
   value,
   onValueChange,
   favourites = noFavourites,
-  label = "Model",
+  label: labelDeprecated,
+  "aria-label": label = labelDeprecated ?? "Model",
   searchLabel = "Search models",
   makersLabel = "Makers",
   favouritesLabel = "Favourites",

@@ -73,14 +73,14 @@ export const ChatBar = () => {
         end={
           <ComposerAction
             icon={placement === "floating" ? AppWindow : PanelToggle}
-            label={t`Open the chat (${shortcut})`}
+            aria-label={t`Open the chat (${shortcut})`}
             onClick={() => {
               openHere();
             }}
           />
         }
         failedLabel={t`Could not send`}
-        label={words.title}
+        aria-label={words.title}
         layout={styles.fill}
         mentionItems={mentioning?.items}
         mentionKinds={mentioning?.kinds}
@@ -110,7 +110,7 @@ export const ChatBar = () => {
           <ComposerAdd
             accept={accepted}
             kinds={mentioning?.kinds}
-            label={t`Add to the question`}
+            aria-label={t`Add to the question`}
             // Files show in the chat's box, which opens to show them.
             onAttach={
               onAttach === undefined

@@ -1,4 +1,4 @@
-// Scroll: every box in Grasp UI that scrolls with the browser (a list in a popup, a dialog's body,
+// Scroll: every box in Damsko that scrolls with the browser (a list in a popup, a dialog's body,
 // a table, a text area, a code view) scrolls with no visible bar, at rest or in motion, as the
 // product does. Like src/focus/focus.ts, it goes last in a scroller's stylex.props():
 //

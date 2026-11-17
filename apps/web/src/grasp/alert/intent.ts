@@ -11,6 +11,10 @@ export const intent = {
       when: "Something a person must read or act on.",
       source: "docs/components/toast.mdx",
     },
+    {
+      when: 'News about the whole page or the app, across its top: a notice, a warning, an outage. `variant="banner"`.',
+      source: "src/components/alert/alert.tsx",
+    },
   ],
   notWhen: [
     {
@@ -23,24 +27,27 @@ export const intent = {
       source: "docs/components/toast.mdx",
     },
     {
-      when: "News about the whole page or the app.",
-      instead: ["banner"],
-      source: "docs/components/banner.mdx",
-    },
-    {
       when: "What is wrong with one field of a form.",
       instead: ["field"],
       source: "src/components/field/field.tsx",
     },
   ],
   variants: [
-    { name: 'variant="neutral"', when: "Something to know: the default." },
-    { name: 'variant="success"', when: "It went well." },
+    { name: 'tone="neutral"', when: "Something to know: the default." },
+    { name: 'tone="success"', when: "It went well." },
     {
-      name: 'variant="attention"',
+      name: 'tone="attention"',
       when: "Something to look at before it becomes a problem.",
     },
-    { name: 'variant="danger"', when: "It went wrong." },
+    { name: 'tone="danger"', when: "It went wrong." },
+    {
+      name: 'variant="banner"',
+      when: "Across the top of a page or the app, about the whole of it (once Banner).",
+    },
+    {
+      name: "onDismiss",
+      when: "A banner that can be put away; remember the choice.",
+    },
     {
       name: 'live="off"',
       when: "It is part of the page, read where it stands, not news: a note on a page that loads with it.",

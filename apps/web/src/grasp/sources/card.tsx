@@ -9,7 +9,7 @@ import * as stylex from "@stylexjs/stylex";
 import type { ReactNode } from "react";
 
 import { AgentActivity } from "../agent-activity";
-import { Avatar } from "../avatar";
+import { Avatar, AvatarImage, AvatarFallback } from "../avatar";
 import { Badge } from "../badge";
 import { CodeBlock } from "../code-block";
 import { focus } from "../focus/focus";
@@ -69,7 +69,10 @@ const People = ({ people }: { people: Source["people"] }) =>
           key={person.name}
           {...stylex.props(styles.person, index === 0 && styles.personFirst)}
         >
-          <Avatar name={person.name} src={person.src} size="xs" />
+          <Avatar name={person.name} size="xs">
+            <AvatarImage src={person.src} />
+            <AvatarFallback />
+          </Avatar>
         </span>
       ))}
     </span>
@@ -106,12 +109,10 @@ const Transcript = ({ source }: { source: Source }) => (
 const Sayer = ({ source }: { source: Source }) =>
   source.person === undefined ? null : (
     <span {...stylex.props(styles.sayer)}>
-      <Avatar
-        name={source.person.name}
-        src={source.person.src}
-        size="xs"
-        decorative
-      />
+      <Avatar name={source.person.name} size="xs" decorative>
+        <AvatarImage src={source.person.src} />
+        <AvatarFallback />
+      </Avatar>
       <span {...stylex.props(styles.sayerName)}>{source.person.name}</span>
       {hasWords(source.when) ? source.when : null}
     </span>
@@ -181,7 +182,7 @@ const Inside = ({ source, labels, onOpen }: CardProps) => {
     return source.fields === undefined ? (
       <InContext source={source} />
     ) : (
-      <KeyValueList items={source.fields} layout="inline" />
+      <KeyValueList items={source.fields} variant="inline" />
     );
   }
   if (kind === "message") {
@@ -220,9 +221,9 @@ const Inside = ({ source, labels, onOpen }: CardProps) => {
         {source.flow === undefined ? null : (
           <Stepper
             steps={source.flow}
-            current={source.usedStep ?? 0}
+            value={source.usedStep ?? 0}
             orientation="vertical"
-            label={source.title}
+            aria-label={source.title}
           />
         )}
         <InContext source={source} />
@@ -243,7 +244,7 @@ const Inside = ({ source, labels, onOpen }: CardProps) => {
       <>
         <InContext source={source} />
         {source.fields === undefined ? null : (
-          <KeyValueList items={source.fields} layout="inline" />
+          <KeyValueList items={source.fields} variant="inline" />
         )}
         <CardLink href={source.href} words={labels.correct} />
       </>

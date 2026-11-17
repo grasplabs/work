@@ -12,6 +12,7 @@
 // to search, or effort that is not the model's. Every value is a token (src/tokens).
 "use client";
 
+/* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
 import { Popover, PopoverContent, PopoverTrigger } from "@ui-sdk/react/popover";
 import { useId, useRef, useState } from "react";
@@ -56,6 +57,8 @@ export interface ComposerModelEffortProps {
    * The control's name for a screen reader, before the model's name and its level.
    * @default "Model and effort"
    */
+  "aria-label"?: string;
+  /** @deprecated Use `aria-label`. */
   label?: string;
   /**
    * The list of models' name.
@@ -379,7 +382,8 @@ export const ComposerModelEffort = ({
   onModelChange,
   effort,
   onEffortChange,
-  label = "Model and effort",
+  label: labelDeprecated,
+  "aria-label": label = labelDeprecated ?? "Model and effort",
   modelLabel = "Model",
   effortLabel = "Effort",
   noEffortLabel = "This model has one level of effort.",

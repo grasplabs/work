@@ -1,4 +1,4 @@
-// The icons of Grasp UI: one entry point for the whole system. Every icon is a Hugeicons drawing,
+// The icons of Damsko: one entry point for the whole system. Every icon is a Hugeicons drawing,
 // renamed to what it means in the product, so a component asks for `Tick`, not for
 // `Tick02Icon`. Add an icon here (with its Hugeicons name in the comment) before using it.
 //
@@ -168,9 +168,13 @@ export * from "./brands";
 /** Add something new. Add01Icon. */
 export const Plus: IconData = Add01Icon;
 /** Go on to the next step. ArrowRight02Icon: an arrow with a stem, never a chevron. */
-export const ArrowRight: IconData = pointing(ArrowRight02Icon);
+export const ArrowRight: IconData =
+  /* @__PURE__ */
+  pointing(ArrowRight02Icon);
 /** Go back a step. ArrowLeft02Icon. */
-export const ArrowLeft: IconData = pointing(ArrowLeft02Icon);
+export const ArrowLeft: IconData =
+  /* @__PURE__ */
+  pointing(ArrowLeft02Icon);
 /** A conversation, or open in a chat. BubbleChatIcon. */
 export const Chat: IconData = BubbleChatIcon;
 /** Follow the system's light or dark. ComputerIcon. */
@@ -201,7 +205,9 @@ export const Download: IconData = Download01Icon;
 /** More actions, in a menu. MoreHorizontalIcon. */
 export const More: IconData = MoreHorizontalIcon;
 /** Send a message or an invite. Sent02Icon. */
-export const Send: IconData = pointing(Sent02Icon);
+export const Send: IconData =
+  /* @__PURE__ */
+  pointing(Sent02Icon);
 /** Settings. Settings01Icon. */
 export const Settings: IconData = Settings01Icon;
 /** Working: drawn turning while something happens. Loading03Icon. */
@@ -231,9 +237,13 @@ export const Done: IconData = CheckmarkCircle02Icon;
 /** It went wrong: an error that stops something. AlertCircleIcon. */
 export const Failed: IconData = AlertCircleIcon;
 /** A step back: Previous, in a pagination. ArrowLeft01Icon. */
-export const ChevronLeft: IconData = pointing(ArrowLeft01Icon);
+export const ChevronLeft: IconData =
+  /* @__PURE__ */
+  pointing(ArrowLeft01Icon);
 /** A step on: Next, in a pagination. ArrowRight01Icon. */
-export const ChevronRight: IconData = pointing(ArrowRight01Icon);
+export const ChevronRight: IconData =
+  /* @__PURE__ */
+  pointing(ArrowRight01Icon);
 
 // Table (cloud/data): the sort of a column.
 /** A column sorted from low to high. ArrowUp02Icon. */
@@ -250,23 +260,33 @@ export const Underline: IconData = TextUnderlineIcon;
 /** Put away, out of the list: Archive. Archive02Icon. */
 export const Archive: IconData = Archive02Icon;
 /** Show as a list. LeftToRightListBulletIcon. */
-export const ListView: IconData = pointing(LeftToRightListBulletIcon);
+export const ListView: IconData =
+  /* @__PURE__ */
+  pointing(LeftToRightListBulletIcon);
 /** Show as a grid. GridViewIcon. */
 export const GridView: IconData = GridViewIcon;
 /** Undo the last change. Undo02Icon. */
-export const Undo: IconData = pointing(Undo02Icon);
+export const Undo: IconData =
+  /* @__PURE__ */
+  pointing(Undo02Icon);
 /** Redo what was undone. Redo02Icon. */
-export const Redo: IconData = pointing(Redo02Icon);
+export const Redo: IconData =
+  /* @__PURE__ */
+  pointing(Redo02Icon);
 
 // Item (cloud builder 6).
 /** A folder or a project that holds files. Folder01Icon. */
 export const Folder: IconData = Folder01Icon;
 /** Text set to the start. TextAlignLeftIcon. */
-export const AlignStart: IconData = pointing(TextAlignLeftIcon);
+export const AlignStart: IconData =
+  /* @__PURE__ */
+  pointing(TextAlignLeftIcon);
 /** Text set in the middle. TextAlignCenterIcon. */
 export const AlignCentre: IconData = TextAlignCenterIcon;
 /** Text set to the end. TextAlignRightIcon. */
-export const AlignEnd: IconData = pointing(TextAlignRightIcon);
+export const AlignEnd: IconData =
+  /* @__PURE__ */
+  pointing(TextAlignRightIcon);
 
 // Table (cloud/data): the sort of a column.
 // Button group (cloud builder 6). Italic and Underline came from another builder. Archive is in
@@ -280,7 +300,9 @@ export const Bell: IconData = Notification03Icon;
 /** Edit or rename. PencilEdit02Icon. */
 export const Edit: IconData = PencilEdit02Icon;
 /** Sign out. Logout03Icon. */
-export const SignOut: IconData = pointing(Logout03Icon);
+export const SignOut: IconData =
+  /* @__PURE__ */
+  pointing(Logout03Icon);
 
 // Date picker (cloud/data): the button that opens a calendar.
 /** Opens a calendar to choose a date. Calendar03Icon. */
@@ -308,9 +330,13 @@ export const Forward10: IconData = GoForward10SecIcon;
 
 // Sidebar (cloud builder 6).
 /** Fold or unfold a sidebar. SidebarLeftIcon. */
-export const SidebarToggle: IconData = pointing(SidebarLeftIcon);
+export const SidebarToggle: IconData =
+  /* @__PURE__ */
+  pointing(SidebarLeftIcon);
 /** Show or set aside a panel at the end, such as App shell's panels on a phone. SidebarRightIcon. */
-export const PanelToggle: IconData = pointing(SidebarRightIcon);
+export const PanelToggle: IconData =
+  /* @__PURE__ */
+  pointing(SidebarRightIcon);
 /** The first page, a workspace's home. Home01Icon. */
 export const Home: IconData = Home01Icon;
 /** Reports and figures. Analytics01Icon. */
@@ -379,7 +405,9 @@ export const Agent: IconData = AiMagicIcon;
 // Link (cloud builder 10): the mark after a link that leaves the product. ArrowUpRight01Icon is
 // imported once, with the Composer's icons above.
 /** A link that opens another site, in a new tab. ArrowUpRight01Icon. */
-export const External: IconData = pointing(ArrowUpRight01Icon);
+export const External: IconData =
+  /* @__PURE__ */
+  pointing(ArrowUpRight01Icon);
 
 // Thread (cloud/pickers): "Jump to latest". ArrowDown02Icon is imported once, with Table's above.
 /** Down to the latest: a thread's jump. ArrowDown02Icon. */
@@ -490,7 +518,9 @@ export const Lock: IconData = SquareLock02Icon;
  * points along the line: right to left it turns round, as the pointer does in a right-to-left
  * system, so its tip still leads the name tag that follows it.
  */
-export const Pointer: IconData = pointing(Cursor02Icon);
+export const Pointer: IconData =
+  /* @__PURE__ */
+  pointing(Cursor02Icon);
 // App preview: the widths a running app is shown at.
 /** A phone's width: an app shown as on a phone. SmartPhone01Icon. */
 export const Phone: IconData = SmartPhone01Icon;

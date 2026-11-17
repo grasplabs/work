@@ -12,6 +12,7 @@
 // `name`. Escape closes the calendar and focus goes back to the field. Every value is a token.
 "use client";
 
+/* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
 import {
   DatePicker as RootPrimitive,
@@ -48,7 +49,9 @@ export interface DatePickerProps extends Omit<
   | "presentation"
 > {
   /** The field's name for a screen reader, a voice command and an agent ("Due date"). */
-  label: string;
+  "aria-label"?: string;
+  /** @deprecated Use `aria-label`. */
+  label?: string;
   /**
    * One date, or a range with a field for its start and one for its end.
    * @default "single"
@@ -135,7 +138,8 @@ const onPhone = () => window.matchMedia(PHONE).matches;
 const notOnPhone = () => false;
 
 export const DatePicker = ({
-  label,
+  label: labelDeprecated,
+  "aria-label": label = labelDeprecated ?? "",
   mode = "single",
   months = 1,
   size = "md",

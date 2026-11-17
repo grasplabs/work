@@ -14,6 +14,7 @@
 // its size and layout (the `style` prop).
 "use client";
 
+/* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
 import { Resizable as ResizablePrimitive } from "@ui-sdk/react/resizable";
 import type { ComponentProps, ReactNode } from "react";
@@ -45,6 +46,13 @@ interface ResizableOwnProps {
    * @default false
    */
   disabled?: boolean;
+  /**
+   * Each panel's size in percent, for panels whose sizes you hold (UI SDK's `layout`, by the name
+   * that leaves `layout` free for where it sits).
+   */
+  sizes?: ResizablePrimitiveProps["layout"];
+  /** @deprecated Use `sizes`. */
+  layout?: ResizablePrimitiveProps["layout"];
   /** Its size and where it sits. */
   style?: ResizableLayoutStyle;
 }
@@ -66,8 +74,18 @@ const styles = stylex.create({
   },
 });
 
-export const Resizable = ({ children, style, ...rest }: ResizableProps) => (
-  <ResizablePrimitive {...rest} {...stylex.props(styles.group, style)}>
+export const Resizable = ({
+  children,
+  style,
+  sizes,
+  layout,
+  ...rest
+}: ResizableProps) => (
+  <ResizablePrimitive
+    {...rest}
+    layout={sizes ?? layout}
+    {...stylex.props(styles.group, style)}
+  >
     {children}
   </ResizablePrimitive>
 );

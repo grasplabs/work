@@ -1,5 +1,5 @@
 // Arrive, with nothing round a word: how the words of an answer still being written fade in, in
-// Grasp UI. No element is added for the fade. The newest text is marked by ranges over the text
+// Damsko. No element is added for the fade. The newest text is marked by ranges over the text
 // nodes themselves, held in named highlights (the CSS Custom Highlight API), and each highlight
 // draws the text a step paler than its own colour. Every frame a range moves to the next step, and
 // when it has arrived it is let go. Nothing in the page changes for the fade, so no line is ever

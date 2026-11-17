@@ -22,6 +22,7 @@
 // token (src/tokens).
 "use client";
 
+/* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
 import {
   Tooltip as TooltipPrimitive,
@@ -39,7 +40,7 @@ import type { LayoutStyle } from "../layout/layout";
 import { Skeleton } from "../skeleton";
 import { grasp, media } from "../tokens/tokens.stylex";
 import { ms } from "../tokens/tokens.values";
-import { TooltipPanel } from "../tooltip";
+import { TooltipContent } from "../tooltip";
 
 /** What a caller may style: where it sits and how wide it is. */
 export type KeyValueLayoutStyle = LayoutStyle;
@@ -85,6 +86,8 @@ export interface KeyValueListProps {
    * short list in a small space.
    * @default "stacked"
    */
+  variant?: "stacked" | "inline";
+  /** @deprecated Use `variant`. */
   layout?: "stacked" | "inline";
   /**
    * A line between the rows, for a list that stands on its own.
@@ -492,9 +495,9 @@ const IconName = ({
           )
         }
       />
-      <TooltipPanel side="top" align="start">
+      <TooltipContent side="top" align="start">
         {name}
-      </TooltipPanel>
+      </TooltipContent>
     </TooltipPrimitive>
   );
 };
@@ -733,7 +736,8 @@ const Rail = ({
 
 export const KeyValueList = ({
   items,
-  layout = "stacked",
+  layout: layoutDeprecated,
+  variant: layout = layoutDeprecated ?? "stacked",
   divided = false,
   labels: given,
   open,

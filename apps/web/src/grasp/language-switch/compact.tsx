@@ -15,10 +15,14 @@ import type { MenuRadioItemState } from "@ui-sdk/react/menu";
 import { Popover, PopoverContent, PopoverTrigger } from "@ui-sdk/react/popover";
 import { useEffect, useState } from "react";
 
-import { DropdownMenu, DropdownMenuPanel, menuStyles } from "../dropdown-menu";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  menuStyles,
+} from "../dropdown-menu";
 import { focus } from "../focus/focus";
 import { ChevronDown, Icon, Tick } from "../icons";
-import { Sheet, SheetBody, SheetPanel, SheetTitle } from "../sheet";
+import { Sheet, SheetBody, SheetContent, SheetTitle } from "../sheet";
 import { popup, px } from "../tokens/tokens.values";
 import { OptionFlag, SteadyFace } from "./face";
 import { LanguageList } from "./list";
@@ -92,7 +96,7 @@ const Menu = ({
     >
       <Face options={options} value={value} size={size} />
     </MenuTrigger>
-    <DropdownMenuPanel align="start" aria-label={words.label}>
+    <DropdownMenuContent align="start" aria-label={words.label}>
       <MenuRadioGroup
         value={value}
         onValueChange={(next) => {
@@ -130,7 +134,7 @@ const Menu = ({
           );
         })}
       </MenuRadioGroup>
-    </DropdownMenuPanel>
+    </DropdownMenuContent>
   </DropdownMenu>
 );
 
@@ -195,7 +199,7 @@ const OnPhone = ({ onChoose, size, buttonLabel, ...list }: CompactProps) => {
           setOpen(next);
         }}
       >
-        <SheetPanel>
+        <SheetContent>
           <SheetTitle>{list.words.label}</SheetTitle>
           <SheetBody>
             <LanguageList
@@ -207,7 +211,7 @@ const OnPhone = ({ onChoose, size, buttonLabel, ...list }: CompactProps) => {
               }}
             />
           </SheetBody>
-        </SheetPanel>
+        </SheetContent>
       </Sheet>
     </>
   );

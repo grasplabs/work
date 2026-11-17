@@ -18,7 +18,7 @@
 
 import * as stylex from "@stylexjs/stylex";
 import { useEffect, useId, useRef, useState } from "react";
-import type { RefObject } from "react";
+import type { ReactNode, RefObject } from "react";
 
 import { Button } from "../button";
 import { Alert, Cross, Icon, Mic, MicOff, Retry, Tick } from "../icons";
@@ -138,32 +138,13 @@ const styles = stylex.create({
     display: "grid",
     gap: grasp.space3,
     padding: grasp.space4,
-    paddingBlockEnd: grasp.space3,
+    paddingBlockEnd: grasp.space2,
     minWidth: 0,
     fontFamily: grasp.fontSans,
   },
-  // The words' room: the text, and under it the band the light lies in (BAND), directly under the
-  // line being written. Its height never changes, so nothing jumps as the voice swells.
-  room: {
-    position: "relative",
-    isolation: "isolate",
-    minWidth: 0,
-    // Closed, the card is as tall as the composer it replaces, so nothing jumps either way.
-    paddingBlockEnd: grasp.space3,
-    transitionProperty: "padding-block-end",
-    transitionDuration: { default: "220ms", [media.reduced]: "0s" },
-    transitionTimingFunction: grasp.ease,
-    // Closing waits a beat, so the light is seen draining before its band goes.
-    transitionDelay: { default: "100ms", [media.reduced]: "0s" },
-  },
-  // The band opens as it starts listening and closes as it writes it down, is cancelled or stops.
-  roomOpen: {
-    paddingBlockEnd: {
-      default: `calc(${grasp.space8} + ${grasp.space1})`,
-      [media.forced]: grasp.space3,
-    },
-    transitionDelay: "0s",
-  },
+  // The words' room: the text alone, as tall as the composer's text it replaces, so the card is no
+  // taller while it listens than while it is typed in. The light lies in the footer (band).
+  room: { position: "relative", minWidth: 0, paddingBlockEnd: grasp.space3 },
   words: {
     position: "relative",
     zIndex: 1,
@@ -194,7 +175,39 @@ const styles = stylex.create({
     animationIterationCount: "infinite",
   },
   caretQuiet: { opacity: 0, animationName: "none" },
-  // The field: over the whole room, under the words. In forced colours there is no light.
+  // The band the light lies in: the footer's row between the time and the microphone, on its
+  // centre line, as tall as the row's controls, so the footer is as tall listening as at rest. It
+  // opens (its padding, read by the field as how open it is) as it starts listening and closes as
+  // it writes it down, is cancelled or stops; closing waits a beat, so the light is seen draining.
+  band: {
+    position: "relative",
+    isolation: "isolate",
+    flexGrow: 1,
+    minWidth: 0,
+    // Its height is its padding (and a state's words, when they show): opening it resizes the
+    // canvas, so the field reads how open it is as it opens.
+    alignSelf: "center",
+    display: "flex",
+    alignItems: "center",
+    paddingBlockEnd: 0,
+    transitionProperty: "padding-block-end",
+    transitionDuration: { default: "220ms", [media.reduced]: "0s" },
+    transitionTimingFunction: grasp.ease,
+    transitionDelay: { default: "100ms", [media.reduced]: "0s" },
+  },
+  bandOpen: { paddingBlockEnd: grasp.controlSm, transitionDelay: "0s" },
+  // A state's words in the band's place (Silence, Muted, A part unheard, Asking), from its start.
+  bandWords: {
+    minWidth: 0,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    fontSize: grasp.textXs,
+    lineHeight: grasp.textXsLine,
+    color: grasp.muted,
+  },
+  bandHidden: { visibility: "hidden" },
+  // The field: over the whole band. In forced colours there is no light.
   field: {
     position: "absolute",
     inset: 0,
@@ -211,26 +224,24 @@ const styles = stylex.create({
     width: "100%",
     height: grasp.space2,
   },
+  // The ways out, on the composer footer's own inset (space-2 from the card's side, as its footer),
+  // each a Button with its own corner, as Add and Send at rest: the card nests round them.
   foot: {
     display: "flex",
     alignItems: "center",
     gap: grasp.space2,
     minWidth: 0,
+    marginInline: `calc(${grasp.space2} - ${grasp.space4})`,
   },
-  status: {
-    flexGrow: 1,
-    minWidth: 0,
+  time: {
+    flexShrink: 0,
     margin: 0,
-    display: "flex",
-    alignItems: "center",
-    gap: grasp.space2,
     fontSize: grasp.textXs,
     lineHeight: grasp.textXsLine,
-    color: grasp.muted,
+    fontVariantNumeric: "tabular-nums",
+    color: grasp.ink,
     whiteSpace: "nowrap",
   },
-  statusWords: { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" },
-  time: { flexShrink: 0, fontVariantNumeric: "tabular-nums", color: grasp.ink },
   problem: {
     display: "flex",
     alignItems: "flex-start",
@@ -410,8 +421,8 @@ const saidOf = (
   return say.listening;
 };
 
-/** The band the light lies in, at the room's foot: 36px, space-8 and space-1. */
-const BAND = 36;
+/** The band the light lies in: the footer row's height, controlSm, 32px. */
+const BAND = 32;
 
 /** What the host gives for the sound, kept in a ref for the frame loop. */
 interface Reading {
@@ -422,7 +433,7 @@ interface Reading {
 
 /** The parts the field is drawn from and tells. */
 interface FieldParts {
-  room: RefObject<HTMLDivElement | null>;
+  band: RefObject<HTMLDivElement | null>;
   canvas: RefObject<HTMLCanvasElement | null>;
   meter: RefObject<HTMLMeterElement | null>;
 }
@@ -433,7 +444,7 @@ interface FieldParts {
  * frame). The card's dithered edge listens with it. Returns nothing: everything goes through refs.
  */
 const useVoiceField = (
-  { room, canvas, meter }: FieldParts,
+  { band, canvas, meter }: FieldParts,
   reading: RefObject<Reading>,
   mode: VoiceFieldMode,
   on: boolean,
@@ -452,7 +463,7 @@ const useVoiceField = (
 
   useEffect(() => {
     const element = canvas.current;
-    const box = room.current;
+    const box = band.current;
     if (element === null || box === null || !on) {
       return holdNothing;
     }
@@ -488,7 +499,7 @@ const useVoiceField = (
       seen = entries.some((entry) => entry.isIntersecting);
       decide();
     });
-    // The room, not the canvas: in forced colours the canvas is hidden, and the meter still follows.
+    // The band, not the canvas: in forced colours the canvas is hidden, and the meter still follows.
     watch.observe(box);
     document.addEventListener("visibilitychange", decide);
     decide();
@@ -498,7 +509,7 @@ const useVoiceField = (
       drawing.stop();
       field.current = null;
     };
-  }, [room, canvas, meter, reading, on, still]);
+  }, [band, canvas, meter, reading, on, still]);
 
   // The card's dithered edge listens with the field, at a third of its swing.
   useEffect(() => {
@@ -528,60 +539,45 @@ const dissolve = (box: HTMLElement) => {
   return all.length > 0;
 };
 
-/** The status line's words, beside the time. */
-const statusOf = (
+/**
+ * The words in the band's place, from its start, while a state holds that is not plain listening:
+ * Paused (silence), Muted, or asking for the microphone. Listening shows the light alone: it is said
+ * once, by the live region, and not written. Writing it down shows the light draining. A stretch
+ * unheard keeps its note above, and a problem its alert, with no band.
+ */
+const bandWordsOf = (
   phase: ComposerVoicePhase,
   muted: boolean,
   silent: boolean,
   problem: ComposerVoiceProblem | undefined,
   say: ComposerVoiceWords
 ) => {
-  if (phase === "problem") {
-    return "";
+  if (phase === "asking") {
+    return say.asking;
   }
-  if (phase !== "listening") {
-    return saidOf(phase, muted, problem, say);
+  if (phase !== "listening" || problem === "unheard") {
+    return "";
   }
   if (muted) {
     return say.muted;
   }
-  return silent ? say.silent : say.listening;
+  return silent ? say.silent : "";
 };
 
-/** The meter (forced colours only), a stretch unheard, and a problem that stopped it. */
+/** A stretch unheard, and a problem that stopped it. */
 const VoiceNotes = ({
-  meter,
-  showField,
   phase,
   problem,
   say,
 }: {
-  meter: RefObject<HTMLMeterElement | null>;
-  showField: boolean;
   phase: ComposerVoicePhase;
   problem: ComposerVoiceProblem | undefined;
   say: ComposerVoiceWords;
 }) => {
-  const meterId = useId();
   const stopping =
     phase === "problem" && problem !== undefined && problem !== "unheard";
   return (
     <>
-      {showField ? (
-        <>
-          <label htmlFor={meterId} {...stylex.props(styles.unseen)}>
-            {say.level}
-          </label>
-          <meter
-            ref={meter}
-            id={meterId}
-            min={0}
-            max={1}
-            value={0}
-            {...stylex.props(styles.meter)}
-          />
-        </>
-      ) : null}
       {problem === "unheard" && phase === "listening" ? (
         <output {...stylex.props(styles.note)}>
           <Icon icon={Alert} />
@@ -598,13 +594,74 @@ const VoiceNotes = ({
   );
 };
 
-/** The ways out: Cancel, the time and the phase, then Mute and Done, or Try again after a problem. */
+/** The band: the light (and in forced colours the level as a meter), or a state's words in its place. */
+interface BandProps {
+  band: RefObject<HTMLDivElement | null>;
+  canvas: RefObject<HTMLCanvasElement | null>;
+  meter: RefObject<HTMLMeterElement | null>;
+  showField: boolean;
+  open: boolean;
+  words: string;
+  say: ComposerVoiceWords;
+}
+
+const VoiceBand = ({
+  band,
+  canvas,
+  meter,
+  showField,
+  open,
+  words,
+  say,
+}: BandProps) => {
+  const meterId = useId();
+  const worded = words !== "";
+  return (
+    <div
+      ref={band}
+      data-slot="composer-voice-band"
+      {...stylex.props(styles.band, open && !worded && styles.bandOpen)}
+    >
+      {showField ? (
+        <>
+          <canvas
+            ref={canvas}
+            aria-hidden="true"
+            data-slot="composer-voice-field"
+            {...stylex.props(styles.field, worded && styles.bandHidden)}
+          />
+          <label htmlFor={meterId} {...stylex.props(styles.unseen)}>
+            {say.level}
+          </label>
+          <meter
+            ref={meter}
+            id={meterId}
+            min={0}
+            max={1}
+            value={0}
+            {...stylex.props(styles.meter, worded && styles.bandHidden)}
+          />
+        </>
+      ) : null}
+      {worded ? (
+        <span
+          data-slot="composer-voice-state"
+          {...stylex.props(styles.bandWords)}
+        >
+          {words}
+        </span>
+      ) : null}
+    </div>
+  );
+};
+
+/** The ways out: Cancel, the time, the band, then Mute and Done, or Try again after a problem. */
 const VoiceFoot = ({
   phase,
   muted,
-  status,
   elapsedMs,
   say,
+  children,
   onCancel,
   onMute,
   onDone,
@@ -612,28 +669,24 @@ const VoiceFoot = ({
 }: {
   phase: ComposerVoicePhase;
   muted: boolean;
-  status: string;
   elapsedMs: number;
   say: ComposerVoiceWords;
+  children: ReactNode;
   onCancel: () => void;
   onMute: () => void;
   onDone: () => void;
   onRetry: () => void;
 }) => (
-  <div {...stylex.props(styles.foot)}>
+  <div data-slot="composer-voice-foot" {...stylex.props(styles.foot)}>
     <Button
       variant="ghost"
       size="sm"
       icon={Cross}
-      label={say.cancel}
+      aria-label={say.cancel}
       onClick={onCancel}
     />
-    <p {...stylex.props(styles.status)}>
-      <span {...stylex.props(styles.time)}>{say.time(elapsedMs)}</span>
-      {status === "" ? null : (
-        <span {...stylex.props(styles.statusWords)}>{status}</span>
-      )}
-    </p>
+    <p {...stylex.props(styles.time)}>{say.time(elapsedMs)}</p>
+    {children}
     {phase === "problem" ? (
       <Button variant="quiet" size="sm" icon={Retry} onClick={onRetry}>
         {say.retry}
@@ -644,7 +697,7 @@ const VoiceFoot = ({
           variant="ghost"
           size="sm"
           icon={muted ? MicOff : Mic}
-          label={muted ? say.unmute : say.mute}
+          aria-label={muted ? say.unmute : say.mute}
           onClick={onMute}
           disabled={phase !== "listening"}
         />
@@ -652,7 +705,7 @@ const VoiceFoot = ({
           variant="ink"
           size="sm"
           icon={Tick}
-          label={say.done}
+          aria-label={say.done}
           onClick={onDone}
           disabled={phase !== "listening"}
         />
@@ -687,6 +740,7 @@ export const ComposerVoice = ({
   };
   const still = useStill();
   const room = useRef<HTMLDivElement>(null);
+  const band = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const caret = useRef<HTMLSpanElement>(null);
   const meter = useRef<HTMLMeterElement>(null);
@@ -705,7 +759,7 @@ export const ComposerVoice = ({
     reading.current = { sample, level, bands };
   }, [sample, level, bands]);
 
-  useVoiceField({ room, canvas, meter }, reading, mode, showField, still);
+  useVoiceField({ band, canvas, meter }, reading, mode, showField, still);
 
   const cancel = () => {
     const box = room.current;
@@ -733,18 +787,7 @@ export const ComposerVoice = ({
       data-mode={mode}
       {...stylex.props(styles.surface)}
     >
-      <div
-        ref={room}
-        {...stylex.props(styles.room, bandOpen && styles.roomOpen)}
-      >
-        {showField ? (
-          <canvas
-            ref={canvas}
-            aria-hidden="true"
-            data-slot="composer-voice-field"
-            {...stylex.props(styles.field)}
-          />
-        ) : null}
+      <div ref={room} {...stylex.props(styles.room)}>
         <p data-slot="composer-voice-words" {...stylex.props(styles.words)}>
           {before === "" ? null : (
             <span {...stylex.props(styles.typed)}>{before}</span>
@@ -764,24 +807,27 @@ export const ComposerVoice = ({
           />
         </p>
       </div>
-      <VoiceNotes
-        meter={meter}
-        showField={showField}
-        phase={phase}
-        problem={problem}
-        say={say}
-      />
+      <VoiceNotes phase={phase} problem={problem} say={say} />
       <VoiceFoot
         phase={phase}
         muted={muted}
-        status={statusOf(phase, muted, silent, problem, say)}
         elapsedMs={elapsedMs}
         say={say}
         onCancel={cancel}
         onMute={onMute}
         onDone={onDone}
         onRetry={onRetry}
-      />
+      >
+        <VoiceBand
+          band={band}
+          canvas={canvas}
+          meter={meter}
+          showField={showField}
+          open={bandOpen}
+          words={bandWordsOf(phase, muted, silent, problem, say)}
+          say={say}
+        />
+      </VoiceFoot>
       <p aria-live="polite" {...stylex.props(styles.unseen)}>
         {saidOf(phase, muted, problem, say)}
       </p>

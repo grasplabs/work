@@ -11,6 +11,7 @@
 // value is a token (src/tokens).
 "use client";
 
+/* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
 import {
   Progress as ProgressPrimitive,
@@ -47,6 +48,8 @@ export interface ProgressProps {
    * `bar` runs the width it is given, `ring` sits beside words.
    * @default "bar"
    */
+  variant?: "bar" | "ring";
+  /** @deprecated Use `variant`. */
   shape?: "bar" | "ring";
   /**
    * A bar 4, 8 or 12px tall; a ring 14, 20 or 60px across. A large ring holds its value.
@@ -67,9 +70,9 @@ export interface ProgressProps {
   showLabel?: boolean;
   /** What a screen reader hears for the value, when the percentage says too little: "3 of 12 files". */
   valueText?: (value: number | null) => string;
-  /** Layout only: where it sits and how wide it is. */
+  /** @deprecated Use `layout`. */
   style?: ProgressLayoutStyle;
-  /** The same as `style`, by a name a style lint does not take for an inline style attribute. */
+  /** Layout only: where it sits and how wide it is. */
   layout?: ProgressLayoutStyle;
 }
 
@@ -290,7 +293,8 @@ export const Progress = ({
   label,
   value,
   max = 100,
-  shape = "bar",
+  shape: shapeDeprecated,
+  variant: shape = shapeDeprecated ?? "bar",
   size = "md",
   tone = "neutral",
   showLabel = true,

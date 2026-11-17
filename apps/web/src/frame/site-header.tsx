@@ -108,7 +108,7 @@ export const SiteHeader = ({
             : { label: crumb.label }
         )}
         phoneCrumbs={phoneCrumbs}
-        trailing={trailing}
+        end={trailing}
       />
       {banner}
     </>

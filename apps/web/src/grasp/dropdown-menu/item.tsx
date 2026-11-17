@@ -4,6 +4,7 @@
 // the item when it failed: for a person, and to an agent with the same words.
 "use client";
 
+/* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
 import { Button as PressPrimitive } from "@ui-sdk/react/button";
 import type { ButtonState } from "@ui-sdk/react/button";
@@ -50,10 +51,11 @@ interface ItemBase extends Omit<
    */
   shortcut?: string;
   /**
-   * An item that deletes or cannot be undone: drawn in the danger colour, and an agent asks the
-   * person before pressing it.
-   * @default false
+   * `danger` for an item that deletes or cannot be undone: drawn in the danger colour, and an
+   * agent asks the person before pressing it.
    */
+  variant?: "danger";
+  /** @deprecated Use `variant`. */
   danger?: boolean;
   /**
    * Out of use: drawn at half strength and pressing it does nothing, but the keys still reach it,
@@ -309,7 +311,8 @@ const Item = ({
   icon,
   mirrorIcon,
   shortcut: _shortcut,
-  danger = false,
+  danger: dangerDeprecated,
+  variant,
   agentConfirm,
   onSelect,
   action,
@@ -317,6 +320,10 @@ const Item = ({
   keys,
   ...rest
 }: DropdownMenuItemProps & { keys?: Keys }) => {
+  // The new name wins over the old one (the breaking release's step 1).
+  const danger =
+    variant === "danger" ||
+    (variant === undefined && dangerDeprecated === true);
   const confirm = agentConfirm ?? (danger ? children : undefined);
   const look: ItemLook = {
     children,

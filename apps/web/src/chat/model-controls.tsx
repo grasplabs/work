@@ -90,7 +90,7 @@ export const ModelControls = ({
     <ComposerModelEffort
       effort={effort ?? ""}
       effortLabel={t`How hard it thinks`}
-      label={t`Model and effort`}
+      aria-label={t`Model and effort`}
       makers={makers}
       model={model}
       modelLabel={t`Model`}

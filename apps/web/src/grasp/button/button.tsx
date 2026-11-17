@@ -1,5 +1,6 @@
 "use client";
 
+/* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
 import { Button as ButtonPrimitive } from "@ui-sdk/react/button";
 import type { ButtonActionDetails } from "@ui-sdk/react/button";
@@ -28,10 +29,13 @@ import { simply } from "../motion/simply.stylex";
 import { Spinner } from "../spinner";
 import { spinnerVars } from "../spinner/spinner.stylex";
 import { grasp, media } from "../tokens/tokens.stylex";
+import { useWords } from "../words/words";
 import { buttonMarker, layerMarker } from "./button.stylex";
 import { HoldFill, holdLook } from "./hold-fill";
-import { HoldContext, assignRef, englishHoldLabels } from "./use-hold";
+import { HoldContext, assignRef, useHoldLabels } from "./use-hold";
 import type { ButtonHoldLabels, HoldLook, HoldSetting } from "./use-hold";
+import { buttonWords } from "./words";
+import type { ButtonOwnWords } from "./words";
 
 export type ButtonVariant = "ink" | "quiet" | "ghost" | "danger" | "approve";
 export type ButtonSize = "xs" | "sm" | "md" | "lg";
@@ -57,22 +61,38 @@ export type ButtonWords =
 interface WithWords {
   /** The words on the button: a verb first, in sentence case ("Save changes"). */
   children: ButtonWords;
-  /** An icon before the words, or the whole button with `label`. Import it from the icons entry (`@/components/grasp/icons`). */
+  /** An icon before the words, or the whole button with `aria-label`. Import it from the icons entry (`@/components/grasp/icons`). */
   icon?: IconData;
   /** An icon after the words: an arrow that leads on. */
   iconEnd?: IconData;
+  /** @deprecated Use `aria-label`. */
   label?: never;
+  "aria-label"?: string;
 }
 
 /**
- * A button that is only an icon. It is square, and `label` is its name.
+ * A button that is only an icon. It is square, and `aria-label` is its name.
  */
 interface IconOnly {
   children?: never;
   icon: IconData;
   iconEnd?: never;
   /** The name of an icon-only button, for a screen reader and a voice command ("More actions"). */
+  "aria-label": string;
+  /** @deprecated Use `aria-label`. */
+  label?: never;
+}
+
+/**
+ * The same, named the old way.
+ */
+interface IconOnlyLabel {
+  children?: never;
+  icon: IconData;
+  iconEnd?: never;
+  /** @deprecated Use `aria-label`. */
   label: string;
+  "aria-label"?: string;
 }
 
 /** What every button takes. */
@@ -118,13 +138,13 @@ interface ButtonBase {
    * @default false
    */
   disabled?: boolean;
+  /** @deprecated Use `layout`. */
+  style?: ButtonLayoutStyle;
   /**
    * Layout only: where it sits and how much room it takes, as on every part (src/layout): margins,
    * alignment, `display`, a full width in a phone's footer, or a floor that follows the words
    * (`minWidth: "fit-content"`). Its colours, corners and height belong to the button: use `size`.
    */
-  style?: ButtonLayoutStyle;
-  /** The same as `style`, by a name a style lint does not take for an inline style attribute. */
   layout?: ButtonLayoutStyle;
   /**
    * Hold to confirm, for what cannot be undone but is not grave (delete a draft): the action runs
@@ -141,6 +161,8 @@ interface ButtonBase {
 
 /** A plain button: it does its work and the page shows the result. */
 interface WithoutLife {
+  status?: undefined;
+  /** @deprecated Use `status`. */
   state?: undefined;
   workingLabel?: never;
   doneLabel?: never;
@@ -155,7 +177,9 @@ interface WithLife {
    * Where the action is: `idle`, `working`, `done` or `failed`. While working, it cannot be
    * pressed again. Comes from useAction().
    */
-  state: ActionState;
+  status: ActionState;
+  /** @deprecated Use `status`. */
+  state?: ActionState;
   /**
    * Said to a screen reader while it works ("Saving"). Not shown: the spinner shows that it works,
    * and the button keeps its own words.
@@ -178,10 +202,19 @@ type Shared = Omit<
 > &
   ButtonBase;
 
+/**
+ * The same, by the old name.
+ */
+interface WithLifeOld extends Omit<WithLife, "status" | "state"> {
+  status?: ActionState;
+  /** @deprecated Use `status`. */
+  state: ActionState;
+}
+
 /** Every prop a Button takes: the ones above, and the rest of UI SDK's Button and a <button>. */
 export type ButtonProps = Shared &
-  (WithWords | IconOnly) &
-  (WithoutLife | WithLife);
+  (WithWords | IconOnly | IconOnlyLabel) &
+  (WithoutLife | WithLife | WithLifeOld);
 
 // ---- The look --------------------------------------------------------------------------------------
 
@@ -859,6 +892,8 @@ interface Read extends Shared {
   icon?: IconData;
   iconEnd?: IconData;
   label?: string;
+  "aria-label"?: string;
+  status?: ActionState;
   state?: ActionState;
   workingLabel?: string;
   doneLabel?: string;
@@ -883,7 +918,8 @@ const confirmFor = (
   variant: ButtonVariant,
   words: string | undefined,
   agentConfirm: string | undefined,
-  extra: Record<string, unknown>
+  extra: Record<string, unknown>,
+  said: ButtonOwnWords
 ) => {
   const theirs = extra["data-agent-confirm"];
   const given =
@@ -892,8 +928,8 @@ const confirmFor = (
     (variant === "danger" || variant === "approve") && !opensSomething(extra);
   const own =
     words === undefined || words === ""
-      ? "Does something that needs your yes"
-      : `Presses "${words}"`;
+      ? said.agentAsks
+      : said.agentPresses(words);
   return given ?? (asks ? own : undefined);
 };
 
@@ -1051,6 +1087,17 @@ const faceOf = ({
 const givenName = (extra: Record<string, unknown>) =>
   typeof extra["aria-label"] === "string" ? extra["aria-label"] : undefined;
 
+/** The name and the life by their new names, else the deprecated old ones (the breaking release's step 1). */
+const newNamesOf = (
+  extra: Record<string, unknown>,
+  label: string | undefined,
+  status: ActionState | undefined,
+  state: ActionState | undefined
+) => ({
+  label: givenName(extra) ?? label,
+  state: status ?? state,
+});
+
 /** The button's own props: its look, its data attributes, its name and what an agent is told. */
 const ownOf = ({
   look,
@@ -1059,6 +1106,7 @@ const ownOf = ({
   words,
   agentConfirm,
   extra,
+  said,
 }: {
   look: Look;
   state: ActionState | undefined;
@@ -1066,6 +1114,7 @@ const ownOf = ({
   words: string | undefined;
   agentConfirm: string | undefined;
   extra: Record<string, unknown>;
+  said: ButtonOwnWords;
 }) => {
   const { variant, size, busy, iconOnly, held } = look;
   const name = busy ? undefined : held?.name;
@@ -1082,7 +1131,7 @@ const ownOf = ({
     "data-state": busy ? state : extra["data-state"],
     // A danger or approve button never runs for an agent without the person's yes (UI SDK's mark).
     // One that only opens something (a dialog's trigger) does not ask: the action inside it does.
-    "data-agent-confirm": confirmFor(variant, words, agentConfirm, extra),
+    "data-agent-confirm": confirmFor(variant, words, agentConfirm, extra, said),
     // A hold's name, else an icon-only button's label, else the caller's own aria-label: a button
     // with words keeps a name it is given ("Delete Spring launch" on a row's Delete), never drops it.
     "aria-label": name ?? (iconOnly ? label : givenName(extra)),
@@ -1102,9 +1151,10 @@ const Pressable = ({
     size = "md",
     icon,
     iconEnd,
-    label,
+    label: labelDeprecated,
     children,
-    state,
+    status,
+    state: stateDeprecated,
     workingLabel,
     doneLabel,
     failedLabel,
@@ -1120,6 +1170,13 @@ const Pressable = ({
     ...rest
   } = read;
   const extra: Record<string, unknown> = rest;
+  // The new names win over the old ones (the breaking release's step 1).
+  const { label, state } = newNamesOf(
+    extra,
+    labelDeprecated,
+    status,
+    stateDeprecated
+  );
 
   const iconOnly = isEmpty(children);
   const busy = state !== undefined && state !== "idle";
@@ -1142,6 +1199,7 @@ const Pressable = ({
   // The result is said once, by the page's one polite voice (src/announce), when it changes.
   // Nothing is put beside the button, so it stays a single element in a row or a group.
   // workingLabel is said, not shown: the words on the button stay its own while it works.
+  const ownWords = useWords("button", buttonWords);
   useSaid(
     saidFor(state, {
       working: workingLabel,
@@ -1163,7 +1221,7 @@ const Pressable = ({
     }
     event.preventDefault();
     if (busy && details.source === "agent") {
-      throw new Error(`It still says "${shown}". Press it again in a moment.`);
+      throw new Error(ownWords.agentStillSays(shown ?? ""));
     }
     return null;
   };
@@ -1175,6 +1233,7 @@ const Pressable = ({
     agentConfirm,
     extra,
     words: typeof children === "string" ? children : label,
+    said: ownWords,
   });
   const inside = (
     <Inside
@@ -1258,7 +1317,7 @@ const LazyHold = (allProps: ButtonProps) => {
   const early = useRef(false);
   const words =
     typeof allProps.children === "string" ? allProps.children : allProps.label;
-  const { holdTo } = { ...englishHoldLabels, ...allProps.holdLabels };
+  const { holdTo } = useHoldLabels(allProps.holdLabels);
   const name = words === undefined || words === "" ? undefined : holdTo(words);
   const waiting = { holding: false, ms: 0, name };
   const keep = (event: MouseEvent<HTMLElement>) => {

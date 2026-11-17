@@ -11,7 +11,7 @@ import {
   AlertDialogAction,
   AlertDialogDescription,
   AlertDialogFooter,
-  AlertDialogPanel,
+  AlertDialogContent,
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "../grasp/alert-dialog/index.ts";
@@ -64,7 +64,7 @@ const EndStaffAccess = ({
       <AlertDialogTrigger size="sm">
         {t`End staff access now`}
       </AlertDialogTrigger>
-      <AlertDialogPanel>
+      <AlertDialogContent>
         <AlertDialogTitle>{t`End Grasp staff access now?`}</AlertDialogTitle>
         <AlertDialogDescription>
           {t`Everyone from Grasp is signed out at once, and nobody from Grasp can sign in again until a new window is opened.`}
@@ -82,7 +82,7 @@ const EndStaffAccess = ({
             {t`End access`}
           </AlertDialogAction>
         </AlertDialogFooter>
-      </AlertDialogPanel>
+      </AlertDialogContent>
     </AlertDialog>
   );
 };

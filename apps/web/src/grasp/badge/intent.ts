@@ -8,6 +8,10 @@ export const intent = {
       when: "How something stands, in a word or two, beside what it describes.",
     },
     { when: "A row's status, at the end of the row." },
+    {
+      when: 'How serious something is, such as a captured log, on a page full of them: `variant="dot"`, a dot beside words in the text colour.',
+      source: "src/components/badge/badge.tsx",
+    },
   ],
   notWhen: [
     { when: "Something to press or follow.", instead: ["button", "link"] },
@@ -15,11 +19,6 @@ export const intent = {
       when: "A label that sorts or names something.",
       instead: ["tag"],
       source: "docs/components/tag.mdx",
-    },
-    {
-      when: "How serious something is.",
-      instead: ["severity"],
-      source: "docs/components/severity.mdx",
     },
   ],
   variants: [
@@ -29,6 +28,10 @@ export const intent = {
     { name: 'tone="danger"', when: "It failed or is blocked." },
     { name: 'tone="info"', when: "A note." },
     { name: 'size="sm"', when: "A dense table." },
+    {
+      name: 'variant="dot"',
+      when: "How serious: a dot in the tone's colour beside neutral words (once Severity).",
+    },
     {
       name: "pending",
       when: "Something is happening to it now: an invitation sending, a member being removed.",

@@ -19,7 +19,7 @@ import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import { Link } from "@tanstack/react-router";
 import { useId } from "react";
 
-import { HighlightsGrid, Highlight } from "../grasp/highlights/index.ts";
+import { StatsGrid, Stat } from "../grasp/stats/index.ts";
 import {
   columnsOf,
   fullDays,
@@ -234,7 +234,7 @@ const Headline = ({ days }: { days: readonly RunActivityDay[] }) => {
   }
   const without = percent(share, i18n.locale);
   return (
-    <Highlight
+    <Stat
       title={plural(runs, {
         one: "Without a person, of # run",
         other: "Without a person, of # runs",
@@ -268,7 +268,7 @@ const Decisions = ({ activity }: { activity: RunActivity }) => {
           value={total}
         />
       </p>
-      <HighlightsGrid
+      <StatsGrid
         aria-label={t`Decisions, by how they ended`}
         columns={4}
         items={counts.map(({ name, count }) => ({

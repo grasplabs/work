@@ -1,5 +1,6 @@
 "use client";
 
+/* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
 import { useId } from "react";
 import type { ReactNode } from "react";
@@ -11,7 +12,9 @@ import { Info } from "../icons";
 import type { LayoutStyle } from "../layout/layout";
 import { Spinner } from "../spinner";
 import { grasp } from "../tokens/tokens.stylex";
-import { Tooltip, TooltipPanel, TooltipTrigger } from "../tooltip";
+import { Tooltip, TooltipContent, TooltipTrigger } from "../tooltip";
+import { useWords, withGiven } from "../words/words";
+import { settingRowWords } from "./words";
 
 /** What a caller may style: where the rows sit and how wide they are. Never their look. */
 export type SettingsRowsLayoutStyle = LayoutStyle;
@@ -48,6 +51,8 @@ export interface SettingRowProps {
    * keeps the person's value and offers Try again. Said politely, once, in the help's place.
    * @default "idle"
    */
+  status?: SettingRowState;
+  /** @deprecated Use `status`. */
   state?: SettingRowState;
   /** Called by Try again, after a failed save. */
   onRetry?: () => void;
@@ -83,9 +88,19 @@ export interface RowAlertProps {
 export interface SettingsRowsProps {
   /** The rows: SettingRow, FactRow and RowAlert, in order. */
   children: ReactNode;
-  /** Layout only. */
+  /**
+   * A small name over the group ("Notifications"), muted, which names the group for a screen reader
+   * too. Without it the group stands unnamed, as before.
+   */
+  label?: string;
+  /**
+   * The level of the label's heading: 3 under a page's h2 sections, 2 where the page has none.
+   * @default 3
+   */
+  headingLevel?: 2 | 3 | 4;
+  /** @deprecated Use `layout`. */
   style?: SettingsRowsLayoutStyle;
-  /** The same as `style`, by a name a style lint does not take for an inline style attribute. */
+  /** Layout only. */
   layout?: SettingsRowsLayoutStyle;
 }
 
@@ -94,6 +109,22 @@ const NARROW = "@container setting-row (width < 34rem)";
 
 const styles = stylex.create({
   rows: { display: "flex", flexDirection: "column", minWidth: 0 },
+  // A named group: its label over the rows, no frame, the label on the rows' own start edge.
+  group: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space1,
+    minWidth: 0,
+  },
+  groupLabel: {
+    margin: 0,
+    paddingInline: grasp.tableCellInline,
+    fontFamily: grasp.fontSans,
+    fontSize: grasp.textXs,
+    lineHeight: grasp.textXsLine,
+    fontWeight: grasp.weightMedium,
+    color: grasp.muted,
+  },
   box: {
     containerType: "inline-size",
     containerName: "setting-row",
@@ -223,16 +254,30 @@ export const SettingRow = ({
   label,
   help,
   info,
-  infoLabel = "More about this setting",
+  infoLabel: infoLabelGiven,
   children,
   error,
-  state = "idle",
+  state: stateDeprecated,
+  status: state = stateDeprecated ?? "idle",
   onRetry,
-  savingLabel = "Saving",
-  savedLabel = "Saved",
-  failedLabel = "Could not save. Your choice is kept.",
-  retryLabel = "Try again",
+  savingLabel: savingLabelGiven,
+  savedLabel: savedLabelGiven,
+  failedLabel: failedLabelGiven,
+  retryLabel: retryLabelGiven,
 }: SettingRowProps) => {
+  const {
+    info: infoLabel,
+    saving: savingLabel,
+    saved: savedLabel,
+    failed: failedLabel,
+    retry: retryLabel,
+  } = withGiven(useWords("settingRow", settingRowWords), {
+    info: infoLabelGiven,
+    saving: savingLabelGiven,
+    saved: savedLabelGiven,
+    failed: failedLabelGiven,
+    retry: retryLabelGiven,
+  });
   const id = useId();
   const helpId = useId();
   const field: SettingField =
@@ -252,11 +297,11 @@ export const SettingRow = ({
                 <Tooltip>
                   <TooltipTrigger
                     icon={Info}
-                    label={infoLabel}
+                    aria-label={infoLabel}
                     variant="ghost"
                     size="xs"
                   />
-                  <TooltipPanel>{info}</TooltipPanel>
+                  <TooltipContent>{info}</TooltipContent>
                 </Tooltip>
               </span>
             )}
@@ -280,7 +325,7 @@ export const SettingRow = ({
         </div>
         {error !== undefined && (
           <div {...stylex.props(styles.across)}>
-            <Alert variant="danger">{error}</Alert>
+            <Alert tone="danger">{error}</Alert>
           </div>
         )}
       </div>
@@ -304,20 +349,49 @@ export const FactRow = ({ label, help, children }: FactRowProps) => (
 /** Something to know about a card's rows, a failure or a warning, as a row of its own. */
 export const RowAlert = ({ variant = "neutral", children }: RowAlertProps) => (
   <div data-slot="row-alert" {...stylex.props(styles.box, styles.alertRow)}>
-    <Alert variant={variant}>{children}</Alert>
+    <Alert tone={variant}>{children}</Alert>
   </div>
 );
 
-/** The rows of one card, a hairline between them. Put it in a flush Section card. */
+const headings = { 2: "h2", 3: "h3", 4: "h4" } as const;
+
+/**
+ * The rows of one group, a hairline between them and no frame: in a flush Section card, or alone on
+ * a page with a `label` over it.
+ */
 export const SettingsRows = ({
   children,
+  label,
+  headingLevel = 3,
   style,
   layout,
-}: SettingsRowsProps) => (
-  <div
-    data-slot="settings-rows"
-    {...stylex.props(styles.rows, layout ?? style)}
-  >
-    {children}
-  </div>
-);
+}: SettingsRowsProps) => {
+  const labelId = useId();
+  if (label === undefined) {
+    return (
+      <div
+        data-slot="settings-rows"
+        {...stylex.props(styles.rows, layout ?? style)}
+      >
+        {children}
+      </div>
+    );
+  }
+  const Heading = headings[headingLevel];
+  return (
+    <section
+      data-slot="settings-rows"
+      aria-labelledby={labelId}
+      {...stylex.props(styles.group, layout ?? style)}
+    >
+      <Heading
+        id={labelId}
+        data-slot="settings-rows-label"
+        {...stylex.props(styles.groupLabel)}
+      >
+        {label}
+      </Heading>
+      <div {...stylex.props(styles.rows)}>{children}</div>
+    </section>
+  );
+};

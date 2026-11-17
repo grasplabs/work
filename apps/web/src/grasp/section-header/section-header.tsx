@@ -9,6 +9,7 @@
 // replace the placeholders fade in (src/motion/arrive.ts).
 "use client";
 
+/* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
 import { useState } from "react";
 import type { ReactNode } from "react";
@@ -35,6 +36,8 @@ export interface SectionHeaderProps {
    * The heading's level, so the page's outline stays in order.
    * @default 2
    */
+  headingLevel?: 2 | 3 | 4;
+  /** @deprecated Use `headingLevel`. */
   level?: 2 | 3 | 4;
   /**
    * `md` for a section of a page; `sm` for a dense one (a settings card): the title and the
@@ -49,9 +52,9 @@ export interface SectionHeaderProps {
    * @default false
    */
   loading?: boolean;
-  /** Layout only: margins and alignment. The look belongs to the header. */
+  /** @deprecated Use `layout`. */
   style?: SectionHeaderLayoutStyle;
-  /** The same as `style`, by a name a style lint does not take for an inline style attribute. */
+  /** Layout only: margins and alignment. The look belongs to the header. */
   layout?: SectionHeaderLayoutStyle;
 }
 
@@ -132,12 +135,17 @@ const styles = stylex.create({
   descriptionWait: { width: "100%" },
 });
 
+/** A small header with no description stands centred on its line. */
+const centredOf = (size: SectionHeaderProps["size"], description: ReactNode) =>
+  size === "sm" && description === undefined;
+
 export const SectionHeader = ({
   title,
   description,
   aside,
   actions,
-  level = 2,
+  level: levelDeprecated,
+  headingLevel: level = levelDeprecated ?? 2,
   size = "md",
   id,
   loading = false,
@@ -152,7 +160,7 @@ export const SectionHeader = ({
     setWaited(true);
   }
   const arrived = waited && !loading;
-  const centred = size === "sm" && description === undefined;
+  const centred = centredOf(size, description);
   return (
     <div
       data-slot="section-header"

@@ -24,7 +24,7 @@ import {
   DialogBody,
   DialogDescription,
   DialogFooter,
-  DialogPanel,
+  DialogContent,
   DialogTitle,
 } from "../grasp/dialog/index.ts";
 import {
@@ -36,7 +36,13 @@ import {
 import { Form } from "../grasp/form/index.ts";
 import { Heading } from "../grasp/heading/index.ts";
 import { Input } from "../grasp/input/index.ts";
-import { Item, ItemGroup } from "../grasp/item/index.ts";
+import {
+  Item,
+  ItemGroup,
+  ItemContent,
+  ItemTitle,
+  ItemActions,
+} from "../grasp/item/index.ts";
 import { Progress } from "../grasp/progress/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
 import { Spinner } from "../grasp/spinner/index.ts";
@@ -215,9 +221,9 @@ const WhatErasingDoes = ({ areas }: { areas: readonly string[] }) => {
 const Loading = ({ lost }: { lost: string | undefined }) => {
   const { t } = useLingui();
   return lost === undefined ? (
-    <Spinner label={t`Loading…`} />
+    <Spinner aria-label={t`Loading…`} />
   ) : (
-    <Alert variant="danger">{lost}</Alert>
+    <Alert tone="danger">{lost}</Alert>
   );
 };
 
@@ -336,7 +342,7 @@ const EraseDialog = ({
       }}
       open
     >
-      <DialogPanel closeLabel={t`Close`}>
+      <DialogContent closeLabel={t`Close`}>
         <DialogTitle>{t`Erase ${name}?`}</DialogTitle>
         <DialogDescription>
           {erasure === null
@@ -393,7 +399,7 @@ const EraseDialog = ({
                 </Text>
               </output>
               {(lost ?? failure) === undefined ? null : (
-                <Alert variant="attention">{lost ?? failure}</Alert>
+                <Alert tone="attention">{lost ?? failure}</Alert>
               )}
             </div>
           )}
@@ -415,7 +421,7 @@ const EraseDialog = ({
             <DialogAction>{t`Close`}</DialogAction>
           </DialogFooter>
         )}
-      </DialogPanel>
+      </DialogContent>
     </Dialog>
   );
 };
@@ -449,7 +455,7 @@ const ReleaseAddressDialog = ({
   };
   return (
     <Dialog onOpenChange={onOpenChange} open>
-      <DialogPanel closeLabel={t`Close`}>
+      <DialogContent closeLabel={t`Close`}>
         <DialogTitle>{t`Let ${name}’s old address in again?`}</DialogTitle>
         <DialogDescription>
           {t`For an address your company gave to someone else. Anyone signing in with it then gets in, ${name} too if your sign-in provider still has it for them.`}
@@ -511,7 +517,7 @@ const ReleaseAddressDialog = ({
             {t`Let it in`}
           </Button>
         </DialogFooter>
-      </DialogPanel>
+      </DialogContent>
     </Dialog>
   );
 };
@@ -546,8 +552,21 @@ const RemovedRow = ({ person }: { person: RemovedPerson }) => {
   };
   return (
     <>
-      <Item
-        actions={
+      <Item size="sm">
+        <ItemContent>
+          <ItemTitle>
+            <TitleLine
+              detail={
+                email === null
+                  ? t`Removed on ${date} · email erased`
+                  : t`${email} · removed on ${date}`
+              }
+            >
+              {name}
+            </TitleLine>
+          </ItemTitle>
+        </ItemContent>
+        <ItemActions>
           <>
             <Standing person={person} />
             {erasure === null || erasure.completedAt === null ? (
@@ -579,20 +598,8 @@ const RemovedRow = ({ person }: { person: RemovedPerson }) => {
               </Button>
             ) : null}
           </>
-        }
-        size="sm"
-        title={
-          <TitleLine
-            detail={
-              email === null
-                ? t`Removed on ${date} · email erased`
-                : t`${email} · removed on ${date}`
-            }
-          >
-            {name}
-          </TitleLine>
-        }
-      />
+        </ItemActions>
+      </Item>
       {open === "erase" ? (
         <EraseDialog onOpenChange={close} person={person} />
       ) : null}
@@ -673,7 +680,7 @@ export const RemovedPeople = ({ page }: { page: RemovedPeoplePage }) => {
             {t`Show older`}
           </Button>
           {failure === undefined ? null : (
-            <Alert variant="danger">{failure}</Alert>
+            <Alert tone="danger">{failure}</Alert>
           )}
         </div>
       ) : null}

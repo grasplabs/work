@@ -16,6 +16,7 @@
 // Every value is a token (src/tokens). A caller may set layout only (the `style` prop).
 "use client";
 
+/* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
 import { Button as PressPrimitive } from "@ui-sdk/react/button";
 import { useEffect, useRef, useState } from "react";
@@ -25,8 +26,10 @@ import { useCopy } from "../button/copy";
 import { focus } from "../focus/focus";
 import { Copy, Failed, Icon, Tick } from "../icons";
 import type { LayoutStyle } from "../layout/layout";
+import { useWords, withGiven } from "../words/words";
 import { copyFieldMarker } from "./copy-field.stylex";
 import { styles } from "./styles";
+import { copyFieldWords } from "./words";
 
 /** What a caller may style: where the field sits and how wide it is. Never its look. */
 export type CopyFieldLayoutStyle = LayoutStyle;
@@ -36,7 +39,9 @@ export interface CopyFieldProps {
   /** What is shown and copied, exactly: a command, an id, a token's name or value. */
   value: string;
   /** The button's name, saying what it copies ("Copy the install command", "Copy --grasp-mint"). */
-  label: string;
+  "aria-label"?: string;
+  /** @deprecated Use `aria-label`. */
+  label?: string;
   /**
    * What is said once it is copied, and what the tick means.
    * @default "Copied"
@@ -57,9 +62,9 @@ export interface CopyFieldProps {
   swatch?: string;
   /** Called with the value once it is on the clipboard. */
   onCopy?: (value: string) => void;
-  /** Layout only: margins, width and alignment. The look belongs to the field. */
+  /** @deprecated Use `layout`. */
   style?: CopyFieldLayoutStyle;
-  /** The same as `style`, by a name a style lint does not take for an inline style attribute. */
+  /** Layout only: margins, width and alignment. The look belongs to the field. */
   layout?: CopyFieldLayoutStyle;
 }
 
@@ -125,15 +130,20 @@ const Marks = () => (
 /** A value you can copy, as one quiet line with the Copy icon at its end. */
 export const CopyField = ({
   value,
-  label,
-  copiedLabel = "Copied",
-  failedLabel = "Could not copy",
+  label: labelDeprecated,
+  "aria-label": label = labelDeprecated ?? "",
+  copiedLabel: copiedLabelGiven,
+  failedLabel: failedLabelGiven,
   size = "md",
   swatch,
   onCopy,
   style: styleProp,
   layout,
 }: CopyFieldProps) => {
+  const { copied: copiedLabel, failed: failedLabel } = withGiven(
+    useWords("copyField", copyFieldWords),
+    { copied: copiedLabelGiven, failed: failedLabelGiven }
+  );
   const [box, more] = useMore();
   const copy = useCopy(value, { done: copiedLabel, failed: failedLabel });
   const copied =
