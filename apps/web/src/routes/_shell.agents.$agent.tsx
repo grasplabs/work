@@ -87,7 +87,9 @@ const AgentRoutePage = () => {
       <SiteHeader crumbs={[...crumbs, { label: agent.name }]} />
       <AgentPage
         agent={agent}
-        apps={apps}
+        apps={
+          apps === undefined ? undefined : { ...apps, userId: identity.userId }
+        }
         documents={documents}
         editable={mine || isMemberAdmin(identity)}
         instructions={instructions}

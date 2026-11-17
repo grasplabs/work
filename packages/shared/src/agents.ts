@@ -164,6 +164,12 @@ export interface AgentAppsWorkedOut {
   turnedOn: CompanyToolClass[];
   /** Apps its instructions name that the company doesn't offer. */
   missing: string[];
+  /**
+   * When its instructions say it works on its own, for one of the
+   * company's agents: a wake-up proposed, never made by this, for an
+   * admin to make (`makeAgentWake`) with the opening line it is asked.
+   */
+  schedule?: { cron: string; opening: string };
 }
 
 /** Most characters a wake-up's opening line holds. */
