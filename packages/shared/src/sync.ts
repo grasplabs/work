@@ -18,15 +18,17 @@ const sourceIdSchema = z.string().min(1).max(1024);
 
 /**
  * Who may open an item, as the source lists it: one account, by the ID the
- * provider's sign-in vouches for; a group; or everyone in the source's
- * organisation or domain. The connection's provider and tenant say whose
- * (core makes the principals). "Anyone with the link" is never a reader:
- * a link alone gives nobody access, so a connector leaves it out.
+ * provider's sign-in vouches for; a group; everyone in the source's
+ * organisation or domain; or whoever has a link to it ("anyone with the
+ * link", or everyone in the organisation with it), which counts for
+ * nobody: a link alone gives nobody access. The connection's provider and
+ * tenant say whose (core makes the principals).
  */
 export const syncReaderSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("account"), id: sourceIdSchema }),
   z.strictObject({ kind: z.literal("group"), id: sourceIdSchema }),
   z.strictObject({ kind: z.literal("tenant"), id: sourceIdSchema }),
+  z.strictObject({ kind: z.literal("link") }),
 ]);
 export type SyncReader = z.infer<typeof syncReaderSchema>;
 
