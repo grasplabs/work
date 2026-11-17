@@ -1,3 +1,4 @@
+import { citedQuoteMax } from "@grasp-os/shared/chat";
 import type { ChatCitedDocument } from "@grasp-os/shared/chat";
 import { useLingui } from "@lingui/react/macro";
 import { useNavigate } from "@tanstack/react-router";
@@ -86,6 +87,36 @@ const LeavingLink = ({
 /** The links out of Grasp a click may open. */
 const leavingSchemes = new Set(["http", "https", "mailto"]);
 
+/** Whitespace aside, as core compares a quote with its document. */
+const spaced = (words: string): string => words.replaceAll(/\s+/gu, " ").trim();
+
+/**
+ * The passage a citation rests on, for its hover card: the quote its link
+ * gives as its title, but only as core checked it against the document
+ * (a span's `quote`, which core keeps only while the document says it, cut
+ * at `citedQuoteMax`). A quote core didn't keep shows nothing.
+ */
+const checkedQuote = (
+  document: ChatCitedDocument | undefined,
+  title: string | undefined
+): string | undefined => {
+  if (document === undefined || title === undefined) {
+    return undefined;
+  }
+  const given = spaced(title);
+  const same = (quote: string): boolean => {
+    const kept = spaced(quote);
+    // Cut at its longest, only its start is kept.
+    return quote.length >= citedQuoteMax
+      ? given.startsWith(kept)
+      : given === kept;
+  };
+  return (
+    document.spans.find(({ quote }) => quote !== null && same(quote))?.quote ??
+    undefined
+  );
+};
+
 /** One of the answer's links, drawn by what `cited` holds. */
 const AnswerLink = ({
   link,
@@ -101,10 +132,11 @@ const AnswerLink = ({
     if (at === undefined || at < 0) {
       return <span>{link.children}</span>;
     }
+    const quote = checkedQuote(cited?.[at], link.title);
     return (
       <>
         <Claim n={at + 1}>{link.children}</Claim>
-        <Citation n={at + 1} />
+        <Citation n={at + 1} {...(quote === undefined ? {} : { quote })} />
       </>
     );
   }

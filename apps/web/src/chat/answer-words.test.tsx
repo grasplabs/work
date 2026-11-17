@@ -133,6 +133,51 @@ const plan: ChatCitedDocument = {
   spans: [],
 };
 
+/** What the hover card of the citation named `name` shows, once it opens. */
+const cardOf = async (name: string): Promise<string> => {
+  const citation = document.querySelector<HTMLElement>(
+    `[aria-label="${name}"]`
+  );
+  if (citation === null) {
+    throw new Error(`No citation ${name}`);
+  }
+  await act(async () => {
+    for (const type of [
+      "pointerenter",
+      "mouseenter",
+      "pointermove",
+      "mousemove",
+    ]) {
+      citation.dispatchEvent(
+        new PointerEvent(type, {
+          bubbles: type.endsWith("move"),
+          pointerType: "mouse",
+        })
+      );
+    }
+    const { promise, resolve } = Promise.withResolvers<boolean>();
+    setTimeout(() => {
+      resolve(true);
+    }, 400);
+    await promise;
+  });
+  // The card this citation opened: the latest, should another still be leaving.
+  const card =
+    [...document.querySelectorAll("[data-slot=source-card]")].at(-1)
+      ?.textContent ?? "";
+  await act(async () => {
+    for (const type of ["pointerleave", "mouseleave"]) {
+      citation.dispatchEvent(new PointerEvent(type, { pointerType: "mouse" }));
+    }
+    const { promise, resolve } = Promise.withResolvers<boolean>();
+    setTimeout(() => {
+      resolve(true);
+    }, 400);
+    await promise;
+  });
+  return card;
+};
+
 describe(AnswerWords, () => {
   beforeEach(() => {
     window.open = (url?: string | URL, _target?: string, features?: string) => {
@@ -249,5 +294,32 @@ describe(AnswerWords, () => {
         document.body.textContent.includes(words)
       ),
     }).toStrictEqual({ drawn: null, words: ["Before", "A chart"] });
+  });
+
+  it("shows in a citation's card the passage it rests on, as core checked it, and nothing for a quote core didn't keep", async () => {
+    const quoted: ChatCitedDocument = {
+      ...leave,
+      spans: [
+        {
+          at: 12,
+          text: "sixteen weeks",
+          quote: "Leave lasts sixteen weeks, paid.",
+        },
+        { at: 80, text: "unpaid", quote: null },
+      ],
+    };
+    await shown(
+      'Leave lasts [sixteen weeks](grasp:note/leave "Leave lasts sixteen   weeks, paid."), and is [unpaid](grasp:note/leave "Unpaid, always.").',
+      [quoted]
+    );
+
+    const first = await cardOf("Source 1, first mention: Parental leave");
+    const second = await cardOf("Source 1, second mention: Parental leave");
+
+    expect({
+      first: first.includes("Leave lasts sixteen weeks, paid."),
+      second: [second.includes("Unpaid, always."), second.includes("paid.")],
+      start: first.includes("Parental leave lasts sixteen weeks."),
+    }).toStrictEqual({ first: true, second: [false, false], start: false });
   });
 });
