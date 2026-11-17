@@ -39,6 +39,7 @@ import type {
   OfferedCatalog,
   AppPointerSetting,
   SharedMailboxSetting,
+  ConnectionBrainAudienceSetting,
   ToolClassSetting,
 } from "@grasp-os/shared/connect";
 import type { SignInConfig } from "@grasp-os/shared/deployment-config";
@@ -97,6 +98,10 @@ import { providerIds, signInConfig } from "./auth/config.ts";
 import { identify } from "./auth/identity.ts";
 import { eraseCaptures } from "./brain-next-origins.ts";
 import { listAppRequests, requestApp } from "./catalog-requests.ts";
+import {
+  readConnectionAudiences,
+  setConnectionAudience,
+} from "./connection-audiences.ts";
 import { mayHoldCapturesOf } from "./connection-capture-key.ts";
 import {
   accounts,
@@ -769,6 +774,22 @@ export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
   async pointSharedMailbox(mailbox: unknown, audience: unknown): Promise<void> {
     await withPerson(this.#check, async (identity) => {
       await pointSharedMailbox(this.#env, identity, mailbox, audience);
+    });
+  }
+
+  async brainAudiences(): Promise<ConnectionBrainAudienceSetting[]> {
+    return await withPerson(
+      this.#check,
+      async (identity) => await readConnectionAudiences(this.#env, identity)
+    );
+  }
+
+  async setBrainAudience(
+    connectionId: unknown,
+    audience: unknown
+  ): Promise<void> {
+    await withPerson(this.#check, async (identity) => {
+      await setConnectionAudience(this.#env, identity, connectionId, audience);
     });
   }
 

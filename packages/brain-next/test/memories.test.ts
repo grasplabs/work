@@ -110,7 +110,7 @@ const tick = async (store: Store = shared()): Promise<void> => {
   await store.work({
     ask: async () => {
       await Promise.resolve();
-      return { kind: "answer", text: "" };
+      return { kind: "answer", text: "", model: "test/model" };
     },
     at: new Date(),
     embedders: {

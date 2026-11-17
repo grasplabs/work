@@ -3021,6 +3021,10 @@ msgstr "Haben ihn gefragt, oder er arbeitet nach Zeitplan für sie"
 msgid "Asked the agent to fix a run"
 msgstr "Den Agenten gebeten, einen Lauf zu beheben"
 
+#: src/activity/audit-words.ts
+msgid "Asked the Brain who knows about something"
+msgstr "Das Gehirn gefragt, wer sich mit etwas auskennt"
+
 #: src/chat/thread.tsx
 msgid "Asked to connect {binding}"
 msgstr "Verbindung {binding} angefragt"
@@ -3543,6 +3547,14 @@ msgstr "Projekt ändern"
 #: src/chat/agent-draft-card.tsx
 msgid "Change something"
 msgstr "Etwas ändern"
+
+#: src/chat/chat-panel.tsx
+msgid "Change something about the agent"
+msgstr "Etwas am Agenten ändern"
+
+#: src/chat/chat-panel.tsx
+msgid "Change something about the change"
+msgstr "Etwas an der Änderung ändern"
 
 #: src/chat/chat-panel.tsx
 msgid "Change something about the plan"
@@ -10950,6 +10962,15 @@ msgstr "Entitäten aus dem Gehirn gelesen"
 #: src/activity/audit-words.ts
 msgid "Read everyone's calls of unknown outcome"
 msgstr "Die Aufrufe mit unbekanntem Ergebnis aller gelesen"
+
+#: src/brain/sources-page.tsx
+msgctxt "a source of the Brain"
+msgid "Read from a shared connection"
+msgstr "Aus einer geteilten Verbindung gelesen"
+
+#: src/brain/memories-page.tsx
+msgid "Read from a shared connection, version {version}"
+msgstr "Aus einer geteilten Verbindung gelesen, Version {version}"
 
 #: src/activity/audit-words.ts
 msgid "Read how knowledge is used"

@@ -918,7 +918,7 @@ describe("AI providers", { timeout: 60_000 }, () => {
   });
 
   describe("falling back", () => {
-    it("tries the next model when a provider refuses a call before anything was billed, and audits it", async () => {
+    it("tries the next model when a provider refuses a call before anything was billed, says which answered, and audits it", async () => {
       const keys = await fallingBack();
       // Refused for its credentials: OpenAI takes nothing on.
       await plan(keys.openai, [{ status: 401 }]);
@@ -929,7 +929,10 @@ describe("AI providers", { timeout: 60_000 }, () => {
         await callOf(openaiCase.model, { trigger })
       );
 
-      expect(answer.text).toBe("From Claude.");
+      expect({ text: answer.text, model: answer.model }).toStrictEqual({
+        text: "From Claude.",
+        model: anthropicCase.model,
+      });
       const events = await auditedFor(trigger.userId, 3);
       expect(
         events.map(({ action, model, detail }) => ({

@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "271b55a8-b4cb-4927-8421-f85137b95b1e",
+  "id": "2d38f463-0091-4441-b29b-af6b98d23c6b",
   "prevId": "e0247aad-2cda-4244-b925-dbc00c2bb32d",
   "tables": {
     "access_revocations": {
@@ -5685,6 +5685,44 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
+    "connection_brain_audiences": {
+      "name": "connection_brain_audiences",
+      "columns": {
+        "connection_id": {
+          "name": "connection_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "team_id": {
+          "name": "team_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "changed_by": {
+          "name": "changed_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "changed_at": {
+          "name": "changed_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
     "connector_trigger_holds": {
       "name": "connector_trigger_holds",
       "columns": {
@@ -9572,53 +9610,6 @@
             "permission_id"
           ],
           "name": "run_brain_evidence_run_id_document_id_version_permission_id_pk"
-        }
-      },
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "run_brain_memories": {
-      "name": "run_brain_memories",
-      "columns": {
-        "run_id": {
-          "name": "run_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "memory_id": {
-          "name": "memory_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "permission_id": {
-          "name": "permission_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "recorded_at": {
-          "name": "recorded_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {
-        "run_brain_memories_run_id_memory_id_permission_id_pk": {
-          "columns": [
-            "run_id",
-            "memory_id",
-            "permission_id"
-          ],
-          "name": "run_brain_memories_run_id_memory_id_permission_id_pk"
         }
       },
       "uniqueConstraints": {},

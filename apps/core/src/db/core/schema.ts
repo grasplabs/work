@@ -3402,6 +3402,22 @@ export const sharedMailboxPointers = sqliteTable("shared_mailbox_pointers", {
 });
 
 /**
+ * Who may read in the Brain what agents read through a shared connection
+ * (connection-audiences.ts, GRA-1831): one row per shared connection an
+ * admin chose an audience for, by connect's connection ID. `team_id` is
+ * the one team; null is everyone in the company. No row is nobody.
+ */
+export const connectionBrainAudiences = sqliteTable(
+  "connection_brain_audiences",
+  {
+    connectionId: text("connection_id").primaryKey(),
+    teamId: text("team_id"),
+    changedBy: text("changed_by").notNull(),
+    changedAt: timestamp("changed_at").notNull(),
+  }
+);
+
+/**
  * The company's agents an admin made or changed (agents.ts): one row per
  * agent, by the ID its permissions, audit events and instruction file name.
  * `face` is the figure it is drawn with; `job` one line on what it is

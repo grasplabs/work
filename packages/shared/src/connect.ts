@@ -734,6 +734,20 @@ export interface ConnectionsApi extends StephenReachApi, AgentsApi {
     mailbox: string,
     audience: ToolClassAudience
   ) => Promise<void>;
+  /**
+   * The shared connections an admin chose who may read in the Brain what
+   * agents read through them (GRA-1831), and for whom. Admins only.
+   */
+  brainAudiences: () => Promise<ConnectionBrainAudienceSetting[]>;
+  /**
+   * Chooses who may read in the Brain what agents read through the shared
+   * connection `connectionId`: one team, everyone, or nobody. Admins only,
+   * never Grasp staff; audited.
+   */
+  setBrainAudience: (
+    connectionId: string,
+    audience: ConnectionBrainAudience
+  ) => Promise<void>;
 }
 
 // The catalog: everything an admin can connect, in one list. Native
@@ -1093,6 +1107,45 @@ export const sharedMailboxSchema = z
   .email()
   .max(254)
   .transform((mailbox) => mailbox.toLowerCase());
+
+/**
+ * Who may read in the Brain what agents read through a shared connection
+ * (GRA-1831), as an admin chooses: nobody, which it is until one chooses,
+ * one team, or everyone in the company. The choice an uploaded document
+ * has, but never one person: the connection is the company's.
+ */
+export const connectionBrainAudienceSchema = z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.literal("nobody") }),
+  z.strictObject({ kind: z.literal("team"), teamId: identifierSchema }),
+  z.strictObject({ kind: z.literal("everyone") }),
+]);
+export type ConnectionBrainAudience = z.infer<
+  typeof connectionBrainAudienceSchema
+>;
+
+/** A shared connection's Brain audience, as an admin last chose it. */
+export interface ConnectionBrainAudienceSetting {
+  connectionId: string;
+  audience: Exclude<ConnectionBrainAudience, { kind: "nobody" }>;
+  /** The admin who last changed it. */
+  changedBy: string;
+  /** ISO 8601. */
+  changedAt: string;
+}
+
+/**
+ * A shared connection's ID, as the Brain's groups and keys take it
+ * (GRA-1831): well-formed, never "/" nor ":", and at most 245 characters,
+ * so its group (`connection:` and it) fits a Brain principal (256).
+ */
+export const brainConnectionIdSchema = z
+  .string()
+  .min(1)
+  .max(245)
+  .refine(
+    (id) => id.isWellFormed() && !(id.includes("/") || id.includes(":")),
+    { message: "Not a connection's ID" }
+  );
 
 /**
  * A shared mailbox Stephen is pointed at, and for whom (`audience`): the

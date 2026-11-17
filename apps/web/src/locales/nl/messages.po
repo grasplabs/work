@@ -3021,6 +3021,10 @@ msgstr "Vroegen hem iets, of hij werkt volgens schema voor hen"
 msgid "Asked the agent to fix a run"
 msgstr "De agent gevraagd een run te herstellen"
 
+#: src/activity/audit-words.ts
+msgid "Asked the Brain who knows about something"
+msgstr "Het Brein gevraagd wie ergens iets van weet"
+
 #: src/chat/thread.tsx
 msgid "Asked to connect {binding}"
 msgstr "Gevraagd om {binding} te koppelen"
@@ -3543,6 +3547,14 @@ msgstr "Project wijzigen"
 #: src/chat/agent-draft-card.tsx
 msgid "Change something"
 msgstr "Iets wijzigen"
+
+#: src/chat/chat-panel.tsx
+msgid "Change something about the agent"
+msgstr "Iets aan de agent wijzigen"
+
+#: src/chat/chat-panel.tsx
+msgid "Change something about the change"
+msgstr "Iets aan de wijziging aanpassen"
 
 #: src/chat/chat-panel.tsx
 msgid "Change something about the plan"
@@ -10950,6 +10962,15 @@ msgstr "Entiteiten uit het Brein gelezen"
 #: src/activity/audit-words.ts
 msgid "Read everyone's calls of unknown outcome"
 msgstr "De aanroepen met onbekende uitkomst van iedereen gelezen"
+
+#: src/brain/sources-page.tsx
+msgctxt "a source of the Brain"
+msgid "Read from a shared connection"
+msgstr "Gelezen uit een gedeelde verbinding"
+
+#: src/brain/memories-page.tsx
+msgid "Read from a shared connection, version {version}"
+msgstr "Gelezen uit een gedeelde verbinding, versie {version}"
 
 #: src/activity/audit-words.ts
 msgid "Read how knowledge is used"
