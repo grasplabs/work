@@ -736,17 +736,20 @@ describe(
       const noneId = await add(`Unfiled note ${sharedWord} ${noneMarker}`, {
         kind: "none",
       });
-      // A claim five or more of a staff-list team made in their interviews
-      // (GRA-1741): every member reads it as themselves (GRA-1748), nobody
-      // outside the company, and never code (GRA-1946).
+      // A claim of how a staff-list team works, from its interviews, from
+      // the first person who told it (GRA-1741, GRA-1987): every member
+      // reads it as themselves (GRA-1748), nobody outside the company, and
+      // never code (GRA-1946). That one person told it changes nothing
+      // here: the Brain holds and reads it alike (team-work.test.ts makes
+      // one through the onboarding).
       const claimText = `Team claim ${sharedWord} ${claimMarker}`;
       const claimId = await add(
         claimText,
         { kind: "members" },
         { producer: "claim", id: crypto.randomUUID() }
       );
-      // A drawing of a staff-list team's piece of work, from what five or
-      // more told in their interviews (GRA-1748): read as a claim is.
+      // A drawing of a staff-list team's piece of work, from what its
+      // people told in their interviews (GRA-1748): read as a claim is.
       const drawingText = `Team drawing ${sharedWord} ${drawingMarker}`;
       const drawingId = await add(
         drawingText,
