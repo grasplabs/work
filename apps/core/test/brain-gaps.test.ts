@@ -584,6 +584,44 @@ describe("the brain's teams and gaps", { timeout: 120_000 }, () => {
     });
   });
 
+  it("list in the inbox every open one for an admin, and for anyone else only those asked of them", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const owner = await signedInApi(idp, "user");
+    const other = await signedInApi(idp, "user");
+    const asked = gapRecords(unique());
+    const unasked = gapRecords(unique());
+    const answered = gapRecords(unique());
+    await admin.api.brain.addRecords([
+      ...asked.records,
+      ...unasked.records,
+      ...answered.records,
+    ]);
+    await rosterWith(admin, "Head of finance", owner);
+    await admin.api.brain.askAboutGap(asked.ids.gap);
+    await admin.api.brain.answerGap(answered.ids.gap, "About 400.");
+    const ours = new Set([asked.ids.gap, unasked.ids.gap, answered.ids.gap]);
+    /** The gaps of this test `person` lists, by id. */
+    const listedBy = async (person: Signed) => {
+      const listed = await person.api.brain.openGaps();
+      return listed
+        .filter(({ id }) => ours.has(id))
+        .map(({ id, askedAt }) => ({ id, asked: askedAt !== undefined }));
+    };
+
+    expect({
+      admin: await listedBy(admin),
+      owner: await listedBy(owner),
+      other: await listedBy(other),
+    }).toStrictEqual({
+      admin: [
+        { id: asked.ids.gap, asked: true },
+        { id: unasked.ids.gap, asked: false },
+      ],
+      owner: [{ id: asked.ids.gap, asked: true }],
+      other: [],
+    });
+  });
+
   it("aren't asked, nor shown as asked, when nobody who can sign in holds the role", async () => {
     const admin = await signedInApi(idp, "admin");
     const owner = await signedInApi(idp, "user");
