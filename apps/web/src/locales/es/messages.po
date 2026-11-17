@@ -16268,6 +16268,10 @@ msgstr "Lo que el Brain guarda y solo esa persona puede leer"
 msgid "What the Brain keeps that you may read, and search through it as your agents recall it."
 msgstr "Lo que el cerebro guarda y puedes leer, y la búsqueda en ello tal como lo recuerdan tus agentes."
 
+#: src/connections/brain-audience.tsx
+msgid "What the Brain kept from {label} is being erased. You can choose who may read it again once that is done."
+msgstr "Lo que el Brain guardó de {label} se está borrando. Podrás volver a elegir quién puede leerlo cuando termine."
+
 #: src/brain/brain-log.tsx
 msgid "What the brain kept of it"
 msgstr "Lo que el cerebro guardó"

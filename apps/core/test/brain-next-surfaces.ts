@@ -10831,8 +10831,6 @@ export const sourcesProbes = {
         )
     ),
   ],
-  // An admin's listing of shared uploads: each by its file's name, team
-  // and uploader, never its text; refused to anyone else.
   // The shared connections whose kept reads the reader may read
   // (GRA-1831): never one outside their audience, by its ID, name or
   // count; a connection's ID may hold a marker.
@@ -10842,6 +10840,8 @@ export const sourcesProbes = {
       async () => await sourcesAs(personId).connections()
     ),
   ],
+  // An admin's listing of shared uploads: each by its file's name, team
+  // and uploader, never its text; refused to anyone else.
   sharedUploads: async ({ personId, markers }) => {
     const admin = await adminMemberOf();
     return [

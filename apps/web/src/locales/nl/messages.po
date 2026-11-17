@@ -16268,6 +16268,10 @@ msgstr "Wat het Brain bewaart en alleen zij mogen lezen"
 msgid "What the Brain keeps that you may read, and search through it as your agents recall it."
 msgstr "Wat het brein bewaart en jij mag lezen, en zoeken daarin zoals je agents het terughalen."
 
+#: src/connections/brain-audience.tsx
+msgid "What the Brain kept from {label} is being erased. You can choose who may read it again once that is done."
+msgstr "Wat het Brain van {label} heeft bewaard, wordt gewist. Je kunt weer kiezen wie het mag lezen zodra dat klaar is."
+
 #: src/brain/brain-log.tsx
 msgid "What the brain kept of it"
 msgstr "Wat het brein ervan bewaarde"

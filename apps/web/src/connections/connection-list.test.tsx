@@ -146,32 +146,60 @@ type Asked = [string, ...unknown[]][];
  * its audience (`audience`) and the company's teams, and records what
  * the page asks it to change.
  */
+/** What the fake core holds of the connection: its audience, and whether it is being erased. */
+interface Held {
+  audience: { kind: string; teamId?: string };
+  erasing: boolean;
+}
+
 const asAdmin = async (
   shown: CatalogConnection,
-  audience?: { kind: string; teamId?: string }
+  audience?: { kind: string; teamId?: string },
+  /** What core holds, which a test changes as the clock would. */
+  holding?: Held
 ): Promise<Asked> => {
+  const held = holding ?? {
+    audience: audience ?? { kind: "nobody" },
+    erasing: false,
+  };
   const asked: Asked = [];
   const session = {
     connections: {
+      // As core lists them: one with an audience or being erased.
       brainAudiences: async () =>
         await Promise.resolve(
-          audience === undefined
+          held.audience.kind === "nobody" && !held.erasing
             ? []
             : [
                 {
                   connectionId: shown.id,
-                  audience,
-                  changedBy: "u2",
-                  changedAt: "2026-11-17T08:00:00.000Z",
+                  audience: held.audience,
+                  erasing: held.erasing,
+                  changedBy: held.audience.kind === "nobody" ? null : "u2",
+                  changedAt:
+                    held.audience.kind === "nobody"
+                      ? null
+                      : "2026-11-17T08:00:00.000Z",
                 },
               ]
         ),
       setBrainAudience: async (...given: unknown[]) => {
         asked.push(["setBrainAudience", ...given]);
+        const [, next] = given;
+        if (typeof next === "object" && next !== null && "kind" in next) {
+          held.audience = {
+            kind: String(next.kind),
+            ...("teamId" in next ? { teamId: String(next.teamId) } : {}),
+          };
+        }
         await Promise.resolve();
       },
+      // An erase takes the audience away and is under way until the
+      // clock ends it.
       eraseBrainReads: async (...given: unknown[]) => {
         asked.push(["eraseBrainReads", ...given]);
+        held.audience = { kind: "nobody" };
+        held.erasing = true;
         await Promise.resolve();
       },
     },
@@ -310,6 +338,51 @@ describe("a shared connection's Brain audience, for an admin", () => {
       erasing: true,
       toTeam: true,
       fromNobody: [],
+    });
+  });
+
+  it("shows nobody, refuses a choice and says so while an erasure is under way, and asks before opening it once it has ended", async () => {
+    const held: Held = { audience: { kind: "everyone" }, erasing: false };
+    const kept = connection({
+      scope: "shared",
+      ownerUserId: null,
+      keepsReads: true,
+    });
+    await asAdmin(kept, undefined, held);
+    await press("Erase what the Brain kept");
+    await press("Erase for good");
+    // Read again from core.
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const select = document.querySelector("select");
+    const whileErasing = {
+      shown: select?.value,
+      disabled: select?.disabled,
+      says: document.body.textContent.includes(
+        "What the Brain kept from Notes is being erased. You can choose who may read it again once that is done."
+      ),
+    };
+    // The clock ends the erasure; the admin comes back to the card.
+    held.erasing = false;
+    act(() => {
+      root?.unmount();
+    });
+    document.body.replaceChildren();
+    const asked = await asAdmin(kept, undefined, held);
+    await choose("t1");
+
+    expect({
+      whileErasing,
+      asking: dialogText().includes(
+        "Everyone in Sales will be able to find what agents read through Notes, including what was kept before."
+      ),
+      asked,
+    }).toStrictEqual({
+      whileErasing: { shown: "nobody", disabled: true, says: true },
+      asking: true,
+      // Not chosen until confirmed.
+      asked: [],
     });
   });
 

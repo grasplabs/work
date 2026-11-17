@@ -210,9 +210,10 @@ describe("a shared connection's Brain audience", setUpTime, () => {
         .filter((each) => each.connectionId === connectionId)
         .map(({ changedAt, ...each }) => ({
           ...each,
-          changedAt: Number.isNaN(Date.parse(changedAt))
-            ? "not a time"
-            : "a time",
+          changedAt:
+            changedAt === null || Number.isNaN(Date.parse(changedAt))
+              ? "not a time"
+              : "a time",
         })),
     }).toStrictEqual({
       before: nowhere,
@@ -233,6 +234,7 @@ describe("a shared connection's Brain audience", setUpTime, () => {
         {
           connectionId,
           audience: { kind: "team", teamId: sales },
+          erasing: false,
           changedBy: admin.userId,
           changedAt: "a time",
         },

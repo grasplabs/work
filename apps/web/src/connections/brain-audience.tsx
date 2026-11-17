@@ -40,9 +40,13 @@ interface Team {
   name: string;
 }
 
-/** What the card reads from core: the connection's audience now, and the company's teams. */
+/**
+ * What the card reads from core: the connection's audience now, whether
+ * what the Brain kept of it is being erased, and the company's teams.
+ */
 interface Loaded {
   audience: ConnectionBrainAudience;
+  erasing: boolean;
   teams: Team[];
 }
 
@@ -70,7 +74,11 @@ const readAudience = async (
         const chosen = audiences.find(
           (each) => each.connectionId === connectionId
         );
-        return { audience: chosen?.audience ?? { kind: "nobody" }, teams };
+        return {
+          audience: chosen?.audience ?? { kind: "nobody" },
+          erasing: chosen?.erasing ?? false,
+          teams,
+        };
       }
     );
     return { state: "ready", data };
@@ -162,9 +170,12 @@ const WidenDialog = ({
 const EraseKept = ({
   connection,
   label,
+  onErased,
 }: {
   connection: ListedConnection;
   label: string;
+  /** The erase was asked for: what the card shows is read again. */
+  onErased: () => void;
 }) => {
   const { busy, failure, change } = useChange();
   const [confirming, setConfirming] = useState(false);
@@ -202,9 +213,12 @@ const EraseKept = ({
               disabled={busy}
               onClick={() => {
                 setConfirming(false);
-                void change(async (session) => {
-                  await session.connections.eraseBrainReads(connection.id);
-                });
+                void (async () => {
+                  await change(async (session) => {
+                    await session.connections.eraseBrainReads(connection.id);
+                  });
+                  onErased();
+                })();
               }}
               variant="destructive"
             >
@@ -218,13 +232,19 @@ const EraseKept = ({
   );
 };
 
-/** For an admin, on a shared connection's card: its Brain audience, and erasing what was kept. */
-export const BrainAudience = ({
+/**
+ * The audience as core holds it now, read as it opens, and its choices:
+ * `onChanged` once a change or an erase was asked for, so it is read
+ * again.
+ */
+const AudienceChoice = ({
   connection,
   label,
+  onChanged,
 }: {
   connection: ListedConnection;
   label: string;
+  onChanged: () => void;
 }) => {
   const core = useCore();
   const { t } = useLingui();
@@ -251,13 +271,15 @@ export const BrainAudience = ({
   if (read.state === "refused") {
     return <ErrorText>{read.message}</ErrorText>;
   }
-  const { audience, teams } = read.data;
+  const { audience, erasing, teams } = read.data;
   const choose = (next: ConnectionBrainAudience): void => {
     setAsked(undefined);
-    void change(async (session) => {
-      await session.connections.setBrainAudience(connection.id, next);
-      setRead({ state: "ready", data: { audience: next, teams } });
-    });
+    void (async () => {
+      await change(async (session) => {
+        await session.connections.setBrainAudience(connection.id, next);
+      });
+      onChanged();
+    })();
   };
   return (
     <div className="flex flex-col gap-2 text-sm">
@@ -269,7 +291,7 @@ export const BrainAudience = ({
           <Trans>Keep what agents read through it for</Trans>
         </FieldLabel>
         <NativeSelect
-          disabled={busy}
+          disabled={busy || erasing}
           id={selectId}
           onChange={(event) => {
             const next = audienceOf(event.target.value);
@@ -298,6 +320,14 @@ export const BrainAudience = ({
           {label}: choose a team if not everyone should see it.
         </Trans>
       </p>
+      {erasing ? (
+        <p className="text-muted-foreground">
+          <Trans>
+            What the Brain kept from {label} is being erased. You can choose who
+            may read it again once that is done.
+          </Trans>
+        </p>
+      ) : null}
       <ErrorText>{failure}</ErrorText>
       {asked === undefined ? null : (
         <WidenDialog
@@ -312,9 +342,35 @@ export const BrainAudience = ({
           teams={teams}
         />
       )}
-      {audience.kind !== "nobody" || connection.keepsReads === true ? (
-        <EraseKept connection={connection} label={label} />
+      {!erasing &&
+      (audience.kind !== "nobody" || connection.keepsReads === true) ? (
+        <EraseKept connection={connection} label={label} onErased={onChanged} />
       ) : null}
     </div>
+  );
+};
+
+/** For an admin, on a shared connection's card: its Brain audience, and erasing what was kept. */
+export const BrainAudience = ({
+  connection,
+  label,
+}: {
+  connection: ListedConnection;
+  label: string;
+}) => {
+  // Each change or erase asked for counts: the choice opens again and
+  // reads what core holds then, so it shows only what core says, never a
+  // copy of its own (an erase takes the audience away, and an erasure
+  // under way allows none).
+  const [changes, setChanges] = useState(0);
+  return (
+    <AudienceChoice
+      connection={connection}
+      key={changes}
+      label={label}
+      onChanged={() => {
+        setChanges((before) => before + 1);
+      }}
+    />
   );
 };

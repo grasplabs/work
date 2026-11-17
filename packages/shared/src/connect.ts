@@ -736,7 +736,8 @@ export interface ConnectionsApi extends StephenReachApi, AgentsApi {
   ) => Promise<void>;
   /**
    * The shared connections an admin chose who may read in the Brain what
-   * agents read through them (GRA-1831), and for whom. Admins only.
+   * agents read through them (GRA-1831), and for whom, and those whose
+   * kept reads are being erased. Admins only.
    */
   brainAudiences: () => Promise<ConnectionBrainAudienceSetting[]>;
   /**
@@ -1135,11 +1136,17 @@ export type ConnectionBrainAudience = z.infer<
 /** A shared connection's Brain audience, as an admin last chose it. */
 export interface ConnectionBrainAudienceSetting {
   connectionId: string;
-  audience: Exclude<ConnectionBrainAudience, { kind: "nobody" }>;
-  /** The admin who last changed it. */
-  changedBy: string;
-  /** ISO 8601. */
-  changedAt: string;
+  /** Who may read it now: nobody while an erasure is under way. */
+  audience: ConnectionBrainAudience;
+  /**
+   * Whether what the Brain kept of it is being erased: no audience can
+   * be chosen until that has ended.
+   */
+  erasing: boolean;
+  /** The admin who last chose its audience: null while it is nobody. */
+  changedBy: string | null;
+  /** When (ISO 8601): null while it is nobody. */
+  changedAt: string | null;
 }
 
 /**

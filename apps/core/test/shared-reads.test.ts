@@ -8,6 +8,7 @@ import { drainAuditOutboxes } from "../src/audit-drains.ts";
 import { addSource, recallAs, workBrain } from "../src/brain-next.ts";
 import type { SourceRef } from "../src/brain-next.ts";
 import { setConnectionAudience } from "../src/connection-audiences.ts";
+import { ConnectionsRpc } from "../src/connections.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
 import {
   claimSharedRead,
@@ -357,6 +358,7 @@ describe("what the Brain kept from a shared connection", setUpTime, () => {
     };
     const memberRows = await listedFor(member.api);
     const listed = await admin.api.connections.list();
+    const memberListed = await member.api.connections.list();
 
     expect({
       member: memberRows.map(({ lastReadAt, ...row }) => ({
@@ -370,6 +372,10 @@ describe("what the Brain kept from a shared connection", setUpTime, () => {
       outsider: await listedFor(outsider.api),
       admin: await listedFor(admin.api),
       keepsReads: listed.find(({ id }) => id === connectionId)?.keepsReads,
+      // Said to admins alone: a member, in its audience or not, isn't told.
+      memberKeepsReads: memberListed
+        .filter(({ id }) => id === connectionId)
+        .map((each) => "keepsReads" in each),
     }).toStrictEqual({
       member: [
         {
@@ -384,6 +390,7 @@ describe("what the Brain kept from a shared connection", setUpTime, () => {
       outsider: [],
       admin: [],
       keepsReads: true,
+      memberKeepsReads: [false],
     });
   });
 
@@ -671,7 +678,16 @@ describe("what the Brain kept from a shared connection", setUpTime, () => {
       found: await finds(member, marker),
     }).toStrictEqual({
       opened: "connection.brain_erasing",
-      audiences: [],
+      // Being erased, with no audience.
+      audiences: [
+        {
+          connectionId,
+          audience: { kind: "nobody" },
+          erasing: true,
+          changedBy: null,
+          changedAt: null,
+        },
+      ],
       found: false,
     });
   });
@@ -843,6 +859,84 @@ describe("what the Brain kept from a shared connection", setUpTime, () => {
     await completeOwedErasures(out, { left: 40 });
 
     await expect(keyState(source)).resolves.toBe("erased");
+  });
+
+  it("tells admins which connections are being erased, with no audience, until the clock has ended it", async () => {
+    const { admin, connectionId } = await sharedWithTeam();
+    await kept(connectionId, "deal", "Deal");
+    const listedFor = async () => {
+      const audiences = await admin.api.connections.brainAudiences();
+      return audiences.filter((each) => each.connectionId === connectionId);
+    };
+    await admin.api.connections.eraseBrainReads(connectionId);
+    const whileErasing = await listedFor();
+    await erasuresEnded();
+
+    expect({ whileErasing, ended: await listedFor() }).toStrictEqual({
+      whileErasing: [
+        {
+          connectionId,
+          audience: { kind: "nobody" },
+          erasing: true,
+          changedBy: null,
+          changedAt: null,
+        },
+      ],
+      ended: [],
+    });
+  });
+
+  it("fails a disconnect whose close in the Brain failed, and closes it when disconnected again", async () => {
+    const { admin, member, connectionId } = await sharedWithTeam();
+    const marker = uniqueWord();
+    await kept(connectionId, "deal", `Deal ${marker}`);
+    // Core's database refuses the close.
+    const failing = new ConnectionsRpc(
+      {
+        ...env,
+        DB: refusingWrites(env.DB, 'insert into "connection_brain_erasures"'),
+      },
+      async () => await admin.api.whoami()
+    );
+    const first = await outcome(failing.disconnect(connectionId));
+    const again = await outcome(admin.api.connections.disconnect(connectionId));
+
+    expect({
+      failed: first !== "ok",
+      again,
+      found: await finds(member, marker),
+      claimed: await kept(connectionId, "late", `Late ${marker}`),
+    }).toStrictEqual({
+      failed: true,
+      again: "ok",
+      found: false,
+      claimed: "not claimed",
+    });
+  });
+
+  it("is erased after a disconnect through core, its drain and the clock, recorded once with its count", async () => {
+    const { admin, member, connectionId } = await sharedWithTeam();
+    const marker = uniqueWord();
+    await kept(connectionId, "deal 1", `Deal one ${marker}`);
+    await kept(connectionId, "deal 2", `Deal two ${marker}`);
+    const events = await auditedDuring(async () => {
+      await admin.api.connections.disconnect(connectionId);
+      await drainAuditOutboxes(env);
+      await erasuresEnded();
+    });
+
+    expect({
+      found: await finds(member, marker),
+      ended: about(events, "brain.shared_reads.erased", connectionId),
+    }).toStrictEqual({
+      found: false,
+      ended: [
+        {
+          actor: { type: "person", userId: admin.userId },
+          detail: { sources: 2 },
+        },
+      ],
+    });
   });
 
   it("is erased by the company's admins alone, on a shared connection, and never touches a person's own captures", async () => {

@@ -134,9 +134,11 @@ export interface KeptOf {
 
 /**
  * What the Brain keeps of each of the shared connections `connectionIds`
- * now: its records of the connection's current generation (an older one
- * is being erased, and nobody reads it), how many and when the last was
- * read. A connection with none is left out.
+ * now, how many records and when the last was read; a connection with
+ * none is left out. For connections a reader holds (brain-next.ts
+ * `readableConnectionsOf`): each has an audience, which none being erased
+ * or closed has, and a connection's records of an older generation exist
+ * only while it is being erased, so all of its records are current.
  */
 export const keptOf = async (
   env: Pick<Env, "DB">,
@@ -152,12 +154,7 @@ export const keptOf = async (
       lastReadAt: sql<number>`max(${connectionBrainReads.readAt})`,
     })
     .from(connectionBrainReads)
-    .where(
-      and(
-        inList(connectionBrainReads.connectionId, connectionIds),
-        sql`${connectionBrainReads.generation} = COALESCE((SELECT ${connectionBrainErasures.generation} FROM ${connectionBrainErasures} WHERE ${connectionBrainErasures.connectionId} = ${connectionBrainReads.connectionId}), 0)`
-      )
-    )
+    .where(inList(connectionBrainReads.connectionId, connectionIds))
     .groupBy(connectionBrainReads.connectionId)
     .orderBy(asc(connectionBrainReads.connectionId));
   return rows.map(({ connectionId, records, lastReadAt }) => ({

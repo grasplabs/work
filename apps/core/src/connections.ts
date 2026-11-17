@@ -238,27 +238,6 @@ const eraseCapturesSoon = async (
   }
 };
 
-/**
- * Closes the shared connection `connectionId`, just disconnected by
- * `userId`, in the Brain (shared-reads.ts `closeOnDisconnect`): a failure
- * is logged, never the disconnect's, as the erasure that follows from
- * connect's record closes it too.
- */
-const closeNow = async (
-  env: Env,
-  connectionId: string,
-  userId: string
-): Promise<void> => {
-  try {
-    await closeOnDisconnect(env, connectionId, { type: "person", userId });
-  } catch (error) {
-    log.warn("connection.brain_close_failed", {
-      connectionId,
-      ...errorFields(error),
-    });
-  }
-};
-
 /** The organization's tenant at `provider`, from the sign-in config. */
 export const tenantOf = (
   config: SignInConfig,
@@ -605,13 +584,16 @@ export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
     const names = new Map(people.map(({ id, name }) => [id, name]));
     // A shared connection the Brain may hold reads of (shared-reads.ts):
     // its disconnect erases them, so the page says so, as for a person's
-    // own (`mayHoldCapturesOf`).
-    const holdingShared = await mayHoldReadsOf(
-      this.#env,
-      listed.flatMap(({ id, ownerUserId }) =>
-        ownerUserId === null ? [id] : []
-      )
-    );
+    // own (`mayHoldCapturesOf`). Said to admins alone, who disconnect and
+    // erase it: a member outside its audience learns nothing of it.
+    const holdingShared = isAdmin(person.role)
+      ? await mayHoldReadsOf(
+          this.#env,
+          listed.flatMap(({ id, ownerUserId }) =>
+            ownerUserId === null ? [id] : []
+          )
+        )
+      : new Set<string>();
     return listed.map((connection) => ({
       ...connection,
       connectedByName:
@@ -694,9 +676,16 @@ export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
     // A shared connection's records in the Brain: closed before this
     // answers, so nobody reads them from then on and no audience is
     // opened on it again; connect's record of the disconnect erases them
-    // (shared-reads.ts, capture-erasures.ts).
+    // (shared-reads.ts, capture-erasures.ts). A close that fails fails
+    // the disconnect, so it is never answered as done while its records
+    // can still be read: disconnecting again is safe, as connect answers
+    // an already stopped connection as not revoked, and the close runs
+    // again.
     if (owner?.id === connectionId && owner.ownerUserId === null) {
-      await closeNow(this.#env, connectionId, person.userId);
+      await closeOnDisconnect(this.#env, connectionId, {
+        type: "person",
+        userId: person.userId,
+      });
     }
     return disconnected;
   }

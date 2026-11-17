@@ -76,16 +76,51 @@ export const readConnectionAudiences = async (
   identity: Identity
 ): Promise<ConnectionBrainAudienceSetting[]> => {
   requireAdmin(identity);
-  const rows = await drizzle(env.DB)
-    .select()
-    .from(connectionBrainAudiences)
-    .orderBy(connectionBrainAudiences.connectionId);
-  return rows.map(({ connectionId, teamId, changedBy, changedAt }) => ({
-    connectionId,
-    audience: teamId === null ? { kind: "everyone" } : { kind: "team", teamId },
-    changedBy,
-    changedAt: changedAt.toISOString(),
-  }));
+  const db = drizzle(env.DB);
+  // One snapshot: an erasure that starts takes the audience away in the
+  // same batch, so both are read as of one moment.
+  const [rows, erasing] = await db.batch([
+    db
+      .select()
+      .from(connectionBrainAudiences)
+      .orderBy(connectionBrainAudiences.connectionId),
+    db
+      .select({ connectionId: connectionBrainErasures.connectionId })
+      .from(connectionBrainErasures)
+      .where(eq(connectionBrainErasures.erasing, true))
+      .orderBy(connectionBrainErasures.connectionId),
+  ]);
+  const erasingIds = new Set(erasing.map(({ connectionId }) => connectionId));
+  const chosen: ConnectionBrainAudienceSetting[] = rows.map(
+    ({ connectionId, teamId, changedBy, changedAt }) => ({
+      connectionId,
+      audience:
+        teamId === null ? { kind: "everyone" } : { kind: "team", teamId },
+      erasing: erasingIds.has(connectionId),
+      changedBy,
+      changedAt: changedAt.toISOString(),
+    })
+  );
+  const audienced = new Set(rows.map(({ connectionId }) => connectionId));
+  // Being erased, so with no audience: listed all the same, so a page
+  // can say so and offer no choice until it has ended.
+  const beingErased: ConnectionBrainAudienceSetting[] = erasing.flatMap(
+    ({ connectionId }) =>
+      audienced.has(connectionId)
+        ? []
+        : [
+            {
+              connectionId,
+              audience: { kind: "nobody" },
+              erasing: true,
+              changedBy: null,
+              changedAt: null,
+            },
+          ]
+  );
+  return [...chosen, ...beingErased].toSorted((one, other) =>
+    one.connectionId.localeCompare(other.connectionId)
+  );
 };
 
 /**
