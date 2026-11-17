@@ -73,6 +73,4 @@ export const uploadErrors = defineErrorFamily({
     "The file takes more work to read than an upload may take: it may be damaged, or built to be. Check that it opens, or save it again as a simpler file, then upload it again.",
   "upload.no_text":
     "The file has no text to read: a scan without a text layer has none.",
-  "upload.conversion_unavailable":
-    "Reading PDFs isn't set up for this deployment yet. Ask Grasp to set it up, then upload the file again.",
 });

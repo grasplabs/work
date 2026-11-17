@@ -24,8 +24,8 @@ import { buildBrain } from "./brain.ts";
 import type { Note } from "./brain.ts";
 import { testWorkspace } from "./test-workspace.ts";
 
-// A team's claim from the interviews (GRA-1084) is what five or more of
-// its people said, put together: wherever the Brain names it, it reads in
+// A team's claim from the interviews (GRA-1084, GRA-1987) is how the
+// team works, as its people told it, put together: wherever the Brain names it, it reads in
 // plain words, never in quotation marks as one person's, and where it
 // stands on its own it says what it rests on. Anyone's own words stay
 // quoted.
@@ -105,7 +105,7 @@ describe("a team's claim, wherever the Brain names it", () => {
     document.body.replaceChildren();
   });
 
-  it("heads its page in plain words, and says it rests on five or more people", async () => {
+  it("heads its page in plain words, and says it is how the team works, with no count of people", async () => {
     const host = await shown(
       <BannerHeader
         kern={{ interviewed: [], counts: [] }}
@@ -114,7 +114,9 @@ describe("a team's claim, wherever the Brain names it", () => {
     );
     expect({
       title: host.querySelector("h1")?.textContent,
-      basis: host.textContent?.includes("Said by five or more people"),
+      basis: host.textContent?.includes(
+        "How the team works, as its people told it"
+      ),
     }).toStrictEqual({ title: claimText, basis: true });
   });
 
@@ -127,7 +129,9 @@ describe("a team's claim, wherever the Brain names it", () => {
     );
     expect({
       title: host.querySelector("h1")?.textContent,
-      basis: host.textContent?.includes("Said by five or more people"),
+      basis: host.textContent?.includes(
+        "How the team works, as its people told it"
+      ),
     }).toStrictEqual({ title: `“${ownText}”`, basis: false });
   });
 
