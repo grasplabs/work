@@ -10,6 +10,7 @@ import { env } from "cloudflare:workers";
 import { z } from "zod";
 
 import { onboardingStore } from "../src/onboarding/store.ts";
+import { claimsAbout } from "../src/onboarding/team-claims.ts";
 import {
   answering,
   answeringWith,
@@ -43,7 +44,11 @@ export type Key =
   | "pim"
   | "rik"
   | "sam"
-  | "ada";
+  | "ada"
+  | "bo"
+  | "cas"
+  | "dirk"
+  | "eva";
 
 const names: Record<Key, [string, string]> = {
   lea: ["Lea Lind", "Team lead"],
@@ -55,6 +60,10 @@ const names: Record<Key, [string, string]> = {
   rik: ["Rik Rooms", "Agent"],
   sam: ["Sam Smit", "Agent"],
   ada: ["Ada Aerts", "Agent"],
+  bo: ["Bo Bakker", "Agent"],
+  cas: ["Cas Claes", "Agent"],
+  dirk: ["Dirk Dekker", "Agent"],
+  eva: ["Eva Engels", "Agent"],
 };
 
 /** Each person's and the team's id, by key. */
@@ -69,6 +78,10 @@ const idsOf = (id: string) => ({
   rik: `rik-${id}`,
   sam: `sam-${id}`,
   ada: `ada-${id}`,
+  bo: `bo-${id}`,
+  cas: `cas-${id}`,
+  dirk: `dirk-${id}`,
+  eva: `eva-${id}`,
 });
 
 /** The staff list of Ops, led by Lea, with the people `keys`. */
@@ -365,7 +378,12 @@ export const fiveToldReply = (
 /** Lea's map drawn, from `more` she said too, and everyone's links out. */
 export const mapped = async (
   ids: Ids,
-  more: { facts?: InterviewFact[]; lines?: InterviewLine[] } = {}
+  more: {
+    facts?: InterviewFact[];
+    lines?: InterviewLine[];
+    /** The map as drawn, when not `mapReply`'s. */
+    map?: ProviderReply;
+  } = {}
 ) => {
   const store = onboardingStore(env);
   await store.releaseDue();
@@ -383,7 +401,10 @@ export const mapped = async (
     0,
     more.lines
   );
-  await answering([mapReply(ids)], async () => await store.drawNext());
+  await answering(
+    [more.map ?? mapReply(ids)],
+    async () => await store.drawNext()
+  );
   await store.releaseDue();
   // The rota, Lea's own, is drawn from her alone, and out of the way.
   await answering(
@@ -498,24 +519,28 @@ const shownSchema = z.array(
     ),
   })
 );
-const checkSchema = z.object({ claim: z.string(), fact: z.string() });
-const partSchema = z.object({
-  work: z.string(),
-  kind: z.string(),
-  part: z.string(),
-  facts: z.array(z.string()),
+/** A backing check as sent (team-claims.ts `backingOf`): lines by label, and items each with the labels it may rest on. */
+const backingSchema = z.strictObject({
+  about: z.string(),
+  lines: z.array(z.strictObject({ id: z.string(), text: z.string() })),
+  items: z.array(
+    z.strictObject({
+      id: z.string(),
+      kind: z.string().optional(),
+      text: z.string(),
+      lines: z.array(z.string()),
+    })
+  ),
 });
-const numberSchema = z.object({
-  work: z.string(),
-  number: z.string(),
-  facts: z.array(z.string()),
+/** A judgment check as sent (team-claims.ts `howItRunsOf`): only the items' words. */
+const judgmentSchema = z.strictObject({
+  items: z.array(z.strictObject({ id: z.string(), text: z.string() })),
 });
-const describesSchema = z.strictObject({ description: z.string() });
 
 /**
  * Whether a description of the team's work (a claim, a drawing's part)
  * says only how the work runs, as the fake judgment check answers
- * (`onlyHowItRuns`): `true` keeps it, `false` drops it, `"fails"` fails
+ * (`howItRunsOf`): `true` keeps it, `false` drops it, `"fails"` fails
  * the call at the provider.
  */
 export type Describes = (description: string) => boolean | "fails";
@@ -524,8 +549,9 @@ export type Describes = (description: string) => boolean | "fails";
 const keeps: Describes = () => true;
 
 /**
- * Whether a person's facts say a part of a drawing, or give a number the
- * drawing says is theirs, as the fake checker answers: a plain one agrees.
+ * Whether a line someone shared says a part of a drawing, or gives a
+ * number the drawing says is theirs, as the fake checker answers: a plain
+ * one agrees. Asked of each line apart, as `facts`.
  */
 export type PartJudge = (
   part: string,
@@ -554,18 +580,31 @@ const dataOf = (request: SentRequest | undefined, tag: string): unknown => {
   return typeof text === "string" ? JSON.parse(text) : undefined;
 };
 
-/** Each check of one claim against one fact the quick model was asked in `requests`. */
+/** The backing checks of claims in `requests`: each claim beside each fact it may rest on. */
 export const checksIn = (
   requests: readonly SentRequest[]
 ): { claim: string; fact: string }[] =>
   requests.flatMap((request) => {
-    const check = checkSchema.safeParse(dataOf(request, "data"));
-    return check.success ? [check.data] : [];
+    const asked = backingSchema.safeParse(dataOf(request, "data"));
+    if (!asked.success || asked.data.about !== claimsAbout) {
+      return [];
+    }
+    const words = new Map(asked.data.lines.map(({ id, text }) => [id, text]));
+    return asked.data.items.flatMap(({ text, lines }) =>
+      lines.map((label) => ({ claim: text, fact: words.get(label) ?? "" }))
+    );
   });
 
-/** The claims the quick model was asked to check against a fact in `requests`, each once, sorted. */
+/** The claims the quick model was asked to check in `requests`, each once, sorted. */
 export const checkedClaimsIn = (requests: readonly SentRequest[]): string[] =>
   [...new Set(checksIn(requests).map(({ claim }) => claim))].toSorted();
+
+/** What every judgment check in `requests` was given, as sent: only items' words, or so it must be. */
+export const judgedIn = (requests: readonly SentRequest[]): unknown[] =>
+  requests.flatMap((request) => {
+    const data = dataOf(request, "data");
+    return judgmentSchema.safeParse(data).success ? [data] : [];
+  });
 
 /** The facts a claims request showed the model, by label. */
 const shownIn = (request: SentRequest | undefined) =>
@@ -573,11 +612,18 @@ const shownIn = (request: SentRequest | undefined) =>
     .parse(dataOf(request, "facts") ?? [])
     .flatMap(({ facts }) => facts);
 
+/** A fake model's answer, as JSON. */
+const answered = (value: unknown): ProviderReply => ({
+  text: JSON.stringify(value),
+  inputTokens: 1000,
+  outputTokens: 200,
+});
+
 /**
- * The model, faked: a check of one fact against one claim answered by
- * `says`, one of a person's facts against a drawing's part by `part`, the
- * judgment check of a description by `describes`; anything else, the
- * claims, by `claims`.
+ * The model, faked: a backing check answered line by line, a claim's by
+ * `says` and a drawing's part or number by `part`; a judgment check item
+ * by item by `describes`; anything else, the claims, by `claims`. Any
+ * answer of `"fails"` fails the whole call at the provider.
  */
 const claimsOrCheck =
   (
@@ -589,39 +635,46 @@ const claimsOrCheck =
   (requests: readonly SentRequest[]): ProviderReply => {
     const request = requests.at(-1);
     const data = dataOf(request, "data");
-    const check = checkSchema.safeParse(data);
-    const ofPart = partSchema.safeParse(data);
-    const ofNumber = numberSchema.safeParse(data);
-    const judged = describesSchema.safeParse(data);
-    let answer: boolean | "fails" | undefined;
+    const backing = backingSchema.safeParse(data);
+    const judged = judgmentSchema.safeParse(data);
+    const failed = { status: 400, errorType: "invalid_request_error" } as const;
     if (judged.success) {
-      answer = describes(judged.data.description);
-    } else if (check.success) {
-      answer = says(check.data.claim, check.data.fact);
-    } else if (ofPart.success) {
-      answer = part(
-        ofPart.data.part,
-        ofPart.data.facts,
-        ofPart.data.work,
-        ofPart.data.kind
-      );
-    } else if (ofNumber.success) {
-      answer = part(
-        ofNumber.data.number,
-        ofNumber.data.facts,
-        ofNumber.data.work
-      );
+      const verdicts = judged.data.items.map(({ id, text }) => ({
+        id,
+        howItRuns: describes(text),
+      }));
+      return verdicts.some(({ howItRuns }) => howItRuns === "fails")
+        ? failed
+        : answered({ verdicts });
     }
-    if (answer === "fails") {
-      return { status: 400, errorType: "invalid_request_error" };
+    if (backing.success) {
+      const { about, lines, items } = backing.data;
+      const words = new Map(lines.map(({ id, text }) => [id, text]));
+      const said = items.map(({ id, kind, text, lines: own }) => ({
+        id,
+        lines: own.map((label) => {
+          const line = words.get(label) ?? "";
+          return [
+            label,
+            about === claimsAbout
+              ? says(text, line)
+              : part(text, [line], about, kind),
+          ] as const;
+        }),
+      }));
+      if (
+        said.some(({ lines: own }) => own.some(([, yes]) => yes === "fails"))
+      ) {
+        return failed;
+      }
+      return answered({
+        backing: said.map(({ id, lines: own }) => ({
+          id,
+          lines: own.flatMap(([label, yes]) => (yes === true ? [label] : [])),
+        })),
+      });
     }
-    return {
-      text: JSON.stringify(
-        answer === undefined ? claims(request) : { says: answer }
-      ),
-      inputTokens: 1000,
-      outputTokens: 200,
-    };
+    return answered(claims(request));
   };
 
 /**

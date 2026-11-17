@@ -2918,13 +2918,27 @@ export class Onboarding extends DurableObject<Env> {
    * differences nobody could explain among them: what the review, and how
    * much of it is known, are read from.
    */
-  #reviewed(): {
+  async #reviewed(): Promise<{
     differences: Difference[];
     mapped: number;
     works: number;
     known: number;
-  } {
+  }> {
+    // The Brain's id of each piece of work first, a hash of its own: what
+    // follows reads the store in one go, with nothing awaited between.
+    const brainIds = await this.#brainIdsOfWorks();
     const settled = this.#settled();
+    // A difference shows only while the drawing it was checked in stands
+    // (GRA-1987): one that fell (someone it rests on moved, went or took a
+    // line back), or was never noted, shows none.
+    const standing = new Set(
+      this.#db
+        .select({ workflow: brainDrawings.workflow })
+        .from(brainDrawings)
+        .where(standingDrawing)
+        .all()
+        .map(({ workflow }) => workflow)
+    );
     const checked = new Map(
       this.#db
         .select()
@@ -2968,6 +2982,7 @@ export class Onboarding extends DurableObject<Env> {
         if (
           differs?.why === "conflict" &&
           heard &&
+          standing.has(brainIds.get(work.id) ?? "") &&
           check?.drawnAt === drawn.at
         ) {
           differences.push({
@@ -2989,8 +3004,8 @@ export class Onboarding extends DurableObject<Env> {
    * ways and nobody could say why, settled or not, and how many pieces of
    * work are mapped. Never who told which way.
    */
-  review(): OnboardingReview {
-    const { differences, mapped } = this.#reviewed();
+  async review(): Promise<OnboardingReview> {
+    const { differences, mapped } = await this.#reviewed();
     return { differences, mapped };
   }
 
@@ -2999,8 +3014,8 @@ export class Onboarding extends DurableObject<Env> {
    * much of what needs the admin is settled, half how much of the work is
    * known. Nothing counts before any piece of work is drawn.
    */
-  reviewKnown(): number {
-    const { differences, mapped, works: all, known } = this.#reviewed();
+  async reviewKnown(): Promise<number> {
+    const { differences, mapped, works: all, known } = await this.#reviewed();
     if (mapped === 0) {
       return 0;
     }
@@ -3016,14 +3031,13 @@ export class Onboarding extends DurableObject<Env> {
    * ways kept, or which way holds. It can be settled again another way.
    * Null when nothing about it needs settling.
    */
-  settle(
+  async settle(
     work: string,
     holds: SettleChoice,
     by: AuditActor
-  ): OnboardingReview | null {
-    const open = this.#reviewed().differences.some(
-      (difference) => difference.work === work
-    );
+  ): Promise<OnboardingReview | null> {
+    const { differences } = await this.#reviewed();
+    const open = differences.some((difference) => difference.work === work);
     if (!open) {
       return null;
     }
@@ -3037,7 +3051,7 @@ export class Onboarding extends DurableObject<Env> {
       this.#changed(by, "onboarding.work.settled", { holds });
     });
     this.#deliverAudit();
-    return this.review();
+    return await this.review();
   }
 
   /** The list after `change`, held to the roster's rules; or why it can't be. */
@@ -5235,10 +5249,14 @@ export class Onboarding extends DurableObject<Env> {
       if ((await this.drawNext()) !== null) {
         await this.releaseDue();
       }
-      await this.intakeNext();
       await this.remindDue();
       await this.sendUpdate();
       await this.deliverMail();
+      // Last: a team's intake makes the most model calls of anything here,
+      // and an alarm that runs out of time (15 minutes of wall time for an
+      // alarm handler) is cut off where it is. Reminders, the update and
+      // mail never wait behind it, and read nothing it writes.
+      await this.intakeNext();
     } finally {
       // Set again whatever failed above, so what is left is tried again.
       await this.#armLinks();
@@ -6529,8 +6547,10 @@ export class Onboarding extends DurableObject<Env> {
             // In one statement, only while what it was checked from still
             // stands as the intake read it: the drawing it checked, and the
             // interview of everyone it rests on, at the same admission
-            // (`admissionSql`). One forgotten, withdrawn, deleted or taken
-            // back meanwhile leaves no copy of its words.
+            // (`admissionSql`), told in this team and still in it now
+            // (`#toldHere`, GRA-1984). One forgotten, withdrawn, deleted,
+            // taken back or moved to another team meanwhile leaves no copy
+            // of its words.
             const restsOn = [
               ...new Set([
                 ...(support.steps[differs.step] ?? []),
@@ -6544,6 +6564,13 @@ export class Onboarding extends DurableObject<Env> {
               ...restsOn.map(
                 (person) =>
                   sql`${admissionSql(person)} IS ${began.get(person) ?? null}`
+              ),
+              ...restsOn.map(
+                (person) => sql`EXISTS (SELECT 1 FROM ${people}
+              JOIN ${interviewStates} ON ${interviewStates.person} = ${people.id}
+              WHERE ${people.id} = ${person}
+                AND ${people.team} = ${teamId}
+                AND ${interviewStates.toldIn} = ${teamId})`
               )
             );
             this.#db
@@ -7554,7 +7581,8 @@ export class Onboarding extends DurableObject<Env> {
         // drawings (`#reviewed`): one that falls (someone it rests on
         // moved, went or took back a line) takes its team's differences
         // with it, here, before the change commits. Its team's next intake
-        // checks them again from who still counts.
+        // checks them again from who still counts. Every work's of that
+        // team goes, not only the fallen drawing's: on the safe side.
         const fallenTeams = this.#db
           .select({ team: brainDrawings.team })
           .from(brainDrawings)

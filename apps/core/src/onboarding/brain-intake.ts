@@ -35,7 +35,7 @@ import { inUnitOf } from "./work-drawing.ts";
 // - A claim is the team's, never one person's fact, nor their words
 //   (`text`) or quote; never resting on the lead, whose role alone says
 //   who they are; a name on the staff list in it is taken out; and it
-//   holds no judgment (`onlyHowItRuns`).
+//   holds no judgment (`howItRunsOf`).
 // - A drawing keeps no `from` and no `told`, and no count of people: its
 //   numbers are medians over whoever gave one, never whose, and a count
 //   someone gave as their own never shows; and only what one or more of

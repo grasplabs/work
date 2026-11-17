@@ -14,6 +14,7 @@ import { mockIdp } from "./idp.ts";
 import {
   aloneInTheStore,
   answering,
+  answeringWith,
   approveAgreed,
   onLink,
   openLinkAs,
@@ -22,7 +23,7 @@ import {
 } from "./interview-link.ts";
 import type { Device } from "./interview-link.ts";
 import type { ProviderReply } from "./model-provider.ts";
-import { intake } from "./onboarding-team.ts";
+import { claimsReply, intake } from "./onboarding-team.ts";
 import type { PartJudge } from "./onboarding-team.ts";
 import {
   auditedDuring,
@@ -201,7 +202,8 @@ const ticketsReply = (ids: Ids): ProviderReply => {
 const drawn = async (
   ids: Ids,
   part?: PartJudge,
-  others: readonly string[] = [salesforceWay]
+  others: readonly string[] = [salesforceWay],
+  { given = true }: { given?: boolean } = {}
 ) => {
   const store = onboardingStore(env);
   await store.releaseDue();
@@ -244,7 +246,9 @@ const drawn = async (
     ],
     async () => [await store.drawNext(), await store.drawNext()]
   );
-  await intake(ids, [], part);
+  if (given) {
+    await intake(ids, [], part);
+  }
   const [tickets, rota] = await store.teamWorks(ids.team);
   return { tickets: tickets?.id ?? "", rota: rota?.id ?? "" };
 };
@@ -433,6 +437,76 @@ describe("what needs the admin", { timeout: 120_000 }, () => {
     }).toStrictEqual({
       before: ["Look up the customer in Salesforce, as someone does."],
       after: [],
+    });
+  });
+
+  it("shows no difference whose teller moved to another team while the team's first intake checked it", async () => {
+    const ids = await team();
+    // The other five's own words carry a marker, so the call held below is
+    // one of this team's checks.
+    const marker = `marker${unique().replaceAll("-", "")}`;
+    const { tickets } = await drawn(
+      ids,
+      undefined,
+      [`${salesforceWay} ${marker}`],
+      { given: false }
+    );
+    const store = onboardingStore(env);
+    const { roster } = await store.view();
+    const mover = ids.doers[5] ?? "";
+    const moved = {
+      teams: [
+        ...(roster?.teams ?? []),
+        {
+          id: `${ids.team}-b`,
+          name: "Billing",
+          lead: null,
+          does: "",
+          off: false,
+        },
+      ],
+      people: (roster?.people ?? []).map((person) =>
+        person.id === mover ? { ...person, team: `${ids.team}-b` } : person
+      ),
+    };
+    // This team's intake is held at its first check of the marked words
+    // until a save moving one who told the Salesforce way to Billing has
+    // committed; then it goes on.
+    const checker = claimsReply([]);
+    let moving: Promise<unknown> | undefined;
+    const held = async (
+      requests: Parameters<typeof checker>[0]
+    ): Promise<ReturnType<typeof checker>> => {
+      if (JSON.stringify(requests.at(-1)?.body ?? null).includes(marker)) {
+        moving ??= store.saveRoster(moved, { type: "system" });
+        await moving;
+      }
+      return checker(requests);
+    };
+    let gave: string | null = null;
+    for (
+      let round = 0;
+      round < 20 && gave !== `brain:${ids.team}`;
+      round += 1
+    ) {
+      // oxlint-disable-next-line no-await-in-loop -- one team at a time, as the alarm gives them
+      ({ result: gave } = await answeringWith(
+        held,
+        async () => await store.intakeNext()
+      ));
+    }
+    const { api } = await signedInApi(idp, "admin");
+    const { differences } = await api.onboarding.review();
+    expect({
+      held: moving !== undefined,
+      gave,
+      shown: differences.filter(({ work }) => work === tickets),
+      kept: await checkedOf(tickets),
+    }).toStrictEqual({
+      held: true,
+      gave: `brain:${ids.team}`,
+      shown: [],
+      kept: [],
     });
   });
 
