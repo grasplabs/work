@@ -217,6 +217,12 @@ const button = (name: string) =>
       each.getAttribute("aria-label") === name
   );
 
+/** One of the page's tabs, by its name (its count follows). */
+const tab = (name: string) =>
+  [...document.querySelectorAll('[role="tab"]')].find((each) =>
+    each.textContent?.trim().startsWith(name)
+  );
+
 const link = (name: string) =>
   [...document.querySelectorAll("a")].find(
     (each) => each.textContent?.trim() === name
@@ -316,6 +322,7 @@ describe("A project's page", () => {
   it("adds someone as a user, from who core offers when the list opens, and says why an add was refused", async () => {
     const { session, asked } = fakeProjects();
     await shown(session, project("builder"));
+    await press(tab("People"));
 
     const before = [...asked];
     await press(button("Add someone"));
@@ -349,6 +356,7 @@ describe("A project's page", () => {
       { id: "user-bo", name: "Bo" },
     ]);
     await shown(session, project("builder"));
+    await press(tab("People"));
 
     await press(button("Add someone"));
     const options = [...document.querySelectorAll("[cmdk-item]")].map((each) =>
@@ -377,6 +385,7 @@ describe("A project's page", () => {
       ...project("builder"),
       members: [ada, { ...ada, id: "user-ada-222222" }],
     });
+    await press(tab("People"));
 
     expect([
       button("Take Ada (ID …er-ada) out of the project") !== undefined,
@@ -421,6 +430,7 @@ describe("A project's page", () => {
   it("shows a project bigger than one page a page at a time, reading the next after the last shown", async () => {
     const { session, asked } = fakeProjects();
     await shown(session, { ...project("user"), moreItems: true });
+    await press(tab("Apps"));
 
     const before = document.body.textContent?.includes("Desk");
     await press(button("Show more"));
@@ -444,12 +454,15 @@ describe("A project's page", () => {
       { items: [desk], more: false },
     ]);
     await shown(session, { ...project("user"), moreItems: true });
+    await press(tab("Apps"));
 
     await press(button("Show more"));
     await press(button("Show more"));
+    const deskShown = document.body.textContent?.includes("Desk");
+    await press(tab("Workflows"));
 
     expect({
-      desk: document.body.textContent?.includes("Desk"),
+      desk: deskShown,
       invoicesShown: [...document.querySelectorAll("li")].filter((row) =>
         row.textContent?.includes("Invoices")
       ).length,

@@ -19,12 +19,13 @@ import {
 } from "@grasp-os/ui/components/native-select";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import { useRouter } from "@tanstack/react-router";
-import { PlusIcon } from "lucide-react";
 import { useId, useState } from "react";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
 import { ErrorText } from "../error-text.tsx";
 import { formatList } from "../format.ts";
+import { Button as GraspButton } from "../grasp/button/index.ts";
+import { Plus } from "../grasp/icons/index.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { namesInProject } from "./project-people-names.ts";
 
@@ -180,6 +181,7 @@ const FileForm = ({
 
 /** Add on a project's page, for its builders. */
 export const FileItemDialog = ({ project }: { project: Project }) => {
+  const { t } = useLingui();
   const { failure, run } = useCoreAction();
   const [open, setOpen] = useState(false);
   const [candidates, setCandidates] = useState<ProjectItemCandidate[]>();
@@ -200,10 +202,13 @@ export const FileItemDialog = ({ project }: { project: Project }) => {
       }}
       open={open}
     >
-      <DialogTrigger render={<Button variant="outline" />}>
-        <PlusIcon data-icon="inline-start" />
-        <Trans context="put in a project">Add</Trans>
-      </DialogTrigger>
+      <DialogTrigger
+        render={
+          <GraspButton icon={Plus} variant="quiet">
+            {t({ message: "Add", context: "put in a project" })}
+          </GraspButton>
+        }
+      />
       <DialogContent>
         {open ? (
           <>

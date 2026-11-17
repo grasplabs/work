@@ -45,7 +45,8 @@ import {
   Workflow,
 } from "../grasp/icons/index.ts";
 import { Item, ItemGroup } from "../grasp/item/index.ts";
-import { SectionCard } from "../grasp/section-card/index.ts";
+import { Tabs, TabsList, TabsPanel, TabsTab } from "../grasp/tabs/index.ts";
+import { Text } from "../grasp/text/index.ts";
 import { roleLabel } from "../labels.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { FileItemDialog } from "./file-item-dialog.tsx";
@@ -165,14 +166,9 @@ const SharedWords = ({ role }: { role: ProjectRole | null }) => {
   return <Trans>Everyone in it · {shownRole}</Trans>;
 };
 
-/**
- * What is in the project that the person may open, a page at a time, or a
- * line saying there is nothing.
- */
-const Items = ({ project }: { project: Project }) => {
-  const { t } = useLingui();
-  const builds = project.role === "builder";
-  const pages = usePages(
+/** The project's items, read a page at a time, shared by its tabs. */
+const useItemPages = (project: Project) =>
+  usePages(
     project,
     project.items,
     project.moreItems,
@@ -181,13 +177,32 @@ const Items = ({ project }: { project: Project }) => {
       return { list: page.items, more: page.more };
     }
   );
-  const items = pages.all;
-  if (items.length === 0) {
+type ItemPages = ReturnType<typeof useItemPages>;
+
+/**
+ * What of one kind is in the project that the person may open, a page at
+ * a time, or a line saying there is nothing. Core pages Apps and
+ * workflows together: each tab shows its own kind of what is read so far,
+ * and Show more reads on.
+ */
+const Items = ({
+  project,
+  kind,
+  pages,
+}: {
+  project: Project;
+  kind: ProjectItem["type"];
+  pages: ItemPages;
+}) => {
+  const { t } = useLingui();
+  const builds = project.role === "builder";
+  const items = pages.all.filter(({ type }) => type === kind);
+  if (items.length === 0 && !pages.more) {
     return <Empty size="inline">{t`Nothing in it that you can open.`}</Empty>;
   }
   return (
     <>
-      <ItemGroup aria-label={t`Apps and workflows`} separated>
+      <ItemGroup separated>
         {items.map((item) => (
           <Item
             actions={
@@ -279,6 +294,16 @@ const DeleteProject = ({
   );
 };
 
+/** A tab's name, and how many it holds, quieter beside it. */
+const KindTab = ({ children, count }: { children: string; count: number }) => (
+  <>
+    {children}{" "}
+    <Text element="span" size="xs" tone="muted">
+      {count}
+    </Text>
+  </>
+);
+
 /** The page's menu, for the project's builders: change it, or delete it. */
 const ProjectMenu = ({
   project,
@@ -321,6 +346,10 @@ export const ProjectView = ({
   const [deleting, setDeleting] = useState(false);
   const builds = project.role === "builder";
   const makes = builds && canBuild(identity.role);
+  const { apps, workflows } = project.counts;
+  const pages = useItemPages(project);
+  // Opens on what it has: its Apps, else its workflows.
+  const firstTab = apps === 0 && workflows > 0 ? "workflows" : "apps";
   return (
     <>
       <SiteHeader
@@ -343,6 +372,7 @@ export const ProjectView = ({
                   }}
                   project={project}
                 />
+                <FileItemDialog project={project} />
                 {makes ? (
                   <Button
                     icon={Plus}
@@ -365,19 +395,28 @@ export const ProjectView = ({
           }
           title={project.name}
         />
-        <SectionCard
-          actions={builds ? <FileItemDialog project={project} /> : undefined}
-          flush
-          title={t`Apps and workflows`}
-        >
-          <Items project={project} />
-        </SectionCard>
-        <SectionCard
-          description={t`Being in the project reaches only what is shared with everyone in it.`}
-          title={t`People`}
-        >
-          <ProjectPeople project={project} />
-        </SectionCard>
+        <Tabs defaultValue={firstTab}>
+          <TabsList aria-label={project.name}>
+            <TabsTab value="apps">
+              <KindTab count={apps}>{t`Apps`}</KindTab>
+            </TabsTab>
+            <TabsTab value="workflows">
+              <KindTab count={workflows}>{t`Workflows`}</KindTab>
+            </TabsTab>
+            <TabsTab value="people">
+              <KindTab count={project.people}>{t`People`}</KindTab>
+            </TabsTab>
+          </TabsList>
+          <TabsPanel value="apps">
+            <Items kind="app" pages={pages} project={project} />
+          </TabsPanel>
+          <TabsPanel value="workflows">
+            <Items kind="workflow" pages={pages} project={project} />
+          </TabsPanel>
+          <TabsPanel value="people">
+            <ProjectPeople project={project} />
+          </TabsPanel>
+        </Tabs>
       </Page>
       <ProjectDialog
         editing={project}

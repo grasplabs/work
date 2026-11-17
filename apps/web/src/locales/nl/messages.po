@@ -2766,6 +2766,7 @@ msgstr "Goedkeurder voor nieuwe tools benoemd"
 #: src/dashboard/widget-board.tsx
 #: src/grasp/frame/grasp-sidebar.tsx
 #: src/projects/file-item-dialog.tsx
+#: src/projects/project-view.tsx
 #: src/routes/_shell.apps.$app_.settings.tsx
 #: src/routes/_shell.apps.$app.tsx
 #: src/routes/_shell.apps.index.tsx
@@ -2782,10 +2783,6 @@ msgstr "Apps en agents met een toestemming"
 msgctxt "inbox filter"
 msgid "Apps and connections"
 msgstr "Apps en koppelingen"
-
-#: src/projects/project-view.tsx
-msgid "Apps and workflows"
-msgstr "Apps en workflows"
 
 #: src/workflows/files-and-apps.tsx
 msgid "Apps it works in"
@@ -3182,10 +3179,6 @@ msgstr "Voordat we beginnen: welke taal heeft je voorkeur?"
 #: src/apps/data-model-changes.tsx
 msgid "Before you make this change"
 msgstr "Voordat je deze wijziging maakt"
-
-#: src/projects/project-view.tsx
-msgid "Being in the project reaches only what is shared with everyone in it."
-msgstr "Wie in het project zit, bereikt alleen wat met iedereen erin gedeeld is."
 
 #. A time zone, by its city
 #: src/routes/_shell.settings.workspace.tsx
@@ -16713,6 +16706,7 @@ msgstr "workflow.json"
 #: src/dashboard/widget-board.tsx
 #: src/grasp/frame/grasp-sidebar.tsx
 #: src/projects/file-item-dialog.tsx
+#: src/projects/project-view.tsx
 #: src/routes/_shell.integrations.$integration.tsx
 #: src/routes/_shell.settings.spend.tsx
 #: src/routes/_shell.workflows.$workflow.tsx
