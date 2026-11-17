@@ -169,6 +169,10 @@ describe("a person's own store at work on its own alarm", () => {
 
   it("finishes an item a kill cut off mid-tick, once the store starts again, and runs nothing twice on a tick delivered twice", async () => {
     const person = await personWithSource();
+    // Its source embedded first, so this item is all the store has to do:
+    // an embedding the kill cut off would settle on the next tick, and
+    // the store would wake once more to note its rebuild done.
+    await workedOut(person);
     const key = `killed-${crypto.randomUUID()}`;
     const gate = { open: false };
     behaviours.set(key, async () => {
