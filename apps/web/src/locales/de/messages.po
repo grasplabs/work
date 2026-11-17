@@ -663,6 +663,10 @@ msgstr "{label}, nur lesen"
 msgid "{label}:"
 msgstr "{label}:"
 
+#: src/brain/memories-page.tsx
+msgid "{label}: {held}"
+msgstr "{label}: {held}"
+
 #: src/onboarding/setup-steps.tsx
 msgid "{leads, plural, one {Thank you. I’ll start with this lead.} other {Thank you. I’ll start with these # leads.}}"
 msgstr "{leads, plural, one {Danke. Ich beginne mit dieser Teamleitung.} other {Danke. Ich beginne mit diesen # Teamleitungen.}}"
@@ -1734,6 +1738,10 @@ msgstr "Thema"
 msgctxt "what a decision is about, as its workflow run passed it"
 msgid "About"
 msgstr "Worum es geht"
+
+#: src/brain/memories-page.tsx
+msgid "About {aboutShown}"
+msgstr "Über {aboutShown}"
 
 #: src/workflows/requests/request-plan.tsx
 msgid "About {ahead} by {end}"
@@ -5396,6 +5404,7 @@ msgid "Every weekday at {time}"
 msgstr "Jeden Werktag um {time}"
 
 #: src/agents/agent-facts.tsx
+#: src/brain/memories-page.tsx
 #: src/brain/sources-page.tsx
 #: src/settings/stephen-audience.tsx
 msgid "Everyone"
@@ -12398,6 +12407,7 @@ msgstr "Geklärt: {choice}"
 msgid "Several for one question"
 msgstr "Mehrere für eine Frage"
 
+#: src/brain/memories-page.tsx
 #: src/drafts/share-with-team.tsx
 #: src/drafts/sharing.tsx
 msgid "Share"
@@ -12431,6 +12441,10 @@ msgstr "Anteil von {name}, der gefragt hat"
 msgid "Share once it's ready"
 msgstr "Teilen, sobald es bereit ist"
 
+#: src/brain/memories-page.tsx
+msgid "Share this memory?"
+msgstr "Diese Erinnerung teilen?"
+
 #: src/brain/skills-page.tsx
 msgid "Share this version instead"
 msgstr "Stattdessen diese Version teilen"
@@ -12438,6 +12452,10 @@ msgstr "Stattdessen diese Version teilen"
 #: src/brain/skills-page.tsx
 msgid "Share with a team"
 msgstr "Mit einem Team teilen"
+
+#: src/brain/memories-page.tsx
+msgid "Share with others: {statement}"
+msgstr "Mit anderen teilen: {statement}"
 
 #: src/agents/agent-share.tsx
 #: src/brain/skills-page.tsx
@@ -12452,6 +12470,14 @@ msgstr "Mit Ihrem Team teilen"
 #: src/onboarding/setup-steps.tsx
 msgid "Share your staff list"
 msgstr "Mitarbeiterliste teilen"
+
+#: src/brain/memories-page.tsx
+msgid "Share…"
+msgstr "Teilen…"
+
+#: src/brain/memories-page.tsx
+msgid "Shared {when}"
+msgstr "Geteilt am {when}"
 
 #: src/settings/stephen-settings.tsx
 msgid "Shared mailboxes, colleagues' calendars and the company's files."
@@ -12472,6 +12498,22 @@ msgstr "Geteilt mit"
 #: src/drafts/share-with-team.tsx
 msgid "Shared with {who}"
 msgstr "Geteilt mit {who}"
+
+#: src/brain/memories-page.tsx
+msgid "Shared with a team you are no longer in."
+msgstr "Geteilt mit einem Team, in dem Sie nicht mehr sind."
+
+#: src/brain/memories-page.tsx
+msgid "Shared with everyone."
+msgstr "Mit allen geteilt."
+
+#: src/brain/memories-page.tsx
+msgid "Shared with team {team}."
+msgstr "Mit dem Team {team} geteilt."
+
+#: src/brain/memories-page.tsx
+msgid "Shared. It shows under the same name for those you shared it with."
+msgstr "Geteilt. Wer es lesen darf, sieht es unter demselben Namen."
 
 #: src/brain/skills-page.tsx
 msgid "Shares waiting for you"
@@ -13323,6 +13365,18 @@ msgstr "{name} aus dem Projekt nehmen"
 msgid "Take {who} off {name}"
 msgstr "{who} aus {name} entfernen"
 
+#: src/brain/memories-page.tsx
+msgid "Take back"
+msgstr "Zurücknehmen"
+
+#: src/brain/memories-page.tsx
+msgid "Take back what you shared"
+msgstr "Geteiltes zurücknehmen"
+
+#: src/brain/memories-page.tsx
+msgid "Take back what you shared: {statement}"
+msgstr "Geteiltes zurücknehmen: {statement}"
+
 #: src/agents/agent-apps-card.tsx
 msgid "Take off"
 msgstr "Wegnehmen"
@@ -13426,6 +13480,7 @@ msgctxt "what the Brain remembers about something"
 msgid "Team"
 msgstr "Team"
 
+#: src/brain/memories-page.tsx
 #: src/brain/sources-page.tsx
 msgid "Team {name}"
 msgstr "Team {name}"
@@ -14471,6 +14526,10 @@ msgstr "Aussagen"
 msgid "They use"
 msgstr "Nutzen"
 
+#: src/brain/memories-page.tsx
+msgid "They will read exactly what is below, as someone's own word, without your name. Your own memory stays yours alone, and you can take the copy back."
+msgstr "Sie lesen genau das, was unten steht, als eigenes Wort von jemandem, ohne Ihren Namen. Ihre eigene Erinnerung bleibt nur Ihre, und Sie können die Kopie zurücknehmen."
+
 #: src/drafts/share-with-team.tsx
 msgid "They'll find it under Apps, and see it as it is now."
 msgstr "Sie finden es unter Apps und sehen es so, wie es jetzt ist."
@@ -14660,6 +14719,10 @@ msgstr "Diese Liste ist zu groß. Ich kann bis zu {peopleMost} Personen in bis z
 #: src/brain/memories-page.tsx
 msgid "This memory has changed or is no longer yours to read. Look at it again first."
 msgstr "Diese Erinnerung hat sich geändert, oder Sie dürfen sie nicht mehr lesen. Sehen Sie sie sich zuerst noch einmal an."
+
+#: src/brain/memories-page.tsx
+msgid "This memory has changed or is no longer yours to share. Look at it again first."
+msgstr "Diese Erinnerung hat sich geändert, oder Sie dürfen sie nicht mehr teilen. Sehen Sie sie sich zuerst noch einmal an."
 
 #: src/chat/failure.ts
 msgid "This model can't give an answer that long. Pick another model, or ask for less."
@@ -15004,6 +15067,14 @@ msgstr "Auslöser {trigger}"
 msgctxt "a workflow's settings section"
 msgid "Triggers"
 msgstr "Auslöser"
+
+#: src/brain/memories-page.tsx
+msgid "True from {from}"
+msgstr "Gilt ab {from}"
+
+#: src/brain/memories-page.tsx
+msgid "True until {until}"
+msgstr "Gilt bis {until}"
 
 #: src/workflows/workflow-diagram.tsx
 msgid "Try"
@@ -15375,6 +15446,10 @@ msgstr "Wert"
 #: src/apps/data-model-changes.tsx
 msgid "Value for {name}"
 msgstr "Wert für {name}"
+
+#: src/brain/memories-page.tsx
+msgid "Value: {held}"
+msgstr "Wert: {held}"
 
 #: src/apps/app-data.tsx
 msgid "Values aren't kept: the table is sensitive."
@@ -16162,6 +16237,10 @@ msgstr "Was du teilen wolltest"
 msgid "What you chose"
 msgstr "Was Sie gewählt haben"
 
+#: src/brain/memories-page.tsx
+msgid "What you shared"
+msgstr "Was Sie geteilt haben"
+
 #: src/routes/_shell.settings.instructions.tsx
 msgid "What your chats with Grasp start with, and only yours: how you like to work, what you are responsible for."
 msgstr "Womit deine Chats mit Grasp beginnen, und nur deine: wie du gern arbeitest, wofür du verantwortlich bist."
@@ -16412,6 +16491,11 @@ msgstr "Wer es fragen darf"
 msgctxt "a file uploaded into the Brain"
 msgid "Who may read it"
 msgstr "Wer sie lesen darf"
+
+#: src/brain/memories-page.tsx
+msgctxt "a memory shared with others"
+msgid "Who may read it"
+msgstr "Wer es lesen darf"
 
 #: src/agents/agent-page.tsx
 msgid "Who may use {name}"
@@ -16849,6 +16933,14 @@ msgstr "Sie sind als Grasp-Mitarbeiter angemeldet, für begrenzte Zeit."
 msgid "You can close this page now. Come back here to see how far I am."
 msgstr "Sie können diese Seite jetzt schließen. Kommen Sie hierher zurück, um zu sehen, wie weit ich bin."
 
+#: src/brain/memories-page.tsx
+msgid "You can no longer read this memory."
+msgstr "Sie können diese Erinnerung nicht mehr lesen."
+
+#: src/brain/memories-page.tsx
+msgid "You can share with a team of yours, or with everyone, once it has three people or more."
+msgstr "Sie können mit einem Ihrer Teams oder mit allen teilen, sobald es drei oder mehr Personen hat."
+
 #: src/pages/frame-failure.tsx
 msgid "You can't open this App"
 msgstr "Du kannst diese App nicht öffnen"
@@ -16900,6 +16992,10 @@ msgstr "Du hast keine aktuellen Läufe, deren Eingabe noch aufbewahrt wird, also
 #: src/brain/skills-page.tsx
 msgid "You have no skills of your own yet."
 msgstr "Du hast noch keine eigenen Skills."
+
+#: src/brain/memories-page.tsx
+msgid "You haven't shared any of your memories."
+msgstr "Sie haben noch keine Ihrer Erinnerungen geteilt."
 
 #: src/onboarding/about-story.tsx
 msgid "You show me who’s who, where the documents are, and which tools people use."

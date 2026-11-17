@@ -51,6 +51,7 @@ import {
   recallRequestSchema,
   restoringNow,
   retireRequestSchema,
+  retireWrittenRequestSchema,
   sourceErasureSchema,
   sourceRemovalSchema,
   sourceIdSchema,
@@ -60,11 +61,15 @@ import {
   storeKindOf,
   vectorModelNameOf,
   vectorSearchSchema,
+  writtenRequestSchema,
   vectorsToPutSchema,
   versionListRequestSchema,
   versionRequestSchema,
 } from "./contract.ts";
 import type {
+  RetireWrittenRequest,
+  WrittenPage,
+  WrittenRequest,
   AddedInstructions,
   AddedVersion,
   Card,
@@ -251,6 +256,7 @@ import {
   workOverview,
   workTick,
 } from "./work.ts";
+import { listWritten, retireWritten } from "./written.ts";
 
 /** What a person's own store's alarm works with (`BrainStore.alarmHost`). */
 export interface AlarmHost {
@@ -2339,6 +2345,52 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
         return retireMemory(this.ctx.storage.sql, {
           id: memory,
           reader,
+          writer,
+          change,
+        });
+      });
+    });
+  }
+
+  /** A page of what a writer wrote and hasn't retired, for a reader (written.ts). */
+  async listWritten(request: WrittenRequest): Promise<WrittenPage> {
+    const { writer, reader, after, limit } = checked(
+      writtenRequestSchema,
+      request
+    );
+    this.#mayRead(reader);
+    if (!(await this.#readable())) {
+      return { memories: [], more: false };
+    }
+    const subject = await writerSubjectOf(writer);
+    return listWritten(this.ctx.storage.sql, {
+      writer,
+      subject,
+      reader,
+      after,
+      limit,
+    });
+  }
+
+  /** Retires one of a writer's own memories, whoever may read it (written.ts). */
+  async retireWritten(
+    request: RetireWrittenRequest
+  ): Promise<RetiredMemory | null> {
+    const { memory, writer, change } = checked(
+      retireWrittenRequestSchema,
+      request
+    );
+    return await this.#changing(async () => {
+      if (!(await this.#readable())) {
+        return null;
+      }
+      return this.ctx.storage.transactionSync(() => {
+        // Refused while a restore runs, as an add is (restoring.ts).
+        if (isRestoring(this.ctx.storage.sql)) {
+          throw new Error(restoringNow);
+        }
+        return retireWritten(this.ctx.storage.sql, {
+          id: memory,
           writer,
           change,
         });
