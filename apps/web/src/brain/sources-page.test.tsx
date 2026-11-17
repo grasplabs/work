@@ -36,6 +36,7 @@ import {
   vi,
 } from "vite-plus/test";
 
+import { formatDateTime } from "../format.ts";
 import { SourcesPage } from "./sources-page.tsx";
 
 // The Brain's Sources page, against core's `brainSources` as the page
@@ -75,6 +76,9 @@ const listed = (
   personal,
   versions,
 });
+
+/** When the source read through a connection was last read. */
+const lastReadAt = "2026-11-12T10:00:00.000Z";
 
 /** A record agents read through a shared connection an admin opened to the person. */
 const deal: BrainSourceRef = { producer: "connected", id: "conn-1/0/abc" };
@@ -260,7 +264,11 @@ const shown = async (
             ],
             next: { addedAt: "2026-11-10T09:00:00.000Z", source: minutes },
           }
-        : { sources: [listed(older, "")], next: null };
+        : {
+            // Read through a connection: core says when it was last read.
+            sources: [{ ...listed(older, ""), readAt: lastReadAt }],
+            next: null,
+          };
     },
     versions: async (source: BrainSourceRef) => {
       await Promise.resolve();
@@ -699,7 +707,7 @@ describe(SourcesPage, () => {
     vi.unstubAllGlobals();
   });
 
-  it("lists the sources core gives a page at a time, and opens one at its newest version, then an older one", async () => {
+  it("lists the sources core gives a page at a time, says when one read through a connection was last read, and opens one at its newest version, then an older one", async () => {
     const { calls } = await shown([]);
     await press("Show more");
     const listedText = document.body.textContent;
@@ -718,12 +726,17 @@ describe(SourcesPage, () => {
         "Those marked Only you are yours alone",
       ].map((text) => listedText.includes(text)),
       moreGone: listedText.includes("Show more"),
+      // Once, for the one source core gave a read time, in the page's
+      // own date format.
+      lastRead: listedText.split(`Last read ${formatDateTime(lastReadAt)}`)
+        .length,
       newest: newest.includes("Invoices are paid on Fridays."),
       oldest: oldest.includes("Invoices are paid monthly."),
       calls,
     }).toStrictEqual({
       listed: [true, true, true, true, true, true],
       moreGone: false,
+      lastRead: 2,
       newest: true,
       oldest: true,
       calls: [
@@ -926,8 +939,8 @@ describe(SourcesPage, () => {
     expect({ feeds, none }).toStrictEqual({
       feeds:
         "How your connections feed the Brain" +
-        "The Brain keeps one Gmail message or attachment, one OneNote page, or the answer of a read in an app that holds your own things, when an agent reads it for you through an account you connected yourself, and keeps it for you alone. Everything else agents search live when you ask, and the Brain keeps nothing of it." +
-        "GmailThe Brain may keep some of what an agent reads for you from this." +
+        "When an agent reads for you through an account you connected yourself, the Brain keeps what it read for you alone, while that account stays connected: one Gmail message or attachment, one OneNote page, or the answer of a read in another app, the company’s records included. Everything else agents search live when you ask, and the Brain keeps nothing of it." +
+        "GmailThe Brain may keep, for you alone, some of what an agent reads for you through this connection, while it stays connected." +
         "Microsoft 365Searched live, nothing kept." +
         "HubSpotSearched live, nothing kept.",
       none: "How your connections feed the BrainYou have no connections yet.",

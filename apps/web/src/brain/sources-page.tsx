@@ -828,11 +828,12 @@ const ConnectionFeeds = ({ connections }: { connections: Connection[] }) => {
         <>
           <p className="text-muted-foreground text-sm">
             <Trans>
-              The Brain keeps one Gmail message or attachment, one OneNote page,
-              or the answer of a read in an app that holds your own things, when
-              an agent reads it for you through an account you connected
-              yourself, and keeps it for you alone. Everything else agents
-              search live when you ask, and the Brain keeps nothing of it.
+              When an agent reads for you through an account you connected
+              yourself, the Brain keeps what it read for you alone, while that
+              account stays connected: one Gmail message or attachment, one
+              OneNote page, or the answer of a read in another app, the
+              company’s records included. Everything else agents search live
+              when you ask, and the Brain keeps nothing of it.
             </Trans>
           </p>
           <ul className="flex flex-col gap-2 text-sm">
@@ -842,8 +843,9 @@ const ConnectionFeeds = ({ connections }: { connections: Connection[] }) => {
                 <span className="text-muted-foreground">
                   {keepsReads === true ? (
                     <Trans>
-                      The Brain may keep some of what an agent reads for you
-                      from this.
+                      The Brain may keep, for you alone, some of what an agent
+                      reads for you through this connection, while it stays
+                      connected.
                     </Trans>
                   ) : (
                     <Trans>Searched live, nothing kept.</Trans>
@@ -958,6 +960,8 @@ const SourceLine = ({
   onPick: () => void;
 }) => {
   const { versions } = listed;
+  const lastRead =
+    listed.readAt === undefined ? undefined : formatDateTime(listed.readAt);
   return (
     <Item
       onClick={onPick}
@@ -985,6 +989,11 @@ const SourceLine = ({
             </Badge>
           ) : null}
           <span>{formatDateTime(listed.addedAt)}</span>
+          {lastRead === undefined ? null : (
+            <span>
+              <Trans>Last read {lastRead}</Trans>
+            </span>
+          )}
           <span>
             <Plural one="# version" other="# versions" value={versions} />
           </span>

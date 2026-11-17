@@ -32,9 +32,11 @@ type Mutable<T> = { -readonly [Key in keyof T]: T[Key] };
 // How a passage was found: the same four ways.
 expectTypeOf<BrainFound>().toEqualTypeOf<FoundBy>();
 
-// A passage: the Brain's, apart from how its source is named.
+// A passage: the Brain's, apart from how its source is named, and when
+// its version was last read where it lives, which is what an agent read
+// for its person and never code's (core's brain-recall.ts leaves it out).
 expectTypeOf<Mutable<Omit<BrainPackItem, "source">>>().toEqualTypeOf<
-  Omit<PackItem, "source">
+  Omit<PackItem, "source" | "readAt">
 >();
 
 // The pack: the same fields, apart from its items, and passages alone:
