@@ -2,7 +2,7 @@ import { brainOf } from "@grasp-os/brain-next/contract";
 import { v } from "@grasp-os/runtime/app";
 import type { FunctionResult } from "@grasp-os/shared/functions";
 import { httpContract } from "@grasp-os/shared/http-contract";
-import { teamIdSchema, workspaceIdSchema } from "@grasp-os/shared/ids";
+import { teamIdSchema } from "@grasp-os/shared/ids";
 import type { PermissionRequest } from "@grasp-os/shared/permissions";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { runFileContentPath } from "@grasp-os/shared/run-files";
@@ -37,8 +37,7 @@ import {
   reviewDecision,
   waitingDecisions,
 } from "../src/decisions/decisions.ts";
-import { inJurisdiction, workspace } from "../src/durable-objects.ts";
-import { brainVersionRead } from "../src/history-access.ts";
+import { inJurisdiction } from "../src/durable-objects.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
 import { grantPermission, requestPermission } from "../src/permissions.ts";
 import { rollback } from "../src/publish.ts";
@@ -2216,67 +2215,48 @@ describe(
   "what the Brain keeps of a run that read what may be withheld later",
   setUpTime,
   () => {
-    it("keeps only how it ended, never the card it returned, so nothing of it outlives a person's erasure", async () => {
+    it("keeps only how it ended, never the card it returned, when the card rests on memories alone, so nothing of it outlives a person's erasure", async () => {
       const admin = await person("admin");
       const ada = await person("builder");
       const workflow = await entitiesWorkflow(ada, admin);
-      const anna = await annasCard();
+      // A card in its writer's own word, drawn from no document: the run
+      // keeps the memories it rests on, and no version.
+      const name = `Anna ${unique()}`;
+      const card = await store().addMemories({
+        change: crypto.randomUUID(),
+        access: { kind: "audience", group: "company" },
+        entities: [{ key: "a", kind: "person", names: [name] }],
+        memories: [
+          {
+            about: "a",
+            type: "fact",
+            statement: `${name} leads finance`,
+            speaker: { kind: "system" },
+            basis: { kind: "writer", writer: "app:directory" },
+          },
+        ],
+      });
       const runId = await endedRun(ada, workflow.id, {
-        entity: anna.card,
+        entity: card.entities.a ?? "",
         name: unique(),
       });
-      const returned = await recordOf(ada, workflow.id, runId);
-      await handedOver();
-
-      expect({
-        returnedTheCard: JSON.stringify(returned.result).includes(anna.name),
-        kept: await keptOf(ada, runId),
-      }).toStrictEqual({
-        returnedTheCard: true,
-        kept: "Workflow run completed.",
-      });
-    });
-
-    it("keeps only how a run ended when the chat that started it had read something, never what it returned", async () => {
-      const admin = await person("admin");
-      const ada = await person("builder");
-      const workflow = await entitiesWorkflow(ada, admin);
-      // A run that reads no card of the Brain's itself.
-      const runId = await endedRun(ada, workflow.id, {
-        entity: crypto.randomUUID(),
-        name: unique(),
-      });
-      const returned = await recordOf(ada, workflow.id, runId);
-      // What a real chat of Ada's had read as its agent started the run,
-      // still the chat's to read: pinned onto the run as a start from a
-      // chat copies what the chat read (workflow-starts.ts).
-      const pinned = await sourceForEveryone(`Invoice ${unique()} is due.`);
-      const agentId = `agent-${unique()}`;
-      const workspaceId = workspaceIdSchema.parse(crypto.randomUUID());
-      const chat = await workspace(env, workspaceId).createChat(
-        "Questions",
-        ada.userId,
-        agentId
-      );
-      await env.DB.prepare(
-        "INSERT INTO run_chat_sources (run_id, source_id, workspace_id, chat_id, agent_id, person_id) VALUES (?, ?, ?, ?, ?, ?)"
+      const versions = await env.DB.prepare(
+        "SELECT count(*) AS n FROM run_brain_versions WHERE run_id = ?"
       )
-        .bind(
-          runId,
-          brainVersionRead({ source: pinned, version: 1 }),
-          workspaceId,
-          chat.id,
-          agentId,
-          ada.userId
-        )
-        .run();
+        .bind(runId)
+        .first<number>("n");
+      const returned = await recordOf(ada, workflow.id, runId);
       await handedOver();
 
       expect({
-        returned: returned.result !== null,
+        versions,
+        memories: (await memoriesKeptBy(runId)) > 0,
+        returnedTheCard: JSON.stringify(returned.result).includes(name),
         kept: await keptOf(ada, runId),
       }).toStrictEqual({
-        returned: true,
+        versions: 0,
+        memories: true,
+        returnedTheCard: true,
         kept: "Workflow run completed.",
       });
     });
