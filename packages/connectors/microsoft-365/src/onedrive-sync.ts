@@ -70,15 +70,25 @@ import {
 // that explicitly have sharing changes", and delta returns "only items
 // with direct changes … and the parent hierarchy of the changed items"
 // (https://learn.microsoft.com/en-us/onedrive/developer/rest-api/concepts/scan-guidance):
-// when a folder is unshared, the folder comes back, not its files. So a
-// folder (not the drive's root) that comes after the first listing with a
-// `sharing` facet lists the drive again (`sync.restart`): delta has no
+// when a folder is unshared, the folder comes back, not its files. "In
+// cases where the sharing change is to remove sharing from an item you
+// will find an empty sharing facet" (the same page). So a folder (not the
+// drive's root) that comes after the first listing with an EMPTY sharing
+// facet relists the drive, which reads every file's permissions again:
+// first the round of changes it came in is read to its end, so nothing
+// that round holds is lost, then the drive is listed again, then caught up
+// from when that listing began. A facet that isn't empty (a share added
+// or changed, or a root of a hierarchy that merely came in the feed) is
+// no reason: readers missing or stale there are on the safe side until
+// the daily relisting below. And at most one relisting per listing: while
+// one is pending or under way, up to the end of its catch-up, another
+// empty facet is left to the daily relisting, so a feed that sends them
+// more often than documented can't keep the sync relisting. Delta has no
 // documented read of one folder's files, and walking its children would
-// need a stack no cursor holds. The cost is a whole relisting, every
-// file's permissions and content again, each time a shared folder itself
-// changes. Parents of a changed file are asked to stay out of the feed
-// (`deltaExcludeParent`, a request header the same page documents), so a
-// change to a file inside a shared folder doesn't relist the drive.
+// need a stack no cursor holds; the cost of a relisting is every file's
+// permissions and content again. Parents of a changed file are asked to
+// stay out of the feed (`deltaExcludeParent`, a request header the delta
+// page documents).
 //
 // Where Microsoft gives no signal (below), the sync run in core relists
 // every connection in full once a day (PR I), so a reader list is at most
@@ -98,8 +108,9 @@ import {
 //   without a `sharing` facet when it inherits, and its files don't come
 //   ("renaming a folder doesn't result in any descendants of the folder
 //   being returned"): at most a day stale.
-// - Whether Graph honours `deltaExcludeParent`. If not, every change in a
-//   shared folder relists the drive: correct, and costly.
+// - Whether Graph honours `deltaExcludeParent`. If not, the parents of
+//   changed files come in the feed too; only an empty sharing facet on
+//   one relists the drive, at most once per listing.
 // - That a delta token read again answers the same entries in the same
 //   order, less those changed since, which moved to later. A page that
 //   stopped part-way goes on after the last entry it handled, matched by
@@ -203,19 +214,34 @@ interface Handled {
 }
 
 /**
+ * How a round of changes treats a folder unshared: `watch` relists the
+ * drive at the round's end (`pending` from then on), and while one is
+ * pending or its listing's catch-up is under way (`quiet`), another is
+ * left to the daily relisting.
+ */
+type Mode = "watch" | "pending" | "quiet";
+
+const modes: Readonly<Record<string, Mode>> = {
+  w: "watch",
+  p: "pending",
+  q: "quiet",
+};
+
+/**
  * Where a read is: listing the drive, with the delta token to read from
- * (none: from the start), and when the listing began, as Graph's clock
- * said; or reading its changes from a token. Either way, the entry of
- * that token's page already handled.
+ * (none: from the start), when the listing began, as Graph's clock said,
+ * and whether it is a relisting; or reading its changes from a token, in
+ * a mode. Either way, the entry of that token's page already handled.
  */
 type Position =
   | {
       phase: "list";
       token: string | null;
       began: string | null;
+      relist: boolean;
       after: Handled | null;
     }
-  | { phase: "changes"; token: string; after: Handled | null };
+  | { phase: "changes"; token: string; mode: Mode; after: Handled | null };
 
 const base64url = /^[\w-]*$/u;
 
@@ -243,14 +269,15 @@ const decode = (value: string): string => {
 };
 
 /**
- * The cursor of a position: `l.<token>.<began>` while listing,
- * `c.<token>` after, and, inside a page, `.<id>.<eTag>`.
+ * The cursor of a position: `l.<token>.<began>.<r|n>` while listing (a
+ * relisting or not), `c.<token>.<w|p|q>` after (its mode), and, inside a
+ * page, `.<id>.<eTag>`.
  */
 const cursorOf = (position: Position): string => {
   const at =
     position.phase === "list"
-      ? `l.${encode(position.token ?? "")}.${encode(position.began ?? "")}`
-      : `c.${encode(position.token)}`;
+      ? `l.${encode(position.token ?? "")}.${encode(position.began ?? "")}.${position.relist ? "r" : "n"}`
+      : `c.${encode(position.token)}.${position.mode.charAt(0)}`;
   const { after } = position;
   return after === null
     ? at
@@ -273,32 +300,44 @@ const handledOf = (parts: readonly string[]): Handled | null => {
 const positionOf = (cursor: string): Position => {
   const [phase, token, ...rest] = cursor.split(".");
   if (phase === "l" && token !== undefined) {
-    const [began, ...handled] = rest;
+    const [began, relist, ...handled] = rest;
+    if (relist !== "r" && relist !== "n") {
+      throw notOurs();
+    }
     const decoded = decode(token);
     const since = decode(began ?? "");
     return {
       phase: "list",
       token: decoded === "" ? null : decoded,
       began: since === "" ? null : since,
+      relist: relist === "r",
       after: handledOf(handled),
     };
   }
   if (phase === "c" && token !== undefined) {
+    const [flag = "", ...handled] = rest;
     const decoded = decode(token);
-    if (decoded === "") {
+    const mode = Object.hasOwn(modes, flag) ? modes[flag] : undefined;
+    if (decoded === "" || mode === undefined) {
       throw notOurs();
     }
-    return { phase: "changes", token: decoded, after: handledOf(rest) };
+    return {
+      phase: "changes",
+      token: decoded,
+      mode,
+      after: handledOf(handled),
+    };
   }
   throw notOurs();
 };
 
 /**
  * The delta token a link Graph handed back carries, in each form Graph
- * writes it: `delta(token='…')`, `delta?(token='…')` (the delta page's own
- * example), or `?token=…`. The link itself is never followed.
+ * writes it: `delta(token='…')`, `delta(token=…)` and `delta?(token='…')`
+ * (the delta page's own examples), or `?token=…`. The link itself is never
+ * followed.
  */
-const quotedToken = /\(token='(?<token>[^']+)'\)/u;
+const quotedToken = /\(token='?(?<token>[^')]+)'?\)/u;
 
 const tokenOf = (link: string): string => {
   let url: URL;
@@ -325,6 +364,12 @@ interface Room {
   requests: number;
   bytes: number;
   deadline: number;
+  /**
+   * Whether no entry is handled yet: the page's first takes a file late
+   * past the deadline without its content, so every read moves on; any
+   * later one is left to the next page.
+   */
+  first: boolean;
 }
 
 /** A GET to Graph: its answer, or the ToolError a failure stands for. */
@@ -510,6 +555,12 @@ const noRoom = (room: Room): Read =>
   isEmpty(room) ? { content: null } : "full";
 
 /**
+ * Past the page's deadline before a file's content came: the page's first
+ * entry comes without it, any later one is left to the next page.
+ */
+const late = (room: Room): Read => (room.first ? { content: null } : "full");
+
+/**
  * A file's download and its bytes, given up at the page's deadline: a slow
  * file never holds a page past it.
  */
@@ -551,14 +602,14 @@ const contentOf = async (room: Room, entry: Entry): Promise<Read> => {
     return { content: null };
   }
   if (Date.now() >= room.deadline) {
-    return noRoom(room);
+    return late(room);
   }
   const bytes = await download(
     room,
     graphUrl(`${drive}/items/${segment(entry.id)}/content`)
   );
   if (bytes === "late") {
-    return noRoom(room);
+    return late(room);
   }
   if (bytes instanceof Response) {
     if (isUnreadable(bytes)) {
@@ -692,15 +743,16 @@ const lastOfEach = (items: readonly SyncItem[]): SyncItem[] => {
 };
 
 /**
- * Whether an entry says the readers its files inherit may have changed: a
- * folder, not the drive's root, with a `sharing` facet (see above).
+ * Whether an entry says a folder was unshared: a folder, not the drive's
+ * root, with an empty `sharing` facet (see above).
  */
-const isSharedFolder = (entry: Entry): boolean =>
+const isUnsharedFolder = (entry: Entry): boolean =>
   entry.folder !== undefined &&
   entry.folder !== null &&
   (entry.root === undefined || entry.root === null) &&
-  entry.sharing !== undefined &&
-  entry.sharing !== null;
+  typeof entry.sharing === "object" &&
+  entry.sharing !== null &&
+  Object.keys(entry.sharing).length === 0;
 
 /**
  * Where the feed goes on once Graph's page is done: its next page, or,
@@ -729,12 +781,35 @@ const nextOf = (
   }
   if (position.phase === "list" && own.driveType !== "personal") {
     return {
-      position: { phase: "changes", token: began ?? "", after: null },
+      position: {
+        phase: "changes",
+        token: began ?? "",
+        mode: position.relist ? "quiet" : "watch",
+        after: null,
+      },
+      more: true,
+    };
+  }
+  if (position.phase === "changes" && position.mode === "pending") {
+    // The round read to its end: the drive is listed again.
+    return {
+      position: {
+        phase: "list",
+        token: null,
+        began: null,
+        relist: true,
+        after: null,
+      },
       more: true,
     };
   }
   return {
-    position: { phase: "changes", token: tokenOf(end), after: null },
+    position: {
+      phase: "changes",
+      token: tokenOf(end),
+      mode: "watch",
+      after: null,
+    },
     more: false,
   };
 };
@@ -748,6 +823,7 @@ const readPage = async (
     requests: syncPageLimits.requests,
     bytes: syncPageLimits.contentBytes,
     deadline,
+    first: true,
   };
   // https://learn.microsoft.com/en-us/graph/api/drive-get?view=graph-rest-1.0
   const own = await getJson(
@@ -757,13 +833,18 @@ const readPage = async (
   );
   const { time, feed } = await feedPage(room, position.token);
   const entries = feed.value;
-  if (position.phase === "changes" && entries.some(isSharedFolder)) {
-    throw new RestartSyncError("A folder's sharing changed");
-  }
   // The listing began with its first page: Graph's time of that.
   const began = position.phase === "list" ? (position.began ?? time) : null;
   const here: Position =
-    position.phase === "list" ? { ...position, began } : position;
+    position.phase === "list"
+      ? { ...position, began }
+      : {
+          ...position,
+          mode:
+            position.mode === "watch" && entries.some(isUnsharedFolder)
+              ? "pending"
+              : position.mode,
+        };
   const start = startOf(entries, position.after);
   const items: SyncItem[] = [];
   let handled: Entry | null = null;
@@ -781,6 +862,7 @@ const readPage = async (
       items.push(item);
     }
     handled = entry;
+    room.first = false;
   }
   const done = handled === null ? start : entries.indexOf(handled) + 1;
   if (done < entries.length) {
@@ -830,7 +912,13 @@ export const onedriveSync = defineSync({
     }
     return await readPage(
       cursor === null
-        ? { phase: "list", token: null, began: null, after: null }
+        ? {
+            phase: "list",
+            token: null,
+            began: null,
+            relist: false,
+            after: null,
+          }
         : positionOf(cursor),
       deadline
     );
