@@ -327,6 +327,22 @@ describe("what the Brain kept from a shared connection", setUpTime, () => {
     });
   });
 
+  it("is closed to everyone the moment its connection is disconnected", async () => {
+    const { admin, member, connectionId } = await sharedWithTeam();
+    const marker = uniqueWord();
+    await kept(connectionId, "deal", `Deal ${marker}`);
+    const before = await finds(member, marker);
+    await admin.api.connections.disconnect(connectionId);
+    // Before connect's record of it is drained.
+    const audiences = await admin.api.connections.brainAudiences();
+
+    expect({
+      before,
+      after: await finds(member, marker),
+      audiences: audiences.filter((each) => each.connectionId === connectionId),
+    }).toStrictEqual({ before: true, after: false, audiences: [] });
+  });
+
   it("is owed until every record is erased when the Brain fails part-way, and only then recorded as done", async () => {
     const { admin, member, connectionId } = await sharedWithTeam();
     const marker = uniqueWord();

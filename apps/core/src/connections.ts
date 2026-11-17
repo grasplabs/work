@@ -237,9 +237,10 @@ const eraseCapturesSoon = async (
 /**
  * Takes away the Brain audience of the connection `connectionId`, just
  * disconnected (shared-reads.ts `forgetAudienceOf`): a failure is logged,
- * as the erasure that follows from connect's record takes it away too.
+ * never the disconnect's, as the erasure that follows from connect's
+ * record takes it away too.
  */
-const forgetAudienceSoon = async (
+const forgetAudienceNow = async (
   env: Env,
   connectionId: string
 ): Promise<void> => {
@@ -674,9 +675,9 @@ export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
     });
     waitUntil(eraseCapturesSoon(this.#env, person, connectionId));
     // A shared connection's records in the Brain: nobody reads them from
-    // now on, and connect's record of the disconnect erases them
-    // (shared-reads.ts, capture-erasures.ts).
-    waitUntil(forgetAudienceSoon(this.#env, connectionId));
+    // the moment this answers, and connect's record of the disconnect
+    // erases them (shared-reads.ts, capture-erasures.ts).
+    await forgetAudienceNow(this.#env, connectionId);
     return disconnected;
   }
 
