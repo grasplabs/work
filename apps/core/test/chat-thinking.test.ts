@@ -19,9 +19,9 @@ import {
   intake,
   mapped,
   openLink,
-  team,
+  sevenTeam,
+  sevenTold,
   ticketsReply,
-  told as peopleTold,
 } from "./onboarding-team.ts";
 import type { Ids } from "./onboarding-team.ts";
 import { signedInApi } from "./sign-in.ts";
@@ -60,11 +60,11 @@ const thinks = (input: Record<string, unknown>): Answer => ({
   outputTokens: 30,
 });
 
-/** A team through the onboarding, its claims and its tickets in the brain. */
+/** A team through the onboarding, its claims and its tickets in the brain: seven tell, as a team needs to have claims. */
 const teamInTheBrain = async (): Promise<Ids> => {
-  const ids = await team();
+  const ids = await sevenTeam();
   await mapped(ids);
-  await peopleTold(ids);
+  await sevenTold(ids);
   await answering(
     [ticketsReply(ids)],
     async () => await onboardingStore(env).drawNext()

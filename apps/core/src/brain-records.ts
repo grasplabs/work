@@ -603,30 +603,6 @@ export const purgeOnboardingRecords = async (
 };
 
 /**
- * The onboarding's statements of a team the brain holds now, by id
- * (`teamId` as the brain names it): what the team's claims, put together
- * anew, replace. Read from the brain's own records, so one the onboarding
- * no longer knows it gave is found too.
- */
-export const onboardingStatementsOf = async (
-  env: Env,
-  teamId: string
-): Promise<string[]> => {
-  const rows = await drizzle(env.DB)
-    .select({ id: brainRecords.id })
-    .from(brainRecords)
-    .where(
-      and(
-        eq(brainRecords.type, "statement"),
-        like(brainRecords.id, `${onboardingIdPrefix}st-%`),
-        sql`exists (select 1 from json_each(${brainRecords.body}, '$.teamIds') where value = ${teamId})`
-      )
-    )
-    .all();
-  return rows.map(({ id }) => id);
-};
-
-/**
  * The onboarding's drawings the brain holds now of the workflows
  * `workflowIds`, by id, each with its workflow: what a piece of work drawn
  * and checked anew replaces (GRA-1084).

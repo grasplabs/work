@@ -114,6 +114,54 @@ describe("what the Brain page says of the interviews", () => {
     ]);
   });
 
+  it("offers an admin to remove a statement whose source can be removed, never a team's claim", async () => {
+    const claim = statement(
+      "onb-claim-0123456789abcdef",
+      "Tickets come in through Zendesk."
+    );
+    // An admin's own record, from a source of theirs.
+    const notes: Source = {
+      id: "src-notes",
+      kind: "document",
+      title: "Notes",
+      date: "2026-10-20",
+      forgettable: true,
+    };
+    const added = {
+      ...statement("st-zendesk", "Zendesk holds every ticket."),
+      sourceId: notes.id,
+    };
+    const removed: string[] = [];
+    await shown(
+      <StatementsByKind
+        kern={{ interviewed: [], counts: [{ kind: "tool", count: 2 }] }}
+        onRemove={({ id }) => {
+          removed.push(id);
+        }}
+        rows={[
+          {
+            statement: claim,
+            place: { source: interviews, context: [], own: 0 },
+          },
+          { statement: added, place: { source: notes, context: [], own: 0 } },
+        ]}
+      />
+    );
+    const offered = [
+      ...document.querySelectorAll<HTMLElement>("[data-statement]"),
+    ].map((line) => ({
+      id: line.dataset.statement,
+      remove:
+        line.querySelector(
+          'button[aria-label="Remove this from the brain"]'
+        ) !== null,
+    }));
+    expect(offered).toStrictEqual([
+      { id: claim.id, remove: false },
+      { id: added.id, remove: true },
+    ]);
+  });
+
   it("shows a team's claim in plain words wherever it is named, and anyone's own words in quotation marks", () => {
     expect({
       claim: statementWords(

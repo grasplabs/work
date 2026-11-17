@@ -26,7 +26,10 @@ export const StatementsByKind = ({
   kern: Kern;
   rows: StatementRow[];
   activeId?: string | undefined;
-  /** Takes one statement out of the brain, for whoever may. */
+  /**
+   * Takes one statement out of the brain, for whoever may: offered on one
+   * whose source can be taken out (`forgettable`).
+   */
   onRemove?: ((statement: Statement) => void) | undefined;
 }) => {
   const { t } = useLingui();
@@ -72,7 +75,13 @@ export const StatementsByKind = ({
                 .map((row) => (
                   <StatementLine
                     key={row.statement.id}
-                    onRemove={onRemove}
+                    // Only what an admin's own records said: a team's claim
+                    // stands while five of its people back it (GRA-1748).
+                    onRemove={
+                      row.place.source.forgettable === true
+                        ? onRemove
+                        : undefined
+                    }
                     row={row}
                   />
                 ))}
