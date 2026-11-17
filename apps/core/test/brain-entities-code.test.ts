@@ -4,6 +4,7 @@ import { httpContract } from "@grasp-os/shared/http-contract";
 import { teamIdSchema } from "@grasp-os/shared/ids";
 import type { PermissionRequest } from "@grasp-os/shared/permissions";
 import type { Identity } from "@grasp-os/shared/rpc";
+import { runFileContentPath } from "@grasp-os/shared/run-files";
 import type {
   WorkflowCandidateRun,
   WorkflowResourceRun,
@@ -34,6 +35,7 @@ import { approveResourceBinding } from "../src/resource-bindings.ts";
 import { approveWorkflowBinding } from "../src/workflow-bindings.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
 import { editWorkflowDraft, workflowDraft } from "../src/workflow-editor.ts";
+import { workflowFiles } from "../src/workflow-own.ts";
 import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
 import { workflowStateOf } from "../src/workflow-state.ts";
@@ -58,7 +60,7 @@ import { fakeProviderFor } from "./model-provider.ts";
 import { noProducers } from "./no-producers.ts";
 import { appWith, person, seal } from "./sealed-apps.ts";
 import type { Fixture } from "./sealed-apps.ts";
-import { unique } from "./sign-in.ts";
+import { routed, unique } from "./sign-in.ts";
 import { testBinding } from "./test-env.ts";
 import { publishDefinition } from "./workflow-publishing.ts";
 
@@ -1654,16 +1656,17 @@ describe(
       });
     });
 
-    it("withholds a run's files that hold her card once her erasure lands, though they were written before it", async () => {
-      const admin = await person("admin");
-      const ada = await person("builder");
+    it("withholds a run's files that hold her card once her erasure lands, though written before it: off the workflow's files page, filled past them, off the run sheet, and not downloaded, as a missing file", async () => {
+      const people = jsonWorkflowAppsOf(idp);
+      const admin = await people.signedIn("admin");
+      const ada = await people.signedIn("builder");
       const anna = await annasCard();
       const filesKey = `files-${unique()}`;
-      await publishCatalogContract(env, admin, {
+      await publishCatalogContract(env, admin.acting, {
         key: filesKey,
         kind: "files",
       });
-      const workflow = await readThenWorkflow(ada, admin, {
+      const workflow = await readThenWorkflow(ada.acting, admin.acting, {
         permissions: { files: { runFiles: { contract: filesKey } } },
         after: [
           {
@@ -1672,39 +1675,106 @@ describe(
             files: "runFiles",
             action: "write",
             args: {
-              name: "card.md",
+              // Named after the card it read: what a page lists.
+              name: { $expr: '(card?.entity.name ?? "none") + ".md"' },
               type: "text/markdown",
               text: { $expr: 'card?.entity.name ?? ""' },
             },
           },
         ],
       });
-      await approveWorkflowBinding(env, admin, workflow.id, {
+      await approveWorkflowBinding(env, admin.acting, workflow.id, {
         alias: "runFiles",
         target: { kind: "files" },
         reviewed: { version: 1 },
       });
-      const runId = await startedRun(ada, workflow.id, {
+      // A run that read a card nobody erases, its file older, and with
+      // copies of it a whole page of files (100) besides hers.
+      const kept = await written(`Bert ${unique()}`);
+      const keptRun = await startedRun(ada.acting, workflow.id, {
+        entity: kept.entity,
+        name: unique(),
+      });
+      await endingOf(ada.acting, workflow.id, keptRun);
+      await env.DB.prepare(
+        `WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 99)
+        INSERT INTO workflow_run_files (id, run_id, workflow_resource_id, opened_by, open_key, name, type, size, sha256, state, created_at, finished_at, deleted_at)
+        SELECT lower(hex(randomblob(16))), run_id, workflow_resource_id, opened_by, open_key || '-' || i, name, type, size, sha256, state, created_at, finished_at - i, deleted_at
+        FROM workflow_run_files, n WHERE run_id = ?`
+      )
+        .bind(keptRun)
+        .run();
+      const hers = await startedRun(ada.acting, workflow.id, {
         entity: anna.card,
         name: unique(),
       });
-      const ended = await endingOf(ada, workflow.id, runId);
-      const listed = async () => {
-        const files = await runFilesFor(env, ada, workflow.id, runId);
-        return files?.map(({ name }) => name) ?? null;
+      const ended = await endingOf(ada.acting, workflow.id, hers);
+      const [herFile] =
+        (await runFilesFor(env, ada.acting, workflow.id, hers)) ?? [];
+      /** What `by` lists of the workflow's files: how many, how many of hers, whether any names her. */
+      const page = async (by: typeof ada) => {
+        const files = await workflowFiles(env, by.acting, workflow.id);
+        return {
+          files: files.length,
+          hers: files.filter(({ runId }) => runId === hers).length,
+          names: JSON.stringify(files).includes(anna.name),
+        };
       };
-      const before = await listed();
+      /** A download of `file` of run `run` by Ada, as her run sheet's link asks: its status. */
+      const download = async (run: string, file: string): Promise<number> => {
+        const response = await routed(
+          runFileContentPath(workflow.id, run, file),
+          {
+            headers: { cookie: ada.session, "sec-fetch-site": "same-origin" },
+          }
+        );
+        await response.body?.cancel();
+        return response.status;
+      };
+      const listedBefore = await runFilesFor(
+        env,
+        ada.acting,
+        workflow.id,
+        hers
+      );
+      const before = {
+        ada: await page(ada),
+        admin: await page(admin),
+        sheet: listedBefore?.length,
+        download: await download(hers, herFile?.id ?? ""),
+      };
 
       await erasePersonShared(env, {
         personId: anna.personId,
         email: anna.address,
       });
 
-      expect({ ended, before, after: await listed() }).toStrictEqual({
+      expect({
+        ended,
+        before,
+        after: {
+          ada: await page(ada),
+          admin: await page(admin),
+          sheet: await runFilesFor(env, ada.acting, workflow.id, hers),
+          download: await download(hers, herFile?.id ?? ""),
+        },
+        missing: await download(hers, crypto.randomUUID()),
+      }).toStrictEqual({
         ended: { status: "completed", error: null },
-        before: ["card.md"],
-        // Listed and downloaded by no one, as its result is withheld.
-        after: null,
+        before: {
+          ada: { files: 100, hers: 1, names: true },
+          admin: { files: 100, hers: 1, names: true },
+          sheet: 1,
+          download: 200,
+        },
+        after: {
+          // As if her run wrote none: the page filled past it.
+          ada: { files: 100, hers: 0, names: false },
+          admin: { files: 100, hers: 0, names: false },
+          sheet: null,
+          download: 404,
+        },
+        missing: 404,
       });
     });
 

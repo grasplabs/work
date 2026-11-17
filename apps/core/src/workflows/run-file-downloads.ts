@@ -36,7 +36,7 @@ import {
 } from "../db/core/schema.ts";
 import { errorResponse } from "../errors.ts";
 import { requireWorkflowRole } from "../workflow-resources.ts";
-import { requireEndedRunEvidenceReadable } from "./resource-reads.ts";
+import { runEvidenceHolds } from "./resource-reads.ts";
 import { detailsRemoved } from "./retention.ts";
 
 // Downloading a run's finished files from its run sheet (GRA-1306). A
@@ -112,33 +112,6 @@ interface Decided {
 }
 
 /**
- * Whether run `runId` of `workflow` may still read what it read
- * (resource-reads.ts): its files can hold that, so they go where its
- * result goes, withheld once it may not (GRA-1985), whatever was written
- * before. Decided again with the rest, before each chunk.
- */
-const evidenceReadable = async (
-  env: Env,
-  workflow: string,
-  runId: string,
-  principal: string
-): Promise<boolean> => {
-  try {
-    await requireEndedRunEvidenceReadable(env, {
-      runId,
-      workflowId: workflow,
-      principal,
-    });
-    return true;
-  } catch (error) {
-    if (workflowResourceErrors.codeOf(error) !== "brain.revoked") {
-      throw error;
-    }
-    return false;
-  }
-};
-
-/**
  * Whether `by` may download run `runId`'s files: undefined when they may
  * not see the run at all; not allowed once the run may no longer read
  * what it read.
@@ -181,7 +154,14 @@ const mayDownload = async (
     may:
       allowed &&
       !detailsRemoved(row) &&
-      (await evidenceReadable(env, workflow, runId, row.principalId)),
+      // Its files can hold what it read, so they go where its result
+      // goes: withheld once it may no longer read that (GRA-1985),
+      // whatever was written before. Decided again before each chunk.
+      (await runEvidenceHolds(env, {
+        runId,
+        workflowId: workflow,
+        principal: row.principalId,
+      })),
     own,
   };
 };

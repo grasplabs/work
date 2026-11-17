@@ -188,3 +188,24 @@ export const requireEndedRunEvidenceReadable = async (
 ): Promise<void> => {
   await requireOwnEvidenceReadable(env, run);
 };
+
+/**
+ * Whether run `run` may still read what it read
+ * (`requireEndedRunEvidenceReadable`): false once refused as
+ * `brain.revoked`, for a reader that leaves what it holds out (its files,
+ * listed or downloaded). Any other failure throws.
+ */
+export const runEvidenceHolds = async (
+  env: Env,
+  run: Pick<CallingRun, "runId" | "workflowId" | "principal">
+): Promise<boolean> => {
+  try {
+    await requireEndedRunEvidenceReadable(env, run);
+    return true;
+  } catch (error) {
+    if (workflowResourceErrors.codeOf(error) !== "brain.revoked") {
+      throw error;
+    }
+    return false;
+  }
+};
