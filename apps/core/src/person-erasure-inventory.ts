@@ -439,6 +439,10 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "onboarding.counted": { kept: "who was counted in the admin's numbers" },
   "onboarding.asked_about": { erased: "interview" },
   "onboarding.brain_sent": { erased: "interview" },
+  "onboarding.opinion_candidates": { erased: "interview" },
+  "onboarding.opinion_backers": { erased: "interview" },
+  "onboarding.opinion_teams": noPerson,
+  "onboarding.opinions_due": noPerson,
   "onboarding.interview_settings": { erased: "interview" },
   // An interview's (`link:<person>`) go with it; an admin's
   // (`admin:<user>`), hashes of what the voice said for them, go with
@@ -467,6 +471,9 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   },
   "onboarding.brain_drawings": {
     company: "a team's work as five or more told it, names out",
+  },
+  "onboarding.brain_opinions": {
+    company: "what five or more across the company say, no team, names out",
   },
   "onboarding.checked_differences": {
     company: "a team's difference five or more told each way, names out",
@@ -826,6 +833,8 @@ export const reviewedPersonColumns: Readonly<
   "onboarding.asked_about": ["person"],
   "onboarding.brain_interviews": ["person", "user_id"],
   "onboarding.brain_sent": ["person"],
+  "onboarding.opinion_candidates": ["person"],
+  "onboarding.opinion_backers": ["person"],
   "onboarding.counted": ["person"],
   "onboarding.interview_settings": ["person"],
   "onboarding.interview_states": ["person"],

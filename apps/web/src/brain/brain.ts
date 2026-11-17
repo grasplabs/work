@@ -18,7 +18,11 @@ import type {
   WorkflowStatus,
   Workspace,
 } from "@grasp-os/shared/brain";
-import { onboardingIdPrefix } from "@grasp-os/shared/brain-records";
+import {
+  companyOpinionIdPrefix,
+  companyOpinionsSourceId,
+  onboardingIdPrefix,
+} from "@grasp-os/shared/brain-records";
 import { i18n } from "@lingui/core";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg, plural, select, t } from "@lingui/core/macro";
@@ -926,12 +930,25 @@ export const isTeamClaim = (statementId: string): boolean =>
 export const statementWords = (statementId: string, text: string): string =>
   isTeamClaim(statementId) ? text : quoted(text);
 
-/** What a team's claim rests on, in words: for where `ClaimBasis` can't go, such as the Markdown export. */
-export const teamClaimBasis = (): string =>
-  t({
-    message: "Said by five or more people",
-    comment: "Under a statement put together from the interviews",
-  });
+/**
+ * Whether a statement is one of the company's opinions (GRA-1987): what
+ * five or more people across the company say, never a team's.
+ */
+export const isCompanyOpinion = (statementId: string): boolean =>
+  statementId.startsWith(companyOpinionIdPrefix);
+
+/** What a team's claim or a company's opinion rests on, in words: for where `ClaimBasis` can't go, such as the Markdown export. */
+export const teamClaimBasis = (statementId: string): string =>
+  isCompanyOpinion(statementId)
+    ? t({
+        message: "Said by five or more people across the company",
+        comment:
+          "Under a statement put together from what people across the company told, only counted anonymously",
+      })
+    : t({
+        message: "Said by five or more people",
+        comment: "Under a statement put together from the interviews",
+      });
 
 type Draft = Omit<
   Note,
@@ -1937,11 +1954,16 @@ export const buildBrain = (read: Workspace): Brain => {
   // still names it, such as a workflow's numbers, says it was removed.
   const ws: Workspace = {
     ...read,
-    sources: read.sources.map((source) =>
-      source.removedAt === undefined
-        ? source
-        : { ...source, title: t`Removed from the brain` }
-    ),
+    sources: read.sources.map((source) => {
+      if (source.removedAt !== undefined) {
+        return { ...source, title: t`Removed from the brain` };
+      }
+      // The company's opinions have one source, worded here in the
+      // reader's language.
+      return source.id === companyOpinionsSourceId
+        ? { ...source, title: t`What people across the company say` }
+        : source;
+    }),
   };
   const brainSources = ws.sources.filter(inBrain);
   // How the board steers the sprint: the budget for AI and who approves a new tool, each with its history.

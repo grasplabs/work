@@ -800,3 +800,91 @@ export const brainDrawings = sqliteTable(
     index("brain_drawings_team").on(table.team),
   ]
 );
+
+/**
+ * What one team's lines only counted anonymously say, put together
+ * (GRA-1987, onboarding/company-opinions.ts): a candidate for the
+ * company's opinions, one row for each person whose line was checked to
+ * say it. Read by nothing but the company's merge of them: never the
+ * Brain, a page, staff or a log, as one may rest on a single person. Goes
+ * with the person (`#erase`), and with what they said once it no longer
+ * counts.
+ */
+export const opinionCandidates = sqliteTable(
+  "opinion_candidates",
+  {
+    /** The candidate's id, from its team and its words. */
+    id: text().notNull(),
+    /** The team whose lines it was put together from: only so they are put together anew as one. */
+    team: text().notNull(),
+    text: text().notNull(),
+    person: text().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.id, table.person] }),
+    index("opinion_candidates_team").on(table.team),
+    index("opinion_candidates_person").on(table.person),
+  ]
+);
+
+/**
+ * What each team's candidates were put together from (`opinion_candidates`):
+ * a hash of exactly what the model was given, so a team whose lines didn't
+ * change asks no model again.
+ */
+export const opinionTeams = sqliteTable("opinion_teams", {
+  team: text().primaryKey(),
+  formedFrom: text("formed_from").notNull(),
+});
+
+/**
+ * Each opinion of the company given to the Brain (GRA-1987): what five or
+ * more people across the company say, in a company where seven or more
+ * have a line only counted anonymously, given to the Brain as a source of
+ * its own (`opinion:<source>`) under an id minted here each time it
+ * stands. It has no team. Who backs it is noted here alone
+ * (`opinion_backers`). Once a change drops it, it is marked to be erased
+ * (`erase`), then taken out of use and erased in the Brain, all before
+ * that change commits; the row goes once the Brain's erasure returned.
+ */
+export const brainOpinions = sqliteTable(
+  "brain_opinions",
+  {
+    /** The source's id in the Brain (`opinion:<source>`), minted here. */
+    source: text().primaryKey(),
+    /** The opinion's own id, from its words: whom it rests on is noted under it. */
+    record: text().notNull(),
+    /** What kind of thing it says, as the Brain page groups it. */
+    kind: text().$type<StatementKind>().notNull(),
+    text: text().notNull(),
+    /** The day it was put together (ISO 8601): the company's daily merge, never one person's moment. */
+    at: text().notNull(),
+    /** Whether it is to be erased: set once, never cleared. */
+    erase: integer({ mode: "boolean" }).notNull().default(false),
+  },
+  (table) => [index("brain_opinions_record").on(table.record)]
+);
+
+/** Who each of the company's opinions rests on (`brain_opinions.record`): never in the Brain. */
+export const opinionBackers = sqliteTable(
+  "opinion_backers",
+  {
+    record: text().notNull(),
+    person: text().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.record, table.person] }),
+    index("opinion_backers_person").on(table.person),
+  ]
+);
+
+/**
+ * When something new for the company's opinions came in (ISO 8601), one
+ * row while it waits: what came in on a day is put together once that day
+ * is over (`opinionsNext`), so no opinion shows right after one person's
+ * approval.
+ */
+export const opinionsDue = sqliteTable("opinions_due", {
+  id: integer().primaryKey(),
+  dueAt: text("due_at").notNull(),
+});

@@ -22,6 +22,7 @@ import {
   interviewPagePath,
   interviewProgressSchema,
   isErased,
+  neverShared,
   participationNotice,
   sharedWithTeam,
 } from "@grasp-os/shared/interview-links";
@@ -140,6 +141,7 @@ import {
   brainClaims,
   brainDrawings,
   brainInterviews,
+  brainOpinions,
   brainSent,
   brainTeams,
   countedPeople,
@@ -158,6 +160,10 @@ import {
   kickoff,
   links,
   onboarding,
+  opinionBackers,
+  opinionCandidates,
+  opinionsDue,
+  opinionTeams,
   participations,
   people,
   readbacks,
@@ -188,6 +194,15 @@ import { mailDomain, mailSends, sendMail } from "../mail.ts";
 import { forgetStored } from "../speech-cache.ts";
 import { intakeIds, intakeOf, withoutNames } from "./brain-intake.ts";
 import type { IntakeClaim, IntakeDrawing, TeamIntake } from "./brain-intake.ts";
+import {
+  candidateId,
+  candidateInputOf,
+  companyMayHaveOpinions,
+  companyOpinions,
+  opinionBackersMin,
+  teamCandidates,
+} from "./company-opinions.ts";
+import type { CandidateBrief } from "./company-opinions.ts";
 import { companyTeamsText } from "./company-teams.ts";
 import type { CompanyTeam } from "./company-teams.ts";
 import { storedDocumentReadingSchema } from "./document-reading.ts";
@@ -592,6 +607,8 @@ const linkCheckMs = 60 * 60 * 1000;
 const drawAfterMs = 15_000;
 /** How long a drawing that failed waits before it's tried again, each time; then it's given up. */
 const drawRetryMs = [60_000, 5 * 60_000, 30 * 60_000] as const;
+/** What a run of the company's opinions is noted as among the failures (`draw_failures`). */
+const opinionsItem = "opinions";
 /** And how soon the alarm goes on drawing the next thing. */
 const drawNextMs = 500;
 /** And how long before it retries delivering audit events, first and at most. */
@@ -787,7 +804,50 @@ export type OwedErasure =
       account: string;
       reason: "deleted" | "withdrawn";
     }
-  | { kind: "claim" | "drawing"; source: string; team: string };
+  | { kind: "claim" | "drawing"; source: string; team: string }
+  | { kind: "opinion"; source: string };
+
+/**
+ * An opinion of the company's that stands now (GRA-1987): not owed an
+ * erasure, as `standingClaim` for a team's claims.
+ */
+const standingOpinion = eq(brainOpinions.erase, false);
+
+/**
+ * An opinion of the company's standing now, as the Brain page shows it
+ * (`standingOpinions`): its words alone, never a team, nor who or how
+ * many back it.
+ */
+export interface StandingOpinion {
+  /** Its id in the Brain (`opinion:<source>`). */
+  source: string;
+  kind: StatementKind;
+  text: string;
+  /** The day the company's opinions were put together, for the page's source. */
+  at: string;
+}
+
+/**
+ * The one rule for whether an opinion of the company's resting on
+ * `backers` stands now (GRA-1987): the company has seven or more who may
+ * back one (`companyMayHaveOpinions`, the store's `#opinionTellers`), and
+ * five or more of `backers` are among them (`opinionBackersMin`). Noting
+ * opinions (`#noteOpinions`) and the recount (`#opinionsFalling`) both
+ * ask it.
+ */
+const opinionStands = (
+  backers: readonly string[],
+  tellers: ReadonlyMap<string, unknown>
+): boolean =>
+  companyMayHaveOpinions(tellers.size) &&
+  backers.filter((person) => tellers.has(person)).length >= opinionBackersMin;
+
+/** A day in milliseconds: the company's opinions are put together once in one. */
+const dayMs = 24 * 60 * 60 * 1000;
+
+/** The start (UTC) of the day after the one `at` (ISO 8601) falls in. */
+const nextDayOf = (at: string): number =>
+  Date.parse(`${at.slice(0, 10)}T00:00:00.000Z`) + dayMs;
 
 /**
  * When what the new Brain holds of someone's interview is to be decided
@@ -5147,6 +5207,7 @@ export class Onboarding extends DurableObject<Env> {
         await this.releaseDue();
       }
       await this.intakeNext();
+      await this.opinionsNext();
       await this.remindDue();
       await this.sendUpdate();
       await this.deliverMail();
@@ -5154,6 +5215,7 @@ export class Onboarding extends DurableObject<Env> {
       // Set again whatever failed above, so what is left is tried again.
       await this.#armLinks();
       await this.#armDrawing();
+      await this.#armOpinions();
     }
   }
 
@@ -6068,6 +6130,8 @@ export class Onboarding extends DurableObject<Env> {
       .values({ team, dueAt: at })
       .onConflictDoUpdate({ target: brainTeams.team, set: { dueAt: at } })
       .run();
+    // Whatever makes a team due may change what its people think too.
+    this.#opinionsDueAt(at);
     this.#armSoon();
   }
 
@@ -6090,6 +6154,7 @@ export class Onboarding extends DurableObject<Env> {
         await Promise.resolve();
         this.#arming = false;
         await this.#armDrawing();
+        await this.#armOpinions();
       })()
     );
   }
@@ -6659,7 +6724,7 @@ export class Onboarding extends DurableObject<Env> {
    * alone; what it holds is read when the hand-over runs.
    */
   #noteHandOver(
-    producer: "claim" | "drawing" | "kickoff" | "roster",
+    producer: "claim" | "drawing" | "kickoff" | "opinion" | "roster",
     id: string
   ): void {
     const at = new Date().toISOString();
@@ -6774,6 +6839,507 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /**
+   * The company's opinions standing now (`standingOpinion`, GRA-1987), as
+   * every member reads them on the Brain page, by the rule the hand-over
+   * adds them by (`opinionToHand`): each with its kind and words, in the
+   * order of its words, never by when, and never with a team or who or
+   * how many back it.
+   */
+  standingOpinions(): StandingOpinion[] {
+    return this.#db
+      .select({
+        source: brainOpinions.source,
+        kind: brainOpinions.kind,
+        text: brainOpinions.text,
+        at: brainOpinions.at,
+      })
+      .from(brainOpinions)
+      .where(standingOpinion)
+      .orderBy(asc(brainOpinions.text), asc(brainOpinions.source))
+      .all();
+  }
+
+  /**
+   * The opinion `source` as the hand-over adds it now: its sentence, only
+   * while it stands (`standingOpinion`). Null otherwise.
+   */
+  opinionToHand(source: string): { text: string } | null {
+    const [row] = this.#db
+      .select({ text: brainOpinions.text })
+      .from(brainOpinions)
+      .where(and(eq(brainOpinions.source, source), standingOpinion))
+      .all();
+    return row ?? null;
+  }
+
+  /**
+   * The lines `person` left only counted anonymously that count now
+   * (GRA-1987): approved, in an interview they agree to, never who does
+   * the work, which is only for knowing whom to ask. As the record keeps
+   * them.
+   */
+  #anonymousLines(person: string, agreed: ReadonlySet<string>): string[] {
+    if (!agreed.has(person)) {
+      return [];
+    }
+    return this.#admitted(person).flatMap((fact) =>
+      sharedWithTeam(fact) || fact.tag === neverShared ? [] : [fact.record]
+    );
+  }
+
+  /**
+   * Who may back the company's opinions now, with their lines only
+   * counted anonymously, by team: everyone on the list with such a line
+   * that counts, in a team taking part (not switched off, not waiting for
+   * the admin), leads too: a role says nothing in a company's opinion.
+   * The one rule for the company's floor and for whom an opinion rests on.
+   */
+  #opinionTellers(
+    roster: Roster | null = this.#roster()
+  ): Map<string, { team: string; lines: string[] }> {
+    if (roster === null) {
+      return new Map();
+    }
+    const waiting = this.#unconfirmed().teams;
+    const teamsTakingPart = new Set(
+      roster.teams.flatMap(({ id, off }) =>
+        off || waiting.has(id) ? [] : [id]
+      )
+    );
+    const agreed = this.#agreedPeople();
+    return new Map(
+      roster.people.flatMap(({ id, team }) => {
+        if (team === null || !teamsTakingPart.has(team)) {
+          return [];
+        }
+        const lines = this.#anonymousLines(id, agreed);
+        return lines.length === 0 ? [] : [[id, { team, lines }]];
+      })
+    );
+  }
+
+  /**
+   * The company's opinions that no longer stand (`opinionStands`) and
+   * may still be in use in the Brain, or that are owed their erasure and
+   * this object hasn't seen taken out: what any recount takes out before
+   * its change commits (`#recountStanding`). Opinions have no team, so
+   * every recount asks.
+   */
+  #opinionsFalling(): FallingSource[] {
+    const held = this.#db
+      .select({
+        source: brainOpinions.source,
+        record: brainOpinions.record,
+        erase: brainOpinions.erase,
+      })
+      .from(brainOpinions)
+      .all();
+    if (held.length === 0) {
+      return [];
+    }
+    const standing = held.filter(({ erase }) => !erase);
+    const tellers = standing.length === 0 ? new Map() : this.#opinionTellers();
+    return held.flatMap(({ source, record, erase }) => {
+      const id = { producer: "opinion" as const, id: source };
+      if (erase) {
+        return this.#mayBeInUse(id, erase) ? [id] : [];
+      }
+      const backers = this.#db
+        .select({ person: opinionBackers.person })
+        .from(opinionBackers)
+        .where(eq(opinionBackers.record, record))
+        .all()
+        .map(({ person }) => person);
+      return opinionStands(backers, tellers) ? [] : [id];
+    });
+  }
+
+  /**
+   * Marks the opinions `sources` to be erased, in the caller's
+   * transaction (`#fallenFirst`), and forgets whom those still standing
+   * rested on. The company's opinions are put together again at the next
+   * day's run: one others still back comes back then.
+   */
+  #opinionsFell(sources: readonly string[]): void {
+    if (sources.length === 0) {
+      return;
+    }
+    const fell = this.#db
+      .select({ record: brainOpinions.record })
+      .from(brainOpinions)
+      .where(and(inList(brainOpinions.source, sources), standingOpinion))
+      .all()
+      .map(({ record }) => record);
+    this.#db
+      .delete(opinionBackers)
+      .where(inList(opinionBackers.record, fell))
+      .run();
+    this.#db
+      .update(brainOpinions)
+      .set({ erase: true })
+      .where(inList(brainOpinions.source, sources))
+      .run();
+    this.#opinionsDueAt(new Date().toISOString());
+  }
+
+  /**
+   * Forgets, in the caller's transaction, every candidate and opinion
+   * `person` was behind: what they approved stopped counting, or they are
+   * erased. The recount of the change then takes out what that leaves
+   * under five (`#recountStanding`).
+   */
+  #forgetOpinionsOf(person: string): void {
+    this.#db
+      .delete(opinionCandidates)
+      .where(eq(opinionCandidates.person, person))
+      .run();
+    this.#db
+      .delete(opinionBackers)
+      .where(eq(opinionBackers.person, person))
+      .run();
+  }
+
+  /** Notes, in the caller's transaction, that something new for the company's opinions came in at `at`. */
+  #opinionsDueAt(at: string): void {
+    this.#db
+      .insert(opinionsDue)
+      .values({ id: 1, dueAt: at })
+      .onConflictDoUpdate({ target: opinionsDue.id, set: { dueAt: at } })
+      .run();
+  }
+
+  /**
+   * When the company's opinions are next to be put together: the start
+   * of the day after something new came in, or later while a failed run
+   * waits to be tried again. Null while nothing waits.
+   */
+  #opinionsWhen(): { dueAt: string; at: number; tries: number } | null {
+    const [due] = this.#db.select().from(opinionsDue).all();
+    if (due === undefined) {
+      return null;
+    }
+    const [failed] = this.#db
+      .select()
+      .from(drawFailures)
+      .where(eq(drawFailures.item, opinionsItem))
+      .all();
+    return {
+      dueAt: due.dueAt,
+      at: Math.max(
+        nextDayOf(due.dueAt),
+        failed === undefined ? 0 : Date.parse(failed.after)
+      ),
+      tries: failed?.tries ?? 0,
+    };
+  }
+
+  /**
+   * Sets the alarm for the next run of the company's opinions
+   * (`#opinionsWhen`). While the company has fewer than seven who may back
+   * one, a run would put nothing together: what is due is settled here,
+   * with no alarm, and comes due again with whatever adds one.
+   */
+  async #armOpinions(): Promise<void> {
+    const when = this.#opinionsWhen();
+    if (when === null) {
+      return;
+    }
+    if (!companyMayHaveOpinions(this.#opinionTellers().size)) {
+      this.ctx.storage.transactionSync(() => {
+        this.#db
+          .delete(opinionsDue)
+          .where(eq(opinionsDue.dueAt, when.dueAt))
+          .run();
+      });
+      return;
+    }
+    await this.#alarmBy(Math.max(when.at, Date.now() + drawNextMs));
+  }
+
+  /**
+   * Puts the company's opinions together (GRA-1987), once what came in on
+   * a day is over, so no opinion shows right after one person's approval:
+   * first each team whose lines changed since its candidates were put
+   * together, one team a call (`opinions:<team>`), then the company's
+   * merge of them (`opinions`). A company with fewer than seven who may
+   * back one asks no model. What fails is tried again after a minute,
+   * five and thirty, then given up until something new comes in. Returns
+   * what it did, or null.
+   */
+  async opinionsNext(now: number = Date.now()): Promise<string | null> {
+    return await this.#withBrain(async () => await this.#opinionsRun(now));
+  }
+
+  async #opinionsRun(now: number): Promise<string | null> {
+    const when = this.#opinionsWhen();
+    if (when === null || when.at > now) {
+      return null;
+    }
+    const at = new Date(now).toISOString();
+    try {
+      const team = await this.#formCandidates(at);
+      if (team !== null) {
+        return `${opinionsItem}:${team}`;
+      }
+      await this.#mergeOpinions(at);
+      this.ctx.storage.transactionSync(() => {
+        this.#db
+          .delete(drawFailures)
+          .where(eq(drawFailures.item, opinionsItem))
+          .run();
+        this.#db
+          .delete(opinionsDue)
+          .where(eq(opinionsDue.dueAt, when.dueAt))
+          .run();
+      });
+    } catch (error) {
+      const tries = when.tries + 1;
+      log.error("onboarding.opinions_failed", {
+        tries,
+        error: error instanceof Error ? error.name : "unknown",
+      });
+      const wait = drawRetryMs[tries - 1];
+      this.ctx.storage.transactionSync(() => {
+        if (wait === undefined) {
+          this.#db
+            .delete(drawFailures)
+            .where(eq(drawFailures.item, opinionsItem))
+            .run();
+          this.#db
+            .delete(opinionsDue)
+            .where(eq(opinionsDue.dueAt, when.dueAt))
+            .run();
+          return;
+        }
+        const after = new Date(now + wait).toISOString();
+        this.#db
+          .insert(drawFailures)
+          .values({ item: opinionsItem, tries, after })
+          .onConflictDoUpdate({
+            target: drawFailures.item,
+            set: { tries, after },
+          })
+          .run();
+      });
+    }
+    return opinionsItem;
+  }
+
+  /**
+   * Puts the candidates of the first team whose lines only counted
+   * anonymously changed since they were last put together
+   * (`candidateInputOf`), and keeps them in this store alone: the team,
+   * or null when every team's are current. A team that left the list
+   * takes its candidates with it. Nothing while the company has fewer
+   * than seven who may back an opinion: no model is asked.
+   */
+  async #formCandidates(at: string): Promise<string | null> {
+    const roster = this.#roster();
+    const listed = new Set((roster?.teams ?? []).map(({ id }) => id));
+    this.ctx.storage.transactionSync(() => {
+      for (const { team } of this.#db.select().from(opinionTeams).all()) {
+        if (!listed.has(team)) {
+          this.#db
+            .delete(opinionCandidates)
+            .where(eq(opinionCandidates.team, team))
+            .run();
+          this.#db
+            .delete(opinionTeams)
+            .where(eq(opinionTeams.team, team))
+            .run();
+        }
+      }
+    });
+    const tellers = this.#opinionTellers(roster);
+    if (roster === null || !companyMayHaveOpinions(tellers.size)) {
+      return null;
+    }
+    const formed = new Map(
+      this.#db
+        .select()
+        .from(opinionTeams)
+        .all()
+        .map(({ team, formedFrom }) => [team, formedFrom])
+    );
+    for (const { id: team } of roster.teams.toSorted((a, b) =>
+      a.id.localeCompare(b.id)
+    )) {
+      const brief: CandidateBrief = {
+        names: roster.people.map(({ name }) => name),
+        teamNames: roster.teams.map(({ name }) => name),
+        tellers: [...tellers].flatMap(([person, told]) =>
+          told.team === team ? [{ person, lines: told.lines }] : []
+        ),
+      };
+      // oxlint-disable-next-line no-await-in-loop -- a hash a team, until one changed
+      const input = await candidateInputOf(brief);
+      if (formed.get(team) === input) {
+        continue;
+      }
+      // Whose interviews it is put together from, before anything is
+      // awaited: anyone's that moves meanwhile counts for nothing of it.
+      const began = this.#interviewsOf(
+        brief.tellers.map(({ person }) => person)
+      );
+      // oxlint-disable-next-line no-await-in-loop -- one team a run
+      const candidates = await teamCandidates(
+        brief,
+        checksFor(this.env, (took) => {
+          this.meter(took, at);
+        })
+      );
+      // oxlint-disable-next-line no-await-in-loop -- one team a run
+      const ids = await Promise.all(
+        candidates.map(async ({ text }) => await candidateId(team, text))
+      );
+      this.ctx.storage.transactionSync(() => {
+        const gone = new Set(this.#goneSince(began));
+        this.#db
+          .delete(opinionCandidates)
+          .where(eq(opinionCandidates.team, team))
+          .run();
+        for (const [index, { text, people: on }] of candidates.entries()) {
+          for (const person of on.filter((each) => !gone.has(each))) {
+            this.#db
+              .insert(opinionCandidates)
+              .values({ id: ids[index] ?? "", team, text, person })
+              .onConflictDoNothing()
+              .run();
+          }
+        }
+        this.#db
+          .insert(opinionTeams)
+          .values({ team, formedFrom: input })
+          .onConflictDoUpdate({
+            target: opinionTeams.team,
+            set: { formedFrom: input },
+          })
+          .run();
+      });
+      return team;
+    }
+    return null;
+  }
+
+  /**
+   * Merges every team's candidates into the company's opinions
+   * (company-opinions.ts) and notes them (`#noteOpinions`): from the
+   * candidates' sentences alone, never a person or a team. Nothing while
+   * the company has fewer than seven who may back one: no model is asked,
+   * and the recount took out any held.
+   */
+  async #mergeOpinions(at: string): Promise<void> {
+    const roster = this.#roster();
+    const tellers = this.#opinionTellers(roster);
+    if (roster === null || !companyMayHaveOpinions(tellers.size)) {
+      return;
+    }
+    const byId = new Map<
+      string,
+      { id: string; text: string; people: string[] }
+    >();
+    for (const { id, text, person } of this.#db
+      .select()
+      .from(opinionCandidates)
+      .all()) {
+      if (!tellers.has(person)) {
+        continue;
+      }
+      const held = byId.get(id) ?? { id, text, people: [] };
+      held.people.push(person);
+      byId.set(id, held);
+    }
+    const candidates = [...byId.values()];
+    const began = this.#interviewsOf([
+      ...new Set(candidates.flatMap(({ people: on }) => on)),
+    ]);
+    const opinions = await companyOpinions(
+      {
+        candidates,
+        names: roster.people.map(({ name }) => name),
+        teamNames: roster.teams.map(({ name }) => name),
+        lines: [...tellers.values()].flatMap(({ lines }) => lines),
+      },
+      checksFor(this.env, (took) => {
+        this.meter(took, at);
+      })
+    );
+    await this.#fallenFirst(() => {
+      this.ctx.storage.transactionSync(() => {
+        const gone = new Set(this.#goneSince(began));
+        this.#noteOpinions(
+          opinions.map((opinion) => ({
+            ...opinion,
+            people: opinion.people.filter((person) => !gone.has(person)),
+          })),
+          at
+        );
+      });
+    });
+    // The opinions it noted reach the hand-over with their events.
+    this.#deliverAudit();
+  }
+
+  /**
+   * Notes, in the caller's transaction, that `opinions` are the company's
+   * opinions now (GRA-1987): each new one that stands (`opinionStands`)
+   * is to be written to the new Brain under a change key minted here, and
+   * whom it rests on is noted here alone. Each noted before that isn't one
+   * of them any more (no longer made, or no longer backed by five) falls:
+   * it is out of use in the Brain before this transaction commits
+   * (`SourcesFallError`, `#fallenFirst`).
+   */
+  #noteOpinions(
+    opinions: readonly {
+      record: string;
+      kind: StatementKind;
+      text: string;
+      people: readonly string[];
+    }[],
+    at: string
+  ): void {
+    const tellers = this.#opinionTellers();
+    const shown = opinions.filter(({ people: on }) =>
+      opinionStands(on, tellers)
+    );
+    const current = new Set(shown.map(({ record }) => record));
+    const held = this.#db
+      .select({ source: brainOpinions.source, record: brainOpinions.record })
+      .from(brainOpinions)
+      .where(standingOpinion)
+      .all();
+    const dropped = held.filter(({ record }) => !current.has(record));
+    if (dropped.length > 0) {
+      throw new SourcesFallError(
+        dropped.map(({ source }) => ({ producer: "opinion", id: source }))
+      );
+    }
+    const kept = new Set(held.map(({ record }) => record));
+    for (const { record, kind, text, people: on } of shown) {
+      // Whom it rests on is exactly who backs it now.
+      this.#db
+        .delete(opinionBackers)
+        .where(eq(opinionBackers.record, record))
+        .run();
+      for (const person of on) {
+        this.#db
+          .insert(opinionBackers)
+          .values({ record, person })
+          .onConflictDoNothing()
+          .run();
+      }
+      if (!kept.has(record)) {
+        const source = crypto.randomUUID();
+        this.#db
+          .insert(brainOpinions)
+          .values({ source, record, kind, text, at: at.slice(0, 10) })
+          .run();
+        this.#noteHandOver("opinion", source);
+      }
+    }
+  }
+
+  /**
    * The drawings standing now (`standingDrawing`), as every member reads
    * them on the Brain page (GRA-1748), by the rule the hand-over adds them
    * by (`drawingToHand`): each piece of work's one drawing, with its team
@@ -6862,11 +7428,13 @@ export class Onboarding extends DurableObject<Env> {
           ofTeams.add(now);
         }
       }
+      // The company's opinions have no team: any owed is every scope's.
       return this.owedErasures().filter((owed) =>
         "claims" in scope
-          ? owed.kind === "claim" || owed.kind === "drawing"
+          ? owed.kind !== "interview"
           : (owed.kind === "interview" &&
               this.#interviewPersonOf(owed.source) === scope.person) ||
+            owed.kind === "opinion" ||
             ((owed.kind === "claim" || owed.kind === "drawing") &&
               ofTeams.has(owed.team))
       );
@@ -6894,7 +7462,13 @@ export class Onboarding extends DurableObject<Env> {
       .where(eq(brainDrawings.erase, true))
       .all()
       .map(({ source, team }) => ({ kind: "drawing", source, team }));
-    return [...owedInterviews, ...claims, ...drawings];
+    const opinions: OwedErasure[] = this.#db
+      .select({ source: brainOpinions.source })
+      .from(brainOpinions)
+      .where(eq(brainOpinions.erase, true))
+      .all()
+      .map(({ source }) => ({ kind: "opinion", source }));
+    return [...owedInterviews, ...claims, ...drawings, ...opinions];
   }
 
   /**
@@ -7005,6 +7579,13 @@ export class Onboarding extends DurableObject<Env> {
           .delete(brainClaims)
           .where(
             and(eq(brainClaims.source, source), eq(brainClaims.erase, true))
+          )
+          .run();
+      } else if (kind === "opinion") {
+        this.#db
+          .delete(brainOpinions)
+          .where(
+            and(eq(brainOpinions.source, source), eq(brainOpinions.erase, true))
           )
           .run();
       } else {
@@ -7147,8 +7728,14 @@ export class Onboarding extends DurableObject<Env> {
    * (`#fallenFirst`).
    */
   #recountStanding(of: readonly (string | null)[] | "all"): void {
+    // The company's opinions have no team: every recount counts them
+    // (`#opinionsFalling`), whatever teams it names.
+    const opinions = this.#opinionsFalling();
     const named = of === "all" ? [] : of.filter((team) => team !== null);
     if (of !== "all" && named.length === 0) {
+      if (opinions.length > 0) {
+        throw new SourcesFallError(opinions);
+      }
       return;
     }
     const claims = this.#db
@@ -7183,6 +7770,9 @@ export class Onboarding extends DurableObject<Env> {
     );
     const standing = held.filter(({ erase }) => !erase);
     if (owed.length === 0 && standing.length === 0) {
+      if (opinions.length > 0) {
+        throw new SourcesFallError(opinions);
+      }
       return;
     }
     const roster = this.#roster();
@@ -7199,11 +7789,15 @@ export class Onboarding extends DurableObject<Env> {
         ? !this.#claimStands(team, resting, { roster, agreed, mayClaim })
         : !this.#drawingStands(team, resting, { roster, agreed, mayClaim });
     });
-    const out = [...owed, ...falling];
+    const out = [
+      ...[...owed, ...falling].map(({ producer, source }) => ({
+        producer,
+        id: source,
+      })),
+      ...opinions,
+    ];
     if (out.length > 0) {
-      throw new SourcesFallError(
-        out.map(({ producer, source }) => ({ producer, id: source }))
-      );
+      throw new SourcesFallError(out);
     }
   }
 
@@ -7391,6 +7985,7 @@ export class Onboarding extends DurableObject<Env> {
           .set({ erase: true })
           .where(inList(brainDrawings.source, ofProducer("drawing")))
           .run();
+        this.#opinionsFell(ofProducer("opinion"));
       });
       if (this.#removeFallen === undefined) {
         throw new Error("Nothing takes sources out of the Brain here.", {
@@ -7423,6 +8018,11 @@ export class Onboarding extends DurableObject<Env> {
       return await remove(sources);
     } catch (error) {
       this.#dueAgain(this.#teamsOf(sources));
+      if (sources.some(({ producer }) => producer === "opinion")) {
+        this.ctx.storage.transactionSync(() => {
+          this.#opinionsDueAt(new Date().toISOString());
+        });
+      }
       throw error;
     }
   }
@@ -8362,6 +8962,7 @@ export class Onboarding extends DurableObject<Env> {
           .run();
       }
       this.#db.delete(brainSent).where(eq(brainSent.person, person.id)).run();
+      this.#forgetOpinionsOf(person.id);
     }
     if (counts) {
       this.#db
@@ -8423,6 +9024,7 @@ export class Onboarding extends DurableObject<Env> {
     this.#queueSpokenOf(person);
     this.#forgetMapOf(person);
     this.#forgetDrawings(person);
+    this.#forgetOpinionsOf(person);
     this.#db.delete(interviews).where(eq(interviews.person, person)).run();
     this.#db
       .delete(interviewStates)

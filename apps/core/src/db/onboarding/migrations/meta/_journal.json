@@ -302,6 +302,13 @@
       "when": 1794922649743,
       "tag": "0042_team_results_from_shared_lines",
       "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "6",
+      "when": 1794925496131,
+      "tag": "0043_tough_nemesis",
+      "breakpoints": true
     }
   ]
 }

@@ -376,6 +376,7 @@ describe(
         "an upload for everyone": markerWord(),
         "a team's claim from the interviews": markerWord(),
         "a team's drawing from the interviews": markerWord(),
+        "the company's opinion from the interviews": markerWord(),
         "the company's vision from the kickoff": markerWord(),
         "the company's teams from its staff list": markerWord(),
       };
@@ -383,6 +384,7 @@ describe(
         "an upload for everyone": everyoneUploadMarker,
         "a team's claim from the interviews": claimMarker,
         "a team's drawing from the interviews": drawingMarker,
+        "the company's opinion from the interviews": opinionMarker,
         "the company's vision from the kickoff": kickoffMarker,
         "the company's teams from its staff list": rosterMarker,
       } = companyMarkers;
@@ -670,6 +672,15 @@ describe(
         drawingText,
         { kind: "members" },
         { producer: "drawing", id: crypto.randomUUID() }
+      );
+      // An opinion of the company's, from what five or more across it left
+      // only counted anonymously (GRA-1987): read as a claim is. Through a
+      // real hand-over in brain-next-opinions.test.ts.
+      const opinionText = `Company opinion ${sharedWord} ${opinionMarker}`;
+      const opinionId = await add(
+        opinionText,
+        { kind: "members" },
+        { producer: "opinion", id: crypto.randomUUID() }
       );
       // The holder's interview (GRA-1790): what they approved in it, theirs
       // alone, as the onboarding hands it over.
@@ -1068,6 +1079,11 @@ describe(
           source: drawingId,
           reader: outsider,
         },
+        opinion: {
+          marker: "the company's opinion from the interviews",
+          source: opinionId,
+          reader: outsider,
+        },
         kickoff: {
           marker: "the company's vision from the kickoff",
           source: kickoffSource,
@@ -1128,6 +1144,8 @@ describe(
         claimText,
         drawingMarker,
         drawingText,
+        opinionMarker,
+        opinionText,
         narrowedMarker,
         captureMarker,
         captureId,
@@ -1155,6 +1173,7 @@ describe(
         noneId,
         claimId,
         drawingId,
+        opinionId,
         narrowedId,
         ownUpload,
         teamUpload,
@@ -1220,6 +1239,7 @@ describe(
         handbook,
         claimText,
         drawingText,
+        opinionText,
         capped,
         secretTeam,
         teamSkillMarker,
@@ -1277,8 +1297,13 @@ describe(
         ),
         narrowedToHolder: "refused",
         // A member, so the team's claim and drawing from the interviews
-        // too (GRA-1748).
-        outsiderFinds: [handbook, claimText, drawingText].toSorted(),
+        // too (GRA-1748), and the company's opinions (GRA-1987).
+        outsiderFinds: [
+          handbook,
+          claimText,
+          drawingText,
+          opinionText,
+        ].toSorted(),
         holderFindsCapture: true,
         holderFindsToolkitCapture: true,
         cappedFinds: [{ text: capped, found: "exact" }],
@@ -1386,13 +1411,15 @@ describe(
                 world.everyoneUploadMarker,
                 world.claimMarker,
                 world.drawingMarker,
+                world.opinionMarker,
               ],
               hiddenVersions: [
                 ...asOutsider.hiddenVersions,
                 ...everyVersionOf(
                   world.everyoneUpload,
                   world.claimId,
-                  world.drawingId
+                  world.drawingId,
+                  world.opinionId
                 ),
               ],
               hiddenUploads: [
@@ -1724,6 +1751,7 @@ describe(
             world.noneMarker,
             world.claimMarker,
             world.drawingMarker,
+            world.opinionMarker,
             world.narrowedMarker,
             world.sharedMemoryMarker,
             ...holdersOwnProduced(world).markers,
@@ -1734,6 +1762,7 @@ describe(
             world.noneId,
             world.claimId,
             world.drawingId,
+            world.opinionId,
             ...holdersOwnProduced(world).sources
           ),
           hiddenInstructionFiles: [world.agentFile, world.appFile],
@@ -1751,6 +1780,8 @@ describe(
             world.claimMarker,
           "a team's drawing from the interviews, which code never gets":
             world.drawingMarker,
+          "the company's opinion from the interviews, which code never gets":
+            world.opinionMarker,
           "a source narrowed away from the outsider": world.narrowedMarker,
           ...holdersOwnProduced(world).forbidden,
         },
@@ -1799,6 +1830,7 @@ describe(
             world.noneMarker,
             world.claimMarker,
             world.drawingMarker,
+            world.opinionMarker,
             world.narrowedMarker,
             world.sharedMemoryMarker,
             ...holdersOwnProduced(world).markers,
@@ -1809,6 +1841,7 @@ describe(
             world.noneId,
             world.claimId,
             world.drawingId,
+            world.opinionId,
             ...holdersOwnProduced(world).sources
           ),
           hiddenInstructionFiles: [world.agentFile, world.appFile],
@@ -1828,6 +1861,8 @@ describe(
             world.claimMarker,
           "a team's drawing from the interviews, which code never gets":
             world.drawingMarker,
+          "the company's opinion from the interviews, which code never gets":
+            world.opinionMarker,
           "a source narrowed away from the outsider": world.narrowedMarker,
           ...holdersOwnProduced(world).forbidden,
         },

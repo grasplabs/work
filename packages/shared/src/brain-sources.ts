@@ -15,9 +15,10 @@ import { defineErrorFamily } from "./errors.ts";
  * Who added a source: an upload, a chat, a workflow run, what an agent
  * fetched through a connection (`capture`), the person's own interview,
  * a claim five or more of their team made in theirs, a drawing of a
- * team's piece of work from what five or more of its people told, the
- * company's vision from the onboarding's kickoff, or the company's teams
- * from its staff list.
+ * team's piece of work from what five or more of its people told, an
+ * opinion five or more people across the company hold, the company's
+ * vision from the onboarding's kickoff, or the company's teams from its
+ * staff list.
  */
 export type BrainSourceProducer =
   | "upload"
@@ -27,6 +28,7 @@ export type BrainSourceProducer =
   | "interview"
   | "claim"
   | "drawing"
+  | "opinion"
   | "kickoff"
   | "roster";
 
