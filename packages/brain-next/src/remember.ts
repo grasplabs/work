@@ -29,7 +29,12 @@ import {
   stampWrite,
 } from "./memories.ts";
 import { isOwnEntityRow, ownEntityRow } from "./own-entity.ts";
-import { isErasedPerson, namingOf, strippedOf } from "./people.ts";
+import {
+  isErasedPerson,
+  leavingOutCards,
+  namingOf,
+  strippedOf,
+} from "./people.ts";
 import type { Naming } from "./people.ts";
 import { CurrentTextsNeededError, heldIn, judgeLate } from "./quotes.ts";
 import type { CurrentText, CurrentTexts, Written } from "./quotes.ts";
@@ -635,7 +640,8 @@ export const writeAdd = (
   { key, hash, subjects, writers, restatements, naming }: AddHashes,
   texts: CurrentTexts = new Map()
 ): AddedMemories => {
-  const planned = planOf(asked);
+  // Refused as asked, before anything is left out of it.
+  planOf(asked);
   const { sql } = storage;
   {
     // Nothing is added while a restore runs (restoring.ts): it writes a
@@ -657,27 +663,34 @@ export const writeAdd = (
     }
     // An identifier a person's erasure closed (people.ts) is left out,
     // and the rest written: answered as for an identifier the store holds
-    // nowhere, so an add learns nothing of an erasure. Only extraction
+    // nowhere, so an add learns nothing of an erasure. Drawn from a source
+    // (a memory rests on a version, or it marks one extracted), the erased
+    // person's card is left out too, with what is about it or relates to
+    // it: it is answered for none of them. Only extraction
     // speaks for an internal person in the shared store, and it leaves out
     // what is in an erased person's word before it writes: one here is a
     // host's fault. A repeat of an add made before answers above, as it was.
     if (naming.speakers.some((person) => isErasedPerson(sql, person))) {
       throw refused("it is in the word of a person an erasure took");
     }
-    // Drawn from a source when a memory rests on a version, or it marks
-    // one extracted: a released identifier stays out of that for good.
     const drawn =
       asked.extracted !== undefined ||
       asked.memories.some(({ basis }) => basis.kind === "source");
     const adding: Adding = {
       ...asked,
-      entities: strippedOf(
-        sql,
-        asked.entities,
-        naming.identifiers,
-        drawn ? "drawn" : "written"
-      ).entities,
+      ...(drawn
+        ? leavingOutCards(sql, asked, naming.identifiers)
+        : {
+            entities: strippedOf(sql, asked.entities, naming.identifiers)
+              .entities,
+          }),
     };
+    const planned = planOf(adding);
+    const identified = new Set(
+      asked.entities.flatMap((entity) =>
+        entity.identifiers.length > 0 ? [entity.key] : []
+      )
+    );
     // The set is stored (read sets match readers by it); memories name it
     // by its key alone, never its row id.
     readerSetOf(db, adding.access);
@@ -687,7 +700,7 @@ export const writeAdd = (
       adding,
       readers,
       shared,
-      asked.entities.map(({ identifiers }) => identifiers.length > 0)
+      adding.entities.map((entity) => identified.has(entity.key))
     );
     const ids = rows.map(
       (row) =>

@@ -5,7 +5,6 @@
 import { brainOf, recallBudgetMax } from "@grasp-os/brain-next/contract";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -19,11 +18,7 @@ import {
   startBrainExport,
   workBrain,
 } from "../src/brain-next.ts";
-import {
-  members as memberships,
-  teamMembers,
-  teams,
-} from "../src/db/core/schema.ts";
+import { teamMembers, teams } from "../src/db/core/schema.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
 import { finishedByTheClock } from "./brain-next-own-store.ts";
 import { copyOfStore, restoreStore } from "./brain-next-store-copy.ts";
@@ -316,100 +311,6 @@ describe(
         done: true,
         herEntity: false,
         herMemories: [],
-      });
-    });
-
-    it("keeps their address again once an admin releases it to someone else", async () => {
-      const at = await annaAndBob();
-      await erased(at.admin, at.anna);
-      /** Whether a card written now with her old address is found by it. */
-      const keptByAddress = async () => {
-        const team = `team:${crypto.randomUUID()}`;
-        await shared().addMemories({
-          change: crypto.randomUUID(),
-          access: { kind: "audience", group: team },
-          entities: [
-            {
-              key: "n",
-              kind: "person",
-              names: [`Noor ${word()}`],
-              identifiers: [{ type: "email", value: at.address }],
-            },
-          ],
-          memories: [
-            {
-              about: "n",
-              type: "fact",
-              statement: `Noor joins finance ${at.marker}`,
-              speaker: { kind: "agent", agent: "app:hr" },
-              basis: { kind: "writer", writer: "app:hr" },
-            },
-          ],
-        });
-        const found = await shared().findEntities({
-          reader: { person: crypto.randomUUID(), groups: [team] },
-          identifier: { type: "email", value: at.address },
-        });
-        return found.entities.length;
-      };
-      const closed = await keptByAddress();
-      // An admin no longer one, though their session still says so: the
-      // release is refused, and the Brain keeps it closed.
-      const demoted = await signedInApi(idp, "admin");
-      await drizzle(env.DB)
-        .update(memberships)
-        .set({ role: "user" })
-        .where(eq(memberships.userId, demoted.userId));
-      const refused = await demoted.api.members.releaseAddress(at.address).then(
-        () => "released",
-        (error: unknown) =>
-          error instanceof Error ? error.message : String(error)
-      );
-      const stillClosed = await keptByAddress();
-      // The Brain fails as the release lands: the release stands, and the
-      // admin asking again finishes the Brain's part.
-      const brainStore = inJurisdiction(env, env.BRAIN_STORE).getByName(
-        "brain"
-      );
-      const holding = async (held: boolean) => {
-        await runInDurableObject(brainStore, (_instance, state) => {
-          state.storage.sql.exec(
-            held
-              ? `CREATE TRIGGER IF NOT EXISTS test_hold_release
-                  BEFORE UPDATE ON person_erasure_subjects
-                  BEGIN SELECT RAISE(ABORT, 'held by the test'); END`
-              : "DROP TRIGGER IF EXISTS test_hold_release"
-          );
-        });
-      };
-      await holding(true);
-      let first: string;
-      try {
-        first = await at.admin.api.members.releaseAddress(at.address).then(
-          () => "released",
-          () => "failed"
-        );
-      } finally {
-        await holding(false);
-      }
-      const meanwhile = await keptByAddress();
-      const again = await at.admin.api.members.releaseAddress(at.address);
-      expect({
-        closed,
-        refused,
-        stillClosed,
-        first,
-        meanwhile,
-        again,
-        open: await keptByAddress(),
-      }).toStrictEqual({
-        closed: 0,
-        refused: "Your role doesn't allow that.",
-        stillClosed: 0,
-        first: "failed",
-        meanwhile: 0,
-        again: { released: false },
-        open: 1,
       });
     });
 

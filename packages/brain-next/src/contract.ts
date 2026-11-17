@@ -1947,15 +1947,6 @@ export const sharedPersonErasureSchema = z.strictObject({
 export type SharedPersonErasure = z.infer<typeof sharedPersonErasureSchema>;
 
 /**
- * Identifiers a person's erasure closed, to release
- * (`Brain.reopenIdentifiers`): an admin gave each to someone else.
- */
-export const identifiersReopenSchema = z.strictObject({
-  identifiers: z.array(identifierSchema).min(1).max(namesPerEntityMax),
-});
-export type IdentifiersReopen = z.infer<typeof identifiersReopenSchema>;
-
-/**
  * Who confirmed a memory (`Memory.confirmed.by`) once a person's erasure
  * took who it was (`Brain.erasePersonShared`): the confirmation stands, so
  * the memory doesn't turn contested because someone left, and no
@@ -3021,28 +3012,14 @@ export interface Brain {
    * write leaves one out and writes the rest, answering as for an
    * identifier held nowhere; what is drawn from a source (extraction, a
    * write resting on a version, a restore of one) also leaves out a
-   * person's card holding one, and their word. `reopenIdentifiers`
-   * releases one to the host's and Apps' own writes alone. The sources
-   * stay. Safe to repeat: the same person is the same erasure, its
+   * person's card holding one, with what is about it or relates to it,
+   * and their word. Closed for good: nothing opens one again, also once
+   * the host gives the address to someone else. The sources stay. Safe to repeat: the same person is the same erasure, its
    * identifiers those of its first call. Returns only once its entry is in
    * the ledger: one that throws must be repeated. The shared store's
    * alone: a person's own store refuses.
    */
   erasePersonShared: (request: SharedPersonErasure) => Promise<void>;
-  /**
-   * Releases each of `identifiers` a person's erasure closed (erasure.ts
-   * `reopenIdentifiers`), once an admin gave it to someone else: from then
-   * on the host's and Apps' own writes keep it, so its next holder has a
-   * card; what is drawn from a source keeps leaving it out, for good.
-   * Recorded in the ledger before it applies, so a restore keeps it
-   * released after the erasure that closed it. What the erasure took stays
-   * erased. Answers how many it released: none for one nothing closed or
-   * released already, which writes nothing. One that throws released
-   * nothing, and is asked again. The shared store's alone.
-   */
-  reopenIdentifiers: (
-    request: IdentifiersReopen
-  ) => Promise<{ opened: number }>;
   /**
    * Whether a source was erased, from the store's record of its ledger
    * alone (`ErasureStatus`). For staff, who name what a client
@@ -3120,8 +3097,11 @@ export interface Brain {
    * object or names one of another kind, a value is missing or given to a
    * relation, a source version isn't one this store holds (erased ones
    * included), a person's own store is given anyone else's readers, or the
-   * change was added before with other memories. The same change again
-   * answers what it added.
+   * change was added before with other memories. An identifier a person's
+   * erasure closed is left out (`erasePersonShared`); when the add is
+   * drawn from a source, so is that person's card with what is about it
+   * or relates to it, which the answer then doesn't name. The same change
+   * again answers what it added.
    */
   addMemories: (memories: NewMemories) => Promise<AddedMemories>;
   /**

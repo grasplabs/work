@@ -816,8 +816,7 @@ const restoreMemory = async (
     const kept = strippedOf(
       sql,
       line.entities.map((entity) => ({ ...entity, key: entity.id })),
-      naming.identifiers,
-      line.source === null ? "written" : "drawn"
+      naming.identifiers
     ).entities;
     for (const { id, names, identifiers } of kept) {
       const entity = rows.get(id);

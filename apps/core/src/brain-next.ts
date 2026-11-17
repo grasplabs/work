@@ -1946,25 +1946,6 @@ export const erasePersonShared = async (
 };
 
 /**
- * Releases `email` in the shared store, if a member's erasure closed it
- * (`erasePersonShared`), once an admin gave the address to someone else
- * (person-erasure.ts `releaseAddress`): from then on the host's and Apps'
- * own writes keep it, so its next holder has a card; documents still
- * build or feed no person's card by it. What the erasure took stays
- * erased. Answers whether it released it now. One that throws released
- * nothing.
- */
-export const reopenAddress = async (
-  env: BrainEnv,
-  email: string
-): Promise<boolean> => {
-  const { opened } = await brain(env).reopenIdentifiers({
-    identifiers: [{ type: "email", value: checked(z.string().min(1), email) }],
-  });
-  return opened > 0;
-};
-
-/**
  * Erases every memory `writer` wrote in the shared store, learned up to
  * now (the Brain's `eraseWriter`): for an App whose data is reset or whose
  * store is deleted, `app:<id>`, as core names its code's writer. Hidden

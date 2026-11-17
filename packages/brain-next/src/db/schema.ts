@@ -1273,11 +1273,8 @@ export const memoryJudgingPlaces = sqliteTable("memory_judging_places", {
  * What a person's erasure closed (people.ts): each identifier the host gave
  * as theirs, by the SHA-256 of `identifier:<type>:<folded>`, and each
  * entity that was theirs, by `entity:<id>`. Closed, it is left out of every
- * write. Released (`released`, once an admin gave the address to someone
- * else: erasure.ts `reopenIdentifiers`), the host's and Apps' writes keep
- * it again, so its next holder has a card; extraction and a restore of
- * what a source said leave it out for good, so no document builds or feeds
- * a person's card by it again.
+ * write, for good: an admin releasing the address in core doesn't reopen
+ * it here.
  */
 export const personErasureSubjects = sqliteTable(
   "person_erasure_subjects",
@@ -1285,8 +1282,6 @@ export const personErasureSubjects = sqliteTable(
     subject: text().primaryKey(),
     /** The erasure that closed it (`erasures.key`). */
     erasure: text().notNull(),
-    /** Whether an admin released it (above). */
-    released: integer({ mode: "boolean" }).notNull().default(false),
   },
   (table) => [index("person_erasure_subjects_erasure_idx").on(table.erasure)]
 );
@@ -1302,14 +1297,4 @@ export const personErasureMemories = sqliteTable("person_erasure_memories", {
     .references(() => memories.row, { onDelete: "cascade" }),
   /** The erasure that hid it (`erasures.key`). */
   erasure: text().notNull(),
-});
-
-/**
- * An identifier a person's erasure closed, released (erasure.ts
- * `reopenIdentifiers`), by its ledger entry's key and time: so a replay
- * applies each once, and the next erasure's time is past it.
- */
-export const personErasureReopens = sqliteTable("person_erasure_reopens", {
-  key: text().primaryKey(),
-  at: integer().notNull(),
 });

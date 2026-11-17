@@ -32,7 +32,7 @@ import type {
 } from "./contract.ts";
 import { bucketCallMs } from "./embedding.ts";
 import { fileKeyOf, hashOf } from "./files.ts";
-import { isErasedPerson, namingOf, strippedOf } from "./people.ts";
+import { isErasedPerson, leavingOutCards, namingOf } from "./people.ts";
 import type { Naming } from "./people.ts";
 import { accessOfKey } from "./reader-sets.ts";
 import { hashesOf, writeAdd } from "./remember.ts";
@@ -961,37 +961,28 @@ const pieceNamingOf = async (adding: Candidates): Promise<Naming> =>
   );
 
 /**
- * `adding` as a person's erasure leaves it (people.ts): an entity of kind
- * `person` holding a closed identifier, a released one too, is their card,
+ * `adding` as a person's erasure leaves it (people.ts `leavingOutCards`):
+ * an entity of kind `person` holding a closed identifier is their card,
  * left out with the memories about it or relating to it; so are the
  * memories in their word; every other entity only loses a closed
  * identifier. Their sources stay, so nothing drawn from them again makes
- * or feeds their card, or the card of the address's next holder, and
- * nothing else of them is lost.
+ * or feeds their card, and nothing else of them is lost.
  */
 const leavingOutClosed = (
   sql: SqlStorage,
   adding: Candidates,
   naming: Naming
-): Candidates => {
-  const { entities, erased } = strippedOf(
+): Candidates =>
+  leavingOutCards(
     sql,
-    adding.entities,
-    naming.identifiers,
-    "drawn"
+    {
+      entities: adding.entities,
+      memories: adding.memories.filter(
+        (_memory, index) => !isErasedPerson(sql, naming.speakers[index])
+      ),
+    },
+    naming.identifiers
   );
-  return keeping(
-    entities,
-    adding.memories.filter(
-      (memory, index) =>
-        !(
-          erased.has(memory.about) ||
-          (memory.object !== undefined && erased.has(memory.object)) ||
-          isErasedPerson(sql, naming.speakers[index])
-        )
-    )
-  );
-};
 
 const writePiece = async (
   { storage, owner }: WorkContext,

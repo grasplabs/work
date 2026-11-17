@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "8493d58e-4521-4274-b317-ffbb4e4848d1",
+  "id": "30a4f2de-fc42-4248-b311-23c4fe40f869",
   "prevId": "44ec4096-f43d-40c2-a038-2fe584d43f87",
   "tables": {
     "chunk_days": {
@@ -1941,30 +1941,6 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
-    "person_erasure_reopens": {
-      "name": "person_erasure_reopens",
-      "columns": {
-        "key": {
-          "name": "key",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "at": {
-          "name": "at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
     "person_erasure_subjects": {
       "name": "person_erasure_subjects",
       "columns": {
@@ -1981,14 +1957,6 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
-        },
-        "released": {
-          "name": "released",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": false
         }
       },
       "indexes": {

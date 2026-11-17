@@ -23,7 +23,6 @@ import {
 } from "./memories.ts";
 import {
   applyPerson,
-  closedOf,
   foundForReplay,
   identifierSubjectOf,
   personSubjectOf,
@@ -152,15 +151,14 @@ export interface ErasureStore {
 
 /**
  * What is erased: a source, what a writer wrote, or what the shared store
- * derived about a person; or, not an erasure, an identifier a person's
- * erasure closed released (`reopen`: `reopenIdentifiers`).
+ * derived about a person.
  */
-type ErasureKind = "source" | "writer" | "person" | "reopen";
+type ErasureKind = "source" | "writer" | "person";
 
 /** An erasure, as the ledger holds it. */
 interface LedgerEntry {
   kind: ErasureKind;
-  /** The SHA-256 of the source's key, of the writer's lineage, of the person's id, or of the identifier released, in hex. */
+  /** The SHA-256 of the source's key, of the writer's lineage, or of the person's id, in hex. */
   subject: string;
   reason: ErasureReason;
   /**
@@ -222,7 +220,7 @@ const ledgerKeyOf = ({ at, kind, reason, subject }: LedgerEntry): string =>
   `${ledgerPrefix}${timeOf(at)}-${kind}-${reason}-${subject}`;
 
 const ledgerKeyPattern =
-  /^erasures\/(?<at>\d{15})-(?<kind>source|writer|person|reopen)-(?<reason>[a-z_]+)-(?<subject>[0-9a-f]{64})$/u;
+  /^erasures\/(?<at>\d{15})-(?<kind>source|writer|person)-(?<reason>[a-z_]+)-(?<subject>[0-9a-f]{64})$/u;
 
 /**
  * One of the parts (`<key>/0000` on) of a person's entry, as the shared
@@ -241,10 +239,7 @@ const isReason = (reason: string): reason is ErasureReason =>
   erasureReasons.some((known) => known === reason);
 
 const isKind = (kind: string): kind is ErasureKind =>
-  kind === "source" ||
-  kind === "writer" ||
-  kind === "person" ||
-  kind === "reopen";
+  kind === "source" || kind === "writer" || kind === "person";
 
 /** The entry `key` names: none for a key the ledger never writes. */
 const entryOf = (key: string): LedgerEntry | undefined => {
@@ -629,28 +624,6 @@ const applyPersonEntry = (
   if (found !== undefined) {
     applyPerson(sql, { key, subject: entry.subject }, found);
   }
-};
-
-/**
- * Applies the release `key` of the identifier whose SHA-256 is `subject`
- * (`reopenIdentifiers`): its record, and the identifier released (people.ts:
- * kept by the host's and Apps' own writes, still left out of what is drawn
- * from a source). In the caller's transaction; safe to repeat.
- */
-const applyReopen = (
-  sql: SqlStorage,
-  key: string,
-  { subject, at }: Pick<LedgerEntry, "subject" | "at">
-): void => {
-  sql.exec(
-    "INSERT OR IGNORE INTO person_erasure_reopens (key, at) VALUES (?, ?)",
-    key,
-    at
-  );
-  sql.exec(
-    "UPDATE person_erasure_subjects SET released = 1 WHERE subject = ?",
-    subject
-  );
 };
 
 /**
@@ -1287,12 +1260,7 @@ export const confirmPending = async (store: ErasureStore): Promise<void> => {
  */
 const nextAt = (sql: SqlStorage): number => {
   const last = sql
-    .exec<{ at: number | null }>(
-      `SELECT max(at) AS at FROM (
-        SELECT max(erased_at) AS at FROM erasures
-        UNION ALL SELECT max(at) AS at FROM person_erasure_reopens
-      )`
-    )
+    .exec<{ at: number | null }>("SELECT max(erased_at) AS at FROM erasures")
     .one().at;
   return Math.max(Date.now(), (last ?? 0) + 1);
 };
@@ -1570,53 +1538,6 @@ export const erasePersonShared = async (
 };
 
 /**
- * Releases each of `identifiers` a person's erasure closed, as the host
- * asks once an admin gave it to someone else (people.ts): from then on
- * the host's and Apps' own writes keep it; what is drawn from a source
- * keeps leaving it out, for good. Its ledger entry is written first, one
- * an identifier (`reopen`, the identifier's SHA-256), so a restore of an
- * older copy, or of an export into an empty store, applies it after the
- * erasure that closed it; then it is applied. Answers how many it
- * released: none for one nothing closed or released already, which writes
- * nothing. Throws when the entry can't be written, releasing nothing; the
- * host asks again. What an erasure took stays erased.
- */
-export const reopenIdentifiers = async (
-  store: ErasureStore,
-  identifiers: readonly Identifier[]
-): Promise<number> => {
-  const { storage, bucket } = store;
-  const { sql } = storage;
-  const subjects = await Promise.all(
-    identifiers.map(async (identifier) => await identifierSubjectOf(identifier))
-  );
-  let opened = 0;
-  for (const subject of new Set(subjects)) {
-    if (!closedOf(sql, [subject], "written").has(subject)) {
-      continue;
-    }
-    const entry: LedgerEntry = {
-      kind: "reopen",
-      subject,
-      reason: "person_erased",
-      at: nextAt(sql),
-    };
-    const key = ledgerKeyOf(entry);
-    try {
-      // oxlint-disable-next-line no-await-in-loop -- one entry at a time, in order
-      await inTime(bucket.put(key, ""));
-    } catch {
-      throw new Error(notRecorded);
-    }
-    storage.transactionSync(() => {
-      applyReopen(sql, key, entry);
-    });
-    opened += 1;
-  }
-  return opened;
-};
-
-/**
  * Where a replay reads the ledger from: after the last entry this copy of
  * the store holds. That is part of the store, so it is exactly what this
  * copy has applied: on an ordinary start the listing finds nothing new;
@@ -1675,7 +1596,7 @@ const readGroupMark = async (
  * (`PersonBody`).
  */
 const readsEntry = (entry: LedgerEntry, groups: boolean): boolean =>
-  entry.kind === "source" ? groups : entry.kind !== "reopen";
+  entry.kind !== "source" || groups;
 
 /**
  * A writer's entry's body (`WriterBody`), read within `stopAt` (throws
@@ -1710,15 +1631,8 @@ const readPersonBody = async (
 };
 
 /** Whether this copy of the store applied the ledger's entry `key` already. */
-const isApplied = (sql: SqlStorage, key: string, entry: LedgerEntry): boolean =>
-  sql
-    .exec(
-      entry.kind === "reopen"
-        ? "SELECT 1 FROM person_erasure_reopens WHERE key = ?"
-        : "SELECT 1 FROM erasures WHERE key = ?",
-      key
-    )
-    .toArray().length > 0;
+const isApplied = (sql: SqlStorage, key: string): boolean =>
+  sql.exec("SELECT 1 FROM erasures WHERE key = ?", key).toArray().length > 0;
 
 /** What a replay read of an entry's body (`readEntry`). */
 interface EntryRead {
@@ -1807,7 +1721,7 @@ export const replayStep = async ({
         // rollback): never passed, so nothing after it is skipped.
         throw new Error("A key of the erasure ledger can't be read");
       }
-      const isNew = entry !== undefined && !isApplied(sql, key, entry);
+      const isNew = entry !== undefined && !isApplied(sql, key);
       if (isNew) {
         if (
           Date.now() >= stopAt ||
@@ -1837,10 +1751,6 @@ export const replayStep = async ({
           }
           if (person !== undefined) {
             applyPersonEntry(sql, key, entry, true, person.found);
-            return [];
-          }
-          if (entry.kind === "reopen") {
-            applyReopen(sql, key, entry);
             return [];
           }
           return apply(sql, key, entry, true, writer).stopped;

@@ -3429,8 +3429,8 @@ msgid "Card"
 msgstr "Karte"
 
 #: src/settings/erasures.tsx
-msgid "Cards about them that hold no work address of theirs can remain. Those built from documents go when an admin deletes those documents, and those an App wrote go when that App’s data is reset."
-msgstr "Karten über sie, die keine ihrer Arbeitsadressen enthalten, können bleiben. Die aus Dokumenten entstandenen verschwinden, wenn ein Admin diese Dokumente löscht, und die von einer App geschriebenen, wenn die Daten dieser App zurückgesetzt werden."
+msgid "Cards about them without the address they signed in with can remain. Those built from documents go when an admin deletes those documents, and those an App wrote go when that App’s data is reset."
+msgstr "Karten über sie ohne die Adresse, mit der sie sich angemeldet haben, können bleiben. Die aus Dokumenten entstandenen verschwinden, wenn ein Admin diese Dokumente löscht, und die von einer App geschriebenen, wenn die Daten dieser App zurückgesetzt werden."
 
 #: src/activity/audit-words.ts
 msgid "Carried out a confirmed write to an App, or failed to"
@@ -15949,8 +15949,8 @@ msgid "What the brain kept of it"
 msgstr "Was das Gehirn davon behalten hat"
 
 #: src/settings/erasures.tsx
-msgid "What the Brain learned about them under their work address, and what they said, where others may read it"
-msgstr "Was das Brain unter ihrer Arbeitsadresse über sie gelernt hat und was sie gesagt haben, wo andere es lesen dürfen"
+msgid "What the Brain learned about them under the address they signed in with, and what they said, where others may read it"
+msgstr "Was das Brain unter der Adresse, mit der sie sich angemeldet haben, über sie gelernt hat und was sie gesagt haben, wo andere es lesen dürfen"
 
 #: src/brain/memories-page.tsx
 msgid "What the Brain learns from sources and from what you tell it shows here."

@@ -16,7 +16,8 @@ import { hashOf } from "./files.ts";
 // (entities.ts), never a name. An entity of kind `person` holding one is
 // their card, whole, whatever else it holds (another address of theirs, a
 // reference, or, on a card two people were wrongly joined on, the other
-// one's address: the sources stay and are read again): every memory about
+// one's address: their card comes back only from a new version of a
+// source naming them without her address): every memory about
 // it or relating to it is covered, so it goes with its names. Any other
 // entity holding one (a team, a project or a customer whose contact
 // address was theirs, a shared desk) loses only that identifier: nothing
@@ -29,19 +30,15 @@ import { hashOf } from "./files.ts";
 // started before it is stale, if it changed anything (it holds what
 // changed).
 //
-// What it closed stays closed (`person_erasure_subjects`, and the
-// erasure's own record for the person). A write leaves a closed
+// What it closed stays closed, for good (`person_erasure_subjects`, and
+// the erasure's own record for the person): an admin releasing the
+// address in core doesn't reopen it here. A write leaves a closed
 // identifier out and writes the rest, answering as it would for an
 // identifier it holds nowhere. What is drawn from a source (extraction, a
 // write resting on a version, a restore of one) also leaves out an entity
 // of kind `person` holding a closed identifier, with what is about it or
 // relates to it, and what is in their word, so nothing drawn again from a
-// source that stays makes their card again. Once an admin gives the
-// address to someone else, it is released (`reopenIdentifiers`): the
-// host's and Apps' own writes keep it again, so its next holder has a
-// card; what is drawn from a source keeps leaving it out, for good, so no
-// document builds or feeds a person's card by it again (by a name it
-// may).
+// source that stays makes their card again (by a name it may).
 //
 // The store and the ledger keep a person and an identifier as SHA-256
 // hashes, never plain: the person by their id (as the erasure's subject),
@@ -105,18 +102,10 @@ export const namingOf = async (
   ),
 });
 
-/**
- * How a write meets what a person's erasure closed: the host's or an App's
- * own word (`written`), which keeps a released identifier; or drawn from a
- * source (`drawn`), which leaves it out for good (above).
- */
-export type WriteKind = "written" | "drawn";
-
-/** Of `subjects`, those a person's erasure closed to a write of `kind`: one seek each. */
+/** Of `subjects`, those a person's erasure closed: one seek each. */
 export const closedOf = (
   sql: SqlStorage,
-  subjects: readonly string[],
-  kind: WriteKind = "drawn"
+  subjects: readonly string[]
 ): Set<string> =>
   subjects.length === 0
     ? new Set()
@@ -124,10 +113,8 @@ export const closedOf = (
         sql
           .exec<{ subject: string }>(
             `SELECT subject FROM person_erasure_subjects
-            WHERE subject IN (SELECT value FROM json_each(?1))
-              AND (?2 = 'drawn' OR released = 0)`,
-            JSON.stringify(subjects),
-            kind
+            WHERE subject IN (SELECT value FROM json_each(?1))`,
+            JSON.stringify(subjects)
           )
           .toArray()
           .map(({ subject }) => subject)
@@ -148,11 +135,11 @@ export const isErasedPerson = (
     .toArray().length > 0;
 
 /**
- * `entities` (`naming.identifiers` theirs, in order) as a write of `kind`
- * keeps them: every identifier a person's erasure closed to it stripped;
- * and the keys of those of kind `person` that held one: the erased
- * person's card, by exact evidence, which what is drawn from a source
- * leaves out whole.
+ * `entities` (`identifiers` theirs, in order) as a write keeps them: every
+ * identifier a person's erasure closed stripped; and the keys of those of
+ * kind `person` that held one: the erased person's card, by exact
+ * evidence, which what is drawn from a source leaves out whole
+ * (`leavingOutCards`).
  */
 export const strippedOf = <
   Entity extends {
@@ -163,10 +150,9 @@ export const strippedOf = <
 >(
   sql: SqlStorage,
   entities: readonly Entity[],
-  identifiers: readonly string[][],
-  kind: WriteKind
+  identifiers: readonly string[][]
 ): { entities: Entity[]; erased: Set<string> } => {
-  const closed = closedOf(sql, identifiers.flat(), kind);
+  const closed = closedOf(sql, identifiers.flat());
   const erased = new Set<string>();
   const stripped = entities.map((entity, index) => {
     const given = entity.identifiers ?? [];
@@ -182,6 +168,48 @@ export const strippedOf = <
       : { ...entity, identifiers: kept };
   });
   return { entities: stripped, erased };
+};
+
+/**
+ * What is drawn from a source (`entities` and `memories`, `identifiers`
+ * the entities' in order) as a person's erasure leaves it: every closed
+ * identifier stripped (`strippedOf`); an entity of kind `person` that held
+ * one is the erased person's card, left out with every memory about it or
+ * relating to it; an entity no memory left names is left out too. So
+ * nothing drawn again from a source that stays makes or feeds their card.
+ */
+export const leavingOutCards = <
+  Entity extends {
+    kind: string;
+    key: string;
+    identifiers?: readonly Identifier[] | undefined;
+  },
+  Memory extends { about: string; object?: string | undefined },
+>(
+  sql: SqlStorage,
+  {
+    entities,
+    memories,
+  }: { entities: readonly Entity[]; memories: readonly Memory[] },
+  identifiers: readonly string[][]
+): { entities: Entity[]; memories: Memory[] } => {
+  const stripped = strippedOf(sql, entities, identifiers);
+  const kept = memories.filter(
+    ({ about, object }) =>
+      !(
+        stripped.erased.has(about) ||
+        (object !== undefined && stripped.erased.has(object))
+      )
+  );
+  const named = new Set(
+    kept.flatMap(({ about, object }) =>
+      object === undefined ? [about] : [about, object]
+    )
+  );
+  return {
+    entities: stripped.entities.filter(({ key }) => named.has(key)),
+    memories: kept,
+  };
 };
 
 /** An identifier as the store keeps it on a name (`entity_names`): its type and folded value. */
@@ -255,12 +283,10 @@ export const applyPerson = (
       alone ? [entityClosureOf(id)] : []
     ),
   ]) {
-    // Closed anew, also one an earlier erasure closed and an admin
-    // released since (its next holder erased in turn).
+    // Kept by the first erasure that closed it.
     sql.exec(
-      `INSERT INTO person_erasure_subjects (subject, erasure, released)
-      VALUES (?1, ?2, 0)
-      ON CONFLICT (subject) DO UPDATE SET erasure = ?2, released = 0`,
+      `INSERT OR IGNORE INTO person_erasure_subjects (subject, erasure)
+      VALUES (?1, ?2)`,
       closed,
       key
     );

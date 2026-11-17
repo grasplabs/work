@@ -914,7 +914,6 @@ describe("a writer's erasure", () => {
                 "own_entity",
                 "person_erasure_subjects",
                 "person_erasure_memories",
-                "person_erasure_reopens",
               ].includes(name)
           )
           .map((table) => {
