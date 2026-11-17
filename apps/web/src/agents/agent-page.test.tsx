@@ -25,6 +25,7 @@ import {
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router";
+import type { AnyRouter } from "@tanstack/react-router";
 import { act } from "react";
 import type { ReactNode } from "react";
 import { createRoot } from "react-dom/client";
@@ -318,6 +319,9 @@ const Page = ({
   );
 };
 
+/** The router of the page shown, to open another of its parts. */
+let shownRouter: AnyRouter | undefined;
+
 /** `open` on what `connections` holds, for the company's admin when `editable`. */
 const shown = async (connections: Connections, open: Open, editable = true) => {
   const core = {
@@ -411,6 +415,7 @@ const shown = async (connections: Connections, open: Open, editable = true) => {
     );
     await router.load();
   });
+  shownRouter = router;
   return router;
 };
 
@@ -473,15 +478,15 @@ const dialogButton = (name: string): HTMLButtonElement => {
   return found;
 };
 
-/** Opens the tab named `name`: a link in the page's heading. */
-const openTab = async (name: string) => {
-  const tab = [...document.querySelectorAll("nav a")].find((each) =>
-    each.textContent?.trim().startsWith(name)
-  );
-  if (!(tab instanceof HTMLElement)) {
-    throw new TypeError(`No tab ${name}`);
-  }
-  await press(tab);
+/** Opens the agent's part `tab`, as its row in the sidebar leads there. */
+const openTab = async (tab: AgentTab) => {
+  await act(async () => {
+    await shownRouter?.navigate({
+      to: ".",
+      search: tab === "overview" ? {} : { tab },
+    });
+  });
+  await settled();
 };
 
 /** The field labelled `label`, on whichever tab or dialog it is. */
@@ -654,7 +659,7 @@ describe("an agent's page", () => {
         onSwitch().getAttribute("aria-disabled") === "true" ||
         onSwitch().hasAttribute("disabled"),
     }).toStrictEqual({ edit: true, on: true });
-    await openTab("Schedule");
+    await openTab("schedule");
     expect(document.body.textContent).toContain(
       "Claire only works when asked."
     );
@@ -681,8 +686,8 @@ describe("an agent's page", () => {
     // Paused: core is asked and the page read again.
     await press(onSwitch());
     const afterPause = field("Instructions").value;
-    await openTab("Access");
-    await openTab("Instructions");
+    await openTab("access");
+    await openTab("instructions");
     expect(asked.at(-1)).toStrictEqual(["paused", "agent-1", true]);
     expect([afterPause, field("Instructions").value]).toStrictEqual([
       "A draft, not saved.",

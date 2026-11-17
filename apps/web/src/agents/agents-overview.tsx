@@ -24,6 +24,7 @@ import {
 } from "../grasp/input-group/index.ts";
 import { Item, ItemGroup } from "../grasp/item/index.ts";
 import { Link as TextLink } from "../grasp/link/index.ts";
+import { SectionHeader } from "../grasp/section-header/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { Toggle, ToggleGroup } from "../grasp/toggle/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
@@ -62,6 +63,8 @@ const styles = stylex.create({
   },
   search: { width: "100%", maxWidth: "18rem" },
   lines: { display: "grid", gap: grasp.space1 },
+  groups: { display: "grid", gap: grasp.space8 },
+  groupHead: { marginBlockEnd: grasp.space2 },
 });
 
 /** What a row shows of one agent. */
@@ -221,6 +224,28 @@ const AgentRow = ({
   );
 };
 
+/**
+ * The list's groups, in order: the person's own agents, the company's,
+ * and a colleague's own put forward for the whole company. This branch's
+ * core has only the company's; the others come with the API that names
+ * them (main's `ownAgents`, `offeredAgents`), each a group here.
+ */
+const groupKeys = ["yours", "company", "putForward"] as const;
+type GroupKey = (typeof groupKeys)[number];
+
+/** Which group an agent stands in. */
+const groupOf = (_agent: Shown): GroupKey => "company";
+
+/** The groups that hold an agent, in order, each with its agents. */
+const groupsOf = (
+  agents: readonly Shown[],
+  names: Readonly<Record<GroupKey, string>>
+) =>
+  groupKeys.flatMap((key) => {
+    const held = agents.filter((agent) => groupOf(agent) === key);
+    return held.length === 0 ? [] : [{ key, name: names[key], agents: held }];
+  });
+
 /** The Agents page's body: the agents the person may `usable`, and what an admin `managed`. */
 export const AgentsOverview = ({
   usable,
@@ -237,6 +262,11 @@ export const AgentsOverview = ({
 }) => {
   const { t } = useLingui();
   const factsOf = useFacts(managed?.teams ?? []);
+  const groupNames = {
+    yours: t`Yours`,
+    company: t`Company`,
+    putForward: t`Put forward`,
+  } as const satisfies Record<GroupKey, string>;
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
   const agents = shownOf(usable, managed);
@@ -252,6 +282,7 @@ export const AgentsOverview = ({
   const paused = agents.filter(
     (agent) => agent.managed?.state === "paused"
   ).length;
+  const groups = groupsOf(shown, groupNames);
   const newAgent = makes ? <NewAgentButton models={models} /> : undefined;
   return (
     <Page>
@@ -309,17 +340,36 @@ export const AgentsOverview = ({
                 : t`No agent matches “${asked}”`}
             </Empty>
           ) : (
-            <ItemGroup aria-label={t`Agents`} separated>
-              {shown.map((agent) => (
-                <AgentRow
-                  facts={
-                    agent.managed === undefined ? [] : factsOf(agent.managed)
-                  }
-                  key={agent.id}
-                  shown={agent}
-                />
+            <div {...stylex.props(styles.groups)}>
+              {groups.map((group) => (
+                <section key={group.key}>
+                  {/* A group's name only beside another group: alone, the page's title says it. */}
+                  {groups.length > 1 ? (
+                    <SectionHeader
+                      layout={styles.groupHead}
+                      size="sm"
+                      title={group.name}
+                    />
+                  ) : null}
+                  <ItemGroup
+                    aria-label={groups.length > 1 ? group.name : t`Agents`}
+                    separated
+                  >
+                    {group.agents.map((agent) => (
+                      <AgentRow
+                        facts={
+                          agent.managed === undefined
+                            ? []
+                            : factsOf(agent.managed)
+                        }
+                        key={agent.id}
+                        shown={agent}
+                      />
+                    ))}
+                  </ItemGroup>
+                </section>
               ))}
-            </ItemGroup>
+            </div>
           )}
         </>
       )}

@@ -917,7 +917,7 @@ msgstr "{name} : {started} lancées, {completed} terminées, {failed} en échec"
 msgid "{name}: agents search it live when you ask. The Brain keeps nothing from it."
 msgstr "{name} : les agents y cherchent en direct quand vous demandez. Le cerveau n'en garde rien."
 
-#: src/agents/agent-page.tsx
+#: src/agents/agent-section.tsx
 msgid "{name}'s pages"
 msgstr "Pages de {name}"
 
@@ -1860,7 +1860,7 @@ msgctxt "memory record state"
 msgid "Accepted"
 msgstr "Accepté"
 
-#: src/agents/agent-page.tsx
+#: src/agents/agent-section.tsx
 #: src/apps/publish.tsx
 msgid "Access"
 msgstr "Accès"
@@ -2207,6 +2207,7 @@ msgstr "Agent pour {person}"
 msgid "Agent not found"
 msgstr "Agent introuvable"
 
+#: src/agents/agent-section.tsx
 #: src/agents/agents-overview.tsx
 #: src/grasp/frame/grasp-sidebar.tsx
 #: src/routes/_shell.agents.$agent.tsx
@@ -4103,6 +4104,7 @@ msgctxt "kind of app"
 msgid "Commerce"
 msgstr "Commerce"
 
+#: src/agents/agents-overview.tsx
 #: src/brain/brain.ts
 #: src/routes/_shell.settings.billing.tsx
 msgid "Company"
@@ -7114,6 +7116,7 @@ msgstr "Instruction"
 
 #: src/agents/agent-form.tsx
 #: src/agents/agent-page.tsx
+#: src/agents/agent-section.tsx
 msgid "Instructions"
 msgstr "Instructions"
 
@@ -10230,7 +10233,7 @@ msgstr "En dehors de Grasp ce mois-ci."
 msgid "Over the next two weeks you’ll get a short personal link to talk with Stephen, Grasp’s AI interviewer: leads for about 20 minutes, everyone else for 10 to 15. By voice or by typing."
 msgstr "Dans les deux prochaines semaines, vous recevrez un court lien personnel pour parler avec Stephen, l’intervieweur IA de Grasp : les responsables pendant environ 20 minutes, les autres 10 à 15. À la voix ou par écrit."
 
-#: src/agents/agent-page.tsx
+#: src/agents/agent-section.tsx
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Overview"
 msgstr "Vue d’ensemble"
@@ -10784,6 +10787,10 @@ msgstr "{name} déposé à la place {place}."
 #: src/interview/read-back.tsx
 msgid "Put back"
 msgstr "Remettre"
+
+#: src/agents/agents-overview.tsx
+msgid "Put forward"
+msgstr "Proposés"
 
 #: src/knowledge/new-document.tsx
 msgid "Put it in folders with a slash, as in handbook/leave."
@@ -12168,14 +12175,10 @@ msgstr "Dites ce qu’il faut changer. Vous seul voyez les modifications, dans l
 msgid "Say what you want to build, and Grasp builds it."
 msgstr "Dites ce que vous voulez construire, et Grasp le construit."
 
-#: src/agents/agent-page.tsx
+#: src/agents/agent-section.tsx
 #: src/agents/agent-wakes.tsx
 msgid "Schedule"
 msgstr "Horaire"
-
-#: src/agents/agent-page.tsx
-msgid "Schedule ({scheduled})"
-msgstr "Planification ({scheduled})"
 
 #: src/workflows/trigger-description.ts
 msgid "Schedule trigger"
@@ -17168,6 +17171,10 @@ msgstr "Votre version de l’App"
 #: src/interview/before.tsx
 msgid "Your words"
 msgstr "Vos mots"
+
+#: src/agents/agents-overview.tsx
+msgid "Yours"
+msgstr "Les vôtres"
 
 #: src/brain/lessons-view.tsx
 msgctxt "lesson scope"

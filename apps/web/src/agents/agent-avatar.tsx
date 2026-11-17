@@ -11,7 +11,8 @@ import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 // (settings/stephen-avatar.tsx). An admin picks which (agent-form.tsx);
 // a name these pages don't know is drawn as the head. Grasp UI's Avatar
 // draws a person's picture or initials only, so the tile is drawn here
-// at its sizes (sm 32px, md 40px), on its soft fill.
+// at its sizes (xs 20px, for the sidebar's mark; sm 32px; md 40px), on
+// its soft fill.
 
 /** The sign figure each face is. */
 const figures = {
@@ -32,6 +33,7 @@ const styles = stylex.create({
     backgroundColor: grasp.soft,
     color: grasp.ink,
   },
+  xs: { width: "1.25rem", height: "1.25rem" },
   sm: { width: "2rem", height: "2rem" },
   md: { width: "2.5rem", height: "2.5rem" },
   figure: { width: "80%", height: "80%" },
@@ -47,7 +49,7 @@ export const AgentAvatar = ({
   size = "md",
 }: {
   face: string;
-  size?: "sm" | "md";
+  size?: "xs" | "sm" | "md";
 }) => (
   <span aria-hidden="true" {...stylex.props(styles.tile, styles[size])}>
     <svg {...stylex.props(styles.figure)} viewBox="-1.12 -1.12 2.24 2.24">

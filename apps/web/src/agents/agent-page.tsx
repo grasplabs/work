@@ -55,7 +55,6 @@ import type { KeyValueItem } from "../grasp/key-value/index.ts";
 import { PageHeader } from "../grasp/page-header/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
 import { Switch } from "../grasp/switch/index.ts";
-import { TabsLink, TabsNav } from "../grasp/tabs/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { dollars } from "../settings/money.ts";
 import { SettingRow, SettingsRows } from "../settings/section.tsx";
@@ -85,9 +84,10 @@ import { AgentWakes } from "./agent-wakes.tsx";
 // One agent's page, for the company's admins, on Grasp UI: its Page
 // header holds the agent (picture, name, what it is for, whether it is
 // on) and the things done most: turning it off and on, Chat, and Edit,
-// which changes its name, job, picture and model in a dialog. Its views
-// are tab links in the header, the tab in the address so a link can lead
-// to an agent's access or its schedule:
+// which changes its name, job, picture and model in a dialog. Its parts
+// are rows of the sidebar, which the agent takes over as Settings does
+// (agent-section.tsx), the part in the address (`?tab=`) so a link can
+// lead to an agent's access or its schedule:
 //
 // - Overview: its facts as a rail (whom it answers, what it may do, when
 //   it works on its own, its model, this month's use) and what it did
@@ -620,23 +620,6 @@ export const AgentPage = ({
     }
     await navigate({ to: "/agents", replace: true });
   };
-  const scheduled = wakesOn(wakes).length;
-  const tabLink = (value: AgentTab, words: string) => (
-    <TabsLink
-      current={tab === value}
-      key={value}
-      render={
-        <Link
-          params={{ agent: agent.id }}
-          replace
-          search={value === "overview" ? {} : { tab: value }}
-          to="/agents/$agent"
-        />
-      }
-    >
-      {words}
-    </TabsLink>
-  );
   return (
     <Page>
       <PageHeader
@@ -673,17 +656,6 @@ export const AgentPage = ({
         aside={<AgentStateBadge state={agent.state} />}
         description={agent.job === "" ? t`No job written yet` : agent.job}
         descriptionLines={2}
-        tabs={
-          <TabsNav label={t`${name}'s pages`}>
-            {tabLink("overview", t`Overview`)}
-            {tabLink("instructions", t`Instructions`)}
-            {tabLink("access", t`Access`)}
-            {tabLink(
-              "schedule",
-              scheduled === 0 ? t`Schedule` : t`Schedule (${scheduled})`
-            )}
-          </TabsNav>
-        }
         title={
           <span {...stylex.props(styles.title)}>
             <AgentAvatar face={agent.face} />
