@@ -1,5 +1,6 @@
 import { defineConnector } from "@grasp-os/connector-kit/connector";
 
+import { calendarSync } from "./calendar-sync.ts";
 import { calendarTools } from "./calendar.ts";
 import { draftTools } from "./drafts.ts";
 import { driveSync } from "./drive-sync.ts";
@@ -24,7 +25,8 @@ import { sheetsTools } from "./sheets.ts";
  * the files this app made).
  *
  * It syncs the person's own Drive (drive-sync.ts), on `drive.readonly`,
- * and mailbox (gmail-sync.ts), on `gmail.modify`, for the Brain.
+ * mailbox (gmail-sync.ts), on `gmail.modify`, and primary calendar
+ * (calendar-sync.ts), on `calendar.events`, for the Brain.
  */
 export default defineConnector({
   name: "google-workspace",
@@ -47,5 +49,5 @@ export default defineConnector({
     ...sheetsTools,
     ...draftTools,
   ],
-  syncs: [driveSync, gmailSync],
+  syncs: [driveSync, gmailSync, calendarSync],
 });
