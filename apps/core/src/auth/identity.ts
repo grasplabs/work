@@ -15,59 +15,8 @@ import { authFor, currentMembership, organizationId } from "./auth.ts";
 import { providerIds, signInConfig } from "./config.ts";
 
 /**
- * A person's role in the organization, read now. `undefined` when they have
- * no membership, a removed one, or a role that isn't exactly one of ours:
- * no access.
- */
-export const memberRole = async (
-  database: D1Database,
-  userId: string
-): Promise<Role | undefined> => {
-  const db = drizzle(database);
-  const [membership] = await db
-    .select({ role: members.role })
-    .from(members)
-    .where(currentMembership(userId));
-  const role = roleSchema.safeParse(membership?.role);
-  return role.success ? role.data : undefined;
-};
-
-/** The teams of the organization a person is in, read now, by name. */
-export const teamsOf = async (
-  database: D1Database,
-  userId: string
-): Promise<Identity["teams"]> =>
-  await drizzle(database)
-    .select({ id: teams.id, name: teams.name })
-    .from(teamMembers)
-    .innerJoin(teams, eq(teams.id, teamMembers.teamId))
-    .where(
-      and(
-        eq(teamMembers.userId, userId),
-        eq(teams.organizationId, organizationId)
-      )
-    )
-    .orderBy(teams.name);
-
-/**
- * A member of the organization, as the checks on what they may do see
- * them: an {@link Identity} without its session.
- */
-export type Member = Pick<Identity, "userId" | "role" | "teams" | "staff">;
-
-/**
- * Who acts: a member, or the chat's agent acting for one (agent-builds.ts)
- * with their role and rights, as `actor`, the audit log's name for it.
- */
-export type Acting = Member & {
-  actor?: AuditActor;
-  /** The chat's agent acting, as what it writes records it. */
-  via?: AgentProposer;
-};
-
-/**
- * The reads of `memberOf`, for one batch with others: a member and what
- * else is read with them in the same snapshot of the database (core's
+ * A member's reads as `memberOf` makes them, for one batch with others,
+ * so what else is read is of the same snapshot of the database (core's
  * Brain module reads the shared connections' audiences so).
  */
 export const memberReads = (db: DrizzleD1Database, userId: string) =>
@@ -88,6 +37,46 @@ export const memberReads = (db: DrizzleD1Database, userId: string) =>
       )
       .orderBy(teams.name),
   ] as const;
+
+/**
+ * A person's role in the organization, read now. `undefined` when they have
+ * no membership, a removed one, or a role that isn't exactly one of ours:
+ * no access.
+ */
+export const memberRole = async (
+  database: D1Database,
+  userId: string
+): Promise<Role | undefined> => {
+  const [read] = memberReads(drizzle(database), userId);
+  const [membership] = await read;
+  const role = roleSchema.safeParse(membership?.role);
+  return role.success ? role.data : undefined;
+};
+
+/** The teams of the organization a person is in, read now, by name. */
+export const teamsOf = async (
+  database: D1Database,
+  userId: string
+): Promise<Identity["teams"]> => {
+  const [, read] = memberReads(drizzle(database), userId);
+  return await read;
+};
+
+/**
+ * A member of the organization, as the checks on what they may do see
+ * them: an {@link Identity} without its session.
+ */
+export type Member = Pick<Identity, "userId" | "role" | "teams" | "staff">;
+
+/**
+ * Who acts: a member, or the chat's agent acting for one (agent-builds.ts)
+ * with their role and rights, as `actor`, the audit log's name for it.
+ */
+export type Acting = Member & {
+  actor?: AuditActor;
+  /** The chat's agent acting, as what it writes records it. */
+  via?: AgentProposer;
+};
 
 /** The member `userId`, from what `memberReads` read; `undefined` with no current membership. */
 export const memberFrom = (
@@ -110,9 +99,13 @@ export const memberOf = async (
   database: D1Database,
   userId: string
 ): Promise<Member | undefined> => {
-  const db = drizzle(database);
-  const [membership, memberTeams] = await db.batch(memberReads(db, userId));
-  return memberFrom(userId, membership, memberTeams);
+  const [role, memberTeams] = await Promise.all([
+    memberRole(database, userId),
+    teamsOf(database, userId),
+  ]);
+  return role === undefined
+    ? undefined
+    : { userId, role, teams: memberTeams, staff: false };
 };
 
 /**
