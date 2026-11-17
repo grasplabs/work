@@ -9,14 +9,14 @@ import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
-import { readableVersionsAs } from "../brain-next.ts";
+import { readableMemoriesAs, readableVersionsAs } from "../brain-next.ts";
 import type { PinnedVersionRef } from "../brain-next.ts";
 import { runChatSources } from "../db/core/schema.ts";
 import { readableSources } from "../history-access.ts";
 import { authorize } from "../permissions.ts";
 import { runAuthority, runContext } from "./resource-authority.ts";
 import type { CallingRun } from "./resource-authority.ts";
-import { evidenceOf } from "./run-evidence.ts";
+import { evidenceOf, memoryEvidenceOf } from "./run-evidence.ts";
 
 // What a run read, checked before anything of the run leaves it: the
 // Brain's versions its recalls pinned (run-evidence.ts) and what the chat
@@ -76,8 +76,11 @@ const requireOwnEvidenceReadable = async (
   run: Pick<CallingRun, "runId" | "workflowId" | "principal">
 ): Promise<void> => {
   await requireChatPinsReadable(env, run.runId);
-  const rows = await evidenceOf(env, run.runId);
-  if (rows.length === 0) {
+  const [rows, memoryRows] = await Promise.all([
+    evidenceOf(env, run.runId),
+    memoryEvidenceOf(env, run.runId),
+  ]);
+  if (rows.length === 0 && memoryRows.length === 0) {
     return;
   }
   // SAFETY: core wrote each row from a pack's own item or a skill it
@@ -90,7 +93,9 @@ const requireOwnEvidenceReadable = async (
       ({ source: { producer, id: sourceId }, version }) as PinnedVersionRef
   );
   try {
-    for (const permissionId of new Set(rows.map((row) => row.permissionId))) {
+    for (const permissionId of new Set(
+      [...rows, ...memoryRows].map((row) => row.permissionId)
+    )) {
       // oxlint-disable-next-line no-await-in-loop -- one per grant, few
       await authorize(
         env,
@@ -100,6 +105,23 @@ const requireOwnEvidenceReadable = async (
         permissionIdSchema.parse(permissionId),
         runContext(run)
       );
+    }
+    // What its entity reads rested on, as they read: the company alone.
+    // One a person's erasure took, its writer retired or took back (a
+    // share), or resting on a source erased or narrowed away from the
+    // company, is no longer readable, as a chat's history decides it
+    // (history-access.ts): someone who takes a memory back wants others to
+    // stop getting it (GRA-1985). One a newer memory ended stays. Paged by
+    // the Brain's check, 500 a call.
+    const memories = [...new Set(memoryRows.map(({ memoryId }) => memoryId))];
+    const readableMemories = await readableMemoriesAs(
+      env,
+      run.principal,
+      memories.map((memory) => ({ store: "shared" as const, memory })),
+      { reach: "company" }
+    );
+    if (readableMemories.length < memories.length) {
+      throw workflowResourceErrors.create("brain.revoked");
     }
     // As the run's recalls read them: the company alone.
     const readable = await readableVersionsAs(env, run.principal, versions, {
@@ -129,7 +151,14 @@ const requireOwnEvidenceReadable = async (
  * recalls came through still the run's, active, now (`authorize`), and
  * each version they handed it still one the whole company may read
  * (`readableVersionsAs`, as `company`, as its recalls read): not erased,
- * nor its readers narrowed away from the company. A test run recalls nothing, so has nothing to check.
+ * nor its readers narrowed away from the company; and each memory its
+ * entity reads rested on still one the company may read
+ * (`readableMemoriesAs`): not taken by a person's erasure, retired, or
+ * resting on a source erased or narrowed (GRA-1985). A test run recalls
+ * nothing, so has nothing to check. Asked before a model, connection,
+ * App or files-write call, a decision, its output, and before a step's
+ * state is written (sealed-run.ts `stepRecording`); its files are listed
+ * and downloaded only while it holds (run-file-downloads.ts).
  *
  * What a running run shows needs no check: its details (`resourceRunFor`)
  * hold its output or failure only once it ended, which this checks first,
@@ -158,4 +187,25 @@ export const requireEndedRunEvidenceReadable = async (
   run: Pick<CallingRun, "runId" | "workflowId" | "principal">
 ): Promise<void> => {
   await requireOwnEvidenceReadable(env, run);
+};
+
+/**
+ * Whether run `run` may still read what it read
+ * (`requireEndedRunEvidenceReadable`): false once refused as
+ * `brain.revoked`, for a reader that leaves what it holds out (its files,
+ * listed or downloaded). Any other failure throws.
+ */
+export const runEvidenceHolds = async (
+  env: Env,
+  run: Pick<CallingRun, "runId" | "workflowId" | "principal">
+): Promise<boolean> => {
+  try {
+    await requireEndedRunEvidenceReadable(env, run);
+    return true;
+  } catch (error) {
+    if (workflowResourceErrors.codeOf(error) !== "brain.revoked") {
+      throw error;
+    }
+    return false;
+  }
 };
