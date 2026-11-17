@@ -61,6 +61,10 @@ export const decisionErrors = defineErrorFamily({
     "This answer wasn't confirmed in Grasp, so it wasn't recorded. Answer again and confirm it.",
   "decision.conflict":
     "This decision changed since you opened it. Review it again before you answer.",
+  "decision.withheld":
+    "What this decision asks is withheld, so it can only be rejected.",
+  "decision.unavailable":
+    "What this decision asks can't be shown right now, so it takes no answer yet. Try again in a moment.",
   "decision.cancelled":
     "You didn't confirm the answer, so nothing was recorded.",
   "decision.asking_paused":
@@ -81,6 +85,9 @@ export type DecisionStatus =
   | "rejected"
   | "timed_out"
   | "closed";
+
+/** Why what a decision asks isn't shown (`DecisionView.withheld`). */
+export type DecisionWithheld = "revoked" | "unchecked";
 
 /** A decision as the people who answer it see it. */
 export interface DecisionView {
@@ -106,6 +113,14 @@ export interface DecisionView {
    * context. None once removed with its run's details.
    */
   input?: Json;
+  /**
+   * Present when what it asks isn't shown, its description saying why and
+   * no input with it: `revoked` once its run may no longer read what it
+   * read, when it takes a rejection alone; `unchecked` while that can't be
+   * checked (Grasp can't reach what it needs right now), when it takes no
+   * answer, until a later read shows it.
+   */
+  withheld?: DecisionWithheld;
   status: DecisionStatus;
   /** ISO 8601: no answer is taken from then on. */
   expiresAt: string;

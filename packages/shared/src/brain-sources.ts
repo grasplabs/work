@@ -180,6 +180,19 @@ export const brainUploadReadersSchema = z.discriminatedUnion("kind", [
 ]);
 export type BrainUploadReaders = z.infer<typeof brainUploadReadersSchema>;
 
+/**
+ * A shared connection whose kept reads the person may read (GRA-1831):
+ * the system's name, the account it reads as, how many records the Brain
+ * keeps of it, and when the last was read (ISO 8601).
+ */
+export interface BrainConnectedSource {
+  connectionId: string;
+  name: string;
+  account: string | null;
+  records: number;
+  lastReadAt: string;
+}
+
 /** A file to upload into the Brain: its name and itself. */
 export interface BrainUploadFile {
   /** Such as `Travel policy.docx`: its type is read from its extension. */
@@ -294,6 +307,12 @@ export interface BrainSourcesApi {
   ) => Promise<BrainLearned | null>;
   /** Recall for `question` as them, within `brainSearchBudget` tokens. */
   search: (question: string) => Promise<BrainSearchPack>;
+  /**
+   * The shared connections whose kept reads the person may read now
+   * (GRA-1831), each with what is kept: none for one outside its
+   * audience, as if it kept nothing.
+   */
+  connections: () => Promise<BrainConnectedSource[]>;
   /**
    * Uploads `file` into the Brain for `readers`: a new source, its text
    * read from the file, findable at once. Returns its first version.

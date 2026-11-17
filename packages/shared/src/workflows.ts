@@ -2,6 +2,7 @@ import { Cron } from "croner";
 import { z } from "zod";
 
 import type { ProviderTrouble } from "./ai-providers.ts";
+import type { DecisionWithheld } from "./decisions.ts";
 import { defineErrorFamily } from "./errors.ts";
 import { isRetryableCode } from "./functions.ts";
 import { connectionIdSchema, identifierSchema } from "./ids.ts";
@@ -899,6 +900,11 @@ export interface TodayRun {
     on: TodayWaitsOn;
     since: string;
     asks: string;
+    /**
+     * Present when what it asks isn't shown, `asks` saying why, as its
+     * decision's page has it (`DecisionView.withheld`).
+     */
+    withheld?: DecisionWithheld;
   } | null;
   /** It waits on someone other than the reader. */
   waitsOnOthers: boolean;

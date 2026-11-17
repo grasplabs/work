@@ -2,6 +2,7 @@ import type { Connection } from "@grasp-os/shared/brain";
 import type {
   BrainFoundBy,
   BrainMemoryFoundBy,
+  BrainConnectedSource,
   BrainSearchMemory,
   BrainSearchPack,
   BrainSourceListed,
@@ -859,6 +860,96 @@ const ConnectionFeeds = ({ connections }: { connections: Connection[] }) => {
   );
 };
 
+/**
+ * The shared connections whose kept reads the person may read
+ * (GRA-1831): what agents read through a connection an admin shared,
+ * kept for the people the admin chose. One row a connection, not one a
+ * record.
+ */
+const SharedConnectionReads = ({
+  connected,
+}: {
+  connected: BrainConnectedSource[];
+}) => {
+  const heading = useId();
+  if (connected.length === 0) {
+    return null;
+  }
+  return (
+    <section aria-labelledby={heading} className="flex flex-col gap-3">
+      <h2 className="text-sm font-medium" id={heading}>
+        <Trans>What agents read through shared connections</Trans>
+      </h2>
+      <p className="text-muted-foreground text-sm">
+        <Trans>
+          The Brain keeps what agents read through these connections an admin
+          shared, for the people the admin chose. It is what each system said
+          when it was read, not kept up to date.
+        </Trans>
+      </p>
+      <ul className="flex flex-col gap-2 text-sm">
+        {connected.map(
+          ({ connectionId, name, account, records, lastReadAt }) => {
+            const lastRead = formatDateTime(lastReadAt);
+            return (
+              <li className="flex flex-col" key={connectionId}>
+                <span>{account === null ? name : `${name} (${account})`}</span>
+                <span className="text-muted-foreground">
+                  <Plural
+                    one="# record kept"
+                    other="# records kept"
+                    value={records}
+                  />
+                </span>
+                <span className="text-muted-foreground">
+                  <Trans>Last read {lastRead}</Trans>
+                </span>
+              </li>
+            );
+          }
+        )}
+      </ul>
+    </section>
+  );
+};
+
+/** The shared connection a kept read's source is under: the first part of its ID. */
+const connectionOfSource = (source: BrainSourceRef): string | undefined =>
+  source.producer === "connected" ? source.id.split("/")[0] : undefined;
+
+/**
+ * Where and when a kept read was read (a `connected` source): its
+ * system's name, when known, and its version's time. Nothing for any
+ * other source.
+ */
+const ReadFrom = ({
+  source,
+  read,
+  names,
+}: {
+  source: BrainSourceRef;
+  read: BrainSourceText;
+  names: ReadonlyMap<string, string>;
+}) => {
+  const connectionId = connectionOfSource(source);
+  if (connectionId === undefined) {
+    return null;
+  }
+  const name = names.get(connectionId);
+  const readOn = formatDateTime(read.addedAt);
+  return (
+    <p className="text-muted-foreground text-sm">
+      {name === undefined ? (
+        <Trans>Read from a shared connection on {readOn}</Trans>
+      ) : (
+        <Trans>
+          Read from {name} on {readOn}
+        </Trans>
+      )}
+    </p>
+  );
+};
+
 const SourceLine = ({
   listed,
   picked,
@@ -1097,6 +1188,7 @@ const SourcePanel = ({
   source,
   version: asked,
   teams,
+  connectedNames,
   onChanged,
   onDeleted,
 }: {
@@ -1104,6 +1196,8 @@ const SourcePanel = ({
   /** The version to show first: the newest they may read when left out. */
   version: number | undefined;
   teams: Team[];
+  /** The names of the shared connections whose kept reads they may read, by ID. */
+  connectedNames: ReadonlyMap<string, string>;
   /** A new version of it was added. */
   onChanged: (source: BrainSourceRef) => void;
   /** It was deleted. */
@@ -1179,6 +1273,7 @@ const SourcePanel = ({
             <h3 className="text-sm font-medium">
               {firstLineOf(read.text) || <Trans>No first line</Trans>}
             </h3>
+            <ReadFrom names={connectedNames} read={read} source={source} />
             <p className="text-sm whitespace-pre-wrap">{read.text}</p>
             <LearnedSection
               key={`${keyOf(source)}#${read.version}`}
@@ -1408,8 +1503,32 @@ export const SourcesPage = ({
   }>();
   const heading = useId();
   const uploadHeading = useId();
+  const core = useCore();
   // Each change to the sources counts, so the list reads them again.
   const [listing, setListing] = useState(0);
+  const [connected, setConnected] = useState<Read<BrainConnectedSource[]>>({
+    state: "loading",
+  });
+  useEffect(() => {
+    let left = false;
+    const read = async (): Promise<void> => {
+      const answer = await readFrom(
+        core,
+        async (sources) => await sources.connections()
+      );
+      if (!left) {
+        setConnected(answer);
+      }
+    };
+    void read();
+    return () => {
+      left = true;
+    };
+  }, [core]);
+  const connectedList = connected.state === "ready" ? connected.data : [];
+  const connectedNames = new Map(
+    connectedList.map(({ connectionId, name }) => [connectionId, name])
+  );
   const open = (source: BrainSourceRef, version?: number) => {
     const opening = (opened?.opening ?? 0) + 1;
     setOpened(
@@ -1478,6 +1597,11 @@ export const SourcesPage = ({
           />
         ) : null}
         <ConnectionFeeds connections={connections} />
+        {connected.state === "refused" ? (
+          <ErrorText>{connected.message}</ErrorText>
+        ) : (
+          <SharedConnectionReads connected={connectedList} />
+        )}
         <section aria-labelledby={heading} className="flex flex-col gap-3">
           <h2 className="text-sm font-medium" id={heading}>
             <Trans>Sources you may read</Trans>
@@ -1495,6 +1619,7 @@ export const SourcesPage = ({
                 key={`panel-${opened.opening}`}
                 onChanged={changed}
                 onDeleted={deleted}
+                connectedNames={connectedNames}
                 source={opened.source}
                 teams={teams}
                 version={opened.version}

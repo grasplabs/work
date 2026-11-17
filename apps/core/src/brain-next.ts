@@ -1665,6 +1665,24 @@ export interface SourcePage {
 }
 
 /**
+ * The shared connections whose Brain audience holds the member
+ * `personId` now, as their own reader does (`personReaderOf`): those
+ * whose kept reads every read of theirs may return (GRA-1831), by ID.
+ * Refused once they are no longer a member.
+ */
+export const readableConnectionsOf = async (
+  env: ReaderEnv,
+  personId: string
+): Promise<string[]> => {
+  const { groups } = await personReaderOf(env, personId);
+  return groups.flatMap((group) =>
+    group.startsWith(connectionPrefix)
+      ? [group.slice(connectionPrefix.length)]
+      : []
+  );
+};
+
+/**
  * A page of the sources the member `personId` may read, of every
  * producer's kind (never an instruction file), newest first by when their
  * current version was added, after `after` when given: what they may not
