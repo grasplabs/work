@@ -36,7 +36,8 @@ export const ProfileName = ({ name }: { name: string }) => {
       if (done === true) {
         setSaved(next);
         setTried(undefined);
-        setState("saved");
+        // Success is silent for now: the row's "Saved" line under the label was rejected (Ruben, 17 Nov 2026); the library is moving the mark into the control.
+        setState("idle");
       } else {
         setTried(next);
         setState("failed");
