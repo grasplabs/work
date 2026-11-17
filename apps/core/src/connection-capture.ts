@@ -2,7 +2,7 @@ import { delegateActorOf } from "@grasp-os/shared/audit";
 import { brainSourceErrors } from "@grasp-os/shared/brain-sources";
 import type { ConnectResult, ToolClass } from "@grasp-os/shared/connect";
 import { errorFields, log } from "@grasp-os/shared/log";
-import { redactJsonText } from "@grasp-os/shared/redact-json";
+import { redact } from "@grasp-os/shared/redact";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -47,7 +47,7 @@ import { classOf } from "./tool-classes.ts";
 // - Only a tool that answers one item's content, as its manifest declares
 //   (`answersItem`: Gmail's message and attachment reads, OneNote's page
 //   read), kept whole as that item's source for the tool, in the person's
-//   own store (owner content), credentials redacted (`redactJsonText`); never the
+//   own store (owner content), credentials redacted (`redact`); never the
 //   call's input. What a tool is decides it, never how many items came
 //   back: a list or a search is never kept, even with one hit (a snippet
 //   beside the full copy is noise in recall, and every changed summary
@@ -84,10 +84,11 @@ import { classOf } from "./tool-classes.ts";
 //   read and gives as the version's latest read time, on the person's
 //   Sources page and in the passage the model reads. A read again of the
 //   same text adds that read time to its version, and no version.
-// - Credentials are redacted inside every JSON string the text holds as
-//   well as over the rest of it (`redactJsonText`, GRA-1880), once, over
-//   exactly the text kept (a toolkit's blocks joined first): what is kept
-//   never holds anything `redact` removes from that same text.
+// - Credentials are redacted once, over exactly the text kept (a
+//   toolkit's blocks joined first, a native item's whole answer), so what
+//   is kept never holds anything `redact` removes from that same text. Not
+//   yet inside JSON string values, where an escaped newline can hide the
+//   next line's credential (GRA-1880).
 // - Capturing never holds up or fails the call: it runs once the agent
 //   has its answer (`waitUntil`). Every call ends in one audit event, of
 //   IDs and counts alone (items, kept, failed, skipped, adding up to
@@ -260,7 +261,7 @@ const answerCaptured = async (
   }
   // Redacted once, over exactly the text kept: a credential's name in one
   // block and its value in the next are one credential.
-  const text = redactJsonText(texts.join("\n\n"));
+  const text = redact(texts.join("\n\n"));
   let ended: Ended;
   try {
     const id = await answerCaptureIdOf(
@@ -336,7 +337,7 @@ const captured = async (
     scope,
     connectionId,
     id,
-    redactJsonText(result.output),
+    redact(result.output),
     readAt
   );
 };

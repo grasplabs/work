@@ -1,8 +1,7 @@
 import { personalBrainOf } from "@grasp-os/brain-next/contract";
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import { chatIdSchema } from "@grasp-os/shared/ids";
-import { redactedSpans } from "@grasp-os/shared/redact";
-import { redactJsonText } from "@grasp-os/shared/redact-json";
+import { redact } from "@grasp-os/shared/redact";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
@@ -327,16 +326,13 @@ describe("what a chat's agent reads through a toolkit", setUpTime, () => {
       "efgh",
       crypto.randomUUID().replaceAll("-", ""),
     ].join("");
-    const session = ["s3ss", "10n", crypto.randomUUID().slice(0, 8)].join("");
     // Each answer's text blocks, and the image between them that keeps
-    // connect from joining them itself.
+    // connect from joining them itself: a credential split across blocks,
+    // and a block of JSON next to one of prose.
     const answers = [
       ["password:", secret],
       ["Authorization: Bearer", token],
-      [
-        JSON.stringify({ note: `password: ${secret}\nCookie: sid=${session}` }),
-        `and token=${token}`,
-      ],
+      [JSON.stringify({ password: secret }), `and token=${token}`],
     ];
     const chat = await chatOf(
       person.userId,
@@ -377,21 +373,12 @@ describe("what a chat's agent reads through a toolkit", setUpTime, () => {
 
     expect({
       stored,
-      // Nothing `redact` removes from the same text is kept.
-      kept: stored.map((text, index) =>
-        redactedSpans(joined[index] ?? "")
-          .map(([from, to]) => (joined[index] ?? "").slice(from, to))
-          .filter((removed) => removed.length >= 6 && text.includes(removed))
-      ),
       secrets: stored.map(
-        (text) =>
-          text.includes(secret) ||
-          text.includes(token) ||
-          text.includes(session)
+        (text) => text.includes(secret) || text.includes(token)
       ),
     }).toStrictEqual({
-      stored: joined.map((text) => redactJsonText(text)),
-      kept: [[], [], []],
+      // Redacted once, over exactly the text kept.
+      stored: joined.map((text) => redact(text)),
       secrets: [false, false, false],
     });
   });
@@ -584,16 +571,11 @@ describe("what a chat's agent reads through a toolkit", setUpTime, () => {
     });
   });
 
-  it("keeps a company read without the credentials inside its JSON, and a read again of it unchanged on a later day adds that read time and no version", async () => {
+  it("keeps a company read without its credentials, and a read again of it unchanged on a later day adds that read time and no version", async () => {
     const person = await signedInApi(idp, "user");
     const marker = markerOf();
-    const session = ["s3ss", "10n", crypto.randomUUID().slice(0, 8)].join("");
     const own = await ownToolkit(person, "mail");
-    // The reviewer's shape (GRA-1880): a session ID on the line after a
-    // password, inside a JSON string, where a line break is `\n`.
-    const answer = {
-      body: `password: hunter2\nCookie: sid=${session}\nQuote ${marker}`,
-    };
+    const answer = { body: `Quote ${marker}`, password: "hunter2" };
     await own.answer("mail.search", structured(answer));
     const input = { query: marker };
     const chat = await chatOf(
@@ -665,9 +647,8 @@ describe("what a chat's agent reads through a toolkit", setUpTime, () => {
     expect({
       first,
       kept: kept.map(({ text }) => ({
-        // `redact` over the whole text takes `hunter2\nCookie:` as one value.
-        password: text.includes("password: [redacted] [redacted]"),
-        secret: text.includes(session) || text.includes("hunter2"),
+        password: text.includes('"password":"[redacted]"'),
+        secret: text.includes("hunter2"),
       })),
       unchanged,
       // The model gets when it was last read, beside the passage.
@@ -682,7 +663,7 @@ describe("what a chat's agent reads through a toolkit", setUpTime, () => {
         {
           readOn: day(new Date(now)),
           versions: 1,
-          firstLine: `{"body":"password: [redacted] [redacted]\\nQuote ${marker}"}`,
+          firstLine: `{"body":"Quote ${marker}","password":"[redacted]"}`,
         },
       ],
       kept: [{ password: true, secret: false }],

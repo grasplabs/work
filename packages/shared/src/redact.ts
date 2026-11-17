@@ -239,18 +239,6 @@ const redactParams = (url: URL, nested: boolean): boolean => {
   return changed;
 };
 
-/** `found`, a link as `linkPattern` found it, as `redactLinks` writes it. */
-const redactedLink = (found: string): string => {
-  // What ends no link stays outside it, byte for byte (`linkEndOf`).
-  const end = linkEndOf(found);
-  const link = decodeHTMLAttribute(found.slice(0, end));
-  if (!URL.canParse(link)) {
-    return found;
-  }
-  const url = new URL(link);
-  return redactParams(url, true) ? serialized(url) + found.slice(end) : found;
-};
-
 /**
  * `text` with the granting parameters of every link in it redacted: each
  * link's character references decoded as a browser reads an `href`, the
@@ -259,7 +247,16 @@ const redactedLink = (found: string): string => {
  * is left exactly as it was written.
  */
 const redactLinks = (text: string): string =>
-  text.replace(linkPattern, (found: string) => redactedLink(found));
+  text.replace(linkPattern, (found) => {
+    // What ends no link stays outside it, byte for byte (`linkEndOf`).
+    const end = linkEndOf(found);
+    const link = decodeHTMLAttribute(found.slice(0, end));
+    if (!URL.canParse(link)) {
+      return found;
+    }
+    const url = new URL(link);
+    return redactParams(url, true) ? serialized(url) + found.slice(end) : found;
+  });
 
 /** `text` with every credential in it ({@link credentials}) redacted. */
 export const redact = (text: string): string => {
@@ -280,145 +277,3 @@ export const redact = (text: string): string => {
  */
 export const holdsKnownCredential = (text: string): boolean =>
   credentialFormats.some((pattern) => text.search(pattern) !== -1);
-
-/** What `redact` writes in place of a value. */
-const marker = "[redacted]";
-
-/** How many characters `one` and `two` share at their start. */
-const sharedStart = (one: string, two: string): number => {
-  let length = 0;
-  while (
-    length < one.length &&
-    length < two.length &&
-    one[length] === two[length]
-  ) {
-    length += 1;
-  }
-  return length;
-};
-
-/** How many characters `one` and `two` share at their end. */
-const sharedEnd = (one: string, two: string): number => {
-  let length = 0;
-  while (
-    length < one.length &&
-    length < two.length &&
-    one[one.length - 1 - length] === two[two.length - 1 - length]
-  ) {
-    length += 1;
-  }
-  return length;
-};
-
-/** `redact`'s passes, in its order: links, then each credential rule. */
-const passes: readonly (readonly [
-  RegExp,
-  string | ((...args: unknown[]) => string),
-])[] = [
-  [linkPattern, (found: unknown): string => redactedLink(String(found))],
-  ...credentials,
-];
-
-/** `text` after some of `redact`'s passes, and where each character stood. */
-interface Passed {
-  current: string;
-  /** Where each character of `current` stood in the text: -1 where a replacement wrote it. */
-  origin: Int32Array;
-}
-
-/**
- * One of `redact`'s passes (`pattern`, `replacement`) over `passed`,
- * marking in `removed` each character of the text it replaces, less what
- * the replacement keeps as written at its start and its end, and never
- * reaching into the marker it holds.
- */
-const passOver = (
-  { current, origin }: Passed,
-  [pattern, replacement]: (typeof passes)[number],
-  removed: Uint8Array
-): Passed => {
-  const pieces: string[] = [];
-  const next: number[] = [];
-  let last = 0;
-  const keep = (from: number, to: number): void => {
-    for (let index = from; index < to; index += 1) {
-      next.push(origin[index] ?? -1);
-    }
-  };
-  current.replace(pattern, (...args: unknown[]): string => {
-    const match = String(args[0]);
-    const named = typeof args.at(-1) === "object";
-    const offset = Number(args.at(named ? -3 : -2));
-    const written =
-      typeof replacement === "string" ? replacement : replacement(...args);
-    const at = written.indexOf(marker);
-    const head = Math.min(
-      sharedStart(match, written),
-      at === -1 ? written.length : at
-    );
-    const tail = Math.min(
-      sharedEnd(match, written),
-      match.length - head,
-      written.length - head,
-      at === -1 ? written.length : written.length - at - marker.length
-    );
-    pieces.push(current.slice(last, offset), written);
-    keep(last, offset + head);
-    for (let index = head; index < written.length - tail; index += 1) {
-      next.push(-1);
-    }
-    keep(offset + match.length - tail, offset + match.length);
-    for (
-      let index = offset + head;
-      index < offset + match.length - tail;
-      index += 1
-    ) {
-      const stood = origin[index] ?? -1;
-      if (stood !== -1) {
-        removed[stood] = 1;
-      }
-    }
-    last = offset + match.length;
-    return written;
-  });
-  pieces.push(current.slice(last));
-  keep(last, current.length);
-  return { current: pieces.join(""), origin: Int32Array.from(next) };
-};
-
-/**
- * Where `redact` removes text from `text`: each stretch of `text`, `[start,
- * end)` in UTF-16 units, in order, that its passes replace (the same
- * passes, in the same order, over the same text, so its rules are its
- * own), less what a replacement keeps as it was written at its start and
- * its end (a name, its separator and quotes; a link's unchanged parts).
- * For a caller that redacts the same text in a way of its own and must
- * never keep anything `redact` would remove (redact-json.ts). Linear in
- * `text`.
- */
-export const redactedSpans = (text: string): [number, number][] => {
-  // Most texts hold nothing to redact: no need to place anything.
-  if (redact(text) === text) {
-    return [];
-  }
-  const removed = new Uint8Array(text.length);
-  let passed: Passed = {
-    current: text,
-    origin: Int32Array.from({ length: text.length }, (_, index) => index),
-  };
-  for (const pass of passes) {
-    passed = passOver(passed, pass, removed);
-  }
-  const spans: [number, number][] = [];
-  let start = -1;
-  for (let index = 0; index <= removed.length; index += 1) {
-    const isRemoved = index < removed.length && removed[index] === 1;
-    if (isRemoved && start === -1) {
-      start = index;
-    } else if (!isRemoved && start !== -1) {
-      spans.push([start, index]);
-      start = -1;
-    }
-  }
-  return spans;
-};
