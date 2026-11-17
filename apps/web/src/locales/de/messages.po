@@ -568,9 +568,29 @@ msgstr "{failed, plural, one {# fehlgeschlagener Lauf} other {# fehlgeschlagene 
 msgid "{field} in {table} needs a change in code before this can be published."
 msgstr "{field} in {table} braucht eine Änderung im Code, bevor dies veröffentlicht werden kann."
 
+#: src/agents/agent-documents.tsx
+msgid "{file} added."
+msgstr "{file} hinzugefügt."
+
+#: src/agents/agent-documents.tsx
+msgid "{file} is larger than 10 MB."
+msgstr "{file} ist größer als 10 MB."
+
+#: src/agents/agent-documents.tsx
+msgid "{file} is one more than {most} documents."
+msgstr "{file} wäre eines mehr als {most} Dokumente."
+
+#: src/agents/agent-documents.tsx
+msgid "{file} isn't a kind of file an agent reads."
+msgstr "{file} ist keine Dateiart, die ein Agent liest."
+
 #: src/onboarding/document-drop.tsx
 msgid "{file} removed"
 msgstr "{file} entfernt"
+
+#: src/agents/agent-documents.tsx
+msgid "{file} wasn't added."
+msgstr "{file} wurde nicht hinzugefügt."
 
 #: src/activity/audit-log.tsx
 msgid "{firstShown}–{lastShown}"
@@ -1138,6 +1158,10 @@ msgstr "{signIn} ist verbunden. Ich sehe {people} Personen in {teams} Teams."
 #: src/agents/agent-documents.tsx
 msgid "{size} · Added {when}"
 msgstr "{size} · Hinzugefügt am {when}"
+
+#: src/agents/agent-documents.tsx
+msgid "{size}, added"
+msgstr "{size}, hinzugefügt"
 
 #: src/brain/brain.ts
 msgid "{sources, plural, one {Time-consuming work that could be automated, raised in # source by {teams}.} other {Time-consuming work that could be automated, raised in # sources by {teams}.}}"
@@ -2032,8 +2056,8 @@ msgid "Add as"
 msgstr "Hinzufügen als"
 
 #: src/agents/agent-documents.tsx
-msgid "Add document"
-msgstr "Dokument hinzufügen"
+msgid "Add documents"
+msgstr "Dokumente hinzufügen"
 
 #: src/apps/field-editor.tsx
 msgid "Add field"
@@ -2092,6 +2116,10 @@ msgstr "Webhook hinzufügen"
 msgid "Add who answers"
 msgstr "Wer antwortet hinzufügen"
 
+#: src/agents/agent-documents.tsx
+msgid "Added"
+msgstr "Hinzugefügt"
+
 #: src/apps/draft-changes.tsx
 msgctxt "a file a change adds"
 msgid "Added"
@@ -2132,6 +2160,10 @@ msgstr "Hinzugefügt am"
 #: src/activity/audit-words.ts
 msgid "Added someone to a team"
 msgstr "Jemanden zu einem Team hinzugefügt"
+
+#: src/agents/agent-documents.tsx
+msgid "Adding"
+msgstr "Wird hinzugefügt"
 
 #: src/projects/file-item-dialog.tsx
 msgid "Adding an app or workflow shares it with nobody. Only those it is shared with see it here."
@@ -3268,7 +3300,6 @@ msgstr "Gebunden"
 msgid "Bound to"
 msgstr "Gebunden an"
 
-#: src/agents/agent-form.tsx
 #: src/apps/resource-bindings.tsx
 #: src/brain/brain-nav.tsx
 #: src/grasp/frame/grasp-sidebar.tsx
@@ -3787,10 +3818,6 @@ msgstr "Workflow prüfen"
 msgid "Check and save"
 msgstr "Prüfen und speichern"
 
-#: src/agents/agent-form.tsx
-msgid "Check mark"
-msgstr "Häkchen"
-
 #: src/chat/thread.tsx
 msgid "Check or replace it in Settings › AI providers"
 msgstr "Prüfen oder ersetzen Sie ihn unter Einstellungen › KI-Anbieter"
@@ -3865,6 +3892,10 @@ msgstr "Workflow wählen"
 #: src/onboarding/place-picker.tsx
 msgid "Choose documents"
 msgstr "Dokumente auswählen"
+
+#: src/agents/agent-documents.tsx
+msgid "Choose files"
+msgstr "Dateien auswählen"
 
 #: src/onboarding/setup-steps.tsx
 msgid "Choose from Google Drive"
@@ -5249,6 +5280,10 @@ msgstr "Laufwerk"
 msgid "Drop files here"
 msgstr "Dateien hier ablegen"
 
+#: src/agents/agent-documents.tsx
+msgid "Drop files here, or"
+msgstr "Dateien hier ablegen oder"
+
 #: src/apps/publish.tsx
 msgid "Drop them and go back"
 msgstr "Verwerfen und zurückgehen"
@@ -5868,6 +5903,7 @@ msgstr "Datei"
 msgid "File {where}: {message}"
 msgstr "Datei {where}: {message}"
 
+#: src/agents/agent-documents.tsx
 #: src/apps/app-code.tsx
 #: src/inbox/items.ts
 #: src/routes/_shell.knowledge.$collection.tsx
@@ -6015,10 +6051,6 @@ msgstr "Ein Problem wird behoben…"
 #: src/chat/chat-panel.tsx
 msgid "Float over the page"
 msgstr "Über der Seite schweben lassen"
-
-#: src/agents/agent-form.tsx
-msgid "Flow"
-msgstr "Ablauf"
 
 #: src/routes/_shell.workflows.$workflow.tsx
 msgctxt "a workflow's view"
@@ -6682,10 +6714,6 @@ msgstr "Er wusste es nicht"
 #: src/settings/stephen-card.tsx
 msgid "He stops answering everywhere outside Grasp, and says so once to whoever writes. Grasp’s chat keeps working."
 msgstr "Er antwortet nirgends mehr außerhalb von Grasp und sagt das jedem, der schreibt, einmal. Der Chat von Grasp funktioniert weiter."
-
-#: src/agents/agent-form.tsx
-msgid "Head"
-msgstr "Kopf"
 
 #: src/connections/http-connections.tsx
 msgid "Header name"
@@ -7966,10 +7994,6 @@ msgstr "Limette"
 msgid "Limits"
 msgstr "Limits"
 
-#: src/agents/agent-form.tsx
-msgid "Lines"
-msgstr "Linien"
-
 #: src/apps/app-own-link.tsx
 #: src/apps/app-settings.tsx
 #: src/apps/app-workspace.tsx
@@ -9198,6 +9222,10 @@ msgstr "Keines: Sein Anbieter wurde entfernt."
 #: src/connections/connection-list.tsx
 msgid "None."
 msgstr "Keine."
+
+#: src/agents/agent-documents.tsx
+msgid "Not added"
+msgstr "Nicht hinzugefügt"
 
 #: src/routes/_shell.integrations.$integration.tsx
 #: src/workflows/workflow-triggers.tsx
@@ -10432,10 +10460,6 @@ msgstr "PDF, Word, Excel, Markdown, Text, CSV oder JSON, jeweils bis 10 MB. Höc
 msgid "PDF, Word, Excel, PowerPoint or text"
 msgstr "PDF, Word, Excel, PowerPoint oder Text"
 
-#: src/agents/agent-form.tsx
-msgid "Pen"
-msgstr "Stift"
-
 #: src/knowledge/uploads.tsx
 msgid "Pending"
 msgstr "Ausstehend"
@@ -10554,10 +10578,6 @@ msgstr "Eine auswählen"
 #: src/apps/field-editor.tsx
 msgid "Picked up {name}, at place {place}."
 msgstr "{name} aufgenommen, an Stelle {place}."
-
-#: src/agents/agent-form.tsx
-msgid "Picture"
-msgstr "Bild"
 
 #: src/onboarding/interviews-progress.tsx
 msgid "pieces of work found"
@@ -10779,10 +10799,6 @@ msgstr "{name} an Stelle {place} abgelegt."
 #: src/interview/read-back.tsx
 msgid "Put back"
 msgstr "Zurücklegen"
-
-#: src/agents/agents-overview.tsx
-msgid "Put forward"
-msgstr "Vorgeschlagen"
 
 #: src/knowledge/new-document.tsx
 msgid "Put it in folders with a slash, as in handbook/leave."
@@ -15072,6 +15088,7 @@ msgstr "Auslöser"
 msgid "Try"
 msgstr "Versuchen"
 
+#: src/agents/agent-documents.tsx
 #: src/apps/app-data.tsx
 #: src/apps/app-owner.tsx
 #: src/apps/app-settings.tsx
@@ -17175,10 +17192,6 @@ msgstr "Ihre Version der App"
 #: src/interview/before.tsx
 msgid "Your words"
 msgstr "Ihre Worte"
-
-#: src/agents/agents-overview.tsx
-msgid "Yours"
-msgstr "Deine"
 
 #: src/brain/lessons-view.tsx
 msgctxt "lesson scope"

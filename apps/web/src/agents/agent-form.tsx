@@ -1,11 +1,8 @@
 import {
-  agentFaces,
   agentInstructionsMax,
   agentJobMax,
   agentNameMax,
 } from "@grasp-os/shared/agents";
-import type { AgentFace } from "@grasp-os/shared/agents";
-import { msg } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import { useState } from "react";
 
@@ -20,14 +17,12 @@ import { Form } from "../grasp/form/index.ts";
 import { Input } from "../grasp/input/index.ts";
 import { Select } from "../grasp/select/index.ts";
 import { Textarea } from "../grasp/textarea/index.ts";
-import { Toggle, ToggleGroup } from "../grasp/toggle/index.ts";
-import { AgentAvatar, faceOf } from "./agent-avatar.tsx";
 
-// What an admin says of an agent: its name, what it is for, the picture
-// it is drawn with, the model its turns use and its instructions. A form
-// of Grasp UI's fields, without its own button: the dialog or card it
-// stands in has the submit button, tied to it by `id`
-// (`<Button form={id} type="submit">`). A new agent asks for all at once
+// What an admin says of an agent: its name, what it is for, the model its
+// turns use and its instructions. Its face is the Agent mark, drawn from
+// its name, so a new name gives it a new face. A form of Grasp UI's
+// fields, without its own button: the dialog or card it stands in has
+// the submit button, tied to it by `id` (`<Button form={id} type="submit">`). A new agent asks for all at once
 // (new-agent.tsx); an agent's page asks for some of them at a time
 // (agent-page.tsx), and saves only those.
 
@@ -36,21 +31,14 @@ export interface Typed {
   name: string;
   job: string;
   instructions: string;
-  /** The figure it is drawn with, by name. */
+  /**
+   * The figure core keeps for it, passed back unchanged: it is drawn with
+   * Grasp UI's Agent mark, from its name, so nobody picks a figure now.
+   */
   face: string;
   /** The model its turns use; null for the one its asker picks. */
   model: string | null;
 }
-
-/** Each picture, as a screen reader names it. */
-const faceNames = {
-  stephen: msg`Head`,
-  brain: msg`Brain`,
-  pen: msg`Pen`,
-  lines: msg`Lines`,
-  flow: msg`Flow`,
-  check: msg`Check mark`,
-} as const satisfies Record<AgentFace, unknown>;
 
 /** No models to give an agent: a form that doesn't ask for one. */
 const noModels: readonly string[] = [];
@@ -59,7 +47,7 @@ const noModels: readonly string[] = [];
 const askersOwn = "asker";
 
 /** Which of an agent's words a form asks for. */
-export type Part = keyof Typed;
+export type Part = Exclude<keyof Typed, "face">;
 
 /** A form for `parts` of an agent, saved together by the button tied to `id`. */
 export const AgentForm = ({
@@ -80,7 +68,7 @@ export const AgentForm = ({
   /** What the form's own `parts` now say: nothing of the rest of the agent. */
   onSave: (said: Partial<Typed>) => Promise<void>;
 }) => {
-  const { t, i18n } = useLingui();
+  const { t } = useLingui();
   const [typed, setTyped] = useState<Typed>(initial);
   // Its own model stays offered while it has one the organization no longer chose.
   const offered = [
@@ -133,33 +121,6 @@ export const AgentForm = ({
             placeholder={t`Chases unpaid invoices`}
             value={typed.job}
           />
-        </Field>
-      ) : null}
-      {parts.includes("face") ? (
-        <Field disabled={!can}>
-          <FieldLabel>{t`Picture`}</FieldLabel>
-          <ToggleGroup
-            aria-label={t`Picture`}
-            disabled={!can}
-            onValueChange={(next: unknown[]) => {
-              const face = agentFaces.find((each) => each === next.at(0));
-              // A press on the chosen one keeps it chosen.
-              if (face !== undefined) {
-                setTyped({ ...typed, face });
-              }
-            }}
-            value={[faceOf(typed.face)]}
-          >
-            {agentFaces.map((face) => (
-              <Toggle
-                aria-label={i18n._(faceNames[face])}
-                key={face}
-                value={face}
-              >
-                <AgentAvatar face={face} size="sm" />
-              </Toggle>
-            ))}
-          </ToggleGroup>
         </Field>
       ) : null}
       {parts.includes("model") ? (

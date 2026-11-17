@@ -550,9 +550,15 @@ const onSwitch = (): HTMLElement => {
   return found;
 };
 
+/** The words of the agent's documents' list. */
+const documentsListed = (): string =>
+  document.querySelector("ul[aria-label='Documents']")?.textContent ?? "";
+
 /** Picks `files` in the documents' file picker, as a person does. */
 const pick = async (...files: File[]) => {
-  const input = document.querySelector("[data-testid='agent-document-input']");
+  const input = document.querySelector(
+    "[data-slot='file-upload'] input[type='file']"
+  );
   if (!(input instanceof HTMLInputElement)) {
     throw new TypeError("No file picker");
   }
@@ -769,25 +775,16 @@ describe("an agent's page", () => {
   it("saves each card's own fields over the agent as core has it now, never undoing what another card saved", async () => {
     const { connections, asked } = await withClaire();
     await shown(connections, { agent: "Claire", tab: "instructions" });
-    // The instructions were shown before the picture was saved.
+    // The name's dialog is opened after the instructions were saved.
     await set(field("Instructions"), "Only invoices over 30 days.", "input");
-    await press(button("Edit"));
-    await press(button("Pen"));
-    await press(dialogButton("Save"));
     await press(exactButton("Save"));
-    // And the name is asked for after both.
     await press(button("Edit"));
     await set(field("Name"), "Clara", "input");
     await press(dialogButton("Save"));
     const said = "Only invoices over 30 days.";
     expect(asked).toStrictEqual([
-      ["change", "agent-1", { ...claire, face: "pen" }],
-      ["change", "agent-1", { ...claire, face: "pen", instructions: said }],
-      [
-        "change",
-        "agent-1",
-        { ...claire, name: "Clara", face: "pen", instructions: said },
-      ],
+      ["change", "agent-1", { ...claire, instructions: said }],
+      ["change", "agent-1", { ...claire, name: "Clara", instructions: said }],
     ]);
   });
 
@@ -806,9 +803,10 @@ describe("an agent's page", () => {
         listed.includes("Close checklist.md"),
         listed.includes("Terms.txt"),
       ],
+      // The agent's documents, as their list has them once core kept them.
       after: [
-        document.body.textContent.includes("Close checklist.md"),
-        document.body.textContent.includes("Terms.txt"),
+        documentsListed().includes("Close checklist.md"),
+        documentsListed().includes("Terms.txt"),
       ],
       // Who may learn what a document says, said where one is added.
       warned: listed.includes("Anyone who may ask it can learn what they say."),
@@ -829,7 +827,7 @@ describe("an agent's page", () => {
     });
   });
 
-  it("says why a file wasn't taken, keeps those taken before it, and stops there", async () => {
+  it("says why a file wasn't taken, and keeps the others", async () => {
     const { connections, asked } = await withClaire();
     await shown(connections, { agent: "Claire", tab: "instructions" });
     await pick(
@@ -837,16 +835,17 @@ describe("an agent's page", () => {
       new File(["not a PDF"], "policy.pdf"),
       new File(["c"], "c.md")
     );
+    // Each file is sent on its own: one core refuses stops none of the rest.
     expect({
       asked: asked.map((each) => each[2]),
       said: document.body.textContent.includes(
         "Only PDF, Word and text files can be attached."
       ),
-      kept: document.body.textContent.includes("a.md"),
+      kept: ["a.md", "c.md"].map((file) => documentsListed().includes(file)),
     }).toStrictEqual({
-      asked: ["a.md", "policy.pdf"],
+      asked: ["a.md", "policy.pdf", "c.md"],
       said: true,
-      kept: true,
+      kept: [true, true],
     });
   });
 
@@ -857,14 +856,14 @@ describe("an agent's page", () => {
     Object.defineProperty(large, "size", { value: chatFileMaxBytes + 1 });
     await pick(large);
     const tooLarge = document.body.textContent.includes(
-      "A document is at most 10 MB"
+      "large.md is larger than 10 MB."
     );
     await pick(new File(["MZ"], "tool.exe"));
     expect({
       asked,
       tooLarge,
       unsupported: document.body.textContent.includes(
-        "A document is a PDF, Word (.docx)"
+        "tool.exe isn't a kind of file an agent reads."
       ),
     }).toStrictEqual({ asked: [], tooLarge: true, unsupported: true });
   });
@@ -880,7 +879,9 @@ describe("an agent's page", () => {
     expect({
       listed: document.body.textContent.includes("Terms.txt"),
       add: document.body.textContent.includes("Add document"),
-      picker: document.querySelector("[data-testid='agent-document-input']"),
+      picker: document.querySelector(
+        "[data-slot='file-upload'] input[type='file']"
+      ),
       remove: [...document.querySelectorAll("button")].some(
         (each) => each.getAttribute("aria-label") === "Remove Terms.txt"
       ),

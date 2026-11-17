@@ -13,7 +13,7 @@ import {
   DialogBody,
   DialogDescription,
   DialogFooter,
-  DialogPanel,
+  DialogContent,
   DialogTitle,
 } from "../grasp/dialog/index.ts";
 import { Empty } from "../grasp/empty/index.ts";
@@ -21,7 +21,15 @@ import { Field, FieldLabel } from "../grasp/field/index.ts";
 import { Form, FormRow } from "../grasp/form/index.ts";
 import { Plus, Trash } from "../grasp/icons/index.ts";
 import { inputStyles, sizeStyles } from "../grasp/input/input.tsx";
-import { Item, ItemGroup } from "../grasp/item/index.ts";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemDetail,
+  ItemGroup,
+  ItemTitle,
+} from "../grasp/item/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
 import { Select } from "../grasp/select/index.ts";
 import { Switch } from "../grasp/switch/index.ts";
@@ -187,7 +195,7 @@ const NewWake = ({
         {t`Add a time`}
       </Button>
       <Dialog onOpenChange={setOpen} open={open}>
-        <DialogPanel closeLabel={t`Close`}>
+        <DialogContent closeLabel={t`Close`}>
           <DialogTitle>{t`Add a time`}</DialogTitle>
           <DialogDescription>
             {t`It only reads. What it wants to change waits in that person's chat.`}
@@ -285,7 +293,7 @@ const NewWake = ({
               {t`Add`}
             </Button>
           </DialogFooter>
-        </DialogPanel>
+        </DialogContent>
       </Dialog>
     </>
   );
@@ -342,50 +350,50 @@ export const AgentWakes = ({
             const last = lastOf(wake);
             const { opening } = wake;
             return (
-              <Item
-                actions={
-                  <>
-                    <Switch
-                      checked={wake.state === "on"}
+              <Item key={wake.id} size="sm">
+                <ItemContent>
+                  <ItemTitle>
+                    {when}
+                    {/* With the zone it was made in: the company's then,
+                        which it keeps if the company's changes. */}
+                    <ItemDetail>{wake.timeZone}</ItemDetail>
+                  </ItemTitle>
+                  <ItemDescription>
+                    {last === undefined
+                      ? t`For ${person}: ${opening}`
+                      : t`For ${person}: ${opening} · ${last}`}
+                  </ItemDescription>
+                </ItemContent>
+                <ItemActions>
+                  <Switch
+                    checked={wake.state === "on"}
+                    disabled={!can}
+                    label={t`On`}
+                    onCheckedChange={(next) => {
+                      void change(async (session) => {
+                        await session.connections.setAgentWakePaused(
+                          wake.id,
+                          !next
+                        );
+                      });
+                    }}
+                  />
+                  {editable ? (
+                    <Button
+                      aria-label={t`Remove ${when}, for ${person}`}
                       disabled={!can}
-                      label={t`On`}
-                      onCheckedChange={(next) => {
+                      icon={Trash}
+                      onClick={() => {
                         void change(async (session) => {
-                          await session.connections.setAgentWakePaused(
-                            wake.id,
-                            !next
-                          );
+                          await session.connections.deleteAgentWake(wake.id);
                         });
                       }}
+                      size="sm"
+                      variant="ghost"
                     />
-                    {editable ? (
-                      <Button
-                        disabled={!can}
-                        icon={Trash}
-                        label={t`Remove ${when}, for ${person}`}
-                        onClick={() => {
-                          void change(async (session) => {
-                            await session.connections.deleteAgentWake(wake.id);
-                          });
-                        }}
-                        size="sm"
-                        variant="ghost"
-                      />
-                    ) : null}
-                  </>
-                }
-                description={
-                  last === undefined
-                    ? t`For ${person}: ${opening}`
-                    : t`For ${person}: ${opening} · ${last}`
-                }
-                // With the zone it was made in: the company's then, which
-                // it keeps if the company's changes.
-                detail={wake.timeZone}
-                key={wake.id}
-                size="sm"
-                title={when}
-              />
+                  ) : null}
+                </ItemActions>
+              </Item>
             );
           })}
         </ItemGroup>

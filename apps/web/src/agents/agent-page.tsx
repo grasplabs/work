@@ -19,12 +19,13 @@ import { changeThenRefresh } from "../change-then-refresh.ts";
 import { modelName } from "../chat/model-names.tsx";
 import type { Session } from "../core.ts";
 import { Page } from "../frame/page.tsx";
+import { AgentMark } from "../grasp/agent-mark/index.ts";
 import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogDescription,
   AlertDialogFooter,
-  AlertDialogPanel,
+  AlertDialogContent,
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "../grasp/alert-dialog/index.ts";
@@ -34,10 +35,15 @@ import {
   DialogAction,
   DialogBody,
   DialogFooter,
-  DialogPanel,
+  DialogContent,
   DialogTitle,
 } from "../grasp/dialog/index.ts";
-import { Empty } from "../grasp/empty/index.ts";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyTitle,
+} from "../grasp/empty/index.ts";
 import {
   Agent as AgentIcon,
   CalendarIcon,
@@ -49,7 +55,14 @@ import {
   Tool,
   Trash,
 } from "../grasp/icons/index.ts";
-import { Item, ItemGroup } from "../grasp/item/index.ts";
+import {
+  Item,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemMedia,
+  ItemTitle,
+} from "../grasp/item/index.ts";
 import { KeyValueList } from "../grasp/key-value/index.ts";
 import type { KeyValueItem } from "../grasp/key-value/index.ts";
 import { PageHeader } from "../grasp/page-header/index.ts";
@@ -67,7 +80,6 @@ import {
 import { classNames, StephenSettings } from "../settings/stephen-settings.tsx";
 import type { AskableWorkflow } from "../settings/stephen-settings.tsx";
 import { useCoreAction } from "../use-core-action.ts";
-import { AgentAvatar } from "./agent-avatar.tsx";
 import { AgentDocuments } from "./agent-documents.tsx";
 import {
   AgentFailure,
@@ -248,7 +260,7 @@ const Facts = ({
       icon: Clock,
     });
   }
-  return <KeyValueList divided items={items} layout="inline" />;
+  return <KeyValueList divided items={items} variant="inline" />;
 };
 
 /**
@@ -278,27 +290,26 @@ const RecentActivity = ({
       ) : (
         <ItemGroup separated>
           {asked === null ? null : (
-            <Item
-              description={moment(asked)}
-              icon={Conversation}
-              iconLook="inline"
-              size="sm"
-              title={t`Last asked in a chat`}
-            />
+            <Item size="sm">
+              <ItemMedia icon={Conversation} iconLook="inline" />
+              <ItemContent>
+                <ItemTitle>{t`Last asked in a chat`}</ItemTitle>
+                <ItemDescription>{moment(asked)}</ItemDescription>
+              </ItemContent>
+            </Item>
           )}
           {ran.map((wake) => (
-            <Item
-              description={
-                wake.lastOutcome === null
-                  ? moment(wake.lastAt)
-                  : `${moment(wake.lastAt)} · ${wake.lastOutcome}`
-              }
-              icon={CalendarIcon}
-              iconLook="inline"
-              key={wake.id}
-              size="sm"
-              title={wake.opening}
-            />
+            <Item key={wake.id} size="sm">
+              <ItemMedia icon={CalendarIcon} iconLook="inline" />
+              <ItemContent>
+                <ItemTitle>{wake.opening}</ItemTitle>
+                <ItemDescription>
+                  {wake.lastOutcome === null
+                    ? moment(wake.lastAt)
+                    : `${moment(wake.lastAt)} · ${wake.lastOutcome}`}
+                </ItemDescription>
+              </ItemContent>
+            </Item>
           ))}
         </ItemGroup>
       )}
@@ -334,8 +345,13 @@ const Access = ({
     // Core didn't say, as it won't for Grasp's staff: said, never left
     // blank or shown as anyone's.
     return (
-      <Empty kind="error" size="section" title={t`Access isn't shown`}>
-        {t`Only the company's own admins see it. If that is you, load the page again.`}
+      <Empty size="section" tone="danger">
+        <EmptyHeader>
+          <EmptyTitle>{t`Access isn't shown`}</EmptyTitle>
+          <EmptyDescription>
+            {t`Only the company's own admins see it. If that is you, load the page again.`}
+          </EmptyDescription>
+        </EmptyHeader>
       </Empty>
     );
   }
@@ -426,7 +442,7 @@ const EditAgent = ({
   const formId = useId();
   const { name } = agent;
   const [open, setOpen] = useState(false);
-  const parts: readonly Part[] = ["name", "job", "face", "model"];
+  const parts: readonly Part[] = ["name", "job", "model"];
   return (
     <>
       <Button
@@ -439,7 +455,7 @@ const EditAgent = ({
         {t`Edit`}
       </Button>
       <Dialog onOpenChange={setOpen} open={open}>
-        <DialogPanel closeLabel={t`Close`}>
+        <DialogContent closeLabel={t`Close`}>
           <DialogTitle>{t`Edit ${name}`}</DialogTitle>
           <DialogBody>
             {/* Mounted only while open, so it starts from what core keeps. */}
@@ -464,7 +480,7 @@ const EditAgent = ({
               {t`Save`}
             </Button>
           </DialogFooter>
-        </DialogPanel>
+        </DialogContent>
       </Dialog>
     </>
   );
@@ -493,7 +509,7 @@ const DeleteAgent = ({
           >
             {t`Delete`}
           </AlertDialogTrigger>
-          <AlertDialogPanel>
+          <AlertDialogContent>
             <AlertDialogTitle>{t`Delete ${name}?`}</AlertDialogTitle>
             <AlertDialogDescription>
               {t`It answers nobody, and its schedule and settings are removed. The chats people had with it stay theirs.`}
@@ -508,7 +524,7 @@ const DeleteAgent = ({
                 {t`Delete for good`}
               </AlertDialogAction>
             </AlertDialogFooter>
-          </AlertDialogPanel>
+          </AlertDialogContent>
         </AlertDialog>
       }
       density="compact"
@@ -658,7 +674,7 @@ export const AgentPage = ({
         descriptionLines={2}
         title={
           <span {...stylex.props(styles.title)}>
-            <AgentAvatar face={agent.face} />
+            <AgentMark name={name} size="lg" />
             {name}
           </span>
         }

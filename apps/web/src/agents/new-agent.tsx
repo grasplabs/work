@@ -11,7 +11,7 @@ import {
   DialogBody,
   DialogDescription,
   DialogFooter,
-  DialogPanel,
+  DialogContent,
   DialogTitle,
 } from "../grasp/dialog/index.ts";
 import { Plus } from "../grasp/icons/index.ts";
@@ -21,12 +21,13 @@ import { AgentForm } from "./agent-form.tsx";
 import type { Typed } from "./agent-form.tsx";
 
 // A new agent, for the company's admins: its name, what it is for, its
-// picture, its model and its instructions, said once. A task in a dialog
-// from the Agents page (NewAgentButton); /agents/new has the same form
-// on a page of its own, for a link. Core makes it on, reaching nobody
-// and with nothing it may do (agent-builder.ts), so the page it then
-// opens is the agent's Access tab: an agent nobody may ask is not yet
-// any use.
+// model and its instructions, said once; its face is drawn from its
+// name. A task in a dialog from the Agents page (NewAgentButton);
+// /agents/new has the same form on a page of its own, for a link. Core
+// makes it on, reaching nobody and with nothing it may do
+// (agent-builder.ts), so the page it then opens is the agent's Access
+// part: an agent nobody may ask is not yet any use. Core still keeps a
+// figure for it, `stephen`, which nothing draws now.
 
 /** A new agent before anything is said of it. */
 const blank: Typed = {
@@ -38,7 +39,7 @@ const blank: Typed = {
 };
 
 /** Every part a new agent is made with. */
-const parts = ["name", "job", "face", "model", "instructions"] as const;
+const parts = ["name", "job", "model", "instructions"] as const;
 
 /** Makes the agent `said` describes, then opens its Access tab. */
 const useMakeAgent = () => {
@@ -87,7 +88,7 @@ export const NewAgentButton = ({ models }: { models: readonly string[] }) => {
         {t`New agent`}
       </Button>
       <Dialog onOpenChange={setOpen} open={open}>
-        <DialogPanel closeLabel={t`Close`}>
+        <DialogContent closeLabel={t`Close`}>
           <DialogTitle>{t`New agent`}</DialogTitle>
           <DialogDescription>{lead}</DialogDescription>
           <DialogBody>
@@ -110,7 +111,7 @@ export const NewAgentButton = ({ models }: { models: readonly string[] }) => {
               {t`Make agent`}
             </Button>
           </DialogFooter>
-        </DialogPanel>
+        </DialogContent>
       </Dialog>
     </>
   );

@@ -1,16 +1,16 @@
 import { useLingui } from "@lingui/react/macro";
 import { Link, useMatch } from "@tanstack/react-router";
 
+import { AgentMark } from "../grasp/agent-mark/index.ts";
 import { CalendarIcon, Info, Lock, Note } from "../grasp/icons/index.ts";
 import type { SidebarSection } from "../grasp/sidebar/index.ts";
-import { AgentAvatar } from "./agent-avatar.tsx";
 import { wakesOn } from "./agent-facts.tsx";
 import { agentTabOf } from "./agent-page.tsx";
 import type { AgentTab } from "./agent-page.tsx";
 
 // One agent as the sidebar's section while an admin is on its page, as
 // Settings is (grasp/frame/grasp-sidebar.tsx): Back to the Agents page,
-// the agent's figure and name, then a row per part of its page. The parts
+// the agent's mark and name, then a row per part of its page. The parts
 // are its page's tabs, kept in the address (`?tab=`), so a row is a link
 // the page reads. What it shows is what the agent's route read: no read
 // of its own.
@@ -53,7 +53,7 @@ export const useAgentSection = (): SidebarSection | undefined => {
   return {
     id: "agent",
     title: name,
-    mark: <AgentAvatar face={agent.face} size="xs" />,
+    mark: <AgentMark name={name} size="xs" />,
     navLabel: t`${name}'s pages`,
     back: { label: t`Agents`, render: <Link to="/agents" /> },
     groups: [

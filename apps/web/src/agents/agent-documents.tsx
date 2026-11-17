@@ -7,41 +7,42 @@ import {
   chatFileTypes,
 } from "@grasp-os/shared/chat";
 import { useLingui } from "@lingui/react/macro";
-import * as stylex from "@stylexjs/stylex";
-import { useRef } from "react";
 
 import type { Session } from "../core.ts";
 import { formatBytes } from "../format.ts";
 import { Button } from "../grasp/button/index.ts";
 import { Empty } from "../grasp/empty/index.ts";
-import { File as FileIcon, Trash, Upload } from "../grasp/icons/index.ts";
-import { Item, ItemGroup } from "../grasp/item/index.ts";
+import { Field, FieldLabel } from "../grasp/field/index.ts";
+import { FileUpload } from "../grasp/file-upload/index.ts";
+import { File as FileIcon, Trash } from "../grasp/icons/index.ts";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemMedia,
+  ItemTitle,
+} from "../grasp/item/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
-import { Text } from "../grasp/text/index.ts";
 
-// An agent's documents, on its page's Instructions tab (agent-page.tsx):
+// An agent's documents, on its page's Instructions part (agent-page.tsx):
 // files an admin gives it to answer from, such as a checklist or a policy
 // too long for its instructions. Core reads each file's text once and
 // keeps only that (agent-documents.ts); the agent is told its documents
 // by name and reads one when a question needs it. Whoever may ask the
 // agent may learn what a document says, and the card says so where one
-// is added. A card of Grasp UI's Items; Add document opens the file
-// picker, as Grasp UI has no file drop part yet.
-
-const styles = stylex.create({
-  // The picker itself is never seen: Add document opens it.
-  picker: { display: "none" },
-});
+// is added. A card of Grasp UI's Items, and its File upload at the foot:
+// each file is sent to core as it is dropped or chosen, and once core
+// keeps it, it is a row above.
 
 /** What a page change asks of core, then the page read again. */
 type Change = (action: (session: Session) => Promise<unknown>) => Promise<void>;
 
-/** What the file picker offers: the extensions core takes. */
-const accepted = Object.keys(chatFileTypes)
-  .map((extension) => `.${extension}`)
-  .join(",");
+/** The kinds of file core takes, by their extensions. */
+const accepted = Object.keys(chatFileTypes).map((extension) => `.${extension}`);
 
-/** The rows of `agent`'s documents, and the way to add one. */
+/** The rows of `agent`'s documents, and the place to add more. */
 export const AgentDocuments = ({
   agent,
   documents,
@@ -59,109 +60,115 @@ export const AgentDocuments = ({
   change: Change;
 }) => {
   const { t, i18n } = useLingui();
-  const input = useRef<HTMLInputElement>(null);
   const { name } = agent;
   const most = agentDocumentsMax;
-  const full = (documents?.length ?? 0) >= agentDocumentsMax;
+  const kept = documents?.length ?? 0;
   const added = (at: string): string =>
     new Intl.DateTimeFormat(i18n.locale, { dateStyle: "medium" }).format(
       new Date(at)
     );
-  const add = (files: readonly File[]): void => {
-    if (files.length === 0) {
-      return;
-    }
-    void change(async (session) => {
-      // One after another: core counts each against the most an agent
-      // keeps, and the first it refuses says why.
-      for (const file of files) {
-        // Refused here as core would, before it is sent at all: a file
-        // past what one message to core holds would drop the connection,
-        // and every call waiting on it, before core could say why.
-        if (chatFileTypeOf(file.name) === undefined) {
-          throw agentErrors.create("agent.document_unsupported");
-        }
-        if (file.size > chatFileMaxBytes) {
-          throw agentErrors.create("agent.document_too_large");
-        }
-        // oxlint-disable-next-line no-await-in-loop -- in order, stopping at the first refused
-        const bytes = new Uint8Array(await file.arrayBuffer());
-        // oxlint-disable-next-line no-await-in-loop -- in order, stopping at the first refused
-        await session.connections.addAgentDocument(agent.id, {
-          name: file.name,
-          bytes,
-        });
+  // One file to core. It throws when core didn't take it, so File upload
+  // says so on the file's row; why is said under the page's header.
+  const send = async (file: File): Promise<void> => {
+    let sent = false;
+    await change(async (session) => {
+      // Refused here as core would, before it is sent at all: a file past
+      // what one message to core holds would drop the connection, and
+      // every call waiting on it, before core could say why.
+      if (chatFileTypeOf(file.name) === undefined) {
+        throw agentErrors.create("agent.document_unsupported");
       }
+      if (file.size > chatFileMaxBytes) {
+        throw agentErrors.create("agent.document_too_large");
+      }
+      await session.connections.addAgentDocument(agent.id, {
+        name: file.name,
+        bytes: new Uint8Array(await file.arrayBuffer()),
+      });
+      sent = true;
     });
+    if (!sent) {
+      throw new Error(t`Not added`);
+    }
   };
+  const editing = editable && documents !== undefined;
   return (
     <SectionCard
-      actions={
-        editable && documents !== undefined ? (
-          <>
-            <input
-              accept={accepted}
-              aria-hidden="true"
-              data-testid="agent-document-input"
-              multiple
-              onChange={(event) => {
-                add([...(event.target.files ?? [])]);
-                // The same file can be picked again once it was removed.
-                event.target.value = "";
-              }}
-              ref={input}
-              tabIndex={-1}
-              type="file"
-              {...stylex.props(styles.picker)}
-            />
-            <Button
-              disabled={!can || full}
-              icon={Upload}
-              onClick={() => {
-                input.current?.click();
-              }}
-              size="sm"
-            >
-              {t`Add document`}
-            </Button>
-          </>
-        ) : undefined
-      }
       description={t`Files ${name} reads when a question needs them. Anyone who may ask it can learn what they say.`}
       flush
       footer={
-        editable && documents !== undefined ? (
-          <Text size="xs" tone="muted">
-            {full
-              ? t`${name} has ${most} documents, the most an agent keeps. Remove one to add another.`
-              : t`PDF, Word, Excel, Markdown, text, CSV or JSON, up to 10 MB each. At most ${most} documents.`}
-          </Text>
+        editing && kept < most ? (
+          <Field disabled={!can}>
+            <FieldLabel>{t`Add documents`}</FieldLabel>
+            <FileUpload
+              accept={accepted}
+              // Each file a new list: those core kept are rows above.
+              key={kept}
+              maxFiles={most - kept}
+              maxSize={chatFileMaxBytes}
+              multiple
+              hint={t`PDF, Word, Excel, Markdown, text, CSV or JSON, up to 10 MB each. At most ${most} documents.`}
+              upload={send}
+              words={{
+                drop: t`Drop files here, or`,
+                choose: t`Choose files`,
+                uploading: t`Adding`,
+                done: t`Added`,
+                failed: t`Not added`,
+                retry: t`Try again`,
+                files: t`Files`,
+                doneLine: (size) => t`${size}, added`,
+                sent: (file) => t`${file} added.`,
+                notSent: (file) => t`${file} wasn't added.`,
+                remove: (file) => t`Remove ${file}`,
+                refused: (file, reason) => {
+                  if (reason === "file-too-large") {
+                    return t`${file} is larger than 10 MB.`;
+                  }
+                  if (reason === "too-many-files") {
+                    return t`${file} is one more than ${most} documents.`;
+                  }
+                  return t`${file} isn't a kind of file an agent reads.`;
+                },
+              }}
+            />
+          </Field>
         ) : undefined
       }
       title={t`Documents`}
     >
       {documents === undefined ? (
-        <Empty kind="error" size="inline">
+        <Empty size="inline" tone="danger">
           {t`The documents couldn't be loaded. Reload the page.`}
         </Empty>
       ) : null}
       {documents?.length === 0 ? (
         <Empty size="inline">{t`${name} has no documents.`}</Empty>
       ) : null}
+      {editing && kept >= most ? (
+        <Empty size="inline">
+          {t`${name} has ${most} documents, the most an agent keeps. Remove one to add another.`}
+        </Empty>
+      ) : null}
       {documents === undefined || documents.length === 0 ? null : (
-        <ItemGroup separated>
+        <ItemGroup aria-label={t`Documents`} separated>
           {documents.map((document) => {
             const file = document.name;
             const size = formatBytes(document.bytes);
             const when = added(document.addedAt);
             return (
-              <Item
-                actions={
-                  editable ? (
+              <Item key={document.id} size="sm">
+                <ItemMedia icon={FileIcon} iconLook="inline" />
+                <ItemContent>
+                  <ItemTitle>{file}</ItemTitle>
+                  <ItemDescription>{t`${size} · Added ${when}`}</ItemDescription>
+                </ItemContent>
+                {editable ? (
+                  <ItemActions>
                     <Button
+                      aria-label={t`Remove ${file}`}
                       disabled={!can}
                       icon={Trash}
-                      label={t`Remove ${file}`}
                       onClick={() => {
                         void change(async (session) => {
                           await session.connections.removeAgentDocument(
@@ -173,15 +180,9 @@ export const AgentDocuments = ({
                       size="sm"
                       variant="ghost"
                     />
-                  ) : undefined
-                }
-                description={t`${size} · Added ${when}`}
-                icon={FileIcon}
-                iconLook="inline"
-                key={document.id}
-                size="sm"
-                title={file}
-              />
+                  </ItemActions>
+                ) : null}
+              </Item>
             );
           })}
         </ItemGroup>

@@ -217,7 +217,7 @@ const cards = () =>
       link.getAttribute("href")
     );
     return {
-      name: names.find((name) => text.startsWith(name)),
+      name: names.find((name) => text.includes(name)),
       to: links.find((href) => href?.startsWith("/agents/") === true),
       chat: links.filter((href) => href?.startsWith("/?agent=") === true),
       text,
@@ -421,26 +421,6 @@ describe("the company's agents, on pages of their own", () => {
             modelRole: null,
           },
         ],
-      ]);
-    });
-
-    it("saves a picked picture with the rest of the agent as it was", async () => {
-      const asked = await mounted(page(claire, "overview"));
-      await press(buttonNamed("Edit"));
-      await press(document.querySelector("[aria-label='Pen']"));
-      await press(
-        [...document.querySelectorAll("[role='dialog'] button")].find(
-          (each) => each.textContent?.trim() === "Save"
-        )
-      );
-      const whole = {
-        name: "Claire",
-        job: "Chases invoices.",
-        instructions: "Claire's instructions.",
-        modelRole: null,
-      };
-      expect(asked).toStrictEqual([
-        ["change", "agent-claire", { ...whole, face: "pen", model: null }],
       ]);
     });
 

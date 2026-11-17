@@ -13,8 +13,16 @@ import { Link } from "@tanstack/react-router";
 import { useState } from "react";
 
 import { Page, PageHeading } from "../frame/page.tsx";
+import { AgentMark } from "../grasp/agent-mark/index.ts";
 import { Button } from "../grasp/button/index.ts";
-import { Empty } from "../grasp/empty/index.ts";
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "../grasp/empty/index.ts";
 import { AgentPerson, Conversation, Search } from "../grasp/icons/index.ts";
 import {
   InputGroup,
@@ -22,14 +30,22 @@ import {
   InputGroupInput,
   InputGroupText,
 } from "../grasp/input-group/index.ts";
-import { Item, ItemGroup } from "../grasp/item/index.ts";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemDetail,
+  ItemGroup,
+  ItemMedia,
+  ItemTitle,
+} from "../grasp/item/index.ts";
 import { Link as TextLink } from "../grasp/link/index.ts";
 import { SectionHeader } from "../grasp/section-header/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { Toggle, ToggleGroup } from "../grasp/toggle/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { dollars } from "../settings/money.ts";
-import { AgentAvatar } from "./agent-avatar.tsx";
 import { classesOn, useAudienceLine, wakesOn } from "./agent-facts.tsx";
 import { NewAgentButton } from "./new-agent.tsx";
 
@@ -183,9 +199,40 @@ const AgentRow = ({
   const job = shown.job === "" ? t`No job written yet` : shown.job;
   const answers = managed === undefined || managed.state === "on";
   return (
-    <Item
-      actions={
-        shown.usable && answers ? (
+    <Item>
+      <ItemMedia>
+        <AgentMark name={shown.name} />
+      </ItemMedia>
+      <ItemContent>
+        <ItemTitle>
+          {managed === undefined ? (
+            shown.name
+          ) : (
+            <TextLink
+              render={<Link params={{ agent: shown.id }} to="/agents/$agent" />}
+            >
+              {shown.name}
+            </TextLink>
+          )}
+          {managed?.state === "paused" ? (
+            <ItemDetail>{t`Paused`}</ItemDetail>
+          ) : null}
+        </ItemTitle>
+        <ItemDescription>
+          {facts.length === 0 ? (
+            job
+          ) : (
+            <span {...stylex.props(styles.lines)}>
+              <span>{job}</span>
+              <Text element="span" size="xs" tone="quiet">
+                {facts.join(" · ")}
+              </Text>
+            </span>
+          )}
+        </ItemDescription>
+      </ItemContent>
+      {shown.usable && answers ? (
+        <ItemActions>
           <Button
             icon={Conversation}
             render={<Link search={{ agent: shown.id }} to="/" />}
@@ -193,58 +240,65 @@ const AgentRow = ({
           >
             {t`Chat`}
           </Button>
-        ) : undefined
-      }
-      description={
-        facts.length === 0 ? (
-          job
-        ) : (
-          <span {...stylex.props(styles.lines)}>
-            <span>{job}</span>
-            <Text element="span" size="xs" tone="quiet">
-              {facts.join(" · ")}
-            </Text>
-          </span>
-        )
-      }
-      detail={managed?.state === "paused" ? t`Paused` : undefined}
-      media={<AgentAvatar face={shown.face} size="sm" />}
-      title={
-        managed === undefined ? (
-          shown.name
-        ) : (
-          <TextLink
-            render={<Link params={{ agent: shown.id }} to="/agents/$agent" />}
-          >
-            {shown.name}
-          </TextLink>
-        )
-      }
-    />
+        </ItemActions>
+      ) : null}
+    </Item>
   );
 };
 
+/** One group of the list: its name, and the agents in it. */
+interface AgentGroup {
+  key: string;
+  name: string;
+  agents: readonly Shown[];
+}
+
 /**
- * The list's groups, in order: the person's own agents, the company's,
- * and a colleague's own put forward for the whole company. This branch's
- * core has only the company's; the others come with the API that names
- * them (main's `ownAgents`, `offeredAgents`), each a group here.
+ * The list's groups, in order: the person's own agents ("Yours"), the
+ * company's, and a colleague's own put forward for the whole company
+ * ("Waiting for approval", each row with Approve and Decline). A group
+ * shows only while it holds an agent, and its name only beside another
+ * group: alone, the page's title says it. This branch's core has only
+ * the company's agents, the first agent first; the other two join as one
+ * entry each once core names them (main's `ownAgents`, `offeredAgents`).
  */
-const groupKeys = ["yours", "company", "putForward"] as const;
-type GroupKey = (typeof groupKeys)[number];
-
-/** Which group an agent stands in. */
-const groupOf = (_agent: Shown): GroupKey => "company";
-
-/** The groups that hold an agent, in order, each with its agents. */
-const groupsOf = (
-  agents: readonly Shown[],
-  names: Readonly<Record<GroupKey, string>>
-) =>
-  groupKeys.flatMap((key) => {
-    const held = agents.filter((agent) => groupOf(agent) === key);
-    return held.length === 0 ? [] : [{ key, name: names[key], agents: held }];
-  });
+const AgentGroups = ({
+  groups,
+  factsOf,
+}: {
+  groups: readonly AgentGroup[];
+  factsOf: (managed: NonNullable<Shown["managed"]>) => string[];
+}) => {
+  const { t } = useLingui();
+  const held = groups.filter(({ agents }) => agents.length > 0);
+  const named = held.length > 1;
+  return (
+    <div {...stylex.props(styles.groups)}>
+      {held.map((group) => (
+        <section key={group.key}>
+          {named ? (
+            <SectionHeader
+              layout={styles.groupHead}
+              size="sm"
+              title={group.name}
+            />
+          ) : null}
+          <ItemGroup aria-label={named ? group.name : t`Agents`} separated>
+            {group.agents.map((agent) => (
+              <AgentRow
+                facts={
+                  agent.managed === undefined ? [] : factsOf(agent.managed)
+                }
+                key={agent.id}
+                shown={agent}
+              />
+            ))}
+          </ItemGroup>
+        </section>
+      ))}
+    </div>
+  );
+};
 
 /** The Agents page's body: the agents the person may `usable`, and what an admin `managed`. */
 export const AgentsOverview = ({
@@ -262,11 +316,6 @@ export const AgentsOverview = ({
 }) => {
   const { t } = useLingui();
   const factsOf = useFacts(managed?.teams ?? []);
-  const groupNames = {
-    yours: t`Yours`,
-    company: t`Company`,
-    putForward: t`Put forward`,
-  } as const satisfies Record<GroupKey, string>;
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
   const agents = shownOf(usable, managed);
@@ -282,21 +331,24 @@ export const AgentsOverview = ({
   const paused = agents.filter(
     (agent) => agent.managed?.state === "paused"
   ).length;
-  const groups = groupsOf(shown, groupNames);
   const newAgent = makes ? <NewAgentButton models={models} /> : undefined;
   return (
     <Page>
       <PageHeading action={newAgent} title={t`Agents`} />
       {agents.length === 0 ? (
-        <Empty
-          action={newAgent}
-          icon={AgentPerson}
-          size="page"
-          title={t`No agents yet`}
-        >
-          {managed === undefined
-            ? t`The agents your company sets up for you show here.`
-            : t`Make one for a job, such as chasing unpaid invoices.`}
+        <Empty size="page">
+          <EmptyHeader>
+            <EmptyMedia icon={AgentPerson} />
+            <EmptyTitle>{t`No agents yet`}</EmptyTitle>
+            <EmptyDescription>
+              {managed === undefined
+                ? t`The agents your company sets up for you show here.`
+                : t`Make one for a job, such as chasing unpaid invoices.`}
+            </EmptyDescription>
+          </EmptyHeader>
+          {newAgent === undefined ? null : (
+            <EmptyContent>{newAgent}</EmptyContent>
+          )}
         </Empty>
       ) : (
         <>
@@ -312,7 +364,7 @@ export const AgentsOverview = ({
                   type="search"
                   value={query}
                 />
-                <InputGroupClear label={t`Clear search`} />
+                <InputGroupClear aria-label={t`Clear search`} />
               </InputGroup>
               {/* Only where some are paused: with all on there is nothing to tell apart. */}
               {managed === undefined || paused === 0 ? null : (
@@ -340,36 +392,10 @@ export const AgentsOverview = ({
                 : t`No agent matches “${asked}”`}
             </Empty>
           ) : (
-            <div {...stylex.props(styles.groups)}>
-              {groups.map((group) => (
-                <section key={group.key}>
-                  {/* A group's name only beside another group: alone, the page's title says it. */}
-                  {groups.length > 1 ? (
-                    <SectionHeader
-                      layout={styles.groupHead}
-                      size="sm"
-                      title={group.name}
-                    />
-                  ) : null}
-                  <ItemGroup
-                    aria-label={groups.length > 1 ? group.name : t`Agents`}
-                    separated
-                  >
-                    {group.agents.map((agent) => (
-                      <AgentRow
-                        facts={
-                          agent.managed === undefined
-                            ? []
-                            : factsOf(agent.managed)
-                        }
-                        key={agent.id}
-                        shown={agent}
-                      />
-                    ))}
-                  </ItemGroup>
-                </section>
-              ))}
-            </div>
+            <AgentGroups
+              factsOf={factsOf}
+              groups={[{ key: "company", name: t`Company`, agents: shown }]}
+            />
           )}
         </>
       )}

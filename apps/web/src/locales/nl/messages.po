@@ -568,9 +568,29 @@ msgstr "{failed, plural, one {# mislukte run} other {# mislukte runs}} van {name
 msgid "{field} in {table} needs a change in code before this can be published."
 msgstr "{field} in {table} heeft een wijziging in code nodig voordat dit gepubliceerd kan worden."
 
+#: src/agents/agent-documents.tsx
+msgid "{file} added."
+msgstr "{file} toegevoegd."
+
+#: src/agents/agent-documents.tsx
+msgid "{file} is larger than 10 MB."
+msgstr "{file} is groter dan 10 MB."
+
+#: src/agents/agent-documents.tsx
+msgid "{file} is one more than {most} documents."
+msgstr "{file} is er één meer dan {most} documenten."
+
+#: src/agents/agent-documents.tsx
+msgid "{file} isn't a kind of file an agent reads."
+msgstr "{file} is geen soort bestand dat een agent leest."
+
 #: src/onboarding/document-drop.tsx
 msgid "{file} removed"
 msgstr "{file} verwijderd"
+
+#: src/agents/agent-documents.tsx
+msgid "{file} wasn't added."
+msgstr "{file} is niet toegevoegd."
 
 #: src/activity/audit-log.tsx
 msgid "{firstShown}–{lastShown}"
@@ -1138,6 +1158,10 @@ msgstr "{signIn} is gekoppeld. Ik zie {people} mensen in {teams} teams."
 #: src/agents/agent-documents.tsx
 msgid "{size} · Added {when}"
 msgstr "{size} · Toegevoegd op {when}"
+
+#: src/agents/agent-documents.tsx
+msgid "{size}, added"
+msgstr "{size}, toegevoegd"
 
 #: src/brain/brain.ts
 msgid "{sources, plural, one {Time-consuming work that could be automated, raised in # source by {teams}.} other {Time-consuming work that could be automated, raised in # sources by {teams}.}}"
@@ -2032,8 +2056,8 @@ msgid "Add as"
 msgstr "Toevoegen als"
 
 #: src/agents/agent-documents.tsx
-msgid "Add document"
-msgstr "Document toevoegen"
+msgid "Add documents"
+msgstr "Documenten toevoegen"
 
 #: src/apps/field-editor.tsx
 msgid "Add field"
@@ -2092,6 +2116,10 @@ msgstr "Webhook toevoegen"
 msgid "Add who answers"
 msgstr "Wie antwoordt toevoegen"
 
+#: src/agents/agent-documents.tsx
+msgid "Added"
+msgstr "Toegevoegd"
+
 #: src/apps/draft-changes.tsx
 msgctxt "a file a change adds"
 msgid "Added"
@@ -2132,6 +2160,10 @@ msgstr "Toegevoegd op"
 #: src/activity/audit-words.ts
 msgid "Added someone to a team"
 msgstr "Iemand aan een team toegevoegd"
+
+#: src/agents/agent-documents.tsx
+msgid "Adding"
+msgstr "Wordt toegevoegd"
 
 #: src/projects/file-item-dialog.tsx
 msgid "Adding an app or workflow shares it with nobody. Only those it is shared with see it here."
@@ -3268,7 +3300,6 @@ msgstr "Gekoppeld"
 msgid "Bound to"
 msgstr "Gekoppeld aan"
 
-#: src/agents/agent-form.tsx
 #: src/apps/resource-bindings.tsx
 #: src/brain/brain-nav.tsx
 #: src/grasp/frame/grasp-sidebar.tsx
@@ -3787,10 +3818,6 @@ msgstr "Workflow controleren"
 msgid "Check and save"
 msgstr "Controleren en opslaan"
 
-#: src/agents/agent-form.tsx
-msgid "Check mark"
-msgstr "Vinkje"
-
 #: src/chat/thread.tsx
 msgid "Check or replace it in Settings › AI providers"
 msgstr "Controleer of vervang hem in Instellingen › AI-aanbieders"
@@ -3865,6 +3892,10 @@ msgstr "Kies een workflow"
 #: src/onboarding/place-picker.tsx
 msgid "Choose documents"
 msgstr "Documenten kiezen"
+
+#: src/agents/agent-documents.tsx
+msgid "Choose files"
+msgstr "Bestanden kiezen"
 
 #: src/onboarding/setup-steps.tsx
 msgid "Choose from Google Drive"
@@ -5249,6 +5280,10 @@ msgstr "Schijf"
 msgid "Drop files here"
 msgstr "Zet bestanden hier neer"
 
+#: src/agents/agent-documents.tsx
+msgid "Drop files here, or"
+msgstr "Sleep bestanden hierheen, of"
+
 #: src/apps/publish.tsx
 msgid "Drop them and go back"
 msgstr "Weggooien en teruggaan"
@@ -5868,6 +5903,7 @@ msgstr "Bestand"
 msgid "File {where}: {message}"
 msgstr "Bestand {where}: {message}"
 
+#: src/agents/agent-documents.tsx
 #: src/apps/app-code.tsx
 #: src/inbox/items.ts
 #: src/routes/_shell.knowledge.$collection.tsx
@@ -6015,10 +6051,6 @@ msgstr "Een probleem wordt opgelost…"
 #: src/chat/chat-panel.tsx
 msgid "Float over the page"
 msgstr "Boven de pagina laten zweven"
-
-#: src/agents/agent-form.tsx
-msgid "Flow"
-msgstr "Stroom"
 
 #: src/routes/_shell.workflows.$workflow.tsx
 msgctxt "a workflow's view"
@@ -6682,10 +6714,6 @@ msgstr "Hij wist het niet"
 #: src/settings/stephen-card.tsx
 msgid "He stops answering everywhere outside Grasp, and says so once to whoever writes. Grasp’s chat keeps working."
 msgstr "Hij stopt overal buiten Grasp met antwoorden en zegt dat één keer tegen wie schrijft. De chat van Grasp blijft werken."
-
-#: src/agents/agent-form.tsx
-msgid "Head"
-msgstr "Hoofd"
 
 #: src/connections/http-connections.tsx
 msgid "Header name"
@@ -7966,10 +7994,6 @@ msgstr "Limoen"
 msgid "Limits"
 msgstr "Limieten"
 
-#: src/agents/agent-form.tsx
-msgid "Lines"
-msgstr "Lijnen"
-
 #: src/apps/app-own-link.tsx
 #: src/apps/app-settings.tsx
 #: src/apps/app-workspace.tsx
@@ -9198,6 +9222,10 @@ msgstr "Geen: de provider ervan is verwijderd."
 #: src/connections/connection-list.tsx
 msgid "None."
 msgstr "Geen."
+
+#: src/agents/agent-documents.tsx
+msgid "Not added"
+msgstr "Niet toegevoegd"
 
 #: src/routes/_shell.integrations.$integration.tsx
 #: src/workflows/workflow-triggers.tsx
@@ -10432,10 +10460,6 @@ msgstr "PDF, Word, Excel, Markdown, tekst, CSV of JSON, elk tot 10 MB. Hoogstens
 msgid "PDF, Word, Excel, PowerPoint or text"
 msgstr "PDF, Word, Excel, PowerPoint of tekst"
 
-#: src/agents/agent-form.tsx
-msgid "Pen"
-msgstr "Pen"
-
 #: src/knowledge/uploads.tsx
 msgid "Pending"
 msgstr "In afwachting"
@@ -10554,10 +10578,6 @@ msgstr "Kies er een"
 #: src/apps/field-editor.tsx
 msgid "Picked up {name}, at place {place}."
 msgstr "{name} opgepakt, op plek {place}."
-
-#: src/agents/agent-form.tsx
-msgid "Picture"
-msgstr "Afbeelding"
 
 #: src/onboarding/interviews-progress.tsx
 msgid "pieces of work found"
@@ -10779,10 +10799,6 @@ msgstr "{name} neergezet op plek {place}."
 #: src/interview/read-back.tsx
 msgid "Put back"
 msgstr "Terugzetten"
-
-#: src/agents/agents-overview.tsx
-msgid "Put forward"
-msgstr "Voorgedragen"
 
 #: src/knowledge/new-document.tsx
 msgid "Put it in folders with a slash, as in handbook/leave."
@@ -15072,6 +15088,7 @@ msgstr "Triggers"
 msgid "Try"
 msgstr "Proberen"
 
+#: src/agents/agent-documents.tsx
 #: src/apps/app-data.tsx
 #: src/apps/app-owner.tsx
 #: src/apps/app-settings.tsx
@@ -17175,10 +17192,6 @@ msgstr "Jouw versie van de App"
 #: src/interview/before.tsx
 msgid "Your words"
 msgstr "Jouw woorden"
-
-#: src/agents/agents-overview.tsx
-msgid "Yours"
-msgstr "Van jou"
 
 #: src/brain/lessons-view.tsx
 msgctxt "lesson scope"
