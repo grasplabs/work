@@ -399,6 +399,7 @@ export const rpcParamNames: ParamNames = {
   },
   "ProjectsRpc": {
     "addMember": ["id","member"],
+    "connections": ["id"],
     "create": ["project"],
     "file": ["id","file"],
     "get": ["id"],

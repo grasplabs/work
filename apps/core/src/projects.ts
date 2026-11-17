@@ -19,6 +19,7 @@ import type {
   NewProjectMember,
   Project,
   ProjectChanges,
+  ProjectConnections,
   ProjectCounts,
   ProjectCursor,
   ProjectIcon,
@@ -57,6 +58,7 @@ import {
   storedEvent,
 } from "./audit-outbox.ts";
 import { activeMember, notRemoved, organizationId } from "./auth/auth.ts";
+import { personOf } from "./connections.ts";
 import {
   apps,
   appMembers,
@@ -532,6 +534,41 @@ export const getProject = async (
     moreItems: firstItems.more,
     shared,
   };
+};
+
+/**
+ * The connections project `id`'s items that `by` may open hold a grant on,
+ * as `countsIn` counts them: those `by` may see by name (connect's list
+ * for them), and how many more there are.
+ */
+export const listProjectConnections = async (
+  env: Env,
+  by: Identity,
+  id: unknown
+): Promise<ProjectConnections> => {
+  const { project } = await requireProjectRole(env, by, id, "user");
+  const visible = await visibleTo(env, by);
+  const [used, listed] = await Promise.all([
+    drizzle(env.DB).all<{ id: string }>(
+      sql`SELECT DISTINCT ${permissions.objectId} AS id
+        FROM ${itemRowsSql([project.id])} AS items
+        CROSS JOIN ${permissions} ON ${permissions.subjectType} = items.type AND ${permissions.subjectId} = items.id
+        WHERE ${permissions.objectType} = 'connection' AND ${permissions.status} <> 'revoked'
+          AND ${opensSql(visible)}`
+    ),
+    env.CONNECT.listConnections(await personOf(env, by)),
+  ]);
+  const ids = new Set(used.map((row) => row.id));
+  const connections = listed
+    .filter((connection) => ids.has(connection.id))
+    .map(({ id: connectionId, provider, accountName, status }) => ({
+      id: connectionId,
+      provider,
+      accountName,
+      status,
+    }))
+    .toSorted((a, b) => a.provider.localeCompare(b.provider));
+  return { connections, unseen: ids.size - connections.length };
 };
 
 /** The page of project `id`'s items after `after`, for `by`, who is in it. */
@@ -1270,6 +1307,13 @@ export class ProjectsRpc extends CoreRpcTarget implements ProjectsApi {
     return await withPerson(
       this.#check,
       async (by) => await listProjectMembers(this.#env, by, id, after)
+    );
+  }
+
+  async connections(id: string): Promise<ProjectConnections> {
+    return await withPerson(
+      this.#check,
+      async (by) => await listProjectConnections(this.#env, by, id)
     );
   }
 

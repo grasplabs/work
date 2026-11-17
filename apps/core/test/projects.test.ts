@@ -20,6 +20,7 @@ import { testApp } from "./app-definitions.ts";
 import { racingDb, release } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { newTeam } from "./knowledge.ts";
+import { mailConnection } from "./mail-connection.ts";
 import {
   auditedDuring,
   callAuth,
@@ -148,6 +149,67 @@ describe("projects", { timeout: 120_000 }, () => {
         { target: { type: "project", id: project }, shared: false },
         { target: { type: "project", id: project }, shared: false },
       ],
+    });
+  });
+
+  it("lists the connections its items use, by name where the person may see one, and counts the rest", async () => {
+    const owner = await personApi("builder");
+    const ada = await personApi("user");
+    const outsider = await personApi("user");
+    const project = await projectOf(owner);
+    await owner.api.projects.addMember(project, {
+      type: "person",
+      id: ada.userId,
+      role: "user",
+    });
+    const workflow = await workflowOf(owner);
+    await owner.api.projects.file(project, {
+      item: { type: "workflow", id: workflow },
+      share: true,
+    });
+    const mail = await mailConnection();
+    const grant = (connection: string, status: string) =>
+      env.DB.prepare(
+        "INSERT INTO permissions (id, subject_type, subject_id, object_type, object_id, actions, binding, status, requested_by, requested_at, personal) VALUES (?, 'workflow', ?, 'connection', ?, '[\"mail.send\"]', ?, ?, ?, ?, 0)"
+      ).bind(
+        crypto.randomUUID(),
+        workflow,
+        connection,
+        `B${unique()}`,
+        status,
+        owner.userId,
+        Date.now()
+      );
+    await env.DB.batch([
+      grant(mail.id, "active"),
+      // A second grant on the same connection lists it once.
+      grant(mail.id, "active"),
+      // One nobody here may see by name: counted, never named.
+      grant(`connection-${unique()}`, "active"),
+      // A revoked grant is no use: not there at all.
+      grant(`connection-${unique()}`, "revoked"),
+    ]);
+
+    const seen = await ada.api.projects.get(project);
+
+    expect({
+      ada: await ada.api.projects.connections(project),
+      counted: seen.counts.connections,
+      outsider: await outcome(outsider.api.projects.connections(project)),
+    }).toStrictEqual({
+      ada: {
+        connections: [
+          {
+            id: mail.id,
+            provider: "mail",
+            accountName: null,
+            status: "active",
+          },
+        ],
+        unseen: 1,
+      },
+      counted: 2,
+      outsider: "project.not_found",
     });
   });
 
