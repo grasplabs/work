@@ -9,6 +9,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { recallBudgetMax, vectorsPerPutMax } from "../src/contract.ts";
+import { asMigrated } from "./blocks-migrated.ts";
 import { countRowsRead } from "./rows-read.ts";
 
 // What a recall costs the store, against what the reader may not read.
@@ -35,6 +36,13 @@ import { countRowsRead } from "./rows-read.ts";
 // 4,800). A way that lists hidden chunks again (an index asked outside
 // the reader's blocks, a join that scans the chunks) reads a row or more
 // for each, thousands here, and fails.
+//
+// Two more hold where an add places chunks: a set's chunks share its block
+// (a word no chunk holds costs the same however many sources the reader's
+// own set holds; an add that took a block of its own each time would
+// cost the reader a lookup per version, the design GRA-1803 rejected), and
+// a store made before the blocks, whose chunks all share block 0, keeps
+// new chunks out of it (else every set's readers would list them there).
 
 /** The shared store, from empty storage, its SQL's reads counted. */
 const countedStore = async () => {
@@ -63,6 +71,12 @@ const hiddenSizes = [0, 6, 24];
 
 /** Rows an index seek may read more as the trees grow deeper. */
 const seekMargin = 8;
+
+/** Whether `rows` stay within `seekMargin` of the first, and never fewer. */
+const flat = (rows: readonly number[]): boolean => {
+  const [first = 0] = rows;
+  return rows.every((row) => row >= first && row - first <= seekMargin);
+};
 
 /** What every chunk holds: telling words, stop words, an ID and a date. */
 const words = "The invoice of the warehouse INV-2024-0042 and the, 14/03/2026";
@@ -188,16 +202,7 @@ describe("what a recall reads of what the reader may not read", () => {
     const measured = Object.fromEntries(
       names.map((name) => {
         const rows = read.get(name) ?? [];
-        const [alone = 0] = rows;
-        return [
-          name,
-          {
-            rows,
-            flat: rows.every(
-              (row) => row >= alone && row - alone <= seekMargin
-            ),
-          },
-        ];
+        return [name, { rows, flat: flat(rows) }];
       })
     );
     expect(measured).toStrictEqual(
@@ -205,5 +210,68 @@ describe("what a recall reads of what the reader may not read", () => {
         names.map((name) => [name, { rows: measured[name]?.rows, flat: true }])
       )
     );
+  });
+
+  it("reads the same rows on a store made before the blocks, however many hidden chunks its sets add since", async () => {
+    const { stub, rowsReadBy } = await countedStore();
+    // Before the blocks: the reader's and another set's chunks in block 0.
+    for (const [source, access] of [
+      ["upload:own", own],
+      ["upload:hidden", someoneElse(0)],
+    ] as const) {
+      // oxlint-disable-next-line no-await-in-loop -- one add at a time
+      await stub.addSource({
+        source,
+        change: crypto.randomUUID(),
+        text: passagesOf(2),
+        access,
+      });
+    }
+    await asMigrated(stub);
+    const ask = waysOf(stub).words;
+    const rows = [await rowsReadBy(ask)];
+    // The other set adds more since: never into block 0, which the
+    // reader reads for its own chunks there.
+    for (let index = 0; index < 6; index += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one add at a time
+      await stub.addSource({
+        source: `upload:hidden-${index}`,
+        change: crypto.randomUUID(),
+        text: passagesOf(hiddenPassages),
+        access: someoneElse(0),
+      });
+    }
+    rows.push(await rowsReadBy(ask));
+
+    expect({ rows, flat: flat(rows) }).toStrictEqual({ rows, flat: true });
+  });
+});
+
+describe("what a recall reads of the reader's own sources", () => {
+  it("reads the same rows for a word no chunk holds, however many sources the reader's own set holds", async () => {
+    const { stub, rowsReadBy } = await countedStore();
+    const ask = async () =>
+      await stub.recall({
+        question: "zebra",
+        reader,
+        budget: { tokens: recallBudgetMax },
+      });
+    const rows: number[] = [];
+    let held = 0;
+    for (const size of [3, 30, 120]) {
+      for (; held < size; held += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- one add at a time
+        await stub.addSource({
+          source: `upload:own-${held}`,
+          change: crypto.randomUUID(),
+          text: `${words} ${held}`,
+          access: own,
+        });
+      }
+      // oxlint-disable-next-line no-await-in-loop -- one size at a time
+      rows.push(await rowsReadBy(ask));
+    }
+
+    expect({ rows, flat: flat(rows) }).toStrictEqual({ rows, flat: true });
   });
 });
