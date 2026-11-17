@@ -9,6 +9,7 @@ import {
   workflowResourceParams,
   workflowStartReceipts,
   runBrainEvidence,
+  runBrainMemories,
   runBrainVersions,
   runChatSources,
   resourceRunMailCalls,
@@ -284,6 +285,8 @@ const startDetailsRemoved = async (
     runFilesRemoved(db, due),
     // What its recalls cited (resource-reads.ts): no new call of its to gate.
     db.delete(runBrainVersions).where(inArray(runBrainVersions.runId, due)),
+    // And what its entity reads rested on (GRA-1985).
+    db.delete(runBrainMemories).where(inArray(runBrainMemories.runId, due)),
     // And what an older core recorded of its recalls before runs recalled
     // from the new Brain, while the table exists (schema.ts): this goes
     // when the table is dropped.

@@ -14,7 +14,7 @@ import {
   accountOf,
   answering,
   approveAgreed,
-  holdAlarm,
+  aloneInTheStore,
   modelOf,
   onLink,
   openLinkAs,
@@ -45,8 +45,8 @@ const isoDay = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 const team = async (start: string) => {
   // These tests release links and draw by hand, so the store's own alarm
   // is held from the start: on a slow run it drew a map between a test's
-  // steps.
-  await holdAlarm();
+  // steps. And what earlier tests left due is out of the way.
+  await aloneInTheStore();
   const store = onboardingStore(env);
   const id = unique();
   const ids = {

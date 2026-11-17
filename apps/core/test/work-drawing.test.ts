@@ -15,13 +15,13 @@ import { drawnOf, knownOf } from "../src/onboarding/work-drawing.ts";
 import type { RawDrawing } from "../src/onboarding/work-drawing.ts";
 import {
   accountOf,
+  aloneInTheStore,
   answering,
   approveAgreed,
   modelOf,
   onLink,
   openLinkAs,
   participate,
-  holdAlarm,
   quick,
   signedInAs,
 } from "./interview-link.ts";
@@ -277,7 +277,7 @@ const refused: ProviderReply = {
 describe("a piece of work, drawn", { timeout: 60_000 }, () => {
   // The test draws itself, each with the model's answer it gives: the
   // store's own alarm, set whenever a team falls due, would try first.
-  beforeEach(holdAlarm);
+  beforeEach(aloneInTheStore);
 
   it("is drawn from three agreed interviews, keeps each person's numbers apart, and tells the next interview only what nobody has said yet, never a colleague's words", async () => {
     const store = onboardingStore(env);

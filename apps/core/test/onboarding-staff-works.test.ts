@@ -13,9 +13,9 @@ import { z } from "zod";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { adminCommands, adminSnapshot } from "./admin-command.ts";
 import {
+  aloneInTheStore,
   answering,
   approveAgreed,
-  holdAlarm,
   onLink,
   openLinkAs,
   participate,
@@ -187,7 +187,7 @@ describe("the work in Grasp's onboarding area", { timeout: 60_000 }, () => {
   // Every test draws its team's work itself (`drawn`), with the provider's
   // replies faked around each `drawNext`; the alarm each agreement sets
   // would draw outside them (`holdAlarm`).
-  beforeEach(holdAlarm);
+  beforeEach(aloneInTheStore);
 
   it("shows staff each piece of work with each person's numbers apart and its open questions, and every read is on record", async () => {
     const { ids, booking, filing } = await drawn();

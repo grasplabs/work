@@ -27,6 +27,7 @@
     "stephen:report": "node scripts/stephen-eval.ts report",
     "brain:eval": "node scripts/brain-eval.ts",
     "brain:eval:model": "node scripts/brain-eval-model.ts",
+    "brain:eval:extraction": "node scripts/brain-eval-extraction.ts",
     "check:secrets": "secretlint \"**/*\"",
     "test:durations": "node scripts/test-durations.ts",
     "e2e:durations": "node scripts/e2e-durations.ts",

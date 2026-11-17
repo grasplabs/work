@@ -39,10 +39,10 @@ import { copyOfStore, restoreStore } from "./brain-next-store-copy.ts";
 import { mockIdp } from "./idp.ts";
 import {
   accountOf,
+  aloneInTheStore,
   answering,
   answeringWith,
   approveAgreed,
-  holdAlarm,
   onLink,
   participate,
   openLinkAs,
@@ -488,7 +488,7 @@ const movedToBilling =
   });
 
 describe("interviews in the new Brain", { timeout: 120_000 }, () => {
-  beforeEach(holdAlarm);
+  beforeEach(aloneInTheStore);
 
   it("are refused for any readers but their own person, so none is ever in the shared store", async () => {
     await expect(
@@ -1234,7 +1234,7 @@ const dueAgain = async (ids: Ids): Promise<void> => {
 };
 
 describe("team claims in the new Brain", { timeout: 120_000 }, () => {
-  beforeEach(holdAlarm);
+  beforeEach(aloneInTheStore);
 
   /**
    * A team through the onboarding, its tickets drawn, Max signed in to his

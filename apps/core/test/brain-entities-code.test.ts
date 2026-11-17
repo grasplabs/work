@@ -1,13 +1,16 @@
 import { brainOf } from "@grasp-os/brain-next/contract";
 import type { FunctionResult } from "@grasp-os/shared/functions";
+import { httpContract } from "@grasp-os/shared/http-contract";
 import { teamIdSchema } from "@grasp-os/shared/ids";
 import type { PermissionRequest } from "@grasp-os/shared/permissions";
 import type { Identity } from "@grasp-os/shared/rpc";
+import { runFileContentPath } from "@grasp-os/shared/run-files";
 import type {
   WorkflowCandidateRun,
   WorkflowResourceRun,
 } from "@grasp-os/shared/workflow-resources";
 import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
+import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
@@ -16,28 +19,49 @@ import { callAppFunction } from "../src/app-functions.ts";
 import type { Release } from "../src/app-releases.ts";
 import { appFor, appKind } from "../src/apps.ts";
 import { teamsOf } from "../src/auth/identity.ts";
-import { eraseSource } from "../src/brain-next.ts";
+import {
+  erasePersonShared,
+  eraseSource,
+  workBrain,
+} from "../src/brain-next.ts";
 import type { SourceRef } from "../src/brain-next.ts";
+import { builtins, fingerprintOf, thisRelease } from "../src/builtins.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
 import { grantPermission, requestPermission } from "../src/permissions.ts";
 import { rollback } from "../src/publish.ts";
+import { httpCatalogContract } from "../src/release-contracts.ts";
 import { approveResourceBinding } from "../src/resource-bindings.ts";
 import { approveWorkflowBinding } from "../src/workflow-bindings.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
 import { editWorkflowDraft, workflowDraft } from "../src/workflow-editor.ts";
+import { workflowFiles } from "../src/workflow-own.ts";
 import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
+import { workflowStateOf } from "../src/workflow-state.ts";
 import {
   candidateRunFor,
   startCandidateRun,
 } from "../src/workflows/candidate-runs.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
+import { runFilesFor } from "../src/workflows/run-file-downloads.ts";
 import { testApp } from "./app-definitions.ts";
 import { allEvents } from "./audit-events.ts";
+import {
+  copyOfStore,
+  killStore,
+  restoreStore,
+} from "./brain-next-store-copy.ts";
+import { httpApiOrigin, httpApiReceivedUrl } from "./connect-providers.ts";
+import { mockIdp } from "./idp.ts";
+import { askedModel, jsonWorkflowAppsOf } from "./json-workflow-apps.ts";
+import { runQuarterHourTasks } from "./maintenance.ts";
+import { fakeProviderFor } from "./model-provider.ts";
+import { noProducers } from "./no-producers.ts";
 import { appWith, person, seal } from "./sealed-apps.ts";
 import type { Fixture } from "./sealed-apps.ts";
-import { unique } from "./sign-in.ts";
+import { routed, unique } from "./sign-in.ts";
+import { testBinding } from "./test-env.ts";
 import { publishDefinition } from "./workflow-publishing.ts";
 
 // The Brain's entities for code (GRA-1837; the threat model is on the
@@ -409,7 +433,11 @@ describe("entities, as an App reads them", setUpTime, () => {
  * entities by its args' name, its `brain` permission bound by `admin` to
  * a grant of its own.
  */
-const entitiesWorkflow = async (by: Member, admin: Member) => {
+const entitiesWorkflow = async (
+  by: Member,
+  admin: Member,
+  { hold = false }: { hold?: boolean } = {}
+) => {
   const key = `brain-${unique()}`;
   await publishCatalogContract(env, admin, { key, kind: "brain" });
   const workflow = await createWorkflowResource(
@@ -458,6 +486,8 @@ const entitiesWorkflow = async (by: Member, admin: Member) => {
           action: "entities.find",
           args: { name: { $expr: "args.name" } },
         },
+        // A moment after it read, before its output leaves it.
+        ...(hold ? [{ id: "hold", type: "wait", for: "5 seconds" }] : []),
       ],
     })
   );
@@ -643,7 +673,7 @@ describe("entities, as a workflow reads them", setUpTime, () => {
     });
   });
 
-  it("keeps every name a run is handed with the run: a related entity's and one found, each withheld once the source that named it is erased; a name in a person's own word stands once its memory is retired", async () => {
+  it("keeps every name a run is handed with the run: a related entity's and one found, each withheld once the source that named it is erased, and a name in a person's own word once its memory is retired", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
     const workflow = await entitiesWorkflow(ada, admin);
@@ -752,10 +782,9 @@ describe("entities, as a workflow reads them", setUpTime, () => {
       after: {
         relation: { status: "completed", error: "brain.revoked", shows: [] },
         found: { status: "completed", error: "brain.revoked", shows: [] },
-        // A retired memory stays as history and still names its entity
-        // for everyone who may read it: nothing a run passed on is now
-        // hidden from them.
-        said: { status: "completed", error: null, shows: [said] },
+        // A memory its writer retired (or a share taken back) is no longer
+        // passed on, as a chat withholds it (GRA-1985).
+        said: { status: "completed", error: "brain.revoked", shows: [] },
       },
     });
   });
@@ -1135,3 +1164,745 @@ describe("entities, as a workflow reads them", setUpTime, () => {
     });
   });
 });
+
+// What a run read of a member a person's erasure took (GRA-1985, the
+// threat model on the issue): her card, its names and facts, rest on
+// memories her erasure takes, though the documents they were drawn from
+// stay. Every memory an entity read rests on is kept with the run
+// (`run_brain_memories`), and checked before anything leaves it, as the
+// versions are: the run is refused (`brain.revoked`), its output withheld.
+
+/**
+ * Anna's card, for everyone: her name and address, and a fact about her
+ * drawn from a document everyone may read, which stays; and a desk whose
+ * address was hers, given by another group's memory, with a fact of its
+ * own for everyone.
+ */
+const annasCard = async () => {
+  const personId = crypto.randomUUID();
+  const address = `anna.${crypto.randomUUID()}@acme.test`;
+  const name = `Anna ${unique()}`;
+  const fact = `${name} leads finance`;
+  const note = await sourceForEveryone(`${fact}.`);
+  const deskName = `Desk ${unique()}`;
+  const deskFact = `${deskName} opens at eight`;
+  const group = `team:${crypto.randomUUID()}`;
+  // The desk's address, hers, in a memory only another group may read: a
+  // card of the company's is never joined with it by that address.
+  const desk = await store().addMemories({
+    change: crypto.randomUUID(),
+    access: { kind: "audience", group },
+    entities: [
+      {
+        key: "d",
+        kind: "team",
+        names: [deskName],
+        identifiers: [{ type: "email", value: address }],
+      },
+    ],
+    memories: [
+      {
+        about: "d",
+        type: "fact",
+        statement: `${deskName} is shared`,
+        speaker: { kind: "system" },
+        basis: { kind: "writer", writer: "app:desks" },
+      },
+    ],
+  });
+  const deskId = desk.entities.d ?? "";
+  await store().addMemories({
+    change: crypto.randomUUID(),
+    access: { kind: "audience", group: "company" },
+    reader: { person: null, groups: [group, "company"] },
+    entities: [{ key: "d", id: deskId, kind: "team", names: [deskName] }],
+    memories: [
+      {
+        about: "d",
+        type: "fact",
+        statement: deskFact,
+        speaker: { kind: "system" },
+        basis: { kind: "writer", writer: "app:desks" },
+      },
+    ],
+  });
+  const card = await store().addMemories({
+    change: crypto.randomUUID(),
+    access: { kind: "audience", group: "company" },
+    entities: [
+      {
+        key: "a",
+        kind: "person",
+        names: [name],
+        identifiers: [{ type: "email", value: address }],
+      },
+    ],
+    memories: [memoryFrom("a", note, fact)],
+  });
+  return {
+    personId,
+    address,
+    name,
+    fact,
+    card: card.entities.a ?? "",
+    desk: deskId,
+    deskFact,
+  };
+};
+
+/** A run of `id` for `by` on `args`, started: its ID. */
+const startedRun = async (
+  by: Member,
+  id: string,
+  args: { entity: string; name: string }
+): Promise<string> => {
+  const { runId } = await startWorkflow(
+    env,
+    { type: "person", person: by },
+    id,
+    { expected: 1, args, key: unique() }
+  );
+  if (runId === null) {
+    throw new Error("The start admitted no run");
+  }
+  return runId;
+};
+
+/** How run `runId` of `id` ended: its status and error's code, once it has. */
+const endingOf = async (by: Member, id: string, runId: string) =>
+  await vi.waitFor(
+    async () => {
+      const run = await resourceRunFor(env, by, id, runId);
+      expect(run.endedAt).not.toBeNull();
+      return { status: run.status, error: run.error?.code ?? null };
+    },
+    { timeout: 30_000, interval: 100 }
+  );
+
+/** How many memories run `runId` keeps of what its entity reads rested on. */
+const memoriesKeptBy = async (runId: string): Promise<number> =>
+  (await env.DB.prepare(
+    "SELECT count(*) AS n FROM run_brain_memories WHERE run_id = ?"
+  )
+    .bind(runId)
+    .first<number>("n")) ?? 0;
+
+/** How many memories people's erasures still hide in the shared store. */
+const hiddenByErasures = async (): Promise<number> =>
+  await runInDurableObject(
+    inJurisdiction(env, env.BRAIN_STORE).getByName("brain"),
+    (_instance, state) =>
+      state.storage.sql
+        .exec<{ count: number }>(
+          "SELECT count(*) AS count FROM person_erasure_memories"
+        )
+        .one().count
+  );
+
+describe(
+  "entities, as a workflow read them, once a person is erased",
+  setUpTime,
+  () => {
+    it("refuses a run under way and withholds an ended run's output once a person's erasure took the card it read or found, also after the tick, an older copy and a lost storage; a desk that only held her address goes on", async () => {
+      const admin = await person("admin");
+      const ada = await person("builder");
+      const workflow = await entitiesWorkflow(ada, admin);
+      const holding = await entitiesWorkflow(ada, admin, { hold: true });
+      const anna = await annasCard();
+      const nobody = unique();
+      const ended = {
+        card: await endedRun(ada, workflow.id, {
+          entity: anna.card,
+          name: nobody,
+        }),
+        found: await endedRun(ada, workflow.id, {
+          entity: crypto.randomUUID(),
+          name: anna.name,
+        }),
+        desk: await endedRun(ada, workflow.id, {
+          entity: anna.desk,
+          name: nobody,
+        }),
+      };
+      const underWay = {
+        card: await startedRun(ada, holding.id, {
+          entity: anna.card,
+          name: nobody,
+        }),
+        found: await startedRun(ada, holding.id, {
+          entity: crypto.randomUUID(),
+          name: anna.name,
+        }),
+      };
+      // Each has read, and waits before its output leaves it.
+      await vi.waitFor(
+        async () => {
+          const kept = await Promise.all(
+            Object.values(underWay).map(async (runId) => {
+              const memories = await memoriesKeptBy(runId);
+              return memories > 0;
+            })
+          );
+          expect(kept).toStrictEqual([true, true]);
+        },
+        { timeout: 10_000, interval: 50 }
+      );
+      const names = [anna.name, anna.fact, anna.deskFact];
+      const shown = async () => ({
+        card: await showsOf(admin, workflow.id, ended.card, names),
+        found: await showsOf(admin, workflow.id, ended.found, names),
+        desk: await showsOf(admin, workflow.id, ended.desk, names),
+      });
+      const before = await shown();
+      const older = await copyOfStore();
+
+      await erasePersonShared(env, {
+        personId: anna.personId,
+        email: anna.address,
+      });
+      const refused = {
+        card: await endingOf(ada, holding.id, underWay.card),
+        found: await endingOf(ada, holding.id, underWay.found),
+      };
+      const afterErasure = await shown();
+      for (let ticks = 0; ticks < 10; ticks += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- a tick at a time
+        if ((await hiddenByErasures()) === 0) {
+          break;
+        }
+        // oxlint-disable-next-line no-await-in-loop -- a tick at a time
+        await workBrain(env, new Date(), noProducers);
+      }
+      const left = await hiddenByErasures();
+      const afterTick = await shown();
+      const now = await copyOfStore();
+      await restoreStore(older);
+      const olderCopy = await shown();
+      await runInDurableObject(
+        inJurisdiction(env, env.BRAIN_STORE).getByName("brain"),
+        async (_instance, state) => {
+          await state.storage.deleteAll();
+        }
+      );
+      await killStore();
+      const lost = await shown();
+      await restoreStore(now);
+
+      const withheld = {
+        status: "completed",
+        error: "brain.revoked",
+        shows: [],
+      };
+      const takenAfter = {
+        card: withheld,
+        found: withheld,
+        desk: { status: "completed", error: null, shows: [anna.deskFact] },
+      };
+      expect({
+        before,
+        refused,
+        afterErasure,
+        left,
+        afterTick,
+        olderCopy,
+        lost,
+      }).toStrictEqual({
+        before: {
+          card: {
+            status: "completed",
+            error: null,
+            shows: [anna.name, anna.fact],
+          },
+          found: { status: "completed", error: null, shows: [anna.name] },
+          desk: { status: "completed", error: null, shows: [anna.deskFact] },
+        },
+        refused: {
+          card: { status: "failed", error: "brain.revoked" },
+          found: { status: "failed", error: "brain.revoked" },
+        },
+        afterErasure: takenAfter,
+        left: 0,
+        afterTick: takenAfter,
+        olderCopy: takenAfter,
+        // A store holding nothing: no memory the desk's run rests on either.
+        lost: { ...takenAfter, desk: withheld },
+      });
+    });
+
+    it("gives a run's step nothing it read of her card when what it rests on can't be kept with the run first", async () => {
+      const admin = await person("admin");
+      const ada = await person("builder");
+      const workflow = await entitiesWorkflow(ada, admin);
+      const anna = await annasCard();
+      // Core's database refuses to keep a memory with a run.
+      await env.DB.prepare(
+        `CREATE TRIGGER test_refuse_run_memories BEFORE INSERT ON run_brain_memories
+      BEGIN SELECT RAISE(ABORT, 'refused by the test'); END`
+      ).run();
+      let ran: Awaited<ReturnType<typeof showsOf>>;
+      try {
+        const runId = await endedRun(ada, workflow.id, {
+          entity: anna.card,
+          name: anna.name,
+        });
+        ran = await showsOf(admin, workflow.id, runId, [anna.name, anna.fact]);
+      } finally {
+        await env.DB.prepare("DROP TRIGGER test_refuse_run_memories").run();
+      }
+
+      expect({ status: ran.status, shows: ran.shows }).toStrictEqual({
+        status: "failed",
+        shows: [],
+      });
+    });
+
+    it("drops what a run's entity reads rested on with the run's details, once its retention is over", async () => {
+      const admin = await person("admin");
+      const ada = await person("builder");
+      const workflow = await entitiesWorkflow(ada, admin);
+      const anna = await annasCard();
+      const runId = await endedRun(ada, workflow.id, {
+        entity: anna.card,
+        name: anna.name,
+      });
+      const kept = await memoriesKeptBy(runId);
+      const day = 24 * 60 * 60 * 1000;
+      await runQuarterHourTasks({}, new Date(Date.now() + 31 * day));
+
+      expect({
+        kept: kept > 0,
+        after: await memoriesKeptBy(runId),
+      }).toStrictEqual({ kept: true, after: 0 });
+    });
+  }
+);
+
+/**
+ * A workflow of `by`'s that reads entity `args.entity`'s card, waits a
+ * moment, then runs `after` (steps reading the card as `card`), with
+ * `permissions` beside its Brain's, and its state `state` if any: bound
+ * by `admin` to a grant of its own to read the Brain.
+ */
+const readThenWorkflow = async (
+  by: Member,
+  admin: Member,
+  {
+    after,
+    permissions = {},
+    state,
+    first = {
+      id: "card",
+      type: "call",
+      brain: "docs",
+      action: "entities.get",
+      args: { entity: { $expr: "args.entity" } },
+    },
+  }: {
+    after: unknown[];
+    permissions?: Record<string, unknown>;
+    state?: Record<string, unknown>;
+    first?: unknown;
+  }
+) => {
+  const key = `brain-${unique()}`;
+  await publishCatalogContract(env, admin, { key, kind: "brain" });
+  const workflow = await createWorkflowResource(env, by, `then-${unique()}`);
+  await publishDefinition(
+    env,
+    by,
+    workflow.id,
+    JSON.stringify({
+      $schema: workflowSchemaUrl,
+      args: {
+        kind: "object",
+        fields: { entity: { kind: "string" }, name: { kind: "string" } },
+      },
+      permissions: { ...permissions, brain: { docs: { contract: key } } },
+      ...(state === undefined ? {} : { state }),
+      steps: [first, { id: "hold", type: "wait", for: "5 seconds" }, ...after],
+    })
+  );
+  const permissionId = await granted(
+    by,
+    admin,
+    brainGrant({ type: "workflow", workflowId: workflow.id })
+  );
+  await approveWorkflowBinding(env, admin, workflow.id, {
+    alias: "docs",
+    target: { kind: "brain", permissionId },
+    reviewed: { version: 1 },
+  });
+  return workflow;
+};
+
+/** Waits until run `runId` keeps what its first read rested on: memories or versions. */
+const hasRead = async (runId: string): Promise<void> => {
+  await vi.waitFor(
+    async () => {
+      const kept = await env.DB.prepare(
+        `SELECT (SELECT count(*) FROM run_brain_memories WHERE run_id = ?1)
+        + (SELECT count(*) FROM run_brain_versions WHERE run_id = ?1) AS n`
+      )
+        .bind(runId)
+        .first<number>("n");
+      expect(kept).toBeGreaterThan(0);
+    },
+    { timeout: 10_000, interval: 50 }
+  );
+};
+
+/** What reached the outside API so far, by its body. */
+const receivedBodies = async (): Promise<string[]> => {
+  const providers = testBinding("CONNECT_PROVIDERS");
+  if (
+    typeof providers !== "object" ||
+    providers === null ||
+    !("fetch" in providers)
+  ) {
+    throw new TypeError("Expected the providers Worker as CONNECT_PROVIDERS");
+  }
+  // SAFETY: checked just above to have `fetch`, as a Fetcher does.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  const response = await (providers as Fetcher).fetch(httpApiReceivedUrl);
+  return z
+    .array(z.object({ body: z.string() }))
+    .parse(await response.json())
+    .map(({ body }) => body);
+};
+
+const idp = mockIdp();
+
+describe(
+  "what a run passes on once a person's erasure took what it read",
+  setUpTime,
+  () => {
+    it("keeps nothing in the workflow's state of her card once her erasure landed after the read, and nothing of a recalled passage once its source is erased", async () => {
+      const admin = await person("admin");
+      const ada = await person("builder");
+      const anna = await annasCard();
+      const card = await readThenWorkflow(ada, admin, {
+        state: { kept: { kind: "string" } },
+        after: [
+          {
+            id: "found",
+            type: "call",
+            brain: "docs",
+            action: "entities.find",
+            args: { name: { $expr: "args.name" } },
+            state: { kept: { $expr: 'card?.entity.name ?? ""' } },
+          },
+        ],
+      });
+      const word = `ledger${unique().replaceAll(/\W/gu, "")}`;
+      const passage = `The ${word} closes on Friday.`;
+      const note = await sourceForEveryone(passage);
+      const recalled = await readThenWorkflow(ada, admin, {
+        state: { kept: { kind: "string" } },
+        first: {
+          id: "recalled",
+          type: "call",
+          brain: "docs",
+          action: "recall",
+          args: {
+            question: { $expr: "args.name" },
+            budget: { tokens: 800 },
+          },
+        },
+        after: [
+          {
+            id: "found",
+            type: "call",
+            brain: "docs",
+            action: "entities.find",
+            args: { name: { $expr: "args.name" } },
+            state: { kept: { $expr: 'recalled.items[0]?.text ?? ""' } },
+          },
+        ],
+      });
+      const runs = {
+        card: await startedRun(ada, card.id, {
+          entity: anna.card,
+          name: unique(),
+        }),
+        recalled: await startedRun(ada, recalled.id, {
+          entity: crypto.randomUUID(),
+          name: word,
+        }),
+      };
+      await hasRead(runs.card);
+      await hasRead(runs.recalled);
+
+      await erasePersonShared(env, {
+        personId: anna.personId,
+        email: anna.address,
+      });
+      await eraseSource(env, {
+        source: note,
+        readers: { kind: "none" },
+        reason: "deleted",
+      });
+
+      expect({
+        card: await endingOf(ada, card.id, runs.card),
+        recalled: await endingOf(ada, recalled.id, runs.recalled),
+        state: {
+          card: await workflowStateOf(env, card.id),
+          recalled: await workflowStateOf(env, recalled.id),
+        },
+      }).toStrictEqual({
+        card: { status: "failed", error: "brain.revoked" },
+        recalled: { status: "failed", error: "brain.revoked" },
+        state: { card: {}, recalled: {} },
+      });
+    });
+
+    it("withholds a run's files that hold her card once her erasure lands, though written before it: off the workflow's files page, filled past them, off the run sheet, and not downloaded, as a missing file", async () => {
+      const people = jsonWorkflowAppsOf(idp);
+      const admin = await people.signedIn("admin");
+      const ada = await people.signedIn("builder");
+      const anna = await annasCard();
+      const filesKey = `files-${unique()}`;
+      await publishCatalogContract(env, admin.acting, {
+        key: filesKey,
+        kind: "files",
+      });
+      const workflow = await readThenWorkflow(ada.acting, admin.acting, {
+        permissions: { files: { runFiles: { contract: filesKey } } },
+        after: [
+          {
+            id: "written",
+            type: "call",
+            files: "runFiles",
+            action: "write",
+            args: {
+              // Named after the card it read: what a page lists.
+              name: { $expr: '(card?.entity.name ?? "none") + ".md"' },
+              type: "text/markdown",
+              text: { $expr: 'card?.entity.name ?? ""' },
+            },
+          },
+        ],
+      });
+      await approveWorkflowBinding(env, admin.acting, workflow.id, {
+        alias: "runFiles",
+        target: { kind: "files" },
+        reviewed: { version: 1 },
+      });
+      // A run that read a card nobody erases, its file older, and with
+      // copies of it a whole page of files (100) besides hers.
+      const kept = await written(`Bert ${unique()}`);
+      const keptRun = await startedRun(ada.acting, workflow.id, {
+        entity: kept.entity,
+        name: unique(),
+      });
+      await endingOf(ada.acting, workflow.id, keptRun);
+      await env.DB.prepare(
+        `WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 99)
+        INSERT INTO workflow_run_files (id, run_id, workflow_resource_id, opened_by, open_key, name, type, size, sha256, state, created_at, finished_at, deleted_at)
+        SELECT lower(hex(randomblob(16))), run_id, workflow_resource_id, opened_by, open_key || '-' || i, name, type, size, sha256, state, created_at, finished_at - i, deleted_at
+        FROM workflow_run_files, n WHERE run_id = ?`
+      )
+        .bind(keptRun)
+        .run();
+      const hers = await startedRun(ada.acting, workflow.id, {
+        entity: anna.card,
+        name: unique(),
+      });
+      const ended = await endingOf(ada.acting, workflow.id, hers);
+      const [herFile] =
+        (await runFilesFor(env, ada.acting, workflow.id, hers)) ?? [];
+      /** What `by` lists of the workflow's files: how many, how many of hers, whether any names her. */
+      const page = async (by: typeof ada) => {
+        const files = await workflowFiles(env, by.acting, workflow.id);
+        return {
+          files: files.length,
+          hers: files.filter(({ runId }) => runId === hers).length,
+          names: JSON.stringify(files).includes(anna.name),
+        };
+      };
+      /** A download of `file` of run `run` by Ada, as her run sheet's link asks: its status. */
+      const download = async (run: string, file: string): Promise<number> => {
+        const response = await routed(
+          runFileContentPath(workflow.id, run, file),
+          {
+            headers: { cookie: ada.session, "sec-fetch-site": "same-origin" },
+          }
+        );
+        await response.body?.cancel();
+        return response.status;
+      };
+      const listedBefore = await runFilesFor(
+        env,
+        ada.acting,
+        workflow.id,
+        hers
+      );
+      const before = {
+        ada: await page(ada),
+        admin: await page(admin),
+        sheet: listedBefore?.length,
+        download: await download(hers, herFile?.id ?? ""),
+      };
+
+      await erasePersonShared(env, {
+        personId: anna.personId,
+        email: anna.address,
+      });
+
+      expect({
+        ended,
+        before,
+        after: {
+          ada: await page(ada),
+          admin: await page(admin),
+          sheet: await runFilesFor(env, ada.acting, workflow.id, hers),
+          download: await download(hers, herFile?.id ?? ""),
+        },
+        missing: await download(hers, crypto.randomUUID()),
+      }).toStrictEqual({
+        ended: { status: "completed", error: null },
+        before: {
+          ada: { files: 100, hers: 1, names: true },
+          admin: { files: 100, hers: 1, names: true },
+          sheet: 1,
+          download: 200,
+        },
+        after: {
+          // As if her run wrote none: the page filled past it.
+          ada: { files: 100, hers: 0, names: false },
+          admin: { files: 100, hers: 0, names: false },
+          sheet: null,
+          download: 404,
+        },
+        missing: 404,
+      });
+    });
+
+    it("asks no model with her card once her erasure landed after the read", async () => {
+      const admin = await person("admin");
+      const ada = await person("builder");
+      const anna = await annasCard();
+      const modelKey = `reader-${unique()}`;
+      await publishCatalogContract(env, admin, {
+        key: modelKey,
+        kind: "model",
+      });
+      const workflow = await readThenWorkflow(ada, admin, {
+        permissions: { ai: { contract: modelKey } },
+        after: [
+          {
+            id: "ask",
+            type: "generate",
+            instructions: "Greet them.",
+            input: { who: { $expr: 'card?.entity.name ?? ""' } },
+            returns: { kind: "object", fields: { line: { kind: "string" } } },
+          },
+        ],
+      });
+      // Connected first: a model binding needs its model to be.
+      const provider = await fakeProviderFor([askedModel], {
+        text: '{"line": "Hello"}',
+        inputTokens: 1,
+        outputTokens: 1,
+      });
+      await approveWorkflowBinding(env, admin, workflow.id, {
+        alias: "ai",
+        target: { kind: "model", model: askedModel },
+        reviewed: { version: 1 },
+      });
+      const runId = await startedRun(ada, workflow.id, {
+        entity: anna.card,
+        name: unique(),
+      });
+      await hasRead(runId);
+
+      await erasePersonShared(env, {
+        personId: anna.personId,
+        email: anna.address,
+      });
+
+      expect({
+        ending: await endingOf(ada, workflow.id, runId),
+        asked: provider.requests.length,
+      }).toStrictEqual({
+        ending: { status: "failed", error: "brain.revoked" },
+        asked: 0,
+      });
+    });
+
+    it("sends nothing of her card through a connection once her erasure landed after the read", async () => {
+      const people = jsonWorkflowAppsOf(idp);
+      const admin = await people.signedIn("admin");
+      const builder = await people.signedIn("builder");
+      const anna = await annasCard();
+      await builtins(env).ensureInstalled(await fingerprintOf(thisRelease));
+      const { connectionId } = await admin.api.connections.createHttp({
+        name: "Billing API",
+        origin: httpApiOrigin,
+        pathPrefixes: ["/v1/invoices"],
+        methods: ["GET", "POST"],
+        credential: {
+          kind: "header",
+          header: "x-api-key",
+          secret: "the-billing-api-test-credential",
+        },
+      });
+      const workflow = await readThenWorkflow(builder.acting, admin.acting, {
+        permissions: {
+          connections: { api: { contract: httpCatalogContract } },
+        },
+        after: [
+          {
+            id: "send",
+            type: "call",
+            connection: "api",
+            action: "send",
+            args: {
+              method: "POST",
+              path: "/v1/invoices",
+              headers: { "content-type": "application/json" },
+              body: { $expr: "JSON.stringify({ who: card?.entity.name })" },
+            },
+          },
+        ],
+      });
+      const requested = await builder.api.permissions.request({
+        subject: { type: "workflow", workflowId: workflow.id },
+        object: { type: "connection", connectionId },
+        actions: ["get", "send"],
+        binding: `API_${unique().toUpperCase().replaceAll("-", "_")}`,
+      });
+      await admin.api.permissions.grant(requested.id, { version: null });
+      await admin.api.workflowResources.approveBinding(workflow.id, {
+        alias: "api",
+        target: {
+          kind: "connector",
+          permissionId: requested.id,
+          contract: httpContract,
+        },
+        reviewed: { version: 1 },
+      });
+      const runId = await startedRun(builder.acting, workflow.id, {
+        entity: anna.card,
+        name: unique(),
+      });
+      await hasRead(runId);
+
+      await erasePersonShared(env, {
+        personId: anna.personId,
+        email: anna.address,
+      });
+
+      const ending = await endingOf(builder.acting, workflow.id, runId);
+      const sentBodies = await receivedBodies();
+
+      expect({
+        ending,
+        sent: sentBodies.filter((body) => body.includes(anna.name)),
+      }).toStrictEqual({
+        ending: { status: "failed", error: "brain.revoked" },
+        sent: [],
+      });
+    });
+  }
+);
