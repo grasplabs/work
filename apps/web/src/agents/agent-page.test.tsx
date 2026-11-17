@@ -1059,9 +1059,17 @@ describe("an agent's page", () => {
     await press(button("Add this schedule"));
     expect({
       said: said.includes("works on its own: 0 8 * * 1 · Sum up the week."),
+      // Made: shown as one of its schedules, with no button to make it twice.
+      made: [
+        document.body.textContent.includes("Already one of its schedules."),
+        [...document.querySelectorAll("button")].every(
+          (each) => each.textContent?.trim() !== "Add this schedule"
+        ),
+      ],
       asked: asked.slice(before).map((each) => each.slice(0, 3)),
     }).toStrictEqual({
       said: true,
+      made: [true, true],
       asked: [
         ["request app", "Slack"],
         [
@@ -1070,7 +1078,8 @@ describe("an agent's page", () => {
           {
             cron: "0 8 * * 1",
             opening: "Sum up the week.",
-            personId: "user-1",
+            // The viewer isn't among the company's people: the first is.
+            personId: "user-anna",
           },
         ],
       ],

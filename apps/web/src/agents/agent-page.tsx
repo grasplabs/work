@@ -700,6 +700,8 @@ export const AgentPage = ({
               change={change}
               editable={editable}
               first={first}
+              people={people}
+              wakes={wakes}
             />
             <Card variant="panel">
               <ul className="[&>li:first-child]:border-t-0">

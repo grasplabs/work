@@ -2003,10 +2003,6 @@ msgstr "Add webhook"
 msgid "Add who answers"
 msgstr "Add who answers"
 
-#: src/agents/agent-apps-card.tsx
-msgid "Added"
-msgstr "Added"
-
 #: src/apps/draft-changes.tsx
 msgctxt "a file a change adds"
 msgid "Added"
@@ -2267,6 +2263,10 @@ msgstr "Almost there"
 #: src/connections/request-app-dialog.tsx
 msgid "Already here, in case you mean one of these"
 msgstr "Already here, in case you mean one of these"
+
+#: src/agents/agent-apps-card.tsx
+msgid "Already one of its schedules."
+msgstr "Already one of its schedules."
 
 #: src/onboarding/about-story.tsx
 msgid "Alright, here’s the plan."
@@ -5955,6 +5955,7 @@ msgstr "For the company"
 msgid "For the team {team}"
 msgstr "For the team {team}"
 
+#: src/agents/agent-apps-card.tsx
 #: src/agents/agent-wakes.tsx
 msgid "For whom"
 msgstr "For whom"

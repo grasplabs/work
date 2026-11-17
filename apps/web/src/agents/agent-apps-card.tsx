@@ -3,16 +3,19 @@ import type {
   Agent,
   AgentApp,
   AgentAppsWorkedOut,
+  AgentWake,
 } from "@grasp-os/shared/agents";
 import type { CatalogEntry } from "@grasp-os/shared/connect";
+import type { Member } from "@grasp-os/shared/members";
 import { Button } from "@grasp-os/ui/components/button";
 import { Card } from "@grasp-os/ui/components/card";
+import { Field, FieldLabel } from "@grasp-os/ui/components/field";
 import {
   NativeSelect,
   NativeSelectOption,
 } from "@grasp-os/ui/components/native-select";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { useState } from "react";
+import { useId, useState } from "react";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
 import type { Session } from "../core.ts";
@@ -30,7 +33,7 @@ import { useCoreAction } from "../use-core-action.ts";
 export interface AgentAppsShown {
   apps: readonly AgentApp[] | undefined;
   offered: readonly Offered[];
-  /** Who looks: a schedule it proposes works for them, once they make it. */
+  /** Who looks: whom a schedule it proposes works for, unless they pick another. */
   userId?: string;
 }
 
@@ -98,48 +101,81 @@ const MissingApps = ({
   ));
 };
 
-/** When its instructions say it works on its own: the schedule proposed, made only on a press. */
+/** When its instructions say it works on its own: the schedule proposed, made only on a press, for whom the admin picks. */
 const ProposedSchedule = ({
   schedule,
   agent,
   change,
   can,
   userId,
+  people,
+  wakes,
 }: {
   schedule: { cron: string; opening: string };
   agent: Agent;
   change: Change;
   can: boolean;
   userId: string;
+  people: readonly Member[];
+  wakes: readonly AgentWake[];
 }) => {
   const { t } = useLingui();
-  const [made, setMade] = useState(false);
+  const forWhom = useId();
+  const [person, setPerson] = useState(
+    people.some((each) => each.userId === userId)
+      ? userId
+      : (people[0]?.userId ?? userId)
+  );
   const { cron, opening } = schedule;
+  // Made already, as its wake-ups say, not as this card last pressed.
+  const made = wakes.some(
+    (wake) => wake.cron === cron && wake.opening.trim() === opening.trim()
+  );
   return (
-    <span className="flex items-center justify-between gap-3">
+    <span className="flex flex-col gap-2">
       <span>
         {t`Its instructions say it works on its own: ${cron} · ${opening}`}
       </span>
       {made ? (
-        <span className="text-muted-foreground">{t`Added`}</span>
+        <span className="text-muted-foreground">{t`Already one of its schedules.`}</span>
       ) : (
-        <Button
-          disabled={!can}
-          onClick={() => {
-            void change(async (session) => {
-              await session.connections.makeAgentWake(agent.id, {
-                cron,
-                opening,
-                personId: userId,
+        <span className="flex flex-wrap items-end gap-2">
+          <Field className="min-w-48 flex-1">
+            <FieldLabel htmlFor={forWhom}>
+              <Trans>For whom</Trans>
+            </FieldLabel>
+            <NativeSelect
+              disabled={!can}
+              id={forWhom}
+              onChange={(event) => {
+                setPerson(event.target.value);
+              }}
+              value={person}
+            >
+              {people.map(({ userId: id, name, email }) => (
+                <NativeSelectOption key={id} value={id}>
+                  {name === "" ? email : name}
+                </NativeSelectOption>
+              ))}
+            </NativeSelect>
+          </Field>
+          <Button
+            disabled={!can || person === ""}
+            onClick={() => {
+              void change(async (session) => {
+                await session.connections.makeAgentWake(agent.id, {
+                  cron,
+                  opening,
+                  personId: person,
+                });
               });
-              setMade(true);
-            });
-          }}
-          size="sm"
-          variant="outline"
-        >
-          <Trans>Add this schedule</Trans>
-        </Button>
+            }}
+            size="sm"
+            variant="outline"
+          >
+            <Trans>Add this schedule</Trans>
+          </Button>
+        </span>
       )}
     </span>
   );
@@ -152,12 +188,16 @@ const WorkedOut = ({
   change,
   can,
   userId,
+  people,
+  wakes,
 }: {
   worked: AgentAppsWorkedOut;
   agent: Agent;
   change: Change;
   can: boolean;
   userId: string | undefined;
+  people: readonly Member[];
+  wakes: readonly AgentWake[];
 }) => {
   const { t, i18n } = useLingui();
   const { name } = agent;
@@ -192,8 +232,10 @@ const WorkedOut = ({
           agent={agent}
           can={can}
           change={change}
+          people={people}
           schedule={worked.schedule}
           userId={userId}
+          wakes={wakes}
         />
       )}
       {worked.suggested.map((toolClass) => {
@@ -238,6 +280,8 @@ export const AgentApps = ({
   can,
   change,
   userId,
+  people,
+  wakes,
 }: {
   agent: Agent;
   /** Its apps; undefined where core didn't say. */
@@ -250,6 +294,10 @@ export const AgentApps = ({
   can: boolean;
   change: Change;
   userId?: string | undefined;
+  /** The company's people, whom a proposed schedule can work for. */
+  people: readonly Member[];
+  /** Its wake-ups now: a proposal already made is shown as made. */
+  wakes: readonly AgentWake[];
 }) => {
   const { t } = useLingui();
   const whereFrom = (each: AgentApp): string => {
@@ -387,7 +435,9 @@ export const AgentApps = ({
           agent={agent}
           can={can}
           change={change}
+          people={people}
           userId={userId}
+          wakes={wakes}
           worked={worked}
         />
       )}
@@ -411,6 +461,8 @@ export const AgentAppsPanel = ({
   editable,
   can,
   change,
+  people,
+  wakes,
 }: {
   agent: Agent;
   apps: AgentAppsShown | undefined;
@@ -418,6 +470,8 @@ export const AgentAppsPanel = ({
   editable: boolean;
   can: boolean;
   change: Change;
+  people: readonly Member[];
+  wakes: readonly AgentWake[];
 }) =>
   first ? null : (
     <Card variant="panel">
@@ -429,7 +483,9 @@ export const AgentAppsPanel = ({
           change={change}
           editable={editable}
           offered={apps?.offered ?? []}
+          people={people}
           userId={apps?.userId}
+          wakes={wakes}
         />
       </ul>
     </Card>
