@@ -54,8 +54,8 @@ import {
 // and its fallbacks, tried in order when a provider refuses a call before
 // anything was billed. The organization's own admins change it; Grasp
 // staff only read it. Every change saves at once and reads the page again.
-// Last, which provider handles Grasp's own AI features (document
-// conversion, transcription, speech) on Grasp's keys, whatever was
+// Last, which provider handles Grasp's own AI features (transcription,
+// speech) on Grasp's keys, whatever was
 // connected: said plainly, with nothing to switch, so the admins know
 // where that data goes.
 
@@ -771,9 +771,6 @@ const testModelOf = (
 const useUsageLine = () => {
   const { t } = useLingui();
   return ({ feature, provider }: AiPlatformUse): string => {
-    if (provider === null) {
-      return t`Grasp converts uploaded documents on this deployment: nothing is sent out.`;
-    }
     const { whereItRuns } = provider;
     if (feature === "transcription") {
       return t`Grasp transcribes interviews with ${whereItRuns}, using Grasp's own key.`;

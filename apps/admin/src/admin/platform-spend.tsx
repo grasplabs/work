@@ -30,6 +30,7 @@ import { Section } from "./section.tsx";
 import { dollars, formatMonth } from "./words.ts";
 
 const featureWords: Record<PlatformAiFeature, string> = {
+  // No release converts documents any more; its old rows still read so.
   conversion: "Document conversion",
   transcription: "Transcription",
   speech: "Speech",
@@ -207,7 +208,7 @@ export const OrganizationPlatformSpend = ({
   status: Promise<AiStatusReport | null>;
 }) => (
   <Section
-    description="What document conversion, transcription and speech cost Grasp on its own keys for this organization: what each call used, recorded after it, in US dollars at list prices, read from its core now. Nothing caps them."
+    description="What transcription and speech cost Grasp on its own keys for this organization: what each call used, recorded after it, in US dollars at list prices, read from its core now. Nothing caps them."
     title="Grasp’s own AI features"
   >
     <Await fallback={<Line>Reading its core…</Line>} promise={status}>

@@ -688,7 +688,6 @@ describe("Settings › AI providers", () => {
     const { api } = fakeAiProviders({
       connected: [{ provider: "mistral" }],
       platform: [
-        { feature: "conversion", provider: null },
         { feature: "transcription", provider: openai },
         { feature: "speech", provider: elevenLabs },
       ],
@@ -707,16 +706,5 @@ describe("Settings › AI providers", () => {
     );
     expect(section?.querySelectorAll("input, select, button")).toHaveLength(0);
     expect(section?.textContent).toContain("Grasp's own provider keys");
-  });
-
-  it("says when documents are converted on the deployment itself", async () => {
-    const { api } = fakeAiProviders({
-      platform: [{ feature: "conversion", provider: null }],
-    });
-    await shown(api);
-
-    expect(text()).toContain(
-      "Grasp converts uploaded documents on this deployment: nothing is sent out."
-    );
   });
 });
