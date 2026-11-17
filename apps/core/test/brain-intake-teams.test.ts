@@ -9,6 +9,8 @@ import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { claimChecksMax } from "../src/onboarding/team-claims.ts";
+import { setObjectEnv } from "./agent-chat.ts";
+import { erasuresFailing } from "./brain-erasures-failing.ts";
 import { intakesWith, namedIn } from "./brain-intakes.ts";
 import { mockIdp } from "./idp.ts";
 import {
@@ -412,6 +414,60 @@ describe("what a team said, put together", { timeout: 120_000 }, () => {
     }).toStrictEqual({
       before: ["Tickets come in through Zendesk."],
       after: [],
+    });
+  });
+
+  it("shows no claim owed its erasure on the page or in a chat's thinking, before core's clock finishes it", async () => {
+    // Eight tell: Pim leaving takes the claim under five of its backers,
+    // and leaves the team seven.
+    const ids = await eightTeam();
+    await mapped(ids);
+    await eightTold(ids);
+    await drawTickets(ids);
+    await intake(ids);
+    const member = await signedInApi(idp, "user");
+    const claimsIn = async () => {
+      const [page, thinking] = await Promise.all([
+        member.api.brain.read(),
+        member.api.brain.thinking(),
+      ]);
+      const teamId = `team-${ids.team}`;
+      return {
+        page: page.statements
+          .filter(({ teamIds }) => teamIds.includes(teamId))
+          .map(({ text }) => text),
+        thinking: thinking.statements
+          .filter(({ teamId: of }) => of === teamId)
+          .map(({ text }) => text),
+      };
+    };
+    const before = await claimsIn();
+    // Pim withdraws, and the Brain's erasures fail, the onboarding's own
+    // too: the claim is out of use in the Brain, and owed its erasure until
+    // core's clock runs.
+    const restore = await setObjectEnv(onboardingStore(env), {
+      BRAIN_STORE: erasuresFailing().BRAIN_STORE,
+    });
+    try {
+      await onLink(
+        { action: "withdraw", ...(await openLink(ids.pim)) },
+        erasuresFailing()
+      );
+    } finally {
+      await restore();
+    }
+    const owed = await onboardingStore(env).owedErasures({ claims: true });
+    expect({
+      before,
+      owed: owed.filter(({ kind }) => kind === "claim").length,
+      after: await claimsIn(),
+    }).toStrictEqual({
+      before: {
+        page: ["Tickets come in through Zendesk."],
+        thinking: ["Tickets come in through Zendesk."],
+      },
+      owed: 1,
+      after: { page: [], thinking: [] },
     });
   });
 

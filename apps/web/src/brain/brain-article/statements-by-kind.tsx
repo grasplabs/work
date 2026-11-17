@@ -9,6 +9,7 @@ import { useLingui } from "@lingui/react/macro";
 import { useEffect, useRef, useState } from "react";
 
 import type { Kern, StatementRow } from "../article-kern.ts";
+import { isTeamClaim } from "../brain.ts";
 import { KindLabel } from "../statement-kind.tsx";
 import { PartHeading, StatementLine } from "./kern.tsx";
 
@@ -26,10 +27,7 @@ export const StatementsByKind = ({
   kern: Kern;
   rows: StatementRow[];
   activeId?: string | undefined;
-  /**
-   * Takes one statement out of the brain, for whoever may: offered on one
-   * whose source can be taken out (`forgettable`).
-   */
+  /** Takes one statement out of the brain, for whoever may: never a team's claim. */
   onRemove?: ((statement: Statement) => void) | undefined;
 }) => {
   const { t } = useLingui();
@@ -75,12 +73,10 @@ export const StatementsByKind = ({
                 .map((row) => (
                   <StatementLine
                     key={row.statement.id}
-                    // Only what an admin's own records said: a team's claim
-                    // stands while five of its people back it (GRA-1748).
+                    // Never a team's claim: it stands while five of its
+                    // people back it (GRA-1748).
                     onRemove={
-                      row.place.source.forgettable === true
-                        ? onRemove
-                        : undefined
+                      isTeamClaim(row.statement.id) ? undefined : onRemove
                     }
                     row={row}
                   />

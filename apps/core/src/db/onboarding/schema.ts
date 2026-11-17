@@ -740,8 +740,12 @@ export const brainClaims = sqliteTable(
     team: text().notNull(),
     /**
      * What kind of thing was said (a goal, a blocker, ...), as the Brain
-     * page groups the team's claims (GRA-1748). None only on a row from
-     * before it was kept, which onboarding migration 0040 owes an erasure.
+     * page groups the team's claims (GRA-1748). None on a row from before
+     * it was kept: onboarding migration 0040 owes those an erasure. None
+     * also on a claim noted while the admin rolled back past 0040 and
+     * rolled forward again: such a claim stays off the page for good
+     * (hidden, never shown wrongly) until its team's claims are put
+     * together anew.
      */
     kind: text().$type<StatementKind>(),
     text: text().notNull(),

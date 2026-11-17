@@ -737,6 +737,17 @@ const foldedAddress = (email: string): string => email.trim().toLowerCase();
  * core to do with `eraseSource` (onboarding/new-brain.ts): a source it
  * gave that no longer stands.
  */
+/**
+ * A team claim that stands now: not owed an erasure. The one rule, for
+ * the hand-over (`claimToHand`) and the Brain page (`standingClaims`). A
+ * claim that stops standing (under five backers, its team under seven
+ * interviewed, or no longer made) is marked in the transaction of the
+ * change that drops it, before that change commits (`#recountClaims`,
+ * `#noteClaims`, `#claimsFirst`), so it leaves both before it is out of
+ * the Brain, and no unmarked claim is of a team under seven.
+ */
+const standingClaim = eq(brainClaims.erase, false);
+
 /** A team claim standing now, as the Brain page shows it (`standingClaims`). */
 export interface StandingClaim {
   /** Its id in the Brain (`claim:<source>`). */
@@ -6652,15 +6663,13 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /**
-   * The team claims standing now, as every member reads them on the Brain
-   * page (GRA-1748), by the rule the hand-over adds them by
-   * (`claimToHand`): not owed an erasure, so a claim that falls is gone
-   * from here before it is out of the Brain (`#claimsFirst` marks it
-   * first), and in a team that may have claims shown now. Each with its
-   * kind, its team and its words; never who backs it.
+   * The team claims standing now (`standingClaim`), as every member reads
+   * them on the Brain page (GRA-1748), by the rule the hand-over adds them
+   * by (`claimToHand`). Each with its kind, its team and its words; never
+   * who backs it.
    */
   standingClaims(): StandingClaim[] {
-    const rows = this.#db
+    return this.#db
       .select({
         source: brainClaims.source,
         team: brainClaims.team,
@@ -6668,39 +6677,24 @@ export class Onboarding extends DurableObject<Env> {
         text: brainClaims.text,
       })
       .from(brainClaims)
-      .where(eq(brainClaims.erase, false))
-      .all();
-    const mayClaim = new Map<string, boolean>();
-    return rows.flatMap(({ source, team, kind, text }) => {
-      if (kind === null) {
-        return [];
-      }
-      const shown =
-        mayClaim.get(team) ?? teamMayClaim(this.#tellers(team).length);
-      mayClaim.set(team, shown);
-      return shown ? [{ source, team, kind, text }] : [];
-    });
+      .where(and(standingClaim, isNotNull(brainClaims.kind)))
+      .all()
+      .flatMap(({ source, team, kind, text }) =>
+        kind === null ? [] : [{ source, team, kind, text }]
+      );
   }
 
   /**
    * The claim `source` as the hand-over adds it now: its sentence and its
-   * team, only while it stands (five or more back it, and its team may
-   * have claims shown, `teamMayClaim`). Null otherwise.
+   * team, only while it stands (`standingClaim`). Null otherwise.
    */
   claimToHand(source: string): { text: string; team: string } | null {
     const [row] = this.#db
       .select()
       .from(brainClaims)
-      .where(eq(brainClaims.source, source))
+      .where(and(eq(brainClaims.source, source), standingClaim))
       .all();
-    if (
-      row === undefined ||
-      row.erase ||
-      !teamMayClaim(this.#tellers(row.team).length)
-    ) {
-      return null;
-    }
-    return { text: row.text, team: row.team };
+    return row === undefined ? null : { text: row.text, team: row.team };
   }
 
   /**

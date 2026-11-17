@@ -273,6 +273,49 @@ describe("a step of thinking, checked", () => {
 describe("show_thinking in a chat", slow, () => {
   beforeEach(holdAlarm);
 
+  it("is never offered in a chat others share: a shared thread's turn names no claim of the brain", async () => {
+    const ids = await teamInTheBrain();
+    const first = await askedWithBrain(ids);
+    const { member, chats } = await askedWithBrain(
+      ids,
+      thinks({
+        step: "Looking at what they said.",
+        shape: "same-pain",
+        move: "said",
+        notes: [first.said],
+      }),
+      says("Ops says tickets come in through Zendesk.")
+    );
+    const colleague = await signedInApi(idp, "user");
+    const shared = await chats.stub.askThrough(
+      member.userId,
+      chats.agent.agentId,
+      "slack",
+      "Does the same pain hurt more than one team?",
+      undefined,
+      {
+        thread: `C${crypto.randomUUID()}`,
+        kind: "group",
+        audience: {
+          members: [member.userId, colleague.userId],
+          outsiders: false,
+        },
+      }
+    );
+    const kept = await transcript(chats.stub, shared.chatId);
+    const told = toldOf(kept);
+
+    expect({
+      told: told.map(({ shown }) => shown),
+      // What the tool answered holds nothing the team said.
+      claim: told.some(({ told: text }) => text.includes("Zendesk")),
+    }).toStrictEqual({
+      // Not a tool of this turn: the call answers as one it doesn't have.
+      told: [false],
+      claim: false,
+    });
+  });
+
   it("shows only what is in the brain, keeps the steps with the answer, and asks once for words", async () => {
     const ids = await teamInTheBrain();
     const steps = (said: string, teamId: string) => [

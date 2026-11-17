@@ -114,7 +114,7 @@ describe("what the Brain page says of the interviews", () => {
     ]);
   });
 
-  it("offers an admin to remove a statement whose source can be removed, never a team's claim", async () => {
+  it("offers an admin to remove their own statements, whatever they cite, and never a team's claim", async () => {
     const claim = statement(
       "onb-claim-0123456789abcdef",
       "Tickets come in through Zendesk."
@@ -131,12 +131,22 @@ describe("what the Brain page says of the interviews", () => {
       ...statement("st-zendesk", "Zendesk holds every ticket."),
       sourceId: notes.id,
     };
-    const removed: string[] = [];
+    // One of theirs citing the staff list, a source no admin removes.
+    const roster: Source = {
+      id: "src-roster",
+      kind: "import",
+      title: "Staff list",
+      date: "2026-10-20",
+    };
+    const onRoster = {
+      ...statement("st-roster", "Ops answers the phone."),
+      sourceId: roster.id,
+    };
     await shown(
       <StatementsByKind
-        kern={{ interviewed: [], counts: [{ kind: "tool", count: 2 }] }}
-        onRemove={({ id }) => {
-          removed.push(id);
+        kern={{ interviewed: [], counts: [{ kind: "tool", count: 3 }] }}
+        onRemove={() => {
+          // Asked only once someone presses it.
         }}
         rows={[
           {
@@ -144,6 +154,10 @@ describe("what the Brain page says of the interviews", () => {
             place: { source: interviews, context: [], own: 0 },
           },
           { statement: added, place: { source: notes, context: [], own: 0 } },
+          {
+            statement: onRoster,
+            place: { source: roster, context: [], own: 0 },
+          },
         ]}
       />
     );
@@ -159,6 +173,7 @@ describe("what the Brain page says of the interviews", () => {
     expect(offered).toStrictEqual([
       { id: claim.id, remove: false },
       { id: added.id, remove: true },
+      { id: onRoster.id, remove: true },
     ]);
   });
 
