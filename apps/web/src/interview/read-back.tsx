@@ -1,3 +1,4 @@
+import type { InterviewFact } from "@grasp-os/shared/interview-links";
 import { interviewerNames } from "@grasp-os/shared/onboarding";
 import { Button } from "@grasp-os/ui/components/button";
 import { Input } from "@grasp-os/ui/components/input";
@@ -6,8 +7,9 @@ import { cn } from "@grasp-os/ui/lib/utils";
 import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import { XIcon } from "lucide-react";
-import { useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 
+import { Destination, moveLine } from "./destination.tsx";
 import { Head, headSizes, useHead } from "./head.tsx";
 import { update, useInterviewer, useProgress } from "./kept.ts";
 import { agreeToPart, changeLine, useLoop } from "./loop.ts";
@@ -47,18 +49,19 @@ const toldOf = (
 /**
  * A line that can be put right where it is: a press turns it into a field
  * with its words; Enter or leaving it keeps the change and Stephen hears of
- * it; Escape lets it be.
+ * it; Escape lets it be. Under it, where it goes (`Destination`).
  */
 const ReadBackLine = ({
   id,
   text,
+  tag,
+  share,
   told,
-}: {
-  id: string;
-  text: string;
+}: Pick<InterviewFact, "id" | "text" | "tag" | "share"> & {
   told: keyof typeof toldLooks | null;
 }) => {
   const { t } = useLingui();
+  const words = useId();
   const [draft, setDraft] = useState<string | null>(null);
   // Escape lets it be, also when leaving the field follows.
   const letBe = useRef(false);
@@ -71,59 +74,74 @@ const ReadBackLine = ({
     changeLine(id, text, now);
   };
   return (
-    <div className="flex items-center gap-3 py-1">
-      <span className="min-w-0 flex-1">
-        {draft === null ? (
-          <button
-            aria-label={t`Change: ${text}`}
-            className="hover:bg-muted focus-visible:ring-ring/50 w-full cursor-text rounded-sm text-left outline-none focus-visible:ring-3"
-            onClick={() => {
-              letBe.current = false;
-              setDraft(text);
-            }}
-            type="button"
-          >
-            <span className={told === null ? undefined : toldLooks[told]}>
-              {text}
-            </span>
-          </button>
-        ) : (
-          <Input
-            aria-label={t`Change: ${text}`}
-            // The field takes the keys the moment it opens, with the cursor after its words.
-            autoFocus
-            maxLength={300}
-            onBlur={keep}
-            onChange={(event) => {
-              setDraft(event.target.value);
-            }}
-            onFocus={(event) => {
-              const { length } = event.target.value;
-              event.target.setSelectionRange(length, length);
-            }}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                event.preventDefault();
-                keep();
-              } else if (event.key === "Escape") {
-                letBe.current = true;
-                setDraft(null);
-              }
-            }}
-            value={draft}
-          />
-        )}
-      </span>
-      <Button
-        aria-label={t`Take out: ${text}`}
-        onClick={() => {
-          update((progress) => withFactToggled(progress, id));
+    <div className="flex flex-col items-start gap-0.5 py-1">
+      <div className="flex w-full items-center gap-3">
+        <span className="min-w-0 flex-1">
+          {draft === null ? (
+            <button
+              aria-label={t`Change: ${text}`}
+              className="hover:bg-muted focus-visible:ring-ring/50 w-full cursor-text rounded-sm text-left outline-none focus-visible:ring-3"
+              onClick={() => {
+                letBe.current = false;
+                setDraft(text);
+              }}
+              type="button"
+            >
+              <span
+                className={told === null ? undefined : toldLooks[told]}
+                id={words}
+              >
+                {text}
+              </span>
+            </button>
+          ) : (
+            <Input
+              aria-label={t`Change: ${text}`}
+              // The field takes the keys the moment it opens, with the cursor after its words.
+              autoFocus
+              maxLength={300}
+              onBlur={keep}
+              onChange={(event) => {
+                setDraft(event.target.value);
+              }}
+              onFocus={(event) => {
+                const { length } = event.target.value;
+                event.target.setSelectionRange(length, length);
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  keep();
+                } else if (event.key === "Escape") {
+                  letBe.current = true;
+                  setDraft(null);
+                }
+              }}
+              value={draft}
+            />
+          )}
+        </span>
+        <Button
+          aria-label={t`Take out: ${text}`}
+          onClick={() => {
+            update((progress) => withFactToggled(progress, id));
+          }}
+          size="icon-sm"
+          variant="ghost"
+        >
+          <XIcon />
+        </Button>
+      </div>
+      <Destination
+        // The line's words describe it; while they are being put right,
+        // the field holds them, and nothing that isn't there is named.
+        of={draft === null ? words : undefined}
+        onMove={() => {
+          moveLine(id, share);
         }}
-        size="icon-sm"
-        variant="ghost"
-      >
-        <XIcon />
-      </Button>
+        share={share}
+        tag={tag}
+      />
     </div>
   );
 };
@@ -181,10 +199,12 @@ export const ReadBack = ({ room }: { room: number }) => {
           <p className="text-muted-foreground text-xs">{t`Part ${n} of ${count}`}</p>
         ) : null}
         <ol className="flex w-full flex-col border-b text-left">
-          {left.map(({ id, text }) => (
+          {left.map(({ id, text, tag, share }) => (
             <li className="animate-in fade-in border-t duration-300" key={id}>
               <ReadBackLine
                 id={id}
+                share={share}
+                tag={tag}
                 text={text}
                 told={toldOf(loop.telling, id)}
               />
@@ -218,7 +238,7 @@ export const ReadBack = ({ room }: { room: number }) => {
           >
             {agree}
           </Button>
-          <p className="text-muted-foreground text-xs text-balance">{t`Press a line to change it, take out what is wrong, or type what is missing. What you leave in is what counts.`}</p>
+          <p className="text-muted-foreground text-xs text-balance">{t`Press a line to change it, take out what is wrong, or type what is missing. Choose where each line goes. What you leave in is what counts.`}</p>
           {at === parts.length - 1 ? (
             <p className="text-muted-foreground text-xs text-balance">
               {promise}

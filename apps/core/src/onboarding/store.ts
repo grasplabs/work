@@ -23,11 +23,13 @@ import {
   interviewProgressSchema,
   isErased,
   participationNotice,
+  sharedWithTeam,
 } from "@grasp-os/shared/interview-links";
 import type {
   ApprovedFact,
   InterviewApproval,
   InterviewFact,
+  InterviewLine,
   InterviewParticipation,
   InterviewProgress,
   InterviewSaved,
@@ -679,6 +681,28 @@ export interface DrawInput {
   facts: { tag: FactTag; record: string }[];
 }
 
+/**
+ * The pieces of a map drawn before that outlive a map drawn again, which
+ * no longer names them: one someone was asked about, or one drawn already.
+ * Only while the map they came from stands (`#mapTeam`).
+ */
+const outliving = <
+  Piece extends { id: string; drawn: unknown; doers: string[] },
+>(
+  before: readonly Piece[],
+  named: readonly { id: string }[],
+  members: readonly { id: string }[],
+  asked: ReadonlyMap<string, string>
+): Piece[] =>
+  before
+    .filter(
+      (old) =>
+        !named.some(({ id }) => id === old.id) &&
+        (old.drawn !== null ||
+          members.some(({ id }) => asked.get(id) === old.id))
+    )
+    .map((old) => ({ ...old, doers: [...old.doers] }));
+
 /** One of a team's pieces of work, and who is asked about it. */
 export interface TeamWork {
   id: string;
@@ -972,6 +996,8 @@ export interface AdminInterviewFacts {
   rating: number | null;
   typed: boolean;
   interviewer: NonNullable<InterviewProgress["interviewer"]> | null;
+  /** Of the facts kept in, those they chose to share with their team (GRA-1987). */
+  shared: number;
   /** Which Stephen held its last turn (`stephenVersion`); null before that was kept. */
   version: string | null;
   /** The language its last turn was held in; null before a turn ran. */
@@ -1033,6 +1059,8 @@ interface InterviewCounts {
   rating: number | null;
   typed: boolean;
   interviewer: NonNullable<InterviewProgress["interviewer"]> | null;
+  /** Of the facts kept in, those they marked as shared as how their team works (GRA-1987). */
+  shared: number;
 }
 
 const noCounts: InterviewCounts = {
@@ -1044,6 +1072,55 @@ const noCounts: InterviewCounts = {
   rating: null,
   typed: false,
   interviewer: null,
+  shared: 0,
+};
+
+/** What of a line a save may record: who said it, its words, and what was marked or shared with it. */
+const lineWords = (line: InterviewLine | undefined): string =>
+  line === undefined || line.removed === true
+    ? ""
+    : JSON.stringify([
+        line.from,
+        line.text,
+        line.typed ?? null,
+        line.file ?? null,
+        line.tone ?? null,
+        line.marks ?? [],
+      ]);
+
+/**
+ * Whether `progress` records anything of theirs that `held` doesn't: a
+ * line, or a line's words, marks or file; a fact's words; a line moved to
+ * shared as how their team works; or how they rated it. Removing a line,
+ * taking a fact out, erasing it, or moving a line to only counted
+ * anonymously records nothing new.
+ */
+const recordsNew = (
+  held: InterviewProgress | null,
+  progress: InterviewProgress
+): boolean => {
+  const lines = held?.lines ?? [];
+  const facts = new Map((held?.facts ?? []).map((fact) => [fact.id, fact]));
+  return (
+    (progress.rating !== undefined && progress.rating !== held?.rating) ||
+    progress.lines.some(
+      (line, at) =>
+        line.removed !== true && lineWords(line) !== lineWords(lines[at])
+    ) ||
+    progress.facts.some((fact) => {
+      if (isErased(fact)) {
+        return false;
+      }
+      const was = facts.get(fact.id);
+      return (
+        was === undefined ||
+        was.tag !== fact.tag ||
+        was.text !== fact.text ||
+        was.record !== fact.record ||
+        (fact.share === "team" && was.share !== "team")
+      );
+    })
+  );
 };
 
 /** The statements of `progress` taken out in the read-back and not erased yet. */
@@ -1077,10 +1154,17 @@ const bringsBack = (
       !progress.facts.some((each) => each.id === fact.id && isErased(each))
   );
 
-const countsOf = (progress: InterviewProgress): InterviewCounts => ({
+const countsOf = (
+  progress: InterviewProgress,
+  kind: InterviewKind
+): InterviewCounts => ({
   state: progress.person,
   phase: progress.phase,
   facts: progress.facts.filter(({ out }) => out !== true).length,
+  // By the one rule for what is shared (`sharedWithTeam`), as core uses it.
+  shared: progress.facts.filter(
+    (fact) => fact.out !== true && sharedWithTeam(fact, kind)
+  ).length,
   // One erased counts nowhere.
   out: takenOut(progress).length,
   confirmed: progress.confirmed,
@@ -1632,7 +1716,7 @@ export class Onboarding extends DurableObject<Env> {
         .map(({ person, work }) => [person, work])
     );
     for (const team of roster.teams) {
-      const mine = this.teamWorks(team.id);
+      const mine = this.#worksStanding(team.id);
       if (mine.length === 0) {
         continue;
       }
@@ -1888,7 +1972,7 @@ export class Onboarding extends DurableObject<Env> {
       name: firstName(person.name),
       team: team?.name ?? "",
       lead: lead === undefined ? null : firstName(lead.name),
-      kind: leads(roster, person.id) ? "lead" : "own",
+      kind: this.#kindOf(person.id, roster),
       closes,
       closed: dayOf(now) > closes,
       progress: this.#forSpeaker(person.id, this.#held(person.id)),
@@ -1995,6 +2079,16 @@ export class Onboarding extends DurableObject<Env> {
     );
     if ("answer" in savable) {
       return acted(work, savable.answer);
+    }
+    // Nothing they say is recorded unless they take part, to the notice as
+    // it is now (GRA-329): a save that holds anything new of theirs is
+    // refused as a turn is, though it came from a page still open on an
+    // older notice. One that only takes out, removes or erases, or moves a
+    // line to only counted anonymously, records nothing new: never kept
+    // from them, as withdrawing and deleting aren't (GRA-1987).
+    const taking = this.#participating(person.id);
+    if (taking !== null && recordsNew(this.#held(person.id), progress)) {
+      return acted(work, refused(taking));
     }
     const { next, erasing } = savable;
     const { progress: keeping, revisions } = erasing;
@@ -2397,7 +2491,11 @@ export class Onboarding extends DurableObject<Env> {
   /**
    * What the drawing gets from someone's interview: only the facts they
    * agreed to, as the record keeps them. Nothing before they agreed, and
-   * nothing they added after until they agreed to that too.
+   * nothing they added after until they agreed to that too. Only the lines
+   * they chose to share as how their team works (GRA-1987): one
+   * only counted anonymously never reaches the team's map, its drawings or
+   * its claims, and someone with none to share tells their team nothing.
+   * This is the one way facts leave the store for any of those.
    */
   drawInput(person: string): DrawInput | null {
     const [state] = this.#db
@@ -2405,8 +2503,13 @@ export class Onboarding extends DurableObject<Env> {
       .from(interviewStates)
       .where(eq(interviewStates.person, person))
       .all();
-    const facts = this.#admitted(person);
-    if (state === undefined || state.agreedAt === null || facts.length === 0) {
+    if (state === undefined) {
+      return null;
+    }
+    const facts = this.#admitted(person).filter((fact) =>
+      sharedWithTeam(fact, state.kind)
+    );
+    if (state.agreedAt === null || facts.length === 0) {
       return null;
     }
     return {
@@ -2415,11 +2518,10 @@ export class Onboarding extends DurableObject<Env> {
       agreedAt: state.agreedAt,
       generation: `${state.agreedAt}|${state.revocations}`,
       admission: `${state.startedAt ?? ""}|${state.revocations}`,
-      // Who does the work they were asked about names a colleague: it is
-      // for putting right who is asked what (`#referOne`), never drawn.
-      facts: facts
-        .filter(({ tag }) => tag !== "who")
-        .map(({ tag, record }) => ({ tag, record })),
+      // Who does the work they were asked about, and the work someone
+      // says they do instead, are for putting right who is asked what
+      // (`#referOne`), never shared (`sharedWithTeam` leaves them out).
+      facts: facts.map(({ tag, record }) => ({ tag, record })),
     };
   }
 
@@ -2858,7 +2960,7 @@ export class Onboarding extends DurableObject<Env> {
       // its intake checks none (`#teamIntake`), and one checked before
       // stays out until it may again (GRA-1084, GRA-1748).
       const heard = showing.has(team.id);
-      for (const work of this.teamWorks(team.id)) {
+      for (const work of this.#worksStanding(team.id)) {
         all += 1;
         if (
           work.known.state === "complete" ||
@@ -5039,6 +5141,15 @@ export class Onboarding extends DurableObject<Env> {
     // no counts, not the whole read failing; the log names the person by
     // id alone, never what was kept.
     const countsBy = new Map<string, InterviewCounts>();
+    // Whose interview each is, as core counts what of it is shared; one
+    // not kept yet as anyone's counts as their own, the stricter.
+    const kinds = new Map(
+      this.#db
+        .select({ person: interviewStates.person, kind: interviewStates.kind })
+        .from(interviewStates)
+        .all()
+        .map(({ person, kind }) => [person, kind])
+    );
     let after = "";
     for (;;) {
       const page = this.#db
@@ -5053,7 +5164,10 @@ export class Onboarding extends DurableObject<Env> {
           parsedJson(row.progress)
         );
         if (progress.success) {
-          countsBy.set(row.person, countsOf(progress.data));
+          countsBy.set(
+            row.person,
+            countsOf(progress.data, kinds.get(row.person) ?? "own")
+          );
         } else {
           log.warn("onboarding.admin_facts.unreadable", { person: row.person });
         }
@@ -5707,13 +5821,25 @@ export class Onboarding extends DurableObject<Env> {
       roster.teams.filter(({ off }) => !off).map((team) => [team.id, team])
     );
     const teamOf = new Map(roster.people.map(({ id, team }) => [id, team]));
+    const stands = new Map<string, boolean>();
+    const standing = (team: string): boolean => {
+      const known = stands.get(team);
+      if (known !== undefined) {
+        return known;
+      }
+      const backed = this.#mapBacked(team);
+      stands.set(team, backed);
+      return backed;
+    };
     const due = this.#db
       .select()
       .from(works)
       .all()
       .flatMap((row): (WorkToDraw & { since: string })[] => {
         const team = teamsOn.get(row.team);
-        if (team === undefined) {
+        // A piece of a map that no longer stands is drawn from nobody
+        // until the map is drawn again (GRA-1987).
+        if (team === undefined || !standing(row.team)) {
           return [];
         }
         const doers = doersOf(row.doers);
@@ -5822,7 +5948,7 @@ export class Onboarding extends DurableObject<Env> {
   ): Promise<{ brief: WorkBrief; lead: string | null } | "gone" | "nothing"> {
     const roster = this.#roster();
     const team = roster?.teams.find(({ id }) => id === due.team);
-    const work = this.teamWorks(due.team).find(({ id }) => id === due.id);
+    const work = this.#worksStanding(due.team).find(({ id }) => id === due.id);
     if (roster === null || team === undefined || work === undefined) {
       return "gone";
     }
@@ -6151,7 +6277,7 @@ export class Onboarding extends DurableObject<Env> {
       lead !== null && this.#agreedAt(lead) !== null ? [lead] : [];
     // The pieces of work are the lead's map: none reach the brain while
     // what it was drawn from no longer counts (`#mapBacked`).
-    const mapped = this.#mapBacked(teamId) ? this.teamWorks(teamId) : [];
+    const mapped = this.#worksStanding(teamId);
     return {
       team: { id: team.id, name: team.name },
       names: roster.people.map(({ name }) => name),
@@ -6208,15 +6334,28 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /**
+   * A team's pieces of work, as anyone but Grasp's staff may meet them: an
+   * interview asked about one, a drawing, the review, the team's results.
+   * None while its map no longer stands on what its lead shares (GRA-1987,
+   * `#mapBacked`): a map is drawn from the lead's shared lines alone, so
+   * one drawn before a line it came from stopped counting as shared, or
+   * from lines with no destination, names nothing until drawn again.
+   */
+  #worksStanding(teamId: string): TeamWork[] {
+    return this.#mapBacked(teamId) ? this.teamWorks(teamId) : [];
+  }
+
+  /**
    * Whether a team's map stands on what its lead's facts are now: drawn
    * from their agreement, and nothing they approved stopped counting since
-   * (an edit or a withdrawal, `revocations`). A team without a lead has no
-   * map of anyone's.
+   * (an edit or a withdrawal, `revocations`). A team without a lead draws
+   * no map, so none stands for it: what a former lead's map left behind
+   * reaches nobody but staff (GRA-1987).
    */
   #mapBacked(teamId: string): boolean {
     const team = this.#roster()?.teams.find(({ id }) => id === teamId);
     if (team === undefined || team.lead === null) {
-      return true;
+      return false;
     }
     const [row] = this.#db
       .select({ mappedFrom: teams.mappedFrom })
@@ -7569,31 +7708,50 @@ export class Onboarding extends DurableObject<Env> {
    * The record is put right, whoever they named is asked about it next and
    * sent their link at once, so that work is told by those who do it.
    */
+  /**
+   * The piece of work `person` is asked about, and their team's
+   * others, as a referral may name them: only pieces of a map that stands
+   * (GRA-1987, `#worksStanding`). None when the piece asked about isn't
+   * one: then nothing is referred.
+   */
+  #referralPieces(
+    person: Roster["people"][number] | undefined
+  ): { asked: TeamWork; others: TeamWork[] } | null {
+    if (person === undefined) {
+      return null;
+    }
+    const [row] = this.#db
+      .select({ work: askedAbout.work })
+      .from(askedAbout)
+      .where(eq(askedAbout.person, person.id))
+      .all();
+    const pieces = this.#worksStanding(person.team);
+    const asked = pieces.find(({ id }) => id === row?.work);
+    return asked === undefined
+      ? null
+      : { asked, others: pieces.filter(({ id }) => id !== asked.id) };
+  }
+
   async #referOne(personId: string, at: string): Promise<void> {
     const done = () => {
       this.#db.delete(referrals).where(eq(referrals.person, personId)).run();
     };
     const roster = this.#roster();
     const person = roster?.people.find(({ id }) => id === personId);
-    const [askedRow] = this.#db
-      .select({ work: askedAbout.work })
-      .from(askedAbout)
-      .where(eq(askedAbout.person, personId))
-      .all();
-    const all = this.#db.select().from(works).all();
-    const asked = all.find(({ id }) => id === askedRow?.work);
+    const pieces = this.#referralPieces(person);
     const facts = this.#admitted(personId).filter(
       ({ tag }) => tag === "who" || tag === "work"
     );
     if (
       roster === null ||
       person === undefined ||
-      asked === undefined ||
+      pieces === null ||
       facts.length === 0
     ) {
       done();
       return;
     }
+    const { asked, others } = pieces;
     const teamNames = new Map(roster.teams.map(({ id, name }) => [id, name]));
     // Someone erased stays on the list, the company's entry (D5), but is
     // never named again: found by the address that was theirs, as their
@@ -7606,9 +7764,7 @@ export class Onboarding extends DurableObject<Env> {
       this.env,
       {
         asked: asked.local === "" ? asked.name : asked.local,
-        works: all
-          .filter(({ team, id }) => team === person.team && id !== asked.id)
-          .map(({ id, name, local }) => ({ id, name, local })),
+        works: others.map(({ id, name, local }) => ({ id, name, local })),
         people: roster.people
           .filter(
             ({ id, away, email }) =>
@@ -7874,6 +8030,10 @@ export class Onboarding extends DurableObject<Env> {
       }
       const members = now.people.filter(({ team: of }) => of === teamId);
       const before = this.teamWorks(teamId);
+      // Whether the map drawn before still stands on what the lead
+      // approved: once a line it was drawn from stopped counting as shared
+      // (GRA-1987), no piece of it outlives this map unless it names it.
+      const stood = this.#mapBacked(teamId);
       const asked = new Map(
         this.#db
           .select()
@@ -7888,16 +8048,8 @@ export class Onboarding extends DurableObject<Env> {
           `w-${crypto.randomUUID().slice(0, 8)}`,
         doers: [...work.doers],
       }));
-      // A piece someone was asked about, or one drawn already, stays,
-      // though the map no longer names it.
-      for (const old of before) {
-        if (
-          !drawn.some(({ id }) => id === old.id) &&
-          (old.drawn !== null ||
-            members.some(({ id }) => asked.get(id) === old.id))
-        ) {
-          drawn.push({ ...old, doers: [...old.doers] });
-        }
+      if (stood) {
+        drawn.push(...outliving(before, drawn, members, asked));
       }
       const open = members.filter(
         ({ id, away }) =>
@@ -8027,12 +8179,13 @@ export class Onboarding extends DurableObject<Env> {
   /** The piece of work someone is asked about, in their team's language; empty before the map. */
   #workOf(person: string): string {
     const [row] = this.#db
-      .select({ local: works.local })
+      .select({ local: works.local, team: works.team })
       .from(askedAbout)
       .innerJoin(works, eq(works.id, askedAbout.work))
       .where(eq(askedAbout.person, person))
       .all();
-    return row?.local ?? "";
+    // A piece of a map that no longer stands is named to nobody (GRA-1987).
+    return row === undefined || !this.#mapBacked(row.team) ? "" : row.local;
   }
 
   /** The language the teams speak: the first Stephen interviews in. */
@@ -8732,8 +8885,10 @@ export class Onboarding extends DurableObject<Env> {
    * model's answer from their interview, from staff too, in the
    * transaction of their withdrawal, delete or erasure, or of an approval
    * they took back (GRA-1748); a map drawn again gives it anew. The
-   * team's pieces of work stay: the rest of the team was asked about them,
-   * and they are drawn again from what those people agreed (GRA-329).
+   * team's pieces of work stay, kept for staff and for ids the company
+   * settled or counted, but no longer stand (`#mapBacked`): nobody meets
+   * them until the map is drawn again, which keeps only what it names
+   * (GRA-1987).
    */
   #forgetMapOf(person: string): void {
     const led = [...this.#ledBy(person)];
@@ -8899,6 +9054,26 @@ export class Onboarding extends DurableObject<Env> {
     by: string = interviewee
   ): void {
     this.#db.insert(events).values({ at, by, what, about: person }).run();
+  }
+
+  /**
+   * Whose interview `person`'s is, as core counts what of it is shared
+   * (`sharedWithTeam`): settled once they agreed (`#noteState`), else as
+   * the list has them now. The page shows where each line goes by it.
+   */
+  #kindOf(person: string, roster: Roster): "own" | "lead" {
+    const [held] = this.#db
+      .select({
+        kind: interviewStates.kind,
+        completedAt: interviewStates.completedAt,
+      })
+      .from(interviewStates)
+      .where(eq(interviewStates.person, person))
+      .all();
+    if (held !== undefined && held.completedAt !== null) {
+      return held.kind;
+    }
+    return leads(roster, person) ? "lead" : "own";
   }
 
   #noteState(

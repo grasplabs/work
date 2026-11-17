@@ -75,7 +75,10 @@ test("an employee has their interview by typing on a phone, agrees to it, and de
   // The read-back, and they agree to it as it is.
   await expect(page.getByText(readBack)).toBeVisible();
   await expect(
-    page.getByRole("list").filter({ hasText: "Exact" }).getByRole("listitem")
+    page
+      .getByRole("list")
+      .filter({ hasText: "Exact" })
+      .getByRole("button", { name: /^Change: /u })
   ).toHaveText(["You check the invoice in Exact.", "You send it to Sam."]);
   expect(await scrollsSideways(page)).toBe(false);
   await page.getByRole("button", { name: "Yes, that’s correct" }).click();

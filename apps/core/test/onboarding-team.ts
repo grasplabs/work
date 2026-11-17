@@ -14,6 +14,7 @@ import {
   answering,
   answeringWith,
   approveAgreed,
+  participate,
   onLink,
   openLinkAs,
   sentToOf,
@@ -142,7 +143,12 @@ export const openLink = async (person: string): Promise<Device> => {
   return device;
 };
 
-/** A fact as agreed: what they said, as Stephen read it back to them (`text`), and the record. */
+/**
+ * A fact as agreed: what they said, as Stephen read it back to them
+ * (`text`), and the record; shared with their team as how they work, as
+ * any line but who does the work may be (GRA-1987). `anonymous` makes it
+ * one only counted anonymously.
+ */
 export const fact = (
   id: string,
   tag: FactTag,
@@ -153,19 +159,25 @@ export const fact = (
   text: `You said: ${record}`,
   record,
   agreed: true,
+  ...(tag === "who" ? {} : { share: "team" as const }),
 });
 
+/** `shared` only counted anonymously: where every line approved before there was a choice stands. */
+export const anonymous = ({
+  share: _share,
+  ...shared
+}: InterviewFact): InterviewFact => shared;
+
 /**
- * Saves someone's interview as agreed to, with `facts`, after `lines`, and
- * approves on their link those of them marked agreed, as they stand;
- * returns the new version.
+ * Saves someone's interview as agreed to, with `facts`, after `lines`, on
+ * their link as their page does: core's answer, kept or refused.
  */
-export const agree = async (
+export const saveAgreed = async (
   person: string,
   facts: InterviewFact[],
   version = 0,
   lines: InterviewLine[] = [{ from: "stephen", text: "What starts one?" }]
-): Promise<number> => {
+): Promise<Response> => {
   const link = await openLink(person);
   const progress: InterviewProgress = {
     person: "completed",
@@ -180,9 +192,25 @@ export const agree = async (
     adding: false,
     addedAt: 0,
   };
-  const response = await onLink({ action: "save", ...link, version, progress });
+  return await onLink({ action: "save", ...link, version, progress });
+};
+
+/**
+ * Saves someone's interview as agreed to (`saveAgreed`), and approves on
+ * their link those of its facts marked agreed, as they stand; returns the
+ * new version.
+ */
+export const agree = async (
+  person: string,
+  facts: InterviewFact[],
+  version = 0,
+  lines?: InterviewLine[]
+): Promise<number> => {
+  // They take part before anything they say is kept, as their page has them.
+  await participate(await openLink(person));
+  const response = await saveAgreed(person, facts, version, lines);
   const saved: InterviewSaved = await response.json();
-  await approveAgreed(link, facts);
+  await approveAgreed(await openLink(person), facts);
   return saved.version;
 };
 

@@ -6,7 +6,13 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { adminCommands, adminSnapshot } from "./admin-command.ts";
-import { onLink, openLinkAs, sentToOf, signedInAs } from "./interview-link.ts";
+import {
+  onLink,
+  openLinkAs,
+  participate,
+  sentToOf,
+  signedInAs,
+} from "./interview-link.ts";
 import { onboardingLog } from "./onboarding-log.ts";
 import { auditedDuring, outcome, unique } from "./sign-in.ts";
 
@@ -83,6 +89,8 @@ const running = async () => {
     path.split("#")[1] ?? "",
     await signedInAs(await sentToOf(ids.oli))
   );
+  // They take part before anything they say is kept, as their page has them.
+  await participate(oli);
   const saved = await onLink({
     action: "save",
     ...oli,

@@ -128,10 +128,15 @@ test("someone has their interview by typing, carries on after stopping, and agre
   // The read-back, a part at a time: a line put right where it is.
   await expect(page.getByText(readBack)).toBeVisible();
   const lines = page.getByRole("list").filter({ hasText: "Exact" });
-  await expect(lines.getByRole("listitem")).toHaveText([
+  const words = lines.getByRole("button", { name: /^Change: /u });
+  await expect(words).toHaveText([
     "You check the invoice in Exact.",
     "You send it to Sam.",
   ]);
+  // How the work runs starts out shared with the team, each line its own to move.
+  await expect(
+    lines.getByRole("button", { name: "Shared as how your team works" })
+  ).toHaveCount(2);
   await page
     .getByRole("button", { name: "Change: You send it to Sam." })
     .click();
@@ -139,7 +144,7 @@ test("someone has their interview by typing, carries on after stopping, and agre
   await field.fill("You send it to Kim.");
   await field.press("Enter");
   await expect(page.getByText(changed)).toBeVisible();
-  await expect(lines.getByRole("listitem")).toHaveText([
+  await expect(words).toHaveText([
     "You check the invoice in Exact.",
     "You send it to Kim in finance.",
   ]);
