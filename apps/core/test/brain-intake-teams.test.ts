@@ -725,7 +725,7 @@ describe("what a team said, put together", { timeout: 120_000 }, () => {
       changed = true;
     };
     const reply = claimsReply([zendeskClaim]);
-    await answeringWith(
+    const { result: gave } = await answeringWith(
       async (requests) => {
         if (!changed) {
           await changeMax();
@@ -738,10 +738,17 @@ describe("what a team said, put together", { timeout: 120_000 }, () => {
     await onboardingStore(env).purgeBrain();
     const member = await signedInApi(idp, "user");
     expect({
+      // This team's intake, never another's picked first.
+      gave,
       changed,
       after: await statementsFor(member.api, ids),
       restsOn: await onboardingStore(env).sentFor(ids.max),
-    }).toStrictEqual({ changed: true, after: [], restsOn: [] });
+    }).toStrictEqual({
+      gave: `brain:${ids.team}`,
+      changed: true,
+      after: [],
+      restsOn: [],
+    });
   });
 
   it("tells two takings-back apart in the same millisecond: support taken back while the claims were put together never counts", async () => {
