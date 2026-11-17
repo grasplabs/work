@@ -156,9 +156,7 @@ export const readableStateOf = async (
 ): Promise<{ values: Record<string, Json>; withheld: number }> => {
   const rows = await checkedRowsOf(env, workflowId, reader);
   if (rows.some(({ evidence }) => evidence === "unchecked")) {
-    throw new Error(
-      "What a workflow keeps could not be checked: its run starts later"
-    );
+    throw workflowResourceErrors.create("workflow.state_unchecked");
   }
   const kept = rows.filter(({ evidence }) => evidence === "holds");
   return {
@@ -252,10 +250,16 @@ export const writeWorkflowState = async (
         )
         .onConflictDoUpdate({
           target: [workflowState.workflowResourceId, workflowState.key],
+          // The same value written again keeps the run that wrote it, and
+          // when: a step that carries a key forward unchanged copies
+          // nothing it read, and must not lift its writer's check
+          // (GRA-1996). Decided by the row as this statement finds it.
           set: {
             value: sql`excluded.value`,
-            runId: sql`excluded.run_id`,
-            updatedAt: sql`excluded.updated_at`,
+            runId: sql`CASE WHEN ${workflowState.value} = excluded.value
+              THEN ${workflowState.runId} ELSE excluded.run_id END`,
+            updatedAt: sql`CASE WHEN ${workflowState.value} = excluded.value
+              THEN ${workflowState.updatedAt} ELSE excluded.updated_at END`,
           },
         }),
       // The cap, over what this write left with every other's: NULL past
@@ -335,7 +339,7 @@ const withheldFor = {
 /**
  * `rows` as the workflow's page shows them: a key whose value its reader
  * may no longer read, or can't be checked now, withheld, its value never
- * shown. What it takes counts every key, withheld or not, as the cap does.
+ * shown, nor counted in what it takes.
  */
 const stateOf = (
   rows: readonly (StateRow & { evidence: EvidenceState })[]
@@ -350,13 +354,15 @@ const stateOf = (
       ? { ...shown, value: z.json().parse(JSON.parse(row.value)) }
       : { ...shown, withheld: withheldFor[row.evidence] };
   });
-  return {
-    entries,
-    bytes: rows.reduce(
-      (total, { key, value }) => total + bytesOf(key) + bytesOf(value),
-      0
-    ),
-  };
+  // Only of what is shown: a total with a withheld value in it would tell
+  // its length (what the cap counts includes it).
+  let bytes = 0;
+  for (const { key, value, evidence } of rows) {
+    if (evidence === "holds") {
+      bytes += bytesOf(key) + bytesOf(value);
+    }
+  }
+  return { entries, bytes };
 };
 
 /** What workflow `id` keeps between its runs, for its builders and admins. */

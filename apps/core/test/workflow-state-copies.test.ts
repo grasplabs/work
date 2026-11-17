@@ -19,6 +19,7 @@ import {
 } from "../src/permissions.ts";
 import { approveWorkflowBinding } from "../src/workflow-bindings.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
+import { workflowDraft } from "../src/workflow-editor.ts";
 import { shareWorkflowResource } from "../src/workflow-members.ts";
 import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
@@ -26,6 +27,7 @@ import {
   readWorkflowState,
   resetWorkflowState,
 } from "../src/workflow-state.ts";
+import { startCandidateRun } from "../src/workflows/candidate-runs.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { allEvents } from "./audit-events.ts";
 import { runQuarterHourTasks } from "./maintenance.ts";
@@ -121,10 +123,25 @@ const rolesOf = (by: Identity) => ({
 });
 
 /**
+ * A step `id` that reads nothing it keeps and keeps `keep` (an expression)
+ * as `kept`: a call, as only a call keeps state.
+ */
+const keepingCall = (id: string, keep: string) => ({
+  id,
+  type: "call",
+  brain: "docs",
+  action: "entities.find",
+  args: { name: unique() },
+  state: { kept: { $expr: keep } },
+});
+
+/**
  * A workflow of `by`'s whose run reads the Brain with `first` (its result
  * named by the step's ID), then, if its `keep` argument says so, keeps
- * `keep` (an expression over it) in the workflow's state as `kept`: bound
- * by `admin` to a grant of its own to read the Brain.
+ * `keep` (an expression over it) in the workflow's state as `kept`. With
+ * `carry`, it reads nothing in the Brain and keeps `kept` as it found it,
+ * as a step carrying a value forward does. Bound by `admin` to a grant of
+ * its own to read the Brain.
  */
 const keepingWorkflow = async (
   by: Member,
@@ -146,27 +163,34 @@ const keepingWorkflow = async (
           entity: { kind: "string" },
           ask: { kind: "string" },
           keep: { kind: "boolean" },
+          carry: { kind: "boolean" },
         },
       },
       permissions: { brain: { docs: { contract: key } } },
       state: { kept: { kind: "string" } },
       steps: [
-        first,
         {
-          id: "keeping",
+          id: "reading",
           type: "if",
-          condition: { $expr: "args.keep" },
+          condition: { $expr: "args.carry === false" },
           // oxlint-disable-next-line unicorn/no-thenable -- the if step's list
           then: [
+            first,
             {
-              id: "keep",
-              type: "call",
-              brain: "docs",
-              action: "entities.find",
-              args: { name: unique() },
-              state: { kept: { $expr: keep } },
+              id: "keeping",
+              type: "if",
+              condition: { $expr: "args.keep" },
+              // oxlint-disable-next-line unicorn/no-thenable -- the if step's list
+              then: [keepingCall("keep", keep)],
             },
           ],
+        },
+        {
+          id: "carrying",
+          type: "if",
+          condition: { $expr: "args.carry" },
+          // oxlint-disable-next-line unicorn/no-thenable -- the if step's list
+          then: [keepingCall("carry", 'state.kept ?? ""')],
         },
       ],
     })
@@ -195,13 +219,13 @@ const keepingWorkflow = async (
 const started = async (
   by: Member,
   id: string,
-  args: { entity: string; ask: string; keep: boolean }
+  args: { entity: string; ask: string; keep: boolean; carry?: boolean }
 ): Promise<string> => {
   const { runId } = await startWorkflow(
     env,
     { type: "person", person: by },
     id,
-    { expected: 1, args, key: unique() }
+    { expected: 1, args: { carry: false, ...args }, key: unique() }
   );
   if (runId === null) {
     throw new Error("The start admitted no run");
@@ -569,13 +593,105 @@ describe("what a workflow keeps of what its run read", setUpTime, () => {
       })
     );
 
-    expect({
-      builder,
-      start: start.includes("could not be checked"),
-    }).toStrictEqual({
+    expect({ builder, start }).toStrictEqual({
       builder: "unchecked",
-      start: true,
+      start: "workflow.state_unchecked",
     });
+  });
+
+  it("keeps the run that read a value as its writer when a later run that read nothing keeps it again unchanged, so the value still follows its source", async () => {
+    const { admin, ada } = await people();
+    const word = `ledger${unique().replaceAll(/\W/gu, "")}`;
+    const passage = `The ${word} closes on Friday.`;
+    const source: SourceRef = { producer: "upload", id: crypto.randomUUID() };
+    await sourceSaying(source, passage);
+    const workflow = await keepingWorkflow(ada, admin, recalling);
+    const reader = await started(ada, workflow.id, {
+      entity: unique(),
+      ask: word,
+      keep: true,
+    });
+    await ended(ada, workflow.id, reader);
+    // A run that reads nothing in the Brain and keeps `kept` as it found
+    // it: the same value, written again.
+    const carrier = await started(ada, workflow.id, {
+      entity: unique(),
+      ask: unique(),
+      keep: true,
+      carry: true,
+    });
+    const carried = await ended(ada, workflow.id, carrier);
+    const before = await readWorkflowState(env, ada, workflow.id);
+
+    await eraseSource(env, {
+      source,
+      readers: { kind: "none" },
+      reason: "deleted",
+    });
+    const after = await readWorkflowState(env, ada, workflow.id);
+
+    expect({
+      carried,
+      carrierRead: await evidenceOf(carrier),
+      writer: before.entries.find(({ key }) => key === "kept")?.runId,
+      after: await keptFor(ada, workflow.id),
+      // What it takes counts no withheld value, so tells no length.
+      bytes: {
+        before: before.bytes > 0,
+        after: after.bytes,
+      },
+      next: await nextRunReads(ada, workflow.id),
+    }).toStrictEqual({
+      carried: { status: "completed", error: null },
+      carrierRead: 0,
+      writer: reader,
+      after: "revoked",
+      bytes: { before: true, after: 0 },
+      next: { state: {}, withheld: 1 },
+    });
+  });
+
+  it("starts a test run without a key whose run read what is gone: read as unset, counted on its start", async () => {
+    const { admin, ada } = await people();
+    const word = `ledger${unique().replaceAll(/\W/gu, "")}`;
+    const source: SourceRef = { producer: "upload", id: crypto.randomUUID() };
+    await sourceSaying(source, `The ${word} closes on Friday.`);
+    const workflow = await keepingWorkflow(ada, admin, recalling);
+    const runId = await started(ada, workflow.id, {
+      entity: unique(),
+      ask: word,
+      keep: true,
+    });
+    await ended(ada, workflow.id, runId);
+    await eraseSource(env, {
+      source,
+      readers: { kind: "none" },
+      reason: "deleted",
+    });
+    const { revision } = await workflowDraft(env, ada, workflow.id);
+    const test = await startCandidateRun(env, ada, workflow.id, {
+      revision,
+      args: { entity: unique(), ask: unique(), keep: false, carry: true },
+      fixtures: {},
+    });
+    const frozen = await env.DB.prepare(
+      `SELECT snapshots.body FROM workflow_candidate_runs AS runs
+        JOIN workflow_state_snapshots AS snapshots ON snapshots.hash = runs.state_hash
+        WHERE runs.id = ?`
+    )
+      .bind(test.runId)
+      .first<string>("body");
+    const events = await allEvents();
+    const startedEvent = events.find(
+      (event) =>
+        event.action === "workflow.candidate.started" &&
+        event.detail?.run === test.runId
+    );
+
+    expect({
+      state: frozen === null ? null : z.json().parse(JSON.parse(frozen)),
+      withheld: startedEvent?.detail?.stateWithheld ?? 0,
+    }).toStrictEqual({ state: {}, withheld: 1 });
   });
 
   it("checks the runs that set its keys together: what reading the state costs doesn't grow with how many runs set it", async () => {
