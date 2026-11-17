@@ -197,6 +197,13 @@
       "when": 1794901556910,
       "tag": "0027_person_erasure",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "6",
+      "when": 1794922879415,
+      "tag": "0028_extractors",
+      "breakpoints": true
     }
   ]
 }

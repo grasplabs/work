@@ -1990,6 +1990,10 @@ msgstr "Quelle hinzufügen"
 msgid "Add the trigger"
 msgstr "Auslöser hinzufügen"
 
+#: src/agents/agent-apps-card.tsx
+msgid "Add this schedule"
+msgstr "Diesen Zeitplan hinzufügen"
+
 #: src/projects/file-item-dialog.tsx
 msgid "Add to {projectName}"
 msgstr "Zu {projectName} hinzufügen"
@@ -2270,6 +2274,10 @@ msgstr "Fast geschafft"
 #: src/connections/request-app-dialog.tsx
 msgid "Already here, in case you mean one of these"
 msgstr "Schon da, falls Sie eine davon meinen"
+
+#: src/agents/agent-apps-card.tsx
+msgid "Already one of its schedules."
+msgstr "Bereits einer seiner Zeitpläne."
 
 #: src/onboarding/about-story.tsx
 msgid "Alright, here’s the plan."
@@ -2909,6 +2917,10 @@ msgstr "Einen Admin fragen"
 msgid "Ask anything, or describe a process"
 msgstr "Etwas fragen oder einen Prozess beschreiben"
 
+#: src/agents/agent-apps-card.tsx
+msgid "Ask for {app}"
+msgstr "{app} anfragen"
+
 #: src/chat/chat-subject.ts
 msgid "Ask for a change"
 msgstr "Um eine Änderung bitten"
@@ -2921,6 +2933,7 @@ msgstr "Zugriff anfragen"
 msgid "Ask for access for this App"
 msgstr "Zugriff für diese App anfragen"
 
+#: src/agents/agent-apps-card.tsx
 #: src/onboarding/connect-steps.tsx
 msgid "Ask for it"
 msgstr "Anfragen"
@@ -2982,6 +2995,7 @@ msgstr "Angefragt von {requester} am {date}"
 msgid "Asked by a former member"
 msgstr "Angefragt von einem ehemaligen Mitglied"
 
+#: src/agents/agent-apps-card.tsx
 #: src/apps/app-access-requests.tsx
 #: src/onboarding/connect-steps.tsx
 msgid "Asked for"
@@ -3006,6 +3020,10 @@ msgstr "Haben ihn gefragt, oder er arbeitet nach Zeitplan für sie"
 #: src/activity/audit-words.ts
 msgid "Asked the agent to fix a run"
 msgstr "Den Agenten gebeten, einen Lauf zu beheben"
+
+#: src/activity/audit-words.ts
+msgid "Asked the Brain who knows about something"
+msgstr "Das Gehirn gefragt, wer sich mit etwas auskennt"
 
 #: src/chat/thread.tsx
 msgid "Asked to connect {binding}"
@@ -3530,6 +3548,14 @@ msgstr "Projekt ändern"
 #: src/chat/agent-draft-card.tsx
 msgid "Change something"
 msgstr "Etwas ändern"
+
+#: src/chat/chat-panel.tsx
+msgid "Change something about the agent"
+msgstr "Etwas am Agenten ändern"
+
+#: src/chat/chat-panel.tsx
+msgid "Change something about the change"
+msgstr "Etwas an der Änderung ändern"
 
 #: src/chat/chat-panel.tsx
 msgid "Change something about the plan"
@@ -6002,6 +6028,10 @@ msgstr "Für Stephens Anfragen, zu „{label}“ ({why}), tu Folgendes: {proposa
 msgid "For the {role}"
 msgstr "Für: {role}"
 
+#: src/agents/agent-apps-card.tsx
+msgid "For the agent {agentName}."
+msgstr "Für den Agenten {agentName}."
+
 #: src/agents/new-agent.tsx
 msgid "For the company"
 msgstr "Für das Unternehmen"
@@ -6010,6 +6040,7 @@ msgstr "Für das Unternehmen"
 msgid "For the team {team}"
 msgstr "Für das Team {team}"
 
+#: src/agents/agent-apps-card.tsx
 #: src/agents/agent-wakes.tsx
 msgid "For whom"
 msgstr "Für wen"
@@ -7539,6 +7570,10 @@ msgstr "Seine Anweisungen"
 #: src/agents/agent-apps-card.tsx
 msgid "Its instructions name apps your company doesn't offer: {missing}."
 msgstr "Seine Anweisungen nennen Apps, die eure Firma nicht anbietet: {missing}."
+
+#: src/agents/agent-apps-card.tsx
+msgid "Its instructions say it works on its own: {cron} · {opening}"
+msgstr "Laut seinen Anweisungen arbeitet es von selbst: {cron} · {opening}"
 
 #: src/settings/ai-providers.tsx
 msgid "Its key is deleted, and calls stop using it at once. Models of this provider are no longer used, even as a fallback."
@@ -10949,6 +10984,15 @@ msgstr "Entitäten aus dem Gehirn gelesen"
 #: src/activity/audit-words.ts
 msgid "Read everyone's calls of unknown outcome"
 msgstr "Die Aufrufe mit unbekanntem Ergebnis aller gelesen"
+
+#: src/brain/sources-page.tsx
+msgctxt "a source of the Brain"
+msgid "Read from a shared connection"
+msgstr "Aus einer geteilten Verbindung gelesen"
+
+#: src/brain/memories-page.tsx
+msgid "Read from a shared connection, version {version}"
+msgstr "Aus einer geteilten Verbindung gelesen, Version {version}"
 
 #: src/activity/audit-words.ts
 msgid "Read how knowledge is used"

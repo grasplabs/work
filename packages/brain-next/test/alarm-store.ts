@@ -8,7 +8,7 @@ import type { AlarmHost } from "../src/store.ts";
 /** A model that answers nothing: no work of the tests asks one. */
 const quietAsk: AskModel = async () => {
   await Promise.resolve();
-  return { kind: "answer", text: "" };
+  return { kind: "answer", text: "", model: "test/model" };
 };
 
 /** The store, its own alarm working as a host with no model works it. */
