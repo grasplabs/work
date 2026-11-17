@@ -23,7 +23,7 @@ import {
   outboxedEventWhere,
   uuidFromHash,
 } from "./audit-outbox.ts";
-import { eraseSources } from "./brain-next-origins.ts";
+import { erasingAtOnce, eraseSources } from "./brain-next-origins.ts";
 import {
   connectionBrainAudiences,
   connectionBrainErasures,
@@ -68,16 +68,19 @@ import { inList } from "./db/d1.ts";
 const hashSchema = z.string().regex(/^[0-9a-f]{64}$/u);
 
 /**
- * How many calls to the Brain's store one invocation spends on erasures
- * at most, one a record: 400 of Workers' bound of 1,000 subrequests an
- * invocation, leaving 600 for the clock's other tasks that run in the same
- * one (the audit drain, the Brain's work queue and hand-overs, the
- * onboarding's and the uploads' owed work, each a few dozen calls a
- * tick). Every erasure under
- * way shares it (`completeOwedErasures`); what is left is erased by the
- * next tick, so any number is erased in the end.
+ * How many calls to the Brain's store one run of the clock spends on
+ * erasures at most, one a record. The platform's own limit is Workers'
+ * subrequests per invocation: 10,000 by default on Workers Paid, as
+ * Cloudflare's Workers limits page states it (checked 17 November 2026;
+ * D1 queries count too; on-prem workerd has none). Erasures take a tenth
+ * of it; the other 9,000 are left for the clock's other tasks in the same
+ * invocation (the audit drain, the Brain's work queue and hand-overs, the
+ * onboarding's and the uploads' owed work), which is an estimate, not a
+ * measurement: each takes a few dozen calls a tick today. Every erasure
+ * under way shares it (`completeOwedErasures`); what is left is erased by
+ * the next run, so any number is erased in the end.
  */
-export const brainCallsPerTick = 400;
+export const brainCallsPerTick = 1000;
 
 /** A page of keys erased and forgotten in one go. */
 const erasedPerPage = 100;
@@ -87,9 +90,11 @@ const erasedPerPage = 100;
  * shared connection `connectionId`, the call or item its producer hashed
  * as `hash` (a SHA-256 in hex), and answers the source to add it as, in
  * the connection's current generation: or nothing when no audience is
- * chosen for it now. An erasure under way never has one: it takes the
- * audience away as it starts, and none can be chosen until it ends
- * (connection-audiences.ts). Decided in the statement that names it, so
+ * chosen for it now, or an erasure of it is under way, or a disconnect
+ * closed it. Neither ever has an audience (an erasure's start and a
+ * disconnect take it away, and none can be chosen meanwhile:
+ * connection-audiences.ts); the statement checks it all the same, as
+ * every read that trusts an audience does. Decided in the statement that names it, so
  * an erasure that starts after it lists it, and one that started before
  * refuses it. The same record again is the same source, named once.
  */
@@ -106,7 +111,8 @@ export const claimSharedRead = async (
     .insert(connectionBrainReads)
     .select(
       sql`SELECT ${connection} || '/' || ${generation} || '/' || ${hashed}, ${connection}, ${generation}, ${readAt.getTime()}
-        WHERE EXISTS (SELECT 1 FROM ${connectionBrainAudiences} WHERE ${connectionBrainAudiences.connectionId} = ${connection})`
+        WHERE EXISTS (SELECT 1 FROM ${connectionBrainAudiences} WHERE ${connectionBrainAudiences.connectionId} = ${connection})
+          AND NOT EXISTS (SELECT 1 FROM ${connectionBrainErasures} WHERE ${connectionBrainErasures.connectionId} = ${connection} AND (${connectionBrainErasures.erasing} = 1 OR ${connectionBrainErasures.closed} = 1))`
     )
     // Named already: the same source, as it was first named.
     .onConflictDoUpdate({
@@ -302,16 +308,22 @@ export const stepErasure = async (
       return;
     }
     const ids = page.map(({ sourceId }) => sourceId);
-    budget.left -= ids.length;
-    // oxlint-disable-next-line no-await-in-loop -- a page at a time
-    await eraseSources(
-      env,
-      ids.map((id) => ({
-        source: { producer: "connected", id },
-        readers: { kind: "connection", connectionId },
-      })),
-      "deleted"
-    );
+    // Charged a round at a time, as `eraseSources` makes them (all of a
+    // round's calls are made, even when one fails), so a step that fails
+    // spends only the calls it made.
+    for (let at = 0; at < ids.length; at += erasingAtOnce) {
+      const round = ids.slice(at, at + erasingAtOnce);
+      budget.left -= round.length;
+      // oxlint-disable-next-line no-await-in-loop -- a round at a time
+      await eraseSources(
+        env,
+        round.map((id) => ({
+          source: { producer: "connected", id },
+          readers: { kind: "connection", connectionId },
+        })),
+        "deleted"
+      );
+    }
     // Counted for its own erasure only, and only while it is under way:
     // a newer one counts its own records, these among them.
     // oxlint-disable-next-line no-await-in-loop -- a page at a time
@@ -396,17 +408,41 @@ export const eraseSharedReadsOfDisconnect = async (
 };
 
 /**
- * Stops anyone reading what the Brain kept of the shared connection
- * `connectionId` at once, as its disconnect returns: its audience goes.
- * The erasure follows from connect's record of the disconnect.
+ * Closes the shared connection `connectionId` for good as its disconnect
+ * answers, by `actor`, in one batch: its audience goes, and it is marked
+ * closed, so no audience change that passed connect's check before the
+ * disconnect can write one after it (connection-audiences.ts), nor can
+ * anything be kept under it. The erasure follows from connect's record of
+ * the disconnect (`eraseSharedReadsOfDisconnect`), which starts it here.
  */
-export const forgetAudienceOf = async (
+export const closeOnDisconnect = async (
   env: Pick<Env, "DB">,
-  connectionId: string
+  connectionId: string,
+  actor: AuditActor
 ): Promise<void> => {
-  await drizzle(env.DB)
-    .delete(connectionBrainAudiences)
-    .where(eq(connectionBrainAudiences.connectionId, connectionId));
+  const db = drizzle(env.DB);
+  await db.batch([
+    db
+      .delete(connectionBrainAudiences)
+      .where(eq(connectionBrainAudiences.connectionId, connectionId)),
+    db
+      .insert(connectionBrainErasures)
+      .values({
+        connectionId,
+        generation: 0,
+        erasing: false,
+        // No erasure yet: the disconnect's own starts it.
+        request: "",
+        actor: JSON.stringify(actor),
+        requestedAt: new Date(),
+        erased: 0,
+        closed: true,
+      })
+      .onConflictDoUpdate({
+        target: connectionBrainErasures.connectionId,
+        set: { closed: true },
+      }),
+  ]);
 };
 
 /**

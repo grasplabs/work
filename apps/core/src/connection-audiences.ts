@@ -62,7 +62,13 @@ export const audiencesRead = (db: DrizzleD1Database) =>
       connectionId: connectionBrainAudiences.connectionId,
       teamId: connectionBrainAudiences.teamId,
     })
-    .from(connectionBrainAudiences);
+    .from(connectionBrainAudiences)
+    // Never one of a connection being erased or closed by a disconnect:
+    // none has an audience (shared-reads.ts), and a read never trusts one
+    // that would.
+    .where(
+      sql`NOT EXISTS (SELECT 1 FROM ${connectionBrainErasures} WHERE ${connectionBrainErasures.connectionId} = ${connectionBrainAudiences.connectionId} AND (${connectionBrainErasures.erasing} = 1 OR ${connectionBrainErasures.closed} = 1))`
+    );
 
 /** Every shared connection's Brain audience, as an admin last chose it. */
 export const readConnectionAudiences = async (

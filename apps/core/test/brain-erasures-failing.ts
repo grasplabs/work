@@ -5,13 +5,13 @@ import { env } from "cloudflare:workers";
 // removal that fails once, and the retry after it.
 
 /**
- * A store's stub whose `method` first runs `before`, which may wait or
- * throw, then is called as it is.
+ * A store's stub whose `method` first runs `before` on the call's
+ * arguments, which may wait or throw, then is called as it is.
  */
 const beforeOf = <T extends object>(
   stub: T,
   method: string,
-  before: () => Promise<void>
+  before: (given: readonly unknown[]) => Promise<void>
 ): T =>
   new Proxy(stub, {
     get: (target, name): unknown => {
@@ -21,7 +21,7 @@ const beforeOf = <T extends object>(
       }
       if (name === method) {
         return async (...given: unknown[]): Promise<unknown> => {
-          await before();
+          await before(given);
           return await Reflect.apply(member, target, given);
         };
       }
@@ -148,3 +148,23 @@ export const erasuresCounted = (): { env: Env; count: () => number } => {
     count: () => asked,
   };
 };
+
+/**
+ * Core's env, but an erasure of a source in the Brain's stores fails when
+ * `fails` says so of its key (`<kind>:<id>`); every other lands.
+ */
+export const erasuresFailingFor = (fails: (key: string) => boolean): Env => ({
+  ...env,
+  BRAIN_STORE: namespaceWith(env.BRAIN_STORE, (stub) =>
+    beforeOf(stub, "eraseSource", async ([request]) => {
+      await Promise.resolve();
+      const key =
+        typeof request === "object" && request !== null && "source" in request
+          ? request.source
+          : undefined;
+      if (typeof key === "string" && fails(key)) {
+        throw new Error("The Brain is out of reach.");
+      }
+    })
+  ),
+});

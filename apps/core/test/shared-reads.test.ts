@@ -18,6 +18,7 @@ import {
 import {
   erasuresCounted,
   erasuresFailing,
+  erasuresFailingFor,
   erasuresHeld,
 } from "./brain-erasures-failing.ts";
 import { newTeam } from "./brain-next-leaks-harness.ts";
@@ -351,6 +352,67 @@ describe("what the Brain kept from a shared connection", setUpTime, () => {
       after: await finds(member, marker),
       audiences: audiences.filter((each) => each.connectionId === connectionId),
     }).toStrictEqual({ before: true, after: false, audiences: [] });
+  });
+
+  it("gives nobody anything once the disconnect answered, though an audience change that passed connect's check before it writes after it", async () => {
+    const { admin, member, connectionId } = await sharedWithTeam();
+    const marker = uniqueWord();
+    await kept(connectionId, "deal", `Deal ${marker}`);
+    await admin.api.connections.setBrainAudience(connectionId, {
+      kind: "nobody",
+    });
+    const other = await signedInApi(idp, "admin");
+    // The first admin's change passes connect's check; then, before it
+    // writes, the other admin disconnects the connection, and the
+    // disconnect answers. Connect's record of it is not drained yet.
+    const racing: Env = {
+      ...env,
+      DB: afterFirstRead(
+        env.DB,
+        'select "erasing", "closed" from "connection_brain_erasures"',
+        async () => {
+          await other.api.connections.disconnect(connectionId);
+        }
+      ),
+    };
+    const identity = await admin.api.whoami();
+    const opened = await outcome(
+      setConnectionAudience(racing, identity, connectionId, {
+        kind: "everyone",
+      })
+    );
+    const audiences = await admin.api.connections.brainAudiences();
+
+    expect({
+      opened,
+      audiences: audiences.filter((each) => each.connectionId === connectionId),
+      found: await finds(member, marker),
+      claimed: await kept(connectionId, "late", `Late ${marker}`),
+    }).toStrictEqual({
+      opened: "connection.invalid",
+      audiences: [],
+      found: false,
+      claimed: "not claimed",
+    });
+  });
+
+  it("trusts no audience row of a connection being erased, whatever wrote it: no read and no claim", async () => {
+    const { admin, member, team, connectionId } = await sharedWithTeam();
+    const marker = uniqueWord();
+    await kept(connectionId, "deal", `Deal ${marker}`);
+    await admin.api.connections.eraseBrainReads(connectionId);
+    // A row no write of core's makes while it is erased, put there
+    // straight.
+    await env.DB.prepare(
+      "INSERT INTO connection_brain_audiences (connection_id, team_id, changed_by, changed_at) VALUES (?, ?, ?, ?)"
+    )
+      .bind(connectionId, team, admin.userId, Date.now())
+      .run();
+
+    expect({
+      found: await finds(member, marker),
+      claimed: await kept(connectionId, "late", `Late ${marker}`),
+    }).toStrictEqual({ found: false, claimed: "not claimed" });
   });
 
   it("is owed until every record is erased when the Brain fails part-way, and only then recorded as done", async () => {
@@ -698,6 +760,40 @@ describe("what the Brain kept from a shared connection", setUpTime, () => {
       longest: typeof longestKept,
       tooLong: tooLong.includes("too_big"),
     }).toStrictEqual({ longest: "object", tooLong: true });
+  });
+
+  it("charges a failing erasure only the calls it made, so erasures that keep failing never starve a newer one", async () => {
+    const failing = await Promise.all(
+      ["a", "b", "c", "d"].map(async () => await sharedWithTeam())
+    );
+    for (const { connectionId } of failing) {
+      // More than a round of calls (8) each: a page of them is charged
+      // in full when nothing but a whole page is.
+      for (let deal = 0; deal < 12; deal += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- one record at a time
+        await kept(connectionId, `deal ${deal}`, `Deal ${deal}`);
+      }
+      // oxlint-disable-next-line no-await-in-loop -- oldest first
+      await disconnectRecorded(connectionId);
+      // oxlint-disable-next-line no-await-in-loop -- oldest first
+      await drainAuditOutboxes(env);
+    }
+    const newer = await sharedWithTeam();
+    const record = await kept(newer.connectionId, "deal", "Deal");
+    const source: SourceRef =
+      typeof record === "string" ? { producer: "connected", id: "" } : record;
+    await disconnectRecorded(newer.connectionId);
+    await drainAuditOutboxes(env);
+    // The four older ones' Brain is out of reach; a run may spend 40
+    // calls. Each fails at its first round of 8, so 8 are left for the
+    // newer one; charged a page each (12, 12, 12, 4) they would take all.
+    const failingIds = new Set(failing.map(({ connectionId }) => connectionId));
+    const out = erasuresFailingFor((key) =>
+      failingIds.has(key.slice("connected:".length).split("/")[0] ?? "")
+    );
+    await completeOwedErasures(out, { left: 40 });
+
+    await expect(keyState(source)).resolves.toBe("erased");
   });
 
   it("is erased by the company's admins alone, on a shared connection, and never touches a person's own captures", async () => {
