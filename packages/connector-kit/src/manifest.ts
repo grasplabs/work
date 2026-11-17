@@ -491,8 +491,8 @@ export const connectorManifestSchema = z
     "The account lookup goes to one of the connector's hosts"
   )
   .refine(
-    ({ hosts, actions }) =>
-      Object.values(actions).every(({ routes }) =>
+    ({ hosts, actions, syncs = {} }) =>
+      [...Object.values(actions), ...Object.values(syncs)].every(({ routes }) =>
         routes.every(({ host }) => hosts.includes(host))
       ),
     "Every route's host must be one of the connector's hosts"
