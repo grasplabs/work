@@ -1990,6 +1990,10 @@ msgstr "Add the source"
 msgid "Add the trigger"
 msgstr "Add the trigger"
 
+#: src/agents/agent-apps-card.tsx
+msgid "Add this schedule"
+msgstr "Add this schedule"
+
 #: src/projects/file-item-dialog.tsx
 msgid "Add to {projectName}"
 msgstr "Add to {projectName}"
@@ -2270,6 +2274,10 @@ msgstr "Almost there"
 #: src/connections/request-app-dialog.tsx
 msgid "Already here, in case you mean one of these"
 msgstr "Already here, in case you mean one of these"
+
+#: src/agents/agent-apps-card.tsx
+msgid "Already one of its schedules."
+msgstr "Already one of its schedules."
 
 #: src/onboarding/about-story.tsx
 msgid "Alright, here’s the plan."
@@ -2909,6 +2917,10 @@ msgstr "Ask an admin"
 msgid "Ask anything, or describe a process"
 msgstr "Ask anything, or describe a process"
 
+#: src/agents/agent-apps-card.tsx
+msgid "Ask for {app}"
+msgstr "Ask for {app}"
+
 #: src/chat/chat-subject.ts
 msgid "Ask for a change"
 msgstr "Ask for a change"
@@ -2921,6 +2933,7 @@ msgstr "Ask for access"
 msgid "Ask for access for this App"
 msgstr "Ask for access for this App"
 
+#: src/agents/agent-apps-card.tsx
 #: src/onboarding/connect-steps.tsx
 msgid "Ask for it"
 msgstr "Ask for it"
@@ -2982,6 +2995,7 @@ msgstr "Asked by {requester} on {date}"
 msgid "Asked by a former member"
 msgstr "Asked by a former member"
 
+#: src/agents/agent-apps-card.tsx
 #: src/apps/app-access-requests.tsx
 #: src/onboarding/connect-steps.tsx
 msgid "Asked for"
@@ -3006,6 +3020,10 @@ msgstr "Asked it, or it works for them on a schedule"
 #: src/activity/audit-words.ts
 msgid "Asked the agent to fix a run"
 msgstr "Asked the agent to fix a run"
+
+#: src/activity/audit-words.ts
+msgid "Asked the Brain who knows about something"
+msgstr "Asked the Brain who knows about something"
 
 #: src/chat/thread.tsx
 msgid "Asked to connect {binding}"
@@ -3529,6 +3547,14 @@ msgstr "Change project"
 #: src/chat/agent-draft-card.tsx
 msgid "Change something"
 msgstr "Change something"
+
+#: src/chat/chat-panel.tsx
+msgid "Change something about the agent"
+msgstr "Change something about the agent"
+
+#: src/chat/chat-panel.tsx
+msgid "Change something about the change"
+msgstr "Change something about the change"
 
 #: src/chat/chat-panel.tsx
 msgid "Change something about the plan"
@@ -5996,6 +6022,10 @@ msgstr "For Stephen's requests, about “{label}” ({why}), do this: {proposal}
 msgid "For the {role}"
 msgstr "For the {role}"
 
+#: src/agents/agent-apps-card.tsx
+msgid "For the agent {agentName}."
+msgstr "For the agent {agentName}."
+
 #: src/agents/new-agent.tsx
 msgid "For the company"
 msgstr "For the company"
@@ -6004,6 +6034,7 @@ msgstr "For the company"
 msgid "For the team {team}"
 msgstr "For the team {team}"
 
+#: src/agents/agent-apps-card.tsx
 #: src/agents/agent-wakes.tsx
 msgid "For whom"
 msgstr "For whom"
@@ -7529,6 +7560,10 @@ msgstr "Its instructions"
 #: src/agents/agent-apps-card.tsx
 msgid "Its instructions name apps your company doesn't offer: {missing}."
 msgstr "Its instructions name apps your company doesn't offer: {missing}."
+
+#: src/agents/agent-apps-card.tsx
+msgid "Its instructions say it works on its own: {cron} · {opening}"
+msgstr "Its instructions say it works on its own: {cron} · {opening}"
 
 #: src/settings/ai-providers.tsx
 msgid "Its key is deleted, and calls stop using it at once. Models of this provider are no longer used, even as a fallback."
@@ -10927,6 +10962,15 @@ msgstr "Read entities from the Brain"
 #: src/activity/audit-words.ts
 msgid "Read everyone's calls of unknown outcome"
 msgstr "Read everyone's calls of unknown outcome"
+
+#: src/brain/sources-page.tsx
+msgctxt "a source of the Brain"
+msgid "Read from a shared connection"
+msgstr "Read from a shared connection"
+
+#: src/brain/memories-page.tsx
+msgid "Read from a shared connection, version {version}"
+msgstr "Read from a shared connection, version {version}"
 
 #: src/activity/audit-words.ts
 msgid "Read how knowledge is used"

@@ -351,7 +351,12 @@ const fakeConnections = () => {
         turnedOn: ["read-own"],
         suggested: ["reach-others"],
         missing: ["Slack"],
+        schedule: { cron: "0 8 * * 1", opening: "Sum up the week." },
       };
+    },
+    requestApp: async (request: { name: string; why?: string }) => {
+      await Promise.resolve();
+      asked.push(["request app", request.name]);
     },
     setAgentToolClass: async (
       id: string,
@@ -422,6 +427,7 @@ const Page = ({
           { source: "native", id: "google", name: "Google Workspace" },
           { source: "composio", id: "hubspot", name: "HubSpot" },
         ],
+        userId: "user-1",
       }}
       documents={data.documents[agent.id]}
       editable={editable}
@@ -1297,6 +1303,44 @@ describe("an agent's page", () => {
       picker: null,
       remove: false,
       asked: [],
+    });
+  });
+
+  it("asks an admin for an app its instructions name that the company doesn't offer, and adds the schedule they propose only on a press", async () => {
+    const fake = await withClaire();
+    const { asked } = fake;
+    await shown(fake, { agent: "Claire", tab: "instructions" });
+    await press(button("Work out from its instructions"));
+    const said = document.body.textContent;
+    const before = asked.length;
+    await press(button("Ask for Slack"));
+    await press(button("Add this schedule"));
+    expect({
+      said: said.includes("works on its own: 0 8 * * 1 · Sum up the week."),
+      // Made: shown as one of its schedules, with no button to make it twice.
+      made: [
+        document.body.textContent.includes("Already one of its schedules."),
+        [...document.querySelectorAll("button")].every(
+          (each) => each.textContent?.trim() !== "Add this schedule"
+        ),
+      ],
+      asked: asked.slice(before).map((each) => each.slice(0, 3)),
+    }).toStrictEqual({
+      said: true,
+      made: [true, true],
+      asked: [
+        ["request app", "Slack"],
+        [
+          "wake",
+          "agent-1",
+          {
+            cron: "0 8 * * 1",
+            opening: "Sum up the week.",
+            // The viewer isn't among the company's people: the first is.
+            personId: "user-anna",
+          },
+        ],
+      ],
     });
   });
 });
