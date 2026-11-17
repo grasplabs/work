@@ -2309,38 +2309,55 @@ describe("exports and restores", () => {
       }
     );
 
-    it("gives up a failed restore once a memory is written after an App's data reset left it to start again (threat 9)", async () => {
-      await putBack(shared(), emptyShared);
-      const group = `team:${unique()}`;
-      await add(shared(), `test:${unique()}`, "words", team(group));
-      const { id } = await shared().startExport("test");
-      await settled(shared(), id);
-      await putBack(shared(), emptyShared);
-      await startedAndStopped(id);
-      await shared().eraseWriter({
-        writer: `app:${unique()}`,
-        reason: "deleted",
-        change: unique(),
-      });
-      await tick(shared());
-      const reset = await shared().restoreStatus(id);
-      await shared().addMemories({
-        change: unique(),
-        access: team(group),
-        entities: [customer()],
-        memories: [writtenBy(`app:${unique()}`, "Acme is new")],
-      });
-      await tick(shared());
-      const written = await shared().restoreStatus(id);
+    it.each([
+      ["after an App's data reset left it to start again", "reset first"],
+      ["and then an App's data is reset, before the next tick", "write first"],
+    ] as const)(
+      "gives up a failed restore once a memory is written %s (threat 9)",
+      async (_case, order) => {
+        await putBack(shared(), emptyShared);
+        const group = `team:${unique()}`;
+        await add(shared(), `test:${unique()}`, "words", team(group));
+        const { id } = await shared().startExport("test");
+        await settled(shared(), id);
+        await putBack(shared(), emptyShared);
+        await startedAndStopped(id);
+        const reset = async (): Promise<void> => {
+          await shared().eraseWriter({
+            writer: `app:${unique()}`,
+            reason: "deleted",
+            change: unique(),
+          });
+        };
+        const write = async (): Promise<void> => {
+          await shared().addMemories({
+            change: unique(),
+            access: team(group),
+            entities: [customer()],
+            memories: [writtenBy(`app:${unique()}`, "Acme is new")],
+          });
+        };
+        if (order === "reset first") {
+          await reset();
+          await tick(shared());
+        }
+        const before = await shared().restoreStatus(id);
+        await write();
+        if (order === "write first") {
+          await reset();
+        }
+        await tick(shared());
+        const after = await shared().restoreStatus(id);
 
-      expect({
-        reset: reset?.state,
-        written: written?.state,
-      }).toStrictEqual({ reset: "failed", written: "abandoned" });
-      await expect(called(shared().startRestore(id, "test"))).rejects.toThrow(
-        "given up"
-      );
-    });
+        expect({
+          before: before?.state,
+          after: after?.state,
+        }).toStrictEqual({ before: "failed", after: "abandoned" });
+        await expect(called(shared().startRestore(id, "test"))).rejects.toThrow(
+          "given up"
+        );
+      }
+    );
 
     it("lets go of a failed restore's export once the ledger names what it holds, and won't restart it into a store in use (threats 6, 7)", async () => {
       await putBack(shared(), emptyShared);
