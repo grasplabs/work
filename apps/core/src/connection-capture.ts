@@ -476,7 +476,26 @@ export interface RunRead {
   readonly run: Pick<CallingRun, "runId" | "principal" | "invoker">;
   /** Whether the call passed a sensitive argument (a binding argument). */
   readonly sensitive: boolean;
+  /**
+   * When the step's attempt ends (resource-calls.ts `Effect.deadline`), in
+   * milliseconds since the epoch: the step waits for its capture, which
+   * may take no more than half of what is left of it.
+   */
+  readonly deadline: number;
 }
+
+/**
+ * Whether `capture` ended within `ms`; never rejects (`capture` doesn't).
+ * One it outlasted goes on by itself.
+ */
+const endedWithin = async (
+  capture: Promise<void>,
+  ms: number
+): Promise<boolean> =>
+  await Promise.race([
+    capture.then(() => true as const),
+    scheduler.wait(ms).then(() => false as const),
+  ]);
 
 /**
  * Keeps what workflow run `run` read with the tool `action` through
@@ -488,7 +507,7 @@ export interface RunRead {
  */
 export const captureRunRead = async (
   env: Env,
-  { run, sensitive }: RunRead,
+  { run, sensitive, deadline }: RunRead,
   connectionId: string,
   action: string,
   input: unknown,
@@ -511,16 +530,38 @@ export const captureRunRead = async (
       await markCaptured(env, run.runId);
     },
   };
-  if (sensitive) {
-    // Counted as the items it named, and at least one, as a failure is.
-    const items = Math.max(1, new Set(read.result.provenance).size);
-    await endedAudited(
-      env,
-      capturer,
+  // The step waits for its capture (a run host has no `waitUntil`), and a
+  // capture is best effort: it never costs the run its answer, which the
+  // host takes only while the step's attempt holds its lease. So it may
+  // take half of what the attempt has left as the answer came, the other
+  // half left for the step's own code; with nothing left, it is skipped.
+  // One that takes longer is given up: the step goes on, and the capture
+  // with it, by itself. It still lands whole or not at all, never half:
+  // the run was marked before anything is written, so a mark with no
+  // capture only makes the run hand over how it ended, the safe side; and
+  // once the run has ended, its row takes no mark, so nothing is kept.
+  const left = deadline - Date.now();
+  const budget = Math.floor(left / 2);
+  // Counted as the items it named, and at least one, as a failure is.
+  const items = Math.max(1, new Set(read.result.provenance).size);
+  if (budget <= 0) {
+    log.warn("connection_capture.skipped_late", {
       connectionId,
-      skippedAll("sensitive", items)
-    );
+      ...capturer.where,
+      items,
+      leftMs: left,
+    });
     return;
   }
-  await capturedFor(env, capturer, connectionId, action, input, read);
+  const capture = sensitive
+    ? endedAudited(env, capturer, connectionId, skippedAll("sensitive", items))
+    : capturedFor(env, capturer, connectionId, action, input, read);
+  if (!(await endedWithin(capture, budget))) {
+    log.warn("connection_capture.given_up", {
+      connectionId,
+      ...capturer.where,
+      items,
+      waitedMs: budget,
+    });
+  }
 };

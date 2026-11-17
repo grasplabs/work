@@ -697,6 +697,8 @@ describe(
               },
             },
             sensitive: false,
+            // As a step's attempt that has a minute left.
+            deadline: Date.now() + 60_000,
           },
           runConnection,
           "mail.search",

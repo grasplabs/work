@@ -733,12 +733,17 @@ const callConnector = async (
     throw callInvalid("output: It echoes a sensitive argument.");
   }
   // An answer the run took, kept for the one person the run acts for
-  // (GRA-1828), by the chat's rules and code, before the step goes on:
-  // a run host has no `waitUntil`. Never throws; a retry reads again
-  // under the same key, and the same text again adds no version.
+  // (GRA-1828), by the chat's rules and code, before the step goes on,
+  // within half of what the step's attempt has left (`captureRunRead`).
+  // Never throws; a retry reads again under the same key, and the same
+  // text again adds no version.
   await captureRunRead(
     env,
-    { run, sensitive: call.sensitive.length > 0 },
+    {
+      run,
+      sensitive: call.sensitive.length > 0,
+      deadline: effect.deadline,
+    },
     connectionId,
     call.operation,
     input,

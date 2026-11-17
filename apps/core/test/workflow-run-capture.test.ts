@@ -6,6 +6,7 @@ import {
   workflowResourceIdSchema,
 } from "@grasp-os/shared/ids";
 import type { Identity } from "@grasp-os/shared/rpc";
+import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
@@ -13,6 +14,7 @@ import { drainAuditOutboxes } from "../src/audit-drains.ts";
 import { readSourceVersionAs, recallAs, workBrain } from "../src/brain-next.ts";
 import { producersOf, relayHandOvers } from "../src/brain-sources.ts";
 import { answerCaptureIdOf } from "../src/connection-capture-key.ts";
+import { inJurisdiction } from "../src/durable-objects.ts";
 import { createTriggerResource } from "../src/trigger-resources.ts";
 import { approveWorkflowBinding } from "../src/workflow-bindings.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
@@ -109,13 +111,14 @@ const ownMail = async (owner: string | undefined, messages: string[]) => {
 /**
  * A workflow of `by`'s that searches `connectionId`, approved by `admin`,
  * for its input's `who`, or for its parameter `token` (sensitive, as every
- * parameter not marked otherwise) set to `token`.
+ * parameter not marked otherwise) set to `token`; each attempt of its
+ * search taking at most `timeout`, if given.
  */
 const searching = async (
   by: Identity,
   admin: Identity,
   connectionId: string,
-  { token }: { token?: string } = {}
+  { token, timeout }: { token?: string; timeout?: `${number} seconds` } = {}
 ) => {
   const key = `mail-search-${unique()}`;
   await publishCatalogContract(env, admin, {
@@ -143,6 +146,7 @@ const searching = async (
         args: {
           query: { $expr: token === undefined ? "args.who" : "params.token" },
         },
+        ...(timeout === undefined ? {} : { timeout }),
       },
     ],
     status: "search.messages[0]",
@@ -309,6 +313,63 @@ describe("what a workflow run reads through a connection", setUpTime, () => {
       ada: [kept],
       ben: [],
       asCode: [],
+      handedOver: "Workflow run completed.",
+    });
+  });
+
+  it("gives up a capture the Brain holds past half of what the step has left: the step returns its answer in time, and nothing is kept", async () => {
+    const [admin, ada] = await Promise.all([
+      person("admin"),
+      person("builder"),
+    ]);
+    const marker = markerOf();
+    const mail = await ownMail(ada.userId, [`Ada's quote ${marker}`]);
+    const { workflow, serving } = await searching(ada, admin, mail.id, {
+      timeout: "5 seconds",
+    });
+    // Ada's own Brain store takes nothing until the test says, then
+    // restarts: what waited for it fails. Waited on by flags: workerd
+    // won't let one request wait on another's promise.
+    const hold = { reached: false, restart: false };
+    const held = runInDurableObject(
+      inJurisdiction(env, env.BRAIN_STORE).getByName(`person:${ada.userId}`),
+      async (_instance, state) => {
+        await state.blockConcurrencyWhile(async () => {
+          hold.reached = true;
+          while (!hold.restart) {
+            // oxlint-disable-next-line no-await-in-loop -- until the test says
+            await scheduler.wait(20);
+          }
+          state.abort("Restarted by the test");
+        });
+      }
+    ).catch(() => {
+      // Aborting fails the call that aborted: that is the restart.
+    });
+    await vi.waitFor(() => {
+      expect(hold.reached).toBeTruthy();
+    });
+    const runId = await startedAs(
+      serving,
+      { type: "person", person: ada },
+      workflow.id,
+      marker
+    );
+    // Its answer, though the Brain still holds the capture: an attempt
+    // that waited for it would lose its lease, and the Brain would hold
+    // every attempt after it the same way.
+    const end = endOf(await ended(ada, workflow.id, runId));
+    hold.restart = true;
+    await held;
+    await handedOver();
+    expect({
+      end,
+      ada: await recalled(ada.userId, marker),
+      // Marked before the Brain was asked: how it ended alone.
+      handedOver: await keptOf(ada.userId, runId),
+    }).toStrictEqual({
+      end: { status: "completed", output: { status: `Ada's quote ${marker}` } },
+      ada: [],
       handedOver: "Workflow run completed.",
     });
   });
