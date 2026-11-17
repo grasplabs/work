@@ -10,6 +10,7 @@ import type {
   ContestedCursor,
   ContestedFact,
   ContestedPage,
+  ErasedMemory,
   MemoriesCursor,
   MemoriesRead,
   EntityId,
@@ -734,13 +735,59 @@ export interface HeldMemory {
 }
 
 /**
- * What an answer rests on (contract.ts `Card.restsOn`, `restsOnWords`):
- * of `held`, each version of a source once, and each memory in a writer's
- * word once, by id.
+ * `?1` the ids of memories an answer rests on (JSON): each one's record as
+ * an erasure is asked by it (contract.ts `ErasedMemory`), one seek by id
+ * each.
+ */
+const restingRecordsSql = `
+SELECT m.id AS memory, m.source AS source, m.writer AS writer,
+  m.learned_at AS learned_at, m.speaker AS speaker,
+  about.id AS about, object.id AS object
+FROM json_each(?1) AS asked
+CROSS JOIN memories AS m ON m.id = asked.value
+CROSS JOIN entities AS about ON about.row = m.entity
+LEFT JOIN entities AS object ON object.row = m.object`;
+
+/**
+ * What an answer rests on (contract.ts `Card.restsOn`, `restsOnWords`,
+ * `restsOnMemories`): of `held`, each version of a source once, each
+ * memory in a writer's word once, by id, and each memory once with its
+ * record, read in the caller's snapshot (a read is synchronous).
  */
 export const restingOn = (
+  sql: SqlStorage,
   held: readonly HeldMemory[]
-): { restsOn: SourceVersionRef[]; restsOnWords: MemoryId[] } => ({
+): {
+  restsOn: SourceVersionRef[];
+  restsOnWords: MemoryId[];
+  restsOnMemories: ErasedMemory[];
+} => ({
+  restsOnMemories:
+    held.length === 0
+      ? []
+      : sql
+          .exec<{
+            memory: string;
+            source: string | null;
+            writer: string | null;
+            learned_at: number;
+            speaker: string;
+            about: string;
+            object: string | null;
+          }>(
+            restingRecordsSql,
+            JSON.stringify([...new Set(held.map(({ memory }) => memory))])
+          )
+          .toArray()
+          .map((row) => ({
+            memory: row.memory,
+            source: row.source,
+            writer: row.writer,
+            learnedAt: row.learned_at,
+            speaker: speakerSchema.parse(JSON.parse(row.speaker)),
+            about: row.about,
+            object: row.object,
+          })),
   restsOn: [
     ...new Map(
       held.flatMap(({ source, version }) =>
