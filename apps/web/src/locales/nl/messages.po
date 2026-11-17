@@ -1703,8 +1703,8 @@ msgid "A question"
 msgstr "Een vraag"
 
 #: src/connections/tool-permissions.tsx
-msgid "A Read tool runs without asking. A call of a Write tool from chat, or from a person using an App, waits for that person to confirm it. Press a tool's badge to change it. Mark a tool Read only if it changes nothing: marked wrongly, it changes things without asking."
-msgstr "Een tool met Lezen draait zonder te vragen. Een aanroep van een tool met Schrijven vanuit de chat, of door iemand die een app gebruikt, wacht tot die persoon hem bevestigt. Druk op de badge van een tool om dat te wijzigen. Zet een tool alleen op Lezen als hij niets wijzigt: staat hij er ten onrechte op, dan wijzigt hij dingen zonder te vragen."
+msgid "A Read tool runs without asking. A call of a Write tool from chat, or from a person using an App, waits for that person to confirm it. Press a tool's Read or Write to change it. Mark a tool Read only if it changes nothing: marked wrongly, it changes things without asking."
+msgstr "Een tool met Lezen draait zonder te vragen. Een aanroep van een tool met Schrijven vanuit de chat, of door iemand die een app gebruikt, wacht tot die persoon hem bevestigt. Druk bij een tool op Lezen of Schrijven om dat te wijzigen. Zet een tool alleen op Lezen als hij niets wijzigt: staat hij er ten onrechte op, dan wijzigt hij dingen zonder te vragen."
 
 #: src/routes/_shell.settings.billing.tsx
 msgid "A receipt each time a payment goes through."
@@ -1798,8 +1798,8 @@ msgid "A tick: yes or no"
 msgstr "Een vinkje: ja of nee"
 
 #: src/connections/connect-dialog.tsx
-msgid "A tool switched on starts as Read where Composio says it only reads; Grasp doesn't check that. A Read tool runs without asking. A call of a Write tool from chat, or from a person using an App, waits for that person to confirm it; a workflow's run makes it as one of its steps. Press a tool's badge to change it. Mark a tool Read only if it changes nothing: marked wrongly, it changes things without asking."
-msgstr "Een tool die je aanzet begint als Lezen waar Composio zegt dat hij alleen leest; Grasp controleert dat niet. Een tool op Lezen draait zonder te vragen. Een aanroep van een tool op Schrijven vanuit een chat, of door iemand die een app gebruikt, wacht tot die persoon bevestigt; een workflowrun voert hem uit als een van zijn stappen. Klik op het label van een tool om het te wijzigen. Zet een tool alleen op Lezen als hij niets wijzigt: verkeerd gemarkeerd wijzigt hij dingen zonder te vragen."
+msgid "A tool switched on starts as Read where Composio says it only reads; Grasp doesn't check that. A Read tool runs without asking. A call of a Write tool from chat, or from a person using an App, waits for that person to confirm it; a workflow's run makes it as one of its steps. Press a tool's Read or Write to change it. Mark a tool Read only if it changes nothing: marked wrongly, it changes things without asking."
+msgstr "Een tool die je aanzet begint als Lezen waar Composio zegt dat hij alleen leest; Grasp controleert dat niet. Een tool met Lezen draait zonder te vragen. Een aanroep van een tool met Schrijven vanuit de chat, of door iemand die een app gebruikt, wacht tot die persoon hem bevestigt; een workflowrun voert hem uit als een van zijn stappen. Druk bij een tool op Lezen of Schrijven om dat te wijzigen. Zet een tool alleen op Lezen als hij niets wijzigt: staat hij er ten onrechte op, dan wijzigt hij dingen zonder te vragen."
 
 #: src/workflows/requests/request-parts.tsx
 msgid "A topic"
@@ -5167,11 +5167,6 @@ msgstr "Upload geen opnames van interviews of hun ondertitels: interviews gaan v
 #: src/routes/_shell.workflows.index.tsx
 #: src/settings/event-sources.tsx
 #: src/shown-once.tsx
-msgid "Done"
-msgstr "Klaar"
-
-#: src/connections/connect-dialog.tsx
-msgctxt "a step that is finished"
 msgid "Done"
 msgstr "Klaar"
 
@@ -8592,10 +8587,6 @@ msgstr "Genoemd, niet gelinkt"
 #: src/routes/_shell.brain.$noteId.tsx
 msgid "Names {title} under {under}"
 msgstr "Noemt {title} onder {under}"
-
-#: src/connections/source-badge.tsx
-msgid "Native"
-msgstr "Native"
 
 #: src/chat/plan-card.tsx
 msgid "Needs {name} connected"
@@ -12841,6 +12832,10 @@ msgid "Signing"
 msgstr "Digitaal ondertekenen"
 
 #: src/connections/connect-dialog.tsx
+msgid "Signing in"
+msgstr "Aanmelden"
+
+#: src/connections/connect-dialog.tsx
 msgid "Signing in happens at {app}. It takes about a minute."
 msgstr "Aanmelden gebeurt bij {app}. Het duurt ongeveer een minuut."
 
@@ -13231,6 +13226,10 @@ msgstr "Stephen praat met niemand totdat je de dag kiest waarop de interviews be
 msgid "Stephen’s requests"
 msgstr "Verzoeken aan Stephen"
 
+#: src/connections/connect-dialog.tsx
+msgid "Steps"
+msgstr "Stappen"
+
 #: src/knowledge/uploads.tsx
 msgid "Still being read. It shows in the file list once it's ready."
 msgstr "Wordt nog gelezen. Het verschijnt in de bestandslijst zodra het klaar is."
@@ -13459,8 +13458,8 @@ msgid "Takes terms out of every version of the collection's documents, for good.
 msgstr "Haalt termen definitief uit elke versie van de documenten van de collectie. Je ziet eerst wat er zou verdwijnen."
 
 #: src/connections/connect-dialog.tsx
-msgid "Taking long? <0>Try again</0>"
-msgstr "Duurt het lang? <0>Probeer opnieuw</0>"
+msgid "Taking long?"
+msgstr "Duurt het lang?"
 
 #: src/routes/_shell.connect-microsoft.tsx
 msgid "Taking you to the Microsoft sign-in…"
@@ -14994,6 +14993,7 @@ msgstr "Proberen"
 #: src/chat/chat-body.tsx
 #: src/chat/chat-files.tsx
 #: src/chat/thread.tsx
+#: src/connections/connect-dialog.tsx
 #: src/frame/page-states.tsx
 #: src/frame/setting-up.tsx
 #: src/interview/sound-check.tsx
@@ -15473,10 +15473,6 @@ msgstr "Heel goed"
 #: src/chat/chat-window.tsx
 msgid "via {app}"
 msgstr "via {app}"
-
-#: src/connections/source-badge.tsx
-msgid "Via Composio"
-msgstr "Via Composio"
 
 #. A time zone, by its city
 #: src/routes/_shell.settings.workspace.tsx
@@ -16561,6 +16557,7 @@ msgstr "workflow.json"
 
 #: src/brain/goals-editor.tsx
 #: src/chat/mentions.tsx
+#: src/connections/workflows-using.tsx
 #: src/dashboard/custom-widget.tsx
 #: src/dashboard/report.ts
 #: src/dashboard/widget-board.tsx
@@ -16834,8 +16831,8 @@ msgstr "Jij laat me zien wie wie is, waar de documenten staan en welke tools men
 
 #. {host} is the web address of the sign-in page, e.g. login.microsoftonline.com.
 #: src/connections/connect-dialog.tsx
-msgid "You sign in at <0>{host}</0>"
-msgstr "Je meldt je aan op <0>{host}</0>"
+msgid "You sign in at {host}"
+msgstr "Je meldt je aan op {host}"
 
 #: src/connections/connect-dialog.tsx
 msgid "You sign in on {app}’s own page."

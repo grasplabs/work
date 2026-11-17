@@ -1703,8 +1703,8 @@ msgid "A question"
 msgstr "A question"
 
 #: src/connections/tool-permissions.tsx
-msgid "A Read tool runs without asking. A call of a Write tool from chat, or from a person using an App, waits for that person to confirm it. Press a tool's badge to change it. Mark a tool Read only if it changes nothing: marked wrongly, it changes things without asking."
-msgstr "A Read tool runs without asking. A call of a Write tool from chat, or from a person using an App, waits for that person to confirm it. Press a tool's badge to change it. Mark a tool Read only if it changes nothing: marked wrongly, it changes things without asking."
+msgid "A Read tool runs without asking. A call of a Write tool from chat, or from a person using an App, waits for that person to confirm it. Press a tool's Read or Write to change it. Mark a tool Read only if it changes nothing: marked wrongly, it changes things without asking."
+msgstr "A Read tool runs without asking. A call of a Write tool from chat, or from a person using an App, waits for that person to confirm it. Press a tool's Read or Write to change it. Mark a tool Read only if it changes nothing: marked wrongly, it changes things without asking."
 
 #: src/routes/_shell.settings.billing.tsx
 msgid "A receipt each time a payment goes through."
@@ -1798,8 +1798,8 @@ msgid "A tick: yes or no"
 msgstr "A tick: yes or no"
 
 #: src/connections/connect-dialog.tsx
-msgid "A tool switched on starts as Read where Composio says it only reads; Grasp doesn't check that. A Read tool runs without asking. A call of a Write tool from chat, or from a person using an App, waits for that person to confirm it; a workflow's run makes it as one of its steps. Press a tool's badge to change it. Mark a tool Read only if it changes nothing: marked wrongly, it changes things without asking."
-msgstr "A tool switched on starts as Read where Composio says it only reads; Grasp doesn't check that. A Read tool runs without asking. A call of a Write tool from chat, or from a person using an App, waits for that person to confirm it; a workflow's run makes it as one of its steps. Press a tool's badge to change it. Mark a tool Read only if it changes nothing: marked wrongly, it changes things without asking."
+msgid "A tool switched on starts as Read where Composio says it only reads; Grasp doesn't check that. A Read tool runs without asking. A call of a Write tool from chat, or from a person using an App, waits for that person to confirm it; a workflow's run makes it as one of its steps. Press a tool's Read or Write to change it. Mark a tool Read only if it changes nothing: marked wrongly, it changes things without asking."
+msgstr "A tool switched on starts as Read where Composio says it only reads; Grasp doesn't check that. A Read tool runs without asking. A call of a Write tool from chat, or from a person using an App, waits for that person to confirm it; a workflow's run makes it as one of its steps. Press a tool's Read or Write to change it. Mark a tool Read only if it changes nothing: marked wrongly, it changes things without asking."
 
 #: src/workflows/requests/request-parts.tsx
 msgid "A topic"
@@ -5167,11 +5167,6 @@ msgstr "Don’t upload interview recordings or their captions: interviews go thr
 #: src/routes/_shell.workflows.index.tsx
 #: src/settings/event-sources.tsx
 #: src/shown-once.tsx
-msgid "Done"
-msgstr "Done"
-
-#: src/connections/connect-dialog.tsx
-msgctxt "a step that is finished"
 msgid "Done"
 msgstr "Done"
 
@@ -8592,10 +8587,6 @@ msgstr "Named, not linked"
 #: src/routes/_shell.brain.$noteId.tsx
 msgid "Names {title} under {under}"
 msgstr "Names {title} under {under}"
-
-#: src/connections/source-badge.tsx
-msgid "Native"
-msgstr "Native"
 
 #: src/chat/plan-card.tsx
 msgid "Needs {name} connected"
@@ -12841,6 +12832,10 @@ msgid "Signing"
 msgstr "Signing"
 
 #: src/connections/connect-dialog.tsx
+msgid "Signing in"
+msgstr "Signing in"
+
+#: src/connections/connect-dialog.tsx
 msgid "Signing in happens at {app}. It takes about a minute."
 msgstr "Signing in happens at {app}. It takes about a minute."
 
@@ -13231,6 +13226,10 @@ msgstr "Stephen talks to nobody until you pick the day the interviews start."
 msgid "Stephen’s requests"
 msgstr "Stephen’s requests"
 
+#: src/connections/connect-dialog.tsx
+msgid "Steps"
+msgstr "Steps"
+
 #: src/knowledge/uploads.tsx
 msgid "Still being read. It shows in the file list once it's ready."
 msgstr "Still being read. It shows in the file list once it's ready."
@@ -13459,8 +13458,8 @@ msgid "Takes terms out of every version of the collection's documents, for good.
 msgstr "Takes terms out of every version of the collection's documents, for good. You see what it would remove first."
 
 #: src/connections/connect-dialog.tsx
-msgid "Taking long? <0>Try again</0>"
-msgstr "Taking long? <0>Try again</0>"
+msgid "Taking long?"
+msgstr "Taking long?"
 
 #: src/routes/_shell.connect-microsoft.tsx
 msgid "Taking you to the Microsoft sign-in…"
@@ -14994,6 +14993,7 @@ msgstr "Try"
 #: src/chat/chat-body.tsx
 #: src/chat/chat-files.tsx
 #: src/chat/thread.tsx
+#: src/connections/connect-dialog.tsx
 #: src/frame/page-states.tsx
 #: src/frame/setting-up.tsx
 #: src/interview/sound-check.tsx
@@ -15473,10 +15473,6 @@ msgstr "Very good"
 #: src/chat/chat-window.tsx
 msgid "via {app}"
 msgstr "via {app}"
-
-#: src/connections/source-badge.tsx
-msgid "Via Composio"
-msgstr "Via Composio"
 
 #. A time zone, by its city
 #: src/routes/_shell.settings.workspace.tsx
@@ -16561,6 +16557,7 @@ msgstr "workflow.json"
 
 #: src/brain/goals-editor.tsx
 #: src/chat/mentions.tsx
+#: src/connections/workflows-using.tsx
 #: src/dashboard/custom-widget.tsx
 #: src/dashboard/report.ts
 #: src/dashboard/widget-board.tsx
@@ -16834,8 +16831,8 @@ msgstr "You show me who’s who, where the documents are, and which tools people
 
 #. {host} is the web address of the sign-in page, e.g. login.microsoftonline.com.
 #: src/connections/connect-dialog.tsx
-msgid "You sign in at <0>{host}</0>"
-msgstr "You sign in at <0>{host}</0>"
+msgid "You sign in at {host}"
+msgstr "You sign in at {host}"
 
 #: src/connections/connect-dialog.tsx
 msgid "You sign in on {app}’s own page."

@@ -543,7 +543,7 @@ const IntegrationPage = ({ integration }: { integration: Integration }) => {
         {isAdmin(identity.role) && integration.listed ? (
           <OfferSwitch integration={integration} staff={identity.staff} />
         ) : null}
-        <SectionCard density="compact" title={t`Workflows`}>
+        <SectionCard density="compact" flush title={t`Workflows`}>
           <WorkflowsUsing integration={integration} uses={uses} />
         </SectionCard>
         {/* Its connections, each a card of its own. */}
