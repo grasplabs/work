@@ -9,8 +9,10 @@ import { focus } from "../focus/focus";
 import { simply } from "../motion/simply.stylex";
 import { Skeleton } from "../skeleton";
 import { grasp, media } from "../tokens/tokens.stylex";
+import { useWords, withGiven } from "../words/words";
 import { cardLine } from "./card-line.stylex";
 import { RenamableName } from "./rename";
+import { appShellWords } from "./words";
 
 /** A step on the way to the page, in the page bar. The last is the page itself. */
 export interface AppShellCrumb {
@@ -971,7 +973,7 @@ export const PageBar = ({
   middle,
   phoneMiddle = "bar",
   actions,
-  breadcrumbLabel = "Breadcrumb",
+  breadcrumbLabel,
   loading = false,
   barEnd,
 }: AppShellBarProps & {
@@ -980,13 +982,11 @@ export const PageBar = ({
   barEnd?: ReactNode;
 }) => {
   const [bar, setBar] = useState<HTMLElement | null>(null);
-  useFitBar(bar);
-  const where = whereOf({
-    loading,
-    crumbs,
-    phoneCrumbs,
-    label: breadcrumbLabel,
+  const { breadcrumb } = withGiven(useWords("appShell", appShellWords), {
+    breadcrumb: breadcrumbLabel,
   });
+  useFitBar(bar);
+  const where = whereOf({ loading, crumbs, phoneCrumbs, label: breadcrumb });
   const head =
     brand === undefined ? null : (
       <div

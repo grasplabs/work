@@ -33,7 +33,6 @@ import { Retry } from "../grasp/icons/index.ts";
 import { Markdown } from "../grasp/markdown/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { Thread } from "../grasp/thread/index.ts";
-import type { ThreadWords } from "../grasp/thread/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { useMemberAdmin } from "../use-member-admin.ts";
 import {
@@ -41,7 +40,7 @@ import {
   useAnswerThinking,
   useThinkingStep,
 } from "./answer-thinking.tsx";
-import { AnswerWords, useMarkdownWords } from "./answer-words.tsx";
+import { AnswerWords } from "./answer-words.tsx";
 import { answeredOf } from "./answered.ts";
 import { AskedLine } from "./asked-questions.tsx";
 import { pendingPlan, ThreadPlan } from "./build-progress.tsx";
@@ -370,46 +369,16 @@ const useActivitySteps = (): ((
 /** Agent activity's own words, in the page's language. */
 const useActivityWords = (): Partial<AgentActivityWords> => {
   const { t } = useLingui();
+  // A step Grasp never finished because the answer stopped reads as
+  // stopped, where the library says skipped.
   return {
     states: {
-      waiting: t`Waiting`,
-      working: t`Working`,
-      done: t`Done`,
-      failed: t`Failed`,
+      waiting: t({ message: "Waiting", context: "a step's state" }),
+      working: t({ message: "Working", context: "a step's state" }),
+      done: t({ message: "Done", context: "a step's state" }),
+      failed: t({ message: "Failed", context: "a step's state" }),
       skipped: t`Stopped`,
     },
-    showMore: t`Show more`,
-    showLess: t`Show less`,
-    input: t`Input`,
-    result: t`Result`,
-    error: t`Error`,
-    stepFailed: (title) => t`${title} failed`,
-    summarize: (steps) => {
-      const count = steps.length;
-      return t`${plural(count, { one: "Took # step", other: "Took # steps" })}`;
-    },
-  };
-};
-
-/** The Thread's own words, in the page's language. */
-const useThreadWords = (): Partial<ThreadWords> => {
-  const { t, i18n } = useLingui();
-  return {
-    unread: t`Unread`,
-    unreadFrom: t`Unread messages from here`,
-    loadingOlder: t`Loading older messages`,
-    jumpToNew: () => t`Jump to latest, new messages`,
-    arrived: (count) =>
-      t`${plural(count, { one: "# new message", other: "# new messages" })}`,
-    today: t({ message: "Today", context: "a date line in a chat" }),
-    yesterday: t({ message: "Yesterday", context: "a date line in a chat" }),
-    day: (day, sameYear) =>
-      new Intl.DateTimeFormat(
-        i18n.locale,
-        sameYear
-          ? { weekday: "long", day: "numeric", month: "long" }
-          : { day: "numeric", month: "long", year: "numeric" }
-      ).format(day),
   };
 };
 
@@ -714,7 +683,6 @@ const Question = ({
   message: Asked;
   asked: Answer["asked"];
 }) => {
-  const { t } = useLingui();
   const answered =
     asked === undefined ? undefined : answeredOf(asked, message.text);
   return (
@@ -722,7 +690,7 @@ const Question = ({
       {message.files === undefined || message.files.length === 0 ? null : (
         <FileCards files={message.files} />
       )}
-      <Message dateTime={message.at} from="person" personLabel={t`You`}>
+      <Message dateTime={message.at} from="person">
         {answered === undefined ? (
           message.text
         ) : (
@@ -858,7 +826,6 @@ const AnswerEnding = ({
           {t`Try again`}
         </Button>
       ) : null}
-      {ending.keyFailedForAdmin ? <KeyFailed /> : null}
     </>
   );
 };
@@ -1000,7 +967,6 @@ const AnswerRow = ({
   );
   const steps = activitySteps(stepped, writing, context);
   const thought = thoughtOf(replies, partial);
-  const markdownWords = useMarkdownWords();
   const { words, last, failed, ending, status } = answerStateOf(
     turn,
     steps,
@@ -1010,63 +976,62 @@ const AnswerRow = ({
   const copyText = words.join("\n\n");
   const retry = context.onRetry;
   return (
-    <Message
-      actions={
-        retry === undefined || failed ? undefined : (
-          <ChatMessageAction
-            icon={Retry}
-            aria-label={t`Ask again`}
-            onClick={() => {
-              retry();
-            }}
+    <>
+      <Message
+        // An answer with no words (its turn asked the person instead) has
+        // nothing to act on.
+        actions={
+          retry === undefined || failed || copyText === "" ? undefined : (
+            <ChatMessageAction
+              icon={Retry}
+              aria-label={t`Ask again`}
+              onClick={() => {
+                retry();
+              }}
+            />
+          )
+        }
+        actionsLabel={t`Answer actions`}
+        copyLabels={{
+          copy: t`Copy the answer`,
+          copied: t`Copied`,
+          failed: t`Could not copy`,
+        }}
+        copyText={live || copyText === "" ? undefined : copyText}
+        failedLabel={
+          ending.keyFailedForAdmin
+            ? t`Your AI provider is refusing your key.`
+            : failureMessage(last?.failure, i18n)
+        }
+        from="agent"
+        name="Grasp"
+        nameHidden
+        onRetry={ending.providerMissing ? undefined : retry}
+        status={ending.providerMissing ? "done" : status}
+        thinkingLabel={context.workingLabel}
+        thoughts={
+          thought.thoughts === undefined ? undefined : (
+            <Markdown
+              size="sm"
+              source={thought.thoughts}
+              streaming={status === "thinking"}
+            />
+          )
+        }
+        thoughtSeconds={thought.seconds}
+      >
+        {status === "thinking" ? undefined : (
+          <AnswerBody
+            context={context}
+            ending={ending}
+            steps={steps}
+            turn={turn}
           />
-        )
-      }
-      actionsLabel={t`Answer actions`}
-      copyLabels={{
-        copy: t`Copy the answer`,
-        copied: t`Copied`,
-        failed: t`Could not copy`,
-      }}
-      copyText={live || copyText === "" ? undefined : copyText}
-      doneLabel={t`Answer ready`}
-      failedLabel={
-        ending.keyFailedForAdmin
-          ? t`Your AI provider is refusing your key.`
-          : failureMessage(last?.failure, i18n)
-      }
-      from="agent"
-      name="Grasp"
-      nameHidden
-      onRetry={ending.providerMissing ? undefined : retry}
-      retryLabel={t`Try again`}
-      status={ending.providerMissing ? "done" : status}
-      streamingLabel={t`Writing`}
-      thinkingLabel={context.workingLabel}
-      thoughtLabel={(time) =>
-        t`${plural(time, { one: "Thought for # second", other: "Thought for # seconds" })}`
-      }
-      thoughts={
-        thought.thoughts === undefined ? undefined : (
-          <Markdown
-            {...markdownWords}
-            size="sm"
-            source={thought.thoughts}
-            streaming={status === "thinking"}
-          />
-        )
-      }
-      thoughtSeconds={thought.seconds}
-    >
-      {status === "thinking" ? undefined : (
-        <AnswerBody
-          context={context}
-          ending={ending}
-          steps={steps}
-          turn={turn}
-        />
-      )}
-    </Message>
+        )}
+      </Message>
+      {/* Under the failure it fixes: the way to check or replace the key. */}
+      {ending.keyFailedForAdmin ? <KeyFailed /> : null}
+    </>
   );
 };
 
@@ -1118,7 +1083,6 @@ export const ChatThread = ({
   children?: ReactNode;
 }) => {
   const { t } = useLingui();
-  const threadWords = useThreadWords();
   const workingLabelOf = useWorkingLabel();
   const results = resultsOf(messages);
   const { lastAnswer, answersLast } = lastAnswerOf(messages);
@@ -1226,7 +1190,6 @@ export const ChatThread = ({
         answerTo={answerTo}
         aria-label={t`Messages`}
         items={items}
-        jumpLabel={t`Jump to latest`}
         renderItem={(row) => (
           <div {...stylex.props(!compact && styles.column)}>
             {row.kind === "question" ? (
@@ -1238,7 +1201,6 @@ export const ChatThread = ({
             {row.kind === "after" ? row.children : null}
           </div>
         )}
-        words={threadWords}
       />
     </div>
   );

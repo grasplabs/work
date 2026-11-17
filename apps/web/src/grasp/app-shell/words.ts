@@ -1,6 +1,23 @@
 // App shell's own words for its panels, in English. The product gives them in its languages through
 // GraspWords (src/words).
 
+export const appShellWords = {
+  /** The name of the handle between the page and the panels. */
+  resize: "Resize the panel",
+  /** The name of the page's crumbs, for a screen reader. */
+  breadcrumb: "Breadcrumb",
+  /** The phone's Menu button. */
+  menu: "Menu",
+  /** The button that closes the phone's menu. */
+  closeMenu: "Close the menu",
+  /** The button that closes panels lying over the page for want of room. */
+  closePanel: "Close the panel",
+  /** On a phone, the button that sets the panels aside for the page and brings them back. */
+  togglePanel: "Show or hide the panel",
+};
+
+export type AppShellWords = typeof appShellWords;
+
 export const appShellPanelWords = {
   /** The name of a floating panel's head, which moves it: dragged, or with the arrow keys. */
   move: "Move the panel",
@@ -27,6 +44,7 @@ export type AppShellPanelWords = typeof appShellPanelWords;
 
 declare module "../words/words" {
   interface GraspWordsCatalog {
+    appShell: AppShellWords;
     "app-shell-panel": AppShellPanelWords;
   }
 }

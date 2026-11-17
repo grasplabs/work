@@ -295,8 +295,9 @@ const moveTime = (column: HTMLElement | null) => {
   if (card === null || card === undefined) {
     return 0;
   }
-  const [first = "0s"] = getComputedStyle(card).transitionDuration.split(",");
-  const time = first.trim();
+  const time = (
+    getComputedStyle(card).transitionDuration.split(",")[0] ?? ""
+  ).trim();
   const value = Number(time.replace(/m?s$/u, ""));
   if (Number.isNaN(value)) {
     return 0;

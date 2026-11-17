@@ -12,7 +12,12 @@
 
 import * as stylex from "@stylexjs/stylex";
 import { use, useEffect, useId, useState } from "react";
-import type { KeyboardEvent, ReactNode, SubmitEvent } from "react";
+import type {
+  KeyboardEvent,
+  ReactElement,
+  ReactNode,
+  SubmitEvent,
+} from "react";
 
 import { Button } from "../button";
 import { focus } from "../focus/focus";
@@ -39,6 +44,11 @@ import type { PanelPlacement } from "./float-window";
 import { appShellPanelWords } from "./words";
 
 const NARROW = "@container app-shell (width < 40rem)";
+// The panel's words and its Composer stand in one column: the page's room in from the panel's sides,
+// and, where the panel is wider than a chat's column (full screen), that column centred, the
+// Composer's width, as a chat's own page lays it out (patterns/chat-page). `cqi` is the panels'
+// card, a size container (panels.tsx `panels`).
+const COLUMN = `max(${grasp.shellPageInline}, calc((100cqi - ${grasp.composerWidth}) / 2))`;
 
 const styles = stylex.create({
   // One bar's height (shellBar), the name where the page's words begin and the last button's glyph
@@ -129,8 +139,14 @@ const styles = stylex.create({
     flexGrow: 1,
     overflowY: "auto",
     scrollbarWidth: "none",
-    paddingInline: grasp.shellPageInline,
+    paddingInline: COLUMN,
     paddingBlockStart: grasp.space7,
+  },
+  // The panel's foot (its Composer): the page's room round it, in the same column as the body.
+  foot: {
+    flexShrink: 0,
+    paddingBlock: grasp.shellPageInline,
+    paddingInline: COLUMN,
   },
   // Floating, the window is a layer over the page: its scroll keeps the wheel (PRODUCT-RULES 5).
   contained: { overscrollBehavior: "contain" },
@@ -152,6 +168,12 @@ export interface AppShellPanelHeadProps {
   /** The panel's own page: a link to it, "Open as a page", where you give one. */
   pageHref?: string;
   /**
+   * The element that link is drawn as, for a router's link (`pageRender={<Link to="/chat/42" />}`),
+   * so opening the page does not load the whole app again. It takes the button's look and its
+   * name, and keeps its own props. Without it, an `<a href={pageHref}>`.
+   */
+  pageRender?: ReactElement;
+  /**
    * Whether the panel is full screen: keep it with `onExpandedChange` and give it to AppShell's
    * `covered`. Docked or floating, it goes full screen and comes back to where it was, in one move.
    */
@@ -165,12 +187,14 @@ const HeadControls = ({
   setPlacement,
   next,
   pageHref,
+  pageRender,
   expanded,
   onExpandedChange,
 }: {
   setPlacement?: (placement: PanelPlacement) => void;
   next: PanelPlacement;
   pageHref?: string;
+  pageRender?: ReactElement;
   expanded: boolean;
   onExpandedChange?: (expanded: boolean) => void;
 }) => {
@@ -202,13 +226,13 @@ const HeadControls = ({
           }}
         />
       )}
-      {pageHref !== undefined && (
+      {(pageHref !== undefined || pageRender !== undefined) && (
         <Button
           variant="ghost"
           size="sm"
           icon={External}
           aria-label={words.page}
-          render={<a href={pageHref} aria-label={words.page} />}
+          render={pageRender ?? <a href={pageHref} aria-label={words.page} />}
         />
       )}
     </>
@@ -220,6 +244,7 @@ export const AppShellPanelHead = ({
   title,
   actions,
   pageHref,
+  pageRender,
   expanded = false,
   onExpandedChange,
 }: AppShellPanelHeadProps) => {
@@ -276,6 +301,7 @@ export const AppShellPanelHead = ({
           setPlacement={setPlacement}
           next={next}
           pageHref={pageHref}
+          pageRender={pageRender}
           expanded={expanded}
           onExpandedChange={onExpandedChange}
         />
@@ -320,6 +346,22 @@ export const AppShellPanelBody = ({
     </div>
   );
 };
+
+/** Every prop an AppShellPanelFoot takes. */
+export interface AppShellPanelFootProps {
+  /** What stands at the panel's foot: its Composer. */
+  children: ReactNode;
+}
+
+/**
+ * The panel's foot, for its Composer: the page's room round it, in the same column as the body's
+ * words, centred at the Composer's width when the panel is full screen.
+ */
+export const AppShellPanelFoot = ({ children }: AppShellPanelFootProps) => (
+  <div data-slot="app-shell-panel-foot" {...stylex.props(styles.foot)}>
+    {children}
+  </div>
+);
 
 /** Every prop an AppShellPanelTitle takes. */
 export interface AppShellPanelTitleProps {

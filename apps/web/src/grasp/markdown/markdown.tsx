@@ -41,6 +41,7 @@ import {
   TableHeader,
   TableRow,
 } from "../table";
+import { useWords, withGiven } from "../words/words";
 import { NOTHING, readBlocks } from "./blocks";
 import type { Placed } from "./blocks";
 import { parse, safeHref, schemeOf } from "./parse";
@@ -55,6 +56,7 @@ import type {
   RootContent,
   Table as TableNode,
 } from "./types";
+import { markdownWords } from "./words";
 
 /** What a host may draw in a link's place: anything React draws at once (never a promise). */
 export type MarkdownDrawn = Exclude<ReactNode, Promise<unknown>>;
@@ -707,10 +709,6 @@ const nameTables = (blocks: RootContent[]) => {
   return names;
 };
 
-// The default words for a footnote's links, in English; each is a prop, so a product can translate it.
-const backToReference = (number: number) => `Back to reference ${number}`;
-const footnoteNumber = (number: number) => `Footnote ${number}`;
-
 /** The notes at the foot, each leading back to where it was first used. */
 const Notes = ({
   notes,
@@ -868,14 +866,23 @@ export const Markdown = ({
   pace,
   size = "md",
   codeMaxLines = 18,
-  externalLabel = "opens in a new tab",
-  backLabel = backToReference,
-  footnoteLabel = footnoteNumber,
-  doneLabel = "Done",
-  notDoneLabel = "Not done",
-  tableLabel = "Table",
+  externalLabel,
+  backLabel,
+  footnoteLabel,
+  doneLabel,
+  notDoneLabel,
+  tableLabel,
   renderLink,
 }: MarkdownProps) => {
+  // Its words: the product's, by its catalogue, else English; a text prop given still wins.
+  const text = withGiven(useWords("markdown", markdownWords), {
+    external: externalLabel,
+    back: backLabel,
+    footnote: footnoteLabel,
+    done: doneLabel,
+    notDone: notDoneLabel,
+    table: tableLabel,
+  });
   const prefix = useId().replaceAll(":", "");
   const { shown, live } = useAnswer(source, streaming, { pace });
   const { setRoot, written } = useWrittenHere(live);
@@ -891,7 +898,7 @@ export const Markdown = ({
   );
   const lastBlock = blocks.at(-1);
   const tableNames = nameTables(blocks);
-  useSaidBlocks(blocks, live, tableNames, tableLabel);
+  useSaidBlocks(blocks, live, tableNames, text.table);
   const context: Context = {
     definitions,
     renderLink,
@@ -899,17 +906,17 @@ export const Markdown = ({
     prefix,
     streaming: live,
     codeMaxLines,
-    externalLabel,
+    externalLabel: text.external,
     writing: live ? lastBlock : undefined,
     openCode:
       live && lastBlock?.type === "code" && openFence(shown)
         ? lastBlock
         : undefined,
     inLink: false,
-    footnoteLabel,
-    doneLabel,
-    notDoneLabel,
-    tableLabel,
+    footnoteLabel: text.footnote,
+    doneLabel: text.done,
+    notDoneLabel: text.notDone,
+    tableLabel: text.table,
     small: size === "sm",
     xsmall: size === "xs",
     greedy: written,
@@ -940,7 +947,7 @@ export const Markdown = ({
         </Fragment>
       ))}
       {notes.length > 0 && (
-        <Notes notes={notes} context={context} backLabel={backLabel} />
+        <Notes notes={notes} context={context} backLabel={text.back} />
       )}
     </div>
   );

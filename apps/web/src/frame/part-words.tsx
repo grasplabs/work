@@ -1,17 +1,24 @@
+import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import type { ReactNode } from "react";
 
+import { agentActivityWords } from "../grasp/agent-activity/words.ts";
 import { alertWords } from "../grasp/alert/words.ts";
-import { appShellPanelWords } from "../grasp/app-shell/words.ts";
+import { appShellPanelWords, appShellWords } from "../grasp/app-shell/words.ts";
 import { badgeWords } from "../grasp/badge/words.ts";
 import { buttonWords } from "../grasp/button/words.ts";
+import { chatMessageWords } from "../grasp/chat-message/words.ts";
 import { codeBlockWords } from "../grasp/code-block/words.ts";
 import { copyFieldWords } from "../grasp/copy-field/words.ts";
 import { dialogWords } from "../grasp/dialog/words.ts";
+import { markdownWords } from "../grasp/markdown/words.ts";
 import { paginationWords } from "../grasp/pagination/words.ts";
 import { settingRowWords } from "../grasp/setting-row/words.ts";
 import { sidebarWords } from "../grasp/sidebar/words.ts";
+import { sourcesWords } from "../grasp/sources/words.ts";
 import { tagWords } from "../grasp/tag/words.ts";
+import { dayWritten } from "../grasp/thread/rows.ts";
+import { threadWords } from "../grasp/thread/words.ts";
 import { toasterWords } from "../grasp/toast/words.ts";
 import { renameWords } from "../grasp/words/rename.ts";
 import { GraspWords } from "../grasp/words/words.tsx";
@@ -28,24 +35,115 @@ import type { GraspWordsCatalog } from "../grasp/words/words.tsx";
 /** Every installed part's words in English: the library's own. */
 export const englishPartWords: GraspWordsCatalog = {
   "app-shell-panel": appShellPanelWords,
+  agentActivity: agentActivityWords,
   alert: alertWords,
+  appShell: appShellWords,
   badge: badgeWords,
   button: buttonWords,
+  chatMessage: chatMessageWords,
   codeBlock: codeBlockWords,
   copyField: copyFieldWords,
   dialog: dialogWords,
+  markdown: markdownWords,
   pagination: paginationWords,
   rename: renameWords,
   settingRow: settingRowWords,
   sidebar: sidebarWords,
+  sources: sourcesWords,
   tag: tagWords,
+  thread: threadWords,
   toaster: toasterWords,
 };
 
 /** Every installed part's words in the page's language, from its Lingui catalog. */
 export const usePartWords = (): GraspWordsCatalog => {
-  const { t } = useLingui();
+  const { t, i18n } = useLingui();
   return {
+    agentActivity: {
+      states: {
+        waiting: t({ message: "Waiting", context: "a step's state" }),
+        working: t({ message: "Working", context: "a step's state" }),
+        done: t({ message: "Done", context: "a step's state" }),
+        failed: t({ message: "Failed", context: "a step's state" }),
+        skipped: t({ message: "Skipped", context: "a step's state" }),
+      },
+      showMore: t`Show more`,
+      showLess: t`Show less`,
+      input: t`Input`,
+      result: t`Result`,
+      error: t`Why it failed`,
+      stepFailed: (title) => t`${title} failed`,
+      summarize: (steps) => {
+        const count = steps.length;
+        return t`${plural(count, { one: "Took # step", other: "Took # steps" })}`;
+      },
+      name: t`Agent activity`,
+      working: t`Working`,
+    },
+    appShell: {
+      resize: t`Resize the panel`,
+      breadcrumb: t`Breadcrumb`,
+      menu: t`Menu`,
+      closeMenu: t`Close the menu`,
+      closePanel: t`Close the panel`,
+      togglePanel: t`Show or hide the panel`,
+    },
+    chatMessage: {
+      person: t`You`,
+      failed: t`Could not answer`,
+      retry: t`Try again`,
+      actions: t`Message actions`,
+      copy: t({ message: "Copy", context: "a message" }),
+      copied: t`Copied`,
+      copyFailed: t`Could not copy`,
+      streaming: t`Writing`,
+      done: t`Answer ready`,
+      thinking: t`Thinking`,
+      thought: (seconds) =>
+        t`${plural(seconds, { one: "Thought for # second", other: "Thought for # seconds" })}`,
+    },
+    markdown: {
+      external: t`opens in a new tab`,
+      back: (number) => t`Back to reference ${number}`,
+      footnote: (number) => t`Footnote ${number}`,
+      done: t`Done`,
+      notDone: t`Not done`,
+      table: t`Table`,
+    },
+    sources: {
+      source: (number) => t`Source ${number}`,
+      mention: (index) => t`mention ${index}`,
+      gone: t`Could not be opened`,
+      locked: t`You cannot open this`,
+      goneInName: t`could not be opened`,
+      lockedInName: t`you cannot open it`,
+      count: (count) =>
+        t`${plural(count, { 0: "No sources", one: "# source", other: "# sources" })}`,
+      kind: (_kind, count) =>
+        t`${plural(count, { 0: "No documents", one: "# document", other: "# documents" })}`,
+      showMore: (count) => t`Show ${count} more`,
+      showFewer: t`Show fewer`,
+      order: t`Order`,
+      byRelevance: t`By relevance`,
+      byKind: t`By kind`,
+      open: t`Show them`,
+      close: t`Fold them away`,
+      openRun: t`Open the run`,
+      correct: t`Correct it`,
+      heading: t`Sources`,
+    },
+    thread: {
+      jump: t`Jump to latest`,
+      unread: t`Unread`,
+      unreadFrom: t`Unread messages from here`,
+      loadingOlder: t`Loading older messages`,
+      jumpToNew: (jump) => t`${jump}, new messages`,
+      arrived: (count) =>
+        t`${plural(count, { one: "# new message", other: "# new messages" })}`,
+      today: t`Today`,
+      yesterday: t`Yesterday`,
+      day: (day, sameYear) => dayWritten(day, sameYear, i18n.locale),
+    },
     "app-shell-panel": {
       move: t`Move the panel`,
       moveHint: t`Arrow keys move it, Shift for a longer step, End docks it beside the page, Escape goes back to the page`,

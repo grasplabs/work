@@ -171,9 +171,7 @@ const shownFor = async (
   // What each alert says went wrong, apart from the way to ask again beside it.
   const said = alerts.map((alert) => alert.textContent ?? "");
   // The ways out the failed answers offer.
-  const links = [
-    ...document.querySelectorAll('article[aria-label="Grasp"] a'),
-  ].map(
+  const links = [...document.querySelectorAll('[data-slot="thread"] a')].map(
     (link) =>
       `${link.textContent?.trim() ?? ""} → ${link.getAttribute("href") ?? ""}`
   );
@@ -264,6 +262,24 @@ describe("a failed answer", () => {
       shown: true,
       retried: 1,
     });
+  });
+
+  it("puts the way to check or replace a refused key under the failure it fixes", async () => {
+    await showThread(
+      failedWith(["model.provider_key_failed"]),
+      signedIn("admin")
+    );
+    const failure = document.querySelector('[role="alert"]');
+    const fix = document.querySelector('[data-slot="thread"] a');
+    // In the page's order: the fix comes after the failure.
+    const all = [...document.querySelectorAll("*")];
+    const after =
+      failure !== null &&
+      fix !== null &&
+      all.indexOf(fix) > all.indexOf(failure);
+    cleared();
+
+    expect(after).toBeTruthy();
   });
 
   it("says the AI provider is refusing the key, with the way to check or replace it for the organization's own admins and who to ask for anyone else", async () => {

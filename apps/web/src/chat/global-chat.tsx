@@ -3,7 +3,7 @@ import type { ModelEfforts } from "@grasp-os/shared/models";
 import { useIsMobile } from "@grasp-os/ui/hooks/use-mobile";
 import { useLingui } from "@lingui/react/macro";
 import { useRouteContext } from "@tanstack/react-router";
-import { createContext, use, useEffect, useEffectEvent } from "react";
+import { createContext, use, useEffect, useEffectEvent, useRef } from "react";
 import type { ReactNode } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
@@ -34,6 +34,7 @@ import type { ChatPresence } from "./chat-presence.ts";
 import { stageOf } from "./chat-stage.ts";
 import { subjectOf, subjectWords, useSubjectChat } from "./chat-subject.ts";
 import { useFollowedChat } from "./chat-watch.ts";
+import { tellChatsChanged } from "./chats-changed.ts";
 import type { SourceName } from "./sources.tsx";
 import { useAsk } from "./use-ask.ts";
 
@@ -254,6 +255,16 @@ const useGlobalChatValue = () => {
       setActiveChat(undefined, slot);
     }
   }, [chatId, gone, slot]);
+  // Its answer ended: the chats are listed again, so its row no longer
+  // shows it working.
+  const { running } = session.view;
+  const wasRunning = useRef(running);
+  useEffect(() => {
+    if (wasRunning.current && !running) {
+      tellChatsChanged();
+    }
+    wasRunning.current = running;
+  }, [running]);
   const layout = useChatLayout();
   const roomBeside = !useIsMobile();
   // About the page's subject, it stays open (chat-subject.ts), where the

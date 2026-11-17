@@ -91,6 +91,15 @@ export interface ComposerProps {
   /** The words when a send failed, shown under the card and given to an agent ("Could not send"). */
   failedLabel: string;
   /**
+   * Whether the last send failed, set from outside: for a failure learned after `onSend` settled,
+   * or a failed draft brought back (with its text in `value` or `defaultValue`). It shows as a send
+   * that failed here does: `failedLabel` under the card, the words kept. Leave it unset and the
+   * Composer keeps this itself; set it and call `onSendFailedChange` to follow its changes.
+   */
+  sendFailed?: boolean;
+  /** Called when the Composer would change `sendFailed`: true when a send fails, false on typing or a new send. */
+  onSendFailedChange?: (failed: boolean) => void;
+  /**
    * Where the assistant is. `working`: the light travels round the card, send turns into Stop, and
    * the text can still be written. `success`: one halo of mint, then rest; set it again to play it
    * again. `disabled`: nothing can be written or pressed; the card takes the soft fill and its words
@@ -948,6 +957,8 @@ interface SendInput {
   working: boolean;
   onSend: (text: string) => unknown;
   failedLabel: string;
+  sendFailed: boolean | undefined;
+  onSendFailedChange: ((failed: boolean) => void) | undefined;
 }
 
 /**
@@ -966,8 +977,23 @@ const useSend = ({
   working,
   onSend,
   failedLabel,
+  sendFailed,
+  onSendFailedChange,
 }: SendInput) => {
-  const [failed, setFailed] = useState(false);
+  const [ownFailed, setOwnFailed] = useState(false);
+  // Set from outside (`sendFailed`), else kept here.
+  const failed = sendFailed ?? ownFailed;
+  // A send's own result: always told, since the caller may have cleared it while the send ran.
+  const report = (next: boolean) => {
+    setOwnFailed(next);
+    onSendFailedChange?.(next);
+  };
+  // Typing clears it: told only when it was shown.
+  const setFailed = (next: boolean) => {
+    if (next !== failed) {
+      report(next);
+    }
+  };
   // The text as it is now, for a send that ends after the person typed on.
   const latest = useRef(text);
   useEffect(() => {
@@ -998,7 +1024,7 @@ const useSend = ({
             }
           },
           () => {
-            setFailed(true);
+            report(true);
             return new Error(failedLabel);
           }
         );
@@ -1925,6 +1951,8 @@ const ComposerForm = (props: Resolved) => {
     working,
     onSend: props.onSend,
     failedLabel: props.failedLabel,
+    sendFailed: props.sendFailed,
+    onSendFailedChange: props.onSendFailedChange,
   });
   const mentions = useMentions({
     text,

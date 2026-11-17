@@ -1,6 +1,11 @@
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { useMatch, useRouteContext, useRouter } from "@tanstack/react-router";
+import {
+  Link,
+  useMatch,
+  useRouteContext,
+  useRouter,
+} from "@tanstack/react-router";
 import { useEffect, useEffectEvent, useRef } from "react";
 import type { ReactNode } from "react";
 
@@ -13,7 +18,7 @@ import type {
   AppShellPanelPlacement,
   AppShellPanelPosition,
 } from "../grasp/app-shell/index.ts";
-import { Cross, Edit, External } from "../grasp/icons/index.ts";
+import { Cross, Edit } from "../grasp/icons/index.ts";
 import type { IconData } from "../grasp/icons/index.ts";
 import {
   Tooltip,
@@ -34,7 +39,7 @@ import {
   resizeChat,
   useChatLayout,
 } from "./chat-layout.ts";
-import { useGoToChat } from "./chat-link.ts";
+import { chatLink } from "./chat-link.ts";
 import { ChatMoreMenu, ChatPanelTitle } from "./chat-more.tsx";
 import { allows } from "./chat-presence.ts";
 import { chatKey, useGlobalChat } from "./global-chat.tsx";
@@ -45,7 +50,7 @@ import { reading } from "./reading.stylex.ts";
 // back. The shell moves it, sizes it and docks it (drag it to the end edge,
 // or pull the docked head out to float it); work keeps where it is
 // (chat-layout.ts). Its head: the chat's name, renamed where it stands, the
-// shell's switch and full screen, then a new chat, the chat's own page, its
+// shell's switch, full screen and the chat's own page, then a new chat, its
 // menu and Close. Then the thread, and the box to ask in, which takes the
 // cursor as the chat opens. Escape closes it to its idle bar, which takes
 // the cursor back (chat-bar.tsx).
@@ -130,7 +135,6 @@ const ChatTitle = () => {
 const HeaderActions = () => {
   const { t } = useLingui();
   const { chatId, slot, keptOpen, summary, sourceNames } = useGlobalChat();
-  const goToChat = useGoToChat();
   return (
     <>
       {chatId === undefined ? null : (
@@ -145,18 +149,6 @@ const HeaderActions = () => {
             } else {
               startAfresh(slot);
             }
-          }}
-        />
-      )}
-      {/* A chat not made yet has no page until its first question. The
-          router's way there, not the head's own link, which loads the app
-          anew. */}
-      {chatId === undefined ? null : (
-        <HeaderButton
-          icon={External}
-          label={t`Open as a page`}
-          onClick={() => {
-            goToChat(chatId);
           }}
         />
       )}
@@ -290,7 +282,7 @@ const Body = ({ open, expanded }: { open: boolean; expanded: boolean }) => {
  */
 export const ChatPanel = () => {
   const { t } = useLingui();
-  const { stage } = useGlobalChat();
+  const { stage, chatId } = useGlobalChat();
   const { expanded } = useChatLayout();
   return (
     <section aria-label={t`Chat`} {...stylex.props(panelStyles.content)}>
@@ -298,6 +290,14 @@ export const ChatPanel = () => {
         actions={<HeaderActions />}
         expanded={expanded}
         onExpandedChange={expandChat}
+        // A chat not made yet has no page until its first question. The
+        // router's link, so opening it doesn't load the app anew.
+        {...(chatId === undefined
+          ? {}
+          : {
+              pageHref: `/chats/${chatId}`,
+              pageRender: <Link {...chatLink(chatId)} />,
+            })}
         title={<ChatTitle />}
       />
       <Body expanded={expanded} open={stage.card} />
