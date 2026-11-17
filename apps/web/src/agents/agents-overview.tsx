@@ -49,8 +49,8 @@ import {
   wakesOn,
 } from "./agent-facts.tsx";
 
-// The Agents page: the company's agents as a grid of cards, as the Apps
-// page has its Apps (apps/apps-overview.tsx). Everyone sees the agents
+// The Agents page: the company's agents, being moved onto Damsko's parts
+// (apps/web/src/grasp) as a list of rows. Everyone sees the agents
 // they may talk to (`chats.agents`), each with the way into a chat with
 // it. The company's admins see every agent (`connections.agents`), with
 // whether it is on, whom it answers, how much it may do and whether it
