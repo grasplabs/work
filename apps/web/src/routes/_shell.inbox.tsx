@@ -5,7 +5,7 @@ import { z } from "zod";
 import { readActivity, readWaiting } from "../dashboard/read-dashboard.ts";
 import { readDirectory } from "../directory.ts";
 import { PageLoading } from "../frame/page-states.tsx";
-import { InboxPage } from "../inbox/inbox-page.tsx";
+import { InboxPage, groupOrder } from "../inbox/inbox-page.tsx";
 import { inboxItems, unread } from "../inbox/items.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 
@@ -39,10 +39,10 @@ const Inbox = () => {
 };
 
 export const Route = createFileRoute("/_shell/inbox")({
-  // `group`: the group in view first, as Settings › Unknown outcomes leads here.
+  // `group`: the inbox's group in view, as its filter and the sidebar's Inbox view set it.
   validateSearch: z.object({
     item: z.string().optional(),
-    group: z.enum(["asked", "brain", "outcomes"]).optional(),
+    group: z.enum(groupOrder).optional(),
   }),
   pendingComponent: PageLoading,
   loader: async ({ context: { core, identity } }) => {

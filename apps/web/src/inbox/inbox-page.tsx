@@ -26,6 +26,7 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "../grasp/empty/index.ts";
+import { Agent } from "../grasp/icons/index.ts";
 import {
   Item,
   ItemContent,
@@ -115,8 +116,11 @@ const styles = stylex.create({
   },
 });
 
-/** The groups, short enough that the filter fits beside the list. */
-const groupLabel: Record<Group, MessageDescriptor> = {
+/**
+ * The groups, short enough that the filter fits beside the list. The
+ * sidebar's Inbox view names its rows by these too.
+ */
+export const groupLabel: Record<Group, MessageDescriptor> = {
   all: msg({ message: "All", context: "inbox filter, short" }),
   workflows: msg({ message: "Workflows", context: "inbox filter" }),
   asked: msg({ message: "Asked of you", context: "inbox filter" }),
@@ -125,7 +129,14 @@ const groupLabel: Record<Group, MessageDescriptor> = {
   apps: msg({ message: "Apps", context: "inbox filter, short" }),
 };
 
-const groupOrder = ["asked", "brain", "outcomes", "workflows", "apps"] as const;
+/** The groups in the filter's order; the address (`?group=`) takes these. */
+export const groupOrder = [
+  "asked",
+  "brain",
+  "outcomes",
+  "workflows",
+  "apps",
+] as const;
 
 const isGroup = (value: string | null): value is Group =>
   value === "all" || groupOrder.some((each) => each === value);
@@ -198,7 +209,14 @@ const ItemList = ({
           <Item
             current={item.id === selected?.id}
             key={item.id}
-            render={<Link replace search={{ item: item.id }} to="/inbox" />}
+            render={
+              <Link
+                from="/inbox"
+                replace
+                search={(before) => ({ ...before, item: item.id })}
+                to="/inbox"
+              />
+            }
             size="xs"
           >
             {item.face === undefined ? (
@@ -237,22 +255,21 @@ const ItemList = ({
 const ToDo = ({
   items,
   chosen,
-  initialGroup,
+  group,
   notLoaded,
   olderFailures,
   onSaid,
 }: {
   items: readonly InboxItem[];
   chosen: string | undefined;
-  /** The group in view first, as an address may ask. */
-  initialGroup?: Group;
+  /** The group in view, as the address has it (`?group=`). */
+  group: Group;
   notLoaded: readonly Loaded<unknown>[];
   olderFailures: boolean;
   onSaid: (said: string) => void;
 }) => {
   const { t, i18n } = useLingui();
   const navigate = useNavigate();
-  const [group, setGroup] = useState<Group>(initialGroup ?? "all");
   // Where the open item stood, so the one after it opens once it is settled.
   const [at, setAt] = useState(0);
   const counts = new Map<Group, number>();
@@ -275,7 +292,12 @@ const ToDo = ({
   const reading = chosen !== undefined && selected !== undefined;
 
   const open = (id: string, focus: boolean) => {
-    void navigate({ to: "/inbox", search: { item: id }, replace: true });
+    void navigate({
+      from: "/inbox",
+      to: "/inbox",
+      search: (before) => ({ ...before, item: id }),
+      replace: true,
+    });
     if (focus) {
       // The row keeps the focus as the keys move it, as a list's would.
       requestAnimationFrame(() => {
@@ -288,7 +310,12 @@ const ToDo = ({
     }
   };
   const back = () => {
-    void navigate({ to: "/inbox", search: {}, replace: true });
+    void navigate({
+      from: "/inbox",
+      to: "/inbox",
+      search: (before) => ({ ...before, item: undefined }),
+      replace: true,
+    });
   };
 
   // J and K anywhere on the page, but not while something is typed.
@@ -353,7 +380,16 @@ const ToDo = ({
           <Tabs
             onValueChange={(value) => {
               if (isGroup(value)) {
-                setGroup(value);
+                // In the address, so the sidebar's views and Back follow it.
+                void navigate({
+                  from: "/inbox",
+                  to: "/inbox",
+                  search: (before) => ({
+                    ...before,
+                    group: value === "all" ? undefined : value,
+                  }),
+                  replace: true,
+                });
               }
             }}
             value={current}
@@ -434,6 +470,14 @@ const ActivityRow = ({
     record.event === null ? "–" : actorOf(record.event.actor, directory).label;
   return (
     <Item size="xs">
+      {/* Who did it: a person's face, or Grasp's mark for what Grasp and its agents did. */}
+      {byGrasp(record) ? (
+        <ItemMedia icon={Agent} iconLook="inline" />
+      ) : (
+        <ItemMedia>
+          <Avatar name={actor} size="xs" />
+        </ItemMedia>
+      )}
       <ItemContent>
         <ItemTitle>
           {sentence}
@@ -526,8 +570,8 @@ export const InboxPage = ({
   items: readonly InboxItem[];
   /** The item open, by its ID: the list's first when none is, or it waits no more. */
   chosen?: string;
-  /** The group in view first, as an address may ask. */
-  group?: Group;
+  /** The group in view, as the address has it; all when it has none. */
+  group?: Exclude<Group, "all">;
   notLoaded: readonly Loaded<unknown>[];
   /** Whether core has failed workflows older than the ones listed: the dashboard shows them. */
   olderFailures: boolean;
@@ -538,7 +582,7 @@ export const InboxPage = ({
   const toDo = (
     <ToDo
       chosen={chosen}
-      initialGroup={group}
+      group={group ?? "all"}
       items={items}
       notLoaded={notLoaded}
       olderFailures={olderFailures}

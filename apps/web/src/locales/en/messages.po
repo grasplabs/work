@@ -412,6 +412,10 @@ msgstr "{count, plural, one {# team, with its roles} other {# teams, with their 
 msgid "{count, plural, one {# test} other {# tests}}"
 msgstr "{count, plural, one {# test} other {# tests}}"
 
+#: src/inbox/sidebar-inbox.tsx
+msgid "{count, plural, one {# thing waiting for you} other {# things waiting for you}}"
+msgstr "{count, plural, one {# thing waiting for you} other {# things waiting for you}}"
+
 #: src/brain/brain.ts
 msgid "{count, plural, one {# time waster} other {# time wasters}}"
 msgstr "{count, plural, one {# time waster} other {# time wasters}}"
@@ -2996,11 +3000,6 @@ msgstr "Apps"
 msgid "Apps and agents with a permission"
 msgstr "Apps and agents with a permission"
 
-#: src/inbox/sidebar-inbox.tsx
-msgctxt "inbox filter"
-msgid "Apps and connections"
-msgstr "Apps and connections"
-
 #: src/projects/project-view.tsx
 msgid "Apps and workflows"
 msgstr "Apps and workflows"
@@ -3246,7 +3245,6 @@ msgid "Asked of the {owner}"
 msgstr "Asked of the {owner}"
 
 #: src/inbox/inbox-page.tsx
-#: src/inbox/sidebar-inbox.tsx
 msgctxt "inbox filter"
 msgid "Asked of you"
 msgstr "Asked of you"
@@ -7305,6 +7303,10 @@ msgstr "Hide exactly what was sent"
 msgid "Hide exactly what will be sent"
 msgstr "Hide exactly what will be sent"
 
+#: src/frame/part-words.tsx
+msgid "Hide password"
+msgstr "Hide password"
+
 #: src/workflows/requests/request-who.tsx
 msgid "Hide people one by one"
 msgstr "Hide people one by one"
@@ -10777,11 +10779,6 @@ msgstr "Open full page"
 msgid "Open in full"
 msgstr "Open in full"
 
-#: src/inbox/sidebar-inbox.tsx
-msgctxt "inbox filter"
-msgid "Open in the Brain"
-msgstr "Open in the Brain"
-
 #: src/dashboard/in-inbox.tsx
 msgid "Open in the inbox: {title}"
 msgstr "Open in the inbox: {title}"
@@ -12638,6 +12635,10 @@ msgstr "Reword it for them if you like. It can't rest on documents they may not 
 msgid "Reword the goal"
 msgstr "Reword the goal"
 
+#: src/frame/part-words.tsx
+msgid "Right arrow for more"
+msgstr "Right arrow for more"
+
 #: src/settings/backdrop-settings.tsx
 msgid "Rings"
 msgstr "Rings"
@@ -13101,6 +13102,11 @@ msgid "Search"
 msgstr "Search"
 
 #: src/frame/part-words.tsx
+msgctxt "a command list's field"
+msgid "Search"
+msgstr "Search"
+
+#: src/frame/part-words.tsx
 msgid "Search {many}"
 msgstr "Search {many}"
 
@@ -13216,6 +13222,11 @@ msgstr "Searched the brain for {query}"
 #: src/chat/thread.tsx
 msgid "Searched the docs for {query}"
 msgstr "Searched the docs for {query}"
+
+#: src/frame/part-words.tsx
+msgctxt "a list fetching results"
+msgid "Searching"
+msgstr "Searching"
 
 #: src/chat/thread.tsx
 msgid "Searching the App's files for {text}"
@@ -13666,6 +13677,10 @@ msgstr "Show or hide the panel"
 #: src/grasp/frame/grasp-sidebar.tsx
 msgid "Show or hide the sidebar"
 msgstr "Show or hide the sidebar"
+
+#: src/frame/part-words.tsx
+msgid "Show password"
+msgstr "Show password"
 
 #: src/workflows/requests/request-who.tsx
 msgid "Show people one by one"
@@ -15415,10 +15430,6 @@ msgstr "The whole company"
 msgid "the whole connection"
 msgstr "the whole connection"
 
-#: src/inbox/sidebar-inbox.tsx
-msgid "The whole inbox"
-msgstr "The whole inbox"
-
 #: src/chat/use-dictation.ts
 msgid "The words couldn't be written down. What you typed is kept."
 msgstr "The words couldn't be written down. What you typed is kept."
@@ -16175,6 +16186,10 @@ msgstr "Type"
 msgid "Type {name} to confirm"
 msgstr "Type {name} to confirm"
 
+#: src/frame/part-words.tsx
+msgid "Type a command or search"
+msgstr "Type a command or search"
+
 #: src/workflows/start-run.tsx
 msgid "Type a number."
 msgstr "Type a number."
@@ -16300,7 +16315,6 @@ msgid "Unknown outcome"
 msgstr "Unknown outcome"
 
 #: src/inbox/inbox-page.tsx
-#: src/inbox/sidebar-inbox.tsx
 msgctxt "inbox filter"
 msgid "Unknown outcomes"
 msgstr "Unknown outcomes"
@@ -16710,6 +16724,10 @@ msgstr "Waiting elsewhere"
 msgid "Waiting for {app}"
 msgstr "Waiting for {app}"
 
+#: src/inbox/sidebar-inbox.tsx
+msgid "Waiting for {duration}"
+msgstr "Waiting for {duration}"
+
 #: src/workflows/runs.tsx
 msgid "Waiting for {label}, which is limiting requests, since {since}. It goes on by itself once calls work."
 msgstr "Waiting for {label}, which is limiting requests, since {since}. It goes on by itself once calls work."
@@ -16773,6 +16791,11 @@ msgstr "Waiting for you to let them go live"
 #: src/workflows/files-and-apps.tsx
 msgid "Waiting for your approval"
 msgstr "Waiting for your approval"
+
+#: src/inbox/sidebar-inbox.tsx
+msgctxt "sidebar: the inbox items that have waited longest"
+msgid "Waiting longest"
+msgstr "Waiting longest"
 
 #: src/dashboard/runs-widget.tsx
 #: src/dashboard/widget-board.tsx
@@ -17768,7 +17791,6 @@ msgid "Workflows"
 msgstr "Workflows"
 
 #: src/inbox/inbox-page.tsx
-#: src/inbox/sidebar-inbox.tsx
 msgctxt "inbox filter"
 msgid "Workflows"
 msgstr "Workflows"

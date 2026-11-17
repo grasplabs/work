@@ -15,6 +15,7 @@ import { calendarWords } from "../grasp/calendar/words.ts";
 import { chatMessageWords } from "../grasp/chat-message/words.ts";
 import { codeBlockWords } from "../grasp/code-block/words.ts";
 import { comboboxWords } from "../grasp/combobox/words.ts";
+import { commandWords } from "../grasp/command/words.ts";
 import { copyFieldWords } from "../grasp/copy-field/words.ts";
 import {
   dataTableWords,
@@ -25,6 +26,7 @@ import { dateRangePickerWords } from "../grasp/date-range-picker/words.ts";
 import { dialogWords } from "../grasp/dialog/words.ts";
 import { emptyWords } from "../grasp/empty/words.ts";
 import { fileUploadWords, imageWellWords } from "../grasp/file-upload/words.ts";
+import { inputWords } from "../grasp/input/words.ts";
 import { languageSwitchWords } from "../grasp/language-switch/words.ts";
 import { markdownWords } from "../grasp/markdown/words.ts";
 import { paginationWords } from "../grasp/pagination/words.ts";
@@ -60,6 +62,7 @@ export const englishPartWords: GraspWordsCatalog = {
   badge: badgeWords,
   calendar: calendarWords,
   combobox: comboboxWords,
+  command: commandWords,
   datePicker: datePickerWords,
   dateRangePicker: dateRangePickerWords,
   languageSwitch: languageSwitchWords,
@@ -74,6 +77,7 @@ export const englishPartWords: GraspWordsCatalog = {
   empty: emptyWords,
   fileUpload: fileUploadWords,
   imageWell: imageWellWords,
+  input: inputWords,
   markdown: markdownWords,
   pagination: paginationWords,
   rename: renameWords,
@@ -365,6 +369,23 @@ export const usePartWords = (): GraspWordsCatalog => {
       empty: t`No results`,
       trigger: t`Show the choices`,
       failed: t({ message: "Failed", context: "a list row's action" }),
+    },
+    command: {
+      placeholder: t({ message: "Search", context: "a command list's field" }),
+      empty: t`No results`,
+      failed: t({ message: "Failed", context: "a list row's action" }),
+      loading: t({ message: "Searching", context: "a list fetching results" }),
+      more: (label) => t`More for ${label}`,
+      moreHint: t`Right arrow for more`,
+      dialogTrigger: t({
+        message: "Search",
+        context: "a command list's field",
+      }),
+      dialogPlaceholder: t`Type a command or search`,
+    },
+    input: {
+      showPassword: t`Show password`,
+      hidePassword: t`Hide password`,
     },
     datePicker: { choose: t`Choose date` },
     dateRangePicker: {

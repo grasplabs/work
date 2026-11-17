@@ -412,6 +412,10 @@ msgstr "{count, plural, one {# équipe, avec ses rôles} other {# équipes, avec
 msgid "{count, plural, one {# test} other {# tests}}"
 msgstr "{count, plural, one {# test} other {# tests}}"
 
+#: src/inbox/sidebar-inbox.tsx
+msgid "{count, plural, one {# thing waiting for you} other {# things waiting for you}}"
+msgstr "{count, plural, one {# élément vous attend} other {# éléments vous attendent}}"
+
 #: src/brain/brain.ts
 msgid "{count, plural, one {# time waster} other {# time wasters}}"
 msgstr "{count, plural, one {# perte de temps} other {# pertes de temps}}"
@@ -2996,11 +3000,6 @@ msgstr "Apps"
 msgid "Apps and agents with a permission"
 msgstr "Applications et agents avec une autorisation"
 
-#: src/inbox/sidebar-inbox.tsx
-msgctxt "inbox filter"
-msgid "Apps and connections"
-msgstr "Applications et connexions"
-
 #: src/projects/project-view.tsx
 msgid "Apps and workflows"
 msgstr "Apps et workflows"
@@ -3246,7 +3245,6 @@ msgid "Asked of the {owner}"
 msgstr "Posée à {owner}"
 
 #: src/inbox/inbox-page.tsx
-#: src/inbox/sidebar-inbox.tsx
 msgctxt "inbox filter"
 msgid "Asked of you"
 msgstr "Posée à vous"
@@ -7305,6 +7303,10 @@ msgstr "Masquer exactement ce qui a été envoyé"
 msgid "Hide exactly what will be sent"
 msgstr "Masquer exactement ce qui sera envoyé"
 
+#: src/frame/part-words.tsx
+msgid "Hide password"
+msgstr ""
+
 #: src/workflows/requests/request-who.tsx
 msgid "Hide people one by one"
 msgstr "Masquer les personnes une à une"
@@ -10777,11 +10779,6 @@ msgstr "Ouvrir en pleine page"
 msgid "Open in full"
 msgstr "Ouvrir en entier"
 
-#: src/inbox/sidebar-inbox.tsx
-msgctxt "inbox filter"
-msgid "Open in the Brain"
-msgstr "Ouvertes dans le Brain"
-
 #: src/dashboard/in-inbox.tsx
 msgid "Open in the inbox: {title}"
 msgstr "Ouvrir dans la boîte de réception : {title}"
@@ -12638,6 +12635,10 @@ msgstr "Reformulez-le pour eux si vous le souhaitez. Il ne peut pas reposer sur 
 msgid "Reword the goal"
 msgstr "Reformuler l’objectif"
 
+#: src/frame/part-words.tsx
+msgid "Right arrow for more"
+msgstr ""
+
 #: src/settings/backdrop-settings.tsx
 msgid "Rings"
 msgstr "Anneaux"
@@ -13101,6 +13102,11 @@ msgid "Search"
 msgstr "Rechercher"
 
 #: src/frame/part-words.tsx
+msgctxt "a command list's field"
+msgid "Search"
+msgstr ""
+
+#: src/frame/part-words.tsx
 msgid "Search {many}"
 msgstr "Rechercher des {many}"
 
@@ -13216,6 +13222,11 @@ msgstr "{query} recherché dans le cerveau"
 #: src/chat/thread.tsx
 msgid "Searched the docs for {query}"
 msgstr "{query} recherché dans la documentation"
+
+#: src/frame/part-words.tsx
+msgctxt "a list fetching results"
+msgid "Searching"
+msgstr ""
 
 #: src/chat/thread.tsx
 msgid "Searching the App's files for {text}"
@@ -13666,6 +13677,10 @@ msgstr "Afficher ou masquer le panneau"
 #: src/grasp/frame/grasp-sidebar.tsx
 msgid "Show or hide the sidebar"
 msgstr "Afficher ou masquer la barre latérale"
+
+#: src/frame/part-words.tsx
+msgid "Show password"
+msgstr ""
 
 #: src/workflows/requests/request-who.tsx
 msgid "Show people one by one"
@@ -15415,10 +15430,6 @@ msgstr "Toute l’entreprise"
 msgid "the whole connection"
 msgstr "toute la connexion"
 
-#: src/inbox/sidebar-inbox.tsx
-msgid "The whole inbox"
-msgstr "Toute la boîte de réception"
-
 #: src/chat/use-dictation.ts
 msgid "The words couldn't be written down. What you typed is kept."
 msgstr "Les mots n'ont pas pu être transcrits. Ce que vous avez tapé est conservé."
@@ -16175,6 +16186,10 @@ msgstr "Type"
 msgid "Type {name} to confirm"
 msgstr "Saisissez {name} pour confirmer"
 
+#: src/frame/part-words.tsx
+msgid "Type a command or search"
+msgstr ""
+
 #: src/workflows/start-run.tsx
 msgid "Type a number."
 msgstr "Saisissez un nombre."
@@ -16300,7 +16315,6 @@ msgid "Unknown outcome"
 msgstr "Résultat inconnu"
 
 #: src/inbox/inbox-page.tsx
-#: src/inbox/sidebar-inbox.tsx
 msgctxt "inbox filter"
 msgid "Unknown outcomes"
 msgstr "Résultats inconnus"
@@ -16710,6 +16724,10 @@ msgstr "En attente ailleurs"
 msgid "Waiting for {app}"
 msgstr "En attente de {app}"
 
+#: src/inbox/sidebar-inbox.tsx
+msgid "Waiting for {duration}"
+msgstr "En attente depuis {duration}"
+
 #: src/workflows/runs.tsx
 msgid "Waiting for {label}, which is limiting requests, since {since}. It goes on by itself once calls work."
 msgstr "En attente de {label}, qui limite les requêtes, depuis {since}. Reprend d'elle-même dès que les appels fonctionnent."
@@ -16773,6 +16791,11 @@ msgstr "Attendent que vous les mettiez en service"
 #: src/workflows/files-and-apps.tsx
 msgid "Waiting for your approval"
 msgstr "En attente de votre approbation"
+
+#: src/inbox/sidebar-inbox.tsx
+msgctxt "sidebar: the inbox items that have waited longest"
+msgid "Waiting longest"
+msgstr "En attente depuis le plus longtemps"
 
 #: src/dashboard/runs-widget.tsx
 #: src/dashboard/widget-board.tsx
@@ -17768,7 +17791,6 @@ msgid "Workflows"
 msgstr "Workflows"
 
 #: src/inbox/inbox-page.tsx
-#: src/inbox/sidebar-inbox.tsx
 msgctxt "inbox filter"
 msgid "Workflows"
 msgstr "Workflows"

@@ -22,9 +22,9 @@ import { Sidebar } from "../grasp/sidebar/index.ts";
 import { useInboxGroups, useWaitingItems } from "./sidebar-inbox.tsx";
 
 // The sidebar's Inbox view against core's feed of what waits, faked as the
-// page reaches it over RPC, in Grasp UI's own Sidebar: each item a link to
-// its place in the inbox, by the inbox's groups when there are several, a
-// last row to the whole inbox, a quiet sentence when nothing waits; and
+// page reaches it over RPC, in Grasp UI's own Sidebar: the inbox's views,
+// each to the inbox with that view open, then what waited longest, each to
+// its place in the inbox, a quiet sentence when nothing waits; and
 // listing them marks no notification read, as only the inbox and the
 // dashboard do.
 
@@ -172,22 +172,24 @@ describe("the sidebar's inbox", () => {
     document.body.replaceChildren();
   });
 
-  it("lists what waits, each to its place in the inbox, by the inbox's groups, and the whole inbox last", async () => {
+  it("leads to each of the inbox's views, counted, then to what has waited longest", async () => {
     await shown(feedOf([heldWrite, question]));
     await vi.waitFor(() => {
       expect(counted()).toBe("2");
     });
-    expect(rows().map(({ href }) => href)).toStrictEqual([
-      // The inbox's groups in its order: Asked of you, then Apps and connections.
+    const links = rows().map(({ href }) => href);
+    // The inbox's views in its filter's order: all, Asked of you, Apps.
+    expect(links.slice(0, 3)).toStrictEqual([
+      "/inbox",
+      "/inbox?group=asked",
+      "/inbox?group=apps",
+    ]);
+    // Then each item, to its place in the inbox.
+    expect(links.slice(3).toSorted()).toStrictEqual([
       "/inbox?item=asked%3Anote-1",
       "/inbox?item=held%3Awrite-1",
-      "/inbox",
     ]);
-    const labels = [...document.querySelectorAll("nav h2, nav [id]")].map(
-      (label) => label.textContent
-    );
-    expect(labels.join(" ")).toMatch(/Asked of you/u);
-    expect(labels.join(" ")).toMatch(/Apps and connections/u);
+    expect(document.body.textContent).toContain("Waiting longest");
   });
 
   it("marks no notification read by listing it", async () => {
