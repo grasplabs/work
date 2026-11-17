@@ -6434,10 +6434,6 @@ msgctxt "“Requested” is the name of a section on the Integrations page."
 msgid "Grasp checks what it takes to connect it. You find it under Requested."
 msgstr "Grasp prüft, was es braucht, um sie zu verbinden. Sie finden sie unter Angefragt."
 
-#: src/settings/ai-providers.tsx
-msgid "Grasp converts uploaded documents on this deployment: nothing is sent out."
-msgstr "Grasp wandelt hochgeladene Dokumente in dieser Umgebung selbst um: Nichts wird nach außen gesendet."
-
 #: src/chat/failure.ts
 msgid "Grasp could not be reached. Try again."
 msgstr "Grasp war nicht erreichbar. Versuchen Sie es erneut."
@@ -6758,10 +6754,6 @@ msgstr "Header-Name"
 msgid "Hear both again"
 msgstr "Beide noch einmal hören"
 
-#: src/brain/work-knowledge.tsx
-msgid "Heard from enough people"
-msgstr "Von genug Menschen gehört"
-
 #: src/interview/words.ts
 msgid "Hello"
 msgstr "Hallo"
@@ -6900,6 +6892,13 @@ msgstr "Wie oft"
 #: src/brain/work-knowledge.tsx
 msgid "How sure"
 msgstr "Wie sicher"
+
+#. Under a statement put together from the interviews
+#. Under a statement put together from the interviews
+#: src/brain/aggregate.tsx
+#: src/brain/brain.ts
+msgid "How the team works, as its people told it"
+msgstr "Wie das Team arbeitet, wie seine Leute es erzählt haben"
 
 #: src/brain/work-knowledge.tsx
 msgid "How the work goes today"
@@ -12072,13 +12071,6 @@ msgctxt "what something known rests on: people said it"
 msgid "Said"
 msgstr "Gesagt"
 
-#. Under a statement put together from the interviews
-#. Under a statement put together from the interviews
-#: src/brain/aggregate.tsx
-#: src/brain/brain.ts
-msgid "Said by five or more people"
-msgstr "Von fünf oder mehr Personen gesagt"
-
 #: src/brain/work-knowledge.tsx
 msgid "Said in an interview"
 msgstr "In einem Interview gesagt"
@@ -15209,6 +15201,10 @@ msgstr "Heute"
 #: src/onboarding/hr-leads.tsx
 msgid "Token"
 msgstr "Token"
+
+#: src/brain/work-knowledge.tsx
+msgid "Told by the team that does it"
+msgstr "Vom Team erzählt, das es macht"
 
 #: src/onboarding/send-plan-form.tsx
 msgid "Tomorrow"

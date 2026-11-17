@@ -38,7 +38,7 @@ export const aiProviderStatusSchema = z.strictObject({
   provider: aiProviderIdSchema,
   /**
    * Whose key: the organization's own, which its admins connected, or
-   * Grasp's, for its platform features (conversion, transcription, speech).
+   * Grasp's, for its platform features (transcription, speech).
    */
   kind: z.enum(["organization", "platform"]),
   /** When a call last worked; null before one did. */

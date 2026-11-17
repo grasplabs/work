@@ -30,7 +30,7 @@ import type { DeploySecrets } from "./secrets.ts";
 
 /**
  * Grasp's own AI provider keys, one per provider it pays for its platform
- * features with (conversion, transcription, speech: @grasp-os/shared/
+ * features with (transcription, speech: @grasp-os/shared/
  * platform-ai), as connect's secrets name them (@grasp-os/shared/
  * ai-providers, `platformSecret`).
  */
