@@ -18,7 +18,7 @@ import {
 } from "@grasp-os/ui/components/alert-dialog";
 import { Button as KitButton } from "@grasp-os/ui/components/button";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { useNavigate, useRouter } from "@tanstack/react-router";
+import { Link, useNavigate, useRouter } from "@tanstack/react-router";
 import { useState } from "react";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
@@ -347,7 +347,7 @@ export const ProjectView = ({
                   <Button
                     icon={Plus}
                     render={
-                      <RouterLink
+                      <Link
                         search={{ make: "app", project: project.id }}
                         to="/"
                       />
