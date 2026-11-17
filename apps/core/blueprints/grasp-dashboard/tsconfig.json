@@ -1,0 +1,13 @@
+{
+  // The built-in's config and server code, as an App's build checks them
+  // (the compiler's type-check.ts): against what Grasp generates for it
+  // (files/server/_generated/, ../../generate-blueprints.ts). Its pages
+  // need the route tree and the kit a page build gives them, so the build
+  // type-checks them (builtin-blueprints.test.ts), as it does any App's.
+  "extends": "../../../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["es2024", "webworker", "esnext.disposable"],
+    "paths": { "@server/_generated/*": ["./files/server/_generated/*"] }
+  },
+  "include": ["files/*.ts", "files/server"]
+}

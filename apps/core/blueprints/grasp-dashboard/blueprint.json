@@ -1,0 +1,4 @@
+{
+  "name": "Grasp dashboard",
+  "description": "The company's dashboard as an App, drawn from what an App can read today: how often the workflows of the Apps it counts ran, and where they lose time. Each other card says which read of the platform it still waits for."
+}
