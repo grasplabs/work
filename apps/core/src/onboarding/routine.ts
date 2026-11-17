@@ -5,11 +5,13 @@ import type { StandingDrawing } from "./store.ts";
 // A team's routine, as the Brain keeps it (GRA-1749): the drawing of one
 // of its pieces of work (brain-intake.ts) as a `routine` entity, each of
 // its facts a memory filed under one of the routine's attributes. What a
-// routine holds is only what its drawing holds: the parts five or more of
-// its people were checked to have told, each figure a median over five or
-// more who gave it, and no one's name. Code writes it, line by line, from
-// the drawing's structure: a model named and described the steps when it
-// drew the work, and adds nothing here.
+// routine holds is only what its drawing holds: the parts its people are
+// checked to have told, each figure a median over whoever gave it, and no
+// one's name. Like the drawing, it shows from the first person who told
+// the work (GRA-1987), so it reads as how the team works and never says
+// how many told it: a count would say whose it is. Code writes it, line
+// by line, from the drawing's structure: a model named and described the
+// steps when it drew the work, and adds nothing here.
 //
 // The drawing's text is these lines (`drawingText`), and each memory
 // quotes its own line, so every fact rests on the drawing's version word
@@ -64,17 +66,14 @@ const whose: Record<WorkflowVersionRecord["volumes"][number]["of"], string> = {
 const frequencyOf = (
   drawing: WorkflowVersionRecord
 ): { value: string; line: string } | null => {
-  const counts = drawing.volumes.map(({ of, per, low, high, people }) => ({
-    said: `${between(low, high)} a ${per}${whose[of]}`,
-    people,
-  }));
+  const counts = drawing.volumes.map(
+    ({ of, per, low, high }) => `${between(low, high)} a ${per}${whose[of]}`
+  );
   if (counts.length === 0) {
     return null;
   }
-  return {
-    value: counts.map(({ said }) => said).join("; "),
-    line: `How often: ${counts.map(({ said, people }) => `${said}, as ${people} of them said`).join("; ")}.`,
-  };
+  const value = counts.join("; ");
+  return { value, line: `How often: ${value}.` };
 };
 
 /**
@@ -93,7 +92,7 @@ export const routineLines = ({
   lines: readonly { line: string; fact?: RoutineFact }[];
 } => {
   const called = `${name}${local === undefined ? "" : ` (${local})`}`;
-  const title = `How a team does ${called}, as ${drawing.people} of its people told it.`;
+  const title = `How a team does ${called}, as its people told it.`;
   const steps = drawing.steps.map(({ text, who, tool, minutes }, at) => {
     const about = [
       who,
@@ -127,12 +126,7 @@ export const routineLines = ({
   const duration =
     takes === null
       ? []
-      : [
-          {
-            value: `${between(takes.quickest, takes.longest)} ${takes.unit}`,
-            people: takes.people,
-          },
-        ];
+      : [`${between(takes.quickest, takes.longest)} ${takes.unit}`];
   const lines = [
     ...(drawing.starts === ""
       ? []
@@ -150,8 +144,8 @@ export const routineLines = ({
             } as const,
           },
         ]),
-    ...duration.map(({ value, people }) => ({
-      line: `How long one takes: ${value}, as ${people} of them said.`,
+    ...duration.map((value) => ({
+      line: `How long one takes: ${value}.`,
       fact: {
         attribute: "duration",
         value,
@@ -163,7 +157,7 @@ export const routineLines = ({
       ? []
       : [
           {
-            line: `Comes in wrong or incomplete: ${between(wrong.low, wrong.high)} in 10, as ${wrong.people} of them said.`,
+            line: `Comes in wrong or incomplete: ${between(wrong.low, wrong.high)} in 10.`,
             fact: {
               attribute: "variant",
               value: `Comes in wrong or incomplete, ${between(wrong.low, wrong.high)} in 10`,
@@ -198,8 +192,8 @@ export const drawingText = (routine: RoutineDrawing): string => {
 };
 
 /**
- * Every fact of `routine`: the team that does it and how many people it
- * rests on, from its heading, then one for each line that files one. None
+ * Every fact of `routine`: the team that does it and what it rests on,
+ * from its heading, then one for each line that files one. None
  * when no step stands: a routine is its steps, and a drawing with none is
  * no routine.
  */
@@ -209,17 +203,19 @@ export const routineFacts = (routine: RoutineDrawing): RoutineFact[] => {
   if (!facts.some(({ attribute }) => attribute === "step")) {
     return [];
   }
-  const { name, drawing } = routine;
+  const { name } = routine;
   return [
     {
       attribute: "team",
       statement: `${name} is done by the team it is drawn for.`,
       line: title,
     },
+    // What it rests on, never how many: described in its team's
+    // interviews. Observed activity comes with native sync.
     {
       attribute: "evidence",
-      value: `described by ${drawing.people} people in interviews`,
-      statement: `${name} is described by ${drawing.people} people of its team in interviews.`,
+      value: "described in interviews",
+      statement: `${name} is described in its team's interviews.`,
       line: title,
     },
     ...facts,

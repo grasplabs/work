@@ -40,8 +40,9 @@ import type { Key, PartJudge } from "./onboarding-team.ts";
 // steps, figures and evidence, resting on the drawing's version. The ways
 // it can fail, tried here:
 //
-// - A step four people told reaching the routine, or a routine standing
-//   on a drawing with no step five told.
+// - A routine standing on a drawing with no step anyone is checked to
+//   have told, or one that says how many told it, which would say whose it
+//   is: a drawing shows from the first person who told the work (GRA-1987).
 // - A routine readable by code (an App or a workflow), which the
 //   drawing's readers never are.
 // - A routine still readable once the drawing it rests on falls: a
@@ -57,7 +58,6 @@ const drawingWithSteps: WorkflowVersionRecord = {
   sourceId: "onb-src-0123456789abcdef0123456789abcdef",
   date: "2026-11-17",
   state: "mapping",
-  people: 7,
   starts: "",
   steps: [
     {
@@ -171,7 +171,8 @@ const seven: readonly Key[] = [
 
 /**
  * A team through the onboarding: its tickets drawn as five told them
- * (`fiveToldReply`: Max, Mia, Mo, Noor and Pim), each part checked by
+ * (`fiveToldReply`: Max, Mia, Mo, Noor and Pim; Max alone a step that
+ * names Noor), each part checked by
  * `part`, its intake given and handed over to the Brain. Max's account,
  * and the id of the tickets' drawing standing now, if one does.
  */
@@ -251,22 +252,10 @@ const valuesOf = (routine: ReadRoutine | null, attribute: string): string[] =>
 /** Texts in their order. */
 const byText = (one: string, other: string): number => one.localeCompare(other);
 
-/** The four who back a step in the case of four: Max, Mia, Mo and Noor, by a fact only each of them agreed to. */
-const fourOwn = [
-  "Opens the ticket in Zendesk.",
-  "Would like the customer number filled in for them.",
-  "A ticket waits days for the customer's reply.",
-  "Reads the ticket first.",
-];
-
-/** Whether `facts` are one of those four's. */
-const ofTheFour = (facts: readonly string[]): boolean =>
-  facts.some((said) => fourOwn.some((own) => said.includes(own)));
-
 describe("routines in the new Brain", { timeout: 120_000 }, () => {
   beforeEach(aloneInTheStore);
 
-  it("file a piece of work five people told as a routine every member reads, with its steps, its figures, its team and how many it rests on", async () => {
+  it("file a team's piece of work as a routine every member reads, with its steps, its figures, its team and what it rests on, never how many told it", async () => {
     const { max, drawing } = await drawnTeam();
     const routine = await routineOn(max, drawing ?? "");
     expect({
@@ -279,17 +268,18 @@ describe("routines in the new Brain", { timeout: 120_000 }, () => {
         ({ attribute, object }) => attribute === "team" && object !== null
       ).length,
       evidence: valuesOf(routine, "evidence"),
-      frequency: valuesOf(routine, "frequency").length,
       duration: valuesOf(routine, "duration").length,
     }).toStrictEqual({
       drawn: true,
       name: "handling new tickets",
-      // Max alone told the step that asks Noor: it stays out.
-      steps: ["1. Open the ticket.", "2. Send the answer."],
+      // A step one person told stands too, with no one's name in it.
+      steps: [
+        "1. Open the ticket.",
+        "2. Ask someone when the customer number is missing.",
+        "3. Send the answer.",
+      ],
       team: 1,
-      // Drawn from all seven who tell their own work.
-      evidence: ["described by 7 people in interviews"],
-      frequency: 1,
+      evidence: ["described in interviews"],
       duration: 1,
     });
   });
@@ -309,7 +299,11 @@ describe("routines in the new Brain", { timeout: 120_000 }, () => {
       steps: valuesOf(routine, "step").toSorted(byText),
     }).toStrictEqual({
       calls: 2,
-      steps: ["1. Open the ticket.", "2. Send the answer."],
+      steps: [
+        "1. Open the ticket.",
+        "2. Ask someone when the customer number is missing.",
+        "3. Send the answer.",
+      ],
     });
   });
 
@@ -344,7 +338,11 @@ describe("routines in the new Brain", { timeout: 120_000 }, () => {
       steps: valuesOf(routine, "step").toSorted(byText),
     }).toStrictEqual({
       calls: 2,
-      steps: ["1. Open the ticket.", "2. Send the answer."],
+      steps: [
+        "1. Open the ticket.",
+        "2. Ask someone when the customer number is missing.",
+        "3. Send the answer.",
+      ],
     });
   });
 
@@ -359,7 +357,6 @@ describe("routines in the new Brain", { timeout: 120_000 }, () => {
             per: "week",
             low: 30,
             high: 50,
-            people: 5,
             basis: "estimated",
           },
           {
@@ -367,7 +364,6 @@ describe("routines in the new Brain", { timeout: 120_000 }, () => {
             per: "week",
             low: 200,
             high: 200,
-            people: 5,
             basis: "estimated",
           },
         ],
@@ -378,12 +374,11 @@ describe("routines in the new Brain", { timeout: 120_000 }, () => {
     ]);
   });
 
-  it("file no routine from a drawing whose steps only four people told", async () => {
-    // Only the four's facts back a step: each step rests on four, while
-    // everything else of the drawing stands on all who told it.
+  it("file no routine from a drawing with no step anyone is checked to have told", async () => {
+    // No line backs a step, while everything else of the drawing stands.
     const { max, drawing } = await drawnTeam(
-      (_part, facts, _work, kind) =>
-        kind?.startsWith("A step of the work") !== true || ofTheFour(facts)
+      (_part, _facts, _work, kind) =>
+        kind?.startsWith("A step of the work") !== true
     );
     expect({
       drawn: drawing !== undefined,

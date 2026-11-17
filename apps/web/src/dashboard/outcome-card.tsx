@@ -41,6 +41,34 @@ export const isUnresolvable = ({ key, origin }: UnknownOutcome): boolean =>
   origin === null || (key.subject.type === "app" && origin.appVersion === null);
 
 /**
+ * Why what was sent isn't shown: no longer kept, or withheld by core
+ * (`withheld`), its run no longer allowed to read what it read, or that
+ * not checked now.
+ */
+const RemovedInput = ({
+  withheld,
+}: {
+  withheld: UnknownOutcome["withheld"];
+}) => {
+  if (withheld === "revoked") {
+    return (
+      <Trans>
+        What was sent is withheld: the run that sent it may no longer read what
+        it read.
+      </Trans>
+    );
+  }
+  if (withheld === "unchecked") {
+    return (
+      <Trans>
+        What was sent can&apos;t be shown right now. Try again in a moment.
+      </Trans>
+    );
+  }
+  return <Trans>What was sent is no longer kept.</Trans>;
+};
+
+/**
  * Where it acted and when it was sent, and what was sent, while kept. On
  * the dashboard's pile and in the inbox.
  */
@@ -94,7 +122,7 @@ export const OutcomeDetails = ({
       )}
       {input === null ? (
         <p id={removedId} role="note">
-          <Trans>What was sent is no longer kept.</Trans>
+          <RemovedInput withheld={outcome.withheld} />
         </p>
       ) : (
         <>

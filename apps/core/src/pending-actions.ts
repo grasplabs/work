@@ -39,6 +39,11 @@ import {
   requireCallAuthority,
 } from "./workflows/resource-authority.ts";
 import type { CallingRun } from "./workflows/resource-authority.ts";
+import {
+  callRunOf,
+  callRunsEvidence,
+  requireResourceRunEvidenceReadable,
+} from "./workflows/resource-reads.ts";
 import { attachedAgain } from "./workflows/run-files.ts";
 import { sealedStepOf } from "./workflows/sealed-steps.ts";
 import { wakingHeld } from "./workflows/wakes.ts";
@@ -163,8 +168,11 @@ const requireHeldFilesAllowed = async (
  * through, as the run's sealed build names it, is the call's permission's
  * and allowed now (`requireCallAuthority`): confirming sends the call, so
  * it is decided as the call itself would be, through its own alias only,
- * never another that shares the permission; and a write that attaches
- * files, only while the files use they come from (`filesFrom`) is too.
+ * never another that shares the permission; a write that attaches
+ * files, only while the files use they come from (`filesFrom`) is too;
+ * and only while the run may still read what it read
+ * (`requireResourceRunEvidenceReadable`, `brain.revoked`): connect sends
+ * the input it holds, which can carry what the run read (GRA-1999).
  */
 const requireHeldRunCallAllowed = async (
   env: Env,
@@ -215,6 +223,7 @@ const requireHeldRunCallAllowed = async (
   }
   await requireCallAuthority(env, run, binding);
   await requireHeldFilesAllowed(env, run, held);
+  await requireResourceRunEvidenceReadable(env, run);
 };
 
 /** Whether connect still holds the held action `id` for `person`. */
@@ -516,6 +525,42 @@ const withRestricted = async (
   );
 };
 
+/**
+ * `waiting`, each a run made shown only while its run may still read what
+ * it read (`callRunsEvidence`, checked together): otherwise `withheld`,
+ * with nothing of its input (its description, input, hash or files), as
+ * a decision's ask is withheld (GRA-1999). Its confirmation is refused
+ * then too (`requireHeldRunCallAllowed`); declining sends nothing.
+ */
+const withInputsChecked = async (
+  env: Env,
+  waiting: PendingAction[]
+): Promise<PendingAction[]> => {
+  const states = await callRunsEvidence(
+    env,
+    waiting.flatMap((held) => callRunOf(held) ?? [])
+  );
+  return waiting.map((held) => {
+    const run = callRunOf(held);
+    const state =
+      run === undefined ? "holds" : (states.get(run.runId) ?? "refused");
+    if (state === "holds") {
+      return held;
+    }
+    const {
+      description: _description,
+      attachments: _attachments,
+      ...shown
+    } = held;
+    return {
+      ...shown,
+      input: "",
+      inputHash: "",
+      withheld: state === "refused" ? "revoked" : state,
+    };
+  });
+};
+
 /** A signed-in person's held actions, over `/rpc`. */
 export class PendingActionsRpc
   extends CoreRpcTarget
@@ -541,7 +586,10 @@ export class PendingActionsRpc
         await personOf(this.#env, person),
         "grasp"
       );
-      return await withRestricted(this.#env, person.userId, waiting);
+      return await withInputsChecked(
+        this.#env,
+        await withRestricted(this.#env, person.userId, waiting)
+      );
     });
   }
 
