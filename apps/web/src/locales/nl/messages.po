@@ -2816,6 +2816,7 @@ msgid "Archive and take offline"
 msgstr "Archiveren en offline halen"
 
 #: src/apps/app-status.tsx
+#: src/apps/apps-overview.tsx
 msgctxt "an App put away"
 msgid "Archived"
 msgstr "Gearchiveerd"
@@ -8128,10 +8129,6 @@ msgstr "Kleine letters en cijfers, met enkele streepjes ertussen; niet de naam v
 msgid "Lowest"
 msgstr "Laagste"
 
-#: src/apps/apps-overview.tsx
-msgid "Made {made}"
-msgstr "Gemaakt {made}"
-
 #: src/activity/audit-words.ts
 msgid "Made a webhook source a new secret"
 msgstr "Heeft een nieuw geheim gemaakt voor een webhookbron"
@@ -8409,6 +8406,7 @@ msgid "Monthly budget for AI"
 msgstr "Maandbudget voor AI"
 
 #: src/apps/app-workspace.tsx
+#: src/apps/apps-overview.tsx
 msgid "More"
 msgstr "Meer"
 
@@ -8966,6 +8964,7 @@ msgid "No owner yet"
 msgstr "Nog geen eigenaar"
 
 #: src/apps/app-page.tsx
+#: src/apps/apps-overview.tsx
 msgid "No page yet"
 msgstr "Nog geen pagina"
 
@@ -9935,6 +9934,7 @@ msgid "Only you see it while you try it. You share it when it's right."
 msgstr "Alleen jij ziet het terwijl je het uitprobeert. Je deelt het als het goed is."
 
 #: src/apps/app-status.tsx
+#: src/apps/apps-overview.tsx
 #: src/workflows/workflow-status.tsx
 msgid "Only you see this"
 msgstr "Alleen jij ziet dit"
@@ -12523,6 +12523,7 @@ msgid "Setting up {name}…"
 msgstr "{name} wordt opgezet…"
 
 #: src/apps/app-page.tsx
+#: src/apps/apps-overview.tsx
 #: src/grasp/frame/grasp-sidebar.tsx
 #: src/routes/_shell.apps.$app_.settings.tsx
 #: src/routes/_shell.settings.tsx
@@ -17211,6 +17212,7 @@ msgid "Your team has this one"
 msgstr "Je team heeft deze"
 
 #: src/apps/app-status.tsx
+#: src/apps/apps-overview.tsx
 msgid "Your team uses it"
 msgstr "Je team gebruikt het"
 

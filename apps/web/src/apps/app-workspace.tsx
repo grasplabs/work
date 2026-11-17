@@ -17,16 +17,23 @@ import { LoadingLines } from "../frame/page-states.tsx";
 import { SettingUp, SettingUpBar, Updating } from "../frame/setting-up.tsx";
 import type { SetUp } from "../frame/setting-up.tsx";
 import type { Crumb } from "../frame/site-header.tsx";
+import { Alert } from "../grasp/alert/index.ts";
 import { AppBuilding } from "../grasp/app-building/index.ts";
-import { Banner } from "../grasp/banner/index.ts";
 import { Button } from "../grasp/button/index.ts";
 import {
   DropdownMenu,
   DropdownMenuItem,
-  DropdownMenuPanel,
+  DropdownMenuContent,
   DropdownMenuTrigger,
 } from "../grasp/dropdown-menu/index.ts";
-import { Empty } from "../grasp/empty/index.ts";
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "../grasp/empty/index.ts";
 import {
   AppWindow,
   Archive,
@@ -244,8 +251,8 @@ const MoreMenu = ({
   return (
     <>
       <DropdownMenu>
-        <DropdownMenuTrigger icon={More} label={t`More`} variant="ghost" />
-        <DropdownMenuPanel align="end">
+        <DropdownMenuTrigger aria-label={t`More`} icon={More} variant="ghost" />
+        <DropdownMenuContent align="end">
           {app.archived ? null : (
             <DropdownMenuItem
               icon={LinkIcon}
@@ -293,7 +300,7 @@ const MoreMenu = ({
               {t`Open the chat in Chat`}
             </DropdownMenuItem>
           )}
-        </DropdownMenuPanel>
+        </DropdownMenuContent>
       </DropdownMenu>
       <AppLinkDialog app={app} onOpenChange={setLinking} open={linking} />
     </>
@@ -372,22 +379,22 @@ const PreviewState = ({
   title,
   children,
   action,
-  kind = "empty",
+  tone = "neutral",
 }: {
   icon?: IconData;
   title: string;
   children: ReactNode;
   action?: ReactNode;
-  kind?: "empty" | "error";
+  tone?: "neutral" | "danger";
 }) => (
   <div {...stylex.props(styles.place)}>
-    <Empty
-      {...(icon === undefined ? {} : { icon })}
-      {...(action === undefined ? {} : { action })}
-      kind={kind}
-      title={title}
-    >
-      {children}
+    <Empty tone={tone}>
+      <EmptyHeader>
+        {icon === undefined ? null : <EmptyMedia icon={icon} />}
+        <EmptyTitle>{title}</EmptyTitle>
+        <EmptyDescription>{children}</EmptyDescription>
+      </EmptyHeader>
+      {action === undefined ? null : <EmptyContent>{action}</EmptyContent>}
     </Empty>
   </div>
 );
@@ -400,7 +407,8 @@ const PreviewState = ({
 const StaleTestData = ({ app }: { app: string }) => {
   const { t } = useLingui();
   return (
-    <Banner
+    <Alert
+      variant="banner"
       action={
         <Button
           render={
@@ -426,7 +434,7 @@ const StaleTestData = ({ app }: { app: string }) => {
         can&apos;t follow. Reset the example data in Data to try it. What your
         team entered isn&apos;t touched.
       </Trans>
-    </Banner>
+    </Alert>
   );
 };
 
@@ -531,7 +539,8 @@ const ReadOnlyBar = ({
   );
   return (
     <>
-      <Banner
+      <Alert
+        variant="banner"
         action={
           <>
             {"point" in shown ? (
@@ -556,7 +565,7 @@ const ReadOnlyBar = ({
         tone={failure === undefined ? "attention" : "danger"}
       >
         {failure}
-      </Banner>
+      </Alert>
       <ConfirmChange
         asked={asked}
         onCancel={() => {
@@ -578,7 +587,8 @@ const ReadOnlyBar = ({
 const TeamViewBar = ({ app }: { app: string }) => {
   const { t } = useLingui();
   return (
-    <Banner
+    <Alert
+      variant="banner"
       action={
         <Button
           render={
@@ -619,7 +629,8 @@ const MadeTip = ({ app }: { app: string }) => {
     return null;
   }
   return (
-    <Banner
+    <Alert
+      variant="banner"
       dismissLabel={t`Dismiss the tip`}
       icon={Sparkles}
       layout={styles.strip}
@@ -634,7 +645,7 @@ const MadeTip = ({ app }: { app: string }) => {
         change anything, tell Grasp in the chat. When it&apos;s right, share it
         with your team.
       </Trans>
-    </Banner>
+    </Alert>
   );
 };
 
@@ -690,7 +701,7 @@ const PreviewArea = ({
   if (draft === undefined) {
     return (
       <div {...stylex.props(styles.place)}>
-        <Spinner label={t`Loading…`} size="lg" />
+        <Spinner aria-label={t`Loading…`} size="lg" />
       </div>
     );
   }
@@ -1219,7 +1230,7 @@ const Archived = ({
               </Button>
             }
             icon={Archive}
-            kind={failure === undefined ? "empty" : "error"}
+            tone={failure === undefined ? "neutral" : "danger"}
             title={t`This App is archived`}
           >
             {failure ?? (

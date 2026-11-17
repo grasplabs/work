@@ -10,10 +10,16 @@ import type { Crumb } from "../frame/site-header.tsx";
 import {
   DropdownMenu,
   DropdownMenuItem,
-  DropdownMenuPanel,
+  DropdownMenuContent,
   DropdownMenuTrigger,
 } from "../grasp/dropdown-menu/index.ts";
-import { Empty } from "../grasp/empty/index.ts";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "../grasp/empty/index.ts";
 import {
   AppWindow,
   Archive,
@@ -67,10 +73,10 @@ const MoreMenu = ({
     <DropdownMenu>
       <DropdownMenuTrigger
         icon={More}
-        label={t`More for ${name}`}
+        aria-label={t`More for ${name}`}
         variant="ghost"
       />
-      <DropdownMenuPanel align="end">
+      <DropdownMenuContent align="end">
         {full === undefined ? null : (
           <DropdownMenuItem
             icon={Expand}
@@ -90,7 +96,7 @@ const MoreMenu = ({
         >
           {t`Settings`}
         </DropdownMenuItem>
-      </DropdownMenuPanel>
+      </DropdownMenuContent>
     </DropdownMenu>
   );
 };
@@ -101,12 +107,22 @@ const NoPage = ({ archived }: { archived: boolean }) => {
   return (
     <div {...stylex.props(styles.place)}>
       {archived ? (
-        <Empty icon={Archive} title={t`This App is archived`}>
-          {t`It is kept as it was, and nobody works on it, until a builder restores it.`}
+        <Empty>
+          <EmptyHeader>
+            <EmptyMedia icon={Archive} />
+            <EmptyTitle>{t`This App is archived`}</EmptyTitle>
+            <EmptyDescription>
+              {t`It is kept as it was, and nobody works on it, until a builder restores it.`}
+            </EmptyDescription>
+          </EmptyHeader>
         </Empty>
       ) : (
-        <Empty icon={AppWindow} title={t`No page yet`}>
-          {t`This App has nothing to open yet.`}
+        <Empty>
+          <EmptyHeader>
+            <EmptyMedia icon={AppWindow} />
+            <EmptyTitle>{t`No page yet`}</EmptyTitle>
+            <EmptyDescription>{t`This App has nothing to open yet.`}</EmptyDescription>
+          </EmptyHeader>
         </Empty>
       )}
     </div>

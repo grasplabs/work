@@ -2816,6 +2816,7 @@ msgid "Archive and take offline"
 msgstr "Archiver et mettre hors ligne"
 
 #: src/apps/app-status.tsx
+#: src/apps/apps-overview.tsx
 msgctxt "an App put away"
 msgid "Archived"
 msgstr "Archivée"
@@ -8128,10 +8129,6 @@ msgstr "Lettres minuscules et chiffres, séparés par de simples tirets ; pas le
 msgid "Lowest"
 msgstr "Minimum"
 
-#: src/apps/apps-overview.tsx
-msgid "Made {made}"
-msgstr "Créée le {made}"
-
 #: src/activity/audit-words.ts
 msgid "Made a webhook source a new secret"
 msgstr "A généré un nouveau secret pour une source de webhook"
@@ -8409,6 +8406,7 @@ msgid "Monthly budget for AI"
 msgstr "Budget mensuel pour l’IA"
 
 #: src/apps/app-workspace.tsx
+#: src/apps/apps-overview.tsx
 msgid "More"
 msgstr "Plus"
 
@@ -8966,6 +8964,7 @@ msgid "No owner yet"
 msgstr "Pas encore de responsable"
 
 #: src/apps/app-page.tsx
+#: src/apps/apps-overview.tsx
 msgid "No page yet"
 msgstr "Pas encore de page"
 
@@ -9935,6 +9934,7 @@ msgid "Only you see it while you try it. You share it when it's right."
 msgstr "Vous seul le voyez pendant que vous l’essayez. Vous le partagez quand il est prêt."
 
 #: src/apps/app-status.tsx
+#: src/apps/apps-overview.tsx
 #: src/workflows/workflow-status.tsx
 msgid "Only you see this"
 msgstr "Vous seul voyez ceci"
@@ -12523,6 +12523,7 @@ msgid "Setting up {name}…"
 msgstr "Préparation de {name}…"
 
 #: src/apps/app-page.tsx
+#: src/apps/apps-overview.tsx
 #: src/grasp/frame/grasp-sidebar.tsx
 #: src/routes/_shell.apps.$app_.settings.tsx
 #: src/routes/_shell.settings.tsx
@@ -17211,6 +17212,7 @@ msgid "Your team has this one"
 msgstr "Votre équipe a celle-ci"
 
 #: src/apps/app-status.tsx
+#: src/apps/apps-overview.tsx
 msgid "Your team uses it"
 msgstr "Votre équipe l’utilise"
 

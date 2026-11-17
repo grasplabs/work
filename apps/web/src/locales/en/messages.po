@@ -2816,6 +2816,7 @@ msgid "Archive and take offline"
 msgstr "Archive and take offline"
 
 #: src/apps/app-status.tsx
+#: src/apps/apps-overview.tsx
 msgctxt "an App put away"
 msgid "Archived"
 msgstr "Archived"
@@ -8128,10 +8129,6 @@ msgstr "Lower-case letters and digits, with single dashes between them; not the 
 msgid "Lowest"
 msgstr "Lowest"
 
-#: src/apps/apps-overview.tsx
-msgid "Made {made}"
-msgstr "Made {made}"
-
 #: src/activity/audit-words.ts
 msgid "Made a webhook source a new secret"
 msgstr "Made a webhook source a new secret"
@@ -8409,6 +8406,7 @@ msgid "Monthly budget for AI"
 msgstr "Monthly budget for AI"
 
 #: src/apps/app-workspace.tsx
+#: src/apps/apps-overview.tsx
 msgid "More"
 msgstr "More"
 
@@ -8966,6 +8964,7 @@ msgid "No owner yet"
 msgstr "No owner yet"
 
 #: src/apps/app-page.tsx
+#: src/apps/apps-overview.tsx
 msgid "No page yet"
 msgstr "No page yet"
 
@@ -9935,6 +9934,7 @@ msgid "Only you see it while you try it. You share it when it's right."
 msgstr "Only you see it while you try it. You share it when it's right."
 
 #: src/apps/app-status.tsx
+#: src/apps/apps-overview.tsx
 #: src/workflows/workflow-status.tsx
 msgid "Only you see this"
 msgstr "Only you see this"
@@ -12523,6 +12523,7 @@ msgid "Setting up {name}…"
 msgstr "Setting up {name}…"
 
 #: src/apps/app-page.tsx
+#: src/apps/apps-overview.tsx
 #: src/grasp/frame/grasp-sidebar.tsx
 #: src/routes/_shell.apps.$app_.settings.tsx
 #: src/routes/_shell.settings.tsx
@@ -17211,6 +17212,7 @@ msgid "Your team has this one"
 msgstr "Your team has this one"
 
 #: src/apps/app-status.tsx
+#: src/apps/apps-overview.tsx
 msgid "Your team uses it"
 msgstr "Your team uses it"
 

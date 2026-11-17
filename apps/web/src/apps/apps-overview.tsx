@@ -1,84 +1,110 @@
 import type { AppOverview } from "@grasp-os/shared/apps";
 import { Trans, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { Link } from "@tanstack/react-router";
+import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 
-import { formatDate } from "../format.ts";
 import { Page, PageHeading } from "../frame/page.tsx";
-import { Card, CardDescription, CardTitle } from "../grasp/card/index.ts";
-import { Empty } from "../grasp/empty/index.ts";
-import { Search } from "../grasp/icons/index.ts";
+import { AppCard, AppCardGrid } from "../grasp/app-card/index.ts";
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "../grasp/empty/index.ts";
+import { Search, Settings } from "../grasp/icons/index.ts";
 import {
   InputGroup,
   InputGroupInput,
   InputGroupText,
 } from "../grasp/input-group/index.ts";
-import { Text } from "../grasp/text/index.ts";
-import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { MakeSomethingLink } from "../make/make-link.tsx";
-import { StatusBadge } from "./app-status.tsx";
+import { PageFrame } from "../pages/page-frame.tsx";
+import { statusOf } from "./app-status.tsx";
 
-// The Apps page: every App the person can open, newest first, as a grid of
-// cards (its name, what it is for, where it stands and when it was made),
-// each opening the App (/apps/$app). A search over their names, and Make
-// something for who builds, which starts a chat to make an App
-// (make/make-link.tsx).
-
-// How wide a card grows before the grid adds a column: Grasp UI has no
-// token for a card's measure.
-const CARD_MIN = "16rem";
+// The Apps page: every App the person can open, newest first, as Grasp
+// UI's App cards: each App seen running in its window (its current
+// version, as the person, read-only and out of reach), its name, what it
+// is for and where it stands; the card opens the App (/apps/$app). A
+// search over their names, and Make something for who builds, which
+// starts a chat to make an App (make/make-link.tsx).
 
 const styles = stylex.create({
   search: { maxWidth: "18rem" },
-  grid: {
-    display: "grid",
-    gridTemplateColumns: `repeat(auto-fill, minmax(min(${CARD_MIN}, 100%), 1fr))`,
-    gap: grasp.space4,
-    margin: 0,
-    padding: 0,
-  },
-  card: { position: "relative" },
-  // The name's link covers the whole card, so the card opens the App.
-  open: {
-    color: "inherit",
-    textDecoration: "none",
-    outline: "none",
-    "::after": { content: '""', position: "absolute", inset: 0 },
-  },
-  meta: {
-    display: "flex",
-    flexWrap: "wrap",
-    alignItems: "center",
-    gap: grasp.space2,
-    marginTop: grasp.space3,
-  },
 });
 
-/** One App: its card, whose name opens it. */
-const AppCard = ({ overview: { app } }: { overview: AppOverview }) => {
-  const made = formatDate(app.createdAt);
+/**
+ * App card links with a plain `<a href>`, which would load the whole
+ * product again: a plain press on a card's link goes through the router
+ * instead, and a press with a modifier (a new tab) stays the browser's.
+ */
+const useRoutedCardLinks = (): ((
+  element: HTMLElement | null
+) => () => void) => {
+  const navigate = useNavigate();
+  return (element) => {
+    const onClick = (event: MouseEvent): void => {
+      const modified =
+        event.button !== 0 ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.shiftKey ||
+        event.altKey;
+      if (event.defaultPrevented || modified) {
+        return;
+      }
+      const link =
+        event.target instanceof Element
+          ? event.target.closest("a[data-card-link]")
+          : null;
+      const href = link?.getAttribute("href");
+      if (href === null || href === undefined) {
+        return;
+      }
+      event.preventDefault();
+      void navigate({ href });
+    };
+    element?.addEventListener("click", onClick);
+    return () => {
+      element?.removeEventListener("click", onClick);
+    };
+  };
+};
+
+/** One App: its card, the App running in its window when it has a page to show. */
+const OneApp = ({ overview: { app, contents } }: { overview: AppOverview }) => {
+  const { t } = useLingui();
+  const navigate = useNavigate();
+  const status = statusOf(app);
+  const runs = status === "live" && contents.pages;
+  const metaOf = {
+    live: t`Your team uses it`,
+    draft: t`Only you see this`,
+    archived: t({ message: "Archived", context: "an App put away" }),
+  };
   return (
-    <Card element="li" layout={styles.card}>
-      <CardTitle>
-        <Link
-          params={{ app: app.id }}
-          to="/apps/$app"
-          {...stylex.props(styles.open)}
-        >
-          {app.name}
-        </Link>
-      </CardTitle>
-      {app.description === "" ? null : (
-        <CardDescription>{app.description}</CardDescription>
-      )}
-      <div {...stylex.props(styles.meta)}>
-        <StatusBadge app={app} />
-        <Text element="span" size="xs" tone="muted">
-          <Trans>Made {made}</Trans>
-        </Text>
-      </div>
-    </Card>
+    <AppCard
+      actions={[
+        {
+          label: t`Settings`,
+          icon: Settings,
+          onSelect: () => {
+            void navigate({
+              to: "/apps/$app/settings",
+              params: { app: app.id },
+            });
+          },
+        },
+      ]}
+      href={`/apps/${app.id}`}
+      labels={{ more: t`More`, empty: t`No page yet` }}
+      meta={metaOf[status]}
+      preview={runs ? <PageFrame app={app.id} bare embedded /> : undefined}
+      title={app.name}
+      {...(app.description === "" ? {} : { description: app.description })}
+    />
   );
 };
 
@@ -98,6 +124,7 @@ export const AppsOverview = ({
 }) => {
   const { t } = useLingui();
   const [query, setQuery] = useState("");
+  const room = useRoutedCardLinks();
   const apps = newestFirst(listed);
   const asked = query.trim();
   const needle = asked.toLocaleLowerCase();
@@ -116,17 +143,25 @@ export const AppsOverview = ({
         title={<Trans>Apps</Trans>}
       />
       {apps.length === 0 ? (
-        <Empty
-          action={builds ? <MakeSomethingLink kind="app" /> : undefined}
-          picture="nothing"
-          size="page"
-          title={t`No Apps yet`}
-        >
+        <Empty size="page">
+          <EmptyHeader>
+            <EmptyMedia picture="nothing" />
+            <EmptyTitle>{t`No Apps yet`}</EmptyTitle>
+            <EmptyDescription>
+              {builds ? (
+                <Trans>Say what you want to build, and Grasp builds it.</Trans>
+              ) : (
+                <Trans>
+                  The Apps your colleagues share with you show here.
+                </Trans>
+              )}
+            </EmptyDescription>
+          </EmptyHeader>
           {builds ? (
-            <Trans>Say what you want to build, and Grasp builds it.</Trans>
-          ) : (
-            <Trans>The Apps your colleagues share with you show here.</Trans>
-          )}
+            <EmptyContent>
+              <MakeSomethingLink kind="app" />
+            </EmptyContent>
+          ) : null}
         </Empty>
       ) : (
         <>
@@ -142,15 +177,22 @@ export const AppsOverview = ({
             />
           </InputGroup>
           {shown.length === 0 ? (
-            <Empty picture="search">
-              <Trans>No App is called “{asked}”</Trans>
+            <Empty>
+              <EmptyHeader>
+                <EmptyMedia picture="search" />
+                <EmptyDescription>
+                  <Trans>No App is called “{asked}”</Trans>
+                </EmptyDescription>
+              </EmptyHeader>
             </Empty>
           ) : (
-            <ul aria-label={t`Apps`} {...stylex.props(styles.grid)}>
-              {shown.map((overview) => (
-                <AppCard key={overview.app.id} overview={overview} />
-              ))}
-            </ul>
+            <section aria-label={t`Apps`} ref={room}>
+              <AppCardGrid>
+                {shown.map((overview) => (
+                  <OneApp key={overview.app.id} overview={overview} />
+                ))}
+              </AppCardGrid>
+            </section>
           )}
         </>
       )}
