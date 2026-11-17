@@ -16363,6 +16363,10 @@ msgstr "Wat ze liever willen"
 msgid "What this decision asks can't be shown right now, so it can't be answered yet. Try again in a moment."
 msgstr "Wat deze beslissing vraagt, kan nu niet worden getoond. Ze kan daarom nog niet worden beantwoord. Probeer het zo opnieuw."
 
+#: src/decision-card.tsx
+msgid "What this decision asks can't be shown right now."
+msgstr "Wat deze beslissing vraagt, kan nu niet worden getoond."
+
 #: src/decision-confirmation.tsx
 msgid "What this decision asks is withheld, so you can only reject it."
 msgstr "Wat deze beslissing vraagt, wordt achtergehouden. Je kunt haar daarom alleen afwijzen."

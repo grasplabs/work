@@ -16363,6 +16363,10 @@ msgstr "Was sie stattdessen wollen"
 msgid "What this decision asks can't be shown right now, so it can't be answered yet. Try again in a moment."
 msgstr "Was diese Entscheidung fragt, kann gerade nicht angezeigt werden. Sie kann daher noch nicht beantwortet werden. Versuchen Sie es gleich noch einmal."
 
+#: src/decision-card.tsx
+msgid "What this decision asks can't be shown right now."
+msgstr "Was diese Entscheidung fragt, kann gerade nicht angezeigt werden."
+
 #: src/decision-confirmation.tsx
 msgid "What this decision asks is withheld, so you can only reject it."
 msgstr "Was diese Entscheidung fragt, wird zurückgehalten. Sie können sie daher nur ablehnen."

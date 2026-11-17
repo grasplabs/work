@@ -5,7 +5,7 @@ import { Label } from "@grasp-os/ui/components/label";
 import { Textarea } from "@grasp-os/ui/components/textarea";
 import { i18n } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
-import { Trans } from "@lingui/react/macro";
+import { Trans, useLingui } from "@lingui/react/macro";
 import { CircleDotIcon } from "lucide-react";
 import { useState } from "react";
 
@@ -54,23 +54,57 @@ const outcomeOf = (decision: DecisionView): string => {
  * from, until when, and the answers core offers, or how it ended.
  */
 export const DecisionCard = ({ decision }: { decision: DecisionView }) => {
-  const [current, setCurrent] = useState(decision);
+  const { t } = useLingui();
+  // What the card learned of the decision since it was given it, shown
+  // only over the decision it learned it of: one given anew (a fresh load
+  // after a cached one) is shown as given.
+  const [learned, setLearned] = useState<{
+    of: DecisionView;
+    view: DecisionView;
+  }>();
+  const current = learned?.of === decision ? learned.view : decision;
+  const setCurrent = (view: DecisionView): void => {
+    setLearned({ of: decision, view });
+  };
   const [comment, setComment] = useState("");
   const [pending, setPending] = useState<PendingConfirmation>();
   const { busy, failure, run } = useCoreAction();
   const open = current.status === "open";
   /**
-   * Shows the decision as core serves it now, after core refused something
-   * of it: what is asked may have changed since the card was read (its ask
-   * withheld, `decision.withheld`, or `decision.conflict`), so the card
-   * shows that, with why, and keeps the comment for a deliberate answer.
+   * Reads the decision again and shows it as core serves it now: after
+   * core refused something of it (what is asked may have changed since the
+   * card was read: its ask withheld, `decision.withheld`, or
+   * `decision.conflict`), or when the person tries again. One that can't
+   * be read again shows nothing of what it asks, never what the card
+   * showed before, and takes no answer; the read's failure is thrown.
    */
   const readAgain = async (session: Session): Promise<void> => {
     try {
       setCurrent(await session.decisions.get(current.id));
-    } catch {
-      // Shown as it was.
+    } catch (error) {
+      const { input: _input, ...rest } = current;
+      setCurrent({
+        ...rest,
+        description: t`What this decision asks can't be shown right now.`,
+        withheld: "unchecked",
+      });
+      throw error;
     }
+  };
+  /**
+   * After core refused `error`: the decision as it is now, shown with why
+   * it was refused, which is thrown again.
+   */
+  const refusedWith = async (
+    session: Session,
+    error: unknown
+  ): Promise<never> => {
+    try {
+      await readAgain(session);
+    } catch {
+      // Shown as unreadable; why it was refused says more.
+    }
+    throw error;
   };
   // Core shows the answer as it would record it, and Grasp's own dialog
   // asks the person to confirm exactly that (decision-confirmation.tsx).
@@ -84,8 +118,7 @@ export const DecisionCard = ({ decision }: { decision: DecisionView }) => {
       try {
         return await session.decisions.review(current.id, given);
       } catch (error) {
-        await readAgain(session);
-        throw error;
+        return await refusedWith(session, error);
       }
     });
     if (review !== undefined) {
@@ -110,8 +143,7 @@ export const DecisionCard = ({ decision }: { decision: DecisionView }) => {
             )
         );
       } catch (error) {
-        await readAgain(session);
-        throw error;
+        return await refusedWith(session, error);
       }
     });
     if (answered !== undefined) {

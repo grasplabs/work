@@ -1059,7 +1059,7 @@ describe(
     });
 
     it("take no answer to a decision while its run's evidence can't be checked, the Brain away, and show it as it asks once it is back", async () => {
-      const { fixture, workflowId, opened, reviewer, runAsking } =
+      const { fixture, workflowId, opened, reviewer, runAsking, ask } =
         await decisionInbox();
       const permissionId = await brainGrantOf(fixture, workflowId, reviewer);
       const source = await companySource();
@@ -1076,7 +1076,16 @@ describe(
         const waits = today.lanes
           .flatMap(({ runs }) => runs)
           .find(({ id }) => id === asking.runId)?.waits;
+        // As the App's page reads it: its code gets none of it then.
+        const detail = await ask(reviewer, "decision", {
+          runId: asking.runId,
+          decisionId,
+        });
         return {
+          app:
+            detail === null
+              ? null
+              : z.object({ prompt: z.string() }).parse(detail).prompt,
           page: {
             description: page.description,
             input: page.input,
@@ -1145,6 +1154,7 @@ describe(
         approvable: afterReview.state,
       }).toStrictEqual({
         during: {
+          app: null,
           page: {
             description: uncheckedAskText,
             input: undefined,
@@ -1163,6 +1173,7 @@ describe(
         refusalsAudited: 2,
         // Back by itself on the next read that can check it.
         after: {
+          app: "Approve this invoice?",
           page: {
             description: "Approve this invoice?",
             input: { amount: 5 },

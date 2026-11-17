@@ -499,10 +499,11 @@ const WaitsOnYou = ({ run }: { run: LaneRun }) => {
     seconds: graceSeconds,
     go: (answering) => {
       void (async () => {
-        const answered = await act(answerWith(answering));
-        if (answered !== undefined) {
-          await router.invalidate();
-        }
+        await act(answerWith(answering));
+        // Answered, or refused because the decision changed since Today
+        // was read (what it asks withheld since): Today reads it again and
+        // shows it as it is now, with why.
+        await router.invalidate();
       })();
     },
     // Gone before the seconds were over: the answer was confirmed, so it

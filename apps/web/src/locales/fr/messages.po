@@ -16363,6 +16363,10 @@ msgstr "Ce qu’ils veulent à la place"
 msgid "What this decision asks can't be shown right now, so it can't be answered yet. Try again in a moment."
 msgstr "Ce que demande cette décision ne peut pas être affiché pour le moment : elle ne peut donc pas encore recevoir de réponse. Réessayez dans un instant."
 
+#: src/decision-card.tsx
+msgid "What this decision asks can't be shown right now."
+msgstr "Ce que demande cette décision ne peut pas être affiché pour le moment."
+
 #: src/decision-confirmation.tsx
 msgid "What this decision asks is withheld, so you can only reject it."
 msgstr "Ce que demande cette décision est retenu : vous ne pouvez donc que la rejeter."

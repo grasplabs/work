@@ -89,18 +89,24 @@ const settle = async (): Promise<void> => {
   });
 };
 
-/** Shows the card for `asked` on a faked core whose `decisions` are `api`. */
+/**
+ * Shows the card on a faked core whose `decisions` are `api`, for the
+ * decision its page's loader gives, `asked` at first, as the decision's
+ * own page does; `give` loads the page again on another.
+ */
 const shown = async (api: Readonly<Record<string, unknown>>) => {
   const core = {
     withSession: async <T,>(
       action: (session: { decisions: typeof api }) => Promise<T>
     ): Promise<T> => await action({ decisions: api }),
   };
+  let given = asked;
   const rootRoute = createRootRoute({ component: Outlet });
   const page = createRoute({
     getParentRoute: () => rootRoute,
     path: "/",
-    component: () => <DecisionCard decision={asked} />,
+    loader: () => given,
+    component: () => <DecisionCard decision={page.useLoaderData()} />,
   });
   const router = createRouter({
     routeTree: rootRoute.addChildren([page]),
@@ -117,6 +123,27 @@ const shown = async (api: Readonly<Record<string, unknown>>) => {
       </I18nProvider>
     );
     await router.load();
+  });
+  await settle();
+  return {
+    give: async (decision: DecisionView): Promise<void> => {
+      given = decision;
+      await act(async () => {
+        await router.invalidate();
+      });
+      await settle();
+    },
+  };
+};
+
+/** Waits `ms`, letting renders settle: past the dialog's delay. */
+const waited = async (ms: number): Promise<void> => {
+  await act(async () => {
+    const { promise, resolve } = Promise.withResolvers<boolean>();
+    setTimeout(() => {
+      resolve(true);
+    }, ms);
+    await promise;
   });
   await settle();
 };
@@ -259,5 +286,85 @@ describe("a decision's card, its ask withheld while it is open", () => {
         buttons: ["Approve", "Reject"],
       },
     });
+  });
+
+  it("shows the decision as core serves it once a confirmed approval is refused: the prompt gone, the note, Reject alone", async () => {
+    await shown({
+      review: async (_id: string, answer: { approved: boolean }) =>
+        await Promise.resolve({
+          state: "review",
+          decision: asked,
+          response: answer,
+        }),
+      confirm: async () => {
+        await Promise.resolve();
+        throw decisionErrors.create("decision.withheld");
+      },
+      get: async () => await Promise.resolve(withheld),
+    });
+
+    await press("Approve");
+    // Past the confirmation's delay.
+    await waited(1100);
+    await press("Confirm");
+
+    expect(seen()).toStrictEqual({
+      prompt: false,
+      about: false,
+      note: true,
+      uncheckedNote: false,
+      comment: true,
+      buttons: ["Reject"],
+    });
+  });
+
+  it("shows nothing of what it asked, and takes no answer, once it can't be read again after a refusal", async () => {
+    await shown({
+      review: async () => {
+        await Promise.resolve();
+        throw decisionErrors.create("decision.withheld");
+      },
+      get: async () => {
+        await Promise.resolve();
+        throw new Error("Core can't be reached");
+      },
+    });
+
+    await press("Approve");
+    const refused = seen();
+    // Why it was refused, until trying again says why that failed.
+    const why = document.body.textContent.includes("it can only be rejected");
+    await press("Try again");
+
+    const unreadable = {
+      prompt: false,
+      about: false,
+      note: false,
+      uncheckedNote: true,
+      comment: false,
+      buttons: [],
+    };
+    expect({
+      refused,
+      why,
+      tried: seen(),
+    }).toStrictEqual({ refused: unreadable, why: true, tried: unreadable });
+  });
+
+  it("shows the decision a fresh load gives, not the one it was given before", async () => {
+    const revised: DecisionView = {
+      ...asked,
+      description: "Pay Initech the 12,000 it asked for?",
+      revision: "revision-revised",
+    };
+    const page = await shown({});
+
+    await page.give(revised);
+    const text = document.body.textContent;
+
+    expect({
+      revised: text.includes("Pay Initech the 12,000 it asked for?"),
+      before: text.includes(prompt),
+    }).toStrictEqual({ revised: true, before: false });
   });
 });

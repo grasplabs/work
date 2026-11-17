@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { decisionErrors } from "@grasp-os/shared/decisions";
 import type { DecisionWithheld } from "@grasp-os/shared/decisions";
 import type { WorkflowsToday } from "@grasp-os/shared/workflows";
 import { i18n } from "@lingui/core";
@@ -77,18 +78,33 @@ const settle = async (): Promise<void> => {
   });
 };
 
-/** Shows `today`, and opens its waiting run as the reader does. */
-const opened = async (today: WorkflowsToday): Promise<void> => {
+/**
+ * Shows Today as its page's loader reads it (`read`, called again when the
+ * page reads it again), on a faked core whose `decisions` are `decisions`,
+ * and opens its waiting run as the reader does.
+ */
+const opened = async (
+  read: () => WorkflowsToday,
+  decisions: Readonly<Record<string, unknown>> = {}
+): Promise<void> => {
   const core = {
     withSession: async <T,>(
-      action: (session: Record<string, never>) => Promise<T>
-    ): Promise<T> => await action({}),
+      action: (session: {
+        decisions: typeof decisions;
+        workflows: { today: () => Promise<WorkflowsToday> };
+      }) => Promise<T>
+    ): Promise<T> =>
+      await action({
+        decisions,
+        workflows: { today: async () => await Promise.resolve(read()) },
+      }),
   };
   const rootRoute = createRootRoute({ component: Outlet });
   const page = createRoute({
     getParentRoute: () => rootRoute,
     path: "/",
-    component: () => <TodayLanes today={today} />,
+    loader: () => read(),
+    component: () => <TodayLanes today={page.useLoaderData()} />,
   });
   const router = createRouter({
     routeTree: rootRoute.addChildren([page]),
@@ -114,6 +130,33 @@ const opened = async (today: WorkflowsToday): Promise<void> => {
   await act(async () => {
     run.click();
     await Promise.resolve();
+  });
+  await settle();
+};
+
+/** Presses the button whose text is `label`. */
+const press = async (label: string): Promise<void> => {
+  const button = [...document.querySelectorAll("button")].find(
+    (each) => each.textContent.trim() === label
+  );
+  if (!button) {
+    throw new TypeError(`No ${label} button`);
+  }
+  await act(async () => {
+    button.click();
+    await Promise.resolve();
+  });
+  await settle();
+};
+
+/** Waits `ms`, letting renders settle. */
+const waited = async (ms: number): Promise<void> => {
+  await act(async () => {
+    const { promise, resolve } = Promise.withResolvers<boolean>();
+    setTimeout(() => {
+      resolve(true);
+    }, ms);
+    await promise;
   });
   await settle();
 };
@@ -145,7 +188,7 @@ describe("a run of Today that waits on the reader", () => {
   });
 
   it("asks what its decision asks, and takes either answer", async () => {
-    await opened(todayWith());
+    await opened(() => todayWith());
 
     expect(seen()).toStrictEqual({
       prompt: true,
@@ -156,7 +199,7 @@ describe("a run of Today that waits on the reader", () => {
   });
 
   it("says what it asks is withheld and offers Reject alone", async () => {
-    await opened(todayWith("revoked"));
+    await opened(() => todayWith("revoked"));
 
     expect(seen()).toStrictEqual({
       prompt: false,
@@ -167,7 +210,7 @@ describe("a run of Today that waits on the reader", () => {
   });
 
   it("says what it asks can't be shown right now and takes no answer", async () => {
-    await opened(todayWith("unchecked"));
+    await opened(() => todayWith("unchecked"));
 
     expect(seen()).toStrictEqual({
       prompt: false,
@@ -176,4 +219,49 @@ describe("a run of Today that waits on the reader", () => {
       answers: [],
     });
   });
+
+  // It waits out the confirmation's delay and the seconds to undo it.
+  it(
+    "reads Today again when a confirmed approval is refused, and shows what it asks withheld, Reject alone",
+    { timeout: 15_000 },
+    async () => {
+      let today = todayWith();
+      const view = {
+        id: "decision-1",
+        workflowResource: { id: "wr-1", name: "invoices" },
+        workflow: "invoices",
+        run: "run-1",
+        description: prompt,
+        status: "open",
+        expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+        revision: "revision-asked",
+      };
+      await opened(() => today, {
+        review: async (_id: string, response: { approved: boolean }) =>
+          await Promise.resolve({ state: "review", decision: view, response }),
+        confirm: async () => {
+          // Withheld since Today was read.
+          today = todayWith("revoked");
+          await Promise.resolve();
+          throw decisionErrors.create("decision.withheld");
+        },
+      });
+
+      await press("Approve");
+      // Past the confirmation's delay, then past the seconds to undo it.
+      await waited(1100);
+      await press("Confirm");
+      for (let second = 0; second < 6; second += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- a second at a time, each one's render landing
+        await waited(1000);
+      }
+
+      expect(seen()).toStrictEqual({
+        prompt: false,
+        withheldNote: true,
+        uncheckedNote: false,
+        answers: ["Reject"],
+      });
+    }
+  );
 });
