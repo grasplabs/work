@@ -178,6 +178,10 @@ export const knowledgeOf = (
       .map(({ sourceId }) => sourceId)
   );
   const heard = drawing !== undefined || conversations.size >= minTeamShown;
+  // More of its team may still be heard about a drawn piece of work: it
+  // shows from the first who told it (GRA-1987), and asking only puts it
+  // first for the team's next newcomers. Any other, only until it is heard.
+  const askable = drawing !== undefined || !heard;
   return {
     id,
     name: workflow?.name ?? candidate?.name ?? id,
@@ -186,8 +190,8 @@ export const knowledgeOf = (
       ...statements.map((statement) => statementSentence(ws, statement, heard)),
     ],
     confidence: heard ? "heard" : "waiting",
-    canAskMore: canAskMore && !heard,
-    moreAsked: moreAsked && !heard,
+    canAskMore: canAskMore && askable,
+    moreAsked: moreAsked && askable,
   };
 };
 
