@@ -68,7 +68,7 @@ const fieldOut = (value: unknown): string | boolean | null => {
 };
 
 /** A store's cursor as the page holds it (`fieldOut`). */
-const cursorOut = (cursor: object): BrainStoreCursor =>
+export const cursorOut = (cursor: object): BrainStoreCursor =>
   Object.fromEntries(
     Object.entries(cursor).map(([field, value]: [string, unknown]) => [
       field,
@@ -81,7 +81,7 @@ const cursorOut = (cursor: object): BrainStoreCursor =>
  * Brain's own schema to check (brain-next.ts): anything else as it came,
  * refused there.
  */
-const cursorIn = (cursor: unknown): unknown =>
+export const cursorIn = (cursor: unknown): unknown =>
   typeof cursor === "object" && cursor !== null && !Array.isArray(cursor)
     ? Object.fromEntries(
         Object.entries(cursor).map(([field, value]: [string, unknown]) => [
@@ -126,7 +126,7 @@ const attributeOut = (attribute: string): BrainMemoryAttribute =>
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
   attribute as BrainMemoryAttribute;
 
-const entityOut = ({
+export const entityOut = ({
   store,
   id,
   kind,
@@ -141,7 +141,10 @@ const entityOut = ({
   borrowed,
 });
 
-const memoryOut = (person: string, memory: StoredMemory): BrainMemoryShown => ({
+export const memoryOut = (
+  person: string,
+  memory: StoredMemory
+): BrainMemoryShown => ({
   store: memory.store,
   id: memory.id,
   about: memory.about,

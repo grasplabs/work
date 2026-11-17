@@ -1396,6 +1396,213 @@ const memoryFixture = async ({
   };
 };
 
+/** A source of the reader's group's, by versions: what a version's change is asked of (GRA-1991). */
+interface ChangeFixture {
+  source: SourceRef;
+  /** A memory the reader may read rests on it, which hidden ones would end and contest. */
+  readable: number;
+  /** Only memories the reader may not read rest on it. */
+  onlyHidden: number;
+  /** No memory rests on it. */
+  none: number;
+}
+
+/**
+ * A source of the reader's group's (their first; a stranger's when they
+ * have none), with three versions: the first with a memory they may
+ * read; the second with marked memories only another group may read, one
+ * that would end the first's and one about an entity nothing else names;
+ * the third with none. Beside it, a marked rival, from a source only that
+ * group reads, that would contest the first's. Each version's text holds
+ * the first's quote, so nothing goes out.
+ */
+const changeFixture = async ({
+  reader,
+  markers,
+}: Probing): Promise<ChangeFixture> => {
+  const group = `team:${stranger()}`;
+  const theirs = reader.groups[0] ?? stranger();
+  const source = missingSource();
+  const text = "Plain is Active. Plain renews.";
+  const add = async (version: string) =>
+    await store().addSource({
+      source: keyOf(source),
+      change: crypto.randomUUID(),
+      text: `${text} ${version}`,
+      access: { kind: "audience", group: theirs },
+    });
+  const firstVersion = await add("First.");
+  const seen = await store().addMemories({
+    change: crypto.randomUUID(),
+    access: { kind: "audience", group: theirs },
+    entities: [{ key: "c", kind: "customer", names: ["Plain"] }],
+    memories: [
+      {
+        about: "c",
+        type: "fact",
+        statement: "Plain is active",
+        attribute: "status",
+        value: "Active",
+        speaker: { kind: "system" },
+        basis: { kind: "source", ...firstVersion, quote: "Plain is Active" },
+      },
+    ],
+  });
+  const entity = seen.entities.c ?? "";
+  const second = await add("Second.");
+  const marked = markedText(markers);
+  // Made for someone who sees the reader's entity and is in the group.
+  const forBoth = { person: reader.person, groups: [group, theirs] };
+  await store().addMemories({
+    change: crypto.randomUUID(),
+    access: { kind: "audience", group },
+    reader: forBoth,
+    entities: [
+      { key: "c", id: entity, kind: "customer", names: ["Plain"] },
+      { key: "m", kind: "customer", names: [marked] },
+    ],
+    memories: [
+      {
+        about: "c",
+        type: "fact",
+        statement: marked,
+        attribute: "status",
+        value: markers.join(""),
+        speaker: { kind: "internal", person: `person:${markers[0] ?? ""}` },
+        basis: { kind: "source", ...second, quote: "Plain is Active" },
+      },
+      {
+        about: "m",
+        type: "fact",
+        statement: marked,
+        speaker: { kind: "system" },
+        basis: { kind: "source", ...second, quote: "Plain renews" },
+      },
+    ],
+  });
+  const rival = await store().addSource({
+    source: keyOf(missingSource()),
+    change: crypto.randomUUID(),
+    text: marked,
+    access: { kind: "audience", group },
+  });
+  await store().addMemories({
+    change: crypto.randomUUID(),
+    access: { kind: "audience", group },
+    reader: forBoth,
+    entities: [{ key: "c", id: entity, kind: "customer", names: [marked] }],
+    memories: [
+      {
+        about: "c",
+        type: "fact",
+        statement: marked,
+        attribute: "status",
+        value: `${markers.join("")} rival`,
+        speaker: { kind: "system" },
+        basis: { kind: "source", ...rival, quote: marked },
+      },
+    ],
+  });
+  const none = await add("Third.");
+  return {
+    source,
+    readable: firstVersion.version,
+    onlyHidden: second.version,
+    none: none.version,
+  };
+};
+
+/**
+ * The probe of a read of a version's change (GRA-1991), by `read`: of a
+ * version no one added and each the reader may not read, as nothing; of
+ * one only hidden memories rest on, as one none rests on; of the one they
+ * may read, which hidden ones would end and contest, whole and a memory
+ * at a time; as someone who isn't a member; and of a source the markers
+ * name.
+ */
+const versionChangeProbe =
+  (
+    read: (
+      /** Who reads: the probing reader, or someone who isn't a member. */
+      as: Probing | null,
+      source: SourceRef,
+      version: number,
+      limit?: number
+    ) => Promise<unknown>
+  ): Probe =>
+  async (probing) => {
+    const { hiddenVersions, markers } = probing;
+    const fixture = await changeFixture(probing);
+    const asked: Answer[] = [
+      await answer(
+        "a version no one added",
+        async () => await read(probing, missingSource(), 1),
+        "nothing"
+      ),
+    ];
+    for (const [index, { source, version }] of hiddenVersions.entries()) {
+      // oxlint-disable-next-line no-await-in-loop -- one read at a time
+      const answered = await answer(
+        `hidden version ${index}`,
+        async () => await read(probing, source, version),
+        "hidden"
+      );
+      asked.push(answered);
+    }
+    asked.push(
+      await answer(
+        "a version only hidden memories rest on",
+        async () => await read(probing, fixture.source, fixture.onlyHidden),
+        "hidden",
+        "readable"
+      ),
+      await answer(
+        "a version no memory rests on",
+        async () => await read(probing, fixture.source, fixture.none),
+        "nothing",
+        "readable"
+      ),
+      await answer(
+        "the version they may read, which hidden ones would end and contest",
+        async () => await read(probing, fixture.source, fixture.readable)
+      ),
+      await answer(
+        "the version they may read, a memory at a time",
+        async () => await read(probing, fixture.source, fixture.readable, 1)
+      ),
+      await answer(
+        "as someone who isn't a member",
+        async () => await read(null, fixture.source, fixture.readable)
+      ),
+      await answer(
+        "an unknown producer named by the markers",
+        async () =>
+          await read(
+            probing,
+            unchecked({ producer: markers.join(""), id: fixture.source.id }),
+            1
+          )
+      )
+    );
+    return asked;
+  };
+
+/**
+ * `change` without the moment it was read at, which every write moves,
+ * a hidden one too (threat model, GRA-1739): compared without it.
+ */
+const withoutMoment = (change: unknown): unknown =>
+  typeof change === "object" && change !== null && !Array.isArray(change)
+    ? Object.fromEntries(
+        Object.entries(change).flatMap(([key, value]: [string, unknown]) => {
+          if (key === "at") {
+            return [];
+          }
+          return [[key, key === "next" ? withoutMoment(value) : value]];
+        })
+      )
+    : change;
+
 /**
  * A marked memory in someone else's own store (`person:<id>`), readable by
  * them alone: its entity's id and its own. Every probe of a person's
@@ -2034,6 +2241,15 @@ export const coreProbes = {
     );
     return asked;
   },
+  versionChangeAs: showingEntities(
+    versionChangeProbe(
+      async (as, source, version) =>
+        await coreBrain.versionChangeAs(env, as?.personId ?? stranger(), {
+          source,
+          version,
+        })
+    )
+  ),
   readSourceVersionAs: async ({ personId, hiddenVersions, markers }) => {
     const read = async (
       name: string,
@@ -5819,6 +6035,16 @@ const memoryProbes = {
       await list("any", null),
     ];
   },
+  readVersionChange: versionChangeProbe(async (as, source, version, limit) =>
+    withoutMoment(
+      await store().readVersionChange({
+        source: keyOf(source),
+        version,
+        reader: as?.reader ?? { person: stranger(), groups: [] },
+        ...(limit === undefined ? {} : { limit }),
+      })
+    )
+  ),
   retireMemory: async (probing) => {
     const fixture = await memoryFixture(probing);
     const retire = async (
@@ -10561,6 +10787,12 @@ export const sourcesProbes = {
     );
     return asked;
   },
+  learned: showingEntities(
+    versionChangeProbe(
+      async (as, source, version) =>
+        await sourcesAs(as?.personId ?? stranger()).learned(source, version)
+    )
+  ),
   read: async ({ personId, hiddenVersions, markers }) => {
     const asked: Answer[] = [
       await answer(
@@ -10740,6 +10972,7 @@ export const sourcesProbes = {
   | "list"
   | "versions"
   | "read"
+  | "learned"
   | "search"
   | "uploadOf"
   | "uploadVersion"
