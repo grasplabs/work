@@ -6,6 +6,7 @@ import { onboardingStore } from "../src/onboarding/store.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { holdAlarm } from "./interview-link.ts";
+import { drawingHeld } from "./onboarding-drawings.ts";
 import { mapped, rosterOf, team } from "./onboarding-team.ts";
 import { signedInApi, unique } from "./sign-in.ts";
 
@@ -34,23 +35,39 @@ describe(
         throw new Error("The team's map names no work");
       }
       const brainId = await intakeIds.workflow(ids.team, smaller.id);
-      // The brain holds the piece of work, as the onboarding gives it.
-      await env.DB.prepare(
-        "INSERT INTO brain_records (type, id, body, added_at) VALUES ('workflow', ?, ?, ?)"
-      )
-        .bind(
-          brainId,
-          JSON.stringify({
-            type: "workflow",
-            id: brainId,
-            name: smaller.name,
-            teamId: `team-${ids.team}`,
-            sourceId: "onb-src-0123456789abcdef0123456789abcdef",
-            status: "drawn",
-          }),
-          Date.now()
-        )
-        .run();
+      // The Brain page shows the piece of work, as the onboarding holds a
+      // drawing of it (GRA-1748).
+      await drawingHeld({
+        workflow: brainId,
+        team: ids.team,
+        name: smaller.name,
+        drawing: {
+          type: "workflowVersion",
+          id: `onb-wfv-${unique().replaceAll("-", "")}`,
+          workflowId: brainId,
+          sourceId: "onb-src-0123456789abcdef0123456789abcdef",
+          date: "2026-10-20",
+          state: "mapping",
+          // Fewer than five so far: more voices are wanted.
+          people: 2,
+          starts: "",
+          steps: [],
+          waits: [],
+          differently: [],
+          decides: "",
+          own: "",
+          ai: "",
+          right: "",
+          ask: "",
+          next: "",
+          term: null,
+          differs: null,
+          volumes: [],
+          takes: null,
+          wrong: null,
+          open: [],
+        },
+      });
       const admin = await signedInApi(idp, "admin");
       const asked = await admin.api.brain.askMorePeople(brainId);
       await admin.api.brain.askMorePeople(brainId);

@@ -16,6 +16,9 @@
  */
 export const brainModules = {
   "apps/core/src/instruction-files.ts": "instructions",
+  // An agent's apps, worked out from its instruction file by a model for
+  // whoever may change the agent: its own surface, each export probed.
+  "apps/core/src/agent-app-access.ts": "agentApps",
   // The skills' rules (GRA-1826): its own surface, each export probed.
   "apps/core/src/brain-skills.ts": "skills",
   // Runs core's workBrain on the clock, and hands nothing of it on.
@@ -67,6 +70,10 @@ export const brainModules = {
   // sources, with core's addSource and eraseSource, and answers nothing of
   // them.
   "apps/core/src/onboarding/new-brain.ts": "core",
+  // The onboarding's object as the Worker runs it: takes team claims that
+  // stop standing out of use with core's removeSharedSources, and hands
+  // nothing of the Brain on.
+  "apps/core/src/onboarding/object.ts": "core",
   // A chat's recall before its question: hands the model what core's
   // recallAs gave the chat's own person, passages and memories, two of its
   // packs merged at most (mergeRecalled, which only drops what both hold

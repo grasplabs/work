@@ -36,7 +36,6 @@ const agentFor = async (admin: Person, name: string) => {
     name,
     face: "stephen",
     job: "",
-    instructions: "",
     modelRole: null,
   });
   await admin.api.connections.setAgentReach(agent.id, true, {

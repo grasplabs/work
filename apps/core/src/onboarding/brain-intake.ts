@@ -117,9 +117,40 @@ export interface Rest {
   parent?: string;
 }
 
-/** The records a team gives the brain, in the order they may be kept, and who each rests on. */
+/**
+ * A claim of the team, as the onboarding keeps it (`brain_claims`) and
+ * every member reads it, on the Brain page and in the new Brain
+ * (GRA-1748): never a record of the brain's own.
+ */
+export interface IntakeClaim {
+  /** Its id, from its team, kind and words: whom it rests on is noted under it. */
+  record: string;
+  kind: StatementKind;
+  text: string;
+}
+
+/**
+ * A drawing of one of the team's pieces of work, as the onboarding keeps
+ * it (`brain_drawings`) and every member reads it, on the Brain page and
+ * in the new Brain (GRA-1748): only the parts five or more told, checked,
+ * never who told what. Never a record of the brain's own.
+ */
+export interface IntakeDrawing {
+  /** Its id, from what it holds: whom it rests on is noted under it. */
+  record: string;
+  /** The piece of work's id on the Brain page, from its team and its work. */
+  workflow: string;
+  name: string;
+  /** Its name in the language its people speak, where it differs. */
+  local?: string;
+  drawing: WorkflowVersionRecord;
+}
+
+/** The records a team gives the brain, in the order they may be kept, its claims and drawings, and who each rests on. */
 export interface Intake {
   records: BrainRecord[];
+  claims: IntakeClaim[];
+  drawings: IntakeDrawing[];
   rests: Rest[];
 }
 
@@ -397,11 +428,13 @@ export const recordOf = (record: BrainRecordInput): BrainRecord[] => {
 };
 
 /**
- * What a team gives the brain: its team record, its claims (`claims`, each
- * resting on five or more people) as statements, and its drawn workflows,
- * each drawing a version of its own, all naming the one source of its
- * interviews. The same team, claim or drawing is the same id, so giving
- * it again keeps nothing twice; a new drawing is a new version. The team was found in the staff list (`rosterSource`).
+ * What a team gives the brain: its team record, naming the staff list
+ * (`rosterSource`); and its claims (`claims`, each resting on five or more
+ * people) and the drawings of its pieces of work (`drawings`), each
+ * naming the one source of its interviews, which the onboarding keeps
+ * itself and the Brain page reads there (GRA-1748). The same claim or
+ * drawing is the same id, so giving it again keeps nothing twice; a
+ * drawing drawn anew is a new one.
  */
 export const intakeOf = async (
   intake: TeamIntake,
@@ -418,6 +451,7 @@ export const intakeOf = async (
     sourceId: rosterSource,
   });
   const rests: Rest[] = [];
+  const kept: IntakeClaim[] = [];
   // Only what five or more of its people said, put together
   // (team-claims.ts): never one person's fact as a statement of its own.
   for (const claim of claims) {
@@ -427,7 +461,8 @@ export const intakeOf = async (
     }
     // oxlint-disable-next-line no-await-in-loop -- a hash each, in order
     const id = await intakeIds.statement(intake.team.id, claim.kind, text);
-    const statement = recordOf({
+    // Held to what a statement may say, as the page shows it as one.
+    const valid = recordOf({
       type: "statement",
       id,
       kind: claim.kind,
@@ -436,10 +471,10 @@ export const intakeOf = async (
       teamIds: [teamId],
       toolIds: [],
     });
-    if (statement.length === 0 || records.some((each) => each.id === id)) {
+    if (valid.length === 0 || kept.some(({ record }) => record === id)) {
       continue;
     }
-    records.push(...statement);
+    kept.push({ record: id, kind: claim.kind, text });
     rests.push(
       ...claim.people.map((person) => ({
         record: id,
@@ -448,24 +483,15 @@ export const intakeOf = async (
       }))
     );
   }
+  const drawings: IntakeDrawing[] = [];
   for (const work of intake.works) {
     // oxlint-disable-next-line no-await-in-loop -- a hash each, in order
     const workflowId = await intakeIds.workflow(intake.team.id, work.id);
-    const [workflow] = recordOf({
-      type: "workflow",
-      id: workflowId,
-      name: clean(work.name),
-      ...(work.local === "" || work.local === work.name
-        ? {}
-        : { local: clean(work.local) }),
-      ...(work.one === "" ? {} : { one: clean(work.one) }),
-      teamId,
-      sourceId,
-      status: "drawn",
-    });
-    if (workflow === undefined) {
-      continue;
-    }
+    const name = clean(work.name);
+    const local =
+      work.local === "" || work.local === work.name
+        ? undefined
+        : clean(work.local);
     const support = supports.get(work.id);
     if (support === undefined) {
       continue;
@@ -473,26 +499,27 @@ export const intakeOf = async (
     const body = { ...versionOf(work, clean, support), workflowId, sourceId };
     // oxlint-disable-next-line no-await-in-loop -- a hash each, in order
     const id = await ownId("wfv", canonicalJson(body));
-    const version = recordOf({ ...body, id });
-    records.push(workflow, ...version);
-    // A workflow rests on the lead who named it and on whom it was drawn
-    // from, so it stays while any of them does; each drawing on whom it
-    // was drawn from, and the lead whose facts were its context.
+    const [drawing] = recordOf({ ...body, id });
+    if (drawing?.type !== "workflowVersion") {
+      continue;
+    }
+    drawings.push({
+      record: id,
+      workflow: workflowId,
+      name,
+      ...(local === undefined ? {} : { local }),
+      drawing,
+    });
+    // A drawing rests on whom it was drawn from, and the lead whose facts
+    // were its context.
     rests.push(
-      ...[...new Set([...work.namedBy, ...work.drawn.from])].map((person) => ({
-        record: workflowId,
-        type: "workflow" as const,
+      ...[...new Set([...work.drawn.from, ...work.context])].map((person) => ({
+        record: id,
+        type: "workflowVersion" as const,
         person,
-      })),
-      ...(version.length === 0
-        ? []
-        : [...new Set([...work.drawn.from, ...work.context])].map((person) => ({
-            record: id,
-            type: "workflowVersion" as const,
-            person,
-            parent: workflowId,
-          })))
+        parent: workflowId,
+      }))
     );
   }
-  return { records, rests };
+  return { records, claims: kept, drawings, rests };
 };

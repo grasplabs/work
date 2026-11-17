@@ -38,6 +38,9 @@ import m0035 from './0035_fine_adam_destine.sql';
 import m0036 from './0036_cuddly_leopardon.sql';
 import m0037 from './0037_late_mongu.sql';
 import m0038 from './0038_lush_eternity.sql';
+import m0039 from './0039_salty_prodigy.sql';
+import m0040 from './0040_zippy_fabian_cortez.sql';
+import m0041 from './0041_plain_franklin_storm.sql';
 
   export default {
     journal,
@@ -80,7 +83,10 @@ m0034,
 m0035,
 m0036,
 m0037,
-m0038
+m0038,
+m0039,
+m0040,
+m0041
     }
   }
   

@@ -1627,11 +1627,14 @@ const leavingNone = [
   "confirmMemory",
   // Cards likewise: read whole in their call (cards.ts).
   "erasePerson",
-  // A person's own entity, read in one statement (own-entity.ts).
+  // A person's own entity and their profile, each read in one snapshot
+  // (own-entity.ts).
   "ownEntity",
+  "readProfile",
   // One read of which keys and memories an erasure took.
   "erasedOf",
-  // The shared store's alone: a person's own store refuses it.
+  // The shared store's alone: a person's own store refuses them.
+  "erasePersonShared",
   "eraseWriter",
   "erasureStatus",
   "exportFile",
@@ -1657,6 +1660,10 @@ const leavingNone = [
   "repackVectors",
   "restoreStatus",
   "retireMemory",
+  // A writer's own word, listed and retired in one statement each
+  // (written.ts).
+  "listWritten",
+  "retireWritten",
   "searchVectors",
   "startExport",
   // A person's own store refuses the company's export and every restore.
@@ -2708,6 +2715,9 @@ describe("what an erasure took for good, asked of a person's own store", () => {
       source: held?.source?.source ?? null,
       writer: held?.writer ?? null,
       learnedAt: held?.learnedAt.getTime() ?? 0,
+      speaker: held?.speaker ?? { kind: "system" },
+      about: entity,
+      object: null,
     };
   };
 
@@ -2748,6 +2758,9 @@ describe("what an erasure took for good, asked of a person's own store", () => {
       source: null,
       writer: null,
       learnedAt: 0,
+      speaker: { kind: "system" },
+      about: crypto.randomUUID(),
+      object: null,
     };
     const asked = {
       sources: [kept.source, erased.source, `${group}/1`, `${group}/2`],

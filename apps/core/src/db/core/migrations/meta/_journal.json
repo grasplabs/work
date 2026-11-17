@@ -1814,6 +1814,27 @@
       "when": 1794874936233,
       "tag": "0258_agent_offered",
       "breakpoints": true
+    },
+    {
+      "idx": 259,
+      "version": "6",
+      "when": 1794877911407,
+      "tag": "0259_kickoff_records_removed",
+      "breakpoints": true
+    },
+    {
+      "idx": 260,
+      "version": "6",
+      "when": 1794887510924,
+      "tag": "0260_onboarding_statements_removed",
+      "breakpoints": true
+    },
+    {
+      "idx": 261,
+      "version": "6",
+      "when": 1794894522942,
+      "tag": "0261_onboarding_workflows_removed",
+      "breakpoints": true
     }
   ]
 }

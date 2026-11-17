@@ -1,4 +1,8 @@
 import { brainQuestionMaxLength } from "@grasp-os/shared/brain-sources";
+import {
+  instructionsMaxLength,
+  isOverInstructionsLimit,
+} from "@grasp-os/shared/instruction-files";
 import { z } from "zod";
 
 import type { BrainStore } from "./store.ts";
@@ -119,13 +123,6 @@ export const recallBudgetMax = 32_000;
 
 /** Most characters of a source's identity, and of a change's key. */
 export const sourceIdMaxLength = 256;
-
-/**
- * Most UTF-16 units (`.length`) of an instruction file's text: about 2000
- * tokens, so the few files a chat starts with leave it room for the
- * conversation.
- */
-export const instructionsMaxLength = 8000;
 
 /** Most sources one read of current versions names. */
 export const currentReadMax = 10;
@@ -319,10 +316,6 @@ export const newSourceSchema = z.strictObject({
   readAt: z.int().nonnegative().optional(),
 });
 export type NewSource = z.infer<typeof newSourceSchema>;
-
-/** Whether `text` is over `instructionsMaxLength` UTF-16 units. */
-export const isOverInstructionsLimit = (text: string): boolean =>
-  text.length > instructionsMaxLength;
 
 /**
  * An instruction file's text: at most `instructionsMaxLength` UTF-16
@@ -1580,8 +1573,11 @@ export interface RestoreStatus {
   export: string;
   /**
    * Failed restores start again while the store holds nothing but what they
-   * wrote; abandoned once it took anything, or the ledger names what the
-   * export holds.
+   * wrote, also once a source's or a person's erasure names what the export
+   * holds (started again, they leave it out). Abandoned once the store took
+   * anything since (a version, or a write of memories; a writer's erasure,
+   * as an App's data reset, counts as one, as it moves the store's write
+   * stamp), or once its check found a part of the export damaged.
    */
   state: "running" | "done" | "failed" | "abandoned";
   restored: number;
@@ -1932,6 +1928,28 @@ export const identifierSchema = z.discriminatedUnion("type", [
 ]);
 export type Identifier = z.infer<typeof identifierSchema>;
 
+/**
+ * A person to erase from the shared store (`Brain.erasePersonShared`):
+ * the host's id for them, as it names them whose word a memory is or who
+ * confirmed one, and the exact identifiers the host verified as theirs
+ * (their sign-in email). A name is never one: only exact evidence says
+ * which entity is theirs.
+ */
+export const sharedPersonErasureSchema = z.strictObject({
+  person: principalSchema,
+  identifiers: z.array(identifierSchema).max(namesPerEntityMax),
+  reason: z.literal("person_erased"),
+});
+export type SharedPersonErasure = z.infer<typeof sharedPersonErasureSchema>;
+
+/**
+ * Who confirmed a memory (`Memory.confirmed.by`) once a person's erasure
+ * took who it was (`Brain.erasePersonShared`): the confirmation stands, so
+ * the memory doesn't turn contested because someone left, and no
+ * principal is ever this.
+ */
+export const erasedConfirmer = "";
+
 /** A short text a memory holds: some text, at most `max` characters. */
 const someText = (max: number) =>
   wellFormedString().regex(/\S/u, { message: "Holds no text" }).max(max);
@@ -2158,6 +2176,7 @@ export interface Memory {
   validUntil: Date | null;
   learnedAt: Date;
   endedAt: Date | null;
+  /** `by` is `erasedConfirmer` once an erasure took who it was. */
   confirmed: { by: string; at: Date } | null;
   contested: boolean;
 }
@@ -2300,15 +2319,21 @@ export type ReadableMemoriesRequest = z.infer<
 /**
  * A memory to ask whether an erasure took it (`Brain.erasedOf`), with what
  * it rests on as a host read it when it was handed over: the key of the
- * source it was drawn from, or its writer, and when the store learned it.
- * What decides is the erasure ledger alone, which outlives a lost storage:
- * never whether the store holds the memory now.
+ * source it was drawn from, or its writer, and when the store learned it;
+ * whose word it is, and the entity it is about and the one it relates to
+ * (a person's erasure takes a memory by those: people.ts). None of them
+ * ever changes for a memory. What decides is the erasure ledger alone,
+ * which outlives a lost storage: never whether the store holds the memory
+ * now.
  */
 export const erasedMemorySchema = z.strictObject({
   memory: memoryIdSchema,
   source: sourceIdSchema.nullable(),
   writer: principalSchema.nullable(),
   learnedAt: z.int().nonnegative(),
+  speaker: speakerSchema,
+  about: entityIdSchema,
+  object: entityIdSchema.nullable(),
 });
 export type ErasedMemory = z.infer<typeof erasedMemorySchema>;
 
@@ -2357,6 +2382,58 @@ export interface RetiredMemory {
   retiredAt: Date;
   change: string | null;
 }
+
+/**
+ * Where a page of `listWritten` ended: its last memory's learning time
+ * and id. The next page starts after it.
+ */
+export const writtenCursorSchema = z.strictObject({
+  learnedAt: z.date(),
+  memory: memoryIdSchema,
+});
+export type WrittenCursor = z.infer<typeof writtenCursorSchema>;
+
+/**
+ * What `writer` wrote to list (`Brain.listWritten`), for `reader`, the
+ * person the host resolved as that writer: a page of at most `limit`,
+ * after `after`.
+ */
+export const writtenRequestSchema = z.strictObject({
+  writer: principalSchema,
+  reader: readerSchema,
+  after: writtenCursorSchema.optional(),
+  limit: z.int().min(1).max(memoriesReadMax).default(memoriesReadMax),
+});
+export type WrittenRequest = z.input<typeof writtenRequestSchema>;
+
+/**
+ * A memory its writer wrote and hasn't retired: its id, who may read it
+ * (`Access`, null for readers the contract can't name), when it was
+ * learned, and the memory as the reader reads it (`Memory`, ended ones
+ * too), or null when they may not read it now: then nothing of what it
+ * says.
+ */
+export interface WrittenMemory {
+  id: MemoryId;
+  access: Access | null;
+  learnedAt: Date;
+  memory: Memory | null;
+}
+
+/** A page of `listWritten`, by learning time then id; whether more follow, and where to go on from. */
+export interface WrittenPage {
+  memories: WrittenMemory[];
+  more: boolean;
+  next?: WrittenCursor;
+}
+
+/** A memory of `writer`'s own lineage to retire whoever may read it (`Brain.retireWritten`), under the caller's change. */
+export const retireWrittenRequestSchema = z.strictObject({
+  memory: memoryIdSchema,
+  writer: principalSchema,
+  change: changeKeySchema,
+});
+export type RetireWrittenRequest = z.infer<typeof retireWrittenRequestSchema>;
 
 /** A memory the reader confirms, as their own word. */
 export const confirmRequestSchema = z.strictObject({
@@ -2544,6 +2621,28 @@ export type MemoryChangeOutcome = "done" | "nothing";
 // as `own`. An entity that holds the person's email is another entity.
 // Kept while the store is (erasing its memories leaves it), and gone with
 // the store erased whole. The shared store holds none, and refuses `own`.
+
+/**
+ * The reader's profile to read (store.ts `readProfile`), in their own
+ * store, within `budget.tokens` (`packMemoryTokens` each).
+ */
+export const profileRequestSchema = z.strictObject({
+  reader: personReaderSchema,
+  budget: z.strictObject({ tokens: z.int().min(1).max(recallBudgetMax) }),
+});
+export type ProfileRequest = z.input<typeof profileRequestSchema>;
+
+/**
+ * What a chat starts with about its reader (the plan's profile): the
+ * current memories about their own entity in their own word (an
+ * `internal` speaker who is the reader), newest first (by when each was
+ * learned, then by id), each whole, as many as fit the budget, stopping at
+ * the first that doesn't. Built when asked, from what the reader may read,
+ * never stored, so a changed or retired memory changes the next one.
+ */
+export interface Profile {
+  memories: Memory[];
+}
 
 /** The reader's own entity to read, in their own store. */
 export const ownEntityRequestSchema = z.strictObject({
@@ -2976,6 +3075,35 @@ export interface Brain {
    */
   eraseWriter: (request: WriterErasure) => Promise<WriterErased>;
   /**
+   * Erases from the shared store what it derived about `person`, and what
+   * is in their own word, for an erasure of the person (erasure.ts
+   * `erasePersonShared`, people.ts): every memory whose speaker is them;
+   * on an entity of kind `person` holding one of `identifiers`, their card,
+   * every memory about it or relating to it, so it goes whole with its
+   * names; on any other entity holding one of them, that identifier alone.
+   * Hidden from every read at once, recorded in the ledger, deleted by the
+   * tick if not by the call. Their confirmations stand, the confirmer
+   * replaced by `erasedConfirmer`; every export started before it is
+   * stale, when it changed anything. Their identifiers stay closed: a
+   * write leaves one out and writes the rest, answering as for an
+   * identifier held nowhere; what is drawn from a source (extraction, a
+   * write resting on a version) also leaves out a person's card holding
+   * one, with what is about it or relates to it, and their word. A restore
+   * of an export (`startRestore`), before it writes any line and again on
+   * every start, closes each `person` card the export gives with one, and
+   * then passes over every line about it or relating to it, whichever
+   * comes first, and every line in their word; another entity only loses
+   * the identifier. Closed for good: nothing opens one again, also once
+   * the host gives the address to someone else. The sources stay. Safe
+   * to repeat: the same person is the same erasure, its identifiers those
+   * of its first call. Refused while a restore runs (`restoringNow`), to
+   * be asked again once it is through or given up; not held by one that
+   * failed.
+   * Returns only once its entry is in the ledger: one that throws must be
+   * repeated. The shared store's alone: a person's own store refuses.
+   */
+  erasePersonShared: (request: SharedPersonErasure) => Promise<void>;
+  /**
    * Whether a source was erased, from the store's record of its ledger
    * alone (`ErasureStatus`). For staff, who name what a client
    * gave them: it reads nothing but that record, so what was never erased
@@ -3052,8 +3180,11 @@ export interface Brain {
    * object or names one of another kind, a value is missing or given to a
    * relation, a source version isn't one this store holds (erased ones
    * included), a person's own store is given anyone else's readers, or the
-   * change was added before with other memories. The same change again
-   * answers what it added.
+   * change was added before with other memories. An identifier a person's
+   * erasure closed is left out (`erasePersonShared`); when the add is
+   * drawn from a source, so is that person's card with what is about it
+   * or relates to it, which the answer then doesn't name. The same change
+   * again answers what it added.
    */
   addMemories: (memories: NewMemories) => Promise<AddedMemories>;
   /**
@@ -3097,8 +3228,10 @@ export interface Brain {
    * Of the keys and memories asked, those an erasure took for good, as
    * the erasure ledger alone says it, whoever may read them, in the order
    * asked and each once: a key as `keyState` answers `erased`; a memory
-   * whose source's key is so erased, or whose writer was erased after the
-   * store learned it (`eraseWriter`). Never a retired memory, a key whose
+   * whose source's key is so erased, whose writer was erased after the
+   * store learned it (`eraseWriter`), or that a person's erasure takes
+   * (`erasePersonShared`): in that person's word, or about or relating to
+   * an entity it closed (their card). Never a retired memory, a key whose
    * readers only changed, nor a memory only because the store doesn't
    * hold it now: a lost storage, until a restore puts it back, lacks what
    * was never erased. For the host only, which asks of what it once read
@@ -3126,6 +3259,28 @@ export interface Brain {
    * still answers its time on a repeat.
    */
   retireMemory: (request: RetireRequest) => Promise<RetiredMemory | null>;
+  /**
+   * A page of what `writer` wrote (its lineage is the writer's) and hasn't
+   * retired, by when it was learned: each with who may read it and when
+   * it was learned, and the memory itself only where the reader may read
+   * it now; of any other, nothing of what it says. Never one an erasure
+   * hides. For the host only, for a person listing their own word
+   * (core's shares of a memory), the writer and the reader both that
+   * person, as the host verified them: the store can't tell.
+   */
+  listWritten: (request: WrittenRequest) => Promise<WrittenPage>;
+  /**
+   * Retires one of `writer`'s own memories whoever may read it, as
+   * `retireMemory` retires one, expired or not: its writer taking back
+   * their own word, which removes and reads nothing. Answers when and by
+   * which change (`RetiredMemory`), the same again for one this writer
+   * retired before. Null alike for no such memory, another writer's, and
+   * one an erasure hides. For the host only, the writer as the host
+   * verified them.
+   */
+  retireWritten: (
+    request: RetireWrittenRequest
+  ) => Promise<RetiredMemory | null>;
   /**
    * The reader confirms a current memory they may read, over the current
    * memories of other lineages they may read that say something else of
@@ -3169,6 +3324,12 @@ export interface Brain {
    * whole. Only for that store's person; the shared store refuses.
    */
   ownEntity: (request: OwnEntityRequest) => Promise<EntityId | null>;
+  /**
+   * The reader's profile (`Profile`), in their own store, built now: empty
+   * while they have no own entity, and once the store is erased whole.
+   * Only for that store's person; the shared store refuses.
+   */
+  readProfile: (request: ProfileRequest) => Promise<Profile>;
   /**
    * An entity's card as the reader sees it (`Card`), built now from the
    * memories they may read: null when they may see no such entity, alike

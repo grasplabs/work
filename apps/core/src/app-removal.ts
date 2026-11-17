@@ -82,9 +82,6 @@ import {
 //   (`app.conflict`). A restore that read it archived before the removal
 //   writes only over an App not removed (app-status.ts), so it is refused
 //   in turn, never undoing the removal.
-// - What it was, kept where people search: its Apps-collection entry
-//   (its name, description and AGENTS.md) is replaced by a tombstone and
-//   read by nobody, admins included (app-entries.ts).
 // - Its default store's records stuck: a removed App has no builders, so
 //   the organization's own admins, never Grasp staff, read, export and
 //   delete its default store (data-stores.ts, `managedBy`); the store's

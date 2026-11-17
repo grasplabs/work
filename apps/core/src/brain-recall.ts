@@ -26,7 +26,6 @@ import {
   codeEntitiesAs,
   codeRecallOf,
   isCodeEntitiesRequest,
-  passagesReadAs,
   recallPassagesAs,
   skillVersionRefOf,
 } from "./brain-next.ts";
@@ -215,16 +214,20 @@ export const recallFor = async (
     });
     // A capture and an interview are one person's own, kept only in their
     // own store (core's addSource refuses them anywhere else), which this
-    // recall never reads; a team's claims from its interviews are read as
-    // the person alone (brain-next.ts `readerOf`): none can be here.
-    // Narrowed for the SDK's type, never thrown over.
+    // recall never reads; a team's claim or drawing from the onboarding's
+    // interviews is read by members as themselves alone (brain-next.ts
+    // `membersGroup`),
+    // which code never reads as, so no statement of this recall ever ranks
+    // or counts one: none can be here. Narrowed for the SDK's type, never
+    // thrown over.
     const pack: BrainPack = {
       ...recalled,
       items: recalled.items.flatMap((item) => {
         const { producer, id } = item.source;
         return producer === "capture" ||
           producer === "interview" ||
-          producer === "claim"
+          producer === "claim" ||
+          producer === "drawing"
           ? []
           : [{ ...item, source: { producer, id } }];
       }),
@@ -253,7 +256,7 @@ export const recallFor = async (
 //   read. The passages are the Brain's, found as recall finds them for
 //   the chat's code (`recallFor`'s reach), filtered by the reader inside
 //   the Brain's own statements; each upload is checked again in the one
-//   statement that reads its uploader (`uploadersOf`), as this read's
+//   statement that reads its uploader (`uploadersOf`), as the same
 //   reader. A document they may not read answers as one nobody holds.
 // - What only one person may read becomes evidence for anyone else: no
 //   person's own store is read (`personal: false`; the shared store holds
@@ -281,12 +284,14 @@ export interface UploadVersion {
 }
 
 /**
- * A person who knows about the topic: who they are, and the one version
- * they uploaded that the asker may read and that answers best.
+ * A person who knows about the topic: who they are, the one version they
+ * uploaded that the asker may read and that answers best, and how its
+ * passage was found, as a pack's item says (`BrainPack`).
  */
 export interface PersonWhoKnows extends UploadVersion {
   id: string;
   name: string;
+  found: BrainPack["items"][number]["found"];
 }
 
 /**
@@ -360,23 +365,22 @@ export const whoKnowsFor = async (
     // their own chat (`reach`), the company alone anywhere else. Never
     // their own store (`personal: false`): a second layer, as the shared
     // store keeps nothing only one person may read.
-    const { passages, teams } = await passagesReadAs(
-      env,
-      caller.authority.onBehalfOf,
-      {
-        question: asked.question,
-        budget: asked.budget,
-        personal: false,
-        company: caller.reach !== "teams",
-      }
+    const reachesTeams = caller.reach === "teams";
+    const passages = await recallPassagesAs(env, caller.authority.onBehalfOf, {
+      question: asked.question,
+      budget: asked.budget,
+      personal: false,
+      company: !reachesTeams,
+    });
+    const uploads = passages.items.flatMap(({ source, version, found }) =>
+      source.producer === "upload" ? [{ id: source.id, version, found }] : []
     );
-    const uploads = passages.items.flatMap(({ source, version }) =>
-      source.producer === "upload" ? [{ id: source.id, version }] : []
-    );
+    // A team's upload as the person reads it now, in the same statement
+    // as its uploader (`uploadersOf`); none as the company alone.
     const found = await uploadersOf(
       env,
       [...new Set(uploads.map(({ id }) => id))],
-      teams
+      { person: reachesTeams ? caller.authority.onBehalfOf : null }
     );
     const uploaders = new Map(
       found.map((uploader) => [uploader.uploadId, uploader])
@@ -384,7 +388,7 @@ export const whoKnowsFor = async (
     // Each person once, with their first upload in the pack's order: the
     // one that answers best.
     const people = new Map<string, PersonWhoKnows>();
-    for (const { id, version } of uploads) {
+    for (const { id, version, found: how } of uploads) {
       const uploader = uploaders.get(id);
       if (uploader !== undefined && !people.has(uploader.userId)) {
         people.set(uploader.userId, {
@@ -392,6 +396,7 @@ export const whoKnowsFor = async (
           name: uploader.name,
           source: { producer: "upload", id },
           version,
+          found: how,
         });
       }
     }

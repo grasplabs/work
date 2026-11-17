@@ -25,6 +25,7 @@
 /** The erasure areas (person-erasure.ts), and removal before them. */
 export const erasureAreas = [
   "removal",
+  "brain_shared",
   "identity",
   "channels",
   "connect",
@@ -181,8 +182,13 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "core.preview_fixture_stores": {
     none: "nothing writes or reads it; dropped by the next contract migration",
   },
+  // A source is a pin (history-access.ts): a memory's pin names other
+  // people by ID, its writer and the person whose word it is. Their
+  // erasure removes neither; the IDs stay, as the company's records keep
+  // an erased person's ID (D3).
   "core.run_chat_sources": {
-    company: "what a run's chat had read, with the run (D3)",
+    company:
+      "what a run's chat had read, with the run; its pins keep other people's IDs after their erasure (D3)",
   },
   "core.org_settings": {
     none: "the organization's billing and Pulse settings",
@@ -408,6 +414,10 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "workspace.chat_drafts": { erased: "workspace" },
   "workspace.chat_files": { erased: "workspace" },
   "workspace.chat_messages": { erased: "workspace" },
+  // Its person's alone, erased with their workspace. A memory's pin also
+  // names other people by ID (its writer, the person whose word it is):
+  // their erasure removes neither, and the IDs stay in this person's chat,
+  // as the company's records keep an erased person's ID (D3).
   "workspace.chat_run_sources": { erased: "workspace" },
   "workspace.chat_search_text": { erased: "workspace" },
   "workspace.chat_sources": { erased: "workspace" },
@@ -454,6 +464,9 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "onboarding.brain_teams": noPerson,
   "onboarding.brain_claims": {
     company: "a team's claims seven or more told and five back, names out",
+  },
+  "onboarding.brain_drawings": {
+    company: "a team's work as five or more told it, names out",
   },
   "onboarding.checked_differences": {
     company: "a team's difference five or more told each way, names out",
@@ -522,6 +535,114 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   // The audit log: IDs only, never rewritten, archived for 7 years (D2).
   "auditLog.events": { kept: "the audit log (D2)" },
   "auditLog.archives": noPerson,
+  // The new Brain's shared store (@grasp-os/brain-next): what a team, the
+  // company, an App's users or a staff-list team may read, or nobody.
+  // Erasing a member removes what the Brain derived about them and what is
+  // in their own word, and keeps the company's documents, even where their
+  // text names them (decided 16 November, GRA-1747): `brain_shared`
+  // (brain-next.ts `erasePersonShared`; the Brain's people.ts). What one
+  // person alone may read is never here (the store refuses it,
+  // store.ts `#mayKeep`): it is in their own store, the same tables, which
+  // their erasure deletes whole (`brain_sources`, brain-next.ts
+  // `erasePerson`), its record in R2 read before the store answers
+  // anything, so a restore brings nothing back; so a person's own store
+  // needs no entry here. The word indexes (migrations, not in the schema)
+  // hold the words of these passages and memories, and go with them.
+  "brainStore.reader_sets": {
+    none: "sets of groups: the shared store refuses a set of one person",
+  },
+  "brainStore.reader_set_members": {
+    none: "groups: the shared store refuses a set of one person",
+  },
+  "brainStore.files": noPerson,
+  "brainStore.source_versions": {
+    company: "documents a team or more may read, even where they name them",
+  },
+  "brainStore.current_versions": { company: "the current version of each" },
+  "brainStore.removed_sources": {
+    company: "documents taken out of use, kept as history",
+  },
+  "brainStore.source_changes": {
+    company: "the change keys of each add, as its producer named them",
+  },
+  "brainStore.source_subjects": {
+    kept: "SHA-256 of each source's key, as the erasure ledger names it",
+  },
+  "brainStore.known_groups": {
+    kept: "SHA-256 of each key named a group, so an erased group stays closed",
+  },
+  "brainStore.chunks": { company: "passages of those documents" },
+  "brainStore.chunk_days": {
+    company: "the days passages of those documents mention",
+  },
+  "brainStore.chunk_blocks": noPerson,
+  "brainStore.vector_models": noPerson,
+  "brainStore.vector_blocks": { company: "vector codes of those passages" },
+  "brainStore.vector_codes": { company: "vector codes of those passages" },
+  "brainStore.vector_removed": noPerson,
+  "brainStore.vector_files": noPerson,
+  "brainStore.embedding_state": noPerson,
+  "brainStore.unembeddable": noPerson,
+  "brainStore.work_items": {
+    company:
+      "work on those documents; a drawing names whose word a version is, by ID, and leaves out what is in an erased person's",
+  },
+  "brainStore.work_model_bucket": noPerson,
+  "brainStore.word_index": noPerson,
+  "brainStore.erasures": {
+    kept: "the erasure ledger's record: SHA-256 of a source's key, a writer's lineage or an erased person's id (D2)",
+  },
+  "brainStore.erasing_versions": { kept: "erasures under way, by row" },
+  "brainStore.erased_versions": {
+    kept: "what an older release's erasure hid, by SHA-256 of a source's key",
+  },
+  "brainStore.person_erasure_subjects": {
+    kept: "what a person's erasure closed: their address by SHA-256, closed for good, and their card by its id",
+  },
+  // SHA-256 of the identifiers of the person cards a restore's export
+  // gives: a person's erasure deletes the rows of theirs, after taking the
+  // cards by them (people.ts `applyPerson`); the rest go once the restore
+  // is done, or, given up, with each card the store holds (forget.ts).
+  "brainStore.restore_cards": { erased: "brain_shared" },
+  "brainStore.person_erasure_memories": {
+    kept: "the memories a person's erasure hides until the tick deletes them, by row",
+  },
+  "brainStore.exports": {
+    company:
+      "exports an admin asked for; one started before a member's erasure is stale",
+  },
+  "brainStore.export_parts": noPerson,
+  "brainStore.export_sources": {
+    company: "the versions each export holds, by SHA-256 of a source's key",
+  },
+  "brainStore.export_sweep": noPerson,
+  "brainStore.restores": noPerson,
+  // The person entity that is them alone (by the address they signed in
+  // with), the memories about it or in their word, and the names those
+  // gave; on anyone else's entity (a team, a project, a shared desk) their
+  // address alone.
+  "brainStore.entities": { erased: "brain_shared" },
+  "brainStore.memories": { erased: "brain_shared" },
+  "brainStore.entity_names": { erased: "brain_shared" },
+  // Their confirmations stand, their id replaced (`erasedConfirmer`).
+  "brainStore.memory_confirmations": { erased: "brain_shared" },
+  "brainStore.memory_confirmed_over": noPerson,
+  "brainStore.memory_extractions": {
+    company: "marks of the versions fully drawn from",
+  },
+  "brainStore.memory_changes": {
+    kept: "SHA-256 of change keys and ids, so an erased add is never made again",
+  },
+  "brainStore.memory_erase_failures": noPerson,
+  "brainStore.memory_erasure_replay": noPerson,
+  "brainStore.memory_stamps": noPerson,
+  "brainStore.memory_outs": noPerson,
+  "brainStore.memory_ins": noPerson,
+  "brainStore.memory_judging": noPerson,
+  "brainStore.memory_judging_places": noPerson,
+  "brainStore.own_entity": {
+    none: "a person's own store's entity for its person (own-entity.ts): the shared store holds none, and their own store is erased whole",
+  },
 };
 
 /**
@@ -534,6 +655,18 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
 export const reviewedPersonColumns: Readonly<
   Record<string, readonly string[]>
 > = {
+  "brainStore.erased_versions": ["subject"],
+  "brainStore.erasures": ["subject"],
+  "brainStore.export_sources": ["subject"],
+  "brainStore.known_groups": ["subject"],
+  "brainStore.memories": ["speaker", "subject", "writer", "writer_subject"],
+  "brainStore.memory_confirmations": ["person"],
+  "brainStore.memory_extractions": ["subject"],
+  "brainStore.person_erasure_subjects": ["subject"],
+  "brainStore.restore_cards": ["subject"],
+  "brainStore.reader_set_members": ["principal"],
+  "brainStore.removed_sources": ["subject"],
+  "brainStore.source_subjects": ["group_subject", "subject"],
   "core.access_revocations": ["user_ids"],
   "core.accounts": ["user_id"],
   "core.action_invocations": ["person_id"],

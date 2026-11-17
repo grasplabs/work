@@ -44,7 +44,9 @@ import { signedInApi, unique } from "./sign-in.ts";
 // 6. A named person outlives what it rests on in the chat's history: the
 //    version cited and the person are pinned, so a later turn withholds
 //    the answer once the document is gone, or the person removed or
-//    erased.
+//    erased; and the chat no longer shows it once either was erased.
+// Team claims and drawings (the `members` reader set) name nobody: code's
+// reach never reads that set, and only uploads name their uploader.
 // 7. The audit log names who was named: each answer is audited by who
 //    asked and counts alone. Without the brain permission a chat's code
 //    has no `env.brain` at all; the harness probes the refusals.
@@ -130,6 +132,7 @@ const answerSchema = z.union([
           id: z.string(),
         }),
         version: z.number(),
+        found: z.enum(["exact", "words", "stop words", "meaning"]),
       })
     ),
     notFound: z.array(z.string()),
@@ -259,7 +262,8 @@ const askedInWokenTurn = async (
 /**
  * Whether a chat whose code named `named` for `topic` still sends that to
  * the model in its next turn, once `change` ran: whether it names them
- * again, and whether the result was withheld.
+ * again, and whether the result was withheld; and whether the chat still
+ * shows its person the code's result naming them (`shown`).
  */
 const sentAfter = async (
   admin: Person,
@@ -282,10 +286,12 @@ const sentAfter = async (
   await change();
   await chat.ask(word());
   const sent = JSON.stringify(chat.provider.requests[before]?.body);
+  const results = await codeResults(chat.stub, chat.chat.id);
   return {
     first,
     named: sent.includes(named.userId),
     withheld: sent.includes(withheldResult),
+    shown: results.some(({ text }) => text.includes(named.userId)),
   };
 };
 
@@ -453,7 +459,7 @@ describe("a chat's code asking who knows about a topic", setUpTime, () => {
     });
   });
 
-  it("withholds its answer from a later turn once the document it cites is erased, or the person it names removed or erased", async () => {
+  it("withholds its answer from a later turn once the document it cites is erased, or the person it names removed or erased, and no longer shows it once erased", async () => {
     const admin = await signedInApi(idp, "admin");
     const [asker, uploader, removed, erased] = await Promise.all([
       signedInApi(idp, "user"),
@@ -470,7 +476,11 @@ describe("a chat's code asking who knows about a topic", setUpTime, () => {
     );
     await uploaded(removed, `Budget ${topics.removed}`, everyone);
     await uploaded(erased, `Budget ${topics.erased}`, everyone);
-    const gone = { first: true, named: false, withheld: true };
+    // Withheld from the model each time; replaced on screen too once an
+    // erasure took it for good (the document, or the person), never when
+    // the person was only removed: their asker saw it while they could.
+    const withheld = { first: true, named: false, withheld: true };
+    const gone = { ...withheld, shown: false };
 
     expect({
       document: await sentAfter(
@@ -499,7 +509,11 @@ describe("a chat's code asking who knows about a topic", setUpTime, () => {
           String(erased.person.name)
         );
       }),
-    }).toStrictEqual({ document: gone, removed: gone, erased: gone });
+    }).toStrictEqual({
+      document: gone,
+      removed: { ...withheld, shown: true },
+      erased: gone,
+    });
   });
 
   it("audits each answer by who asked and counts, never by who was named", async () => {

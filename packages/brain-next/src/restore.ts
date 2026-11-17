@@ -3,10 +3,12 @@ import type { DrizzleSqliteDODatabase } from "drizzle-orm/durable-sqlite";
 import { z } from "zod";
 
 import type { BrainBucket } from "./bucket.ts";
+import { placeChunks } from "./chunk-blocks.ts";
 import { chunksOf } from "./chunks.ts";
 import {
   attributeRuleOf,
   changeKeySchema,
+  erasedConfirmer,
   isWholeKey,
   newInstructionsSchema,
   newMemoriesSchema,
@@ -70,6 +72,16 @@ import {
   lineageOfWriter,
   writerErasedAfterSql,
 } from "./memories.ts";
+import {
+  closeCards,
+  closedOf,
+  entityClosureOf,
+  isErasedPerson,
+  namingOf,
+  personSubjectOf,
+  strippedOf,
+} from "./people.ts";
+import type { Naming } from "./people.ts";
 import { readerSetKeyOf, readerSetOf } from "./reader-sets.ts";
 import { planOf, restatementOf, valueKeyFor } from "./remember.ts";
 import { memoriesWrittenSinceSql, restoreFailedSql } from "./restoring.ts";
@@ -111,8 +123,11 @@ import type { WorkContext } from "./work.ts";
 // key is closed), asked again in the transaction that writes it; and so as each memory and mark resting
 // on one is. That record is the whole ledger: the
 // store answers nothing until it has read the ledger through (store.ts),
-// and an erasure that lands during the restore covers what was restored
-// before it as it covers any content.
+// and an erasure of a source or a writer that lands during the restore
+// covers what was restored before it as it covers any content. A person's
+// erasure doesn't land during one: it is refused until the restore is
+// through or given up (store.ts `erasePersonShared`), then runs on the
+// whole of what came back.
 //
 // While it runs, nothing is added to the store (restoring.ts): no add can
 // meet a version it brings back. It never moves a current pointer that is
@@ -120,9 +135,12 @@ import type { WorkContext } from "./work.ts";
 // (written by a run the store stopped part-way) is passed over, so a run
 // repeated finds what the last one wrote and ends the same, and a failed
 // restore can be started again from the same export while the store holds
-// nothing but what it wrote: once anything is added (a version, or any
-// write of memories, which moves the write stamp), or the ledger names a
-// version the export holds, the restore is given up (`abandoned`), and its
+// nothing but what it wrote, also once a source's or a person's erasure
+// names what the export holds (started again, it leaves that out, and its
+// export is served to no one meanwhile): once anything is added (a
+// version, or any write of memories, which moves the write stamp; a
+// writer's erasure, as an App's data reset, moves it too), or its check
+// found a part damaged, the restore is given up (`abandoned`), and its
 // export's files are no longer held (exports.ts `exportsStep`). It fails rather than
 // fill the store past its quota (contract.ts `storeBytesMax`). Its export
 // is recorded as one the store has (exports.ts `recordRestoredExport`), so
@@ -148,10 +166,10 @@ const refusals = {
   // One a newer release made may hold what this one doesn't know.
   newerFormat: `${refusalPrefix} that export was made by a newer release, which this one can't restore`,
   // An abandoned restore's export id is refused for good: the store it
-  // half-filled has been used since, or its export holds what the ledger
-  // erased (its files are then deleted), so restoring it again would mix
-  // what it wrote with what came after, or bring back nothing whole.
-  givenUp: `${refusalPrefix} that restore was given up: the store took something since, or the ledger names what the export holds`,
+  // half-filled has been used since, or its export is damaged, so restoring
+  // it again would mix what it wrote with what came after, or bring back
+  // nothing whole.
+  givenUp: `${refusalPrefix} that restore was given up: the store took something since, or its export is damaged`,
 } as const;
 
 /** A restore's row, as the store keeps it. */
@@ -404,7 +422,10 @@ const partLineSchema = z.union([
     message: "Not a memory to restore",
   }),
   confirmationLineSchema.refine(
-    ({ person }) => principalSchema.safeParse(person).success,
+    // A person's erasure leaves their confirmations standing, its
+    // confirmer replaced (people.ts).
+    ({ person }) =>
+      person === erasedConfirmer || principalSchema.safeParse(person).success,
     { message: "Not a confirmation to restore" }
   ),
   extractionLineSchema.refine(
@@ -560,11 +581,14 @@ const restoreVersion = async (
       )
       .one();
     const memo: WordMemo = new Map();
+    // In its set of readers' own block, as an add places them.
+    const first = placeChunks(sql, readerSet, chunks.length);
     for (const [position, chunk] of chunks.entries()) {
       const written = sql
         .exec<{ row: number }>(
-          `INSERT INTO chunks (version_row, position, text, hash)
-          VALUES (?, ?, ?, ?) RETURNING row`,
+          `INSERT INTO chunks (row, version_row, position, text, hash)
+          VALUES (?, ?, ?, ?, ?) RETURNING row`,
+          first + position,
           row,
           position,
           chunk.text,
@@ -696,10 +720,20 @@ const passesOverMemory = (
   sql: SqlStorage,
   line: MemoryLine,
   subject: string | null,
-  writerSubject: string | null
+  writerSubject: string | null,
+  naming: Naming
 ): boolean =>
   sql.exec("SELECT 1 FROM memories WHERE id = ?", line.id).toArray().length >
     0 ||
+  // In the word of a person an erasure took, or about or relating to an
+  // entity that was theirs alone (people.ts).
+  isErasedPerson(sql, naming.speakers[0]) ||
+  closedOf(
+    sql,
+    [line.about, ...(line.object === null ? [] : [line.object])].map((id) =>
+      entityClosureOf(id)
+    )
+  ).size > 0 ||
   (line.source !== null &&
     (subject === null ||
       line.version === null ||
@@ -735,9 +769,10 @@ const restoreMemory = async (
   const writerSubject =
     line.writer === null ? null : await writerSubjectOf(line.writer);
   const restatement = await restatementOf(line);
+  const naming = await namingOf(line.entities, [line.speaker]);
   storage.transactionSync(() => {
     const { sql } = storage;
-    if (passesOverMemory(sql, line, subject, writerSubject)) {
+    if (passesOverMemory(sql, line, subject, writerSubject, naming)) {
       return;
     }
     const rows = entityRowsOf(sql, line);
@@ -788,7 +823,13 @@ const restoreMemory = async (
       )
       .one();
     indexMemoryWords(sql, row, line.statement, new Map());
-    for (const { id, names, identifiers } of line.entities) {
+    // Without an identifier a person's erasure closed, as an add keeps it.
+    const kept = strippedOf(
+      sql,
+      line.entities.map((entity) => ({ ...entity, key: entity.id })),
+      naming.identifiers
+    ).entities;
+    for (const { id, names, identifiers } of kept) {
       const entity = rows.get(id);
       if (entity !== undefined) {
         keepNames(sql, entity, row, names, identifiers);
@@ -801,14 +842,20 @@ const restoreMemory = async (
  * Writes the confirmation `line` back, over the memories it names, unless
  * the store lacks any of them (passed over, as erasing one deletes the
  * confirmation) or holds it already (the same memory, person and moment:
- * a run of this restore before). In one transaction.
+ * a run of this restore before). Its confirmer is `erasedConfirmer` once a
+ * person's erasure took them (people.ts), as the erasure leaves one it
+ * finds. In one transaction.
  */
-const restoreConfirmation = (
+const restoreConfirmation = async (
   storage: DurableObjectStorage,
   line: ConfirmationLine
-): void => {
+): Promise<void> => {
+  const confirmer = await personSubjectOf(line.person);
   storage.transactionSync(() => {
     const { sql } = storage;
+    const person = isErasedPerson(sql, confirmer)
+      ? erasedConfirmer
+      : line.person;
     const named = [line.memory, ...line.over];
     const rows = sql
       .exec<{ id: string; row: number }>(
@@ -826,7 +873,7 @@ const restoreConfirmation = (
         `SELECT 1 FROM memory_confirmations
         WHERE memory = ? AND person = ? AND at = ?`,
         memory,
-        line.person,
+        person,
         line.at
       )
       .toArray();
@@ -837,7 +884,7 @@ const restoreConfirmation = (
       .exec<{ row: number }>(
         "INSERT INTO memory_confirmations (memory, person, at) VALUES (?, ?, ?) RETURNING row",
         memory,
-        line.person,
+        person,
         line.at
       )
       .one();
@@ -952,7 +999,7 @@ const restoreMemoriesLine = async (
   if (line.kind === "memory") {
     await restoreMemory(storage, db, line);
   } else if (line.kind === "confirmation") {
-    restoreConfirmation(storage, line);
+    await restoreConfirmation(storage, line);
   } else if (line.kind === "extraction") {
     await restoreExtraction(storage, db, line);
   } else if (line.kind === "removal") {
@@ -985,6 +1032,8 @@ const settle = (
   // hold (an erasure before or during the restore).
   if (settled.length > 0 && state === "done") {
     retireIfStale(storage, id);
+    // The store holds the cards as their lines gave them now.
+    sql.exec("DELETE FROM restore_cards");
   }
 };
 
@@ -1046,9 +1095,39 @@ const checkPart = async (
     (lines ?? []).map(async (line) => await heldBy(line))
   );
   const fromLines = heldByLines.filter((held) => held !== undefined);
+  const memoryLines = (lines ?? []).filter(
+    (line): line is MemoryLine => !isVersionLine(line) && line.kind === "memory"
+  );
+  const namings = await Promise.all(
+    memoryLines.map(async ({ entities }) => {
+      const { identifiers } = await namingOf(entities, []);
+      return identifiers;
+    })
+  );
   storage.transactionSync(() => {
     const { sql } = storage;
     recordExportSources(sql, id, [...(holdings ?? []), ...fromLines]);
+    // Each card of a person an erasure took, as the export gives it, closed
+    // before any line is written (every part is checked first, on every
+    // start): so every line about it is passed over, whichever comes first
+    // in the export, and nothing rests on what an earlier start recorded.
+    for (const [at, { entities }] of memoryLines.entries()) {
+      const subjects = namings[at] ?? [];
+      // Every card of kind `person` it gives, by its identifiers' subjects:
+      // so an erasure before the restore is through takes it by its id.
+      for (const [place, entity] of entities.entries()) {
+        for (const subject of entity.kind === "person"
+          ? (subjects[place] ?? [])
+          : []) {
+          sql.exec(
+            "INSERT OR IGNORE INTO restore_cards (subject, entity) VALUES (?, ?)",
+            subject,
+            entity.id
+          );
+        }
+      }
+      closeCards(sql, id, entities, subjects);
+    }
     // A part whose lines don't check, or whose holdings are missing or
     // unreadable (what it holds may not all be on record), is damaged.
     sql.exec(

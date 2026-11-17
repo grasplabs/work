@@ -15,6 +15,7 @@ import type {
   PersonReader,
   Reader,
 } from "@grasp-os/brain-next/contract";
+import { instructionsMaxLength } from "@grasp-os/shared/instruction-files";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { beforeAll, describe, expect, it } from "vite-plus/test";
@@ -23,7 +24,6 @@ import { z } from "zod";
 import { catchUpDue } from "../src/catch-up.ts";
 import {
   exportFileNameSchema,
-  instructionsMaxLength,
   removedSource,
   restoringNow,
 } from "../src/contract.ts";
@@ -2210,17 +2210,29 @@ describe("exports and restores", () => {
       const asked: ErasedRequest = {
         sources: [kept, erased],
         memories: [onKept, onErased, byKept, byErased].flatMap((id) =>
-          memories.flatMap(({ id: held, source, writer, learnedAt }) =>
-            held === id
-              ? [
-                  {
-                    memory: id,
-                    source: source?.source ?? null,
-                    writer,
-                    learnedAt: learnedAt.getTime(),
-                  },
-                ]
-              : []
+          memories.flatMap(
+            ({
+              id: held,
+              source,
+              writer,
+              learnedAt,
+              speaker,
+              about,
+              object,
+            }) =>
+              held === id
+                ? [
+                    {
+                      memory: id,
+                      source: source?.source ?? null,
+                      writer,
+                      learnedAt: learnedAt.getTime(),
+                      speaker,
+                      about,
+                      object,
+                    },
+                  ]
+                : []
           )
         ),
       };

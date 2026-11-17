@@ -352,9 +352,12 @@ export class BrainAgentApi extends WorkerEntrypoint<Env, AgentScope> {
 }
 
 /** The types `env.brain` returns, as the model reads them. */
-const brainTypes = `/** A passage a recall found: the part of it that best answers the question, or all of it (\`whole\`), cited by its source (an upload, a chat or a run, and its ID), the source's version and the passage's place in it. */
+const brainTypes = `/** A passage a recall found: the part of it that best answers the question, or all of it (\`whole\`), cited by its source (an upload, a chat, a run, the company's vision from the onboarding's kickoff or the company's teams from its staff list, and its ID), the source's version and the passage's place in it. */
 interface BrainPackItem {
-  source: { producer: "upload" | "chat" | "run"; id: string };
+  source: {
+    producer: "upload" | "chat" | "run" | "kickoff" | "roster";
+    id: string;
+  };
   version: number;
   position: number;
   text: string;
@@ -372,12 +375,13 @@ interface BrainPack {
   truncated: boolean;
 }
 
-/** A person who uploaded documents about the topic that your person may read: their member ID and name, and the one version of theirs that answers best. */
+/** A person who uploaded documents about the topic that your person may read: their member ID and name, the one version of theirs that answers best, and how its passage was found (as \`BrainPackItem\`'s \`found\`). */
 interface BrainPersonWhoKnows {
   id: string;
   name: string;
   source: { producer: "upload"; id: string };
   version: number;
+  found: "exact" | "words" | "stop words" | "meaning";
 }
 
 /** Who knows about a topic: the people, by name (never a ranking), the parts of the question nothing they may read holds, and whether the budget left a passage out. */
