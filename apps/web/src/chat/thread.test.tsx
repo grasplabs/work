@@ -46,6 +46,24 @@ const asked: ChatMessage = {
   at: "2026-10-27T09:00:00.000Z",
 };
 
+/** A finished answer, `text`. */
+const answer = (id: number, text: string): ChatMessage => ({
+  id,
+  role: "assistant",
+  text,
+  citations: [],
+  code: [],
+  tools: [],
+  end: "done",
+  at: "2026-10-27T09:00:05.000Z",
+});
+
+/** How many Ask again buttons show. */
+const askAgain = (): number =>
+  [...document.querySelectorAll("button")].filter(
+    (button) => button.getAttribute("aria-label") === "Ask again"
+  ).length;
+
 /**
  * The thread of `messages`, with `partial` being written while it runs,
  * and the calls its code made (`tools`), on a page of its own.
@@ -641,6 +659,21 @@ describe(ChatThread, () => {
       stopped: steps?.includes("Stopped while writing"),
       words,
     }).toStrictEqual({ stopped: true, words: "Four, as the" });
+  });
+
+  it("offers to ask again under an answer with words, and nothing under one without", async () => {
+    await thread([asked, answer(2, "Four.")]);
+    const worded = askAgain();
+    act(() => {
+      root?.unmount();
+    });
+    document.body.replaceChildren();
+    await thread([asked, answer(2, "")]);
+
+    expect({ worded, wordless: askAgain() }).toStrictEqual({
+      worded: 1,
+      wordless: 0,
+    });
   });
 
   it("shows a response's tool calls and code steps in the order it made them", async () => {

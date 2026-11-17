@@ -36,9 +36,11 @@ import { focus } from "../focus/focus";
 import { visuallyHidden } from "../hidden/hidden";
 import { ArrowDown, Icon, Spinner } from "../icons";
 import { scroll } from "../scroll/scroll";
+import { useWords, useWordsLocale, withGiven } from "../words/words";
 import { dayWritten, rowsOf } from "./rows";
 import type { ThreadItemBase, ThreadRow } from "./rows";
 import { threadPlaces as places, threadStyles as styles } from "./styles";
+import { threadWords } from "./words";
 
 /** The words the thread writes itself: its lines, its status words and the days. */
 export interface ThreadWords {
@@ -621,16 +623,26 @@ const afterLoading = async (result: unknown, done: () => void) => {
   }
 };
 
-/** Its words in English: replace any of them through `words`. */
-const englishWords: ThreadWords = {
-  unread: "Unread",
-  unreadFrom: "Unread messages from here",
-  loadingOlder: "Loading older messages",
-  jumpToNew: (jumpLabel) => `${jumpLabel}, new messages`,
-  arrived: (count) => (count === 1 ? "1 new message" : `${count} new messages`),
-  today: "Today",
-  yesterday: "Yesterday",
-  day: (day, sameYear) => dayWritten(day, sameYear),
+/**
+ * Its own words: the product's, by its catalogue, else English; the caller's `words` and `jumpLabel`
+ * still win. The days in the catalogue's locale, unless someone gave `day`.
+ */
+const useThreadWords = (
+  given: Partial<ThreadWords> | undefined,
+  jumpLabel: string | undefined
+) => {
+  const text = withGiven(useWords("thread", threadWords), {
+    ...given,
+    jump: jumpLabel,
+  });
+  const locale = useWordsLocale();
+  return text.day === threadWords.day && locale !== undefined
+    ? {
+        ...text,
+        day: (day: Date, sameYear: boolean) =>
+          dayWritten(day, sameYear, locale),
+      }
+    : text;
 };
 
 /** What the status line says for the messages that came in, or nothing for none. */
@@ -712,14 +724,14 @@ export const Thread = <T extends ThreadItemBase>({
   unreadFrom,
   hasOlder = false,
   onLoadOlder,
-  jumpLabel = "Jump to latest",
+  jumpLabel,
   estimate = 96,
   startAt = "end",
   now: nowProp,
   answerTo,
   words: given,
 }: ThreadProps<T>) => {
-  const words = { ...englishWords, ...given };
+  const words = useThreadWords(given, jumpLabel);
   // The day lines are worked out against `now`, or the day the page was drawn, once, so the server
   // and the browser agree.
   const nowKey = nowProp instanceof Date ? nowProp.getTime() : nowProp;
@@ -1082,7 +1094,7 @@ export const Thread = <T extends ThreadItemBase>({
                 scroller.current?.focus({ preventScroll: true });
               }}
             >
-              {newBelow ? words.jumpToNew(jumpLabel) : jumpLabel}
+              {newBelow ? words.jumpToNew(words.jump) : words.jump}
             </Button>
           </span>
         </div>

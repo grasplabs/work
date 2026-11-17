@@ -628,8 +628,8 @@
     color-mix(in oklch, var(--grasp-shell-card) 94%, var(--grasp-shell-text))
   );
   --grasp-shell-peek-shadow:
-    0 4px 4px 0 light-dark(oklch(0 0 0 / 0.02), oklch(0 0 0 / 0.3)),
-    0 4px 80px 8px light-dark(oklch(0 0 0 / 0.02), oklch(0 0 0 / 0.45)),
+    0 4px 4px 0 light-dark(oklch(0 0 0 / 0.05), oklch(0 0 0 / 0.3)),
+    0 4px 80px 8px light-dark(oklch(0 0 0 / 0.07), oklch(0 0 0 / 0.45)),
     0 0 0 1px light-dark(oklch(0 0 0 / 0.05), oklch(1 0 0 / 0.1));
   --grasp-shell-popup: light-dark(
     oklch(0.992 0.002 165.08),
@@ -1466,8 +1466,8 @@
     color-mix(in oklch, var(--grasp-shell-card) 94%, var(--grasp-shell-text))
   );
   --grasp-shell-peek-shadow:
-    0 4px 4px 0 light-dark(oklch(0 0 0 / 0.02), oklch(0 0 0 / 0.3)),
-    0 4px 80px 8px light-dark(oklch(0 0 0 / 0.02), oklch(0 0 0 / 0.45)),
+    0 4px 4px 0 light-dark(oklch(0 0 0 / 0.05), oklch(0 0 0 / 0.3)),
+    0 4px 80px 8px light-dark(oklch(0 0 0 / 0.07), oklch(0 0 0 / 0.45)),
     0 0 0 1px light-dark(oklch(0 0 0 / 0.05), oklch(1 0 0 / 0.1));
   --grasp-shell-popup: light-dark(
     oklch(0.972 0.014 172),
@@ -2301,8 +2301,8 @@
     color-mix(in oklch, var(--grasp-shell-card) 94%, var(--grasp-shell-text))
   );
   --grasp-shell-peek-shadow:
-    0 4px 4px 0 light-dark(oklch(0 0 0 / 0.02), oklch(0 0 0 / 0.3)),
-    0 4px 80px 8px light-dark(oklch(0 0 0 / 0.02), oklch(0 0 0 / 0.45)),
+    0 4px 4px 0 light-dark(oklch(0 0 0 / 0.05), oklch(0 0 0 / 0.3)),
+    0 4px 80px 8px light-dark(oklch(0 0 0 / 0.07), oklch(0 0 0 / 0.45)),
     0 0 0 1px light-dark(oklch(0 0 0 / 0.05), oklch(1 0 0 / 0.1));
   --grasp-shell-popup: light-dark(oklch(0.982 0.007 85), oklch(0.275 0.006 75));
   --grasp-shell-popup-line: var(--grasp-shell-rule);

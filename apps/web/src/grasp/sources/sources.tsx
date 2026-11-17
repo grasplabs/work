@@ -3,10 +3,11 @@
 import { useId, useState } from "react";
 import type { ReactNode } from "react";
 
+import { useWords, withGiven } from "../words/words";
 import { placeOf, SourcesContext, startList } from "./context";
 import type { Marks, SourcesValue } from "./context";
-import { englishLabels } from "./labels";
 import type { Source, SourcesLabels } from "./types";
+import { sourcesWords } from "./words";
 
 /** Every prop a Sources takes. */
 export interface SourcesProps {
@@ -37,6 +38,8 @@ export const Sources = ({ items, children, labels, onOpen }: SourcesProps) => {
   // In state, not a ref, so reading it while drawing is allowed (the React Compiler's rule).
   const [marks, setMarks] = useState<Marks>(noMarks);
   const [list, setList] = useState(startList);
+  // Its words: the product's, by its catalogue, else English; the caller's `labels` still win.
+  const catalogue = withGiven(useWords("sources", sourcesWords), labels ?? {});
   const value: SourcesValue = {
     sources: items,
     active: hovered ?? focused,
@@ -52,7 +55,7 @@ export const Sources = ({ items, children, labels, onOpen }: SourcesProps) => {
     place: (number, element) => placeOf(marks, number, element),
     list,
     setList,
-    labels: { ...englishLabels, ...labels },
+    labels: catalogue,
     onOpen,
   };
   return <SourcesContext value={value}>{children}</SourcesContext>;

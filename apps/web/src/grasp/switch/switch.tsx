@@ -163,7 +163,10 @@ const breathe = stylex.keyframes({
 
 const styles = stylex.create({
   // The switch alone (labelHidden): only its control, on the line it stands in.
+  // Its own box for the switch's reach to fill, so the reach is the switch's, not the page's.
   alone: {
+    position: "relative",
+    isolation: "isolate",
     display: "inline-flex",
     alignItems: "center",
     verticalAlign: "middle",

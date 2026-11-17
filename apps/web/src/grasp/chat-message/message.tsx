@@ -31,9 +31,12 @@ import { ArrivingContext, usePaced } from "../motion/use-paced";
 import type { PacedOptions } from "../motion/use-paced";
 import { Shimmer } from "../shimmer";
 import { grasp, media } from "../tokens/tokens.stylex";
+import { useWords as useCatalogue, withGiven } from "../words/words";
 import { ChatMessageCopy } from "./copy";
 import { Thoughts } from "./thoughts";
 import type { ChatMessageThoughtsLook } from "./thoughts";
+import { chatMessageWords } from "./words";
+import type { ChatMessageWords } from "./words";
 
 /** What a caller may style: where the message sits. Never its look. */
 export type ChatMessageLayoutStyle = LayoutStyle;
@@ -286,8 +289,6 @@ const styles = stylex.create({
   },
 });
 
-const copyWords = { copy: "Copy", copied: "Copied", failed: "Could not copy" };
-
 /** A string with words in it: an empty one counts as none, as it always has. */
 const filled = (text: string | undefined): text is string =>
   text !== undefined && text !== "";
@@ -315,12 +316,10 @@ const sameAs = (heard: Heard, now: Heard) =>
   heard.streamingLabel === now.streamingLabel &&
   heard.doneLabel === now.doneLabel;
 
-const THINKING = "Thinking";
-
 /** What the status region says after a change, given the status before it. */
 const sayFor = (now: Heard, before: ChatMessageStatus) => {
   if (now.status === "thinking") {
-    return now.thinkingLabel ?? THINKING;
+    return now.thinkingLabel ?? "";
   }
   if (now.status === "streaming") {
     return now.streamingLabel;
@@ -409,8 +408,8 @@ interface ActionRowProps {
   status: ChatMessageStatus;
   copyText: string | undefined;
   actions: ReactNode;
-  label: string | undefined;
-  copyLabels: ChatMessageProps["copyLabels"];
+  label: string;
+  copyLabels: { copy: string; copied: string; failed: string };
 }
 
 const ActionRow = ({
@@ -418,8 +417,8 @@ const ActionRow = ({
   status,
   copyText,
   actions,
-  label = "Message actions",
-  copyLabels = copyWords,
+  label,
+  copyLabels,
 }: ActionRowProps) => {
   const person = from === "person";
   if (
@@ -478,16 +477,12 @@ const useTook = (thinking: boolean) => {
   return took;
 };
 
-// In English, the default of `thoughtLabel`.
-const thoughtFor = (seconds: number) =>
-  `Thought for ${seconds} ${seconds === 1 ? "second" : "seconds"}`;
-
 interface ThoughtProps {
   thinking: boolean;
   thoughts: ReactNode;
   look: ChatMessageThoughtsLook | undefined;
-  label: string | undefined;
-  thoughtLabel: ((seconds: number) => string) | undefined;
+  label: string;
+  thoughtLabel: (seconds: number) => string;
   seconds: number | undefined;
 }
 
@@ -499,8 +494,8 @@ const Thought = ({
   thinking,
   thoughts,
   look = "rule",
-  label = THINKING,
-  thoughtLabel = thoughtFor,
+  label,
+  thoughtLabel,
   seconds,
 }: ThoughtProps) => {
   const took = useTook(thinking);
@@ -543,16 +538,12 @@ const Thought = ({
 };
 
 interface FailureProps {
-  label: string | undefined;
+  label: string;
   onRetry: (() => unknown) | undefined;
-  retryLabel: string | undefined;
+  retryLabel: string;
 }
 
-const Failure = ({
-  label = "Could not answer",
-  onRetry,
-  retryLabel = "Try again",
-}: FailureProps) => (
+const Failure = ({ label, onRetry, retryLabel }: FailureProps) => (
   <div {...stylex.props(styles.failed)}>
     <p role="alert" {...stylex.props(styles.failedWords)}>
       <Icon icon={Alert} />
@@ -664,11 +655,11 @@ const useWaiting = (
 interface SignProps {
   waiting: boolean;
   mark: boolean;
-  label: string | undefined;
+  label: string;
 }
 
 /** What says the agent is at work beside the words: the thinking line before the first word, or the mark when asked for. */
-const Sign = ({ waiting, mark, label = THINKING }: SignProps) => (
+const Sign = ({ waiting, mark, label }: SignProps) => (
   <>
     {waiting && (
       <p aria-hidden="true" data-waiting="" {...stylex.props(styles.waiting)}>
@@ -709,6 +700,34 @@ const useWords = (
   };
 };
 
+/** The caller's text props, by their key in the catalogue's entry (words.ts). */
+const givenOf = (
+  props: Pick<
+    ChatMessageProps,
+    | "personLabel"
+    | "failedLabel"
+    | "retryLabel"
+    | "actionsLabel"
+    | "copyLabels"
+    | "streamingLabel"
+    | "doneLabel"
+    | "thinkingLabel"
+    | "thoughtLabel"
+  >
+): Partial<ChatMessageWords> => ({
+  person: props.personLabel,
+  failed: props.failedLabel,
+  retry: props.retryLabel,
+  actions: props.actionsLabel,
+  copy: props.copyLabels?.copy,
+  copied: props.copyLabels?.copied,
+  copyFailed: props.copyLabels?.failed,
+  streaming: props.streamingLabel,
+  done: props.doneLabel,
+  thinking: props.thinkingLabel,
+  thought: props.thoughtLabel,
+});
+
 /** One message in a conversation: a person's, or the agent's. */
 export const ChatMessage = ({
   from,
@@ -717,7 +736,7 @@ export const ChatMessage = ({
   nameHidden,
   time,
   dateTime,
-  personLabel = "You",
+  personLabel,
   status = "done",
   failedLabel,
   onRetry,
@@ -726,8 +745,8 @@ export const ChatMessage = ({
   actions,
   actionsLabel,
   copyLabels,
-  streamingLabel = "Writing",
-  doneLabel = "Answer ready",
+  streamingLabel,
+  doneLabel,
   streamingMark = false,
   thinkingLabel,
   thoughtLabel,
@@ -739,6 +758,21 @@ export const ChatMessage = ({
   layout,
 }: ChatMessageProps) => {
   const root = useRef<HTMLElement | null>(null);
+  // Its own words: the product's, by its catalogue, else English; a text prop given still wins.
+  const text = withGiven(
+    useCatalogue("chatMessage", chatMessageWords),
+    givenOf({
+      personLabel,
+      failedLabel,
+      retryLabel,
+      actionsLabel,
+      copyLabels,
+      streamingLabel,
+      doneLabel,
+      thinkingLabel,
+      thoughtLabel,
+    })
+  );
   const { words, paced, arriving, streaming, fades, setInside } = useWords(
     children,
     from,
@@ -749,9 +783,9 @@ export const ChatMessage = ({
   const said = useSaid({
     from,
     status: arriving ? "streaming" : status,
-    thinkingLabel,
-    streamingLabel,
-    doneLabel,
+    thinkingLabel: text.thinking,
+    streamingLabel: text.streaming,
+    doneLabel: text.done,
   });
   useKeepFocus(root, from, status);
   const [wordsBox, setWordsBox] = useState<HTMLDivElement | null>(null);
@@ -774,8 +808,12 @@ export const ChatMessage = ({
       status={arriving ? "streaming" : status}
       copyText={copyText}
       actions={actions}
-      label={actionsLabel}
-      copyLabels={copyLabels}
+      label={text.actions}
+      copyLabels={{
+        copy: text.copy,
+        copied: text.copied,
+        failed: text.copyFailed,
+      }}
     />
   );
 
@@ -783,7 +821,7 @@ export const ChatMessage = ({
     return (
       <article
         ref={root}
-        aria-label={personLabel}
+        aria-label={text.person}
         data-slot="chat-message"
         data-from="person"
         {...stylex.props(styles.root, styles.person, layout ?? styleProp)}
@@ -823,8 +861,8 @@ export const ChatMessage = ({
         thinking={status === "thinking"}
         thoughts={thoughts}
         look={thoughtsLook}
-        label={thinkingLabel}
-        thoughtLabel={thoughtLabel}
+        label={text.thinking}
+        thoughtLabel={text.thought}
         seconds={thoughtSeconds}
       />
       {children !== undefined && children !== null && children !== false && (
@@ -843,13 +881,13 @@ export const ChatMessage = ({
       <Sign
         waiting={waiting}
         mark={streaming && streamingMark}
-        label={thinkingLabel}
+        label={text.thinking}
       />
       {status === "failed" && (
         <Failure
-          label={failedLabel}
+          label={text.failed}
           onRetry={onRetry}
-          retryLabel={retryLabel}
+          retryLabel={text.retry}
         />
       )}
       {row}

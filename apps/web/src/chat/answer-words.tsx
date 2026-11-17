@@ -1,5 +1,4 @@
 import type { ChatCitedDocument } from "@grasp-os/shared/chat";
-import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
@@ -22,7 +21,7 @@ import {
   SourceList,
   Sources,
 } from "../grasp/sources/index.ts";
-import type { Source, SourcesLabels } from "../grasp/sources/index.ts";
+import type { Source } from "../grasp/sources/index.ts";
 import { citedNoteLink } from "./cited-note.tsx";
 
 // The agent's answer, as Grasp UI draws one: its Markdown (the library's,
@@ -116,45 +115,6 @@ const AnswerLink = ({
   return <span>{link.children}</span>;
 };
 
-/** What Markdown says itself, in the page's language: an answer's and its thoughts'. */
-export const useMarkdownWords = () => {
-  const { t } = useLingui();
-  return {
-    backLabel: (number: number) => t`Back to reference ${number}`,
-    doneLabel: t`Done`,
-    externalLabel: t`opens in a new tab`,
-    footnoteLabel: (number: number) => t`Footnote ${number}`,
-    notDoneLabel: t`Not done`,
-    tableLabel: t`Table`,
-  };
-};
-
-/** What Sources says, in the page's language. */
-const useSourcesLabels = (): Partial<SourcesLabels> => {
-  const { t } = useLingui();
-  return {
-    source: (number) => t`Source ${number}`,
-    mention: (index) => t`mention ${index}`,
-    gone: t`Could not be opened`,
-    locked: t`You cannot open this`,
-    goneInName: t`could not be opened`,
-    lockedInName: t`you cannot open it`,
-    count: (count) =>
-      t`${plural(count, { 0: "No sources", one: "# source", other: "# sources" })}`,
-    kind: (_kind, count) =>
-      t`${plural(count, { 0: "No documents", one: "# document", other: "# documents" })}`,
-    showMore: (count) => t`Show ${count} more`,
-    showFewer: t`Show fewer`,
-    order: t`Order`,
-    byRelevance: t`By relevance`,
-    byKind: t`By kind`,
-    open: t`Show them`,
-    close: t`Fold them away`,
-    openRun: t`Open the run`,
-    correct: t`Correct it`,
-  };
-};
-
 /** A cited document, as Sources lists it: a document of the company's, opened on its collection's page. */
 const sourceOf = ({ title, path, snippet }: ChatCitedDocument): Source => ({
   kind: "file",
@@ -177,13 +137,9 @@ export const AnswerWords = ({
   writing: boolean;
   cited?: readonly ChatCitedDocument[];
 }) => {
-  const { t } = useLingui();
-  const labels = useSourcesLabels();
-  const markdownWords = useMarkdownWords();
   const navigate = useNavigate();
   const words = (
     <Markdown
-      {...markdownWords}
       renderLink={(link) => <AnswerLink cited={cited} link={link} />}
       source={text}
       streaming={writing}
@@ -195,7 +151,6 @@ export const AnswerWords = ({
   return (
     <Sources
       items={cited.map(sourceOf)}
-      labels={labels}
       onOpen={(_source, index) => {
         const document = cited[index];
         if (document !== undefined) {
@@ -208,7 +163,7 @@ export const AnswerWords = ({
       }}
     >
       {words}
-      <SourceList heading={t`Sources`} />
+      <SourceList />
     </Sources>
   );
 };

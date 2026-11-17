@@ -1,58 +1,9 @@
-// The words Sources shows and says, in English. A product passes its own words through `labels`; any it leaves out are these.
+// What Sources does with its words: the kinds in a list, counted. The words themselves are in
+// words.ts.
 import type { SourceKind, SourcesLabels } from "./types";
 
-const nth = [
-  "first",
-  "second",
-  "third",
-  "fourth",
-  "fifth",
-  "sixth",
-  "seventh",
-  "eighth",
-  "ninth",
-  "tenth",
-];
-
-const kindWords: Record<SourceKind, readonly [string, string]> = {
-  file: ["file", "files"],
-  web: ["page", "pages"],
-  record: ["record", "records"],
-  message: ["message", "messages"],
-  meeting: ["meeting", "meetings"],
-  person: ["person", "people"],
-  agent: ["agent", "agents"],
-  workflow: ["workflow", "workflows"],
-  table: ["table", "tables"],
-  memory: ["memory", "memories"],
-  code: ["code file", "code files"],
-};
-
-export const englishLabels: SourcesLabels = {
-  source: (number) => `Source ${number}`,
-  mention: (index) =>
-    `${nth[index - 1] ?? `mention ${index}`}${index <= nth.length ? " mention" : ""}`,
-  gone: "Could not be opened",
-  locked: "You cannot open this",
-  goneInName: "could not be opened",
-  lockedInName: "you cannot open it",
-  // None is said in words: "No sources", "No files".
-  count: (count) =>
-    count === 0
-      ? "No sources"
-      : `${count} ${count === 1 ? "source" : "sources"}`,
-  kind: (kind, count) =>
-    `${count === 0 ? "No" : count} ${kindWords[kind][count === 1 ? 0 : 1]}`,
-  showMore: (count) => `Show ${count} more`,
-  showFewer: "Show fewer",
-  order: "Order",
-  byRelevance: "By relevance",
-  byKind: "By kind",
-  open: "Show them",
-  close: "Fold them away",
-  openRun: "Open the run",
-  correct: "Correct it",
-};
+// The English moved to words.ts, the catalogue's entry; still exported from here by its old name.
+export { englishLabels } from "./words";
 
 /** The kinds in a list, most first, each with its number: ["4 files", "3 messages"]. */
 export const kindsInParts = (

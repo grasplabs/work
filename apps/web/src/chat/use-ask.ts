@@ -121,6 +121,8 @@ export const useAsk = (
   const [files, setFiles] = useState<readonly BoxFile[]>([]);
   // Why a file the person chose stays out of the box.
   const [fileProblem, setFileProblem] = useState<string>();
+  // The last question didn't go: the box says so under it, the words kept.
+  const [sendFailed, setSendFailed] = useState(false);
   // The box's files core already took, by chat: asking again in the same
   // chat names them rather than attaching them twice.
   const attached = useRef(
@@ -282,14 +284,14 @@ export const useAsk = (
       })),
       onAttach: attach,
       onRemoveFile: removeFile,
-      // Rejects when the question didn't go: the box says so under it
-      // (`failure`, why), keeps the text, and Send tries again.
+      // When the question didn't go, the box says so under it (`failure`,
+      // why), keeps the text, and Send tries again.
       onSend: async (): Promise<void> => {
         setFileProblem(undefined);
-        if (!(await ask(text, files, mentions))) {
-          throw new Error("The question was not sent");
-        }
+        setSendFailed(!(await ask(text, files, mentions)));
       },
+      sendFailed,
+      onSendFailedChange: setSendFailed,
       onStop: () => {
         void stop();
       },

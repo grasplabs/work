@@ -1,7 +1,8 @@
 // Avatar group: a few people as one stack of faces, then "+N" for the rest, named once for a
 // screen reader ("Anna de Vries, Ravi Menon and 4 others"). A team in a row, the people on a
 // thread. Up to four faces by default; the faces overlap by a quarter, each one cut back where the
-// next stands, so a gap of the ground shows between them on any ground (a mask, no ring of a
+// next stands; a face without a picture shows one letter, the first name's, since two initials
+// fill a face and the next one would cut the second, so a gap of the ground shows between them on any ground (a mask, no ring of a
 // colour that would have to match). Every value is a token.
 //
 //   <AvatarGroup people={team.people} size="xs" />
@@ -10,7 +11,7 @@
 import * as stylex from "@stylexjs/stylex";
 
 import { grasp, media } from "../tokens/tokens.stylex";
-import { Avatar, AvatarFallback, AvatarImage } from "./avatar";
+import { Avatar, AvatarFallback, AvatarImage, initialsOf } from "./avatar";
 import type { AvatarSize } from "./avatar";
 
 /** Someone in the group: their name, and their picture if they have one. */
@@ -79,7 +80,8 @@ const styles = stylex.create({
     flexShrink: 0,
     verticalAlign: "middle",
   },
-  // Each face after the first stands a quarter of a face back over the one before it.
+  // Each face after the first stands a quarter of a face back over the one before it. A face in a
+  // stack shows one letter, so no letter is ever under the next face (two initials fill a face).
   face: (face: string) => ({
     display: "inline-flex",
     flexShrink: 0,
@@ -117,6 +119,14 @@ const styles = stylex.create({
   }),
 });
 
+// The first character as a person sees it (an accent with its letter, an emoji whole), as Avatar's.
+const segmenter = new Intl.Segmenter("und", { granularity: "grapheme" });
+
+/** One letter for a face in a stack: the first of the person's initials. */
+const firstLetter = (name: string) =>
+  segmenter.segment(initialsOf(name))[Symbol.iterator]().next().value
+    ?.segment ?? "";
+
 /** A few people as one stack of faces, then "+N", named once. */
 export const AvatarGroup = ({
   people,
@@ -153,7 +163,12 @@ export const AvatarGroup = ({
         >
           <Avatar name={person.name} size={size} decorative>
             <AvatarImage src={person.src} />
-            <AvatarFallback />
+            {/* Alone, a face is not stacked: it keeps both initials. */}
+            <AvatarFallback>
+              {shown.length + (rest > 0 ? 1 : 0) > 1
+                ? firstLetter(person.name)
+                : undefined}
+            </AvatarFallback>
           </Avatar>
         </span>
       ))}

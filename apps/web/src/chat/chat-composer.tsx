@@ -70,8 +70,12 @@ export interface ChatComposerProps {
   failure?: string;
   /** Why a file the person chose stays out of the box. */
   fileProblem?: string;
-  /** Sends the question; rejects when it didn't go, which the box says (`failure`). */
+  /** Sends the question. */
   onSend: () => Promise<void> | void;
+  /** The last question didn't go: the box says Could not send, and why (`failure`), the words kept. */
+  sendFailed?: boolean;
+  /** Follows the box's own changes to `sendFailed`: typing again clears it. */
+  onSendFailedChange?: (failed: boolean) => void;
   onStop?: () => void;
   /** What the box is called, for a screen reader. */
   label?: string;
@@ -195,6 +199,8 @@ export const ChatComposer = ({
   failure,
   fileProblem,
   onSend,
+  sendFailed,
+  onSendFailedChange,
   onStop,
   label,
   placeholder,
@@ -280,6 +286,8 @@ export const ChatComposer = ({
         }
       }}
       onStop={onStop}
+      sendFailed={sendFailed}
+      onSendFailedChange={onSendFailedChange}
       mentionItems={mentioning?.items}
       mentionKinds={mentioning?.kinds}
       mentionsEmptyLabel={t`Nothing found`}

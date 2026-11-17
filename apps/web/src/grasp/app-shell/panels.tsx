@@ -31,12 +31,14 @@ import { Cross } from "../icons";
 import { simply } from "../motion/simply.stylex";
 import { Resizable } from "../resizable";
 import { grasp, media } from "../tokens/tokens.stylex";
+import { useWords, withGiven } from "../words/words";
 import { CardLine } from "./card-line";
 import { cardLine } from "./card-line.stylex";
 import { PanelPlaceContext, useFloat } from "./float-window";
 import type { PanelPlacement } from "./float-window";
 import type { PanelPosition } from "./floating";
 import { FOCUSABLE, firstStop, placeOf } from "./focus-place";
+import { appShellWords } from "./words";
 
 const NARROW = "@container app-shell (width < 40rem)";
 // Before the script has measured the column (on the server, before hydration), the crowded rule is
@@ -523,9 +525,9 @@ const moveTime = (element: HTMLElement | null): number => {
   if (element === null) {
     return 0;
   }
-  const [first = "0s"] =
-    getComputedStyle(element).transitionDuration.split(",");
-  const time = first.trim();
+  const time = (
+    getComputedStyle(element).transitionDuration.split(",")[0] ?? ""
+  ).trim();
   const value = Number(time.replace(/m?s$/u, ""));
   if (Number.isNaN(value)) {
     return 0;
@@ -902,7 +904,7 @@ export const Panels = ({
   max,
   covered,
   aside,
-  resizeLabel = "Resize the panel",
+  resizeLabel,
   onWidthChange,
   onNarrowChange,
   onCrowdedChange,
@@ -913,6 +915,9 @@ export const Panels = ({
   narrow,
   ...place
 }: PanelsProps) => {
+  const said = withGiven(useWords("appShell", appShellWords), {
+    resize: resizeLabel,
+  });
   const column = useRef<HTMLDivElement>(null);
   const side = useRef<HTMLDivElement>(null);
   const given = panels !== undefined && panels !== null;
@@ -1024,7 +1029,7 @@ export const Panels = ({
         {/* Full screen by the host's word the gutter keeps its room, out of sight, so the page's card
             ends the window's margin from the column's end, as it does beside the panels. */}
         <ResizableHandlePrimitive
-          aria-label={resizeLabel}
+          aria-label={said.resize}
           data-slot="app-shell-panel-handle"
           disabled={covered || !still}
           className={handleLook({ measured, covered, cover, still })}

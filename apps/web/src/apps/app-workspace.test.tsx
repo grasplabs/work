@@ -1314,10 +1314,10 @@ describe(AppWorkspace, () => {
     expect({
       before,
       after: placeholder(),
-      plan:
-        document.querySelector(
-          'section[aria-label="Here\'s what Grasp will make"]'
-        ) !== null,
+      // The plan's card, by its heading.
+      plan: [...document.querySelectorAll("section h2")].some(
+        (heading) => heading.textContent === "Here's what Grasp will make"
+      ),
     }).toStrictEqual({
       before: "Say what should change",
       after: "Change something about the plan",

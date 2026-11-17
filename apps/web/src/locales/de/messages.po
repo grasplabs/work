@@ -254,11 +254,11 @@ msgstr "{connections, plural, one {# Verbindung} other {# Verbindungen}}"
 msgid "{conversations, plural, one {# conversation} other {# conversations}}"
 msgstr "{conversations, plural, one {# Gespräch} other {# Gespräche}}"
 
-#: src/chat/answer-words.tsx
+#: src/frame/part-words.tsx
 msgid "{count, plural, =0 {No documents} one {# document} other {# documents}}"
 msgstr "{count, plural, =0 {Keine Dokumente} one {# Dokument} other {# Dokumente}}"
 
-#: src/chat/answer-words.tsx
+#: src/frame/part-words.tsx
 msgid "{count, plural, =0 {No sources} one {# source} other {# sources}}"
 msgstr "{count, plural, =0 {Keine Quellen} one {# Quelle} other {# Quellen}}"
 
@@ -330,7 +330,7 @@ msgstr "{count, plural, one {# eingeladenes Team noch nicht interviewt: {teams}.
 msgid "{count, plural, one {# more App this chat worked on} other {# more Apps this chat worked on}}"
 msgstr "{count, plural, one {# weitere App, an der dieser Chat gearbeitet hat} other {# weitere Apps, an denen dieser Chat gearbeitet hat}}"
 
-#: src/chat/thread.tsx
+#: src/frame/part-words.tsx
 msgid "{count, plural, one {# new message} other {# new messages}}"
 msgstr "{count, plural, one {# neue Nachricht} other {# neue Nachrichten}}"
 
@@ -452,7 +452,7 @@ msgstr "{count, plural, one {Die Geschäftsleitung hat # Ziel für den Sprint ge
 msgid "{count, plural, one {This is not an email address:} other {These are not email addresses:}} {listed}"
 msgstr "{count, plural, one {Das ist keine E-Mail-Adresse:} other {Das sind keine E-Mail-Adressen:}} {listed}"
 
-#: src/chat/thread.tsx
+#: src/frame/part-words.tsx
 msgid "{count, plural, one {Took # step} other {Took # steps}}"
 msgstr "{count, plural, one {# Schritt} other {# Schritte}}"
 
@@ -684,6 +684,10 @@ msgstr "{input} ein, {output} aus"
 #: src/brain/brain.ts
 msgid "{invited, plural, one {Stakeholders of {interviewed} of # invited team} other {Stakeholders of {interviewed} of # invited teams}}"
 msgstr "{invited, plural, one {Stakeholder von {interviewed} von # eingeladenen Team} other {Stakeholder von {interviewed} von # eingeladenen Teams}}"
+
+#: src/frame/part-words.tsx
+msgid "{jump}, new messages"
+msgstr "{jump}, neue Nachrichten"
 
 #: src/activity/pending.tsx
 msgid "{kind} ({what})"
@@ -1132,6 +1136,10 @@ msgstr "{scheduled, plural, one {Arbeitet selbstständig, # Zeitplan} other {Arb
 msgid "{scheduled} on a schedule"
 msgstr "{scheduled} nach Zeitplan"
 
+#: src/frame/part-words.tsx
+msgid "{seconds, plural, one {Thought for # second} other {Thought for # seconds}}"
+msgstr "{seconds, plural, one {# Sekunde nachgedacht} other {# Sekunden nachgedacht}}"
+
 #: src/activity/audit-log.tsx
 msgid "{set, plural, one {Filters, # set} other {Filters, # set}}"
 msgstr "{set, plural, one {Filter, # gesetzt} other {Filter, # gesetzt}}"
@@ -1305,10 +1313,6 @@ msgstr "{teams, plural, one {# Team} other {# Teams}}, {statements, plural, one 
 msgid "{teams, plural, one {Named by # team. Not seen in use yet, so its use is reported, not observed.} other {Named by # teams. Not seen in use yet, so its use is reported, not observed.}}"
 msgstr "{teams, plural, one {Von # Team genannt. Noch keine Nutzung erkannt, daher ist die Nutzung berichtet, nicht gemessen.} other {Von # Teams genannt. Noch keine Nutzung erkannt, daher ist die Nutzung berichtet, nicht gemessen.}}"
 
-#: src/chat/thread.tsx
-msgid "{time, plural, one {Thought for # second} other {Thought for # seconds}}"
-msgstr "{time, plural, one {# Sekunde nachgedacht} other {# Sekunden nachgedacht}}"
-
 #: src/settings/audit-chain.tsx
 msgid "{time}. Entries through {purged} were removed when their retention ended; they still link up."
 msgstr "{time}. Einträge bis {purged} wurden nach Ablauf ihrer Aufbewahrung entfernt; die Kette bleibt verbunden."
@@ -1325,7 +1329,7 @@ msgstr "{title} wurde zum Dashboard hinzugefügt."
 msgid "{title} changed."
 msgstr "{title} wurde geändert."
 
-#: src/chat/thread.tsx
+#: src/frame/part-words.tsx
 msgid "{title} failed"
 msgstr "{title} fehlgeschlagen"
 
@@ -2268,6 +2272,10 @@ msgstr "Agent {agentId} für {person}"
 msgid "Agent {agentId} for {person}, in {app}"
 msgstr "Agent {agentId} für {person}, in {app}"
 
+#: src/frame/part-words.tsx
+msgid "Agent activity"
+msgstr "Aktivität des Agenten"
+
 #: src/apps/app-data.tsx
 msgid "Agent for {person}"
 msgstr "Agent für {person}"
@@ -2607,7 +2615,7 @@ msgstr "Kundenfragen beantworten"
 msgid "Answer in the brain"
 msgstr "Im Gehirn beantworten"
 
-#: src/chat/thread.tsx
+#: src/frame/part-words.tsx
 msgid "Answer ready"
 msgstr "Antwort fertig"
 
@@ -3228,7 +3236,7 @@ msgstr "Zurück zu {destination}"
 msgid "Back to how it began"
 msgstr "Wieder wie am Anfang"
 
-#: src/chat/answer-words.tsx
+#: src/frame/part-words.tsx
 msgid "Back to reference {number}"
 msgstr "Zurück zu Verweis {number}"
 
@@ -3389,6 +3397,7 @@ msgctxt "inbox filter"
 msgid "Brain"
 msgstr "Gehirn"
 
+#: src/frame/part-words.tsx
 #: src/frame/site-header.tsx
 msgid "Breadcrumb"
 msgstr "Brotkrümelnavigation"
@@ -3467,7 +3476,7 @@ msgctxt "how search found a passage"
 msgid "By its words"
 msgstr "Über seine Wörter"
 
-#: src/chat/answer-words.tsx
+#: src/frame/part-words.tsx
 msgid "By kind"
 msgstr "Nach Art"
 
@@ -3476,7 +3485,7 @@ msgctxt "how search found a passage"
 msgid "By meaning"
 msgstr "Über die Bedeutung"
 
-#: src/chat/answer-words.tsx
+#: src/frame/part-words.tsx
 msgid "By relevance"
 msgstr "Nach Relevanz"
 
@@ -4139,8 +4148,13 @@ msgid "Close the chat"
 msgstr "Chat schließen"
 
 #: src/frame/app-frame.tsx
+#: src/frame/part-words.tsx
 msgid "Close the menu"
 msgstr "Menü schließen"
+
+#: src/frame/part-words.tsx
+msgid "Close the panel"
+msgstr "Bereich schließen"
 
 #: src/brain/gap-actions.tsx
 msgid "Close this question without an answer?"
@@ -4574,6 +4588,11 @@ msgstr "Kopien"
 msgid "Copy"
 msgstr "Kopieren"
 
+#: src/frame/part-words.tsx
+msgctxt "a message"
+msgid "Copy"
+msgstr "Kopieren"
+
 #: src/activity/audit-event.tsx
 msgid "Copy {name}"
 msgstr "{name} kopieren"
@@ -4641,7 +4660,7 @@ msgid "Copying didn't work"
 msgstr "Kopieren hat nicht geklappt"
 
 #: src/brain/memory-page.tsx
-#: src/chat/answer-words.tsx
+#: src/frame/part-words.tsx
 msgid "Correct it"
 msgstr "Korrigieren"
 
@@ -4659,15 +4678,19 @@ msgstr "Kosten"
 msgid "Could be better"
 msgstr "Könnte besser sein"
 
+#: src/frame/part-words.tsx
+msgid "Could not answer"
+msgstr "Konnte nicht antworten"
+
 #: src/chat/approval-words.ts
 msgid "Could not approve"
 msgstr "Konnte nicht genehmigen"
 
-#: src/chat/answer-words.tsx
+#: src/frame/part-words.tsx
 msgid "could not be opened"
 msgstr "konnte nicht geöffnet werden"
 
-#: src/chat/answer-words.tsx
+#: src/frame/part-words.tsx
 msgid "Could not be opened"
 msgstr "Konnte nicht geöffnet werden"
 
@@ -5337,9 +5360,8 @@ msgid "Don’t upload interview recordings or their captions: interviews go thro
 msgstr "Laden Sie keine Interviewaufnahmen oder deren Untertitel hoch: Interviews laufen über den Interviewablauf."
 
 #: src/apps/blueprints.tsx
-#: src/chat/answer-words.tsx
-#: src/chat/thread.tsx
 #: src/chat/use-dictation.ts
+#: src/frame/part-words.tsx
 #: src/onboarding/setup-steps.tsx
 #: src/routes/_shell.workflows.index.tsx
 #: src/settings/event-sources.tsx
@@ -5354,6 +5376,12 @@ msgstr "Erledigt"
 
 #: src/connections/connect-dialog.tsx
 msgctxt "a step that is finished"
+msgid "Done"
+msgstr "Erledigt"
+
+#: src/chat/thread.tsx
+#: src/frame/part-words.tsx
+msgctxt "a step's state"
 msgid "Done"
 msgstr "Erledigt"
 
@@ -5702,10 +5730,6 @@ msgstr "Wird gelöscht, {done} von {total}"
 msgid "Erasing…"
 msgstr "Wird gelöscht…"
 
-#: src/chat/thread.tsx
-msgid "Error"
-msgstr "Fehler"
-
 #: src/frame/part-words.tsx
 msgctxt "a badge's dot"
 msgid "Error"
@@ -5992,7 +6016,6 @@ msgctxt "a run that ended in failure"
 msgid "failed"
 msgstr "fehlgeschlagen"
 
-#: src/chat/thread.tsx
 #: src/dashboard/runs-widget.tsx
 #: src/knowledge/uploads.tsx
 #: src/routes/_shell.workflows.index.tsx
@@ -6005,6 +6028,12 @@ msgstr "Fehlgeschlagen"
 
 #: src/dashboard/report.ts
 msgctxt "a figure of the report"
+msgid "Failed"
+msgstr "Fehlgeschlagen"
+
+#: src/chat/thread.tsx
+#: src/frame/part-words.tsx
+msgctxt "a step's state"
 msgid "Failed"
 msgstr "Fehlgeschlagen"
 
@@ -6257,7 +6286,7 @@ msgstr "Ablauf"
 msgid "Fold the navigation"
 msgstr "Navigation einklappen"
 
-#: src/chat/answer-words.tsx
+#: src/frame/part-words.tsx
 msgid "Fold them away"
 msgstr "Einklappen"
 
@@ -6281,7 +6310,7 @@ msgstr "Angebote bis zur Zahlung verfolgen"
 msgid "Follow the erasure of {who}"
 msgstr "Löschung von {who} verfolgen"
 
-#: src/chat/answer-words.tsx
+#: src/frame/part-words.tsx
 msgid "Footnote {number}"
 msgstr "Fußnote {number}"
 
@@ -7365,7 +7394,7 @@ msgstr "Info"
 msgid "Ink"
 msgstr "Tinte"
 
-#: src/chat/thread.tsx
+#: src/frame/part-words.tsx
 msgid "Input"
 msgstr "Eingabe"
 
@@ -7904,13 +7933,9 @@ msgstr "JSON, mit dem Archiv"
 msgid "Judgment"
 msgstr "Ermessen"
 
-#: src/chat/thread.tsx
+#: src/frame/part-words.tsx
 msgid "Jump to latest"
 msgstr "Zur neuesten Nachricht"
-
-#: src/chat/thread.tsx
-msgid "Jump to latest, new messages"
-msgstr "Zur neuesten Nachricht, neue Nachrichten"
 
 #: src/connections/connect-dialog.tsx
 #: src/connections/connected-dialog.tsx
@@ -8369,7 +8394,7 @@ msgstr "Geladen"
 msgid "Loading"
 msgstr "Wird geladen"
 
-#: src/chat/thread.tsx
+#: src/frame/part-words.tsx
 msgid "Loading older messages"
 msgstr "Ältere Nachrichten werden geladen"
 
@@ -8626,7 +8651,7 @@ msgctxt "the mention menu"
 msgid "Mention"
 msgstr "Erwähnen"
 
-#: src/chat/answer-words.tsx
+#: src/frame/part-words.tsx
 msgid "mention {index}"
 msgstr "Erwähnung {index}"
 
@@ -8636,8 +8661,13 @@ msgid "Mentioned"
 msgstr "Genannt"
 
 #: src/frame/app-frame.tsx
+#: src/frame/part-words.tsx
 msgid "Menu"
 msgstr "Menü"
+
+#: src/frame/part-words.tsx
+msgid "Message actions"
+msgstr "Aktionen zur Nachricht"
 
 #: src/chat/thread.tsx
 #: src/routes/guest.tsx
@@ -9593,7 +9623,7 @@ msgstr "Noch nicht von der Geschäftsleitung bestätigt"
 msgid "Not connected"
 msgstr "Nicht verbunden"
 
-#: src/chat/answer-words.tsx
+#: src/frame/part-words.tsx
 msgid "Not done"
 msgstr "Nicht erledigt"
 
@@ -10356,7 +10386,6 @@ msgstr "Einen Link außerhalb von Grasp öffnen?"
 msgid "Open again"
 msgstr "Wieder öffnen"
 
-#: src/chat/chat-panel.tsx
 #: src/frame/part-words.tsx
 msgid "Open as a page"
 msgstr "Als Seite öffnen"
@@ -10445,7 +10474,7 @@ msgstr "Dashboard öffnen"
 msgid "Open the inbox"
 msgstr "Posteingang öffnen"
 
-#: src/chat/answer-words.tsx
+#: src/frame/part-words.tsx
 msgid "Open the run"
 msgstr "Lauf öffnen"
 
@@ -10495,8 +10524,8 @@ msgstr "Notiz wird geöffnet"
 msgid "Opening your interview…"
 msgstr "Ihr Gespräch wird geöffnet …"
 
-#: src/chat/answer-words.tsx
 #: src/frame/ai-key-banner.tsx
+#: src/frame/part-words.tsx
 msgid "opens in a new tab"
 msgstr "öffnet in einem neuen Tab"
 
@@ -10535,7 +10564,7 @@ msgstr "oder wählen Sie sie auf Ihrem Computer aus"
 msgid "Or withdraw: nothing you said is used from now on, and you can still read it here."
 msgstr "Oder ziehen Sie sich zurück: Nichts von dem, was Sie gesagt haben, wird ab jetzt verwendet, und Sie können es hier weiterhin lesen."
 
-#: src/chat/answer-words.tsx
+#: src/frame/part-words.tsx
 msgid "Order"
 msgstr "Reihenfolge"
 
@@ -11949,6 +11978,10 @@ msgid "Resize the chat"
 msgstr "Chatgröße ändern"
 
 #: src/frame/part-words.tsx
+msgid "Resize the panel"
+msgstr "Bereichsgröße ändern"
+
+#: src/frame/part-words.tsx
 msgid "Resize the panel's height"
 msgstr "Höhe des Bereichs ändern"
 
@@ -11993,7 +12026,7 @@ msgctxt "what a piece of work's knowledge rests on: said, written, seen or done"
 msgid "Rests on"
 msgstr "Beruht auf"
 
-#: src/chat/thread.tsx
+#: src/frame/part-words.tsx
 msgid "Result"
 msgstr "Ergebnis"
 
@@ -13136,7 +13169,7 @@ msgstr "Teilen rückgängig gemacht"
 msgid "Show"
 msgstr "Anzeigen"
 
-#: src/chat/answer-words.tsx
+#: src/frame/part-words.tsx
 msgid "Show {count} more"
 msgstr "{count} weitere anzeigen"
 
@@ -13169,7 +13202,7 @@ msgid "Show exactly what will be sent"
 msgstr "Genau Gesendetes anzeigen"
 
 #: src/brain/brain-chips.tsx
-#: src/chat/answer-words.tsx
+#: src/frame/part-words.tsx
 msgid "Show fewer"
 msgstr "Weniger anzeigen"
 
@@ -13186,14 +13219,12 @@ msgid "Show its definition"
 msgstr "Seine Definition anzeigen"
 
 #: src/chat/held-writes.tsx
-#: src/chat/thread.tsx
 #: src/frame/part-words.tsx
 msgid "Show less"
 msgstr "Weniger anzeigen"
 
 #: src/brain/since-last-look.tsx
 #: src/brain/sources-page.tsx
-#: src/chat/thread.tsx
 #: src/frame/part-words.tsx
 #: src/knowledge/nav.tsx
 #: src/onboarding/connect-steps.tsx
@@ -13224,6 +13255,10 @@ msgid "Show or hide the chat"
 msgstr "Chat ein- oder ausblenden"
 
 #: src/frame/part-words.tsx
+msgid "Show or hide the panel"
+msgstr "Bereich ein- oder ausblenden"
+
+#: src/frame/part-words.tsx
 #: src/grasp/frame/grasp-sidebar.tsx
 msgid "Show or hide the sidebar"
 msgstr "Seitenleiste ein- oder ausblenden"
@@ -13244,7 +13279,7 @@ msgstr "Seite für {title} zeigen"
 msgid "Show the time zones"
 msgstr "Zeitzonen anzeigen"
 
-#: src/chat/answer-words.tsx
+#: src/frame/part-words.tsx
 msgid "Show them"
 msgstr "Anzeigen"
 
@@ -13453,6 +13488,11 @@ msgstr "Überspringen"
 msgid "Skip for now"
 msgstr "Vorerst überspringen"
 
+#: src/frame/part-words.tsx
+msgctxt "a step's state"
+msgid "Skipped"
+msgstr "Übersprungen"
+
 #: src/settings/erasures.tsx
 msgid "Skipped, may still hold data"
 msgstr "Übersprungen, kann noch Daten enthalten"
@@ -13555,7 +13595,7 @@ msgstr "Sortieren"
 msgid "Source"
 msgstr "Quelle"
 
-#: src/chat/answer-words.tsx
+#: src/frame/part-words.tsx
 msgid "Source {number}"
 msgstr "Quelle {number}"
 
@@ -13564,8 +13604,8 @@ msgid "Source {number}: {title}"
 msgstr "Quelle {number}: {title}"
 
 #: src/brain/brain.ts
-#: src/chat/answer-words.tsx
 #: src/chat/chat-markdown.ts
+#: src/frame/part-words.tsx
 #: src/routes/_shell.brain.$noteId.tsx
 #: src/settings/event-sources.tsx
 msgid "Sources"
@@ -13990,7 +14030,7 @@ msgid "System"
 msgstr "System"
 
 #: src/apps/app-data.tsx
-#: src/chat/answer-words.tsx
+#: src/frame/part-words.tsx
 msgid "Table"
 msgstr "Tabelle"
 
@@ -15078,6 +15118,7 @@ msgid "They'll find it under Apps, and see it as it is now."
 msgstr "Sie finden es unter Apps und sehen es so, wie es jetzt ist."
 
 #: src/chat/thread.tsx
+#: src/frame/part-words.tsx
 msgid "Thinking"
 msgstr "Denkt nach"
 
@@ -15506,11 +15547,7 @@ msgstr "An diese Teams"
 
 #: src/activity/audit-log.tsx
 #: src/brain/brain-log.tsx
-msgid "Today"
-msgstr "Heute"
-
-#: src/chat/thread.tsx
-msgctxt "a date line in a chat"
+#: src/frame/part-words.tsx
 msgid "Today"
 msgstr "Heute"
 
@@ -15832,11 +15869,11 @@ msgctxt "turn your microphone back on"
 msgid "Unmute"
 msgstr "Stummschaltung aufheben"
 
-#: src/chat/thread.tsx
+#: src/frame/part-words.tsx
 msgid "Unread"
 msgstr "Ungelesen"
 
-#: src/chat/thread.tsx
+#: src/frame/part-words.tsx
 msgid "Unread messages from here"
 msgstr "Ungelesene Nachrichten ab hier"
 
@@ -16169,11 +16206,16 @@ msgstr "Lautstärke"
 msgid "wait for a decision now"
 msgstr "warten jetzt auf eine Entscheidung"
 
-#: src/chat/thread.tsx
 #: src/inbox/items.ts
 #: src/interview/words.ts
 #: src/workflows/traces.tsx
 #: src/workflows/workflow-diagram.tsx
+msgid "Waiting"
+msgstr "Wartet"
+
+#: src/chat/thread.tsx
+#: src/frame/part-words.tsx
+msgctxt "a step's state"
 msgid "Waiting"
 msgstr "Wartet"
 
@@ -17080,6 +17122,7 @@ msgstr "der Person, die die Zeile hinzugefügt hat"
 msgid "Why"
 msgstr "Warum"
 
+#: src/frame/part-words.tsx
 #: src/workflows/run-detail.tsx
 msgid "Why it failed"
 msgstr "Warum er fehlschlug"
@@ -17297,7 +17340,6 @@ msgstr "Workflows mit den höchsten Ausgaben"
 msgid "Workflows the App starts"
 msgstr "Workflows, die die App startet"
 
-#: src/chat/thread.tsx
 #: src/frame/part-words.tsx
 msgid "Working"
 msgstr "In Arbeit"
@@ -17306,6 +17348,12 @@ msgstr "In Arbeit"
 msgctxt "a provider's key works"
 msgid "Working"
 msgstr "Funktioniert"
+
+#: src/chat/thread.tsx
+#: src/frame/part-words.tsx
+msgctxt "a step's state"
+msgid "Working"
+msgstr "Läuft"
 
 #: src/chat/thread.tsx
 #: src/workflows/requests/request-needs.tsx
@@ -17448,8 +17496,7 @@ msgstr "Ja, das stimmt."
 msgid "Yes: it is unchanged and links to the event before it."
 msgstr "Ja: Es ist unverändert und mit dem vorherigen Ereignis verknüpft."
 
-#: src/chat/thread.tsx
-msgctxt "a date line in a chat"
+#: src/frame/part-words.tsx
 msgid "Yesterday"
 msgstr "Gestern"
 
@@ -17459,8 +17506,8 @@ msgid "you"
 msgstr "Ihnen"
 
 #: src/apps/app-history.tsx
-#: src/chat/thread.tsx
 #: src/connections/connection-list.tsx
+#: src/frame/part-words.tsx
 #: src/knowledge/timeline.tsx
 #: src/routes/_shell.settings.members.tsx
 #: src/workflows/go-lives-waiting.tsx
@@ -17504,11 +17551,11 @@ msgstr "Sie können diese Quelle nicht lesen."
 msgid "You can't read this version."
 msgstr "Sie können diese Version nicht lesen."
 
-#: src/chat/answer-words.tsx
+#: src/frame/part-words.tsx
 msgid "you cannot open it"
 msgstr "Sie können es nicht öffnen"
 
-#: src/chat/answer-words.tsx
+#: src/frame/part-words.tsx
 msgid "You cannot open this"
 msgstr "Sie können dies nicht öffnen"
 
