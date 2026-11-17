@@ -261,8 +261,6 @@ export const makeAgent = async (
         db.insert(agents).values({
           id,
           ...made,
-          // No longer read: what it is told is its instruction file.
-          instructions: "",
           nameKey: agentNameKey(made.name),
           state: "on",
           madeBy: identity.userId,
@@ -452,7 +450,6 @@ export const changeAgent = async (
               .values({
                 id: agent.id,
                 ...named,
-                instructions: "",
                 state: agent.state,
                 madeBy: identity.userId,
                 madeAt: now,
@@ -520,7 +517,6 @@ export const setAgentPaused = async (
             nameKey: agentNameKey(agent.name),
             face: agent.face,
             job: agent.job,
-            instructions: "",
             modelRole: agent.modelRole,
             model: agent.model,
             state,

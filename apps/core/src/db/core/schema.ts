@@ -582,9 +582,9 @@ export const auditOutboxRejected = sqliteTable(
  * is its workflow resource's ID in `object_id`; an App is its ID in
  * `object_id`: an agent's, to call its functions, with `resource` null; a
  * workflow's, to call one of them, with that function's stable ID in
- * `resource`. `actions` is a JSON array of action names. Rows of kinds
- * the platform removed (a store's, a Knowledge collection's) may remain,
- * which every read takes as not there (`servedSql` in permissions.ts).
+ * `resource`. `actions` is a JSON array of action names. Rows of a kind
+ * the platform removed (a store's) may remain, which every read takes as
+ * not there (`servedSql` in permissions.ts).
  */
 export const permissions = sqliteTable(
   "permissions",
@@ -3470,9 +3470,10 @@ export const connectionBrainErasures = sqliteTable(
  * The company's agents an admin made or changed (agents.ts): one row per
  * agent, by the ID its permissions, audit events and instruction file name.
  * `face` is the figure it is drawn with; `job` one line on what it is
- * for; `instructions` no longer read, and written empty: what an agent
- * is told is its instruction file in the Brain (instruction-files.ts),
- * and the column goes in a later release (expand, then contract);
+ * for; `instructions` neither read nor written: what an agent is told is
+ * its instruction file in the Brain (instruction-files.ts), and the
+ * column is dropped in the release after the one that stopped writing it
+ * (expand, then contract);
  * `modelRole` the role it asks the gateway for, or null for the model a
  * chat would use anyway; `state` whether it answers. No row for the
  * first agent, the organization's: as Grasp ships it.
@@ -3490,7 +3491,7 @@ export const agents = sqliteTable(
     nameKey: text("name_key"),
     face: text().notNull(),
     job: text().notNull(),
-    instructions: text().notNull(),
+    instructions: text(),
     modelRole: text("model_role", { enum: modelRoles }),
     /** The model its turns use, `<provider>/<model>`; null: the asker's own. */
     model: text(),
@@ -5964,10 +5965,10 @@ export const brainRecords = sqliteTable(
     body: text().notNull(),
     addedAt: timestamp("added_at").notNull(),
     /**
-     * When an earlier release's Knowledge term purge last rewrote `body`:
-     * the record is the company's as purged from then on, and the same id
-     * sent again is left as it is, never its words put back
-     * (brain-records.ts `keepRecords`). Nothing sets it any more.
+     * When an earlier release's Knowledge term purge, gone since GRA-1911,
+     * last rewrote `body`. Neither read nor written; dropped in the
+     * release after the one that stopped reading it (expand, then
+     * contract).
      */
     purgedAt: timestamp("purged_at"),
     /**
@@ -6043,23 +6044,6 @@ export const brainGapStates = sqliteTable("brain_gap_states", {
 // (collections, documents, versions, sections, links, payloads, search).
 // They name Knowledge's collections and documents by ID, with no foreign
 // key: no batch holds both databases.
-
-/**
- * The teams that could read a `teams` collection in Knowledge, gone since
- * GRA-1941: nothing reads or writes it, and S7 of GRA-1735 drops it.
- */
-export const collectionTeams = sqliteTable(
-  "collection_teams",
-  {
-    /** A collection in Knowledge. */
-    collectionId: text("collection_id").notNull(),
-    teamId: text("team_id").notNull(),
-  },
-  (table) => [
-    primaryKey({ columns: [table.collectionId, table.teamId] }),
-    index("collection_teams_team_id_idx").on(table.teamId),
-  ]
-);
 
 /**
  * Which version of each App its entry in Knowledge's Apps collection held,
