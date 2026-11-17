@@ -5,6 +5,7 @@ import { z } from "zod";
 import { ToolError } from "./connector.ts";
 import { maxContentBytes } from "./content.ts";
 import {
+  connectorIsolateRequests,
   syncManifestSchema,
   syncNameSchema,
   syncParamsSchema,
@@ -28,16 +29,24 @@ export type SyncFailure = z.infer<typeof syncFailureSchema>;
 
 /**
  * What one page may take, so it fits what connect gives a connector's
- * isolate and reads of its answer: `requests`, the provider requests a
- * page may send, of the 50 a connector's isolate may (connect's
- * connector-isolate.ts); `contentBytes`, its items' content together, as
- * JSON, the same bound a tool's file read has (`maxContentBytes`, half of
- * the 16 MiB connect reads, for the rest of the page). A file larger than
- * a tool reads (`maxReadBytes`) comes without content.
+ * isolate and reads of its answer:
+ *
+ * - `requests`: every request a connector's isolate may send
+ *   (`connectorIsolateRequests`, which connect's isolate is loaded with).
+ *   Nothing else in a sync's isolate sends any.
+ * - `contentBytes`: its items' content together, as JSON, the same bound a
+ *   tool's file read has (`maxContentBytes`, half of the 16 MiB connect
+ *   reads, for the rest of the page). A file larger than a tool reads
+ *   (`maxReadBytes`) comes without content.
+ * - `millis`: how long after it started a page stops taking more, half of
+ *   the 30 s connect waits for a connector's answer (`callTimeoutMs`), the
+ *   rest for loading the isolate and answering. A request still under way
+ *   then is given up, so a page always answers in time with what it has.
  */
 export const syncPageLimits = {
-  requests: 45,
+  requests: connectorIsolateRequests,
   contentBytes: maxContentBytes,
+  millis: 15_000,
 } as const;
 
 /** A connector's answer to `syncMethod`: a page, or why there is none. */
@@ -71,7 +80,12 @@ export interface SyncDefinition {
    * what `place` holds: for `own`, only what the connection's own account
    * owns. A page stays within what connect reads of a connector's answer.
    */
-  read: (params: { place: string; cursor: string | null }) => Promise<SyncPage>;
+  read: (params: {
+    place: string;
+    cursor: string | null;
+    /** When the page stops taking more, in ms since the epoch (`syncPageLimits.millis`). */
+    deadline: number;
+  }) => Promise<SyncPage>;
 }
 
 /** A sync, as a connector carries it. */
@@ -113,6 +127,7 @@ export const defineSync = (definition: SyncDefinition): Sync => ({
       page = await definition.read({
         place: asked.place,
         cursor: asked.cursor,
+        deadline: Date.now() + syncPageLimits.millis,
       });
     } catch (error) {
       return { failure: failureOf(error) };

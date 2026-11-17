@@ -1,5 +1,5 @@
 import { syncErrors } from "@grasp-os/shared/sync";
-import type { SyncPage, SyncPageRequest } from "@grasp-os/shared/sync";
+import type { SyncPageRequest } from "@grasp-os/shared/sync";
 import { exports } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -35,8 +35,10 @@ interface Drive {
   changes: Record<string, Record<string, unknown>>;
   /** Each file's content, by ID. */
   contents: Record<string, string>;
-  /** Answers every request instead, when set. */
+  /** Answers every request instead, when it answers. */
   answer?: (url: URL) => Response | undefined;
+  /** A path Google is slow to answer, and how slow. */
+  slow?: { path: string; ms: number };
 }
 
 const drive: Drive = { start: "100", owned: [], changes: {}, contents: {} };
@@ -47,6 +49,7 @@ const reset = (): void => {
   drive.changes = {};
   drive.contents = {};
   drive.answer = undefined;
+  drive.slow = undefined;
 };
 
 const listing = (url: URL): Response => {
@@ -59,7 +62,10 @@ const listing = (url: URL): Response => {
   });
 };
 
-const internet = fakeInternet((_request, url) => {
+const internet = fakeInternet(async (_request, url) => {
+  if (drive.slow?.path === url.pathname) {
+    await scheduler.wait(drive.slow.ms);
+  }
   const answered = drive.answer?.(url);
   if (answered !== undefined) {
     return answered;
@@ -133,7 +139,8 @@ const priceList = ownedFile("price-list", {
   permissions: [
     { type: "user", emailAddress: "Owner@Acme.test" },
     { type: "group", emailAddress: "Sales@Acme.test" },
-    { type: "domain", domain: "Acme.test" },
+    { type: "domain", domain: "Acme.test", allowFileDiscovery: true },
+    { type: "domain", domain: "partner.test", allowFileDiscovery: false },
     { type: "anyone" },
     { type: "user", emailAddress: "left@acme.test", deleted: true },
   ],
@@ -162,11 +169,15 @@ describe("syncing a person's own Drive", () => {
         changedAt: "2026-11-10T09:00:00.000Z",
         title: "Price list",
         content: { type: "text", text: "Coffee 3.20" },
-        // Anyone with the link, and a deleted account, give nobody access.
+        // A domain that can't find it in its own search, and anyone with
+        // the link, are links: they count for nobody. A deleted account
+        // isn't there.
         readers: [
           { kind: "account", id: owner },
           { kind: "group", id: "sales@acme.test" },
           { kind: "tenant", id: "acme.test" },
+          { kind: "link" },
+          { kind: "link" },
         ],
         changedBy: owner,
         partOf: null,
@@ -279,31 +290,90 @@ describe("syncing a person's own Drive", () => {
     });
   });
 
-  it("goes on where a full page stopped, within Google's page, each page within what a read may send", async () => {
+  it("never skips a file when one before it goes to the bin between two reads", async () => {
     const connectionId = await connected();
     const many = Array.from({ length: 60 }, (_, index) =>
       ownedFile(`file-${index}`)
     );
-    drive.owned = many;
+    drive.owned = [...many];
     drive.contents = Object.fromEntries(many.map(({ id }) => [id, id]));
     drive.changes = { 100: { newStartPageToken: "100", changes: [] } };
 
-    const seen: string[] = [];
-    let cursor: string | null = null;
-    let page: SyncPage;
-    let reads = 0;
-    do {
+    const seen = new Set<string>();
+    let page = await read(connectionId, null);
+    for (const { id } of page.items) {
+      seen.add(id);
+    }
+    // A full page stopped inside Google's page: binning its first file
+    // moves every later one up.
+    expect(seen.size).toBeLessThan(many.length);
+    drive.owned = many.slice(1);
+    let reads = 1;
+    while (page.more && reads < 10) {
       const before = sentToGoogle().length;
       // oxlint-disable-next-line no-await-in-loop -- pages come one after another
-      page = await read(connectionId, cursor);
-      expect(sentToGoogle().length - before).toBeLessThanOrEqual(45);
-      seen.push(...page.items.map(({ id }) => id));
-      ({ cursor } = page);
+      page = await read(connectionId, page.cursor);
+      // Within what a connector's isolate may send.
+      expect(sentToGoogle().length - before).toBeLessThanOrEqual(50);
+      for (const { id } of page.items) {
+        seen.add(id);
+      }
       reads += 1;
-    } while (page.more && reads < 10);
-    expect(page.more).toBeFalsy();
-    expect(reads).toBeGreaterThan(1);
-    expect(seen.toSorted()).toStrictEqual(many.map(({ id }) => id).toSorted());
+    }
+    expect([...seen].toSorted()).toStrictEqual(
+      many.map(({ id }) => id).toSorted()
+    );
+  });
+
+  it("exports a spreadsheet as a workbook with every sheet", async () => {
+    const connectionId = await connected();
+    const xlsx =
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+    drive.owned = [
+      ownedFile("prices", {
+        mimeType: "application/vnd.google-apps.spreadsheet",
+        size: undefined,
+      }),
+    ];
+    // Google's CSV export holds the first sheet only.
+    drive.answer = (url) =>
+      url.pathname === "/drive/v3/files/prices/export"
+        ? new Response(
+            url.searchParams.get("mimeType") === xlsx
+              ? "workbook: Coffee, Tea"
+              : "Coffee only"
+          )
+        : undefined;
+    const { items } = await read(connectionId, null);
+    expect(items).toStrictEqual([
+      expect.objectContaining({
+        id: "prices",
+        content: {
+          type: "file",
+          contentType: xlsx,
+          base64: btoa("workbook: Coffee, Tea"),
+        },
+      }),
+    ]);
+  });
+
+  it("answers in time when an export is slow, and goes on after the last file it handled", async () => {
+    const connectionId = await connected();
+    drive.owned = [
+      ownedFile("quick"),
+      ownedFile("slow", { mimeType: doc, size: undefined }),
+      ownedFile("next"),
+    ];
+    drive.contents = { quick: "q", slow: "s", next: "n" };
+    // Longer than a page may take: given up before connect does.
+    drive.slow = { path: "/drive/v3/files/slow/export", ms: 20_000 };
+    const first = await read(connectionId, null);
+    expect(first.items.map(({ id }) => id)).toStrictEqual(["quick"]);
+    expect(first.more).toBeTruthy();
+
+    drive.slow = undefined;
+    const second = await read(connectionId, first.cursor);
+    expect(second.items.map(({ id }) => id)).toStrictEqual(["slow", "next"]);
   });
 
   it("lists again when Google no longer has the cursor, or it isn't one the sync wrote", async () => {
