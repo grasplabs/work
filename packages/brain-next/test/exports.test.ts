@@ -422,6 +422,56 @@ const stoppingBucket = async (
   return { reached: () => flags.reached };
 };
 
+/**
+ * `store`'s bucket swapped for one whose deletes of keys under `prefix`
+ * fail, as R2 erring would: `heal` puts the bucket back.
+ */
+const failingDeletes = async (
+  store: Store,
+  prefix: string
+): Promise<{ heal: () => Promise<void> }> => {
+  const bucket = env.BRAIN_OBJECTS;
+  const swap = async (to: unknown): Promise<void> => {
+    await runInDurableObject(store, (instance) => {
+      const objectEnv: unknown = Reflect.get(instance, "env");
+      if (typeof objectEnv !== "object" || objectEnv === null) {
+        throw new TypeError("The store has no env");
+      }
+      Reflect.set(instance, "env", { ...objectEnv, BRAIN_OBJECTS: to });
+    });
+  };
+  await swap(
+    Object.fromEntries(
+      r2Calls.map((name) => [
+        name,
+        async (...args: unknown[]) => {
+          const [keys] = args;
+          const named = Array.isArray(keys) ? keys : [keys];
+          if (
+            name === "delete" &&
+            named.some(
+              (key) => typeof key === "string" && key.startsWith(prefix)
+            )
+          ) {
+            throw new Error("R2 failed for the test");
+          }
+          const method: unknown = Reflect.get(bucket, name);
+          if (typeof method !== "function") {
+            throw new TypeError(`R2 has no ${name}`);
+          }
+          const result: unknown = await Reflect.apply(method, bucket, args);
+          return result;
+        },
+      ])
+    )
+  );
+  return {
+    heal: async () => {
+      await swap(bucket);
+    },
+  };
+};
+
 /** Stops `store`, as a crash or a deploy would. */
 const stop = async (store: Store): Promise<void> => {
   try {
@@ -1875,27 +1925,92 @@ describe("exports and restores", () => {
       });
     });
 
-    it("drops an adopted export handed back by a stopped check once the ledger names a version it holds (threats 6, 9)", async () => {
-      await putBack(shared(), emptyShared);
-      const marker = `marker${unique()}`;
-      const source = `test:${unique()}`;
-      await add(shared(), source, marker, team(`team:${unique()}`));
-      const { id } = await shared().startExport("test");
-      await settled(shared(), id);
-      const files = await keysUnder(`exports/${id}/`);
-      await putBack(shared(), emptyShared);
-      await startedAndStopped(id);
-      const kept = await keysUnder(`exports/${id}/`);
-      await shared().eraseSource({ source, reason: "deleted" });
-      for (let ticks = 0; ticks < 4; ticks += 1) {
-        // oxlint-disable-next-line no-await-in-loop -- a tick at a time
+    // GRA-1979: an erasure of what it holds leaves it to start again.
+    it.each([
+      ["a source's erasure", "source"],
+      ["an App's data reset", "writer"],
+    ] as const)(
+      "keeps an adopted export handed back by a stopped check through %s naming what it holds, while its restore can start again; started again it leaves that out, and the export goes once the restore is through (threats 6, 9)",
+      async (_case, erasure) => {
+        await putBack(shared(), emptyShared);
+        const group = `team:${unique()}`;
+        const reader = readerOf(`person:${unique()}`, [group]);
+        const source = `test:${unique()}`;
+        const keptSource = `test:${unique()}`;
+        const writer = `app:${unique()}`;
+        await add(shared(), source, `erased ${unique()}`, team(group));
+        await add(shared(), keptSource, "words", team(group));
+        const made = await shared().addMemories({
+          change: unique(),
+          access: team(group),
+          entities: [customer()],
+          memories: [
+            drawn(keptSource, "Acme has words"),
+            writtenBy(writer, "Acme goes"),
+          ],
+        });
+        const { id } = await shared().startExport("test");
+        await settled(shared(), id);
+        const files = await keysUnder(`exports/${id}/`);
+        await putBack(shared(), emptyShared);
+        await startedAndStopped(id);
+        await (erasure === "source"
+          ? shared().eraseSource({ source, reason: "deleted" })
+          : shared().eraseWriter({
+              writer,
+              reason: "deleted",
+              change: unique(),
+            }));
+        for (let ticks = 0; ticks < 4; ticks += 1) {
+          // oxlint-disable-next-line no-await-in-loop -- a tick at a time
+          await tick(shared());
+        }
+        const stopped = await shared().restoreStatus(id);
+        const kept = await keysUnder(`exports/${id}/`);
+        const again = await called(shared().startRestore(id, "test")).then(
+          ({ state }) => state,
+          (error: unknown) => (error instanceof Error ? error.message : "")
+        );
+        const done = await restoreSettled(id);
+        const { memories } = await shared().readMemories({
+          entity: made.entities.c ?? "",
+          reader,
+        });
+        const sources = await Promise.all(
+          [source, keptSource].map(
+            async (key) =>
+              (await shared().readVersion({
+                source: key,
+                version: 1,
+                reader,
+              })) !== null
+          )
+        );
         await tick(shared());
+        await tick(shared());
+
+        expect({
+          stopped: stopped?.state,
+          kept,
+          again,
+          done: done?.state,
+          memories: memories.map(({ statement }) => statement).toSorted(),
+          sources,
+          after: await keysUnder(`exports/${id}/`),
+        }).toStrictEqual({
+          stopped: "failed",
+          kept: files,
+          again: "running",
+          done: "done",
+          memories:
+            erasure === "source"
+              ? ["Acme goes", "Acme has words"]
+              : ["Acme has words"],
+          sources: [erasure !== "source", true],
+          after: [],
+        });
       }
-      expect({
-        kept,
-        after: await keysUnder(`exports/${id}/`),
-      }).toStrictEqual({ kept: files, after: [] });
-    });
+    );
 
     it("holds no file past the parts its manifest names once a restore adopts it (threats 6, 8)", async () => {
       await putBack(shared(), emptyShared);
@@ -1959,7 +2074,83 @@ describe("exports and restores", () => {
       });
     });
 
-    it("drops a handed-back export whose holdings an erasure named while its restore was stuck, with no erasure after (threats 6, 9)", async () => {
+    it("keeps the files of an export whose deletion was queued before a restore adopted it, once its check stopped, when that deletion is tried again (threats 6, 9)", async () => {
+      await putBack(shared(), emptyShared);
+      const group = `team:${unique()}`;
+      const reader = readerOf(`person:${unique()}`, [group]);
+      const erased = `test:${unique()}`;
+      const kept = `test:${unique()}`;
+      await add(shared(), erased, `erased ${unique()}`, team(group));
+      await add(shared(), kept, "words", team(group));
+      const { id } = await shared().startExport("test");
+      await settled(shared(), id);
+      const files = await keysUnder(`exports/${id}/`);
+      // The storage lost, the source erased: the sweep puts the deletion
+      // of the export's files on the queue, and R2 fails it.
+      await putBack(shared(), emptyShared);
+      const failing = await failingDeletes(shared(), `exports/${id}/`);
+      await shared().eraseSource({ source: erased, reason: "deleted" });
+      for (let ticks = 0; ticks < 3; ticks += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- a tick at a time
+        await tick(shared());
+      }
+      const queued = await runInDurableObject(
+        shared(),
+        (_instance, state) =>
+          state.storage.sql
+            .exec(
+              "SELECT 1 FROM work_items WHERE kind = 'brain.export' AND key = ?",
+              `export:${id}`
+            )
+            .toArray().length
+      );
+      // A restore adopts it, and its check stops: handed back, still failed.
+      await startedAndStopped(id);
+      const stopped = await shared().restoreStatus(id);
+      // R2 heals; the deletion is tried again, past its backoff.
+      await failing.heal();
+      for (let ticks = 1; ticks <= 3; ticks += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- a tick at a time
+        await shared().work({
+          ask: quietAsk,
+          at: new Date(Date.now() + ticks * 3_600_000),
+          embedders: noEmbedders,
+          handOvers: noHandOvers,
+          contextTokens: null,
+        });
+      }
+      const left = await keysUnder(`exports/${id}/`);
+      const again = await called(shared().startRestore(id, "test")).then(
+        ({ state }) => state,
+        (error: unknown) => (error instanceof Error ? error.message : "")
+      );
+      const done = await restoreSettled(id);
+      const sources = await Promise.all(
+        [erased, kept].map(
+          async (source) =>
+            (await shared().readVersion({ source, version: 1, reader })) !==
+            null
+        )
+      );
+
+      expect({
+        queued,
+        stopped: stopped?.state,
+        kept: left,
+        again,
+        done: done?.state,
+        sources,
+      }).toStrictEqual({
+        queued: 1,
+        stopped: "failed",
+        kept: files,
+        again: "running",
+        done: "done",
+        sources: [false, true],
+      });
+    });
+
+    it("drops a handed-back export whose holdings an erasure named while its restore was stuck, once that restore is given up, with no erasure after (threats 6, 9)", async () => {
       await putBack(shared(), emptyShared);
       const source = `test:${unique()}`;
       await add(
@@ -1997,17 +2188,38 @@ describe("exports and restores", () => {
         await tick(shared());
       }
       const held = await keysUnder(`exports/${id}/`);
-      // Parked for good: the tick hands the export back, and with no
-      // erasure after, a pass still judges its files.
+      // Parked for good: the tick hands the export back, its files kept
+      // while the restore can start again.
       await restoreItem(`parks = ${workParksMax}`);
       for (let ticks = 0; ticks < 6; ticks += 1) {
         // oxlint-disable-next-line no-await-in-loop -- a tick at a time
         await tick(shared());
       }
+      const handedBack = await keysUnder(`exports/${id}/`);
+      // The store used: the restore is given up, and with no erasure
+      // after, a pass still judges its files.
+      await add(
+        shared(),
+        `test:${unique()}`,
+        "in use",
+        team(`team:${unique()}`)
+      );
+      for (let ticks = 0; ticks < 6; ticks += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- a tick at a time
+        await tick(shared());
+      }
+      const given = await shared().restoreStatus(id);
       expect({
         held: held.length > 0,
+        handedBack,
+        given: given?.state,
         after: await keysUnder(`exports/${id}/`),
-      }).toStrictEqual({ held: true, after: [] });
+      }).toStrictEqual({
+        held: true,
+        handedBack: held,
+        given: "abandoned",
+        after: [],
+      });
     });
 
     it("goes on with a sweep pass whose item went before it ended, from its saved place (threat 6)", async () => {
@@ -2102,6 +2314,176 @@ describe("exports and restores", () => {
         held: 60,
       });
     });
+
+    // GRA-1979: an App's data reset is an erasure, not a write: it leaves a
+    // failed restore to start again, and its export's files with it.
+    it.each([
+      ["an App the export holds nothing of", false],
+      ["the App whose memories the export holds", true],
+    ] as const)(
+      "keeps a restore failed in its write pass, and its export's files, through data resets of %s (retried, a second App's, a restart between); started again it brings back none of that App's memories (threats 6, 9)",
+      async (_case, held) => {
+        await putBack(shared(), emptyShared);
+        const group = `team:${unique()}`;
+        const reader = readerOf(`person:${unique()}`, [group]);
+        const source = `test:${unique()}`;
+        await add(shared(), source, "words", team(group));
+        const reset = `app:${unique()}`;
+        const made = await shared().addMemories({
+          change: unique(),
+          access: team(group),
+          entities: [customer()],
+          memories: [
+            drawn(source, "Acme has words"),
+            writtenBy(`app:${unique()}`, "Acme stays"),
+            ...(held ? [writtenBy(reset, "Acme goes")] : []),
+          ],
+        });
+        const entity = made.entities.c ?? "";
+        const statements = async (): Promise<string[]> => {
+          const { memories } = await shared().readMemories({ entity, reader });
+          return memories.map(({ statement }) => statement).toSorted();
+        };
+        const { id } = await shared().startExport("test");
+        await settled(shared(), id);
+        const files = await keysUnder(`exports/${id}/`);
+        await putBack(shared(), emptyShared);
+        // The write pass stops the store at its read of the last part, the
+        // memories written before it.
+        const manifest = storeManifestSchema.parse(
+          JSON.parse(await textAt(`exports/${id}/manifest.json`))
+        );
+        const last = manifest.parts.at(-1)?.file ?? "";
+        const stopping = await stoppingBucket(
+          shared(),
+          "get",
+          `exports/${id}/${last}`,
+          2,
+          true
+        );
+        await shared().startRestore(id, "test");
+        const ticking = called(tick(shared())).catch(() => {});
+        await until(stopping.reached, "the last part's write-pass read");
+        await runInDurableObject(shared(), (_instance, state) => {
+          state.storage.sql.exec(
+            "DELETE FROM work_items WHERE kind = 'brain.restore'"
+          );
+        });
+        await stop(shared());
+        await ticking;
+        await tick(shared());
+        const failed = await shared().restoreStatus(id);
+        const halfway = await statements();
+        // The App's data reset, asked again with its change; the store
+        // restarted; another App's data reset.
+        const change = unique();
+        await shared().eraseWriter({
+          writer: reset,
+          reason: "deleted",
+          change,
+        });
+        await shared().eraseWriter({
+          writer: reset,
+          reason: "deleted",
+          change,
+        });
+        await stop(shared());
+        await shared().eraseWriter({
+          writer: `app:${unique()}`,
+          reason: "deleted",
+          change: unique(),
+        });
+        for (let ticks = 0; ticks < 3; ticks += 1) {
+          // oxlint-disable-next-line no-await-in-loop -- a tick at a time
+          await tick(shared());
+        }
+        const still = await shared().restoreStatus(id);
+        const kept = await keysUnder(`exports/${id}/`);
+        const again = await called(shared().startRestore(id, "test")).then(
+          ({ state }) => state,
+          (error: unknown) => (error instanceof Error ? error.message : "")
+        );
+        const done = await restoreSettled(id);
+        await tick(shared());
+        const after = await shared().exportStatus({ id });
+
+        expect({
+          failed: failed?.state,
+          halfway,
+          still: still?.state,
+          kept,
+          again,
+          done: done?.state,
+          restored: await statements(),
+          // What the reset names in it, the export is let go of once
+          // the restore is through.
+          after: after?.state,
+        }).toStrictEqual({
+          failed: "failed",
+          halfway: [
+            "Acme has words",
+            ...(held ? ["Acme goes"] : []),
+            "Acme stays",
+          ].toSorted(),
+          still: "failed",
+          kept: files,
+          again: "running",
+          done: "done",
+          restored: ["Acme has words", "Acme stays"],
+          after: held ? "erased" : "done",
+        });
+      }
+    );
+
+    it.each([
+      ["after an App's data reset left it to start again", "reset first"],
+      ["and then an App's data is reset, before the next tick", "write first"],
+    ] as const)(
+      "gives up a failed restore once a memory is written %s (threat 9)",
+      async (_case, order) => {
+        await putBack(shared(), emptyShared);
+        const group = `team:${unique()}`;
+        await add(shared(), `test:${unique()}`, "words", team(group));
+        const { id } = await shared().startExport("test");
+        await settled(shared(), id);
+        await putBack(shared(), emptyShared);
+        await startedAndStopped(id);
+        const reset = async (): Promise<void> => {
+          await shared().eraseWriter({
+            writer: `app:${unique()}`,
+            reason: "deleted",
+            change: unique(),
+          });
+        };
+        const write = async (): Promise<void> => {
+          await shared().addMemories({
+            change: unique(),
+            access: team(group),
+            entities: [customer()],
+            memories: [writtenBy(`app:${unique()}`, "Acme is new")],
+          });
+        };
+        if (order === "reset first") {
+          await reset();
+          await tick(shared());
+        }
+        const before = await shared().restoreStatus(id);
+        await write();
+        if (order === "write first") {
+          await reset();
+        }
+        await tick(shared());
+        const after = await shared().restoreStatus(id);
+
+        expect({
+          before: before?.state,
+          after: after?.state,
+        }).toStrictEqual({ before: "failed", after: "abandoned" });
+        await expect(called(shared().startRestore(id, "test"))).rejects.toThrow(
+          "given up"
+        );
+      }
+    );
 
     it("lets go of a failed restore's export once the ledger names what it holds, and won't restart it into a store in use (threats 6, 7)", async () => {
       await putBack(shared(), emptyShared);
