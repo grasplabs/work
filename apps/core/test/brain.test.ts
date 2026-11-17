@@ -1,5 +1,4 @@
 import type { BrainRecordInput } from "@grasp-os/shared/brain-records";
-import { purgedMarker } from "@grasp-os/shared/brain-records";
 import { visionFields } from "@grasp-os/shared/kickoff";
 import type { VisionField } from "@grasp-os/shared/kickoff";
 import type { RosterInput } from "@grasp-os/shared/onboarding";
@@ -1110,55 +1109,6 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
         (each) => each === "Finance" || each === "Legal"
       )
     ).toStrictEqual((kept.reading?.teams ?? []).map(({ name }) => name));
-  });
-
-  it("joins no two teams an earlier release's purge left named the same", async () => {
-    const admin = await signedInApi(idp, "admin");
-    const store = onboardingStore(env);
-    // The kickoff names one team, an admin's record another, as a term
-    // purge of an earlier release left both: "Legal (removed)".
-    await bringInKickoff();
-    const { reading } = await store.kickoff();
-    await store.saveKickoff(
-      {
-        transcript: `${kickoffTranscript}\nAnna (CEO): Legal ${purgedMarker}.`,
-        fileName: null,
-        reading: {
-          ...(reading ?? { fields: {}, ask: {}, teams: [] }),
-          teams: [
-            { name: `Legal ${purgedMarker}`, does: "Contracts", people: 3 },
-          ],
-        },
-      },
-      { type: "system" },
-      await store.purgeMark()
-    );
-    const source = `src-${unique()}`;
-    await admin.api.brain.addRecords([
-      {
-        type: "source",
-        id: source,
-        kind: "interview",
-        title: "Legal interview",
-        date: today(),
-      },
-      {
-        type: "team",
-        id: `${source}-team`,
-        name: `Legal ${purgedMarker}`,
-        sourceId: source,
-      },
-    ]);
-    const { teams } = await admin.api.brain.read();
-    const removed = teams.filter(
-      ({ name }) => name === `Legal ${purgedMarker}`
-    );
-
-    expect(
-      removed
-        .map(({ id }) => id.startsWith("onb-kt-"))
-        .toSorted((a, b) => Number(a) - Number(b))
-    ).toStrictEqual([false, true]);
   });
 
   it("leaves room for a kickoff brought in again and again: retired records take none", async () => {

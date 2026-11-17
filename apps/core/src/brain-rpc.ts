@@ -17,10 +17,7 @@ import type {
   Workflow,
   Workspace,
 } from "@grasp-os/shared/brain";
-import {
-  onboardingIdPrefix,
-  purgedMarker,
-} from "@grasp-os/shared/brain-records";
+import { onboardingIdPrefix } from "@grasp-os/shared/brain-records";
 import type {
   BrainRecordInput,
   BrainRecordsAdded,
@@ -165,14 +162,6 @@ const dayOf = (iso: string): string => iso.slice(0, 10);
 /** A team's name as two sources can both mean it: trimmed, any case. */
 const nameKey = teamNameKey;
 
-/**
- * Whether teams of `name` may be joined by it: not one a purge rewrote
- * (its terms replaced by `purgedMarker`), which could name an unrelated
- * team the same way.
- */
-const joinable = (name: string): boolean =>
-  !name.toLowerCase().includes(purgedMarker.toLowerCase());
-
 /** A tool's name as an id part: its letters and digits, any case, joined by `-`; empty when it has none. */
 const slugOf = (name: string): string =>
   name
@@ -274,12 +263,7 @@ type TeamsByName = ReadonlyMap<string, string>;
 
 /** The first of `teams` of each name: the roster's before the records'. */
 const teamsByName = (teams: readonly Team[]): TeamsByName =>
-  new Map(
-    teams
-      .filter(({ name }) => joinable(name))
-      .toReversed()
-      .map(({ id, name }) => [nameKey(name), id])
-  );
+  new Map(teams.toReversed().map(({ id, name }) => [nameKey(name), id]));
 
 /** The ids of the brain's teams `names` name, once each; names it has no team for are left out. */
 const teamIdsNamed = (
@@ -775,14 +759,12 @@ const withKickoffTeams = (
   const byName = new Map<string, Team>();
   for (const team of [...roster, ...own]) {
     const key = nameKey(team.name);
-    if (joinable(team.name) && !byName.has(key)) {
+    if (!byName.has(key)) {
       byName.set(key, team);
     }
   }
   const alone = kickoff.filter((team) => {
-    const into = joinable(team.name)
-      ? byName.get(nameKey(team.name))
-      : undefined;
+    const into = byName.get(nameKey(team.name));
     if (into === undefined) {
       return true;
     }
