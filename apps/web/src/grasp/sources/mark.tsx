@@ -3,7 +3,7 @@
 import * as stylex from "@stylexjs/stylex";
 import { useState } from "react";
 
-import { Avatar } from "../avatar";
+import { Avatar, AvatarImage, AvatarFallback } from "../avatar";
 import { BrandIcon } from "../brand-icon";
 import {
   Agent,
@@ -71,10 +71,12 @@ const Face = ({ source, size }: { source: Source; size: "row" | "pile" }) => {
     return (
       <Avatar
         name={source.person.name}
-        src={source.person.src}
         size={size === "row" ? "sm" : "xs"}
         decorative
-      />
+      >
+        <AvatarImage src={source.person.src} />
+        <AvatarFallback />
+      </Avatar>
     );
   }
   if (source.brand !== undefined && source.icon === undefined) {

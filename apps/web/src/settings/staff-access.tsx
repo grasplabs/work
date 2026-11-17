@@ -11,15 +11,15 @@ import {
   AlertDialogAction,
   AlertDialogDescription,
   AlertDialogFooter,
-  AlertDialogPanel,
+  AlertDialogContent,
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "../grasp/alert-dialog/index.ts";
 import { Badge } from "../grasp/badge/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
+import { FactRow, RowAlert, SettingsRows } from "../grasp/setting-row/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { useCore } from "../use-core.ts";
-import { FactRow, RowAlert, SettingsRows } from "./section.tsx";
 
 // Settings › Workspace › Grasp staff access, for the company's admins:
 // whether Grasp's staff may sign in now, what they reach and until when,
@@ -64,7 +64,7 @@ const EndStaffAccess = ({
       <AlertDialogTrigger size="sm">
         {t`End staff access now`}
       </AlertDialogTrigger>
-      <AlertDialogPanel>
+      <AlertDialogContent>
         <AlertDialogTitle>{t`End Grasp staff access now?`}</AlertDialogTitle>
         <AlertDialogDescription>
           {t`Everyone from Grasp is signed out at once, and nobody from Grasp can sign in again until a new window is opened.`}
@@ -82,7 +82,7 @@ const EndStaffAccess = ({
             {t`End access`}
           </AlertDialogAction>
         </AlertDialogFooter>
-      </AlertDialogPanel>
+      </AlertDialogContent>
     </AlertDialog>
   );
 };
@@ -104,6 +104,7 @@ export const StaffAccessSection = ({
       {...(open && editable
         ? { actions: <EndStaffAccess onFailure={setFailure} /> }
         : {})}
+      density="compact"
       description={t`Only while a window your organization opened lasts.`}
       flush
       title={t`Grasp staff access`}

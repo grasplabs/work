@@ -12,11 +12,11 @@ import {
 import type { CollapsibleState } from "@ui-sdk/react/collapsible";
 import { useLayoutEffect, useRef, useState } from "react";
 
+import { AgentIndicator } from "../agent-indicator";
 import { Button } from "../button";
 import { focus } from "../focus/focus";
 import { visuallyHidden } from "../hidden/hidden";
 import { ChevronDown, Failed, Icon, Skipped } from "../icons";
-import { WorkingMark } from "../working-mark";
 import { seconds } from "./format";
 import { activityStyles as styles } from "./styles";
 import type { ActivityStep, AgentActivityWords } from "./types";
@@ -27,7 +27,7 @@ import type { ActivityStep, AgentActivityWords } from "./types";
  */
 const Mark = ({ step }: { step: ActivityStep }) => {
   if (step.state === "working") {
-    return <WorkingMark />;
+    return <AgentIndicator />;
   }
   if (step.state === "failed") {
     return <Icon icon={Failed} />;

@@ -1727,10 +1727,6 @@ msgstr "A run of version {version} started for someone else"
 msgid "A run of version {version} started for you"
 msgstr "A run of version {version} started for you"
 
-#: src/settings/backdrop-settings.tsx
-msgid "A scene, a dither, sand, or nothing."
-msgstr "A scene, a dither, sand, or nothing."
-
 #: src/workflows/workflow-triggers.tsx
 msgid "A schedule"
 msgstr "A schedule"
@@ -1901,6 +1897,11 @@ msgstr "Access waiting for an admin"
 
 #: src/connections/connection-list.tsx
 #: src/routes/_shell.integrations.$integration.tsx
+msgid "Account"
+msgstr "Account"
+
+#: src/settings/sections.ts
+msgctxt "settings group"
 msgid "Account"
 msgstr "Account"
 
@@ -2799,6 +2800,7 @@ msgstr "Apps it works in"
 
 #: src/apps/app-settings.tsx
 #: src/apps/app-status.tsx
+#: src/chat/sidebar-chats.tsx
 msgid "Archive"
 msgstr "Archive"
 
@@ -2904,6 +2906,7 @@ msgstr "Ask an admin"
 
 #: src/chat/chat-composer.tsx
 #: src/chat/global-chat.tsx
+#: src/settings/backdrop-settings.tsx
 msgid "Ask anything, or describe a process"
 msgstr "Ask anything, or describe a process"
 
@@ -3152,8 +3155,8 @@ msgid "Back to your version"
 msgstr "Back to your version"
 
 #: src/settings/backdrop-settings.tsx
-msgid "Backdrop"
-msgstr "Backdrop"
+msgid "Background"
+msgstr "Background"
 
 #: src/onboarding/ai-step.tsx
 #: src/settings/ai-providers.tsx
@@ -3761,8 +3764,8 @@ msgid "Chat apps"
 msgstr "Chat apps"
 
 #: src/settings/backdrop-settings.tsx
-msgid "Chat backdrop"
-msgstr "Chat backdrop"
+msgid "Chat background"
+msgstr "Chat background"
 
 #: src/chat/chat-more.tsx
 #: src/chat/chat-window.tsx
@@ -4555,6 +4558,14 @@ msgstr "Could not make admin"
 msgid "Could not remove"
 msgstr "Could not remove"
 
+#: src/settings/workspace-name.tsx
+msgid "Could not save. Your change is kept."
+msgstr "Could not save. Your change is kept."
+
+#: src/settings/profile-name.tsx
+msgid "Could not save. Your name is kept."
+msgstr "Could not save. Your name is kept."
+
 #: src/chat/asked-questions.tsx
 #: src/chat/chat-bar.tsx
 #: src/chat/chat-composer.tsx
@@ -4796,6 +4807,7 @@ msgstr "Definition version"
 #: src/chat/chat-menus.tsx
 #: src/chat/chat-more.tsx
 #: src/chat/delete-chat-dialog.tsx
+#: src/chat/sidebar-chats.tsx
 #: src/projects/project-view.tsx
 #: src/settings/event-sources.tsx
 #: src/settings/teams.tsx
@@ -5045,10 +5057,6 @@ msgstr "Dismiss this signal about {name}"
 #: src/activity/audit-words.ts
 msgid "Dismissed a knowledge signal"
 msgstr "Dismissed a knowledge signal"
-
-#: src/settings/backdrop-settings.tsx
-msgid "Dithers"
-msgstr "Dithers"
 
 #: src/workflows/requests/request-needs.tsx
 msgid "Do it"
@@ -5344,7 +5352,6 @@ msgstr "Editing a workflow"
 
 #: src/onboarding/interviews-progress.tsx
 #: src/routes/_shell.settings.profile.tsx
-#: src/routes/_shell.settings.security.tsx
 #: src/settings/invitations.tsx
 #: src/workflows/requests/request-summary.tsx
 msgid "Email"
@@ -6510,10 +6517,6 @@ msgstr "Grasp sent this link to that account in {app}. Link it only if it is you
 msgid "Grasp sent this, but its answer was lost: nobody can tell whether it took effect. Check on {connection} before you say."
 msgstr "Grasp sent this, but its answer was lost: nobody can tell whether it took effect. Check on {connection} before you say."
 
-#: src/settings/sign-in-settings.tsx
-msgid "Grasp sets this up; ask Grasp to change it."
-msgstr "Grasp sets this up; ask Grasp to change it."
-
 #: src/routes/_shell.settings.workspace.tsx
 #: src/settings/staff-access.tsx
 msgid "Grasp staff access"
@@ -6813,10 +6816,6 @@ msgstr "How often"
 #: src/brain/work-knowledge.tsx
 msgid "How sure"
 msgstr "How sure"
-
-#: src/settings/backdrop-settings.tsx
-msgid "How the dither's cells are set."
-msgstr "How the dither's cells are set."
 
 #: src/brain/work-knowledge.tsx
 msgid "How the work goes today"
@@ -7859,10 +7858,6 @@ msgstr "Leave this page?"
 msgid "Leaves this list"
 msgstr "Leaves this list"
 
-#: src/routes/_shell.settings.security.tsx
-msgid "Leaving the company stops new sign-ins."
-msgstr "Leaving the company stops new sign-ins."
-
 #: src/workflows/requests/request-needs.tsx
 msgid "Left as it is since {date}"
 msgstr "Left as it is since {date}"
@@ -8437,6 +8432,7 @@ msgid "More for {name}"
 msgstr "More for {name}"
 
 #: src/chat/chat-menus.tsx
+#: src/chat/sidebar-chats.tsx
 msgid "More for {title}"
 msgstr "More for {title}"
 
@@ -8544,6 +8540,7 @@ msgstr "My version of the App didn't start. Find out why and fix it:"
 #: src/onboarding/interviews-progress.tsx
 #: src/projects/project-dialog.tsx
 #: src/routes/_shell.settings.profile.tsx
+#: src/settings/profile-name.tsx
 #: src/settings/teams.tsx
 #: src/settings/workspace-name.tsx
 #: src/workflows/files-and-apps.tsx
@@ -9016,10 +9013,6 @@ msgstr "No tables"
 msgid "No tables yet"
 msgstr "No tables yet"
 
-#: src/routes/_shell.settings.profile.tsx
-msgid "No teams"
-msgstr "No teams"
-
 #: src/settings/teams.tsx
 msgid "No teams yet."
 msgstr "No teams yet."
@@ -9296,8 +9289,8 @@ msgid "Not offered"
 msgstr "Not offered"
 
 #: src/settings/sign-in-settings.tsx
-msgid "Not offered: its secret isn’t set"
-msgstr "Not offered: its secret isn’t set"
+msgid "Not on the sign-in page yet"
+msgstr "Not on the sign-in page yet"
 
 #: src/onboarding/send-plan-form.tsx
 msgid "Not planned yet"
@@ -9603,10 +9596,6 @@ msgctxt "a kind of field"
 msgid "Number"
 msgstr "Number"
 
-#: src/routes/_shell.settings.profile.tsx
-msgid "Numbers, dates and amounts follow it too."
-msgstr "Numbers, dates and amounts follow it too."
-
 #: src/workflows/figures.tsx
 msgid "of them wait for a decision"
 msgstr "of them wait for a decision"
@@ -9727,10 +9716,6 @@ msgstr "On in {name}"
 msgid "On the schedule {cron}, in {zone}"
 msgstr "On the schedule {cron}, in {zone}"
 
-#: src/settings/sign-in-settings.tsx
-msgid "On the sign-in page"
-msgstr "On the sign-in page"
-
 #: src/workflows/workflows-table.tsx
 msgid "On the way"
 msgstr "On the way"
@@ -9785,10 +9770,6 @@ msgstr "Once it has a version, it can be copied."
 msgid "One a line, up to {most}: a name, each other form of it, an email address. A term is removed as a whole word, in any case, so list joined forms as terms of their own."
 msgstr "One a line, up to {most}: a name, each other form of it, an email address. A term is removed as a whole word, in any case, so list joined forms as terms of their own."
 
-#: src/settings/backdrop-settings.tsx
-msgid "One green, or a run of greens from the edge in."
-msgstr "One green, or a run of greens from the edge in."
-
 #: src/agents/agent-form.tsx
 msgid "One line, such as: chases unpaid invoices."
 msgstr "One line, such as: chases unpaid invoices."
@@ -9804,14 +9785,6 @@ msgstr "One of a list of options"
 #: src/interview/words.ts
 msgid "One real case"
 msgstr "One real case"
-
-#: src/settings/sign-in-settings.tsx
-msgid "Only accounts of the Google Workspace {hostedDomain}."
-msgstr "Only accounts of the Google Workspace {hostedDomain}."
-
-#: src/settings/sign-in-settings.tsx
-msgid "Only accounts of the tenant {tenantId}."
-msgstr "Only accounts of the tenant {tenantId}."
 
 #: src/settings/use-team-change.ts
 msgid "Only admins can change teams."
@@ -9903,6 +9876,14 @@ msgstr "Only when asked"
 msgid "Only while a window your organization opened lasts."
 msgstr "Only while a window your organization opened lasts."
 
+#: src/settings/sign-in-settings.tsx
+msgid "Only work accounts from {organization}’s Google Workspace ({hostedDomain})."
+msgstr "Only work accounts from {organization}’s Google Workspace ({hostedDomain})."
+
+#: src/settings/sign-in-settings.tsx
+msgid "Only work accounts from {organization}’s Microsoft 365."
+msgstr "Only work accounts from {organization}’s Microsoft 365."
+
 #: src/brain/sources-page.tsx
 msgctxt "a source nobody else may read"
 msgid "Only you"
@@ -9926,6 +9907,7 @@ msgstr "Only you see it while you try it. You share it when it's right."
 msgid "Only you see this"
 msgstr "Only you see this"
 
+#: src/chat/sidebar-chats.tsx
 #: src/connections/request-app-dialog.tsx
 #: src/dashboard/in-inbox.tsx
 #: src/inbox/item-detail.tsx
@@ -10647,8 +10629,8 @@ msgid "Press a line to change it, take out what is wrong, or type what is missin
 msgstr "Press a line to change it, take out what is wrong, or type what is missing. What you leave in is what counts."
 
 #: src/settings/backdrop-settings.tsx
-msgid "Preview of your chat backdrop"
-msgstr "Preview of your chat backdrop"
+msgid "Preview of your chat background"
+msgstr "Preview of your chat background"
 
 #: src/knowledge/purge.tsx
 msgid "Preview the purge"
@@ -10670,7 +10652,6 @@ msgstr "Problems"
 msgid "Procedures, handbooks, how-tos. Connect where they live, and I’ll only read what you share with me."
 msgstr "Procedures, handbooks, how-tos. Connect where they live, and I’ll only read what you share with me."
 
-#: src/routes/_shell.settings.profile.tsx
 #: src/settings/sections.ts
 msgid "Profile"
 msgstr "Profile"
@@ -10855,6 +10836,10 @@ msgstr "Ran without a person"
 #: src/dashboard/report.ts
 msgid "Ran without a person: {share}"
 msgstr "Ran without a person: {share}"
+
+#: src/settings/backdrop-settings.tsx
+msgid "Randomize"
+msgstr "Randomize"
 
 #: src/workflows/requests/request-needs.tsx
 msgid "Rated down"
@@ -11338,6 +11323,7 @@ msgstr "Removing"
 
 #: src/chat/chat-menus.tsx
 #: src/chat/chat-more.tsx
+#: src/chat/sidebar-chats.tsx
 #: src/settings/teams.tsx
 msgid "Rename"
 msgstr "Rename"
@@ -11345,6 +11331,14 @@ msgstr "Rename"
 #: src/settings/teams.tsx
 msgid "Rename {name}"
 msgstr "Rename {name}"
+
+#: src/chat/sidebar-chats.tsx
+msgid "Rename {title}"
+msgstr "Rename {title}"
+
+#: src/chat/sidebar-chats.tsx
+msgid "Renamed to {name}"
+msgstr "Renamed to {name}"
 
 #: src/apps/data-model-changes.tsx
 msgid "Renames the table {from} to {to}; its records go with it."
@@ -12083,6 +12077,8 @@ msgid "Save the correction"
 msgstr "Save the correction"
 
 #: src/interview/composer.tsx
+#: src/settings/profile-name.tsx
+#: src/settings/workspace-name.tsx
 msgid "Saved"
 msgstr "Saved"
 
@@ -12119,6 +12115,11 @@ msgstr "Saved to your memory"
 #: src/workflows/resource-params.tsx
 msgid "Saved."
 msgstr "Saved."
+
+#: src/settings/profile-name.tsx
+#: src/settings/workspace-name.tsx
+msgid "Saving"
+msgstr "Saving"
 
 #: src/chat/thread.tsx
 msgid "Saving to your memory"
@@ -12157,10 +12158,6 @@ msgstr "Say what to change. Only you see the changes, in the Flow: its runs go o
 #: src/apps/apps-overview.tsx
 msgid "Say what you want to build, and Grasp builds it."
 msgstr "Say what you want to build, and Grasp builds it."
-
-#: src/settings/backdrop-settings.tsx
-msgid "Scenes"
-msgstr "Scenes"
 
 #: src/agents/agent-page.tsx
 msgid "Schedule"
@@ -13557,7 +13554,6 @@ msgstr "Team size unknown."
 #: src/people/people-teams-picker.tsx
 #: src/people/share-picker.tsx
 #: src/routes/_shell.settings.brain.tsx
-#: src/routes/_shell.settings.profile.tsx
 #: src/settings/members-tabs.tsx
 #: src/settings/teams.tsx
 #: src/workflows/share-workflow.tsx
@@ -15084,7 +15080,9 @@ msgstr "Try"
 #: src/frame/setting-up.tsx
 #: src/interview/sound-check.tsx
 #: src/pages/frame-failure.tsx
+#: src/settings/profile-name.tsx
 #: src/settings/section.tsx
+#: src/settings/workspace-name.tsx
 msgid "Try again"
 msgstr "Try again"
 
@@ -16094,10 +16092,6 @@ msgstr "What should this App do?"
 msgid "What should we look at today?"
 msgstr "What should we look at today?"
 
-#: src/settings/backdrop-settings.tsx
-msgid "What stands behind the page where you start a chat."
-msgstr "What stands behind the page where you start a chat."
-
 #: src/workflows/workflow-triggers.tsx
 msgid "What starts it"
 msgstr "What starts it"
@@ -16894,10 +16888,6 @@ msgstr "You and AI"
 msgid "You approve there. {app} shows what Grasp asks for."
 msgstr "You approve there. {app} shows what Grasp asks for."
 
-#: src/routes/_shell.settings.profile.tsx
-msgid "You are signed in as Grasp staff, for a limited time."
-msgstr "You are signed in as Grasp staff, for a limited time."
-
 #: src/inbox/items.ts
 #: src/workflows/workflow-status.tsx
 msgid "You asked for this yourself, and nobody else may approve it, so you decide it. It is recorded as self-approved."
@@ -16985,10 +16975,6 @@ msgstr "You’re seeing your version."
 msgid "You're still signed in. Try again in a moment."
 msgstr "You're still signed in. Try again in a moment."
 
-#: src/settings/sections.ts
-msgid "Your account"
-msgstr "Your account"
-
 #: src/chat/failure.ts
 msgid "Your AI provider is limiting requests (a rate or spending limit at the provider). Try again in a while."
 msgstr "Your AI provider is limiting requests (a rate or spending limit at the provider). Try again in a while."
@@ -17072,6 +17058,10 @@ msgstr "Your company’s name in Grasp."
 msgid "Your company’s name in Grasp. An admin changes it."
 msgstr "Your company’s name in Grasp. An admin changes it."
 
+#: src/routes/_shell.settings.profile.tsx
+msgid "Your details"
+msgstr "Your details"
+
 #: src/settings/ai-providers.tsx
 msgid "Your endpoint's public HTTPS address, such as https://models.example.com/v1."
 msgstr "Your endpoint's public HTTPS address, such as https://models.example.com/v1."
@@ -17105,10 +17095,6 @@ msgstr "Your organization’s account"
 msgid "Your organization's own keys pay for its model calls. Stored sealed."
 msgstr "Your organization's own keys pay for its model calls. Stored sealed."
 
-#: src/routes/_shell.settings.profile.tsx
-msgid "Your organization’s sign-in sets your name and email; an admin, your role and teams."
-msgstr "Your organization’s sign-in sets your name and email; an admin, your role and teams."
-
 #: src/onboarding/ai-step.tsx
 msgid "Your own contract with Anthropic, OpenAI, Mistral or another provider. You pay them directly."
 msgstr "Your own contract with Anthropic, OpenAI, Mistral or another provider. You pay them directly."
@@ -17116,6 +17102,10 @@ msgstr "Your own contract with Anthropic, OpenAI, Mistral or another provider. Y
 #: src/settings/ai-providers.tsx
 msgid "Your own keys, for when your AI runs on them. Stored sealed."
 msgstr "Your own keys, for when your AI runs on them. Stored sealed."
+
+#: src/settings/sign-in-settings.tsx
+msgid "Your people sign in with the work accounts your organization already has. Grasp set this up with you; to change it, ask your Grasp contact."
+msgstr "Your people sign in with the work accounts your organization already has. Grasp set this up with you; to change it, ask your Grasp contact."
 
 #: src/onboarding/about-story.tsx
 msgid "Your people, documents and tools first. Then two weeks of short conversations with your team. At {threshold}%, your team can start."

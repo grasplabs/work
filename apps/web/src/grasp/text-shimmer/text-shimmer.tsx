@@ -15,6 +15,7 @@
 // runs the other way. A screen reader reads the words once: the light's copy is hidden from it.
 "use client";
 
+/* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
 import { useEffect, useRef, useState } from "react";
 
@@ -22,13 +23,13 @@ import type { LayoutStyle } from "../layout/layout";
 import { grasp, media } from "../tokens/tokens.stylex";
 import { shimmerVars as v } from "./shimmer.stylex";
 
-/** How strong the light is. */
+/** How strong the light is. @deprecated Use `ShimmerStrength`, from `@/components/grasp/shimmer`. */
 export type TextShimmerStrength = "soft" | "clear" | "bright";
 
-/** What a caller may style: where the line sits. Never its look. */
+/** What a caller may style: where the line sits. Never its look. @deprecated Use `ShimmerLayoutStyle`, from `@/components/grasp/shimmer`. */
 export type TextShimmerLayoutStyle = LayoutStyle;
 
-/** Every prop a TextShimmer takes. */
+/** Every prop a TextShimmer takes. @deprecated Use `ShimmerProps`, from `@/components/grasp/shimmer`. */
 export interface TextShimmerProps {
   /** The words. */
   children: string;
@@ -171,7 +172,7 @@ const useSeen = () => {
   return { line, seen };
 };
 
-/** A line of what an agent is doing, the light crossing it while the work runs. */
+/** A line of what an agent is doing, the light crossing it while the work runs. @deprecated Use `Shimmer`, from `@/components/grasp/shimmer`. */
 export const TextShimmer = ({
   children,
   active = true,

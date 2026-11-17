@@ -1,27 +1,6 @@
-import * as stylex from "@stylexjs/stylex";
-import { useEffect, useRef } from "react";
-import type { RefObject } from "react";
-
-import { grasp } from "../tokens/tokens.stylex.ts";
-import type { SandKind } from "./look.ts";
-
-// Sand backdrops, drawn on a 2D canvas over the page's own ground: grains
-// on a shaken plate, as a Chladni figure. Each grain wanders where the
-// plate moves and comes to rest where it is still, so the sand gathers
-// along the still lines; the pointer stirs it. What differs is the plate:
-//
-// - sand: a square plate's own figures, rings and bars; every so often
-//   its tone changes and the sand runs to its new lines.
-// - dunes: ripples across, as wind leaves them, slowly drifting.
-// - rings: rings round what stands on the page, slowly widening.
-// - pixels: the plate's figures with every grain snapped to the dither's
-//   grid: sand, set as a dither.
-//
-// The grains are fine pine dots, one in a few mint, as the website's brain
-// is drawn. None stand on what is on the page (`clear`): they fade out
-// towards it. Drawn about thirty times a second, only while the page is
-// seen. With less motion each is one settled, still picture. Decorative
-// only.
+import { drawn, nothingDrawn } from "./drawing";
+import type { DrawOptions, Drawing } from "./drawing";
+import type { BackdropSand } from "./look";
 
 interface Box {
   left: number;
@@ -123,7 +102,7 @@ const rings: Plate = (x, y, now) => {
   return Math.sin(away * 0.034 - now.time * 0.22);
 };
 
-const plates: Record<SandKind, Plate> = {
+const plates: Record<BackdropSand, Plate> = {
   sand: plate,
   dunes,
   rings,
@@ -137,9 +116,16 @@ const pixelMark = 2;
 /** How many frames the sand takes to settle, for its first and its still picture. */
 const settleFrames = 150;
 
+/** The most grains, and how many CSS pixels of field each grain has. */
+const mostGrains = 9000;
+const pixelsPerGrain = 140;
+
 /** The sand on `field`: its grains, a step of them, and drawing them. */
 const sandOn = (scene: Scene, field: Plate, pixel: boolean) => {
-  const count = Math.min(9000, Math.round((scene.width * scene.height) / 140));
+  const count = Math.min(
+    mostGrains,
+    Math.round((scene.width * scene.height) / pixelsPerGrain)
+  );
   const grains = Array.from({ length: count }, (_, index) => ({
     x: Math.random() * scene.width,
     y: Math.random() * scene.height,
@@ -148,8 +134,8 @@ const sandOn = (scene: Scene, field: Plate, pixel: boolean) => {
   }));
   const step = (now: Scene): void => {
     for (const grain of grains) {
-      // Down the slope of how much the plate moves, faster where it moves
-      // more, with the shake of the plate on top.
+      // Down the slope of how much the plate moves, faster where it moves more, with the shake of
+      // the plate on top.
       const value = field(grain.x, grain.y, now);
       const dx = field(grain.x + 2, grain.y, now) - value;
       const dy = field(grain.x, grain.y + 2, now) - value;
@@ -225,19 +211,20 @@ const sandOn = (scene: Scene, field: Plate, pixel: boolean) => {
 /** How long a frame is, at most thirty a second. */
 const frameMs = 1000 / 30;
 
-/** Draws `kind` on `element` until the returned function is called. */
-const startSand = (
+/** The most canvas pixels to a CSS pixel: a grain is a dot of 1 to 1.6px, crisp at 2. */
+const mostRatio = 2;
+
+/** Draws sand of `kind` on `element`, run and held by Backdrop. */
+export const startSand = (
   element: HTMLCanvasElement,
-  kind: SandKind,
-  clear: RefObject<HTMLElement | null> | undefined
-): (() => void) => {
+  kind: BackdropSand,
+  options: DrawOptions
+): Drawing => {
   const ctx = element.getContext("2d");
   if (ctx === null) {
-    return () => {
-      // Nothing to draw on.
-    };
+    return nothingDrawn;
   }
-  const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const { still } = options;
   const scene: Scene = {
     width: 1,
     height: 1,
@@ -250,8 +237,9 @@ const startSand = (
   const begun = performance.now();
   let last = begun;
   let frame = 0;
-  // The canvas takes its colours from its own style, so they follow the
-  // theme: its text colour for the grains, its outline's for the sparks.
+  let running = false;
+  // The canvas takes its colours from its own style, so they follow the theme: its text colour for
+  // the grains, its outline's for the sparks (backdrop-grain and backdrop-spark).
   const colours = (): Colours => {
     const style = getComputedStyle(element);
     return { grain: style.color, accent: style.outlineColor };
@@ -259,7 +247,7 @@ const startSand = (
   /** Where what is kept clear stands, in the canvas's own space. */
   const place = (): void => {
     const box = element.getBoundingClientRect();
-    const kept = clear?.current?.getBoundingClientRect();
+    const kept = options.clear();
     scene.clear =
       kept === undefined
         ? undefined
@@ -270,39 +258,43 @@ const startSand = (
             bottom: kept.bottom - box.top,
           };
   };
+  const paint = (): void => {
+    sand?.draw(ctx, scene, colours());
+    drawn(element);
+  };
   const fit = (): void => {
     const box = element.getBoundingClientRect();
-    const ratio = Math.min(devicePixelRatio, 2);
+    const ratio = Math.min(devicePixelRatio, mostRatio);
     element.width = Math.max(1, Math.round(box.width * ratio));
     element.height = Math.max(1, Math.round(box.height * ratio));
     ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
     const before = { width: scene.width, height: scene.height };
-    scene.width = box.width;
-    scene.height = box.height;
+    scene.width = Math.max(1, box.width);
+    scene.height = Math.max(1, box.height);
     place();
     if (sand === undefined) {
       sand = sandOn(scene, plates[kind], pixel);
-      // The settled picture: all there is with less motion, and the first
-      // frame otherwise, so the sand is never seen as a plain scatter.
+      // The settled picture: all there is with less motion, and the first frame otherwise, so the
+      // sand is never seen as a plain scatter.
       for (let done = 0; done < settleFrames; done += 1) {
         sand.step(scene);
       }
     } else {
-      // Resized (the sidebar folding, say): the same sand, moved with the
-      // field, so it is never scattered and settled again.
+      // Resized (the sidebar folding, say): the same sand, moved with the field, so it is never
+      // scattered and settled again.
       sand.stretch(scene.width / before.width, scene.height / before.height);
     }
     // Sizing the canvas clears it: drawn again at once, so no frame is bare.
-    sand.draw(ctx, scene, colours());
+    paint();
   };
   const loop = (now: number): void => {
     frame = requestAnimationFrame(loop);
-    if (now - last >= frameMs && document.visibilityState === "visible") {
+    if (now - last >= frameMs) {
       last = now;
       place();
       scene.time = (now - begun) / 1000;
       sand?.step(scene);
-      sand?.draw(ctx, scene, colours());
+      paint();
     }
   };
   const point = (event: PointerEvent): void => {
@@ -315,56 +307,26 @@ const startSand = (
   const resized = new ResizeObserver(fit);
   resized.observe(element);
   fit();
-  if (!still) {
-    frame = requestAnimationFrame(loop);
-    window.addEventListener("pointermove", point);
-    document.documentElement.addEventListener("pointerleave", leave);
-  }
-  return () => {
-    cancelAnimationFrame(frame);
-    resized.disconnect();
-    window.removeEventListener("pointermove", point);
-    document.documentElement.removeEventListener("pointerleave", leave);
-  };
-};
-
-const styles = stylex.create({
-  // Its colours are what it draws in (startSand): pine grains, or sea on a
-  // dark ground, and mint for the sparks.
-  canvas: {
-    position: "absolute",
-    inset: 0,
-    width: "100%",
-    height: "100%",
-    pointerEvents: "none",
-    color: `light-dark(${grasp.lightPine}, ${grasp.lightSea})`,
-    outlineStyle: "none",
-    outlineColor: grasp.mintDeep,
-  },
-});
-
-/**
- * The sand backdrop of `kind`, filling what it is placed in (a box with a
- * position of its own), clear round `clear`. Key it by its kind.
- */
-export const ParticleField = ({
-  kind,
-  clear,
-}: {
-  kind: SandKind;
-  clear?: RefObject<HTMLElement | null>;
-}) => {
-  const canvas = useRef<HTMLCanvasElement>(null);
-  useEffect(() => {
-    const element = canvas.current;
-    if (element === null) {
-      return () => {
-        // Nothing to draw on.
-      };
+  const run = (on: boolean): void => {
+    if (still || on === running) {
+      return;
     }
-    return startSand(element, kind, clear);
-  }, [kind, clear]);
-  return (
-    <canvas aria-hidden="true" ref={canvas} {...stylex.props(styles.canvas)} />
-  );
+    running = on;
+    if (on) {
+      frame = requestAnimationFrame(loop);
+      window.addEventListener("pointermove", point);
+      document.documentElement.addEventListener("pointerleave", leave);
+    } else {
+      cancelAnimationFrame(frame);
+      window.removeEventListener("pointermove", point);
+      document.documentElement.removeEventListener("pointerleave", leave);
+    }
+  };
+  return {
+    run,
+    stop: () => {
+      run(false);
+      resized.disconnect();
+    },
+  };
 };

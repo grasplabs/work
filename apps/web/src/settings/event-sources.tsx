@@ -12,7 +12,7 @@ import {
   AlertDialogAction,
   AlertDialogDescription,
   AlertDialogFooter,
-  AlertDialogPanel,
+  AlertDialogContent,
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "../grasp/alert-dialog/index.ts";
@@ -26,7 +26,7 @@ import {
   DialogBody,
   DialogDescription,
   DialogFooter,
-  DialogPanel,
+  DialogContent,
   DialogTitle,
 } from "../grasp/dialog/index.ts";
 import { Field, FieldError, FieldLabel } from "../grasp/field/index.ts";
@@ -134,7 +134,7 @@ const Confirmed = ({
       >
         {button}
       </AlertDialogTrigger>
-      <AlertDialogPanel>
+      <AlertDialogContent>
         <AlertDialogTitle>{title}</AlertDialogTitle>
         <AlertDialogDescription>{description}</AlertDialogDescription>
         <AlertDialogFooter>
@@ -146,7 +146,7 @@ const Confirmed = ({
             {confirm}
           </AlertDialogAction>
         </AlertDialogFooter>
-      </AlertDialogPanel>
+      </AlertDialogContent>
     </AlertDialog>
   );
 };
@@ -187,7 +187,7 @@ const SourceRow = ({
         </Text>
       </div>
       {url === undefined ? null : (
-        <CopyField label={t`Copy the URL of ${name}`} value={url} />
+        <CopyField aria-label={t`Copy the URL of ${name}`} value={url} />
       )}
       {revoked ? (
         <Text size="sm" tone="muted">
@@ -248,7 +248,7 @@ const SourceRow = ({
           title={t`Delete this source?`}
         />
       </div>
-      {failure === undefined ? null : <Alert variant="danger">{failure}</Alert>}
+      {failure === undefined ? null : <Alert tone="danger">{failure}</Alert>}
     </li>
   );
 };
@@ -326,7 +326,7 @@ const SecretDialog = ({
       }}
       open={secret !== undefined}
     >
-      <DialogPanel closeLabel={t`Close`}>
+      <DialogContent closeLabel={t`Close`}>
         <DialogTitle>{t`The source's secret`}</DialogTitle>
         <DialogDescription>
           {t`The sender signs every event with it, so Grasp can tell an event is theirs.`}
@@ -336,10 +336,10 @@ const SecretDialog = ({
             {/* Mounted with each secret, so Copied never carries over. */}
             <CopyField
               key={secret}
-              label={t`Copy the secret`}
+              aria-label={t`Copy the secret`}
               value={secret ?? ""}
             />
-            <Alert variant="attention">
+            <Alert tone="attention">
               {t`Copy it now: you won't see it again. Lost, it can only be replaced.`}
             </Alert>
           </SettingsStack>
@@ -347,7 +347,7 @@ const SecretDialog = ({
         <DialogFooter>
           <DialogAction variant="ink">{t`Done`}</DialogAction>
         </DialogFooter>
-      </DialogPanel>
+      </DialogContent>
     </Dialog>
   );
 };

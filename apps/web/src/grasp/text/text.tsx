@@ -1,3 +1,4 @@
+/* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
 import type { ReactNode } from "react";
 
@@ -49,9 +50,9 @@ export interface TextProps {
   wrap?: "words" | "anywhere" | "truncate";
   /** An id, so `aria-describedby` can point at it. */
   id?: string;
-  /** Layout only: margins, alignment and width. The type belongs to the words. */
+  /** @deprecated Use `layout`. */
   style?: TextLayoutStyle;
-  /** The same as `style`, by a name a style lint does not take for an inline style attribute. */
+  /** Layout only: margins, alignment and width. The type belongs to the words. */
   layout?: TextLayoutStyle;
 }
 

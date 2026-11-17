@@ -13,6 +13,7 @@
 // Every value is a token (src/tokens). A caller may set layout only (the `style` prop).
 "use client";
 
+/* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
 import { Textarea as TextareaPrimitive } from "@ui-sdk/react/textarea";
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
@@ -33,14 +34,14 @@ import type {
 } from "react";
 import { flushSync } from "react-dom";
 
+import { AgentIndicator } from "../agent-indicator";
 import { visuallyHidden } from "../hidden/hidden";
 import { Alert, Icon, Mic } from "../icons";
 import { iconVars } from "../icons/icon.stylex";
 import type { LayoutStyle } from "../layout/layout";
 import { scroll } from "../scroll/scroll";
-import { TextShimmer } from "../text-shimmer";
+import { Shimmer } from "../shimmer";
 import { grasp, media } from "../tokens/tokens.stylex";
-import { WorkingMark } from "../working-mark";
 import { ComposerAction } from "./action";
 import type { ComposerKind } from "./add";
 import type { ComposerAttachmentWords } from "./attachment";
@@ -61,6 +62,10 @@ import { ComposerSend } from "./send";
 import { ComposerVoice } from "./voice";
 import type { ComposerVoiceProps } from "./voice";
 
+/** The field's name by its new name, else its deprecated old one (the breaking release's step 1). */
+const nameOf = (props: { "aria-label"?: string; label?: string }) =>
+  props["aria-label"] ?? props.label ?? "";
+
 /** What a caller may style: where the composer sits and how wide it is. Never its look. */
 export type ComposerLayoutStyle = LayoutStyle;
 
@@ -72,7 +77,9 @@ type TextareaProps = ComponentProps<typeof TextareaPrimitive>;
 /** Every prop a Composer takes. */
 export interface ComposerProps {
   /** The name of the text, for a screen reader and an agent ("Message"). It is not shown. */
-  label: string;
+  "aria-label"?: string;
+  /** @deprecated Use `aria-label`. */
+  label?: string;
   /** An example of what to write ("Ask a question"). It goes when typing starts. */
   placeholder?: string;
   /**
@@ -165,6 +172,8 @@ export interface ComposerProps {
    * After send, behind a short hairline: a control that is not about this message, such as the Ask
    * bar's Open the chat. In the compact row and in the full footer alike, it stands last.
    */
+  footer?: ReactNode;
+  /** @deprecated Use `footer`. */
   after?: ReactNode;
   /** Anything else inside the card above the text. Files go in `attachments`. */
   above?: ReactNode;
@@ -295,9 +304,9 @@ export interface ComposerProps {
    * @default "card"
    */
   surface?: "card" | "glass";
-  /** Layout only: margins, alignment and width. The look belongs to the composer. */
+  /** @deprecated Use `layout`. */
   style?: ComposerLayoutStyle;
-  /** The same as `style`, by a name a style lint does not take for an inline style attribute. */
+  /** Layout only: margins, alignment and width. The look belongs to the composer. */
   layout?: ComposerLayoutStyle;
 }
 
@@ -384,10 +393,9 @@ const styles = stylex.create({
     borderWidth: { default: 0, [FORCED]: 1 },
     borderStyle: "solid",
     borderColor: "currentColor",
-    borderRadius: grasp.corner,
+    borderRadius: grasp.composerCorner,
     cornerShape: grasp.cornerShape,
-    // What a control at its corner takes: its corner less the footer's room, 12px (corner.ts, F71).
-    "--grasp-composer-nested": `calc(${grasp.corner} - ${grasp.space3})`,
+    "--grasp-composer-nested": grasp.corner,
     "--grasp-composer-first": grasp.corner,
     "--grasp-composer-last": grasp.corner,
     backgroundColor: { default: grasp.raised, ":disabled": grasp.soft },
@@ -544,8 +552,9 @@ const styles = stylex.create({
     justifyContent: "space-between",
     gap: grasp.space2,
     minWidth: 0,
-    paddingInline: grasp.space3,
-    paddingBlockEnd: grasp.space3,
+    // The footer's inset: 8px, so the card's corner is its buttons' plus 8 (composer-corner).
+    paddingInline: grasp.space2,
+    paddingBlockEnd: grasp.space2,
   },
   side: {
     display: "flex",
@@ -553,16 +562,10 @@ const styles = stylex.create({
     gap: grasp.space2,
     minWidth: 0,
     flexShrink: 0,
-    // The start side's first control and the end side's last stand at the card's corners: they nest
-    // in them (corner.ts, F71).
-    "--grasp-composer-first": {
-      default: null,
-      ":first-child": "var(--grasp-composer-nested)",
-    },
-    "--grasp-composer-last": {
-      default: null,
-      ":last-child": "var(--grasp-composer-nested)",
-    },
+    // Every control in the footer has one corner: Button's own for its size (the card's nested
+    // corner yields it, above). A focus ring is an outline, so it follows that corner plus its offset.
+    "--grasp-composer-first": "var(--grasp-composer-nested)",
+    "--grasp-composer-last": "var(--grasp-composer-nested)",
   },
   startSide: {
     flexShrink: 1,
@@ -587,24 +590,21 @@ const styles = stylex.create({
     alignItems: "center",
     gap: grasp.space1,
     minWidth: 0,
-    // Its first control is at the card's corner only while these lead the row (corner.ts, F71).
-    "--grasp-composer-first": {
-      default: grasp.corner,
-      ":first-child": "inherit",
-    },
-    "--grasp-composer-last": grasp.corner,
+    // The footer's one corner for its controls (side, above), first or not.
+    "--grasp-composer-first": "var(--grasp-composer-nested)",
+    "--grasp-composer-last": "var(--grasp-composer-nested)",
   },
   // Lines under the card, on a band tucked under its foot, as Palermo's disclaimer.
   under: {
     display: "grid",
     gap: grasp.space1,
     paddingInline: grasp.space4,
-    paddingBlockStart: `calc(${grasp.corner} + ${grasp.space2})`,
+    paddingBlockStart: `calc(${grasp.composerCorner} + ${grasp.space2})`,
     paddingBlockEnd: grasp.space2,
-    marginBlockStart: `calc(-1 * ${grasp.corner})`,
+    marginBlockStart: `calc(-1 * ${grasp.composerCorner})`,
     marginInline: grasp.space2,
-    borderEndStartRadius: grasp.corner,
-    borderEndEndRadius: grasp.corner,
+    borderEndStartRadius: grasp.composerCorner,
+    borderEndEndRadius: grasp.composerCorner,
     cornerShape: grasp.cornerShape,
     backgroundColor: grasp.soft,
     boxShadow: grasp.edge,
@@ -890,10 +890,14 @@ const useTakeoverFocus = (
       const room = card.current?.querySelector<HTMLElement>(
         "[data-slot=composer-takeover-room]"
       );
+      // A dictation takes it with no ring: the person pressed the microphone, and its cancel shows
+      // a ring only when the keyboard reaches it.
+      const dictating =
+        (room?.querySelector("[data-slot=composer-voice]") ?? null) !== null;
       (
         room?.querySelector<HTMLElement>("[aria-checked=true]") ??
         room?.querySelector<HTMLElement>("button, input")
-      )?.focus({ preventScroll: true });
+      )?.focus({ preventScroll: true, focusVisible: !dictating });
     }
     if (!taken && hadTakeover.current && here) {
       area.current?.focus({ preventScroll: true });
@@ -1642,6 +1646,8 @@ interface InsideProps {
   end: ReactNode;
   last: ReactNode;
   after: ReactNode;
+  /** What stands after send by its new name: it wins over `after`. */
+  footer: ReactNode;
   editor: ReactNode;
   controls: ReactNode;
   above: ReactNode;
@@ -1662,7 +1668,8 @@ const ComposerInside = ({
   start,
   end,
   last,
-  after,
+  after: afterGiven,
+  footer,
   editor,
   controls,
   above,
@@ -1675,6 +1682,7 @@ const ComposerInside = ({
   attachmentsLabel,
   focusText,
 }: InsideProps) => {
+  const after = footer ?? afterGiven;
   const taken = Boolean(takeover);
   if (taken) {
     return <div data-slot="composer-takeover-room">{takeover}</div>;
@@ -1765,8 +1773,8 @@ const ComposerUnder = ({
           data-slot="composer-working"
           {...stylex.props(styles.line)}
         >
-          <WorkingMark />
-          <TextShimmer>{workingLabel}</TextShimmer>
+          <AgentIndicator />
+          <Shimmer>{workingLabel}</Shimmer>
         </p>
       )}
       {failed && (
@@ -1846,7 +1854,7 @@ const dictationParts = (props: Resolved, text: string) => ({
     (props.onDictate === undefined ? undefined : (
       <ComposerAction
         icon={Mic}
-        label={props.dictateLabel}
+        aria-label={props.dictateLabel}
         onClick={props.onDictate}
       />
     )),
@@ -1860,15 +1868,9 @@ const dictationParts = (props: Resolved, text: string) => ({
 
 /** The composer, with every default in place. */
 const ComposerForm = (props: Resolved) => {
-  const {
-    label,
-    activity,
-    value,
-    onValueChange,
-    attachments,
-    validation,
-    compact,
-  } = props;
+  const { activity, value, onValueChange, attachments, validation, compact } =
+    props;
+  const label = nameOf(props);
   const [own, setOwn] = useState(props.defaultValue);
   const text = value ?? own;
   const { voice, takeover, dismiss } = dictationParts(props, text);
@@ -2121,6 +2123,7 @@ const ComposerForm = (props: Resolved) => {
                     end={props.end}
                     last={last}
                     after={props.after}
+                    footer={props.footer}
                     editor={editor}
                     controls={props.controls}
                     above={props.above}

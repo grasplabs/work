@@ -17,7 +17,7 @@ import {
   AlertDialogAction,
   AlertDialogDescription,
   AlertDialogFooter,
-  AlertDialogPanel,
+  AlertDialogContent,
   AlertDialogTitle,
 } from "../grasp/alert-dialog/index.ts";
 import { Alert } from "../grasp/alert/index.ts";
@@ -25,7 +25,7 @@ import { Badge } from "../grasp/badge/index.ts";
 import {
   DropdownMenu,
   DropdownMenuItem,
-  DropdownMenuPanel,
+  DropdownMenuContent,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "../grasp/dropdown-menu/index.ts";
@@ -39,10 +39,21 @@ import {
   Trash,
 } from "../grasp/icons/index.ts";
 import { Input } from "../grasp/input/index.ts";
-import { Item, ItemGroup } from "../grasp/item/index.ts";
+import {
+  Item,
+  ItemGroup,
+  ItemContent,
+  ItemTitle,
+  ItemActions,
+} from "../grasp/item/index.ts";
 import { KeyValueList } from "../grasp/key-value/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
-import { Select } from "../grasp/select/index.ts";
+import {
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+} from "../grasp/select/index.ts";
 import {
   Table,
   TableBody,
@@ -188,7 +199,6 @@ const MemberActions = ({
     <div {...stylex.props(styles.rowEnd)}>
       <div {...stylex.props(styles.role)}>
         <Select
-          aria-label={t`Role of ${who}`}
           disabled={busy}
           items={roleItems()}
           onValueChange={(role) => {
@@ -198,18 +208,22 @@ const MemberActions = ({
               void setRole(roleSchema.parse(role));
             }
           }}
-          size="sm"
           value={member.role}
-        />
+        >
+          <SelectTrigger size="sm" aria-label={t`Role of ${who}`}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent />
+        </Select>
       </div>
       <DropdownMenu>
         <DropdownMenuTrigger
           icon={More}
-          label={t`Actions for ${who}`}
+          aria-label={t`Actions for ${who}`}
           size="sm"
           variant="ghost"
         />
-        <DropdownMenuPanel align="end">
+        <DropdownMenuContent align="end">
           <DropdownMenuItem
             action={signOutEverywhere}
             failedLabel={t`Could not sign out`}
@@ -220,7 +234,7 @@ const MemberActions = ({
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem
-            danger
+            variant="danger"
             icon={Trash}
             onSelect={() => {
               setAsking("remove");
@@ -228,7 +242,7 @@ const MemberActions = ({
           >
             {t`Remove`}
           </DropdownMenuItem>
-        </DropdownMenuPanel>
+        </DropdownMenuContent>
       </DropdownMenu>
       <AlertDialog
         onOpenChange={(open) => {
@@ -238,7 +252,7 @@ const MemberActions = ({
         }}
         open={asking === "promote"}
       >
-        <AlertDialogPanel>
+        <AlertDialogContent>
           <AlertDialogTitle>{t`Make ${name} an admin?`}</AlertDialogTitle>
           <AlertDialogDescription>
             {t`Admins can change anyone's role, end their sessions and remove them, other admins included.`}
@@ -255,7 +269,7 @@ const MemberActions = ({
               {t`Make admin`}
             </AlertDialogAction>
           </AlertDialogFooter>
-        </AlertDialogPanel>
+        </AlertDialogContent>
       </AlertDialog>
       <AlertDialog
         onOpenChange={(open) => {
@@ -265,7 +279,7 @@ const MemberActions = ({
         }}
         open={asking === "remove"}
       >
-        <AlertDialogPanel>
+        <AlertDialogContent>
           <AlertDialogTitle>{t`Remove ${name}?`}</AlertDialogTitle>
           <AlertDialogDescription>
             {t`They are signed out everywhere, their personal connections are disconnected, and they cannot sign in again.`}
@@ -281,7 +295,7 @@ const MemberActions = ({
               {t`Remove`}
             </AlertDialogAction>
           </AlertDialogFooter>
-        </AlertDialogPanel>
+        </AlertDialogContent>
       </AlertDialog>
     </div>
   );
@@ -435,9 +449,9 @@ const MembersList = ({
       {notice.failure === undefined && notice.done === undefined ? null : (
         <div {...stylex.props(styles.notice)}>
           {notice.failure === undefined ? (
-            <Alert variant="success">{notice.done}</Alert>
+            <Alert tone="success">{notice.done}</Alert>
           ) : (
-            <Alert variant="danger">{notice.failure}</Alert>
+            <Alert tone="danger">{notice.failure}</Alert>
           )}
         </div>
       )}
@@ -448,9 +462,19 @@ const MembersList = ({
       ) : (
         <ItemGroup aria-label={t`Members`} separated>
           {shown.map((member) => (
-            <Item
-              actions={
-                member.userId === me ? (
+            <Item key={member.userId} size="sm">
+              <ItemContent>
+                <ItemTitle>
+                  <TitleLine detail={member.email}>
+                    {member.name}
+                    {member.userId === me ? (
+                      <Badge size="sm">{t`You`}</Badge>
+                    ) : null}
+                  </TitleLine>
+                </ItemTitle>
+              </ItemContent>
+              <ItemActions>
+                {member.userId === me ? (
                   <div {...stylex.props(styles.own)}>
                     <Badge>{roleLabel(member.role)}</Badge>
                   </div>
@@ -462,19 +486,9 @@ const MembersList = ({
                       searchField.current?.focus();
                     }}
                   />
-                )
-              }
-              key={member.userId}
-              size="sm"
-              title={
-                <TitleLine detail={member.email}>
-                  {member.name}
-                  {member.userId === me ? (
-                    <Badge size="sm">{t`You`}</Badge>
-                  ) : null}
-                </TitleLine>
-              }
-            />
+                )}
+              </ItemActions>
+            </Item>
           ))}
           {invited.map((invitation) => (
             <InvitationRow invitation={invitation} key={invitation.id} />

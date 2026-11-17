@@ -31,13 +31,13 @@ import {
   Dialog,
   DialogBody,
   DialogDescription,
-  DialogPanel,
+  DialogContent,
   DialogTitle,
 } from "../grasp/dialog/index.ts";
 import {
   DropdownMenu,
   DropdownMenuItem,
-  DropdownMenuPanel,
+  DropdownMenuContent,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "../grasp/dropdown-menu/index.ts";
@@ -47,10 +47,15 @@ import { Input } from "../grasp/input/index.ts";
 import { KeyValueList } from "../grasp/key-value/index.ts";
 import {
   Popover,
-  PopoverPanel,
+  PopoverContent,
   PopoverTrigger,
 } from "../grasp/popover/index.ts";
-import { Select } from "../grasp/select/index.ts";
+import {
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+} from "../grasp/select/index.ts";
 import {
   Table,
   TableBody,
@@ -219,7 +224,7 @@ const MoreFilters = ({
           ? t`More filters`
           : t`${plural(set, { one: "More filters, # set", other: "More filters, # set" })}`}
       </PopoverTrigger>
-      <PopoverPanel align="start">
+      <PopoverContent align="start">
         <div {...stylex.props(styles.more)}>
           <Field name="action">
             <FieldLabel>{t`Action`}</FieldLabel>
@@ -256,7 +261,7 @@ const MoreFilters = ({
             />
           </Field>
         </div>
-      </PopoverPanel>
+      </PopoverContent>
     </Popover>
   );
 };
@@ -287,17 +292,19 @@ export const LogFilters = ({ search }: { search: LogSearch }) => {
       {...stylex.props(styles.toolbar)}
     >
       <Select
-        aria-label={t`Type`}
         items={types}
         onValueChange={(type) => {
           setShown({ ...shown, type: type ?? anyType });
         }}
-        size="sm"
-        layout={styles.type}
         value={shown.type}
-      />
+      >
+        <SelectTrigger size="sm" aria-label={t`Type`} layout={styles.type}>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent />
+      </Select>
       <DateRangePicker
-        label={t`When`}
+        aria-label={t`When`}
         onValueChange={(range) => {
           setShown({ ...shown, from: range?.[0], to: range?.[1] });
         }}
@@ -362,7 +369,7 @@ export const LogExport = ({ search }: { search: LogSearch }) => {
       <DropdownMenuTrigger chevron icon={Download} size="sm" variant="ghost">
         {t`Export`}
       </DropdownMenuTrigger>
-      <DropdownMenuPanel align="end">
+      <DropdownMenuContent align="end">
         <DropdownMenuItem onSelect={download("csv", false)}>
           {t`Export CSV`}
         </DropdownMenuItem>
@@ -376,7 +383,7 @@ export const LogExport = ({ search }: { search: LogSearch }) => {
         <DropdownMenuItem onSelect={download("json", true)}>
           {t`Export JSON with the archive`}
         </DropdownMenuItem>
-      </DropdownMenuPanel>
+      </DropdownMenuContent>
     </DropdownMenu>
   );
 };
@@ -525,7 +532,7 @@ const RecordDetails = ({
       }}
       open
     >
-      <DialogPanel closeLabel={t`Close`}>
+      <DialogContent closeLabel={t`Close`}>
         <DialogTitle>{entryWords(record.event?.action)}</DialogTitle>
         <DialogDescription>{entryTime(record.receivedAt)}</DialogDescription>
         <DialogBody>
@@ -562,7 +569,10 @@ const RecordDetails = ({
                 {
                   key: t`Hash`,
                   value: (
-                    <CopyField label={t`Copy the hash`} value={record.hash} />
+                    <CopyField
+                      aria-label={t`Copy the hash`}
+                      value={record.hash}
+                    />
                   ),
                 },
               ]}
@@ -579,7 +589,7 @@ const RecordDetails = ({
             />
           </div>
         </DialogBody>
-      </DialogPanel>
+      </DialogContent>
     </Dialog>
   );
 };
@@ -659,7 +669,7 @@ export const LogRecords = ({
   const lastShown = at * pageSize + shown.length;
   return (
     <>
-      <Table density="compact" label={t`Events`}>
+      <Table density="compact" aria-label={t`Events`}>
         <TableHeader>
           <TableRow>
             <TableHead>{t`When`}</TableHead>

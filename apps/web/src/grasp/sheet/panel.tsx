@@ -21,7 +21,7 @@ import { useSize } from "./size-context";
 type ContentPrimitiveProps = ComponentProps<typeof ContentPrimitive>;
 
 /** Every prop a SheetPanel takes: these, and the rest of UI SDK's DrawerContent. */
-export interface SheetPanelProps extends Omit<
+export interface SheetContentProps extends Omit<
   ContentPrimitiveProps,
   "children" | "className" | "style" | "render"
 > {
@@ -68,21 +68,21 @@ export const SheetClose = ({
         variant="ghost"
         size={size}
         icon={Cross}
-        label={label}
+        aria-label={label}
       />
     )}
   />
 );
 
 /** The panel, with the shade behind it and the close button in its corner. The window's height. */
-export const SheetPanel = ({
+export const SheetContent = ({
   children,
   closeLabel = "Close",
   close = "corner",
   corner = "sheet",
   bounds = "window",
   ...rest
-}: SheetPanelProps) => {
+}: SheetContentProps) => {
   const size = useSize();
   const still = useStill();
   if (still) {
@@ -111,7 +111,7 @@ export const SheetPanel = ({
                 variant="ghost"
                 size="sm"
                 icon={Cross}
-                label={closeLabel}
+                aria-label={closeLabel}
               />
             </span>
           </div>
@@ -151,3 +151,8 @@ export const SheetPanel = ({
     </KindContext.Provider>
   );
 };
+
+/** @deprecated Use `SheetContent`. */
+export const SheetPanel = SheetContent;
+/** @deprecated Use `SheetContentProps`. */
+export type SheetPanelProps = SheetContentProps;

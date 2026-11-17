@@ -14,6 +14,7 @@
 // Every value is a token (src/tokens). A caller may set layout and width only (the `style` prop).
 "use client";
 
+/* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
 import { Input as InputPrimitive, InputGroup } from "@ui-sdk/react/input";
 import type { InputState } from "@ui-sdk/react/input";
@@ -94,9 +95,9 @@ export interface InputProps extends Omit<
   secret?: boolean;
   /** An icon at the start, when it says what goes in faster than the label alone: Search. From the icons entry (`@/components/grasp/icons`). */
   icon?: IconData;
-  /** Layout only: margins, alignment and width. Colours, heights and corners belong to the input. */
+  /** @deprecated Use `layout`. */
   style?: InputLayoutStyle;
-  /** The same as `style`, by a name a style lint does not take for an inline style attribute. */
+  /** Layout only: margins, alignment and width. Colours, heights and corners belong to the input. */
   layout?: InputLayoutStyle;
   /** The <input> itself, to focus it or read it. */
   ref?: Ref<HTMLInputElement>;

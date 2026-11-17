@@ -15,6 +15,7 @@
 // prop with an English default. Every value is a token (src/tokens). A caller may set layout only.
 "use client";
 
+/* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
 import { usePart, usePrimitive } from "@ui-sdk/react/primitive";
 
@@ -38,6 +39,8 @@ export interface ThemeSwitchProps {
    * `segmented` for a header or a menu; `icon` where there is no room; `picker` on a settings page.
    * @default "segmented"
    */
+  variant?: "segmented" | "icon" | "picker";
+  /** @deprecated Use `variant`. */
   form?: "segmented" | "icon" | "picker";
   /**
    * Its name, said with the choice ("Theme, Dark, 2 of 3"), and the picker's mode heading.
@@ -68,14 +71,15 @@ export interface ThemeSwitchProps {
    * @default (label, current, next) => `${label}, ${current}. Switch to ${next}`
    */
   iconLabel?: (label: string, current: string, next: string) => string;
-  /** Layout only: where it sits. */
+  /** @deprecated Use `layout`. */
   style?: ThemeSwitchLayoutStyle;
-  /** The same as `style`, by a name a style lint does not take for an inline style attribute. */
+  /** Layout only: where it sits. */
   layout?: ThemeSwitchLayoutStyle;
 }
 
 export const ThemeSwitch = ({
-  form = "segmented",
+  form: formDeprecated,
+  variant: form = formDeprecated ?? "segmented",
   label = "Theme",
   themesLabel = "Colours",
   showThemes = true,

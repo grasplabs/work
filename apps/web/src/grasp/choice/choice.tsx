@@ -32,39 +32,14 @@ import { RequiredMark, labelStyles } from "../label/label";
 import { simply } from "../motion/simply.stylex";
 import { grasp, media } from "../tokens/tokens.stylex";
 import { choiceMarker, choiceVars } from "./choice.stylex";
+import { rowStyles } from "./row";
 
 // Hover only where a pointer can hover, so a tap never leaves a control lit.
 const HOVER = media.hover;
 const REDUCED = media.reduced;
 const FORCED = media.forced;
 
-const rowStyles = stylex.create({
-  row: {
-    position: "relative",
-    isolation: "isolate",
-    display: "grid",
-    alignItems: "start",
-    minWidth: 0,
-    margin: 0,
-    paddingBlock: `calc((${grasp.tap} - ${grasp.textSmLine}) / 2)`,
-  },
-  // The control first, then its words: a checkbox, a radio.
-  start: {
-    gridTemplateColumns: "auto minmax(0, 1fr)",
-    columnGap: grasp.space3,
-  },
-  // The words first, then the control at the end: a switch, as in a list of settings.
-  end: {
-    gridTemplateColumns: "minmax(0, 1fr) auto",
-    columnGap: grasp.space4,
-  },
-  words: {
-    display: "grid",
-    gridTemplateColumns: "minmax(0, 1fr)",
-    rowGap: grasp.space1,
-    minWidth: 0,
-  },
-});
+// The row's layout lives in row.ts, shared with Field's horizontal orientation.
 
 /** The reach: inside the button, behind the row's words, so a press anywhere on the row lands on it. */
 export const reachStyles = stylex.create({

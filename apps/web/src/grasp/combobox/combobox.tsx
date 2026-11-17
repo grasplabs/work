@@ -14,6 +14,7 @@
 // value is a token (src/tokens).
 "use client";
 
+/* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
 import type { ChangeDetails } from "@ui-sdk/core";
 import {
@@ -128,9 +129,9 @@ export interface ComboboxProps {
   form?: string;
   /** The `id` of the input, for a Label outside a Field (`htmlFor`). */
   id?: string;
-  /** Layout only: margins, alignment and width. Colours, heights and corners belong to the combobox. */
+  /** @deprecated Use `layout`. */
   style?: ComboboxLayoutStyle;
-  /** The same as `style`, by a name a style lint does not take for an inline style attribute. */
+  /** Layout only: margins, alignment and width. Colours, heights and corners belong to the combobox. */
   layout?: ComboboxLayoutStyle;
 }
 

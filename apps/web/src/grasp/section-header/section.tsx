@@ -5,6 +5,7 @@
 //     <SectionHeader title="Usage" />
 //     <UsageTable />
 //   </Section>
+/* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
 import type { ReactNode } from "react";
 
@@ -17,9 +18,9 @@ export interface SectionProps {
   children: ReactNode;
   /** What the section is, when its header does not name it: a screen reader lists it as a region. */
   "aria-labelledby"?: string;
-  /** Layout only: margins and alignment. */
+  /** @deprecated Use `layout`. */
   style?: SectionHeaderLayoutStyle;
-  /** The same as `style`, by a name a style lint does not take for an inline style attribute. */
+  /** Layout only: margins and alignment. */
   layout?: SectionHeaderLayoutStyle;
 }
 

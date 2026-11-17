@@ -8,6 +8,7 @@
 //
 // Inside a button, use the button's own working state (useAction); this is for everything else.
 // Every value is a token (src/tokens). A caller may set layout only (the `style` prop).
+/* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
 
 import { visuallyHidden } from "../hidden/hidden";
@@ -28,15 +29,17 @@ export interface SpinnerProps {
    * What is working, said once to a screen reader ("Loading the report"), never shown. Give it when
    * no words beside it say so; leave it out when they do, and make those words the status.
    */
+  "aria-label"?: string;
+  /** @deprecated Use `aria-label`. */
   label?: string;
   /**
    * `sm` beside small text, `md` beside body text, `lg` alone in a panel.
    * @default "sm"
    */
   size?: SpinnerSize;
-  /** Layout only: margins and alignment. The look belongs to the spinner. */
+  /** @deprecated Use `layout`. */
   style?: SpinnerLayoutStyle;
-  /** The same as `style`, by a name a style lint does not take for an inline style attribute. */
+  /** Layout only: margins and alignment. The look belongs to the spinner. */
   layout?: SpinnerLayoutStyle;
 }
 
@@ -77,16 +80,23 @@ const styles = stylex.create({
 });
 
 export const Spinner = ({
-  label,
+  label: labelDeprecated,
+  "aria-label": label = labelDeprecated,
   size = "sm",
   style: styleProp,
   layout,
 }: SpinnerProps) => {
+  // The caller's layout goes on the root: the spinner alone, or the status round it when named.
+  const place = layout ?? styleProp;
   const spinner = (
     <span
       aria-hidden="true"
       data-slot="spinner"
-      {...stylex.props(styles.spinner, styles[size], layout ?? styleProp)}
+      {...stylex.props(
+        styles.spinner,
+        styles[size],
+        label === undefined && place
+      )}
     >
       <Icon icon={SpinnerIcon} />
     </span>
@@ -97,7 +107,7 @@ export const Spinner = ({
   // A live region reads its text, not a name: the label is hidden text inside the status.
   return (
     // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- not every screen reader treats <output> as a live region; role="status" is
-    <span role="status">
+    <span role="status" {...stylex.props(place)}>
       {spinner}
       <span {...stylex.props(visuallyHidden)}>{label}</span>
     </span>

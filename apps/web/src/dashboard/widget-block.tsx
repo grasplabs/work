@@ -65,7 +65,7 @@ export const BlockButton = ({
 }) => (
   <Button
     icon={icon}
-    label={label}
+    aria-label={label}
     onClick={onClick}
     size="xs"
     variant="ghost"

@@ -22,6 +22,8 @@ import {
 import type { KeyboardEvent, MouseEvent, PointerEvent, Ref } from "react";
 
 import { ms } from "../tokens/tokens.values";
+import { useWords } from "../words/words";
+import { buttonWords } from "./words";
 
 /** `true` for the hold-duration token, or `{ ms }` for a hold of another length. */
 export type HoldSetting = boolean | { ms: number };
@@ -38,13 +40,26 @@ export interface ButtonHoldLabels {
   cancel: string;
 }
 
-/** A hold's words in English: replace any of them through Button's `holdLabels`. */
+/** A hold's words in English (./words.ts): replace any of them through Button's `holdLabels`. */
 export const englishHoldLabels: ButtonHoldLabels = {
-  holdTo: (words) =>
-    `Hold to ${words.charAt(0).toLowerCase()}${words.slice(1)}`,
-  ask: (words) => `${words}?`,
-  confirm: "Confirm",
-  cancel: "Cancel",
+  holdTo: buttonWords.holdTo,
+  ask: buttonWords.ask,
+  confirm: buttonWords.confirm,
+  cancel: buttonWords.cancel,
+};
+
+/** A hold's words: the product's GraspWords for Button, else English; a caller's `holdLabels` win. */
+export const useHoldLabels = (
+  given: Partial<ButtonHoldLabels> | undefined
+): ButtonHoldLabels => {
+  const words = useWords("button", buttonWords);
+  return {
+    holdTo: words.holdTo,
+    ask: words.ask,
+    confirm: words.confirm,
+    cancel: words.cancel,
+    ...given,
+  };
 };
 
 /** What the Button inside a hold draws from: whether it is held now, for how long, and its name. */

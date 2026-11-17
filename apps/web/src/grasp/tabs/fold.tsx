@@ -10,7 +10,7 @@ import type { ReactNode } from "react";
 
 import {
   DropdownMenu,
-  DropdownMenuPanel,
+  DropdownMenuContent,
   DropdownMenuTrigger,
   menuStyles,
 } from "../dropdown-menu";
@@ -73,8 +73,8 @@ export const Fold = ({
         <span {...stylex.props(styles.fallback)}>{label}</span>
       </span>
     </DropdownMenuTrigger>
-    <DropdownMenuPanel align="start">
+    <DropdownMenuContent align="start">
       <PlaceContext.Provider value="menu">{children}</PlaceContext.Provider>
-    </DropdownMenuPanel>
+    </DropdownMenuContent>
   </DropdownMenu>
 );

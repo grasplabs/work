@@ -5,11 +5,17 @@
 //
 //   <Alert title="Exports are ready">The CSV has finished and is ready to download.</Alert>
 //   <Alert variant="attention" title="Almost at this month's limit">Two refreshes are left.</Alert>
-//   <Alert variant="danger" title="The answers did not load">Try again in a moment.</Alert>
+//   <Alert tone="danger" title="The answers did not load">Try again in a moment.</Alert>
+//   <Alert variant="banner" tone="attention" title="Scheduled maintenance" onDismiss={…}>…</Alert>
+//
+// `variant="banner"` (once Banner, the breaking release's step 3) is a message across the top of a
+// page or the app, about the whole of it: full width, its actions after the words, and a dismiss
+// button at the end (alert/banner.tsx). The inline Alert is about the part it sits in.
 //
 // An alert stays where it is; it is not a toast. Attention and danger are said to a screen reader
 // when they appear; neutral and success are read where they stand, and said when their words
 // change. Every value is a token.
+/* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
 import type { ReactNode } from "react";
 
@@ -18,8 +24,11 @@ import type { IconData } from "../icons";
 import { iconVars } from "../icons/icon.stylex";
 import type { LayoutStyle } from "../layout/layout";
 import { grasp, media } from "../tokens/tokens.stylex";
+import { AlertBanner } from "./banner";
 
 export type AlertVariant = "neutral" | "success" | "attention" | "danger";
+/** Where it stands: `inline` in the part it is about, `banner` across the top of the page or the app. */
+export type AlertLook = "inline" | "banner";
 
 /** What a caller may style: where it sits and how wide it is. */
 export type AlertLayoutStyle = LayoutStyle;
@@ -35,7 +44,30 @@ export interface AlertProps {
    * at before it becomes a problem, `danger` when it went wrong.
    * @default "neutral"
    */
-  variant?: AlertVariant;
+  tone?: AlertVariant;
+  /**
+   * `inline` a note set into the part it is about. `banner` a message across the top of a page or
+   * the app, about the whole of it (once Banner): full width, `action` after the words, and
+   * `onDismiss` for a dismiss button. A tone's name here (`variant="danger"`) is its old name for
+   * `tone`, still read until the breaking release's step 9.
+   * @default "inline"
+   */
+  variant?: AlertLook | AlertVariant;
+  /**
+   * With `variant="banner"`: what to do about it, one or two Buttons of size `xs`, the main one
+   * first, after the message. They wrap under the words when the line is too narrow.
+   */
+  action?: ReactNode;
+  /**
+   * With `variant="banner"`: shows a dismiss button at the end. The banner goes at once, then this
+   * runs: remember it, so the banner does not come back on the next page.
+   */
+  onDismiss?: () => void;
+  /**
+   * With `variant="banner"`: the dismiss button's name, in the page's language.
+   * @default "Dismiss"
+   */
+  dismissLabel?: string;
   /**
    * The quiet weight: no fill and no inset, the icon in its tone beside the words. For an alert
    * inside a row or a rail, next to quiet rows, where a filled box is too heavy.
@@ -57,9 +89,9 @@ export interface AlertProps {
   live?: "polite" | "assertive" | "off";
   /** An id, so a field or a section can point at it with `aria-describedby`. */
   id?: string;
-  /** Layout only: where it sits and how wide it is. */
+  /** @deprecated Use `layout`. */
   style?: AlertLayoutStyle;
-  /** The same as `style`, by a name a style lint does not take for an inline style attribute. */
+  /** Layout only: where it sits and how wide it is. */
   layout?: AlertLayoutStyle;
 }
 
@@ -151,20 +183,59 @@ const roles: Record<AlertVariant, "alert" | "status"> = {
 // `live` in a live region's words, as the role it gives.
 const byLive = { polite: "status", assertive: "alert", off: "none" } as const;
 
+/** The role it is heard by: `live` wins over `role`, and the variant's own role is the default. */
+const saidOf = (
+  live: AlertProps["live"],
+  role: AlertProps["role"],
+  variant: AlertVariant
+) => (live === undefined ? (role ?? roles[variant]) : byLive[live]);
+
+/** The tone: `tone`, else a tone's name given as `variant` (its old name), else neutral. */
+const toneOf = (
+  tone: AlertVariant | undefined,
+  variant: AlertProps["variant"]
+): AlertVariant =>
+  tone ??
+  (variant === undefined || variant === "inline" || variant === "banner"
+    ? "neutral"
+    : variant);
+
 export const Alert = ({
   children,
   title,
-  variant = "neutral",
+  variant: look,
+  tone: toneGiven,
   quiet = false,
   icon,
   role,
   live,
   id,
+  action,
+  onDismiss,
+  dismissLabel,
   style: styleProp,
   layout,
 }: AlertProps) => {
+  const variant = toneOf(toneGiven, look);
+  const said = saidOf(live, role, variant);
+  if (look === "banner") {
+    return (
+      <AlertBanner
+        tone={variant}
+        title={title}
+        icon={icon}
+        action={action}
+        onDismiss={onDismiss}
+        dismissLabel={dismissLabel}
+        role={said}
+        id={id}
+        layout={layout ?? styleProp}
+      >
+        {children}
+      </AlertBanner>
+    );
+  }
   const mark = icon === false ? undefined : (icon ?? icons[variant]);
-  const said = live === undefined ? (role ?? roles[variant]) : byLive[live];
   return (
     <div
       id={id}

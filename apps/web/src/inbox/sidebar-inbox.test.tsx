@@ -125,7 +125,7 @@ const shown = async (feed: WaitingFeed) => {
         <Sidebar
           empty="Nothing waits for you."
           groups={useInboxGroups(items)}
-          label="Sidebar"
+          aria-label="Sidebar"
         />
       </>
     );

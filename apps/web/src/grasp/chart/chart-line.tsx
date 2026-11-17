@@ -7,6 +7,7 @@
 // dashed. ChartLabels names each at its end, in place of a legend.
 "use client";
 
+/* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
 import { useEffect } from "react";
 import { Area } from "recharts";
@@ -27,6 +28,8 @@ export interface ChartLineProps {
    * `dotted`, `thin`, or `quiet` for an earlier period (muted, thinner, dashed).
    * @default "solid"
    */
+  variant?: ChartLineLook;
+  /** @deprecated Use `variant`. */
   look?: ChartLineLook;
 }
 
@@ -74,7 +77,11 @@ const lineOf = (points: readonly Point[]) =>
     .map((p) => `${p.x},${p.y}`)
     .join(" ");
 
-export const ChartLine = ({ series, look = "solid" }: ChartLineProps) => {
+export const ChartLine = ({
+  series,
+  look: lookDeprecated,
+  variant: look = lookDeprecated ?? "solid",
+}: ChartLineProps) => {
   const { config, setLook } = useChart();
   const reduced = useReducedMotion();
   // The chart knows how this line is drawn, so its name at the end can match.

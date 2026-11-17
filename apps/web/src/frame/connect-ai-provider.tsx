@@ -3,7 +3,14 @@ import * as stylex from "@stylexjs/stylex";
 import { Link } from "@tanstack/react-router";
 
 import { Button } from "../grasp/button/index.ts";
-import { Empty } from "../grasp/empty/index.ts";
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "../grasp/empty/index.ts";
 import { Icon, Lock } from "../grasp/icons/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
@@ -53,15 +60,21 @@ export const ConnectAiProvider = ({
   const { t } = useLingui();
   const canConnect = useMemberAdmin();
   return (
-    <Empty
-      icon={Lock}
-      size={emptySize[size]}
-      title={t`Connect an AI provider`}
-      {...(canConnect ? { action: <GoToAiProviders /> } : {})}
-    >
-      {canConnect
-        ? t`Grasp's AI works with your organization's own AI provider key. Connect one and choose a model to start.`
-        : t`Ask your admin to connect an AI provider.`}
+    <Empty size={emptySize[size]}>
+      <EmptyHeader>
+        <EmptyMedia icon={Lock} />
+        <EmptyTitle>{t`Connect an AI provider`}</EmptyTitle>
+        <EmptyDescription>
+          {canConnect
+            ? t`Grasp's AI works with your organization's own AI provider key. Connect one and choose a model to start.`
+            : t`Ask your admin to connect an AI provider.`}
+        </EmptyDescription>
+      </EmptyHeader>
+      {canConnect ? (
+        <EmptyContent>
+          <GoToAiProviders />
+        </EmptyContent>
+      ) : null}
     </Empty>
   );
 };

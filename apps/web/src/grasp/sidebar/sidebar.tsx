@@ -1,5 +1,6 @@
 "use client";
 
+/* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
 import {
   createElement,
@@ -26,6 +27,8 @@ import { SidebarNav } from "./nav";
 import type { SidebarFilter } from "./nav";
 import { SidebarProfile } from "./profile";
 import type { SidebarProfileProps } from "./profile";
+import { RowActions, rowActionsRoom } from "./row-actions";
+import type { RowActionProps } from "./row-actions";
 import {
   SectionHead,
   SidebarTabs,
@@ -38,8 +41,13 @@ import type { SidebarBack, SidebarTab } from "./section";
 import { useSidebarInShell } from "./shell";
 import type { SidebarInShell } from "./shell";
 
-/** One of a row's own rows, under its name: a link to a page within it. */
-export interface SidebarSubRow {
+/**
+ * One of a row's own rows, under its name: a link to a page within it. With `actions` it has three
+ * dots at its end and their menu; with `onRename` it can be renamed in place (row-actions.tsx).
+ */
+export interface SidebarSubRow extends Omit<RowActionProps, "label"> {
+  /** What tells this row from the others in its list, when two may share a name. @default `label` and `href` */
+  id?: string;
   /** The page's name ("Requests"). It names the link. */
   label: string;
   /** Where it goes. Leave it out when `render` gives the link. */
@@ -208,6 +216,8 @@ export interface SidebarProps {
    * What the sidebar is, said to a screen reader as a landmark.
    * @default "Sidebar"
    */
+  "aria-label"?: string;
+  /** @deprecated Use `aria-label`. */
   label?: string;
   /**
    * What its rows are, said to a screen reader as a navigation landmark.
@@ -274,9 +284,9 @@ export interface SidebarProps {
   tabsLabel?: string;
   /** One quiet sentence where the rows would be, when the list has none ("Nothing needs you yet"). */
   empty?: string;
-  /** Layout only: where it sits and how tall it is. */
+  /** @deprecated Use `layout`. */
   style?: SidebarLayoutStyle;
-  /** The same as `style`, by a name a style lint does not take for an inline style attribute. */
+  /** Layout only: where it sits and how tall it is. */
   layout?: SidebarLayoutStyle;
 }
 
@@ -983,50 +993,60 @@ const RowIcon = ({
   );
 };
 
+/** Whether a row has its own menu, so keeps room at its end for the dots. */
+const hasActions = (row: SidebarSubRow) =>
+  row.actions !== undefined && row.actions.length > 0;
+
+/** A row under a row, with its actions where it has them. */
+const SubRow = ({ sub, item }: { sub: SidebarSubRow; item: boolean }) => {
+  const look = stylex.props(
+    styles.row,
+    styles.subRow,
+    sub.current === true && styles.current,
+    hasActions(sub) && rowActionsRoom,
+    focus.inside
+  );
+  return (
+    <RowActions {...sub} look={look}>
+      <Linked row={sub} item={item} look={look}>
+        <span {...stylex.props(styles.name)}>{sub.label}</span>
+      </Linked>
+    </RowActions>
+  );
+};
+
 const Row = ({ row, item }: { row: SidebarRow; item: boolean }) => {
   const counted = row.count !== undefined && row.count > 0;
   const { onClick: handleClick } = row;
+  const look = stylex.props(
+    styles.row,
+    hasDetail(row) && styles.rowTall,
+    row.current === true && styles.current,
+    hasActions(row) && rowActionsRoom,
+    focus.inside
+  );
   return (
     <li>
-      <Linked
-        row={row}
-        item={item}
-        onClick={handleClick}
-        look={stylex.props(
-          styles.row,
-          hasDetail(row) && styles.rowTall,
-          row.current === true && styles.current,
-          focus.inside
-        )}
-      >
-        <RowIcon icon={row.icon} tall={hasDetail(row)} />
-        <RowWords label={row.label} detail={row.detail} />
-        <RowEnd end={row.end} label={row.endLabel} />
-        {counted && (
-          <>
-            <span aria-hidden="true" {...stylex.props(styles.count)}>
-              {row.count}
-            </span>
-            <Unseen>{` ${row.countLabel ?? String(row.count)}`}</Unseen>
-          </>
-        )}
-      </Linked>
+      <RowActions {...row} look={look}>
+        <Linked row={row} item={item} onClick={handleClick} look={look}>
+          <RowIcon icon={row.icon} tall={hasDetail(row)} />
+          <RowWords label={row.label} detail={row.detail} />
+          <RowEnd end={row.end} label={row.endLabel} />
+          {counted && (
+            <>
+              <span aria-hidden="true" {...stylex.props(styles.count)}>
+                {row.count}
+              </span>
+              <Unseen>{` ${row.countLabel ?? String(row.count)}`}</Unseen>
+            </>
+          )}
+        </Linked>
+      </RowActions>
       {row.rows !== undefined && row.rows.length > 0 && (
         <ul {...stylex.props(styles.list, styles.sub)}>
           {row.rows.map((sub) => (
-            <li key={`${sub.label}-${sub.href ?? ""}`}>
-              <Linked
-                row={sub}
-                item={item}
-                look={stylex.props(
-                  styles.row,
-                  styles.subRow,
-                  sub.current === true && styles.current,
-                  focus.inside
-                )}
-              >
-                <span {...stylex.props(styles.name)}>{sub.label}</span>
-              </Linked>
+            <li key={sub.id ?? `${sub.label}-${sub.href ?? ""}`}>
+              <SubRow item={item} sub={sub} />
             </li>
           ))}
         </ul>
@@ -1146,6 +1166,10 @@ const HeadMark = ({ head }: { head: ReactNode }) =>
 
 /** Search, at the head's end, with the keys that open it elsewhere in its title. App shell stands
  * the same button in its bar while the sidebar is folded (`brandIn="sidebar"`). */
+/** The landmark's name by its new name, else the deprecated old one (the breaking release's step 1). */
+const nameOf = (named: string | undefined, label: string | undefined) =>
+  named ?? label ?? "Sidebar";
+
 export const SearchButton = ({
   onSearch,
   label,
@@ -1395,7 +1419,11 @@ const ListArea = ({
         storageKey={section === undefined ? storageKey : section.storageKey}
         keys={keys}
         renderRow={(row, item) => (
-          <Row key={`${row.label}-${row.href ?? ""}`} row={row} item={item} />
+          <Row
+            key={row.id ?? `${row.label}-${row.href ?? ""}`}
+            row={row}
+            item={item}
+          />
         )}
       />
     </>
@@ -1511,7 +1539,8 @@ const SidebarDrawn = ({
   onOpenChange,
   foldLabel = "Show or hide the sidebar",
   foldShortcut,
-  label = "Sidebar",
+  label: labelDeprecated,
+  "aria-label": named,
   navLabel = "Main",
   reopen = true,
   reopenLook = "raised",
@@ -1533,6 +1562,7 @@ const SidebarDrawn = ({
   onPeek,
   beside,
 }: SidebarProps & ShellExtras) => {
+  const label = nameOf(named, labelDeprecated);
   const [own, setOwn] = useState(defaultOpen);
   const open = given ?? own;
   // Whether the person has folded or opened it on this page: only then does the reopen button fade

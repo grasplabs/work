@@ -86,7 +86,7 @@ const shown = async (
   const page = createRoute({
     getParentRoute: () => shell,
     path: "/",
-    component: SignInSection,
+    component: () => <SignInSection organization="Noordkade Finance" />,
   });
   const router = createRouter({
     routeTree: rootRoute.addChildren([shell.addChildren([page])]),

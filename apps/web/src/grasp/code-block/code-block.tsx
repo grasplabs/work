@@ -20,10 +20,12 @@ import { focus } from "../focus/focus";
 import { visuallyHidden } from "../hidden/hidden";
 import { Spinner } from "../spinner";
 import { grasp } from "../tokens/tokens.stylex";
+import { useWords, withGiven } from "../words/words";
 import { foldVars } from "./fold.stylex";
 import { grammarOrNull, languageNames, linesOf } from "./prism";
 import type { Line } from "./prism";
 import { codeStyles as styles, tones } from "./styles";
+import { codeBlockWords } from "./words";
 
 /** Every prop a CodeBlock takes. */
 export interface CodeBlockProps {
@@ -215,11 +217,22 @@ const Head = ({
   name,
   streaming,
   streamingMark = false,
-  copyLabel = "Copy code",
-  copiedLabel = "Copied",
-  copyFailedLabel = "Could not copy",
-  writingLabel = "Writing",
+  copyLabel: copyLabelGiven,
+  copiedLabel: copiedLabelGiven,
+  copyFailedLabel: copyFailedLabelGiven,
+  writingLabel: writingLabelGiven,
 }: HeadProps) => {
+  const {
+    copy: copyLabel,
+    copied: copiedLabel,
+    copyFailed: copyFailedLabel,
+    writing: writingLabel,
+  } = withGiven(useWords("codeBlock", codeBlockWords), {
+    copy: copyLabelGiven,
+    copied: copiedLabelGiven,
+    copyFailed: copyFailedLabelGiven,
+    writing: writingLabelGiven,
+  });
   const hasFile = fileName !== undefined && fileName !== "";
   return (
     <div {...stylex.props(styles.head)}>
@@ -377,21 +390,27 @@ const Foot = ({
   open,
   controls,
   onToggle,
-  moreLabel = "Show more",
-  lessLabel = "Show less",
-}: FootProps) => (
-  <div {...stylex.props(styles.foot)}>
-    <Button
-      variant="quiet"
-      size="sm"
-      aria-expanded={open}
-      aria-controls={controls}
-      onClick={onToggle}
-    >
-      {open ? lessLabel : moreLabel}
-    </Button>
-  </div>
-);
+  moreLabel: moreGiven,
+  lessLabel: lessGiven,
+}: FootProps) => {
+  const { more, less } = withGiven(useWords("codeBlock", codeBlockWords), {
+    more: moreGiven,
+    less: lessGiven,
+  });
+  return (
+    <div {...stylex.props(styles.foot)}>
+      <Button
+        variant="quiet"
+        size="sm"
+        aria-expanded={open}
+        aria-controls={controls}
+        onClick={onToggle}
+      >
+        {open ? less : more}
+      </Button>
+    </div>
+  );
+};
 
 /** Code, highlighted, with its language, a copy button, and Show more when it is long. */
 export const CodeBlock = ({

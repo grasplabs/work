@@ -8,7 +8,14 @@ import { useState } from "react";
 import { integrationKey } from "../connections/integrations.ts";
 import { Button } from "../grasp/button/index.ts";
 import { Lock } from "../grasp/icons/index.ts";
-import { Item } from "../grasp/item/index.ts";
+import {
+  Item,
+  ItemMedia,
+  ItemContent,
+  ItemTitle,
+  ItemDescription,
+  ItemActions,
+} from "../grasp/item/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { NotLoaded } from "../load-from-core.tsx";
@@ -56,8 +63,18 @@ const ReconnectRow = ({ ranOut }: { ranOut: SignInAgainItem }) => {
       ? integration.name
       : `${integration.name} (${connection.accountName})`;
   return (
-    <Item
-      actions={
+    <Item>
+      <ItemMedia icon={Lock} />
+      <ItemContent>
+        <ItemTitle>{t`${app} needs someone to sign in again`}</ItemTitle>
+        <ItemDescription>
+          {t({
+            message: "Connection",
+            context: "kind of thing that waits",
+          })}
+        </ItemDescription>
+      </ItemContent>
+      <ItemActions>
         <Button
           render={
             <Link
@@ -73,14 +90,8 @@ const ReconnectRow = ({ ranOut }: { ranOut: SignInAgainItem }) => {
         >
           {t`Sign in again`}
         </Button>
-      }
-      description={t({
-        message: "Connection",
-        context: "kind of thing that waits",
-      })}
-      icon={Lock}
-      title={t`${app} needs someone to sign in again`}
-    />
+      </ItemActions>
+    </Item>
   );
 };
 

@@ -155,7 +155,8 @@ const styles = stylex.create({
     position: "absolute",
     inset: 0,
     zIndex: 0,
-    borderRadius: grasp.corner,
+    // The card's own corner, full or compact: one number, the card's.
+    borderRadius: "inherit",
     cornerShape: grasp.cornerShape,
     pointerEvents: "none",
     boxShadow: grasp.composerHalo,

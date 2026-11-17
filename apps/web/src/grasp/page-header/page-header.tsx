@@ -1,5 +1,6 @@
 "use client";
 
+/* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
 import { useState } from "react";
 import type { ReactNode } from "react";
@@ -51,9 +52,9 @@ export interface PageHeaderProps {
    * @default false
    */
   loading?: boolean;
-  /** Layout only: margins and width. The look belongs to the header. */
+  /** @deprecated Use `layout`. */
   style?: PageHeaderLayoutStyle;
-  /** The same as `style`, by a name a style lint does not take for an inline style attribute. */
+  /** Layout only: margins and width. The look belongs to the header. */
   layout?: PageHeaderLayoutStyle;
 }
 
@@ -227,7 +228,7 @@ export const PageHeader = ({
           {loading ? (
             <>
               <Skeleton
-                shape="block"
+                variant="block"
                 layout={[styles.titleWait, look.titleWait]}
               />
               {description !== undefined && (

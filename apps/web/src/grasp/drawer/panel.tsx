@@ -19,7 +19,7 @@ import { drawerStyles as styles } from "./styles";
 type ContentPrimitiveProps = ComponentProps<typeof ContentPrimitive>;
 
 /** Every prop a DrawerPanel takes: these, and the rest of UI SDK's DrawerContent. */
-export interface DrawerPanelProps extends Omit<
+export interface DrawerContentProps extends Omit<
   ContentPrimitiveProps,
   "children" | "className" | "style" | "render"
 > {
@@ -41,11 +41,11 @@ const stateOf = (low: boolean, snaps: boolean) => {
   return snaps ? "tall" : "open";
 };
 /** The panel, with the shade behind it and the grip at its top. Along the bottom of the window. */
-export const DrawerPanel = ({
+export const DrawerContent = ({
   children,
   gripLabel = "Resize",
   ...rest
-}: DrawerPanelProps) => {
+}: DrawerContentProps) => {
   const snaps = useSnaps();
   const still = useStill();
   if (still) {
@@ -103,3 +103,8 @@ export const DrawerPanel = ({
     </KindContext.Provider>
   );
 };
+
+/** @deprecated Use `DrawerContent`. */
+export const DrawerPanel = DrawerContent;
+/** @deprecated Use `DrawerContentProps`. */
+export type DrawerPanelProps = DrawerContentProps;

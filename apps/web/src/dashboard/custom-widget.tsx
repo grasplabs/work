@@ -27,7 +27,7 @@ import {
   ChartGrid,
   ChartTooltip,
 } from "../grasp/chart/index.ts";
-import { Highlight } from "../grasp/highlights/index.ts";
+import { Stat } from "../grasp/stats/index.ts";
 import { BarList } from "./bar-list.tsx";
 import { WidgetBlock } from "./widget-block.tsx";
 
@@ -117,7 +117,7 @@ const Part = ({ part }: { part: WidgetViewPart }) => {
   const { i18n } = useLingui();
   switch (part.type) {
     case "number": {
-      return <Highlight title={part.label} value={formatNumber(part.value)} />;
+      return <Stat title={part.label} value={formatNumber(part.value)} />;
     }
     case "bars": {
       const measure = i18n._(measureNames[part.measure]);
@@ -152,7 +152,7 @@ const Part = ({ part }: { part: WidgetViewPart }) => {
             config={{ value: { label: measure } }}
             data={part.points}
             height={TREND_HEIGHT}
-            label={part.label ?? measure}
+            aria-label={part.label ?? measure}
             summary={trendSummary(part.points, measure, i18n)}
             xKey="day"
           >

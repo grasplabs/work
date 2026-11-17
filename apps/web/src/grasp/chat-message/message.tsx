@@ -11,11 +11,13 @@
 // Every value is a token (src/tokens). A caller may set layout only (the `style` prop).
 "use client";
 
+/* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
 import { Button as PressPrimitive } from "@ui-sdk/react/button";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { ReactNode, RefObject } from "react";
 
+import { AgentIndicator } from "../agent-indicator";
 import { announce } from "../announce/announce";
 import { Button } from "../button";
 import { Collapsible } from "../collapsible";
@@ -27,9 +29,8 @@ import type { LayoutStyle } from "../layout/layout";
 import { useArriving } from "../motion/use-arriving";
 import { ArrivingContext, usePaced } from "../motion/use-paced";
 import type { PacedOptions } from "../motion/use-paced";
-import { TextShimmer } from "../text-shimmer";
+import { Shimmer } from "../shimmer";
 import { grasp, media } from "../tokens/tokens.stylex";
-import { WorkingMark } from "../working-mark";
 import { ChatMessageCopy } from "./copy";
 
 /** What a caller may style: where the message sits. Never its look. */
@@ -131,9 +132,9 @@ export interface ChatMessageProps {
    * @default "quick"
    */
   pace?: PacedOptions["pace"];
-  /** Layout only: margins and alignment. The look belongs to the message. */
+  /** @deprecated Use `layout`. */
   style?: ChatMessageLayoutStyle;
-  /** The same as `style`, by a name a style lint does not take for an inline style attribute. */
+  /** Layout only: margins and alignment. The look belongs to the message. */
   layout?: ChatMessageLayoutStyle;
 }
 
@@ -505,9 +506,9 @@ const Thought = ({
     return null;
   }
   const line = (
-    <TextShimmer active={thinking}>
+    <Shimmer active={thinking}>
       {thinking || settled === null ? label : thoughtLabel(settled)}
-    </TextShimmer>
+    </Shimmer>
   );
   if (!present(thoughts)) {
     return (
@@ -655,10 +656,10 @@ const Sign = ({ waiting, mark, label = THINKING }: SignProps) => (
   <>
     {waiting && (
       <p aria-hidden="true" data-waiting="" {...stylex.props(styles.waiting)}>
-        <TextShimmer active>{label}</TextShimmer>
+        <Shimmer active>{label}</Shimmer>
       </p>
     )}
-    {mark && <WorkingMark layout={styles.stream} />}
+    {mark && <AgentIndicator layout={styles.stream} />}
   </>
 );
 

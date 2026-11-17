@@ -7,8 +7,15 @@ import { typeLabels } from "../activity/type-labels.ts";
 import { formatDateTime } from "../format.ts";
 import { RouterLink } from "../frame/router-link.tsx";
 import { Badge } from "../grasp/badge/index.ts";
-import { Empty } from "../grasp/empty/index.ts";
-import { Item, ItemGroup } from "../grasp/item/index.ts";
+import { Empty, EmptyHeader, EmptyDescription } from "../grasp/empty/index.ts";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemTitle,
+} from "../grasp/item/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
 
 // The latest of what Grasp and people did, for admins, from the audit
@@ -29,14 +36,17 @@ const Row = ({ record }: { record: AuditRecord }) => {
     sentence = action;
   }
   return (
-    <Item
-      description={formatDateTime(record.receivedAt)}
-      size="sm"
-      title={sentence}
-      {...(record.type === null
-        ? {}
-        : { actions: <Badge>{i18n._(typeLabels[record.type])}</Badge> })}
-    />
+    <Item size="sm">
+      <ItemContent>
+        <ItemTitle>{sentence}</ItemTitle>
+        <ItemDescription>{formatDateTime(record.receivedAt)}</ItemDescription>
+      </ItemContent>
+      {record.type === null ? null : (
+        <ItemActions>
+          <Badge>{i18n._(typeLabels[record.type])}</Badge>
+        </ItemActions>
+      )}
+    </Item>
   );
 };
 
@@ -65,10 +75,14 @@ export const Activity = ({ activity }: { activity: LatestActivity }) => {
       })}
     >
       {shown.length === 0 ? (
-        <Empty size="inline">
-          {older
-            ? t`Lately the trail only records its own searches: older events are in the full audit trail.`
-            : t`Nothing has happened yet.`}
+        <Empty size="sm">
+          <EmptyHeader>
+            <EmptyDescription>
+              {older
+                ? t`Lately the trail only records its own searches: older events are in the full audit trail.`
+                : t`Nothing has happened yet.`}
+            </EmptyDescription>
+          </EmptyHeader>
         </Empty>
       ) : (
         <ItemGroup aria-label={t`Latest activity`} separated>

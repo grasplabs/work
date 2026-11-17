@@ -28,6 +28,7 @@
     "@ui-sdk/core": "catalog:",
     "@ui-sdk/react": "catalog:",
     "capnweb": "catalog:",
+    "country-flag-icons": "catalog:",
     "lucide-react": "catalog:",
     "mdast-util-from-markdown": "catalog:",
     "mdast-util-gfm": "catalog:",

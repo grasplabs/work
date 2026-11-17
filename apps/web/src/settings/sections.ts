@@ -69,14 +69,42 @@ export interface SettingsSection {
 }
 
 export const settingsGroups: readonly SettingsGroup[] = [
+  // The person's own account first: the one group everyone has.
+  {
+    id: "account",
+    title: msg({ message: "Account", context: "settings group" }),
+  },
   {
     id: "workspace",
     title: msg({ message: "Workspace", context: "settings group" }),
   },
-  { id: "account", title: msg`Your account` },
 ];
 
 export const settingsSections: readonly SettingsSection[] = [
+  {
+    id: "profile",
+    label: msg`Profile`,
+    href: "/settings/profile",
+    group: "account",
+    icon: Person,
+    audience: "everyone",
+  },
+  {
+    id: "appearance",
+    label: msg`Appearance`,
+    href: "/settings/appearance",
+    group: "account",
+    icon: Contrast,
+    audience: "everyone",
+  },
+  {
+    id: "security",
+    label: msg`Security`,
+    href: "/settings/security",
+    group: "account",
+    icon: Lock,
+    audience: "everyone",
+  },
   {
     id: "workspace",
     label: msg`Workspace`,
@@ -166,30 +194,6 @@ export const settingsSections: readonly SettingsSection[] = [
     group: "workspace",
     icon: AppRecord,
     audience: "admins",
-  },
-  {
-    id: "profile",
-    label: msg`Profile`,
-    href: "/settings/profile",
-    group: "account",
-    icon: Person,
-    audience: "everyone",
-  },
-  {
-    id: "appearance",
-    label: msg`Appearance`,
-    href: "/settings/appearance",
-    group: "account",
-    icon: Contrast,
-    audience: "everyone",
-  },
-  {
-    id: "security",
-    label: msg`Security`,
-    href: "/settings/security",
-    group: "account",
-    icon: Lock,
-    audience: "everyone",
   },
 ];
 

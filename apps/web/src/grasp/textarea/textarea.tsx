@@ -13,6 +13,7 @@
 // Every value is a token (src/tokens). A caller may set layout and width only (the `style` prop).
 "use client";
 
+/* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
 import { Textarea as TextareaPrimitive } from "@ui-sdk/react/textarea";
 import type { TextareaState } from "@ui-sdk/react/textarea";
@@ -77,9 +78,9 @@ export interface TextareaProps extends Omit<
    * @default false
    */
   disabled?: boolean;
-  /** Layout only: margins, alignment and width. Colours, corners and padding belong to it. */
+  /** @deprecated Use `layout`. */
   style?: TextareaLayoutStyle;
-  /** The same as `style`, by a name a style lint does not take for an inline style attribute. */
+  /** Layout only: margins, alignment and width. Colours, corners and padding belong to it. */
   layout?: TextareaLayoutStyle;
   /** The <textarea> itself, to focus it or read it. */
   ref?: Ref<HTMLTextAreaElement>;

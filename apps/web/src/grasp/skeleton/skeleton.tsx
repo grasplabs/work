@@ -16,6 +16,7 @@
 // It is hidden from screen readers; the region it stands in carries `aria-busy` and a status
 // that says what is loading. Every value is a token (src/tokens). A caller may set size and
 // layout (the `style` prop): the content it stands for decides how large it is.
+/* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
 import { useEffect, useRef } from "react";
 import type { RefObject } from "react";
@@ -38,6 +39,8 @@ export interface SkeletonProps {
    * field, `circle` for an avatar.
    * @default "line"
    */
+  variant?: SkeletonShape;
+  /** @deprecated Use `variant`. */
   shape?: SkeletonShape;
   /**
    * For a line, the text it stands for: `sm` small text, `md` body text, `lg` a lead or a card
@@ -55,10 +58,12 @@ export interface SkeletonProps {
    * How it waits: `field` a dot field our light crosses; `grey` the soft fill that breathes.
    * @default "field", or "grey" when `pulse` is false
    */
+  surface?: SkeletonLook;
+  /** @deprecated Use `surface`. */
   look?: SkeletonLook;
-  /** Its size and where it sits: the content it stands for decides. Never its fill or corner. */
+  /** @deprecated Use `layout`. */
   style?: SkeletonLayoutStyle;
-  /** The same as `style`, by a name a style lint does not take for an inline style attribute. */
+  /** Its size and where it sits: the content it stands for decides. Never its fill or corner. */
   layout?: SkeletonLayoutStyle;
 }
 
@@ -234,10 +239,12 @@ const Field = ({
 };
 
 export const Skeleton = ({
-  shape = "line",
+  shape: shapeDeprecated,
+  variant: shape = shapeDeprecated ?? "line",
   text = "sm",
   pulse = true,
-  look,
+  look: lookDeprecated,
+  surface: look = lookDeprecated,
   style,
   layout,
 }: SkeletonProps) => {

@@ -1,4 +1,4 @@
-// The one way an icon is drawn in Grasp UI. The drawings come from Hugeicons (only from there);
+// The one way an icon is drawn in Damsko. The drawings come from Hugeicons (only from there);
 // this draws them with the stroke and size of the tokens, so every icon in the product has the
 // same weight. Import icons from "src/icons", never from @hugeicons directly.
 //

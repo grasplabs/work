@@ -2,6 +2,7 @@
 // Dictate. It is UI SDK's Button drawn as a small quiet Grasp Button, so an agent finds it by name.
 "use client";
 
+/* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
 import { Button as PressPrimitive } from "@ui-sdk/react/button";
 import type { MouseEvent } from "react";
@@ -16,7 +17,9 @@ export interface ComposerActionProps {
   /** The icon. Import it from the icons entry (`@/components/grasp/icons`). */
   icon: IconData;
   /** Its name, for a screen reader and an agent ("Add a file"). */
-  label: string;
+  "aria-label"?: string;
+  /** @deprecated Use `aria-label`. */
+  label?: string;
   /** What a press does. Return a Promise and an agent waits for it. */
   onClick?: (event: MouseEvent<HTMLElement>) => unknown;
   /**
@@ -34,7 +37,8 @@ export interface ComposerActionProps {
 /** A round icon button for a composer's `start` or `end`. */
 export const ComposerAction = ({
   icon,
-  label,
+  label: labelDeprecated,
+  "aria-label": label = labelDeprecated ?? "",
   onClick,
   disabled: own = false,
   pressed,
@@ -56,7 +60,7 @@ export const ComposerAction = ({
             variant={alone || pressed === true ? "ink" : "quiet"}
             size="sm"
             icon={icon}
-            label={label}
+            aria-label={label}
             disabled={disabled}
           />
         )}

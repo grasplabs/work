@@ -1,5 +1,6 @@
 "use client";
 
+/* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
 import { createElement, isValidElement, useEffect, useState } from "react";
 import type { ReactElement, ReactNode } from "react";
@@ -8,6 +9,7 @@ import { focus } from "../focus/focus";
 import { simply } from "../motion/simply.stylex";
 import { Skeleton } from "../skeleton";
 import { grasp, media } from "../tokens/tokens.stylex";
+import { cardLine } from "./card-line.stylex";
 
 /** A step on the way to the page, in the page bar. The last is the page itself. */
 export interface AppShellCrumb {
@@ -34,8 +36,13 @@ export interface AppShellBarProps {
    * After the crumbs: where the page's subject stands, such as a status. Where the page's name
    * would be cut beside it, it gives way first, so the name is cut last.
    */
+  end?: ReactNode;
+  /** @deprecated Use `end`. */
   trailing?: ReactNode;
-  /** At the bar's start, before the crumbs: the product's mark and name, as a link home. */
+  /**
+   * At the bar's start, before the crumbs: the product's mark and name, as a link home. Where the
+   * Menu button leads the bar (a narrow shell with a sidebar), it stands in the menu's head instead.
+   */
   brand?: ReactNode;
   /** In the middle of the bar: a short switch between the product's sections ("Docs | Components"). */
   middle?: ReactNode;
@@ -70,9 +77,9 @@ const PHONE = "@media (width < 40rem)";
 // takes its own row. Read on the card round the bar, which is the bar's width (the card beside a
 // sidebar may be narrow in a wide window): the bar cannot ask its own width how to lay itself out.
 const CARD_NARROW = "@container app-shell-card (width < 34rem)";
-// A small phone's window (under 22.5rem, 360px: a 320px phone), as PHONE is read on the window: the
-// brand keeps its mark and gives its words to a screen reader, so the page's name beside it reads
-// whole (FRESH.md F75b).
+// A small phone's window (under 22.5rem, 360px: a 320px phone), as PHONE is read on the window: a
+// brand still in the bar (a shell with no sidebar, so no Menu button) keeps its mark and gives its
+// words to a screen reader, so the page's name beside it reads whole (FRESH.md F75b).
 const SMALL_PHONE = "@media (width < 22.5rem)";
 // A card a phone's width (40rem): where `phoneCrumbs` keeps only some crumbs.
 const CARD_PHONE = "@container app-shell-card (width < 40rem)";
@@ -140,6 +147,20 @@ const styles = stylex.create({
     backgroundColor: grasp.shellCard,
     fontSize: grasp.textXs,
     lineHeight: grasp.textXsLine,
+    // A box for its foot's line (`::after`); a page's own bar is sticky, which is one too.
+    position: "relative",
+    "::after": {
+      content: '""',
+      position: "absolute",
+      insetInline: cardLine.width,
+      insetBlockEnd: 0,
+      height: grasp.hairline,
+      backgroundColor: {
+        default: grasp.shellCardLine,
+        [media.forced]: "CanvasText",
+      },
+      pointerEvents: "none",
+    },
   },
   // A page's own bar: at the top of the page, across the card from edge to edge (out over the page's
   // side room), and it stays as the page scrolls under it. On a narrow shell the menu button floats
@@ -306,15 +327,24 @@ const styles = stylex.create({
   // Between the brand, a link home, and where the page is: a short rule, as the bar's parts stand the
   // bar's gap apart, so the two never read as one phrase or as a first crumb (FRESH.md F75).
   brandRule: {
+    // Gone where the Menu button leads the bar, as the brand is (`brand`, F88).
+    display: {
+      default: "block",
+      [NARROW]: {
+        default: "block",
+        [stylex.when.ancestor("[data-shell-menu]")]: "none",
+      },
+    },
     flexShrink: 0,
     width: grasp.separatorWidth,
     height: grasp.iconSm,
     backgroundColor: { default: grasp.line, [media.forced]: "CanvasText" },
   },
-  // The brand's words (AppShellBrandName): on a small phone's window only a screen reader has them, in
-  // the link's name, and the mark stands for the product; the crumbs get the room (F75b).
-  // Only the bar's own brand gives way there: the same brand in the sidebar's head (a peek, the
-  // phone's menu, which stands inside the bar's header) keeps its name.
+  // The brand's words (AppShellBrandName): on a small phone's window, in a bar that still holds the
+  // brand (no sidebar, so no Menu button: with one the brand is in the menu, `brand` below), only a
+  // screen reader has them, in the link's name, and the mark stands for the product; the crumbs get
+  // the room (F75b). Only the bar's own brand gives way there: the same brand in the sidebar's head (a
+  // peek, the phone's menu, which stands inside the bar's header) keeps its name.
   brandName: {
     position: {
       default: null,
@@ -360,9 +390,19 @@ const styles = stylex.create({
     },
     whiteSpace: "nowrap",
   },
-  // The mark and name never give way, nor wrap: what the bar's start keeps whole (F14).
+  // The mark and name never give way, nor wrap: what the bar's start keeps whole (F14). Where the
+  // Menu button leads the bar, the brand is not in it: the button and the brand's mark read as two
+  // glyphs side by side, and the menu's head holds the brand (F88). That is a narrow shell (NARROW, as
+  // app-shell.tsx shows the button by) with a sidebar to put in the menu, which its grid says
+  // (data-shell-menu).
   brand: {
-    display: "flex",
+    display: {
+      default: "flex",
+      [NARROW]: {
+        default: "flex",
+        [stylex.when.ancestor("[data-shell-menu]")]: "none",
+      },
+    },
     flexShrink: 0,
     alignItems: "center",
     gap: grasp.space2,
@@ -895,21 +935,21 @@ const ruleOf = (brand: ReactNode, where: ReactNode) =>
 
 export const PageBar = ({
   look,
-  start,
+  barStart,
   crumbs = NO_CRUMBS,
   phoneCrumbs = "last-two",
-  trailing,
+  end: trailing,
   brand,
   middle,
   phoneMiddle = "bar",
   actions,
   breadcrumbLabel = "Breadcrumb",
   loading = false,
-  end,
+  barEnd,
 }: AppShellBarProps & {
   look: "frame" | "page";
-  start?: ReactNode;
-  end?: ReactNode;
+  barStart?: ReactNode;
+  barEnd?: ReactNode;
 }) => {
   const [bar, setBar] = useState<HTMLElement | null>(null);
   useFitBar(bar);
@@ -944,7 +984,7 @@ export const PageBar = ({
     );
   // The end: the page's actions, then what the shell puts after them (the panels' button on a phone).
   const tail =
-    actions === undefined && end === undefined ? null : (
+    actions === undefined && barEnd === undefined ? null : (
       <div
         {...stylex.props(
           styles.tail,
@@ -954,7 +994,7 @@ export const PageBar = ({
         {actions !== undefined && (
           <div {...stylex.props(styles.actions)}>{actions}</div>
         )}
-        {end}
+        {barEnd}
       </div>
     );
   if (middle === undefined) {
@@ -965,7 +1005,7 @@ export const PageBar = ({
         aria-busy={busyOf(loading)}
         {...stylex.props(styles.bar, look === "page" && styles.pageBar)}
       >
-        {start}
+        {barStart}
         {head}
         {rule}
         {where}
@@ -987,7 +1027,7 @@ export const PageBar = ({
       )}
     >
       <div data-slot="app-shell-bar-start" {...stylex.props(styles.start)}>
-        {start}
+        {barStart}
         {head}
         {rule}
         {(where !== null || trail !== null) && (
@@ -1018,15 +1058,16 @@ export const PageBar = ({
 };
 
 export interface AppShellBrandNameProps {
-  /** The product's name, as words. On a small phone's window only a screen reader has it in the bar. */
+  /** The product's name, as words. In a bar with no sidebar, on a small phone's window, only a screen reader has it. */
   children: ReactNode;
 }
 
 /**
- * The product's name inside `brand`, after its mark: `<a href="/"><Mark /><AppShellBrandName>Grasp
- * UI</AppShellBrandName></a>`. In the bar on a small phone's window (under 22.5rem) only the mark shows,
- * and the name stays the link's name for a screen reader, so the page's name beside it reads whole.
- * Elsewhere (the sidebar's head, the menu's) it shows as it is.
+ * The product's name inside `brand`, after its mark: `<a href="/"><Mark /><AppShellBrandName>Damsko
+ * </AppShellBrandName></a>`. Where the bar leads with the Menu button, the brand is in the menu's
+ * head, not the bar, and shows its name there. A bar with no sidebar (no Menu button) keeps the brand:
+ * on a small phone's window (under 22.5rem) it shows only the mark there, and the name stays the
+ * link's name for a screen reader, so the page's name beside it reads whole.
  */
 export const AppShellBrandName = ({ children }: AppShellBrandNameProps) => (
   <span {...stylex.props(styles.brandName)}>{children}</span>
@@ -1036,6 +1077,8 @@ export const AppShellBrandName = ({ children }: AppShellBrandNameProps) => (
  * A page's own page bar, for an App shell with `bar="page"`: render it first in the page. It runs
  * across the top of the card and stays as the page scrolls under it.
  */
-export const AppShellBar = (props: AppShellBarProps) => (
-  <PageBar look="page" {...props} />
-);
+export const AppShellBar = ({
+  trailing,
+  end = trailing,
+  ...props
+}: AppShellBarProps) => <PageBar look="page" {...props} end={end} />;

@@ -4,7 +4,7 @@ import { Suspense, lazy } from "react";
 
 import { Alert } from "../grasp/alert/index.ts";
 import { Button } from "../grasp/button/index.ts";
-import { Empty } from "../grasp/empty/index.ts";
+import { Empty, EmptyHeader, EmptyDescription } from "../grasp/empty/index.ts";
 import { Retry } from "../grasp/icons/index.ts";
 import { Spinner } from "../grasp/spinner/index.ts";
 import { Text } from "../grasp/text/index.ts";
@@ -69,9 +69,10 @@ const styles = stylex.create({
     flexDirection: "column",
     flexShrink: 0,
     gap: grasp.space1,
-    paddingInline: grasp.space4,
+    // As far in from the panel's sides and foot as the page's words are.
+    paddingInline: grasp.shellPageInline,
     paddingBlockStart: grasp.space2,
-    paddingBlockEnd: grasp.space4,
+    paddingBlockEnd: grasp.shellPageInline,
   },
   notice: {
     display: "flex",
@@ -91,7 +92,11 @@ const ChatThread = lazy(async () => {
 /** What the chat says before anything is asked in it. */
 const Welcome = ({ text }: { text: string }) => (
   <div {...stylex.props(styles.grow)}>
-    <Empty shape="thread">{text}</Empty>
+    <Empty shape="thread">
+      <EmptyHeader>
+        <EmptyDescription>{text}</EmptyDescription>
+      </EmptyHeader>
+    </Empty>
   </div>
 );
 
@@ -100,7 +105,7 @@ const Loading = () => {
   const { t } = useLingui();
   return (
     <div {...stylex.props(styles.centre)}>
-      <Spinner label={t`Loading…`} />
+      <Spinner aria-label={t`Loading…`} />
     </div>
   );
 };
@@ -166,10 +171,10 @@ export const ChatConversation = ({
         {failure === undefined && view.stopped === null ? null : (
           <div {...stylex.props(styles.stack)}>
             {failure === undefined ? null : (
-              <Alert variant="danger">{failure}</Alert>
+              <Alert tone="danger">{failure}</Alert>
             )}
             {view.stopped === null ? null : (
-              <Alert variant="danger">{view.stopped}</Alert>
+              <Alert tone="danger">{view.stopped}</Alert>
             )}
             {/* A question stopped before the agent answered (a deploy, say)
               is asked again from here: it may be the chat's first. */}
