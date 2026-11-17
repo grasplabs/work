@@ -1,4 +1,5 @@
 import type { AuditActor } from "@grasp-os/shared/audit";
+import { brainSourceErrors } from "@grasp-os/shared/brain-sources";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { functionErrors } from "@grasp-os/shared/functions";
@@ -17,6 +18,7 @@ import { memberOf } from "./auth/identity.ts";
 import { audited, inHostBrainWords, landed } from "./brain-audited.ts";
 import type { MemoryCaller } from "./brain-audited.ts";
 import {
+  credentialIdentifierIssues,
   forgetForAppAs,
   isCodeWriteRequest,
   rememberForAppAs,
@@ -334,7 +336,9 @@ const writeFor = async (
  * `ctx.brain.remember` and `ctx.brain.forget` for App `caller.app`'s code
  * (above): refused as `permission.invalid_args` for input that isn't a
  * request (an id the App's code may not see among them, as one nobody
- * holds), `permission.denied` without the grant to read the Brain, one of
+ * holds), `brain.request_invalid` with `details.issues` saying why for
+ * an identifier that is a credential (`credentialIdentifierIssues`),
+ * `permission.denied` without the grant to read the Brain, one of
  * the `permission.brain_write_*` codes when its code may not write now,
  * and `permission.unavailable` once the person is no longer a member.
  * Audited before it writes and after.
@@ -357,11 +361,22 @@ export const appWriteFor = async (
   const change = `app:${caller.app}/${await sha256Hex(
     JSON.stringify([person, caller.key])
   )}`;
+  // An identifier that is a credential, refused saying which and why, so
+  // its builder can act on it (GRA-2003): its value never in it.
+  const issues =
+    operation === "remember" ? credentialIdentifierIssues(input) : [];
+  const credentialIdentifier =
+    issues.length > 0
+      ? brainSourceErrors.create("brain.request_invalid", { issues })
+      : undefined;
   try {
     // The input first, as a recall's: a caller with no grant and bad
     // input is refused alike by both.
     if (!isCodeWriteRequest(operation, input)) {
       throw functionErrors.create("permission.invalid_args");
+    }
+    if (credentialIdentifier !== undefined) {
+      throw credentialIdentifier;
     }
     await authorize(
       env,
@@ -377,7 +392,8 @@ export const appWriteFor = async (
     }
   } catch (error) {
     // Refused before anything was tried: one event.
-    const refused = inHostBrainWords(error);
+    const refused =
+      error === credentialIdentifier ? error : inHostBrainWords(error);
     await appendAuditEvent(env, {
       actor: audit.actor,
       action,

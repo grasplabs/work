@@ -137,7 +137,7 @@ import { log } from "@grasp-os/shared/log";
 import { modelErrors } from "@grasp-os/shared/models";
 import type { ModelErrorCode } from "@grasp-os/shared/models";
 import { permissionErrors } from "@grasp-os/shared/permissions";
-import { redact } from "@grasp-os/shared/redact";
+import { holdsKnownCredential, redact } from "@grasp-os/shared/redact";
 import { skillErrors } from "@grasp-os/shared/skills";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
@@ -6029,18 +6029,50 @@ const codeAttributes = attributeNames.filter(
 /** A fact App code remembers (`rememberForAppAs`). */
 const codeRememberSchema = z.strictObject({
   // Never a person's own entity: App code writes to the shared store.
-  // Never an identifier `redact` would change (GRA-2003): one finds an
-  // entity, so it can't be redacted without moving the memory, and a
-  // credential is never kept as one.
-  about: memoryAboutSchema
-    .omit({ own: true })
-    .refine(({ identifiers }) =>
-      identifiers.every(({ value }) => redact(value) === value)
-    ),
+  about: memoryAboutSchema.omit({ own: true }),
   attribute: z.enum(codeAttributes).optional(),
   value: memoryText(valueMaxLength).optional(),
   statement: memoryText(statementMaxLength),
 });
+
+/**
+ * Whether identifier `value` is a credential by its own shape: a known
+ * key format (`holdsKnownCredential`), or a link (a URL with a host) that
+ * `redact` signs or grants away. Never by a name before it: a `ref`'s
+ * system (`session:…`, `token:ETH`) or an id's own words
+ * (`checkout_session:cs_test_…`) are ordinary ids. An id shaped like a
+ * key (`sk-` and sixteen more letters, digits or dashes) is refused
+ * whatever words it spells, and so is a link with a `code`: neither can
+ * be told from a credential without a rule of our own.
+ */
+const credentialShaped = ({ type, value }: Identifier): boolean => {
+  // A ref's own system names where the id lives, never a credential.
+  const id = type === "ref" ? value.slice(value.indexOf(":") + 1) : value;
+  const link = URL.canParse(id) && new URL(id).host !== "";
+  return holdsKnownCredential(id) || (link && redact(id) !== id);
+};
+
+/**
+ * Why code may not remember `request` (a valid `codeRememberSchema`
+ * request) as it is, as `details.issues` say it (GRA-2003): each
+ * identifier that is a credential by its own shape (`credentialShaped`),
+ * by its path, never its value. An identifier finds an entity, so it is
+ * never redacted, which would move the memory: refused instead, so a
+ * credential is never kept as one. None when it may.
+ */
+export const credentialIdentifierIssues = (request: unknown): string[] => {
+  const parsed = codeRememberSchema.safeParse(request);
+  if (!parsed.success) {
+    return [];
+  }
+  return parsed.data.about.identifiers.flatMap((identifier, index) =>
+    credentialShaped(identifier)
+      ? [
+          `about.identifiers.${index}: looks like a password, key, token or signed link, which the Brain never keeps as an identifier. Leave it out, or identify the entity another way.`,
+        ]
+      : []
+  );
+};
 
 /** One of its own memories App code forgets (`forgetForAppAs`). */
 const codeForgetSchema = z.strictObject({ memory: memoryIdSchema });
@@ -6089,6 +6121,10 @@ export const rememberForAppAs = async (
     codeRememberSchema,
     request
   );
+  const issues = credentialIdentifierIssues(request);
+  if (issues.length > 0) {
+    throw brainSourceErrors.create("brain.request_invalid", { issues });
+  }
   const writer = appWriterOf(app);
   const reader = await codeReaderOf(env, personId, "company", app);
   let added: Awaited<ReturnType<Brain["addMemories"]>>;

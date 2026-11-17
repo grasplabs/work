@@ -8,7 +8,7 @@ import {
   exportSettled,
   tick,
 } from "../../../packages/brain-next/test/export-reads.ts";
-import { callAppFunction } from "../src/app-functions.ts";
+import { callAppFunction, callPageFunction } from "../src/app-functions.ts";
 import { addMember, removeMember } from "../src/app-members.ts";
 import { holdingsOf, recallsTheBrain } from "../src/app-provenance.ts";
 import { removeApp } from "../src/app-removal.ts";
@@ -312,11 +312,6 @@ describe("an App's code remembers and forgets for its users", setUpTime, () => {
         .toArray()
         .map(({ value }) => value),
     }));
-    const withIdentifier = (value: string) => ({
-      ...remembered,
-      about: { ...remembered.about, identifiers: [{ type: "ref", value }] },
-    });
-
     expect({
       again,
       kept,
@@ -324,15 +319,6 @@ describe("an App's code remembers and forgets for its users", setUpTime, () => {
       shown: [JSON.stringify(card), JSON.stringify(kept)].some(
         (text) => text.includes(secret) || text.includes(token)
       ),
-      // An identifier finds an entity: one holding a credential is never
-      // rewritten, the write refused at its request check.
-      identifiers: {
-        plain: isCodeWriteRequest("remember", withIdentifier("crm:ACME-1")),
-        credential: isCodeWriteRequest(
-          "remember",
-          withIdentifier(`token:${secret}`)
-        ),
-      },
     }).toStrictEqual({
       again: written,
       kept: {
@@ -344,7 +330,80 @@ describe("an App's code remembers and forgets for its users", setUpTime, () => {
       },
       read: [redact(remembered.statement)],
       shown: false,
-      identifiers: { plain: true, credential: false },
+    });
+  });
+
+  it("files a memory under any ordinary identifier, and refuses only one that is a credential by its own shape, saying which and why", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const app = await appOf(ada, admin);
+    const key = `ghp_${"b".repeat(24)}${unique()}`;
+    // A ref's system, or a word in its id, that names a credential is no
+    // credential: only the id's own shape is.
+    const kept = [
+      "crm:ACME-1",
+      "session:2026-11-17-yoga-morning",
+      "stripe:checkout_session:cs_test_a1b2c3",
+      "token:ETH",
+      "erc20:token:0x1f9840a85d5af5bf1d1762f925bdaddc4201f984",
+      "cookie:consent-v2",
+      "url:https://shop.example.com/cart?item=42",
+    ];
+    // A key's own format, and a link `redact` signs or grants away. An id
+    // shaped like a key (`sk-` and sixteen more) and a link's `code` can't
+    // be told from a credential: refused too.
+    const refused = [
+      `token:${key}`,
+      `ref:${key}`,
+      "slug:sk-hynix-semiconductor-europe",
+      "url:https://shop.example.com/cart?code=WELCOME10",
+      "files:https://bucket.example.com/report.pdf?X-Amz-Signature=abc123",
+    ];
+    /** What remembering a fact filed under `ref` answers the App's code. */
+    const filedUnder = async (ref: string) => {
+      const { result } = await callPageFunction(
+        env,
+        ada,
+        app.app,
+        requestOf("remember", {
+          about: {
+            kind: "customer",
+            names: [`Customer ${unique()}`],
+            identifiers: [{ type: "ref", value: ref }],
+          },
+          statement: "Signed up today",
+        }),
+        Date.now() + 60_000
+      );
+      return result.ok
+        ? "kept"
+        : {
+            code: result.error.code,
+            details: result.error.details,
+          };
+    };
+    const answers = [];
+    for (const ref of [...kept, ...refused]) {
+      // oxlint-disable-next-line no-await-in-loop -- one write at a time
+      answers.push(await filedUnder(ref));
+    }
+
+    const why = [
+      "about.identifiers.0: looks like a password, key, token or signed link, which the Brain never keeps as an identifier. Leave it out, or identify the entity another way.",
+    ];
+    expect({
+      answers,
+      // The refusal names the field, never what it held.
+      said: JSON.stringify(answers).includes(key),
+    }).toStrictEqual({
+      answers: [
+        ...kept.map(() => "kept"),
+        ...refused.map(() => ({
+          code: "brain.request_invalid",
+          details: { issues: why },
+        })),
+      ],
+      said: false,
     });
   });
 

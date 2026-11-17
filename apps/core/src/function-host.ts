@@ -23,6 +23,7 @@ import type {
 import type { RunHandle } from "@grasp-os/runtime/server";
 import { fileErrors } from "@grasp-os/shared/app-files";
 import type { AuditActor } from "@grasp-os/shared/audit";
+import { brainSourceErrors } from "@grasp-os/shared/brain-sources";
 import { deadline as timeLimit, whenAborted } from "@grasp-os/shared/deadline";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { internalErrors, isExpectedError } from "@grasp-os/shared/errors";
@@ -1985,6 +1986,11 @@ const brainWriteRefusals = {
   "permission.brain_write_unplaced": z.undefined(),
 } as const;
 
+/** Why the Brain refused a write's request, as it says (`issues`). */
+const brainIssuesSchema = z.strictObject({
+  issues: z.array(z.string()),
+});
+
 const isBrainWriteRefusal = (
   code: string | undefined
 ): code is keyof typeof brainWriteRefusals =>
@@ -2018,6 +2024,20 @@ const providerFailure = (error: unknown, requestId: string): Error => {
         code,
         details.success && details.data !== undefined ? details.data : undefined
       )
+    );
+  }
+  // A memory the Brain refused for what its code asked (an identifier that
+  // is a credential, brain-app-writes.ts), saying why: the only detail
+  // passed on, each issue naming a field, never its value. Any other
+  // request it refuses comes as `permission.invalid_args`
+  // (`inHostBrainWords`), or, saying no why, as unexpected (below).
+  const why =
+    code === "brain.request_invalid" && isExpectedError(error)
+      ? brainIssuesSchema.safeParse(error.details)
+      : undefined;
+  if (why?.success === true) {
+    return hostError(
+      brainSourceErrors.create("brain.request_invalid", why.data)
     );
   }
   // Room held by runs under way, a provider's rate: worth trying again,
