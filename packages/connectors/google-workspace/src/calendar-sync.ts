@@ -3,9 +3,9 @@ import {
   RestartSyncError,
   cursorPart,
   defineSync,
+  fetchInRoom,
   fillPage,
   fromCursorPart,
-  requestSignal,
   syncRoom,
   takeContent,
 } from "@grasp-os/connector-kit/sync";
@@ -105,13 +105,18 @@ const positionOf = (cursor: string): Position => {
   return { sync: sync ?? null, token: token ?? null, after: after ?? null };
 };
 
-/** One GET: its JSON; a 410 starts over. */
+/** One GET, read before the page's deadline: its JSON; a 410 starts over. */
 const getJson = async <Schema extends z.ZodType>(
   room: SyncRoom,
   url: URL,
   schema: Schema
 ): Promise<z.output<Schema>> => {
-  const response = await fetch(url, { signal: requestSignal(room) });
+  const response = await fetchInRoom(room, url);
+  if (response === "late") {
+    throw new ToolError("Calendar didn't answer in time", {
+      code: "unavailable",
+    });
+  }
   if (response.status === 410) {
     await response.body?.cancel();
     throw new RestartSyncError();
