@@ -97,7 +97,7 @@ test("a chat building an App offers its workspace, whose preview changes none of
         );
       });
     });
-    await page.goto(`/?chat=${chat.id}`);
+    await page.goto(`/chats/${chat.id}`);
     const thread = page.getByRole("region", {
       name: `Build ${tag}`,
       exact: true,
@@ -115,8 +115,8 @@ test("a chat building an App offers its workspace, whose preview changes none of
     // A read of it that fails says so in the chat, and is tried again
     // from there.
     failDrafts = true;
-    // Opened afresh from its link: the address left it once it opened.
-    await page.goto(`/?chat=${chat.id}`);
+    // Opened afresh from its address.
+    await page.goto(`/chats/${chat.id}`);
     await expect(
       thread.getByText("The Apps this chat builds didn't load.")
     ).toBeVisible();

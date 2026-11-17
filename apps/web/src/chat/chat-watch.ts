@@ -126,3 +126,41 @@ export const useFollowedChat = (chatId: string | undefined): FollowedChat => {
         : (watches.get(chatId)?.state ?? notStarted)
   );
 };
+
+/**
+ * How long a chat loaded before its page shows (`loadChat`) keeps its
+ * watch for the page: long enough for the page to take it over, rather
+ * than start another from the first message.
+ */
+const loadHoldMs = 10_000;
+
+/** Whether a chat followed has had its first update, or following it stopped. */
+const settledOf = (state: FollowedChat): boolean =>
+  state.view.loaded || state.failure !== undefined;
+
+/**
+ * Follows `chatId` until its first update has come, or following it
+ * stopped: what a chat's page waits for before it shows, so its thread is
+ * there whole as it appears. The watch is kept a while after, for the page
+ * that shows it to follow on from.
+ */
+export const loadChat = async (
+  core: CoreConnection,
+  chatId: string
+): Promise<FollowedChat> => {
+  const current = (): FollowedChat => watches.get(chatId)?.state ?? notStarted;
+  const loaded = Promise.withResolvers<FollowedChat>();
+  const leave = subscriberFor(
+    core,
+    chatId
+  )(() => {
+    if (settledOf(current())) {
+      loaded.resolve(current());
+    }
+  });
+  setTimeout(leave, loadHoldMs);
+  if (settledOf(current())) {
+    loaded.resolve(current());
+  }
+  return await loaded.promise;
+};

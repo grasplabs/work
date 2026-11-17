@@ -6,6 +6,7 @@ import { Toaster } from "@grasp-os/ui/components/toast";
 import { TooltipProvider } from "@grasp-os/ui/components/tooltip";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
+import { useMatchRoute } from "@tanstack/react-router";
 import { useEffect, useEffectEvent, useState } from "react";
 import type { ReactNode } from "react";
 
@@ -135,6 +136,10 @@ export const AppFrame = ({
     fold(!open);
   });
   const fills = usePageFills() || bar === "none";
+  // A chat's own page has the whole card, edge to edge, its box at the foot
+  // with no room under it (App shell's page for an open chat), and no dock
+  // over its foot: the chat is the page.
+  const chatPage = useMatchRoute()({ to: "/chats/$chatId" }) !== false;
   const sidebar = useGraspSidebar({
     core,
     identity,
@@ -166,8 +171,7 @@ export const AppFrame = ({
           <div inert={touring} {...stylex.props(styles.shell)}>
             <AppShell
               bar={bar}
-              covered={panels?.covered ?? false}
-              dock={dock}
+              dock={chatPage ? undefined : dock}
               maxPanelWidth={panels?.maxWidth}
               menuCloseLabel={t`Close the menu`}
               menuLabel={t`Menu`}
@@ -176,6 +180,7 @@ export const AppFrame = ({
               onMenuOpenChange={setMenuOpen}
               onPanelWidthChange={panels?.onWidthChange}
               onPanelsClose={panels?.onClose}
+              page={chatPage ? "whole" : "padded"}
               panelResizeLabel={t`Resize the chat`}
               panelWidth={panels?.width}
               panels={panels?.panels}

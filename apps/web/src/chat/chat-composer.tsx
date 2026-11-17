@@ -3,26 +3,30 @@ import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import type { ReactNode } from "react";
 
+import { formatNumber } from "../format.ts";
 import { ConnectAiProvider } from "../frame/connect-ai-provider.tsx";
 import {
   Composer,
   ComposerAdd,
   ComposerSurface,
 } from "../grasp/composer/index.ts";
-import { Text } from "../grasp/text/index.ts";
+import type { ComposerFile } from "../grasp/composer/index.ts";
 import { accepted, useAttachmentWords } from "./chat-files.tsx";
 import type { CardFile } from "./chat-files.tsx";
 import { useComposerMentions } from "./mentions.tsx";
 import type { Mentionable } from "./mentions.tsx";
 import { ModelControls } from "./model-controls.tsx";
-import { lacksModel, maxQuestionLength, modelName } from "./model-names.tsx";
+import { lacksModel, maxQuestionLength } from "./model-names.tsx";
 
-// The running chat's box to ask in, on Grasp UI's Composer, fed by the
-// same ask as before (use-ask.ts): the text, the model and how hard it
-// thinks, the files the question carries (dropped, pasted, or taken off
-// again), and Stop while Grasp answers, when the light travels round the
-// card. While the organization has no AI provider, the box takes nothing
-// and says how to connect one under it.
+// The box to ask in, everywhere work asks Grasp (Chat start, the chat's
+// page and the docked chat), as Grasp UI's reference for a chat product
+// has it: `start` the plus (files and mentions) where there is something
+// to add, `controls` the model and how hard it thinks, `end` empty. Fed by
+// the same ask as before (use-ask.ts): the text, the model and effort, the
+// files the question carries (dropped, pasted, or taken off again), and
+// Stop while Grasp answers, when the light travels round the card. While
+// the organization has no AI provider, the box takes nothing and says how
+// to connect one under it.
 
 const styles = stylex.create({
   // As wide as the chat's column: the thread above it sets the width.
@@ -64,13 +68,9 @@ export interface ChatComposerProps {
   /** What the box is called, for a screen reader. */
   label?: string;
   placeholder?: string;
-  /** At the footer's end, before send: the recent chats. */
-  actions?: ReactNode;
   /** What the question is about: a band over the text. */
   subject?: ReactNode;
-  /** Which agent answers, at the footer's start (agent-choice.tsx). */
-  agent?: ReactNode;
-  /** The model the chat's agent answers with, where an admin gave it one: said, with nothing to pick. */
+  /** The model the chat's agent answers with, where an admin gave it one: the only one offered. */
   agentModel?: string;
   /** The files the question will carry. */
   files?: readonly CardFile[];
@@ -78,6 +78,8 @@ export interface ChatComposerProps {
   onRemoveFile?: (id: string) => void;
   /** One row, the actions beside the text: a guest's chat. */
   compact?: boolean;
+  /** Glass over a backdrop: Chat start's. */
+  surface?: "card" | "glass";
   /** Takes nothing for now, while something else is on its way to core. */
   disabled?: boolean;
   /** The longest message it takes; a question's by default. */
@@ -87,6 +89,40 @@ export interface ChatComposerProps {
   /** Escape, or Type instead, leaves the takeover for the text. */
   onTakeoverDismiss?: () => void;
 }
+
+/**
+ * The files the question carries, as the Composer shows them. A file goes
+ * up only as the question is sent, and how far it has gone is not known:
+ * each shows its size until then, not a progress.
+ */
+const attachmentsOf = (files: readonly CardFile[]): ComposerFile[] =>
+  files.map(({ id, name, bytes }) => ({
+    id,
+    name,
+    size: bytes,
+    status: "done",
+  }));
+
+/** What the box says as the text nears and reaches its longest, in the page's language. */
+const useLengthWords = () => {
+  const { t } = useLingui();
+  return {
+    maxLengthCountLabel: (length: number, max: number) =>
+      `${formatNumber(length)}/${formatNumber(max)}`,
+    maxLengthCutLabel: (max: number) => {
+      const limit = formatNumber(max);
+      return t`The pasted text was cut at the limit of ${limit} characters`;
+    },
+    maxLengthNearLabel: (max: number) => {
+      const limit = formatNumber(max);
+      return t`Close to the limit of ${limit} characters`;
+    },
+    maxLengthReachedLabel: (max: number) => {
+      const limit = formatNumber(max);
+      return t`The limit of ${limit} characters is reached`;
+    },
+  };
+};
 
 /** Where the assistant is, as the Composer shows it: answering, out of use, or waiting. */
 const activityOf = (
@@ -101,49 +137,7 @@ const activityOf = (
   return off && takeover === undefined ? "disabled" : "idle";
 };
 
-/**
- * The model a question names and how hard it thinks, to pick; or the model
- * the chat's agent answers with, where an admin gave it one, said with
- * nothing to pick.
- */
-const Controls = ({
-  agentModel,
-  models,
-  model,
-  onModel,
-  efforts,
-  effort,
-  onEffort,
-}: Pick<
-  ChatComposerProps,
-  "agentModel" | "models" | "model" | "onModel" | "effort" | "onEffort"
-> & { efforts: readonly ModelEffort[] }) => {
-  const { t } = useLingui();
-  if (agentModel !== undefined) {
-    const name = modelName(agentModel);
-    return (
-      <Text size="sm" tone="muted">
-        {t`${name}, set for this agent`}
-      </Text>
-    );
-  }
-  return (
-    <ModelControls
-      effort={effort}
-      efforts={efforts}
-      model={model ?? ""}
-      models={models}
-      onEffort={(chosen) => {
-        onEffort?.(chosen);
-      }}
-      onModel={(chosen) => {
-        onModel?.(chosen);
-      }}
-    />
-  );
-};
-
-/** The running chat's box to ask in. Controlled: the page keeps the text and the model. */
+/** The box to ask in. Controlled: the page keeps the text and the model. */
 export const ChatComposer = ({
   text,
   onText,
@@ -160,9 +154,7 @@ export const ChatComposer = ({
   onStop,
   label,
   placeholder,
-  actions,
   subject,
-  agent,
   agentModel,
   files = noFiles,
   onAttach,
@@ -170,12 +162,14 @@ export const ChatComposer = ({
   mentions = noMentions,
   onMentions,
   compact = false,
+  surface,
   disabled = false,
   maxLength = maxQuestionLength,
   takeover,
   onTakeoverDismiss,
 }: ChatComposerProps) => {
   const { t } = useLingui();
+  const lengthWords = useLengthWords();
   const attachmentWords = useAttachmentWords("waiting");
   const mentioning = useComposerMentions(mentions, onMentions);
   // No AI provider to call yet: the box takes nothing. Not while the models
@@ -185,34 +179,24 @@ export const ChatComposer = ({
     <Composer
       activity={activityOf(running, noProvider || disabled, takeover)}
       compact={compact}
-      attachments={files.map(({ id, name, bytes }) => ({
-        id,
-        name,
-        size: bytes,
-        // A file goes up only as the question is sent, and how far it has
-        // gone is not known: each shows its size until then, not a progress.
-        status: "done",
-      }))}
+      attachments={attachmentsOf(files)}
       attachmentsLabel={t`Files to send`}
       attachmentWords={attachmentWords}
       start={
-        <>
-          {onAttach === undefined ? null : (
-            <ComposerAdd
-              accept={accepted}
-              kinds={mentioning?.kinds}
-              label={t`Add to the question`}
-              onAttach={(chosen) => {
-                onAttach(chosen);
-              }}
-              uploadLabel={t`Attach a file`}
-            />
-          )}
-          {agent}
-        </>
+        onAttach === undefined ? undefined : (
+          <ComposerAdd
+            accept={accepted}
+            kinds={mentioning?.kinds}
+            label={t`Add to the question`}
+            onAttach={(chosen) => {
+              onAttach(chosen);
+            }}
+            uploadLabel={t`Attach a file`}
+          />
+        )
       }
       controls={
-        <Controls
+        <ModelControls
           agentModel={agentModel}
           effort={effort}
           efforts={efforts}
@@ -222,7 +206,6 @@ export const ChatComposer = ({
           onModel={onModel}
         />
       }
-      end={actions}
       failedLabel={t`Could not send`}
       label={label ?? t`Your question`}
       layout={styles.fill}
@@ -249,15 +232,16 @@ export const ChatComposer = ({
       onMention={(item) => {
         mentioning?.onMention(item);
       }}
+      maxLength={maxLength}
+      {...lengthWords}
       onValueChange={(value) => {
-        // The Composer takes no length of its own: past it, nothing more is typed.
-        const kept = value.slice(0, maxLength);
-        onText(kept);
-        mentioning?.onText(kept);
+        onText(value);
+        mentioning?.onText(value);
       }}
       placeholder={placeholder ?? t`Ask anything, or describe a process`}
       sendLabel={t({ message: "Send", context: "send the question" })}
       stopLabel={t({ message: "Stop", context: "stop the answer" })}
+      surface={surface}
       onTakeoverDismiss={onTakeoverDismiss}
       takeover={takeover}
       top={

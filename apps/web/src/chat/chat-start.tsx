@@ -3,7 +3,7 @@ import type { ChatMake } from "@grasp-os/shared/chat";
 import { Trans } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { Await, useRouteContext } from "@tanstack/react-router";
-import { useRef, useState } from "react";
+import { useRef } from "react";
 
 import type { Session } from "../core.ts";
 import { BackdropField } from "../grasp/field/backdrop.tsx";
@@ -15,11 +15,10 @@ import type { MakeExample } from "../make/examples.ts";
 import { BlueprintIdeas, WorkflowIdeas } from "../make/make-ideas.tsx";
 import { TourOffer } from "../tour/tour-layer.tsx";
 import { useTour } from "../tour/tour-state.ts";
-import { AgentPicker, startingAgent } from "./agent-choice.tsx";
+import { startingAgent } from "./agent-choice.tsx";
 import { ChatComposer } from "./chat-composer.tsx";
-import { openChat } from "./chat-layout.ts";
+import { useGoToChat } from "./chat-link.ts";
 import { useGlobalChat } from "./global-chat.tsx";
-import { RecentsButton } from "./recents.tsx";
 import { useAsk } from "./use-ask.ts";
 
 // Chat's own page (routes/_shell.index.tsx): where to start. The question
@@ -162,7 +161,7 @@ export const ideasOf = async (
 };
 
 /**
- * Asks in a new chat, which opens full screen over the page; from Make
+ * Asks in a new chat, which opens on its own page; from Make
  * something (`make`), with `ideas` to start from, the chat made with what
  * to make. The chat is with the agent `agent` names (the Agents page's
  * "Chat"), else the company's first, until the person picks another.
@@ -181,16 +180,19 @@ export const ChatStart = ({
   const look = useLook(identity.userId);
   const scheme = schemeOf(look);
   const agents = offered?.agents ?? [];
-  const [picked, setPicked] = useState<string | undefined>(agent);
-  const agentId = startingAgent(agents, picked)?.id;
+  // The agent the address names (the Agents page's "Chat"), else the
+  // company's first. The box has no agent picker until Grasp UI's lands.
+  const agentId = startingAgent(agents, agent)?.id;
+  const goToChat = useGoToChat();
   const { composer } = useAsk(
     undefined,
     offered?.models,
     offered?.efforts,
     undefined,
     {
-      onAsked: () => {
-        openChat("fullscreen");
+      // The chat's own page (chat/chat-link.ts), the question already in it.
+      onAsked: (chatId) => {
+        goToChat(chatId);
       },
       ...(make === undefined ? {} : { make }),
       ...(agentId === undefined ? {} : { agentId }),
@@ -231,16 +233,9 @@ export const ChatStart = ({
           </div>
           <ChatComposer
             {...composer}
-            actions={<RecentsButton />}
-            agent={
-              <AgentPicker
-                agentId={agentId}
-                agents={agents}
-                onAgent={setPicked}
-              />
-            }
             models={offered?.models}
             running={false}
+            surface="glass"
           />
           {offeredTour || ideas === undefined ? null : (
             <Ideas

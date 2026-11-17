@@ -70,7 +70,6 @@ type SidebarView = "home" | "chats";
 const useGroups = (
   core: CoreConnection,
   identity: Identity,
-  closeMenu: () => void,
   tab: SidebarView
 ): SidebarGroup[] => {
   const { t } = useLingui();
@@ -81,7 +80,6 @@ const useGroups = (
   // The person's recent chats: the Chats tab's list.
   const recent = useRecentChats({
     enabled: identity.onboardingOnly !== true,
-    onOpened: closeMenu,
   });
   if (identity.onboardingOnly === true) {
     return [];
@@ -95,7 +93,7 @@ const useGroups = (
         label: t`Chat`,
         icon: Conversation,
         render: <Link to="/" />,
-        current: at("/", false) && !recent.anyCurrent,
+        current: at("/", false),
       },
       {
         label: t`Dashboard`,
@@ -199,7 +197,7 @@ const useGroups = (
   // sections, named, so they never stand between the sections. The Chats
   // tab holds the same list alone.
   const chats: SidebarGroup[] =
-    recent.rows.length === 0
+    recent.length === 0
       ? []
       : [
           {
@@ -207,12 +205,12 @@ const useGroups = (
             label: t`Chats`,
             // Its label folds the list away; the sidebar remembers it.
             collapsible: true,
-            count: recent.rows.length,
-            rows: recent.rows,
+            count: recent.length,
+            rows: recent,
           },
         ];
   return tab === "chats"
-    ? [{ rows: recent.rows }]
+    ? [{ rows: recent }]
     : [sections, ...chats, ...fromApps];
 };
 
@@ -355,7 +353,7 @@ export const useGraspSidebar = ({
   const { t } = useLingui();
   const openChats = useChatsWindow();
   const [tab, setTab] = useState<SidebarView>("home");
-  const groups = useGroups(core, identity, closeMenu, tab);
+  const groups = useGroups(core, identity, tab);
   const profile = useProfile(core, identity);
   const section = useSettingsSection(identity);
   const searching = identity.onboardingOnly !== true;

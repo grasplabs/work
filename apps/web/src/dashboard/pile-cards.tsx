@@ -13,6 +13,7 @@ import {
 } from "../activity/pending.tsx";
 import type { PendingRequests } from "../activity/pending.tsx";
 import { changeThenRefresh } from "../change-then-refresh.ts";
+import { chatLink } from "../chat/chat-link.ts";
 import {
   confirmHeld,
   declineHeld,
@@ -79,8 +80,7 @@ export const HeldCard = ({
         context.type === "chat" ? (
           <Link
             className="hover:underline focus-visible:underline"
-            search={{ chat: context.chatId }}
-            to="/"
+            {...chatLink(context.chatId)}
           >
             {who}
           </Link>

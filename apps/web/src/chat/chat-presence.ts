@@ -1,7 +1,7 @@
-import type { DockablePlacement } from "@grasp-os/ui/components/dockable-panel";
 import { useMatches } from "@tanstack/react-router";
 
 import { chatPlacement, openChat } from "./chat-layout.ts";
+import type { ChatPlacement } from "./chat-layout.ts";
 
 // Where Grasp's one chat may show on a page (global-chat.tsx): a page
 // says so on its route, in TanStack Router's own static data, and the
@@ -11,7 +11,7 @@ import { chatPlacement, openChat } from "./chat-layout.ts";
 // doesn't nest (an escaped one, `$app_`) says it for itself.
 //
 //   export const Route = createFileRoute("/_shell/")({
-//     staticData: { chat: chatPresence.fullscreenOnly },
+//     staticData: { chat: chatPresence.hidden },
 //   });
 //
 // Where the chat was last put and isn't allowed, it doesn't show, and
@@ -21,23 +21,24 @@ import { chatPlacement, openChat } from "./chat-layout.ts";
 
 /** Where the chat may show on a page, and whether its idle bar does. */
 export interface ChatPresence {
-  placements: readonly DockablePlacement[];
+  placements: readonly ChatPlacement[];
   bar: boolean;
 }
 
 /** The chat's presences pages choose from. */
 export const chatPresence = {
   /** Every page's but those that say otherwise: the bar, and the chat anywhere. */
-  everywhere: { placements: ["docked", "floating", "fullscreen"], bar: true },
+  everywhere: { placements: ["docked", "floating"], bar: true },
   /**
    * A page the chat builds, about its subject (an App's workspace, a
    * workflow's page: chat-subject.ts): the chat docked beside it, part of
    * the page rather than a window over it, and no bar.
    */
   docked: { placements: ["docked"], bar: false },
-  /** A page that is where to ask (Chat's own): the chat full screen over it, and no bar. */
-  fullscreenOnly: { placements: ["fullscreen"], bar: false },
-  /** A page where Grasp's chat has no place: none of it, nor its bar. */
+  /**
+   * A page where Grasp's chat has no place: none of it, nor its bar. Chat's
+   * start and a chat's own page, which are where to ask already.
+   */
   hidden: { placements: [], bar: false },
 } as const satisfies Record<string, ChatPresence>;
 
@@ -56,7 +57,7 @@ export const useChatPresence = (): ChatPresence =>
 /** Whether the chat may show `placement` on a page with `presence`. */
 export const allows = (
   presence: ChatPresence,
-  placement: DockablePlacement
+  placement: ChatPlacement
 ): boolean => presence.placements.includes(placement);
 
 /**
@@ -65,8 +66,8 @@ export const allows = (
  */
 export const placementOn = (
   presence: ChatPresence,
-  wanted: DockablePlacement
-): DockablePlacement | undefined =>
+  wanted: ChatPlacement
+): ChatPlacement | undefined =>
   allows(presence, wanted) ? wanted : presence.placements[0];
 
 /**
@@ -74,7 +75,7 @@ export const placementOn = (
  * the page allows that, or where the page allows first; not at all on a
  * page that allows it nowhere.
  */
-export const useOpenChat = (): ((wanted?: DockablePlacement) => void) => {
+export const useOpenChat = (): ((wanted?: ChatPlacement) => void) => {
   const presence = useChatPresence();
   return (wanted) => {
     const placement = placementOn(presence, wanted ?? chatPlacement());

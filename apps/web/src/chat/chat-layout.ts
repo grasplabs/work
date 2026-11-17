@@ -4,16 +4,18 @@ import type {
 } from "@grasp-os/ui/components/dockable-panel";
 import { useSyncExternalStore } from "react";
 
-// How Grasp's one chat is laid out (global-chat.tsx): open or closed to its
-// idle bar, docked beside the page, full screen or floating over it, where
-// the person last moved it, and as wide as they last made it docked. Full
-// screen is for now only: closed, or on another page, it is docked again,
-// so the chat opens docked or floating, where it last was. Kept in this
-// browser (local storage), so a reload or a new tab finds it the same.
+// How Grasp's one chat is laid out beside a page (global-chat.tsx): open or
+// closed to its idle bar, docked beside the page or floating over it, where
+// the person last moved it, and as wide as they last made it docked. A chat
+// as a whole page is its own page (chat-page.tsx), not a layout. Kept in
+// this browser (local storage), so a reload or a new tab finds it the same.
+
+/** Where the chat stands beside a page: docked, or floating over it. */
+export type ChatPlacement = Exclude<DockablePlacement, "fullscreen">;
 
 export interface ChatLayout {
   open: boolean;
-  placement: DockablePlacement;
+  placement: ChatPlacement;
   /** How far the floating chat was moved from its corner, once it was. */
   offset: FloatingOffset | null;
   /** How wide the docked chat is, in pixels. */
@@ -38,8 +40,8 @@ const initialLayout: ChatLayout = {
   width: chatWidth.initial,
 };
 
-/** A place the chat is kept in: docked or floating, never full screen. */
-const isKeptPlacement = (value: unknown): value is DockablePlacement =>
+/** A place the chat is kept in: docked or floating. */
+const isKeptPlacement = (value: unknown): value is ChatPlacement =>
   value === "docked" || value === "floating";
 
 const isOffset = (value: unknown): value is FloatingOffset =>
@@ -104,29 +106,20 @@ const subscribe = (listener: () => void): (() => void) => {
 };
 
 /** Where the chat was last put, outside React (an opener's choice). */
-export const chatPlacement = (): DockablePlacement => current().placement;
+export const chatPlacement = (): ChatPlacement => current().placement;
 
 /** The chat's layout now. */
 export const useChatLayout = (): ChatLayout =>
   useSyncExternalStore(subscribe, current);
 
 /** Opens the chat `placement`, or where it last was; moves it, when open. */
-export const openChat = (placement?: DockablePlacement): void => {
+export const openChat = (placement?: ChatPlacement): void => {
   update({ open: true, placement: placement ?? current().placement });
 };
 
-/** Where the chat is kept from `placement`: docked again from full screen. */
-const keptPlacement = (placement: DockablePlacement): DockablePlacement =>
-  placement === "fullscreen" ? "docked" : placement;
-
-/** Takes the chat from full screen back beside the page, open or not. */
-export const exitFullscreen = (): void => {
-  update({ placement: keptPlacement(current().placement) });
-};
-
-/** Closes the chat to its idle bar, docked again from full screen. */
+/** Closes the chat to its idle bar. */
 export const closeChat = (): void => {
-  update({ open: false, placement: keptPlacement(current().placement) });
+  update({ open: false });
 };
 
 /** Keeps where the person moved the floating chat. */

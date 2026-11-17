@@ -11,8 +11,7 @@ import { ChatList, useSelectChat } from "./chat-window.tsx";
 
 /**
  * The box's Recents: the person's recent chats, from where they ask, on
- * Chat's own page and in the open chat. One opens in Grasp's chat, where
- * this page allows it.
+ * Chat's own page and in the open chat. One opens on its own page.
  */
 export const RecentsButton = () => {
   const { t } = useLingui();

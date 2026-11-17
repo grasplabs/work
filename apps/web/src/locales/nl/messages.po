@@ -906,10 +906,6 @@ msgstr "{name}, zoals je team het ziet"
 msgid "{name}, in {app}"
 msgstr "{name}, in {app}"
 
-#: src/chat/chat-composer.tsx
-msgid "{name}, set for this agent"
-msgstr "{name}, ingesteld voor deze agent"
-
 #: src/onboarding/about-story.tsx
 msgid "{name}, where does the time go in your week?"
 msgstr "{name}, waar gaat de tijd heen in jouw week?"
@@ -4015,6 +4011,10 @@ msgstr "Menu sluiten"
 msgid "Close this question without an answer?"
 msgstr "Deze vraag zonder antwoord sluiten?"
 
+#: src/chat/chat-composer.tsx
+msgid "Close to the limit of {limit} characters"
+msgstr "Bijna aan de grens van {limit} tekens"
+
 #: src/brain/gap-actions.tsx
 #: src/chat/brain-questions.tsx
 msgid "Close without an answer"
@@ -5698,10 +5698,6 @@ msgstr "Precies zoals het hier staat."
 msgid "Example"
 msgstr "Voorbeeld"
 
-#: src/chat/chat-panel.tsx
-msgid "Exit full screen"
-msgstr "Volledig scherm sluiten"
-
 #: src/brain/brain-nav.tsx
 #: src/knowledge/nav.tsx
 msgid "Expand the navigation"
@@ -6204,10 +6200,6 @@ msgstr "Fuji"
 #: src/settings/staff-access.tsx
 msgid "Full access"
 msgstr "Volledige toegang"
-
-#: src/chat/chat-panel.tsx
-msgid "Full screen"
-msgstr "Volledig scherm"
 
 #: src/apps/draft-changes.tsx
 msgctxt "files of an App"
@@ -8375,6 +8367,10 @@ msgstr "Modus"
 msgid "Model"
 msgstr "Model"
 
+#: src/chat/model-controls.tsx
+msgid "Model and effort"
+msgstr "Model en inspanning"
+
 #: src/activity/type-labels.ts
 msgid "Model call"
 msgstr "Modelaanroep"
@@ -9999,6 +9995,10 @@ msgstr "Een link buiten Grasp openen?"
 #: src/workflows/requests/request-needs.tsx
 msgid "Open again"
 msgstr "Weer openen"
+
+#: src/chat/chat-panel.tsx
+msgid "Open as a page"
+msgstr "Openen als pagina"
 
 #: src/dashboard/widget-board.tsx
 #: src/workflows/workflows-table.tsx
@@ -14117,6 +14117,10 @@ msgstr "De laatste aanroep, {when}, mislukte omdat {why}."
 msgid "The latest runs, newest first."
 msgstr "De laatste runs, nieuwste eerst."
 
+#: src/chat/chat-composer.tsx
+msgid "The limit of {limit} characters is reached"
+msgstr "De grens van {limit} tekens is bereikt"
+
 #: src/pages/page-links.ts
 msgid "The link wasn't opened."
 msgstr "De link is niet geopend."
@@ -14192,6 +14196,10 @@ msgstr "De origin is https:// en een openbare hostnaam, zonder iets erachter: ht
 #: src/chat/chat-body.tsx
 msgid "The packages are approved. Carry on."
 msgstr "De pakketten zijn goedgekeurd. Ga verder."
+
+#: src/chat/chat-composer.tsx
+msgid "The pasted text was cut at the limit of {limit} characters"
+msgstr "De geplakte tekst is afgekapt op de grens van {limit} tekens"
 
 #: src/apps/access-view.tsx
 #: src/apps/draft-changes.tsx
@@ -14738,6 +14746,10 @@ msgstr "Deze lijst is te groot. Ik kan tot {peopleMost} mensen in maximaal {team
 #: src/chat/failure.ts
 msgid "This model can't give an answer that long. Pick another model, or ask for less."
 msgstr "Dit model kan geen antwoord geven dat zo lang is. Kies een ander model, of vraag om minder."
+
+#: src/chat/model-controls.tsx
+msgid "This model has one level of effort."
+msgstr "Dit model heeft één niveau van inspanning."
 
 #: src/routes/_shell.settings.spend.tsx
 #: src/workflows/requests/request-plan.tsx

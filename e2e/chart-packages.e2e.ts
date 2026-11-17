@@ -58,7 +58,7 @@ test("a builder approves a chart library the agent asked for, a page draws with 
     );
 
     const page = await pageOf(builder);
-    await page.goto(`/?chat=${chat.id}`);
+    await page.goto(`/chats/${chat.id}`);
     const card = page
       .getByRole("region", { name: "Package requests" })
       .filter({ hasText: "react-minimal-pie-chart@8.4.0" });

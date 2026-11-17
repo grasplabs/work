@@ -6,9 +6,10 @@ import { I18nProvider } from "@lingui/react";
 import {
   createMemoryHistory,
   createRootRoute,
+  createRoute,
   createRouter,
   RouterProvider,
-  useSearch,
+  useParams,
 } from "@tanstack/react-router";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
@@ -16,6 +17,7 @@ import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import { activeChat, setActiveChat } from "./active-chat.ts";
+import { chatLink } from "./chat-link.ts";
 import { ChatTitleMenu } from "./chat-more.tsx";
 
 // The open chat's title and its menu at the head of the chat, against
@@ -123,7 +125,7 @@ const opened = async (
   };
   const all = [chat, ...others];
   const Shown = () => {
-    const { chat: open } = useSearch({ strict: false });
+    const { chatId: open } = useParams({ strict: false });
     const shown = all.find(({ id }) => id === open) ?? chat;
     return (
       <Toaster>
@@ -132,14 +134,16 @@ const opened = async (
       </Toaster>
     );
   };
-  const rootRoute = createRootRoute({
+  // Each chat at its own page, as in the app (chat-link.ts).
+  const rootRoute = createRootRoute();
+  const chatRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/chats/$chatId",
     component: Shown,
-    validateSearch: (search: Record<string, unknown>): { chat?: string } =>
-      typeof search.chat === "string" ? { chat: search.chat } : {},
   });
   const router = createRouter({
-    routeTree: rootRoute,
-    history: createMemoryHistory({ initialEntries: [`/?chat=${chat.id}`] }),
+    routeTree: rootRoute.addChildren([chatRoute]),
+    history: createMemoryHistory({ initialEntries: [`/chats/${chat.id}`] }),
     context: { core },
   });
   const host = document.createElement("div");
@@ -352,7 +356,7 @@ describe("the open chat's menu", () => {
     ).not.toBeNull();
 
     await act(async () => {
-      await router.navigate({ to: "/", search: { chat: "chat-2" } });
+      await router.navigate(chatLink("chat-2"));
     });
     await settled();
     expect(document.querySelector('input[aria-label="Chat name"]')).toBeNull();

@@ -1,5 +1,6 @@
-import type { DockablePlacement } from "@grasp-os/ui/components/dockable-panel";
 import { useState } from "react";
+
+import type { ChatPlacement } from "./chat-layout.ts";
 
 // What of Grasp's chat shows, step by step (global-chat.tsx): the idle bar,
 // the room the chat docks into (the shell's right Panel), and the chat's
@@ -15,11 +16,7 @@ import { useState } from "react";
 //   the bar comes back;
 // - floating, the same without the room;
 // - docking or undocking: the card goes (and the room closes after it,
-//   undocking); the room opens (docking) and the card comes in after it;
-// - going full screen, or back beside the page: the card moves open, in
-//   one step (DockablePanel), while the page's content fades (AppShellMain);
-//   the room stays under it, so the page doesn't move as it glides;
-// - opening full screen: the card comes in over the page, with no room.
+//   undocking); the room opens (docking) and the card comes in after it.
 
 /** A part of the chat that moves, and says when it has. */
 export type ChatPart = "bar" | "room" | "card";
@@ -29,7 +26,7 @@ export interface ChatStage {
   room: boolean;
   card: boolean;
   /** Where the card is; it moves only while hidden. */
-  placement: DockablePlacement;
+  placement: ChatPlacement;
 }
 
 /** Which parts move a beat after the other in this step (the kit's `delayed`). */
@@ -47,7 +44,7 @@ export const stageOf = ({
 }: {
   available: boolean;
   open: boolean;
-  placement: DockablePlacement;
+  placement: ChatPlacement;
   /** Room beside the page to dock into: not on a phone. */
   roomBeside: boolean;
   /** A place for the idle bar: not on Chat's own page, where the page asks. */
@@ -69,17 +66,10 @@ interface Step {
   waitFor: ChatPart | null;
 }
 
-/** Whether the card moves between `from` and `to` open, gliding: between docked and full screen. */
-const glides = (from: DockablePlacement, to: DockablePlacement): boolean =>
-  from !== "floating" && to !== "floating";
-
 /** The next step that takes something away, if anything goes. */
 const goingStep = (stage: ChatStage, target: ChatStage): Step | undefined => {
-  // It goes where it closes, or moves to or from floating; between docked
-  // and full screen it glides instead.
-  const moves =
-    stage.placement !== target.placement &&
-    !glides(stage.placement, target.placement);
+  // It goes where it closes, or moves between docked and floating.
+  const moves = stage.placement !== target.placement;
   const cardGoes = stage.card && (!target.card || moves);
   if (cardGoes) {
     // The room closes after it, where it no longer docks.
@@ -105,27 +95,6 @@ const goingStep = (stage: ChatStage, target: ChatStage): Step | undefined => {
     };
   }
   return undefined;
-};
-
-/**
- * The card gliding between beside the page and full screen, open, with the
- * room it needs beside the page opening as it goes; waits for the room
- * where it moves, and for nothing else.
- */
-const glideStep = (stage: ChatStage, target: ChatStage): Step | undefined => {
-  const gliding =
-    stage.card &&
-    target.card &&
-    stage.placement !== target.placement &&
-    glides(stage.placement, target.placement);
-  if (!gliding) {
-    return undefined;
-  }
-  return {
-    stage: { ...stage, placement: target.placement, room: target.room },
-    delays: noDelays,
-    waitFor: stage.room === target.room ? null : "room",
-  };
 };
 
 /** The next step that brings something in, once nothing goes. */
@@ -158,45 +127,26 @@ const comingStep = (stage: ChatStage, target: ChatStage): Step | undefined => {
 };
 
 /**
- * `target`, with the room left as it is under a card full screen that is
- * showing already: one that glided there from beside the page keeps its
- * room, so the page under it doesn't move, and one opened full screen
- * has none.
- */
-const withRoomKept = (stage: ChatStage, target: ChatStage): ChatStage =>
-  stage.card &&
-  stage.placement !== "floating" &&
-  target.placement === "fullscreen"
-    ? { ...target, room: stage.room }
-    : target;
-
-/**
  * The next step from `stage` toward `target`; none once there. The card
- * takes its new place unseen while hidden, and gliding while open, which
- * waits for nothing.
+ * takes its new place unseen while hidden, which waits for nothing.
  */
 export const nextStep = (
   stage: ChatStage,
   target: ChatStage
-): Step | undefined => {
-  const wanted = withRoomKept(stage, target);
-  return (
-    goingStep(stage, wanted) ??
-    glideStep(stage, wanted) ??
-    comingStep(stage, wanted) ??
-    (stage.placement === wanted.placement
-      ? undefined
-      : {
-          stage: { ...stage, placement: wanted.placement },
-          delays: noDelays,
-          waitFor: null,
-        })
-  );
-};
+): Step | undefined =>
+  goingStep(stage, target) ??
+  comingStep(stage, target) ??
+  (stage.placement === target.placement
+    ? undefined
+    : {
+        stage: { ...stage, placement: target.placement },
+        delays: noDelays,
+        waitFor: null,
+      });
 
 /**
  * Whether the part a step waits for says when it has finished moving: only
- * the floating card does (ChatPanel). Docked and full screen the chat lives
+ * the floating card does (ChatPanel). Docked the chat lives
  * in App shell's panels, and the idle bar in its dock (chat-bar.tsx), which
  * show and hide with no word when done, so a step waits for neither. The card a step takes away is where it was;
  * the one it brings, where it goes.

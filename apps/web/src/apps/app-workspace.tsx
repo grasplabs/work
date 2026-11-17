@@ -43,6 +43,7 @@ import type { ReactNode } from "react";
 
 import { setActiveChat } from "../chat/active-chat.ts";
 import { answeredAfterBuild } from "../chat/build-answered.ts";
+import { chatLink } from "../chat/chat-link.ts";
 import { slotOf, useChatSubject } from "../chat/chat-subject.ts";
 import { useGlobalChat } from "../chat/global-chat.tsx";
 import { ErrorText } from "../error-text.tsx";
@@ -240,9 +241,7 @@ const MoreMenu = ({
             </DropdownMenuItem>
           )}
           {chatId === undefined ? null : (
-            <DropdownMenuItem
-              render={<Link search={{ chat: chatId }} to="/" />}
-            >
+            <DropdownMenuItem render={<Link {...chatLink(chatId)} />}>
               <PanelRightIcon />
               <Trans>Open the chat in Chat</Trans>
             </DropdownMenuItem>

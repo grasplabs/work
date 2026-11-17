@@ -1,6 +1,7 @@
 import { Link } from "@tanstack/react-router";
 import type { ComponentProps } from "react";
 
+import { chatLink } from "../chat/chat-link.ts";
 import type { Target } from "./items.ts";
 
 // A link to what an inbox item is about, as the prototype's
@@ -62,5 +63,5 @@ export const TargetLink = ({
       />
     );
   }
-  return <Link search={{ chat: destination.chat }} to="/" {...props} />;
+  return <Link {...chatLink(destination.chat)} {...props} />;
 };

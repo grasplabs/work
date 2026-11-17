@@ -906,10 +906,6 @@ msgstr "{name}, como lo ve tu equipo"
 msgid "{name}, in {app}"
 msgstr "{name}, en {app}"
 
-#: src/chat/chat-composer.tsx
-msgid "{name}, set for this agent"
-msgstr "{name}, fijado para este agente"
-
 #: src/onboarding/about-story.tsx
 msgid "{name}, where does the time go in your week?"
 msgstr "{name}, ¿en qué se te va el tiempo durante la semana?"
@@ -4015,6 +4011,10 @@ msgstr "Cerrar el menú"
 msgid "Close this question without an answer?"
 msgstr "¿Cerrar esta pregunta sin respuesta?"
 
+#: src/chat/chat-composer.tsx
+msgid "Close to the limit of {limit} characters"
+msgstr "Cerca del límite de {limit} caracteres"
+
 #: src/brain/gap-actions.tsx
 #: src/chat/brain-questions.tsx
 msgid "Close without an answer"
@@ -5698,10 +5698,6 @@ msgstr "Exactamente como está escrito aquí."
 msgid "Example"
 msgstr "Ejemplo"
 
-#: src/chat/chat-panel.tsx
-msgid "Exit full screen"
-msgstr "Salir de pantalla completa"
-
 #: src/brain/brain-nav.tsx
 #: src/knowledge/nav.tsx
 msgid "Expand the navigation"
@@ -6204,10 +6200,6 @@ msgstr "Fuji"
 #: src/settings/staff-access.tsx
 msgid "Full access"
 msgstr "Acceso completo"
-
-#: src/chat/chat-panel.tsx
-msgid "Full screen"
-msgstr "Pantalla completa"
 
 #: src/apps/draft-changes.tsx
 msgctxt "files of an App"
@@ -8375,6 +8367,10 @@ msgstr "Modo"
 msgid "Model"
 msgstr "Modelo"
 
+#: src/chat/model-controls.tsx
+msgid "Model and effort"
+msgstr "Modelo y esfuerzo"
+
 #: src/activity/type-labels.ts
 msgid "Model call"
 msgstr "Llamada al modelo"
@@ -9999,6 +9995,10 @@ msgstr "¿Abrir un enlace fuera de Grasp?"
 #: src/workflows/requests/request-needs.tsx
 msgid "Open again"
 msgstr "Volver a abrir"
+
+#: src/chat/chat-panel.tsx
+msgid "Open as a page"
+msgstr "Abrir como página"
 
 #: src/dashboard/widget-board.tsx
 #: src/workflows/workflows-table.tsx
@@ -14117,6 +14117,10 @@ msgstr "La última llamada, {when}, falló porque {why}."
 msgid "The latest runs, newest first."
 msgstr "Las ejecuciones más recientes, primero las nuevas."
 
+#: src/chat/chat-composer.tsx
+msgid "The limit of {limit} characters is reached"
+msgstr "Se ha alcanzado el límite de {limit} caracteres"
+
 #: src/pages/page-links.ts
 msgid "The link wasn't opened."
 msgstr "El enlace no se abrió."
@@ -14192,6 +14196,10 @@ msgstr "El origen es https:// y un nombre de host público, sin nada detrás: ht
 #: src/chat/chat-body.tsx
 msgid "The packages are approved. Carry on."
 msgstr "Los paquetes están aprobados. Continúa."
+
+#: src/chat/chat-composer.tsx
+msgid "The pasted text was cut at the limit of {limit} characters"
+msgstr "El texto pegado se cortó en el límite de {limit} caracteres"
 
 #: src/apps/access-view.tsx
 #: src/apps/draft-changes.tsx
@@ -14738,6 +14746,10 @@ msgstr "Esta lista es demasiado grande. Puedo aceptar hasta {peopleMost} persona
 #: src/chat/failure.ts
 msgid "This model can't give an answer that long. Pick another model, or ask for less."
 msgstr "Este modelo no puede dar una respuesta tan larga. Elige otro modelo o pide menos."
+
+#: src/chat/model-controls.tsx
+msgid "This model has one level of effort."
+msgstr "Este modelo tiene un solo nivel de esfuerzo."
 
 #: src/routes/_shell.settings.spend.tsx
 #: src/workflows/requests/request-plan.tsx

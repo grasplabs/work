@@ -33,7 +33,7 @@ test("the App's builder approves the packages its chat's agent asked for, on the
     });
 
     const page = await pageOf(builder);
-    await page.goto(`/?chat=${chat.id}`);
+    await page.goto(`/chats/${chat.id}`);
     const card = page
       .getByRole("region", { name: "Package requests" })
       .filter({ hasText: `The agent asks for npm packages for ${name}` });

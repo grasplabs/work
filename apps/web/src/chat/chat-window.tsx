@@ -21,16 +21,16 @@ import { useEffect, useEffectEvent, useRef, useState } from "react";
 
 import { ErrorText } from "../error-text.tsx";
 import { useCore } from "../use-core.ts";
-import { setActiveChat, useActiveChat } from "./active-chat.ts";
+import { useActiveChat } from "./active-chat.ts";
 import { groupChats, whenShort } from "./chat-history.ts";
 import type { ChatPeriod } from "./chat-history.ts";
+import { useGoToChat } from "./chat-link.ts";
 import {
   ChatMenu,
   chatTitleMaxLength,
   RenameField,
   useChatChanges,
 } from "./chat-menus.tsx";
-import { useOpenChat } from "./chat-presence.ts";
 import { DeleteChatDialog } from "./delete-chat-dialog.tsx";
 
 // The person's chats in one window, one quiet icon and ⌘K away, in place
@@ -379,17 +379,10 @@ export const ChatList = ({
 };
 
 /**
- * Opens chat `chatId`, or a new one, in Grasp's chat (global-chat.tsx),
- * where this page allows it (chat-presence.ts), so the person stays where
- * they are.
+ * Opens chat `chatId` on its own page (chat-page.tsx), or a new one on
+ * Chat's start.
  */
-export const useSelectChat = () => {
-  const openHere = useOpenChat();
-  return (chatId?: string): void => {
-    setActiveChat(chatId);
-    openHere();
-  };
-};
+export const useSelectChat = (): ((chatId?: string) => void) => useGoToChat();
 
 /** The window and what it shows, while it is open. */
 export const ChatWindow = ({

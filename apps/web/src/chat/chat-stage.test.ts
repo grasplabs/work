@@ -21,16 +21,7 @@ const stepsFrom = (from: ChatStage, to: ChatStage): string[] => {
     }
     step = nextStep(stage, to);
   }
-  // Arrived as laid out; under a full-screen card, the room is as it was.
-  const { bar, card, placement } = stage;
-  expect({ bar, card, placement }).toStrictEqual({
-    bar: to.bar,
-    card: to.card,
-    placement: to.placement,
-  });
-  if (to.placement !== "fullscreen" || !to.card) {
-    expect(stage.room).toBe(to.room);
-  }
+  expect(stage).toStrictEqual(to);
   return shown;
 };
 
@@ -52,7 +43,7 @@ const open = (placement: ChatStage["placement"]): ChatStage =>
 
 describe(nextStep, () => {
   it("stays where the layout is, in every place", () => {
-    for (const placement of ["docked", "fullscreen", "floating"] as const) {
+    for (const placement of ["docked", "floating"] as const) {
       expect(stepsFrom(open(placement), open(placement))).toStrictEqual([]);
     }
     expect(stepsFrom(closed, closed)).toStrictEqual([]);
@@ -79,40 +70,16 @@ describe(nextStep, () => {
     ]);
   });
 
-  it("goes full screen and back in one glide, the card never going", () => {
-    expect(stepsFrom(open("docked"), open("fullscreen"))).toStrictEqual([
-      "bar:false room:true card:true fullscreen",
-    ]);
-    expect(stepsFrom(open("fullscreen"), open("docked"))).toStrictEqual([
-      "bar:false room:true card:true docked",
-    ]);
-  });
-
-  it("opens full screen over the page, without opening a room first", () => {
-    expect(stepsFrom(closed, open("fullscreen"))).toStrictEqual([
-      "bar:false room:false card:false docked",
-      "bar:false room:false card:true fullscreen",
-    ]);
-  });
-
-  it("closes full screen to the bar, docked again for next time, unseen", () => {
-    expect(stepsFrom(open("fullscreen"), closed)).toStrictEqual([
-      "bar:false room:false card:false fullscreen",
-      "bar:true room:false card:false fullscreen",
-      "bar:true room:false card:false docked",
-    ]);
-  });
-
-  it("leaves no idle bar where there is no place for it", () => {
+  it("leaves the page with nothing of it on a chat's own page, the room closing after the card", () => {
     const onChatPage = stageOf({
-      available: true,
-      open: false,
-      placement: "fullscreen",
+      available: false,
+      open: true,
+      placement: "docked",
       roomBeside: true,
       barHere: false,
     });
-    expect(stepsFrom(open("fullscreen"), onChatPage)).toStrictEqual([
-      "bar:false room:false card:false fullscreen",
+    expect(stepsFrom(open("docked"), onChatPage)).toStrictEqual([
+      "bar:false room:false card:false docked",
     ]);
   });
 });

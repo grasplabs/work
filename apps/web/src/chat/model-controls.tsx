@@ -2,10 +2,10 @@ import type { ModelEffort } from "@grasp-os/shared/models";
 import { msg } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 
-import { ComposerModel, ComposerReasoning } from "../grasp/composer/index.ts";
+import { ComposerModelEffort } from "../grasp/composer/index.ts";
 import type {
+  ComposerModelEffortOption,
   ComposerModelMaker,
-  ComposerModelOption,
 } from "../grasp/composer/index.ts";
 import {
   BrandChatGpt,
@@ -15,11 +15,11 @@ import {
 import { isEffort } from "./model-choice.ts";
 import { modelName } from "./model-names.tsx";
 
-// Which model answers and how hard it thinks, as Grasp UI's Composer
-// picks them (ComposerModel, ComposerReasoning): in Chat start's box and
-// the running chat's alike.
+// Which model answers and how hard it thinks, as one control in the
+// Composer's `controls` (Grasp UI's ComposerModelEffort): in Chat start's
+// box and the running chat's alike, for everyone.
 
-/** How each effort is called, least first (as the old box calls them). */
+/** How each effort is called, least first. */
 const effortNames = {
   low: msg({ message: "Low", context: "thinking effort" }),
   medium: msg({ message: "Medium", context: "thinking effort" }),
@@ -39,61 +39,71 @@ const knownMakers: Record<string, Omit<ComposerModelMaker, "value">> = {
 const makerOf = (model: string): string =>
   model.includes("/") ? (model.split("/")[0] ?? "") : "";
 
-/** The model a question names and how hard it thinks, where there are models to pick from. */
+/**
+ * The model a question names and how hard it thinks, where there are
+ * models to pick from. Core offers one set of efforts for every model, so
+ * each model gets them all.
+ */
 export const ModelControls = ({
+  agentModel,
   models: offered,
-  model,
+  model: picked,
   onModel,
   efforts,
   effort,
   onEffort,
 }: {
+  /** The model the chat's agent answers with, where an admin gave it one: the only one offered. */
+  agentModel: string | undefined;
+  /** Undefined while core hasn't said which. */
   models: readonly string[] | undefined;
-  model: string;
-  onModel: (model: string) => void;
+  model: string | undefined;
+  onModel: ((model: string) => void) | undefined;
   efforts: readonly ModelEffort[];
   effort: ModelEffort | undefined;
-  onEffort: (effort: ModelEffort) => void;
+  onEffort: ((effort: ModelEffort) => void) | undefined;
 }) => {
   const { t, i18n } = useLingui();
-  const models = offered ?? [];
+  const models = agentModel === undefined ? (offered ?? []) : [agentModel];
+  const model = agentModel ?? picked ?? "";
+  if (models.length === 0) {
+    return null;
+  }
   const makers = [...new Set(models.map(makerOf))].map((value) => ({
     value,
     ...(knownMakers[value] ?? { label: value === "" ? t`Models` : value }),
   }));
-  const options: ComposerModelOption[] = models.map((each) => ({
+  const levels =
+    effort === undefined
+      ? []
+      : efforts.map((each) => ({
+          value: each,
+          label: i18n._(effortNames[each]),
+        }));
+  const options: ComposerModelEffortOption[] = models.map((each) => ({
     value: each,
     label: modelName(each),
     maker: makerOf(each),
+    levels,
   }));
   return (
-    <>
-      {options.length === 0 ? null : (
-        <ComposerModel
-          label={t`Model`}
-          makers={makers}
-          models={options}
-          onValueChange={(chosen) => {
-            onModel(chosen);
-          }}
-          value={model}
-        />
-      )}
-      {effort === undefined || efforts.length === 0 ? null : (
-        <ComposerReasoning
-          label={t`How hard it thinks`}
-          levels={efforts.map((each) => ({
-            value: each,
-            label: i18n._(effortNames[each]),
-          }))}
-          onValueChange={(value) => {
-            if (isEffort(value)) {
-              onEffort(value);
-            }
-          }}
-          value={effort}
-        />
-      )}
-    </>
+    <ComposerModelEffort
+      effort={effort ?? ""}
+      effortLabel={t`How hard it thinks`}
+      label={t`Model and effort`}
+      makers={makers}
+      model={model}
+      modelLabel={t`Model`}
+      models={options}
+      noEffortLabel={t`This model has one level of effort.`}
+      onEffortChange={(value) => {
+        if (isEffort(value)) {
+          onEffort?.(value);
+        }
+      }}
+      onModelChange={(chosen) => {
+        onModel?.(chosen);
+      }}
+    />
   );
 };

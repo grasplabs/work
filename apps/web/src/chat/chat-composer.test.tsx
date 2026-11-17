@@ -154,6 +154,12 @@ const button = (name: string): HTMLButtonElement => {
   return found;
 };
 
+/** The model and effort control's name, as a screen reader hears it. */
+const control = (): string =>
+  [...document.querySelectorAll("button")]
+    .map((each) => each.getAttribute("aria-label") ?? "")
+    .find((name) => name.startsWith("Model and effort")) ?? "none";
+
 const press = async (element: HTMLElement): Promise<void> => {
   await act(async () => {
     element.click();
@@ -214,6 +220,27 @@ describe(ChatComposer, () => {
       uploaded: false,
       removed: ["f1"],
     });
+  });
+
+  it("offers the model and how hard it thinks as one control, and an agent's own model as the only one", async () => {
+    await shown({
+      efforts: ["low", "medium", "high"],
+      effort: "medium",
+      models: ["openai/gpt-5", "anthropic/claude"],
+    });
+    const offered = control();
+    act(() => {
+      root?.unmount();
+    });
+    document.body.replaceChildren();
+    await shown({ agentModel: "anthropic/claude" });
+
+    const agents = control();
+
+    expect({
+      offered: /gpt-5.*Medium/u.test(offered),
+      agents: agents.includes("claude") && !agents.includes("gpt-5"),
+    }).toStrictEqual({ offered: true, agents: true });
   });
 
   it("takes nothing with no AI provider to call, and says how to connect one", async () => {
