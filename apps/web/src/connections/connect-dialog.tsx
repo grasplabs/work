@@ -29,7 +29,12 @@ import {
   DialogDescription,
   DialogTitle,
 } from "../grasp/dialog/index.ts";
-import { Field, FieldDescription, FieldLabel } from "../grasp/field/index.ts";
+import {
+  Field,
+  FieldContent,
+  FieldDescription,
+  FieldLabel,
+} from "../grasp/field/index.ts";
 import { Heading } from "../grasp/heading/index.ts";
 import {
   Item,
@@ -399,8 +404,10 @@ const ScopeChoice = ({
           }}
           value="personal"
         />
-        <FieldLabel>{t`Just for you`}</FieldLabel>
-        <FieldDescription>{t`Only you can use it.`}</FieldDescription>
+        <FieldContent>
+          <FieldLabel>{t`Just for you`}</FieldLabel>
+          <FieldDescription>{t`Only you can use it.`}</FieldDescription>
+        </FieldContent>
       </Field>
       <Field orientation="horizontal">
         <RadioGroupItem
@@ -409,10 +416,12 @@ const ScopeChoice = ({
           }}
           value="shared"
         />
-        <FieldLabel>{t`For everyone`}</FieldLabel>
-        <FieldDescription>
-          {t`Your organization uses it through the permissions you grant.`}
-        </FieldDescription>
+        <FieldContent>
+          <FieldLabel>{t`For everyone`}</FieldLabel>
+          <FieldDescription>
+            {t`Your organization uses it through the permissions you grant.`}
+          </FieldDescription>
+        </FieldContent>
       </Field>
     </RadioGroup>
   );
