@@ -162,6 +162,10 @@ export const readWaiting = async (
           bindings: partOf(feed, "bindings", (read) =>
             ofKind(read, "bindingApproval")
           ),
+          gaps: await loadFromCore(
+            core,
+            async (session) => await session.brain.openGaps()
+          ),
         }
       : {}),
   };

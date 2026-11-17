@@ -1,3 +1,4 @@
+import type { Gap } from "@grasp-os/shared/brain";
 import type { PendingAction, UnknownOutcome } from "@grasp-os/shared/connect";
 import type { DecisionView } from "@grasp-os/shared/decisions";
 import type { HeldStart } from "@grasp-os/shared/held-starts";
@@ -19,7 +20,7 @@ import { integrationKey } from "../connections/integrations.ts";
 import type { NotificationsPage } from "../dashboard/notifications-page.ts";
 import { decidesRequests } from "../dashboard/waiting.ts";
 import type { Viewer, Waiting } from "../dashboard/waiting.ts";
-import { formatDateTime, formatList } from "../format.ts";
+import { formatDate, formatDateTime, formatList } from "../format.ts";
 import type { Loaded } from "../load-from-core.tsx";
 
 // The inbox, as the prototype derives it (`lib/inbox.ts`): what waits on a
@@ -41,6 +42,7 @@ export type InboxKind =
   | "confirmResult"
   | "conflict"
   | "openQuestion"
+  | "brainQuestion"
   | "unknownAiTool"
   | "signInAgain"
   | "externalDomain"
@@ -82,6 +84,7 @@ export type InboxSource =
   | { type: "bindings"; item: BindingApprovalItem }
   | { type: "reconnect"; integration: string }
   | { type: "asked"; notification: GapAskedNotification }
+  | { type: "gap"; gap: Gap }
   | { type: "stopped"; notification: TriggerStoppedNotification }
   | { type: "packageNotice"; notification: PackageNotification }
   | { type: "stoppedEvents"; notification: EventsStoppedNotification }
@@ -113,7 +116,7 @@ export interface InboxItem {
 }
 
 /** The kinds, grouped as the filter offers them. */
-export type Group = "all" | "workflows" | "brain" | "apps";
+export type Group = "all" | "asked" | "workflows" | "brain" | "apps";
 
 export const groupOf: Record<InboxKind, Exclude<Group, "all">> = {
   checkDrawing: "workflows",
@@ -122,7 +125,8 @@ export const groupOf: Record<InboxKind, Exclude<Group, "all">> = {
   approveChange: "workflows",
   confirmResult: "workflows",
   conflict: "brain",
-  openQuestion: "brain",
+  openQuestion: "asked",
+  brainQuestion: "brain",
   unknownAiTool: "apps",
   signInAgain: "apps",
   externalDomain: "apps",
@@ -419,6 +423,39 @@ const askedItems = (
     ];
   });
 
+/**
+ * The questions the Brain still has open, for an admin: each to answer,
+ * or to ask of whoever holds its role. One asked of the admin themselves
+ * is theirs already (`askedItems`), so it isn't listed twice.
+ */
+const gapItems = (
+  gaps: readonly Gap[],
+  asked: ReadonlySet<string>,
+  readAt: string
+): InboxItem[] =>
+  gaps
+    .filter(({ id }) => !asked.has(id))
+    .map((gap) => {
+      const { owner, askedAt } = gap;
+      return {
+        id: `gap:${gap.id}`,
+        kind: "brainQuestion",
+        title: gap.question,
+        context: gap.question,
+        body: [],
+        facts: [
+          { label: t`For`, value: t`The ${owner}` },
+          ...(askedAt === undefined
+            ? []
+            : [{ label: t`Asked`, value: formatDate(askedAt) }]),
+        ],
+        about: { kind: "brain" },
+        date: askedAt ?? readAt,
+        urgent: false,
+        source: { type: "gap", gap },
+      };
+    });
+
 /** What core's rescan found of an App's approved packages. */
 type PackageNotification = Extract<
   NotificationsPage["page"]["notifications"][number],
@@ -659,6 +696,13 @@ export const inboxItems = (
   const bindings = decidesRequests(viewer)
     ? (readyOf(waiting.bindings) ?? [])
     : [];
+  const gaps = decidesRequests(viewer) ? (readyOf(waiting.gaps) ?? []) : [];
+  // A question asked of the person is theirs already, as asked of them.
+  const askedGaps = new Set(
+    (notifications?.page.notifications ?? []).flatMap((notification) =>
+      notification.type === "gap_asked" ? [notification.gap] : []
+    )
+  );
   const reconnect = (readyOf(waiting.reconnect) ?? []).map(
     ({ integration, connection }): InboxItem => {
       const app =
@@ -698,6 +742,7 @@ export const inboxItems = (
     ...workflowGoLiveItems(workflowGoLives, me),
     ...bindingItems(bindings, readAt),
     ...(notifications === undefined ? [] : askedItems(notifications, me)),
+    ...gapItems(gaps, askedGaps, readAt),
     ...(notifications === undefined ? [] : stoppedItems(notifications, me)),
     ...(notifications === undefined
       ? []
@@ -722,6 +767,7 @@ export const unread = (waiting: Waiting): Loaded<unknown>[] => {
     waiting.workflowGoLives,
     waiting.heldStarts,
     waiting.bindings,
+    waiting.gaps,
   ];
   return parts.filter(
     (part): part is Loaded<unknown> =>

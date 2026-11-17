@@ -28,7 +28,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { inInbox } from "../dashboard/in-inbox.tsx";
 import type { Waiting } from "../dashboard/waiting.ts";
-import { inboxItems, listed, unread } from "./items.ts";
+import { groupOf, inboxItems, listed, unread } from "./items.ts";
 import type { Target } from "./items.ts";
 import { TargetLink } from "./target-link.tsx";
 
@@ -284,6 +284,16 @@ const waiting = (ranOut = true) =>
   }) satisfies Waiting;
 
 const admin = { role: "admin", staff: false, name: "Ada Admin" } as const;
+
+/** An open question the Brain has for the Head of finance, asked on `askedAt`, if at all. */
+const gap = (id: string, askedAt?: string) => ({
+  id,
+  question: `Question ${id}?`,
+  owner: "Head of finance",
+  sourceId: "src-1",
+  about: [],
+  ...(askedAt === undefined ? {} : { askedAt }),
+});
 const member = { role: "user", staff: false, name: "Max Member" } as const;
 
 describe(inboxItems, () => {
@@ -306,6 +316,39 @@ describe(inboxItems, () => {
         "workflowGoLive:workflow-quotes:2",
       ].toSorted()
     );
+  });
+
+  it("lists for an admin every question the Brain still has, by group, the one asked of them once, and none for anyone else", () => {
+    const read = {
+      ...waiting(),
+      gaps: {
+        state: "ready" as const,
+        data: [
+          gap("gap-invoices", "2026-10-13"),
+          gap("gap-open"),
+          gap("gap-elsewhere", "2026-10-12"),
+        ],
+      },
+    } satisfies Waiting;
+    const questions = (viewer: typeof admin | typeof member) =>
+      inboxItems(read, viewer, readAt)
+        .filter(
+          ({ kind }) => kind === "openQuestion" || kind === "brainQuestion"
+        )
+        .map(({ id, kind }) => ({ id, group: groupOf[kind] }))
+        .toSorted((a, b) => a.id.localeCompare(b.id));
+
+    expect({
+      admin: questions(admin),
+      member: questions(member),
+    }).toStrictEqual({
+      admin: [
+        { id: "asked:asked-1", group: "asked" },
+        { id: "gap:gap-elsewhere", group: "brain" },
+        { id: "gap:gap-open", group: "brain" },
+      ],
+      member: [{ id: "asked:asked-1", group: "asked" }],
+    });
   });
 
   it("tells of packages revoked as malware as urgent, with the package, its advisory and where it is fixed", () => {
@@ -550,7 +593,7 @@ describe(listed, () => {
       forWhom: undefined,
     });
     expect(
-      listed(items, "brain", "urgent").map(({ kind, title, about }) => ({
+      listed(items, "asked", "urgent").map(({ kind, title, about }) => ({
         kind,
         title,
         about,

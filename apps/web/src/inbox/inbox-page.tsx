@@ -113,11 +113,12 @@ const styles = stylex.create({
 const groupLabel: Record<Group, MessageDescriptor> = {
   all: msg({ message: "Everything", context: "inbox filter" }),
   workflows: msg({ message: "Workflows", context: "inbox filter" }),
-  brain: msg({ message: "Brain", context: "inbox filter" }),
+  asked: msg({ message: "Asked of you", context: "inbox filter" }),
+  brain: msg({ message: "Open in the Brain", context: "inbox filter" }),
   apps: msg({ message: "Apps and connections", context: "inbox filter" }),
 };
 
-const groupOrder = ["workflows", "brain", "apps"] as const;
+const groupOrder = ["asked", "brain", "workflows", "apps"] as const;
 
 const isGroup = (value: string | null): value is Group =>
   value === "all" || groupOrder.some((each) => each === value);

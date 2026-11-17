@@ -2939,6 +2939,10 @@ msgstr "Ask Grasp for a widget"
 msgid "Ask more people"
 msgstr "Ask more people"
 
+#: src/inbox/item-detail.tsx
+msgid "Ask the {owner}"
+msgstr "Ask the {owner}"
+
 #: src/brain/brain.ts
 #: src/settings/stephen-card.tsx
 msgid "Ask the {role}"
@@ -3017,12 +3021,31 @@ msgid "Asked it, or it works for them on a schedule"
 msgstr "Asked it, or it works for them on a schedule"
 
 #: src/inbox/item-detail.tsx
+msgid "Asked of the {owner}"
+msgstr "Asked of the {owner}"
+
+#: src/inbox/inbox-page.tsx
+#: src/inbox/sidebar-inbox.tsx
+msgctxt "inbox filter"
+msgid "Asked of you"
+msgstr "Asked of you"
+
+#: src/inbox/inbox-kind.tsx
+msgctxt "inbox item kind"
+msgid "Asked of you"
+msgstr "Asked of you"
+
+#: src/inbox/item-detail.tsx
 msgid "Asked of you as the {owner}"
 msgstr "Asked of you as the {owner}"
 
 #: src/workflows/go-lives-waiting.tsx
 msgid "Asked on"
 msgstr "Asked on"
+
+#: src/inbox/item-detail.tsx
+msgid "Asked the {owner}: {question}"
+msgstr "Asked the {owner}: {question}"
 
 #: src/activity/audit-words.ts
 msgid "Asked the agent to fix a run"
@@ -3301,11 +3324,10 @@ msgstr "Bound to"
 msgid "Brain"
 msgstr "Brain"
 
-#: src/inbox/inbox-page.tsx
-#: src/inbox/sidebar-inbox.tsx
-msgctxt "inbox filter"
-msgid "Brain"
-msgstr "Brain"
+#: src/inbox/inbox-kind.tsx
+msgctxt "inbox item kind"
+msgid "Brain question"
+msgstr "Brain question"
 
 #: src/frame/site-header.tsx
 msgid "Breadcrumb"
@@ -6051,6 +6073,7 @@ msgid "Follow the erasure of {who}"
 msgstr "Follow the erasure of {who}"
 
 #: src/inbox/item-detail.tsx
+#: src/inbox/items.ts
 msgid "For"
 msgstr "For"
 
@@ -6116,6 +6139,10 @@ msgstr "For schedules and the times Grasp shows."
 #: src/workflows/requests/request-needs.tsx
 msgid "For Stephen's requests, about “{label}” ({why}), do this: {proposal}"
 msgstr "For Stephen's requests, about “{label}” ({why}), do this: {proposal}"
+
+#: src/inbox/item-detail.tsx
+msgid "For the {owner}"
+msgstr "For the {owner}"
 
 #: src/agents/agent-wakes.tsx
 msgid "For whom"
@@ -9994,6 +10021,12 @@ msgstr "Open full page"
 msgid "Open in full"
 msgstr "Open in full"
 
+#: src/inbox/inbox-page.tsx
+#: src/inbox/sidebar-inbox.tsx
+msgctxt "inbox filter"
+msgid "Open in the Brain"
+msgstr "Open in the Brain"
+
 #: src/dashboard/in-inbox.tsx
 msgid "Open in the inbox: {title}"
 msgstr "Open in the inbox: {title}"
@@ -10005,11 +10038,6 @@ msgstr "Open link"
 #: src/dashboard/runs-widget.tsx
 msgid "Open now"
 msgstr "Open now"
-
-#: src/inbox/inbox-kind.tsx
-msgctxt "inbox item kind"
-msgid "Open question"
-msgstr "Open question"
 
 #: src/chat/brain-questions.tsx
 #: src/routes/_shell.brain.$noteId.tsx
@@ -13722,6 +13750,10 @@ msgstr "That’s plenty to start with. Let’s move on."
 #: src/tour/tour-script.ts
 msgid "That’s the tour. Ask me anything, on any page. You’ll find me right here."
 msgstr "That’s the tour. Ask me anything, on any page. You’ll find me right here."
+
+#: src/inbox/items.ts
+msgid "The {owner}"
+msgstr "The {owner}"
 
 #: src/inbox/item-detail.tsx
 msgid "The {role}"

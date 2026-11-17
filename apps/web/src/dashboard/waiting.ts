@@ -1,3 +1,4 @@
+import type { Gap } from "@grasp-os/shared/brain";
 import type { PendingAction, UnknownOutcome } from "@grasp-os/shared/connect";
 import type { DecisionView } from "@grasp-os/shared/decisions";
 import type { HeldStart } from "@grasp-os/shared/held-starts";
@@ -39,6 +40,8 @@ export interface Waiting {
   heldStarts: Loaded<HeldStart[]>;
   /** Versions of workflows whose bindings no admin approved, so their starts are refused. Admins only. */
   bindings?: Loaded<BindingApprovalItem[]>;
+  /** Every question the Brain still has open, asked of someone or not. Admins only. */
+  gaps?: Loaded<Gap[]>;
 }
 
 /** Who counts what waits: what they may act on follows from their role. */

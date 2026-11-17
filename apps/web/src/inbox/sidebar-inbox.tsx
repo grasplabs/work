@@ -25,11 +25,12 @@ import type { Group, InboxItem } from "./items.ts";
 /** The inbox's groups, under the names its filter gives them. */
 const groupLabel: Record<Exclude<Group, "all">, MessageDescriptor> = {
   workflows: msg({ message: "Workflows", context: "inbox filter" }),
-  brain: msg({ message: "Brain", context: "inbox filter" }),
+  asked: msg({ message: "Asked of you", context: "inbox filter" }),
+  brain: msg({ message: "Open in the Brain", context: "inbox filter" }),
   apps: msg({ message: "Apps and connections", context: "inbox filter" }),
 };
 
-const groupOrder = ["workflows", "brain", "apps"] as const;
+const groupOrder = ["asked", "brain", "workflows", "apps"] as const;
 
 /** The frame's read of what waits, one for each person who signs in. */
 const reads = new WeakMap<

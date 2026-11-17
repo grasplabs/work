@@ -708,6 +708,72 @@ const AskedItem = ({
   );
 };
 
+/**
+ * A question the Brain still has, for an admin: answered here in their
+ * own words, or asked of whoever holds its role (`brain.askAboutGap`)
+ * while nobody was. Answered, core lists it no more, so it leaves.
+ */
+const GapItem = ({
+  frame,
+  source,
+}: {
+  frame: Frame;
+  source: Extract<InboxSource, { type: "gap" }>;
+}) => {
+  const { t } = useLingui();
+  const router = useRouter();
+  const core = useCore();
+  const { busy, failure, decide } = useDecide(frame.onSaid);
+  const { gap } = source;
+  const { owner, askedAt, question } = gap;
+  const heading =
+    askedAt === undefined ? t`For the ${owner}` : t`Asked of the ${owner}`;
+  const answer = async (words: string[]): Promise<void> => {
+    const [text = ""] = words;
+    await core.withSession(
+      async (session) => await session.brain.answerGap(gap.id, text.trim())
+    );
+    frame.onSaid(t`Answered: ${question}`);
+    await router.invalidate({ sync: true });
+  };
+  return (
+    <ItemFrame
+      acts={
+        askedAt === undefined
+          ? [
+              {
+                label: t`Ask the ${owner}`,
+                onPress: async () => {
+                  await decide(
+                    async (session) => await session.brain.askAboutGap(gap.id),
+                    t`Asked the ${owner}: ${question}`
+                  );
+                },
+              },
+            ]
+          : []
+      }
+      busy={busy}
+      extra={
+        <QuestionTool
+          embedded
+          failedLabel={t`Your answer wasn't saved. Try again.`}
+          kind="text"
+          label={t`Your answer`}
+          onSubmit={answer}
+          question={question}
+          submitLabel={t`Answer`}
+        />
+      }
+      failure={failure}
+      frame={{
+        ...frame,
+        item: { ...frame.item, title: heading, context: heading },
+      }}
+    />
+  );
+};
+
 /** What is done on its own page: its next step leads there. */
 const ElsewhereItem = ({ frame }: { frame: Frame }) => {
   const { t } = useLingui();
@@ -752,6 +818,9 @@ export const ItemDetail = (frame: Frame) => {
   }
   if (source.type === "asked") {
     return <AskedItem frame={frame} source={source} />;
+  }
+  if (source.type === "gap") {
+    return <GapItem frame={frame} source={source} />;
   }
   return <ElsewhereItem frame={frame} />;
 };
