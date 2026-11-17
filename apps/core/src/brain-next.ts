@@ -5575,29 +5575,42 @@ export interface CodeEntity {
 
 /**
  * Everything what code is handed rests on (contract `restsOn`,
- * `restsOnWords`), core's to keep with the run or the chat and never
- * code's to see: each version of a source, and each memory in a writer's
- * own word, of the shared store.
+ * `restsOnMemories`), core's to keep with the run or the chat and never
+ * code's to see: each version of a source, and each memory, with what it
+ * rests on (`PinnedMemory`), of the shared store; and which of those
+ * memories it hands over itself (`handed`), as a card's facts, relations
+ * and notes. What a person's erasure takes (her word, her card: GRA-1982)
+ * is told by those memories' records, never by the versions, which stay.
  */
 export interface CodeRestsOn {
   versions: SourceVersionRef[];
-  words: StoredMemoryPlace[];
+  memories: PinnedMemory[];
+  handed: MemoryId[];
 }
 
 /**
- * What `answer` of the shared store rests on, as core names it. A version
- * of a kind no producer has fails the read (`sourceRefOf`): what can't be
- * pinned is never handed over.
+ * What `answer` of the shared store rests on, as core names it, with the
+ * ids of the memories it hands over (`handed`). A version of a kind no
+ * producer has fails the read (`sourceRefOf`): what can't be pinned is
+ * never handed over.
  */
-const codeRestsOnOf = (answer: {
-  restsOn: readonly { source: SourceId; version: number }[];
-  restsOnWords: readonly string[];
-}): CodeRestsOn => ({
+const codeRestsOnOf = (
+  answer: {
+    restsOn: readonly { source: SourceId; version: number }[];
+    restsOnMemories: readonly ErasedMemory[];
+  },
+  handed: readonly Memory[] = []
+): CodeRestsOn => ({
   versions: answer.restsOn.map(({ source, version }) => ({
     source: sourceRefOf(source),
     version,
   })),
-  words: answer.restsOnWords.map((memory) => ({ store: "shared", memory })),
+  memories: answer.restsOnMemories.map(({ memory, source, ...basis }) => ({
+    store: "shared",
+    memory,
+    basis: { ...basis, source: source === null ? null : sourceRefOf(source) },
+  })),
+  handed: handed.map(({ id }) => id),
 });
 
 /**
@@ -5675,7 +5688,11 @@ export const codeCardAs = async (
     })),
     notes: card.notes.map((memory) => cardMemoryOf(memory)),
     next: cursorTextOf(card.next),
-    restsOn: codeRestsOnOf(card),
+    restsOn: codeRestsOnOf(card, [
+      ...card.attributes.flatMap(({ memories }) => memories),
+      ...card.relations.map(({ memory }) => memory),
+      ...card.notes,
+    ]),
   };
 };
 

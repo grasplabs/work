@@ -1352,22 +1352,32 @@ const memoryFixture = async ({
     ],
   });
   const seenId = seen.entities.c ?? "";
+  const markedSpeaker = {
+    kind: "internal",
+    person: `person:${markers[0] ?? ""}`,
+  } as const;
   const ended = await store().addMemories({
     change: crypto.randomUUID(),
     access: { kind: "audience", group },
     // Made for someone who sees the reader's entity and is in the group.
     reader: { person: reader.person, groups: [group, theirs] },
     entities: [{ key: "c", id: seenId, kind: "customer", names: [text] }],
+    // In the word of a person the markers name: what an answer rests on
+    // (`restsOnMemories`) must never carry a hidden memory's record.
     memories: [
       memory(
         "c",
         { kind: "writer", writer },
-        { attribute: "status", value: text }
+        { attribute: "status", value: text, speaker: markedSpeaker }
       ),
       memory(
         "c",
         { kind: "source", ...version, quote: text },
-        { attribute: "status", value: markers.join("") }
+        {
+          attribute: "status",
+          value: markers.join(""),
+          speaker: markedSpeaker,
+        }
       ),
     ],
   });

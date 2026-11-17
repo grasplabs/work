@@ -30,6 +30,7 @@ import {
   brainGrantRead,
   brainMemoryRead,
   brainPersonRead,
+  brainRestingMemoryRead,
   brainTeamVersionRead,
 } from "./history-access.ts";
 import { grantedPermissions } from "./permissions.ts";
@@ -159,12 +160,17 @@ const handedOf = (
  * connections, where no pin of the chat's follows it). Everything the
  * answer rests on is pinned with the run before the code gets it, as
  * recall's are at that reach: in their own chat each version as
- * `brain-team-version` (checked as their teams), and each memory in a
- * writer's own word as `brain-memory` (checked as the person, which for
- * the shared store it names is their teams and the company); elsewhere
- * as `brain-company-version` and `brain-company-memory`, checked as the
- * company, and cut while the chat has anyone Grasp can't name
- * (history-access.ts). Recorded as every call of its code is, refused or
+ * `brain-team-version` (checked as their teams), and each memory it rests
+ * on with what that memory rests on (its source or writer, whose word it
+ * is, its entities: GRA-1982), as `brain-memory` when it handed it over
+ * and `brain-resting-memory` when it didn't (checked as the person, which
+ * for the shared store it names is their teams and the company);
+ * elsewhere as `brain-company-version` and `brain-company-memory`,
+ * checked as the company, and cut while the chat has anyone Grasp can't
+ * name (history-access.ts). So a run is withheld and its result replaced
+ * once an erasure took anything it rests on, a person's included: her
+ * card's name, a fact in her word, though the documents they were drawn
+ * from stay. Recorded as every call of its code is, refused or
  * not; `entitiesCallFor` keeps its own audit event.
  */
 const entitiesRead = async (
@@ -184,19 +190,25 @@ const entitiesRead = async (
       {
         ...caller,
         ...(ownChat ? { reach: "teams" as const } : {}),
-        keep: async ({ versions, words }) => {
+        keep: async ({ versions, memories, handed: given }) => {
+          const shown = new Set(given);
           await recordRunReads(env, scope, [
             ...versions.map((version) =>
               ownChat
                 ? brainTeamVersionRead(version)
                 : brainCompanyVersionRead(version)
             ),
-            // Handed over by id alone: never told erased (history-access.ts).
-            ...words.map((memory) =>
-              ownChat
-                ? brainMemoryRead({ ...memory, basis: null })
-                : brainCompanyMemoryRead({ ...memory, basis: null })
-            ),
+            // Each with what it rests on, so an erasure of it, a person's
+            // too, is told (history-access.ts): in their own chat what it
+            // handed over as their use of it, the rest as no use.
+            ...memories.map((memory) => {
+              if (!ownChat) {
+                return brainCompanyMemoryRead(memory);
+              }
+              return shown.has(memory.memory)
+                ? brainMemoryRead(memory)
+                : brainRestingMemoryRead(memory);
+            }),
           ]);
         },
       },
