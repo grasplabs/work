@@ -86,7 +86,7 @@ import {
 import { removeDocument, shareDocument } from "./documents.ts";
 import { gateView, openAsFlowSays } from "./gate.ts";
 import { connectHr, onboardingHr, readOnboardingHr } from "./hr.ts";
-import { eraseOwedClaimsQuietly } from "./new-brain.ts";
+import { eraseOwedClaimsQuietly, eraseOwedKickoffs } from "./new-brain.ts";
 import { mondayOf } from "./rules.ts";
 import { onboardingStore } from "./store.ts";
 import { summaryOf } from "./summary.ts";
@@ -359,6 +359,11 @@ export class OnboardingRpc extends CoreRpcTarget implements OnboardingApi {
     await withPerson(this.#check, async (person) => {
       requireAdmin(person);
       await onboardingStore(this.#env).deleteKickoff(actorOf(person));
+      // Its source in the new Brain goes now; whatever fails is core's
+      // clock's, and the admin may ask again.
+      if (!(await eraseOwedKickoffs(this.#env))) {
+        throw onboardingErrors.create("onboarding.kickoff_unfinished");
+      }
     });
   }
 

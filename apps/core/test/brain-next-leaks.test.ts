@@ -465,8 +465,14 @@ describe(
         "an answer in the holder's chat": markerWord(),
       };
       // What every member may read, and nobody outside the company.
-      const companyMarkers = { "an upload for everyone": markerWord() };
-      const { "an upload for everyone": everyoneUploadMarker } = companyMarkers;
+      const companyMarkers = {
+        "an upload for everyone": markerWord(),
+        "the company's vision from the kickoff": markerWord(),
+      };
+      const {
+        "an upload for everyone": everyoneUploadMarker,
+        "the company's vision from the kickoff": kickoffMarker,
+      } = companyMarkers;
       const {
         "the holder's own source": ownerMarker,
         "a team's source the outsider isn't in": teamMarker,
@@ -880,6 +886,13 @@ describe(
         { kind: "everyone" },
         "for everyone"
       );
+      // The company's vision, as the onboarding hands its kickoff over
+      // (GRA-1748): every member's, without the shared word.
+      const kickoffSource = await add(
+        `The company's vision ${kickoffMarker}`,
+        { kind: "everyone" },
+        { producer: "kickoff", id: crypto.randomUUID() }
+      );
 
       // Through each producer core hands over (brain-hand-overs.ts), as it
       // does: a workflow run of the holder's that ended, and a turn of the
@@ -1076,6 +1089,11 @@ describe(
           marker: "a staff-list team's claim",
           source: claimId,
           reader: holder,
+        },
+        kickoff: {
+          marker: "the company's vision from the kickoff",
+          source: kickoffSource,
+          reader: outsider,
         },
       };
       // The model prompts that carried each marker while the world was

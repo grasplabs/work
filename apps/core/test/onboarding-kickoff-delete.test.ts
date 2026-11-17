@@ -1,12 +1,10 @@
 import type { KickoffReading } from "@grasp-os/shared/kickoff";
 import type { RosterInput } from "@grasp-os/shared/onboarding";
-import { runDurableObjectAlarm } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { adminKickoff } from "./admin-kickoff.ts";
-import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { d1ColumnsWith, onboardingTablesWith } from "./kept-where.ts";
 import { fakeProvider } from "./model-provider.ts";
@@ -18,14 +16,15 @@ import { sayForAdmin, stillKept } from "./spoken.ts";
 // it can fail, from the threat model on the issue:
 //
 // - A member deleting it, or the delete showing the admin its words.
-// - Its words left in a read: the admin's onboarding, the brain
-//   (`brain.read`'s vision, sector and teams, retired records too), an
-//   interview turn's context, or any table.
+// - Its words left in a read: the admin's onboarding, the Brain page
+//   (`brain.read`'s vision, sector and teams), an interview turn's
+//   context, or any table.
 // - A staff save whose reading began before the delete bringing the
 //   words back.
-// - A failed step: the records' erasure refused part-way. The delete
-//   says so, and a second one finishes it, with one event in all.
 // - Its words in the audit log.
+//
+// Its source in the new Brain, and an erasure of it that fails, are
+// brain-next-kickoff.test.ts'.
 
 const idp = mockIdp();
 
@@ -110,24 +109,13 @@ const keptWhere = async (marker: string) => ({
   onboarding: await onboardingTablesWith(marker),
 });
 
-/** Has core's database refuse every delete of the brain's records until it is dropped. */
-const holdRecordDeletes = async (): Promise<() => Promise<void>> => {
-  const trigger = `hold_${unique()}`;
-  await env.DB.exec(
-    `CREATE TRIGGER ${trigger} BEFORE DELETE ON brain_records BEGIN SELECT RAISE(ABORT, 'held'); END`
-  );
-  return async () => {
-    await env.DB.exec(`DROP TRIGGER ${trigger}`);
-  };
-};
-
 describe("deleting the kickoff", { timeout: 60_000 }, () => {
   it("takes it and everything drawn from it out of every read, with one audit event", async () => {
     const admin = await signedInApi(idp, "admin");
     await admin.api.onboarding.saveRoster(roster);
     const marker = markerOf();
     await bringIn(marker);
-    // Staff answer again, so a vision is retired with the marker in it.
+    // Staff answer again.
     await adminKickoff().answerKickoff("pain", `Ovens at ${marker} run hot.`);
 
     // What /setup said of it, in the voice: the company as the kickoff read it.
@@ -161,23 +149,14 @@ describe("deleting the kickoff", { timeout: 60_000 }, () => {
     }).toStrictEqual({
       // The positive control: each read held the kickoff's words.
       before: ["kickoff", "setup", "brain", "turn", "stephen"],
-      keptBefore: {
-        core: ["brain_records.body"],
-        onboarding: ["kickoff"],
-      },
+      keptBefore: { core: [], onboarding: ["kickoff"] },
       voiced: { before: true, after: false },
       after: [],
       keptAfter: { core: [], onboarding: [] },
       transcript: null,
       sponsor: null,
       events: [
-        {
-          action: "onboarding.kickoff.deleted",
-          // Its vision three times (read, answered, answered again), its
-          // team and the team's size.
-          detail: { kickoff: 1, records: 5 },
-          admin: true,
-        },
+        { action: "onboarding.kickoff.deleted", detail: {}, admin: true },
       ],
       audited: false,
     });
@@ -224,101 +203,6 @@ describe("deleting the kickoff", { timeout: 60_000 }, () => {
     }).toStrictEqual({
       saved: "kickoff.purged",
       kept: { core: [], onboarding: [] },
-    });
-  });
-
-  it("finishes a delete whose erasure failed when asked again, with one event in all", async () => {
-    const admin = await signedInApi(idp, "admin");
-    const marker = markerOf();
-    await bringIn(marker);
-
-    const release = await holdRecordDeletes();
-    const events = await auditedDuring(async () => {
-      const first = await outcome(admin.api.onboarding.deleteKickoff());
-      const left = await keptWhere(marker);
-      await release();
-      const second = await outcome(admin.api.onboarding.deleteKickoff());
-      const third = await outcome(admin.api.onboarding.deleteKickoff());
-      expect({ first, left, second, third }).toStrictEqual({
-        // It says it isn't done: the kickoff is gone, its records owed.
-        first: "onboarding.kickoff_unfinished",
-        left: { core: ["brain_records.body"], onboarding: [] },
-        second: "ok",
-        // Nothing left: nothing changes, nothing is recorded.
-        third: "ok",
-      });
-    });
-
-    expect({
-      kept: await keptWhere(marker),
-      brain: holding(await reads(admin), marker),
-      deleted: events
-        .filter(({ action }) => action === "onboarding.kickoff.deleted")
-        .map(({ detail }) => detail),
-    }).toStrictEqual({
-      kept: { core: [], onboarding: [] },
-      brain: [],
-      deleted: [{ kickoff: 1, records: 4 }],
-    });
-  });
-
-  it("has the alarm finish a delete whose erasure failed, saying meanwhile that it is erasing, with one event", async () => {
-    const admin = await signedInApi(idp, "admin");
-    const marker = markerOf();
-    await bringIn(marker);
-
-    const release = await holdRecordDeletes();
-    const events = await auditedDuring(async () => {
-      const first = await outcome(admin.api.onboarding.deleteKickoff());
-      const meanwhile = await admin.api.onboarding.view();
-      await release();
-      // Nobody asks again: the store's alarm, armed by the failure, finishes it.
-      const ran = await runDurableObjectAlarm(onboardingStore(env));
-      expect({ first, meanwhile: meanwhile.kickoff, ran }).toStrictEqual({
-        first: "onboarding.kickoff_unfinished",
-        meanwhile: "erasing",
-        ran: true,
-      });
-    });
-    const view = await admin.api.onboarding.view();
-
-    expect({
-      kept: await keptWhere(marker),
-      kickoff: view.kickoff,
-      deleted: events
-        .filter(({ action }) => action === "onboarding.kickoff.deleted")
-        .map(({ detail }) => detail),
-    }).toStrictEqual({
-      kept: { core: [], onboarding: [] },
-      kickoff: null,
-      deleted: [{ kickoff: 1, records: 4 }],
-    });
-  });
-
-  it("erases a deleted kickoff's records before keeping a new one's", async () => {
-    const admin = await signedInApi(idp, "admin");
-    const old = markerOf();
-    await bringIn(old);
-    const release = await holdRecordDeletes();
-    await outcome(admin.api.onboarding.deleteKickoff());
-    await release();
-
-    // Staff bring a new kickoff in before anything finished the erasure.
-    const fresh = markerOf();
-    await bringIn(fresh);
-
-    const events = await allEvents();
-
-    expect({
-      old: await keptWhere(old),
-      fresh: holding(await reads(admin), fresh).includes("brain"),
-      logged: events.some((event) =>
-        JSON.stringify(event).toLowerCase().includes(old)
-      ),
-    }).toStrictEqual({
-      old: { core: [], onboarding: [] },
-      fresh: true,
-      logged: false,
     });
   });
 });
