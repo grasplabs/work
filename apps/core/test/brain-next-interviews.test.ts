@@ -40,6 +40,7 @@ import {
   accountOf,
   answering,
   answeringWith,
+  approveAgreed,
   holdAlarm,
   onLink,
   openLinkAs,
@@ -48,12 +49,15 @@ import {
 } from "./interview-link.ts";
 import {
   agree,
+  anonymous,
   claimsReply,
   fact,
   intake,
+  kept as standingOf,
   mapped,
   openLink,
   rosterOf,
+  saveAgreed,
   team,
   ticketsReply,
   told,
@@ -1173,6 +1177,16 @@ const interviewGone = (person: string) => (sql: SqlStorage) =>
   sql.exec("SELECT person FROM interviews WHERE person = ?", person).toArray()
     .length === 0;
 
+/** A word nobody else's line holds, and a line of `tag` that holds it. */
+const markedLine = (id: string, tag: Parameters<typeof fact>[1]) => {
+  const word = `marked${unique().replaceAll("-", "")}`;
+  return { word, line: fact(id, tag, `Checks every ticket in ${word}.`) };
+};
+
+/** Whether any of `requests` reached the model with `word` in it. */
+const promptsHold = (requests: readonly { body: unknown }[], word: string) =>
+  requests.some(({ body }) => JSON.stringify(body).includes(word));
+
 /** Sam says more and approves it, and the team's work is drawn again: the team is due for another intake. */
 const dueAgain = async (ids: Ids): Promise<void> => {
   await agree(
@@ -2011,6 +2025,145 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
         .filter(({ source }) => source.producer === "claim")
         .map(({ text }) => text),
     }).toStrictEqual({ calls: 0, recalled: [zendeskClaim.text] });
+  });
+
+  it("put together a team's claims and drawings from the lines shared with it alone: one only counted anonymously reaches no prompt, claim, drawing, page or recall (GRA-1987)", async () => {
+    const ids = await team([...everyone, "sam"], addressOf);
+    await mapped(ids);
+    await told(ids);
+    // Sam's second line is how he works, moved by him to only counted anonymously.
+    const { word, line } = markedLine("s2", "step");
+    await agree(ids.sam, [
+      fact("s1", "step", "Answers the phone."),
+      anonymous(line),
+    ]);
+    const drawn = await answering(
+      [ticketsReply(ids)],
+      async () => await onboardingStore(env).drawNext()
+    );
+    const given = await intake(ids, [zendeskClaim]);
+    await handOverNow();
+    const max = await accountOfPerson(ids.max);
+    expect({
+      gave: given.gave,
+      prompts: promptsHold([...drawn.requests, ...given.requests], word),
+      page: JSON.stringify(await standingOf(ids)).includes(word),
+      recalled: await recalled(max, word),
+      claim: await recalled(max, "Zendesk", "claim"),
+    }).toStrictEqual({
+      gave: `brain:${ids.team}`,
+      prompts: false,
+      page: false,
+      recalled: [],
+      claim: [zendeskClaim.text],
+    });
+  });
+
+  it("take nothing from interviews approved before a line had a destination: seven who told, every line only counted anonymously, give the team nothing and ask no model for it (GRA-1987)", async () => {
+    const ids = await team([...everyone, "sam"], addressOf);
+    await mapped(ids);
+    const { word, line } = markedLine("x1", "system");
+    const tellers = [ids.max, ids.mia, ids.mo, ids.noor, ids.pim, ids.rik];
+    for (const person of [...tellers, ids.sam]) {
+      // oxlint-disable-next-line no-await-in-loop -- one interview after another
+      await agree(person, [anonymous(line)]);
+    }
+    const drawn = await answering(
+      [ticketsReply(ids)],
+      async () => await onboardingStore(env).drawNext()
+    );
+    const given = await intake(ids, [zendeskClaim]);
+    await handOverNow();
+    // The lead, who never said it: each who did finds it in their own interview alone.
+    const lea = await accountOfPerson(ids.lea);
+    expect({
+      gave: given.gave,
+      asked: given.requests.length,
+      prompts: promptsHold([...drawn.requests, ...given.requests], word),
+      page: await standingOf(ids),
+      recalled: await recalled(lea, word),
+      tellers: await Promise.all(
+        tellers.map(
+          async (person) => await onboardingStore(env).drawInput(person)
+        )
+      ),
+    }).toStrictEqual({
+      gave: `brain:${ids.team}`,
+      asked: 0,
+      prompts: false,
+      page: [],
+      recalled: [],
+      tellers: tellers.map(() => null),
+    });
+  });
+
+  it("take a claim out before the save that moves a backer's line to only counted anonymously commits, refuse that save whole while the Brain can't, and show it again from the line moved back only at the next intake (GRA-1987)", async () => {
+    const { ids, max } = await drawnTeam({ eight: true });
+    await intakeOf(ids, [zendeskClaim]);
+    await handOverNow();
+    const before = await recalled(max, "Zendesk", "claim");
+    const zendesk = fact("p2", "system", "Tickets arrive in Zendesk.");
+    const moved = [fact("p1", "step", "Tags the ticket."), anonymous(zendesk)];
+    // The shared store refuses removals while a restore runs.
+    const shared = inJurisdiction(env, env.BRAIN_STORE).getByName("brain");
+    const restore = `restore-${unique()}`;
+    await runInDurableObject(shared, (_, state) => {
+      state.storage.sql.exec(
+        "INSERT INTO restores (export, checked, part, restored, state, started_at) VALUES (?, 0, 0, 0, 'running', ?)",
+        restore,
+        Date.now()
+      );
+    });
+    const refused = await saveAgreed(ids.pim, moved, 1);
+    const stillTold = await onboardingStore(env).drawInput(ids.pim);
+    const whileRestoring = {
+      ok: refused.ok,
+      told: stillTold?.facts,
+      read: await recalled(max, "Zendesk", "claim"),
+    };
+    await runInDurableObject(shared, (_, state) => {
+      state.storage.sql.exec("DELETE FROM restores WHERE export = ?", restore);
+    });
+    // Read the moment the save is kept, before it is approved or core's clock runs.
+    const saved = await saveAgreed(ids.pim, moved, 1);
+    const atCommit = await claimRead(max);
+    await approveAgreed(await openLink(ids.pim), moved);
+    await settled();
+    const afterApproval = await recalled(max, "Zendesk", "claim");
+    // Moved back and approved: it counts again, but shows only once the team's next intake puts it together.
+    await agree(ids.pim, [fact("p1", "step", "Tags the ticket."), zendesk], 2);
+    await settled();
+    const beforeIntake = await recalled(max, "Zendesk", "claim");
+    await answering(
+      [ticketsReply(ids)],
+      async () => await onboardingStore(env).drawNext()
+    );
+    await intakeOf(ids, [zendeskClaim]);
+    await handOverNow();
+    expect({
+      before,
+      whileRestoring,
+      saved: saved.ok,
+      atCommit,
+      afterApproval,
+      beforeIntake,
+      afterIntake: await recalled(max, "Zendesk", "claim"),
+    }).toStrictEqual({
+      before: [zendeskClaim.text],
+      whileRestoring: {
+        ok: false,
+        told: [
+          { tag: "step", record: "Tags the ticket." },
+          { tag: "system", record: "Tickets arrive in Zendesk." },
+        ],
+        read: [zendeskClaim.text],
+      },
+      saved: true,
+      atCommit: { recalled: [], listed: [] },
+      afterApproval: [],
+      beforeIntake: [],
+      afterIntake: [zendeskClaim.text],
+    });
   });
 
   it("hold a backer's withdrawal back, made of nothing, while the Brain can't take the claim it drops out of use, and let it through once it can", async () => {

@@ -125,7 +125,8 @@ const progress = (): InterviewProgress => ({
     { from: "person", text: sentinel, typed: true },
   ],
   facts: [
-    { id: "f1", tag: "step", text: sentinel, record: sentinel },
+    // Shared with the team as how they work; the next only counted anonymously.
+    { id: "f1", tag: "step", text: sentinel, record: sentinel, share: "team" },
     { id: "f2", tag: "wait", text: `${sentinel}, twice`, record: "x" },
     {
       id: "f3",
@@ -133,6 +134,7 @@ const progress = (): InterviewProgress => ({
       text: "Their own sheet",
       record: "y",
       out: true,
+      share: "team",
     },
   ],
   phase: "steps",
@@ -435,6 +437,8 @@ describe("the admin snapshot", () => {
           facts: 2,
           out: 1,
           confirmed: 1,
+          // Of the two kept in, one shared with the team: no word of either.
+          shared: 1,
           rating: 4,
           typed: true,
           interviewer: null,

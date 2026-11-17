@@ -279,6 +279,7 @@ describe("the onboarding after a restart", { timeout: 60_000 }, () => {
           text: "Max and Mia handle new tickets.",
           record: "Max and Mia handle new tickets.",
           agreed: true,
+          share: "team",
         },
       ],
       "completed"

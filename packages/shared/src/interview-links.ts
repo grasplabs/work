@@ -107,6 +107,7 @@ export const interviewLimits = {
 } as const;
 
 const factTagSchema = z.enum(factTags);
+type FactTag = (typeof factTags)[number];
 
 /** One line said in an interview: Stephen's, or the person's. */
 export const interviewLineSchema = z.strictObject({
@@ -174,8 +175,44 @@ export const interviewFactSchema = z.strictObject({
     .optional(),
   /** Read back and agreed to before. */
   agreed: z.literal(true).optional(),
+  /**
+   * Where the person chose this line goes (GRA-1987): `team`, shared with
+   * their team as how they work; missing, only counted anonymously. Missing
+   * is the strict side, so an interview saved before there was a choice
+   * reaches no team result. Approving binds it (`factRevision`).
+   */
+  share: z.literal("team").optional(),
 });
 export type InterviewFact = z.output<typeof interviewFactSchema>;
+
+/**
+ * The tags whose lines start out only counted anonymously: what someone
+ * wishes, what they use AI for and think of it, and their own list or
+ * unofficial tool, any of which can get someone in trouble. Who does the
+ * work names a colleague and is never shared (`neverShared`). Every other
+ * tag describes how the work runs and starts out shared with the team.
+ * Only where a line starts: the person moves any line before approving.
+ */
+const anonymousByDefault: ReadonlySet<FactTag> = new Set([
+  "wish",
+  "ai",
+  "workaround",
+  "who",
+]);
+
+/** The tag whose line is only used to know whom to ask: never shared with the team. */
+export const neverShared = "who" satisfies FactTag;
+
+/** Where a line of `tag` starts out, as Stephen writes it down. */
+export const shareByDefault = (tag: FactTag): InterviewFact["share"] =>
+  anonymousByDefault.has(tag) ? undefined : "team";
+
+/** Whether `fact` is shared with the team as how they work: chosen so, and of a tag that may be. */
+export const sharedWithTeam = ({
+  tag,
+  share,
+}: Pick<InterviewFact, "tag" | "share">): boolean =>
+  share === "team" && tag !== neverShared;
 
 /**
  * A fact as an interview keeps it: one erased (`erasedFact`) keeps its id
@@ -186,9 +223,16 @@ const keptFactSchema = interviewFactSchema
   .refine(
     (fact) =>
       fact.text === ""
-        ? fact.out === true && fact.record === "" && fact.pin === undefined
+        ? fact.out === true &&
+          fact.record === "" &&
+          fact.pin === undefined &&
+          fact.share === undefined
         : true,
     "An erased fact holds nothing"
+  )
+  .refine(
+    (fact) => fact.tag !== neverShared || fact.share === undefined,
+    "Who does the work is never shared"
   );
 
 /**
@@ -268,11 +312,15 @@ export type InterviewProgress = z.output<typeof interviewProgressSchema>;
  * older one is asked again before anything more is recorded.
  */
 export const participationNotice = {
-  version: 1,
+  version: 2,
   /** Why: how their team's work is done, for the company's Grasp. */
   purpose: "onboarding.interview",
-  /** Who reads it: the company, their approved words by role and team, never by name. */
-  audience: "company.role_and_team",
+  /**
+   * Who reads it (GRA-1987): their team, the lines they chose to share, as
+   * how the team works; the company, what they think, only counted
+   * anonymously across it. Never by name.
+   */
+  audience: "team.work_and_company.views",
 } as const;
 
 /** A fact's revision: the SHA-256 (hex) of exactly what was read back and what the record keeps. */
@@ -280,16 +328,29 @@ export const interviewRevisionSchema = z.string().regex(/^[0-9a-f]{64}$/u);
 
 /**
  * The revision of a fact as it stands: what approving it binds to. Any
- * change to its kind, to what was read back or to what the record keeps
- * makes a new revision, which counts only once it is approved too.
+ * change to its kind, to what was read back, to what the record keeps or
+ * to where it goes (`share`) makes a new revision, which counts only once
+ * it is approved too: a line moved after approval is taken back first.
+ * One only counted anonymously has the revision it had before there was
+ * a choice, so an approval from then still counts, anonymously.
  */
 export const factRevision = async ({
   id,
   tag,
   text,
   record,
-}: Pick<InterviewFact, "id" | "tag" | "text" | "record">): Promise<string> =>
-  await sha256Hex(canonicalJson([id, tag, text, record]));
+  share,
+}: Pick<
+  InterviewFact,
+  "id" | "tag" | "text" | "record" | "share"
+>): Promise<string> =>
+  await sha256Hex(
+    canonicalJson(
+      share === undefined
+        ? [id, tag, text, record]
+        : [id, tag, text, record, share]
+    )
+  );
 
 /** One fact as read back and approved: which, at which revision. */
 export const approvedFactSchema = z.strictObject({

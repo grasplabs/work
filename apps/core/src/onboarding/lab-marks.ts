@@ -9,7 +9,8 @@ import type {
 // prototype's main at 48534d4 (grasplabs/prototype, packages/grasp), after
 // the lab's round of 5 October and the interview's audit of the same day,
 // then the handover to a named colleague and the promise about whose words
-// are seen (GRA-1285, GRA-1286), marked from core's text without a lab round.
+// are seen (GRA-1285, GRA-1286), and that promise again once each line has
+// a destination (GRA-1987), marked from core's text without a lab round.
 // Core speaks only a text whose mark is here, and a test holds it to that:
 // a text changes only through the lab, one change at a time, and its new
 // marks come in with the change the lab kept.
@@ -19,34 +20,34 @@ export const labMarks: Record<
 > = {
   stephen: {
     own: {
-      en: "76a5d9ed59b7d24fecaf6897b2bb450b4d0893aadd06cd9291e68a3adc63eb85",
-      nl: "a7c965a1d750aa396e77e8f25539f243eecb8232e462fbd95112893ab7df3c49",
-      de: "88c24f80df5bc08b6c00d6bb23a6f5da564b10408de550ca09fa37fa2b38bff9",
-      fr: "848ca68f5524ed6bf8cfa9b3806c8ee20964bda3ca1ace93c05007f139d7a5e6",
-      es: "b3336e76c49fb6b973a447d90a2efc20cdcbfb1302a95c7c4aceca5fc435670f",
+      en: "34a742c98863a6c87689be4f3881e12495a8f34f2de56c2d56401c5e284b813a",
+      nl: "f522ab263b8a067e5ec1c830686f44e9322a0edc1049d8a4864015d1ba1737d0",
+      de: "e3601c0dd80506be2859aabade62e2b68580369c5fc11e6b2fe3b30893741bfe",
+      fr: "450be45d5a78be5b9126497a9a357f48bd7e80b3b3eb4bfae8bfbe02946afcfa",
+      es: "df3406ccceb67983ba2c54d4f858019a565494ec922cafe2d9d2a414083c780e",
     },
     lead: {
-      en: "d238af3f8de94ad37189363f341d63f6f546fee177d9c60d788a350a063a2bd7",
-      nl: "5ca515561995f10be29e8786a87320e483627ed08a2a3abba3bddb88a73edcf2",
-      de: "590054b30680bd9326b65ae052c4583f6612366a6f9dc8d3590a220bbff95697",
-      fr: "9751ee09c7c31f19a6c138eac219493b79f7b0af1e6ee1ead0130a8ad5756db0",
-      es: "713c4899ecf45f556b6f979af8fe349ee17e68dd20aedd25d48ba4d724404e15",
+      en: "688b5a772acd26200c01993d1c65f5d6700c44f5d0fbc733718ab59ae02082a8",
+      nl: "454b9ddb5a2e16ced3a09a30c6f9de4fac34d7de33a71e59d50e10da0ec26306",
+      de: "2da379a7384b7315f965231e9081602d807f95f7821072a24be514e0b76486ef",
+      fr: "b3abd9540d312c1ebcbbeaac41d6474a5ac1ca661949f9c01e7c7c5b8f846004",
+      es: "601c5b08c830fec2d1837abe8d98160be957677929b0aa9108cd4978da2c20c3",
     },
   },
   claire: {
     own: {
-      en: "0a59f54cc0140eeaa0337a703678ec216ec9b65533d6922568d958933cf4affe",
-      nl: "0150b2ea2a7efd83ee15022d93c791b5ba327b5ddf159a33d1528268d69cccd6",
-      de: "544f88250f19a45cc0bc1895e4d4e7fd825aadb28e36f386f4306a701e87de0d",
-      fr: "ba2e34c22a41807a3cf07bb0aa053dc9491c2598b185d788bdd3740275824d3c",
-      es: "9016e9a067de5c428f7236c7b2567ec8ee4c51ab5f809adad3c86bc4224dd1d0",
+      en: "4208572e18f3d658a47a147cfa3bb9317d2bf9bf99e1f5fd239527ad183ebb8d",
+      nl: "70a3efb0e9b8ae39e75a7292efa3e962c28e2e9b70d8693b2daa6b2f83bbc73c",
+      de: "6a29e5a3075c061ca10376657b85f0c76e68c6b5e69659e198bfd959cf768f3f",
+      fr: "9446784eecdb9119cdfae77960a629160914a29b9e088dc74b3337b7d17b0de5",
+      es: "58868a14b4e4787d53bf629ce6b3dad4dbd2ca12973f2cbb635036c4baa7d138",
     },
     lead: {
-      en: "6044edd8be8d1c8a2b5cbd1088abc17394ef64d10c86bf15ae1caf769cbfbeba",
-      nl: "2ad1b9c4010cb8d1d5352c19750605ba2bb737367129c3aeb277dd89870c159b",
-      de: "f526a5fd3c17bc11968d707892085e5373357887388b33e6fd751bc916f7bb7e",
-      fr: "10c1d1607803c1c9927218553b7dca3d7102f7944790c4153ce77db67acb9d68",
-      es: "b7dd1a8465cb0f8b269fa9853ca82926b4c835dc04879d77ddb613d426aa5af5",
+      en: "7d60f6862f4c8cc07d2454c87f3dac02c07ae23443cd678440e06b3f0d2b234b",
+      nl: "abeefad85440fcd8336a1f2ca4bf68ce45b617c75d33fb6288d60e4163c6f86a",
+      de: "97d811841b44b6010ca5d410ee8ac11a4144b227d4bad97e1d749f5b8e5e4606",
+      fr: "3191ba304ac8c266a6c7c4cb839fb9beb0c8a45b864bca4358d742e7828318b9",
+      es: "b1195164a2f2c264be45976dcb12f1ae7f95448db472b78e36c0434a89cddd8a",
     },
   },
 };
@@ -57,7 +58,7 @@ export const labMarks: Record<
 // that keeps it says which texts held it, in whatever language it ran, and
 // the Stephen Lab sets the interviews of one version beside its runs. A
 // test holds it to the marks.
-export const stephenVersion = "1bf63f92d3f9";
+export const stephenVersion = "866527574350";
 
 /** Every mark above, in the order they stand: what `stephenVersion` is taken over. */
 export const everyLabMark = (): string[] =>

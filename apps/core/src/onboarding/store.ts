@@ -23,6 +23,7 @@ import {
   interviewProgressSchema,
   isErased,
   participationNotice,
+  sharedWithTeam,
 } from "@grasp-os/shared/interview-links";
 import type {
   ApprovedFact,
@@ -972,6 +973,8 @@ export interface AdminInterviewFacts {
   rating: number | null;
   typed: boolean;
   interviewer: NonNullable<InterviewProgress["interviewer"]> | null;
+  /** Of the facts kept in, those they chose to share with their team (GRA-1987). */
+  shared: number;
   /** Which Stephen held its last turn (`stephenVersion`); null before that was kept. */
   version: string | null;
   /** The language its last turn was held in; null before a turn ran. */
@@ -1033,6 +1036,8 @@ interface InterviewCounts {
   rating: number | null;
   typed: boolean;
   interviewer: NonNullable<InterviewProgress["interviewer"]> | null;
+  /** Of the facts kept in, those they chose to share with their team (GRA-1987). */
+  shared: number;
 }
 
 const noCounts: InterviewCounts = {
@@ -1044,6 +1049,7 @@ const noCounts: InterviewCounts = {
   rating: null,
   typed: false,
   interviewer: null,
+  shared: 0,
 };
 
 /** The statements of `progress` taken out in the read-back and not erased yet. */
@@ -1081,6 +1087,9 @@ const countsOf = (progress: InterviewProgress): InterviewCounts => ({
   state: progress.person,
   phase: progress.phase,
   facts: progress.facts.filter(({ out }) => out !== true).length,
+  shared: progress.facts.filter(
+    (fact) => fact.out !== true && sharedWithTeam(fact)
+  ).length,
   // One erased counts nowhere.
   out: takenOut(progress).length,
   confirmed: progress.confirmed,
@@ -2397,7 +2406,11 @@ export class Onboarding extends DurableObject<Env> {
   /**
    * What the drawing gets from someone's interview: only the facts they
    * agreed to, as the record keeps them. Nothing before they agreed, and
-   * nothing they added after until they agreed to that too.
+   * nothing they added after until they agreed to that too. Only the lines
+   * they chose to share with their team as how they work (GRA-1987): one
+   * only counted anonymously never reaches the team's map, its drawings or
+   * its claims, and someone with none to share tells their team nothing.
+   * This is the one way facts leave the store for any of those.
    */
   drawInput(person: string): DrawInput | null {
     const [state] = this.#db
@@ -2405,7 +2418,7 @@ export class Onboarding extends DurableObject<Env> {
       .from(interviewStates)
       .where(eq(interviewStates.person, person))
       .all();
-    const facts = this.#admitted(person);
+    const facts = this.#admitted(person).filter(sharedWithTeam);
     if (state === undefined || state.agreedAt === null || facts.length === 0) {
       return null;
     }
@@ -2416,10 +2429,9 @@ export class Onboarding extends DurableObject<Env> {
       generation: `${state.agreedAt}|${state.revocations}`,
       admission: `${state.startedAt ?? ""}|${state.revocations}`,
       // Who does the work they were asked about names a colleague: it is
-      // for putting right who is asked what (`#referOne`), never drawn.
-      facts: facts
-        .filter(({ tag }) => tag !== "who")
-        .map(({ tag, record }) => ({ tag, record })),
+      // for putting right who is asked what (`#referOne`), never shared
+      // (`sharedWithTeam` leaves it out).
+      facts: facts.map(({ tag, record }) => ({ tag, record })),
     };
   }
 

@@ -44,6 +44,7 @@ const fact = (id: string, record: string): InterviewFact => ({
   text: record,
   record,
   agreed: true,
+  share: "team",
 });
 
 /** Opens `person`'s link and saves their interview as agreed to, with `facts`. */

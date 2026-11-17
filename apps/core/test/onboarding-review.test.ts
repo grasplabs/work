@@ -141,6 +141,7 @@ const agree = async (
     text: record,
     record,
     agreed: true,
+    ...(tag === "who" ? {} : { share: "team" as const }),
   }));
   const progress: InterviewProgress = {
     person: "completed",

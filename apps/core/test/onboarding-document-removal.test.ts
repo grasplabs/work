@@ -184,6 +184,7 @@ const fact = (id: string, tag: FactTag, record: string): InterviewFact => ({
   text: `You said: ${record}`,
   record,
   agreed: true,
+  ...(tag === "who" ? {} : { share: "team" as const }),
 });
 
 /** Saves someone's interview as agreed to, with `facts`, on `link` (opened anew unless given). */

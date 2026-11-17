@@ -99,6 +99,7 @@ const agreed = (id: string, record: string): InterviewFact => ({
   text: record,
   record,
   agreed: true,
+  share: "team",
 });
 
 /** Saves the lead's interview as agreed to, with `facts`; returns the new version. */

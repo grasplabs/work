@@ -17,6 +17,7 @@ import {
   withFactToggled,
   withLine,
   withoutLine,
+  withShares,
 } from "./progress.ts";
 
 // From the prototype's `data/interviews.ts` (`takeTurn`), which these steps
@@ -38,6 +39,60 @@ const said = withLine(
   withLine(freshProgress, { from: "stephen", text: "What do you do first?" }),
   { from: "person", text: "I open the invoice in Exact.", typed: true }
 );
+
+describe("where a line goes", () => {
+  const written = afterTurn(
+    said,
+    turn({
+      facts: (
+        ["step", "system", "rule", "wish", "ai", "workaround", "who"] as const
+      ).map((tag) => ({
+        tag,
+        text: `A ${tag}.`,
+        record: `A ${tag}.`,
+        quote: "",
+      })),
+    }),
+    { answered: 1 }
+  );
+
+  it("starts from what kind of line it is: how the work runs is shared with the team, a wish, AI, an own list or tool and who does it only counted anonymously", () => {
+    expect(
+      written.facts.map(({ tag, share }) => [tag, share ?? null])
+    ).toStrictEqual([
+      ["step", "team"],
+      ["system", "team"],
+      ["rule", "team"],
+      ["wish", null],
+      ["ai", null],
+      ["workaround", null],
+      ["who", null],
+    ]);
+  });
+
+  it("is theirs to move either way, and is kept as they chose it", () => {
+    const idOf = (tag: string): string =>
+      written.facts.find((fact) => fact.tag === tag)?.id ?? "";
+    const moved = withShares(
+      approved(written),
+      new Map([
+        [idOf("step"), undefined],
+        [idOf("wish"), "team" as const],
+      ])
+    );
+    expect(
+      moved.facts.map(({ tag, share, agreed }) => [tag, share ?? null, agreed])
+    ).toStrictEqual([
+      ["step", null, true],
+      ["system", "team", true],
+      ["rule", "team", true],
+      ["wish", "team", true],
+      ["ai", null, true],
+      ["workaround", null, true],
+      ["who", null, true],
+    ]);
+  });
+});
 
 describe("a line they remove", () => {
   it("keeps its place and nothing of it, and a turn under way puts no marks on it", () => {
@@ -177,6 +232,7 @@ describe("a turn of Stephen's", () => {
           tag: "system",
           text: "You open the invoice in Exact.",
           record: "Open the invoice in Exact.",
+          share: "team",
         },
       ],
       phase: "steps",
@@ -214,9 +270,24 @@ describe("a turn of Stephen's", () => {
         tag: "step",
         text: "One, put right.",
         record: "One, put right.",
+        share: "team",
       },
-      { id: "f2", tag: "step", text: "Two.", record: "Two.", out: true },
-      { id: "f3", tag: "rule", text: "Three.", record: "Three.", pin: 0 },
+      {
+        id: "f2",
+        tag: "step",
+        text: "Two.",
+        record: "Two.",
+        out: true,
+        share: "team",
+      },
+      {
+        id: "f3",
+        tag: "rule",
+        text: "Three.",
+        record: "Three.",
+        pin: 0,
+        share: "team",
+      },
     ]);
   });
 });

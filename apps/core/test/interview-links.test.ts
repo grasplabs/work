@@ -13,6 +13,7 @@ import type { Roster } from "@grasp-os/shared/onboarding";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
+import { z } from "zod";
 
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { adminCommands } from "./admin-command.ts";
@@ -1157,6 +1158,48 @@ describe("taking part, approving and withdrawing", () => {
       late: await codeOf(await approveFact(secrets.oli, me)),
       drawn: await store.drawInput(ids.oli),
     }).toStrictEqual({ late: "interview.closed", drawn: null });
+  });
+
+  it("binds where each line goes: an approval naming a line shared that was saved only counted anonymously approves nothing, and approved as saved it tells the team nothing (GRA-1987)", async () => {
+    const { ids, store, secrets, me } = await running();
+    await opened(secrets.oli, me);
+    await takePart(secrets.oli, me);
+    await save(secrets.oli, me, 0);
+    const forged = await post(
+      {
+        action: "approve",
+        secret: secrets.oli,
+        facts: [
+          {
+            id: "f1",
+            revision: await factRevision({
+              id: "f1",
+              tag: "step",
+              text: sentinel,
+              record: sentinel,
+              share: "team",
+            }),
+          },
+        ],
+      },
+      me
+    );
+    const answer = z
+      .object({ approved: z.boolean() })
+      .parse(await forged.json());
+    const afterForged = await store.drawInput(ids.oli);
+    const honest = await approveFact(secrets.oli, me);
+    expect({
+      forged: answer.approved,
+      afterForged,
+      honest: honest.status,
+      drawn: await store.drawInput(ids.oli),
+    }).toStrictEqual({
+      forged: false,
+      afterForged: null,
+      honest: 200,
+      drawn: null,
+    });
   });
 
   it("asks again before anything new once the interview is deleted: taking part goes with it", async () => {
