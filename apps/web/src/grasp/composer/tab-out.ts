@@ -5,6 +5,16 @@
 
 const STOPS = "a[href], button, input, select, textarea, [tabindex]";
 
+/** Whether a radio is not Tab's stop: another in its group is checked, so Tab stops there. */
+const passedRadio = (element: HTMLElement) =>
+  element instanceof HTMLInputElement &&
+  element.type === "radio" &&
+  !element.checked &&
+  element.name !== "" &&
+  (element.form ?? element.ownerDocument).querySelector(
+    `input[type="radio"][name="${CSS.escape(element.name)}"]:checked`
+  ) !== null;
+
 /** The elements Tab reaches in `root`, in order. */
 const stopsIn = (root: ParentNode): HTMLElement[] =>
   [...root.querySelectorAll<HTMLElement>(STOPS)].filter(
@@ -12,7 +22,8 @@ const stopsIn = (root: ParentNode): HTMLElement[] =>
       element.tabIndex >= 0 &&
       !element.matches(":disabled") &&
       element.closest("[inert], [hidden]") === null &&
-      element.getClientRects().length > 0
+      element.getClientRects().length > 0 &&
+      !passedRadio(element)
   );
 
 /**

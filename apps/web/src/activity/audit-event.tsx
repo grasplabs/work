@@ -282,7 +282,14 @@ const Integrity = ({ record }: { record: AuditRecord }) => {
   return (
     <div {...stylex.props(styles.foot)}>
       <Collapsible title={t`Integrity`}>
-        <KeyValueList items={items} />
+        <KeyValueList
+          items={items}
+          labels={{
+            copy: (name) => t`Copy ${name}`,
+            copied: t`Copied`,
+            failed: t`Could not copy`,
+          }}
+        />
       </Collapsible>
     </div>
   );
@@ -307,7 +314,11 @@ export const EventInspector = ({
   /** Where it sits and how tall it is: the whole of what holds it, beside the table. */
   layout?: PanelLayoutStyle;
 }) => {
-  const { t } = useLingui();
+  const { t, i18n: page } = useLingui();
+  // A section's name inside the panel's own sentences, lower case as the
+  // library has it, but for German, whose nouns keep their capital.
+  const inSentence = (label: string): string =>
+    page.locale === "de" ? label : label.toLocaleLowerCase(page.locale);
   const navigate = useNavigate();
   const whoRows = useWhoRows();
   const aboutRows = useAboutRows();
@@ -380,7 +391,20 @@ export const EventInspector = ({
       icon={event === null ? undefined : actorIcon(event.actor)}
       sections={sections}
       title={entryWords(event?.action)}
-      words={{ close: t`Close` }}
+      words={{
+        add: t({ message: "Add", context: "a panel section's action" }),
+        addTo: (label) => {
+          const section = inSentence(label);
+          return t`Add ${section}`;
+        },
+        remove: (name) => t`Remove ${name}`,
+        showAll: (label) => {
+          const section = inSentence(label);
+          return t`Show all the ${section}`;
+        },
+        close: t`Close`,
+        views: t`Views`,
+      }}
       {...(onClose === undefined ? {} : { onClose })}
       {...(layout === undefined ? {} : { layout })}
     />

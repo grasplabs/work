@@ -1,15 +1,3 @@
-// ComposerReasoning: how hard the agent thinks, as a quiet control beside the model in a
-// composer's footer (composer.tsx), after Capy's. It shows the current level's word and opens a
-// small menu of the levels, as one choice. Built from Grasp's Dropdown menu parts, opened from the
-// footer's quiet control. Each level carries a scale of dots, one a level, filled up to it, so a
-// level shows where it stands among the rest; the chosen one has a tick at its start, apart from
-// the scale, which stands in the same place on every row. The strongest level (an option's `top`)
-// has a ground of its own: the Composer's dithered working light rises behind its row, faint at
-// rest and full when hovered or chosen; chosen, the light runs round the footer's control.
-//
-//   <ComposerReasoning levels={levels} value={level} onValueChange={setLevel} />
-//
-// Every value is a token (src/tokens).
 "use client";
 
 /* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
@@ -30,6 +18,7 @@ import {
 } from "../dropdown-menu";
 import { menuStyles } from "../dropdown-menu/styles";
 import { focus } from "../focus/focus";
+import { visuallyHidden } from "../hidden/hidden";
 import { ChevronDown, Icon, Tick } from "../icons";
 import { grasp, media } from "../tokens/tokens.stylex";
 import { useComposerDisabled } from "./context";
@@ -40,8 +29,10 @@ import { stopEscape } from "./escape";
 export interface ComposerReasoningOption {
   /** What the change handlers receive. */
   value: string;
-  /** Its word, one a person who is not an engineer understands ("Thorough"). */
+  /** Its word, one a person who is not an engineer understands ("Medium"). */
   label: string;
+  /** One quiet line on what it means, under its name in the list ("Thinks longest"). */
+  note?: string;
   /**
    * The strongest level: its row has a ground of its own, the working light dithered behind it,
    * and chosen, the light runs round the footer's control. One level at most.
@@ -90,8 +81,22 @@ const styles = stylex.create({
     width: grasp.iconSm,
   },
   words: {
+    display: "grid",
     flexGrow: 1,
     minWidth: 0,
+  },
+  // A level's note, under its name: quiet and small.
+  note: {
+    color: grasp.muted,
+    fontSize: grasp.textXs,
+    lineHeight: grasp.textXsLine,
+    fontWeight: grasp.weightRegular,
+  },
+  // The chosen level's tick, at the row's end.
+  tickEnd: {
+    display: "inline-flex",
+    flexShrink: 0,
+    marginInlineStart: "auto",
   },
   // The strongest level's ground: the working light seen through the Composer's dither, rising
   // from the row's end. It is the row's own shape (its radius and corner shape, inherited), so it
@@ -150,7 +155,11 @@ const styles = stylex.create({
   },
 });
 
-/** A level's place among the levels, as dots: `at` of `count` filled. Also the model-and-effort chip's. */
+/**
+ * A level's place among the levels, as dots: `at` of `count` filled.
+ * @deprecated The level is said in a word now (Ruben, 17 November); nothing in the Composer draws
+ * this. Kept until the breaking release's step 9.
+ */
 export const Scale = ({
   at,
   count,
@@ -209,7 +218,39 @@ export interface ComposerReasoningProps {
   "aria-label"?: string;
   /** @deprecated Use `aria-label`. */
   label?: string;
+  /**
+   * At the strongest level (an option's `top`), the working light: behind its row in the menu, and
+   * round the control while it is chosen. Off, the level's word says it alone.
+   * @default false
+   */
+  topLight?: boolean;
 }
+
+/**
+ * A level's words in a list: its name, and its note under it where it has one. A screen reader
+ * hears "Low, Fastest": the comma is said, not shown. With `noteId` the note can describe a control.
+ */
+export const LevelWords = ({
+  level,
+  over = false,
+  noteId,
+}: {
+  level: ComposerReasoningOption;
+  over?: boolean;
+  noteId?: string;
+}) => (
+  <span {...stylex.props(styles.words, over && styles.over)}>
+    <span>{level.label}</span>
+    {level.note !== undefined && level.note !== "" && (
+      <>
+        <span {...stylex.props(visuallyHidden)}>, </span>
+        <span id={noteId} {...stylex.props(styles.note)}>
+          {level.note}
+        </span>
+      </>
+    )}
+  </span>
+);
 
 /** How hard the agent thinks: a word in the footer and a small menu of levels. */
 export const ComposerReasoning = ({
@@ -218,11 +259,11 @@ export const ComposerReasoning = ({
   onValueChange,
   label: labelDeprecated,
   "aria-label": label = labelDeprecated ?? "Reasoning",
+  topLight = false,
 }: ComposerReasoningProps) => {
   const disabled = useComposerDisabled();
-  const at = levels.findIndex((level) => level.value === value);
-  const current = levels[at];
-  const lit = current?.top === true;
+  const current = levels.find((level) => level.value === value);
+  const lit = topLight && current?.top === true;
   return (
     <DropdownMenu>
       <MenuTrigger
@@ -244,9 +285,6 @@ export const ComposerReasoning = ({
             <span aria-hidden="true" {...stylex.props(controlStyles.reach)} />
             {lit ? <LitEdge /> : null}
             <span key={value} {...stylex.props(controlStyles.value)}>
-              {current === undefined ? null : (
-                <Scale at={at} count={levels.length} />
-              )}
               <span {...stylex.props(controlStyles.words)}>
                 {current?.label}
               </span>
@@ -266,7 +304,7 @@ export const ComposerReasoning = ({
               }
             }}
           >
-            {levels.map((level, index) => (
+            {levels.map((level) => (
               <MenuRadioItem
                 key={level.value}
                 value={level.value}
@@ -274,22 +312,19 @@ export const ComposerReasoning = ({
                 className={rowClass}
                 data-top={level.top === true || undefined}
               >
-                {level.top === true ? (
+                {topLight && level.top === true ? (
                   <span
                     aria-hidden="true"
                     data-slot="composer-reasoning-ground"
                     {...stylex.props(styles.ground)}
                   />
                 ) : null}
-                <span {...stylex.props(styles.chosen, styles.over)}>
+                <LevelWords level={level} over />
+                <span {...stylex.props(styles.tickEnd, styles.over)}>
                   <MenuItemIndicator {...stylex.props(menuStyles.icon)}>
                     <Icon icon={Tick} />
                   </MenuItemIndicator>
                 </span>
-                <span {...stylex.props(styles.words, styles.over)}>
-                  {level.label}
-                </span>
-                <Scale at={index} count={levels.length} end over />
               </MenuRadioItem>
             ))}
           </DropdownMenuRadioGroup>

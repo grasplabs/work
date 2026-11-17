@@ -41,7 +41,7 @@ import {
   useAnswerThinking,
   useThinkingStep,
 } from "./answer-thinking.tsx";
-import { AnswerWords } from "./answer-words.tsx";
+import { AnswerWords, useMarkdownWords } from "./answer-words.tsx";
 import { answeredOf } from "./answered.ts";
 import { AskedLine } from "./asked-questions.tsx";
 import { pendingPlan, ThreadPlan } from "./build-progress.tsx";
@@ -1000,6 +1000,7 @@ const AnswerRow = ({
   );
   const steps = activitySteps(stepped, writing, context);
   const thought = thoughtOf(replies, partial);
+  const markdownWords = useMarkdownWords();
   const { words, last, failed, ending, status } = answerStateOf(
     turn,
     steps,
@@ -1048,6 +1049,7 @@ const AnswerRow = ({
       thoughts={
         thought.thoughts === undefined ? undefined : (
           <Markdown
+            {...markdownWords}
             size="sm"
             source={thought.thoughts}
             streaming={status === "thinking"}

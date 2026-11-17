@@ -426,9 +426,10 @@ test("shows the members page only to someone signed in, and never signs them out
   // Trying again shows it's trying, then says so again while core fails.
   const unreachable = page.getByRole("alert");
   await page.getByRole("button", { name: "Try again" }).click();
+  // Busy while it tries: a second press waits for the first.
   await expect(
     page.getByRole("button", { name: "Trying again…" })
-  ).toBeDisabled();
+  ).toHaveAttribute("aria-busy", "true");
   await expect(unreachable).toHaveText(
     "Grasp can't be reached right now. Try again in a moment.",
     { timeout: reconnectMs }

@@ -16,13 +16,14 @@ import {
 } from "@grasp-os/ui/components/empty";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { BookOpenIcon, FileTextIcon, FolderIcon } from "lucide-react";
+import { FileTextIcon, FolderIcon } from "lucide-react";
 
 import type { Session } from "../core.ts";
 import { formatDate } from "../format.ts";
 import { NotFoundState, NotLoadedState } from "../frame/page-states.tsx";
 import { PageHeading } from "../frame/page.tsx";
 import type { Crumb } from "../frame/site-header.tsx";
+import { Doc as DocMark, Folder as FolderMark } from "../grasp/icons/index.ts";
 import { CollectionMarkers } from "../knowledge/collection-markers.tsx";
 import { CopySkill, isSkill } from "../knowledge/copy-skill.tsx";
 import { DocumentView } from "../knowledge/document.tsx";
@@ -246,14 +247,14 @@ const CollectionNotLoaded = ({
   if (collection.state !== "ready") {
     return (
       <NotLoadedState
-        icon={BookOpenIcon}
+        icon={FolderMark}
         notFound={t`Collection not found`}
         page={collection}
       />
     );
   }
   if (open?.state === "missing") {
-    return <NotFoundState icon={FileTextIcon} title={t`Document not found`} />;
+    return <NotFoundState icon={DocMark} title={t`Document not found`} />;
   }
   return open === undefined ? null : <NotLoaded page={open} />;
 };

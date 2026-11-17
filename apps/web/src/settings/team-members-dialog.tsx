@@ -35,6 +35,7 @@ import {
   InputGroupText,
 } from "../grasp/input-group/index.ts";
 import { Input } from "../grasp/input/index.ts";
+import { ScrollArea } from "../grasp/scroll-area/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { addTeamMember, removeTeamMember, renameTeam } from "./team-changes.ts";
 
@@ -49,6 +50,7 @@ import { addTeamMember, removeTeamMember, renameTeam } from "./team-changes.ts";
 const styles = stylex.create({
   fields: { display: "grid", gap: grasp.space4 },
   people: { display: "grid", gap: grasp.space2 },
+  list: { height: "16rem" },
   label: {
     margin: 0,
     fontSize: grasp.textSm,
@@ -90,6 +92,18 @@ const matches = (member: Member, query: string): boolean => {
   return (
     words === "" ||
     `${member.name} ${member.email}`.toLocaleLowerCase().includes(words)
+  );
+};
+
+/** The members, the team's own first, each part by name. */
+const teamFirst = (
+  members: readonly Member[],
+  inTeam: readonly string[]
+): Member[] => {
+  const ours = new Set(inTeam);
+  const rank = (member: Member): number => (ours.has(member.userId) ? 0 : 1);
+  return members.toSorted(
+    (a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name)
   );
 };
 
@@ -139,14 +153,7 @@ export const TeamDialog = ({
   const [problem, setProblem] = useState<string>();
   // The order is set as the dialog opens: the team's people first.
   // oxlint-disable-next-line react/hook-use-state -- fixed as the dialog opens, never set
-  const [order] = useState(() =>
-    members.toSorted(
-      (a, b) =>
-        Number(team?.memberIds.includes(b.userId)) -
-          Number(team?.memberIds.includes(a.userId)) ||
-        a.name.localeCompare(b.name)
-    )
-  );
+  const [order] = useState(() => teamFirst(members, team?.memberIds ?? []));
   const found = order.filter((member) => matches(member, query));
   const count = chosen.length;
   const tick = (userId: string, on: boolean): void => {
@@ -210,42 +217,45 @@ export const TeamDialog = ({
                   value={query}
                 />
               </InputGroup>
-              {found.length === 0 ? (
-                <Empty size="sm">
-                  <EmptyHeader>
-                    <EmptyTitle>{t`No one by that name`}</EmptyTitle>
-                    <EmptyDescription>
-                      {t`Invite them from the people list first.`}
-                    </EmptyDescription>
-                  </EmptyHeader>
-                </Empty>
-              ) : (
-                <ul {...stylex.props(styles.rows)}>
-                  {found.map((member) => (
-                    <li key={member.userId}>
-                      <Field orientation="horizontal">
-                        <Checkbox
-                          checked={chosen.includes(member.userId)}
-                          onCheckedChange={(on) => {
-                            tick(member.userId, on === true);
-                          }}
-                        />
-                        <FieldContent>
-                          <FieldLabel>
-                            <span {...stylex.props(styles.who)}>
-                              <Avatar decorative name={member.name} size="xs">
-                                <AvatarFallback />
-                              </Avatar>
-                              {member.name}
-                            </span>
-                          </FieldLabel>
-                          <FieldDescription>{member.email}</FieldDescription>
-                        </FieldContent>
-                      </Field>
-                    </li>
-                  ))}
-                </ul>
-              )}
+              {/* The list scrolls inside the field, so the dialog keeps its size with forty people. */}
+              <ScrollArea aria-label={t`People to tick`} layout={styles.list}>
+                {found.length === 0 ? (
+                  <Empty size="sm">
+                    <EmptyHeader>
+                      <EmptyTitle>{t`No one by that name`}</EmptyTitle>
+                      <EmptyDescription>
+                        {t`Invite them from the people list first.`}
+                      </EmptyDescription>
+                    </EmptyHeader>
+                  </Empty>
+                ) : (
+                  <ul {...stylex.props(styles.rows)}>
+                    {found.map((member) => (
+                      <li key={member.userId}>
+                        <Field orientation="horizontal">
+                          <Checkbox
+                            checked={chosen.includes(member.userId)}
+                            onCheckedChange={(on) => {
+                              tick(member.userId, on === true);
+                            }}
+                          />
+                          <FieldContent>
+                            <FieldLabel>
+                              <span {...stylex.props(styles.who)}>
+                                <Avatar decorative name={member.name} size="xs">
+                                  <AvatarFallback />
+                                </Avatar>
+                                {member.name}
+                              </span>
+                            </FieldLabel>
+                            <FieldDescription>{member.email}</FieldDescription>
+                          </FieldContent>
+                        </Field>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </ScrollArea>
               {/* oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- not every screen reader treats <output> as a live region */}
               <p role="status" {...stylex.props(styles.count)}>
                 {t`${plural(count, { one: "# person in the team", other: "# people in the team" })}`}

@@ -86,10 +86,11 @@ export interface MarkdownProps {
   pace?: PacedOptions["pace"];
   /**
    * `md` for an answer in a thread; `sm` for words in a card or a panel (an agent's instructions,
-   * a note), a step smaller, its headings too.
+   * a note), a step smaller, its headings too; `xs` a step smaller again, for a note beside the
+   * answer (an agent's thoughts).
    * @default "md"
    */
-  size?: "md" | "sm";
+  size?: "md" | "sm" | "xs";
   /**
    * Fenced code past this many lines is folded under Show more, as Code block's `maxLines`.
    * @default 18
@@ -160,6 +161,8 @@ interface Context {
   tableLabel: string;
   /** The smaller size, for words in a card. */
   small: boolean;
+  /** A step smaller again (`size="xs"`). */
+  xsmall: boolean;
   /**
    * Written here, word by word: its lines break where they fill, never weighed again as a word
    * comes (pretty and balanced wrapping move earlier words to a new line as the last line grows).
@@ -432,7 +435,16 @@ const Inline = ({
       );
     }
     case "inlineCode": {
-      return <code {...stylex.props(styles.inlineCode)}>{node.value}</code>;
+      return (
+        <code
+          {...stylex.props(
+            styles.inlineCode,
+            context.xsmall && styles.xsmallCode
+          )}
+        >
+          {node.value}
+        </code>
+      );
     }
     case "break": {
       return <br />;
@@ -579,6 +591,7 @@ const Heading = ({
         styles.heading,
         levelStyles[level],
         context.small && small,
+        context.xsmall && styles.xsmallHeading,
         context.greedy && styles.greedy
       )}
     >
@@ -898,6 +911,7 @@ export const Markdown = ({
     notDoneLabel,
     tableLabel,
     small: size === "sm",
+    xsmall: size === "xs",
     greedy: written,
     seen: new Map(),
     tableNames,
@@ -909,7 +923,11 @@ export const Markdown = ({
       ref={setRoot}
       data-slot="markdown"
       aria-busy={live || undefined}
-      {...stylex.props(styles.root, size === "sm" && styles.small)}
+      {...stylex.props(
+        styles.root,
+        size === "sm" && styles.small,
+        size === "xs" && styles.xsmall
+      )}
     >
       {placed.map(({ node }, index) => (
         // A block keeps its place by its order, so one that is already shown never fades in again.
