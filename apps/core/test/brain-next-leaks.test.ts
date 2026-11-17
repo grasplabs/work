@@ -2,6 +2,7 @@ import {
   brainOf,
   exactCandidatesMax,
   onlyInOwnStore,
+  personalBrainOf,
   recallBudgetMax,
 } from "@grasp-os/brain-next/contract";
 import type { Access } from "@grasp-os/brain-next/contract";
@@ -70,7 +71,7 @@ import {
   shareWorkflowResource,
   unshareWorkflowResource,
 } from "../src/workflow-members.ts";
-import { codeStep, says } from "./agent-chat.ts";
+import { codeStep, says, toolStep } from "./agent-chat.ts";
 import { published, requestGranted } from "./apps.ts";
 import { brainModules } from "./brain-next-modules.ts";
 import {
@@ -331,6 +332,7 @@ const readingSurfaces = new Set([
   "core memoriesAs",
   "core contestedAs",
   "core ownEntityAs",
+  "core ownEntityIdAs",
   "memoriesRpc entities",
   "memoriesRpc memories",
   "memoriesRpc contested",
@@ -346,6 +348,7 @@ const readingSurfaces = new Set([
   "store findEntities",
   "store readEntityNames",
   "store readEntity",
+  "store ownEntity",
   "store readCard",
   "store findPassages",
   "store listContested",
@@ -4180,6 +4183,91 @@ describe(
         groupRecalled: true,
         afterGroup: { groupCompany: false, directCompany: false, own: false },
         afterDirect: { company: true, own: true },
+      });
+    });
+
+    it("keeps what a person says in their Teams direct message in their own store alone: never in the shared store, never for another reader", async () => {
+      // The agent remembers in a direct message as in the person's own
+      // chat in Grasp (GRA-1920): their word, in their own store, which
+      // nobody else reads, a team-mate in their own direct message
+      // included.
+      await chatAgentReadsBrain();
+      const depot = `d${unique()}`;
+      const word = markerWord();
+      const statement = `Depot ${depot} opens at ${word}`;
+      const ann = await teamsMember(
+        idp,
+        toolStep("remember", {
+          about: { kind: "customer", name: `Depot ${depot}` },
+          type: "fact",
+          statement,
+          quote: statement,
+        }),
+        says(JSON.stringify({ theirs: true })),
+        says("Noted."),
+        says("I don't know.")
+      );
+      const ben = await memberAnsweredBy(idp, ann.provider);
+      const team = `team:${await newTeam(ann.userId, ben.userId)}`;
+      await post(
+        messageFrom(ann.teams, { text: `${statement}, for the record.` })
+      );
+      const own = personalBrainOf(
+        inJurisdiction(env, env.BRAIN_STORE),
+        ann.userId
+      );
+      const annReads = { person: ann.userId, groups: [] };
+      const { entities: ownEntities } = await own.findEntities({
+        reader: annReads,
+        name: `Depot ${depot}`,
+      });
+      const ownKept = await Promise.all(
+        ownEntities.map(async ({ id }) => {
+          const { memories } = await own.readMemories({
+            entity: id,
+            reader: annReads,
+          });
+          return memories.map((memory) => memory.statement);
+        })
+      );
+      /**
+       * Whether the shared store gives `person`, in the team and the
+       * company, anything holding the marker or naming the depot: what
+       * other tests keep there may answer too, so never a count.
+       */
+      const sharedGives = async (person: string) => {
+        const reader = { person, groups: [team, "company"] };
+        const { items, memories } = await sharedStore().recall({
+          question: `${word} depot ${depot}`,
+          reader,
+          budget: { tokens: recallBudgetMax },
+        });
+        const { entities } = await sharedStore().findEntities({
+          reader,
+          name: `Depot ${depot}`,
+        });
+        const given = JSON.stringify([...items, ...memories, ...entities]);
+        return given.includes(word) || given.includes(depot);
+      };
+      const before = ann.provider.requests.length;
+      await post(
+        messageFrom(ben.teams, { text: `When does depot ${depot} open?` })
+      );
+      const toBen = ann.provider.requests.slice(before);
+
+      expect({
+        ownKept: ownKept.flat(),
+        sharedGives: {
+          ann: await sharedGives(ann.userId),
+          ben: await sharedGives(ben.userId),
+        },
+        benAnswered: toBen.length > 0,
+        benGotIt: JSON.stringify(toBen.map(({ body }) => body)).includes(word),
+      }).toStrictEqual({
+        ownKept: [statement],
+        sharedGives: { ann: false, ben: false },
+        benAnswered: true,
+        benGotIt: false,
       });
     });
 

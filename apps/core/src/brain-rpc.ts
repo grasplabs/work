@@ -643,6 +643,9 @@ const visionOf = (
   version: kickoff === null ? 0 : 1,
 });
 
+/** What starts the id of each team the kickoff names (`kickoffTeamsOf`). */
+const kickoffTeamIdPrefix = `${onboardingIdPrefix}kt-`;
+
 /**
  * The teams the kickoff named, each with the size the sponsor gave it,
  * as every member reads them (onboarding/kickoff-company.ts). Each one's
@@ -970,6 +973,40 @@ const witnessed = (teams: readonly Team[], source: Source): Source => {
 };
 
 /**
+ * `records` without the kickoff's teams it no longer names: one a
+ * replaced kickoff named, or an earlier release's (its record removed by
+ * migration 0258), named by an admin's source, tool or statement. Such a
+ * team is no one's to read, so it is left out, never shown by its bare
+ * id, as its counts and stakeholders already are (`teamsOf`).
+ */
+const withoutGoneKickoffTeams = (
+  records: HeldRecords,
+  kickoff: readonly Team[]
+): HeldRecords => {
+  const named = new Set(kickoff.map(({ id }) => id));
+  const kept = (teamIds: readonly string[]): string[] =>
+    teamIds.filter(
+      (id) => !id.startsWith(kickoffTeamIdPrefix) || named.has(id)
+    );
+  return {
+    ...records,
+    sources: records.sources.map((source) =>
+      source.teamIds === undefined
+        ? source
+        : { ...source, teamIds: kept(source.teamIds) }
+    ),
+    tools: records.tools.map((tool) => ({
+      ...tool,
+      teamIds: kept(tool.teamIds),
+    })),
+    statements: records.statements.map((statement) => ({
+      ...statement,
+      teamIds: kept(statement.teamIds),
+    })),
+  };
+};
+
+/**
  * What every read of the brain starts from, as `person` may read it: the
  * onboarding (an admin's alone), the brain's records, and its teams.
  */
@@ -1002,7 +1039,7 @@ const readBrainCore = async (
   return {
     facts,
     kickoff,
-    records,
+    records: withoutGoneKickoffTeams(records, kickoffTeams),
     teams: teamsOf(roster, kickoffTeams, records),
   };
 };

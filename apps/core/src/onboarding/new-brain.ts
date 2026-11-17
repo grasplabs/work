@@ -26,9 +26,11 @@ import type { OwedErasure } from "./store.ts";
 //   for the hand-over (brain-hand-overs.ts), which reads it here
 //   (`claimOf`) when it runs: a team's, never a person's.
 // - The kickoff (`kickoff:<id>`, GRA-1748): what every member reads of it
-//   (kickoff-company.ts), readable by everyone, a new version at each save
-//   and answer, under an id minted for each kickoff. Noted for the
-//   hand-over like a claim, and read here when it runs (`kickoffOf`).
+//   (kickoff-company.ts), readable by everyone, under an id minted for
+//   each kickoff. Noted for the hand-over like a claim, and read here
+//   when it runs (`kickoffOf`): a version is what it reads then, so saves
+//   and answers between two hand-overs are one version, and nothing
+//   anyone could read is lost.
 //   The admin's delete erases it (`eraseOwedKickoffs`), every version.
 // - The company's teams (`roster:teams-<n>`, GRA-1748): each confirmed
 //   team taking part, as the admin described it, and its head count, never
