@@ -198,7 +198,7 @@ describe("what judging quotes costs", () => {
       found: Math.abs(after.found - before.found) <= seekMargin,
       card: Math.abs(after.card - before.card) <= seekMargin,
     }).toStrictEqual({ memories: true, found: true, card: true });
-  }, 60_000);
+  });
 
   it("reads the same few rows more for each out memory, however many and however many others the store holds", async () => {
     const { stub, rowsReadBy } = await countedStore();

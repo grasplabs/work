@@ -18,10 +18,10 @@ import { allEvents } from "./audit-events.ts";
 import { removalsFailingOnce } from "./brain-erasures-failing.ts";
 import { mockIdp } from "./idp.ts";
 import {
+  aloneInTheStore,
   answering,
   answeringWith as answeringWithRequests,
   approveAgreed,
-  holdAlarm,
   onLink,
   openLinkAs,
   signedInAs,
@@ -440,7 +440,7 @@ describe(
     // Each test draws step by step, as the alarm would: the store's own
     // alarm, which agreeing and purging set, would otherwise race it for
     // the drawing and the provider's replies (`holdAlarm`).
-    beforeEach(holdAlarm);
+    beforeEach(aloneInTheStore);
 
     it.each([
       {
@@ -678,7 +678,7 @@ describe(
   "what was drawn, as a work is drawn again",
   { timeout: 120_000 },
   () => {
-    beforeEach(holdAlarm);
+    beforeEach(aloneInTheStore);
 
     it("drops a work's checked difference when the work is drawn again", async () => {
       const word = sentinelOf();

@@ -482,47 +482,43 @@ describe("a company's export, round trip", () => {
     empty = await copyOf(shared());
   });
 
-  it(
-    "answers every reader alike after an export restored into an empty store, for stores made by a fixed set of seeds",
-    { timeout: 60_000 },
-    async () => {
-      const outcomes: string[] = [];
-      const made = new Set<Feature>();
-      for (const seed of seeds) {
-        // oxlint-disable-next-line no-await-in-loop -- one store at a time
-        await restore(shared(), empty);
-        // oxlint-disable-next-line no-await-in-loop -- one store at a time
-        const store = await madeBy(seed);
-        for (const feature of store.made) {
-          made.add(feature);
-        }
-        // oxlint-disable-next-line no-await-in-loop -- one store at a time
-        const before = await everyRead(shared(), store.asked);
-        // oxlint-disable-next-line no-await-in-loop -- one store at a time
-        const { id } = await shared().startExport("test");
-        // oxlint-disable-next-line no-await-in-loop -- one store at a time
-        const exported = await exportSettled(shared, id);
-        const restored =
-          exported === "done"
-            ? // oxlint-disable-next-line no-await-in-loop -- one store at a time
-              await restoredAfterLoss(shared, id, empty)
-            : undefined;
-        // oxlint-disable-next-line no-await-in-loop -- one store at a time
-        const after = await everyRead(shared(), store.asked);
-        const differ = differences(before, after);
-        if (exported !== "done" || restored !== "done" || differ.length > 0) {
-          outcomes.push(
-            `seed ${seed}: export ${exported}, restore ${restored}, reads that differ: ${differ.join("; ")}`
-          );
-        }
+  it("answers every reader alike after an export restored into an empty store, for stores made by a fixed set of seeds", async () => {
+    const outcomes: string[] = [];
+    const made = new Set<Feature>();
+    for (const seed of seeds) {
+      // oxlint-disable-next-line no-await-in-loop -- one store at a time
+      await restore(shared(), empty);
+      // oxlint-disable-next-line no-await-in-loop -- one store at a time
+      const store = await madeBy(seed);
+      for (const feature of store.made) {
+        made.add(feature);
       }
-
-      expect({
-        outcomes,
-        unmade: features.filter((feature) => !made.has(feature)),
-      }).toStrictEqual({ outcomes: [], unmade: [] });
+      // oxlint-disable-next-line no-await-in-loop -- one store at a time
+      const before = await everyRead(shared(), store.asked);
+      // oxlint-disable-next-line no-await-in-loop -- one store at a time
+      const { id } = await shared().startExport("test");
+      // oxlint-disable-next-line no-await-in-loop -- one store at a time
+      const exported = await exportSettled(shared, id);
+      const restored =
+        exported === "done"
+          ? // oxlint-disable-next-line no-await-in-loop -- one store at a time
+            await restoredAfterLoss(shared, id, empty)
+          : undefined;
+      // oxlint-disable-next-line no-await-in-loop -- one store at a time
+      const after = await everyRead(shared(), store.asked);
+      const differ = differences(before, after);
+      if (exported !== "done" || restored !== "done" || differ.length > 0) {
+        outcomes.push(
+          `seed ${seed}: export ${exported}, restore ${restored}, reads that differ: ${differ.join("; ")}`
+        );
+      }
     }
-  );
+
+    expect({
+      outcomes,
+      unmade: features.filter((feature) => !made.has(feature)),
+    }).toStrictEqual({ outcomes: [], unmade: [] });
+  });
 
   it("keeps a thread a thread through an export, and judges a document's quotes again at its next version", async () => {
     await restore(shared(), empty);

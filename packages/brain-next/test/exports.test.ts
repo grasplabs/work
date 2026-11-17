@@ -649,7 +649,7 @@ describe("exports and restores", () => {
     emptyShared = await copyOf(shared());
   });
 
-  describe("a company's export", { timeout: 60_000 }, () => {
+  describe("a company's export", () => {
     // What one person alone may read is never in the shared store, whose
     // export this is: it refuses it (personal.test.ts).
     it("holds every version a group may read, with its readers and history, and nothing no one known may read (threats 4, 5)", async () => {
@@ -1038,7 +1038,7 @@ describe("exports and restores", () => {
     });
   });
 
-  describe("a restore of a company export", { timeout: 60_000 }, () => {
+  describe("a restore of a company export", () => {
     it("brings it back into an empty store as it was, leaving out what the ledger names (threats 7, 9)", async () => {
       const group = `team:${unique()}`;
       const kept = `test:${unique()}`;
@@ -2523,7 +2523,7 @@ describe("exports and restores", () => {
   // GRA-1840: memories, entities, names, confirmations, extraction marks,
   // change keys and the write stamp in an export, and back. The threat
   // model is on GRA-1840; each test names the threats it holds.
-  describe("memories in a company's export", { timeout: 60_000 }, () => {
+  describe("memories in a company's export", () => {
     /** Exports the shared store, loses its storage, and restores the export: done. */
     const exportedAndRestored = async (
       between: () => Promise<void> = async () => {
