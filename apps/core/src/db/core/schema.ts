@@ -1011,8 +1011,8 @@ export const blueprints = sqliteTable(
 /**
  * Where an App created from a blueprint came from (src/app-blueprints.ts):
  * the blueprint, the version of its App a marked one was (null for a
- * built-in), the tree it was copied from, and that tree's code
- * (`codeIdentity`), stored under the App as a version's tree is, for an
+ * built-in), the tree it was copied from, and that tree's code as it was
+ * taken, stored under the App as a version's tree is, for an
  * update to be merged over. Written in the batch that creates the App
  * from the blueprint, and moved on to a built-in's newer code only in the
  * batch that commits an update a builder accepted: unlike
@@ -1055,9 +1055,9 @@ export const appVersions = sqliteTable(
     parent: integer(),
     tree: text().notNull(),
     /**
-     * The hash of the version's code (`codeIdentity`, apps.ts): its files
-     * but AGENTS.md, which agents write and nothing builds or runs. Null
-     * for a version committed before the column, which is no blueprint's.
+     * The hash of the version's code: its tree, the whole of its code.
+     * Null for a version committed before the column, which is no
+     * blueprint's.
      */
     code: text(),
     /**
@@ -3412,6 +3412,11 @@ export const agents = sqliteTable(
      * theirs the same.
      */
     ownerId: text("owner_id"),
+    /**
+     * When its owner offered a person's own agent to the company, for its
+     * admins to take on (agent-builder.ts, `adoptAgent`); null for none.
+     */
+    offeredAt: timestamp("offered_at"),
     madeBy: text("made_by").notNull(),
     madeAt: timestamp("made_at").notNull(),
     changedBy: text("changed_by").notNull(),
@@ -5874,7 +5879,7 @@ export const brainRecords = sqliteTable(
      * When the record stopped counting: what a replaced kickoff transcript
      * gave the brain, left out of `brain.read`. Nothing sets it any more
      * (GRA-1748: the kickoff is a source of the new Brain, and its rows
-     * here were removed by migration 0258); dropped in a later release.
+     * here were removed by migration 0259); dropped in a later release.
      */
     retiredAt: timestamp("retired_at"),
     /**

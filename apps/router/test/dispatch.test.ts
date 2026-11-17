@@ -70,6 +70,7 @@ const deliver = async (to: string): Promise<Disposition> => {
     }),
     headers: new Headers(),
     rawSize: bytes.byteLength,
+    canBeForwarded: true,
     setReject: (reason) => {
       disposition.rejected = reason;
     },

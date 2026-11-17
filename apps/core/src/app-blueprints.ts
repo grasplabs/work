@@ -35,7 +35,6 @@ import type { BuiltinBlueprint } from "#blueprints";
 
 import { versionMadeCurrent } from "./access-revocations.ts";
 import { appsFoundBy, stillOpenTo } from "./app-access.ts";
-import { appMemoryPath } from "./app-agents-file.ts";
 import { generatedPaths, withGeneratedCode } from "./app-definition.ts";
 import { refuseAppWorkflows } from "./app-no-workflows.ts";
 import type { AppRow, StoredDefinition, VersionRow } from "./apps.ts";
@@ -99,24 +98,23 @@ import {
 // Either way the new App is theirs, with a fresh ID, and core records
 // where it came from (`app_origins`: the blueprint, a marked one's
 // version, the tree it was copied from), which grants nothing. Its first
-// version is the blueprint's code, but
-// for its AGENTS.md, and it asks for what the blueprint declares, each
-// request waiting for an admin: a built-in's `blueprint.json`, or what the
-// App asked for or was given as the version was marked, of the kinds
-// that name the same thing for whoever creates from it (`declarableOf` in
-// permissions.ts). Its builders ask for the rest themselves. Nothing else
+// version is the blueprint's code, and it asks for what the blueprint
+// declares, each request waiting for an admin: a built-in's
+// `blueprint.json`, or what the App asked for or was given as the version
+// was marked, of the kinds that name the same thing for whoever creates
+// from it (`declarableOf` in permissions.ts). Its builders ask for the
+// rest themselves. Nothing else
 // comes with it: none of the App's data (its storage, its workflows'
 // state, its runs), settings (parameter values), members or error log.
 // A marked blueprint's code is its version's tree, which never changes.
 //
 // The copy doesn't inherit what its source may have read
 // (app-provenance.ts): it has no sources until an admin grants its
-// requests, so whoever it is shared with meanwhile passes the check. So
-// its AGENTS.md, which the source's agents write from what they read, is
-// not copied but a stub naming the blueprint, for the copy's builders and
-// agents to write their own. Every other file a builder stored in the
-// code is copied as it is, taken to hold no data: builders must not put
-// data into code.
+// requests, so whoever it is shared with meanwhile passes the check.
+// Every file a builder stored in the code is copied as it is, taken to
+// hold no data: builders must not put data into code. What chats about
+// the App start with is its instruction file in the Brain, the source's
+// own, which is never copied (instruction-files.ts).
 //
 // A built-in may also ship independent workflows (`workflows`, from the
 // release's `blueprint.json`): each App created from it gets one of each,
@@ -175,10 +173,6 @@ import {
 // creating asks for permissions, which staff never do for a client.
 
 type Row = typeof blueprints.$inferSelect;
-
-/** A copy's AGENTS.md in place of its blueprint's (see above). */
-const copiedMemory = (name: string): string =>
-  `Created from the blueprint ${name}. Write what this App does here.\n`;
 
 /**
  * Refuses Grasp staff: which of a client's Apps others copy, and copying
@@ -465,7 +459,7 @@ export const unmarkBlueprint = async (
 
 /**
  * Creates an App of `by`'s own from the blueprint `id`: its code as the
- * App's first version (its AGENTS.md a stub), and requests for what it
+ * App's first version, and requests for what it
  * declares. All of it lands in one batch, or none of it (the files,
  * stored first, are only named once it lands), and only while the
  * blueprint is still there and, for a marked one, `by` still has a role
@@ -474,7 +468,7 @@ export const unmarkBlueprint = async (
  * `by` passes that App's check once, before anything is read, what it
  * read included (`appFor`). The batch's guard repeats the role, not what
  * it read, which SQL can't express; nor does it need to: the copy holds
- * only code (its AGENTS.md a stub, above) and requests that wait for an
+ * only code (above) and requests that wait for an
  * admin, declared as the version was marked, so an App that reads more
  * after the check adds nothing to the copy.
  */
@@ -515,15 +509,8 @@ export const createFromBlueprint = async (
   // its build checks).
   withGeneratedCode(files, definition);
   // The blueprint's code, kept under the copy (`app_origins.code`): what an
-  // update of the blueprint is merged over. Its AGENTS.md isn't, as it
-  // isn't copied (above).
-  const taken = new Map(files);
-  taken.delete(appMemoryPath);
-  const takenCode = await versionTree(taken);
-  // Replaced, not added: the copy has as many files as the blueprint.
-  if (files.has(appMemoryPath)) {
-    files.set(appMemoryPath, copiedMemory(blueprint.name));
-  }
+  // update of the blueprint is merged over.
+  const takenCode = await versionTree(files);
   const app = appIdSchema.parse(crypto.randomUUID());
   // Its requests checked before anything is stored: one the blueprint may
   // no longer declare refuses the copy with nothing left behind in R2.
@@ -605,7 +592,7 @@ export const createFromBlueprint = async (
     version: 1,
     parent: null,
     tree: tree.tree,
-    // The blueprint's code: the copy's AGENTS.md is its own.
+    // The blueprint's code, which is the copy's whole.
     code: takenCode.tree,
     definition: tree.definition.text,
     definitionHash: tree.definition.hash,
@@ -821,9 +808,8 @@ const renamedAsTheirs = (
  * (the App's latest version's) from `base` (what the App last took of the
  * blueprint), file by file and the definition as a whole: what only one
  * side changed comes from that side, and what both changed (to different
- * content) stays as the App has it, listed as a conflict. AGENTS.md is
- * the App's own, whatever the blueprint holds. The config and schema
- * aren't merged: they are generated from the merged definition, as in
+ * content) stays as the App has it, listed as a conflict. The config
+ * and schema aren't merged: they are generated from the merged definition, as in
  * every version; a definition both changed is a conflict of its own
  * (`definitionConflict`), the code it generates alike or not.
  */
@@ -844,10 +830,11 @@ const mergeOver = (
       continue;
     }
     const mine = ours.files.get(path);
-    const { kept, conflict } =
-      path === appMemoryPath
-        ? { kept: mine, conflict: false }
-        : threeWay(base.files.get(path), mine, theirs.files.get(path));
+    const { kept, conflict } = threeWay(
+      base.files.get(path),
+      mine,
+      theirs.files.get(path)
+    );
     if (conflict) {
       conflicts.push(path);
     }
@@ -897,8 +884,7 @@ interface PendingUpdate {
   latest: VersionRow;
   ours: Map<string, string>;
   /**
-   * The blueprint's code now, without its AGENTS.md, and its definition:
-   * the next base.
+   * The blueprint's code now, and its definition: the next base.
    */
   theirs: MergeSide;
   merged: Merged;
@@ -952,9 +938,7 @@ const pendingUpdate = async (
     readStored(latestRow),
     readStored(blueprint),
   ]);
-  const theirs = new Map(blueprintNow);
-  theirs.delete(appMemoryPath);
-  const theirSide = { files: theirs, definition: theirsDefinition };
+  const theirSide = { files: blueprintNow, definition: theirsDefinition };
   return {
     app: found.id,
     origin,
@@ -1097,7 +1081,7 @@ export const acceptBlueprintUpdate = async (
     version: latest.version + 1,
     parent: latest.version,
     tree: tree.tree,
-    code: tree.code,
+    code: tree.tree,
     definition: tree.definition.text,
     definitionHash: tree.definition.hash,
     files: files.size,

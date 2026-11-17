@@ -55,7 +55,6 @@ import {
   stillBuiltBy,
 } from "./app-access.ts";
 import type { Person } from "./app-access.ts";
-import { appMemoryPath, requireWithinLimit } from "./app-agents-file.ts";
 import {
   generatedPaths,
   functionIdsOf,
@@ -488,24 +487,6 @@ const checkLimits = (
   }
 };
 
-/**
- * `app.agents_too_large` if the App's AGENTS.md is over its limit,
- * and only if it also grew, as with `checkLimits`. No chat reads it any
- * more (instruction-files.ts holds an App's file); it goes from the code
- * with GRA-1834.
- */
-const checkMemory = (
-  before: string | undefined,
-  after: string | undefined
-): void => {
-  const grew =
-    after !== undefined &&
-    (before === undefined || after.length > before.length);
-  if (grew) {
-    requireWithinLimit(after);
-  }
-};
-
 /** A version's files as stored: canonical JSON, and its SHA-256. */
 interface Tree {
   tree: string;
@@ -522,21 +503,6 @@ export const versionTree = async (
   checkLimits(files);
   const json = canonicalJson(Object.fromEntries(files));
   return { tree: await sha256Hex(json), json };
-};
-
-/**
- * The hash of `files`' code: their tree without AGENTS.md, which nothing
- * builds, runs or (since instruction files moved to the new Brain) loads
- * into a chat; it goes from the code with GRA-1834. Two versions of
- * the same code have the same hash, whatever their AGENTS.md: what the
- * release vouches for in a built-in blueprint (app-blueprints.ts).
- */
-export const codeIdentity = async (
-  files: ReadonlyMap<string, string>
-): Promise<string> => {
-  const code = new Map(files);
-  code.delete(appMemoryPath);
-  return await sha256Hex(canonicalJson(Object.fromEntries(code)));
 };
 
 /**
@@ -673,9 +639,8 @@ export const releaseFunctionsOf = async (
   return functionIdsOf(definition, release.app);
 };
 
-/** A version as it is stored: its tree, the hash of its code, its definition. */
+/** A version as it is stored: its tree (the hash of its code) and its definition. */
 export interface StoredVersion extends Tree {
-  code: string;
   definition: StoredDefinition;
 }
 
@@ -829,7 +794,6 @@ export const storedVersion = async (
   );
   return {
     ...(await versionTree(files)),
-    code: await codeIdentity(files),
     definition: await storedDefinition(defined),
   };
 };
@@ -1066,9 +1030,8 @@ export const readFiles = async (
  * Applies changes (`FileChanges`: new content by path, or null to delete a
  * file) to an App's `files`, its latest version's or a chat's draft of it
  * (agent-builds.ts), with the config and schema `definition` generates,
- * refused as a whole when they would be over the App's limits, hold
- * paths that can't both exist, or an AGENTS.md over its limit. The
- * changes, checked.
+ * refused as a whole when they would be over the App's limits, or hold
+ * paths that can't both exist. The changes, checked.
  */
 export const applyChanges = (
   files: Map<string, string>,
@@ -1080,7 +1043,6 @@ export const applyChanges = (
     appErrors.parse("app.invalid", fileChangesSchema, input)
   );
   const before = sizeOf(files);
-  const agentsBefore = files.get(appMemoryPath);
   const added = new Set(
     changes.flatMap(([path, content]) =>
       content === null || files.has(path) ? [] : [path]
@@ -1109,7 +1071,6 @@ export const applyChanges = (
   checkLimits(files, before);
   withGeneratedCode(files, definition);
   checkPaths(files.keys(), added);
-  checkMemory(agentsBefore, files.get(appMemoryPath));
   const generated = [...generatedPaths].flatMap((path): [string, string][] => {
     const content = files.get(path);
     return content === undefined || content === submitted.get(path)
@@ -1186,7 +1147,8 @@ export const commitDraft = async (
     version,
     parent,
     tree,
-    code: stored.code,
+    // Its code's hash: its tree's, the whole of its code.
+    code: tree,
     definition: stored.definition.text,
     definitionHash: stored.definition.hash,
     files: files.size,

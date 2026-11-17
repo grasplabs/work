@@ -642,7 +642,7 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
       },
     ]);
     // The next kickoff names Finance alone: Legal is gone, as an earlier
-    // release's kickoff teams are since migration 0258.
+    // release's kickoff teams are since migration 0259.
     await bringInKickoff(
       {},
       {
