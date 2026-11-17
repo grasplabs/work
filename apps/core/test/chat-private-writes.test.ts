@@ -1,5 +1,4 @@
 import { personalBrainOf, recallLimit } from "@grasp-os/brain-next/contract";
-import { agentErrors } from "@grasp-os/shared/agent";
 import { heldAppCallsPage } from "@grasp-os/shared/chat";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { runInDurableObject } from "cloudflare:test";
@@ -8,7 +7,6 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { callAppFunction } from "../src/app-functions.ts";
-import { loadRelease } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
 import type { RecalledItem } from "../src/brain-next.ts";
 import {
@@ -29,14 +27,21 @@ import {
   says,
   toolStep,
 } from "./agent-chat.ts";
-import { testApp } from "./app-definitions.ts";
-import { commitApp, requestGranted } from "./apps.ts";
+import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { saveInstructions } from "./instruction-saves.ts";
 import { mailConnection, mailWithSearch } from "./mail-connection.ts";
 import { fakeProvider } from "./model-provider.ts";
 import type { ProviderReply } from "./model-provider.ts";
+import {
+  callOf,
+  liveNotes,
+  noteTitles,
+  ownSource,
+  word,
+  writesNote,
+} from "./notes-app.ts";
 import { leave } from "./runs.ts";
 import { outcome, signedInApi, unique } from "./sign-in.ts";
 
@@ -55,78 +60,6 @@ const idp = mockIdp();
 
 /** Signing people in and whole turns take a while on CI. */
 const slow = { timeout: 120_000 };
-
-const notesFiles = testApp(
-  {
-    name: "Notes",
-    tables: {
-      notes: {
-        fields: { title: "v.string().min(1).max(200)" },
-        access: { read: "appMembers", write: "appMembers" },
-      },
-    },
-  },
-  {
-    "server/notes.ts": `import { v } from "@grasp-os/sdk";
-import { action, mutation, query } from "@server/_generated/server";
-
-export const create = mutation({
-  args: { title: v.string().min(1).max(200) },
-  returns: v.id("notes"),
-  handler: async (ctx, args) => await ctx.db.insert("notes", args),
-});
-
-export const titles = query({
-  args: {},
-  returns: v.array(v.string()),
-  handler: async (ctx) => (await ctx.db.query("notes").take(100)).map((note) => note.title),
-});
-
-/**
- * Says it has started (a "started" note, committed at once), waits until
- * a "go" note appears, then writes: the test acts between the two.
- */
-export const holdThenCreate = action({
-  args: { title: v.string().min(1).max(200) },
-  returns: v.null(),
-  handler: async (ctx, args) => {
-    await ctx.runMutation(create, { title: "started" });
-    for (let polls = 0; polls < 100; polls += 1) {
-      const seen = await ctx.runQuery(titles, {});
-      if (seen.includes("go")) {
-        await ctx.runMutation(create, args);
-        return null;
-      }
-      await new Promise((resolve) => setTimeout(resolve, 100));
-    }
-    return null;
-  },
-});
-`,
-  }
-);
-
-/** A word no other test's sources hold: letters only. */
-const word = () =>
-  `zq${crypto
-    .randomUUID()
-    .replaceAll(/[^a-f]/gu, "")
-    .slice(0, 12)}`;
-
-/** The call of `path` with `input`, as the chat's code writes it. */
-const callOf = (release: Release, path: string, input: unknown): string =>
-  JSON.stringify({
-    reference: { name: path, kind: release.app.functions[path]?.kind },
-    args: input,
-  });
-
-/** A Notes App of `builder`'s, live, and the release that runs. */
-const liveNotes = async (builder: Awaited<ReturnType<typeof signedInApi>>) => {
-  const { id: app } = await builder.api.apps.create({ name: "Notes" });
-  const { version } = await commitApp(builder.api, app, notesFiles);
-  await builder.api.versions.rollback({ kind: "app", id: app }, version);
-  return { app, release: await loadRelease(env, app, version) };
-};
 
 /**
  * A builder's Notes App, live, and a chat in its own Workspace whose
@@ -171,17 +104,8 @@ const notesChat = async (
   });
   const { chat, ask } = await chats.newChat();
   /** The App's notes, as its builder's page reads them. */
-  const titles = async (): Promise<string[]> => {
-    const { result } = await callAppFunction(
-      env,
-      { userId: builder.userId, role: "builder", teams: [] },
-      app,
-      callOf(release, "notes.titles", {})
-    );
-    return z
-      .object({ ok: z.literal(true), value: z.array(z.string()) })
-      .parse(result).value;
-  };
+  const titles = async (): Promise<string[]> =>
+    await noteTitles(builder.userId, app, release);
   return {
     builder,
     admin,
@@ -194,16 +118,6 @@ const notesChat = async (
     ask,
     titles,
   };
-};
-
-/** Adds `text` to `personId`'s own store: readable by them alone. */
-const ownSource = async (personId: string, text: string): Promise<void> => {
-  await addSource(env, {
-    source: { producer: "upload", id: crypto.randomUUID() },
-    change: crypto.randomUUID(),
-    text,
-    readers: { kind: "owner", personId },
-  });
 };
 
 /** Adds `text` to the shared store: readable by everyone. */
@@ -223,25 +137,6 @@ const keyOf = ({ source, version, position, text }: RecalledItem): string =>
 /** `items`' citations and texts in any order. */
 const inAnyOrder = (items: readonly RecalledItem[]): string[] =>
   items.map((item) => keyOf(item)).toSorted();
-
-/** A code step writing a note titled `title` to `app` (with `path`): what the call answered. */
-const writesNote = (
-  app: string,
-  release: Release,
-  title: string,
-  path = "notes.create"
-) =>
-  codeStep(
-    `export default async (self, env) => {
-      try {
-        return await env.apps.call(${JSON.stringify(app)}, new Blob([${JSON.stringify(
-          callOf(release, path, { title })
-        )}]).stream());
-      } catch (error) {
-        return { refused: error.code ?? error.message, message: error.message };
-      }
-    };`
-  );
 
 const answeredSchema = z.union([
   z.object({ held: z.object({ id: z.uuid(), expiresAt: z.string() }) }),
@@ -344,6 +239,70 @@ const confirmedAsShown = async ({
   await outcome(
     person.api.chats.confirmHeldCall(chat.id, held.id, held.requestHash)
   );
+
+/** A code step searching `binding`'s mail, then writing a note titled `title`. */
+const searchesThenWrites = (
+  app: string,
+  release: Release,
+  binding: string,
+  title: string
+) =>
+  codeStep(
+    `export default async (self, env) => {
+      await env.connections.call(${JSON.stringify(binding)}, "mail.search", { query: "invoice" });
+      return await env.apps.call(${JSON.stringify(app)}, new Blob([${JSON.stringify(
+        callOf(release, "notes.create", { title })
+      )}]).stream());
+    };`
+  );
+
+/** A code step reading `read`'s notes, then writing a note to the chat's own App. */
+const copiesNotes =
+  (read: Awaited<ReturnType<typeof liveNotes>>, title: string) =>
+  (app: string, release: Release) => [
+    codeStep(
+      `export default async (self, env) => {
+        await env.apps.call(${JSON.stringify(read.app)}, new Blob([${JSON.stringify(
+          callOf(read.release, "notes.titles", {})
+        )}]).stream());
+        return await env.apps.call(${JSON.stringify(app)}, new Blob([${JSON.stringify(
+          callOf(release, "notes.create", { title })
+        )}]).stream());
+      };`
+    ),
+    says("Done."),
+  ];
+
+describe("App writes held in one chat", () => {
+  it("keep the order asked, held in the same millisecond too: each later than the one before", async () => {
+    const { userId } = await signedInApi(idp, "user");
+    const chats = await personalChatsOf(userId);
+    const { chat } = await chats.newChat();
+    const now = Date.now();
+    const holdOf = async (title: string) =>
+      await chats.stub.holdAppCall(
+        chat.id,
+        userId,
+        {
+          agentId: chats.agent.agentId,
+          appId: crypto.randomUUID(),
+          function: "notes.create",
+          kind: "mutation",
+          request: title,
+          requestHash: await sha256Hex(title),
+        },
+        now
+      );
+    const first = await holdOf("first");
+    const second = await holdOf("second");
+    const listed = await chats.stub.heldAppCalls(chat.id, userId, "web", now);
+
+    expect({
+      later: second.heldAt > first.heldAt,
+      listed: listed.map(({ request }) => request),
+    }).toStrictEqual({ later: true, listed: ["first", "second"] });
+  });
+});
 
 describe("what a chat writes for others once it used something only its person may read", () => {
   it(
@@ -464,6 +423,90 @@ describe("what a chat writes for others once it used something only its person m
   );
 
   it(
+    "holds a write after a turn whose recall found nothing of the person's own but handed over their profile (GRA-1745)",
+    slow,
+    async () => {
+      const marker = `profile-${unique()}`;
+      const notes = await notesChat((app, release) => [
+        writesNote(app, release, marker),
+        says("It waits for you."),
+      ]);
+      const { builder, chats, chat, ask, titles } = notes;
+      // What they said about themselves: their profile, from their own store.
+      const statement = `Leads the ${word()} depot`;
+      await rememberAs(env, builder.userId, {
+        change: crypto.randomUUID(),
+        about: { kind: "person", own: true },
+        type: "fact",
+        statement,
+        quote: statement,
+      });
+
+      // A question whose words nothing of theirs holds.
+      await ask(`Add a note about the ${word()} keys.`);
+
+      expect({
+        answers: await answers(chats.stub, chat.id),
+        handed: JSON.stringify(
+          chats.provider.requests.map(({ body }) => body)
+        ).includes(statement),
+        after: await titles(),
+      }).toStrictEqual({ answers: ["held"], handed: true, after: [] });
+      await eventsOf("chat.private_read", chat.id, 1);
+    }
+  );
+
+  it(
+    "writes at once after a turn whose recall read the person's profile but had no room left to hand it over (GRA-1745)",
+    slow,
+    async () => {
+      const marker = `no-room-${unique()}`;
+      const notes = await notesChat((app, release) => [
+        writesNote(app, release, marker),
+        says("Written."),
+      ]);
+      const { builder, chats, chat, ask, titles } = notes;
+      // Company passages that fill the turn's budget on their own.
+      const filler = word();
+      const sentence = (index: number) =>
+        `The ${filler} procedure step ${index} says that every ${filler} case is checked by two people before it is closed and archived in the register.`;
+      for (let source = 0; source < 6; source += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- one at a time
+        await sharedSource(
+          Array.from({ length: 120 }, (_, index) =>
+            sentence(source * 1000 + index)
+          ).join(" ")
+        );
+      }
+      // A memory about themselves too long for what the search leaves.
+      const long = Array.from({ length: 60 }, () => word()).join(" ");
+      await rememberAs(env, builder.userId, {
+        change: crypto.randomUUID(),
+        about: { kind: "person", own: true },
+        type: "fact",
+        statement: long,
+        quote: long,
+      });
+
+      await ask(`Add a note about what the ${filler} procedure says.`);
+
+      expect({
+        answers: await answers(chats.stub, chat.id),
+        handed: JSON.stringify(
+          chats.provider.requests.map(({ body }) => body)
+        ).includes(long),
+        marked: await chats.stub.isChatPrivateRead(chat.id),
+        after: await titles(),
+      }).toStrictEqual({
+        answers: ["written"],
+        handed: false,
+        marked: false,
+        after: [marker],
+      });
+    }
+  );
+
+  it(
     "writes at once while the chat read nothing of the person's own, and holds every write after a turn that did, also from a turn that recalls nothing",
     slow,
     async () => {
@@ -571,21 +614,6 @@ describe("what a chat writes for others once it used something only its person m
     async () => {
       const ownTitle = `own-mail-${unique()}`;
       const sharedTitle = `shared-mail-${unique()}`;
-      /** A code step searching `binding`'s mail, then writing a note titled `title`. */
-      const searchesThenWrites = (
-        app: string,
-        release: Release,
-        binding: string,
-        title: string
-      ) =>
-        codeStep(
-          `export default async (self, env) => {
-            await env.connections.call(${JSON.stringify(binding)}, "mail.search", { query: "invoice" });
-            return await env.apps.call(${JSON.stringify(app)}, new Blob([${JSON.stringify(
-              callOf(release, "notes.create", { title })
-            )}]).stream());
-          };`
-        );
       // One chat at a time: the fake provider answers the last one made.
       const own = await notesChat((app, release) => [
         searchesThenWrites(app, release, "MYMAIL", ownTitle),
@@ -640,6 +668,7 @@ describe("what a chat writes for others once it used something only its person m
       const later = await chats.stub.heldAppCalls(
         chat.id,
         person.userId,
+        "web",
         Date.now() + heldStartMs + 1
       );
       const kept = await runInDurableObject(chats.stub, (_instance, state) =>
@@ -852,29 +881,13 @@ describe("what a chat writes for others once it used something only its person m
         actions: ["mail.search"],
         binding: "MAIL",
       });
-      /** A code step reading `read`'s notes, then writing a note to the chat's own App. */
-      const readsThenWrites =
-        (read: Awaited<ReturnType<typeof liveNotes>>, title: string) =>
-        (app: string, release: Release) => [
-          codeStep(
-            `export default async (self, env) => {
-              await env.apps.call(${JSON.stringify(read.app)}, new Blob([${JSON.stringify(
-                callOf(read.release, "notes.titles", {})
-              )}]).stream());
-              return await env.apps.call(${JSON.stringify(app)}, new Blob([${JSON.stringify(
-                callOf(release, "notes.create", { title })
-              )}]).stream());
-            };`
-          ),
-          says("Done."),
-        ];
       /** A chat of the builder's that may read `read`, asked to copy from it. */
       const copiesFrom = async (
         read: Awaited<ReturnType<typeof liveNotes>>,
         title: string
       ) => {
         // One chat at a time: the fake provider answers the last one made.
-        const notes = await notesChat(readsThenWrites(read, title), {
+        const notes = await notesChat(copiesNotes(read, title), {
           builder,
         });
         await requestGranted(idp, builder, {
@@ -904,14 +917,14 @@ describe("what a chat writes for others once it used something only its person m
   );
 
   it(
-    "refuses, rather than holds, a marked chat's write to an App in a chat app's direct message: nothing waits or is written, and the agent is told to send the person to Grasp",
+    "holds a marked chat's write to an App in a chat app's direct message, for its card there alone: Grasp neither lists nor decides it, and nothing is written",
     slow,
     async () => {
       const depot = word();
       const title = `teams-${unique()}`;
       const notes = await notesChat((app, release) => [
         writesNote(app, release, title),
-        says("I can't from here: do it from a chat in Grasp."),
+        says("It waits for you on the card."),
       ]);
       const { person, chats, titles } = notes;
       await ownSource(person.userId, `Depot ${depot} opens at seven.`);
@@ -923,21 +936,46 @@ describe("what a chat writes for others once it used something only its person m
         undefined,
         { kind: "direct" }
       );
-      const [result] = await codeResults(chats.stub, chatId);
-      const returned: unknown = JSON.parse(
-        result?.text.replace("Returned:\n", "") ?? "{}"
+      const [held] = await chats.stub.heldAppCalls(
+        chatId,
+        person.userId,
+        "teams",
+        Date.now()
+      );
+
+      const tries = {
+        listed: await outcome(person.api.chats.heldCalls(chatId)),
+        confirmed: await outcome(
+          person.api.chats.confirmHeldCall(
+            chatId,
+            held?.id ?? "",
+            held?.requestHash ?? ""
+          )
+        ),
+        declined: await outcome(
+          person.api.chats.declineHeldCall(chatId, held?.id ?? "")
+        ),
+      };
+      const stillHeld = await chats.stub.heldAppCalls(
+        chatId,
+        person.userId,
+        "teams",
+        Date.now()
       );
 
       expect({
-        result: returned,
-        held: await person.api.chats.heldCalls(chatId),
+        answers: await answers(chats.stub, chatId),
+        // A chat app's conversation is no chat in Grasp (GRA-1919): its
+        // holds are listed and decided on its card alone.
+        ...tries,
+        stillHeld: stillHeld.map(({ id }) => id),
         after: await titles(),
       }).toStrictEqual({
-        result: {
-          refused: "agent.held_call_in_chat_app",
-          message: agentErrors.create("agent.held_call_in_chat_app").message,
-        },
-        held: [],
+        answers: ["held"],
+        listed: "agent.chat_not_found",
+        confirmed: "agent.chat_not_found",
+        declined: "agent.chat_not_found",
+        stillHeld: [held?.id],
         after: [],
       });
     }

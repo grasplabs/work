@@ -292,7 +292,7 @@ const workerEntry = (
 
 /** A model file a release names: not in the build, but in the releases bucket. */
 export interface ModelFileInfo {
-  /** What it is, such as `bekko-embedding-v1-a8m/tokens`. */
+  /** What it is, such as `engram-1/tokens`. */
   name: string;
   sha256: string;
   size: number;
@@ -383,9 +383,7 @@ const checkBudget = (build: WorkerBuild): void => {
 
 /**
  * Throws when the release names model files but no Worker binds the
- * bucket they're copied into: files nothing reads. A Worker that binds it
- * while the release names none runs no model (`shippedModel` is unset),
- * and its embedder says so.
+ * bucket they're copied into: files nothing reads.
  */
 const checkModelFiles = (
   modelFiles: readonly ModelFileInfo[],

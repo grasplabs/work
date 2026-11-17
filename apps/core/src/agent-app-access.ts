@@ -11,8 +11,14 @@ import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { wakeScheduleOf } from "./agent-wakes.ts";
-import { changeableAgent, firstAgentId, readableAgent } from "./agents.ts";
+import {
+  agentInstructionFile,
+  changeableAgent,
+  firstAgentId,
+  readableAgent,
+} from "./agents.ts";
 import { auditedBatch, outboxed, outboxedIfChanged } from "./audit-outbox.ts";
+import { readInstructionFilesAs } from "./brain-next.ts";
 import {
   agentApps,
   agents,
@@ -24,8 +30,8 @@ import { modelForRole, models, modelSettings } from "./models.ts";
 // The apps an agent may use (GRA-1852): each a catalog entry the company
 // offers, by `<source>:<id>`. Whoever manages an agent adds and removes
 // them by hand, and Grasp works them out from its name, job and
-// instructions (`workOutAgentApps`): "check incoming email once a week
-// with Gmail" gives it Gmail.
+// instruction file (`workOutAgentApps`): "check incoming email once a
+// week with Gmail" gives it Gmail.
 //
 // The gate (`requireAgentHasApp`, agent-app-gate.ts, called by the class
 // gate in tool-classes.ts on every call of a connection) holds them: an agent
@@ -34,7 +40,9 @@ import { modelForRole, models, modelSettings } from "./models.ts";
 // widens: the company's classes, the app's, and the agent's still apply.
 //
 // Working them out is a model call on the organization's models, made for
-// whoever asks, on the instructions they may read anyway. What it answers
+// whoever asks, on the instruction file they may read anyway: whoever may
+// change the agent, by the rule that lets them read and write its file
+// (instruction-files.ts), read from the Brain as it is now. What it answers
 // only proposes: core keeps only apps the company offers now and nobody
 // took off, and turns on only kinds of work that read, and only on a
 // company agent whose class is off (a person's own has no class rows: it
@@ -273,7 +281,17 @@ export const workOutAgentApps = async (
     rowsOf(env, agent.id),
   ]);
   const offeredList = [...offered.values()];
-  const said = await askModel(env, identity, agent, offeredList);
+  // Its file as it is now, which whoever may change the agent may read
+  // and write (instruction-files.ts).
+  const [file] = await readInstructionFilesAs(env, identity.userId, [
+    agentInstructionFile(agent),
+  ]);
+  const said = await askModel(
+    env,
+    identity,
+    { name: agent.name, job: agent.job, instructions: file?.text ?? "" },
+    offeredList
+  );
   const kept = new Set(had.map(({ app }) => app));
   const added = [...new Set(said.apps)].flatMap((app) => {
     const found = offered.get(app);

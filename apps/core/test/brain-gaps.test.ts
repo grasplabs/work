@@ -103,10 +103,10 @@ const gapRecords = (tag: string) => {
 };
 
 describe("the brain's teams and gaps", { timeout: 120_000 }, () => {
-  it("add a team's sizes and stakeholders as dated values, joining the onboarding's team for admins alone", async () => {
+  it("add a team's sizes and stakeholders as dated values, joining the onboarding's team for whoever reads it: every member once the admin confirmed it", async () => {
     const admin = await signedInApi(idp, "admin");
     const member = await signedInApi(idp, "user");
-    await admin.api.onboarding.saveRoster(roster);
+    await admin.api.onboarding.confirmRoster(roster);
     const tag = unique();
     const team = `sales-${tag}`;
     await admin.api.brain.addRecords([
@@ -189,8 +189,10 @@ describe("the brain's teams and gaps", { timeout: 120_000 }, () => {
         { sourceId: `src-${tag}`, people: 2 },
         { sourceId: "src-roster", people: 1 },
       ],
-      // The onboarding's team is the admin's to see; the records' isn't.
-      memberTeams: [team],
+      // The confirmed roster's teams are every member's (GRA-1748), with
+      // the records' own; its roles and counts from the records stay the
+      // admin's.
+      memberTeams: ["team-finance", team],
       // A roster team's id, now or later, is never a team record's.
       roster: "brain.record_invalid",
     });
@@ -349,7 +351,7 @@ describe("the brain's teams and gaps", { timeout: 120_000 }, () => {
   it("show members the onboarding source a gap or team names, and each team's values in date order", async () => {
     const admin = await signedInApi(idp, "admin");
     const member = await signedInApi(idp, "user");
-    await admin.api.onboarding.saveRoster(roster);
+    await admin.api.onboarding.confirmRoster(roster);
     const tag = unique();
     const team = `team${tag}`;
     const source = `src-${tag}`;
@@ -439,7 +441,9 @@ describe("the brain's teams and gaps", { timeout: 120_000 }, () => {
         ?.counts.map(({ sourceId }) => sourceId)
         .filter((id) => id === source || id === "src-roster"),
     }).toStrictEqual({
-      before: [],
+      // The confirmed roster's teams name it for every member already
+      // (GRA-1748).
+      before: ["src-roster"],
       withGap: ["src-roster"],
       counts: [
         { date: "2026-10-20", people: 4 },

@@ -4,6 +4,49 @@ import { defineErrorFamily } from "./errors.ts";
 // company's, their own, an App's, an agent's), kept in the Brain and
 // loaded whole (core's instruction-files.ts).
 
+/**
+ * Most UTF-16 units (`.length`) of an instruction file's text: about 2000
+ * tokens, so the few files a chat starts with leave it room for the
+ * conversation.
+ */
+export const instructionsMaxLength = 8000;
+
+/**
+ * Whether `text` is over `instructionsMaxLength` UTF-16 units: the Brain
+ * store's own rule for an instruction file's text (its contract's
+ * `instructionsTextSchema`).
+ */
+export const isOverInstructionsLimit = (text: string): boolean =>
+  text.length > instructionsMaxLength;
+
+/** Characters an instruction file's text never holds in a prompt as written. */
+const markup = /[&<>]/gu;
+
+const entities: Readonly<Record<string, string>> = {
+  "&": "&amp;",
+  "<": "&lt;",
+  ">": "&gt;",
+};
+
+/**
+ * An instruction file's text as a chat's prompt holds it (core's
+ * agent.ts): its markup escaped, so it can neither close the block it
+ * stands in nor fake an escape. Never shorter than the text.
+ */
+export const promptTextOf = (text: string): string =>
+  text.replaceAll(markup, (character) => entities[character] ?? character);
+
+/**
+ * Whether `text` is too long to save as an instruction file: counted as a
+ * chat's prompt holds it (`promptTextOf`), which is how a save measures
+ * it (core's `addInstructionFile`), so what reaches a model is bounded by
+ * the limit whatever the text holds. The one measure for every place that
+ * takes instructions before they are saved, so none is refused only once
+ * something else was made for them.
+ */
+export const instructionsTooLong = (text: string): boolean =>
+  isOverInstructionsLimit(promptTextOf(text));
+
 /** Why an instruction file wasn't saved. */
 export const instructionFileErrors = defineErrorFamily({
   "instructions.too_large":

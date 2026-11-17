@@ -95,6 +95,7 @@ const allPages = async <T>(
 
 /** Every area of an erasure, done: what a finished one shows. */
 const allComplete = [
+  "brain_shared",
   "identity",
   "channels",
   "connect",

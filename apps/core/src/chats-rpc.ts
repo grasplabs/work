@@ -63,6 +63,7 @@ import {
   declineHeldAppCall,
   heldAppCallsOf,
 } from "./held-app-calls.ts";
+import { saveInstructionFile } from "./instruction-files.ts";
 import { modelSettings, modelEffortsOf } from "./models.ts";
 import { chatPackageRequests } from "./packages/requests.ts";
 import { callbackFor, isStub } from "./page-callbacks.ts";
@@ -595,11 +596,13 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
    * Make it: the agent the chat drafted, as its card showed it, by the
    * Agents page's own checks (`makeAgent` for an admin, `makeOwnAgent`
    * for anyone the company lets), recorded as made from a chat. A first
-   * refusal leaves the draft to make again; once the agent is made, the
-   * draft stays taken, so no retry makes it twice, and what the card said
-   * of whom it reaches, what it may do and when it wakes is set by the
-   * same checks, each refused as on its page. Then the chat's agent goes
-   * on, in the person's words.
+   * refusal leaves the draft to make again. Once the agent is made, what
+   * the card said it is told is saved as its instruction file; a save
+   * that fails gives the draft back naming that agent, so the next Make it
+   * tells it and makes no second. Told, the draft stays taken, so no retry
+   * makes it twice, and what the card said of whom it reaches, what it may
+   * do and when it wakes is set by the same checks, each refused as on its
+   * page. Then the chat's agent goes on, in the person's words.
    */
   async makeDraftedAgent(
     chatId: string,
@@ -613,30 +616,42 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
       }
       const { draft: callId, ...asked } = parsed.data;
       const chats = this.#chatsOf(person.userId);
-      const draft = await chats.takeAgentDraft(id, person.userId, callId);
-      const said = {
-        name: draft.name,
-        face: "pen",
-        job: draft.job,
-        instructions: draft.instructions,
-        modelRole: null,
-      };
+      const { draft, made } = await chats.takeAgentDraft(
+        id,
+        person.userId,
+        callId
+      );
       const company = draft.whose === "company";
-      let agent: Agent;
-      try {
-        // What the card says beyond the agent is checked first, so a
-        // schedule or teams core won't take make nothing.
-        if (company) {
-          await this.#checkDrafted(draft);
+      // The agent an earlier Make it made of this draft, whose instructions
+      // it couldn't save; otherwise one made now.
+      let agentId = made;
+      if (agentId === null) {
+        try {
+          const madeNow = await this.#makeDrafted(person, draft);
+          agentId = madeNow.id;
+        } catch (error) {
+          await chats.releaseAgentDraft(id, callId);
+          throw error;
         }
-        agent = company
-          ? await makeAgent(this.#env, person, said, { from: "chat" })
-          : await makeOwnAgent(this.#env, person, said, { from: "chat" });
+      }
+      // What it is told: its instruction file's first version, saved as on
+      // its page, under a change named by the agent, so a second Make it
+      // after an answer that never came saves it once. Not saved, the
+      // draft is given back, its instructions on its card, naming the
+      // agent made, which Make it then tells them and never makes again.
+      try {
+        await saveInstructionFile(this.#env, person, {
+          file: { scope: "agent", agentId },
+          change: `made-${agentId}`,
+          text: draft.instructions,
+          after: 0,
+        });
       } catch (error) {
-        await chats.releaseAgentDraft(id, callId);
+        await chats.keepAgentDraftMade(id, callId, agentId);
         throw error;
       }
-      // Made: it stays made and the draft taken, whatever fails next, and
+      const agent = { id: agentId, name: draft.name };
+      // Told: it stays made and the draft taken, whatever fails next, and
       // the person lands on its page to finish it there.
       try {
         if (company) {
@@ -649,6 +664,25 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
       }
       return { id: agent.id, name: agent.name };
     });
+  }
+
+  /**
+   * Makes the agent `draft` is of, by the Agents page's own checks, what
+   * its card says beyond the agent checked first, so a schedule or teams
+   * core won't take make nothing.
+   */
+  async #makeDrafted(person: Identity, draft: AgentDraft): Promise<Agent> {
+    const said = {
+      name: draft.name,
+      face: "pen",
+      job: draft.job,
+      modelRole: null,
+    };
+    if (draft.whose !== "company") {
+      return await makeOwnAgent(this.#env, person, said, { from: "chat" });
+    }
+    await this.#checkDrafted(draft);
+    return await makeAgent(this.#env, person, said, { from: "chat" });
   }
 
   /** Refuses what a company agent's card said that its page would refuse. */
@@ -783,10 +817,14 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
     });
   }
 
+  // Grasp's own chats' held App calls alone: a chat app's are shown and
+  // decided on its card there (channels/held.ts), and its conversation is
+  // no chat here (GRA-1919).
   async heldCalls(chatId: string, after?: string): Promise<HeldAppCall[]> {
     return await withPerson(
       this.#check,
-      async (person) => await heldAppCallsOf(this.#env, person, chatId, after)
+      async (person) =>
+        await heldAppCallsOf(this.#env, person, chatId, "web", after)
     );
   }
 
@@ -796,13 +834,19 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
     requestHash: string
   ): Promise<void> {
     await withPerson(this.#check, async (person) => {
-      await confirmHeldAppCall(this.#env, person, chatId, id, requestHash);
+      await confirmHeldAppCall(
+        this.#env,
+        person,
+        { chatId, via: "web" },
+        id,
+        requestHash
+      );
     });
   }
 
   async declineHeldCall(chatId: string, id: string): Promise<void> {
     await withPerson(this.#check, async (person) => {
-      await declineHeldAppCall(this.#env, person, chatId, id);
+      await declineHeldAppCall(this.#env, person, { chatId, via: "web" }, id);
     });
   }
 

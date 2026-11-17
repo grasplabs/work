@@ -125,7 +125,6 @@
     "./lowered-limit": "./src/lowered-limit.ts",
     "./mail-ingress": "./src/mail-ingress.ts",
     "./members": "./src/members.ts",
-    "./memory": "./src/memory.ts",
     "./models": "./src/models.ts",
     "./notifications": "./src/notifications.ts",
     "./oauth-relay": "./src/oauth-relay.ts",

@@ -1331,7 +1331,16 @@ const teamDraft = (cx: Context, team: Team): Draft => {
       interviews.length > 0 ? "interviewed" : "not-interviewed",
     ],
     summary: teamSummary(latest(team.counts), interviews.length > 0),
-    points: [],
+    // What it does, as the company's admin described it: their own words.
+    points: points(
+      point(
+        t({
+          message: "What it does",
+          context: "a team, as the company's admin described it",
+        }),
+        team.does ?? ""
+      )
+    ),
     // Its size, its stakeholder and its workflows over time; never each conversation with its day, which would say who talked and when.
     timeline: [...teamHistory(cx, team), ...workflows.flatMap(workflowEvents)],
     open:

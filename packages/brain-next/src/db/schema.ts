@@ -251,6 +251,34 @@ export const chunkDays = sqliteTable(
     primaryKey({ columns: [table.monthDay, table.year, table.chunk] }),
     // A chunk's rows, for its delete.
     index("chunk_days_chunk_idx").on(table.chunk),
+    // A day's chunks within a block of rows (`chunk_blocks`), of any
+    // year: how recall reads only the reader's blocks for a day.
+    index("chunk_days_day_chunk_idx").on(table.monthDay, table.chunk),
+  ]
+);
+
+/**
+ * Where each set of readers' chunks are: the blocks of rows
+ * (`chunk-blocks.ts`, `chunkBlockRows` rows each, block n from row
+ * n × `chunkBlockRows`) holding a chunk of a version it reads. Recall asks
+ * the word index only within the reader's blocks, so a chunk the reader
+ * may not read is never listed. A trigger writes a row for every chunk
+ * added, by any release (migration 0026), so every chunk is in a block of
+ * its set; an add places its chunks in its set's own block (`placeChunks`),
+ * so a block holds one set's chunks. Integers alone: kept when chunks go
+ * (an empty block lists nothing), and deleted with their set (erasure.ts
+ * `dropUnusedReaderSet`).
+ */
+export const chunkBlocks = sqliteTable(
+  "chunk_blocks",
+  {
+    readerSet: integer("reader_set").notNull(),
+    block: integer().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.readerSet, table.block] }),
+    // The highest block taken, so a new one is never one taken before.
+    index("chunk_blocks_block_idx").on(table.block),
   ]
 );
 
@@ -995,6 +1023,11 @@ export const memories = sqliteTable(
     // A writer's memories learned before its erasure: what the erasure
     // deletes, a batch at a time (erasure.ts `eraseWriterBatch`).
     index("memories_writer_idx").on(table.writerSubject, table.learnedAt),
+    // The memories in a person's word: what a person's erasure hides
+    // (people.ts `applyPerson`), and the people a replay hashes, a seek.
+    index("memories_speaker_idx")
+      .on(sql`(speaker ->> 'person')`)
+      .where(sql`speaker ->> 'kind' = 'internal'`),
   ]
 );
 
@@ -1061,7 +1094,11 @@ export const memoryConfirmations = sqliteTable(
     person: text().notNull(),
     at: integer().notNull(),
   },
-  (table) => [index("memory_confirmations_memory_idx").on(table.memory)]
+  (table) => [
+    index("memory_confirmations_memory_idx").on(table.memory),
+    // A person's confirmations: what their erasure takes them off.
+    index("memory_confirmations_person_idx").on(table.person),
+  ]
 );
 
 /** A memory a confirmation was made over. */
@@ -1254,4 +1291,64 @@ export const memoryJudgingPlaces = sqliteTable("memory_judging_places", {
   versionRow: integer("version_row").notNull(),
   afterVersion: integer("after_version").notNull(),
   afterRow: integer("after_row").notNull(),
+});
+
+// A person's erasure in the shared store (erasure.ts `erasePersonShared`):
+// what the store derived about a person, and what is in their own word,
+// goes; the sources stay.
+
+/**
+ * What a person's erasure closed (people.ts): each identifier the host gave
+ * as theirs, by the SHA-256 of `identifier:<type>:<folded>`, and each
+ * entity that was theirs, by `entity:<id>`. Closed, it is left out of every
+ * write, for good: an admin releasing the address in core doesn't reopen
+ * it here.
+ */
+export const personErasureSubjects = sqliteTable(
+  "person_erasure_subjects",
+  {
+    subject: text().primaryKey(),
+    /** The erasure that closed it (`erasures.key`). */
+    erasure: text().notNull(),
+  },
+  (table) => [index("person_erasure_subjects_erasure_idx").on(table.erasure)]
+);
+
+/**
+ * A card of kind `person` the export of a restore gives, with an
+ * identifier of it (restore.ts `checkPart`): its id, and the identifier's
+ * SHA-256 as an erasure closes it (people.ts), never the identifier. So a
+ * person's erasure while the restore is not through (failed, to start
+ * again) takes their card by its id, though the store holds the lines
+ * with their address yet (people.ts `applyPerson`), and it deletes the rows
+ * of their identifiers. Written by the restore's check, again on every
+ * start (the same rows). All gone once the restore is done; given up, those
+ * of a card the store holds nothing of go, and the rest stay as long as
+ * their card (forget.ts) or until an erasure takes it.
+ */
+export const restoreCards = sqliteTable(
+  "restore_cards",
+  {
+    subject: text().notNull(),
+    entity: text().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.subject, table.entity] }),
+    // By the card: when it goes (forget.ts), when an erasure takes it, and
+    // when a restore is given up.
+    index("restore_cards_entity_idx").on(table.entity),
+  ]
+);
+
+/**
+ * A memory a person's erasure hides until the tick deletes it (memories.ts
+ * `unerasedSql`): every statement that reads, counts, links or exports a
+ * memory leaves it out. Gone with the memory.
+ */
+export const personErasureMemories = sqliteTable("person_erasure_memories", {
+  memory: integer()
+    .primaryKey()
+    .references(() => memories.row, { onDelete: "cascade" }),
+  /** The erasure that hid it (`erasures.key`). */
+  erasure: text().notNull(),
 });

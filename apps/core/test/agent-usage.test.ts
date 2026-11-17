@@ -87,7 +87,6 @@ describe("what each agent used", setUpTime, () => {
     const said = {
       face: "stephen",
       job: "",
-      instructions: "",
       modelRole: null,
     };
     const claire = await admin.api.connections.makeAgent({

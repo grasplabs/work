@@ -5,6 +5,7 @@ import { BotIcon } from "lucide-react";
 
 import { AgentPage, agentTabOf } from "../agents/agent-page.tsx";
 import type { AgentTab, FirstAgentAccess } from "../agents/agent-page.tsx";
+import { agentInstructionsFor } from "../agents/unsaved-instructions.ts";
 import type { Session } from "../core.ts";
 import { PageLoading, PageNotLoaded } from "../frame/page-states.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
@@ -55,8 +56,18 @@ const AgentRoutePage = () => {
     // Never shown: the loader leads such a read to the Agents page.
     return null;
   }
-  const { managed, own, usable, people, models, firstAccess, documents, apps } =
-    page.data;
+  const {
+    managed,
+    own,
+    usable,
+    people,
+    models,
+    firstAccess,
+    instructions,
+    unsaved,
+    documents,
+    apps,
+  } = page.data;
   const agent =
     own.find(({ id }) => id === agentId) ??
     managed?.agents.find(({ id }) => id === agentId);
@@ -81,6 +92,8 @@ const AgentRoutePage = () => {
         }
         documents={documents}
         editable={mine || isMemberAdmin(identity)}
+        instructions={instructions}
+        unsaved={unsaved}
         first={!mine && agent.id === managed?.agents.at(0)?.id}
         key={agent.id}
         models={models}
@@ -132,10 +145,19 @@ export const Route = createFileRoute("/_shell/agents/$agent")({
       const [listed] = await Promise.allSettled([session.members.list()]);
       // The agent's documents: not shown when core won't say, and the
       // page still shows the agent.
-      const [kept, apps, catalog] = await Promise.allSettled([
+      const [kept, apps, catalog, told] = await Promise.allSettled([
         session.connections.agentDocuments(params.agent),
         session.connections.agentApps(params.agent),
         session.connections.catalog(),
+        // Its instruction file, for whoever may change the agent (core's
+        // instruction-files.ts): never Grasp's staff, who change nothing.
+        // With it, what its New agent page couldn't save, once the
+        // editor can show it.
+        agentInstructionsFor(
+          session,
+          params.agent,
+          mine || isMemberAdmin(identity)
+        ),
       ]);
       return {
         managed,
@@ -143,6 +165,9 @@ export const Route = createFileRoute("/_shell/agents/$agent")({
         usable,
         people: listed.status === "fulfilled" ? listed.value : [],
         models: chosen.status === "fulfilled" ? chosen.value : [],
+        instructions:
+          told.status === "fulfilled" ? told.value.instructions : undefined,
+        unsaved: told.status === "fulfilled" ? told.value.unsaved : undefined,
         documents: kept.status === "fulfilled" ? kept.value : undefined,
         apps: {
           apps: apps.status === "fulfilled" ? apps.value : undefined,

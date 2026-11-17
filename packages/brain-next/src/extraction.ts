@@ -32,6 +32,7 @@ import type {
 } from "./contract.ts";
 import { bucketCallMs } from "./embedding.ts";
 import { fileKeyOf, hashOf } from "./files.ts";
+import { isErasedPerson, namingOf } from "./people.ts";
 import { accessOfKey } from "./reader-sets.ts";
 import { hashesOf, writeAdd } from "./remember.ts";
 import type { Adding } from "./remember.ts";
@@ -969,26 +970,64 @@ const writePiece = async (
     last: boolean;
   }
 ): Promise<"written" | "superseded"> => {
-  const full: Adding = {
+  const { sql } = storage;
+  const addOf = (kept: Candidates): Adding => ({
     change,
     access,
-    entities: adding.entities,
-    memories: adding.memories,
+    entities: kept.entities,
+    memories: kept.memories,
     ...(last ? { extracted: { source, version } } : {}),
+  });
+  // What is in the word of a person an erasure took is left out here
+  // (people.ts). `writeAdd` is the line of defence inside the write's
+  // transaction: it refuses their word, so an erasure that landed in
+  // between fails the attempt and the queue tries it again; and it leaves
+  // out the rest of what an erasure closed (their card, their address),
+  // so the change's hash is of what this piece kept here, whatever
+  // erasure lands later.
+  const { speakers } = await namingOf(
+    [],
+    adding.memories.map(({ speaker }) => speaker)
+  );
+  const kept = keeping(
+    adding.entities,
+    adding.memories.filter(
+      (_memory, index) => !isErasedPerson(sql, speakers[index])
+    )
+  );
+  const whole = addOf(adding);
+  const full = addOf(kept);
+  const wholeHashes = await hashesOf(whole);
+  const hashes =
+    JSON.stringify(kept) === JSON.stringify(adding)
+      ? wholeHashes
+      : await hashesOf(full);
+  const store = {
+    storage,
+    db: drizzle(storage),
+    // The shared store's tick names no owner (`WorkContext.owner`).
+    shared: owner === undefined,
   };
-  const hashes = await hashesOf(full);
-  const { sql } = storage;
   try {
     return storage.transactionSync(() => {
       if (currentOf(sql, source, version) === undefined) {
         return "superseded";
       }
-      writeAdd(
-        // The shared store's tick names no owner (`WorkContext.owner`).
-        { storage, db: drizzle(storage), shared: owner === undefined },
-        full,
-        hashes
-      );
+      // Written before, its item not settled (the store stopped between):
+      // it answers as it was written, with what the piece kept then, the
+      // whole of it or without an erased person's word.
+      const [before] = sql
+        .exec<{ hash: string }>(
+          "SELECT hash FROM memory_changes WHERE key = ?",
+          hashes.key
+        )
+        .toArray();
+      if (before !== undefined) {
+        const now = before.hash === hashes.hash;
+        writeAdd(store, now ? full : whole, now ? hashes : wholeHashes);
+        return "written";
+      }
+      writeAdd(store, full, hashes);
       return "written";
     });
   } catch (error) {

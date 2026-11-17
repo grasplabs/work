@@ -21,6 +21,7 @@ import { seededRandom } from "./brain-scoring.ts";
 import { mockIdp } from "./idp.ts";
 import { signedInWithRole } from "./sign-in.ts";
 import { testBinding } from "./test-env.ts";
+import { withoutEmbedder } from "./without-embedder.ts";
 
 // The random permission test (GRA-1722). From a seed: teams, sources with
 // random words and readers, new versions of them with other readers, other
@@ -177,6 +178,9 @@ const mostParagraphs = 3;
  * target, so no two share a chunk.
  */
 const longParagraph = 650;
+
+/** Core's env, recalling by words and exact parts alone (without-embedder.ts). */
+const coreWithoutMeaning = withoutEmbedder(env);
 
 /** Dimensions of the scenario's vectors: few, so the puts are cheap. */
 const vectorDimensions = 64;
@@ -1113,9 +1117,10 @@ const scenario = (people: readonly string[], seed: number) => {
   };
 
   /**
-   * What `person` recalls for `question`, through core, or, by meaning
-   * too (`vector`), of the store, as core would ask it with a model: its
-   * items citing sources as core names them.
+   * What `person` recalls for `question`, through core without a vector
+   * (`coreWithoutMeaning`), or, by meaning too (`vector`), of the store, as
+   * core would ask it with a model: its items citing sources as core names
+   * them.
    */
   const recallOf = async (
     person: number,
@@ -1123,7 +1128,7 @@ const scenario = (people: readonly string[], seed: number) => {
     vector: number[] | undefined
   ) => {
     if (vector === undefined) {
-      return await recallAs(env, personId(person), {
+      return await recallAs(coreWithoutMeaning, personId(person), {
         personal: true,
         question,
         budget: { tokens: recallBudgetMax },

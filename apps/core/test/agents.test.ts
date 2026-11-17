@@ -39,7 +39,6 @@ describe("the company's agents", () => {
       id: chatAgentId,
       name: "Stephen",
       state: "on",
-      instructions: "",
       modelRole: null,
       changedBy: null,
       changedAt: null,
@@ -53,12 +52,12 @@ describe("the company's agents", () => {
       name: "Ada",
       face: "claire",
       job: "Chases unpaid invoices.",
-      instructions: "Answer only about invoices.",
       modelRole: "careful",
       model: null,
       state: "paused",
       // One of the company's: nobody's own.
       ownerId: null,
+      offeredAt: null,
       changedBy: "admin-2",
       changedAt: "2026-11-02T00:00:00.000Z",
     });

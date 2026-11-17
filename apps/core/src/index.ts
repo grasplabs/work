@@ -19,7 +19,7 @@ export { SkillsApi } from "./agent-skills.ts";
 export { WorkflowBuildApi } from "./agent-workflow-build.ts";
 export { WorkflowsApi } from "./agent-workflows.ts";
 export { Builtins } from "./builtins.ts";
-export { Onboarding } from "./onboarding/store.ts";
+export { Onboarding } from "./onboarding/object.ts";
 export { DataStore } from "./data-store.ts";
 export { Embedder } from "./embedder.ts";
 export { AppTail } from "./server-logs.ts";

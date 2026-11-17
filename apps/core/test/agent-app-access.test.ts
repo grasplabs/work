@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it } from "vite-plus/test";
 import { requireAgentHasApp } from "../src/agent-app-gate.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
+import { saveInstructions } from "./instruction-saves.ts";
 import { fakeProvider } from "./model-provider.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
 
@@ -26,9 +27,23 @@ const said = (name: string) => ({
   name,
   face: "pen",
   job: "Answers HR questions.",
-  instructions: "Check incoming email in Gmail once a week and sum it up.",
   modelRole: null,
 });
+
+/**
+ * Tells the agent `agentId` to read Gmail, in its instruction file as
+ * `person` saves it on its page, with a word of its own: the text the
+ * model must be given to work its apps out. Returns that word.
+ */
+const toldGmail = async (person: Person, agentId: string): Promise<string> => {
+  const word = `weekly-${crypto.randomUUID()}`;
+  await saveInstructions(
+    person.api,
+    { scope: "agent", agentId },
+    `Check incoming email in Gmail once a week and sum it up (${word}).`
+  );
+  return word;
+};
 
 /** Whether a call of `agentId` for `person` to `app` is let through. */
 const gate = async (agentId: string, person: Person, app: string) =>
@@ -138,6 +153,7 @@ describe("an agent's apps", slow, () => {
     const admin = await signedInApi(idp, "admin");
     const user = await signedInApi(idp, "user");
     const hr = await admin.api.connections.makeAgent(said("HR"));
+    const word = await toldGmail(admin, hr.id);
     const { connections } = admin.api;
     // Someone took HubSpot off before; the company hides Microsoft.
     await connections.setAgentApp(hr.id, "composio:hubspot", false);
@@ -146,7 +162,7 @@ describe("an agent's apps", slow, () => {
     )
       .bind(admin.userId, Date.now())
       .run();
-    await answering({
+    const provider = await answering({
       apps: [
         "native:google",
         "composio:hubspot",
@@ -175,6 +191,10 @@ describe("an agent's apps", slow, () => {
       .map(({ action, detail }) => [action, detail?.app ?? detail?.toolClass]);
 
     expect({
+      // What it is told, from its instruction file in the Brain.
+      toldTheModel: provider.requests.map(({ body }) =>
+        JSON.stringify(body).includes(word)
+      ),
       byUser,
       recorded,
       worked,
@@ -183,6 +203,7 @@ describe("an agent's apps", slow, () => {
         .filter(({ audience }) => audience.who !== "nobody")
         .map(({ toolClass }) => toolClass),
     }).toStrictEqual({
+      toldTheModel: [true],
       byUser: "role.forbidden",
       // Each change it made, and none it didn't.
       recorded: [
@@ -210,17 +231,29 @@ describe("an agent's apps", slow, () => {
     });
   });
 
-  it("are worked out for a person's own agent by its owner, turning on no kind of work of its own", async () => {
+  it("are worked out for a person's own agent by its owner, from the file only they read, turning on no kind of work of its own", async () => {
     const ann = await signedInApi(idp, "user");
+    const admin = await signedInApi(idp, "admin");
     const mine = await ann.api.connections.makeOwnAgent(said("Scribe"));
-    await answering({
+    const word = await toldGmail(ann, mine.id);
+    const provider = await answering({
       apps: ["native:google"],
       kinds: ["read-own", "change-own"],
       missing: [],
       // Never proposed for an agent of one's own, which never wakes.
       schedule: { cron: "0 8 * * 1", opening: "Sum up the week." },
     });
+    // An admin can't have it worked out, as for an agent no one made.
+    const byAdmin = await outcome(
+      admin.api.connections.workOutAgentApps(mine.id)
+    );
     const worked = await ann.api.connections.workOutAgentApps(mine.id);
+    expect({
+      byAdmin,
+      toldTheModel: provider.requests.map(({ body }) =>
+        JSON.stringify(body).includes(word)
+      ),
+    }).toStrictEqual({ byAdmin: "agent.unknown", toldTheModel: [true] });
     expect(worked).toStrictEqual({
       added: [
         {

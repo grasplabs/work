@@ -6,6 +6,7 @@ import type {
   AgentWake,
 } from "@grasp-os/shared/agents";
 import type { ToolClassSetting } from "@grasp-os/shared/connect";
+import type { InstructionFileText } from "@grasp-os/shared/instruction-files";
 import type { Member } from "@grasp-os/shared/members";
 import type { StephenReach } from "@grasp-os/shared/stephen-reach";
 import type { StephenWeek } from "@grasp-os/shared/stephen-requests";
@@ -40,8 +41,9 @@ import { changeThenRefresh } from "../change-then-refresh.ts";
 import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
 import { Page, PageHeading, SectionTitle } from "../frame/page.tsx";
+import { InstructionFileEditor } from "../settings/instruction-file.tsx";
 import { dollars } from "../settings/money.ts";
-import { SettingsSection } from "../settings/settings-parts.tsx";
+import { SettingsBody, SettingsSection } from "../settings/settings-parts.tsx";
 import {
   AudienceControl,
   appAudienceOf,
@@ -67,7 +69,9 @@ import {
   wakesOn,
 } from "./agent-facts.tsx";
 import { AgentForm } from "./agent-form.tsx";
+import { ShareAgent } from "./agent-share.tsx";
 import { AgentWakes } from "./agent-wakes.tsx";
+import type { UnsavedInstructions } from "./unsaved-instructions.ts";
 
 // One agent's page, for the company's admins: what it is, what it is
 // told, whom it answers and what it may do, and when it works on its own,
@@ -393,6 +397,43 @@ const Access = ({
   );
 };
 
+/**
+ * What the agent is told: its instruction file, edited as every
+ * instruction file is (core's instruction-files.ts). Saving works out the
+ * apps it calls for, but for the first agent, which has none of its own.
+ */
+const AgentInstructions = ({
+  agentId,
+  first,
+  saved,
+  unsaved,
+}: {
+  agentId: string;
+  first: boolean;
+  /** Its file as it is now, null while never written; undefined where core didn't say. */
+  saved: InstructionFileText | null | undefined;
+  /** What was typed as it was made and couldn't be saved (unsaved-instructions.ts). */
+  unsaved: UnsavedInstructions | undefined;
+}) => {
+  const { t } = useLingui();
+  if (saved === undefined) {
+    return <p className="text-muted-foreground text-sm">{t`Not shown`}</p>;
+  }
+  const workOut = async (session: Session): Promise<void> => {
+    await workOutQuietly(session, agentId);
+  };
+  return (
+    <InstructionFileEditor
+      description={t`What it should know and how it should work. Grasp's own rules always hold over these.`}
+      file={{ scope: "agent", agentId }}
+      label={t`Instructions`}
+      onSaved={first ? undefined : workOut}
+      saved={saved}
+      unsaved={unsaved}
+    />
+  );
+};
+
 /** One agent's page body. */
 export const AgentPage = ({
   agent,
@@ -400,6 +441,8 @@ export const AgentPage = ({
   settings,
   teams,
   wakes,
+  instructions,
+  unsaved,
   documents,
   apps,
   people,
@@ -422,6 +465,13 @@ export const AgentPage = ({
    * say them, and for the first agent, which has none of its own.
    */
   apps?: AgentAppsShown | undefined;
+  /**
+   * Its instruction file as it is now, null while never written;
+   * undefined where core didn't say it.
+   */
+  instructions: InstructionFileText | null | undefined;
+  /** What was typed as it was made and couldn't be saved (unsaved-instructions.ts). */
+  unsaved?: UnsavedInstructions | undefined;
   /** The documents it answers from; undefined where core didn't say. */
   documents: readonly AgentDocument[] | undefined;
   /** The company's people, whom a wake-up can work for. */
@@ -467,7 +517,6 @@ export const AgentPage = ({
   const typed = {
     name: agent.name,
     job: agent.job,
-    instructions: agent.instructions,
     face: agent.face,
     model: agent.model,
   };
@@ -480,10 +529,6 @@ export const AgentPage = ({
         ...said,
         modelRole: agent.modelRole,
       });
-      // New instructions: the apps they call for, added as it saves.
-      if (said.instructions !== undefined && !first) {
-        await workOutQuietly(session, agent.id);
-      }
     });
   };
   const remove = async (): Promise<void> => {
@@ -598,6 +643,7 @@ export const AgentPage = ({
               wakes={wakes}
             />
             {usage === undefined ? null : <Usage usage={usage} />}
+            <ShareAgent agent={agent} can={can} change={change} />
             <SettingsSection
               description={t`What people call it, one line on what it is for, and its picture. All three show where people pick an agent.`}
               title={t`Name, job and picture`}
@@ -684,14 +730,14 @@ export const AgentPage = ({
               description={t`What ${name} should know and how it should work, on top of Grasp's own rules. Those always hold over what is written here.`}
               title={t`Instructions`}
             >
-              <AgentForm
-                can={can}
-                initial={typed}
-                key={`${agent.id}:${agent.instructions}`}
-                onSave={save}
-                parts={["instructions"]}
-                submit={t`Save`}
-              />
+              <SettingsBody>
+                <AgentInstructions
+                  agentId={agent.id}
+                  first={first}
+                  saved={instructions}
+                  unsaved={unsaved}
+                />
+              </SettingsBody>
             </SettingsSection>
             <AgentAppsPanel
               agent={agent}

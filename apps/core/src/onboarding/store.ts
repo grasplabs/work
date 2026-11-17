@@ -12,6 +12,9 @@ import type {
 } from "@grasp-os/shared/admin/org-record";
 import { createAuditEvent } from "@grasp-os/shared/audit";
 import type { AuditActor, AuditDetailValue } from "@grasp-os/shared/audit";
+import type { StatementKind } from "@grasp-os/shared/brain";
+import { brainRecordSchema } from "@grasp-os/shared/brain-records";
+import type { WorkflowVersionRecord } from "@grasp-os/shared/brain-records";
 import { randomToken, sha256Hex } from "@grasp-os/shared/encoding";
 import {
   erasedFact,
@@ -32,7 +35,11 @@ import type {
   InterviewWithdrawal,
 } from "@grasp-os/shared/interview-links";
 import type { FactTag } from "@grasp-os/shared/interview-turn";
-import { kickoffErrors, visionFields } from "@grasp-os/shared/kickoff";
+import {
+  isVisionShared,
+  kickoffErrors,
+  visionFields,
+} from "@grasp-os/shared/kickoff";
 import type {
   KickoffReading,
   KickoffView,
@@ -42,7 +49,6 @@ import { errorFields, log } from "@grasp-os/shared/log";
 import {
   agreementsSchema,
   minTeamShown,
-  onboardingErrors,
   planSchema,
   remindAfterWorkingDays,
 } from "@grasp-os/shared/onboarding";
@@ -121,13 +127,6 @@ import { z } from "zod";
 import { drainObjectOutbox } from "../audit-outbox.ts";
 import { signInConfig } from "../auth/config.ts";
 import { handOverProducers } from "../brain-hand-overs.ts";
-import {
-  keepOnboardingRecords,
-  purgeOnboardingDrawings,
-  onboardingDrawingsOf,
-  onboardingStatementsOf,
-  purgeOnboardingRecords,
-} from "../brain-records.ts";
 import { organizations } from "../db/core/schema.ts";
 import { inList } from "../db/d1.ts";
 import { migrateOnWake } from "../db/migrate.ts";
@@ -138,6 +137,7 @@ import {
   moreVoices,
   auditOutbox,
   brainClaims,
+  brainDrawings,
   brainInterviews,
   brainSent,
   brainTeams,
@@ -185,21 +185,15 @@ import {
 import type { MailState, MailToQueue } from "../mail-outbox.ts";
 import { mailDomain, mailSends, sendMail } from "../mail.ts";
 import { forgetStored } from "../speech-cache.ts";
-import {
-  intakeIds,
-  intakeOf,
-  rosterSource,
-  withoutNames,
-} from "./brain-intake.ts";
-import type { TeamIntake } from "./brain-intake.ts";
+import { intakeIds, intakeOf, withoutNames } from "./brain-intake.ts";
+import type { IntakeClaim, IntakeDrawing, TeamIntake } from "./brain-intake.ts";
+import { companyTeamsText } from "./company-teams.ts";
+import type { CompanyTeam } from "./company-teams.ts";
 import { storedDocumentReadingSchema } from "./document-reading.ts";
 import { checkedSupport } from "./drawing-support.ts";
 import type { Support } from "./drawing-support.ts";
-import {
-  eraseKickoffRecords,
-  keepKickoffRecords,
-  kickoffRecordsHeld,
-} from "./kickoff-records.ts";
+import { companyKickoffOf, companyKickoffText } from "./kickoff-company.ts";
+import type { CompanyKickoff } from "./kickoff-company.ts";
 import {
   contextOf,
   kickoffBrief,
@@ -221,6 +215,8 @@ import {
   takingPart,
 } from "./rules.ts";
 import type { InterviewState, TeamCount } from "./rules.ts";
+import { SourcesFallError } from "./sources-fall.ts";
+import type { FallingSource, SourceRemover } from "./sources-fall.ts";
 import { interviewBrief, setupView } from "./stephen-setup.ts";
 import { onboardingStoreName } from "./store-name.ts";
 import {
@@ -263,10 +259,11 @@ import type { WorkBrief, WorkKnown } from "./work-drawing.ts";
 // - A deleted interview left anywhere (GRA-368): deleting one, from its
 //   link, by staff, with a new start or by taking someone off the roster,
 //   takes out at once what they said, where it stood, every drawing it
-//   was in (drawn again from who is left, or emptied), the brain's
-//   records that rest on it (`purgeBrain`), and Stephen's lines kept
-//   from it (spoken-lines.ts). A drawing or a brain intake under way
-//   when it goes is thrown away or taken out again as it ends.
+//   was in (drawn again from who is left, or emptied), every claim and
+//   drawing of the new Brain that no longer stands without it (out of use
+//   before the change commits, `#recountStanding`), and Stephen's lines
+//   kept from it (spoken-lines.ts). A drawing or an intake under way when
+//   it goes is thrown away, or what it noted forgotten, as it ends.
 // - A mail going twice, or a link's secret kept or logged: mail goes
 //   through the outbox (mail-outbox.ts), once by its key, the link filled
 //   in only as the mail is sent. Each link goes by email on its day, and
@@ -299,21 +296,77 @@ const purgesKey = "purges";
 const queuedKey = "forget_lines_queued";
 
 /**
- * The brain's records of the kickoff still owed (kickoff-records.ts):
- * `replaced` when a new kickoff's records must also retire the last
- * one's, `answered` when only an answer changed it. Set with the kickoff
- * in one transaction, cleared once the records are kept; the alarm keeps
- * them until then.
+ * How often the kickoff changed (a save or an answer), store-wide: the
+ * key the new Brain is given with its text at each hand-over
+ * (`kickoffToHand`). A version is that text as it stood when the
+ * hand-over ran: changes that land between two hand-overs are one
+ * version, the later text holding all of them, so nothing anyone could
+ * read is lost. A change back to earlier words still counts, so it is a
+ * new version, never a retry of an old one; a retry of a hand-over with
+ * no change since reads the same key and text and adds nothing.
  */
-const kickoffOwedKey = "kickoff_records_owed";
+const kickoffChangesKey = "kickoff_changes";
 
 /**
- * Set when the admin deleted the kickoff and the brain's records it gave
- * are still to be erased (`deleteKickoff`): set with the delete in one
- * transaction, cleared once they are erased. Erased before any kickoff's
- * records are kept, and by the alarm until done.
+ * The company's teams as the admin last confirmed them (`#rosterConfirmed`):
+ * when, and each confirmed team taking part, its name, the admin's own
+ * description and its head count. What every member reads on the Brain
+ * page (`companyTeams`); gone with the Brain's copy when the admin erases
+ * it (`eraseTeamsFromBrain`), until the next confirmed save.
  */
-const kickoffErasureOwedKey = "kickoff_records_erasure_owed";
+const rosterConfirmedKey = "roster_confirmed";
+
+const companyTeamSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  does: z.string(),
+  people: z.int(),
+});
+
+const rosterConfirmedSchema = z.object({
+  at: z.string(),
+  teams: z.array(companyTeamSchema),
+});
+
+/**
+ * What the new Brain was last given of the company's teams: under which of
+ * its ids (`rosterBrainIdKey`), the key of that change (a count that only
+ * grows, so a text back to an earlier one is a new version), and the text.
+ * Gone once the admin erased it (`eraseTeamsFromBrain`), so the next
+ * confirmed save gives the Brain the teams afresh.
+ */
+const rosterHandedKey = "roster_handed";
+
+const rosterHandedSchema = z.object({
+  id: z.string(),
+  change: z.int(),
+  text: z.string(),
+});
+
+/**
+ * How often the admin erased the company's teams from the Brain: the
+ * teams' id there is `teams-<that count>` (`rosterBrainId`), so the teams
+ * given after an erase are a source of their own, never under the key the
+ * erase closed.
+ */
+const rosterErasesKey = "roster_erases";
+
+/**
+ * What starts the key of each id of the company's teams the admin erased
+ * that the Brain may still hold, the rest being that id: set with the
+ * erase in one transaction, gone once core's erasure of it returned
+ * (`rosterErased`).
+ */
+const rosterErasurePrefix = "roster_erasure_owed:";
+
+/**
+ * What starts the key of each kickoff the admin deleted whose source the
+ * new Brain still holds (`deleteKickoff`), the rest being its id there:
+ * set with the delete in one transaction, gone once core's erasure of it
+ * returned (`kickoffErased`). One a deleted kickoff, so a second delete
+ * before the first's erasure leaves both owed.
+ */
+const kickoffErasurePrefix = "kickoff_erasure_owed:";
 
 export const onboardingStore = (
   env: Pick<Env, "ONBOARDING" | "DURABLE_OBJECT_JURISDICTION">
@@ -677,6 +730,55 @@ const foldedAddress = (email: string): string => email.trim().toLowerCase();
  * core to do with `eraseSource` (onboarding/new-brain.ts): a source it
  * gave that no longer stands.
  */
+/**
+ * A team claim that stands now: not owed an erasure. The one rule, for
+ * the hand-over (`claimToHand`) and the Brain page (`standingClaims`). A
+ * claim that stops standing (under five backers, its team under seven
+ * interviewed, or no longer made) is marked in the transaction of the
+ * change that drops it, before that change commits (`#recountStanding`,
+ * `#noteClaims`, `#fallenFirst`), so it leaves both before it is out of
+ * the Brain, and no unmarked claim is of a team under seven.
+ */
+const standingClaim = eq(brainClaims.erase, false);
+
+/** A falling source's key among those an object saw taken out (`#takenOut`). */
+const fallenKey = ({ producer, id }: FallingSource): string =>
+  `${producer}:${id}`;
+
+/** A drawing that stands now: not owed an erasure, as `standingClaim` for claims. */
+const standingDrawing = eq(brainDrawings.erase, false);
+
+/** A drawing standing now, as the Brain page shows it (`standingDrawings`). */
+export interface StandingDrawing {
+  /** Its id in the Brain (`drawing:<source>`). */
+  source: string;
+  /** The piece of work's id on the Brain page. */
+  workflow: string;
+  /** The staff list's team. */
+  team: string;
+  name: string;
+  local?: string;
+  drawing: WorkflowVersionRecord;
+}
+
+/** A drawing as the store keeps it (`brain_drawings.drawing`), or none when it no longer reads as one. */
+const brainDrawingOf = (stored: string): WorkflowVersionRecord | null => {
+  const parsed = brainRecordSchema.safeParse(JSON.parse(stored));
+  return parsed.success && parsed.data.type === "workflowVersion"
+    ? parsed.data
+    : null;
+};
+
+/** A team claim standing now, as the Brain page shows it (`standingClaims`). */
+export interface StandingClaim {
+  /** Its id in the Brain (`claim:<source>`). */
+  source: string;
+  /** The staff list's team. */
+  team: string;
+  kind: StatementKind;
+  text: string;
+}
+
 export type OwedErasure =
   | {
       kind: "interview";
@@ -684,7 +786,7 @@ export type OwedErasure =
       account: string;
       reason: "deleted" | "withdrawn";
     }
-  | { kind: "claim"; source: string; team: string };
+  | { kind: "claim" | "drawing"; source: string; team: string };
 
 /**
  * When what the new Brain holds of someone's interview is to be decided
@@ -781,24 +883,56 @@ const doersOf = (stored: string): string[] =>
   doersSchema.safeParse(JSON.parse(stored)).data ?? [];
 
 /**
+ * The teams whose results a save may show again once their next intake
+ * runs (GRA-1748), so they are given again: both teams of everyone who
+ * moved, a move back too, and, once the admin confirms it, each team
+ * switched from off to on. A team that waits for confirmation is given
+ * again when it is confirmed (`#confirmed`).
+ */
+const teamsBack = (
+  before: Roster | null,
+  roster: Roster,
+  { confirmed }: { confirmed: boolean }
+): string[] => {
+  const was = new Map(before?.people.map(({ id, team }) => [id, team]));
+  const moved = roster.people.flatMap(({ id, team }) => {
+    const from = was.get(id);
+    return from === undefined || from === team ? [] : [from, team];
+  });
+  const offBefore = new Set(
+    before?.teams.flatMap(({ id, off }) => (off ? [id] : []))
+  );
+  const switchedOn = confirmed
+    ? roster.teams.flatMap(({ id, off }) =>
+        offBefore.has(id) && !off ? [id] : []
+      )
+    : [];
+  return [...moved, ...switchedOn];
+};
+
+/**
  * Who a piece of work is drawn from, and when each last agreed: who does
- * it and who was asked about it, as far as they agreed to something.
- * `agreedAt` says when someone did; undefined when they didn't, or aren't
- * on the roster.
+ * it and who was asked about it, as far as they agreed to something and
+ * are in its team now (`teamOf`, from the roster): someone who moved to
+ * another team takes their part with them (GRA-1748). `agreedAt` says
+ * when someone did; undefined when they didn't.
  */
 const agreedAbout = (
-  work: string,
+  work: { id: string; team: string },
   doers: readonly string[],
   asked: readonly { person: string; work: string }[],
+  teamOf: ReadonlyMap<string, string>,
   agreedAt: (person: string) => string | undefined
 ): [person: string, at: string][] =>
   [
     ...new Set([
       ...doers,
-      ...asked.filter((each) => each.work === work).map(({ person }) => person),
+      ...asked
+        .filter((each) => each.work === work.id)
+        .map(({ person }) => person),
     ]),
   ].flatMap((person): [string, string][] => {
-    const at = agreedAt(person);
+    const at = teamOf.get(person) === work.team ? agreedAt(person) : undefined;
     return at === undefined ? [] : [[person, at]];
   });
 
@@ -998,8 +1132,28 @@ export class Onboarding extends DurableObject<Env> {
    */
   #braining: Promise<unknown> = Promise.resolve();
 
-  constructor(ctx: DurableObjectState, env: Env) {
+  /**
+   * Team claims and drawings this object saw taken out of use in the Brain
+   * (`#fallenFirst`) and still owed their erasure, by `fallenKey`: the
+   * recount takes the rest of those owed out again first. Lost with the
+   * object: after a restart, each owed is taken out once more.
+   */
+  readonly #takenOut = new Set<string>();
+
+  /** Whether arming the alarm is asked for already, once the change that asked is done (`#armSoon`). */
+  #arming = false;
+
+  /**
+   * How claims and drawings that stop standing are taken out of use in the
+   * Brain (`#fallenFirst`): given by core's subclass, the object the
+   * Worker runs (onboarding/object.ts). Without one, a change that drops
+   * one fails, with nothing of it made.
+   */
+  readonly #removeFallen: SourceRemover | undefined;
+
+  constructor(ctx: DurableObjectState, env: Env, removeFallen?: SourceRemover) {
     super(ctx, env);
+    this.#removeFallen = removeFallen;
     migrateOnWake(ctx, migrations);
     // The one row everything else updates, there before anything asks. As
     // it is first made it takes the flow staff chose when they added the
@@ -1034,6 +1188,7 @@ export class Onboarding extends DurableObject<Env> {
       agreed: agreementsIn(row.agreements, flowAgreementsOf(row.flow)),
       paused: row.pausedAt !== null,
       kickoff: this.#kickoffState(),
+      teamsInBrain: this.#teamsInBrain(),
       sponsor: this.#sponsor(),
       context: this.#context(),
       waiting: roster === null ? 0 : this.#waiting(roster),
@@ -1054,15 +1209,13 @@ export class Onboarding extends DurableObject<Env> {
     ).length;
   }
 
-  /** Whether the kickoff is kept, or deleted with its records still being erased (`kickoffErasureOwedKey`). */
+  /** Whether the kickoff is kept, or deleted with its source in the new Brain still being erased (`kickoffErasuresOwed`). */
   #kickoffState(): OnboardingView["kickoff"] {
     const [row] = this.#db.select({ id: kickoff.id }).from(kickoff).all();
     if (row !== undefined) {
       return "in";
     }
-    return this.ctx.storage.kv.get(kickoffErasureOwedKey) === undefined
-      ? null
-      : "erasing";
+    return this.kickoffErasuresOwed().length === 0 ? null : "erasing";
   }
 
   /** What the admin's onboarding knows of the company from the kickoff: read without its transcript. */
@@ -1143,14 +1296,27 @@ export class Onboarding extends DurableObject<Env> {
     by: AuditActor,
     { confirmed = true }: { confirmed?: boolean } = {}
   ): Promise<OnboardingView> {
+    return await this.#fallenFirst(
+      async () => await this.#saveRosterOnce(roster, by, { confirmed })
+    );
+  }
+
+  /** `saveRoster`, once: made again by `#fallenFirst` while claims fall. */
+  async #saveRosterOnce(
+    roster: Roster,
+    by: AuditActor,
+    { confirmed = true }: { confirmed?: boolean } = {}
+  ): Promise<OnboardingView> {
     const fresh = await this.#freshCodes(roster);
     const said = this.ctx.storage.transactionSync(() => {
       const before = this.#roster();
       const { removed, erased } = this.#writeRoster(roster, fresh, {
         late: false,
       });
+      this.#dueAgain(teamsBack(before, roster, { confirmed }));
       if (confirmed) {
         this.#confirmed(before, roster);
+        this.#rosterConfirmed(new Date().toISOString());
       } else {
         this.#holdNew(before, roster);
       }
@@ -1173,8 +1339,11 @@ export class Onboarding extends DurableObject<Env> {
   /**
    * Keeps the teams and people new on `roster`, while a plan is set, as
    * waiting for the admin to confirm the organization, with those that
-   * waited already and are still on it. Details of everyone else change
-   * at once; their ids and links stay.
+   * waited already and are still on it; and a team switched from off to
+   * on, so nothing of it shows again before the admin confirms it
+   * (GRA-1748: a team's results follow the stricter of what the admin
+   * confirmed and what they saved). Details of everyone else change at
+   * once; their ids and links stay.
    */
   #holdNew(before: Roster | null, roster: Roster): void {
     if (this.#row().plan === null) {
@@ -1183,10 +1352,16 @@ export class Onboarding extends DurableObject<Env> {
     const was = this.#unconfirmed();
     const teamsBefore = new Set(before?.teams.map(({ id }) => id));
     const peopleBefore = new Set(before?.people.map(({ id }) => id));
+    const offBefore = new Set(
+      before?.teams.flatMap(({ id, off }) => (off ? [id] : []))
+    );
     this.#keepUnconfirmed({
       teams: roster.teams
-        .map(({ id }) => id)
-        .filter((id) => waits(id, teamsBefore, was.teams)),
+        .filter(
+          ({ id, off }) =>
+            waits(id, teamsBefore, was.teams) || (offBefore.has(id) && !off)
+        )
+        .map(({ id }) => id),
       people: roster.people
         .map(({ id }) => id)
         .filter((id) => waits(id, peopleBefore, was.people)),
@@ -1196,10 +1371,14 @@ export class Onboarding extends DurableObject<Env> {
   /**
    * The admin confirmed the organization: nothing waits for it any more,
    * and a team that takes part only now, the ones that waited or were
-   * switched on, starts as a late one, its lead first (`#lateTeams`).
+   * switched on, starts as a late one, its lead first (`#lateTeams`), and
+   * is due to be given to the Brain again.
    */
   #confirmed(before: Roster | null, roster: Roster): void {
     const { teams: waited } = this.#unconfirmed();
+    // Its results may be shown now: an intake that ran while it waited
+    // noted none of them (`#teamShowsResults`), so it is given again.
+    this.#dueAgain([...waited]);
     this.#lateTeams(
       before === null
         ? roster
@@ -1293,6 +1472,7 @@ export class Onboarding extends DurableObject<Env> {
           lead: teams.lead,
           mappedAt: teams.mappedAt,
           mappedFrom: teams.mappedFrom,
+          mappedDoes: teams.mappedDoes,
         })
         .from(teams)
         .all()
@@ -1308,6 +1488,8 @@ export class Onboarding extends DurableObject<Env> {
           ...team,
           position,
           mappedAt: was?.mappedAt ?? null,
+          // What its map drew, kept apart from what the admin wrote (GRA-1748).
+          mappedDoes: was?.mappedDoes ?? null,
           // A map stands on the lead it was drawn from, and no other.
           mappedFrom:
             was?.lead === team.lead ? (was?.mappedFrom ?? null) : null,
@@ -1374,9 +1556,9 @@ export class Onboarding extends DurableObject<Env> {
     this.#askNewcomers(before, roster);
     // Someone moved out, made a lead or taken off may leave a team too
     // small to have claims shown (`teamMayClaim`), or a claim under five of
-    // its team's people now: those claims are owed an erasure at once,
-    // which core's clock does within a minute.
-    this.#markClaimsThatNoLongerStand();
+    // its team's people now: those claims are out of use in the Brain
+    // before this transaction commits (`#recountStanding`).
+    this.#recountStanding("all");
     return { removed: gone.length, erased };
   }
 
@@ -1767,7 +1949,34 @@ export class Onboarding extends DurableObject<Env> {
     page?: SavingPage,
     now: string = new Date().toISOString()
   ): Promise<LinkActed<InterviewSaved>> {
-    const found = this.#onLink(secretMark, { account }, now, "save");
+    return await this.#fallenFirst(
+      async (again) =>
+        await this.#saveInterviewOnce(
+          secretMark,
+          account,
+          version,
+          progress,
+          page,
+          now,
+          !again
+        )
+    );
+  }
+
+  /**
+   * `saveInterview`, once: made again by `#fallenFirst` while claims fall,
+   * then not counted (`asCall`) against the link's calls a second time.
+   */
+  async #saveInterviewOnce(
+    secretMark: string,
+    account: string,
+    version: number,
+    progress: InterviewProgress,
+    page: SavingPage | undefined,
+    now: string,
+    asCall: boolean
+  ): Promise<LinkActed<InterviewSaved>> {
+    const found = this.#onLink(secretMark, { account }, now, "save", asCall);
     if (!found.ok) {
       return found;
     }
@@ -2004,7 +2213,23 @@ export class Onboarding extends DurableObject<Env> {
     account: string,
     now: string = new Date().toISOString()
   ): Promise<LinkActed<InterviewWithdrawal>> {
-    const found = this.#onLink(secretMark, { account }, now, "delete");
+    return await this.#fallenFirst(
+      async (again) =>
+        await this.#withdrawOnce(secretMark, account, now, !again)
+    );
+  }
+
+  /**
+   * `withdraw`, once: made again by `#fallenFirst` while claims fall, then
+   * not counted (`asCall`) against the link's calls a second time.
+   */
+  async #withdrawOnce(
+    secretMark: string,
+    account: string,
+    now: string,
+    asCall: boolean
+  ): Promise<LinkActed<InterviewWithdrawal>> {
+    const found = this.#onLink(secretMark, { account }, now, "delete", asCall);
     if (!found.ok) {
       return found;
     }
@@ -2343,19 +2568,9 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /**
-   * Takes out of the brain, for good, what rests on interviews that are
-   * gone (`#toPurge`): after a delete, and from the alarm until it
-   * succeeds. Returns how many records it took out.
-   */
-  async purgeBrain(): Promise<number> {
-    return await this.#withBrain(async () => await this.#purgeNow());
-  }
-
-  /**
-   * The records the onboarding gave the brain that rest on someone's
-   * interview (brain-intake.ts): what deleting it has to take out of the
-   * brain (GRA-368). For staff and the store alone; the brain never names
-   * anyone.
+   * The team claims and drawings that rest on someone's interview
+   * (brain-intake.ts): what deleting it takes down (GRA-368). For staff and
+   * the store alone; the Brain never names anyone.
    */
   sentFor(person: string): { record: string; type: string; team: string }[] {
     return this.#db
@@ -2396,9 +2611,22 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /**
-   * Each team the brain has interviews of: one source for all of them
-   * (brain-intake.ts), with how many of its people agreed and the day the
-   * first of them did, never who. A team that left the roster has none.
+   * The teams whose results may be shown (`#teamShowsResults`, the one
+   * rule a team's claims and drawings stand by too): on the list, taking
+   * part, and seven or more who tell their own work (GRA-1748).
+   */
+  #teamsShowingResults(roster: Roster | null): string[] {
+    const mayClaim = new Map<string, boolean>();
+    return (roster?.teams ?? []).flatMap(({ id }) =>
+      this.#teamShowsResults(id, { roster, mayClaim }) ? [id] : []
+    );
+  }
+
+  /**
+   * Each team whose interviews its claims and drawings cite: one source
+   * for all of them (brain-intake.ts), with how many of its people agreed
+   * and the day the first of them did, never who. Only while its results
+   * may be shown (`#teamsShowingResults`), in the order of that day.
    */
   interviewSources(): {
     team: string;
@@ -2408,13 +2636,8 @@ export class Onboarding extends DurableObject<Env> {
   }[] {
     const roster = this.#roster();
     const states = this.#agreedInterviews();
-    return this.#db
-      .select({ team: brainTeams.team })
-      .from(brainTeams)
-      .where(isNotNull(brainTeams.sentAt))
-      .orderBy(asc(brainTeams.sentAt), asc(brainTeams.team))
-      .all()
-      .flatMap(({ team: id }) => {
+    return this.#teamsShowingResults(roster)
+      .flatMap((id) => {
         const team = roster?.teams.find((each) => each.id === id);
         const members = new Set(
           roster?.people
@@ -2430,37 +2653,34 @@ export class Onboarding extends DurableObject<Env> {
         return team === undefined || since === undefined
           ? []
           : [{ team: id, name: team.name, people: agreed.length, since }];
-      });
+      })
+      .toSorted(
+        (a, b) => a.since.localeCompare(b.since) || a.team.localeCompare(b.team)
+      );
   }
 
   /**
    * How many interviews the brain learned from, week by week, never who
    * gave them or on which day (GRA-1278): the interviews of the people who
-   * agreed and still take part, in teams whose interviews the brain holds,
-   * by the Monday of the week each finished in. A week of fewer than
-   * `minTeamShown` is left out, never added to another week: no line
-   * stands for fewer people than a team's claim needs, and a week a
-   * withdrawal takes below it goes without its rest showing up elsewhere,
-   * where the difference would tell how many were left.
+   * agreed and still take part, in teams whose results may be shown
+   * (`#teamsShowingResults`), by the Monday of the week each finished in.
+   * A week of fewer than `minTeamShown` is left out, never added to
+   * another week: no line stands for fewer people than a team's claim
+   * needs, and a week a withdrawal takes below it goes without its rest
+   * showing up elsewhere, where the difference would tell how many were
+   * left.
    */
   interviewWeeks(): { week: string; interviews: number }[] {
     const roster = this.#roster();
-    const sent = new Set(
-      this.#db
-        .select({ team: brainTeams.team })
-        .from(brainTeams)
-        .where(isNotNull(brainTeams.sentAt))
-        .all()
-        .map(({ team }) => team)
-    );
-    const inSent = new Set(
+    const showing = new Set(this.#teamsShowingResults(roster));
+    const inShowing = new Set(
       (roster?.people ?? [])
-        .filter((person) => sent.has(person.team))
+        .filter((person) => showing.has(person.team))
         .map(({ id }) => id)
     );
     const byWeek = new Map<string, number>();
     for (const { person, completedAt } of this.#agreedInterviews()) {
-      if (completedAt !== null && inSent.has(person)) {
+      if (completedAt !== null && inShowing.has(person)) {
         const week = mondayOf(dayOf(completedAt));
         byWeek.set(week, (byWeek.get(week) ?? 0) + 1);
       }
@@ -2628,13 +2848,16 @@ export class Onboarding extends DurableObject<Env> {
     let mapped = 0;
     let all = 0;
     let known = 0;
-    for (const team of this.#roster()?.teams ?? []) {
+    const roster = this.#roster();
+    const showing = new Set(this.#teamsShowingResults(roster));
+    for (const team of roster?.teams ?? []) {
       if (team.off) {
         continue;
       }
-      // A team whose interviews the brain doesn't hold shows no
-      // difference: too few told their own work (GRA-1084).
-      const heard = this.#tellers(team.id).length >= minTeamShown;
+      // A team whose results may not be shown shows no difference either:
+      // its intake checks none (`#teamIntake`), and one checked before
+      // stays out until it may again (GRA-1084, GRA-1748).
+      const heard = showing.has(team.id);
       for (const work of this.teamWorks(team.id)) {
         all += 1;
         if (
@@ -2899,7 +3122,23 @@ export class Onboarding extends DurableObject<Env> {
     account: string,
     now: string = new Date().toISOString()
   ): Promise<LinkActed<{ deleted: true }>> {
-    const found = this.#onLink(secretMark, { account }, now, "delete");
+    return await this.#fallenFirst(
+      async (again) =>
+        await this.#deleteInterviewOnce(secretMark, account, now, !again)
+    );
+  }
+
+  /**
+   * `deleteInterview`, once: made again by `#fallenFirst` while claims
+   * fall, then not counted (`asCall`) against the link's calls a second time.
+   */
+  async #deleteInterviewOnce(
+    secretMark: string,
+    account: string,
+    now: string,
+    asCall: boolean
+  ): Promise<LinkActed<{ deleted: true }>> {
+    const found = this.#onLink(secretMark, { account }, now, "delete", asCall);
     if (!found.ok) {
       return found;
     }
@@ -2926,6 +3165,13 @@ export class Onboarding extends DurableObject<Env> {
    * person asks; the audit log has that they did, not for whom.
    */
   async newStart(person: string, by: AuditActor): Promise<boolean> {
+    return await this.#fallenFirst(
+      async () => await this.#newStartOnce(person, by)
+    );
+  }
+
+  /** `newStart`, once: made again by `#fallenFirst` while claims fall. */
+  async #newStartOnce(person: string, by: AuditActor): Promise<boolean> {
     const [link] = this.#db
       .select()
       .from(links)
@@ -3793,10 +4039,10 @@ export class Onboarding extends DurableObject<Env> {
    * the brain's sources and tools (brain-rpc.ts) show them again; every
    * drawing made since the first of them was shared, which may have had
    * it for context, to be drawn again without it; and every drawing the
-   * brain was given since (`purgeOnboardingDrawings`), each of which is
-   * given again once drawn again. The brain first: when that fails,
-   * nothing here has changed, and removing them again finds the
-   * readings still here. In the audit log by counts alone. Within
+   * Brain and its page were given since, each of which is given again once
+   * drawn again. Those are out of use in the Brain first (`#fallenFirst`):
+   * when that fails, nothing here has changed, and removing them again
+   * finds the readings still here. In the audit log by counts alone. Within
    * `#withBrain`, so no intake lands between; answered 0 at once, without
    * waiting for one, when none of `ids` is a shared document's. With
    * `sharedBy`, only the documents that person shared: their file's
@@ -3817,59 +4063,81 @@ export class Onboarding extends DurableObject<Env> {
       if (first === undefined) {
         return 0;
       }
-      const purged = await purgeOnboardingDrawings(this.env, new Date(first));
+      // Every drawing given since, to be given again once drawn again: out
+      // of use in the Brain before the readings go (`#fallenFirst`).
+      const given = this.#db
+        .select({ record: brainDrawings.record, team: brainDrawings.team })
+        .from(brainDrawings)
+        .where(gte(brainDrawings.at, first))
+        .all();
+      const purged = [...new Set(given.map(({ record }) => record))];
       const now = new Date().toISOString();
-      this.ctx.storage.transactionSync(() => {
-        this.#db
-          .delete(documents)
-          .where(
-            inList(
-              documents.id,
-              rows.map(({ id }) => id)
+      await this.#fallenFirst(() => {
+        this.ctx.storage.transactionSync(() => {
+          // Each standing, and each marked that this object hasn't seen
+          // taken out (a removal that failed, a restart): it may be in use
+          // still, so it is taken out before the reading goes.
+          const inUse = this.#db
+            .select({
+              source: brainDrawings.source,
+              erase: brainDrawings.erase,
+            })
+            .from(brainDrawings)
+            .where(gte(brainDrawings.at, first))
+            .all()
+            .flatMap(({ source, erase }) => {
+              const fallen = { producer: "drawing" as const, id: source };
+              return this.#mayBeInUse(fallen, erase) ? [fallen] : [];
+            });
+          if (inUse.length > 0) {
+            throw new SourcesFallError(inUse);
+          }
+          this.#db
+            .delete(documents)
+            .where(
+              inList(
+                documents.id,
+                rows.map(({ id }) => id)
+              )
             )
-          )
-          .run();
-        const forgotten = this.#db
-          .select({ work: drawnWorks.work })
-          .from(drawnWorks)
-          .where(gte(drawnWorks.at, first))
-          .all()
-          .map(({ work }) => work);
-        this.#db
-          .delete(drawnWorks)
-          .where(inList(drawnWorks.work, forgotten))
-          .run();
-        // And the ways of a difference checked in them: words of theirs.
-        this.#db
-          .delete(checkedDifferences)
-          .where(inList(checkedDifferences.work, forgotten))
-          .run();
-        this.#db
-          .delete(drawFailures)
-          .where(
-            inList(
-              drawFailures.item,
-              forgotten.map((work) => `work:${work}`)
+            .run();
+          const forgotten = this.#db
+            .select({ work: drawnWorks.work })
+            .from(drawnWorks)
+            .where(gte(drawnWorks.at, first))
+            .all()
+            .map(({ work }) => work);
+          this.#db
+            .delete(drawnWorks)
+            .where(inList(drawnWorks.work, forgotten))
+            .run();
+          // And the ways of a difference checked in them: words of theirs.
+          this.#db
+            .delete(checkedDifferences)
+            .where(inList(checkedDifferences.work, forgotten))
+            .run();
+          this.#db
+            .delete(drawFailures)
+            .where(
+              inList(
+                drawFailures.item,
+                forgotten.map((work) => `work:${work}`)
+              )
             )
-          )
-          .run();
-        // A drawing given since but drawn before is given again as it is.
-        const given = this.#db
-          .selectDistinct({ team: brainSent.team })
-          .from(brainSent)
-          .where(inList(brainSent.record, purged))
-          .all();
-        this.#db
-          .delete(brainSent)
-          .where(inList(brainSent.record, purged))
-          .run();
-        for (const { team } of given) {
-          this.#brainDue(team, now);
-        }
-        this.#changed(by, "onboarding.document.purged", {
-          documents: rows.length,
-          drawings: forgotten.length,
-          records: purged.length,
+            .run();
+          // A drawing given since but drawn before is given again as it is.
+          this.#db
+            .delete(brainSent)
+            .where(inList(brainSent.record, purged))
+            .run();
+          for (const team of new Set(given.map(({ team: of }) => of))) {
+            this.#brainDue(team, now);
+          }
+          this.#changed(by, "onboarding.document.purged", {
+            documents: rows.length,
+            drawings: forgotten.length,
+            records: purged.length,
+          });
         });
       });
       this.#deliverAudit();
@@ -3984,65 +4252,234 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /**
-   * Gives the brain the kickoff's records still owed (`kickoffOwedKey`),
-   * under the brain lock it is called in, and clears what it kept. A
-   * failure leaves them owed, for the alarm to keep.
+   * The kickoff's id in the new Brain (`kickoff:<id>`, onboarding/
+   * new-brain.ts): one a kickoff, from how often one was deleted
+   * (`purgeMark`), so a kickoff brought in after a delete is a source of
+   * its own, never under the key that delete's erasure closed.
    */
-  async #keepOwedKickoffRecords(): Promise<void> {
-    // What a deleted kickoff gave goes first: a newer kickoff's records
-    // are kept only once it is gone, so the erasure never takes them.
-    if (!(await this.#eraseOwedKickoffRecords())) {
-      return;
-    }
-    const owed = this.ctx.storage.kv.get(kickoffOwedKey);
-    if (owed !== "replaced" && owed !== "answered") {
-      return;
-    }
-    try {
-      await keepKickoffRecords(this.env, this.kickoff(), {
-        replaced: owed === "replaced",
-      });
-    } catch (error) {
-      log.error("onboarding.kickoff_records_owed", {
-        error: error instanceof Error ? error.name : "unknown",
-      });
-      await this.#alarmBy(Date.now() + purgeRetryMs);
-      return;
-    }
-    // Kept as it was when read: an answer meanwhile owes its own.
-    if (this.ctx.storage.kv.get(kickoffOwedKey) === owed) {
-      this.ctx.storage.kv.delete(kickoffOwedKey);
-    }
+  kickoffBrainId(): string {
+    return `company-${this.purgeMark()}`;
   }
 
-  /** The kickoff's records still owed, kept now: what the alarm runs. */
-  async keepKickoffRecordsNow(): Promise<void> {
-    await this.#withBrain(async () => {
-      await this.#keepOwedKickoffRecords();
-    });
+  /** What every member reads of the kickoff (kickoff-company.ts); null before it is in. */
+  companyKickoff(): CompanyKickoff | null {
+    return companyKickoffOf(this.kickoff());
   }
 
   /**
-   * Erases the brain's records of a kickoff the admin deleted, when owed
-   * (`kickoffErasureOwedKey`), under the brain lock it is called in.
-   * Whether none are owed any more: a failure leaves them owed, for the
-   * alarm, or the admin's delete asked again, to erase.
+   * The kickoff `id` as the hand-over gives the new Brain now: its text
+   * for every member as it stands (kickoff-company.ts), under the count of
+   * changes so far (`kickoffChangesKey`). Changes since the last hand-over
+   * are in this one text, one version. Null when `id` is not the kickoff
+   * kept now (deleted since).
    */
-  async #eraseOwedKickoffRecords(): Promise<boolean> {
-    if (this.ctx.storage.kv.get(kickoffErasureOwedKey) === undefined) {
-      return true;
+  kickoffToHand(id: string): { change: string; text: string } | null {
+    const company = this.companyKickoff();
+    if (company === null || id !== this.kickoffBrainId()) {
+      return null;
     }
-    try {
-      await eraseKickoffRecords(this.env);
-    } catch (error) {
-      log.error("onboarding.kickoff_erasure_owed", {
-        error: error instanceof Error ? error.name : "unknown",
-      });
-      await this.#alarmBy(Date.now() + purgeRetryMs);
+    const text = companyKickoffText(company);
+    const changes = this.ctx.storage.kv.get(kickoffChangesKey);
+    return { change: String(typeof changes === "number" ? changes : 0), text };
+  }
+
+  /**
+   * In the transaction of a change of the kickoff (a save or an answer):
+   * counts it (`kickoffChangesKey`) and notes the kickoff for the
+   * hand-over, which reads its text here when it runs (`kickoffToHand`).
+   * A noting replaces one not yet handed over, and a hand-over that ends
+   * removes only its own noting, so a change after its read is handed
+   * over again.
+   */
+  #kickoffChanged(): void {
+    const changes = this.ctx.storage.kv.get(kickoffChangesKey);
+    this.ctx.storage.kv.put(
+      kickoffChangesKey,
+      (typeof changes === "number" ? changes : 0) + 1
+    );
+    this.#noteHandOver("kickoff", this.kickoffBrainId());
+  }
+
+  /**
+   * The company's teams as the admin confirmed them (GRA-1748): each team
+   * taking part, its name, the admin's own description and how many
+   * people the roster has in it, in the admin's order. Only what the admin
+   * gave: never what a lead's map says a team does (`mappedDoes`, from
+   * their own interview), who is in a team, their titles or its lead;
+   * never a team switched off, nor a team or person still waiting for the
+   * admin to confirm the organization.
+   */
+  #confirmedTeams(): CompanyTeam[] {
+    const roster = this.#roster();
+    const waiting = this.#unconfirmed();
+    const confirmed = (roster?.people ?? []).filter(
+      ({ id }) => !waiting.people.has(id)
+    );
+    return (roster?.teams ?? [])
+      .filter(({ id, off }) => !off && !waiting.teams.has(id))
+      .map(({ id, name, does }) => ({
+        id,
+        name,
+        does,
+        people: confirmed.filter(({ team }) => team === id).length,
+      }));
+  }
+
+  /**
+   * The company's teams as every member reads them (GRA-1748): as the admin
+   * last confirmed them (`rosterConfirmedKey`), and when. Null before any
+   * confirmed save.
+   */
+  companyTeams(): z.infer<typeof rosterConfirmedSchema> | null {
+    const held = this.ctx.storage.kv.get(rosterConfirmedKey);
+    return held === undefined ? null : rosterConfirmedSchema.parse(held);
+  }
+
+  /**
+   * The roster as Grasp's staff read it: what each team does as its lead's
+   * map drew it, where it did (`mappedDoes`), else as the admin described
+   * it. Staff's alone (admin-snapshot.ts); never a member's, never the
+   * Brain's (GRA-1748).
+   */
+  rosterAsMapped(): Roster | null {
+    const roster = this.#roster();
+    if (roster === null) {
+      return null;
+    }
+    const mapped = new Map(
+      this.#db
+        .select({ id: teams.id, mappedDoes: teams.mappedDoes })
+        .from(teams)
+        .all()
+        .flatMap(({ id, mappedDoes }) =>
+          mappedDoes === null ? [] : [[id, mappedDoes] as const]
+        )
+    );
+    return {
+      ...roster,
+      teams: roster.teams.map((team) => ({
+        ...team,
+        does: mapped.get(team.id) ?? team.does,
+      })),
+    };
+  }
+
+  /** The company's teams' id in the new Brain now: `teams-<erases>` (`rosterErasesKey`). */
+  rosterBrainId(): string {
+    const erases = this.ctx.storage.kv.get(rosterErasesKey);
+    return `teams-${typeof erases === "number" ? erases : 0}`;
+  }
+
+  /** What the new Brain was last given of the company's teams (`rosterHandedKey`); null before any, or since the admin erased it. */
+  #rosterHanded(): z.infer<typeof rosterHandedSchema> | null {
+    const held = this.ctx.storage.kv.get(rosterHandedKey);
+    return held === undefined ? null : rosterHandedSchema.parse(held);
+  }
+
+  /**
+   * The company's teams as the hand-over gives the new Brain now: as the
+   * admin last confirmed them, under the key of that change, so confirmed
+   * changes since the last hand-over are one version. Null for any
+   * id but the one they were given under, or once the admin erased them.
+   */
+  rosterToHand(id: string): { change: string; text: string } | null {
+    const handed = this.#rosterHanded();
+    return handed === null || id !== handed.id
+      ? null
+      : { change: String(handed.change), text: handed.text };
+  }
+
+  /**
+   * In the transaction of a save the admin confirmed: the company's teams
+   * as they stand now (`#confirmedTeams`), kept as what every member reads
+   * (`companyTeams`) and, when their text differs from what the Brain was
+   * last given, given to it under its id now, noted for the hand-over,
+   * which reads them when it runs (`rosterToHand`). The same text changes
+   * nothing in the Brain and notes nothing: no version, and no event in
+   * the audit log. No team taking part is given only once the Brain holds
+   * teams, as a version saying so, so it never keeps listing them.
+   */
+  #rosterConfirmed(at: string): void {
+    const confirmed = this.#confirmedTeams();
+    this.ctx.storage.kv.put(rosterConfirmedKey, { at, teams: confirmed });
+    const before = this.#rosterHanded();
+    if (confirmed.length === 0 && before === null) {
+      return;
+    }
+    const text = companyTeamsText(confirmed);
+    if (text === before?.text) {
+      return;
+    }
+    const id = this.rosterBrainId();
+    this.ctx.storage.kv.put(rosterHandedKey, {
+      id,
+      change: (before?.change ?? 0) + 1,
+      text,
+    });
+    this.#noteHandOver("roster", id);
+  }
+
+  /**
+   * The admin erases the company's teams from the Brain (GRA-1748): every
+   * version, through the Brain's ledger, owed from this transaction
+   * (`rosterErasuresOwed`) until core's erasure of it returned
+   * (onboarding/new-brain.ts `eraseOwedRosters`). What members read of
+   * them on the Brain page goes in the same transaction; the roster itself
+   * stays as it is. The next confirmed save gives both the teams afresh,
+   * the Brain under a new id
+   * (`rosterBrainId`). One audit event, never a word of them. False, with
+   * nothing recorded, when the Brain was given nothing of them.
+   */
+  eraseTeamsFromBrain(by: AuditActor): boolean {
+    const handed = this.#rosterHanded();
+    if (handed === null) {
       return false;
     }
-    this.ctx.storage.kv.delete(kickoffErasureOwedKey);
+    this.ctx.storage.transactionSync(() => {
+      this.ctx.storage.kv.put(`${rosterErasurePrefix}${handed.id}`, true);
+      const erases = this.ctx.storage.kv.get(rosterErasesKey);
+      this.ctx.storage.kv.put(
+        rosterErasesKey,
+        (typeof erases === "number" ? erases : 0) + 1
+      );
+      this.ctx.storage.kv.delete(rosterHandedKey);
+      this.ctx.storage.kv.delete(rosterConfirmedKey);
+      this.#changed(by, "onboarding.roster.brain_erased", {});
+    });
+    this.#deliverAudit();
     return true;
+  }
+
+  /** The ids of the company's teams the admin erased that the Brain may still hold (`rosterErasurePrefix`). */
+  rosterErasuresOwed(): string[] {
+    return [...this.ctx.storage.kv.list({ prefix: rosterErasurePrefix })].map(
+      ([key]) => key.slice(rosterErasurePrefix.length)
+    );
+  }
+
+  /** Notes that core erased the company's teams `id` from the new Brain: nothing of them is owed. */
+  rosterErased(id: string): void {
+    this.ctx.storage.kv.delete(`${rosterErasurePrefix}${id}`);
+  }
+
+  /** Whether the Brain holds the company's teams, or they are still being erased from it. */
+  #teamsInBrain(): OnboardingView["teamsInBrain"] {
+    if (this.rosterErasuresOwed().length > 0) {
+      return "erasing";
+    }
+    return this.#rosterHanded() === null ? null : "in";
+  }
+
+  /** The ids of the deleted kickoffs whose source the new Brain still holds (`kickoffErasurePrefix`). */
+  kickoffErasuresOwed(): string[] {
+    return [...this.ctx.storage.kv.list({ prefix: kickoffErasurePrefix })].map(
+      ([key]) => key.slice(kickoffErasurePrefix.length)
+    );
+  }
+
+  /** Notes that core erased the deleted kickoff `id` from the new Brain: nothing of it is owed. */
+  kickoffErased(id: string): void {
+    this.ctx.storage.kv.delete(`${kickoffErasurePrefix}${id}`);
   }
 
   /** Notes that the kickoff was deleted from what the onboarding holds (`purgesKey`). */
@@ -4062,14 +4499,14 @@ export class Onboarding extends DurableObject<Env> {
   /**
    * Keeps the kickoff's transcript and its reading, replacing any before
    * them; the sponsor's answers stay, for they answer the company, not one
-   * transcript. Then gives the brain what it holds (kickoff-records.ts).
-   * Under the brain lock, as the kickoff's delete is (`deleteKickoff`): a
-   * save whose reading began before the kickoff was deleted (`mark`,
-   * `purgeMark` as it began) is refused,
-   * `kickoff.purged`, so the erased words never come back with it. In the log and the audit log
-   * without its words.
+   * transcript. What every member reads of it goes to the new Brain at the
+   * next hand-over, as a version of the kickoff's source
+   * (`#kickoffChanged`). A save whose
+   * reading began before the kickoff was deleted (`mark`, `purgeMark` as
+   * it began) is refused, `kickoff.purged`, so the erased words never come
+   * back with it. In the log and the audit log without its words.
    */
-  async saveKickoff(
+  saveKickoff(
     kept: {
       transcript: string;
       fileName: string | null;
@@ -4077,136 +4514,107 @@ export class Onboarding extends DurableObject<Env> {
     },
     by: AuditActor,
     mark: number
-  ): Promise<KickoffView> {
-    return await this.#withBrain(async () => {
-      if (this.purgeMark() !== mark) {
-        throw kickoffErrors.create("kickoff.purged");
-      }
-      const at = new Date().toISOString();
-      const values = {
-        at,
-        by: whoIs(by),
-        fileName: kept.fileName,
-        transcript: kept.transcript,
-        reading: JSON.stringify(kept.reading),
-      };
-      this.ctx.storage.transactionSync(() => {
-        this.#db
-          .insert(kickoff)
-          .values({ id: 1, ...values })
-          .onConflictDoUpdate({ target: kickoff.id, set: values })
-          .run();
-        this.#changed(by, "onboarding.kickoff.saved", {
-          characters: kept.transcript.length,
-          said: Object.keys(kept.reading.fields).length,
-        });
-        this.ctx.storage.kv.put(kickoffOwedKey, "replaced");
+  ): KickoffView {
+    if (this.purgeMark() !== mark) {
+      throw kickoffErrors.create("kickoff.purged");
+    }
+    const at = new Date().toISOString();
+    const values = {
+      at,
+      by: whoIs(by),
+      fileName: kept.fileName,
+      transcript: kept.transcript,
+      reading: JSON.stringify(kept.reading),
+    };
+    this.ctx.storage.transactionSync(() => {
+      this.#db
+        .insert(kickoff)
+        .values({ id: 1, ...values })
+        .onConflictDoUpdate({ target: kickoff.id, set: values })
+        .run();
+      this.#changed(by, "onboarding.kickoff.saved", {
+        characters: kept.transcript.length,
+        said: Object.keys(kept.reading.fields).length,
       });
-      this.#deliverAudit();
-      await this.#keepOwedKickoffRecords();
-      return this.kickoff();
+      this.#kickoffChanged();
     });
+    this.#deliverAudit();
+    return this.kickoff();
   }
 
   /**
    * The admin deletes the kickoff for good (GRA-1897): its transcript,
-   * its file's name, its reading and the sponsor's answers, and every
-   * record it gave the brain, retired ones too. Whatever reads it reads
-   * nothing of it from then on: the admin's onboarding, Stephen's setup,
-   * every interview turn's brief and the brain. Under the brain lock, so
-   * no keep of its records lands between; the purge mark moves on first,
-   * so a staff save whose reading began before is refused
-   * (`saveKickoff`). One audit event, with how many records it takes,
-   * never a word of it. The records are erased right after (owed until
-   * they are: the alarm, or this asked again, finishes it); asked again,
-   * with nothing left, it changes nothing and records nothing. Throws
-   * `onboarding.kickoff_unfinished` while they are still owed. Whether there was anything to
-   * delete.
+   * its file's name, its reading and the sponsor's answers. Whatever reads
+   * it reads nothing of it from then on: the admin's onboarding, Stephen's
+   * setup, every interview turn's brief and the Brain page. Its source in
+   * the new Brain is owed an erasure in the same transaction
+   * (`kickoffErasuresOwed`), which core does right after and on its clock
+   * until done (onboarding/new-brain.ts `eraseOwedKickoffs`); the purge
+   * mark moves on, so a staff save whose reading began before is refused
+   * (`saveKickoff`), and a kickoff brought in later is a source of its own
+   * (`kickoffBrainId`). One audit event, never a word of it. Asked again
+   * with nothing left, it changes nothing and records nothing. Whether
+   * there was anything to delete.
    */
   async deleteKickoff(by: AuditActor): Promise<boolean> {
-    const deleted = await this.#withBrain(async () => {
-      const records = await kickoffRecordsHeld(this.env);
-      const [row] = this.#db.select({ id: kickoff.id }).from(kickoff).all();
-      // Gone already, its records owed by an earlier delete: that one's
-      // event stands, and only its erasure is left to finish.
-      const owed = this.ctx.storage.kv.get(kickoffErasureOwedKey) !== undefined;
-      if (row === undefined && (records === 0 || owed)) {
-        return false;
-      }
-      this.ctx.storage.transactionSync(() => {
-        this.#purged();
-        this.#db.delete(kickoff).run();
-        // Nothing is owed of it any more.
-        this.ctx.storage.kv.delete(kickoffOwedKey);
-        this.ctx.storage.kv.put(kickoffErasureOwedKey, true);
-        // What the voice said on the admins' onboarding may have quoted it
-        // (the sponsor, what the company does): all of it goes from the
-        // cache, said anew when asked.
-        this.#queueSpokenBy(like(spokenKeys.who, `${adminWho}%`));
-        this.#changed(by, "onboarding.kickoff.deleted", {
-          kickoff: row === undefined ? 0 : 1,
-          records,
-        });
-      });
-      this.#deliverAudit();
-      return true;
+    const [row] = this.#db.select({ id: kickoff.id }).from(kickoff).all();
+    if (row === undefined) {
+      return false;
+    }
+    this.ctx.storage.transactionSync(() => {
+      this.ctx.storage.kv.put(
+        `${kickoffErasurePrefix}${this.kickoffBrainId()}`,
+        true
+      );
+      this.#purged();
+      this.#db.delete(kickoff).run();
+      // What the voice said on the admins' onboarding may have quoted it
+      // (the sponsor, what the company does): all of it goes from the
+      // cache, said anew when asked.
+      this.#queueSpokenBy(like(spokenKeys.who, `${adminWho}%`));
+      this.#changed(by, "onboarding.kickoff.deleted", {});
     });
+    this.#deliverAudit();
     // Whatever the cache doesn't take now waits for the alarm.
     await this.forgetLinesNow();
-    // Asked again after a failure, with the kickoff gone: what is owed is
-    // erased all the same.
-    const erased = await this.#withBrain(
-      async () => await this.#eraseOwedKickoffRecords()
-    );
-    if (!erased) {
-      throw onboardingErrors.create("onboarding.kickoff_unfinished");
-    }
-    return deleted;
+    return true;
   }
 
   /**
    * Keeps the sponsor's answer to what the kickoff left open about
-   * `field`; an empty one takes it back. Then gives the brain what the
-   * kickoff holds (kickoff-records.ts): an answer about the goals or the
-   * pain is a new vision. Under the brain lock, as the kickoff's delete is
-   * (`deleteKickoff`): after one, there is nothing to answer. False before
-   * the kickoff is in.
+   * `field`; an empty one takes it back. An answer about the vision, what
+   * every member reads of the kickoff, goes to the new Brain at the
+   * next hand-over (`#kickoffChanged`). False before
+   * the kickoff is in, or after its delete: there is nothing to answer.
    */
-  async answerKickoff(
-    field: VisionField,
-    text: string,
-    by: AuditActor
-  ): Promise<boolean> {
-    return await this.#withBrain(async () => {
-      const [row] = this.#db.select().from(kickoff).all();
-      if (row === undefined) {
-        return false;
+  answerKickoff(field: VisionField, text: string, by: AuditActor): boolean {
+    const [row] = this.#db.select().from(kickoff).all();
+    if (row === undefined) {
+      return false;
+    }
+    const trimmed = text.trim();
+    const kept = storedAnswersSchema.parse(JSON.parse(row.answers));
+    const answers: Partial<Record<VisionField, string>> = {};
+    for (const each of visionFields) {
+      const answer = each === field ? trimmed : (kept[each] ?? "");
+      if (answer !== "") {
+        answers[each] = answer;
       }
-      const trimmed = text.trim();
-      const kept = storedAnswersSchema.parse(JSON.parse(row.answers));
-      const answers: Partial<Record<VisionField, string>> = {};
-      for (const each of visionFields) {
-        const answer = each === field ? trimmed : (kept[each] ?? "");
-        if (answer !== "") {
-          answers[each] = answer;
-        }
+    }
+    this.ctx.storage.transactionSync(() => {
+      this.#db
+        .update(kickoff)
+        .set({ answers: JSON.stringify(answers) })
+        .where(eq(kickoff.id, 1))
+        .run();
+      this.#changed(by, "onboarding.kickoff.answered", { field });
+      // Only the vision's answers are what every member reads of it.
+      if (isVisionShared(field)) {
+        this.#kickoffChanged();
       }
-      this.ctx.storage.transactionSync(() => {
-        this.#db
-          .update(kickoff)
-          .set({ answers: JSON.stringify(answers) })
-          .where(eq(kickoff.id, 1))
-          .run();
-        this.#changed(by, "onboarding.kickoff.answered", { field });
-        // A new kickoff's records not kept yet still retire the last one's.
-        if (this.ctx.storage.kv.get(kickoffOwedKey) !== "replaced") {
-          this.ctx.storage.kv.put(kickoffOwedKey, "answered");
-        }
-      });
-      this.#deliverAudit();
-      await this.#keepOwedKickoffRecords();
-      return true;
     });
+    this.#deliverAudit();
+    return true;
   }
 
   /**
@@ -4505,6 +4913,17 @@ export class Onboarding extends DurableObject<Env> {
     account: string,
     sentBy: string
   ): Promise<boolean> {
+    return await this.#fallenFirst(
+      async () => await this.#eraseInterviewOfOnce(person, account, sentBy)
+    );
+  }
+
+  /** `eraseInterviewOf`, once: made again by `#fallenFirst` while claims fall. */
+  async #eraseInterviewOfOnce(
+    person: string,
+    account: string,
+    sentBy: string
+  ): Promise<boolean> {
     // Their link answers nothing any more and what they said is gone,
     // before anything waits: no new interview is saved under the entry
     // that stays, even while the Brain's and the voice's cleanup follow.
@@ -4542,6 +4961,17 @@ export class Onboarding extends DurableObject<Env> {
    * theirs went out. The audit log has that staff did, not for whom.
    */
   async deleteOnRequest(
+    person: string,
+    by: AuditActor,
+    now: string = new Date().toISOString()
+  ): Promise<boolean> {
+    return await this.#fallenFirst(
+      async () => await this.#deleteOnRequestOnce(person, by, now)
+    );
+  }
+
+  /** `deleteOnRequest`, once: made again by `#fallenFirst` while claims fall. */
+  async #deleteOnRequestOnce(
     person: string,
     by: AuditActor,
     now: string = new Date().toISOString()
@@ -4688,13 +5118,7 @@ export class Onboarding extends DurableObject<Env> {
     try {
       // Erasure first (GRA-329): nothing else that fails holds it up.
       this.#decideInterviews();
-      try {
-        await this.purgeBrain();
-      } catch (error) {
-        log.error("onboarding.purge_failed", {
-          error: error instanceof Error ? error.name : "unknown",
-        });
-      }
+      this.#forgetFallen();
       await this.forgetLinesNow();
       try {
         await this.eraseTakenOutAfterClose();
@@ -4704,7 +5128,6 @@ export class Onboarding extends DurableObject<Env> {
         });
         await this.#alarmBy(Date.now() + purgeRetryMs);
       }
-      await this.keepKickoffRecordsNow();
       await this.#drainAudit();
       await this.releaseDue();
       // A team's map opens its links.
@@ -5283,7 +5706,7 @@ export class Onboarding extends DurableObject<Env> {
     const teamsOn = new Map(
       roster.teams.filter(({ off }) => !off).map((team) => [team.id, team])
     );
-    const onRoster = new Set(roster.people.map(({ id }) => id));
+    const teamOf = new Map(roster.people.map(({ id, team }) => [id, team]));
     const due = this.#db
       .select()
       .from(works)
@@ -5294,8 +5717,8 @@ export class Onboarding extends DurableObject<Env> {
           return [];
         }
         const doers = doersOf(row.doers);
-        const told = agreedAbout(row.id, doers, asked, (id) =>
-          onRoster.has(id) ? agreedAt.get(id) : undefined
+        const told = agreedAbout(row, doers, asked, teamOf, (id) =>
+          agreedAt.get(id)
         );
         const tellers = told.map(([id]) => id);
         const agreed = Object.fromEntries(told);
@@ -5306,7 +5729,10 @@ export class Onboarding extends DurableObject<Env> {
           .filter((id) => before[id] !== agreed[id])
           .map((id) => agreed[id] ?? "")
           .toSorted();
-        const [first] = since;
+        // Someone it was drawn from who no longer counts for it (moved to
+        // another team): drawn again without them.
+        const left = Object.keys(before).some((id) => !(id in agreed));
+        const [first = left ? "" : undefined] = since;
         const last = since.at(-1);
         if (
           first === undefined ||
@@ -5478,14 +5904,18 @@ export class Onboarding extends DurableObject<Env> {
     if (roster === null) {
       return [];
     }
-    const onRoster = new Set(roster.people.map(({ id }) => id));
+    const teamOf = new Map(roster.people.map(({ id, team }) => [id, team]));
     const asked = this.#db.select().from(askedAbout).all();
     const found: { work: string; name: string; drawn: DrawnWork }[] = [];
     for (const row of this.#db.select().from(works).all()) {
       const doers = doersOf(row.doers);
       const agreed = Object.fromEntries(
-        agreedAbout(row.id, doers, asked, (id) =>
-          onRoster.has(id) ? (this.#agreedAt(id) ?? undefined) : undefined
+        agreedAbout(
+          row,
+          doers,
+          asked,
+          teamOf,
+          (id) => this.#agreedAt(id) ?? undefined
         )
       );
       // As the alarm does: a lead's overview alone draws only their own work.
@@ -5626,6 +6056,30 @@ export class Onboarding extends DurableObject<Env> {
       .values({ team, dueAt: at })
       .onConflictDoUpdate({ target: brainTeams.team, set: { dueAt: at } })
       .run();
+    this.#armSoon();
+  }
+
+  /**
+   * Arms the alarm that draws and gives teams to the brain
+   * (`#armDrawing`), once the change that asked for it is done: its
+   * transaction committed (or rolled back, which leaves nothing new to
+   * arm for). Whatever marks a team due asks it (`#brainDue`), so no
+   * caller can leave due work with no alarm to do it, as after the
+   * onboarding closed and every link went out. Asked again before it ran,
+   * it arms once.
+   */
+  #armSoon(): void {
+    if (this.#arming) {
+      return;
+    }
+    this.#arming = true;
+    this.ctx.waitUntil(
+      (async () => {
+        await Promise.resolve();
+        this.#arming = false;
+        await this.#armDrawing();
+      })()
+    );
   }
 
   /** Notes a team given to the brain as it was at `dueAt`: unless something new came since. */
@@ -5676,19 +6130,22 @@ export class Onboarding extends DurableObject<Env> {
    * names (for none to reach it), the facts each person who told their
    * own work agreed to, and its pieces of work as drawn. Never the lead's
    * facts, whose role alone says who they are, nor a piece of work drawn
-   * from the lead alone. None while fewer than `minTeamShown` of its people
-   * agreed: it waits.
+   * from the lead alone. None while the team may not have its results
+   * shown (`#teamShowsResults`: under seven who tell, switched off, or
+   * waiting for the admin): nothing it could note would stand, so no
+   * model is asked. It waits until a change makes the team due again.
    */
   #teamIntake(teamId: string): TeamIntake | null {
     const roster = this.#roster();
     const team = roster?.teams.find(({ id }) => id === teamId);
-    if (roster === null || team === undefined || team.off) {
+    if (
+      roster === null ||
+      team === undefined ||
+      !this.#teamShowsResults(teamId, { roster })
+    ) {
       return null;
     }
-    const tellers = this.#tellers(teamId);
-    if (tellers.length < minTeamShown) {
-      return null;
-    }
+    const tellers = this.#tellers(teamId, roster);
     const { lead } = team;
     const leadAgreed =
       lead !== null && this.#agreedAt(lead) !== null ? [lead] : [];
@@ -5776,10 +6233,10 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /**
-   * Gives the brain what a team learned, as it was due at `dueAt`
-   * (brain-intake.ts), as the onboarding, which owns those records: kept
-   * once each, so giving it again adds only what is new. Then notes who
-   * each rests on, here alone.
+   * Notes what a team learned, as it was due at `dueAt` (brain-intake.ts):
+   * its claims and the drawings of its work, which the onboarding keeps
+   * and hands the new Brain itself (GRA-1748), and who each rests on, here
+   * alone. Noting the same again adds nothing.
    */
   async #intakeTeam(teamId: string, dueAt: string, at: string): Promise<void> {
     const intake = this.#teamIntake(teamId);
@@ -5787,10 +6244,17 @@ export class Onboarding extends DurableObject<Env> {
       this.#brainSettled(teamId, dueAt);
       return;
     }
-    // Who it rests on, as their interviews stand now, before anything is
-    // awaited: whatever happens to them meanwhile is seen at the end.
-    const began = this.#interviewsOf(
-      this.#roster()?.people.map(({ id }) => id) ?? []
+    // Who it may rest on, as their interviews stand now, before anything
+    // is awaited: whatever happens to them meanwhile is seen at the end.
+    // Only those whose interview counts now: nothing of anyone else is in
+    // it, so someone who hasn't agreed (or whose interview went before it
+    // began) is never one who went meanwhile, which would keep the team's
+    // claims and drawings from ever being noted while anyone on the list
+    // hasn't agreed. One who agrees meanwhile makes the team due again.
+    const began = new Map(
+      [
+        ...this.#interviewsOf(this.#roster()?.people.map(({ id }) => id) ?? []),
+      ].filter(([, held]) => held !== null)
     );
     // What five or more of its people said, put together (GRA-1084):
     // never one person's fact. A failing model throws, and the intake is
@@ -5814,42 +6278,23 @@ export class Onboarding extends DurableObject<Env> {
       // oxlint-disable-next-line no-await-in-loop -- one drawing at a time
       supports.set(work.id, await checkedSupport(checks, work, factsOf, clean));
     }
-    const { records, rests } = await intakeOf(intake, claims, supports);
-    // The team's claims are these now: any statement given before that
+    const {
+      claims: made,
+      drawings,
+      rests,
+    } = await intakeOf(intake, claims, supports);
+    // The team's claims and drawings are these now: any noted before that
     // isn't one of them goes, so no earlier one outlives what it was put
-    // together from. Found both where it is noted whom each rests on and
-    // in the brain itself, so one given with no note of it goes too: read
-    // before anything is written.
-    const current = new Set(records.map(({ id }) => id));
-    // And each piece of work's earlier drawings: only the one checked now
-    // is the brain's (GRA-1084), never one drawn before with fewer than
-    // five behind a part of it.
-    const workflows = records.flatMap(({ type, id }) =>
-      type === "workflow" ? [id] : []
-    );
-    const givenStatements = await onboardingStatementsOf(
-      this.env,
-      intakeIds.team(teamId)
-    );
-    const givenDrawings = await onboardingDrawingsOf(this.env, workflows);
-    const given = [
-      ...givenStatements.map((record) => ({
-        record,
-        type: "statement" as const,
-        parent: null,
-      })),
-      ...givenDrawings.map(({ id, workflowId }) => ({
-        record: id,
-        type: "workflowVersion" as const,
-        parent: workflowId,
-      })),
-    ];
+    // together from (only the drawing checked now is the team's, GRA-1084,
+    // never one drawn before with fewer than five behind a part of it),
+    // found where it is noted whom each rests on. Read before anything is
+    // written.
+    const current = new Set([
+      ...made.map(({ record }) => record),
+      ...drawings.map(({ record }) => record),
+    ]);
     const noted = this.#db
-      .select({
-        record: brainSent.record,
-        type: brainSent.type,
-        parent: brainSent.parent,
-      })
+      .select({ record: brainSent.record, type: brainSent.type })
       .from(brainSent)
       .where(
         and(
@@ -5860,7 +6305,7 @@ export class Onboarding extends DurableObject<Env> {
       .all();
     const stale = [
       ...new Map(
-        [...given, ...noted]
+        noted
           .filter(({ record }) => !current.has(record))
           .map((each) => [each.record, each])
       ).values(),
@@ -5872,185 +6317,158 @@ export class Onboarding extends DurableObject<Env> {
         )
       ),
     ];
-    // Whom each record rests on is noted before the brain holds it, so no
-    // record is ever there without it: a withdrawal finds it whatever
-    // happens after (`#toPurge`). Each earlier claim is noted as resting
-    // on nobody left (`gonePrefix`), to be taken out at once or by the
-    // alarm until it is, however the intake itself ends.
-    const changed = this.ctx.storage.transactionSync(() => {
-      // One rule for whom a record rests on (GRA-1084): someone counts only
-      // while what they approved is still exactly what the claims and
-      // drawings were made from, read in this transaction against when the
-      // intake began (`#goneSince`). Anyone whose approval changed since is
-      // noted as gone, and the team stays due for another intake. A gone
-      // mark is never cleared here.
-      const since = new Set(this.#goneSince(began));
-      // A claim rests on exactly the people behind it now: whoever it
-      // rested on before and doesn't now no longer counts towards the five
-      // it needs. Who is gone stays gone.
-      this.#db
-        .delete(brainSent)
-        .where(
-          and(
-            inList(brainSent.record, claimed),
-            not(like(brainSent.person, `${gonePrefix}%`))
-          )
-        )
-        .run();
-      // One row a record: within SQLite's bound parameters.
-      for (const rest of rests) {
+    // A claim or drawing of the team the new backing leaves standing no
+    // more, or a team it leaves under seven, is out of use in the Brain
+    // before this transaction commits (`#recountStanding`): made again
+    // then, from what the intake gave, its model never asked twice.
+    const gone = await this.#fallenFirst(() =>
+      this.ctx.storage.transactionSync(() => {
+        // One rule for whom a record rests on (GRA-1084): someone counts
+        // only while what they approved is still exactly what the claims
+        // and drawings were made from, read in this transaction against
+        // when the intake began (`#goneSince`). Anyone whose approval
+        // changed since is noted as gone (`gonePrefix`), and the team stays
+        // due for another intake.
+        const since = new Set(this.#goneSince(began));
+        // A claim rests on exactly the people behind it now, and on nobody
+        // else: whoever it rested on before, gone marks included, is
+        // replaced. Someone who took back their part while this intake ran
+        // was marked gone on it as their take-back committed; kept here, the
+        // mark would stand beside five who back it now, a claim that still
+        // stands, and never be forgotten (`#forgetFallen` forgets only
+        // what falls). Who went while it ran is marked again below.
         this.#db
-          .insert(brainSent)
-          .values({
-            ...rest,
-            person: since.has(rest.person)
-              ? `${gonePrefix}${rest.person}`
-              : rest.person,
-            team: teamId,
-          })
-          .onConflictDoNothing()
+          .delete(brainSent)
+          .where(inList(brainSent.record, claimed))
           .run();
-      }
-      for (const { record, type, parent } of stale) {
-        this.#db
-          .update(brainSent)
-          .set({ person: sql`${gonePrefix} || ${brainSent.person}` })
-          .where(
-            and(
-              eq(brainSent.record, record),
-              not(like(brainSent.person, `${gonePrefix}%`))
-            )
-          )
-          .run();
-        this.#db
-          .insert(brainSent)
-          .values({
-            record,
-            type,
-            team: teamId,
-            person: `${gonePrefix}${record}`,
-            parent,
-          })
-          .onConflictDoNothing()
-          .run();
-      }
-      return since.size > 0;
-    });
-    await keepOnboardingRecords(this.env, records, {
-      sources: new Set([rosterSource, await intakeIds.interviews(teamId)]),
-      teams: new Set([intakeIds.team(teamId)]),
-    });
-    const gone = this.ctx.storage.transactionSync(() => {
-      // Whose interview went meanwhile, though they began anew: what rests
-      // on it rests on someone gone (`gonePrefix`), and is taken out.
-      const since = this.#goneSince(began);
-      const ours = [...new Set(rests.map(({ record }) => record))];
-      for (const person of since) {
-        this.#db
-          .update(brainSent)
-          .set({ person: `${gonePrefix}${person}` })
-          .where(
-            and(eq(brainSent.person, person), inList(brainSent.record, ours))
-          )
-          .run();
-      }
-      this.#db
-        .update(brainTeams)
-        .set({ sentAt: sql`coalesce(${brainTeams.sentAt}, ${at})` })
-        .where(eq(brainTeams.team, teamId))
-        .run();
-      // Which differences the review may show: those whose two ways five
-      // or more were checked to tell, each, in the drawing as it stands.
-      for (const work of intake.works) {
-        const support = supports.get(work.id);
-        const { differs } = work.drawn;
-        const checked =
-          support !== undefined &&
-          differs !== null &&
-          (support.steps[differs.step] ?? []).length >= minTeamShown &&
-          support.other.length >= minTeamShown;
-        if (checked) {
-          // As checked: each way with the roster's names taken out now,
-          // never again with whatever names it has later.
-          const shown = {
-            drawnAt: work.drawn.at,
-            way: clean(work.drawn.steps[differs.step]?.text ?? ""),
-            other: clean(differs.other),
-            at,
-          };
-          // In one statement, only while what it was checked from still
-          // stands as the intake read it: the drawing it checked, and the
-          // interview of everyone it rests on, at the same admission
-          // (`admissionSql`). One forgotten, withdrawn, deleted or taken
-          // back meanwhile leaves no copy of its words.
-          const restsOn = [
-            ...new Set([
-              ...(support.steps[differs.step] ?? []),
-              ...support.other,
-            ]),
-          ];
-          const standing = and(
-            sql`EXISTS (SELECT 1 FROM ${drawnWorks}
-              WHERE ${drawnWorks.work} = ${work.id}
-                AND json_extract(${drawnWorks.drawn}, '$.at') = ${work.drawn.at})`,
-            ...restsOn.map(
-              (person) =>
-                sql`${admissionSql(person)} IS ${began.get(person) ?? null}`
-            )
-          );
+        // One row a record: within SQLite's bound parameters.
+        for (const rest of rests) {
           this.#db
-            .insert(checkedDifferences)
-            .select(
-              sql`SELECT ${work.id}, ${shown.drawnAt}, ${shown.way}, ${shown.other}, ${shown.at} WHERE ${standing}`
-            )
-            .onConflictDoUpdate({ target: checkedDifferences.work, set: shown })
-            .run();
-        } else {
-          this.#db
-            .delete(checkedDifferences)
-            .where(eq(checkedDifferences.work, work.id))
+            .insert(brainSent)
+            .values({
+              ...rest,
+              person: since.has(rest.person)
+                ? `${gonePrefix}${rest.person}`
+                : rest.person,
+              team: teamId,
+            })
+            .onConflictDoNothing()
             .run();
         }
-      }
-      // The team's claims, for the new Brain (GRA-1741): only from an
-      // intake nobody it rests on moved under, as five or more back each
-      // as read. Otherwise the team stays due, and the next intake notes
-      // them.
-      if (since.length === 0 && !changed) {
-        this.#noteClaims(
-          teamId,
-          records.flatMap((record) =>
-            record.type === "statement"
-              ? [
-                  {
-                    record: record.id,
-                    text: record.text,
-                    people: rests.flatMap(({ record: of, person }) =>
-                      of === record.id ? [person] : []
-                    ),
-                  },
-                ]
-              : []
-          )
-        );
-      }
-      this.#brainSettled(teamId, dueAt);
-      return changed || since.length > 0 || stale.length > 0;
-    });
+        // Each earlier claim or drawing rests on nobody left, and is
+        // forgotten here (`#forgetFallen`).
+        for (const { record, type } of stale) {
+          this.#db
+            .update(brainSent)
+            .set({ person: sql`${gonePrefix} || ${brainSent.person}` })
+            .where(
+              and(
+                eq(brainSent.record, record),
+                not(like(brainSent.person, `${gonePrefix}%`))
+              )
+            )
+            .run();
+          this.#db
+            .insert(brainSent)
+            .values({
+              record,
+              type,
+              team: teamId,
+              person: `${gonePrefix}${record}`,
+            })
+            .onConflictDoNothing()
+            .run();
+        }
+        // Which differences the review may show: those whose two ways five
+        // or more were checked to tell, each, in the drawing as it stands.
+        for (const work of intake.works) {
+          const support = supports.get(work.id);
+          const { differs } = work.drawn;
+          const checked =
+            support !== undefined &&
+            differs !== null &&
+            (support.steps[differs.step] ?? []).length >= minTeamShown &&
+            support.other.length >= minTeamShown;
+          if (checked) {
+            // As checked: each way with the roster's names taken out now,
+            // never again with whatever names it has later.
+            const shown = {
+              drawnAt: work.drawn.at,
+              way: clean(work.drawn.steps[differs.step]?.text ?? ""),
+              other: clean(differs.other),
+              at,
+            };
+            // In one statement, only while what it was checked from still
+            // stands as the intake read it: the drawing it checked, and the
+            // interview of everyone it rests on, at the same admission
+            // (`admissionSql`). One forgotten, withdrawn, deleted or taken
+            // back meanwhile leaves no copy of its words.
+            const restsOn = [
+              ...new Set([
+                ...(support.steps[differs.step] ?? []),
+                ...support.other,
+              ]),
+            ];
+            const standing = and(
+              sql`EXISTS (SELECT 1 FROM ${drawnWorks}
+              WHERE ${drawnWorks.work} = ${work.id}
+                AND json_extract(${drawnWorks.drawn}, '$.at') = ${work.drawn.at})`,
+              ...restsOn.map(
+                (person) =>
+                  sql`${admissionSql(person)} IS ${began.get(person) ?? null}`
+              )
+            );
+            this.#db
+              .insert(checkedDifferences)
+              .select(
+                sql`SELECT ${work.id}, ${shown.drawnAt}, ${shown.way}, ${shown.other}, ${shown.at} WHERE ${standing}`
+              )
+              .onConflictDoUpdate({
+                target: checkedDifferences.work,
+                set: shown,
+              })
+              .run();
+          } else {
+            this.#db
+              .delete(checkedDifferences)
+              .where(eq(checkedDifferences.work, work.id))
+              .run();
+          }
+        }
+        // The team's claims (GRA-1741) and drawings (GRA-1748), for the new
+        // Brain and the Brain page: only from an intake nobody it rests on
+        // moved under, each standing as read. Otherwise the team stays
+        // due, and the next intake notes them.
+        if (since.size === 0) {
+          const restingOn = (record: string): string[] =>
+            rests.flatMap(({ record: of, person }) =>
+              of === record ? [person] : []
+            );
+          this.#noteClaims(
+            teamId,
+            made.map((claim) => ({ ...claim, people: restingOn(claim.record) }))
+          );
+          this.#noteDrawings(
+            teamId,
+            drawings.map((drawing) => ({
+              ...drawing,
+              people: restingOn(drawing.record),
+            }))
+          );
+        }
+        // Whoever's interview went meanwhile no longer backs a claim of it.
+        this.#recountStanding([teamId]);
+        this.#brainSettled(teamId, dueAt);
+        return since.size > 0 || stale.length > 0;
+      })
+    );
     // The claims it noted reach the hand-over with their events.
     this.#deliverAudit();
-    // Someone it rests on deleted their interview while it was given, or a
-    // claim it gave before isn't the team's now: taken out again at once,
-    // or by the alarm.
+    // Someone it rests on deleted their interview while it ran, or a claim
+    // or drawing it noted before isn't the team's now: whom it rested on
+    // is forgotten at once.
     if (gone) {
-      try {
-        await this.#purgeNow();
-      } catch (error) {
-        log.error("onboarding.purge_failed", {
-          error: error instanceof Error ? error.name : "unknown",
-        });
-        await this.#armDrawing();
-      }
+      this.#forgetFallen();
     }
   }
 
@@ -6095,40 +6513,6 @@ export class Onboarding extends DurableObject<Env> {
         ({ person, sentTo }) =>
           listed.has(person) && (sentTo ?? listed.get(person)) === address
       );
-  }
-
-  /**
-   * The staff-list team of the person whose interview is `account`'s
-   * (`links.account`, GRA-1790), while they are on the list, core didn't erase them,
-   * the team may have claims shown (`teamMayClaim`), and none of its
-   * claims is owed an erasure: whose claims they read in the new Brain
-   * (brain-next.ts, `readerOf`). Null otherwise.
-   */
-  interviewTeamOf(account: string): string | null {
-    const [link] = this.#db
-      .select({ person: links.person })
-      .from(links)
-      .where(and(eq(links.account, account), isNull(links.erasedAt)))
-      .all();
-    if (link === undefined) {
-      return null;
-    }
-    // A team too small to have claims shown gives its group to nobody,
-    // from the moment its count changes (`teamMayClaim`); and so does a
-    // team with any claim owed an erasure the Brain hasn't confirmed, so
-    // that what may be read never rests on a Brain call having succeeded:
-    // readers read less, never more, until it has.
-    const team = this.#teamOfPerson(link.person);
-    if (team === null || !teamMayClaim(this.#tellers(team).length)) {
-      return null;
-    }
-    const [owed] = this.#db
-      .select({ source: brainClaims.source })
-      .from(brainClaims)
-      .where(and(eq(brainClaims.team, team), eq(brainClaims.erase, true)))
-      .limit(1)
-      .all();
-    return owed === undefined ? team : null;
   }
 
   /**
@@ -6252,11 +6636,25 @@ export class Onboarding extends DurableObject<Env> {
    * the hand-over runs (`claimToHand`), never here.
    */
   #noteClaimSource(source: string): void {
+    this.#noteHandOver("claim", source);
+  }
+
+  /**
+   * Notes `producer`'s source `id` for core's hand-over to the new Brain,
+   * in the transaction of the change that moved it: an event in the
+   * onboarding's log, and its audit event in the outbox, whose drain
+   * notes the hand-over (brain-hand-overs.ts). Names the source by its id
+   * alone; what it holds is read when the hand-over runs.
+   */
+  #noteHandOver(
+    producer: "claim" | "drawing" | "kickoff" | "roster",
+    id: string
+  ): void {
     const at = new Date().toISOString();
     const {
       actions: [action],
       target: targetType,
-    } = handOverProducers.claim;
+    } = handOverProducers[producer];
     this.#db
       .insert(events)
       .values({ at, by: whoIs({ type: "system" }), what: action, about: null })
@@ -6265,7 +6663,7 @@ export class Onboarding extends DurableObject<Env> {
       {
         actor: { type: "system" },
         action,
-        target: { type: targetType, id: source },
+        target: { type: targetType, id },
         detail: {},
       },
       "core"
@@ -6342,24 +6740,77 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /**
+   * The team claims standing now (`standingClaim`), as every member reads
+   * them on the Brain page (GRA-1748), by the rule the hand-over adds them
+   * by (`claimToHand`). Each with its kind, its team and its words; never
+   * who backs it.
+   */
+  standingClaims(): StandingClaim[] {
+    return this.#db
+      .select({
+        source: brainClaims.source,
+        team: brainClaims.team,
+        kind: brainClaims.kind,
+        text: brainClaims.text,
+      })
+      .from(brainClaims)
+      .where(and(standingClaim, isNotNull(brainClaims.kind)))
+      .all()
+      .flatMap(({ source, team, kind, text }) =>
+        kind === null ? [] : [{ source, team, kind, text }]
+      );
+  }
+
+  /**
+   * The drawings standing now (`standingDrawing`), as every member reads
+   * them on the Brain page (GRA-1748), by the rule the hand-over adds them
+   * by (`drawingToHand`): each piece of work's one drawing, with its team
+   * and names. Never who told what.
+   */
+  standingDrawings(): StandingDrawing[] {
+    return this.#db
+      .select()
+      .from(brainDrawings)
+      .where(standingDrawing)
+      .all()
+      .flatMap((row) => {
+        const drawing = brainDrawingOf(row.drawing);
+        return drawing === null
+          ? []
+          : [
+              {
+                source: row.source,
+                workflow: row.workflow,
+                team: row.team,
+                name: row.name,
+                ...(row.local === null ? {} : { local: row.local }),
+                drawing,
+              },
+            ];
+      });
+  }
+
+  /**
+   * The drawing `source` as the hand-over adds it now: what it holds, for
+   * its team, only while it stands (`standingDrawing`). Null otherwise.
+   */
+  drawingToHand(source: string): StandingDrawing | null {
+    return (
+      this.standingDrawings().find((each) => each.source === source) ?? null
+    );
+  }
+
+  /**
    * The claim `source` as the hand-over adds it now: its sentence and its
-   * team, only while it stands (five or more back it, and its team may
-   * have claims shown, `teamMayClaim`). Null otherwise.
+   * team, only while it stands (`standingClaim`). Null otherwise.
    */
   claimToHand(source: string): { text: string; team: string } | null {
     const [row] = this.#db
       .select()
       .from(brainClaims)
-      .where(eq(brainClaims.source, source))
+      .where(and(eq(brainClaims.source, source), standingClaim))
       .all();
-    if (
-      row === undefined ||
-      row.erase ||
-      !teamMayClaim(this.#tellers(row.team).length)
-    ) {
-      return null;
-    }
-    return { text: row.text, team: row.team };
+    return row === undefined ? null : { text: row.text, team: row.team };
   }
 
   /**
@@ -6401,10 +6852,11 @@ export class Onboarding extends DurableObject<Env> {
       }
       return this.owedErasures().filter((owed) =>
         "claims" in scope
-          ? owed.kind === "claim"
+          ? owed.kind === "claim" || owed.kind === "drawing"
           : (owed.kind === "interview" &&
               this.#interviewPersonOf(owed.source) === scope.person) ||
-            (owed.kind === "claim" && ofTeams.has(owed.team))
+            ((owed.kind === "claim" || owed.kind === "drawing") &&
+              ofTeams.has(owed.team))
       );
     }
     const owedInterviews: OwedErasure[] = this.#db
@@ -6424,7 +6876,13 @@ export class Onboarding extends DurableObject<Env> {
       .where(eq(brainClaims.erase, true))
       .all()
       .map(({ source, team }) => ({ kind: "claim", source, team }));
-    return [...owedInterviews, ...claims];
+    const drawings: OwedErasure[] = this.#db
+      .select({ source: brainDrawings.source, team: brainDrawings.team })
+      .from(brainDrawings)
+      .where(eq(brainDrawings.erase, true))
+      .all()
+      .map(({ source, team }) => ({ kind: "drawing", source, team }));
+    return [...owedInterviews, ...claims, ...drawings];
   }
 
   /**
@@ -6450,8 +6908,9 @@ export class Onboarding extends DurableObject<Env> {
   /**
    * Those of `candidates` who back a claim of `team` now: they agree to what
    * they said, and are in that team on the list now, so someone moved
-   * away no longer backs it. The one rule, for the recount (`#toPurge`)
-   * and for noting a claim (`#noteClaims`).
+   * away no longer backs it. The one rule, for the recount
+   * (`#recountStanding`), for noting a claim (`#noteClaims`) and for
+   * forgetting whom one rested on (`#toForget`).
    */
   #currentBackers(
     team: string,
@@ -6529,57 +6988,66 @@ export class Onboarding extends DurableObject<Env> {
             )
           )
           .run();
-      } else {
+      } else if (kind === "claim") {
         this.#db
           .delete(brainClaims)
           .where(
             and(eq(brainClaims.source, source), eq(brainClaims.erase, true))
           )
           .run();
+      } else {
+        this.#db
+          .delete(brainDrawings)
+          .where(
+            and(eq(brainDrawings.source, source), eq(brainDrawings.erase, true))
+          )
+          .run();
       }
     });
+    if (kind !== "interview") {
+      this.#takenOut.delete(fallenKey({ producer: kind, id: source }));
+    }
   }
 
   /**
    * Notes, in the caller's transaction, that the statements `claims` of
    * `team` are the team's claims now: each new one is to be written to
-   * the new Brain under a change key minted here, and each written before
-   * that isn't one of them any more is to be erased.
+   * the new Brain under a change key minted here. Each written before that
+   * isn't one of them any more (no longer made, or no longer backed by
+   * five) falls: it is out of use in the Brain before this transaction
+   * commits (`SourcesFallError`, `#fallenFirst`), as for any change that
+   * drops one.
    */
   #noteClaims(
     team: string,
-    claims: readonly {
-      record: string;
-      text: string;
-      people: readonly string[];
-    }[]
+    claims: readonly (IntakeClaim & { people: readonly string[] })[]
   ): void {
-    // A team too small to have claims shown has none (`teamMayClaim`); a
-    // claim is noted only while five or more of its team's people now
-    // back it (`#currentBackers`, the recount's own rule): one moved away
-    // while the claims were put together doesn't count.
-    const shown = teamMayClaim(this.#tellers(team).length)
-      ? claims.filter(
-          ({ people: backing }) =>
-            this.#currentBackers(team, backing).length >= minTeamShown
-        )
-      : [];
+    // Noted only while it stands, by the recount's own rule
+    // (`#claimStands`): one moved away while the claims were put together
+    // doesn't count.
+    const read = { roster: this.#roster(), mayClaim: new Map() };
+    const shown = claims.filter(({ people: backing }) =>
+      this.#claimStands(team, backing, read)
+    );
     const current = new Set(shown.map(({ record }) => record));
     const held = this.#db
-      .select({ record: brainClaims.record })
+      .select({ source: brainClaims.source, record: brainClaims.record })
       .from(brainClaims)
       .where(and(eq(brainClaims.team, team), eq(brainClaims.erase, false)))
       .all();
-    this.#eraseClaims(
-      held.flatMap(({ record }) => (current.has(record) ? [] : [record]))
-    );
+    const dropped = held.filter(({ record }) => !current.has(record));
+    if (dropped.length > 0) {
+      throw new SourcesFallError(
+        dropped.map(({ source }) => ({ producer: "claim", id: source }))
+      );
+    }
     const kept = new Set(held.map(({ record }) => record));
-    for (const { record, text } of shown) {
+    for (const { record, kind, text } of shown) {
       if (!kept.has(record)) {
         const source = crypto.randomUUID();
         this.#db
           .insert(brainClaims)
-          .values({ source, record, team, text })
+          .values({ source, record, team, kind, text })
           .run();
         this.#noteClaimSource(source);
       }
@@ -6587,51 +7055,364 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /**
-   * Marks, in the caller's transaction, every claim of a team that may no
-   * longer have claims shown (`teamMayClaim`) to be erased.
+   * Notes, in the caller's transaction, that `drawings` of `team` are the
+   * drawings of its pieces of work now (GRA-1748): each new one is to be
+   * written to the new Brain under a change key minted here, and shown on
+   * the Brain page. Each noted before that isn't one of them any more
+   * (drawn anew, no longer drawn, or no longer standing) falls: it is out
+   * of use in the Brain before this transaction commits
+   * (`SourcesFallError`, `#fallenFirst`), as for any change that drops one.
    */
-  #eraseClaimsOfSmallTeams(): void {
-    const teamsHeld = new Set(
-      this.#db
-        .select({ team: brainClaims.team })
-        .from(brainClaims)
-        .where(eq(brainClaims.erase, false))
-        .all()
-        .map(({ team }) => team)
+  #noteDrawings(
+    team: string,
+    drawings: readonly (IntakeDrawing & { people: readonly string[] })[]
+  ): void {
+    // Noted only while it stands, by the recount's own rule
+    // (`#drawingStands`).
+    const read = { roster: this.#roster(), agreed: this.#agreedPeople() };
+    const shown = drawings.filter(({ people: resting }) =>
+      this.#drawingStands(team, resting, read)
     );
-    const roster = this.#roster();
-    for (const team of teamsHeld) {
-      if (!teamMayClaim(this.#tellers(team, roster).length)) {
+    const current = new Set(shown.map(({ record }) => record));
+    const held = this.#db
+      .select({ source: brainDrawings.source, record: brainDrawings.record })
+      .from(brainDrawings)
+      .where(and(eq(brainDrawings.team, team), standingDrawing))
+      .all();
+    const dropped = held.filter(({ record }) => !current.has(record));
+    if (dropped.length > 0) {
+      throw new SourcesFallError(
+        dropped.map(({ source }) => ({ producer: "drawing", id: source }))
+      );
+    }
+    const kept = new Set(held.map(({ record }) => record));
+    const at = new Date().toISOString();
+    for (const { record, workflow, name, local, drawing } of shown) {
+      if (!kept.has(record)) {
+        const source = crypto.randomUUID();
         this.#db
-          .update(brainClaims)
-          .set({ erase: true })
-          .where(eq(brainClaims.team, team))
+          .insert(brainDrawings)
+          .values({
+            source,
+            record,
+            workflow,
+            team,
+            name,
+            local: local ?? null,
+            drawing: JSON.stringify(drawing),
+            at,
+          })
           .run();
+        this.#noteHandOver("drawing", source);
       }
     }
   }
 
-  /** Marks the claims standing for `records` to be erased, in the caller's transaction. */
-  #eraseClaims(records: readonly string[]): void {
-    this.#db
-      .update(brainClaims)
-      .set({ erase: true })
-      .where(inList(brainClaims.record, records))
-      .run();
+  /** Who agrees to what they said now: their interview counts (`agreedAt`). */
+  #agreedPeople(): Set<string> {
+    return new Set(
+      this.#db
+        .select({ person: interviewStates.person })
+        .from(interviewStates)
+        .where(isNotNull(interviewStates.agreedAt))
+        .all()
+        .map(({ person }) => person)
+    );
   }
 
   /**
-   * The one recount, in the caller's transaction, after anything that may
-   * take a claim under five of its team's people now or its team under
-   * what may have claims shown (`#toPurge`, `#eraseClaimsOfSmallTeams`):
-   * each such claim is marked to be erased in the same transaction as the
-   * change, so no team member reads it from that moment
-   * (`interviewTeamOf`), however long the Brain's own work waits
-   * (`#withBrain`). The Brain's erasure of it follows (`owedErasures`).
+   * The one recount of the team claims (GRA-1741) and drawings (GRA-1748),
+   * in the transaction of a change that may take one down: the standing
+   * claims and drawings of the teams `of` (`all` for a roster save). A
+   * claim stands while its team may have claims shown and five or more of
+   * its people back it (`#claimStands`); a drawing while all it rests on
+   * still count (`#drawingStands`). One that no longer stands must be out
+   * of use in the Brain before the change commits (GRA-1946): the Brain
+   * decides what is read, inside its own statement, so a read that runs
+   * after the change finds nothing of it, also one whose reader was found
+   * before. So, finding one, it throws `SourcesFallError`, which rolls the
+   * whole change back: the change is made again once they are out
+   * (`#fallenFirst`).
    */
-  #markClaimsThatNoLongerStand(): void {
-    this.#eraseClaimsOfSmallTeams();
-    this.#eraseClaims(this.#toPurge().records);
+  #recountStanding(of: readonly (string | null)[] | "all"): void {
+    const named = of === "all" ? [] : of.filter((team) => team !== null);
+    if (of !== "all" && named.length === 0) {
+      return;
+    }
+    const claims = this.#db
+      .select({
+        source: brainClaims.source,
+        record: brainClaims.record,
+        team: brainClaims.team,
+        erase: brainClaims.erase,
+      })
+      .from(brainClaims)
+      .where(of === "all" ? undefined : inList(brainClaims.team, named))
+      .all()
+      .map((row) => ({ ...row, producer: "claim" as const }));
+    const drawings = this.#db
+      .select({
+        source: brainDrawings.source,
+        record: brainDrawings.record,
+        team: brainDrawings.team,
+        erase: brainDrawings.erase,
+      })
+      .from(brainDrawings)
+      .where(of === "all" ? undefined : inList(brainDrawings.team, named))
+      .all()
+      .map((row) => ({ ...row, producer: "drawing" as const }));
+    const held = [...claims, ...drawings];
+    // One owed its erasure that this object hasn't seen taken out (it was
+    // marked just before a removal that failed, or before a restart) may
+    // still be in use: it is taken out again first.
+    const owed = held.filter(
+      ({ producer, source, erase }) =>
+        erase && this.#mayBeInUse({ producer, id: source }, erase)
+    );
+    const standing = held.filter(({ erase }) => !erase);
+    if (owed.length === 0 && standing.length === 0) {
+      return;
+    }
+    const roster = this.#roster();
+    const agreed = this.#agreedPeople();
+    const mayClaim = new Map<string, boolean>();
+    const falling = standing.filter(({ producer, record, team }) => {
+      const resting = this.#db
+        .select({ person: brainSent.person })
+        .from(brainSent)
+        .where(eq(brainSent.record, record))
+        .all()
+        .map(({ person }) => person);
+      return producer === "claim"
+        ? !this.#claimStands(team, resting, { roster, agreed, mayClaim })
+        : !this.#drawingStands(team, resting, { roster, agreed, mayClaim });
+    });
+    const out = [...owed, ...falling];
+    if (out.length > 0) {
+      throw new SourcesFallError(
+        out.map(({ producer, source }) => ({ producer, id: source }))
+      );
+    }
+  }
+
+  /**
+   * The one rule for whether a drawing of `team` resting on `resting`
+   * stands now (GRA-1084, GRA-1748): its team may have its results shown
+   * (`#teamShowsResults`, as for a claim), everyone it rests on still
+   * counts (none gone, none who took back what they approved, none moved
+   * to another team), and its
+   * team's map stands on what its lead's facts are now (`#mapBacked`,
+   * GRA-329). The
+   * recount (`#recountStanding`), noting a drawing (`#noteDrawings`) and
+   * forgetting whom one rested on (`#toForget`) ask it, so none keeps what
+   * another drops.
+   */
+  #drawingStands(
+    team: string,
+    resting: readonly string[],
+    {
+      roster = this.#roster(),
+      agreed,
+      mayClaim = new Map<string, boolean>(),
+    }: {
+      roster?: Roster | null;
+      agreed: ReadonlySet<string>;
+      mayClaim?: Map<string, boolean>;
+    }
+  ): boolean {
+    return (
+      this.#teamShowsResults(team, { roster, mayClaim }) &&
+      resting.length > 0 &&
+      // Each still agrees, and is in the team now: one who moved away takes
+      // their part with them, as for a claim (`#currentBackers`).
+      this.#currentBackers(team, resting, agreed).length === resting.length &&
+      this.#mapBacked(team)
+    );
+  }
+
+  /**
+   * The one rule for whether `team` may have its results (its claims and
+   * the drawings of its work) read at all (GRA-1748): it is on the list,
+   * it takes part (an admin may switch a team off: then nothing of it is
+   * shown to members, #2344; one switched on again, or new, shows only
+   * once the admin confirms it), and seven or more of its people tell their
+   * own work (`teamMayClaim`: five backers in a team of seven, the
+   * owner's decision of 16 November). Both `#claimStands` and
+   * `#drawingStands` ask it. A read of many passes the list read once, and
+   * a map of each team's answer (`mayClaim`), filled as it goes.
+   */
+  #teamShowsResults(
+    team: string,
+    {
+      roster = this.#roster(),
+      mayClaim = new Map<string, boolean>(),
+    }: { roster?: Roster | null; mayClaim?: Map<string, boolean> }
+  ): boolean {
+    const known = mayClaim.get(team);
+    if (known !== undefined) {
+      return known;
+    }
+    // Switched off, or switched on or new and still waiting for the admin
+    // to confirm it (`#holdNew`): nothing of it is shown.
+    const takesPart =
+      roster?.teams.some(({ id, off }) => id === team && !off) === true &&
+      !this.#unconfirmed().teams.has(team);
+    const may = takesPart && teamMayClaim(this.#tellers(team, roster).length);
+    mayClaim.set(team, may);
+    return may;
+  }
+
+  /**
+   * The one rule for whether a claim of `team` resting on `backers` stands
+   * now (GRA-1741): its team may have its results shown
+   * (`#teamShowsResults`), and five or more of `backers` back it now
+   * (`#currentBackers`). Both noting
+   * a claim (`#noteClaims`) and the recount (`#recountStanding`) ask it, so
+   * neither keeps what the other drops. A recount over many claims passes
+   * the list and the agreed people read once, and a map of what each team
+   * may (`mayClaim`), filled as it goes.
+   */
+  #claimStands(
+    team: string,
+    backers: readonly string[],
+    {
+      roster = this.#roster(),
+      agreed,
+      mayClaim = new Map<string, boolean>(),
+    }: {
+      roster?: Roster | null;
+      agreed?: ReadonlySet<string>;
+      mayClaim?: Map<string, boolean>;
+    } = {}
+  ): boolean {
+    return (
+      this.#teamShowsResults(team, { roster, mayClaim }) &&
+      this.#currentBackers(team, backers, agreed).length >= minTeamShown
+    );
+  }
+
+  /** Notes, in a transaction of its own or the caller's, that the teams `due` are due to be given to the Brain again. */
+  #dueAgain(due: readonly string[]): void {
+    const at = new Date().toISOString();
+    this.ctx.storage.transactionSync(() => {
+      for (const team of new Set(due)) {
+        this.#brainDue(team, at);
+      }
+    });
+  }
+
+  /** The teams of the claims and drawings `sources`. */
+  #teamsOf(sources: readonly FallingSource[]): string[] {
+    const of = (producer: FallingSource["producer"]): string[] =>
+      sources.flatMap((source) =>
+        source.producer === producer ? [source.id] : []
+      );
+    return [
+      ...this.#db
+        .select({ team: brainClaims.team })
+        .from(brainClaims)
+        .where(inList(brainClaims.source, of("claim")))
+        .all(),
+      ...this.#db
+        .select({ team: brainDrawings.team })
+        .from(brainDrawings)
+        .where(inList(brainDrawings.source, of("drawing")))
+        .all(),
+    ].map(({ team }) => team);
+  }
+
+  /**
+   * Whether `source`, marked to be erased or not (`erase`), may still be in
+   * use in the Brain: standing, or marked but not seen taken out by this
+   * object (`#takenOut`: a removal that failed after the mark, or a restart
+   * since). The one rule for what a change takes out again before what
+   * rests on it goes (`#recountStanding`, a document's removal).
+   */
+  #mayBeInUse(source: FallingSource, erase: boolean): boolean {
+    return !erase || !this.#takenOut.has(fallenKey(source));
+  }
+
+  /**
+   * Makes a change that may take team claims or drawings down
+   * (`#recountStanding`, `#noteClaims`, `#noteDrawings`, a document's
+   * removal). Each it finds falling (`SourcesFallError`) is first marked
+   * here to be erased (`owedErasures`), in a transaction of its own, so
+   * one the Brain may have taken out never reads as standing here, on the
+   * Brain page or for the hand-over, whatever happens next. It is then
+   * taken out of use in the shared store (the Brain's `removeSources`:
+   * one transaction there, its key closed for good, also while its add is
+   * in flight) and erased there, so the Brain's ledger keeps it out after
+   * a restore too (an erasure that fails is left to core's clock: it is
+   * out of use already). Then the change is made again from the start,
+   * every check read afresh, with `again` (a link's call then isn't
+   * counted twice). One found falling then too, as things moved
+   * meanwhile, goes the same way; each round takes out at least one more,
+   * so it ends. A Brain that can't take them out (out of reach, or
+   * restoring) fails the change, with nothing of it made: nothing stays
+   * readable past a change that drops it. One taken out by a change that
+   * then fails stands again only through the team's next intake, under a
+   * new key.
+   */
+  async #fallenFirst<T>(
+    change: (again: boolean) => Promise<T> | T,
+    again = false
+  ): Promise<T> {
+    try {
+      return await change(again);
+    } catch (error) {
+      if (!(error instanceof SourcesFallError)) {
+        throw error;
+      }
+      const { sources } = error;
+      const ofProducer = (producer: FallingSource["producer"]): string[] =>
+        sources.flatMap((source) =>
+          source.producer === producer ? [source.id] : []
+        );
+      this.ctx.storage.transactionSync(() => {
+        this.#db
+          .update(brainClaims)
+          .set({ erase: true })
+          .where(inList(brainClaims.source, ofProducer("claim")))
+          .run();
+        this.#db
+          .update(brainDrawings)
+          .set({ erase: true })
+          .where(inList(brainDrawings.source, ofProducer("drawing")))
+          .run();
+      });
+      if (this.#removeFallen === undefined) {
+        throw new Error("Nothing takes sources out of the Brain here.", {
+          cause: error,
+        });
+      }
+      const erased = await this.#takeOut(this.#removeFallen, sources);
+      for (const source of sources) {
+        this.#takenOut.add(fallenKey(source));
+      }
+      for (const { producer, id } of erased) {
+        this.erasedFromBrain(producer, id);
+      }
+      return await this.#fallenFirst(change, true);
+    }
+  }
+
+  /**
+   * Takes `sources`, marked already, out of the Brain with `remove`: the
+   * ones it erased. When the Brain can't, the change is refused, its
+   * sources off the page: their teams are given again at their next
+   * intake (`#dueAgain`), so what still stands comes back once the Brain
+   * takes it.
+   */
+  async #takeOut(
+    remove: SourceRemover,
+    sources: readonly FallingSource[]
+  ): Promise<readonly FallingSource[]> {
+    try {
+      return await remove(sources);
+    } catch (error) {
+      this.#dueAgain(this.#teamsOf(sources));
+      throw error;
+    }
   }
 
   /** Runs `work` with the brain once what it is doing with it now is done. */
@@ -6646,134 +7427,63 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /**
-   * What is to be taken out of the brain, from who each record rests on
-   * (`brain_sent`), now that some interviews are gone (their agreement no
-   * longer counts, `#agreedAt`):
-   *
-   * - a statement once fewer than `minTeamShown` of the people it rests on
-   *   are left: a claim is the team's only while five or more make it
-   *   (GRA-1084);
-   * - a drawing once anyone it rests on is gone: their numbers and words
-   *   are in it, and what is left is drawn again without them;
-   * - a workflow once nobody it rests on is left, or none of its drawings;
-   * - everything of a team fewer than `minTeamShown` of whose people still
-   *   agreed, or that left the staff list: the brain has a team's work
-   *   only from three of its people (GRA-359), and gets it again once it
-   *   does.
-   *
-   * Also who is gone, whatever rested on them, and the teams emptied.
+   * The claims and drawings whose backing is to be forgotten (`brain_sent`):
+   * every one that stands no more, by the rules the recount asks
+   * (`#claimStands`, `#drawingStands`). Whoever is gone goes with them:
+   * one who withdrew, deleted their interview or took back what they
+   * approved backs nothing that still stands, as a claim rests on exactly
+   * the five whose facts were checked first (team-claims.ts `supported`)
+   * and a drawing on everyone it was drawn from, so each fell as they went.
+   * An intake that rebuilds such a claim while they go rests it on who
+   * backs it now alone, their gone mark dropped (`#intakeTeam`), so no
+   * standing claim keeps one.
    */
-  #toPurge(): { records: string[]; gone: string[]; emptied: string[] } {
-    const rows = this.#db.select().from(brainSent).all();
-    if (rows.length === 0) {
-      return { records: [], gone: [], emptied: [] };
-    }
-    const agreed = new Set(
-      this.#db
-        .select({ person: interviewStates.person })
-        .from(interviewStates)
-        .where(isNotNull(interviewStates.agreedAt))
-        .all()
-        .map(({ person }) => person)
-    );
-    const roster = this.#roster();
-    const teamIds = [...new Set(rows.map(({ team }) => team))];
-    const emptied = new Set(
-      teamIds.filter((team) => {
-        const onRoster = roster?.teams.some(({ id }) => id === team) === true;
-        return !onRoster || this.#tellers(team, roster).length < minTeamShown;
+  #toForget(): string[] {
+    const rows = this.#db
+      .select({
+        record: brainSent.record,
+        type: brainSent.type,
+        team: brainSent.team,
+        person: brainSent.person,
       })
-    );
-    // A map no longer standing on its lead's facts takes its pieces of
-    // work, and every drawing of them, out of the brain (GRA-329).
-    const unmapped = new Set(teamIds.filter((team) => !this.#mapBacked(team)));
-    const records = new Map<
+      .from(brainSent)
+      .all();
+    if (rows.length === 0) {
+      return [];
+    }
+    const roster = this.#roster();
+    const agreed = this.#agreedPeople();
+    const mayClaim = new Map<string, boolean>();
+    const resting = new Map<
       string,
       { type: string; team: string; people: string[] }
     >();
     for (const { record, type, team, person } of rows) {
-      const held = records.get(record) ?? { type, team, people: [] };
+      const held = resting.get(record) ?? { type, team, people: [] };
       held.people.push(person);
-      records.set(record, held);
+      resting.set(record, held);
     }
-    const purged = new Set<string>();
-    for (const [record, { type, team, people: on }] of records) {
-      const left = on.filter((person) => agreed.has(person));
-      const backers = this.#currentBackers(team, on, agreed);
-      if (
-        emptied.has(team) ||
-        left.length === 0 ||
-        // A claim rests on five or more of its team's people now, or isn't
-        // the team's.
-        (type === "statement" && backers.length < minTeamShown) ||
-        (type === "workflowVersion" && left.length < on.length) ||
-        (unmapped.has(team) &&
-          (type === "workflow" || type === "workflowVersion"))
-      ) {
-        purged.add(record);
-      }
-    }
-    // A workflow goes with the last of its drawings.
-    const drawn = new Set(
-      rows.flatMap(({ parent }) => (parent === null ? [] : [parent]))
-    );
-    const drawingsLeft = new Set(
-      rows.flatMap(({ record, parent }) =>
-        parent === null || purged.has(record) ? [] : [parent]
-      )
-    );
-    for (const [record, { type }] of records) {
-      if (
-        type === "workflow" &&
-        drawn.has(record) &&
-        !drawingsLeft.has(record)
-      ) {
-        purged.add(record);
-      }
-    }
-    return {
-      records: [...purged],
-      gone: [
-        ...new Set(
-          rows.flatMap(({ person }) => (agreed.has(person) ? [] : [person]))
-        ),
-      ],
-      emptied: [...emptied],
-    };
+    return [...resting].flatMap(([record, { type, team, people: on }]) => {
+      const stands =
+        type === "statement"
+          ? this.#claimStands(team, on, { roster, agreed, mayClaim })
+          : this.#drawingStands(team, on, { roster, agreed, mayClaim });
+      return stands ? [] : [record];
+    });
   }
 
   /**
-   * Takes out of the brain what `#toPurge` finds, then forgets here who it
-   * rested on: what stays rests on nobody who is gone. A team emptied has
-   * no interviews in the brain until it is given again. Within
-   * `#withBrain`, so no intake lands between.
+   * Forgets whom what `#toForget` finds rested on (GRA-368): what stays
+   * rests on nobody who is gone. Nothing leaves the Brain here: a claim or
+   * drawing that stops standing is out of use there before the change
+   * that drops it commits (`#recountStanding`), and owed its erasure until
+   * done. After an interview goes, after an intake, and from the alarm.
    */
-  async #purgeNow(): Promise<number> {
-    // A team's claims go with the team dropping below what may have them
-    // shown, whoever left it and whatever else is purged.
-    this.ctx.storage.transactionSync(() => {
-      this.#eraseClaimsOfSmallTeams();
-    });
-    const { records, gone, emptied } = this.#toPurge();
-    if (records.length === 0 && gone.length === 0) {
-      return 0;
-    }
-    // The new Brain's claims among them are to be erased, noted before
-    // anything is awaited (core erases them, onboarding/new-brain.ts).
-    this.ctx.storage.transactionSync(() => {
-      this.#eraseClaims(records);
-    });
-    const purged = await purgeOnboardingRecords(this.env, records);
-    this.ctx.storage.transactionSync(() => {
+  #forgetFallen(): void {
+    const records = this.#toForget();
+    if (records.length > 0) {
       this.#db.delete(brainSent).where(inList(brainSent.record, records)).run();
-      this.#db.delete(brainSent).where(inList(brainSent.person, gone)).run();
-      this.#db
-        .update(brainTeams)
-        .set({ sentAt: null })
-        .where(inList(brainTeams.team, emptied))
-        .run();
-    });
-    return purged;
+    }
   }
 
   /**
@@ -7073,22 +7783,20 @@ export class Onboarding extends DurableObject<Env> {
     const drawing = this.#dueToDraw(now);
     const drawn = new Set(drawing.map(({ id, work }) => work?.team ?? id));
     // A team still being drawn goes to the brain once it is drawn.
-    const { records, gone } = this.#toPurge();
+    const forgettable = this.#toForget().length > 0;
     const afters = [
       ...drawing.map(({ after }) => after),
       ...this.#brainDueAt(now).flatMap(({ team, after }) =>
         drawn.has(team) ? [] : [after]
       ),
-      // What rests on an interview that is gone, still in the brain, and
-      // the voice's lines of one still in the cache.
-      ...(records.length > 0 ||
-      gone.length > 0 ||
+      // Whom what no longer stands rested on, and the voice's lines of an
+      // interview that is gone still in the cache.
+      ...(forgettable ||
       this.#db
         .select({ key: linesToForget.key })
         .from(linesToForget)
         .limit(1)
-        .all().length > 0 ||
-      this.ctx.storage.kv.get(kickoffOwedKey) !== undefined
+        .all().length > 0
         ? [now + purgeRetryMs]
         : []),
     ];
@@ -7246,7 +7954,10 @@ export class Onboarding extends DurableObject<Env> {
       this.#db
         .update(teams)
         .set({
-          does: map.does === "" ? still.does : map.does,
+          // The lead's map is theirs, from their interview: kept apart from
+          // what the admin wrote, never shown as theirs (GRA-1748). A map
+          // saying nothing of it leaves nothing of an earlier one.
+          mappedDoes: map.does === "" ? null : map.does,
           ...(generation === input.generation && admission === input.admission
             ? {
                 mappedAt: sql`coalesce(${teams.mappedAt}, ${at})`,
@@ -7615,7 +8326,8 @@ export class Onboarding extends DurableObject<Env> {
     if (lost) {
       // Every drawing it was in goes, whatever still counts: one drawn
       // from what no longer does never comes back, even when drawing it
-      // again fails.
+      // again fails. So does what their map says a team does.
+      this.#forgetMapOf(person.id);
       this.#forgetDrawings(person.id);
       this.#db
         .update(interviewStates)
@@ -7654,12 +8366,12 @@ export class Onboarding extends DurableObject<Env> {
         .run();
     }
     // A claim it took under five backers, or a team it took under seven
-    // interviewed, is unreadable from this transaction on. Only a loss can
-    // take either down (something they approved stopped counting, or
-    // nothing does any more): a gain never lowers backing, so it pays no
-    // recount.
-    if (lost || !counts) {
-      this.#markClaimsThatNoLongerStand();
+    // interviewed, is out of use in the Brain before this transaction
+    // commits (`#recountStanding`). Only a loss can take either down: a gain
+    // never lowers backing, so it pays no recount, and going from counting
+    // to not counting always loses something.
+    if (lost) {
+      this.#recountStanding([this.#teamOfPerson(person.id)]);
     }
   }
 
@@ -7679,22 +8391,25 @@ export class Onboarding extends DurableObject<Env> {
   #forget(person: string, now: string, what: string, by: string): void {
     this.#erase(person);
     // A claim it took under five backers, or a team it took under seven
-    // interviewed, is unreadable from this transaction on. A roster save,
-    // which erases everyone it takes off the list, recounts once for them
-    // all at the end of its own transaction (`#writeRoster`).
-    this.#markClaimsThatNoLongerStand();
+    // interviewed, is out of use in the Brain before this transaction
+    // commits (`#recountStanding`). A roster save, which erases everyone it
+    // takes off the list, recounts once for them all at the end of its
+    // own transaction (`#writeRoster`).
+    this.#recountStanding([this.#teamOfPerson(person)]);
     this.#noted(person, what, now, by);
   }
 
   /**
    * Removes someone's interview, in the transaction it is called in: what
    * they said and agreed to, where it stood, and every drawing it was in (`#forgetDrawings`). From then on nothing
-   * they agreed to counts (`#agreedAt` is null), which is how the brain's
-   * records resting on them are found (`#toPurge`). Everything the voice
+   * they agreed to counts (`#agreedAt` is null), which is how the claims
+   * and drawings resting on them are found (`#recountStanding`,
+   * `#toForget`). Everything the voice
    * was asked to say in it goes from the cache (`#queueSpokenOf`).
    */
   #erase(person: string): void {
     this.#queueSpokenOf(person);
+    this.#forgetMapOf(person);
     this.#forgetDrawings(person);
     this.#db.delete(interviews).where(eq(interviews.person, person)).run();
     this.#db
@@ -7958,25 +8673,7 @@ export class Onboarding extends DurableObject<Env> {
    * away as it ends (`#drawWork`).
    */
   #forgetDrawings(person: string): void {
-    const [state] = this.#db
-      .select({ leadOf: interviewStates.leadOf })
-      .from(interviewStates)
-      .where(eq(interviewStates.person, person))
-      .all();
-    const [link] = this.#db
-      .select({ ledTeam: links.ledTeam })
-      .from(links)
-      .where(eq(links.person, person))
-      .all();
-    const led = new Set(
-      [
-        state?.leadOf,
-        link?.ledTeam,
-        ...(this.#roster()
-          ?.teams.filter(({ lead }) => lead === person)
-          .map(({ id }) => id) ?? []),
-      ].flatMap((team) => (team === undefined || team === null ? [] : [team]))
-    );
+    const led = this.#ledBy(person);
     const teamOf = new Map(
       this.#db
         .select({ id: works.id, team: works.team })
@@ -8004,6 +8701,48 @@ export class Onboarding extends DurableObject<Env> {
           .where(eq(drawFailures.item, `work:${row.work}`))
           .run();
       }
+    }
+  }
+
+  /** The teams `person` leads or led in their interview, by its state, their link or the roster. */
+  #ledBy(person: string): Set<string> {
+    const [state] = this.#db
+      .select({ leadOf: interviewStates.leadOf })
+      .from(interviewStates)
+      .where(eq(interviewStates.person, person))
+      .all();
+    const [link] = this.#db
+      .select({ ledTeam: links.ledTeam })
+      .from(links)
+      .where(eq(links.person, person))
+      .all();
+    return new Set(
+      [
+        state?.leadOf,
+        link?.ledTeam,
+        ...(this.#roster()
+          ?.teams.filter(({ lead }) => lead === person)
+          .map(({ id }) => id) ?? []),
+      ].flatMap((team) => (team === undefined || team === null ? [] : [team]))
+    );
+  }
+
+  /**
+   * Takes what `person`'s map says a team they lead does (`mappedDoes`), a
+   * model's answer from their interview, from staff too, in the
+   * transaction of their withdrawal, delete or erasure, or of an approval
+   * they took back (GRA-1748); a map drawn again gives it anew. The
+   * team's pieces of work stay: the rest of the team was asked about them,
+   * and they are drawn again from what those people agreed (GRA-329).
+   */
+  #forgetMapOf(person: string): void {
+    const led = [...this.#ledBy(person)];
+    if (led.length > 0) {
+      this.#db
+        .update(teams)
+        .set({ mappedDoes: null })
+        .where(inArray(teams.id, led))
+        .run();
     }
   }
 
@@ -8053,27 +8792,20 @@ export class Onboarding extends DurableObject<Env> {
 
   /**
    * What follows someone's interview going, once it's gone here: what is
-   * left of the work it was in is drawn again, the brain's records that
-   * rested on it are taken out (`purgeBrain`), and so are the lines said
-   * in it that were kept. Both are tried again by the alarm until done
-   * (`#armDrawing`): the brain's records rest on someone gone until they
-   * are out, and the lines wait by their stored keys, hashes, never what
-   * was said (`linesToForget`, GRA-329), queued by the erasing transaction
-   * itself (`#erase`); one the voice says as it goes is taken out once
-   * kept (speech.ts `keepUnlessErased`).
+   * left of the work it was in is drawn again, whom the claims and
+   * drawings it was behind rested on is forgotten (`#forgetFallen`), and so
+   * are the lines said in it that were kept. The lines are tried again by
+   * the alarm until done (`#armDrawing`): they wait by their stored keys,
+   * hashes, never what was said (`linesToForget`, GRA-329), queued by the
+   * erasing transaction itself (`#erase`); one the voice says as it goes
+   * is taken out once kept (speech.ts `keepUnlessErased`).
    */
   async #afterForget(): Promise<void> {
     await this.#armDrawing();
     // What the new Brain holds of their interview is decided again: an
     // erasure owed, before anything else (`owedErasures`).
     this.#decideInterviews();
-    try {
-      await this.purgeBrain();
-    } catch (error) {
-      log.error("onboarding.purge_failed", {
-        error: error instanceof Error ? error.name : "unknown",
-      });
-    }
+    this.#forgetFallen();
     await this.forgetLinesNow();
   }
 

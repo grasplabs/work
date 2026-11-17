@@ -7,10 +7,20 @@ import {
   companyToolClassSchema,
   toolClassAudienceSchema,
 } from "@grasp-os/shared/connect";
-import { roleErrors } from "@grasp-os/shared/roles";
+import { requireAdmin, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { appClassAudienceSchema } from "@grasp-os/shared/stephen-reach";
-import { and, asc, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  eq,
+  inArray,
+  isNotNull,
+  isNull,
+  ne,
+  or,
+  sql,
+} from "drizzle-orm";
 import type { SQLWrapper } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
@@ -43,7 +53,7 @@ import {
 import { audienceOf, off, storedOf } from "./tool-classes.ts";
 
 // The agent builder, as core keeps it: the company's admins making an
-// agent, changing what it is called and told, pausing it, and saying whom
+// agent, changing what it is called, pausing it, and saying whom
 // it reaches and for whom it has each class of tools (agent-reach.ts).
 //
 // An agent starts with nothing. Making one writes, in the same batch as
@@ -54,8 +64,9 @@ import { audienceOf, off, storedOf } from "./tool-classes.ts";
 // whatever an agent's row says: the class gate asks the company first.
 //
 // The company's own admins change agents, never Grasp staff, and every
-// change is audited; one that changes nothing records nothing. An agent's
-// instructions are not kept in the audit log, only how long they are.
+// change is audited; one that changes nothing records nothing. What an
+// agent is told is its instruction file in the Brain, saved and audited
+// as instruction files are (instruction-files.ts), never here.
 //
 // The ways it can fail, which the tests start from: an agent that
 // answers or acts before an admin gave it anyone; someone who isn't the
@@ -143,7 +154,6 @@ const unchanged = (agent: Agent, said: AgentSaid): boolean =>
   agent.name === said.name &&
   agent.face === said.face &&
   agent.job === said.job &&
-  agent.instructions === said.instructions &&
   agent.modelRole === said.modelRole &&
   agent.model === said.model;
 
@@ -167,33 +177,28 @@ const requireModelChosen = async (
 };
 
 /**
- * What an audit event says of a person's own agent: that it is one, and
- * how much it was told. Never its name or job, which are its owner's and
- * the company's admins read the log.
+ * What an audit event says of a person's own agent: that it is one.
+ * Never its name or job, which are its owner's and the company's admins
+ * read the log.
  */
-const ownDetailOf = ({ instructions }: AgentSaid): Record<string, string> => ({
-  own: "true",
-  instructionsLength: String(instructions.length),
-});
+const ownDetail: Record<string, string> = { own: "true" };
 
 /** Where an agent was made, when not on the Agents page: a chat's draft. */
 interface MadeFrom {
   from?: "chat";
 }
 
-/** What an audit event says of an agent: never its instructions. */
+/** What an audit event says of an agent. */
 const detailOf = ({
   name,
   face,
   job,
-  instructions,
   modelRole,
   model,
 }: AgentSaid): Record<string, string> => ({
   name,
   face,
   job,
-  instructionsLength: String(instructions.length),
   modelRole: modelRole ?? "none",
   model: model ?? "none",
 });
@@ -217,8 +222,8 @@ export const listAgents = async (env: Env): Promise<Agent[]> => {
 
 /**
  * Makes an agent, on, reaching nobody and with every class for nobody.
- * Throws `agent.record_invalid` for what isn't an agent's name, job or
- * instructions, and `agent.name_taken` for a name another agent has.
+ * Throws `agent.record_invalid` for what isn't an agent's name, job,
+ * picture or model, and `agent.name_taken` for a name another agent has.
  */
 export const makeAgent = async (
   env: Env,
@@ -255,6 +260,8 @@ export const makeAgent = async (
         db.insert(agents).values({
           id,
           ...made,
+          // No longer read: what it is told is its instruction file.
+          instructions: "",
           nameKey: agentNameKey(made.name),
           state: "on",
           madeBy: identity.userId,
@@ -277,6 +284,7 @@ export const makeAgent = async (
     ...made,
     state: "on",
     ownerId: null,
+    offeredAt: null,
     changedBy: identity.userId,
     changedAt: now.toISOString(),
   };
@@ -360,15 +368,15 @@ export const makeOwnAgent = async (
   await auditedBatch(env, db, [
     db.insert(agents).select(
       sql`SELECT ${id}, ${made.name}, NULL, ${made.face}, ${made.job},
-          ${made.instructions}, ${made.modelRole}, ${made.model}, 'on',
-          ${ownerId}, ${ownerId}, ${now.getTime()}, ${ownerId},
+          '', ${made.modelRole}, ${made.model}, 'on',
+          ${ownerId}, NULL, ${ownerId}, ${now.getTime()}, ${ownerId},
           ${now.getTime()} WHERE ${room} AND ${member} AND ${ownAgentsOnSql}`
     ),
     outboxedIfChanged(db, {
       actor: actorOf(identity),
       action: "agent.made",
       target: { type: "agent", id },
-      detail: { ...ownDetailOf(made), ...(from === undefined ? {} : { from }) },
+      detail: { ...ownDetail, ...(from === undefined ? {} : { from }) },
     }),
   ]);
   const kept = await readAgent(env, id);
@@ -390,7 +398,7 @@ export const makeOwnAgent = async (
 };
 
 /**
- * Changes what the agent `agentId` is called and told. Throws
+ * Changes what the agent `agentId` is called, its picture and its model. Throws
  * `agent.unknown` for an agent the company doesn't have,
  * `agent.record_invalid` for what isn't an agent's, and `agent.name_taken`.
  */
@@ -426,7 +434,6 @@ export const changeAgent = async (
     sql`${agents.name} IS NOT ${changed.name}`,
     sql`${agents.face} IS NOT ${changed.face}`,
     sql`${agents.job} IS NOT ${changed.job}`,
-    sql`${agents.instructions} IS NOT ${changed.instructions}`,
     sql`${agents.modelRole} IS NOT ${changed.modelRole}`,
     sql`${agents.model} IS NOT ${changed.model}`
   );
@@ -444,6 +451,7 @@ export const changeAgent = async (
               .values({
                 id: agent.id,
                 ...named,
+                instructions: "",
                 state: agent.state,
                 madeBy: identity.userId,
                 madeAt: now,
@@ -469,7 +477,7 @@ export const changeAgent = async (
           actor: actorOf(identity),
           action: "agent.changed",
           target: { type: "agent", id: agent.id },
-          detail: ownerId === null ? detailOf(changed) : ownDetailOf(changed),
+          detail: ownerId === null ? detailOf(changed) : ownDetail,
         }),
       ])
   );
@@ -511,7 +519,7 @@ export const setAgentPaused = async (
             nameKey: agentNameKey(agent.name),
             face: agent.face,
             job: agent.job,
-            instructions: agent.instructions,
+            instructions: "",
             modelRole: agent.modelRole,
             model: agent.model,
             state,
@@ -549,7 +557,7 @@ export const setAgentPaused = async (
  * so a chat that still names it is refused its turn (agents.ts); its
  * name is free again; it reaches nobody and has every class for nobody,
  * whatever else reads its rows; its places, wake-ups and documents are gone. The
- * chats people had with it, its audit events and its memory file stay.
+ * chats people had with it, its audit events and its instruction file stay.
  * Throws `agent.first_stays` for the company's first agent, which every
  * chat falls back to, and `agent.unknown`.
  */
@@ -565,25 +573,42 @@ export const deleteAgent = async (
   const by = { changedBy: identity.userId, changedAt: new Date() };
   const nobody = { who: "nobody" as const, teams: "[]" };
   const db = drizzle(env.DB);
+  // Every write only while the agent is still whose it was when checked:
+  // one the company adopted meanwhile is no longer its former owner's.
+  const stillWhose = sql`EXISTS (SELECT 1 FROM ${agents} WHERE ${agents.id} = ${agent.id} AND ${ownedBy(agent.ownerId)})`;
   await auditedBatch(env, db, [
     db
       .update(agentReach)
       .set({ on: false, ...nobody, ...by })
-      .where(eq(agentReach.agentId, agent.id)),
+      .where(and(eq(agentReach.agentId, agent.id), stillWhose)),
     db
       .update(agentToolClasses)
       .set({ ...nobody, ...by })
-      .where(eq(agentToolClasses.agentId, agent.id)),
-    db.delete(agentPlaces).where(eq(agentPlaces.agentId, agent.id)),
-    db.delete(agentWakes).where(eq(agentWakes.agentId, agent.id)),
-    db.delete(agentDocuments).where(eq(agentDocuments.agentId, agent.id)),
-    db.delete(agentApps).where(eq(agentApps.agentId, agent.id)),
+      .where(and(eq(agentToolClasses.agentId, agent.id), stillWhose)),
+    db
+      .delete(agentPlaces)
+      .where(and(eq(agentPlaces.agentId, agent.id), stillWhose)),
+    db
+      .delete(agentWakes)
+      .where(and(eq(agentWakes.agentId, agent.id), stillWhose)),
+    db
+      .delete(agentDocuments)
+      .where(and(eq(agentDocuments.agentId, agent.id), stillWhose)),
+    db
+      .delete(agentApps)
+      .where(and(eq(agentApps.agentId, agent.id), stillWhose)),
     // Last before the event, which is recorded only if this changed a
     // row: an agent deleted twice at once is recorded once.
     db
       .update(agents)
       .set({ state: "deleted", nameKey: null, ...by })
-      .where(and(eq(agents.id, agent.id), ne(agents.state, "deleted"))),
+      .where(
+        and(
+          eq(agents.id, agent.id),
+          ne(agents.state, "deleted"),
+          ownedBy(agent.ownerId)
+        )
+      ),
     outboxedIfChanged(db, {
       actor: actorOf(identity),
       action: "agent.deleted",
@@ -766,5 +791,201 @@ export const dropOwnAgentsOf = async (
     db.delete(agentDocuments).where(inArray(agentDocuments.agentId, own)),
     db.delete(agentApps).where(inArray(agentApps.agentId, own)),
     db.delete(agents).where(eq(agents.ownerId, personId)),
+  ]);
+};
+
+/**
+ * Offers `identity`'s own agent `agentId` to the company, or takes the
+ * offer back: its admins then read what it is and is told, and may take
+ * it on (`adoptAgent`). Its owner's alone to offer, while it is theirs.
+ * Throws as `changeableAgent` does, `agent.unknown` for one of the
+ * company's, and `agent.record_invalid` for what isn't a yes or no.
+ * Audited when it changed, with whether it is offered: never its name,
+ * which its owner hasn't shown anyone before.
+ */
+export const offerOwnAgent = async (
+  env: Env,
+  identity: Identity,
+  agentId: unknown,
+  offered: unknown
+): Promise<void> => {
+  const agent = await changeableAgent(env, identity, agentId);
+  if (agent.ownerId === null) {
+    throw agentErrors.create("agent.unknown");
+  }
+  if (typeof offered !== "boolean") {
+    throw agentErrors.create("agent.record_invalid");
+  }
+  const now = new Date();
+  const db = drizzle(env.DB);
+  await auditedBatch(env, db, [
+    db
+      .update(agents)
+      .set({ offeredAt: offered ? now : null })
+      .where(
+        and(
+          eq(agents.id, agent.id),
+          notDeleted,
+          ownedBy(agent.ownerId),
+          offered ? isNull(agents.offeredAt) : isNotNull(agents.offeredAt)
+        )
+      ),
+    outboxedIfChanged(db, {
+      actor: actorOf(identity),
+      action: "agent.offered",
+      target: { type: "agent", id: agent.id },
+      detail: { offered: String(offered) },
+    }),
+  ]);
+};
+
+/**
+ * The agents people offered the company, the oldest offer first: for its
+ * admins, Grasp's staff among them, who read and change nothing.
+ */
+export const listOfferedAgents = async (
+  env: Env,
+  identity: Identity
+): Promise<Agent[]> => {
+  requireAdmin(identity);
+  const rows = await drizzle(env.DB)
+    .select()
+    .from(agents)
+    .where(and(isNotNull(agents.ownerId), isNotNull(agents.offeredAt)))
+    .orderBy(asc(agents.offeredAt), asc(agents.id));
+  return rows.flatMap((row) => agentOfRow(row) ?? []);
+};
+
+/** The agent `agentId`, while it is offered to the company; else `agent.not_offered`. */
+const requireOffered = async (env: Env, agentId: unknown): Promise<Agent> => {
+  const agent =
+    typeof agentId === "string" ? await readAgent(env, agentId) : undefined;
+  if (
+    agent === undefined ||
+    agent.ownerId === null ||
+    agent.offeredAt === null
+  ) {
+    throw agentErrors.create("agent.not_offered");
+  }
+  return agent;
+};
+
+/**
+ * Takes on the agent `agentId` its owner offered the company: it becomes
+ * one of the company's, under its name, which must be free among the
+ * company's (`agent.name_taken`), on, reaching nobody and with every class
+ * for nobody, as one an admin makes, with its documents as its owner
+ * left them. What its owner told it (their instruction file, in their own
+ * store) doesn't go with it: it starts told nothing until an admin writes
+ * its file (GRA-1833). Throws `agent.not_offered` for one that isn't
+ * offered now. The company's own admins only, never Grasp's staff.
+ *
+ * The batch holds what was read: the agent is taken on only while it is
+ * still offered by the same owner, and its reach and classes are written
+ * only once it is the company's, so an offer taken back meanwhile leaves
+ * it as it was, and records nothing.
+ */
+export const adoptAgent = async (
+  env: Env,
+  identity: Identity,
+  agentId: unknown
+): Promise<void> => {
+  requireCompanyAdmin(identity);
+  const agent = await requireOffered(env, agentId);
+  await requireNameFree(env, agent.name, agent.id);
+  const now = new Date();
+  const by = { changedBy: identity.userId, changedAt: now };
+  const db = drizzle(env.DB);
+  // Still offered by its owner, under the name checked: what this call
+  // adopts. Every write rests on it, before the agent changes, so a later
+  // call, or one after a rename, writes nothing.
+  const stillOffered = and(
+    eq(agents.id, agent.id),
+    notDeleted,
+    ownedBy(agent.ownerId),
+    isNotNull(agents.offeredAt),
+    eq(agents.name, agent.name)
+  );
+  const isCompanys = sql`EXISTS (SELECT 1 FROM ${agents} WHERE ${stillOffered})`;
+  await namedOnce(
+    async () =>
+      await auditedBatch(env, db, [
+        // Reaching nobody, every class for nobody: as a new agent starts.
+        db
+          .insert(agentReach)
+          .select(
+            sql`SELECT ${agent.id}, 1, 'nobody', '[]', ${identity.userId}, ${now.getTime()} WHERE ${isCompanys}`
+          )
+          // Nobody, whatever a row under its ID said before.
+          .onConflictDoUpdate({
+            target: agentReach.agentId,
+            set: { on: true, who: "nobody", teams: "[]", ...by },
+          }),
+        ...companyToolClasses.map((toolClass) =>
+          db
+            .insert(agentToolClasses)
+            .select(
+              sql`SELECT ${agent.id}, ${toolClass}, 'nobody', '[]', ${identity.userId}, ${now.getTime()} WHERE ${isCompanys}`
+            )
+            .onConflictDoUpdate({
+              target: [agentToolClasses.agentId, agentToolClasses.toolClass],
+              set: { who: "nobody", teams: "[]", ...by },
+            })
+        ),
+        // On, as the company's agents start: an owner's pause is theirs.
+        db
+          .update(agents)
+          .set({
+            ownerId: null,
+            offeredAt: null,
+            state: "on",
+            nameKey: agentNameKey(agent.name),
+            ...by,
+          })
+          .where(stillOffered),
+        outboxedIfChanged(db, {
+          actor: actorOf(identity),
+          action: "agent.adopted",
+          target: { type: "agent", id: agent.id },
+          detail: detailOf({ ...agent, model: agent.model }),
+        }),
+      ])
+  );
+  const after = await readAgent(env, agent.id);
+  if (after?.ownerId !== null) {
+    throw agentErrors.create("agent.not_offered");
+  }
+};
+
+/**
+ * Declines the agent `agentId` offered to the company: it stays its
+ * owner's, and no longer offered. Throws `agent.not_offered`. The
+ * company's own admins only.
+ */
+export const declineAgent = async (
+  env: Env,
+  identity: Identity,
+  agentId: unknown
+): Promise<void> => {
+  requireCompanyAdmin(identity);
+  const agent = await requireOffered(env, agentId);
+  const db = drizzle(env.DB);
+  await auditedBatch(env, db, [
+    db
+      .update(agents)
+      .set({ offeredAt: null })
+      .where(
+        and(
+          eq(agents.id, agent.id),
+          ownedBy(agent.ownerId),
+          isNotNull(agents.offeredAt)
+        )
+      ),
+    outboxedIfChanged(db, {
+      actor: actorOf(identity),
+      action: "agent.declined",
+      target: { type: "agent", id: agent.id },
+      detail: { offered: "false" },
+    }),
   ]);
 };

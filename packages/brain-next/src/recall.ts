@@ -1,4 +1,5 @@
 import { packAcross } from "./across.ts";
+import { blocksSql } from "./chunk-blocks.ts";
 import {
   exactCandidatesMax,
   recallLimit,
@@ -133,9 +134,11 @@ const foundBy = (
 ): string => `
   SELECT chunks.row AS row, asked.key AS term, ${exact} AS exact
   FROM json_each(?1) AS asked
+  CROSS JOIN blocks
   CROSS JOIN ${index}
   JOIN chunks ON chunks.row = ${index}.rowid${searched(asOf)}
-    AND ${index} MATCH asked.value ->> '${query}'`;
+    AND ${index} MATCH asked.value ->> '${query}'
+    AND ${index}.rowid BETWEEN blocks.first AND blocks.last`;
 
 /** What a statement returns of a chunk it found. */
 const chunkColumns = `chunks.row AS row, source_versions.source AS source,
@@ -155,6 +158,7 @@ const chunkColumns = `chunks.row AS row, source_versions.source AS source,
  */
 const recallSql = (asOf: number | undefined): string => `
 WITH ${readableSql},
+${blocksSql},
 found AS MATERIALIZED (${foundBy("chunk_words", "$.exact", 1, asOf)}
   UNION ALL${foundBy("chunk_words", "$.forms", 0, asOf)}
   UNION ALL${foundBy("chunk_stems", "$.forms", 0, asOf)}
@@ -167,8 +171,10 @@ matched AS (
 stopped AS (
   SELECT chunk_words.rowid AS row, count(*) AS stops
   FROM json_each(?5) AS stop
+  CROSS JOIN blocks
   CROSS JOIN chunk_words
   WHERE chunk_words MATCH stop.value
+    AND chunk_words.rowid BETWEEN blocks.first AND blocks.last
     AND +chunk_words.rowid IN (SELECT row FROM matched)
   GROUP BY chunk_words.rowid
 ),
@@ -197,12 +203,15 @@ LIMIT ?4`;
  */
 const stopsOnlySql = (asOf: number | undefined): string => `
 WITH ${readableSql},
+${blocksSql},
 found AS (
   SELECT chunks.row AS row, asked.key AS term
   FROM json_each(?1) AS asked
+  CROSS JOIN blocks
   CROSS JOIN chunk_words
   JOIN chunks ON chunks.row = chunk_words.rowid${searched(asOf)}
     AND chunk_words MATCH asked.value
+    AND chunk_words.rowid BETWEEN blocks.first AND blocks.last
     AND chunks.row NOT IN (SELECT value FROM json_each(?5))
 ),
 matched AS (
@@ -231,6 +240,7 @@ LIMIT ?4`;
  */
 const exactSql = (asOf: number | undefined): string => `
 WITH ${readableSql},
+${blocksSql},
 asked AS (
   SELECT value ->> '$.part' AS key, value ->> '$.query' AS query,
     value ->> '$.near' AS near
@@ -245,22 +255,28 @@ dated AS (
 found AS (
   SELECT chunks.row AS row, asked.key AS part
   FROM asked
+  CROSS JOIN blocks
   CROSS JOIN chunk_words
   JOIN chunks ON chunks.row = chunk_words.rowid${searched(asOf)}
     AND chunk_words MATCH asked.query
+    AND chunk_words.rowid BETWEEN blocks.first AND blocks.last
   UNION
   SELECT chunks.row AS row, dated.key AS part
   FROM dated
-  CROSS JOIN chunk_days
-  JOIN chunks ON chunks.row = chunk_days.chunk${searched(asOf)}
+  CROSS JOIN blocks
+  CROSS JOIN chunk_days INDEXED BY chunk_days_day_chunk_idx
+  JOIN chunks ON chunks.row = +chunk_days.chunk${searched(asOf)}
     AND chunk_days.month_day = dated.month_day
+    AND chunk_days.chunk BETWEEN blocks.first AND blocks.last
     AND (dated.year = 0 OR chunk_days.year IN (dated.year, 0))
 ),
 near AS (
   SELECT asked.key AS part, chunk_words.rowid AS row
   FROM asked
+  CROSS JOIN blocks
   CROSS JOIN chunk_words
   WHERE chunk_words MATCH asked.near
+    AND chunk_words.rowid BETWEEN blocks.first AND blocks.last
 ),
 ranked AS (
   SELECT found.row AS row, found.part AS part,
@@ -271,9 +287,9 @@ ranked AS (
         source_versions.added_at DESC, source_versions.source, chunks.position
     ) AS rank
   FROM found
+  CROSS JOIN chunks ON chunks.row = found.row
+  CROSS JOIN source_versions ON source_versions.row = chunks.version_row
   LEFT JOIN near ON near.part = found.part AND near.row = found.row
-  JOIN chunks ON chunks.row = found.row
-  JOIN source_versions ON source_versions.row = chunks.version_row
 )
 SELECT ${chunkColumns},
   json_group_array(ranked.part) FILTER (WHERE ranked.rank <= ?4) AS parts,
@@ -281,8 +297,8 @@ SELECT ${chunkColumns},
     AS near_parts,
   json_group_array(ranked.part) FILTER (WHERE ranked.rank > ?4) AS past
 FROM ranked
-JOIN chunks ON chunks.row = ranked.row
-JOIN source_versions ON source_versions.row = chunks.version_row
+CROSS JOIN chunks ON chunks.row = ranked.row
+CROSS JOIN source_versions ON source_versions.row = chunks.version_row
 WHERE ranked.rank <= ?4 + 1
 GROUP BY chunks.row
 ORDER BY length(chunks.text), source_versions.added_at DESC,
