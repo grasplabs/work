@@ -11,7 +11,8 @@ import {
   CardTitle,
 } from "@grasp-os/ui/components/card";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { useNavigate } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
+import { useState } from "react";
 import type { ReactNode } from "react";
 
 import { useCoreRead } from "../apps/use-core-read.ts";
@@ -223,6 +224,9 @@ export const DraftActions = ({
   const { t } = useLingui();
   const navigate = useNavigate();
   const label = press === "make" ? t`Make it` : t`Change it`;
+  // Made or changed, but not all of the card could be set: it is paused,
+  // and its page says what it has.
+  const [unfinished, setUnfinished] = useState<string>();
   const { busy, failure, run } = useCoreAction();
   const { model, effort } = build;
   return (
@@ -246,7 +250,9 @@ export const DraftActions = ({
                   ? await session.chats.makeDraftedAgent(chatId, asked)
                   : await session.chats.changeDraftedAgent(chatId, asked)
               );
-              if (agent !== undefined) {
+              if (agent?.unfinished === true) {
+                setUnfinished(agent.id);
+              } else if (agent !== undefined) {
                 void navigate({
                   to: "/agents/$agent",
                   params: { agent: agent.id },
@@ -268,6 +274,17 @@ export const DraftActions = ({
         </Button>
       </div>
       <ErrorText>{failure}</ErrorText>
+      {unfinished === undefined ? null : (
+        <p className="text-sm">
+          <Trans>
+            Not all of it could be set, so the agent is paused.{" "}
+            <Link params={{ agent: unfinished }} to="/agents/$agent">
+              Finish it on its page
+            </Link>
+            .
+          </Trans>
+        </p>
+      )}
     </div>
   );
 };

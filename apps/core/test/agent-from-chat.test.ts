@@ -361,7 +361,7 @@ describe("an agent made from the chat", { timeout: 120_000 }, () => {
       const { chat, callId } = await changedChat(admin, {
         agent: name,
         whose: "company",
-        instructions: "Also keep the HR calendar.",
+        addInstructions: "Also keep the HR calendar.",
         addApps: [{ source: "native", provider: "google", name: "Google" }],
         turnOn: ["read-own"],
       });
@@ -386,7 +386,10 @@ describe("an agent made from the chat", { timeout: 120_000 }, () => {
         again,
       }).toStrictEqual({
         before: hr(name).instructions,
-        after: ["Also keep the HR calendar.", hr(name).job],
+        after: [
+          `${hr(name).instructions}\n\nAlso keep the HR calendar.`,
+          hr(name).job,
+        ],
         apps: [["native:google", "on"]],
         on: ["read-own"],
         audience: { who: "nobody" },
@@ -405,7 +408,7 @@ describe("an agent made from the chat", { timeout: 120_000 }, () => {
       const { chat, callId } = await changedChat(admin, {
         agent: name,
         whose: "company",
-        instructions: "Drafted on what it was.",
+        addInstructions: "Drafted on what it was.",
       });
       await admin.api.connections.changeAgent(made.id, {
         ...hr(name),
@@ -442,12 +445,12 @@ describe("an agent made from the chat", { timeout: 120_000 }, () => {
       const others = await changedChat(ann, {
         agent: bens,
         whose: "own",
-        instructions: "Mine now.",
+        addInstructions: "Mine now.",
       });
       const company = await changedChat(ann, {
         agent: companys,
         whose: "company",
-        instructions: "Mine now.",
+        addInstructions: "Mine now.",
       });
 
       const triedOthers = await outcome(
@@ -467,6 +470,66 @@ describe("an agent made from the chat", { timeout: 120_000 }, () => {
         others: "agent.unknown",
         company: "agent.draft_not_found",
         bens: [hr(bens).instructions],
+      });
+    });
+
+    it("changes nothing on a card older than a change to the agent's apps, and keeps whether it answers at all as it is", async () => {
+      const admin = await signedInApi(idp, "admin");
+      const name = `Settings ${unique()}`;
+      const made = await admin.api.connections.makeAgent({
+        ...hr(name),
+        face: "pen",
+        modelRole: null,
+      });
+      await admin.api.connections.setAgentReach(made.id, false, {
+        who: "nobody",
+      });
+      const stale = await changedChat(admin, {
+        agent: name,
+        whose: "company",
+        addApps: [{ source: "native", provider: "google", name: "Google" }],
+      });
+      // Taken off on its page after the card was drafted.
+      await admin.api.connections.setAgentApp(made.id, "native:google", false);
+      const tried = await outcome(press(admin, stale.chat.id, stale.callId));
+      const reach = await changedChat(admin, {
+        agent: name,
+        whose: "company",
+        audience: { who: "everyone" },
+      });
+      await press(admin, reach.chat.id, reach.callId);
+      await idle(admin, reach.chat.id);
+      const apps = await admin.api.connections.agentApps(made.id);
+      const settings = await admin.api.connections.agentSettings(made.id);
+
+      expect({
+        tried,
+        apps: apps.map(({ app, state }) => [app, state]),
+        reach: [settings.on, settings.audience],
+      }).toStrictEqual({
+        tried: "agent.draft_stale",
+        apps: [["native:google", "removed"]],
+        // Whom it reaches changed; that it answers nobody stayed.
+        reach: [false, { who: "everyone" }],
+      });
+    });
+
+    it("refuses a change to the first agent's apps or access before anything changes, leaving the card to press again", async () => {
+      const admin = await signedInApi(idp, "admin");
+      const listed = await admin.api.connections.agents();
+      const first = listed.at(0);
+      const { chat, callId } = await changedChat(admin, {
+        agent: first?.name ?? "",
+        whose: "company",
+        addApps: [{ source: "native", provider: "google", name: "Google" }],
+      });
+
+      const tried = await outcome(press(admin, chat.id, callId));
+      const again = await outcome(press(admin, chat.id, callId));
+
+      expect({ tried, again }).toStrictEqual({
+        tried: "agent.settings_elsewhere",
+        again: "agent.settings_elsewhere",
       });
     });
   });

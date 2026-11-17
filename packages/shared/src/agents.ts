@@ -434,7 +434,16 @@ export const agentChangeDraftSchema = z
     agent: agentInputSchema.shape.name,
     whose: z.enum(["company", "own"]),
     job: agentInputSchema.shape.job.optional(),
-    instructions: z.string().trim().min(1).max(agentInstructionsMax).optional(),
+    /**
+     * What its instructions gain, added after what they say now: never a
+     * rewrite of instructions the chat can't read, which would drop them.
+     */
+    addInstructions: z
+      .string()
+      .trim()
+      .min(1)
+      .max(agentInstructionsMax)
+      .optional(),
     addApps: draftAppsSchema.optional(),
     removeApps: draftAppsSchema.optional(),
     audience: toolClassAudienceSchema.optional(),
@@ -458,7 +467,7 @@ export const agentChangeDraftSchema = z
   .refine(
     ({
       job,
-      instructions,
+      addInstructions,
       addApps = [],
       removeApps = [],
       audience,
@@ -466,7 +475,7 @@ export const agentChangeDraftSchema = z
       schedule,
     }) =>
       job !== undefined ||
-      instructions !== undefined ||
+      addInstructions !== undefined ||
       addApps.length > 0 ||
       removeApps.length > 0 ||
       audience !== undefined ||

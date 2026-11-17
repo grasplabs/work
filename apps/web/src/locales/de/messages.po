@@ -2052,6 +2052,10 @@ msgstr "Hinzugefügt am"
 msgid "Added someone to a team"
 msgstr "Jemanden zu einem Team hinzugefügt"
 
+#: src/chat/agent-change-card.tsx
+msgid "Added to its instructions"
+msgstr "Zu seinen Anweisungen hinzugefügt"
+
 #: src/brain/skills-page.tsx
 msgid "Added to the company's skills, and since taken out of use."
 msgstr "Zu den Skills des Unternehmens hinzugefügt und seitdem außer Gebrauch genommen."
@@ -7451,7 +7455,6 @@ msgstr "Daten"
 msgid "Its definition to keep or move, and a blueprint others can start from."
 msgstr "Ihre Definition zum Aufbewahren oder Umziehen und eine Vorlage, mit der andere beginnen können."
 
-#: src/chat/agent-change-card.tsx
 #: src/chat/agent-draft-card.tsx
 msgid "Its instructions"
 msgstr "Seine Anweisungen"
@@ -9133,6 +9136,10 @@ msgstr "Keine."
 #: src/brain/skills-page.tsx
 msgid "Not added yet"
 msgstr "Noch nicht hinzugefügt"
+
+#: src/chat/agent-draft-card.tsx
+msgid "Not all of it could be set, so the agent is paused. <0>Finish it on its page</0>."
+msgstr "Nicht alles konnte gesetzt werden, daher ist der Agent pausiert. <0>Auf seiner Seite fertigstellen</0>."
 
 #: src/routes/_shell.integrations.$integration.tsx
 #: src/workflows/workflow-triggers.tsx

@@ -45,9 +45,11 @@ import { z } from "zod";
 
 import { offeredApps, setAgentApp } from "./agent-app-access.ts";
 import {
+  agentChangedAt,
   changeAgent,
   listAgents,
   listOwnAgents,
+  readAgentSettings,
   makeAgent,
   makeOwnAgent,
   setAgentPaused,
@@ -55,7 +57,7 @@ import {
   setAgentToolClass,
 } from "./agent-builder.ts";
 import { makeAgentWake, wakeScheduleOf } from "./agent-wakes.ts";
-import { turnAgent } from "./agents.ts";
+import { firstAgentId, turnAgent } from "./agents.ts";
 import { createFromBlueprint } from "./app-blueprints.ts";
 import { appKind, createApp, editableApp } from "./apps.ts";
 import { chatAgentOf, chatAgentsFor } from "./chat-agents.ts";
@@ -105,6 +107,24 @@ const askedSchema = questionSchema.omit({ built: true }).extend({
 const buildSchema = questionSchema
   .pick({ text: true, model: true, effort: true })
   .extend({ plan: z.string().min(1).max(256) });
+
+/** Instructions with `added` after them, as a change from the chat adds them. */
+const instructionsWith = (now: string, added: string | undefined): string =>
+  added === undefined ? now : `${now.trimEnd()}\n\n${added}`.trim();
+
+/** Whether a change touches more than the agent itself: its apps, access or schedule. */
+const settingsIn = ({
+  addApps = [],
+  removeApps = [],
+  audience,
+  turnOn = [],
+  schedule,
+}: AgentChangeDraft): boolean =>
+  addApps.length > 0 ||
+  removeApps.length > 0 ||
+  audience !== undefined ||
+  turnOn.length > 0 ||
+  schedule !== undefined;
 
 const draftMakeSchema = questionSchema
   .pick({ text: true, model: true, effort: true })
@@ -739,9 +759,10 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
    */
   async #changedAgent(
     person: Identity,
-    { agent: name, whose }: AgentChangeDraft,
+    change: AgentChangeDraft,
     at: Date
   ): Promise<Agent> {
+    const { agent: name, whose } = change;
     const among =
       whose === "company"
         ? await this.#companyAgentsFor(person)
@@ -751,7 +772,14 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
     if (agent === undefined) {
       throw agentErrors.create("agent.unknown");
     }
-    if (agent.changedAt !== null && new Date(agent.changedAt) > at) {
+    // The first agent's apps and access are set elsewhere: only its job and
+    // instructions change here, refused before anything is written.
+    if (agent.id === firstAgentId && settingsIn(change)) {
+      throw agentErrors.create("agent.settings_elsewhere");
+    }
+    // Changed since: itself, or any setting a card could change.
+    const changedAt = await agentChangedAt(this.#env, agent);
+    if (changedAt !== null && changedAt > at) {
       throw agentErrors.create("agent.draft_stale");
     }
     return agent;
@@ -769,7 +797,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
     agent: Agent,
     {
       job,
-      instructions,
+      addInstructions,
       addApps = [],
       removeApps = [],
       audience,
@@ -777,12 +805,12 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
       schedule,
     }: AgentChangeDraft
   ): Promise<void> {
-    if (job !== undefined || instructions !== undefined) {
+    if (job !== undefined || addInstructions !== undefined) {
       await changeAgent(this.#env, person, agent.id, {
         name: agent.name,
         face: agent.face,
         job: job ?? agent.job,
-        instructions: instructions ?? agent.instructions,
+        instructions: instructionsWith(agent.instructions, addInstructions),
         modelRole: agent.modelRole,
         model: agent.model,
       });
@@ -802,12 +830,17 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
         );
       }
     }
+    if (audience !== undefined) {
+      // Whom it reaches, and nothing else: whether it answers at all stays
+      // as it is, which the card never showed.
+      const { on } = await readAgentSettings(this.#env, agent.id);
+      await setAgentReach(this.#env, person, agent.id, on, audience);
+    }
     await this.#setDrafted(person, agent.id, {
       name: agent.name,
       job: agent.job,
       instructions: agent.instructions,
       whose: agent.ownerId === null ? "company" : "own",
-      ...(audience === undefined ? {} : { audience }),
       classes: turnOn,
       ...(schedule === undefined ? {} : { schedule }),
     });

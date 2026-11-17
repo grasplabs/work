@@ -448,7 +448,7 @@ describe("making something in a chat's thread", () => {
       callId: "call-change",
       agent: "Claire",
       whose: "company",
-      instructions: "Chase late invoices, and keep the calendar.",
+      addInstructions: "Keep the calendar too.",
       addApps: [{ source: "native", provider: "google", name: "Google" }],
     };
     const { changed, router } = await thread([
@@ -473,10 +473,7 @@ describe("making something in a chat's thread", () => {
       changed,
       at: router.state.location.pathname,
     }).toStrictEqual({
-      shown: [
-        "Chase late invoices.Chase late invoices, and keep the calendar.",
-        "Google Workspace (Google)",
-      ],
+      shown: ["Keep the calendar too.", "Google Workspace (Google)"],
       changed: [
         { draft: "call-change", text: "Change it", model: "openai/gpt-5" },
       ],

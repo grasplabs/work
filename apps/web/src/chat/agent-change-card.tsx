@@ -91,7 +91,7 @@ export const AgentChangeCard = ({
   const {
     agent: name,
     job,
-    instructions,
+    addInstructions,
     addApps = [],
     removeApps = [],
     audience,
@@ -118,9 +118,11 @@ export const AgentChangeCard = ({
               <BeforeAfter becomes={job} now={now?.job} />
             </Line>
           )}
-          {instructions === undefined ? null : (
-            <Line label={t`Its instructions`}>
-              <BeforeAfter becomes={instructions} now={now?.instructions} />
+          {addInstructions === undefined ? null : (
+            <Line label={t`Added to its instructions`}>
+              <span className="block max-h-64 overflow-y-auto whitespace-pre-wrap">
+                {addInstructions}
+              </span>
             </Line>
           )}
           {addApps.length === 0 ? null : (
