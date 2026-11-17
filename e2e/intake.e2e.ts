@@ -222,16 +222,18 @@ test("an admin invites a stakeholder, who opens the link without an account, wri
   await expect(
     guestPage.getByRole("heading", { name: `Hi ${name}` })
   ).toBeVisible();
-  await guestPage.getByLabel("Your message").fill("I approve invoices.");
+  await guestPage
+    .getByRole("textbox", { name: "Your message" })
+    .fill("I approve invoices.");
   await guestPage.getByRole("button", { name: "Send" }).click();
   // The local stack's provider refuses unscripted requests' keys: the message
   // isn't taken, and says so, and what was typed stays to send again.
   await expect(guestPage.getByRole("alert")).toHaveText(
     /^The chat can't answer right now\. Try sending it again in a while\. Reference: [\da-f-]{36}$/u
   );
-  await expect(guestPage.getByLabel("Your message")).toHaveText(
-    "I approve invoices."
-  );
+  await expect(
+    guestPage.getByRole("textbox", { name: "Your message" })
+  ).toHaveText("I approve invoices.");
   await guestPage.getByRole("button", { name: "Finish" }).click();
   await expect(guestPage.getByRole("status")).toHaveText(
     "You finished this chat. Thank you for your time."

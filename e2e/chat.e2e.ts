@@ -166,9 +166,11 @@ test("a person asks in a new chat, follows the answer, renames it, and reads and
   // Offered the tour first, in the greeting's place: turned down, the box
   // to ask in has the focus the gone button had.
   await page.getByRole("button", { name: "Not now" }).click();
-  await expect(page.getByLabel("Your question")).toBeFocused();
+  await expect(
+    page.getByRole("textbox", { name: "Your question" })
+  ).toBeFocused();
 
-  await page.getByLabel("Your question").fill(question);
+  await page.getByRole("textbox", { name: "Your question" }).fill(question);
   await page.getByRole("button", { name: "Send", exact: true }).click();
   // The chat's own page, at its own address, the question already in it.
   const chat = chatOf(page);
@@ -337,7 +339,7 @@ test("a person asks, and reads the agent's answer once its turn ends", async ({
   await page.goto("/");
   await page.getByRole("button", { name: "Not now" }).click();
 
-  await page.getByLabel("Your question").fill(question);
+  await page.getByRole("textbox", { name: "Your question" }).fill(question);
   await page.getByRole("button", { name: "Send", exact: true }).click();
 
   const messages = page.getByRole("log", { name: "Messages" });
@@ -385,15 +387,13 @@ test("a person attaches files to a question, takes one off, and sees the questio
   await expect(page.getByText(/Only PDF, Word/u)).toBeVisible();
   await expect(page.getByText("setup.exe")).toHaveCount(0);
 
-  await page.getByLabel("Your question").fill(question);
+  await page.getByRole("textbox", { name: "Your question" }).fill(question);
   await page.getByRole("button", { name: "Send" }).click();
-  // The question shows the file it carried; the box is empty again.
-  const asked = chatOf(page)
-    .getByRole("log", { name: "Messages" })
-    .getByRole("article")
-    .first();
-  await expect(asked).toContainText(question);
-  await expect(asked).toContainText(plan);
+  // The question shows the file it carried, its card over the bubble; the
+  // box is empty again.
+  const messages = chatOf(page).getByRole("log", { name: "Messages" });
+  await expect(messages.getByRole("article").first()).toContainText(question);
+  await expect(messages).toContainText(plan);
   await expect(
     page.getByRole("main").getByRole("button", { name: `Remove ${plan}` })
   ).toHaveCount(0);
@@ -438,7 +438,9 @@ test("a followed chat says core can't be reached when it stays out of reach", as
   });
   const tag = crypto.randomUUID().slice(0, 8);
   await page.goto("/");
-  await page.getByLabel("Your question").fill(`Out of reach ${tag}.`);
+  await page
+    .getByRole("textbox", { name: "Your question" })
+    .fill(`Out of reach ${tag}.`);
   await page.getByRole("button", { name: "Send", exact: true }).click();
   // The turn has ended (the local stack's provider refuses unscripted
   // requests' keys), so nothing else is on its way when the connection drops.
@@ -482,44 +484,42 @@ test("one control picks the model and how hard it thinks, sends both with the qu
   });
   const tag = crypto.randomUUID().slice(0, 8);
   await page.goto("/");
-  const control = page.getByRole("button", { name: /^Model: /u });
+  const control = page.getByRole("button", { name: /^Model and effort: /u });
+  const models = page.getByRole("list", { name: "Model" }).getByRole("button");
+  const effort = page.getByRole("slider", { name: "How hard it thinks" });
 
-  // The stack's first model doesn't think: the control names it alone.
+  // The stack's first model doesn't think: the control names it alone,
+  // and its surface says it has one level.
   await expect(control).toHaveAccessibleName(
-    "Model: mistral-large-latest. Change model"
+    "Model and effort: mistral-large-latest"
   );
   await control.click();
-  const choices = page.getByRole("menuitemradio");
-  await expect(choices).toHaveText([
+  await expect(
+    page.getByText("This model has one level of effort.")
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Model: mistral-large-latest" })
+    .click();
+  await expect(models).toHaveText([
     /mistral-large-latest/u,
     /claude-sonnet-4-6/u,
   ]);
 
-  // One that thinks offers its efforts in the same menu, which stays open
-  // for them, at the model's own default.
-  await page
-    .getByRole("menuitemradio", { name: /^claude-sonnet-4-6/u })
-    .click();
-  await expect(choices).toHaveText([
-    /mistral-large-latest/u,
-    /claude-sonnet-4-6/u,
-    "Low",
-    "Medium",
-    "High",
-    "Max",
-  ]);
-  await expect(
-    page.getByRole("menuitemradio", { name: "Medium" })
-  ).toHaveAttribute("aria-checked", "true");
-  await page.getByRole("menuitemradio", { name: "Max" }).click();
+  // One that thinks offers its efforts on the same surface, at the
+  // model's own default.
+  await models.filter({ hasText: "claude-sonnet-4-6" }).click();
+  await expect(effort).toHaveAttribute("aria-valuetext", "Medium");
+  await effort.focus();
+  await page.keyboard.press("End");
+  await expect(effort).toHaveAttribute("aria-valuetext", "Max");
   await page.keyboard.press("Escape");
-  await expect(choices).toHaveCount(0);
+  await expect(effort).toHaveCount(0);
   await expect(control).toHaveAccessibleName(
-    "Model: claude-sonnet-4-6, thinking max. Change model or thinking"
+    "Model and effort: claude-sonnet-4-6, Max"
   );
 
   const question = `Think hard ${tag}.`;
-  await page.getByLabel("Your question").fill(question);
+  await page.getByRole("textbox", { name: "Your question" }).fill(question);
   await page.getByRole("button", { name: "Send", exact: true }).click();
   const chat = chatOf(page);
   await expect(
@@ -537,18 +537,20 @@ test("one control picks the model and how hard it thinks, sends both with the qu
   await expect(chat).toBeHidden();
   await page.reload();
   await expect(control).toHaveAccessibleName(
-    "Model: claude-sonnet-4-6, thinking max. Change model or thinking"
+    "Model and effort: claude-sonnet-4-6, Max"
   );
 
   // Back on the model that doesn't think, the effort goes.
   await control.click();
-  await page
-    .getByRole("menuitemradio", { name: /^mistral-large-latest/u })
-    .click();
-  await expect(choices).toHaveCount(2);
+  await page.getByRole("button", { name: "Model: claude-sonnet-4-6" }).click();
+  await models.filter({ hasText: "mistral-large-latest" }).click();
+  await expect(effort).toHaveCount(0);
+  await expect(
+    page.getByText("This model has one level of effort.")
+  ).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(control).toHaveAccessibleName(
-    "Model: mistral-large-latest. Change model"
+    "Model and effort: mistral-large-latest"
   );
 });
 

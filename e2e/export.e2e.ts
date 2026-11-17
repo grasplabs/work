@@ -171,7 +171,7 @@ test("a document and a chat each export as Markdown and as a page to print", asy
   const tag = crypto.randomUUID().slice(0, 8);
   const question = `How long is leave ${tag}?`;
   await page.goto("/");
-  await page.getByLabel("Your question").fill(question);
+  await page.getByRole("textbox", { name: "Your question" }).fill(question);
   await page.getByRole("button", { name: "Send" }).click();
   // It opens on its own page, named once core has said its
   // title, which the export is named after.

@@ -50,7 +50,9 @@ test("a control's icon moves when pointed at, and never for less motion", async 
   // trigger of its own, which isn't pointed at until the browser next
   // looks where the pointer is. Measured across that, the move is gone.
   // Its box, whether its heading greets or offers the tour.
-  await expect(page.getByLabel("Your question")).toBeVisible();
+  await expect(
+    page.getByRole("textbox", { name: "Your question" })
+  ).toBeVisible();
   const trigger = page.getByRole("button", {
     name: "Show or hide the sidebar",
   });

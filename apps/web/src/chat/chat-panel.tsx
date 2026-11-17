@@ -429,11 +429,16 @@ export const ChatPanel = () => {
   );
 };
 
-/** The open chat as App shell's panel holds it: its head and body, with no frame of its own. */
+/**
+ * The open chat as App shell's panel holds it: its head and body, with no
+ * frame of its own. A region named Chat, as the floating chat is, since App
+ * shell's panels name none.
+ */
 const ChatPanelContent = () => {
+  const { t } = useLingui();
   const { stage } = useGlobalChat();
   return (
-    <div {...stylex.props(panelStyles.content)}>
+    <section aria-label={t`Chat`} {...stylex.props(panelStyles.content)}>
       <div {...stylex.props(panelStyles.head)}>
         <div {...stylex.props(panelStyles.title)}>
           <ChatTitle />
@@ -441,7 +446,7 @@ const ChatPanelContent = () => {
         <HeaderActions />
       </div>
       <Body open={stage.card} />
-    </div>
+    </section>
   );
 };
 
