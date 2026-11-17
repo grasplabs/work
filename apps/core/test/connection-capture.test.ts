@@ -384,6 +384,56 @@ describe("what a chat's agent reads through a connection", setUpTime, () => {
     ).toStrictEqual([{ version: 2, latest: true }]);
   });
 
+  it("adds only its read time, and no version, when a message is read again unchanged on a later day", async () => {
+    const person = await signedInApi(idp, "user");
+    const marker = markerOf();
+    const { connectionId, mailbox } = await ownGmail(person);
+    const id = `quote-${marker}`;
+    const read = {
+      output: JSON.stringify({ message: { id, subject: `Quote ${marker}` } }),
+      provenance: [id],
+      keep: true as const,
+    };
+    const capture = async (readAt: Date) => {
+      await captureRead(
+        env,
+        {
+          workspaceId: personalWorkspaceId(person.userId),
+          agentId: chatAgentId,
+          chatId: chatIdSchema.parse(crypto.randomUUID()),
+          personId: person.userId,
+          runId: crypto.randomUUID(),
+        },
+        connectionId,
+        "mail.get",
+        { mailbox, message: id },
+        { result: read, readAt }
+      );
+    };
+    const key = await captureIdOf(connectionId, person.userId, "mail.get", id);
+    /** The source as the person's Sources page lists it. */
+    const listed = async () => {
+      const { sources } = await person.api.brainSources.list();
+      return sources
+        .filter(({ source }) => source.id === key)
+        .map(({ versions, readAt }) => ({
+          versions,
+          readOn: readAt?.slice(0, 10),
+        }));
+    };
+    const today = new Date();
+    const tomorrow = new Date(today.getTime() + 86_400_000);
+
+    await capture(today);
+    const first = await listed();
+    await capture(tomorrow);
+
+    expect({ first, again: await listed() }).toStrictEqual({
+      first: [{ versions: 1, readOn: today.toISOString().slice(0, 10) }],
+      again: [{ versions: 1, readOn: tomorrow.toISOString().slice(0, 10) }],
+    });
+  });
+
   it("keeps nothing of a tool that reaches beyond the person's own things, counted as skipped", async () => {
     const person = await signedInApi(idp, "user");
     const marker = markerOf();

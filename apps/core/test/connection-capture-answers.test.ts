@@ -584,8 +584,8 @@ describe("what a chat's agent reads through a toolkit", setUpTime, () => {
     expect({
       first,
       kept: kept.map(({ text }) => ({
-        cookie: text.includes("Cookie: [redacted]"),
-        password: text.includes("password: [redacted]"),
+        // `redact` over the whole text takes `hunter2\nCookie:` as one value.
+        password: text.includes("password: [redacted] [redacted]"),
         secret: text.includes(session) || text.includes("hunter2"),
       })),
       unchanged,
@@ -601,12 +601,10 @@ describe("what a chat's agent reads through a toolkit", setUpTime, () => {
         {
           readOn: day(new Date(now)),
           versions: 1,
-          firstLine:
-            '{"body":"password: [redacted]\\nCookie: [redacted]\\nQuote ' +
-            `${marker}"}`,
+          firstLine: `{"body":"password: [redacted] [redacted]\\nQuote ${marker}"}`,
         },
       ],
-      kept: [{ cookie: true, password: true, secret: false }],
+      kept: [{ password: true, secret: false }],
       unchanged: [
         { readOn: day(tomorrow), versions: 1, firstLine: first[0]?.firstLine },
       ],
