@@ -15,17 +15,12 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "../grasp/dialog/index.ts";
-import { SectionCard } from "../grasp/section-card/index.ts";
-import { loadFromCore } from "../load-from-core.tsx";
+import { FactRow, RowAlert } from "../grasp/setting-row/index.ts";
+import { loadFromCore, notLoadedText } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
-import {
-  FactRow,
-  LoadingLines,
-  SectionNotLoaded,
-  SettingsRows,
-} from "./section.tsx";
+import { LoadingLines } from "./section.tsx";
 
 // Settings › Audit trail: how long Grasp keeps what it records
 // (`audit.retention`), as facts in a card, and the events retention moved
@@ -35,54 +30,51 @@ import {
 // event could only be found by verifying the chain. Core keeps both to
 // admins, and records each search of the archive as a search.
 
-/** How long Grasp keeps events and run details, as core answered: a card of facts. */
+/** How long Grasp keeps events and run details, as core answered: rows of facts. */
 export const RetentionView = ({
   retention,
 }: {
   /** Undefined while it is read. */
   retention: Loaded<AuditRetention> | undefined;
 }) => {
-  const { t } = useLingui();
+  const { t, i18n } = useLingui();
   const dayCount = (days: number): string =>
     t({
       message: plural(days, { one: "# day", other: "# days" }),
       context: "how long something is kept",
     });
-  if (retention === undefined || retention.state !== "ready") {
+  if (retention === undefined) {
+    return null;
+  }
+  if (retention.state !== "ready") {
     return (
-      <SectionCard title={t`Retention`}>
-        {retention === undefined ? (
-          <LoadingLines lines={3} />
-        ) : (
-          <SectionNotLoaded page={retention} />
-        )}
-      </SectionCard>
+      <RowAlert variant="danger">
+        {notLoadedText(retention, i18n) ?? ""}
+      </RowAlert>
     );
   }
   const { auditDays, archiveDays, runDays } = retention.data;
   return (
-    <SectionCard flush title={t`Retention`}>
-      <SettingsRows>
-        <FactRow help={t`Then events move to the archive.`} label={t`Events`}>
-          {dayCount(auditDays)}
-        </FactRow>
-        <FactRow
-          help={t`Counted from when each event was recorded; then deleted.`}
-          label={t({
-            message: "Archive",
-            context: "where retention keeps older audit events",
-          })}
-        >
-          {dayCount(archiveDays)}
-        </FactRow>
-        <FactRow
-          help={t`After a run ends; then its inputs, outputs and messages go.`}
-          label={t`Workflow run details`}
-        >
-          {dayCount(runDays)}
-        </FactRow>
-      </SettingsRows>
-    </SectionCard>
+    <>
+      <FactRow help={t`Then events move to the archive.`} label={t`Events`}>
+        {dayCount(auditDays)}
+      </FactRow>
+      <FactRow
+        help={t`Counted from when each event was recorded; then deleted.`}
+        label={t({
+          message: "Archive",
+          context: "where retention keeps older audit events",
+        })}
+      >
+        {dayCount(archiveDays)}
+      </FactRow>
+      <FactRow
+        help={t`After a run ends; then its inputs, outputs and messages go.`}
+        label={t`Workflow run details`}
+      >
+        {dayCount(runDays)}
+      </FactRow>
+    </>
   );
 };
 
@@ -147,8 +139,8 @@ export const ArchiveSearch = ({
   );
 };
 
-/** Retention, for an admin on Settings › Audit trail, read as the page shows. */
-export const RetentionCard = () => {
+/** Retention, for an admin on Settings › Audit trail, read as the page shows, as rows. */
+export const RetentionRows = () => {
   const core = useCore();
   const [retention, setRetention] = useState<Loaded<AuditRetention>>();
   useEffect(() => {

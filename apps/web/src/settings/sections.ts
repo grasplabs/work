@@ -4,9 +4,7 @@ import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 
 import {
-  Agent,
   AppRecord,
-  Brain,
   Cable,
   Checklist,
   Clock,
@@ -14,7 +12,6 @@ import {
   Contrast,
   Link,
   Lock,
-  Money,
   People,
   Person,
   Question,
@@ -32,10 +29,7 @@ export type SettingsHref =
   | "/settings/workspace"
   | "/settings/members"
   | "/settings/ai-providers"
-  | "/settings/models"
-  | "/settings/spend"
   | "/settings/onboarding"
-  | "/settings/brain"
   | "/settings/audit"
   | "/settings/webhooks"
   | "/settings/outcomes"
@@ -123,35 +117,10 @@ export const settingsSections: readonly SettingsSection[] = [
   },
   {
     id: "ai-providers",
-    label: msg`AI providers`,
+    label: msg`AI and spend`,
     href: "/settings/ai-providers",
     group: "workspace",
     icon: Cable,
-    audience: "admins",
-  },
-  {
-    id: "models",
-    label: msg`Models`,
-    href: "/settings/models",
-    group: "workspace",
-    icon: Agent,
-    audience: "admins",
-  },
-  {
-    id: "spend",
-    label: msg`AI spend`,
-    href: "/settings/spend",
-    group: "workspace",
-    icon: Money,
-    audience: "admins",
-  },
-  {
-    // Its groups of teams, the brain's regions.
-    id: "brain",
-    label: msg`Brain`,
-    href: "/settings/brain",
-    group: "workspace",
-    icon: Brain,
     audience: "admins",
   },
   {

@@ -6,7 +6,7 @@ import {
   PageSidebarRailDivider,
   PageSidebarRailExpand,
 } from "@grasp-os/ui/components/page-sidebar";
-import { Trans, useLingui } from "@lingui/react/macro";
+import { useLingui } from "@lingui/react/macro";
 import { Link, useMatchRoute } from "@tanstack/react-router";
 import {
   ActivityIcon,
@@ -30,6 +30,7 @@ import { dotClass } from "./brain-colors.ts";
 import { findFolder } from "./brain-sections.ts";
 import { countNotes, folderTree } from "./brain.ts";
 import type { Brain, Folder, Note } from "./brain.ts";
+import { RegionMenu, RegionRename, TeamMenu } from "./region-edit.tsx";
 
 // The brain's navigation, as the prototype has it (`components/brain-nav.tsx`):
 // the brain's regions, not the Playbook's six parts, which keep their own
@@ -151,6 +152,10 @@ const Group = ({
         <span className="text-muted-foreground text-xs tabular-nums">
           {countNotes(folder) - (page ? 1 : 0)}
         </span>
+        {/* A team's own menu, for an admin: move it to another region. */}
+        {folder.key.startsWith("team:") ? (
+          <TeamMenu teamId={folder.key.slice("team:".length)} />
+        ) : null}
         <button
           aria-expanded={expanded}
           aria-label={expanded ? t`Close ${name}` : t`Open ${name}`}
@@ -333,6 +338,8 @@ export const BrainNav = ({
     saveOpened(open);
   }, [open]);
   const [revealed, setRevealed] = useState<string | undefined>();
+  // The region whose name is a field now, by its group's id.
+  const [renaming, setRenaming] = useState<string>();
   const company = brain.notes.find((candidate) => candidate.kind === "company");
   const activityLabel = t({ message: "Activity", context: "the brain's log" });
   // Which of the brain's own pages is open, for the folded rail: the open
@@ -482,31 +489,43 @@ export const BrainNav = ({
           const key = regionKey(region.id);
           const expanded = opening.isOpen(key);
           const current = here.has(key);
-          const { name } = region;
+          const { name, group } = region;
           return (
             <div className="flex flex-col" key={key}>
               <div className="hover:bg-accent has-data-[status=active]:bg-accent flex items-center rounded-md">
-                {/* The region's name goes to it in the brain; the arrow opens what it holds here. */}
-                <Link
-                  activeOptions={{ includeSearch: true }}
-                  className={
-                    current
-                      ? "group flex min-w-0 flex-1 items-center gap-2.5 py-1.5 pl-2 text-sm font-medium"
-                      : "group flex min-w-0 flex-1 items-center gap-2.5 py-1.5 pl-2 text-sm data-[status=active]:font-medium"
-                  }
-                  search={{ region: region.id }}
-                  to="/brain"
-                >
-                  <Icon className="text-muted-foreground group-data-[status=active]:text-foreground size-4 flex-none" />
-                  <span className="min-w-0 flex-1 truncate">{name}</span>
-                  {region.group?.confirmed === false ? (
-                    <span className="text-muted-foreground text-xs font-normal">
-                      <Trans context="a group of teams Grasp proposed that no admin confirmed yet">
-                        Proposed
-                      </Trans>
-                    </span>
-                  ) : null}
-                </Link>
+                {/* The region's name goes to it in the brain; the arrow opens what it holds here. An admin renames it in place. */}
+                {group !== undefined && renaming === group.id ? (
+                  <RegionRename
+                    name={name}
+                    onDone={() => {
+                      setRenaming(undefined);
+                    }}
+                    regionId={group.id}
+                  />
+                ) : (
+                  <Link
+                    activeOptions={{ includeSearch: true }}
+                    className={
+                      current
+                        ? "group flex min-w-0 flex-1 items-center gap-2.5 py-1.5 pl-2 text-sm font-medium"
+                        : "group flex min-w-0 flex-1 items-center gap-2.5 py-1.5 pl-2 text-sm data-[status=active]:font-medium"
+                    }
+                    search={{ region: region.id }}
+                    to="/brain"
+                  >
+                    <Icon className="text-muted-foreground group-data-[status=active]:text-foreground size-4 flex-none" />
+                    <span className="min-w-0 flex-1 truncate">{name}</span>
+                  </Link>
+                )}
+                {group === undefined ? null : (
+                  <RegionMenu
+                    name={name}
+                    onRename={() => {
+                      setRenaming(group.id);
+                    }}
+                    regionId={group.id}
+                  />
+                )}
                 <button
                   aria-expanded={expanded}
                   aria-label={expanded ? t`Close ${name}` : t`Open ${name}`}

@@ -8,23 +8,20 @@ import { msg } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useState } from "react";
+import type { ReactNode } from "react";
 
 import type { Session } from "../core.ts";
 import { formatDateTime } from "../format.ts";
 import { Badge } from "../grasp/badge/index.ts";
 import { Button } from "../grasp/button/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
+import { FactRow, RowAlert, SettingsRows } from "../grasp/setting-row/index.ts";
 import { Spinner } from "../grasp/spinner/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
-import {
-  FactRow,
-  RowAlert,
-  SectionNotLoaded,
-  SettingsRows,
-} from "./section.tsx";
+import { SectionNotLoaded } from "./section.tsx";
 
 const styles = stylex.create({
   running: { display: "flex", alignItems: "center", gap: grasp.space2 },
@@ -143,8 +140,11 @@ const Outcome = ({
  */
 export const AuditChainCheck = ({
   last,
+  children,
 }: {
   last: Loaded<FullVerification | null>;
+  /** More about the log's integrity, as rows after the check's: how long it is kept. */
+  children?: ReactNode;
 }) => {
   const { t } = useLingui();
   const { busy, failure, run } = useCoreAction();
@@ -172,9 +172,10 @@ export const AuditChainCheck = ({
           {t`Verify now`}
         </Button>
       }
-      description={t`Checks that no entry was removed or changed since it was written.`}
+      density="compact"
+      description={t`Whether any event was removed or changed since it was written, and how long Grasp keeps them.`}
       flush
-      title={t`Chain check`}
+      title={t`Integrity`}
     >
       <div aria-live="polite">
         {own === null && !busy && last.state !== "ready" ? (
@@ -189,6 +190,7 @@ export const AuditChainCheck = ({
             {failure === undefined ? null : (
               <RowAlert variant="danger">{failure}</RowAlert>
             )}
+            {children}
           </SettingsRows>
         )}
       </div>
