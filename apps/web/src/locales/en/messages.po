@@ -3025,6 +3025,10 @@ msgstr "Asked it, or it works for them on a schedule"
 msgid "Asked the agent to fix a run"
 msgstr "Asked the agent to fix a run"
 
+#: src/activity/audit-words.ts
+msgid "Asked the Brain who knows about something"
+msgstr "Asked the Brain who knows about something"
+
 #: src/chat/thread.tsx
 msgid "Asked to connect {binding}"
 msgstr "Asked to connect {binding}"
@@ -3548,6 +3552,14 @@ msgstr "Change project"
 #: src/chat/agent-draft-card.tsx
 msgid "Change something"
 msgstr "Change something"
+
+#: src/chat/chat-panel.tsx
+msgid "Change something about the agent"
+msgstr "Change something about the agent"
+
+#: src/chat/chat-panel.tsx
+msgid "Change something about the change"
+msgstr "Change something about the change"
 
 #: src/chat/chat-panel.tsx
 msgid "Change something about the plan"

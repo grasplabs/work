@@ -1,25 +1,14 @@
-import type { AgentDrafted } from "@grasp-os/shared/agents";
-import type { ChatMessage } from "@grasp-os/shared/chat";
+import type { AgentDraftMade, AgentDrafted } from "@grasp-os/shared/agents";
 import type { ToolClassAudience } from "@grasp-os/shared/connect";
-import { Button } from "@grasp-os/ui/components/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "@grasp-os/ui/components/card";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import type { ReactNode } from "react";
 
 import { useCoreRead } from "../apps/use-core-read.ts";
-import { ErrorText } from "../error-text.tsx";
 import { classNames } from "../settings/stephen-settings.tsx";
-import { useCoreAction } from "../use-core-action.ts";
 import type { ThreadBuild } from "./build-progress.tsx";
+import { MakeActions, MakeCard } from "./make-card.tsx";
 
 // An agent Grasp's chat drafted for the person (`draftAgent`), in the
 // thread: what it would be, in the card's own words, and nothing made
@@ -27,18 +16,6 @@ import type { ThreadBuild } from "./build-progress.tsx";
 // Agents page's own checks (`ChatsApi.makeDraftedAgent`), then lands the
 // person on its page, the chat going on beside it. Make it and Change something are there only while the draft
 // waits for the person; what the model wrote is shown as text.
-
-/** The draft waiting for the person: the latest reply's, while nothing runs and nothing was said since. */
-export const pendingAgentDraft = (
-  messages: readonly ChatMessage[],
-  running: boolean
-): AgentDrafted | undefined => {
-  if (running) {
-    return undefined;
-  }
-  const last = messages.findLast(({ role }) => role !== "result");
-  return last?.role === "assistant" ? last.agentDraft : undefined;
-};
 
 /** The teams a draft names, by name where the company's list is read; else by ID. */
 const TeamsWords = ({ teams }: { teams: readonly string[] }) => {
@@ -141,68 +118,63 @@ export const AgentDraftCard = ({
   } = draft;
   const company = whose === "company";
   return (
-    <Card aria-label={t`An agent to make: ${name}`} render={<section />}>
-      <CardHeader>
-        <CardTitle>
-          <h2 className="type-display">{name}</h2>
-        </CardTitle>
-        <CardDescription>
-          <Trans>
-            Nothing is made until you say Make it. You can change any of it
-            first.
-          </Trans>
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <dl className="flex flex-col gap-3">
-          {job === "" ? null : <Line label={t`What it is for`}>{job}</Line>}
-          <Line label={t`Whose it is`}>
-            {company ? (
-              <Trans>One of the company&apos;s agents</Trans>
-            ) : (
-              <Trans>Yours alone: only you ask it</Trans>
-            )}
-          </Line>
+    <MakeCard
+      actions={actions}
+      description={
+        <Trans>
+          Nothing is made until you say Make it. You can change any of it first.
+        </Trans>
+      }
+      label={t`An agent to make: ${name}`}
+      title={name}
+    >
+      <dl className="flex flex-col gap-3">
+        {job === "" ? null : <Line label={t`What it is for`}>{job}</Line>}
+        <Line label={t`Whose it is`}>
           {company ? (
-            <Line label={t`Who may ask it`}>
-              <AudienceWords audience={draft.audience} />
-            </Line>
-          ) : null}
-          <Line label={t`Apps it uses`}>
-            {apps.length === 0 ? (
-              <Trans>Any app its kinds of work allow</Trans>
-            ) : (
-              <AppNames apps={apps} />
-            )}
-          </Line>
-          {company ? (
-            <Line label={t`What it may do`}>
-              {classes.length === 0 ? (
-                <Trans>Nothing yet: you turn it on on its page</Trans>
-              ) : (
-                classes.map((each) => i18n._(classNames[each])).join(", ")
-              )}
-            </Line>
-          ) : null}
-          {schedule === undefined ? null : (
-            <Line label={t`When it works on its own`}>
-              <span className="font-mono text-xs">{schedule.cron}</span>
-              {" · "}
-              {schedule.timeZone ?? t`the company's time zone`}
-              {" · "}
-              {schedule.opening}
-            </Line>
+            <Trans>One of the company&apos;s agents</Trans>
+          ) : (
+            <Trans>Yours alone: only you ask it</Trans>
           )}
-          <Line label={t`Its instructions`}>
-            {/* All of it, as it will be kept: long ones scroll. */}
-            <span className="block max-h-64 overflow-y-auto whitespace-pre-wrap">
-              {instructions}
-            </span>
+        </Line>
+        {company ? (
+          <Line label={t`Who may ask it`}>
+            <AudienceWords audience={draft.audience} />
           </Line>
-        </dl>
-      </CardContent>
-      {actions === undefined ? null : <CardFooter>{actions}</CardFooter>}
-    </Card>
+        ) : null}
+        <Line label={t`Apps it uses`}>
+          {apps.length === 0 ? (
+            <Trans>Any app its kinds of work allow</Trans>
+          ) : (
+            <AppNames apps={apps} />
+          )}
+        </Line>
+        {company ? (
+          <Line label={t`What it may do`}>
+            {classes.length === 0 ? (
+              <Trans>Nothing yet: you turn it on on its page</Trans>
+            ) : (
+              classes.map((each) => i18n._(classNames[each])).join(", ")
+            )}
+          </Line>
+        ) : null}
+        {schedule === undefined ? null : (
+          <Line label={t`When it works on its own`}>
+            <span className="font-mono text-xs">{schedule.cron}</span>
+            {" · "}
+            {schedule.timeZone ?? t`the company's time zone`}
+            {" · "}
+            {schedule.opening}
+          </Line>
+        )}
+        <Line label={t`Its instructions`}>
+          {/* All of it, as it will be kept: long ones scroll. */}
+          <span className="block max-h-64 overflow-y-auto whitespace-pre-wrap">
+            {instructions}
+          </span>
+        </Line>
+      </dl>
+    </MakeCard>
   );
 };
 
@@ -223,69 +195,41 @@ export const DraftActions = ({
 }) => {
   const { t } = useLingui();
   const navigate = useNavigate();
-  const label = press === "make" ? t`Make it` : t`Change it`;
   // Made or changed, but not all of the card could be set: it is paused,
   // and its page says what it has.
   const [unfinished, setUnfinished] = useState<string>();
-  const { busy, failure, run } = useCoreAction();
-  const { model, effort } = build;
   return (
-    <div className="flex flex-col gap-2">
-      <div className="flex flex-wrap gap-2">
-        <Button
-          disabled={busy || model === undefined}
-          onClick={() => {
-            if (model === undefined) {
-              return;
-            }
-            void (async () => {
-              const asked = {
-                draft: callId,
-                text: label,
-                model,
-                ...(effort === undefined ? {} : { effort }),
-              };
-              const agent = await run(async (session) =>
-                press === "make"
-                  ? await session.chats.makeDraftedAgent(chatId, asked)
-                  : await session.chats.changeDraftedAgent(chatId, asked)
-              );
-              if (agent?.unfinished === true) {
-                setUnfinished(agent.id);
-              } else if (agent !== undefined) {
-                void navigate({
-                  to: "/agents/$agent",
-                  params: { agent: agent.id },
-                });
-              }
-            })();
-          }}
-          variant="highlight"
-        >
-          {label}
-        </Button>
-        <Button
-          onClick={() => {
-            build.onChangePlan();
-          }}
-          variant="outline"
-        >
-          <Trans>Change something</Trans>
-        </Button>
-      </div>
-      <ErrorText>{failure}</ErrorText>
-      {unfinished === undefined ? null : (
-        <p className="text-sm">
-          <Trans>
-            Not all of it could be set, so the agent is paused.{" "}
-            <Link params={{ agent: unfinished }} to="/agents/$agent">
-              Finish it on its page
-            </Link>
-            .
-          </Trans>
-        </p>
-      )}
-    </div>
+    <MakeActions
+      build={build}
+      changeLabel={t`Change something`}
+      label={press === "make" ? t`Make it` : t`Change it`}
+      notice={
+        unfinished === undefined ? null : (
+          <p className="text-sm">
+            <Trans>
+              Not all of it could be set, so the agent is paused.{" "}
+              <Link params={{ agent: unfinished }} to="/agents/$agent">
+                Finish it on its page
+              </Link>
+              .
+            </Trans>
+          </p>
+        )
+      }
+      onDone={(agent: AgentDraftMade) => {
+        if (agent.unfinished === true) {
+          setUnfinished(agent.id);
+          return;
+        }
+        void navigate({ to: "/agents/$agent", params: { agent: agent.id } });
+      }}
+      press={async (session, asked) => {
+        const draft = { draft: callId, ...asked };
+        return press === "make"
+          ? await session.chats.makeDraftedAgent(chatId, draft)
+          : await session.chats.changeDraftedAgent(chatId, draft);
+      }}
+    />
   );
 };
 

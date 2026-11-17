@@ -1059,7 +1059,7 @@ const workMarked = async (
 /** The host's model, as a probe hands it: it answers, and holds nothing. */
 const quietModel = async () => {
   await Promise.resolve();
-  return { kind: "answer" as const, text: "" };
+  return { kind: "answer" as const, text: "", model: "test/model" };
 };
 
 /**
@@ -5262,6 +5262,41 @@ const codeRecallProbe =
 /** Code's recall as a chat's code makes it (`codeRecallProbe`). */
 export const chatCodeRecallProbe = codeRecallProbe("agent");
 
+/**
+ * Who knows's answer as a pack (`items`, each its person with their
+ * passage, how it was found among it), so the harness reads what meaning
+ * found as it reads a recall's (`apartFromMeaning`): only the people named
+ * for a passage found by words, an exact part or common words are held to
+ * the twins'.
+ */
+const inPackShape = (answered: unknown): unknown => {
+  if (
+    typeof answered !== "object" ||
+    answered === null ||
+    !("people" in answered) ||
+    !Array.isArray(answered.people)
+  ) {
+    return answered;
+  }
+  const { people, ...rest } = answered;
+  return {
+    ...rest,
+    items: people.map((person: unknown) => {
+      if (
+        typeof person !== "object" ||
+        person === null ||
+        !("passage" in person)
+      ) {
+        return person;
+      }
+      const { passage, ...named } = person;
+      return typeof passage === "object" && passage !== null
+        ? { ...named, ...passage }
+        : person;
+    }),
+  };
+};
+
 /** One probe per export of core's brain-recall.ts. */
 export const recallProbes = {
   recallFor: codeRecallProbe("app"),
@@ -5641,6 +5676,83 @@ export const recallProbes = {
         budget: { tokens: 1 },
         asOf: hidden,
       }),
+    ];
+  },
+  // Who knows (GRA-1744), as a chat's code asks anywhere but its person's
+  // own chat: under an agent's grant, acting for the reader, as the
+  // company, as code's recall is probed (its teams' reach is recall's,
+  // probed through `recallPassagesAs`, and the uploads it names are held
+  // in agent-brain-who-knows.test.ts). Asked of the markers and of their
+  // twins, whose answers must match: an upload the reader may not read
+  // names nobody. Then every way it refuses, the markers in what is
+  // refused.
+  whoKnowsFor: async (probing) => {
+    const { authority, permissionId } = await agentWithBrain(probing.personId);
+    const ask = async (input: unknown, as = authority, grant = permissionId) =>
+      inPackShape(
+        await codeRecall.whoKnowsFor(
+          env,
+          {
+            ...entitiesCallerOf(as, grant),
+            keep: async () => {
+              await Promise.resolve();
+            },
+          },
+          input
+        )
+      );
+    const hidden = probing.markers.join(" ");
+    const whole = { tokens: recallBudgetMax };
+    return [
+      // Never as of a moment, which it refuses (below): no moments.
+      ...(await askedOfMarkers(
+        probing,
+        [],
+        async ({ question, budget }) => await ask({ question, budget }),
+        true
+      )),
+      {
+        ...(await answer(
+          "the shared word",
+          async () => await ask({ question: probing.sharedWord, budget: whole })
+        )),
+        byMeaning: true,
+      },
+      await answer(
+        "no tokens",
+        async () => await ask({ question: hidden, budget: { tokens: 0 } })
+      ),
+      await answer(
+        "a moment",
+        async () =>
+          await ask({
+            question: hidden,
+            budget: whole,
+            asOf: new Date().toISOString(),
+          })
+      ),
+      await answer(
+        "a reader named by the markers",
+        async () =>
+          await ask({ question: hidden, budget: whole, reader: hidden })
+      ),
+      await answer(
+        "the markers, under a grant the agent doesn't hold",
+        async () =>
+          await ask(
+            { question: hidden, budget: whole },
+            authority,
+            crypto.randomUUID()
+          )
+      ),
+      await answer(
+        "the markers, for someone who isn't a member",
+        async () =>
+          await ask(
+            { question: hidden, budget: whole },
+            readersAgent(stranger())
+          )
+      ),
     ];
   },
 } satisfies Record<RecallMember, Probe>;

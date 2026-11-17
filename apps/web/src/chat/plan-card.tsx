@@ -6,14 +6,6 @@ import type {
 import { Badge } from "@grasp-os/ui/components/badge";
 import { buttonVariants } from "@grasp-os/ui/components/button";
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "@grasp-os/ui/components/card";
-import {
   Item,
   ItemContent,
   ItemDescription,
@@ -27,6 +19,7 @@ import { LayoutGridIcon, RepeatIcon, UsersIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { integrationKey } from "../connections/integrations.ts";
+import { MakeCard } from "./make-card.tsx";
 
 // The plan Grasp's agent proposes before it makes anything new
 // (`proposePlan`), in the chat's thread: what Grasp will make in plain
@@ -126,46 +119,40 @@ export const PlanCard = ({
     (one, other) => kindOrder[one.kind] - kindOrder[other.kind]
   );
   return (
-    <Card aria-label={t`Here's what Grasp will make`} render={<section />}>
-      <CardHeader>
-        <CardTitle>
-          <h2 className="type-display">
-            <Trans>Here&apos;s what Grasp will make</Trans>
-          </h2>
-        </CardTitle>
-        <CardDescription>
-          <Trans>
-            Nothing is made until you say Build it. You can change any of it
-            first.
-          </Trans>
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <ItemGroup render={<ul />}>
-          {parts.map((part) => (
-            <Part
-              does={part.does}
-              icon={part.kind === "app" ? <LayoutGridIcon /> : <RepeatIcon />}
-              key={part.kind}
-              kind={<KindWords kind={part.kind} />}
-              name={part.name}
-              needs={(part.needs ?? []).filter((need) => isUnmet(need, unmet))}
-            />
-          ))}
+    <MakeCard
+      actions={actions}
+      description={
+        <Trans>
+          Nothing is made until you say Build it. You can change any of it
+          first.
+        </Trans>
+      }
+      label={t`Here's what Grasp will make`}
+      title={<Trans>Here&apos;s what Grasp will make</Trans>}
+    >
+      <ItemGroup render={<ul />}>
+        {parts.map((part) => (
           <Part
-            does={
-              <Trans>
-                Only you see it while you try it. You share it when it&apos;s
-                right.
-              </Trans>
-            }
-            icon={<UsersIcon />}
-            kind={<Trans>Who gets it</Trans>}
-            name={plan.who}
+            does={part.does}
+            icon={part.kind === "app" ? <LayoutGridIcon /> : <RepeatIcon />}
+            key={part.kind}
+            kind={<KindWords kind={part.kind} />}
+            name={part.name}
+            needs={(part.needs ?? []).filter((need) => isUnmet(need, unmet))}
           />
-        </ItemGroup>
-      </CardContent>
-      {actions === undefined ? null : <CardFooter>{actions}</CardFooter>}
-    </Card>
+        ))}
+        <Part
+          does={
+            <Trans>
+              Only you see it while you try it. You share it when it&apos;s
+              right.
+            </Trans>
+          }
+          icon={<UsersIcon />}
+          kind={<Trans>Who gets it</Trans>}
+          name={plan.who}
+        />
+      </ItemGroup>
+    </MakeCard>
   );
 };

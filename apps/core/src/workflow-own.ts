@@ -4,7 +4,7 @@ import type {
   WorkflowActivity,
   WorkflowFile,
 } from "@grasp-os/shared/workflow-resources";
-import { and, desc, eq, isNotNull, sql } from "drizzle-orm";
+import { and, desc, eq, isNotNull, lt, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import type { Acting } from "./auth/identity.ts";
@@ -15,6 +15,7 @@ import {
   workflowRunFiles,
 } from "./db/core/schema.ts";
 import { requireWorkflowRole } from "./workflow-resources.ts";
+import { runEvidenceHolds } from "./workflows/resource-reads.ts";
 
 // A workflow's own files and activity (GRA-515), for its page: the files
 // its runs wrote, and what happened to it. Reads only, nothing audited, as
@@ -27,14 +28,23 @@ import { requireWorkflowRole } from "./workflow-resources.ts";
 //   hold what it read for its person, so they are listed as its results
 //   are shown (`resourceRunFor`): to that person and the organization's
 //   admins. A listing is what a file is, never its bytes: nothing serves
-//   those outside the run itself (workflows/run-files.ts). Runs in
+//   those outside the run itself (workflows/run-files.ts). Nor of a run
+//   that may no longer read what it read (a source erased, a memory a
+//   person's erasure took: GRA-1985): its files are left out, as its
+//   result is withheld. Runs in
 //   the activity are as `listResourceRuns` shows them: every one to the
 //   workflow's builders, a user's own to a user.
 
 /** The most files and activity entries a read answers: the newest. */
 const pageSize = workflowOwnListed;
 
-/** The files workflow `id`'s runs wrote, newest first, of the runs `by` may see the results of. */
+/**
+ * The files workflow `id`'s runs wrote, newest first, of the runs `by` may
+ * see the results of, and only while each run may still read what it
+ * read (resource-reads.ts `runEvidenceHolds`, GRA-1985): a withheld run's
+ * files are left out and the page filled past them, so it answers as if
+ * that run wrote none, each run checked once.
+ */
 export const workflowFiles = async (
   env: Env,
   by: Acting,
@@ -43,42 +53,79 @@ export const workflowFiles = async (
   const workflow = await requireWorkflowRole(env, by, id, "user");
   const files = workflowRunFiles;
   const runs = workflowResourceRuns;
-  const rows = await drizzle(env.DB)
-    .select({
-      id: files.id,
-      runId: files.runId,
-      name: files.name,
-      type: files.type,
-      size: files.size,
-      finishedAt: files.finishedAt,
-    })
-    .from(files)
-    .innerJoin(runs, eq(runs.id, files.runId))
-    .where(
-      and(
-        eq(files.workflowResourceId, workflow.id),
-        eq(files.state, "done"),
-        isNotNull(files.finishedAt),
-        // A run's results: its person's and admins' (`resourceRunFor`).
-        isAdmin(by.role) ? undefined : eq(runs.principalId, by.userId)
+  const db = drizzle(env.DB);
+  /** A page of the files after `after` (by when finished, then ID), newest first. */
+  const pageAfter = async (after?: { at: Date; id: string }) =>
+    await db
+      .select({
+        id: files.id,
+        runId: files.runId,
+        principalId: runs.principalId,
+        name: files.name,
+        type: files.type,
+        size: files.size,
+        finishedAt: files.finishedAt,
+      })
+      .from(files)
+      .innerJoin(runs, eq(runs.id, files.runId))
+      .where(
+        and(
+          eq(files.workflowResourceId, workflow.id),
+          eq(files.state, "done"),
+          isNotNull(files.finishedAt),
+          // A run's results: its person's and admins' (`resourceRunFor`).
+          isAdmin(by.role) ? undefined : eq(runs.principalId, by.userId),
+          after === undefined
+            ? undefined
+            : or(
+                lt(files.finishedAt, after.at),
+                and(eq(files.finishedAt, after.at), lt(files.id, after.id))
+              )
+        )
       )
-    )
-    .orderBy(desc(files.finishedAt), desc(files.id))
-    .limit(pageSize);
-  return rows.flatMap((row) =>
-    row.finishedAt === null
-      ? []
-      : [
-          {
-            id: row.id,
-            runId: row.runId,
-            name: row.name,
-            type: row.type,
-            size: row.size,
-            writtenAt: row.finishedAt.toISOString(),
-          },
-        ]
-  );
+      .orderBy(desc(files.finishedAt), desc(files.id))
+      .limit(pageSize);
+  const holds = new Map<string, Promise<boolean>>();
+  const listed: WorkflowFile[] = [];
+  let after: { at: Date; id: string } | undefined;
+  while (listed.length < pageSize) {
+    // oxlint-disable-next-line no-await-in-loop -- a page at a time, as filled
+    const rows = await pageAfter(after);
+    for (const row of rows) {
+      if (row.finishedAt === null || listed.length >= pageSize) {
+        continue;
+      }
+      const run =
+        holds.get(row.runId) ??
+        runEvidenceHolds(env, {
+          runId: row.runId,
+          workflowId: workflow.id,
+          principal: row.principalId,
+        });
+      holds.set(row.runId, run);
+      // oxlint-disable-next-line no-await-in-loop -- each run once, in order
+      if (await run) {
+        listed.push({
+          id: row.id,
+          runId: row.runId,
+          name: row.name,
+          type: row.type,
+          size: row.size,
+          writtenAt: row.finishedAt.toISOString(),
+        });
+      }
+    }
+    const last = rows.at(-1);
+    if (
+      rows.length < pageSize ||
+      last === undefined ||
+      last.finishedAt === null
+    ) {
+      break;
+    }
+    after = { at: last.finishedAt, id: last.id };
+  }
+  return listed;
 };
 
 /** What happened to workflow `id`, newest first, as `by` may see it. */

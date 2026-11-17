@@ -377,7 +377,13 @@ describe(
         ...probing,
         codeTeams: [readersTeam, secretTeam],
       };
-      const among = surfaces.filter(([name]) => meaningSurfaces.has(name));
+      // Who knows (`recall whoKnowsFor`) is left out: it names the
+      // uploaders of `recallPassagesAs`'s passages (held here) through
+      // core's records of uploads, and this world's sources, added to the
+      // store straight, have none, so it would name nobody either way.
+      const among = surfaces.filter(
+        ([name]) => meaningSurfaces.has(name) && name !== "recall whoKnowsFor"
+      );
       // Code's recall as an App reads as the company alone, whoever it
       // acts for: held in the admin's pass, whose before has nothing more.
       const amongMembers = among.filter(

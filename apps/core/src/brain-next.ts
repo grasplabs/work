@@ -3725,7 +3725,7 @@ const askModel =
   async ({ purpose, role, system, input, timeoutMs }) => {
     const signal = AbortSignal.timeout(timeoutMs);
     try {
-      const { text } = await models(env).call({
+      const { text, model } = await models(env).call({
         model: modelForRole(await modelSettings(env), role),
         // A check asks the quick model to think little: the cheaper call.
         ...(role === "quick" ? { effort: "low" as const } : {}),
@@ -3738,7 +3738,7 @@ const askModel =
         timeoutMs: timeoutMs + gatewayGraceMs,
         signal,
       });
-      return { kind: "answer", text };
+      return { kind: "answer", text, model };
     } catch (error) {
       if (signal.aborted) {
         // No answer within the call's time, which is the item's: its own.

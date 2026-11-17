@@ -46,6 +46,7 @@ import {
 } from "./brain-pack.ts";
 import { readSkillFor, selectSkillsFor } from "./brain-skills.ts";
 import type { HeldNow, SkillsReach } from "./brain-skills.ts";
+import { uploadersOf } from "./brain-uploads.ts";
 import { permissions } from "./db/core/schema.ts";
 import { authorize } from "./permissions.ts";
 import { heldNothing } from "./skill-needs.ts";
@@ -236,6 +237,202 @@ export const recallFor = async (
     return pack;
   } catch (error) {
     const refused = inHostWords(error);
+    await audit({
+      refused: isExpectedError(refused) ? refused.code : "internal.unexpected",
+    });
+    throw refused;
+  }
+};
+
+// Who knows about a topic (GRA-1744; the design note and threat model are
+// on the issue): the people who uploaded the documents that a recall for
+// it finds for the asker, each with the one passage of theirs that recall
+// found first, its text as recall packs it, pinned with it. For a chat's
+// code alone
+// (agent-brain.ts `whoKnows`), never an App's or a workflow's, whose data
+// can reach people the asker isn't. How it can fail, and how it fails
+// closed:
+//
+// - A person is named on the strength of a document the asker may not
+//   read. The passages are the Brain's, found as recall finds them for
+//   the chat's code (`recallFor`'s reach), filtered by the reader inside
+//   the Brain's own statements; each upload is checked again in the one
+//   statement that reads its uploader (`uploadersOf`), as the same
+//   reader. A document they may not read answers as one nobody holds.
+// - What only one person may read becomes evidence for anyone else: no
+//   person's own store is read (`personal: false`; the shared store holds
+//   nothing one person alone may read either, so this is a second layer),
+//   and an upload its uploader alone reads is never taken.
+// - An erased or removed person is named, or one named for a team's
+//   document they may no longer read themselves: only an uploader who is
+//   an active member now, in that team still.
+// - A person is taken to know about what their document doesn't answer.
+//   Nothing here judges relevance: each person comes with the passage
+//   that matched, as recall found it for this reader (`found` as recall
+//   labels it: only the first way it found the passage, never whether it
+//   answers), and the caller (the chat's
+//   model, which reads the text) judges, as with every other recall. No
+//   threshold of our own, and no passage the reader may not read: each is
+//   one of recall's own items for them.
+// - Monitoring of individuals: people one at a time, in the order of
+//   their names, never ranked, scored or counted (one passage each, never
+//   how many of their documents answer), and never two related to each
+//   other.
+// - What the answer rests on reaches the chat's history unpinned: every
+//   version cited, and every person named, is kept with the run (`keep`)
+//   before the code gets it, so a later turn withholds it once the reach
+//   may no longer read the version, or the person is no longer a member.
+// - Nothing of the question or the answer is in a refusal, a log line or
+//   the audit event, which is kept, answered or refused, before the call
+//   returns.
+
+/** A version of an upload, as code reads a citation. */
+export interface UploadVersion {
+  source: { producer: "upload"; id: string };
+  version: number;
+}
+
+/** A passage of an upload, as a recall's pack hands it over (`BrainPack`). */
+export type UploadPassage = BrainPack["items"][number] & UploadVersion;
+
+/**
+ * A person a recall for the topic found an upload of: who they are, and
+ * the one passage of theirs recall found first for the asker, exactly as
+ * its pack holds it (its text, and how it was `found`): what the caller
+ * judges by whether they know about it.
+ */
+export interface PersonWhoKnows {
+  id: string;
+  name: string;
+  passage: UploadPassage;
+}
+
+/**
+ * Who knows about a topic, as code reads it: the people, by name; the
+ * parts of the question nothing the asker may read holds; and whether the
+ * budget left a passage out, as recall's pack says: someone whose only
+ * passage didn't fit is not named.
+ */
+export interface WhoKnows {
+  people: PersonWhoKnows[];
+  notFound: string[];
+  truncated: boolean;
+}
+
+/** Who asks, as core resolved them: a chat's code, never an App or a run. */
+export interface WhoKnowsCaller extends Omit<RecallCaller, "keep"> {
+  /**
+   * Keeps every version the answer cites, and every person it names (their
+   * member id), with the run, before code gets it: what couldn't be kept
+   * fails the call, audited as refused.
+   */
+  readonly keep: (read: {
+    versions: readonly UploadVersion[];
+    people: readonly string[];
+  }) => Promise<void>;
+}
+
+/** Whether `one` sorts before `other`: by name, then by id, never by count. */
+const byName = (one: PersonWhoKnows, other: PersonWhoKnows): number =>
+  one.name.localeCompare(other.name) || one.id.localeCompare(other.id);
+
+/**
+ * Who uploaded the documents a recall for `input`'s question finds for
+ * `caller`'s person at its reach, each with that passage (`WhoKnows`), for
+ * the caller to judge by. Refused as
+ * `permission.invalid_args` when `input` isn't a request, as
+ * `permission.denied` without the grant, and as `permission.unavailable`
+ * once the person is no longer a member. Audited, answered or refused,
+ * before it returns.
+ */
+export const whoKnowsFor = async (
+  env: Env,
+  caller: WhoKnowsCaller,
+  input: unknown
+): Promise<WhoKnows> => {
+  const audit = async (detail: Record<string, string | number | boolean>) => {
+    await appendAuditEvent(env, {
+      actor: caller.actor,
+      action: "brain.who_knows",
+      ...(caller.target === undefined ? {} : { target: caller.target }),
+      detail: { onBehalfOf: caller.authority.onBehalfOf, ...detail },
+    });
+  };
+  try {
+    // A recall's question and budget, never a moment: who uploaded what
+    // is read as it is now.
+    const asked = codeRecallOf(input);
+    if (asked === undefined || asked.asOf !== undefined) {
+      throw functionErrors.create("permission.invalid_args");
+    }
+    if (caller.permissionId === null) {
+      throw permissionErrors.create("permission.denied", { action: "brain" });
+    }
+    await authorize(
+      env,
+      caller.authority,
+      { type: "platform" },
+      "brain",
+      caller.permissionId,
+      caller.context
+    );
+    // As the chat's code recalls: its person's teams and the company in
+    // their own chat (`reach`), the company alone anywhere else. Never
+    // their own store (`personal: false`): a second layer, as the shared
+    // store keeps nothing only one person may read.
+    const reachesTeams = caller.reach === "teams";
+    // Recall's own pack, within the budget the caller gave: the passages
+    // handed over are its items, so the answer never holds more text.
+    const passages = await recallPassagesAs(env, caller.authority.onBehalfOf, {
+      question: asked.question,
+      budget: asked.budget,
+      personal: false,
+      company: !reachesTeams,
+    });
+    const uploads = passages.items.flatMap(
+      ({ source, ...item }): UploadPassage[] =>
+        source.producer === "upload"
+          ? [{ ...item, source: { producer: "upload", id: source.id } }]
+          : []
+    );
+    // A team's upload as the person reads it now, in the same statement
+    // as its uploader (`uploadersOf`); none as the company alone.
+    const found = await uploadersOf(
+      env,
+      [...new Set(uploads.map(({ source }) => source.id))],
+      { person: reachesTeams ? caller.authority.onBehalfOf : null }
+    );
+    const uploaders = new Map(
+      found.map((uploader) => [uploader.uploadId, uploader])
+    );
+    // Each person once, with their first passage in the pack's order.
+    const people = new Map<string, PersonWhoKnows>();
+    for (const passage of uploads) {
+      const uploader = uploaders.get(passage.source.id);
+      if (uploader !== undefined && !people.has(uploader.userId)) {
+        people.set(uploader.userId, {
+          id: uploader.userId,
+          name: uploader.name,
+          passage,
+        });
+      }
+    }
+    const answer: WhoKnows = {
+      people: [...people.values()].toSorted(byName),
+      notFound: passages.notFound,
+      truncated: passages.truncated,
+    };
+    await caller.keep({
+      versions: answer.people.map(({ passage: { source, version } }) => ({
+        source,
+        version,
+      })),
+      people: answer.people.map(({ id }) => id),
+    });
+    await audit({ people: answer.people.length, truncated: answer.truncated });
+    return answer;
+  } catch (error) {
+    const refused = inHostBrainWords(error);
     await audit({
       refused: isExpectedError(refused) ? refused.code : "internal.unexpected",
     });

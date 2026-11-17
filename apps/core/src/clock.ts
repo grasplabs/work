@@ -113,7 +113,9 @@ export const clockTasks: readonly ClockTask<Env>[] = [
   {
     name: "brain.shared_read_erasures",
     period: "minute",
-    run: completeOwedErasures,
+    run: async (env) => {
+      await completeOwedErasures(env);
+    },
   },
   // Decisions on the company's skills whose outcome the Brain hasn't given
   // yet (src/skill-shares.ts `reconcileSkills`).

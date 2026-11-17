@@ -62,7 +62,13 @@ export const audiencesRead = (db: DrizzleD1Database) =>
       connectionId: connectionBrainAudiences.connectionId,
       teamId: connectionBrainAudiences.teamId,
     })
-    .from(connectionBrainAudiences);
+    .from(connectionBrainAudiences)
+    // Never one of a connection being erased or closed by a disconnect:
+    // none has an audience (shared-reads.ts), and a read never trusts one
+    // that would.
+    .where(
+      sql`NOT EXISTS (SELECT 1 FROM ${connectionBrainErasures} WHERE ${connectionBrainErasures.connectionId} = ${connectionBrainAudiences.connectionId} AND (${connectionBrainErasures.erasing} = 1 OR ${connectionBrainErasures.closed} = 1))`
+    );
 
 /** Every shared connection's Brain audience, as an admin last chose it. */
 export const readConnectionAudiences = async (
@@ -103,26 +109,35 @@ const audienceDetail = (
     : { [who]: "team", [team]: held };
 };
 
-/** That no erasure of what the Brain kept of `connectionId` is under way, as SQL. */
-const notErasing = (connectionId: string): SQL =>
-  sql`NOT EXISTS (SELECT 1 FROM ${connectionBrainErasures} WHERE ${connectionBrainErasures.connectionId} = ${connectionId} AND ${connectionBrainErasures.erasing} = 1)`;
+/**
+ * That `connectionId` may be opened to an audience, as SQL: no erasure of
+ * what the Brain kept of it is under way, and no disconnect closed it
+ * (shared-reads.ts).
+ */
+const openable = (connectionId: string): SQL =>
+  sql`NOT EXISTS (SELECT 1 FROM ${connectionBrainErasures} WHERE ${connectionBrainErasures.connectionId} = ${connectionId} AND (${connectionBrainErasures.erasing} = 1 OR ${connectionBrainErasures.closed} = 1))`;
 
-/** Whether an erasure of what the Brain kept of `connectionId` is under way. */
-const erasingNow = async (
+/**
+ * Why `connectionId` may not be opened to an audience now, if it may
+ * not: a disconnect closed it, or what the Brain kept of it is being
+ * erased.
+ */
+const unopenableNow = async (
   db: DrizzleD1Database,
   connectionId: string
-): Promise<boolean> => {
+): Promise<"closed" | "erasing" | undefined> => {
   const row = await db
-    .select({ id: connectionBrainErasures.connectionId })
+    .select({
+      erasing: connectionBrainErasures.erasing,
+      closed: connectionBrainErasures.closed,
+    })
     .from(connectionBrainErasures)
-    .where(
-      and(
-        eq(connectionBrainErasures.connectionId, connectionId),
-        eq(connectionBrainErasures.erasing, true)
-      )
-    )
+    .where(eq(connectionBrainErasures.connectionId, connectionId))
     .get();
-  return row !== undefined;
+  if (row?.closed === true) {
+    return "closed";
+  }
+  return row?.erasing === true ? "erasing" : undefined;
 };
 
 /** The audience `connectionId` holds now. */
@@ -209,16 +224,21 @@ export const setConnectionAudience = async (
   // landed in between, until it holds what was chosen.
   for (;;) {
     // oxlint-disable-next-line no-await-in-loop -- again only after another change
-    const [held, erasing] = await Promise.all([
+    const [held, unopenable] = await Promise.all([
       heldBy(db, id.data),
-      erasingNow(db, id.data),
+      unopenableNow(db, id.data),
     ]);
     if (held === wanted) {
       return;
     }
-    // Never opened while what the Brain kept of it is being erased
-    // (shared-reads.ts): checked again in the statement that writes it.
-    if (wanted !== undefined && erasing) {
+    // Never opened while what the Brain kept of it is being erased, nor
+    // once a disconnect closed it, though connect said it was connected a
+    // moment ago (shared-reads.ts): checked again in the statement that
+    // writes it.
+    if (wanted !== undefined && unopenable === "closed") {
+      throw connectionErrors.create("connection.invalid");
+    }
+    if (wanted !== undefined && unopenable === "erasing") {
       throw connectionErrors.create("connection.brain_erasing");
     }
     const event = outboxedIfChanged(db, {
@@ -243,14 +263,14 @@ export const setConnectionAudience = async (
       write = db
         .insert(connectionBrainAudiences)
         .select(
-          sql`SELECT ${id.data}, ${wanted}, ${identity.userId}, ${changedAt.getTime()} WHERE ${notErasing(id.data)}`
+          sql`SELECT ${id.data}, ${wanted}, ${identity.userId}, ${changedAt.getTime()} WHERE ${openable(id.data)}`
         )
         .onConflictDoNothing();
     } else {
       write = db
         .update(connectionBrainAudiences)
         .set({ teamId: wanted, changedBy: identity.userId, changedAt })
-        .where(and(asRead, notErasing(id.data)));
+        .where(and(asRead, openable(id.data)));
     }
     // oxlint-disable-next-line no-await-in-loop -- again only after another change
     await auditedBatch(env, db, [write, event]);
