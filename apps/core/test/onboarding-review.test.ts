@@ -12,11 +12,12 @@ import { beforeEach, describe, expect, it } from "vite-plus/test";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { mockIdp } from "./idp.ts";
 import {
+  aloneInTheStore,
   answering,
   approveAgreed,
-  holdAlarm,
   onLink,
   openLinkAs,
+  participate,
   signedInAs,
 } from "./interview-link.ts";
 import type { Device } from "./interview-link.ts";
@@ -155,6 +156,8 @@ const agree = async (
     adding: false,
     addedAt: 0,
   };
+  // They take part before anything they say is kept, as their page has them.
+  await participate(device);
   const saved = await onLink({ action: "save", ...device, version, progress });
   const { version: savedVersion }: InterviewSaved = await saved.json();
   await approveAgreed(device, agreed);
@@ -267,7 +270,7 @@ const onLinkOf = async (person: string, action: string) => {
 };
 
 describe("what needs the admin", { timeout: 120_000 }, () => {
-  beforeEach(holdAlarm);
+  beforeEach(aloneInTheStore);
 
   it("is a step told two ways that nobody could explain, each checked to be told, never who told which or anyone's name, and keeps how the admin settled it", async () => {
     const ids = await team();

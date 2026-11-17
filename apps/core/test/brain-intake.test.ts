@@ -9,7 +9,7 @@ import { z } from "zod";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { namedIn } from "./brain-intakes.ts";
 import { mockIdp } from "./idp.ts";
-import { answering, holdAlarm, onLink } from "./interview-link.ts";
+import { aloneInTheStore, answering, onLink } from "./interview-link.ts";
 import {
   agree,
   eightTeam,
@@ -132,7 +132,7 @@ describe(
   () => {
     // The test draws and gives the brain each team itself, with a model
     // faked: the store's own alarm, which has none, would try first.
-    beforeEach(holdAlarm);
+    beforeEach(aloneInTheStore);
 
     it("is the team, one source, its statements and the drawn workflow, read by every member, and no record names a person", async () => {
       const store = onboardingStore(env);

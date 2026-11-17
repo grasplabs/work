@@ -14,7 +14,7 @@ import { mockIdp } from "./idp.ts";
 import {
   answering,
   answeringWith,
-  holdAlarm,
+  aloneInTheStore,
   onLink,
 } from "./interview-link.ts";
 import type { ProviderReply } from "./model-provider.ts";
@@ -345,7 +345,7 @@ describe(
   () => {
     // The test gives the brain each team itself, step by step, with a model
     // faked: the store's own alarm, which has none, would try first.
-    beforeEach(holdAlarm);
+    beforeEach(aloneInTheStore);
 
     it("shows for a team where one, two or three told it, with no count of people anywhere a member reads it", async () => {
       const reader = await colleague();

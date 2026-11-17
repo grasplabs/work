@@ -67,7 +67,10 @@ import { termsOf } from "./words.ts";
  * (expressions): among its readers and its source's current version's,
  * and no erasure hides it. A version no longer stored is read by no one.
  */
-const versionVisibleSql = (source: string, version: string): string => `EXISTS (
+export const versionVisibleSql = (
+  source: string,
+  version: string
+): string => `EXISTS (
     SELECT 1 FROM source_versions AS based
     JOIN current_versions ON current_versions.source = based.source
     JOIN source_versions AS current ON current.row = current_versions.version_row
@@ -82,7 +85,7 @@ const versionVisibleSql = (source: string, version: string): string => `EXISTS (
  * what memories and extraction marks name their readers by. A key whose
  * set is no longer stored matches no one.
  */
-const readableKeysSql = `SELECT key FROM reader_sets
+export const readableKeysSql = `SELECT key FROM reader_sets
     WHERE id IN (SELECT reader_set FROM readable)`;
 
 /**
@@ -171,14 +174,14 @@ const startSql = (alias: string): string =>
  * memories were judged against and the memory is out. One row or none:
  * a seek of `memory_outs` that finds nothing for a memory never put out.
  */
-const outSql = (alias: string, at: string): string => `
+const outSql = (alias: string, at: string, only = ""): string => `
   SELECT current.added_at AS at FROM memory_outs AS out
   -- The out row first, by its key: one row read (workerd counts a seek
   -- that finds nothing as one) for a memory never out.
   CROSS JOIN current_versions AS pointer
     ON pointer.source = ${alias}.source AND pointer.judged_row = pointer.version_row
   CROSS JOIN source_versions AS current ON current.row = pointer.version_row
-  WHERE out.memory = ${alias}.row AND current.added_at <= ${at}`;
+  WHERE out.memory = ${alias}.row AND current.added_at <= ${at} ${only}`;
 
 /**
  * The newer memories of `alias`'s lineage that end it, by the order of
@@ -193,13 +196,15 @@ const outSql = (alias: string, at: string): string => `
  * "Bob", then "Anna" again, with no memory drawn from the last, has Anna
  * current again. `visible` keeps to those the reader may read, so a
  * restatement merges what one says twice only for a reader of the newer:
- * nobody reads a memory they couldn't before.
+ * nobody reads a memory they couldn't before. `only` narrows them further
+ * (a condition on `newer`).
  */
 export const newerSql = (
   alias: string,
   learned: string,
   valid: string,
-  visible: boolean
+  visible: boolean,
+  only = ""
 ): string => {
   // Two seeks, one for each kind of attribute, never an OR between them:
   // an OR kept `value_key` out of the index (`memories_lineage_value_idx`),
@@ -214,7 +219,8 @@ export const newerSql = (
     AND ${startSql("newer")} <= ${valid}
     AND (newer.retired_at IS NULL OR newer.retired_at > ${learned})
     AND NOT EXISTS (${outSql("newer", learned)})
-    ${visible ? `AND ${visibleSql("newer")}` : ""}`;
+    ${visible ? `AND ${visibleSql("newer")}` : ""}
+    ${only}`;
   return `
   SELECT ${startSql("newer")} AS at FROM memories AS newer
   WHERE ${alias}.one_value = 1
@@ -238,9 +244,9 @@ export const newerSql = (
  * message (`NewSource.thread`). The thread is asked of a mark found, so a
  * memory with none reads nothing more.
  */
-const extractedSql = (alias: string): string => `
+const extractedSql = (alias: string, only = ""): string => `
   SELECT extracted.at AS at FROM memory_extractions AS extracted
-  WHERE extracted.lineage = ${alias}.lineage
+  WHERE extracted.lineage = ${alias}.lineage ${only}
     AND extracted.version > ${alias}.lineage_order
     AND extracted.at <= ?4
     AND extracted.readers IN (${readableKeysSql})
@@ -251,6 +257,16 @@ const extractedSql = (alias: string): string => `
     )`;
 
 /**
+ * Every moment something other than its own text ended `m` for the reader
+ * by `?4`: retired, a newer memory of its lineage, a later version marked
+ * fully extracted (`endedAtSql`).
+ */
+const replacingsSql = `
+  SELECT m.retired_at AS at WHERE m.retired_at IS NOT NULL AND m.retired_at <= ?4
+  UNION ALL${newerSql("m", "?4", validSql, true)}
+  UNION ALL${extractedSql("m")}`;
+
+/**
  * When the reader saw `m` stop being believed, as of `?4`: retired then,
  * or ended by a newer memory of its lineage they may read, from its
  * start, or by a later version of its source marked fully extracted, or
@@ -259,12 +275,34 @@ const extractedSql = (alias: string): string => `
  * older version's memory that came late is history from the start). Null
  * while believed.
  */
-export const endedAtSql = `max(m.learned_at, (SELECT min(at) FROM (
-  SELECT m.retired_at AS at WHERE m.retired_at IS NOT NULL AND m.retired_at <= ?4
-  UNION ALL${newerSql("m", "?4", validSql, true)}
-  UNION ALL${extractedSql("m")}
+export const endedAtSql = `max(m.learned_at, (SELECT min(at) FROM (${replacingsSql}
   UNION ALL${outSql("m", "?4")}
 )))`;
+
+/**
+ * Whether version `version` of `m`'s source replaced `m` for the reader as
+ * of `?4`: the first thing other than its own text that ended it
+ * (`replacingsSql`) is a memory of that version or its mark of being fully
+ * extracted. A memory that left only because a version's text no longer
+ * holds its quote is credited to no version (`outOnlySql`). What the
+ * reader may not read ends nothing here either (version-change.ts).
+ */
+export const endedByVersionSql = (version: string): string => `(
+  (SELECT min(at) FROM (${replacingsSql}
+  )) = (SELECT min(at) FROM (${newerSql("m", "?4", validSql, true, `AND newer.version = ${version}`)}
+    UNION ALL${extractedSql("m", `AND extracted.version = ${version}`)}
+  ))
+)`;
+
+/**
+ * Whether `m` stopped being believed for the reader as of `?4` only because
+ * its source's current version, which is version `version`, no longer
+ * holds its quote (`outSql`): nothing else ended it (`replacingsSql`).
+ */
+export const outOnlySql = (version: string): string => `(
+  EXISTS (${outSql("m", "?4", `AND current.version = ${version}`)})
+  AND NOT EXISTS (${replacingsSql})
+)`;
 
 /** A current rival of `m` the reader may read: judged current, same fact, another value. */
 const rivalSql = `
@@ -622,7 +660,7 @@ const aboutSql = memoriesSql({
  * `?1` the entity's row, `?6` the attribute: its current memories the
  * reader may read.
  */
-const currentOfAttributeSql = memoriesSql({
+export const currentOfAttributeSql = memoriesSql({
   base: `SELECT row FROM memories
     WHERE entity = ?1 AND attribute = ?6`,
   filter: "judged.is_current = 1",

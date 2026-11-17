@@ -23,6 +23,7 @@ import {
   useHeld,
   useKind,
   useSaveState,
+  useUnapproved,
 } from "./kept.ts";
 import type { SaveState } from "./kept.ts";
 import { withShares } from "./progress.ts";
@@ -147,9 +148,14 @@ const SendFoot = ({
   onSave: () => void;
 }) => {
   const { t } = useLingui();
+  const unapproved = useUnapproved();
   const trouble = sending === "not_kept" || sending === "refused";
   let note: string | null = null;
-  if (sending === "refused") {
+  if (trouble && unapproved) {
+    // Kept, but not approved: core took the lines back from where they
+    // went, and counts them where they go only once approved there.
+    note = t`Not saved yet. Until it is, the lines you moved count nowhere.`;
+  } else if (sending === "refused") {
     note = refusal;
   } else if (sending === "not_kept") {
     note = t`Not saved yet. Until it is, your lines still go where they went before.`;

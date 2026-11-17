@@ -1614,12 +1614,21 @@ const SharedList = ({
 };
 
 /** The Brain's memories page: what sources disagree on, and what the Brain remembers, by kind. */
-export const MemoriesPage = ({ teams }: { teams: Team[] }) => {
+export const MemoriesPage = ({
+  teams,
+  open,
+}: {
+  teams: Team[];
+  /** An entity to open first, of its kind (a link from another page). */
+  open?: { entity: BrainEntityRef; kind: BrainEntityKind };
+}) => {
   const kindLabel = useKindLabel();
-  const [kind, setKind] = useState<BrainEntityKind>("customer");
+  const [kind, setKind] = useState<BrainEntityKind>(open?.kind ?? "customer");
   // The open entity, by its store and id alone: its panel names it from
   // its own read, as the person may read it now.
-  const [opened, setOpened] = useState<BrainEntityRef>();
+  const [opened, setOpened] = useState<BrainEntityRef | undefined>(
+    open?.entity
+  );
   // The correction being made, apart from the row that opened it: each
   // opening is one correction (`CorrectDialog`).
   const [correcting, setCorrecting] = useState<{

@@ -14,6 +14,7 @@ import type { SourceReaders, SourceRef } from "../src/brain-next.ts";
 import { setConnectionAudience } from "../src/connection-audiences.ts";
 import { teams } from "../src/db/core/schema.ts";
 import { join, leave, newTeam } from "./brain-next-leaks-harness.ts";
+import { afterFirstRead } from "./d1-after-first-read.ts";
 import { mockIdp } from "./idp.ts";
 import {
   auditedDuring,
@@ -135,64 +136,6 @@ const nowhere: Reaches = {
 
 /** How core's read of an audience starts (connection-audiences.ts `heldBy`). */
 const audienceRead = 'select "team_id" from "connection_brain_audiences"';
-
-/**
- * Core's database, but `between` runs right after the first read of a
- * connection's audience has answered, before its reader gets the answer:
- * as another admin's change landing between one change's read and its
- * write. Every other statement is the database's own.
- */
-const changedAfterFirstRead = (
-  database: D1Database,
-  between: () => Promise<void>
-): D1Database => {
-  let ran = false;
-  const after = async <T>(read: Promise<T>): Promise<T> => {
-    const answered = await read;
-    if (!ran) {
-      ran = true;
-      await between();
-    }
-    return answered;
-  };
-  const reading = (statement: D1PreparedStatement): D1PreparedStatement =>
-    new Proxy(statement, {
-      get: (target, name): unknown => {
-        const member: unknown = Reflect.get(target, name);
-        if (typeof member !== "function") {
-          return member;
-        }
-        if (name === "bind") {
-          return (...values: unknown[]): D1PreparedStatement =>
-            reading(target.bind(...values));
-        }
-        if (name === "all" || name === "raw" || name === "first") {
-          return async (...given: unknown[]): Promise<unknown> =>
-            await after(Promise.resolve(Reflect.apply(member, target, given)));
-        }
-        return (...given: unknown[]): unknown =>
-          Reflect.apply(member, target, given);
-      },
-    });
-  return new Proxy(database, {
-    get: (target, name): unknown => {
-      const member: unknown = Reflect.get(target, name);
-      if (typeof member !== "function") {
-        return member;
-      }
-      if (name === "prepare") {
-        return (query: string): D1PreparedStatement => {
-          const statement = target.prepare(query);
-          return query.startsWith(audienceRead)
-            ? reading(statement)
-            : statement;
-        };
-      }
-      return (...given: unknown[]): unknown =>
-        Reflect.apply(member, target, given);
-    },
-  });
-};
 
 /** Whether `personId` reads `source`'s first version, as the Sources page does. */
 const readsVersion = async (
@@ -516,7 +459,7 @@ describe("a shared connection's Brain audience", setUpTime, () => {
     // opens it to everyone.
     const racing: Env = {
       ...env,
-      DB: changedAfterFirstRead(env.DB, async () => {
+      DB: afterFirstRead(env.DB, audienceRead, async () => {
         await second.api.connections.setBrainAudience(connectionId, {
           kind: "everyone",
         });

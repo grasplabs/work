@@ -8,7 +8,7 @@ import onboardingMigrations from "../src/db/onboarding/migrations/migrations.js"
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { intakesWith } from "./brain-intakes.ts";
 import { mockIdp } from "./idp.ts";
-import { answering, holdAlarm } from "./interview-link.ts";
+import { aloneInTheStore, answering } from "./interview-link.ts";
 import type { ProviderReply } from "./model-provider.ts";
 import {
   agree,
@@ -146,7 +146,7 @@ const givenWith = async (
 describe("what a drawing gives the brain", { timeout: 120_000 }, () => {
   // The test draws and gives the brain each team itself, with a model
   // faked: the store's own alarm would try first, and take its replies.
-  beforeEach(holdAlarm);
+  beforeEach(aloneInTheStore);
 
   it("counts a number only for the work it is about: one a person gave for other work never backs this one", async () => {
     // Each of the six gave numbers, but for the rota, not for tickets.

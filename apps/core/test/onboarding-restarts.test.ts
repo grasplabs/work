@@ -17,6 +17,7 @@ import {
   onLink,
   openedFor,
   openLinkAs,
+  participate,
   postedOnLink,
   quick,
   signedInAs,
@@ -96,6 +97,8 @@ const save = async (
   version: number,
   progress: InterviewProgress
 ): Promise<InterviewSaved> => {
+  // They take part before anything they say is kept, as their page has them.
+  await participate(link);
   const response = await onLink({ action: "save", ...link, version, progress });
   return await response.json();
 };

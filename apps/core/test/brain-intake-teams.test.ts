@@ -14,6 +14,7 @@ import { erasuresFailing } from "./brain-erasures-failing.ts";
 import { intakesWith, namedIn } from "./brain-intakes.ts";
 import { mockIdp } from "./idp.ts";
 import {
+  aloneInTheStore,
   answering,
   answeringWith,
   holdAlarm,
@@ -157,7 +158,7 @@ const drawnTeam = async () => {
 describe("what a team said, put together", { timeout: 120_000 }, () => {
   // The test gives the brain each team itself, step by step, with a model
   // faked: the store's own alarm, which has none, would try first.
-  beforeEach(holdAlarm);
+  beforeEach(aloneInTheStore);
 
   it("keeps only claims of the kinds that describe the work, of facts of their kind that say them, without a name, and shows the model no one", async () => {
     const ids = await drawnTeam();
@@ -799,18 +800,8 @@ describe("what a team said, put together", { timeout: 120_000 }, () => {
   });
 
   it("never counts someone who took back what they approved while the claims were put together", async () => {
-    // Every team an earlier test of this file left due is given first, so
-    // the one intake below is this team's (they share one store).
-    for (let round = 0; round < 10; round += 1) {
-      // oxlint-disable-next-line no-await-in-loop -- one team at a time, as the alarm gives them
-      const { result } = await answeringWith(
-        claimsReply([zendeskClaim]),
-        async () => await onboardingStore(env).intakeNext()
-      );
-      if (result === null) {
-        break;
-      }
-    }
+    // Nothing an earlier test left due is in the way (`aloneInTheStore`):
+    // the one intake below is this team's.
     // Eight tell their own work: Max's taking-back leaves the team seven,
     // so the claim falls by its own backers alone.
     const ids = await eightTeam();

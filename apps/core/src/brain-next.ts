@@ -24,6 +24,7 @@ import {
   instructionsTextSchema,
   memoriesCursorSchema,
   memoryIdSchema,
+  versionChangeCursorSchema,
   writtenCursorSchema,
   memoryTypes,
   namesPerEntityMax,
@@ -94,6 +95,8 @@ import type {
   WayCounts,
   WorkOverview,
   WrittenCursor,
+  VersionChangeCursor,
+  VersionChangePart,
 } from "@grasp-os/brain-next/contract";
 import { skillCardOf, skillNameSchema } from "@grasp-os/brain-next/skills";
 import { brainExportErrors } from "@grasp-os/shared/brain-exports";
@@ -4727,6 +4730,7 @@ export type {
   ContestedCursor,
   EntitiesCursor,
   MemoriesCursor,
+  VersionChangeCursor,
 } from "@grasp-os/brain-next/contract";
 
 // The page's own lists of kinds and attributes (shared's
@@ -5064,6 +5068,88 @@ export const contestedAs = async (
     );
     return { items: facts.flat(), more: page.more, next: page.next };
   });
+};
+
+/** A memory of a version's change, as the page shows it (`versionChangeAs`). */
+export interface ChangedStoredMemory {
+  part: VersionChangePart;
+  memory: StoredMemory;
+  rivals: StoredMemory[];
+  moreRivals: boolean;
+}
+
+/** An entity a page of a version's change names, as the page shows it. */
+export interface ChangedStoredEntity extends StoredEntity {
+  /** The version made it seen: their first memory of it rests on it. */
+  firstSeen: boolean;
+}
+
+/** A page of what a version of a source changed, and where it goes on: null at the last. */
+export interface StoredVersionChange {
+  memories: ChangedStoredMemory[];
+  entities: ChangedStoredEntity[];
+  next: VersionChangeCursor | null;
+}
+
+const versionChangeWantedSchema = versionRefSchema.extend({
+  after: versionChangeCursorSchema.optional(),
+});
+
+/**
+ * A page of what version `version` of `source` changed that the member
+ * `personId` may read (the Brain's `readVersionChange`): what it added,
+ * what it ended, the rivals of what it added that stands contested, and
+ * the entities those name, after `after`. Null alike for a version there
+ * isn't and one they may not read. Of the store the source is kept in:
+ * the shared one, else their own, as `readSourceVersionAs` reads it.
+ * Refused once they are no longer a member.
+ */
+export const versionChangeAs = async (
+  env: BrainEnv & ReaderEnv,
+  personId: string,
+  wanted:
+    | { source: SourceRef; version: number; after?: VersionChangeCursor }
+    | Readonly<Record<string, unknown>>
+): Promise<StoredVersionChange | null> => {
+  const { source, version, after } = checked(versionChangeWantedSchema, wanted);
+  // The person on their own Brain page: both stores (`"person"` reach).
+  const reader = await personReaderOf(env, personId);
+  const request = {
+    source: sourceKeyOf(source),
+    version,
+    reader,
+    ...(after === undefined ? {} : { after }),
+  };
+  const shared = await brain(env).readVersionChange(request);
+  const name: MemoryStoreName = shared === null ? "own" : "shared";
+  const store = storeNamed(env, reader, name);
+  const page = shared ?? (await store.readVersionChange(request));
+  if (page === null) {
+    return null;
+  }
+  const shown = async (memories: readonly Memory[]) =>
+    await storedMemories(store, name, reader, memories);
+  return {
+    memories: await Promise.all(
+      page.memories.map(async ({ part, memory, rivals, moreRivals }) => {
+        const [[stored], storedRivals] = await Promise.all([
+          shown([memory]),
+          shown(rivals),
+        ]);
+        if (stored === undefined) {
+          throw new Error("A memory of a change shown as none");
+        }
+        return { part, memory: stored, rivals: storedRivals, moreRivals };
+      })
+    ),
+    entities: await Promise.all(
+      page.entities.map(async ({ firstSeen, ...entity }) => ({
+        ...(await liveNamed(env, reader, name, entity)),
+        firstSeen,
+      }))
+    ),
+    next: page.more && page.next !== undefined ? page.next : null,
+  };
 };
 
 const memoryRefSchema = z.strictObject({

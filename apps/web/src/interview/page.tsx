@@ -432,7 +432,7 @@ const Stage = ({
   } else if (stopped) {
     stage = <Stopped onCarryOn={onCarryOn} room={room} />;
     key = "stopped";
-  } else if (progress.person === "completed") {
+  } else if (progress.person === "completed" && progress.told) {
     stage = (
       <Closed
         closes={formatDay(session.closes)}
