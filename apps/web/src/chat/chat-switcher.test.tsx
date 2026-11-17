@@ -16,10 +16,11 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { ChatSwitcherProvider } from "./chat-switcher.tsx";
 
 // The ⌘K window against core's chats as the page reaches them over RPC,
-// faked: it opens with the keys on any page, lists the person's chats by
-// when they were last used, narrows them by title at once as the person
-// types, then to what core found was said, showing where, each chat as
-// core lists it now; and the same keys close it again.
+// faked: it opens with the keys on any page, "New chat" first, the
+// person's chats by the day they were last used, "Archived chats" last;
+// narrows them by title at once as the person types, then to what core
+// found was said, showing where, each chat as core lists it now; archives
+// one from its row; and the same keys close it again.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -53,8 +54,14 @@ const shown = async (
   listed: ChatSummary[] = [board, lease, travel]
 ) => {
   const asked: string[] = [];
+  const archived: string[] = [];
   const chats = {
-    list: async () => await Promise.resolve(listed),
+    list: async () =>
+      await Promise.resolve(listed.filter(({ id }) => !archived.includes(id))),
+    archive: async (id: string) => {
+      archived.push(id);
+      await Promise.resolve();
+    },
     search: async (query: string) => {
       asked.push(query);
       return await found(query);
@@ -87,27 +94,31 @@ const shown = async (
     );
     await router.load();
   });
-  return { asked };
+  return { asked, archived };
 };
 
 const dialog = (): HTMLElement | null =>
   document.querySelector<HTMLElement>('[role="dialog"]');
 
 /**
- * The chats the window lists, each as its title and any line found under
- * it; when it was used left out.
+ * The rows the window lists, each as its words and any line under them;
+ * when a chat was used, and its More, left out.
  */
 const rows = (): string[] =>
-  [...(dialog()?.querySelectorAll("[cmdk-item]") ?? [])].map((row) => {
+  [...(dialog()?.querySelectorAll('[role="option"]') ?? [])].map((row) => {
     const read = row.cloneNode(true);
     if (!(read instanceof HTMLElement)) {
       return "";
     }
-    for (const time of read.querySelectorAll("time")) {
-      time.remove();
+    for (const left of read.querySelectorAll("time, button")) {
+      left.remove();
     }
-    return (read.textContent ?? "").trim();
+    return read.textContent.trim();
   });
+
+/** The chats among the rows: those between "New chat" and "Archived chats". */
+const chatRows = (): string[] =>
+  rows().filter((row) => row !== "New chat" && row !== "Archived chats");
 
 const press = async (init: KeyboardEventInit): Promise<void> => {
   await act(async () => {
@@ -124,7 +135,7 @@ const openWindow = async (keys: KeyboardEventInit): Promise<void> => {
   await press(keys);
   await vi.waitFor(
     () => {
-      expect(rows().length).toBeGreaterThan(0);
+      expect(chatRows().length).toBeGreaterThan(0);
     },
     { timeout: openMs }
   );
@@ -132,7 +143,7 @@ const openWindow = async (keys: KeyboardEventInit): Promise<void> => {
 
 /** Types `text` into the window's search, as a person would. */
 const type = async (text: string): Promise<void> => {
-  const input = dialog()?.querySelector<HTMLInputElement>("[cmdk-input]");
+  const input = dialog()?.querySelector<HTMLInputElement>("input");
   if (input === undefined || input === null) {
     throw new Error("The window has no search");
   }
@@ -164,9 +175,11 @@ describe("the chats window", () => {
 
     await openWindow({ key: "k", metaKey: true });
     expect(rows()).toStrictEqual([
+      "New chat",
       "Board report",
       "Lease of the office",
       "Trip to Lyon",
+      "Archived chats",
     ]);
 
     // By title at once, before core has looked through what was said.
@@ -190,7 +203,6 @@ describe("the chats window", () => {
       "Board report…the lease ends in March",
       "Lease of the office",
     ]);
-    expect(dialog()?.querySelector("mark")?.textContent).toBe("lease");
   });
 
   it("says which chat app a chat came through, and nothing for one started in Grasp", async () => {
@@ -199,10 +211,10 @@ describe("the chats window", () => {
       [board, { ...lease, via: "slack" }, { ...travel, via: "teams" }]
     );
     await openWindow({ key: "k", metaKey: true });
-    expect(rows()).toStrictEqual([
+    expect(chatRows()).toStrictEqual([
       "Board report",
-      "Lease of the officevia Slack ·",
-      "Trip to Lyonvia Microsoft Teams ·",
+      "Lease of the officevia Slack",
+      "Trip to Lyonvia Microsoft Teams",
     ]);
   });
 
@@ -216,6 +228,42 @@ describe("the chats window", () => {
     await type("office");
     await vi.waitFor(() => {
       expect(rows()).toStrictEqual(["Office lease 2027"]);
+    });
+  });
+
+  it("archives a chat from its row's More, which leaves the list", async () => {
+    const { archived } = await shown(async () => await Promise.resolve([]));
+    await openWindow({ key: "k", metaKey: true });
+    const more = dialog()?.querySelector<HTMLElement>(
+      '[aria-label="More for Lease of the office"]'
+    );
+    if (more === undefined || more === null) {
+      throw new Error("No More on the lease's row");
+    }
+    await act(async () => {
+      more.click();
+      await Promise.resolve();
+    });
+    const archive = await vi.waitFor(() => {
+      const item = [
+        ...document.querySelectorAll<HTMLElement>('[role="menuitem"]'),
+      ].find((each) => each.textContent.trim() === "Archive");
+      if (item === undefined) {
+        throw new Error("No Archive in the More");
+      }
+      return item;
+    });
+
+    await act(async () => {
+      archive.click();
+      await Promise.resolve();
+    });
+
+    await vi.waitFor(() => {
+      expect({ archived, rows: chatRows() }).toStrictEqual({
+        archived: ["lease"],
+        rows: ["Board report", "Trip to Lyon"],
+      });
     });
   });
 

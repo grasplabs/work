@@ -1,152 +1,87 @@
 import type { ChatSearchHit, ChatSummary } from "@grasp-os/shared/chat";
-import { chatPlatformName } from "@grasp-os/shared/chat";
+import {
+  chatPlatformName,
+  chatTitleMaxLength,
+  chatTitleSchema,
+} from "@grasp-os/shared/chat";
 import { hasEvery } from "@grasp-os/shared/chat-search";
 import { failureText } from "@grasp-os/shared/errors";
-import { Button } from "@grasp-os/ui/components/button";
-import {
-  Command,
-  CommandDialog,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from "@grasp-os/ui/components/command";
-import { cn } from "@grasp-os/ui/lib/utils";
-import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
-import { Trans, useLingui } from "@lingui/react/macro";
-import { PlusIcon } from "lucide-react";
-import { useEffect, useEffectEvent, useRef, useState } from "react";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
+import { useRouter } from "@tanstack/react-router";
+import { useEffect, useRef, useState } from "react";
 
-import { ErrorText } from "../error-text.tsx";
+import { AgentIndicator } from "../grasp/agent-indicator/index.ts";
+import { Alert } from "../grasp/alert/index.ts";
+import { Button } from "../grasp/button/index.ts";
+import { Command } from "../grasp/command/index.ts";
+import type {
+  CommandEntry,
+  CommandItems,
+  CommandRowAction,
+} from "../grasp/command/index.ts";
+import { Dialog, DialogContent, DialogTitle } from "../grasp/dialog/index.ts";
+import { Field, FieldLabel } from "../grasp/field/index.ts";
+import { visuallyHidden } from "../grasp/hidden/hidden.ts";
+import {
+  Archive,
+  ArrowLeft,
+  Conversation,
+  Edit,
+  Plus,
+  Trash,
+  Undo,
+} from "../grasp/icons/index.ts";
+import { Input } from "../grasp/input/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { useCore } from "../use-core.ts";
 import { useActiveChat } from "./active-chat.ts";
-import { groupChats, whenShort } from "./chat-history.ts";
-import type { ChatPeriod } from "./chat-history.ts";
+import { chatsByDay, dayWrittenOut, timeOfDay } from "./chat-history.ts";
+import type { ChatDay } from "./chat-history.ts";
 import { useGoToChat } from "./chat-link.ts";
-import {
-  ChatMenu,
-  chatTitleMaxLength,
-  RenameField,
-  useChatChanges,
-} from "./chat-menus.tsx";
 import { DeleteChatDialog } from "./delete-chat-dialog.tsx";
 
-// The person's chats in one window, one quiet icon and ⌘K away, in place
-// of a list beside the chat (grasplabs/prototype
-// `components/chat/chat-switcher.tsx`). The window is the frame's, on
-// every page (`ChatSwitcherProvider` in chat-switcher.tsx, mounted in the
-// shell, which loads this file the first time it opens): ⌘K opens it
-// anywhere, and a page's header may show the icon that does too
-// (`ChatSwitcherButton`). It reads the chats as it opens, and again after
-// a change made in it: a new chat on top, then the chats by when they
-// were last used, each with when that was. A search on top narrows them
-// to the chats with every word in their title or what was said in them:
-// by title at once, then by what was said as core finds it
-// (`chats.search`), a chat found that way showing where. The keys move
-// through the chats and Enter opens one; a row's three dots, where it is
-// pointed at, rename it or delete it.
+// The person's chats in one window, ⌘K away on every page and opened by
+// the sidebar's "All chats" (`ChatSwitcherProvider` in chat-switcher.tsx,
+// which loads this file the first time it opens): Grasp UI's Command in
+// its Dialog, as the library's command dialog is until it can be opened
+// from outside. "New chat" is its first row; then the chats by the day
+// they were last used, each with its time at the end, or the Working mark
+// while its agent answers, and its More: rename, archive, delete. Typing
+// narrows them by title at once, then to what core found was said in
+// them (`chats.search`), a chat found that way showing where. Archived
+// chats are a quiet row at the end, a list of their own.
+//
+// Not yet: the open chat marked as current, and a foot of key hints,
+// which the library's Command doesn't draw yet.
 
-const periodLabel: Record<ChatPeriod, MessageDescriptor> = {
-  today: msg({ message: "Today", context: "chats from today" }),
-  week: msg({ message: "Last 7 days", context: "chats from the past week" }),
-  earlier: msg({ message: "Earlier", context: "older chats" }),
-};
+const styles = stylex.create({
+  // The rename field, where the list stood.
+  rename: {
+    display: "grid",
+    gap: grasp.space4,
+    padding: grasp.space4,
+  },
+  actions: {
+    display: "flex",
+    justifyContent: "flex-end",
+    gap: grasp.space2,
+  },
+  failure: { paddingInline: grasp.space4, paddingBlockEnd: grasp.space4 },
+});
+
+const today = msg({ message: "Today", context: "chats from today" });
+const yesterday = msg({
+  message: "Yesterday",
+  context: "chats from yesterday",
+});
 
 /** How long typing rests before core is asked what was said. */
 const searchRestMs = 200;
 
-/** The chat platform a chat came through, before its time. */
-const ChannelName = ({ via }: { via: string }) => {
-  const { t } = useLingui();
-  const app = chatPlatformName(via);
-  return <>{t`via ${app}`} · </>;
-};
-
-/**
- * One chat: its title, and on the right when it was last used; found by
- * what was said in it, where it was said under the title. Its three dots take the time's place where
- * it is pointed at.
- */
-const ChatRow = ({
-  chat,
-  hit,
-  active,
-  now,
-  onOpen,
-  onChanged,
-  onDelete,
-}: {
-  chat: ChatSummary;
-  hit: ChatSearchHit | undefined;
-  active: boolean;
-  now: Date;
-  onOpen: () => void;
-  /** It was renamed: the window reads the chats again. */
-  onChanged: () => void;
-  onDelete: () => void;
-}) => {
-  const { t, i18n } = useLingui();
-  const [renaming, setRenaming] = useState(false);
-  const { failure, rename } = useChatChanges(chat);
-  const when = whenShort(chat.lastAt, now, i18n.locale);
-  const said = hit?.said ?? null;
-  if (renaming) {
-    return (
-      <div className="px-2 py-1">
-        <RenameField
-          label={t`Chat name`}
-          maxLength={chatTitleMaxLength}
-          onDone={(name) => {
-            setRenaming(false);
-            void (async () => {
-              await rename(name);
-              onChanged();
-            })();
-          }}
-          value={chat.title}
-        />
-      </div>
-    );
-  }
-  return (
-    <div className="group/row relative">
-      <CommandItem check={false} onSelect={onOpen} value={chat.id}>
-        <span className="flex min-w-0 flex-1 flex-col gap-0.5 px-1 py-0.5">
-          <span className="flex items-baseline gap-3">
-            <span
-              className={cn("min-w-0 flex-1 truncate", active && "font-medium")}
-            >
-              {chat.title}
-            </span>
-            <span className="text-muted-foreground flex-none text-xs tabular-nums group-hover/row:invisible group-has-data-popup-open/row:invisible pointer-coarse:invisible">
-              {chat.via === "web" ? null : <ChannelName via={chat.via} />}
-              <time dateTime={chat.lastAt}>{when}</time>
-            </span>
-          </span>
-          {said === null ? null : (
-            <span className="text-muted-foreground truncate text-xs">
-              {said.before}
-              <mark className="text-foreground bg-transparent font-medium">
-                {said.found}
-              </mark>
-              {said.after}
-            </span>
-          )}
-        </span>
-      </CommandItem>
-      <ChatMenu
-        chat={chat}
-        onDelete={onDelete}
-        onRename={() => {
-          setRenaming(true);
-        }}
-      />
-      <ErrorText>{failure}</ErrorText>
-    </div>
-  );
-};
+/** A chat's value in the list, apart from the window's own rows. */
+const chatValue = (chatId: string): string => `chat:${chatId}`;
 
 /** What core found for a search: the query it was asked, and the chats. */
 interface Found {
@@ -198,25 +133,45 @@ const useSaidSearch = () => {
   return { found, failure, search };
 };
 
-/** Reads the person's chats from core as the window opens, again on each `read`. */
-const useListed = () => {
+/** Reads the person's chats (or the ones they archived) as the window opens, again on each `read`. */
+const useListed = (archived: boolean) => {
   const core = useCore();
   const [listed, setListed] = useState<ChatSummary[]>();
   const [failure, setFailure] = useState<string>();
-  const read = (): void => {
-    void (async () => {
+  const [reads, setReads] = useState(0);
+  useEffect(() => {
+    let current = true;
+    const read = async (): Promise<void> => {
       try {
         const chats = await core.withSession(
-          async (session) => await session.chats.list()
+          async (session) =>
+            await session.chats.list(archived ? { archived: true } : undefined)
         );
-        setListed(chats);
-        setFailure(undefined);
+        // An older read that answers late doesn't show.
+        if (current) {
+          setListed(chats);
+          setFailure(undefined);
+        }
       } catch (error) {
-        setFailure(failureText(error));
+        if (current) {
+          setFailure(failureText(error));
+        }
       }
-    })();
+    };
+    void read();
+    return () => {
+      current = false;
+    };
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- `reads` says when to read again
+  }, [core, archived, reads]);
+  return {
+    listed,
+    failure,
+    /** Reads them again, after a change made in the window. */
+    read: () => {
+      setReads(reads + 1);
+    },
   };
-  return { listed, failure, read };
 };
 
 /**
@@ -243,124 +198,321 @@ const shownChats = ({
   return found.hits.flatMap(({ chat }) => byId.get(chat.id) ?? []);
 };
 
-/**
- * The person's chats: a search on top, a new chat where it offers one
- * (`onNew`), then the chats by when they were last used, each to open,
- * rename or delete. Read each time it is `shown`, so it shows what changed
- * elsewhere. In the chats window and the Recents on Chat's own page.
- */
-export const ChatList = ({
-  shown,
-  onOpen,
-  onNew,
-  fill = false,
+/** Renaming, archiving and bringing back a chat, then reading the page again. */
+const useChanges = (onChanged: () => void) => {
+  const core = useCore();
+  const router = useRouter();
+  const [failure, setFailure] = useState<string>();
+  const change = async (
+    action: (
+      chats: Parameters<Parameters<typeof core.withSession>[0]>[0]["chats"]
+    ) => Promise<void>
+  ): Promise<void> => {
+    setFailure(undefined);
+    try {
+      await core.withSession(async (session) => {
+        await action(session.chats);
+      });
+    } catch (error) {
+      setFailure(failureText(error));
+      return;
+    }
+    onChanged();
+    // The sidebar and the chat's page show the change too.
+    await router.invalidate();
+  };
+  return {
+    failure,
+    rename: async (chat: ChatSummary, name: string): Promise<void> => {
+      const trimmed = name.trim();
+      if (
+        trimmed === chat.title ||
+        !chatTitleSchema.safeParse(trimmed).success
+      ) {
+        return;
+      }
+      await change(async (chats) => {
+        await chats.rename(chat.id, trimmed);
+      });
+    },
+    archive: async (chat: ChatSummary, archived: boolean): Promise<void> => {
+      await change(async (chats) => {
+        await (archived ? chats.archive(chat.id) : chats.unarchive(chat.id));
+      });
+    },
+  };
+};
+
+/** A chat's new name, where the list stood: Enter keeps it, Escape goes back to the list. */
+const RenameChat = ({
+  chat,
+  onDone,
 }: {
-  shown: boolean;
-  onOpen: (chatId: string) => void;
-  onNew?: () => void;
-  /** Fills a window of fixed height, rather than sizing to the chats. */
-  fill?: boolean;
+  chat: ChatSummary;
+  onDone: (name: string | null) => void;
 }) => {
+  const { t } = useLingui();
+  const [name, setName] = useState(chat.title);
+  return (
+    <form
+      onSubmit={(event) => {
+        event.preventDefault();
+        onDone(name);
+      }}
+      {...stylex.props(styles.rename)}
+    >
+      <Field>
+        <FieldLabel>{t`Chat name`}</FieldLabel>
+        <Input
+          // It opens to be typed in.
+          autoFocus
+          maxLength={chatTitleMaxLength}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              // Back to the list, not out of the window.
+              event.preventDefault();
+              event.stopPropagation();
+              onDone(null);
+            }
+          }}
+          onValueChange={setName}
+          value={name}
+        />
+      </Field>
+      <div {...stylex.props(styles.actions)}>
+        <Button
+          onClick={() => {
+            onDone(null);
+          }}
+          variant="ghost"
+        >
+          {t`Cancel`}
+        </Button>
+        <Button type="submit">
+          {t({ message: "Rename", context: "a chat" })}
+        </Button>
+      </div>
+    </form>
+  );
+};
+
+/** A day's name over its chats, in the page's language. */
+const useDayName = () => {
+  const { i18n } = useLingui();
+  return (day: ChatDay): string => {
+    if (day.kind === "today") {
+      return i18n._(today);
+    }
+    if (day.kind === "yesterday") {
+      return i18n._(yesterday);
+    }
+    return dayWrittenOut(day.day, day.sameYear, i18n.locale);
+  };
+};
+
+/**
+ * The person's chats as Command rows, by day: each by its title, the chat
+ * app it came through or where a search found it under it, and its time
+ * at the end, or the Working mark while its agent answers.
+ */
+const useChatRows = (actions: CommandRowAction[]) => {
   const { t, i18n } = useLingui();
+  const dayName = useDayName();
+  return (
+    chats: readonly ChatSummary[],
+    hits: ReadonlyMap<string, ChatSearchHit>
+  ): CommandItems =>
+    chatsByDay(chats, new Date()).map(({ day, chats: inDay }) => ({
+      type: "group" as const,
+      label: dayName(day),
+      items: inDay.map((chat): CommandEntry => {
+        const said = hits.get(chat.id)?.said ?? null;
+        const app = chat.via === "web" ? null : chatPlatformName(chat.via);
+        const where =
+          said === null ? null : `${said.before}${said.found}${said.after}`;
+        let description: string | undefined;
+        if (app !== null && where !== null) {
+          description = t`via ${app} · ${where}`;
+        } else if (app !== null) {
+          description = t`via ${app}`;
+        } else if (where !== null) {
+          description = where;
+        }
+        const time = timeOfDay(chat.lastAt, i18n.locale);
+        return {
+          value: chatValue(chat.id),
+          label: chat.title,
+          icon: Conversation,
+          ...(description === undefined ? {} : { description }),
+          end: chat.running ? (
+            <>
+              <AgentIndicator />
+              <span {...stylex.props(visuallyHidden)}>{t`Answering`}</span>
+            </>
+          ) : (
+            <time dateTime={chat.lastAt}>{time}</time>
+          ),
+          actions,
+        };
+      }),
+    }));
+};
+
+/** Why the list couldn't be read or changed, under it. */
+const Failure = ({ failure }: { failure: string | undefined }) =>
+  failure === undefined ? null : (
+    <div {...stylex.props(styles.failure)}>
+      <Alert tone="danger">{failure}</Alert>
+    </div>
+  );
+
+/** What can be done with a chat from its row: to an archived one, less. */
+const useChatActions = (archived: boolean): CommandRowAction[] => {
+  const { t } = useLingui();
+  const remove = {
+    value: "delete",
+    label: t`Delete`,
+    icon: Trash,
+    danger: true,
+  };
+  return archived
+    ? [{ value: "unarchive", label: t`Unarchive`, icon: Undo }, remove]
+    : [
+        {
+          value: "rename",
+          label: t({ message: "Rename", context: "a chat" }),
+          icon: Edit,
+        },
+        { value: "archive", label: t`Archive`, icon: Archive },
+        remove,
+      ];
+};
+
+/** The rows round the chats: "New chat" first and "Archived chats" last, or back to all chats first. */
+const useListEnds = (archived: boolean) => {
+  const { t } = useLingui();
+  const first: CommandEntry = archived
+    ? { value: "back", label: t`All chats`, icon: ArrowLeft }
+    : { value: "new", label: t`New chat`, icon: Plus };
+  const last: CommandEntry = {
+    value: "archived",
+    label: t`Archived chats`,
+    icon: Archive,
+  };
+  return { first, last };
+};
+
+/** What the list says when nothing is in it: honest about what was searched. */
+const useEmpty = (archived: boolean, query: string): string => {
+  const { t } = useLingui();
+  if (query === "") {
+    return archived ? t`No archived chats` : t`No chats yet`;
+  }
+  // Archived chats are searched by title alone.
+  return archived
+    ? t`No archived chat called “${query}”`
+    : t`No chat has “${query}” in its name or what was said`;
+};
+
+/**
+ * The window's list: the chats (`archived` false: "New chat" first,
+ * "Archived chats" last) or the archived ones (back to all chats first),
+ * with a search over them. Archived chats are searched by title alone:
+ * core's search reads the person's list.
+ */
+const ChatsCommand = ({
+  archived,
+  onArchived,
+  onClose,
+}: {
+  archived: boolean;
+  onArchived: (archived: boolean) => void;
+  onClose: () => void;
+}) => {
+  const { t } = useLingui();
+  const goTo = useGoToChat();
   const activeId = useActiveChat();
-  const [search, setSearch] = useState("");
+  const [query, setQuery] = useState("");
+  const [renaming, setRenaming] = useState<ChatSummary>();
   const [deleting, setDeleting] = useState<ChatSummary>();
   const said = useSaidSearch();
-  const listing = useListed();
-  const [readWhenShown, setReadWhenShown] = useState(false);
-  // Read again each time it shows, so it shows what changed elsewhere.
-  if (shown !== readWhenShown) {
-    setReadWhenShown(shown);
-    if (shown) {
-      setSearch("");
-    }
-  }
-  const read = useEffectEvent(() => {
+  const listing = useListed(archived);
+  const changes = useChanges(() => {
     listing.read();
   });
-  useEffect(() => {
-    if (shown) {
-      read();
-    }
-  }, [shown]);
-
+  const rowsOf = useChatRows(useChatActions(archived));
+  const trimmed = query.trim();
+  const empty = useEmpty(archived, trimmed);
+  const searching = trimmed !== "";
+  const read = listing.listed !== undefined;
   const chats = listing.listed ?? [];
-  const query = search.trim();
-  const searching = query !== "";
-  const answered = said.found?.query === query ? said.found : undefined;
+  const answered =
+    !archived && said.found?.query === trimmed ? said.found : undefined;
   const hits = new Map((answered?.hits ?? []).map((hit) => [hit.chat.id, hit]));
-  const now = new Date();
-  const groups = groupChats(shownChats({ chats, query, found: answered }), now);
+  const byValue = new Map(chats.map((chat) => [chatValue(chat.id), chat]));
+  const ends = useListEnds(archived);
+  const items: CommandItems = [
+    ...(searching ? [] : [ends.first]),
+    ...rowsOf(shownChats({ chats, query: trimmed, found: answered }), hits),
+    ...(searching || archived || !read ? [] : [ends.last]),
+  ];
+  if (renaming !== undefined) {
+    return (
+      <RenameChat
+        chat={renaming}
+        onDone={(name) => {
+          setRenaming(undefined);
+          if (name !== null) {
+            void changes.rename(renaming, name);
+          }
+        }}
+      />
+    );
+  }
+  const failure = listing.failure ?? said.failure ?? changes.failure;
+  const label = archived ? t`Search archived chats` : t`Search chats`;
+  const lookingForSaid = searching && !archived && answered === undefined;
   return (
     <>
       <Command
-        // cmdk names its search by a label of its own: this one.
-        label={t`Search chats`}
-        loop
-        shouldFilter={false}
-      >
-        <CommandInput
-          aria-label={t`Search chats`}
-          onValueChange={(value) => {
-            setSearch(value);
-            said.search(value);
-          }}
-          placeholder={t`Search chats`}
-          size={fill ? "lg" : "default"}
-          value={search}
-        />
-        <div
-          className={
-            fill ? "flex h-112 min-h-0 flex-col" : "flex min-h-0 flex-col"
+        aria-label={label}
+        bare
+        empty={empty}
+        filter={false}
+        items={items}
+        loading={!read || lookingForSaid}
+        loadingLabel={read ? t`Searching what was said` : t`Loading chats`}
+        onAction={(value) => {
+          if (value === "archived" || value === "back") {
+            onArchived(value === "archived");
+            return;
           }
-        >
-          {onNew === undefined ? null : (
-            <div className="flex border-b p-2">
-              <Button onClick={onNew} size="sm" variant="outline">
-                <PlusIcon data-icon="inline-start" />
-                <Trans>New chat</Trans>
-              </Button>
-            </div>
-          )}
-          <ErrorText>{listing.failure ?? said.failure}</ErrorText>
-          <CommandList fill={fill}>
-            {listing.listed === undefined ? null : (
-              <CommandEmpty>
-                {searching ? (
-                  <Trans>No chat has that.</Trans>
-                ) : (
-                  <Trans>No chats here yet.</Trans>
-                )}
-              </CommandEmpty>
-            )}
-            {groups.map((group) => (
-              <CommandGroup
-                heading={i18n._(periodLabel[group.period])}
-                key={group.period}
-              >
-                {group.chats.map((chat) => (
-                  <ChatRow
-                    active={chat.id === activeId}
-                    chat={chat}
-                    hit={hits.get(chat.id)}
-                    key={chat.id}
-                    now={now}
-                    onChanged={() => {
-                      listing.read();
-                    }}
-                    onDelete={() => {
-                      setDeleting(chat);
-                    }}
-                    onOpen={() => {
-                      onOpen(chat.id);
-                    }}
-                  />
-                ))}
-              </CommandGroup>
-            ))}
-          </CommandList>
-        </div>
-      </Command>
+          onClose();
+          goTo(value === "new" ? undefined : byValue.get(value)?.id);
+        }}
+        onQueryChange={(next) => {
+          setQuery(next);
+          if (!archived) {
+            said.search(next);
+          }
+        }}
+        onRowAction={(value, action) => {
+          const chat = byValue.get(value);
+          if (chat === undefined) {
+            return;
+          }
+          if (action === "rename") {
+            setRenaming(chat);
+          } else if (action === "delete") {
+            setDeleting(chat);
+          } else {
+            void changes.archive(chat, action === "archive");
+          }
+        }}
+        placeholder={label}
+        query={query}
+      />
+      <Failure failure={failure} />
       {deleting === undefined ? null : (
         <DeleteChatDialog
           active={deleting.id === activeId}
@@ -378,13 +530,7 @@ export const ChatList = ({
   );
 };
 
-/**
- * Opens chat `chatId` on its own page (chat-page.tsx), or a new one on
- * Chat's start.
- */
-export const useSelectChat = (): ((chatId?: string) => void) => useGoToChat();
-
-/** The window and what it shows, while it is open. */
+/** The chats window: open while `open`, closed by Escape, a press outside, or a chat chosen. */
 export const ChatWindow = ({
   open,
   onOpenChange,
@@ -393,27 +539,31 @@ export const ChatWindow = ({
   onOpenChange: (open: boolean) => void;
 }) => {
   const { t } = useLingui();
-  const selectChat = useSelectChat();
+  const [archived, setArchived] = useState(false);
+  // Each time it opens, it opens on the chats.
+  const [wasOpen, setWasOpen] = useState(open);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open) {
+      setArchived(false);
+    }
+  }
   return (
-    <CommandDialog
-      className="top-1/8 sm:max-w-3xl"
-      description={t`Search your chats, and open one.`}
-      onOpenChange={onOpenChange}
-      open={open}
-      title={t`Chats`}
-    >
-      <ChatList
-        fill
-        onNew={() => {
-          onOpenChange(false);
-          selectChat();
-        }}
-        onOpen={(chatId) => {
-          onOpenChange(false);
-          selectChat(chatId);
-        }}
-        shown={open}
-      />
-    </CommandDialog>
+    <Dialog onOpenChange={onOpenChange} open={open}>
+      <DialogContent>
+        <DialogTitle>{archived ? t`Archived chats` : t`Chats`}</DialogTitle>
+        {/* Afresh each time it opens, and for each list: no search from before. */}
+        {open ? (
+          <ChatsCommand
+            archived={archived}
+            key={archived ? "archived" : "chats"}
+            onArchived={setArchived}
+            onClose={() => {
+              onOpenChange(false);
+            }}
+          />
+        ) : null}
+      </DialogContent>
+    </Dialog>
   );
 };

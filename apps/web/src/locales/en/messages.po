@@ -2475,6 +2475,7 @@ msgctxt "tab listing every workflow"
 msgid "All"
 msgstr "All"
 
+#: src/chat/chat-window.tsx
 #: src/grasp/frame/grasp-sidebar.tsx
 msgid "All chats"
 msgstr "All chats"
@@ -2761,6 +2762,7 @@ msgstr "Answered: {question}"
 msgid "Answered: {title}"
 msgstr "Answered: {title}"
 
+#: src/chat/chat-window.tsx
 #: src/chat/sidebar-chats.tsx
 msgid "Answering"
 msgstr "Answering"
@@ -3014,6 +3016,7 @@ msgstr "Apps it works in"
 
 #: src/apps/app-settings.tsx
 #: src/apps/app-status.tsx
+#: src/chat/chat-window.tsx
 #: src/chat/sidebar-chats.tsx
 msgid "Archive"
 msgstr "Archive"
@@ -3030,6 +3033,10 @@ msgstr "Archive and take offline"
 msgctxt "an App put away"
 msgid "Archived"
 msgstr "Archived"
+
+#: src/chat/chat-window.tsx
+msgid "Archived chats"
+msgstr "Archived chats"
 
 #: src/activity/audit-log.tsx
 #: src/routes/_shell.settings.audit.tsx
@@ -3722,6 +3729,7 @@ msgstr "Can't offer Run: {unread}"
 #: src/brain/share-record.tsx
 #: src/chat/answer-words.tsx
 #: src/chat/brain-questions.tsx
+#: src/chat/chat-window.tsx
 #: src/chat/use-dictation.ts
 #: src/confirmed.tsx
 #: src/connections/connect-dialog.tsx
@@ -4411,8 +4419,8 @@ msgid "Collection"
 msgstr "Collection"
 
 #: src/activity/pending.tsx
-msgid "Collection {collectionId}"
-msgstr "Collection {collectionId}"
+msgid "Collection {collection}"
+msgstr "Collection {collection}"
 
 #: src/knowledge/purge.tsx
 msgid "Collection actions"
@@ -5247,8 +5255,8 @@ msgstr "Definition version"
 
 #: src/agents/agent-page.tsx
 #: src/apps/app-remove.tsx
-#: src/chat/chat-menus.tsx
 #: src/chat/chat-more.tsx
+#: src/chat/chat-window.tsx
 #: src/chat/delete-chat-dialog.tsx
 #: src/chat/sidebar-chats.tsx
 #: src/projects/project-view.tsx
@@ -5812,11 +5820,6 @@ msgstr "Each path prefix starts with /, on its own line, with no query or dot se
 #: src/settings/stephen-settings.tsx
 msgid "Each place only narrows who reaches him there, and whether he does things for people there or only answers."
 msgstr "Each place only narrows who reaches him there, and whether he does things for people there or only answers."
-
-#: src/chat/chat-window.tsx
-msgctxt "older chats"
-msgid "Earlier"
-msgstr "Earlier"
 
 #: src/settings/composer-settings.tsx
 msgid "Edge"
@@ -8405,11 +8408,6 @@ msgstr "Last 30 days"
 msgid "Last 7 days"
 msgstr "Last 7 days"
 
-#: src/chat/chat-window.tsx
-msgctxt "chats from the past week"
-msgid "Last 7 days"
-msgstr "Last 7 days"
-
 #: src/agents/agent-page.tsx
 msgid "Last asked"
 msgstr "Last asked"
@@ -8725,6 +8723,10 @@ msgstr "Loading"
 #: src/frame/part-words.tsx
 msgid "Loading {many}"
 msgstr "Loading {many}"
+
+#: src/chat/chat-window.tsx
+msgid "Loading chats"
+msgstr "Loading chats"
 
 #: src/frame/part-words.tsx
 msgid "Loading more {many}"
@@ -9143,7 +9145,6 @@ msgstr "More for {label}"
 msgid "More for {name}"
 msgstr "More for {name}"
 
-#: src/chat/chat-menus.tsx
 #: src/chat/sidebar-chats.tsx
 msgid "More for {title}"
 msgstr "More for {title}"
@@ -9578,6 +9579,14 @@ msgstr "No Apps yet"
 msgid "No Apps yet. Apps are made in chat."
 msgstr "No Apps yet. Apps are made in chat."
 
+#: src/chat/chat-window.tsx
+msgid "No archived chat called “{query}”"
+msgstr "No archived chat called “{query}”"
+
+#: src/chat/chat-window.tsx
+msgid "No archived chats"
+msgstr "No archived chats"
+
 #: src/workflows/business-process.tsx
 msgid "No business process"
 msgstr "No business process"
@@ -9587,12 +9596,12 @@ msgid "No changes are kept for this record."
 msgstr "No changes are kept for this record."
 
 #: src/chat/chat-window.tsx
-msgid "No chat has that."
-msgstr "No chat has that."
+msgid "No chat has “{query}” in its name or what was said"
+msgstr "No chat has “{query}” in its name or what was said"
 
 #: src/chat/chat-window.tsx
-msgid "No chats here yet."
-msgstr "No chats here yet."
+msgid "No chats yet"
+msgstr "No chats yet"
 
 #: src/apps/app-code.tsx
 msgid "No code yet: Grasp writes the first version in the chat."
@@ -10321,13 +10330,13 @@ msgstr "Nothing to show yet."
 msgid "Nothing uses them until you approve. Known malware is always refused."
 msgstr "Nothing uses them until you approve. Known malware is always refused."
 
+#: src/inbox/inbox-page.tsx
+msgid "Nothing waits for you"
+msgstr "Nothing waits for you"
+
 #: src/grasp/frame/grasp-sidebar.tsx
 msgid "Nothing waits for you."
 msgstr "Nothing waits for you."
-
-#: src/inbox/inbox-page.tsx
-msgid "Nothing waits on you"
-msgstr "Nothing waits on you"
 
 #: src/workflows/requests/request-table.tsx
 msgid "Nothing waits on you."
@@ -11913,17 +11922,9 @@ msgstr "Real run"
 msgid "Receipt"
 msgstr "Receipt"
 
-#: src/chat/recents.tsx
-msgid "Recent chats"
-msgstr "Recent chats"
-
 #: src/settings/event-sources.tsx
 msgid "Recent runs"
 msgstr "Recent runs"
-
-#: src/chat/recents.tsx
-msgid "Recents"
-msgstr "Recents"
 
 #: src/settings/ai-providers.tsx
 msgid "Recommended"
@@ -12213,11 +12214,15 @@ msgid "Removing"
 msgstr "Removing"
 
 #: src/brain/region-edit.tsx
-#: src/chat/chat-menus.tsx
 #: src/chat/chat-more.tsx
 #: src/chat/sidebar-chats.tsx
 #: src/frame/part-words.tsx
 #: src/settings/teams.tsx
+msgid "Rename"
+msgstr "Rename"
+
+#: src/chat/chat-window.tsx
+msgctxt "a chat"
 msgid "Rename"
 msgstr "Rename"
 
@@ -13115,6 +13120,10 @@ msgstr "Search {many}"
 msgid "Search {name}"
 msgstr "Search {name}"
 
+#: src/chat/chat-window.tsx
+msgid "Search archived chats"
+msgstr "Search archived chats"
+
 #: src/routes/_shell.integrations.index.tsx
 msgid "Search by name or kind"
 msgstr "Search by name or kind"
@@ -13195,10 +13204,6 @@ msgstr "Search the transcript"
 msgid "Search time zones"
 msgstr "Search time zones"
 
-#: src/chat/chat-window.tsx
-msgid "Search your chats, and open one."
-msgstr "Search your chats, and open one."
-
 #: src/apps/indexes-view.tsx
 msgid "Search, to find records by the words in them"
 msgstr "Search, to find records by the words in them"
@@ -13239,6 +13244,10 @@ msgstr "Searching the brain for {query}"
 #: src/chat/thread.tsx
 msgid "Searching the docs for {query}"
 msgstr "Searching the docs for {query}"
+
+#: src/chat/chat-window.tsx
+msgid "Searching what was said"
+msgstr "Searching what was said"
 
 #: src/connections/http-connections.tsx
 #: src/shown-once.tsx
@@ -16220,6 +16229,10 @@ msgstr "Type your answer"
 msgid "Unanswered question"
 msgstr "Unanswered question"
 
+#: src/chat/chat-window.tsx
+msgid "Unarchive"
+msgstr "Unarchive"
+
 #: src/apps/app-workflows.tsx
 msgid "Unbind"
 msgstr "Unbind"
@@ -16640,6 +16653,10 @@ msgstr "Very good"
 #: src/chat/chat-window.tsx
 msgid "via {app}"
 msgstr "via {app}"
+
+#: src/chat/chat-window.tsx
+msgid "via {app} · {where}"
+msgstr "via {app} · {where}"
 
 #: src/connections/source-badge.tsx
 msgid "Via Composio"
@@ -17991,6 +18008,11 @@ msgid "Yes: it is unchanged and links to the event before it."
 msgstr "Yes: it is unchanged and links to the event before it."
 
 #: src/frame/part-words.tsx
+msgid "Yesterday"
+msgstr "Yesterday"
+
+#: src/chat/chat-window.tsx
+msgctxt "chats from yesterday"
 msgid "Yesterday"
 msgstr "Yesterday"
 

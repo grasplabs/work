@@ -639,6 +639,60 @@ const seedPermissions = async (
   }
 };
 
+/**
+ * What waits for the admin, so the inbox and the sidebar's Inbox view show
+ * with something in them: two Apps asking to read a Knowledge collection,
+ * asked by their owners through the same call as any request, and left
+ * for an admin to decide. An App that has a permission of that name
+ * already, asked, granted or turned down, is left as it is.
+ */
+const seedWaitingForAdmin = async (
+  sessions: ReadonlyMap<PersonKey, Session>,
+  appIds: ReadonlyMap<string, string>,
+  collectionIds: ReadonlyMap<string, string>
+): Promise<number> => {
+  const adminSession = sessionFor(sessions, admin.key);
+  const asks = [
+    {
+      app: "Record-to-Report",
+      by: "eva",
+      collection: "Finance",
+      binding: "FINANCE_POLICIES",
+    },
+    {
+      app: "Risk-to-Compliance",
+      by: "pieter",
+      collection: "Compliance",
+      binding: "COMPLIANCE_RULES",
+    },
+  ] as const;
+  let asked = 0;
+  for (const { app, by, collection, binding } of asks) {
+    const appId = appIds.get(app);
+    const collectionId = collectionIds.get(collection);
+    if (appId === undefined || collectionId === undefined) {
+      continue;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- one App at a time
+    const held = await adminSession.api.permissions.list({
+      type: "app",
+      appId,
+    });
+    if (held.some(({ binding: name }) => name === binding)) {
+      continue;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- one request at a time
+    await sessionFor(sessions, by).api.permissions.request({
+      subject: { type: "app", appId },
+      object: { type: "collection", collectionId },
+      actions: ["read"],
+      binding,
+    });
+    asked += 1;
+  }
+  return asked;
+};
+
 /** The company's first agent, Stephen: core makes him for every organization. */
 const firstAgentId = "organization";
 
@@ -824,6 +878,12 @@ const main = async (): Promise<void> => {
       console.info(`App ${seed.name}: ${ran}`);
     }
     await seedPermissions(sessions, appIds, collectionIds);
+    const waiting = await seedWaitingForAdmin(sessions, appIds, collectionIds);
+    console.info(
+      waiting === 0
+        ? "The admin's inbox has its requests already"
+        : `${waiting} requests wait for the admin`
+    );
     const read = await seedAgentKnowledge(
       sessionFor(sessions, admin.key),
       collectionIds

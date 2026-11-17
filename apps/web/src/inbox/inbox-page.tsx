@@ -352,7 +352,7 @@ const ToDo = ({
       <Empty size="lg">
         <EmptyHeader>
           <EmptyMedia picture="done" />
-          <EmptyTitle>{t`Nothing waits on you`}</EmptyTitle>
+          <EmptyTitle>{t`Nothing waits for you`}</EmptyTitle>
           <EmptyDescription>
             {t`What Grasp asks you, and what waits for your yes, comes here.`}
           </EmptyDescription>

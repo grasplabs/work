@@ -69,7 +69,7 @@ const useChats = (enabled: boolean): ChatSummary[] => {
 /**
  * Renaming and archiving a chat from its row, then reading the page again,
  * so the sidebar's list and the chat's page show the change. As the chats
- * window does it (`useChatChanges` in chat-menus.tsx), for any of the rows.
+ * window does it (chat-window.tsx), for any of the rows.
  */
 const useRowChanges = () => {
   const router = useRouter();

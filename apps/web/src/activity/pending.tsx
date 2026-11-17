@@ -11,6 +11,7 @@ import {
   appName,
   appsById,
   formatTime,
+  listedOrNone,
   personName,
   readPeople,
 } from "../directory.ts";
@@ -41,11 +42,20 @@ export const readRequestNames = async (
   session: Session,
   requests: Permission[]
 ): Promise<PendingRequests> => {
-  const [apps, people] = await Promise.all([
+  const [apps, people, collections] = await Promise.all([
     session.apps.list(),
     readPeople(session),
+    // For names only: a request for a collection reads by its name.
+    listedOrNone(session.knowledge.listCollections()),
   ]);
-  return { requests, directory: { people, apps: appsById(apps) } };
+  return {
+    requests,
+    directory: {
+      people,
+      apps: appsById(apps),
+      collections: new Map(collections.map(({ id, name }) => [id, name])),
+    },
+  };
 };
 
 /** Workflow `id`, by the name core gave it in `names`, else by its ID. */
@@ -99,8 +109,8 @@ export const subjectOf = (
 };
 
 /**
- * What it asks for: a workflow by its name, connections and collections
- * by ID, as they have no names here.
+ * What it asks for: a workflow or a collection by its name where it was
+ * read, a connection by ID, as it has no name here.
  */
 export const objectOf = (
   { object, actions, workflowNames, functionName }: Permission,
@@ -113,8 +123,9 @@ export const objectOf = (
       : i18n._(msg`Connection ${connectionId}, ${resource}`);
   }
   if (object.type === "collection") {
-    const { collectionId } = object;
-    return i18n._(msg`Collection ${collectionId}`);
+    const collection =
+      directory.collections?.get(object.collectionId) ?? object.collectionId;
+    return i18n._(msg`Collection ${collection}`);
   }
   if (object.type === "app" && object.function !== undefined) {
     // A workflow's permission on one function, by its ID, named by its

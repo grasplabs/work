@@ -16,6 +16,8 @@ export interface Directory {
   apps: ReadonlyMap<string, App>;
   /** Agents' names, where the page read them (the audit trail, for admins). */
   agents?: ReadonlyMap<string, string>;
+  /** Knowledge collections' names, where the page read them (a permission request's). */
+  collections?: ReadonlyMap<string, string>;
 }
 
 /**

@@ -56,7 +56,12 @@ export const Route = createFileRoute("/_shell/inbox")({
           return { ...latest, directory };
         })
       : undefined;
-    const waiting = await readWaiting(core, identity);
+    // Everyone's unknown outcomes too, once a visit, whatever the view: the
+    // filter offers their group, and only this page lists them (core records
+    // each list in the audit trail).
+    const waiting = await readWaiting(core, identity, {
+      everyonesOutcomes: true,
+    });
     return { waiting, readAt: new Date().toISOString(), activity };
   },
   component: Inbox,

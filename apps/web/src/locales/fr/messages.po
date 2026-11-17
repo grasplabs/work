@@ -2475,6 +2475,7 @@ msgctxt "tab listing every workflow"
 msgid "All"
 msgstr "Tous"
 
+#: src/chat/chat-window.tsx
 #: src/grasp/frame/grasp-sidebar.tsx
 msgid "All chats"
 msgstr "Toutes les discussions"
@@ -2761,6 +2762,7 @@ msgstr "Réponse apportée : {question}"
 msgid "Answered: {title}"
 msgstr "Répondu : {title}"
 
+#: src/chat/chat-window.tsx
 #: src/chat/sidebar-chats.tsx
 msgid "Answering"
 msgstr "Répond"
@@ -3014,6 +3016,7 @@ msgstr "Applications dans lesquelles il travaille"
 
 #: src/apps/app-settings.tsx
 #: src/apps/app-status.tsx
+#: src/chat/chat-window.tsx
 #: src/chat/sidebar-chats.tsx
 msgid "Archive"
 msgstr "Archiver"
@@ -3030,6 +3033,10 @@ msgstr "Archiver et mettre hors ligne"
 msgctxt "an App put away"
 msgid "Archived"
 msgstr "Archivée"
+
+#: src/chat/chat-window.tsx
+msgid "Archived chats"
+msgstr "Discussions archivées"
 
 #: src/activity/audit-log.tsx
 #: src/routes/_shell.settings.audit.tsx
@@ -3722,6 +3729,7 @@ msgstr "Impossible de proposer Exécuter : {unread}"
 #: src/brain/share-record.tsx
 #: src/chat/answer-words.tsx
 #: src/chat/brain-questions.tsx
+#: src/chat/chat-window.tsx
 #: src/chat/use-dictation.ts
 #: src/confirmed.tsx
 #: src/connections/connect-dialog.tsx
@@ -4411,8 +4419,8 @@ msgid "Collection"
 msgstr "Collection"
 
 #: src/activity/pending.tsx
-msgid "Collection {collectionId}"
-msgstr "Collection {collectionId}"
+msgid "Collection {collection}"
+msgstr "Collection {collection}"
 
 #: src/knowledge/purge.tsx
 msgid "Collection actions"
@@ -5247,8 +5255,8 @@ msgstr "Version de la définition"
 
 #: src/agents/agent-page.tsx
 #: src/apps/app-remove.tsx
-#: src/chat/chat-menus.tsx
 #: src/chat/chat-more.tsx
+#: src/chat/chat-window.tsx
 #: src/chat/delete-chat-dialog.tsx
 #: src/chat/sidebar-chats.tsx
 #: src/projects/project-view.tsx
@@ -5812,11 +5820,6 @@ msgstr "Chaque préfixe de chemin commence par /, sur sa propre ligne, sans requ
 #: src/settings/stephen-settings.tsx
 msgid "Each place only narrows who reaches him there, and whether he does things for people there or only answers."
 msgstr "Chaque lieu restreint seulement qui le joint là-bas, et s’il agit pour les gens ou se contente de répondre."
-
-#: src/chat/chat-window.tsx
-msgctxt "older chats"
-msgid "Earlier"
-msgstr "Plus anciennes"
 
 #: src/settings/composer-settings.tsx
 msgid "Edge"
@@ -7305,7 +7308,7 @@ msgstr "Masquer exactement ce qui sera envoyé"
 
 #: src/frame/part-words.tsx
 msgid "Hide password"
-msgstr ""
+msgstr "Masquer le mot de passe"
 
 #: src/workflows/requests/request-who.tsx
 msgid "Hide people one by one"
@@ -8405,11 +8408,6 @@ msgstr "30 derniers jours"
 msgid "Last 7 days"
 msgstr "7 derniers jours"
 
-#: src/chat/chat-window.tsx
-msgctxt "chats from the past week"
-msgid "Last 7 days"
-msgstr "7 derniers jours"
-
 #: src/agents/agent-page.tsx
 msgid "Last asked"
 msgstr "Dernière demande"
@@ -8725,6 +8723,10 @@ msgstr "Chargement"
 #: src/frame/part-words.tsx
 msgid "Loading {many}"
 msgstr "Chargement des {many}"
+
+#: src/chat/chat-window.tsx
+msgid "Loading chats"
+msgstr "Chargement des discussions"
 
 #: src/frame/part-words.tsx
 msgid "Loading more {many}"
@@ -9143,7 +9145,6 @@ msgstr "Plus pour {label}"
 msgid "More for {name}"
 msgstr "Plus pour {name}"
 
-#: src/chat/chat-menus.tsx
 #: src/chat/sidebar-chats.tsx
 msgid "More for {title}"
 msgstr "Plus pour {title}"
@@ -9578,6 +9579,14 @@ msgstr "Aucune application pour l’instant"
 msgid "No Apps yet. Apps are made in chat."
 msgstr "Aucune application pour l’instant. Les applications se créent dans le chat."
 
+#: src/chat/chat-window.tsx
+msgid "No archived chat called “{query}”"
+msgstr "Aucune discussion archivée nommée « {query} »"
+
+#: src/chat/chat-window.tsx
+msgid "No archived chats"
+msgstr "Aucune discussion archivée"
+
 #: src/workflows/business-process.tsx
 msgid "No business process"
 msgstr "Aucun processus métier"
@@ -9587,12 +9596,12 @@ msgid "No changes are kept for this record."
 msgstr "Aucune modification n'est conservée pour cet enregistrement."
 
 #: src/chat/chat-window.tsx
-msgid "No chat has that."
-msgstr "Aucun chat ne contient cela."
+msgid "No chat has “{query}” in its name or what was said"
+msgstr "Aucune discussion ne contient « {query} » dans son nom ou ce qui a été dit"
 
 #: src/chat/chat-window.tsx
-msgid "No chats here yet."
-msgstr "Pas encore de chat ici."
+msgid "No chats yet"
+msgstr "Pas encore de discussions"
 
 #: src/apps/app-code.tsx
 msgid "No code yet: Grasp writes the first version in the chat."
@@ -10321,13 +10330,13 @@ msgstr "Rien à afficher pour l’instant."
 msgid "Nothing uses them until you approve. Known malware is always refused."
 msgstr "Rien ne les utilise tant que vous ne les approuvez pas. Les logiciels malveillants connus sont toujours refusés."
 
+#: src/inbox/inbox-page.tsx
+msgid "Nothing waits for you"
+msgstr "Rien ne vous attend"
+
 #: src/grasp/frame/grasp-sidebar.tsx
 msgid "Nothing waits for you."
 msgstr "Rien ne vous attend."
-
-#: src/inbox/inbox-page.tsx
-msgid "Nothing waits on you"
-msgstr "Rien ne vous attend"
 
 #: src/workflows/requests/request-table.tsx
 msgid "Nothing waits on you."
@@ -11913,17 +11922,9 @@ msgstr "Exécution réelle"
 msgid "Receipt"
 msgstr "Reçu"
 
-#: src/chat/recents.tsx
-msgid "Recent chats"
-msgstr "Chats récents"
-
 #: src/settings/event-sources.tsx
 msgid "Recent runs"
 msgstr "Exécutions récentes"
-
-#: src/chat/recents.tsx
-msgid "Recents"
-msgstr "Récents"
 
 #: src/settings/ai-providers.tsx
 msgid "Recommended"
@@ -12213,11 +12214,15 @@ msgid "Removing"
 msgstr "Retrait en cours"
 
 #: src/brain/region-edit.tsx
-#: src/chat/chat-menus.tsx
 #: src/chat/chat-more.tsx
 #: src/chat/sidebar-chats.tsx
 #: src/frame/part-words.tsx
 #: src/settings/teams.tsx
+msgid "Rename"
+msgstr "Renommer"
+
+#: src/chat/chat-window.tsx
+msgctxt "a chat"
 msgid "Rename"
 msgstr "Renommer"
 
@@ -12637,7 +12642,7 @@ msgstr "Reformuler l’objectif"
 
 #: src/frame/part-words.tsx
 msgid "Right arrow for more"
-msgstr ""
+msgstr "Flèche droite pour plus"
 
 #: src/settings/backdrop-settings.tsx
 msgid "Rings"
@@ -13104,7 +13109,7 @@ msgstr "Rechercher"
 #: src/frame/part-words.tsx
 msgctxt "a command list's field"
 msgid "Search"
-msgstr ""
+msgstr "Rechercher"
 
 #: src/frame/part-words.tsx
 msgid "Search {many}"
@@ -13114,6 +13119,10 @@ msgstr "Rechercher des {many}"
 #: src/onboarding/place-picker.tsx
 msgid "Search {name}"
 msgstr "Rechercher dans {name}"
+
+#: src/chat/chat-window.tsx
+msgid "Search archived chats"
+msgstr "Rechercher dans les discussions archivées"
 
 #: src/routes/_shell.integrations.index.tsx
 msgid "Search by name or kind"
@@ -13195,10 +13204,6 @@ msgstr "Chercher dans la transcription"
 msgid "Search time zones"
 msgstr "Rechercher un fuseau horaire"
 
-#: src/chat/chat-window.tsx
-msgid "Search your chats, and open one."
-msgstr "Recherchez dans vos chats et ouvrez-en un."
-
 #: src/apps/indexes-view.tsx
 msgid "Search, to find records by the words in them"
 msgstr "Une recherche, pour trouver des enregistrements par leurs mots"
@@ -13226,7 +13231,7 @@ msgstr "{query} recherché dans la documentation"
 #: src/frame/part-words.tsx
 msgctxt "a list fetching results"
 msgid "Searching"
-msgstr ""
+msgstr "Recherche"
 
 #: src/chat/thread.tsx
 msgid "Searching the App's files for {text}"
@@ -13239,6 +13244,10 @@ msgstr "Recherche de {query} dans le cerveau"
 #: src/chat/thread.tsx
 msgid "Searching the docs for {query}"
 msgstr "Recherche de {query} dans la documentation"
+
+#: src/chat/chat-window.tsx
+msgid "Searching what was said"
+msgstr "Recherche dans ce qui a été dit"
 
 #: src/connections/http-connections.tsx
 #: src/shown-once.tsx
@@ -13680,7 +13689,7 @@ msgstr "Afficher ou masquer la barre latérale"
 
 #: src/frame/part-words.tsx
 msgid "Show password"
-msgstr ""
+msgstr "Afficher le mot de passe"
 
 #: src/workflows/requests/request-who.tsx
 msgid "Show people one by one"
@@ -16188,7 +16197,7 @@ msgstr "Saisissez {name} pour confirmer"
 
 #: src/frame/part-words.tsx
 msgid "Type a command or search"
-msgstr ""
+msgstr "Saisissez une commande ou recherchez"
 
 #: src/workflows/start-run.tsx
 msgid "Type a number."
@@ -16219,6 +16228,10 @@ msgstr "Écrivez votre réponse"
 #: src/dashboard/signals.tsx
 msgid "Unanswered question"
 msgstr "Question sans réponse"
+
+#: src/chat/chat-window.tsx
+msgid "Unarchive"
+msgstr "Désarchiver"
 
 #: src/apps/app-workflows.tsx
 msgid "Unbind"
@@ -16640,6 +16653,10 @@ msgstr "Très bien"
 #: src/chat/chat-window.tsx
 msgid "via {app}"
 msgstr "via {app}"
+
+#: src/chat/chat-window.tsx
+msgid "via {app} · {where}"
+msgstr "via {app} · {where}"
 
 #: src/connections/source-badge.tsx
 msgid "Via Composio"
@@ -17991,6 +18008,11 @@ msgid "Yes: it is unchanged and links to the event before it."
 msgstr "Oui : il est inchangé et lié à l’événement précédent."
 
 #: src/frame/part-words.tsx
+msgid "Yesterday"
+msgstr "Hier"
+
+#: src/chat/chat-window.tsx
+msgctxt "chats from yesterday"
 msgid "Yesterday"
 msgstr "Hier"
 

@@ -102,15 +102,21 @@ const question: WaitingFeed["items"][number] = {
   },
 };
 
-const shown = async (feed: WaitingFeed) => {
+const admin: Identity = { ...identity, role: "admin" };
+
+const shown = async (feed: WaitingFeed, who: Identity = identity) => {
   const markRead = vi.fn<(ids: string[], upTo: string) => Promise<void>>(
     async () => {
       await Promise.resolve();
     }
   );
+  const listAll = vi.fn<() => Promise<unknown>>(async () => {
+    await Promise.resolve();
+  });
   const session = {
     waiting: { list: async () => await Promise.resolve(feed) },
     notifications: { markRead },
+    unknownOutcomes: { listAll },
   };
   const core = {
     withSession: async <T,>(
@@ -118,7 +124,7 @@ const shown = async (feed: WaitingFeed) => {
     ): Promise<T> => await read(session),
   };
   const Frame = () => {
-    const items = useWaitingItems(identity, true);
+    const items = useWaitingItems(who, true);
     return (
       <>
         <output>{items?.length}</output>
@@ -150,7 +156,7 @@ const shown = async (feed: WaitingFeed) => {
     );
     await router.load();
   });
-  return { markRead };
+  return { markRead, listAll };
 };
 
 /** Each row's link and its name, without its second line. */
@@ -198,6 +204,14 @@ describe("the sidebar's inbox", () => {
       expect(counted()).toBe("1");
     });
     expect(markRead).not.toHaveBeenCalled();
+  });
+
+  it("lists nobody's unknown outcomes, even for an admin, so the audit trail isn't filled by the frame", async () => {
+    const { listAll } = await shown(feedOf([question]), admin);
+    await vi.waitFor(() => {
+      expect(counted()).toBe("1");
+    });
+    expect(listAll).not.toHaveBeenCalled();
   });
 
   it("says so quietly when nothing waits", async () => {

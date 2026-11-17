@@ -76,6 +76,6 @@ export const dayWrittenOut = (
 /** When a chat was last used, at its row's end: the time of day, its day standing over it. */
 export const timeOfDay = (lastAt: string, locale: string): string =>
   new Intl.DateTimeFormat(locale, {
-    hour: "2-digit",
+    hour: "numeric",
     minute: "2-digit",
   }).format(new Date(lastAt));
