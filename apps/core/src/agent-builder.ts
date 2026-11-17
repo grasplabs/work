@@ -367,7 +367,7 @@ export const makeOwnAgent = async (
   await auditedBatch(env, db, [
     db.insert(agents).select(
       sql`SELECT ${id}, ${made.name}, NULL, ${made.face}, ${made.job},
-          '', ${made.modelRole}, ${made.model}, 'on',
+          ${made.modelRole}, ${made.model}, 'on',
           ${ownerId}, NULL, ${ownerId}, ${now.getTime()}, ${ownerId},
           ${now.getTime()} WHERE ${room} AND ${member} AND ${ownAgentsOnSql}`
     ),

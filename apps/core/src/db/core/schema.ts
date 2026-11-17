@@ -3470,10 +3470,9 @@ export const connectionBrainErasures = sqliteTable(
  * The company's agents an admin made or changed (agents.ts): one row per
  * agent, by the ID its permissions, audit events and instruction file name.
  * `face` is the figure it is drawn with; `job` one line on what it is
- * for; `instructions` neither read nor written: what an agent is told is
- * its instruction file in the Brain (instruction-files.ts), and the
- * column is dropped in the release after the one that stopped writing it
- * (expand, then contract);
+ * for (what an agent is told is its instruction file in the Brain,
+ * instruction-files.ts; the database's `instructions` column, nullable and
+ * unnamed here, is dropped in a later release: expand, then contract);
  * `modelRole` the role it asks the gateway for, or null for the model a
  * chat would use anyway; `state` whether it answers. No row for the
  * first agent, the organization's: as Grasp ships it.
@@ -3491,7 +3490,6 @@ export const agents = sqliteTable(
     nameKey: text("name_key"),
     face: text().notNull(),
     job: text().notNull(),
-    instructions: text(),
     modelRole: text("model_role", { enum: modelRoles }),
     /** The model its turns use, `<provider>/<model>`; null: the asker's own. */
     model: text(),
@@ -5936,7 +5934,9 @@ export const workflowResourceProcesses = sqliteTable(
  * over, in the order they were added. `body` is the record as
  * `brainRecordSchema` parsed it, as canonical JSON, so a record sent again
  * compares as the same text. No row names who added it: the audit log does.
- * Never written over, but for a content purge rewriting its words.
+ * The database's `purged_at` column, left from the Knowledge term purge
+ * (gone since GRA-1911), is unnamed here and dropped in a later release
+ * (expand, then contract).
  */
 export const brainRecords = sqliteTable(
   "brain_records",
@@ -5964,13 +5964,6 @@ export const brainRecords = sqliteTable(
     id: text().notNull(),
     body: text().notNull(),
     addedAt: timestamp("added_at").notNull(),
-    /**
-     * When an earlier release's Knowledge term purge, gone since GRA-1911,
-     * last rewrote `body`. Neither read nor written; dropped in the
-     * release after the one that stopped reading it (expand, then
-     * contract).
-     */
-    purgedAt: timestamp("purged_at"),
     /**
      * When the record stopped counting: what a replaced kickoff transcript
      * gave the brain, left out of `brain.read`. Nothing sets it any more

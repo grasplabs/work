@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "84e78049-e845-4574-9a06-7d76f9ac5e36",
+  "id": "c0388866-23a0-458d-af73-7aaa59a96228",
   "prevId": "d5b26316-3a11-4754-930a-330a89e4d444",
   "tables": {
     "access_revocations": {
@@ -989,13 +989,6 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false
-        },
-        "instructions": {
-          "name": "instructions",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
           "autoincrement": false
         },
         "model_role": {
@@ -4411,13 +4404,6 @@
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false
-        },
-        "purged_at": {
-          "name": "purged_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
           "autoincrement": false
         },
         "retired_at": {

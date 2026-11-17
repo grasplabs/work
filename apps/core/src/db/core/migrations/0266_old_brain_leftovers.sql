@@ -1,4 +1,11 @@
 DROP TABLE `collection_teams`;--> statement-breakpoint
+-- `agents.instructions` and `brain_records.purged_at` are no longer in the
+-- schema, but stay in the database for one release: the release before
+-- this one still writes both, and a rollback must find them (expand, then
+-- contract). drizzle-kit's `DROP COLUMN` for each is left out here, and a
+-- later release drops them with a custom migration; the snapshot already
+-- lacks them, as the schema does. `instructions` becomes nullable, since
+-- this release no longer writes it.
 PRAGMA foreign_keys=OFF;--> statement-breakpoint
 CREATE TABLE `__new_agents` (
 	`id` text PRIMARY KEY NOT NULL,
