@@ -363,6 +363,8 @@ describe(
         "an upload for a team the outsider isn't in": markerWord(),
         "what the holder's agent fetched through a connection": markerWord(),
         "what the holder's agent fetched through a toolkit": markerWord(),
+        "what an agent read through a shared connection for a team the outsider isn't in":
+          markerWord(),
         "the holder's own skill": markerWord(),
         "a team's skill the outsider isn't in": markerWord(),
         "the holder's run": markerWord(),
@@ -403,6 +405,8 @@ describe(
         "what the holder's agent fetched through a connection": captureMarker,
         "what the holder's agent fetched through a toolkit":
           toolkitCaptureMarker,
+        "what an agent read through a shared connection for a team the outsider isn't in":
+          sharedReadMarker,
         "the holder's own skill": holderSkillMarker,
         "a team's skill the outsider isn't in": teamSkillMarker,
         "the holder's run": runMarker,
@@ -646,6 +650,27 @@ describe(
           toolkitCall
         ),
       };
+      // Read through a shared connection an admin opened in the Brain to a
+      // team the outsider isn't in (GRA-1831): readable by that team, as
+      // core's records say at each read, its connection's ID holding a
+      // marker too.
+      const sharedConnection = `connection-${sharedReadMarker}`;
+      await connectDb()
+        .prepare(
+          "INSERT INTO connections (id, provider, scope, owner_user_id, status, server_kind, server, created_at, updated_at) VALUES (?, 'hubspot', 'shared', NULL, 'active', 'composio', 'hubspot', ?, ?)"
+        )
+        .bind(sharedConnection, readAtNow, readAtNow)
+        .run();
+      const sharingAdmin = await signedInApi(idp, "admin");
+      await sharingAdmin.api.connections.setBrainAudience(sharedConnection, {
+        kind: "team",
+        teamId: secretTeam,
+      });
+      const sharedReadId = await add(
+        `Deal pipeline ${sharedWord} ${sharedReadMarker}`,
+        { kind: "connection", connectionId: sharedConnection },
+        { producer: "shared", id: `${sharedConnection}/${crypto.randomUUID()}` }
+      );
       const teamSource = `Board minutes ${sharedWord} ${teamMarker}`;
       const teamId = await add(teamSource, {
         kind: "team",
@@ -976,6 +1001,7 @@ describe(
           narrowedMarker,
           captureMarker,
           toolkitCaptureMarker,
+          sharedReadMarker,
           toHolderMarker,
           ...instructionMarkers,
           ownUploadMarker,
@@ -996,6 +1022,7 @@ describe(
           teamUpload,
           captureId,
           toolkitCaptureId,
+          sharedReadId,
           runSource,
           turnSource
         ),
@@ -1045,6 +1072,12 @@ describe(
         capture: {
           marker: "what the holder's agent fetched through a connection",
           source: captureId,
+          reader: holder,
+        },
+        shared: {
+          marker:
+            "what an agent read through a shared connection for a team the outsider isn't in",
+          source: sharedReadId,
           reader: holder,
         },
         run: { marker: "the holder's run", source: runSource, reader: holder },
@@ -1536,6 +1569,8 @@ describe(
         "a team's skill the outsider isn't in": _joinedSkill,
         "a memory the holder shared with a team the outsider isn't in":
           _joinedShared,
+        "what an agent read through a shared connection for a team the outsider isn't in":
+          _joinedSharedRead,
         ...notJoined
       } = markers;
       const { findings, addressed } = await watched(
@@ -2013,6 +2048,8 @@ describe(
         "a team's skill the outsider isn't in": _teamSkill,
         "a memory the holder shared with a team the outsider isn't in":
           _teamShared,
+        "what an agent read through a shared connection for a team the outsider isn't in":
+          _teamSharedRead,
         ...notTeams
       } = markers;
       const { findings, addressed } = await watched(

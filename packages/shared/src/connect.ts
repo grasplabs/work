@@ -734,6 +734,20 @@ export interface ConnectionsApi extends StephenReachApi, AgentsApi {
     mailbox: string,
     audience: ToolClassAudience
   ) => Promise<void>;
+  /**
+   * The shared connections an admin chose who may read in the Brain what
+   * agents read through them (GRA-1831), and for whom. Admins only.
+   */
+  brainAudiences: () => Promise<ConnectionBrainAudienceSetting[]>;
+  /**
+   * Chooses who may read in the Brain what agents read through the shared
+   * connection `connectionId`: one team, everyone, or nobody. Admins only,
+   * never Grasp staff; audited.
+   */
+  setBrainAudience: (
+    connectionId: string,
+    audience: ConnectionBrainAudience
+  ) => Promise<void>;
 }
 
 // The catalog: everything an admin can connect, in one list. Native
@@ -1099,6 +1113,31 @@ export const sharedMailboxSchema = z
  * chat's agent reaches a mailbox other than its person's own only when
  * pointed at it for them, whatever classes are on.
  */
+/**
+ * Who may read in the Brain what agents read through a shared connection
+ * (GRA-1831), as an admin chooses: nobody, which it is until one chooses,
+ * one team, or everyone in the company. The choice an uploaded document
+ * has, but never one person: the connection is the company's.
+ */
+export const connectionBrainAudienceSchema = z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.literal("nobody") }),
+  z.strictObject({ kind: z.literal("team"), teamId: identifierSchema }),
+  z.strictObject({ kind: z.literal("everyone") }),
+]);
+export type ConnectionBrainAudience = z.infer<
+  typeof connectionBrainAudienceSchema
+>;
+
+/** A shared connection's Brain audience, as an admin last chose it. */
+export interface ConnectionBrainAudienceSetting {
+  connectionId: string;
+  audience: Exclude<ConnectionBrainAudience, { kind: "nobody" }>;
+  /** The admin who last changed it. */
+  changedBy: string;
+  /** ISO 8601. */
+  changedAt: string;
+}
+
 export interface SharedMailboxSetting {
   mailbox: string;
   audience: ToolClassAudience;

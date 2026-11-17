@@ -145,6 +145,8 @@ import {
 } from "./brain-own-stores.ts";
 import type { OwnStoreHealth } from "./brain-own-stores.ts";
 import { largeEnoughAudiences } from "./brain-share-audiences.ts";
+import { connectionAudiences } from "./connection-audiences.ts";
+import type { ConnectionAudience } from "./connection-audiences.ts";
 import { inJurisdiction, workspace } from "./durable-objects.ts";
 import {
   embedInBulk,
@@ -226,6 +228,14 @@ const companyGroup = "company";
  */
 const membersGroup = "members";
 
+/**
+ * A shared connection's group's name starts with this; the rest is the
+ * connection's ID (`connectionGroup`). A member is in it while the
+ * connection's Brain audience is a group they are in at the reach they
+ * read at (`withConnections`), as core's records say at each read.
+ */
+const connectionPrefix = "connection:";
+
 /** What reading as a member needs: core's records. */
 type ReaderEnv = Pick<Env, "DB">;
 
@@ -234,12 +244,24 @@ const idSchema = wellFormedString()
   .min(1)
   .max(principalMaxLength - teamPrefix.length);
 
+/** A shared connection's ID, as its group names it (`connectionGroup`). */
+const connectionIdSchema = wellFormedString()
+  .min(1)
+  .max(principalMaxLength - connectionPrefix.length)
+  .refine((id) => !id.includes("/"), { message: "Holds a /" });
+
 const sourceReadersSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("owner"), personId: idSchema }),
   z.strictObject({ kind: z.literal("team"), teamId: idSchema }),
   z.strictObject({ kind: z.literal("everyone") }),
   z.strictObject({ kind: z.literal("members") }),
   z.strictObject({ kind: z.literal("none") }),
+  // Whoever the shared connection's Brain audience holds now (GRA-1831):
+  // only for what agents read through it (`shared`).
+  z.strictObject({
+    kind: z.literal("connection"),
+    connectionId: connectionIdSchema,
+  }),
 ]);
 
 /** Who may read a source, as core names them. */
@@ -311,6 +333,9 @@ const kindsWithoutColon = <const K extends string>(
 // `roster`: the company's confirmed teams, as the admin described them,
 // and their head counts, readable by everyone (onboarding/new-brain.ts,
 // GRA-1748).
+// `shared`: what agents read through a shared connection, readable by
+// whoever its Brain audience holds now (`connection` readers, GRA-1831),
+// keyed under the connection's ID; in the shared store alone.
 const producerKinds = kindsWithoutColon([
   "upload",
   "chat",
@@ -321,14 +346,18 @@ const producerKinds = kindsWithoutColon([
   "drawing",
   "kickoff",
   "roster",
+  "shared",
 ]);
 
 /**
  * The kinds the Sources page lists (`listSourcesAs`): not a chat's turns,
- * which its chat shows, and which would list as a row each. Recall still
- * finds them, each naming its chat.
+ * which its chat shows, nor what agents read through a shared connection,
+ * which its connection shows (GRA-1831): each would list as a row of its
+ * own. Recall still finds them, each naming its chat or its connection.
  */
-const listedKinds = producerKinds.filter((kind) => kind !== "chat");
+const listedKinds = producerKinds.filter(
+  (kind) => kind !== "chat" && kind !== "shared"
+);
 
 /** Who adds a source: one of `producerKinds`. */
 export type ProducerKind = (typeof producerKinds)[number];
@@ -739,6 +768,14 @@ const keptIn = async <T>(
 const teamGroup = (teamId: string): string =>
   `${teamPrefix}${checked(idSchema, teamId)}`;
 
+/**
+ * A shared connection, as the Brain's group (GRA-1831): what agents read
+ * through it is kept for this group, and core puts a member in it while
+ * the connection's audience is theirs (`withConnections`).
+ */
+const connectionGroup = (connectionId: string): string =>
+  `${connectionPrefix}${checked(connectionIdSchema, connectionId)}`;
+
 const accessOf = (readers: SourceReaders): Access => {
   switch (readers.kind) {
     case "owner": {
@@ -755,6 +792,9 @@ const accessOf = (readers: SourceReaders): Access => {
     }
     case "none": {
       return { kind: "none" };
+    }
+    case "connection": {
+      return { kind: "audience", group: connectionGroup(readers.connectionId) };
     }
     default: {
       throw new Error("Unknown readers");
@@ -773,17 +813,24 @@ const accessOf = (readers: SourceReaders): Access => {
 export type Reach = "person" | "teams" | "company";
 
 /**
- * The member `personId` as the Brain's reader: the person, their teams as
- * core counts them now, the company, and the members reading as
- * themselves (`membersGroup`). Refused once they have no current
- * membership.
+ * The member `personId`'s own groups: their teams as core counts them
+ * now, the company, and the members reading as themselves
+ * (`membersGroup`), with the shared connections' Brain audiences as core
+ * keeps them now. Refused once they have no current membership.
  */
-const personReaderOf = async (
+const memberGroupsOf = async (
   env: ReaderEnv,
   personId: string
-): Promise<PersonReader> => {
+): Promise<{
+  person: string;
+  groups: string[];
+  audiences: readonly ConnectionAudience[];
+}> => {
   const id = checked(idSchema, personId);
-  const member = await memberOf(env.DB, id);
+  const [member, audiences] = await Promise.all([
+    memberOf(env.DB, id),
+    connectionAudiences(env.DB),
+  ]);
   if (member === undefined) {
     throw permissionErrors.create("permission.person_inactive");
   }
@@ -794,7 +841,53 @@ const personReaderOf = async (
       companyGroup,
       membersGroup,
     ],
+    audiences,
   };
+};
+
+/**
+ * `groups`, with the group of each shared connection whose Brain audience
+ * is one of them (GRA-1831): `company` for everyone, a team's for that
+ * team. So what agents read through it reaches exactly as far as a
+ * document shared with that audience would at the same reach: code's
+ * included, and a shared thread's (the company alone) only for everyone.
+ * An audience whose team is gone is in no one's groups: nobody's. A row
+ * that can't be read is nobody's too.
+ */
+const withConnections = (
+  groups: readonly string[],
+  audiences: readonly ConnectionAudience[]
+): string[] => {
+  const held = new Set(groups);
+  return [
+    ...groups,
+    ...audiences.flatMap(({ connectionId, teamId }) => {
+      const connection = connectionIdSchema.safeParse(connectionId);
+      const team = teamId === null ? undefined : idSchema.safeParse(teamId);
+      if (!connection.success || team?.success === false) {
+        return [];
+      }
+      const audience =
+        team === undefined ? companyGroup : `${teamPrefix}${team.data}`;
+      return held.has(audience)
+        ? [`${connectionPrefix}${connection.data}`]
+        : [];
+    }),
+  ];
+};
+
+/**
+ * The member `personId` as the Brain's reader: the person, their teams as
+ * core counts them now, the company, the members reading as themselves
+ * (`membersGroup`), and the shared connections whose Brain audience holds
+ * them (`withConnections`). Refused once they have no current membership.
+ */
+const personReaderOf = async (
+  env: ReaderEnv,
+  personId: string
+): Promise<PersonReader> => {
+  const { person, groups, audiences } = await memberGroupsOf(env, personId);
+  return { person, groups: withConnections(groups, audiences) };
 };
 
 /**
@@ -825,16 +918,19 @@ const readerOf = async (
   reach: Reach,
   teams: readonly string[] = []
 ): Promise<Reader> => {
-  const { person, groups } = await personReaderOf(env, personId);
+  const { person, groups, audiences } = await memberGroupsOf(env, personId);
   switch (reach) {
     case "person": {
-      return { person, groups };
+      return { person, groups: withConnections(groups, audiences) };
     }
     case "teams": {
       // Never what members read as themselves alone (`membersGroup`).
       return {
         person: null,
-        groups: groups.filter((group) => group !== membersGroup),
+        groups: withConnections(
+          groups.filter((group) => group !== membersGroup),
+          audiences
+        ),
       };
     }
     case "company": {
@@ -842,12 +938,37 @@ const readerOf = async (
       const named = new Set(teams.map((id) => teamGroup(id)));
       return {
         person: null,
-        groups: [...groups.filter((group) => named.has(group)), companyGroup],
+        groups: withConnections(
+          [...groups.filter((group) => named.has(group)), companyGroup],
+          audiences
+        ),
       };
     }
     default: {
       throw new Error("Unknown reach");
     }
+  }
+};
+
+/**
+ * Refuses `readers` for `source` unless both are a shared connection's or
+ * neither is (GRA-1831): what agents read through a shared connection is
+ * for whoever its Brain audience holds, keyed under that connection, and
+ * nothing else is ever for a connection's audience. So a person's own
+ * capture never lands in the shared store, nor this in anyone's own.
+ */
+const refuseOtherConnectionReaders = (
+  source: SourceRef,
+  readers: SourceReaders
+): void => {
+  const forConnection = readers.kind === "connection";
+  if (
+    (source.producer === "shared") !== forConnection ||
+    (forConnection && !source.id.startsWith(`${readers.connectionId}/`))
+  ) {
+    throw new Error(
+      "Refused: only what agents read through a shared connection is for its audience, keyed under it"
+    );
   }
 };
 
@@ -937,6 +1058,7 @@ export const addSource = async (
       `Refused: ${source.producer === "capture" ? "a capture" : "an interview"} is for one person alone`
     );
   }
+  refuseOtherConnectionReaders(source, readers);
   // The store's own rules for a text, here, so a producer is told what is
   // wrong with it by a code, not by trying.
   const problem = sourceTextProblem(text);

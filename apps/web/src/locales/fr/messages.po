@@ -10892,6 +10892,15 @@ msgstr "A lu des entités du Cerveau"
 msgid "Read everyone's calls of unknown outcome"
 msgstr "A lu les appels au résultat inconnu de tout le monde"
 
+#: src/brain/sources-page.tsx
+msgctxt "a source of the Brain"
+msgid "Read from a shared connection"
+msgstr "Lu depuis une connexion partagée"
+
+#: src/brain/memories-page.tsx
+msgid "Read from a shared connection, version {version}"
+msgstr "Lu depuis une connexion partagée, version {version}"
+
 #: src/activity/audit-words.ts
 msgid "Read how knowledge is used"
 msgstr "A lu comment les connaissances sont utilisées"
