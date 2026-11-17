@@ -30,13 +30,15 @@ export type BrainFound = "exact" | "words" | "stop words" | "meaning";
 
 /**
  * A passage of a pack, cited by its source (what kind of thing added it,
- * `producer`, such as an upload, a chat or a run, and its `id`), the
+ * `producer`: an upload, a chat, a run, the company's vision from the
+ * onboarding's kickoff, or the company's teams from its staff list, and its
+ * `id`), the
  * source's version and the passage's place in it, from 0: the part that
  * best answers the question, or the whole passage (`whole`).
  */
 export interface BrainPackItem {
   readonly source: {
-    readonly producer: "upload" | "chat" | "run";
+    readonly producer: "upload" | "chat" | "run" | "kickoff" | "roster";
     readonly id: string;
   };
   readonly version: number;

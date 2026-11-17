@@ -22,9 +22,8 @@ import { deployedModelPrefix } from "@grasp-os/shared/release";
 import { inJurisdiction } from "./durable-objects.ts";
 
 // Core's embedder: the `Embedder` class of @grasp-os/embed, bound as
-// EMBEDDER in the EU, running `shippedModel` from the MODEL_FILES bucket,
-// or no model at all until one ships, when it refuses every text. The
-// model's files reach that bucket with each release: the admin's deploy
+// EMBEDDER in the EU, running `shippedModel` from the MODEL_FILES bucket.
+// The model's files reach that bucket with each release: the admin's deploy
 // copies in the files the release names before core goes live
 // (apps/admin/src/deploy/model-files.ts); on-prem, the clock copies them
 // from the install's release directory (`ensureModelFilesFrom`). The
@@ -70,22 +69,19 @@ export const questionVectorMs = 250;
 
 /**
  * `question`'s vector by the question embedder, in core's jurisdiction,
- * within `questionVectorMs` (@grasp-os/embed/question); null while no
- * model ships, when nothing is embedded.
+ * within `questionVectorMs` (@grasp-os/embed/question), or why there is none.
  */
 export const questionVectorOf = async (
   env: Pick<Env, "EMBEDDER" | "DURABLE_OBJECT_JURISDICTION">,
   question: string
-): Promise<QuestionVector | null> =>
-  shippedModel === null
-    ? null
-    : await embedQuestion(questionEmbedderOf(env), question, {
-        timeoutMs: questionVectorMs,
-      });
+): Promise<QuestionVector> =>
+  await embedQuestion(questionEmbedderOf(env), question, {
+    timeoutMs: questionVectorMs,
+  });
 
-/** The model core's embedders run, and its build: none while no model ships. */
-export const embedderModel = async (): Promise<ModelIdentity | null> =>
-  shippedModel === null ? null : await modelIdentity(shippedModel);
+/** The model core's embedders run, and its build. */
+export const embedderModel = async (): Promise<ModelIdentity> =>
+  await modelIdentity(shippedModel);
 
 /**
  * `texts` embedded by the bulk embedders (@grasp-os/embed/pool), in core's
@@ -117,16 +113,12 @@ const isFile = (head: R2Object | null, file: ModelFile): boolean => {
 
 /**
  * Whether `bucket` holds every file of `model` (the one core runs), each
- * at its size and, where the bucket kept it, its SHA-256. With no model,
- * there is nothing to hold.
+ * at its size and, where the bucket kept it, its SHA-256.
  */
 export const holdsModelFiles = async (
   bucket: R2Bucket,
-  model: EmbedModel | null = shippedModel
+  model: EmbedModel = shippedModel
 ): Promise<boolean> => {
-  if (model === null) {
-    return true;
-  }
   const held = await Promise.all(
     modelFilesOf(model).map(async (file) =>
       isFile(await bucket.head(modelFileKey(file)), file)
@@ -148,9 +140,9 @@ export const holdsModelFiles = async (
 export const ensureModelFilesFrom = async (
   source: Fetcher,
   bucket: R2Bucket,
-  model: EmbedModel | null = shippedModel
+  model: EmbedModel = shippedModel
 ): Promise<"ensured" | "missing"> => {
-  const files = model === null ? [] : modelFilesOf(model);
+  const files = modelFilesOf(model);
   for (const file of files) {
     const key = modelFileKey(file);
     // oxlint-disable-next-line no-await-in-loop -- three files, one at a time
@@ -199,14 +191,14 @@ let tried = false;
  * question embedder load its model, once, whether that works or not: a
  * file that doesn't check out fails the load, and loading it again every
  * minute would copy and clear the whole token table for nothing. The next isolate
- * tries again. With no model (none ships yet) it does nothing. On-prem it
+ * tries again. On-prem it
  * first copies the model's files from the release directory
  * (`MODEL_SOURCE`). Without the model's files (local dev has no real
  * model, an on-prem release directory may lack them) it says so and does
  * nothing more: a deployment without them fails its probe, never here.
  */
 export const warmQuestionEmbedder = async (env: Env): Promise<void> => {
-  if (tried || shippedModel === null) {
+  if (tried) {
     return;
   }
   tried = true;

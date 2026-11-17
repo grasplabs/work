@@ -334,13 +334,26 @@ describe("recall through memories", () => {
       }
       const question = `${name} renews`;
       const whole = await recallAs(reader, question);
-      const all = whole.memories.reduce(
-        (sum, memory) => sum + packMemoryTokens(memory),
-        0
+      // The pack fits memories best first, each if it fits in what is
+      // left, so it can change only where the budget reaches the sum of
+      // some of the memories it weighs (these have no quote or context, so
+      // each weighs as it stands in the whole pack). Every such sum, one
+      // below and one above, from 1 to the whole pack, covers every budget
+      // in between: the pack is the same from one to the next.
+      const sums = [0];
+      for (const memory of whole.memories) {
+        const size = packMemoryTokens(memory);
+        sums.push(...sums.map((sum) => sum + size));
+      }
+      const all = Math.max(...sums);
+      const budgets = new Set(
+        sums
+          .flatMap((sum) => [sum - 1, sum, sum + 1])
+          .filter((tokens) => tokens >= 1 && tokens <= all)
       );
       const facts = new Set<number>();
       const broken: string[] = [];
-      for (let tokens = 1; tokens <= all; tokens += 1) {
+      for (const tokens of budgets) {
         // oxlint-disable-next-line no-await-in-loop -- one budget at a time
         const pack = await recallAs(reader, question, { tokens });
         const held = pack.memories.filter(

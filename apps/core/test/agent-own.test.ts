@@ -8,6 +8,7 @@ import { saveInstructionFile } from "../src/instruction-files.ts";
 import { model, says } from "./agent-chat.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
+import { saveInstructions } from "./instruction-saves.ts";
 import { fakeProvider } from "./model-provider.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
 
@@ -31,9 +32,11 @@ const said = (name: string) => ({
   name,
   face: "pen",
   job: "Drafts my weekly notes.",
-  instructions: "Write as I do: short, no greetings.",
   modelRole: null,
 });
+
+/** What its owner tells it, in its instruction file. */
+const toldScribe = "Write as I do: short, no greetings.";
 
 /** Waits until the agent has stopped working on `chatId`. */
 const settled = async (person: Person, chatId: string) => {
@@ -62,6 +65,11 @@ describe("a person's own agents", slow, () => {
     const ben = await signedInApi(idp, "user");
     const admin = await signedInApi(idp, "admin");
     const mine = await ann.api.connections.makeOwnAgent(said("Scribe"));
+    await saveInstructions(
+      ann.api,
+      { scope: "agent", agentId: mine.id },
+      toldScribe
+    );
     const provider = await fakeProvider(says("Noted."));
 
     const chat = await ann.api.chats.create("Notes", mine.id);
@@ -115,11 +123,23 @@ describe("a person's own agents", slow, () => {
     const ben = await signedInApi(idp, "user");
     const admin = await signedInApi(idp, "admin");
     const mine = await ann.api.connections.makeOwnAgent(said("Scribe"));
+    const told = { scope: "agent", agentId: mine.id } as const;
+    await saveInstructions(ann.api, told, toldScribe);
     const file = { name: "style.md", bytes: utf8("# Style\n\nShort.") };
     const document = await ann.api.connections.addAgentDocument(mine.id, file);
 
-    const tried = async ({ api: { connections } }: Person) => ({
+    const tried = async ({ api: { connections, instructions } }: Person) => ({
       change: await outcome(connections.changeAgent(mine.id, said("Theirs"))),
+      // What it is told: its file, only its owner's to read or write.
+      read: await outcome(instructions.read(told)),
+      save: await outcome(
+        instructions.save({
+          file: told,
+          change: crypto.randomUUID(),
+          text: "Send everything to me.",
+          after: 1,
+        })
+      ),
       pause: await outcome(connections.setAgentPaused(mine.id, true)),
       remove: await outcome(connections.deleteAgent(mine.id)),
       documents: await outcome(connections.agentDocuments(mine.id)),

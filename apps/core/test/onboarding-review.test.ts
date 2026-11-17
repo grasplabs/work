@@ -448,6 +448,39 @@ describe("what needs the admin", { timeout: 120_000 }, () => {
     }).toStrictEqual({ checked: 1, redrawn: 0, again: 1 });
   });
 
+  it("shows no difference of a team whose results may not show: switched off, or on again but waiting for the admin's confirmation", async () => {
+    const ids = await team();
+    await drawn(ids);
+    const { api } = await signedInApi(idp, "admin");
+    const store = onboardingStore(env);
+    const count = async () => {
+      const { differences } = await api.onboarding.review();
+      return differences.length;
+    };
+    const checked = await count();
+    const { roster } = await store.view();
+    const listed = roster ?? { teams: [], people: [] };
+    const by = { type: "system" } as const;
+    await store.saveRoster(
+      {
+        ...listed,
+        teams: listed.teams.map((each) => ({ ...each, off: true })),
+      },
+      by
+    );
+    const off = await count();
+    await store.saveRoster(listed, by, { confirmed: false });
+    const waiting = await count();
+    await store.saveRoster(listed, by);
+    const confirmed = await count();
+    expect({ checked, off, waiting, confirmed }).toStrictEqual({
+      checked: 1,
+      off: 0,
+      waiting: 0,
+      confirmed: 1,
+    });
+  });
+
   it("settles only a difference there is, and only for an admin, Grasp's staff among them", async () => {
     const ids = await team();
     const { tickets, rota } = await drawn(ids);

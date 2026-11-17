@@ -303,6 +303,33 @@ const lines = {
     fr: "Pour préparer cela, j’ai lu {where}, où d’autres personnes peuvent aussi faire des modifications. Vérifiez chaque valeur avant de confirmer.",
     es: "Para preparar esto, he leído {where}, donde otras personas también pueden hacer cambios. Revisa cada valor antes de confirmar.",
   },
+  /**
+   * A write to an App, held because the chat used something only the
+   * person can read (held-app-calls.ts): what it calls, in which App.
+   */
+  heldAppWrite: {
+    en: "{function} in {app}",
+    nl: "{function} in {app}",
+    de: "{function} in {app}",
+    fr: "{function} dans {app}",
+    es: "{function} en {app}",
+  },
+  /** Why a write to an App waits for them, under its title. */
+  heldPrivate: {
+    en: "This uses something only you can read.",
+    nl: "Dit gebruikt iets wat alleen jij kunt lezen.",
+    de: "Hierfür wird etwas verwendet, das nur Sie lesen können.",
+    fr: "Cela utilise quelque chose que vous seul pouvez lire.",
+    es: "Esto usa algo que solo tú puedes leer.",
+  },
+  /** The label of a write to an App's exact request, as it will be sent. */
+  heldAppRequest: {
+    en: "Exactly what will be sent",
+    nl: "Precies wat er wordt verstuurd",
+    de: "Genau das, was gesendet wird",
+    fr: "Exactement ce qui sera envoyé",
+    es: "Exactamente lo que se enviará",
+  },
   /** What would change doesn't fit the card, so it can't be confirmed on it. */
   cardTooLong: {
     en: "This card can't show everything that would change, so it can't be confirmed. Ask me again with fewer changes at a time.",
@@ -310,6 +337,28 @@ const lines = {
     de: "Diese Karte kann nicht alles zeigen, was sich ändern würde, daher lässt es sich nicht bestätigen. Fragen Sie mich noch einmal mit weniger Änderungen auf einmal.",
     fr: "Cette carte ne peut pas montrer tout ce qui changerait, donc cela ne peut pas être confirmé. Redemandez-moi avec moins de modifications à la fois.",
     es: "Esta tarjeta no puede mostrar todo lo que cambiaría, así que no se puede confirmar. Pídemelo de nuevo con menos cambios a la vez.",
+  },
+  /**
+   * A card of changes it shows whole that wait behind the card to confirm
+   * (cards.tsx `heldWritesCards`): they can only be cancelled on it.
+   */
+  heldLater: {
+    en: "These changes can only be cancelled here. Decide the first card, then ask me again for the rest.",
+    nl: "Deze wijzigingen kun je hier alleen annuleren. Beslis eerst over de eerste kaart en vraag me daarna opnieuw om de rest.",
+    de: "Diese Änderungen können Sie hier nur abbrechen. Entscheiden Sie zuerst über die erste Karte und fragen Sie mich dann noch einmal nach dem Rest.",
+    fr: "Ces modifications ne peuvent qu’être annulées ici. Décidez d’abord de la première carte, puis redemandez-moi le reste.",
+    es: "Estos cambios solo se pueden cancelar aquí. Decide primero sobre la primera tarjeta y luego vuelve a pedirme el resto.",
+  },
+  /**
+   * `heldLater`, on a card that also holds a change through a connection,
+   * which is shown only in the turn that held it, never on a later card.
+   */
+  heldLaterConnections: {
+    en: "These changes can only be cancelled here. Decide the first card, then ask me again for the rest. A change through a connection, such as an email, won't come back on a later card, so ask me for it again.",
+    nl: "Deze wijzigingen kun je hier alleen annuleren. Beslis eerst over de eerste kaart en vraag me daarna opnieuw om de rest. Een wijziging via een koppeling, zoals een e-mail, komt niet terug op een latere kaart, dus vraag me er opnieuw om.",
+    de: "Diese Änderungen können Sie hier nur abbrechen. Entscheiden Sie zuerst über die erste Karte und fragen Sie mich dann noch einmal nach dem Rest. Eine Änderung über eine Verbindung, etwa eine E-Mail, erscheint auf keiner späteren Karte wieder, fragen Sie mich also noch einmal danach.",
+    fr: "Ces modifications ne peuvent qu’être annulées ici. Décidez d’abord de la première carte, puis redemandez-moi le reste. Une modification passant par une connexion, comme un e-mail, ne reviendra pas sur une carte suivante : redemandez-la-moi.",
+    es: "Estos cambios solo se pueden cancelar aquí. Decide primero sobre la primera tarjeta y luego vuelve a pedirme el resto. Un cambio a través de una conexión, como un correo, no volverá a aparecer en una tarjeta posterior, así que vuelve a pedírmelo.",
   },
   confirm: {
     en: "Confirm",

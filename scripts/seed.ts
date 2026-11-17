@@ -428,6 +428,17 @@ const seedApp = async (
   if (app.process === null) {
     await owner.api.apps.update(app.id, { process: seed.process });
   }
+  // What a builder's chat about it starts with: its instruction file, as
+  // App settings saves it, written only while it was never written.
+  const told = { scope: "app", appId: app.id } as const;
+  if ((await owner.api.instructions.read(told)) === null) {
+    await owner.api.instructions.save({
+      file: told,
+      change: crypto.randomUUID(),
+      text: seed.instructions,
+      after: 0,
+    });
+  }
   const workflowIds = new Map<string, string>();
   for (const workflow of seed.workflows) {
     workflowIds.set(

@@ -363,6 +363,9 @@ describe("a writer's erasure", () => {
                   source: null,
                   writer: held.writer,
                   learnedAt: held.learnedAt.getTime(),
+                  speaker: held.speaker,
+                  about: held.about,
+                  object: held.object,
                 },
               ]
             : []
@@ -896,8 +899,10 @@ describe("a writer's erasure", () => {
       // that points at the erasure.
       const before: Copy = {
         // The table of memories that failed to delete is the release's own,
-        // and so are the quotes' (migration 0022, quotes.ts) and the days
-        // chunks mention (migration 0024, dates.ts).
+        // and so are the quotes' (migration 0022, quotes.ts), the days
+        // chunks mention (migration 0024, dates.ts), where each set of
+        // readers' chunks are (migration 0026, chunk-blocks.ts) and a
+        // person's erasure's (migration 0027, people.ts).
         tables: now.tables
           .filter(
             ({ name }) =>
@@ -911,6 +916,10 @@ describe("a writer's erasure", () => {
                 "chunk_days",
                 // A person's own entity (migration 0025, own-entity.ts).
                 "own_entity",
+                "chunk_blocks",
+                "person_erasure_subjects",
+                "person_erasure_memories",
+                "restore_cards",
               ].includes(name)
           )
           .map((table) => {
@@ -1007,7 +1016,13 @@ describe("a writer's erasure", () => {
             !made.includes("memory_outs") &&
             !made.includes("memory_ins") &&
             !made.includes("current_versions_unjudged_idx") &&
-            !made.includes("chunk_days_chunk_idx")
+            !made.includes("chunk_days_chunk_idx") &&
+            !made.includes("chunk_days_day_chunk_idx") &&
+            !made.includes("chunk_blocks") &&
+            !made.includes("person_erasure_subjects") &&
+            !made.includes("restore_cards") &&
+            !made.includes("memories_speaker_idx") &&
+            !made.includes("memory_confirmations_person_idx")
         ),
       };
       expect(

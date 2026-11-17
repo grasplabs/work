@@ -69,14 +69,13 @@ export const appDefinition = (
 const capital = /[A-Z]/gu;
 
 /**
- * An App's files: its AGENTS.md, the code generated from its definition
+ * An App's files: the code generated from its definition
  * (`appDefinition`), its board's server functions and page, and an
  * `appTest` suite of each workflow, which says who starts its runs itself.
  */
 export const appFiles = (seed: AppSeed): Record<string, string> => {
   const board = boards[seed.name];
   return {
-    "AGENTS.md": seed.agents,
     ...definitionSources(appDefinition(seed)),
     ...(board === undefined ? {} : boardFiles(board)),
     ...Object.fromEntries(

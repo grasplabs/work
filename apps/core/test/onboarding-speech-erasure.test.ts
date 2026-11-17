@@ -15,7 +15,12 @@ import { mockIdp } from "./idp.ts";
 import { onLink, openedFor } from "./interview-link.ts";
 import type { Device } from "./interview-link.ts";
 import { carrying, plan, release } from "./platform-providers.ts";
-import { signedInApi, signedInWithRole, unique } from "./sign-in.ts";
+import {
+  signedInApi,
+  signedInWithRole,
+  unique,
+  uniqueLetters,
+} from "./sign-in.ts";
 import { sayForAdmin, sayOnLink, stillKept } from "./spoken.ts";
 
 // A line the voice is still saying as what it was said for is erased
@@ -29,8 +34,7 @@ import { sayForAdmin, sayOnLink, stillKept } from "./spoken.ts";
 const idp = mockIdp();
 
 /** A line no other test says, so the cache and the voice have never seen it. */
-const lineOf = (): string =>
-  `So ${unique().replaceAll(/\d/gu, "x")} comes first.`;
+const lineOf = (): string => `So ${uniqueLetters()} comes first.`;
 
 /**
  * Asks for `text` to be said (`ask`) with the voice's answer held until

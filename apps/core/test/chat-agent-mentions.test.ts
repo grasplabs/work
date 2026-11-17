@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { model, says } from "./agent-chat.ts";
 import { mockIdp } from "./idp.ts";
+import { saveInstructions } from "./instruction-saves.ts";
 import { answeringProvider, fakeProvider } from "./model-provider.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
 
@@ -48,18 +49,24 @@ const settled = async (person: Person, chatId: string) => {
   );
 };
 
-/** An agent everyone reaches, told `instructions`. */
+/** An agent everyone reaches, told `instructions` in its instruction file. */
 const agentFor = async (admin: Person, name: string, instructions: string) => {
   const agent = await admin.api.connections.makeAgent({
     name,
     face: "pen",
     job: `${name}'s job.`,
-    instructions,
     modelRole: null,
   });
   await admin.api.connections.setAgentReach(agent.id, true, {
     who: "everyone",
   });
+  if (instructions !== "") {
+    await saveInstructions(
+      admin.api,
+      { scope: "agent", agentId: agent.id },
+      instructions
+    );
+  }
   return agent;
 };
 
@@ -199,7 +206,6 @@ describe("agents mentioned in a question", slow, () => {
       name: "Hidden",
       face: "pen",
       job: "",
-      instructions: "",
       modelRole: null,
     });
     const paused = await agentFor(admin, "Paused", "");
@@ -208,7 +214,6 @@ describe("agents mentioned in a question", slow, () => {
       name: "Scribe",
       face: "pen",
       job: "",
-      instructions: "",
       modelRole: null,
     });
     const provider = await fakeProvider(says("Should not be asked."));

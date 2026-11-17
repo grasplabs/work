@@ -785,6 +785,15 @@ const draftsOf = ({
 /** Where a chat keeps the agents it drafted that Make it took, by call. */
 const draftedKeyPrefix = "drafted:";
 
+/**
+ * Where a chat keeps, by call, the agent Make it made of a draft whose
+ * instructions it couldn't save: its next Make it saves them to that
+ * agent, never making a second (chats-rpc.ts).
+ */
+const draftMadeKeyPrefix = "draft-made:";
+
+const draftMadeSchema = z.record(z.string(), z.string());
+
 const builtSchema = z.array(z.string());
 
 /**
@@ -1964,6 +1973,17 @@ export class Workspace extends DurableObject<Env> {
       if (waiting !== undefined) {
         return waiting;
       }
+      // Later than every hold of the chat before it, by a millisecond if it
+      // must: holds asked for in the same millisecond keep the order asked,
+      // which their cards keep (channels/cards.tsx `heldWritesCards`).
+      const latest = this.#db
+        .select({ heldAt: heldAppCalls.heldAt })
+        .from(heldAppCalls)
+        .where(eq(heldAppCalls.chatId, chat.id))
+        .orderBy(desc(heldAppCalls.heldAt))
+        .limit(1)
+        .get();
+      const heldAt = Math.max(now, (latest?.heldAt.getTime() ?? 0) + 1);
       return this.#db
         .insert(heldAppCalls)
         .values({
@@ -1971,29 +1991,67 @@ export class Workspace extends DurableObject<Env> {
           chatId: chat.id,
           personId,
           ...held,
-          heldAt: new Date(now),
+          heldAt: new Date(heldAt),
           status: "waiting",
         })
         .returning()
         .get();
     });
     this.heldChanged(chat.id);
+    // Ended at its day's end though nobody reads it again (a chat app's
+    // card left unpressed): `#lapseDueHeldAppCalls`.
+    await this.#alarmBy(kept.heldAt.getTime() + heldStartMs);
     return heldAppCallRowOf(kept);
   }
 
   /**
-   * The App writes held for `personId` in their chat `chatId` that still
-   * wait, oldest first, a page of at most `heldAppCallsPage`: none past
-   * their day. A full page goes on `after` its last one's ID; an ID that
-   * names no hold of the chat starts from the first.
+   * Ends every App write held here whose day is over (`#lapseHeldAppCalls`,
+   * chat by chat), then sets the alarm for the next one's end: so a hold
+   * nobody reads again, as a card in a chat app left unpressed, is still
+   * ended at its time, its request emptied and its end recorded.
+   */
+  async #lapseDueHeldAppCalls(now: number): Promise<void> {
+    const due = this.#db
+      .selectDistinct({ chatId: heldAppCalls.chatId })
+      .from(heldAppCalls)
+      .where(
+        and(
+          eq(heldAppCalls.status, "waiting"),
+          lte(heldAppCalls.heldAt, new Date(now - heldStartMs))
+        )
+      )
+      .all();
+    for (const { chatId } of due) {
+      // oxlint-disable-next-line no-await-in-loop -- chat by chat, each in its own write
+      await this.#lapseHeldAppCalls(chatIdSchema.parse(chatId), now);
+    }
+    const next = this.#db
+      .select({ heldAt: heldAppCalls.heldAt })
+      .from(heldAppCalls)
+      .where(eq(heldAppCalls.status, "waiting"))
+      .orderBy(asc(heldAppCalls.heldAt))
+      .limit(1)
+      .get();
+    if (next !== undefined) {
+      await this.#alarmBy(next.heldAt.getTime() + heldStartMs);
+    }
+  }
+
+  /**
+   * The App writes held for `personId` in their chat `chatId`, which came
+   * through `via` (`#chatThrough`), that still wait, oldest first, a page
+   * of at most `heldAppCallsPage`: none past their day. A full page goes
+   * on `after` its last one's ID; an ID that names no hold of the chat
+   * starts from the first.
    */
   async heldAppCalls(
     chatId: unknown,
     personId: string,
+    via: ChatChannel,
     now: number,
     after?: string
   ): Promise<HeldAppCallRow[]> {
-    const chat = this.#ownChat(chatId, personId);
+    const chat = this.#chatThrough(chatId, personId, via);
     await this.#lapseHeldAppCalls(chat.id, now);
     const from =
       after === undefined
@@ -2031,21 +2089,23 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /**
-   * Decides held App call `id` of `personId`'s chat `chatId`, once: only
-   * while it waits, within its day, and, to confirm it, only for the
-   * request whose SHA-256 is `requestHash`, the one the person was shown.
-   * Its request is emptied in the same write, and handed back to run once
-   * confirmed. Anything else (another's, decided already, lapsed, another
-   * request) answers as none: `agent.held_call_not_found`.
+   * Decides held App call `id` of `personId`'s chat `chatId`, which came
+   * through `via` (`#chatThrough`), once: only while it waits, within its
+   * day, and, to confirm it, only for the request whose SHA-256 is
+   * `requestHash`, the one the person was shown. Its request is emptied in
+   * the same write, and handed back to run once confirmed. Anything else
+   * (another's, decided already, lapsed, another request) answers as none:
+   * `agent.held_call_not_found`.
    */
   async decideHeldAppCall(
     chatId: unknown,
     personId: string,
+    via: ChatChannel,
     id: string,
     decision: { confirm: true; requestHash: string } | { confirm: false },
     now: number
   ): Promise<HeldAppCallRow> {
-    const chat = this.#ownChat(chatId, personId);
+    const chat = this.#chatThrough(chatId, personId, via);
     await this.#lapseHeldAppCalls(chat.id, now);
     const decided = this.ctx.storage.transactionSync(() => {
       const row = this.#db
@@ -2765,7 +2825,8 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /**
-   * Waits for every turn `send` started, however long they take: an
+   * Ends the App writes held here past their day (`#lapseDueHeldAppCalls`),
+   * then waits for every turn `send` started, however long they take: an
    * object runs while an event of its own does, so it isn't evicted under
    * a turn nobody waits on. An alarm may run 15 minutes; a turn that takes
    * longer goes on while the object stays up. After a restart there are
@@ -2773,6 +2834,9 @@ export class Workspace extends DurableObject<Env> {
    * short (`#closeInterruptedTurns`).
    */
   override async alarm(): Promise<void> {
+    // Held App writes past their day end first, so the drain below takes
+    // their records too.
+    await this.#lapseDueHeldAppCalls(Date.now());
     // Audit events the log didn't take yet go first: a turn may run long.
     await this.#drainAudit(loneNotesPerDrain);
     while (this.#sent.size > 0) {
@@ -2901,7 +2965,6 @@ export class Workspace extends DurableObject<Env> {
         : {
             agent: {
               name: agent.name,
-              instructions: agent.instructions,
               ...(documents.length === 0 ? {} : { documents }),
             },
           }),
@@ -4209,18 +4272,44 @@ export class Workspace extends DurableObject<Env> {
     chatId: unknown,
     personId: string,
     callId: unknown
-  ): AgentDraft {
-    const { args } = this.#takeCall(chatId, personId, callId, {
+  ): { draft: AgentDraft; made: string | null } {
+    const { chat, args } = this.#takeCall(chatId, personId, callId, {
       tool: "draftAgent",
       keyPrefix: draftedKeyPrefix,
       notFound: "agent.draft_not_found",
     });
-    return agentDraftSchema.parse(args);
+    const kept = draftMadeSchema.safeParse(
+      this.ctx.storage.kv.get(`${draftMadeKeyPrefix}${chat.id}`)
+    );
+    // `#takeCall` took a string call alone.
+    const made =
+      kept.success && typeof callId === "string"
+        ? kept.data[callId]
+        : undefined;
+    return { draft: agentDraftSchema.parse(args), made: made ?? null };
   }
 
   /** Gives back a draft `takeAgentDraft` took, of which Make it made nothing. */
   releaseAgentDraft(chatId: ChatId, callId: string): void {
     this.#releaseCall(`${draftedKeyPrefix}${chatId}`, callId);
+  }
+
+  /**
+   * Gives back a draft `takeAgentDraft` took, of which Make it made the
+   * agent `agentId` but couldn't save its instructions: taken again, it
+   * names that agent (`made`), so Make it saves them to it and makes no
+   * second. In one step, so it is never given back without it.
+   */
+  keepAgentDraftMade(chatId: ChatId, callId: string, agentId: string): void {
+    this.ctx.storage.transactionSync(() => {
+      const key = `${draftMadeKeyPrefix}${chatId}`;
+      const kept = draftMadeSchema.safeParse(this.ctx.storage.kv.get(key));
+      this.ctx.storage.kv.put(key, {
+        ...(kept.success ? kept.data : {}),
+        [callId]: agentId,
+      });
+      this.#releaseCall(`${draftedKeyPrefix}${chatId}`, callId);
+    });
   }
 
   /**
@@ -4797,6 +4886,7 @@ export class Workspace extends DurableObject<Env> {
         this.ctx.storage.kv.delete(`${builtKeyPrefix}${id}`);
         this.ctx.storage.kv.delete(`${runningKeyPrefix}${id}`);
         this.ctx.storage.kv.delete(`${copiedKeyPrefix}${id}`);
+        this.ctx.storage.kv.delete(`${draftMadeKeyPrefix}${id}`);
         if (audited) {
           this.#outboxed(by, "chat.deleted", id, { declined });
         }
@@ -5255,6 +5345,21 @@ export class Workspace extends DurableObject<Env> {
   #ownChat(chatId: unknown, personId: string): Chat {
     const chat = this.#chat(chatId);
     if (chat.personId !== personId) {
+      throw agentErrors.create("agent.chat_not_found");
+    }
+    return chat;
+  }
+
+  /**
+   * The chat, if it is `personId`'s and came through `via`: where its held
+   * App calls are shown, so the only place they are listed and decided
+   * (GRA-1929). Grasp's own app (`web`) never finds a chat app's, as
+   * `#graspChat`; a chat app's card finds only its own platform's. Anything
+   * else is refused as if there were none.
+   */
+  #chatThrough(chatId: unknown, personId: string, via: ChatChannel): Chat {
+    const chat = this.#ownChat(chatId, personId);
+    if (chat.via !== via) {
       throw agentErrors.create("agent.chat_not_found");
     }
     return chat;

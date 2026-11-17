@@ -274,18 +274,21 @@ export const removeAgentDocument = async (
   agentId: unknown,
   documentId: unknown
 ): Promise<void> => {
-  const { id } = await changeableAgent(env, identity, agentId);
+  const { id, ownerId } = await changeableAgent(env, identity, agentId);
   const document = await readAgentDocument(env, id, documentId);
   if (document === undefined) {
     throw agentErrors.create("agent.document_unknown");
   }
   const db = drizzle(env.DB);
   await auditedBatch(env, db, [
-    db
-      .delete(agentDocuments)
-      .where(
-        and(eq(agentDocuments.agentId, id), eq(agentDocuments.id, document.id))
-      ),
+    db.delete(agentDocuments).where(
+      and(
+        eq(agentDocuments.agentId, id),
+        eq(agentDocuments.id, document.id),
+        // Still whose it was when checked: not once the company adopted it.
+        sql`EXISTS (SELECT 1 FROM ${agents} WHERE ${agents.id} = ${id} AND ${agents.ownerId} IS ${ownerId})`
+      )
+    ),
     // Recorded only if this removed it: removed twice at once, once.
     outboxedIfChanged(db, {
       actor: actorOf(identity),

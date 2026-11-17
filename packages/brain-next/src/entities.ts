@@ -567,7 +567,7 @@ export const findEntities = (
     at
   );
   // What makes each found, the one past the page too (`more`).
-  const resting = restingOn([
+  const resting = restingOn(sql, [
     ...names,
     ...heldBy(
       sql,

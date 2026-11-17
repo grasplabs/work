@@ -1011,8 +1011,8 @@ export const blueprints = sqliteTable(
 /**
  * Where an App created from a blueprint came from (src/app-blueprints.ts):
  * the blueprint, the version of its App a marked one was (null for a
- * built-in), the tree it was copied from, and that tree's code
- * (`codeIdentity`), stored under the App as a version's tree is, for an
+ * built-in), the tree it was copied from, and that tree's code as it was
+ * taken, stored under the App as a version's tree is, for an
  * update to be merged over. Written in the batch that creates the App
  * from the blueprint, and moved on to a built-in's newer code only in the
  * batch that commits an update a builder accepted: unlike
@@ -1055,9 +1055,9 @@ export const appVersions = sqliteTable(
     parent: integer(),
     tree: text().notNull(),
     /**
-     * The hash of the version's code (`codeIdentity`, apps.ts): its files
-     * but AGENTS.md, which agents write and nothing builds or runs. Null
-     * for a version committed before the column, which is no blueprint's.
+     * The hash of the version's code: its tree, the whole of its code.
+     * Null for a version committed before the column, which is no
+     * blueprint's.
      */
     code: text(),
     /**
@@ -3377,7 +3377,9 @@ export const sharedMailboxPointers = sqliteTable("shared_mailbox_pointers", {
  * The company's agents an admin made or changed (agents.ts): one row per
  * agent, by the ID its permissions, audit events and instruction file name.
  * `face` is the figure it is drawn with; `job` one line on what it is
- * for; `instructions` what it is told on top of Grasp's own rules;
+ * for; `instructions` no longer read, and written empty: what an agent
+ * is told is its instruction file in the Brain (instruction-files.ts),
+ * and the column goes in a later release (expand, then contract);
  * `modelRole` the role it asks the gateway for, or null for the model a
  * chat would use anyway; `state` whether it answers. No row for the
  * first agent, the organization's: as Grasp ships it.
@@ -3412,6 +3414,11 @@ export const agents = sqliteTable(
      * theirs the same.
      */
     ownerId: text("owner_id"),
+    /**
+     * When its owner offered a person's own agent to the company, for its
+     * admins to take on (agent-builder.ts, `adoptAgent`); null for none.
+     */
+    offeredAt: timestamp("offered_at"),
     madeBy: text("made_by").notNull(),
     madeAt: timestamp("made_at").notNull(),
     changedBy: text("changed_by").notNull(),
@@ -5871,9 +5878,10 @@ export const brainRecords = sqliteTable(
      */
     purgedAt: timestamp("purged_at"),
     /**
-     * When the record stopped counting (brain-records.ts
-     * `retireOnboardingRecords`): what a replaced kickoff transcript gave
-     * the brain. Kept, never deleted, and left out of `brain.read`.
+     * When the record stopped counting: what a replaced kickoff transcript
+     * gave the brain, left out of `brain.read`. Nothing sets it any more
+     * (GRA-1748: the kickoff is a source of the new Brain, and its rows
+     * here were removed by migration 0259); dropped in a later release.
      */
     retiredAt: timestamp("retired_at"),
     /**
@@ -6606,7 +6614,7 @@ export const brainOwnStores = sqliteTable("brain_own_stores", {
   parked: integer().notNull(),
   /** Whether a step of its tick last failed, its queue is paused, or its ledger isn't read through. */
   failing: integer({ mode: "boolean" }).notNull(),
-  /** Whether a model ships and its rebuild for that model isn't done. */
+  /** Whether its rebuild for the model core runs isn't done yet. */
   notRebuilt: integer("not_rebuilt", { mode: "boolean" }).notNull(),
   /** Whether its SQLite is near what one object holds (`storeNearLimit`). */
   nearLimit: integer("near_limit", { mode: "boolean" }).notNull(),

@@ -5,12 +5,17 @@ import { companyToolClasses, toolClassAudienceSchema } from "./connect.ts";
 import type { CompanyToolClass, ToolClassAudience } from "./connect.ts";
 import { modelRoles } from "./deployment-config.ts";
 import type { ModelRole } from "./deployment-config.ts";
+import {
+  instructionsMaxLength,
+  instructionsTooLong,
+} from "./instruction-files.ts";
 import type { ModelEffort } from "./models.ts";
 import type { AppClassAudience } from "./stephen-reach.ts";
 
 // The company's agents, as its admins make and change them: each has its
-// own name, job and instructions, its own audience and its own classes of
-// tools. The organization's own agent, the one every company starts with,
+// own name and job, its own audience and its own classes of tools. What it
+// is told is its instruction file in the Brain (instruction-files.ts),
+// edited as other instruction files are (`session.instructions`). The organization's own agent, the one every company starts with,
 // is the first of them; who reaches it and what it may do stays in
 // Settings › Stephen (stephen-reach.ts).
 
@@ -31,8 +36,6 @@ export interface Agent {
   face: string;
   /** One line on what it is for. */
   job: string;
-  /** What it is told on top of Grasp's own rules. */
-  instructions: string;
   /** The role it asks the gateway for; null: the model a chat uses anyway. */
   modelRole: ModelRole | null;
   /**
@@ -48,15 +51,20 @@ export interface Agent {
    * Null for one of the company's, which its admins make.
    */
   ownerId: string | null;
+  /**
+   * When its owner offered a person's own agent to the company, for its
+   * admins to take on as one of the company's (ISO 8601); null for none
+   * offered, and for every company agent.
+   */
+  offeredAt: string | null;
   /** Who last changed it, and when; null: as Grasp ships it. */
   changedBy: string | null;
   changedAt: string | null;
 }
 
-/** Most characters an agent's name, job and instructions hold. */
+/** Most characters an agent's name and job hold. */
 export const agentNameMax = 60;
 export const agentJobMax = 200;
-export const agentInstructionsMax = 8000;
 
 /**
  * The figures an agent can be drawn with, by name: the dotted head every
@@ -80,7 +88,6 @@ export const agentInputSchema = z.strictObject({
   /** The figure it is drawn with, by its name. */
   face: z.string().regex(/^[a-z][a-z0-9-]{0,39}$/u),
   job: z.string().trim().max(agentJobMax),
-  instructions: z.string().max(agentInstructionsMax),
   modelRole: z.enum(modelRoles).nullable(),
   /** The model its turns use; null, or left out, for the asker's own. */
   model: z.string().min(1).max(200).nullable().default(null),
@@ -253,6 +260,23 @@ export interface AgentsApi {
    */
   makeOwnAgent: (input: AgentInput) => Promise<Agent>;
   /**
+   * Offers one of the person's own agents to the company, for its admins
+   * to take on (`adoptAgent`), or takes the offer back. Its admins then
+   * read what it is and is told, which nobody but its owner did before.
+   */
+  offerOwnAgent: (agentId: string, offered: boolean) => Promise<void>;
+  /** For admins: the agents people offered the company, the oldest offer first. */
+  offeredAgents: () => Promise<Agent[]>;
+  /**
+   * Takes on an agent offered to the company: it becomes one of the
+   * company's, on, reaching nobody and with every class for nobody until
+   * an admin says otherwise, as one an admin makes. Its owner no longer
+   * changes it. The company's own admins only.
+   */
+  adoptAgent: (agentId: string) => Promise<void>;
+  /** Declines an agent offered to the company: it stays its owner's. */
+  declineAgent: (agentId: string) => Promise<void>;
+  /**
    * The apps an agent may use, by name. An agent with none listed uses any
    * app its kinds of work allow, as before agents had apps.
    */
@@ -269,7 +293,7 @@ export interface AgentsApi {
    * only suggested. Never an app someone took off.
    */
   workOutAgentApps: (agentId: string) => Promise<AgentAppsWorkedOut>;
-  /** Changes an agent's name, face, job, instructions or model role. */
+  /** Changes an agent's name, face, job or model role. */
   changeAgent: (agentId: string, input: AgentInput) => Promise<void>;
   /** Pauses an agent, which then takes no turn, or turns it back on. */
   setAgentPaused: (agentId: string, paused: boolean) => Promise<void>;
@@ -350,7 +374,17 @@ export const agentDraftSchema = z
   .strictObject({
     name: agentInputSchema.shape.name,
     job: agentInputSchema.shape.job,
-    instructions: z.string().trim().min(1).max(agentInstructionsMax),
+    // What its instruction file's save takes, measured as that save
+    // measures it: a draft it would refuse is refused as it is drafted,
+    // before Make it makes anything.
+    instructions: z
+      .string()
+      .trim()
+      .min(1)
+      .max(instructionsMaxLength)
+      .refine((text) => !instructionsTooLong(text), {
+        message: `At most ${instructionsMaxLength} characters, counting each &, < and > as its escape`,
+      }),
     whose: z.enum(["company", "own"]),
     audience: toolClassAudienceSchema.optional(),
     classes: z

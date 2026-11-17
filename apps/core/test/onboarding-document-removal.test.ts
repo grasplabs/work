@@ -10,8 +10,12 @@ import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
+import { recallAs, workBrain } from "../src/brain-next.ts";
+import { producersOf, relayHandOvers } from "../src/brain-sources.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
+import { setObjectEnv } from "./agent-chat.ts";
 import { allEvents } from "./audit-events.ts";
+import { removalsFailingOnce } from "./brain-erasures-failing.ts";
 import { mockIdp } from "./idp.ts";
 import {
   answering,
@@ -25,7 +29,7 @@ import {
 import { d1ColumnsWith, onboardingTablesWith } from "./kept-where.ts";
 import type { Answer, ProviderReply } from "./model-provider.ts";
 import { alikeReply, intakeAlike } from "./onboarding-team.ts";
-import { signedInApi, unique } from "./sign-in.ts";
+import { outcome, signedInApi, unique } from "./sign-in.ts";
 import { wordFile } from "./word-file.ts";
 
 // A document shared in the onboarding, whose reading goes when an admin
@@ -97,10 +101,15 @@ const share = async (
 };
 
 /** The people of a team, by key. */
-type Key = "lea" | "max" | "mia" | "mo" | "noor" | "pim";
+type Key = "lea" | "max" | "mia" | "mo" | "noor" | "pim" | "rik" | "sam";
 
-/** A team called Ops, led by Lea, with Max, Mia, Mo, Noor and Pim, in an onboarding that started yesterday: five who tell their own work, as many as reach the brain. */
-const team = async () => {
+/**
+ * A team called Ops, led by Lea, with Max, Mia, Mo, Noor and Pim, in an
+ * onboarding that started yesterday: five who tell their own work, as many
+ * as reach the brain. With `seven`, Rik and Sam too: seven who tell, as a
+ * team needs before any of its results are shown (`teamMayClaim`).
+ */
+const team = async ({ seven = false } = {}) => {
   const store = onboardingStore(env);
   const id = unique();
   const ids = {
@@ -111,6 +120,8 @@ const team = async () => {
     mo: `mo-${id}`,
     noor: `noor-${id}`,
     pim: `pim-${id}`,
+    rik: `rik-${id}`,
+    sam: `sam-${id}`,
   };
   const names: Record<Key, [string, string]> = {
     lea: ["Lea Lind", "Team lead"],
@@ -119,8 +130,18 @@ const team = async () => {
     mo: ["Mo Mertens", "Agent"],
     noor: ["Noor Nijs", "Agent"],
     pim: ["Pim Peeters", "Agent"],
+    rik: ["Rik Ras", "Agent"],
+    sam: ["Sam Sol", "Agent"],
   };
-  const keys: Key[] = ["lea", "max", "mia", "mo", "noor", "pim"];
+  const keys: Key[] = [
+    "lea",
+    "max",
+    "mia",
+    "mo",
+    "noor",
+    "pim",
+    ...(seven ? (["rik", "sam"] as const) : []),
+  ];
   const roster: Roster = {
     teams: [{ id: ids.team, name: "Ops", lead: ids.lea, does: "", off: false }],
     people: keys.map((key) => ({
@@ -282,6 +303,13 @@ const toldAll = async (ids: Ids, maxSays = "Tickets arrive in Zendesk.") => {
   await agree(ids.pim, [fact("p1", "step", "Tags the ticket.")]);
 };
 
+/** What everyone of a team of seven (`team({ seven: true })`) tells: `toldAll`, and Rik and Sam a step each. */
+const sevenTold = async (ids: Ids) => {
+  await toldAll(ids);
+  await agree(ids.rik, [fact("r1", "step", "Checks the queue at noon.")]);
+  await agree(ids.sam, [fact("s1", "step", "Answers the phone.")]);
+};
+
 /** What `run` returns while the provider answers each request with what `respond` makes. */
 const answeringWith = async <T>(
   respond: () => Promise<ProviderReply>,
@@ -333,6 +361,17 @@ const drawAll = async (ids: Ids, tool: string, word: string) => {
   return JSON.stringify(requests.map(({ body }) => body))
     .toLowerCase()
     .includes(word);
+};
+
+/** Gives the brain team `ids`, as the alarm would once others due before it are given. */
+const intakeOf = async (ids: Ids): Promise<void> => {
+  for (let round = 0; round < 5; round += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- one team at a time, as the alarm gives them
+    const given = await intakeAlike();
+    if (given === `brain:${ids.team}` || given === null) {
+      return;
+    }
+  }
 };
 
 /** Where `word` is left: the store's tables, core's database, the audit log, interview turns, and what the admin and the brain show. */
@@ -465,8 +504,9 @@ describe(
         { kind: "me" },
         upload
       );
-      const ids = await team();
-      await toldAll(ids);
+      // Seven tell: only then does a team's intake ask a model.
+      const ids = await team({ seven: true });
+      await sevenTold(ids);
       await drawAll(ids, "Zendesk", sentinelOf());
       // An intake that holds the brain until the test lets its model answer.
       const intakeAsked = Promise.withResolvers<boolean>();
@@ -510,6 +550,84 @@ describe(
         await intaking;
       }
       expect(state).toStrictEqual({ holding: true, deleted: true });
+    });
+
+    it("takes a drawing made since the document was shared off the page and out of what the onboarding holds as its removal answers", async () => {
+      const { api: admin } = await signedInApi(idp, "admin");
+      const word = sentinelOf();
+      const id = await share(admin, `removed-${unique()}.docx`, word);
+      const ids = await team({ seven: true });
+      await sevenTold(ids);
+      await drawAll(ids, word, word);
+      await intakeOf(ids);
+      const standing = async (): Promise<number> => {
+        const drawings = await onboardingStore(env).standingDrawings();
+        return drawings.filter(({ team: of }) => of === ids.team).length;
+      };
+      const work = async (): Promise<string[]> => {
+        const { workflows } = await admin.brain.read();
+        return workflows
+          .filter(({ teamId }) => teamId === `team-${ids.team}`)
+          .map(({ name }) => name);
+      };
+      const before = { standing: await standing(), page: await work() };
+      await admin.onboarding.removeDocument(id);
+      expect({
+        before,
+        after: { standing: await standing(), page: await work() },
+      }).toStrictEqual({
+        before: { standing: 1, page: ["handling new tickets"] },
+        after: { standing: 0, page: [] },
+      });
+    });
+
+    it("takes a drawing out of the new Brain on the removal's retry when taking it out failed the first time, before the reading goes", async () => {
+      const { api: admin } = await signedInApi(idp, "admin");
+      const member = await signedInApi(idp, "user");
+      const word = sentinelOf();
+      const id = await share(admin, `removed-${unique()}.docx`, word);
+      const ids = await team({ seven: true });
+      await sevenTold(ids);
+      await drawAll(ids, word, word);
+      await intakeOf(ids);
+      // Handed to the new Brain, as core's clock does.
+      await allEvents();
+      await relayHandOvers(env);
+      await workBrain(env, new Date(), producersOf(env));
+      const drawingsFound = async (): Promise<number> => {
+        const { items } = await recallAs(env, member.userId, {
+          question: "ticket",
+          budget: { tokens: 2000 },
+          personal: true,
+        });
+        return items.filter(({ source }) => source.producer === "drawing")
+          .length;
+      };
+      const before = await drawingsFound();
+      // The Brain can't take it out of use the first time: the removal
+      // fails, with the reading still there; the retry finds it again.
+      const restore = await setObjectEnv(onboardingStore(env), {
+        BRAIN_STORE: removalsFailingOnce().BRAIN_STORE,
+      });
+      let first: string;
+      try {
+        first = await outcome(admin.onboarding.removeDocument(id));
+        await admin.onboarding.removeDocument(id);
+      } finally {
+        await restore();
+      }
+      const documents = await admin.onboarding.documents();
+      expect({
+        before: before > 0,
+        first: first === "removed" ? "removed" : "refused",
+        reading: documents.some((document) => document.id === id),
+        after: await drawingsFound(),
+      }).toStrictEqual({
+        before: true,
+        first: "refused",
+        reading: false,
+        after: 0,
+      });
     });
 
     it("throws away a drawing under way as its document goes, and draws it again", async () => {
