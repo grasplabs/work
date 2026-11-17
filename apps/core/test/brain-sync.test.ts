@@ -778,6 +778,69 @@ describe("native sync", () => {
   );
 
   it(
+    "finishes the daily relist after a restart in it, while changes go on applying",
+    setUpTime,
+    async () => {
+      const owner = await signedInApi(idp, "user");
+      const { subject, email } = await connectDrive(owner);
+      const [vanished, added] = [markerOf(), markerOf()];
+      const contents = {
+        vanished: `Pitch ${vanished}`,
+        added: `Memo ${added}`,
+      };
+      await driveHolds(subject, {
+        start: "100",
+        owned: [docFile("vanished", email)],
+        changes: { "100": { changes: [], newStartPageToken: "100" } },
+        contents,
+      });
+      later(pollMs);
+      await sync();
+      // Deleted with no signal, which only the relist's end takes out; and
+      // the relist's own change feed (from "R") is lost to it once, so it
+      // starts again.
+      await driveHolds(subject, {
+        start: "R",
+        owned: [],
+        changes: { "100": { changes: [], newStartPageToken: "100" } },
+        contents,
+      });
+      later(24 * 60 * 60 * 1000);
+      await sync();
+      const afterRestart = await finds(owner.userId, vanished);
+      // A change arrives on the ordinary feed meanwhile, and the relist's
+      // feed is there again.
+      await driveHolds(subject, {
+        start: "R",
+        owned: [],
+        changes: {
+          "100": {
+            changes: [
+              {
+                fileId: "added",
+                time: "2026-11-13T09:00:00.000Z",
+                file: docFile("added", email),
+              },
+            ],
+            newStartPageToken: "101",
+          },
+          "101": { changes: [], newStartPageToken: "101" },
+          R: { changes: [], newStartPageToken: "R" },
+        },
+        contents,
+      });
+      later(pollMs);
+      await sync();
+
+      expect({
+        afterRestart,
+        relisted: await finds(owner.userId, vanished),
+        change: await finds(owner.userId, added),
+      }).toStrictEqual({ afterRestart: true, relisted: false, change: true });
+    }
+  );
+
+  it(
     "after a restart, takes out what the relist no longer names",
     setUpTime,
     async () => {
