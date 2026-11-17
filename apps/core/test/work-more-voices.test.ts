@@ -5,7 +5,7 @@ import { intakeIds } from "../src/onboarding/brain-intake.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
-import { holdAlarm } from "./interview-link.ts";
+import { aloneInTheStore } from "./interview-link.ts";
 import { drawingHeld } from "./onboarding-drawings.ts";
 import { mapped, rosterOf, team } from "./onboarding-team.ts";
 import { signedInApi, unique } from "./sign-in.ts";
@@ -21,7 +21,7 @@ describe(
   "asking more people about a piece of work",
   { timeout: 120_000 },
   () => {
-    beforeEach(holdAlarm);
+    beforeEach(aloneInTheStore);
 
     it("asks the next newcomer about the piece of work asked for, ahead of a larger one", async () => {
       const store = onboardingStore(env);

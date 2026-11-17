@@ -16,10 +16,10 @@ import type { SpokenKey } from "../src/speech-cache.ts";
 import { adminCommands } from "./admin-command.ts";
 import { mockIdp } from "./idp.ts";
 import {
+  aloneInTheStore,
   answering,
   answeringWith,
   approve,
-  holdAlarm,
   onLink,
   participate,
 } from "./interview-link.ts";
@@ -353,7 +353,7 @@ const leaSaves = (facts: InterviewFact[]): InterviewProgress => ({
 });
 
 describe("deleting an interview", { timeout: 180_000 }, () => {
-  beforeEach(holdAlarm);
+  beforeEach(aloneInTheStore);
 
   it.each(ways)(
     "$way takes out their words, their facts, their part in every drawing and the brain's records on them, and the work is drawn again without them (D1, D2, W7)",
@@ -837,7 +837,7 @@ describe(
   "withdrawing, and putting right what was approved",
   { timeout: 180_000 },
   () => {
-    beforeEach(holdAlarm);
+    beforeEach(aloneInTheStore);
 
     it("withdrawing takes the team's claim and drawing out as it answers, and leaves nothing of theirs for the alarm (T5)", async () => {
       const store = onboardingStore(env);
@@ -1249,7 +1249,7 @@ describe("the alarm, while something else fails", { timeout: 180_000 }, () => {
   // The test runs the alarm itself: withdrawing sets the store's own half
   // a second on, and on a slow runner it took the records out before the
   // test looked whether they were still there.
-  beforeEach(holdAlarm);
+  beforeEach(aloneInTheStore);
 
   it("leaves nothing of a withdrawn interview for the alarm, and sets itself again when part of it fails (T5)", async () => {
     const ids = await sevenTeam();

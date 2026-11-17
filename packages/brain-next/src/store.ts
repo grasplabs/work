@@ -63,11 +63,14 @@ import {
   vectorSearchSchema,
   writtenRequestSchema,
   vectorsToPutSchema,
+  versionChangeRequestSchema,
   versionListRequestSchema,
   versionRequestSchema,
 } from "./contract.ts";
 import type {
   RetireWrittenRequest,
+  VersionChange,
+  VersionChangeRequest,
   WrittenPage,
   WrittenRequest,
   AddedInstructions,
@@ -246,6 +249,7 @@ import {
   repackVectors,
   searchVectors,
 } from "./vectors.ts";
+import { readVersionChange } from "./version-change.ts";
 import {
   markWordsCurrentIfEmpty,
   reindexWords,
@@ -2350,6 +2354,28 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       ...(asked.entity === undefined ? {} : { entity: asked.entity }),
       reader: asked.reader,
       ...this.#pageMoments(asked.after),
+      ...(asked.after === undefined ? {} : { after: asked.after }),
+      limit: asked.limit,
+    });
+  }
+
+  /**
+   * A page of what a version of a source changed, as the reader sees it
+   * (version-change.ts), or null when they may not read the version.
+   */
+  async readVersionChange(
+    request: VersionChangeRequest
+  ): Promise<VersionChange | null> {
+    const asked = checked(versionChangeRequestSchema, request);
+    this.#mayRead(asked.reader);
+    if (!(await this.#readable())) {
+      return null;
+    }
+    return readVersionChange(this.ctx.storage.sql, {
+      source: asked.source,
+      version: asked.version,
+      reader: asked.reader,
+      at: this.#pageMoments(asked.after).at,
       ...(asked.after === undefined ? {} : { after: asked.after }),
       limit: asked.limit,
     });

@@ -67,6 +67,7 @@ import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
 import { formatBytes, formatDateTime, formatList } from "../format.ts";
 import { useCore } from "../use-core.ts";
+import { LearnedSection } from "./learned-section.tsx";
 import { OwnExportSection } from "./own-export.tsx";
 
 // The Brain's sources, from the new Brain (GRA-1734): what the person may
@@ -1265,6 +1266,11 @@ const SourcePanel = ({
             </h3>
             <ReadFrom names={connectedNames} read={read} source={source} />
             <p className="text-sm whitespace-pre-wrap">{read.text}</p>
+            <LearnedSection
+              key={`${keyOf(source)}#${read.version}`}
+              source={source}
+              version={read.version}
+            />
           </>
         )}
         {text.state === "ready" && text.data === null ? (
