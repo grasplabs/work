@@ -28,6 +28,7 @@ import { z } from "zod";
 
 import { auditedBatch, outboxed } from "../audit-outbox.ts";
 import { requireStepKey, runStubCall } from "../bindings.ts";
+import { captureRunRead } from "../connection-capture.ts";
 import { permissions } from "../db/core/schema.ts";
 import { models } from "../models.ts";
 import { resolveCatalogKeys } from "../workflow-catalog.ts";
@@ -660,6 +661,7 @@ const callConnector = async (
   const attached = await attachedTo(env, run, shape, call, read);
   onFiles(attached.detail);
   const { input } = attached;
+  const connectionId = connectionIdSchema.parse(row.objectId);
   const result = await runStubCall(
     env,
     // Refused at once, before any check, for a key other than the step's.
@@ -694,13 +696,16 @@ const callConnector = async (
       permissionId: permissionIdSchema.parse(target.permissionId),
       connection: {
         type: "connection",
-        connectionId: connectionIdSchema.parse(row.objectId),
+        connectionId,
         ...(row.resource === null ? {} : { resource: row.resource }),
       },
     },
     [call.operation, input, { idempotencyKey: effect.key }],
     attached.files
   );
+  // When the tool answered, before anything else is awaited: the Brain
+  // keeps the read made last (connection-capture.ts `Read`).
+  const readAt = new Date();
   if (result.pending !== undefined) {
     // Connect answers a workflow's held side effect (a restricted run's)
     // with `connect.held`, whose decision the run waits for
@@ -727,6 +732,18 @@ const callConnector = async (
   if (echoes(answer, call.sensitive)) {
     throw callInvalid("output: It echoes a sensitive argument.");
   }
+  // An answer the run took, kept for the one person the run acts for
+  // (GRA-1828), by the chat's rules and code, before the step goes on:
+  // a run host has no `waitUntil`. Never throws; a retry reads again
+  // under the same key, and the same text again adds no version.
+  await captureRunRead(
+    env,
+    { run, sensitive: call.sensitive.length > 0 },
+    connectionId,
+    call.operation,
+    input,
+    { result, readAt }
+  );
   if (content === undefined) {
     return { output: answer, detail: {} };
   }
