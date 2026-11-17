@@ -731,17 +731,13 @@ export const AgentPage = ({
               parts={["instructions"]}
             />
           </SectionCard>
-          <SectionCard flush title={t`Documents`}>
-            <ul>
-              <AgentDocuments
-                agent={agent}
-                can={can}
-                change={change}
-                documents={documents}
-                editable={editable}
-              />
-            </ul>
-          </SectionCard>
+          <AgentDocuments
+            agent={agent}
+            can={can}
+            change={change}
+            documents={documents}
+            editable={editable}
+          />
         </div>
       ) : null}
       {tab === "access" ? (
@@ -769,18 +765,14 @@ export const AgentPage = ({
         </div>
       ) : null}
       {tab === "schedule" ? (
-        <SectionCard flush title={t`Schedule`}>
-          <ul>
-            <AgentWakes
-              agent={agent}
-              can={can}
-              change={change}
-              editable={editable}
-              people={people}
-              wakes={wakes}
-            />
-          </ul>
-        </SectionCard>
+        <AgentWakes
+          agent={agent}
+          can={can}
+          change={change}
+          editable={editable}
+          people={people}
+          wakes={wakes}
+        />
       ) : null}
     </Page>
   );

@@ -1,19 +1,29 @@
 import type { Agent, AgentWake } from "@grasp-os/shared/agents";
+import { agentWakeOpeningMax } from "@grasp-os/shared/agents";
 import type { Member } from "@grasp-os/shared/members";
-import { Button } from "@grasp-os/ui/components/button";
-import { Field, FieldLabel } from "@grasp-os/ui/components/field";
-import { Input } from "@grasp-os/ui/components/input";
-import {
-  NativeSelect,
-  NativeSelectOption,
-} from "@grasp-os/ui/components/native-select";
-import { Switch } from "@grasp-os/ui/components/switch";
-import { Textarea } from "@grasp-os/ui/components/textarea";
-import { Trans, useLingui } from "@lingui/react/macro";
+import { useLingui } from "@lingui/react/macro";
 import { useId, useState } from "react";
 
 import type { Session } from "../core.ts";
-import { Row } from "../settings/stephen-settings.tsx";
+import { Button } from "../grasp/button/index.ts";
+import {
+  Dialog,
+  DialogAction,
+  DialogBody,
+  DialogDescription,
+  DialogFooter,
+  DialogPanel,
+  DialogTitle,
+} from "../grasp/dialog/index.ts";
+import { Empty } from "../grasp/empty/index.ts";
+import { Field, FieldLabel } from "../grasp/field/index.ts";
+import { Form, FormRow } from "../grasp/form/index.ts";
+import { Plus, Trash } from "../grasp/icons/index.ts";
+import { Item, ItemGroup } from "../grasp/item/index.ts";
+import { SectionCard } from "../grasp/section-card/index.ts";
+import { Select } from "../grasp/select/index.ts";
+import { Switch } from "../grasp/switch/index.ts";
+import { Textarea } from "../grasp/textarea/index.ts";
 
 // An agent's wake-ups, on its page's Schedule tab (agent-page.tsx): when it takes a
 // turn nobody asked for, for whom, and what it is asked. An admin picks
@@ -21,8 +31,9 @@ import { Row } from "../settings/stephen-settings.tsx";
 // expression; core keeps the schedule as one (agent-wakes.ts) and refuses
 // anything more often than hourly. A woken turn only reads: what the
 // agent wants to change waits for the person it works for, in their chat.
-// Each wake-up says how its last one went. Its rows are Settings ›
-// Stephen's (`Row`), on a card of the agent's page.
+// Each wake-up says how its last one went. A card of Grasp UI's Items,
+// a new one asked for in a dialog. Grasp UI has no time field, so the
+// time is picked from the day's half hours.
 
 /** What a page change asks of core, then the page read again. */
 type Change = (action: (session: Session) => Promise<unknown>) => Promise<void>;
@@ -111,7 +122,13 @@ const useLast = () => {
   };
 };
 
-/** The form that adds a wake-up to `agent`. */
+/** The day's half hours, `HH:MM`: the times a wake-up made here can start at. */
+const halfHours = Array.from({ length: 48 }, (_, index) => {
+  const hour = String(Math.floor(index / 2)).padStart(2, "0");
+  return `${hour}:${index % 2 === 0 ? "00" : "30"}`;
+});
+
+/** Add a time: its button, and the dialog that asks when, for whom and what. */
 const NewWake = ({
   agent,
   people,
@@ -124,10 +141,8 @@ const NewWake = ({
   change: Change;
 }) => {
   const { t } = useLingui();
-  const rhythmId = useId();
-  const timeId = useId();
-  const personId = useId();
-  const openingId = useId();
+  const formId = useId();
+  const [open, setOpen] = useState(false);
   const [rhythm, setRhythm] = useState<Rhythm>("weekdays");
   const [time, setTime] = useState("09:00");
   const [person, setPerson] = useState(people[0]?.userId ?? "");
@@ -135,112 +150,124 @@ const NewWake = ({
   const cron = cronOf(rhythm, time);
   const ready = cron !== undefined && person !== "" && opening.trim() !== "";
   return (
-    <form
-      className="flex flex-col gap-4 border-t px-5 py-4"
-      onSubmit={(event) => {
-        event.preventDefault();
-        if (cron === undefined) {
-          return;
-        }
-        void (async () => {
-          let added = false;
-          await change(async (session) => {
-            await session.connections.makeAgentWake(agent.id, {
-              cron,
-              personId: person,
-              opening: opening.trim(),
-            });
-            added = true;
-          });
-          // Only what was added is cleared: one core refused stays to be
-          // corrected.
-          if (added) {
-            setOpening("");
-          }
-        })();
-      }}
-    >
-      <div className="flex flex-col gap-4 sm:flex-row">
-        <Field className="flex-1">
-          <FieldLabel htmlFor={rhythmId}>
-            <Trans>How often</Trans>
-          </FieldLabel>
-          <NativeSelect
-            disabled={!can}
-            id={rhythmId}
-            onChange={(event) => {
-              const next = rhythms.find((one) => one === event.target.value);
-              if (next !== undefined) {
-                setRhythm(next);
-              }
-            }}
-            value={rhythm}
-          >
-            <NativeSelectOption value="weekdays">{t`Every weekday`}</NativeSelectOption>
-            <NativeSelectOption value="daily">{t`Every day`}</NativeSelectOption>
-            <NativeSelectOption value="mondays">{t`Every Monday`}</NativeSelectOption>
-          </NativeSelect>
-        </Field>
-        <Field className="flex-1">
-          <FieldLabel htmlFor={timeId}>
-            {t`At, in the company's time zone`}
-          </FieldLabel>
-          <Input
-            disabled={!can}
-            id={timeId}
-            onChange={(event) => {
-              setTime(event.target.value);
-            }}
-            type="time"
-            value={time}
-          />
-        </Field>
-      </div>
-      <Field>
-        <FieldLabel htmlFor={personId}>
-          <Trans>For whom</Trans>
-        </FieldLabel>
-        <NativeSelect
-          disabled={!can}
-          id={personId}
-          onChange={(event) => {
-            setPerson(event.target.value);
-          }}
-          value={person}
-        >
-          {people.map(({ userId, name, email }) => (
-            <NativeSelectOption key={userId} value={userId}>
-              {name === "" ? email : name}
-            </NativeSelectOption>
-          ))}
-        </NativeSelect>
-      </Field>
-      <Field>
-        <FieldLabel htmlFor={openingId}>
-          <Trans>What to ask it each time</Trans>
-        </FieldLabel>
-        <Textarea
-          disabled={!can}
-          id={openingId}
-          maxLength={2000}
-          onChange={(event) => {
-            setOpening(event.target.value);
-          }}
-          placeholder={t`Such as: look for invoices that are overdue and say which.`}
-          rows={3}
-          value={opening}
-        />
-      </Field>
-      <div className="flex justify-end">
-        <Button disabled={!can || !ready} type="submit" variant="outline">
-          <Trans>Add a time</Trans>
-        </Button>
-      </div>
-    </form>
+    <>
+      <Button
+        disabled={!can}
+        icon={Plus}
+        onClick={() => {
+          setOpen(true);
+        }}
+        size="sm"
+      >
+        {t`Add a time`}
+      </Button>
+      <Dialog onOpenChange={setOpen} open={open}>
+        <DialogPanel closeLabel={t`Close`}>
+          <DialogTitle>{t`Add a time`}</DialogTitle>
+          <DialogDescription>
+            {t`It only reads. What it wants to change waits in that person's chat.`}
+          </DialogDescription>
+          <DialogBody>
+            <Form
+              id={formId}
+              onSubmit={(event) => {
+                event.preventDefault();
+                if (cron === undefined || !ready) {
+                  return;
+                }
+                void (async () => {
+                  let added = false;
+                  await change(async (session) => {
+                    await session.connections.makeAgentWake(agent.id, {
+                      cron,
+                      personId: person,
+                      opening: opening.trim(),
+                    });
+                    added = true;
+                  });
+                  // Only what was added is cleared: one core refused stays
+                  // to be corrected.
+                  if (added) {
+                    setOpening("");
+                    setOpen(false);
+                  }
+                })();
+              }}
+            >
+              <FormRow>
+                <Field disabled={!can}>
+                  <FieldLabel>{t`How often`}</FieldLabel>
+                  <Select
+                    items={[
+                      { value: "weekdays", label: t`Every weekday` },
+                      { value: "daily", label: t`Every day` },
+                      { value: "mondays", label: t`Every Monday` },
+                    ]}
+                    onValueChange={(value) => {
+                      const next = rhythms.find((one) => one === value);
+                      if (next !== undefined) {
+                        setRhythm(next);
+                      }
+                    }}
+                    value={rhythm}
+                  />
+                </Field>
+                <Field disabled={!can}>
+                  <FieldLabel>{t`At, company time`}</FieldLabel>
+                  <Select
+                    items={halfHours}
+                    onValueChange={(value) => {
+                      if (value !== null) {
+                        setTime(value);
+                      }
+                    }}
+                    value={time}
+                  />
+                </Field>
+              </FormRow>
+              <Field disabled={!can}>
+                <FieldLabel>{t`For whom`}</FieldLabel>
+                <Select
+                  items={people.map(({ userId, name, email }) => ({
+                    value: userId,
+                    label: name === "" ? email : name,
+                  }))}
+                  onValueChange={(value) => {
+                    setPerson(value ?? "");
+                  }}
+                  value={person}
+                />
+              </Field>
+              <Field disabled={!can}>
+                <FieldLabel>{t`What to ask it each time`}</FieldLabel>
+                <Textarea
+                  maxLength={agentWakeOpeningMax}
+                  onValueChange={setOpening}
+                  placeholder={t`Look for overdue invoices and say which.`}
+                  rows={3}
+                  value={opening}
+                />
+              </Field>
+            </Form>
+          </DialogBody>
+          <DialogFooter>
+            <DialogAction>{t`Cancel`}</DialogAction>
+            <Button
+              disabled={!can || !ready}
+              form={formId}
+              type="submit"
+              variant="ink"
+            >
+              {t`Add`}
+            </Button>
+          </DialogFooter>
+        </DialogPanel>
+      </Dialog>
+    </>
   );
 };
 
-/** An agent's wake-ups, and the way to add one, as rows of its panel. */
+/** An agent's wake-ups, a row each, and Add a time: the Schedule tab's card. */
 export const AgentWakes = ({
   agent,
   wakes,
@@ -271,75 +298,74 @@ export const AgentWakes = ({
     return found.name === "" ? found.email : found.name;
   };
   return (
-    <>
-      <li className="flex flex-col gap-0.5 border-t px-5 py-4">
-        <span className="font-medium">
-          <Trans>When it works on its own</Trans>
-        </span>
-        <span className="text-muted-foreground">
-          {t`At these times it looks into something without being asked. It only reads. What it wants to change waits in that person's chat until they confirm it.`}
-        </span>
-      </li>
-      {wakes.map((wake) => {
-        const when = whenOf(wake);
-        const person = nameOf(wake.personId);
-        const last = lastOf(wake);
-        const { opening } = wake;
-        return (
-          <Row
-            description={
-              last === undefined
-                ? t`For ${person}: ${opening}`
-                : t`For ${person}: ${opening} · ${last}`
-            }
-            key={wake.id}
-            // With the zone it was made in: the company's then, which it
-            // keeps if the company's changes.
-            name={`${when} · ${wake.timeZone}`}
-          >
-            <span className="flex items-center gap-3">
-              <Switch
-                aria-label={t`${when}, for ${person}, is on`}
-                checked={wake.state === "on"}
-                disabled={!can}
-                onCheckedChange={(next) => {
-                  void change(async (session) => {
-                    await session.connections.setAgentWakePaused(
-                      wake.id,
-                      !next
-                    );
-                  });
-                }}
-              />
-              <Button
-                aria-label={t`Remove ${when}, for ${person}`}
-                disabled={!can}
-                onClick={() => {
-                  void change(async (session) => {
-                    await session.connections.deleteAgentWake(wake.id);
-                  });
-                }}
-                size="sm"
-                variant="ghost"
-              >
-                <Trans>Remove</Trans>
-              </Button>
-            </span>
-          </Row>
-        );
-      })}
-      {editable || wakes.length > 0 ? null : (
-        <li className="text-muted-foreground border-t px-5 py-4">
-          {t`${name} never works on its own.`}
-        </li>
-      )}
-      {/* Kept while a change is on its way, only disabled: what is typed
-          and not yet added stays. */}
-      {editable ? (
-        <li>
+    <SectionCard
+      actions={
+        editable ? (
           <NewWake agent={agent} can={can} change={change} people={people} />
-        </li>
-      ) : null}
-    </>
+        ) : undefined
+      }
+      description={t`Times ${name} looks into something without being asked.`}
+      flush
+      title={t`Schedule`}
+    >
+      {wakes.length === 0 ? (
+        <Empty size="inline">{t`${name} only works when asked.`}</Empty>
+      ) : (
+        <ItemGroup separated>
+          {wakes.map((wake) => {
+            const when = whenOf(wake);
+            const person = nameOf(wake.personId);
+            const last = lastOf(wake);
+            const { opening } = wake;
+            return (
+              <Item
+                actions={
+                  <>
+                    <Switch
+                      checked={wake.state === "on"}
+                      disabled={!can}
+                      label={t`On`}
+                      onCheckedChange={(next) => {
+                        void change(async (session) => {
+                          await session.connections.setAgentWakePaused(
+                            wake.id,
+                            !next
+                          );
+                        });
+                      }}
+                    />
+                    {editable ? (
+                      <Button
+                        disabled={!can}
+                        icon={Trash}
+                        label={t`Remove ${when}, for ${person}`}
+                        onClick={() => {
+                          void change(async (session) => {
+                            await session.connections.deleteAgentWake(wake.id);
+                          });
+                        }}
+                        size="sm"
+                        variant="ghost"
+                      />
+                    ) : null}
+                  </>
+                }
+                description={
+                  last === undefined
+                    ? t`For ${person}: ${opening}`
+                    : t`For ${person}: ${opening} · ${last}`
+                }
+                // With the zone it was made in: the company's then, which
+                // it keeps if the company's changes.
+                detail={wake.timeZone}
+                key={wake.id}
+                size="sm"
+                title={when}
+              />
+            );
+          })}
+        </ItemGroup>
+      )}
+    </SectionCard>
   );
 };

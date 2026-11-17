@@ -870,8 +870,8 @@ msgid "{name} may write. Change to Read"
 msgstr "{name} mag schrijven. Wijzigen naar Lezen"
 
 #: src/agents/agent-wakes.tsx
-msgid "{name} never works on its own."
-msgstr "{name} werkt nooit uit zichzelf."
+msgid "{name} only works when asked."
+msgstr "{name} werkt alleen als het gevraagd wordt."
 
 #: src/connections/tool-choice.tsx
 msgid "{name} reads only. Change to Write"
@@ -1373,10 +1373,6 @@ msgstr "{waiting, plural, one {Het gebruikt # nieuw soort toegang. Een beheerder
 #: src/apps/draft-changes.tsx
 msgid "{what}, as {binding} in its code: {actions}"
 msgstr "{what}, als {binding} in de code: {actions}"
-
-#: src/agents/agent-wakes.tsx
-msgid "{when}, for {person}, is on"
-msgstr "{when}, voor {person}, staat aan"
 
 #: src/dashboard/pile-cards.tsx
 #: src/inbox/item-detail.tsx
@@ -1969,6 +1965,7 @@ msgstr "Activiteit"
 msgid "Activity: see all of it in Traces"
 msgstr "Activiteit: bekijk alles in Traces"
 
+#: src/agents/agent-wakes.tsx
 #: src/apps/indexes-view.tsx
 #: src/onboarding/connect-steps.tsx
 #: src/settings/ai-providers.tsx
@@ -3055,10 +3052,6 @@ msgstr "Hoogstens {requests} modelverzoeken"
 msgid "At most {tokens} tokens an answer"
 msgstr "Hoogstens {tokens} tokens per antwoord"
 
-#: src/agents/agent-wakes.tsx
-msgid "At these times it looks into something without being asked. It only reads. What it wants to change waits in that person's chat until they confirm it."
-msgstr "Op deze tijden kijkt hij iets na zonder dat het gevraagd is. Hij leest alleen. Wat hij wil wijzigen, wacht in de chat van die persoon tot die het bevestigt."
-
 #: src/workflows/requests/request-plan.tsx
 msgid "At this pace"
 msgstr "In dit tempo"
@@ -3068,8 +3061,8 @@ msgid "At work"
 msgstr "Aan het werk"
 
 #: src/agents/agent-wakes.tsx
-msgid "At, in the company's time zone"
-msgstr "Om, in de tijdzone van het bedrijf"
+msgid "At, company time"
+msgstr "Om, tijd van het bedrijf"
 
 #. A time zone, by its city
 #: src/routes/_shell.settings.workspace.tsx
@@ -3428,6 +3421,7 @@ msgid "Can't offer Run: {unread}"
 msgstr "Uitvoeren kan niet: {unread}"
 
 #: src/agents/agent-page.tsx
+#: src/agents/agent-wakes.tsx
 #: src/agents/new-agent.tsx
 #: src/apps/app-access-requests.tsx
 #: src/apps/app-data-model.tsx
@@ -3941,6 +3935,7 @@ msgstr "Kliffen"
 
 #: src/activity/audit-log.tsx
 #: src/agents/agent-page.tsx
+#: src/agents/agent-wakes.tsx
 #: src/agents/new-agent.tsx
 #: src/apps/app-access-requests.tsx
 #: src/apps/app-data-model.tsx
@@ -5071,7 +5066,6 @@ msgid "Document not found"
 msgstr "Document niet gevonden"
 
 #: src/agents/agent-documents.tsx
-#: src/agents/agent-page.tsx
 #: src/brain/brain-log.tsx
 #: src/brain/brain.ts
 #: src/onboarding/document-drop.tsx
@@ -5872,8 +5866,8 @@ msgid "Files"
 msgstr "Bestanden"
 
 #: src/agents/agent-documents.tsx
-msgid "Files {name} answers from, such as a checklist or a policy. It reads one when a question needs it. Anyone who may ask {name} can learn what these say."
-msgstr "Bestanden waaruit {name} antwoordt, zoals een checklist of een beleid. Hij leest er een wanneer een vraag erom vraagt. Wie {name} iets mag vragen, kan te weten komen wat erin staat."
+msgid "Files {name} reads when a question needs them. Anyone who may ask it can learn what they say."
+msgstr "Bestanden die {name} leest als een vraag erom vraagt. Wie het iets mag vragen, kan te weten komen wat erin staat."
 
 #: src/workflows/workflow-settings.tsx
 msgctxt "a workflow's settings section"
@@ -7354,6 +7348,10 @@ msgstr "Misschien is het hernoemd of verwijderd."
 msgid "It may read the name, email and teams of everyone in the organization."
 msgstr "Ze kan de naam, het e-mailadres en de teams van iedereen in de organisatie lezen."
 
+#: src/agents/agent-wakes.tsx
+msgid "It only reads. What it wants to change waits in that person's chat."
+msgstr "Hij leest alleen. Wat hij wil veranderen, wacht in de chat van die persoon."
+
 #: src/apps/app-sharing.tsx
 msgid "It opens for the member who created it, the admins, and whoever it is shared with."
 msgstr "Het opent voor het lid dat het maakte, de beheerders en iedereen met wie het gedeeld is."
@@ -8085,6 +8083,10 @@ msgstr "Laden…"
 #: src/routes/_shell.settings.workspace.tsx
 msgid "London"
 msgstr "Londen"
+
+#: src/agents/agent-wakes.tsx
+msgid "Look for overdue invoices and say which."
+msgstr "Zoek achterstallige facturen en zeg welke."
 
 #: src/activity/audit-words.ts
 msgid "Looked at the access to remove by hand"
@@ -9684,6 +9686,7 @@ msgstr "Oudste eerst"
 
 #: src/agents/agent-facts.tsx
 #: src/agents/agent-page.tsx
+#: src/agents/agent-wakes.tsx
 #: src/agents/agents-overview.tsx
 #: src/settings/stephen-card.tsx
 #: src/settings/stephen-settings.tsx
@@ -11202,8 +11205,6 @@ msgstr "Onthouden"
 msgid "Remember something"
 msgstr "Iets onthouden"
 
-#: src/agents/agent-documents.tsx
-#: src/agents/agent-wakes.tsx
 #: src/apps/app-webhooks.tsx
 #: src/apps/data-model-changes.tsx
 #: src/apps/field-editor.tsx
@@ -12166,6 +12167,7 @@ msgid "Scenes"
 msgstr "Scènes"
 
 #: src/agents/agent-page.tsx
+#: src/agents/agent-wakes.tsx
 msgid "Schedule"
 msgstr "Schema"
 
@@ -13374,10 +13376,6 @@ msgstr "Gestopt."
 #: src/routes/_shell.settings.billing.tsx
 msgid "Stripe isn’t linked yet: no plan, card or invoice until it is."
 msgstr "Stripe is nog niet gekoppeld: tot dan geen abonnement, kaart of factuur."
-
-#: src/agents/agent-wakes.tsx
-msgid "Such as: look for invoices that are overdue and say which."
-msgstr "Bijvoorbeeld: zoek naar facturen die over de vervaldatum zijn en zeg welke."
 
 #: src/routes/_shell.brain.$noteId.tsx
 msgctxt "tab: an interview written up short"
@@ -14896,6 +14894,10 @@ msgstr "Verlopen: {timedOut}"
 msgid "Timeline"
 msgstr "Tijdlijn"
 
+#: src/agents/agent-wakes.tsx
+msgid "Times {name} looks into something without being asked."
+msgstr "Momenten waarop {name} uit zichzelf iets bekijkt."
+
 #: src/activity/audit-log.tsx
 #: src/apps/app-access-requests.tsx
 msgid "To"
@@ -16278,10 +16280,6 @@ msgstr "Wanneer het het laatst is gewijzigd"
 #: src/apps/indexes-view.tsx
 msgid "When it was added"
 msgstr "Wanneer het is toegevoegd"
-
-#: src/agents/agent-wakes.tsx
-msgid "When it works on its own"
-msgstr "Wanneer hij uit zichzelf werkt"
 
 #: src/apps/field-editor.tsx
 msgid "When the linked record is deleted"

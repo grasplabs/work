@@ -6,13 +6,18 @@ import {
   chatFileTypeOf,
   chatFileTypes,
 } from "@grasp-os/shared/chat";
-import { Button } from "@grasp-os/ui/components/button";
-import { Trans, useLingui } from "@lingui/react/macro";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { useRef } from "react";
 
 import type { Session } from "../core.ts";
 import { formatBytes } from "../format.ts";
-import { Row } from "../settings/stephen-settings.tsx";
+import { Button } from "../grasp/button/index.ts";
+import { Empty } from "../grasp/empty/index.ts";
+import { File as FileIcon, Trash, Upload } from "../grasp/icons/index.ts";
+import { Item, ItemGroup } from "../grasp/item/index.ts";
+import { SectionCard } from "../grasp/section-card/index.ts";
+import { Text } from "../grasp/text/index.ts";
 
 // An agent's documents, on its page's Instructions tab (agent-page.tsx):
 // files an admin gives it to answer from, such as a checklist or a policy
@@ -20,7 +25,13 @@ import { Row } from "../settings/stephen-settings.tsx";
 // keeps only that (agent-documents.ts); the agent is told its documents
 // by name and reads one when a question needs it. Whoever may ask the
 // agent may learn what a document says, and the card says so where one
-// is added. Its rows are Settings › Stephen's (`Row`), on a card.
+// is added. A card of Grasp UI's Items; Add document opens the file
+// picker, as Grasp UI has no file drop part yet.
+
+const styles = stylex.create({
+  // The picker itself is never seen: Add document opens it.
+  picker: { display: "none" },
+});
 
 /** What a page change asks of core, then the page read again. */
 type Change = (action: (session: Session) => Promise<unknown>) => Promise<void>;
@@ -84,92 +95,97 @@ export const AgentDocuments = ({
     });
   };
   return (
-    <>
-      <li className="flex flex-col gap-0.5 border-t px-5 py-4">
-        <span className="font-medium">
-          <Trans>Documents</Trans>
-        </span>
-        <span className="text-muted-foreground">
-          {t`Files ${name} answers from, such as a checklist or a policy. It reads one when a question needs it. Anyone who may ask ${name} can learn what these say.`}
-        </span>
-      </li>
-      {documents === undefined ? (
-        <li className="text-muted-foreground border-t px-5 py-4">
-          {t`The documents couldn't be loaded. Reload the page.`}
-        </li>
-      ) : (
-        documents.map((document) => {
-          const file = document.name;
-          const size = formatBytes(document.bytes);
-          const when = added(document.addedAt);
-          return (
-            <Row
-              description={t`${size} · Added ${when}`}
-              key={document.id}
-              name={file}
+    <SectionCard
+      actions={
+        editable && documents !== undefined ? (
+          <>
+            <input
+              accept={accepted}
+              aria-hidden="true"
+              data-testid="agent-document-input"
+              multiple
+              onChange={(event) => {
+                add([...(event.target.files ?? [])]);
+                // The same file can be picked again once it was removed.
+                event.target.value = "";
+              }}
+              ref={input}
+              tabIndex={-1}
+              type="file"
+              {...stylex.props(styles.picker)}
+            />
+            <Button
+              disabled={!can || full}
+              icon={Upload}
+              onClick={() => {
+                input.current?.click();
+              }}
+              size="sm"
             >
-              {editable ? (
-                <Button
-                  aria-label={t`Remove ${file}`}
-                  disabled={!can}
-                  onClick={() => {
-                    void change(async (session) => {
-                      await session.connections.removeAgentDocument(
-                        agent.id,
-                        document.id
-                      );
-                    });
-                  }}
-                  size="sm"
-                  variant="ghost"
-                >
-                  <Trans>Remove</Trans>
-                </Button>
-              ) : null}
-            </Row>
-          );
-        })
-      )}
-      {documents?.length === 0 && !editable ? (
-        <li className="text-muted-foreground border-t px-5 py-4">
-          {t`${name} has no documents.`}
-        </li>
-      ) : null}
-      {editable && documents !== undefined ? (
-        <li className="flex flex-col gap-3 border-t px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:gap-8">
-          <span className="text-muted-foreground">
+              {t`Add document`}
+            </Button>
+          </>
+        ) : undefined
+      }
+      description={t`Files ${name} reads when a question needs them. Anyone who may ask it can learn what they say.`}
+      flush
+      footer={
+        editable && documents !== undefined ? (
+          <Text size="xs" tone="muted">
             {full
               ? t`${name} has ${most} documents, the most an agent keeps. Remove one to add another.`
               : t`PDF, Word, Excel, Markdown, text, CSV or JSON, up to 10 MB each. At most ${most} documents.`}
-          </span>
-          <input
-            accept={accepted}
-            aria-hidden="true"
-            className="hidden"
-            data-testid="agent-document-input"
-            multiple
-            onChange={(event) => {
-              add([...(event.target.files ?? [])]);
-              // The same file can be picked again once it was removed.
-              event.target.value = "";
-            }}
-            ref={input}
-            tabIndex={-1}
-            type="file"
-          />
-          <Button
-            className="flex-none"
-            disabled={!can || full}
-            onClick={() => {
-              input.current?.click();
-            }}
-            size="sm"
-            variant="outline"
-          >
-            <Trans>Add document</Trans>
-          </Button>
-        </li>
+          </Text>
+        ) : undefined
+      }
+      title={t`Documents`}
+    >
+      {documents === undefined ? (
+        <Empty kind="error" size="inline">
+          {t`The documents couldn't be loaded. Reload the page.`}
+        </Empty>
       ) : null}
-    </>
+      {documents?.length === 0 ? (
+        <Empty size="inline">{t`${name} has no documents.`}</Empty>
+      ) : null}
+      {documents === undefined || documents.length === 0 ? null : (
+        <ItemGroup separated>
+          {documents.map((document) => {
+            const file = document.name;
+            const size = formatBytes(document.bytes);
+            const when = added(document.addedAt);
+            return (
+              <Item
+                actions={
+                  editable ? (
+                    <Button
+                      disabled={!can}
+                      icon={Trash}
+                      label={t`Remove ${file}`}
+                      onClick={() => {
+                        void change(async (session) => {
+                          await session.connections.removeAgentDocument(
+                            agent.id,
+                            document.id
+                          );
+                        });
+                      }}
+                      size="sm"
+                      variant="ghost"
+                    />
+                  ) : undefined
+                }
+                description={t`${size} · Added ${when}`}
+                icon={FileIcon}
+                iconLook="inline"
+                key={document.id}
+                size="sm"
+                title={file}
+              />
+            );
+          })}
+        </ItemGroup>
+      )}
+    </SectionCard>
   );
 };

@@ -870,8 +870,8 @@ msgid "{name} may write. Change to Read"
 msgstr "{name} darf schreiben. Auf Lesen ändern"
 
 #: src/agents/agent-wakes.tsx
-msgid "{name} never works on its own."
-msgstr "{name} arbeitet nie von sich aus."
+msgid "{name} only works when asked."
+msgstr "{name} arbeitet nur, wenn er gefragt wird."
 
 #: src/connections/tool-choice.tsx
 msgid "{name} reads only. Change to Write"
@@ -1373,10 +1373,6 @@ msgstr "{waiting, plural, one {Es nutzt # neue Art von Zugriff. Ein Admin genehm
 #: src/apps/draft-changes.tsx
 msgid "{what}, as {binding} in its code: {actions}"
 msgstr "{what}, als {binding} im Code: {actions}"
-
-#: src/agents/agent-wakes.tsx
-msgid "{when}, for {person}, is on"
-msgstr "{when}, für {person}, ist an"
 
 #: src/dashboard/pile-cards.tsx
 #: src/inbox/item-detail.tsx
@@ -1969,6 +1965,7 @@ msgstr "Aktivität"
 msgid "Activity: see all of it in Traces"
 msgstr "Aktivität: alles in Traces ansehen"
 
+#: src/agents/agent-wakes.tsx
 #: src/apps/indexes-view.tsx
 #: src/onboarding/connect-steps.tsx
 #: src/settings/ai-providers.tsx
@@ -3055,10 +3052,6 @@ msgstr "Höchstens {requests} Modellanfragen"
 msgid "At most {tokens} tokens an answer"
 msgstr "Höchstens {tokens} Tokens pro Antwort"
 
-#: src/agents/agent-wakes.tsx
-msgid "At these times it looks into something without being asked. It only reads. What it wants to change waits in that person's chat until they confirm it."
-msgstr "Zu diesen Zeiten sieht er etwas nach, ohne gefragt zu werden. Er liest nur. Was er ändern möchte, wartet im Chat dieser Person, bis sie es bestätigt."
-
 #: src/workflows/requests/request-plan.tsx
 msgid "At this pace"
 msgstr "In diesem Tempo"
@@ -3068,8 +3061,8 @@ msgid "At work"
 msgstr "Im Einsatz"
 
 #: src/agents/agent-wakes.tsx
-msgid "At, in the company's time zone"
-msgstr "Um, in der Zeitzone des Unternehmens"
+msgid "At, company time"
+msgstr "Um, Zeit des Unternehmens"
 
 #. A time zone, by its city
 #: src/routes/_shell.settings.workspace.tsx
@@ -3428,6 +3421,7 @@ msgid "Can't offer Run: {unread}"
 msgstr "Ausführen nicht möglich: {unread}"
 
 #: src/agents/agent-page.tsx
+#: src/agents/agent-wakes.tsx
 #: src/agents/new-agent.tsx
 #: src/apps/app-access-requests.tsx
 #: src/apps/app-data-model.tsx
@@ -3941,6 +3935,7 @@ msgstr "Klippen"
 
 #: src/activity/audit-log.tsx
 #: src/agents/agent-page.tsx
+#: src/agents/agent-wakes.tsx
 #: src/agents/new-agent.tsx
 #: src/apps/app-access-requests.tsx
 #: src/apps/app-data-model.tsx
@@ -5071,7 +5066,6 @@ msgid "Document not found"
 msgstr "Dokument nicht gefunden"
 
 #: src/agents/agent-documents.tsx
-#: src/agents/agent-page.tsx
 #: src/brain/brain-log.tsx
 #: src/brain/brain.ts
 #: src/onboarding/document-drop.tsx
@@ -5872,8 +5866,8 @@ msgid "Files"
 msgstr "Dateien"
 
 #: src/agents/agent-documents.tsx
-msgid "Files {name} answers from, such as a checklist or a policy. It reads one when a question needs it. Anyone who may ask {name} can learn what these say."
-msgstr "Dateien, aus denen {name} antwortet, etwa eine Checkliste oder eine Richtlinie. Er liest eine, wenn eine Frage sie braucht. Wer {name} fragen darf, kann erfahren, was darin steht."
+msgid "Files {name} reads when a question needs them. Anyone who may ask it can learn what they say."
+msgstr "Dateien, die {name} liest, wenn eine Frage sie braucht. Wer ihn fragen darf, kann erfahren, was darin steht."
 
 #: src/workflows/workflow-settings.tsx
 msgctxt "a workflow's settings section"
@@ -7354,6 +7348,10 @@ msgstr "Es wurde vielleicht umbenannt oder entfernt."
 msgid "It may read the name, email and teams of everyone in the organization."
 msgstr "Sie kann Name, E-Mail-Adresse und Teams aller Personen in der Organisation lesen."
 
+#: src/agents/agent-wakes.tsx
+msgid "It only reads. What it wants to change waits in that person's chat."
+msgstr "Er liest nur. Was er ändern will, wartet im Chat dieser Person."
+
 #: src/apps/app-sharing.tsx
 msgid "It opens for the member who created it, the admins, and whoever it is shared with."
 msgstr "Es öffnet sich für das Mitglied, das es erstellt hat, die Admins und alle, mit denen es geteilt ist."
@@ -8085,6 +8083,10 @@ msgstr "Wird geladen…"
 #: src/routes/_shell.settings.workspace.tsx
 msgid "London"
 msgstr "London"
+
+#: src/agents/agent-wakes.tsx
+msgid "Look for overdue invoices and say which."
+msgstr "Suche überfällige Rechnungen und nenne sie."
 
 #: src/activity/audit-words.ts
 msgid "Looked at the access to remove by hand"
@@ -9684,6 +9686,7 @@ msgstr "Älteste zuerst"
 
 #: src/agents/agent-facts.tsx
 #: src/agents/agent-page.tsx
+#: src/agents/agent-wakes.tsx
 #: src/agents/agents-overview.tsx
 #: src/settings/stephen-card.tsx
 #: src/settings/stephen-settings.tsx
@@ -11202,8 +11205,6 @@ msgstr "Merken"
 msgid "Remember something"
 msgstr "Etwas merken"
 
-#: src/agents/agent-documents.tsx
-#: src/agents/agent-wakes.tsx
 #: src/apps/app-webhooks.tsx
 #: src/apps/data-model-changes.tsx
 #: src/apps/field-editor.tsx
@@ -12166,6 +12167,7 @@ msgid "Scenes"
 msgstr "Szenen"
 
 #: src/agents/agent-page.tsx
+#: src/agents/agent-wakes.tsx
 msgid "Schedule"
 msgstr "Zeitplan"
 
@@ -13374,10 +13376,6 @@ msgstr "Gestoppt."
 #: src/routes/_shell.settings.billing.tsx
 msgid "Stripe isn’t linked yet: no plan, card or invoice until it is."
 msgstr "Stripe ist noch nicht verbunden: bis dahin kein Tarif, keine Karte und keine Rechnung."
-
-#: src/agents/agent-wakes.tsx
-msgid "Such as: look for invoices that are overdue and say which."
-msgstr "Zum Beispiel: Suche nach überfälligen Rechnungen und sage, welche es sind."
 
 #: src/routes/_shell.brain.$noteId.tsx
 msgctxt "tab: an interview written up short"
@@ -14896,6 +14894,10 @@ msgstr "Abgelaufen: {timedOut}"
 msgid "Timeline"
 msgstr "Zeitverlauf"
 
+#: src/agents/agent-wakes.tsx
+msgid "Times {name} looks into something without being asked."
+msgstr "Zeiten, zu denen {name} ungefragt etwas prüft."
+
 #: src/activity/audit-log.tsx
 #: src/apps/app-access-requests.tsx
 msgid "To"
@@ -16278,10 +16280,6 @@ msgstr "Wann er zuletzt geändert wurde"
 #: src/apps/indexes-view.tsx
 msgid "When it was added"
 msgstr "Wann er hinzugefügt wurde"
-
-#: src/agents/agent-wakes.tsx
-msgid "When it works on its own"
-msgstr "Wann er von sich aus arbeitet"
 
 #: src/apps/field-editor.tsx
 msgid "When the linked record is deleted"
