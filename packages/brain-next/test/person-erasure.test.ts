@@ -702,6 +702,132 @@ describe("a person's erasure in the shared store", () => {
     await restore(shared(), after);
   });
 
+  // GRA-1981: a host replaces what a chat showed of a memory the erasure
+  // took, as the ledger says it, by what it pinned when the memory was
+  // handed over: whose word it is, what it is about and relates to.
+  it("answers a host's pins of what it took as erased for good, in their word or about or relating to their card, also once the tick deleted it, an older copy came back or the storage was lost; never another's word on their document; and refuses while a restore runs", async () => {
+    const at = await annaAndBob();
+    // Her note, in Bob's word: hers as a document, not as a word.
+    await remember(
+      at.group,
+      [
+        {
+          key: "atlas",
+          id: at.entities.atlas,
+          kind: "project",
+          names: [`Atlas ${at.marker}`],
+        },
+      ],
+      [
+        said(
+          "atlas",
+          `Bob says Atlas needs a review ${at.marker}`,
+          at.bob,
+          on(at.annasNote, "Atlas ships in May")
+        ),
+      ]
+    );
+    // Each memory Bob reads, as a host pinned it when it was handed over.
+    const read = await Promise.all(
+      Object.values(at.entities).map(async (entity) => {
+        const { memories } = await shared().readMemories({
+          entity,
+          reader: at.reader,
+        });
+        return memories;
+      })
+    );
+    const statements = new Map<string, string>();
+    const asked = {
+      sources: [],
+      memories: read
+        .flat()
+        .flatMap(
+          ({
+            id,
+            source,
+            writer,
+            learnedAt,
+            speaker,
+            about,
+            object,
+            statement,
+          }) => {
+            if (statements.has(id)) {
+              return [];
+            }
+            statements.set(id, statement);
+            return [
+              {
+                memory: id,
+                source: source?.source ?? null,
+                writer,
+                learnedAt: learnedAt.getTime(),
+                speaker,
+                about,
+                object,
+              },
+            ];
+          }
+        ),
+    };
+    const erasedNow = async (): Promise<string[]> => {
+      const answer = await shared().erasedOf(asked);
+      return answer.memories
+        .map((memory) => (statements.get(memory) ?? "").replace(at.name, "her"))
+        .toSorted();
+    };
+    const before = await copyOf(shared());
+    const none = await erasedNow();
+
+    await erase(at.anna, [email(at.local)]);
+    const hiddenNow = await erasedNow();
+    await tick(shared());
+    const deleted = { left: await hidden(), erased: await erasedNow() };
+    const after = await copyOf(shared());
+    await restore(shared(), before);
+    const olderCopy = await erasedNow();
+    await restore(shared(), empty);
+    const lost = await erasedNow();
+    const restoreId = crypto.randomUUID();
+    await runInDurableObject(shared(), (_instance, state) => {
+      state.storage.sql.exec(
+        `INSERT INTO restores (export, checked, part, restored, state, started_at)
+        VALUES (?, 0, 0, 0, 'running', ?)`,
+        restoreId,
+        Date.now()
+      );
+    });
+    const restoring = await shared()
+      .erasedOf(asked)
+      .then(() => "answered", String);
+    await restore(shared(), after);
+
+    const taken = [
+      `Atlas ships in May, says ${at.marker}`,
+      `Bob reports to her ${at.marker}`,
+      `her is on leave in March ${at.marker}`,
+      `her leads finance ${at.marker}`,
+    ].toSorted();
+    expect({
+      asked: [...statements.values()].length,
+      none,
+      hiddenNow,
+      deleted,
+      olderCopy,
+      lost,
+      restoring,
+    }).toStrictEqual({
+      asked: 7,
+      none: [],
+      hiddenNow: taken,
+      deleted: { left: 0, erased: taken },
+      olderCopy: taken,
+      lost: taken,
+      restoring: `Error: ${restoringNow}`,
+    });
+  });
+
   it("hides her card on a replay into an older copy taken before her address was on it, by the card the erasure closed", async () => {
     const group = unique("g");
     const reader: Reader = { person: unique("bob-"), groups: [group] };

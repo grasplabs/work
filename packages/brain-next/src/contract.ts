@@ -2319,15 +2319,21 @@ export type ReadableMemoriesRequest = z.infer<
 /**
  * A memory to ask whether an erasure took it (`Brain.erasedOf`), with what
  * it rests on as a host read it when it was handed over: the key of the
- * source it was drawn from, or its writer, and when the store learned it.
- * What decides is the erasure ledger alone, which outlives a lost storage:
- * never whether the store holds the memory now.
+ * source it was drawn from, or its writer, and when the store learned it;
+ * whose word it is, and the entity it is about and the one it relates to
+ * (a person's erasure takes a memory by those: people.ts). None of them
+ * ever changes for a memory. What decides is the erasure ledger alone,
+ * which outlives a lost storage: never whether the store holds the memory
+ * now.
  */
 export const erasedMemorySchema = z.strictObject({
   memory: memoryIdSchema,
   source: sourceIdSchema.nullable(),
   writer: principalSchema.nullable(),
   learnedAt: z.int().nonnegative(),
+  speaker: speakerSchema,
+  about: entityIdSchema,
+  object: entityIdSchema.nullable(),
 });
 export type ErasedMemory = z.infer<typeof erasedMemorySchema>;
 
@@ -3170,8 +3176,10 @@ export interface Brain {
    * Of the keys and memories asked, those an erasure took for good, as
    * the erasure ledger alone says it, whoever may read them, in the order
    * asked and each once: a key as `keyState` answers `erased`; a memory
-   * whose source's key is so erased, or whose writer was erased after the
-   * store learned it (`eraseWriter`). Never a retired memory, a key whose
+   * whose source's key is so erased, whose writer was erased after the
+   * store learned it (`eraseWriter`), or that a person's erasure takes
+   * (`erasePersonShared`): in that person's word, or about or relating to
+   * an entity it closed (their card). Never a retired memory, a key whose
    * readers only changed, nor a memory only because the store doesn't
    * hold it now: a lost storage, until a restore puts it back, lacks what
    * was never erased. For the host only, which asks of what it once read

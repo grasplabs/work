@@ -363,6 +363,9 @@ describe("a writer's erasure", () => {
                   source: null,
                   writer: held.writer,
                   learnedAt: held.learnedAt.getTime(),
+                  speaker: held.speaker,
+                  about: held.about,
+                  object: held.object,
                 },
               ]
             : []

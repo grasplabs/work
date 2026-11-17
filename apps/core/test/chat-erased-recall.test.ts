@@ -12,6 +12,7 @@ import {
   eraseSource,
   forgetAs,
   rememberAs,
+  workBrain,
 } from "../src/brain-next.ts";
 import type { SourceReaders, SourceRef } from "../src/brain-next.ts";
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
@@ -20,9 +21,16 @@ import { inJurisdiction, workspace } from "../src/durable-objects.ts";
 import { codeStep, personalChatsOf, says, setObjectEnv } from "./agent-chat.ts";
 import type { WorkspaceStub } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
+import { finishedByTheClock } from "./brain-next-own-store.ts";
+import {
+  copyOfStore,
+  killStore,
+  restoreStore,
+} from "./brain-next-store-copy.ts";
 import { mockIdp } from "./idp.ts";
 import { fakeProvider } from "./model-provider.ts";
 import type { FakeProvider, ProviderReply } from "./model-provider.ts";
+import { noProducers } from "./no-producers.ts";
 import { signedInApi, unique } from "./sign-in.ts";
 
 // What a chat keeps showing of what it read from the Brain (GRA-1807),
@@ -70,8 +78,8 @@ const added = async (
   return source;
 };
 
-/** A new team with `personId` in it. */
-const teamOf = async (personId: string): Promise<string> => {
+/** A new team with `people` in it. */
+const teamOf = async (...people: string[]): Promise<string> => {
   const teamId = crypto.randomUUID();
   const db = drizzle(env.DB);
   await db.insert(teams).values({
@@ -80,12 +88,14 @@ const teamOf = async (personId: string): Promise<string> => {
     organizationId,
     createdAt: new Date(),
   });
-  await db.insert(teamMembers).values({
-    id: crypto.randomUUID(),
-    teamId,
-    userId: personId,
-    createdAt: new Date(),
-  });
+  await db.insert(teamMembers).values(
+    people.map((userId) => ({
+      id: crypto.randomUUID(),
+      teamId,
+      userId,
+      createdAt: new Date(),
+    }))
+  );
   return teamId;
 };
 
@@ -362,6 +372,56 @@ const ownStorageLost = async (personId: string) => {
   };
   return { putBack };
 };
+
+/** A memory's basis on the first version of upload `source`, quoting `quote`. */
+const on = (source: SourceRef, quote: string) =>
+  ({
+    kind: "source",
+    source: `upload:${source.id}`,
+    version: 1,
+    quote,
+  }) as const;
+
+/** In the word of the member `person`. */
+const saidBy = (person: string) => ({ kind: "internal", person }) as const;
+
+/** The shared store of the Brain. */
+const sharedStore = () =>
+  inJurisdiction(env, env.BRAIN_STORE).getByName("brain");
+
+/** How many memories people's erasures still hide in the shared store. */
+const hiddenByErasures = async (): Promise<number> =>
+  await runInDurableObject(
+    sharedStore(),
+    (_instance, state) =>
+      state.storage.sql
+        .exec<{ count: number }>(
+          "SELECT count(*) AS count FROM person_erasure_memories"
+        )
+        .one().count
+  );
+
+/**
+ * A restore of an export under way in the shared store, as its own run
+ * records one, while `running`.
+ */
+const restoringShared = async (id: string, running: boolean) => {
+  await runInDurableObject(sharedStore(), (_instance, state) => {
+    state.storage.sql.exec(
+      running
+        ? `INSERT INTO restores (export, checked, part, restored, state, started_at)
+          VALUES (?, 0, 0, 0, 'running', ?)`
+        : "DELETE FROM restores WHERE export = ?",
+      ...(running ? [id, Date.now()] : [id])
+    );
+  });
+};
+
+/** A result as the chat shows it, without what tells one call or moment from another. */
+const shapeOf = (message: ChatMessage | undefined) =>
+  message?.role === "result"
+    ? { ...message, id: 0, callId: "", at: "" }
+    : message;
 
 /** Whether the provider's requests so far carried `text`. */
 const sentSoFar = (provider: FakeProvider, text: string): boolean =>
@@ -711,6 +771,241 @@ describe("what a chat shows of what it read from the Brain", () => {
       expect({ away, back }).toStrictEqual({
         away: { results: [withheldResult], held: true },
         back: { results: [withheldResult], held: false },
+      });
+    }
+  );
+
+  // GRA-1981: a colleague's chat that cited what a person's erasure took
+  // (#2339: in her word, or about her card) replaces it, as for any other
+  // erasure for good, decided by the ledger alone: also once the tick
+  // deleted what it hid, an older copy of the shared store came back or
+  // its storage was lost; shown withheld, rewriting nothing, while the
+  // shared store restores an export. Her own chats went with her
+  // workspace, erased whole: nothing of hers is left to open.
+  it(
+    "replaces what a colleague's chat recalled in an erased member's word or about her card, after the tick, an older copy or a lost storage, shows it withheld while the Brain restores, and keeps her document in his word and what she wrote in his",
+    slow,
+    async () => {
+      const replies = Array.from({ length: 16 }, () => says("Noted."));
+      const chats = await recallingChats(...replies);
+      const admin = await signedInApi(idp, "admin");
+      const anna = await signedInApi(idp, "user");
+      const ben = chats.person.userId;
+      const name = String(anna.person.name);
+      const address = String(anna.person.email).toLowerCase();
+      const teamId = await teamOf(ben, anna.userId);
+      const team = { kind: "team", teamId } as const;
+      const annasNote = await added("Depot ships in May.", team);
+      const bensNote = await added(`${name} leads the depot.`, team);
+      const goneNote = await added("Depot is closed on Fridays.", team);
+      // What each memory says that a question never does (`mark`), and what
+      // a question finds it by (`topic`).
+      const mark = {
+        word: word(),
+        card: word(),
+        kept: word(),
+        written: word(),
+        twin: word(),
+        teams: word(),
+      };
+      const topic = {
+        word: word(),
+        card: word(),
+        kept: word(),
+        written: word(),
+        twin: word(),
+        teams: word(),
+      };
+      await brainOf(inJurisdiction(env, env.BRAIN_STORE)).addMemories({
+        change: crypto.randomUUID(),
+        access: { kind: "audience", group: `team:${teamId}` },
+        entities: [
+          {
+            key: "anna",
+            kind: "person",
+            names: [name],
+            identifiers: [{ type: "email", value: address }],
+          },
+          { key: "depot", kind: "project", names: [`Depot ${word()}`] },
+        ],
+        memories: [
+          // In her word, from the note she wrote for the team.
+          {
+            about: "depot",
+            type: "fact",
+            statement: `Depot ${topic.word} ${mark.word} ships in May`,
+            speaker: saidBy(anna.userId),
+            basis: on(annasNote, "Depot ships in May"),
+          },
+          // About her card, in Ben's word.
+          {
+            about: "anna",
+            type: "fact",
+            statement: `${name} leads depot ${topic.card} ${mark.card}`,
+            speaker: saidBy(ben),
+            basis: on(bensNote, "leads the depot"),
+          },
+          // Her note, in Ben's word: her document, not her word.
+          {
+            about: "depot",
+            type: "fact",
+            statement: `Depot ${topic.kept} ${mark.kept} needs a review`,
+            speaker: saidBy(ben),
+            basis: on(annasNote, "Depot ships in May"),
+          },
+          // Written by her, in Ben's word.
+          {
+            about: "depot",
+            type: "fact",
+            statement: `Depot ${topic.written} ${mark.written} opens at eight`,
+            speaker: saidBy(ben),
+            basis: { kind: "writer", writer: anna.userId },
+          },
+          // Resting on a note its source's erasure takes: the twin.
+          {
+            about: "depot",
+            type: "fact",
+            statement: `Depot ${topic.twin} ${mark.twin} is closed on Fridays`,
+            speaker: saidBy(ben),
+            basis: on(goneNote, "Depot is closed on Fridays"),
+          },
+          // In her word, recalled in Ben's Teams direct message.
+          {
+            about: "depot",
+            type: "fact",
+            statement: `Depot ${topic.teams} ${mark.teams} ships by boat`,
+            speaker: saidBy(anna.userId),
+            basis: on(annasNote, "Depot ships in May"),
+          },
+        ],
+      });
+      /** A new chat of Ben's that recalled the memory `of`, and whether it showed it. */
+      const recalled = async (of: keyof typeof mark) => {
+        const { chat, ask } = await chats.newChat();
+        await ask(`What do we know about ${topic[of]}?`);
+        const shown = resultsOf(await opened(chats.person, chat.id)).some(
+          (text) => text.includes(mark[of])
+        );
+        return { chat, ask, shown };
+      };
+      const inHerWord = await recalled("word");
+      const card = await recalled("card");
+      const cardLost = await recalled("card");
+      const restoring = await recalled("word");
+      const kept = await recalled("kept");
+      const written = await recalled("written");
+      const twin = await recalled("twin");
+      const teamsAsk = async (question: string) =>
+        await chats.stub.askThrough(
+          ben,
+          chats.agent.agentId,
+          "teams",
+          question,
+          undefined,
+          { kind: "direct" }
+        );
+      await teamsAsk(`What do we know about ${topic.teams}?`);
+      const teamsBefore = await objectHolds(chats.stub, mark.teams);
+      const before = await copyOfStore();
+
+      await admin.api.members.remove(anna.userId);
+      await admin.api.members.erase(anna.userId, name);
+      await finishedByTheClock(anna.userId);
+      await eraseSource(env, {
+        source: goneNote,
+        readers: team,
+        reason: "deleted",
+      });
+      // The tick deletes what her erasure hid: the answer outlives the rows.
+      for (let ticks = 0; ticks < 10; ticks += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- a tick at a time
+        if ((await hiddenByErasures()) === 0) {
+          break;
+        }
+        // oxlint-disable-next-line no-await-in-loop -- a tick at a time
+        await workBrain(env, new Date(), noProducers);
+      }
+      const left = await hiddenByErasures();
+      const openedAfter = async (chatId: string) =>
+        resultsOf(await opened(chats.person, chatId));
+      const afterTick = {
+        word: await openedAfter(inHerWord.chat.id),
+        kept: await openedAfter(kept.chat.id),
+        written: await openedAfter(written.chat.id),
+      };
+      const twinShown = await opened(chats.person, twin.chat.id);
+      const wordShown = await opened(chats.person, inHerWord.chat.id);
+      // While the shared store restores an export: withheld, nothing rewritten.
+      const restoreId = crypto.randomUUID();
+      await restoringShared(restoreId, true);
+      let whileRestoring: { results: string[]; held: boolean };
+      try {
+        whileRestoring = {
+          results: await openedAfter(restoring.chat.id),
+          held: await objectHolds(chats.stub, mark.word),
+        };
+      } finally {
+        await restoringShared(restoreId, false);
+      }
+      const restored = await openedAfter(restoring.chat.id);
+      // An older copy of the shared store, from before her erasure, comes
+      // back: the ledger is replayed.
+      const after = await copyOfStore();
+      await restoreStore(before);
+      const olderCopy = await openedAfter(card.chat.id);
+      // Its storage lost, the ledger kept: replayed whole as it starts.
+      await runInDurableObject(sharedStore(), async (_instance, state) => {
+        await state.storage.deleteAll();
+      });
+      await killStore();
+      const lost = await openedAfter(cardLost.chat.id);
+      await restoreStore(after);
+      // Ben's direct message on Teams, never opened in Grasp: at its next turn.
+      await teamsAsk("Thanks, and what else is new?");
+      /** Whether the next turn of the chat in her word sends it to the model. */
+      const sentNext = async (): Promise<boolean> => {
+        const sentBefore = chats.provider.requests.length;
+        await inHerWord.ask("Thanks, and what else is new?");
+        return JSON.stringify(
+          chats.provider.requests.slice(sentBefore).map(({ body }) => body)
+        ).includes(mark.word);
+      };
+
+      expect({
+        before: [inHerWord, card, cardLost, restoring, kept, written, twin].map(
+          ({ shown }) => shown
+        ),
+        teamsBefore,
+        left,
+        afterTick,
+        twin: twinShown.filter(({ role }) => role === "result").map(shapeOf),
+        whileRestoring,
+        restored,
+        olderCopy,
+        lost,
+        held: await Promise.all(
+          [mark.word, mark.card, mark.teams].map(
+            async (marker) => await objectHolds(chats.stub, marker)
+          )
+        ),
+        sentAgain: await sentNext(),
+      }).toStrictEqual({
+        before: [true, true, true, true, true, true, true],
+        teamsBefore: true,
+        left: 0,
+        afterTick: {
+          word: [withheldResult],
+          kept: [expect.stringContaining(mark.kept)],
+          written: [expect.stringContaining(mark.written)],
+        },
+        // Exactly as a chat shows what any other erasure for good took.
+        twin: wordShown.filter(({ role }) => role === "result").map(shapeOf),
+        whileRestoring: { results: [withheldResult], held: true },
+        restored: [withheldResult],
+        olderCopy: [withheldResult],
+        lost: [withheldResult],
+        held: [false, false, false],
+        sentAgain: false,
       });
     }
   );
