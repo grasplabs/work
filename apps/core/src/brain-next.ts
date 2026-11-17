@@ -5004,10 +5004,15 @@ const shareSchema = z.strictObject({
 /** A share, as `publishAs` takes it. */
 export type Share = z.input<typeof shareSchema>;
 
-/** What `publishAs` shared: the new memory and its entity, in the shared store. */
+/**
+ * What `publishAs` shared: the new memory and its entity, in the shared
+ * store, and the change and stored time that made it (one audit event per
+ * share, however often it is repeated).
+ */
 export interface Shared {
   memory: MemoryId;
   entity: EntityId;
+  once: { change: string; at: Date };
 }
 
 /**
@@ -5031,6 +5036,33 @@ const momentShown = (at: Date | null): string | null =>
   at === null ? null : at.toISOString();
 
 /**
+ * Whether the group `group` alone may read the shared entity that the
+ * person's own entity `entity` stands for (`sharedEntityRefOf`): false for
+ * one that stands for none.
+ */
+const mayReadStoodFor = async (
+  env: BrainEnv,
+  reader: PersonReader,
+  entity: EntityId,
+  group: string
+): Promise<boolean> => {
+  const { identifiers } = await entityNamesOf(
+    ownBrain(env, reader.person),
+    reader,
+    entity
+  );
+  const standsFor = identifiers.find(isSharedEntityRef);
+  if (standsFor === undefined) {
+    return false;
+  }
+  const read = await brain(env).readEntity({
+    entity: standsFor.value.slice(sharedEntityRefPrefix.length),
+    reader: { person: null, groups: [group] },
+  });
+  return read !== null;
+};
+
+/**
  * Memory `ref` of `reader`'s own store, what a share of it copies: the
  * memory, its entity's kind and the name the page shows for it
  * (`liveNamed`), read now. Null alike when there is none current, when it
@@ -5043,7 +5075,8 @@ const toShare = async (
   env: BrainEnv,
   reader: PersonReader,
   ref: { entity: EntityId; memory: MemoryId },
-  shown: z.infer<typeof shareSchema>["shown"]
+  shown: z.infer<typeof shareSchema>["shown"],
+  group: string
 ): Promise<{ read: Memory; kind: EntityKind; name: string } | null> => {
   const own = ownBrain(env, reader.person);
   let read: Memory | undefined;
@@ -5072,7 +5105,67 @@ const toShare = async (
     read.statement === shown.statement &&
     momentShown(read.validFrom) === shown.validFrom &&
     momentShown(read.validUntil) === shown.validUntil;
-  return asShown && name !== null ? { read, kind: entity.kind, name } : null;
+  if (!asShown || name === null) {
+    return null;
+  }
+  // A name the page shows from the shared entity this one stands for (a
+  // correction made it, `liveNamed`) goes only to an audience that may
+  // read that entity: never one wider than whoever said it there.
+  if (
+    entity.name === null &&
+    !(await mayReadStoodFor(env, reader, entity.id, group))
+  ) {
+    return null;
+  }
+  return { read, kind: entity.kind, name };
+};
+
+/**
+ * Fewest members a team a memory is shared with has: in a team of the
+ * sharer and one other, that other knows who shared it, so the copy
+ * would not read as someone's own word, as the page says it does.
+ */
+const shareTeamMembersMin = 3;
+
+/** Of teams `teamIds`, those with at least `shareTeamMembersMin` members now. */
+const teamsLargeEnough = async (
+  env: Pick<Env, "DB">,
+  teamIds: readonly string[]
+): Promise<Set<string>> => {
+  if (teamIds.length === 0) {
+    return new Set();
+  }
+  const { results } = await env.DB.prepare(
+    `SELECT team_id FROM team_members
+    WHERE team_id IN (SELECT value FROM json_each(?1))
+    GROUP BY team_id HAVING count(*) >= ?2`
+  )
+    .bind(JSON.stringify(teamIds), shareTeamMembersMin)
+    .all<{ team_id: string }>();
+  return new Set(results.map(({ team_id: teamId }) => teamId));
+};
+
+/**
+ * The teams the member `personId` may share a memory with (`publishAs`):
+ * those they are in now with at least `shareTeamMembersMin` members, by
+ * name. The company is always one. Refused once they are no longer a
+ * member.
+ */
+export const shareTeamsAs = async (
+  env: ReaderEnv,
+  personId: string
+): Promise<{ id: string; name: string }[]> => {
+  const member = await memberOf(env.DB, checked(idSchema, personId));
+  if (member === undefined) {
+    throw permissionErrors.create("permission.person_inactive");
+  }
+  const large = await teamsLargeEnough(
+    env,
+    member.teams.map(({ id }) => id)
+  );
+  return member.teams
+    .filter(({ id }) => large.has(id))
+    .map(({ id, name }) => ({ id, name }));
 };
 
 /**
@@ -5112,11 +5205,18 @@ export const publishAs = async (
   const reader = await personReaderOf(env, personId);
   const group =
     audience === "company" ? companyGroup : teamGroup(audience.team);
-  // Their teams as core counts them now, and the company.
-  if (!reader.groups.includes(group)) {
+  // Their teams as core counts them now, large enough that a colleague
+  // can't tell who shared it (`shareTeamMembersMin`), and the company.
+  const large =
+    audience === "company"
+      ? undefined
+      : await teamsLargeEnough(env, [audience.team]);
+  const teamTooSmall =
+    audience !== "company" && large?.has(audience.team) !== true;
+  if (!reader.groups.includes(group) || teamTooSmall) {
     throw brainMemoryErrors.create("brain.audience_not_yours");
   }
-  const shared = await toShare(env, reader, memory, shown);
+  const shared = await toShare(env, reader, memory, shown, group);
   if (shared === null) {
     return null;
   }
@@ -5156,41 +5256,49 @@ export const publishAs = async (
   if (saved === undefined || about === undefined) {
     throw new Error("The Brain kept no memory");
   }
-  // A replay of a share taken back since (or replaced by a newer one of
-  // theirs) answers the copy the change made, which is no longer
-  // current: said so, never answered as shared.
-  const copy = await keptMemory(store, reader, about, saved);
-  if (copy !== undefined && copy.endedAt !== null) {
+  // A replay of a share taken back since answers the copy the change
+  // made, which they retired: said so, never answered as shared. One
+  // another share of theirs ended since (two at once, or a newer one) is
+  // still theirs, and answered as shared: it was.
+  const [copy, readable] = await Promise.all([
+    keptMemory(store, reader, about, saved),
+    store.readableMemories({ memories: [saved], reader }),
+  ]);
+  if (copy === undefined || !readable.includes(saved)) {
     throw brainMemoryErrors.create("brain.share_taken_back");
   }
-  return { memory: saved, entity: about };
+  return {
+    memory: saved,
+    entity: about,
+    once: { change: `publish:${person}:${change}`, at: copy.learnedAt },
+  };
 };
 
 /**
  * The member `personId` takes back a memory they shared (`publishAs`),
  * whoever may read it now, themselves included (they may have left the
  * team they shared it with): it is retired in the shared store by their
- * own lineage alone (the Brain's `retireWritten`), current for nobody
- * from then on, and stays as history for its readers; `done` again for
- * one taken back before. Nothing of it is read. `nothing` alike when
- * there is no such memory and when it isn't their own word. Refused once
- * they are no longer a member: their erasure removes it then.
+ * own lineage alone (the Brain's `retireWritten`), with every older copy
+ * of theirs it ended, current for nobody from then on, and stays as
+ * history for its readers: when and by which change, the same again for
+ * one taken back before. Nothing of it is read. Null alike when there is
+ * no such memory and when it isn't their own word. Refused once they are
+ * no longer a member.
  */
 export const unpublishAs = async (
   env: BrainEnv & ReaderEnv,
   personId: string,
   memory: string
-): Promise<MemoryChangeOutcome> => {
+): Promise<RetiredMemory | null> => {
   const id = checked(memoryIdSchema, memory);
   const { person } = await personReaderOf(env, personId);
   try {
-    const retired = await brain(env).retireWritten({
+    return await brain(env).retireWritten({
       memory: id,
       writer: person,
       // One take-back of one memory of theirs: a retry is the same change.
       change: `unpublish:${person}:${id}`,
     });
-    return retired === null ? "nothing" : "done";
   } catch (error) {
     throw erasedAs(error);
   }

@@ -127,6 +127,8 @@ const shown = async (
   // Nothing shared, unless the test says otherwise.
   const memories = {
     shared: async () => await Promise.resolve({ memories: [], next: null }),
+    // The teams it offers: those the page names, unless the test says otherwise.
+    shareTeams: async () => await Promise.resolve(teams),
     ...api,
   };
   const core = {
@@ -1330,5 +1332,27 @@ describe("the Memories page's paged lists, read again", () => {
       raw: dialogText.includes(hidden),
       sent: JSON.stringify(sent[0]?.shown).includes(JSON.stringify(hidden)),
     }).toStrictEqual({ escaped: true, raw: false, sent: true });
+  });
+
+  it("offers only the teams core lets the person share with, never a team of two", async () => {
+    await initechOpen(
+      [ownFact("m-own")],
+      {
+        shareTeams: async () =>
+          await Promise.resolve([{ id: "t-sales", name: "Sales" }]),
+      },
+      [
+        { id: "t-sales", name: "Sales" },
+        { id: "t-pair", name: "Pair" },
+      ]
+    );
+    await press(buttons("Share…")[0]);
+    const options = [
+      ...(document
+        .querySelector("option[value=everyone]")
+        ?.closest("select")
+        ?.querySelectorAll("option") ?? []),
+    ].map((each) => each.value);
+    expect(options).toStrictEqual(["t-sales", "everyone"]);
   });
 });

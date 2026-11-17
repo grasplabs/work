@@ -19,7 +19,7 @@ import { teamMembers, teams } from "../src/db/core/schema.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
 import { mockIdp } from "./idp.ts";
 import { eventsOf } from "./model-rules.ts";
-import { signedInApi } from "./sign-in.ts";
+import { signedInApi, signedInWithRole } from "./sign-in.ts";
 
 type Api = Awaited<ReturnType<typeof signedInApi>>["api"];
 
@@ -38,8 +38,19 @@ type Api = Awaited<ReturnType<typeof signedInApi>>["api"];
 
 const idp = mockIdp();
 
-/** A new team with `members`; its id. */
-const teamOf = async (...members: string[]): Promise<string> => {
+let fillerOnce: Promise<string> | undefined;
+
+/** A member who only fills teams, the same for the file. */
+const filler = async (): Promise<string> => {
+  fillerOnce ??= (async () => {
+    const { userId } = await signedInWithRole(idp, "user");
+    return userId;
+  })();
+  return await fillerOnce;
+};
+
+/** A new team with exactly `members`; its id. */
+const exactTeamOf = async (...members: string[]): Promise<string> => {
   const teamId = crypto.randomUUID();
   const db = drizzle(env.DB);
   await db.insert(teams).values({
@@ -59,6 +70,13 @@ const teamOf = async (...members: string[]): Promise<string> => {
   }
   return teamId;
 };
+
+/**
+ * A new team with `members` and one more (`filler`), large enough to
+ * share with when two are given; its id.
+ */
+const teamOf = async (...members: string[]): Promise<string> =>
+  await exactTeamOf(...members, await filler());
 
 /** Every entity of `kind` `api`'s person may see, every page followed. */
 const allEntities = async (
@@ -317,10 +335,16 @@ describe("sharing a memory of a person's own", () => {
       doras: [{ store: "shared", id: shared?.entity }],
     });
     // The same share's id with another audience is another share's.
-    const sales = await teamOf(anna.userId);
+    const sales = await teamOf(anna.userId, dora.userId);
     await expect(
       anna.api.brainMemories.publish({ ...share, audience: { team: sales } })
     ).rejects.toThrow(brainMemoryErrors.create("brain.share_reused").message);
+    // Repeated, it is one share: one outcome in the audit log.
+    const published = await auditedOf(anna.userId, "brain.memory.published");
+    const outcomes = published.filter(
+      ({ change, outcome }) => change === share.change && outcome === "done"
+    );
+    expect(outcomes).toHaveLength(1);
   });
 
   it("shares only what the person was shown, of their own, a fact or a decision, alike for what isn't theirs", async () => {
@@ -444,6 +468,11 @@ describe("sharing a memory of a person's own", () => {
       ...share,
       shown: { ...share.shown, validUntil: null },
     });
+    // A start date shown that it doesn't have is not what it says.
+    const withStart = await anna.api.brainMemories.publish({
+      ...share,
+      shown: { ...share.shown, validFrom: new Date(0).toISOString() },
+    });
     const shared = await anna.api.brainMemories.publish(share);
     if (shared === null) {
       throw new Error("Shared nothing");
@@ -464,11 +493,13 @@ describe("sharing a memory of a person's own", () => {
     expect({
       shownUntil: shown.validUntil,
       withoutEnd,
+      withStart,
       now: await currentAt(),
       afterTheEnd: await currentAt(new Date(until.getTime() + 1)),
     }).toStrictEqual({
       shownUntil: until.toISOString(),
       withoutEnd: null,
+      withStart: null,
       now: [shared.memory],
       afterTheEnd: [],
     });
@@ -494,6 +525,10 @@ describe("sharing a memory of a person's own", () => {
       throw new Error("Shared nothing");
     }
     const listedIn = await anna.api.brainMemories.shared();
+    const [bensList, carlsList] = await Promise.all([
+      ben.api.brainMemories.shared(),
+      carl.api.brainMemories.shared(),
+    ]);
     const benRecalledIn = await recalls(ben.userId, name, shared.memory);
     await leave(sales, anna.userId);
     const listedOut = await anna.api.brainMemories.shared();
@@ -510,6 +545,8 @@ describe("sharing a memory of a person's own", () => {
         audience,
         statement: memory?.statement,
       })),
+      // Nobody else's list holds what she shared.
+      othersList: [...theirs(bensList), ...theirs(carlsList)],
       benRecalledIn,
       // Out of the team: its id, audience and time, nothing it says.
       listedOut: theirs(listedOut).map(({ audience, memory }) => ({
@@ -523,6 +560,7 @@ describe("sharing a memory of a person's own", () => {
       benRecalledAfter: await recalls(ben.userId, name, shared.memory),
     }).toStrictEqual({
       listedIn: [{ audience: { team: sales }, statement: shown.statement }],
+      othersList: [],
       benRecalledIn: true,
       listedOut: [{ audience: { team: sales }, memory: null }],
       saysNothing: false,
@@ -625,13 +663,184 @@ describe("sharing a memory of a person's own", () => {
       again: "done",
       bens: [{ id: shared.memory, ended: true }],
       annasOwn: [{ id: shown.id, ended: false }],
-      // Her take-back and its retry, each an attempt and its outcome.
+      // Her take-back and its retry: each an attempt, and one outcome.
       unpublished: [
         ["attempted", undefined],
         ["attempted", undefined],
         ["done", "done"],
+      ],
+    });
+  });
+
+  it("takes back the older copies a newer share of the same fact ended, so taking back the newer brings none back", async () => {
+    const [anna, dora] = await Promise.all([
+      signedInApi(idp, "user"),
+      signedInApi(idp, "user"),
+    ]);
+    const name = nameOf("Soylent");
+    const renewing = await ownMemory(
+      anna.api,
+      anna.userId,
+      renewal(name, "Soylent renews")
+    );
+    // The same memory shared twice (two tabs), then a changed one.
+    const first = await anna.api.brainMemories.publish(
+      shareOf(renewing.shown, name, "company")
+    );
+    const twice = await anna.api.brainMemories.publish(
+      shareOf(renewing.shown, name, "company")
+    );
+    const churned = await ownMemory(anna.api, anna.userId, {
+      ...renewal(name, "Soylent churned"),
+      value: "Churned",
+      statement: `${name} churned`,
+    });
+    const newest = await anna.api.brainMemories.publish(
+      shareOf(churned.shown, name, "company")
+    );
+    const listed = await anna.api.brainMemories.shared();
+    const ids = new Set([first?.memory, twice?.memory, newest?.memory]);
+    const taken = await anna.api.brainMemories.unpublish(newest?.memory ?? "");
+    const after = await anna.api.brainMemories.shared();
+    const found = await Promise.all(
+      [`${name} renews`, `${name} churned`].map(async (question) => {
+        const { memories } = await recallAs(env, dora.userId, {
+          personal: false,
+          question,
+          budget: { tokens: 4000 },
+        });
+        return memories.filter(({ memory }) => ids.has(memory));
+      })
+    );
+    expect({
+      // Only the current copy is listed: the ones it ended are history.
+      listed: listed.memories
+        .filter(({ id }) => ids.has(id))
+        .map(({ id }) => id),
+      taken,
+      found,
+      listedAfter: after.memories.filter(({ id }) => ids.has(id)),
+    }).toStrictEqual({
+      listed: [newest?.memory],
+      taken: "done",
+      found: [[], []],
+      listedAfter: [],
+    });
+  });
+
+  it("answers both of two shares of one memory made at once as shared, and audits each as done", async () => {
+    const anna = await signedInApi(idp, "user");
+    const name = nameOf("Cyberdyne");
+    const { shown } = await ownMemory(
+      anna.api,
+      anna.userId,
+      renewal(name, "Cyberdyne renews")
+    );
+    const shares = [
+      shareOf(shown, name, "company"),
+      shareOf(shown, name, "company"),
+    ];
+    const answers = await Promise.all(
+      shares.map(async (share) => await anna.api.brainMemories.publish(share))
+    );
+    const events = await auditedOf(anna.userId, "brain.memory.published");
+    const outcomes = events
+      .filter(({ outcome }) => outcome !== "attempted")
+      .map(({ outcome, result }) => [outcome, result]);
+    expect({
+      shared: answers.map((answer) => answer !== null),
+      outcomes,
+    }).toStrictEqual({
+      shared: [true, true],
+      outcomes: [
+        ["done", "done"],
         ["done", "done"],
       ],
+    });
+  });
+
+  it("shares with no team of two, where the other would know who shared it, and offers only larger teams", async () => {
+    const [anna, ben] = await Promise.all([
+      signedInApi(idp, "user"),
+      signedInApi(idp, "user"),
+    ]);
+    const pair = await exactTeamOf(anna.userId, ben.userId);
+    const larger = await teamOf(anna.userId, ben.userId);
+    const name = nameOf("Gringotts");
+    const { shown } = await ownMemory(
+      anna.api,
+      anna.userId,
+      renewal(name, "Gringotts renews")
+    );
+    const offered = await anna.api.brainMemories.shareTeams();
+    await expect(
+      anna.api.brainMemories.publish(shareOf(shown, name, { team: pair }))
+    ).rejects.toThrow(
+      brainMemoryErrors.create("brain.audience_not_yours").message
+    );
+    expect({
+      offered: offered
+        .map(({ id }) => id)
+        .filter((id) => id === pair || id === larger),
+      larger:
+        (await anna.api.brainMemories.publish(
+          shareOf(shown, name, { team: larger })
+        )) !== null,
+    }).toStrictEqual({ offered: [larger], larger: true });
+  });
+
+  it("shares a correction named by a team's entity only with an audience that may read that entity", async () => {
+    const [anna, ben] = await Promise.all([
+      signedInApi(idp, "user"),
+      signedInApi(idp, "user"),
+    ]);
+    const sales = await teamOf(anna.userId, ben.userId);
+    const name = nameOf("Initrode Secret");
+    // A team-only memory about a customer only the team's memories name.
+    const added = await brainOf(
+      inJurisdiction(env, env.BRAIN_STORE)
+    ).addMemories({
+      change: crypto.randomUUID(),
+      access: { kind: "audience", group: `team:${sales}` },
+      entities: [{ key: "c", kind: "customer", names: [name] }],
+      memories: [
+        {
+          about: "c",
+          attribute: "status",
+          value: "Renewing",
+          type: "fact",
+          statement: `${name} is renewing`,
+          speaker: { kind: "system" },
+          basis: { kind: "writer", writer: `crm-${crypto.randomUUID()}` },
+        },
+      ],
+    });
+    // Her correction: her own entity stands for the team's, named by it.
+    const corrected = await anna.api.brainMemories.correct({
+      wrong: {
+        store: "shared",
+        entity: added.entities.c ?? "",
+        memory: added.memories[0] ?? "",
+      },
+      right: "Churned",
+      change: crypto.randomUUID(),
+    });
+    const [shown] = await memoriesAbout(anna.api, {
+      store: "own",
+      id: corrected?.entity ?? "",
+    });
+    if (shown === undefined) {
+      throw new Error("The page shows no correction");
+    }
+    const everyone = await anna.api.brainMemories.publish(
+      shareOf(shown, name, "company")
+    );
+    const team = await anna.api.brainMemories.publish(
+      shareOf(shown, name, { team: sales })
+    );
+    expect({ everyone, team: team !== null }).toStrictEqual({
+      everyone: null,
+      team: true,
     });
   });
 });

@@ -103,6 +103,7 @@ export const rpcParamNames: ParamNames = {
     "forget": ["memory"],
     "memories": ["entity","next"],
     "publish": ["share"],
+    "shareTeams": [],
     "shared": ["next"],
     "unpublish": ["memory"],
   },

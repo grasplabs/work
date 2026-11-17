@@ -1152,7 +1152,8 @@ type CorePersonMember =
   | "correctAs"
   | "publishAs"
   | "unpublishAs"
-  | "sharedAs";
+  | "sharedAs"
+  | "shareTeamsAs";
 
 /** The exports of core's brain-next.ts for code's entities, probed after them (`coreCodeEntities`). */
 type CoreCodeMember = "codeCardAs" | "codeEntitiesAs" | "isCodeEntitiesRequest";
@@ -5603,7 +5604,30 @@ const memoryProbes = {
             ...(after === undefined ? {} : { after: unchecked(after) }),
           })
       );
+    // Someone who wrote nothing, while others' memories (the fixture's,
+    // the reader's own) are stored: their whole list must be what a store
+    // that holds nothing answers, never another writer's.
+    await memoryFixture(probing);
+    const nobody = stranger();
     return [
+      await answer(
+        "what someone who wrote nothing wrote, among others' memories",
+        async () =>
+          await store().listWritten({
+            writer: nobody,
+            reader: { person: nobody, groups: reader.groups },
+          }),
+        "hidden"
+      ),
+      await answer(
+        "what someone who wrote nothing wrote, in a store that holds nothing",
+        async () =>
+          await personalStore(nobody).listWritten({
+            writer: nobody,
+            reader: { person: nobody, groups: [] },
+          }),
+        "nothing"
+      ),
       await list("what the reader wrote", reader.person),
       await list("what a writer named by the markers wrote", markers.join("")),
       await list("after a place named by the markers", reader.person, {
@@ -6347,6 +6371,7 @@ interface ShareCalls {
   publish: (personId: string, share: unknown) => Promise<unknown>;
   unpublish: (personId: string, memory: unknown) => Promise<unknown>;
   shared: (personId: string, after?: unknown) => Promise<unknown>;
+  shareTeams: (personId: string) => Promise<unknown>;
 }
 
 /**
@@ -6609,6 +6634,17 @@ const memorySharingProbes = (calls: ShareCalls) => {
         ? asked
         : [...asked, await unpublish("one the reader shared", shared.memory)];
     },
+    shareTeams: async ({ personId }: Probing): Promise<Answer[]> => [
+      // Their teams, by name: never one they aren't in.
+      await answer(
+        "the teams the reader may share with",
+        async () => await calls.shareTeams(personId)
+      ),
+      await answer(
+        "as someone who isn't a member",
+        async () => await calls.shareTeams(stranger())
+      ),
+    ],
     shared: async (probing: Probing): Promise<Answer[]> => {
       const { personId, markers } = probing;
       // Their own word they may no longer read: listed by id and
@@ -6644,6 +6680,7 @@ const coreShareProbes = memorySharingProbes({
     await coreBrain.unpublishAs(env, personId, unchecked(memory)),
   shared: async (personId, after) =>
     await coreBrain.sharedAs(env, personId, after),
+  shareTeams: async (personId) => await coreBrain.shareTeamsAs(env, personId),
 });
 
 /** One probe per export of core's brain-next.ts for a person's memories. */
@@ -6668,6 +6705,7 @@ const corePersonMemories = {
   publishAs: coreShareProbes.publish,
   unpublishAs: coreShareProbes.unpublish,
   sharedAs: coreShareProbes.shared,
+  shareTeamsAs: coreShareProbes.shareTeams,
   // An entity of the reader's own store: one in the shared store, one in
   // someone else's own store and one no one added answer alike.
   ownEntityAs: async (probing) => {
@@ -7431,9 +7469,10 @@ export const memoriesProbes = (() => {
         personCaller(personId),
         unchecked(memory)
       ),
-    // Not one of the callers': a read, through core's own function.
+    // Not the callers': reads, through core's own functions.
     shared: async (personId, after) =>
       await coreBrain.sharedAs(env, personId, after),
+    shareTeams: async (personId) => await coreBrain.shareTeamsAs(env, personId),
   });
   return {
     rememberFor: probes.remember,
@@ -10378,6 +10417,7 @@ export const memoriesRpcProbes = {
       await memoriesAs(personId).unpublish(unchecked(memory)),
     shared: async (personId, after) =>
       await memoriesAs(personId).shared(unchecked(after)),
+    shareTeams: async (personId) => await memoriesAs(personId).shareTeams(),
   }),
 } satisfies Record<
   | "forget"
@@ -10388,7 +10428,8 @@ export const memoriesRpcProbes = {
   | "correct"
   | "publish"
   | "unpublish"
-  | "shared",
+  | "shared"
+  | "shareTeams",
   Probe
 >;
 

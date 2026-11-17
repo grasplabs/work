@@ -1,3 +1,5 @@
+import type { BrainMemoryOutcome } from "@grasp-os/shared/brain-memories";
+
 import { auditedIdOf } from "./audit-outbox.ts";
 import { audited } from "./brain-audited.ts";
 import type { MemoryCaller } from "./brain-audited.ts";
@@ -177,7 +179,8 @@ const audienceOf = (share: unknown, checkedTeam: boolean): Detail => {
  * not theirs to share and one that no longer says what they were shown.
  * Audited as `brain.memory.published`: the memory shared, the audience
  * and the change, then the memory made, or `nothing`. Ids alone, never
- * what it says.
+ * what it says. A share repeated keeps one outcome: the event of its
+ * change, at the time the copy was made (`doneOnce`).
  */
 export const publishFor = async (
   env: Env,
@@ -202,25 +205,35 @@ export const publishFor = async (
             published: shared.memory,
             entity: shared.entity,
             ...audienceOf(share, true),
-          }
+          },
+    { doneOnce: (shared) => shared?.once }
   );
 
 /**
  * `caller`'s person takes back a memory they shared (`unpublishAs`):
- * `done`, again for one taken back before; `nothing` alike for none,
- * one not theirs, or one they may no longer read. Audited as
- * `brain.memory.unpublished`.
+ * `done`, again for one taken back before; `nothing` alike for none and
+ * one not theirs. Audited as `brain.memory.unpublished`, one outcome per
+ * take-back however often it is repeated: the event of its change, at
+ * the time it was taken back (`doneOnce`).
  */
 export const unpublishFor = async (
   env: Env,
   caller: MemoryCaller,
   memory: string
-) =>
-  await audited(
+): Promise<BrainMemoryOutcome> => {
+  const retired = await audited(
     env,
     caller,
     "brain.memory.unpublished",
     { memory: auditedIdOf(memory) },
     async () => await unpublishAs(env, caller.person, memory),
-    (outcome) => ({ result: outcome })
+    (taken): Detail => ({ result: taken === null ? "nothing" : "done" }),
+    {
+      doneOnce: (taken) =>
+        taken?.change === null || taken === null
+          ? undefined
+          : { change: taken.change, at: taken.retiredAt },
+    }
   );
+  return retired === null ? "nothing" : "done";
+};

@@ -10,6 +10,7 @@ import {
   memoriesSql,
   memoryOf,
   memoryRows,
+  newerSql,
   nextStamp,
   raiseStamp,
   readMoment,
@@ -22,20 +23,25 @@ import { accessOfKey } from "./reader-sets.ts";
 // its writer may list and take back whoever may read it now, as their
 // own. Taking back removes and reads nothing; a listing gives a memory's
 // text only to a reader who may read it, and of any other its id, its
-// readers and when it was learned alone.
+// readers and when it was learned alone. Only what is current is listed
+// or taken back as such: one a newer memory of the writer's ended, or
+// whose time is over, is history.
 
 /**
  * `?1` the writer's subject (`writer_subject`), `?2` their lineage, `?3`
  * the cursor's moment (milliseconds) and `?4` its memory id, or null for
- * the first page; `?5` the limit: their memories not retired and not
- * hidden by an erasure, by when they were learned, then id. One seek of
- * `memories_writer_idx`.
+ * the first page; `?5` the limit, `?6` the moment read at: their memories
+ * current then (not retired, not ended by a newer one of theirs, their
+ * time not over) and not hidden by an erasure, by when they were learned,
+ * then id. One seek of `memories_writer_idx`.
  */
 const writtenSql = `SELECT m.row AS row, m.id AS id, m.readers AS readers,
     m.learned_at AS learned_at
   FROM memories AS m
   WHERE m.writer_subject = ?1 AND m.lineage = ?2 AND m.retired_at IS NULL
     AND m.learned_at <= ?6
+    AND (m.valid_until IS NULL OR m.valid_until > ?6)
+    AND NOT EXISTS (${newerSql("m", "?6", "?6", false)})
     AND (?3 IS NULL OR m.learned_at > ?3 OR (m.learned_at = ?3 AND m.id > ?4))
     AND ${unerasedSql("m")}
   ORDER BY m.learned_at, m.id
@@ -119,24 +125,46 @@ export const listWritten = (
  * when and by which change (`RetiredMemory`), the same again for one this
  * writer retired before. Null for no such memory, another writer's, and
  * one an erasure hides. In the caller's transaction.
+ *
+ * In the same statement, every older memory of theirs it ends (memories.ts
+ * `newerSql`: the same entity and attribute, and for an attribute of many
+ * values or none, the same value) is retired too, under the same change:
+ * a retired memory ends nothing, so taking back the newer of two copies
+ * would otherwise make the older one current again for its readers.
  */
 export const retireWritten = (
   sql: SqlStorage,
   { id, writer, change }: { id: string; writer: string; change: string }
 ): RetiredMemory | null => {
   const stamp = nextStamp(sql);
-  const [retired] = sql
-    .exec<{ retired_at: number; retired_change: string | null }>(
-      `UPDATE memories AS m SET retired_at = ?3, retired_change = ?4
-      WHERE m.id = ?1 AND m.lineage = ?2 AND m.retired_at IS NULL
-        AND ${unerasedSql("m")}
-      RETURNING retired_at, retired_change`,
+  const retiredRows = sql
+    .exec<{ id: string; retired_at: number; retired_change: string | null }>(
+      `WITH taken AS MATERIALIZED (
+        SELECT m.row, m.entity, m.attribute, m.one_value, m.value_key,
+          m.lineage_order
+        FROM memories AS m
+        WHERE m.id = ?1 AND m.lineage = ?2 AND m.retired_at IS NULL
+          AND ${unerasedSql("m")}
+      )
+      UPDATE memories AS m SET retired_at = ?3, retired_change = ?4
+      WHERE m.lineage = ?2 AND m.retired_at IS NULL AND ${unerasedSql("m")}
+        AND EXISTS (
+          SELECT 1 FROM taken WHERE taken.row = m.row
+            OR (taken.entity = m.entity
+              AND (taken.lineage_order > m.lineage_order
+                OR (taken.lineage_order = m.lineage_order AND taken.row > m.row))
+              AND ((m.one_value = 1 AND m.attribute = taken.attribute)
+                OR (m.one_value = 0 AND m.attribute IS taken.attribute
+                  AND m.value_key = taken.value_key)))
+        )
+      RETURNING id, retired_at, retired_change`,
       id,
       lineageOfWriter(writer),
       stamp,
       change
     )
     .toArray();
+  const retired = retiredRows.find((row) => row.id === id);
   if (retired !== undefined) {
     raiseStamp(sql, stamp);
     return {

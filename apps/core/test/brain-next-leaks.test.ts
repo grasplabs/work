@@ -1322,6 +1322,15 @@ describe(
       // (GRA-1815): a new memory in the shared store, its entity's name and
       // its statement marked, readable by that team alone. After the chat's
       // turn, so no recall of it prompts a model while planting.
+      // Two more in that team, so it is large enough to share with.
+      const fillers = await Promise.all([
+        signedInWithRole(idp, "user"),
+        signedInWithRole(idp, "user"),
+      ]);
+      for (const { userId } of fillers) {
+        // oxlint-disable-next-line no-await-in-loop -- one member at a time
+        await join(secretTeam, userId);
+      }
       const sharedName = `Account ${sharedMemoryMarker}`;
       const sharedStatement = `${sharedWord} ${sharedMemoryMarker} renews`;
       const kept = await rememberAs(env, holder, {

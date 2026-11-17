@@ -188,7 +188,7 @@ const outSql = (alias: string, at: string): string => `
  * restatement merges what one says twice only for a reader of the newer:
  * nobody reads a memory they couldn't before.
  */
-const newerSql = (
+export const newerSql = (
   alias: string,
   learned: string,
   valid: string,

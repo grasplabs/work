@@ -17,6 +17,7 @@ import type {
   BrainShare,
   BrainShared,
   BrainSharedPage,
+  BrainShareTeam,
   BrainStoreCursor,
 } from "@grasp-os/shared/brain-memories";
 
@@ -28,7 +29,13 @@ import {
   unpublishFor,
 } from "./brain-memories.ts";
 import type { MemoryCaller } from "./brain-memories.ts";
-import { contestedAs, entitiesAs, memoriesAs, sharedAs } from "./brain-next.ts";
+import {
+  contestedAs,
+  entitiesAs,
+  memoriesAs,
+  sharedAs,
+  shareTeamsAs,
+} from "./brain-next.ts";
 import type { StoredEntity, StoredMemory, StorePlace } from "./brain-next.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
@@ -257,6 +264,13 @@ export class BrainMemoriesRpc
         ? null
         : { memory: shared.memory, entity: shared.entity };
     });
+  }
+
+  async shareTeams(): Promise<BrainShareTeam[]> {
+    return await withPerson(
+      this.#check,
+      async (person) => await shareTeamsAs(this.#env, person.userId)
+    );
   }
 
   async unpublish(memory: string): Promise<BrainMemoryOutcome> {

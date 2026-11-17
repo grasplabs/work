@@ -53,6 +53,7 @@ import { toast } from "@grasp-os/ui/components/toast";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { useId, useRef, useState } from "react";
 
+import { useHeldCoreRead } from "../apps/use-core-read.ts";
 import { ErrorText } from "../error-text.tsx";
 import { formatDateTime } from "../format.ts";
 import { NotLoaded } from "../load-from-core.tsx";
@@ -529,7 +530,6 @@ const audienceOf = (choice: string): BrainShareAudience =>
 const ShareDialog = ({
   memory,
   about,
-  teams,
   opening,
   returnTo,
   onClose,
@@ -538,7 +538,6 @@ const ShareDialog = ({
   memory: BrainMemoryShown;
   /** The name the page showed for what it is about. */
   about: string;
-  teams: Team[];
   opening: string;
   returnTo: HTMLElement;
   onClose: () => void;
@@ -547,7 +546,16 @@ const ShareDialog = ({
   const { t } = useLingui();
   const ids = useId();
   const attributeLabel = useAttributeLabel();
-  const [choice, setChoice] = useState(teams[0]?.id ?? "everyone");
+  // The teams core lets them share with: theirs of three people or more
+  // (with fewer, the other would know who shared it). Nothing is shared
+  // until they are read.
+  const { loaded } = useHeldCoreRead(
+    `share-teams#${opening}`,
+    async (session) => await session.brainMemories.shareTeams()
+  );
+  const teams = loaded?.state === "ready" ? loaded.data : [];
+  const [chosen, setChosen] = useState<string>();
+  const choice = chosen ?? teams[0]?.id ?? "everyone";
   const [change, setChange] = useState(opening);
   // The audience of a share that failed: another is a new share, with a
   // new id, while the same retries the same one.
@@ -607,7 +615,7 @@ const ShareDialog = ({
           className="flex flex-col gap-5"
           onSubmit={(event) => {
             event.preventDefault();
-            if (!busy) {
+            if (!busy && loaded !== undefined) {
               void share();
             }
           }}
@@ -668,7 +676,7 @@ const ShareDialog = ({
                   setChange(crypto.randomUUID());
                   setTried(undefined);
                 }
-                setChoice(picked);
+                setChosen(picked);
               }}
               value={choice}
             >
@@ -690,7 +698,7 @@ const ShareDialog = ({
             >
               <Trans>Cancel</Trans>
             </DialogClose>
-            <Button disabled={busy} type="submit">
+            <Button disabled={busy || loaded === undefined} type="submit">
               <Trans>Share</Trans>
             </Button>
           </DialogFooter>
@@ -1638,7 +1646,6 @@ export const MemoriesPage = ({ teams }: { teams: Team[] }) => {
           onShared={changed}
           opening={sharing.opening}
           returnTo={sharing.returnTo}
-          teams={teams}
         />
       )}
     </div>
