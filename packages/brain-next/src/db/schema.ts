@@ -929,6 +929,32 @@ export const entities = sqliteTable(
 );
 
 /**
+ * The two model calls of extraction (extraction.ts) that drew a memory and
+ * checked it: each call's prompt version (the SHA-256 of its instructions)
+ * and the model the host says answered it. Once per distinct four, which
+ * memories point at (`memories.extractor`): a few rows, each prompt
+ * version with each model. No content and no person; never deleted.
+ */
+export const extractors = sqliteTable(
+  "extractors",
+  {
+    row: integer().primaryKey({ autoIncrement: true }),
+    readPrompt: text("read_prompt").notNull(),
+    readModel: text("read_model").notNull(),
+    checkPrompt: text("check_prompt").notNull(),
+    checkModel: text("check_model").notNull(),
+  },
+  (table) => [
+    unique("extractors_calls_unique").on(
+      table.readPrompt,
+      table.readModel,
+      table.checkPrompt,
+      table.checkModel
+    ),
+  ]
+);
+
+/**
  * A memory (contract.ts `Memory`). Its lineage is the source it rests on
  * (`source:` and the source's key) or its writer (`writer:` and their
  * id); `lineage_order` orders a lineage's memories, the version number
@@ -995,6 +1021,13 @@ export const memories = sqliteTable(
      */
     retiredChange: text("retired_change"),
     readers: text().notNull(),
+    /**
+     * The calls that drew it from its source and checked it
+     * (`extractors`), for a memory extraction drew; null for any other.
+     * No read of memories returns it: an export carries it, for the
+     * evaluation of extraction.
+     */
+    extractor: integer().references(() => extractors.row),
   },
   (table) => [
     index("memories_entity_idx").on(

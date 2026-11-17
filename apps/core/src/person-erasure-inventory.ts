@@ -631,6 +631,8 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "brainStore.memory_extractions": {
     company: "marks of the versions fully drawn from",
   },
+  // Which prompt versions (hashes) and models drew memories: no content.
+  "brainStore.extractors": noPerson,
   "brainStore.memory_changes": {
     kept: "SHA-256 of change keys and ids, so an erased add is never made again",
   },

@@ -1059,7 +1059,7 @@ const workMarked = async (
 /** The host's model, as a probe hands it: it answers, and holds nothing. */
 const quietModel = async () => {
   await Promise.resolve();
-  return { kind: "answer" as const, text: "" };
+  return { kind: "answer" as const, text: "", model: "test/model" };
 };
 
 /**
