@@ -254,7 +254,6 @@ describe("an agent's wake-ups", setUpTime, () => {
       name: "Claire",
       face: "claire",
       job: "Chases unpaid invoices.",
-      instructions: "",
       modelRole: null,
     });
     const made = await wakes.makeAgentWake(claire.id, said(person.userId));

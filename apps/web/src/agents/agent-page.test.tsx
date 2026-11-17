@@ -15,6 +15,11 @@ import type {
   CompanyToolClass,
   ToolClassAudience,
 } from "@grasp-os/shared/connect";
+import type {
+  InstructionFileRef,
+  InstructionFileText,
+  InstructionsApi,
+} from "@grasp-os/shared/instruction-files";
 import type { Member } from "@grasp-os/shared/members";
 import type { AppClassAudience } from "@grasp-os/shared/stephen-reach";
 import { i18n } from "@lingui/core";
@@ -33,6 +38,8 @@ import { afterEach, describe, expect, it } from "vite-plus/test";
 import { AgentPage } from "./agent-page.tsx";
 import type { AgentTab, FirstAgentAccess } from "./agent-page.tsx";
 import { NewAgent } from "./new-agent.tsx";
+import { agentInstructionsFor } from "./unsaved-instructions.ts";
+import type { UnsavedInstructions } from "./unsaved-instructions.ts";
 
 // One agent's page and the new agent's page against core's connections
 // API as they reach it over RPC (the boundary from the web app), faked:
@@ -54,7 +61,6 @@ const stephen: Agent = {
   name: "Stephen",
   face: "stephen",
   job: "Answers from what the company told Grasp.",
-  instructions: "",
   modelRole: null,
   model: null,
   state: "on",
@@ -92,6 +98,14 @@ const firstAccess: FirstAgentAccess = {
 /** The models the organization chose. */
 const models = ["anthropic/claude-sonnet-4-5"];
 
+/** Whether the page says the Brain couldn't be reached, as the fake refuses. */
+const saysOutOfReach = (): boolean =>
+  document.body.textContent.includes("The Brain can't be reached. Try again.");
+
+/** The agent whose instruction file `file` is. */
+const agentOf = (file: InstructionFileRef): string =>
+  file.scope === "agent" ? file.agentId : "not an agent's";
+
 /** Core's agents, kept as an admin makes and changes them, and each change asked. */
 const fakeConnections = () => {
   const asked: unknown[][] = [];
@@ -100,6 +114,37 @@ const fakeConnections = () => {
   let documents: (AgentDocument & { agentId: string })[] = [];
   const settings = new Map<string, AgentSettings>();
   const apps = new Map<string, AgentApp[]>();
+  // Each agent's instruction file, by its ID, as core's
+  // `session.instructions` keeps it.
+  const files = new Map<string, InstructionFileText>();
+  // Saves to refuse, as a Brain out of reach would, before any is kept.
+  const outOfReach = { saves: 0, reads: 0 };
+  const instructions: InstructionsApi = {
+    read: async (file) => {
+      await Promise.resolve();
+      if (outOfReach.reads > 0) {
+        outOfReach.reads -= 1;
+        throw new Error("The Brain can't be reached. Try again.");
+      }
+      return files.get(agentOf(file)) ?? null;
+    },
+    save: async ({ file, text, after }) => {
+      await Promise.resolve();
+      asked.push(["told", agentOf(file), text]);
+      if (outOfReach.saves > 0) {
+        outOfReach.saves -= 1;
+        throw new Error("The Brain can't be reached. Try again.");
+      }
+      // As core refuses a save over a version it didn't start from.
+      const now = files.get(agentOf(file));
+      if ((now?.version ?? 0) !== after) {
+        throw new Error("Someone saved this instruction file since.");
+      }
+      const version = after + 1;
+      files.set(agentOf(file), { version, text });
+      return { version };
+    },
+  };
   const changed = (id: string, change: Partial<Agent>): void => {
     agents = agents.map((agent) =>
       agent.id === id
@@ -326,16 +371,19 @@ const fakeConnections = () => {
       }
     },
   };
-  return { connections, asked };
+  return { connections, instructions, outOfReach, asked };
 };
 
-type Connections = ReturnType<typeof fakeConnections>["connections"];
+type Fake = ReturnType<typeof fakeConnections>;
+type Connections = Fake["connections"];
 
 let root: Root | undefined;
 
 /** What the page's route read. */
 interface Shown {
   agents: Agent[];
+  instructions: Record<string, InstructionFileText | null | undefined>;
+  unsaved: Record<string, UnsavedInstructions | undefined>;
   settings: Record<string, AgentSettings>;
   wakes: Record<string, AgentWake[]>;
   documents: Record<string, AgentDocument[]>;
@@ -377,6 +425,9 @@ const Page = ({
       }}
       documents={data.documents[agent.id]}
       editable={editable}
+      // Read only for whoever may change it, as its route reads it.
+      instructions={data.instructions[agent.id]}
+      unsaved={data.unsaved[agent.id]}
       first={agent.id === data.agents.at(0)?.id}
       firstAccess={agent.id === data.agents.at(0)?.id ? firstAccess : undefined}
       models={models}
@@ -392,12 +443,21 @@ const Page = ({
   );
 };
 
-/** `open` on what `connections` holds, for the company's admin when `editable`. */
-const shown = async (connections: Connections, open: Open, editable = true) => {
+/**
+ * `open` on what `fake` holds, for the company's admin when `editable`.
+ */
+const shown = async (
+  { connections, instructions }: Fake,
+  open: Open,
+  editable = true
+) => {
   const core = {
     withSession: async <T,>(
-      action: (session: { connections: Connections }) => Promise<T>
-    ): Promise<T> => await action({ connections }),
+      action: (session: {
+        connections: Connections;
+        instructions: InstructionsApi;
+      }) => Promise<T>
+    ): Promise<T> => await action({ connections, instructions }),
   };
   const load = async (): Promise<Shown> => {
     const agents = await connections.agents();
@@ -423,8 +483,25 @@ const shown = async (connections: Connections, open: Open, editable = true) => {
         await connections.agentDocuments(id),
       ])
     );
+    // Each agent's file and what its New agent page couldn't save, read
+    // as the route reads them.
+    const told = await Promise.all(
+      agents.map(
+        async ({ id }) =>
+          [
+            id,
+            await agentInstructionsFor({ instructions }, id, editable),
+          ] as const
+      )
+    );
     return {
       agents,
+      instructions: Object.fromEntries(
+        told.map(([id, { instructions: file }]) => [id, file])
+      ),
+      unsaved: Object.fromEntries(
+        told.map(([id, { unsaved }]) => [id, unsaved])
+      ),
       settings: Object.fromEntries(read),
       wakes: Object.fromEntries(woken),
       documents: Object.fromEntries(kept),
@@ -586,16 +663,24 @@ const pick = async (...files: File[]) => {
 const claire = {
   name: "Claire",
   job: "Chases unpaid invoices.",
-  instructions: "Answer only about invoices.",
   face: "stephen",
   model: null,
   modelRole: null,
 };
 
-/** Core with an agent named Claire an admin made earlier, and nothing asked since. */
+/** What Claire is told, in her instruction file. */
+const claireTold = "Answer only about invoices.";
+
+/** Core with an agent named Claire an admin made and told earlier, and nothing asked since. */
 const withClaire = async () => {
   const fake = fakeConnections();
-  await fake.connections.makeAgent(claire);
+  const made = await fake.connections.makeAgent(claire);
+  await fake.instructions.save({
+    file: { scope: "agent", agentId: made.id },
+    change: "told-earlier",
+    text: claireTold,
+    after: 0,
+  });
   fake.asked.length = 0;
   return fake;
 };
@@ -610,39 +695,160 @@ describe("an agent's page", () => {
   });
 
   it("has the first agent's reach on its own page, and no choice of the kind another agent has", async () => {
-    const { connections } = fakeConnections();
-    await shown(connections, { agent: "Stephen", tab: "access" });
+    const fake = fakeConnections();
+    await shown(fake, { agent: "Stephen", tab: "access" });
     expect(choice("Who may use Stephen")).toBeNull();
     expect(document.body.textContent).toContain("Where people reach him");
     expect(document.querySelector("a[href='/settings/stephen']")).toBeNull();
   });
 
   it("makes an agent from what an admin types, and leads to its access", async () => {
-    const { connections, asked } = fakeConnections();
-    const router = await shown(connections, "new");
+    const fake = fakeConnections();
+    const { asked } = fake;
+    const router = await shown(fake, "new");
     await set(field("Name"), " Claire ", "input");
     await set(field("What it is for"), "Chases unpaid invoices.", "input");
-    await set(field("Instructions"), "Answer only about invoices.", "input");
+    await set(field("Instructions"), claireTold, "input");
     await press(button("Make agent"));
     expect(asked).toStrictEqual([
       ["make", claire],
+      // What it is told: its instruction file's first version.
+      ["told", "agent-1", claireTold],
       ["work out", "agent-1"],
     ]);
     expect(router.state.location.href).toBe("/agents/agent-1?tab=access");
   });
 
+  it("refuses instructions their save would refuse, counted as it counts them, before anything is made", async () => {
+    const fake = fakeConnections();
+    const { asked } = fake;
+    const router = await shown(fake, "new");
+    // Under the limit as typed, over it once each & is escaped.
+    const typed = `${"&".repeat(10)}${"x".repeat(7980)}`;
+    await set(field("Name"), "Claire", "input");
+    await set(field("Instructions"), typed, "input");
+    await press(button("Make agent"));
+    expect({
+      length: typed.length,
+      asked,
+      at: router.state.location.href,
+      said: document.body.textContent.includes(
+        "This instruction file is over its size limit."
+      ),
+      kept: field("Instructions").value === typed,
+    }).toStrictEqual({
+      length: 7990,
+      asked: [],
+      at: "/",
+      said: true,
+      kept: true,
+    });
+  });
+
+  it("keeps instructions it couldn't save while their file can't be read either, shows them once it can, and drops them once saved", async () => {
+    const fake = fakeConnections();
+    fake.outOfReach.saves = 1;
+    await shown(fake, "new");
+    await set(field("Name"), "Claire", "input");
+    await set(field("Instructions"), claireTold, "input");
+    await press(button("Make agent"));
+    /** The agent's page, opened again, as the address it was sent to. */
+    const reopened = async (): Promise<void> => {
+      act(() => {
+        root?.unmount();
+      });
+      document.body.replaceChildren();
+      await shown(fake, { agent: "Claire", tab: "instructions" });
+    };
+    // The Brain still out of reach: no file read, for either agent.
+    fake.outOfReach.reads = 2;
+    await reopened();
+    const unreadable = document.body.textContent.includes("Not shown");
+    await reopened();
+    const readable = {
+      text: field("Instructions").value,
+      said: saysOutOfReach(),
+    };
+    await press(button("Save"));
+    await reopened();
+    expect({
+      unreadable,
+      readable,
+      afterSave: { text: field("Instructions").value, said: saysOutOfReach() },
+      saved: await fake.instructions.read({
+        scope: "agent",
+        agentId: "agent-1",
+      }),
+    }).toStrictEqual({
+      unreadable: true,
+      readable: { text: claireTold, said: true },
+      // Saved, nothing is handed over again: the editor shows the file.
+      afterSave: { text: claireTold, said: false },
+      saved: { version: 1, text: claireTold },
+    });
+  });
+
+  it("makes the agent all the same when its instructions can't be saved, opens them on its page unsaved with why, and saves them once on a press", async () => {
+    const fake = fakeConnections();
+    const { asked } = fake;
+    fake.outOfReach.saves = 1;
+    const router = await shown(fake, "new");
+    await set(field("Name"), "Claire", "input");
+    await set(field("Instructions"), claireTold, "input");
+    await press(button("Make agent"));
+    const at = router.state.location.href;
+    act(() => {
+      root?.unmount();
+    });
+    document.body.replaceChildren();
+    // Its page, as the address it was sent to opens it.
+    await shown(fake, { agent: "Claire", tab: "instructions" });
+    const shownThen = {
+      text: field("Instructions").value,
+      said: document.body.textContent.includes(
+        "The Brain can't be reached. Try again."
+      ),
+    };
+    await press(button("Save"));
+    expect({
+      at,
+      shownThen,
+      asked,
+      saved: await fake.instructions.read({
+        scope: "agent",
+        agentId: "agent-1",
+      }),
+      saidAfter: document.body.textContent.includes(
+        "The Brain can't be reached. Try again."
+      ),
+    }).toStrictEqual({
+      at: "/agents/agent-1?tab=instructions",
+      shownThen: { text: claireTold, said: true },
+      asked: [
+        ["make", { ...claire, job: "" }],
+        ["told", "agent-1", claireTold],
+        ["told", "agent-1", claireTold],
+        ["work out", "agent-1"],
+      ],
+      saved: { version: 1, text: claireTold },
+      saidAfter: false,
+    });
+  });
+
   it("makes an agent of the person's own for someone who isn't an admin, with no choice of whose, and opens its page", async () => {
-    const { connections, asked } = fakeConnections();
-    const router = await shown(connections, "new", false);
+    const fake = fakeConnections();
+    const { asked } = fake;
+    const router = await shown(fake, "new", false);
     const whose = document.querySelectorAll("input[name='whose']").length;
     await set(field("Name"), "Claire", "input");
     await set(field("What it is for"), "Chases unpaid invoices.", "input");
-    await set(field("Instructions"), "Answer only about invoices.", "input");
+    await set(field("Instructions"), claireTold, "input");
     await press(button("Make agent"));
     expect({ whose, asked, at: router.state.location.href }).toStrictEqual({
       whose: 0,
       asked: [
         ["make own", claire],
+        ["told", "agent-1", claireTold],
         ["work out", "agent-1"],
       ],
       at: "/agents/agent-1",
@@ -650,20 +856,21 @@ describe("an agent's page", () => {
   });
 
   it("offers an admin no agent of their own while the company has them off", async () => {
-    const { connections } = fakeConnections();
-    await shown(connections, "new");
+    const fake = fakeConnections();
+    await shown(fake, "new");
     // Shown with the company's setting off, as its route reads it.
     act(() => {
       root?.unmount();
     });
     document.body.replaceChildren();
-    await shown(connections, "new-own-off");
+    await shown(fake, "new-own-off");
     expect(document.querySelectorAll("input[name='whose']")).toHaveLength(0);
   });
 
   it("lets an admin make an agent just for themselves instead of one for the company", async () => {
-    const { connections, asked } = fakeConnections();
-    await shown(connections, "new");
+    const fake = fakeConnections();
+    const { asked } = fake;
+    await shown(fake, "new");
     const mine = document.querySelector("input[name='whose'][value='own']");
     if (!(mine instanceof HTMLElement)) {
       throw new TypeError("Expected the choice of whose it is");
@@ -671,19 +878,21 @@ describe("an agent's page", () => {
     await press(mine);
     await set(field("Name"), "Claire", "input");
     await set(field("What it is for"), "Chases unpaid invoices.", "input");
-    await set(field("Instructions"), "Answer only about invoices.", "input");
+    await set(field("Instructions"), claireTold, "input");
     await press(button("Make agent"));
     expect(asked).toStrictEqual([
       ["make own", claire],
+      ["told", "agent-1", claireTold],
       ["work out", "agent-1"],
     ]);
   });
 
   it("shows a person's own agent as theirs alone, with no audience, classes or schedule to set, and saves what they change", async () => {
-    const { connections, asked } = fakeConnections();
+    const fake = fakeConnections();
+    const { connections, asked } = fake;
     await connections.makeOwnAgent(claire);
     asked.length = 0;
-    await shown(connections, { agent: "Claire" });
+    await shown(fake, { agent: "Claire" });
     const tabs = [...document.querySelectorAll("[role='tab']")].map((each) =>
       each.textContent?.trim()
     );
@@ -704,13 +913,14 @@ describe("an agent's page", () => {
   });
 
   it("offers a person's own agent to the company from its page, and takes the offer back", async () => {
-    const { connections, asked } = fakeConnections();
+    const fake = fakeConnections();
+    const { connections, asked } = fake;
     await connections.makeOwnAgent(claire);
     asked.length = 0;
-    await shown(connections, { agent: "Claire" });
+    await shown(fake, { agent: "Claire" });
     await press(button("Offer to the company"));
     const offered = document.body.textContent.includes(
-      "Your company's admins can now read what Claire is told"
+      "Your company's admins may take Claire on. What you told it doesn't go with it"
     );
     await press(button("Take the offer back"));
     expect({ offered, asked }).toStrictEqual({
@@ -723,18 +933,24 @@ describe("an agent's page", () => {
   });
 
   it("works out a new agent's apps from its instructions as it is made", async () => {
-    const { connections, asked } = fakeConnections();
-    await shown(connections, "new");
+    const fake = fakeConnections();
+    const { asked } = fake;
+    await shown(fake, "new");
     await set(field("Name"), "Claire", "input");
     await set(field("What it is for"), "Chases unpaid invoices.", "input");
     await set(field("Instructions"), "Check Gmail for late payers.", "input");
     await press(button("Make agent"));
-    expect(asked.map(([what]) => what)).toStrictEqual(["make", "work out"]);
+    expect(asked.map(([what]) => what)).toStrictEqual([
+      "make",
+      "told",
+      "work out",
+    ]);
   });
 
   it("works its apps out from its instructions on a press and as they are saved, says what it turned on, and turns on what it suggests only on a press", async () => {
-    const { connections, asked } = await withClaire();
-    await shown(connections, { agent: "Claire", tab: "instructions" });
+    const fake = await withClaire();
+    const { asked } = fake;
+    await shown(fake, { agent: "Claire", tab: "instructions" });
     await press(button("Work out from its instructions"));
     const said = document.body.textContent;
     await press(button("Turn on"));
@@ -759,25 +975,22 @@ describe("an agent's page", () => {
         ["work out", "agent-1"],
         ["class", "agent-1", "reach-others", { who: "asClass" }],
         ["app", "agent-1", "native:google", false],
-        [
-          "change",
-          "agent-1",
-          { ...claire, instructions: "Answer about HubSpot deals too." },
-        ],
+        ["told", "agent-1", "Answer about HubSpot deals too."],
         ["work out", "agent-1"],
       ],
     });
   });
 
   it("offers no company agent to the company", async () => {
-    const { connections } = await withClaire();
-    await shown(connections, { agent: "Claire" });
+    const fake = await withClaire();
+    await shown(fake, { agent: "Claire" });
     expect(document.body.textContent).not.toContain("Offer to the company");
   });
 
   it("opens a new agent reaching nobody, and saves whom it answers and what it may do as an admin chooses them", async () => {
-    const { connections, asked } = await withClaire();
-    await shown(connections, { agent: "Claire", tab: "access" });
+    const fake = await withClaire();
+    const { asked } = fake;
+    await shown(fake, { agent: "Claire", tab: "access" });
     const who = choice("Who may use Claire");
     const readOwn = choice("Read their own, for Claire");
     if (who === null || readOwn === null) {
@@ -797,8 +1010,9 @@ describe("an agent's page", () => {
   });
 
   it("saves a new name with the rest of the agent as it was", async () => {
-    const { connections, asked } = await withClaire();
-    await shown(connections, { agent: "Claire" });
+    const fake = await withClaire();
+    const { asked } = fake;
+    await shown(fake, { agent: "Claire" });
     await set(field("Name"), "Clara", "input");
     await press(button("Save"));
     expect(asked).toStrictEqual([
@@ -807,8 +1021,9 @@ describe("an agent's page", () => {
   });
 
   it("pauses an agent from its heading, and says it is paused", async () => {
-    const { connections, asked } = await withClaire();
-    await shown(connections, { agent: "Claire" });
+    const fake = await withClaire();
+    const { asked } = fake;
+    await shown(fake, { agent: "Claire" });
     await press(onSwitch());
     expect(asked).toStrictEqual([["paused", "agent-1", true]]);
     expect(document.querySelector("h1")?.parentElement?.textContent).toContain(
@@ -818,8 +1033,9 @@ describe("an agent's page", () => {
   });
 
   it("offers someone who isn't the company's admin nothing to change", async () => {
-    const { connections, asked } = await withClaire();
-    await shown(connections, { agent: "Claire" }, false);
+    const fake = await withClaire();
+    const { asked } = fake;
+    await shown(fake, { agent: "Claire" }, false);
     expect({
       name: field("Name").disabled,
       save: button("Save").disabled,
@@ -836,8 +1052,8 @@ describe("an agent's page", () => {
   });
 
   it("says why an agent wasn't made on the page it was typed on, and keeps what was typed", async () => {
-    const { connections } = fakeConnections();
-    const router = await shown(connections, "new");
+    const fake = fakeConnections();
+    const router = await shown(fake, "new");
     await set(field("Name"), "Stephen", "input");
     await press(button("Make agent"));
     expect(document.body.textContent).toContain(
@@ -848,8 +1064,9 @@ describe("an agent's page", () => {
   });
 
   it("keeps what is typed and not yet saved while the agent is paused, and while another tab is looked at", async () => {
-    const { connections, asked } = await withClaire();
-    await shown(connections, { agent: "Claire", tab: "instructions" });
+    const fake = await withClaire();
+    const { asked } = fake;
+    await shown(fake, { agent: "Claire", tab: "instructions" });
     await set(field("Instructions"), "A draft, not saved.", "input");
     // Paused: core is asked and the page read again.
     await press(onSwitch());
@@ -864,14 +1081,15 @@ describe("an agent's page", () => {
     // And it is the draft that is saved.
     await press(button("Save"));
     expect(asked.slice(-2)).toStrictEqual([
-      ["change", "agent-1", { ...claire, instructions: "A draft, not saved." }],
+      ["told", "agent-1", "A draft, not saved."],
       ["work out", "agent-1"],
     ]);
   });
 
   it("adds a time an agent works on its own, as a schedule core keeps, and pauses and removes it", async () => {
-    const { connections, asked } = fakeConnections();
-    await shown(connections, { agent: "Stephen", tab: "schedule" });
+    const fake = fakeConnections();
+    const { asked } = fake;
+    await shown(fake, { agent: "Stephen", tab: "schedule" });
     await set(field("At, in the company's time zone"), "07:30", "input");
     await set(
       field("What to ask it each time"),
@@ -906,8 +1124,9 @@ describe("an agent's page", () => {
   });
 
   it("keeps what is typed of a new time while another change saves, and when core refuses it", async () => {
-    const { connections, asked } = fakeConnections();
-    await shown(connections, { agent: "Stephen", tab: "schedule" });
+    const fake = fakeConnections();
+    const { asked } = fake;
+    await shown(fake, { agent: "Stephen", tab: "schedule" });
     await set(field("What to ask it each time"), "refuse this", "input");
     // Another change on the page saves and the page is read again.
     await press(onSwitch());
@@ -920,8 +1139,8 @@ describe("an agent's page", () => {
   });
 
   it("shows the time zone a wake-up was made in", async () => {
-    const { connections } = fakeConnections();
-    await shown(connections, { agent: "Stephen", tab: "schedule" });
+    const fake = fakeConnections();
+    await shown(fake, { agent: "Stephen", tab: "schedule" });
     await set(field("What to ask it each time"), "Check the inbox.", "input");
     await press(button("Add a time"));
     expect(document.body.textContent).toContain(
@@ -930,8 +1149,9 @@ describe("an agent's page", () => {
   });
 
   it("saves each card's own fields over the agent as core has it now, never undoing what another card saved", async () => {
-    const { connections, asked } = await withClaire();
-    await shown(connections, { agent: "Claire" });
+    const fake = await withClaire();
+    const { asked } = fake;
+    await shown(fake, { agent: "Claire" });
     const pen = document.querySelector("input[aria-label='Pen']");
     const model = document.querySelector("select");
     if (!(pen instanceof HTMLElement) || model === null) {
@@ -972,8 +1192,9 @@ describe("an agent's page", () => {
   });
 
   it("gives an agent the files an admin picks, each with its name and content, lists them, and removes one", async () => {
-    const { connections, asked } = await withClaire();
-    await shown(connections, { agent: "Claire", tab: "instructions" });
+    const fake = await withClaire();
+    const { asked } = fake;
+    await shown(fake, { agent: "Claire", tab: "instructions" });
     await pick(
       new File(["# Close\n\nTwo signatures."], "Close checklist.md"),
       new File(["Net 30."], "Terms.txt")
@@ -1012,8 +1233,9 @@ describe("an agent's page", () => {
   });
 
   it("says why a file wasn't taken, keeps those taken before it, and stops there", async () => {
-    const { connections, asked } = await withClaire();
-    await shown(connections, { agent: "Claire", tab: "instructions" });
+    const fake = await withClaire();
+    const { asked } = fake;
+    await shown(fake, { agent: "Claire", tab: "instructions" });
     await pick(
       new File(["a"], "a.md"),
       new File(["not a PDF"], "policy.pdf"),
@@ -1033,8 +1255,9 @@ describe("an agent's page", () => {
   });
 
   it("never sends core a file larger than it takes, or of a type it doesn't, and says why", async () => {
-    const { connections, asked } = await withClaire();
-    await shown(connections, { agent: "Claire", tab: "instructions" });
+    const fake = await withClaire();
+    const { asked } = fake;
+    await shown(fake, { agent: "Claire", tab: "instructions" });
     const large = new File(["a"], "large.md");
     Object.defineProperty(large, "size", { value: chatFileMaxBytes + 1 });
     await pick(large);
@@ -1052,13 +1275,14 @@ describe("an agent's page", () => {
   });
 
   it("shows someone who isn't the company's admin an agent's documents, with no way to add or remove one", async () => {
-    const { connections, asked } = await withClaire();
+    const fake = await withClaire();
+    const { connections, asked } = fake;
     await connections.addAgentDocument("agent-1", {
       name: "Terms.txt",
       bytes: new TextEncoder().encode("Net 30."),
     });
     asked.length = 0;
-    await shown(connections, { agent: "Claire", tab: "instructions" }, false);
+    await shown(fake, { agent: "Claire", tab: "instructions" }, false);
     expect({
       listed: document.body.textContent.includes("Terms.txt"),
       add: document.body.textContent.includes("Add document"),

@@ -16,6 +16,9 @@
  */
 export const brainModules = {
   "apps/core/src/instruction-files.ts": "instructions",
+  // An agent's apps, worked out from its instruction file by a model for
+  // whoever may change the agent: its own surface, each export probed.
+  "apps/core/src/agent-app-access.ts": "agentApps",
   // The skills' rules (GRA-1826): its own surface, each export probed.
   "apps/core/src/brain-skills.ts": "skills",
   // Runs core's workBrain on the clock, and hands nothing of it on.

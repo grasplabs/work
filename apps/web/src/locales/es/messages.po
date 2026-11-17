@@ -9325,10 +9325,6 @@ msgstr "Anotado: {name}. La conectaremos contigo. Mientras tanto, comprueba qui�
 msgid "Noted. We’ll get in touch to put it on the laptops with you."
 msgstr "Anotado. Nos pondremos en contacto para instalarlo contigo en los portátiles."
 
-#: src/agents/agent-share.tsx
-msgid "Nothing beyond Grasp's own rules."
-msgstr "Nada más allá de las reglas propias de Grasp."
-
 #: src/routes/_shell.integrations.index.tsx
 msgid "Nothing connected yet."
 msgstr "Aún no hay nada conectado."
@@ -9573,8 +9569,8 @@ msgid "Offer to the company"
 msgstr "Ofrecer a la empresa"
 
 #: src/agents/agent-share.tsx
-msgid "Offered on {since}. Your company's admins can now read what {name} is told, and may take it on."
-msgstr "Ofrecido el {since}. Los administradores de tu empresa ya pueden leer lo que se le dice a {name} y quedárselo."
+msgid "Offered on {since}. Your company's admins may take {name} on. What you told it doesn't go with it, and once they take it on, you can no longer open it."
+msgstr "Ofrecido el {since}. Los administradores de tu empresa pueden quedarse con {name}. Lo que le dijiste no se va con él y, una vez que se lo queden, ya no podrás abrirlo."
 
 #: src/agents/agent-share.tsx
 msgid "Offered to the company"
@@ -15879,10 +15875,6 @@ msgctxt "what an app is for, in a sentence"
 msgid "What it is for"
 msgstr "Para qué sirve"
 
-#: src/agents/agent-share.tsx
-msgid "What it is told"
-msgstr "Lo que se le dice"
-
 #: src/agents/agent-page.tsx
 #: src/chat/agent-draft-card.tsx
 msgid "What it may do"
@@ -15893,6 +15885,7 @@ msgid "What it returned"
 msgstr "Qué devolvió"
 
 #: src/agents/agent-form.tsx
+#: src/agents/agent-page.tsx
 msgid "What it should know and how it should work. Grasp's own rules always hold over these."
 msgstr "Qué debe saber y cómo debe trabajar. Las reglas de Grasp siempre están por encima de estas."
 

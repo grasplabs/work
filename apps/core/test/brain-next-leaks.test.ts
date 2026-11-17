@@ -453,6 +453,7 @@ describe(
         "another agent's instruction file": markerWord(),
         "an App's instruction file the outsider doesn't build": markerWord(),
         "an App's instruction file the outsider uses": markerWord(),
+        "the holder's own agent's instruction file": markerWord(),
         "the holder's upload for only them": markerWord(),
         "an upload for a team the outsider isn't in": markerWord(),
         "what the holder's agent fetched through a connection": markerWord(),
@@ -484,6 +485,7 @@ describe(
         "another agent's instruction file": agentFileMarker,
         "an App's instruction file the outsider doesn't build": appFileMarker,
         "an App's instruction file the outsider uses": usedAppFileMarker,
+        "the holder's own agent's instruction file": ownAgentFileMarker,
         "the holder's upload for only them": ownUploadMarker,
         "an upload for a team the outsider isn't in": teamUploadMarker,
         "what the holder's agent fetched through a connection": captureMarker,
@@ -544,11 +546,28 @@ describe(
           after: 0,
         });
       }
+      // An agent of the holder's own, told something only they wrote:
+      // saved on their session, so core keeps it in their own store.
+      const holdersOwnAgent = await holderApi.api.connections.makeOwnAgent({
+        name: `Own ${unique()}`,
+        face: "pen",
+        job: "",
+        modelRole: null,
+      });
+      await saveInstructions(
+        holderApi.api,
+        { scope: "agent", agentId: holdersOwnAgent.id },
+        `Instructions ${sharedWord} ${ownAgentFileMarker}`
+      );
+      const hiddenOwnAgents = [
+        { agentId: holdersOwnAgent.id, ownerId: holder },
+      ];
       const instructionMarkers = [
         holderFileMarker,
         agentFileMarker,
         appFileMarker,
         usedAppFileMarker,
+        ownAgentFileMarker,
       ];
       // The holder's own skill, named by its marker, written and asked to
       // be shared on the holder's own session: theirs alone, and the share
@@ -603,6 +622,7 @@ describe(
         "another agent's instruction file": agentFileMarker,
         "an App's instruction file the outsider doesn't build": appFileMarker,
         "an App's instruction file the outsider uses": usedAppFileMarker,
+        "the holder's own agent's instruction file": ownAgentFileMarker,
       };
       const instructionGroups = [
         "company",
@@ -1008,6 +1028,7 @@ describe(
         ),
         hiddenUploads: [ownUpload.id, teamUpload.id],
         hiddenInstructionFiles: [holderFile, agentFile, appFile, usedAppFile],
+        hiddenOwnAgents,
         hiddenSkills: [holderSkillMarker],
         hiddenTeamSkills: [{ team: secretTeam, name: teamSkillMarker }],
         usedApps,

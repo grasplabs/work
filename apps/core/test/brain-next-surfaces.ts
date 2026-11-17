@@ -32,7 +32,6 @@ import {
   brainOf,
   currentReadMax,
   handOversMax,
-  instructionsMaxLength,
   listPageMax,
   listPrefixesMax,
   modelNameMaxLength,
@@ -73,6 +72,7 @@ import {
   permissionIdSchema,
   workspaceIdSchema,
 } from "@grasp-os/shared/ids";
+import { instructionsMaxLength } from "@grasp-os/shared/instruction-files";
 import type { Authority } from "@grasp-os/shared/permissions";
 import { authoritySchema } from "@grasp-os/shared/permissions";
 import type { Identity } from "@grasp-os/shared/rpc";
@@ -81,6 +81,7 @@ import { DurableObject, env } from "cloudflare:workers";
 import { z } from "zod";
 
 import { embedInProcess } from "../../../packages/embed/test/test-models.ts";
+import * as agentAppAccess from "../src/agent-app-access.ts";
 import { addMember, removeMember } from "../src/app-members.ts";
 import { organizationId } from "../src/auth/auth.ts";
 import { memberOf } from "../src/auth/identity.ts";
@@ -151,6 +152,13 @@ export interface Probing {
    * Each must answer exactly as a file never written.
    */
   hiddenInstructionFiles: readonly InstructionFile[];
+  /**
+   * Agents of someone else's own (core's agents.ts), each with a file
+   * holding every marker, kept in its owner's store: none may be read,
+   * changed or worked out by the reader, nor tell them anything an agent
+   * no one made wouldn't. None when absent.
+   */
+  hiddenOwnAgents?: readonly { agentId: string; ownerId: string }[];
   /**
    * Two Apps the reader uses and doesn't build (core's own records), one
    * whose file holds every marker and one with none: each asked of must
@@ -956,15 +964,17 @@ const hiddenAppsOf = ({
 
 /** The hidden files of `probing` of `scope`: their ids. */
 const hiddenIdsOf = (
-  { hiddenInstructionFiles }: Probing,
+  { hiddenInstructionFiles, hiddenOwnAgents = [] }: Probing,
   scope: "agent" | "person"
-): string[] =>
-  hiddenInstructionFiles.flatMap((file) => {
+): string[] => [
+  ...hiddenInstructionFiles.flatMap((file) => {
     if (scope === "agent") {
       return file.scope === "agent" ? [file.agentId] : [];
     }
     return file.scope === "person" ? [file.personId] : [];
-  });
+  }),
+  ...(scope === "agent" ? hiddenOwnAgents.map(({ agentId }) => agentId) : []),
+];
 
 /** The kinds of conversation a context names. */
 /** Every kind of chat an agent works in, as its instruction files see it. */
@@ -2470,7 +2480,11 @@ export const coreProbes = {
   // (instruction-files.ts); which agent's file is the caller's to pick
   // too. So it is held here to what that reader may read: never another
   // person's file, nor an App's it wasn't told they build.
-  readInstructionFilesAs: async ({ personId, hiddenInstructionFiles }) => {
+  readInstructionFilesAs: async ({
+    personId,
+    hiddenInstructionFiles,
+    hiddenOwnAgents = [],
+  }) => {
     const read = async (
       name: string,
       files: InstructionFile[],
@@ -2482,9 +2496,18 @@ export const coreProbes = {
           await coreBrain.readInstructionFilesAs(env, personId, files),
         about
       );
-    const hidden = hiddenInstructionFiles.filter(
-      ({ scope }) => scope === "person" || scope === "app"
-    );
+    const hidden: InstructionFile[] = [
+      ...hiddenInstructionFiles.filter(
+        ({ scope }) => scope === "person" || scope === "app"
+      ),
+      // Someone else's own agent's, placed with its owner as core places
+      // it from its records: in their store, never the reader's.
+      ...hiddenOwnAgents.map(({ agentId, ownerId }) => ({
+        scope: "agent" as const,
+        agentId,
+        ownerId,
+      })),
+    ];
     const asked: Answer[] = [
       await read("a file never written", [unwrittenFile()], "nothing"),
     ];
@@ -3881,6 +3904,38 @@ export const instructionProbes = {
           personal: true,
         })
       );
+    }
+    // Someone else's own agent acting for them: told nothing its owner
+    // wrote, as an agent no one made is told nothing.
+    for (const { agentId } of probing.hiddenOwnAgents ?? []) {
+      const like = "as someone else's own agent";
+      const actingAs = (id: string) =>
+        authoritySchema.parse({
+          subject: { type: "agent", agentId: id },
+          onBehalfOf: personId,
+          mode: "interactive",
+        });
+      for (const [kind, context] of conversations) {
+        asked.push(
+          // oxlint-disable-next-line no-await-in-loop -- one at a time
+          await answer(
+            `${like}, ${kind}, nothing`,
+            async () =>
+              await filesOutcome(
+                loadAs(actingAs(`agent-${crypto.randomUUID()}`), context)
+              ),
+            "nothing",
+            `${like}, ${kind}`
+          ),
+          // oxlint-disable-next-line no-await-in-loop -- one at a time
+          await answer(
+            `${like}, ${kind}, hidden`,
+            async () => await filesOutcome(loadAs(actingAs(agentId), context)),
+            "hidden",
+            `${like}, ${kind}`
+          )
+        );
+      }
     }
     const inWorkflow = authoritySchema.parse({ ...agent, mode: "workflow" });
     asked.push(
@@ -10079,6 +10134,92 @@ export const memoriesRpcProbes = {
   Probe
 >;
 
+/**
+ * `call` on each agent of `probing` the reader may not change, as they
+ * are and as an admin of the company with their id, held to `call` on an
+ * agent no one made: refused alike. What it sends a model holds no
+ * marker (the harness scans it).
+ */
+const agentAppAnswers = async (
+  probing: Probing,
+  call: (identity: Identity, agentId: string) => Promise<unknown>
+): Promise<Answer[]> => {
+  const asked: Answer[] = [];
+  const session = sessionOf(probing.personId);
+  const asWho = [
+    ["as themselves", session],
+    ["as an admin", { ...session, role: "admin" }],
+  ] as const;
+  for (const [who, identity] of asWho) {
+    for (const agentId of hiddenIdsOf(probing, "agent")) {
+      const like = `${who}, an agent not theirs ${agentId}`;
+      asked.push(
+        // oxlint-disable-next-line no-await-in-loop -- one at a time
+        await answer(
+          `${like}, nothing`,
+          async () =>
+            await refusalOf(
+              async () => await call(identity, `agent-${crypto.randomUUID()}`)
+            ),
+          "nothing",
+          like
+        ),
+        // oxlint-disable-next-line no-await-in-loop -- one at a time
+        await answer(
+          `${like}, hidden`,
+          async () =>
+            await refusalOf(async () => await call(identity, agentId)),
+          "hidden",
+          like
+        )
+      );
+    }
+  }
+  asked.push(
+    await answer(
+      "an agent no one made",
+      async () =>
+        await refusalOf(
+          async () => await call(session, `agent-${crypto.randomUUID()}`)
+        )
+    ),
+    await answer(
+      "an agent named by the markers",
+      async () => await call(session, probing.markers.join(""))
+    )
+  );
+  return asked;
+};
+
+/** One probe per export of core's agent-app-access.ts. */
+export const agentAppProbes = {
+  listAgentApps: async (probing) =>
+    await agentAppAnswers(
+      probing,
+      async (identity, agentId) =>
+        await agentAppAccess.listAgentApps(env, identity, agentId)
+    ),
+  setAgentApp: async (probing) =>
+    await agentAppAnswers(probing, async (identity, agentId) => {
+      await agentAppAccess.setAgentApp(
+        env,
+        identity,
+        agentId,
+        `composio:${probing.markers.join("")}`,
+        true
+      );
+    }),
+  // Sends the agent's instruction file to a model, for whoever may change
+  // the agent: never one of someone else's own, whose file holds the
+  // markers.
+  workOutAgentApps: async (probing) =>
+    await agentAppAnswers(
+      probing,
+      async (identity, agentId) =>
+        await agentAppAccess.workOutAgentApps(env, identity, agentId)
+    ),
+} satisfies Record<keyof typeof agentAppAccess, Probe>;
+
 /** One way into the Brain: a module, or the store's class, and its probes. */
 interface Surface {
   name: string;
@@ -10103,6 +10244,7 @@ export const brainSurfaces = [
     },
   },
   { name: "instructions", module: instructionFiles, probes: instructionProbes },
+  { name: "agentApps", module: agentAppAccess, probes: agentAppProbes },
   { name: "skills", module: brainSkills, probes: skillProbes },
   { name: "recall", module: codeRecall, probes: recallProbes },
   { name: "store", module: BrainStore, probes: storeProbes },
