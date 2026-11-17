@@ -81,7 +81,7 @@ const ProjectForm = ({
   };
   const title = editing === undefined ? t`New project` : t`Change project`;
   return (
-    <DialogContent closeLabel={t`Close`}>
+    <DialogContent>
       <DialogTitle>{title}</DialogTitle>
       <DialogDescription>
         {t`A project groups apps and workflows for a process, a team or a goal. Putting something in it shares it with nobody.`}

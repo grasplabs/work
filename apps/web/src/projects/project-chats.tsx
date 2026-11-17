@@ -108,7 +108,7 @@ export const AddChat = ({
         {t`Add a chat`}
       </Button>
       <Dialog onOpenChange={setOpen} open={open}>
-        <DialogContent closeLabel={t`Close`}>
+        <DialogContent>
           <DialogTitle>{t`Add a chat`}</DialogTitle>
           <DialogBody>
             {offered !== undefined && offered.length === 0 ? (

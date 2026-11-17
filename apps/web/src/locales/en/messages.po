@@ -4321,7 +4321,6 @@ msgstr "Cliffs"
 #: src/knowledge/purge.tsx
 #: src/onboarding/place-picker.tsx
 #: src/projects/project-chats.tsx
-#: src/projects/project-dialog.tsx
 #: src/projects/project-people-stack.tsx
 #: src/routes/_shell.settings.audit.tsx
 #: src/settings/ai-providers.tsx
