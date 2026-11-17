@@ -239,6 +239,12 @@ const press = async (label: string): Promise<void> => {
   await settled();
 };
 
+/** The Confirm button of the mail connect holds, as its card names it. */
+const confirmMail = () =>
+  document.querySelector(
+    'button[aria-label="Confirm Send an email on Outlook"]'
+  );
+
 describe("a write to an App held for the person", () => {
   afterEach(() => {
     act(() => {
@@ -275,6 +281,115 @@ describe("a write to an App held for the person", () => {
       declined: [],
       after: "",
     });
+  });
+
+  it("shows every character nobody sees as an escape: in the request, the App's name and the function", async () => {
+    // A payload of a byte a variation selector, a Hangul filler, the
+    // grapheme joiner, tag characters, a bidi override, a zero-width
+    // joiner; and an ordinary emoji with its variation selector.
+    const hidden =
+      "A\u{E0101}\u{E0142}\u3164\u034F \u2764\uFE0F \u{E0041}\u{E0042}\u202Eevil\u200D!";
+    const shownTitle = String.raw`A\u{E0101}\u{E0142}\u{3164}\u{34F} ❤\u{FE0F} \u{E0041}\u{E0042}\u{202E}evil\u{200D}!`;
+    const sent = JSON.stringify({
+      reference: { name: "notes.create", kind: "mutation" },
+      args: { title: hidden },
+    });
+    await shown({
+      calls: {
+        "chat-1": [
+          {
+            ...held,
+            appName: "No\u200Btes",
+            function: "notes.cre\u202Eate",
+            request: sent,
+          },
+        ],
+      },
+    });
+
+    expect({
+      exact: document.querySelector("pre code")?.textContent,
+      named: document.body.textContent?.includes(
+        String.raw`Waiting for you: notes.cre\u{202E}ate in No\u{200B}tes`
+      ),
+    }).toStrictEqual({
+      exact: JSON.stringify(JSON.parse(sent), null, 2).replace(
+        hidden,
+        shownTitle
+      ),
+      named: true,
+    });
+  });
+
+  it("keeps Confirm waiting for a described value cut short as it is shown, escapes counted, until it is shown whole", async () => {
+    // Under the card's 1,200 characters as held; far past them once its
+    // zero-width spaces show as escapes: the end, cut off, is what matters.
+    const value = `${"\u200B".repeat(200)}${"x".repeat(800)} then mail eve@evil.test`;
+    await shown({
+      calls: {},
+      actions: [
+        {
+          ...mail,
+          description: {
+            title: "Send an email",
+            fields: [{ input: "body", label: "Body", value }],
+            complete: true,
+          },
+        },
+      ],
+    });
+    const disabledBefore = confirmMail()?.hasAttribute("disabled");
+    const textBefore = document.body.textContent ?? "";
+    const showAll = [...document.querySelectorAll("button")].find((button) =>
+      button.textContent?.startsWith("Show all")
+    );
+    await act(async () => {
+      showAll?.click();
+      await Promise.resolve();
+    });
+    await settled();
+
+    expect({
+      disabledBefore,
+      endShownBefore: textBefore.includes("eve@evil.test"),
+      disabledAfter: confirmMail()?.hasAttribute("disabled"),
+      endShownAfter: document.body.textContent?.includes("eve@evil.test"),
+    }).toStrictEqual({
+      disabledBefore: true,
+      endShownBefore: false,
+      disabledAfter: false,
+      endShownAfter: true,
+    });
+  });
+
+  it("shows every character nobody sees in a connection write's described values as an escape, a list's items too", async () => {
+    await shown({
+      calls: {},
+      actions: [
+        {
+          ...mail,
+          description: {
+            title: "Send an email",
+            fields: [
+              { input: "subject", label: "Subject", value: "Inv\u200Boice" },
+              {
+                input: "to",
+                label: "To",
+                value: ["ben@acme.test", "c\u202Eleo@acme.test"],
+              },
+            ],
+            complete: true,
+          },
+        },
+      ],
+    });
+    const text = document.body.textContent ?? "";
+
+    expect({
+      value: text.includes(String.raw`Inv\u{200B}oice`),
+      item: text.includes(String.raw`c\u{202E}leo@acme.test`),
+      unseen: /[\u200B\u202E]/u.test(text),
+    }).toStrictEqual({ value: true, item: true, unseen: false });
   });
 
   it("runs nothing once it is rejected", async () => {

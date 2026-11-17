@@ -493,9 +493,7 @@ export type FromBlueprint = z.input<typeof fromBlueprintSchema>;
 
 /**
  * An App created from a blueprint: its first version holds the
- * blueprint's code, but for its AGENTS.md, a stub naming the
- * blueprint (the blueprint's was written from what its App read, which
- * the copy may not have read), and `permissions` are requests, waiting for
+ * blueprint's code, and `permissions` are requests, waiting for
  * an admin, for what the blueprint declares (`Blueprint.permissions`).
  * Nothing else comes with it: no data, no settings, no runs, no members.
  */
@@ -514,8 +512,8 @@ export interface CreatedFromBlueprint {
  * both changed keeps theirs and is listed in `conflicts`. The App's
  * definition merges as a whole the same way (`definition`, the SHA-256 of
  * the blueprint's now; `definitionConflict` when both changed it), and
- * its config and schema follow it. AGENTS.md is the App's own. Nothing is
- * written until a builder accepts it.
+ * its config and schema follow it. Nothing is written until a builder
+ * accepts it.
  */
 export interface BlueprintUpdate {
   blueprint: string;
@@ -756,8 +754,6 @@ export const appErrors = defineErrorFamily({
   "app.blueprint_not_found": "There's no such blueprint.",
   "app.version_not_found": "The App has no such version.",
   "app.too_large": "The App's files would be over its limits.",
-  "app.agents_too_large":
-    "The App's AGENTS.md would be over its limit. Make it shorter.",
   "app.conflict": "Someone else changed this App at the same time. Try again.",
   "app.not_running": "The App has no current version to run yet.",
   "app.link_taken": "Another App has that link. Choose another.",

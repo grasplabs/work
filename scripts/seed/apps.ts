@@ -101,7 +101,8 @@ export interface AppSeed {
   owner: PersonKey;
   /** The teams it is shared with, and their role in it. */
   teams: { team: TeamName; role: "user" | "builder" }[];
-  agents: string;
+  /** Its instruction file: what a builder's chat about it starts with. */
+  instructions: string;
   workflows: WorkflowSeed[];
 }
 
@@ -257,7 +258,7 @@ const opportunityToCash: AppSeed = {
     { team: "Client onboarding", role: "builder" },
     { team: "Mortgage advice", role: "builder" },
   ],
-  agents: `# Opportunity-to-Cash
+  instructions: `# Opportunity-to-Cash
 
 From a mortgage application to a complete client file in an adviser's hands.
 
@@ -384,7 +385,7 @@ const issueToResolution: AppSeed = {
     { team: "Customer service", role: "builder" },
     { team: "Compliance", role: "user" },
   ],
-  agents: `# Issue-to-Resolution
+  instructions: `# Issue-to-Resolution
 
 Every question and complaint that reaches customer service.
 
@@ -406,7 +407,7 @@ const purchaseToPay: AppSeed = {
     { team: "Finance", role: "builder" },
     { team: "Operations", role: "user" },
   ],
-  agents: `# Purchase-to-Pay
+  instructions: `# Purchase-to-Pay
 
 Supplier invoices, from the inbox to the books.
 
@@ -499,7 +500,7 @@ const recordToReport: AppSeed = {
     "Closing the books and producing the numbers leadership looks at.",
   owner: "eva",
   teams: [{ team: "Finance", role: "builder" }],
-  agents: `# Record-to-Report
+  instructions: `# Record-to-Report
 
 The numbers the board reads.
 
@@ -520,7 +521,7 @@ const riskToCompliance: AppSeed = {
     { team: "Compliance", role: "builder" },
     { team: "Client onboarding", role: "user" },
   ],
-  agents: `# Risk-to-Compliance
+  instructions: `# Risk-to-Compliance
 
 Know-your-customer checks for every new client.
 
@@ -539,7 +540,7 @@ const hireToRetire: AppSeed = {
   description: "Everything around employees, from hiring to leaving.",
   owner: "sanne",
   teams: [],
-  agents: `# Hire-to-Retire
+  instructions: `# Hire-to-Retire
 
 Everything around employees, from hiring to leaving. Nothing runs here yet.
 `,

@@ -1011,8 +1011,8 @@ export const blueprints = sqliteTable(
 /**
  * Where an App created from a blueprint came from (src/app-blueprints.ts):
  * the blueprint, the version of its App a marked one was (null for a
- * built-in), the tree it was copied from, and that tree's code
- * (`codeIdentity`), stored under the App as a version's tree is, for an
+ * built-in), the tree it was copied from, and that tree's code as it was
+ * taken, stored under the App as a version's tree is, for an
  * update to be merged over. Written in the batch that creates the App
  * from the blueprint, and moved on to a built-in's newer code only in the
  * batch that commits an update a builder accepted: unlike
@@ -1055,9 +1055,9 @@ export const appVersions = sqliteTable(
     parent: integer(),
     tree: text().notNull(),
     /**
-     * The hash of the version's code (`codeIdentity`, apps.ts): its files
-     * but AGENTS.md, which agents write and nothing builds or runs. Null
-     * for a version committed before the column, which is no blueprint's.
+     * The hash of the version's code: its tree, the whole of its code.
+     * Null for a version committed before the column, which is no
+     * blueprint's.
      */
     code: text(),
     /**
@@ -6613,7 +6613,7 @@ export const brainOwnStores = sqliteTable("brain_own_stores", {
   parked: integer().notNull(),
   /** Whether a step of its tick last failed, its queue is paused, or its ledger isn't read through. */
   failing: integer({ mode: "boolean" }).notNull(),
-  /** Whether a model ships and its rebuild for that model isn't done. */
+  /** Whether its rebuild for the model core runs isn't done yet. */
   notRebuilt: integer("not_rebuilt", { mode: "boolean" }).notNull(),
   /** Whether its SQLite is near what one object holds (`storeNearLimit`). */
   nearLimit: integer("near_limit", { mode: "boolean" }).notNull(),

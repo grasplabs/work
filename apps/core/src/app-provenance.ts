@@ -42,15 +42,11 @@ import { inList } from "./db/d1.ts";
 // Brain replaced Knowledge (`collection:<id>`): the App may hold what it
 // read there, and nothing can say who may read that now.
 //
-// An App's code is treated as free of provenance, but for its AGENTS.md:
-// that is written from what the App's agents read, and is read only by
-// those who may open the App, so it is under the App's sources like its
-// data. Any
-// other file is taken to hold no data, which nothing checks: builders
-// must not put data into code. A blueprint copy (app-blueprints.ts)
-// doesn't inherit its source's provenance: it has no sources until an
-// admin grants its requests, and its code is the source's, which is why
-// its AGENTS.md isn't copied but starts as a stub.
+// An App's code is treated as free of provenance: every file is taken
+// to hold no data, which nothing checks: builders must not put data into
+// code. A blueprint copy (app-blueprints.ts) doesn't inherit its source's
+// provenance: it has no sources until an admin grants its requests, and
+// its code is the source's.
 //
 // The sources are read once, and each person is decided in memory
 // (`unreadableBy`), so checking a whole team costs a few queries, not a
