@@ -1,6 +1,7 @@
 import type {
   DecisionAnswerInput,
   DecisionView,
+  DecisionWithheld,
 } from "@grasp-os/shared/decisions";
 import {
   AlertDialog,
@@ -26,6 +27,23 @@ import { formatDateTime } from "./format.ts";
 // one-use confirmation the answer needs. Shown by the decision's page and
 // by the page around an App's page, never inside the page's frame: a
 // page can ask to answer, but only the person, here, confirms it.
+
+/**
+ * Why a decision shows nothing of what it asks, and what it takes
+ * (`DecisionView.withheld`): withheld, a rejection alone; or not shown
+ * for now, no answer yet. Wherever it can be answered: its own page, the
+ * confirmation, Today.
+ */
+export const WithheldAskNote = ({
+  withheld,
+}: {
+  withheld: DecisionWithheld;
+}) => {
+  const { t } = useLingui();
+  return withheld === "revoked"
+    ? t`What this decision asks is withheld, so you can only reject it.`
+    : t`What this decision asks can't be shown right now, so it can't be answered yet. Try again in a moment.`;
+};
 
 /** A decision and the answer to confirm, as core gave them for review. */
 export interface PendingConfirmation {
@@ -194,6 +212,12 @@ export const DecisionConfirmDialog = ({
               Grasp records this answer only once you confirm it here. Check
               what is asked and what you answer.
             </Trans>
+            {decision?.withheld === undefined ? null : (
+              <>
+                {" "}
+                <WithheldAskNote withheld={decision.withheld} />
+              </>
+            )}
           </AlertDialogDescription>
         </AlertDialogHeader>
         {decision === undefined || pending === undefined ? null : (

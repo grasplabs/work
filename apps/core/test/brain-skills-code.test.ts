@@ -19,6 +19,7 @@ import { installShippedSkills, selectSkillsFor } from "../src/brain-skills.ts";
 import {
   answerDecision,
   confirmDecision,
+  decisionFor,
   reviewDecision,
 } from "../src/decisions/decisions.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
@@ -396,9 +397,14 @@ const openedIn = async (runId: string): Promise<string> =>
     { timeout: 30_000, interval: 100 }
   );
 
-/** `by`'s answer to `decision`: go on, reviewed and confirmed. */
+/**
+ * `by`'s answer to `decision`, reviewed and confirmed: go on, or decline
+ * one whose ask is withheld, which takes nothing else (GRA-1988). The run
+ * goes on either way.
+ */
 const goOn = async (by: Member, decision: string): Promise<void> => {
-  const answer = { approved: true };
+  const { withheld } = await decisionFor(env, by, decision);
+  const answer = { approved: withheld === undefined };
   const review = await reviewDecision(env, by, decision, answer);
   if (review.state === "recorded") {
     return;

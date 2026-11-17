@@ -62,6 +62,8 @@ import {
 } from "../db/core/schema.ts";
 import { inList } from "../db/d1.ts";
 import { takesExactly } from "../workflows/exact-values.ts";
+import { runsEvidence } from "../workflows/resource-reads.ts";
+import type { EvidenceState } from "../workflows/resource-reads.ts";
 import { removedText } from "../workflows/retention.ts";
 import { tellDecisionFollowers } from "../workflows/run-changes.ts";
 import { oweWake, sendWake } from "../workflows/wakes.ts";
@@ -114,6 +116,19 @@ import type { ReviewContext } from "./confirmations.ts";
 //   while it hasn't ended and no cancel or termination of it was
 //   admitted. What the decision is about (`input`) is part of the review
 //   context.
+// - What a run asks rests on what it read (GRA-1988): a passage it
+//   recalled, a card, what the chat that started it had read. Every read
+//   of a decision checks the run's evidence again (`runsEvidence`, as its
+//   output and files are checked). Once the check refuses it, the
+//   decision is shown withheld (`withheldAskText`, no input), its review
+//   context too, so neither its words nor a fingerprint of them reach
+//   anyone; nobody approves what they can't read, so it takes a rejection
+//   alone (`decision.withheld`), which lets its run go on, to be refused at
+//   its next check (`brain.revoked`). One whose check fails otherwise (a
+//   database or the Brain away) shows nothing of what it asks either
+//   (`uncheckedAskText`), and takes no answer at all
+//   (`decision.unavailable`): an outage is no reason to reject. The next
+//   read whose check succeeds shows it as it is.
 
 type DecisionRow = typeof workflowDecisions.$inferSelect;
 
@@ -802,6 +817,40 @@ export const decisionOutcome = async (
 
 // Person side: the `decisions` RPC (rpc.ts).
 
+/**
+ * What a decision shows in place of what it asks once its run may no
+ * longer read what it read (`runEvidenceHolds`).
+ */
+export const withheldAskText =
+  "What this decision asks is withheld: the run that asked it may no longer read what it read.";
+
+/**
+ * What a decision shows in place of what it asks while its run's
+ * evidence can't be checked (`runsEvidence`): for now.
+ */
+export const uncheckedAskText =
+  "What this decision asks can't be shown right now. Try again in a moment.";
+
+/**
+ * Why `found` takes no `answer` for what it asks, if it takes none: any
+ * answer while its run's evidence can't be checked
+ * (`decision.unavailable`), and an approval of what is withheld from
+ * whoever gives it (`decision.withheld`), a rejection alone taken. An
+ * answer is an approval or a rejection, whatever the contract's response
+ * schema asks besides (`payload`), so every decision has a rejection.
+ */
+const askRefusal = (
+  found: Pick<DecisionWithRun, "evidence">,
+  answer: DecisionAnswerInput
+): "decision.unavailable" | "decision.withheld" | undefined => {
+  if (found.evidence === "unchecked") {
+    return "decision.unavailable";
+  }
+  return found.evidence === "refused" && answer.approved
+    ? "decision.withheld"
+    : undefined;
+};
+
 /** A decision with what the people who answer it see of it. */
 interface DecisionWithRun {
   decision: DecisionRow;
@@ -811,6 +860,11 @@ interface DecisionWithRun {
   /** Whether its run goes on (`runUnended`): an open one takes answers. */
   goesOn: boolean;
   decidedByName: string | null;
+  /**
+   * How its run's evidence stands (`runsEvidence`), as decided as it was
+   * read: unless it holds, what it asks is not shown.
+   */
+  evidence: EvidenceState;
 }
 
 /** A decision's row with its run's, as `decisionWithRun` reads them. */
@@ -821,6 +875,7 @@ const decisionRead = async (db: DrizzleD1Database, id: string) =>
       resourceId: workflowResourceRuns.workflowResourceId,
       resourceName: workflowResources.name,
       resourceVersion: workflowResourceRuns.version,
+      principalId: workflowResourceRuns.principalId,
       goesOn: sql<number>`${runUnended()}`,
       decidedByName: users.name,
     })
@@ -837,15 +892,21 @@ const decisionRead = async (db: DrizzleD1Database, id: string) =>
     .where(eq(workflowDecisions.id, id))
     .get();
 
-/** The run `found` names, with its workflow's name, if it has one. */
+/**
+ * The run `found` names, with its workflow's name and its person, if it
+ * has one.
+ */
 const runOfRead = (
   found: NonNullable<Awaited<ReturnType<typeof decisionRead>>>
-): Pick<DecisionWithRun, "run" | "name"> | undefined => {
+):
+  | (Pick<DecisionWithRun, "run" | "name"> & { principal: string })
+  | undefined => {
   const { decision: row } = found;
   if (
     row.resourceRunId !== null &&
     found.resourceId !== null &&
-    found.resourceVersion !== null
+    found.resourceVersion !== null &&
+    found.principalId !== null
   ) {
     return {
       run: {
@@ -854,15 +915,20 @@ const runOfRead = (
         version: found.resourceVersion,
       },
       name: found.resourceName ?? "",
+      principal: found.principalId,
     };
   }
   return undefined;
 };
 
-const decisionWithRun = async (
+/** A decision as `decisionWithRun` reads it, before its run is checked. */
+type DecisionRead = Omit<DecisionWithRun, "evidence"> & { principal: string };
+
+/** Decision `decision` as read, its run unchecked; `decision.not_found` for none. */
+const decisionUnchecked = async (
   env: Env,
   decision: unknown
-): Promise<DecisionWithRun> => {
+): Promise<DecisionRead> => {
   const id = identifierSchema.safeParse(decision);
   if (!id.success) {
     throw notFound();
@@ -878,6 +944,42 @@ const decisionWithRun = async (
     goesOn: found.goesOn === 1,
     decidedByName: found.decidedByName,
   };
+};
+
+/**
+ * `read`, each with how its run's evidence stands: checked together with
+ * the others' (`runsEvidence`), each run once however many of them it
+ * asked.
+ */
+const checkedAll = async (
+  env: Env,
+  read: readonly DecisionRead[]
+): Promise<DecisionWithRun[]> => {
+  const states = await runsEvidence(
+    env,
+    read.map(({ run, principal }) => ({
+      runId: run.runId,
+      workflowId: run.workflow,
+      principal,
+    }))
+  );
+  return read.map(({ principal: _principal, ...found }) => ({
+    ...found,
+    evidence: states.get(found.run.runId) ?? "unchecked",
+  }));
+};
+
+const decisionWithRun = async (
+  env: Env,
+  decision: unknown
+): Promise<DecisionWithRun> => {
+  const [found] = await checkedAll(env, [
+    await decisionUnchecked(env, decision),
+  ]);
+  if (found === undefined) {
+    throw notFound();
+  }
+  return found;
 };
 
 /** Whether `by` may answer the decision now (`mayAnswer`); never staff. */
@@ -923,19 +1025,6 @@ const allowedDecision = async (
  */
 const databaseNow = sql`CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER)`;
 
-/** The pinned fields of the decision a person reviews before answering. */
-const contextOf = ({ decision, run }: DecisionWithRun): ReviewContext => ({
-  decision: decision.id,
-  run: run.runId,
-  workflow: run.workflow,
-  version: run.version,
-  step: decision.step,
-  deciders: decision.deciders,
-  description: decision.description,
-  expiresAt: decision.expiresAt,
-  input: decision.input ?? null,
-});
-
 /**
  * Where a decision stands as its page shows it: an open decision of a run
  * that has ended, or that someone asked to cancel, takes no answer
@@ -959,6 +1048,54 @@ const sourceOf = ({
   workflow: workflowIdSchema.parse(name),
 });
 
+/**
+ * What a decision asks as it is shown: withheld once its run may no
+ * longer read what it read, not shown while that can't be checked, or
+ * gone with its run's details (workflows/retention.ts), which empties it
+ * (none is asked with an empty description), each saying so.
+ */
+const askedOf = ({
+  decision,
+  evidence,
+}: DecisionWithRun): Pick<
+  DecisionView,
+  "description" | "input" | "withheld"
+> => {
+  if (evidence === "refused") {
+    return { description: withheldAskText, withheld: "revoked" };
+  }
+  if (evidence === "unchecked") {
+    return { description: uncheckedAskText, withheld: "unchecked" };
+  }
+  return {
+    description:
+      decision.description === "" ? removedText : decision.description,
+    ...(decision.input === null ? {} : { input: decision.input }),
+  };
+};
+
+/**
+ * The pinned fields of the decision a person reviews before answering:
+ * what it asks as it is shown (`askedOf`), so its fingerprint holds
+ * nothing of what one that isn't shown asks.
+ */
+const contextOf = (found: DecisionWithRun): ReviewContext => {
+  const { decision, run } = found;
+  const asked = askedOf(found);
+  return {
+    decision: decision.id,
+    run: run.runId,
+    workflow: run.workflow,
+    version: run.version,
+    step: decision.step,
+    deciders: decision.deciders,
+    description:
+      asked.withheld === undefined ? decision.description : asked.description,
+    expiresAt: decision.expiresAt,
+    input: asked.withheld === undefined ? (decision.input ?? null) : null,
+  };
+};
+
 const toView = async (
   env: Env,
   found: DecisionWithRun
@@ -968,11 +1105,7 @@ const toView = async (
     id: decision.id,
     ...sourceOf(found),
     run: runIdSchema.parse(run.runId),
-    // None is asked with an empty description: one that is empty went with
-    // its run's details (workflows/retention.ts), and says so.
-    description:
-      decision.description === "" ? removedText : decision.description,
-    ...(decision.input === null ? {} : { input: decision.input }),
+    ...askedOf(found),
     status: statusOf(found),
     expiresAt: decision.expiresAt.toISOString(),
     revision: await contextFingerprint(contextOf(found)),
@@ -1124,10 +1257,10 @@ export const waitingDecisions = async (
     }
     after = { openedAt: last.openedAt, id: last.id };
   }
-  const views = await Promise.all(
+  const read = await Promise.all(
     ids.map(async (id) => {
       try {
-        return [await toView(env, await decisionWithRun(env, id))];
+        return [await decisionUnchecked(env, id)];
       } catch (error) {
         // One gone since it was listed leaves the rest of the inbox.
         if (decisionErrors.codeOf(error) === "decision.not_found") {
@@ -1137,12 +1270,17 @@ export const waitingDecisions = async (
       }
     })
   );
-  return views.flat();
+  const checked = await checkedAll(env, read.flat());
+  return await Promise.all(
+    checked.map(async (found) => await toView(env, found))
+  );
 };
 
 /** Why an answer, or its confirmation, was refused, as audited. */
 type RefusalCode =
   | "decision.closed"
+  | "decision.withheld"
+  | "decision.unavailable"
   | "decision.forbidden"
   | "decision.unconfirmed"
   | "decision.conflict";
@@ -1272,6 +1410,10 @@ export const reviewDecision = async (
   if (!takesAnswers(found, new Date())) {
     throw decisionErrors.create("decision.closed");
   }
+  const refused = askRefusal(found, response);
+  if (refused !== undefined) {
+    throw decisionErrors.create(refused);
+  }
   return { state: "review", decision: await toView(env, found), response };
 };
 
@@ -1306,6 +1448,10 @@ export const confirmDecision = async (
   const now = new Date();
   if (!takesAnswers(found, now)) {
     throw await refuse("decision.closed");
+  }
+  const refused = askRefusal(found, response);
+  if (refused !== undefined) {
+    throw await refuse(refused);
   }
   const context = await contextFingerprint(contextOf(found));
   if (revision !== context) {
@@ -1371,6 +1517,10 @@ const refusalOf = async (
   }
   if (!takesAnswers(found, new Date())) {
     return "decision.closed";
+  }
+  const refused = askRefusal(found, answer);
+  if (refused !== undefined) {
+    return refused;
   }
   if (confirmed === undefined) {
     return "decision.unconfirmed";
@@ -1453,7 +1603,13 @@ export const answerDecision = async (
     return await notTaken();
   }
   const context = await contextFingerprint(contextOf(found));
-  if (matching.context !== context) {
+  // Never an answer to what isn't shown that it doesn't take: confirming
+  // one is refused already, and one confirmed while it was shown was
+  // confirmed against another context.
+  if (
+    matching.context !== context ||
+    askRefusal(found, response) !== undefined
+  ) {
     return await notTaken(matching);
   }
   const { run } = found;

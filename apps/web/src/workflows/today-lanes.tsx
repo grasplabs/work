@@ -16,6 +16,7 @@ import type { Session } from "../core.ts";
 import {
   confirmAndAnswer,
   DecisionConfirmDialog,
+  WithheldAskNote,
 } from "../decision-confirmation.tsx";
 import type { PendingConfirmation } from "../decision-confirmation.tsx";
 import { ErrorText } from "../error-text.tsx";
@@ -498,10 +499,11 @@ const WaitsOnYou = ({ run }: { run: LaneRun }) => {
     seconds: graceSeconds,
     go: (answering) => {
       void (async () => {
-        const answered = await act(answerWith(answering));
-        if (answered !== undefined) {
-          await router.invalidate();
-        }
+        await act(answerWith(answering));
+        // Answered, or refused because the decision changed since Today
+        // was read (what it asks withheld since): Today reads it again and
+        // shows it as it is now, with why.
+        await router.invalidate();
       })();
     },
     // Gone before the seconds were over: the answer was confirmed, so it
@@ -529,7 +531,10 @@ const WaitsOnYou = ({ run }: { run: LaneRun }) => {
     );
     if (reviewed?.state === "review") {
       setPending(reviewed);
-    } else if (reviewed !== undefined) {
+    } else {
+      // Recorded already, or refused: the decision may have changed since
+      // Today was read (what it asks withheld since), so Today reads it
+      // again and shows it as it is now, with why.
       await router.invalidate();
     }
   };
@@ -553,36 +558,48 @@ const WaitsOnYou = ({ run }: { run: LaneRun }) => {
       <span className="font-medium">{waits.asks}</span>
       <span className="text-muted-foreground text-xs">{waitsSince}</span>
       <ErrorText>{failure}</ErrorText>
-      <span className="flex flex-wrap items-center justify-end gap-2">
-        {/* An answer with a comment, which a decision may require: on the
+      {waits.withheld === undefined ? null : (
+        <span className="text-muted-foreground text-xs">
+          <WithheldAskNote withheld={waits.withheld} />
+        </span>
+      )}
+      {/* Not shown for now: it takes no answer until a later read shows it. */}
+      {waits.withheld === "unchecked" ? null : (
+        <span className="flex flex-wrap items-center justify-end gap-2">
+          {/* An answer with a comment, which a decision may require: on the
             decision's own page, which has the field. */}
-        <Link
-          className="text-muted-foreground mr-auto text-xs hover:underline"
-          params={{ decision: waits.decision }}
-          to="/decisions/$decision"
-        >
-          <Trans>Answer with a comment</Trans>
-        </Link>
-        <Button
-          disabled={busy}
-          onClick={() => {
-            void review({ approved: false });
-          }}
-          size="sm"
-          variant="outline"
-        >
-          <Trans context="send a waiting item back to people">Reject</Trans>
-        </Button>
-        <Button
-          disabled={busy}
-          onClick={() => {
-            void review({ approved: true });
-          }}
-          size="sm"
-        >
-          <Trans context="let a waiting item go ahead">Approve</Trans>
-        </Button>
-      </span>
+          <Link
+            className="text-muted-foreground mr-auto text-xs hover:underline"
+            params={{ decision: waits.decision }}
+            to="/decisions/$decision"
+          >
+            <Trans>Answer with a comment</Trans>
+          </Link>
+          <Button
+            disabled={busy}
+            onClick={() => {
+              void review({ approved: false });
+            }}
+            size="sm"
+            variant="outline"
+          >
+            <Trans context="send a waiting item back to people">Reject</Trans>
+          </Button>
+          {/* Nobody approves what they can't read: a withheld ask takes a
+            rejection alone. */}
+          {waits.withheld === "revoked" ? null : (
+            <Button
+              disabled={busy}
+              onClick={() => {
+                void review({ approved: true });
+              }}
+              size="sm"
+            >
+              <Trans context="let a waiting item go ahead">Approve</Trans>
+            </Button>
+          )}
+        </span>
+      )}
       <DecisionConfirmDialog
         onCancel={() => {
           setPending(undefined);

@@ -4,6 +4,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { runBrainMemories, runBrainVersions } from "../db/core/schema.ts";
+import { inList } from "../db/d1.ts";
 
 // What a workflow run recalled stays pinned to the run (GRA-299, kept on
 // the new Brain by GRA-1731): every version its recalls handed it, and
@@ -95,17 +96,22 @@ export const recordRunVersions = async (
   }
 };
 
-/** What run `runId` was handed, as its evidence keeps it. */
-export const evidenceOf = async (env: Env, runId: string) =>
+/** What each of runs `runIds` was handed, as their evidence keeps it. */
+export const evidenceOfRuns = async (env: Env, runIds: readonly string[]) =>
   await drizzle(env.DB)
     .select({
+      runId: runBrainVersions.runId,
       producer: runBrainVersions.producer,
       sourceId: runBrainVersions.sourceId,
       version: runBrainVersions.version,
       permissionId: runBrainVersions.permissionId,
     })
     .from(runBrainVersions)
-    .where(eq(runBrainVersions.runId, runId));
+    .where(inList(runBrainVersions.runId, runIds));
+
+/** What run `runId` was handed, as its evidence keeps it. */
+export const evidenceOf = async (env: Env, runId: string) =>
+  await evidenceOfRuns(env, [runId]);
 
 /**
  * Adds `memories` (of the shared store), what an entity read handed run
@@ -131,12 +137,19 @@ export const recordRunMemories = async (
     .onConflictDoNothing();
 };
 
-/** What run `runId`'s entity reads rested on, as its evidence keeps it. */
-export const memoryEvidenceOf = async (env: Env, runId: string) =>
+/**
+ * What the entity reads of each of runs `runIds` rested on, as their
+ * evidence keeps it.
+ */
+export const memoryEvidenceOfRuns = async (
+  env: Env,
+  runIds: readonly string[]
+) =>
   await drizzle(env.DB)
     .select({
+      runId: runBrainMemories.runId,
       memoryId: runBrainMemories.memoryId,
       permissionId: runBrainMemories.permissionId,
     })
     .from(runBrainMemories)
-    .where(eq(runBrainMemories.runId, runId));
+    .where(inList(runBrainMemories.runId, runIds));
