@@ -14,6 +14,7 @@ import {
   answering,
   answeringWith,
   approveAgreed,
+  participate,
   onLink,
   openLinkAs,
   sentToOf,
@@ -205,6 +206,8 @@ export const agree = async (
   version = 0,
   lines?: InterviewLine[]
 ): Promise<number> => {
+  // They take part before anything they say is kept, as their page has them.
+  await participate(await openLink(person));
   const response = await saveAgreed(person, facts, version, lines);
   const saved: InterviewSaved = await response.json();
   await approveAgreed(await openLink(person), facts);

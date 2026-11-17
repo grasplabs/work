@@ -388,6 +388,7 @@ describe("someone's own link", () => {
   it("opens for the account its address signs in, keeps what they say, and gives it back on another device they sign in on", async () => {
     const { ids, secrets, me } = await running();
     const first = await opened(secrets.oli, me);
+    await takePart(secrets.oli, me);
     expect(first).toMatchObject({
       state: "open",
       name: "Oli",
@@ -416,6 +417,7 @@ describe("someone's own link", () => {
   it("keeps the clock that leaves time away out of the minutes, and gives it back (GRA-1468)", async () => {
     const { secrets, me } = await running();
     await opened(secrets.oli, me);
+    await takePart(secrets.oli, me);
     const withClock = {
       ...progress(),
       seenAt: Date.now(),
@@ -439,6 +441,7 @@ describe("someone's own link", () => {
   it("gives anyone else with the link, signed in or not, the admin too, nothing that was said, and nothing a link that never was wouldn't (L3)", async () => {
     const { secrets, me } = await running();
     await opened(secrets.oli, me);
+    await takePart(secrets.oli, me);
     await save(secrets.oli, me, 0);
     // The configured admin, and a team-mate, each signed in as themselves.
     const admin = await signedInAs("ada@acme.test");
@@ -490,6 +493,7 @@ describe("someone's own link", () => {
   it("stays the account's it first opened for, whatever the list says or a link goes to afterwards (L3)", async () => {
     const { ids, roster, store, secrets, me } = await running();
     await opened(secrets.oli, me);
+    await takePart(secrets.oli, me);
     await save(secrets.oli, me, 0);
     // The admin puts their own address on Oli's entry, and the link goes out
     // to it again.
@@ -626,6 +630,7 @@ describe("someone's own link", () => {
   it("never loses a save to a second tab: the older copy is refused with the one kept (L4)", async () => {
     const { secrets, me } = await running();
     await opened(secrets.oli, me);
+    await takePart(secrets.oli, me);
     await save(secrets.oli, me, 0);
     const first = await save(secrets.oli, me, 1, progress("First tab"));
     const second = await save(secrets.oli, me, 1, progress("Second tab"));
@@ -643,6 +648,7 @@ describe("someone's own link", () => {
   it("keeps a page's later save over a version its earlier save made that it never heard of, and nobody else's (L4)", async () => {
     const { secrets, me } = await running();
     await opened(secrets.oli, me);
+    await takePart(secrets.oli, me);
     const page = crypto.randomUUID();
     const saved = async (
       version: number,
@@ -698,6 +704,7 @@ describe("someone's own link", () => {
   it("never lets a page's later save go on over another tab's save (L4)", async () => {
     const { secrets, me } = await running();
     await opened(secrets.oli, me);
+    await takePart(secrets.oli, me);
     const page = crypto.randomUUID();
     const saved = async (version: number, from: { id: string; save: number }) =>
       await post(
@@ -720,6 +727,7 @@ describe("someone's own link", () => {
   it("never lets a page's later save save it back over a delete after its own save (L4, D3)", async () => {
     const { secrets, me } = await running();
     await opened(secrets.oli, me);
+    await takePart(secrets.oli, me);
     const page = crypto.randomUUID();
     const saved = async (version: number, from: { id: string; save: number }) =>
       await post(
@@ -776,6 +784,7 @@ describe("when a link opens", () => {
   it("takes nothing while the interviews are paused, and opens again after (L8)", async () => {
     const { store, secrets, me } = await running();
     await opened(secrets.oli, me);
+    await takePart(secrets.oli, me);
     await store.setPaused(true, { type: "system" });
     const paused = [
       await codeOf(await session(secrets.oli, me)),
@@ -930,12 +939,15 @@ describe("deleting and starting again", () => {
   it("deletes at once, and no copy from before, saved or not, can save it back after a new start (D3)", async () => {
     const { secrets, me } = await running();
     await opened(secrets.oli, me);
+    await takePart(secrets.oli, me);
     await save(secrets.oli, me, 0);
     const deleted = await remove(secrets.oli, me);
     const empty = await opened(secrets.oli, me);
     // A tab that saved before the delete, and one that never saved.
     const back = await save(secrets.oli, me, 1);
     const unsaved = await save(secrets.oli, me, 0);
+    // Taking part went with the delete: they agree again before anything new is kept.
+    await takePart(secrets.oli, me);
     const fresh = await save(
       secrets.oli,
       me,
@@ -1008,9 +1020,9 @@ describe("taking part, approving and withdrawing", () => {
       participationNotice.version + 1
     );
     const before = await opened(secrets.oli, me);
-    await save(secrets.oli, me, 0);
     const first = await takePart(secrets.oli, me);
     const again = await takePart(secrets.oli, me);
+    await save(secrets.oli, me, 0);
     const after = await opened(secrets.oli, me);
     const kept = await runInDurableObject(
       onboardingStore(env),
@@ -1049,7 +1061,8 @@ describe("taking part, approving and withdrawing", () => {
   it("lets nobody else signed in with the link, the admin too, take part, approve or withdraw for them (T4)", async () => {
     const { secrets, me } = await running();
     await opened(secrets.oli, me);
-    await save(secrets.oli, me, 0);
+    // Where their interview is, with nothing they said in it yet: kept before they take part.
+    await save(secrets.oli, me, 0, { ...progress(), lines: [], facts: [] });
     const admin = await signedInAs("ada@acme.test");
     expect([
       await codeOf(await takePart(secrets.oli, admin)),
@@ -1242,6 +1255,67 @@ describe("taking part, approving and withdrawing", () => {
       saved: 200,
       approved: 200,
       drawn: [{ tag: "step", record: "Opens the ticket." }],
+    });
+  });
+
+  it("records nothing new on a link whose taking part was agreed to an older notice, as a turn refuses, yet takes out, withdraws and deletes (GRA-1987)", async () => {
+    const { ids, secrets, me } = await running();
+    await opened(secrets.oli, me);
+    await takePart(secrets.oli, me);
+    await save(secrets.oli, me, 0);
+    // They agreed to what the interview said before it changed.
+    await runInDurableObject(onboardingStore(env), (_instance, state) => {
+      state.storage.sql.exec(
+        "UPDATE participations SET notice = ? WHERE person = ?",
+        participationNotice.version - 1,
+        ids.oli
+      );
+    });
+    const typed = `${sentinel} more`;
+    const more: InterviewProgress = {
+      ...progress(),
+      lines: [
+        ...progress().lines,
+        { from: "person", text: typed, typed: true },
+      ],
+    };
+    const recorded = await save(secrets.oli, me, 1, more);
+    const moved = await save(secrets.oli, me, 1, {
+      ...progress(),
+      facts: [
+        {
+          id: "f1",
+          tag: "step",
+          text: sentinel,
+          record: sentinel,
+          share: "team",
+        },
+      ],
+    });
+    const kept = await opened(secrets.oli, me);
+    const takenOut = await save(secrets.oli, me, 1, {
+      ...progress(),
+      facts: [
+        { id: "f1", tag: "step", text: sentinel, record: sentinel, out: true },
+      ],
+    });
+    const withdrew = await withdraw(secrets.oli, me);
+    const deleted = await remove(secrets.oli, me);
+    expect({
+      recorded: [recorded.status, await codeOf(recorded)],
+      moved: await codeOf(moved),
+      kept: kept.progress?.lines.map(({ text }) => text),
+      takenOut: takenOut.status,
+      withdrew: withdrew.status,
+      deleted: deleted.status,
+    }).toStrictEqual({
+      // As a turn or an approval refuses it (`#participating`).
+      recorded: [409, "interview.notice_changed"],
+      moved: "interview.notice_changed",
+      kept: ["What did you do this morning?", sentinel],
+      takenOut: 200,
+      withdrew: 200,
+      deleted: 200,
     });
   });
 

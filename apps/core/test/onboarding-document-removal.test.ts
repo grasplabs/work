@@ -24,6 +24,7 @@ import {
   holdAlarm,
   onLink,
   openLinkAs,
+  participate,
   signedInAs,
 } from "./interview-link.ts";
 import { d1ColumnsWith, onboardingTablesWith } from "./kept-where.ts";
@@ -207,6 +208,8 @@ const agree = async (
     adding: false,
     addedAt: 0,
   };
+  // They take part before anything they say is kept, as their page has them.
+  await participate(link);
   const response = await onLink({
     action: "save",
     ...link,

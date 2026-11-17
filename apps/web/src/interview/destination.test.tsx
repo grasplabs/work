@@ -1,3 +1,5 @@
+import { setTimeout as sleep } from "node:timers/promises";
+
 // @vitest-environment happy-dom
 import type { InterviewProgress } from "@grasp-os/shared/interview-links";
 import { i18n } from "@lingui/core";
@@ -17,7 +19,7 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import type { OpenSession } from "./api.ts";
-import { holdInterview, releaseInterview } from "./kept.ts";
+import { holdInterview, progressNow, releaseInterview } from "./kept.ts";
 import { InterviewPage } from "./page.tsx";
 
 // Moving a line after agreeing to it, in "Where your lines go" (GRA-1987),
@@ -86,13 +88,24 @@ const session: OpenSession = {
   removing: false,
 };
 
-/** How the faked core answers: keeping, unreachable, or refusing; and the facts each approval named. */
+/**
+ * How the faked core answers saves (keeping, unreachable, refusing, or
+ * refusing them as agreed to an older notice) and approvals (keeping,
+ * unreachable, or held until the test lets each go); and what each save
+ * and approval it was sent named.
+ */
 const core: {
-  answers: "keeps" | "unreachable" | "refuses";
+  answers: "keeps" | "unreachable" | "refuses" | "older notice";
+  approvals: "keeps" | "unreachable" | "held";
+  saves: number;
   approved: string[][];
+  held: (() => void)[];
 } = {
   answers: "keeps",
+  approvals: "keeps",
+  saves: 0,
   approved: [],
+  held: [],
 };
 
 const approvedSchema = z.object({
@@ -106,26 +119,51 @@ const refusal = {
   message: "The interviews are over. Thank you for your time.",
 };
 
+/** What core answers a save from a page whose taking part was agreed to an older notice. */
+const olderNotice = {
+  code: "interview.notice_changed",
+  message:
+    "What this interview is for has changed. Read it again before you go on.",
+};
+
+/** An approval, answered as `core.approvals` says: the ids it named are noted first. */
+const approvalAnswered = async (ids: string[]): Promise<Response> => {
+  if (core.approvals === "unreachable") {
+    throw new TypeError("Failed to fetch");
+  }
+  core.approved.push(ids);
+  if (core.approvals === "held") {
+    const until = Promise.withResolvers<null>();
+    core.held.push(() => {
+      until.resolve(null);
+    });
+    await until.promise;
+  }
+  return Response.json({
+    approved: true,
+    receipt: `rb-${core.approved.length}`,
+    at: "2026-11-17T10:00:00.000Z",
+  });
+};
+
 const answered = async (init?: RequestInit): Promise<Response> => {
   await Promise.resolve();
+  const sent = typeof init?.body === "string" ? init.body : "{}";
+  const approval = approvedSchema.safeParse(JSON.parse(sent));
+  if (approval.success) {
+    return await approvalAnswered(approval.data.facts.map(({ id }) => id));
+  }
+  core.saves += 1;
   if (core.answers === "unreachable") {
     throw new TypeError("Failed to fetch");
   }
   if (core.answers === "refuses") {
     return Response.json(refusal, { status: 403 });
   }
-  const sent = typeof init?.body === "string" ? init.body : "{}";
-  const approval = approvedSchema.safeParse(JSON.parse(sent));
-  if (approval.success) {
-    core.approved.push(approval.data.facts.map(({ id }) => id));
+  if (core.answers === "older notice") {
+    return Response.json(olderNotice, { status: 409 });
   }
-  return approval.success
-    ? Response.json({
-        approved: true,
-        receipt: "rb-1",
-        at: "2026-11-17T10:00:00.000Z",
-      })
-    : Response.json({ saved: true, version: 2 });
+  return Response.json({ saved: true, version: 1 + core.saves });
 };
 
 const until = async (ready: () => boolean, what: string): Promise<void> => {
@@ -164,6 +202,27 @@ const stepGoes = (): string | null => {
     line.textContent?.startsWith("You open the ticket.")
   );
   return step?.querySelector("button")?.textContent ?? null;
+};
+
+/** Where the sheet shows the wish going: the switch under it. */
+const wishGoes = (): string | null => {
+  const sheet = document.querySelector("[role=dialog]");
+  const wish = [...(sheet?.querySelectorAll("li") ?? [])].find((line) =>
+    line.textContent?.startsWith("You would like the number filled in.")
+  );
+  return wish?.querySelector("button")?.textContent ?? null;
+};
+
+/** What the sheet says of the change sent: its note, none before one. */
+const sheetSays = (): string | null =>
+  document.querySelector("[role=dialog] [aria-live]")?.textContent ?? null;
+
+/** Lets the oldest approval held go. */
+const letGo = async (): Promise<void> => {
+  await act(async () => {
+    core.held.shift()?.();
+    await Promise.resolve();
+  });
 };
 
 /** The page, its interview agreed to, with the sheet open. */
@@ -218,7 +277,79 @@ describe("moving a line after agreeing to it", () => {
     document.body.replaceChildren();
     vi.unstubAllGlobals();
     core.answers = "keeps";
+    core.approvals = "keeps";
+    core.saves = 0;
     core.approved = [];
+    core.held = [];
+  });
+
+  it("never says a later move is saved while an earlier move's approval is still on its way: each is kept and approved, and shown where core holds it", async () => {
+    await sheetOpen();
+    core.approvals = "held";
+    await press(shared);
+    await press("Save where they go");
+    await until(() => core.held.length === 1, "the first approval asked");
+    // Closed and opened again while the first approval waits; the wish moved too.
+    await press("Close");
+    await until(() => stepGoes() === null, "the sheet closed");
+    await press("Where your lines go");
+    await until(() => wishGoes() !== null, "the sheet again");
+    await press(anonymous);
+    await press("Save where they go");
+    await letGo();
+    await until(() => core.held.length === 1, "the second approval asked");
+    const second = { says: sheetSays(), wish: wishGoes() };
+    await letGo();
+    await until(() => wishGoes() === shared, "the wish moved");
+    expect({
+      second,
+      approved: core.approved,
+      says: sheetSays(),
+    }).toStrictEqual({
+      // The step's move is approved; the wish's not yet: where core holds it.
+      second: { says: null, wish: anonymous },
+      approved: [
+        ["f1", "f2"],
+        ["f1", "f2"],
+      ],
+      says: "Saved",
+    });
+  });
+
+  it("says a move that is kept but not approved counts nowhere until it is", async () => {
+    await sheetOpen();
+    core.approvals = "unreachable";
+    await press(shared);
+    await press("Save where they go");
+    await until(() => buttonNamed("Try again") !== undefined, "the trouble");
+    expect({ says: sheetSays(), goes: stepGoes() }).toStrictEqual({
+      says: "Not saved yet. Until it is, the lines you moved count nowhere.",
+      goes: shared,
+    });
+  });
+
+  it("keeps a move refused for an older notice on the page, and shows what the interview is for again instead of trying it over and over", async () => {
+    await sheetOpen();
+    core.answers = "older notice";
+    await press(shared);
+    await press("Save where they go");
+    await until(
+      () =>
+        text().includes("Which language do you want to do this interview in?"),
+      "what this interview is for"
+    );
+    // Longer than a save waits to be tried again, more than once.
+    await act(async () => {
+      await sleep(1500);
+    });
+    const step = progressNow().facts.find(({ id }) => id === "f1");
+    expect({
+      saves: core.saves,
+      share: step?.share ?? "anonymous",
+    }).toStrictEqual({
+      saves: 1,
+      share: "anonymous",
+    });
   });
 
   it("approves only the lines the sheet shows, as they go now", async () => {

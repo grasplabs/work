@@ -9375,6 +9375,10 @@ msgid "Not saved yet. Trying again."
 msgstr "Aún no guardado. Se intenta de nuevo."
 
 #: src/interview/destination.tsx
+msgid "Not saved yet. Until it is, the lines you moved count nowhere."
+msgstr "Todavía no se ha guardado. Hasta entonces, las líneas que moviste no cuentan en ningún sitio."
+
+#: src/interview/destination.tsx
 msgid "Not saved yet. Until it is, your lines still go where they went before."
 msgstr "Todavía no se ha guardado. Hasta entonces, tus líneas siguen yendo adonde iban antes."
 

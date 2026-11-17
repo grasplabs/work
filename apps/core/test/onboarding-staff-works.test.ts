@@ -18,6 +18,7 @@ import {
   holdAlarm,
   onLink,
   openLinkAs,
+  participate,
   signedInAs,
 } from "./interview-link.ts";
 import type { ProviderReply } from "./model-provider.ts";
@@ -71,6 +72,8 @@ const agreeAs = async (
     adding: false,
     addedAt: 0,
   };
+  // They take part before anything they say is kept, as their page has them.
+  await participate(device);
   await onLink({ action: "save", ...device, version: 0, progress });
   await approveAgreed(device, facts);
 };

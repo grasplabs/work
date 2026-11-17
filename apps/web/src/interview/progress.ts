@@ -63,14 +63,18 @@ export const chose = (
 export const toldWhat = (progress: InterviewProgress): InterviewProgress =>
   progress.told ? progress : { ...progress, told: true };
 
-/** They pressed start, to talk or by typing: they have read what this is. */
+/**
+ * They pressed start, to talk or by typing: they have read what this is.
+ * An interview they agreed to stays agreed to: they read what it says now,
+ * and are back where they were.
+ */
 export const begun = (
   progress: InterviewProgress,
   now: number,
   by: "talk" | "type"
 ): InterviewProgress => ({
   ...progress,
-  person: "progress",
+  person: progress.person === "completed" ? "completed" : "progress",
   told: true,
   mode: by,
   startedAt: progress.startedAt ?? now,

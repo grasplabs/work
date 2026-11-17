@@ -44,6 +44,7 @@ import {
   approveAgreed,
   holdAlarm,
   onLink,
+  participate,
   openLinkAs,
   sentToOf,
   signedInAs,
@@ -915,6 +916,8 @@ describe("interviews in the new Brain", { timeout: 120_000 }, () => {
       .object({ version: z.number() })
       .parse(await first.json());
     const own = `own${unique()}`;
+    // They take part before anything they say is kept, as their page has them.
+    await participate({ secret, cookie });
     await onLink(
       {
         action: "save",
@@ -2262,6 +2265,64 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
       prompt: false,
       pieces: ["planning the rota"],
     });
+  });
+
+  it("use nothing of a map once its team has no lead: a former lead's map, its line moved to only counted anonymously, reaches no interview, drawing or review (GRA-1987)", async () => {
+    const { ids } = await drawnTeam();
+    await intakeOf(ids, [zendeskClaim]);
+    await handOverNow();
+    const store = onboardingStore(env);
+    // Lea moves the line her map's tickets came from to only counted anonymously.
+    await agree(
+      ids.lea,
+      [
+        anonymous(fact("l1", "work", "Max, Mia and Mo handle new tickets.")),
+        fact(
+          "l2",
+          "system",
+          "The team lives in Zendesk and the lead's own rota sheet."
+        ),
+      ],
+      1
+    );
+    // Then the admin saves the team with no lead.
+    const keys: Key[] = [...everyone, "sam"];
+    const roster = rosterOf(
+      ids,
+      keys,
+      Object.fromEntries(keys.map((key) => [key, addressOf(ids[key])]))
+    );
+    await store.saveRoster(
+      {
+        ...roster,
+        teams: roster.teams.map((each) => ({ ...each, lead: null })),
+      },
+      { type: "system" }
+    );
+    // Max shares one more step of the tickets.
+    await agree(
+      ids.max,
+      [
+        fact("m1", "step", "Opens the ticket in Zendesk."),
+        fact("m2", "system", "Tickets arrive in Zendesk."),
+        fact("m3", "handoff", "Max hands billing questions to Noor."),
+        fact("m4", "step", "Closes the ticket once answered."),
+      ],
+      1
+    );
+    const drawn = await answering(
+      [ticketsReply(ids)],
+      async () => await store.drawNext()
+    );
+    const review = await store.review();
+    expect({
+      asked: await askedOf(ids.mia),
+      prompts: drawn.requests.some(({ body }) =>
+        holdsMapWords(JSON.stringify(body))
+      ),
+      review: holdsMapWords(JSON.stringify(review)),
+      mapped: review.mapped,
+    }).toStrictEqual({ asked: "", prompts: false, review: false, mapped: 0 });
   });
 
   it("take a claim out before the save that moves a backer's line to only counted anonymously commits, refuse that save whole while the Brain can't, and show it again from the line moved back only at the next intake (GRA-1987)", async () => {

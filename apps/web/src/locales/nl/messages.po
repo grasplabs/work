@@ -9375,6 +9375,10 @@ msgid "Not saved yet. Trying again."
 msgstr "Nog niet opgeslagen. Nieuwe poging volgt."
 
 #: src/interview/destination.tsx
+msgid "Not saved yet. Until it is, the lines you moved count nowhere."
+msgstr "Nog niet opgeslagen. Tot dan tellen de regels die je verplaatste nergens mee."
+
+#: src/interview/destination.tsx
 msgid "Not saved yet. Until it is, your lines still go where they went before."
 msgstr "Nog niet opgeslagen. Tot dan gaan je regels nog waar ze eerst heen gingen."
 

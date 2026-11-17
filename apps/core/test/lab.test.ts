@@ -31,6 +31,7 @@ import {
   openLinkAs,
   quick,
   signedInAs,
+  participate,
 } from "./interview-link.ts";
 import { keyChanger } from "./model-provider.ts";
 import type { ProviderReply } from "./model-provider.ts";
@@ -153,6 +154,8 @@ const agree = async (person: string, facts: InterviewFact[]): Promise<void> => {
     adding: false,
     addedAt: 0,
   };
+  // They take part before anything they say is kept, as their page has them.
+  await participate(device);
   await onLink({ action: "save", ...device, version: 0, progress });
   await approveAgreed(device, facts);
 };
