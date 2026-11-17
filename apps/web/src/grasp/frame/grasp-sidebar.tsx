@@ -4,9 +4,11 @@ import type { Identity } from "@grasp-os/shared/rpc";
 import { GraspMark } from "@grasp-os/ui/components/grasp-mark";
 import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
-import { Link, useMatchRoute } from "@tanstack/react-router";
+import { Link, useLocation, useMatchRoute } from "@tanstack/react-router";
+import { useState } from "react";
 
 import { chatsKey, useChatsWindow } from "../../chat/chat-switcher.tsx";
+import { useRecentChats } from "../../chat/sidebar-chats.tsx";
 import type { CoreConnection } from "../../core-connection.ts";
 import { useWaitingCount } from "../../dashboard/nav-item.tsx";
 import {
@@ -18,6 +20,7 @@ import { usePersonTheme } from "../../frame/person-theme.tsx";
 import { useSidebarApps } from "../../frame/surface-nav.tsx";
 import { chooseTheme, isTheme } from "../../frame/theme.ts";
 import { appSplat } from "../../pages/app-address.ts";
+import { groupedSectionsFor } from "../../settings/sections.ts";
 import { shortcutLabel } from "../../shortcuts.ts";
 import { useWorkflowsWaiting } from "../../workflows/nav-item.tsx";
 import {
@@ -40,6 +43,7 @@ import type {
   SidebarMenuEntry,
   SidebarProfileProps,
   SidebarProps,
+  SidebarSection,
 } from "../sidebar/index.ts";
 
 // The product's sidebar: Grasp UI's Sidebar (grasp/sidebar), filled with
@@ -61,13 +65,19 @@ const workflowsWaitingLabel = (waiting: number): string =>
 /** The product's sections, and the Apps' own entries after them. */
 const useGroups = (
   core: CoreConnection,
-  identity: Identity
+  identity: Identity,
+  closeMenu: () => void
 ): SidebarGroup[] => {
   const { t } = useLingui();
   const matchRoute = useMatchRoute();
   const waiting = useWaitingCount();
   const workflowsWaiting = useWorkflowsWaiting();
   const apps = useSidebarApps(core);
+  // The person's recent chats under Chat, which itself starts a new one.
+  const recent = useRecentChats({
+    enabled: identity.onboardingOnly !== true,
+    onOpened: closeMenu,
+  });
   if (identity.onboardingOnly === true) {
     return [];
   }
@@ -80,7 +90,8 @@ const useGroups = (
         label: t`Chat`,
         icon: Conversation,
         render: <Link to="/" />,
-        current: at("/", false),
+        current: at("/", false) && !recent.anyCurrent,
+        ...(recent.rows.length === 0 ? {} : { rows: recent.rows }),
       },
       {
         label: t`Dashboard`,
@@ -183,6 +194,56 @@ const useGroups = (
   return [sections, ...fromApps];
 };
 
+/** A page outside Settings, to go back to: its path and its search. */
+interface Outside {
+  pathname: string;
+  search: Record<string, unknown>;
+}
+
+/**
+ * Settings as the sidebar's section while the person is in it: Back to the
+ * page they came from (Chat, when they landed on Settings), then the
+ * sections they may see, in their groups (settings/sections.ts).
+ */
+const useSettingsSection = (identity: Identity): SidebarSection | undefined => {
+  const { t, i18n } = useLingui();
+  const { pathname, search } = useLocation();
+  const inSettings =
+    pathname === "/settings" || pathname.startsWith("/settings/");
+  // The last page outside Settings; kept while the frame is, so a reload on
+  // a section goes back to Chat.
+  const [outside, setOutside] = useState<Outside>();
+  if (!inSettings && outside?.pathname !== pathname) {
+    setOutside({ pathname, search });
+  }
+  if (!inSettings) {
+    return undefined;
+  }
+  return {
+    id: "settings",
+    title: t`Settings`,
+    icon: Settings,
+    back: {
+      label: t`Back`,
+      render:
+        outside === undefined ? (
+          <Link to="/" />
+        ) : (
+          <Link search={outside.search} to={outside.pathname} />
+        ),
+    },
+    groups: groupedSectionsFor(identity).map(({ group, sections }) => ({
+      label: i18n._(group.title),
+      rows: sections.map((section) => ({
+        label: i18n._(section.label),
+        icon: section.icon,
+        render: <Link to={section.href} />,
+        current: pathname.startsWith(section.href),
+      })),
+    })),
+  };
+};
+
 /** The person at the foot, and their menu: Settings, Appearance, Support, their organization, Sign out. */
 const useProfile = (
   core: CoreConnection,
@@ -271,8 +332,9 @@ export const useGraspSidebar = ({
 }): SidebarProps => {
   const { t } = useLingui();
   const openChats = useChatsWindow();
-  const groups = useGroups(core, identity);
+  const groups = useGroups(core, identity, closeMenu);
   const profile = useProfile(core, identity);
+  const section = useSettingsSection(identity);
   const searching = identity.onboardingOnly !== true;
   return {
     foldLabel: t`Show or hide the sidebar`,
@@ -285,6 +347,7 @@ export const useGraspSidebar = ({
     profile,
     searchLabel: t`Search chats`,
     searchShortcut: shortcutLabel(chatsKey),
+    ...(section === undefined ? {} : { section }),
     ...(searching
       ? {
           // The phone's menu goes first: App shell closes it on its own
