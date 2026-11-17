@@ -46,6 +46,7 @@ const entity = (id: string, name: string): BrainEntityListed => ({
   kind: "customer",
   name,
   unreadable: false,
+  borrowed: false,
 });
 const acme = entity("e-acme", "Acme");
 const globex = entity("e-globex", "Globex");
@@ -128,7 +129,7 @@ const shown = async (
   const memories = {
     shared: async () => await Promise.resolve({ memories: [], next: null }),
     // The teams it offers: those the page names, unless the test says otherwise.
-    shareTeams: async () => await Promise.resolve(teams),
+    shareAudiences: async () => await Promise.resolve({ company: true, teams }),
     ...api,
   };
   const core = {
@@ -425,6 +426,7 @@ describe("the Memories page's actions", () => {
       kind: "customer",
       name: "Acme",
       unreadable: false,
+      borrowed: false,
     };
     await shown({
       contested: async () => await Promise.resolve({ facts: [], next: null }),
@@ -731,6 +733,7 @@ describe("the Memories page's actions", () => {
       kind: "customer",
       name: null,
       unreadable: true,
+      borrowed: true,
     };
     const confirmedOwn: string[] = [];
     await shown({
@@ -1018,6 +1021,7 @@ describe("the Memories page's paged lists, read again", () => {
     kind: "customer",
     name: "Initech",
     unreadable: false,
+    borrowed: false,
   };
   const ownFact = (
     id: string,
@@ -1258,8 +1262,10 @@ describe("the Memories page's paged lists, read again", () => {
     expect([
       await shareOffers({ ...initech, kind: "person", name: "Ben Jansen" }),
       await shareOffers({ ...initech, name: null }),
+      // Named by the shared entity it stands for (a correction made it).
+      await shareOffers({ ...initech, borrowed: true }),
       await shareOffers(initech),
-    ]).toStrictEqual([0, 0, 1]);
+    ]).toStrictEqual([0, 0, 0, 1]);
   });
 
   it("lists what the person shared, saying nothing of one they can no longer read, and takes it back", async () => {
@@ -1338,8 +1344,11 @@ describe("the Memories page's paged lists, read again", () => {
     await initechOpen(
       [ownFact("m-own")],
       {
-        shareTeams: async () =>
-          await Promise.resolve([{ id: "t-sales", name: "Sales" }]),
+        shareAudiences: async () =>
+          await Promise.resolve({
+            company: true,
+            teams: [{ id: "t-sales", name: "Sales" }],
+          }),
       },
       [
         { id: "t-sales", name: "Sales" },
@@ -1354,5 +1363,60 @@ describe("the Memories page's paged lists, read again", () => {
         ?.querySelectorAll("option") ?? []),
     ].map((each) => each.value);
     expect(options).toStrictEqual(["t-sales", "everyone"]);
+  });
+
+  /** The audiences the open share dialog offers, by value, and whether Share can be pressed. */
+  const dialogState = () => {
+    const share = buttons("Share").find(
+      (each) => each.textContent === "Share" && each.type === "submit"
+    );
+    const select = share?.closest("form")?.querySelector("select");
+    return {
+      options: [...(select?.querySelectorAll("option") ?? [])].map(
+        (each) => each.value
+      ),
+      shareDisabled: share?.disabled,
+    };
+  };
+
+  it("offers nobody and keeps Share off, saying why, when it can't read whom the person may share with", async () => {
+    let asked = 0;
+    await initechOpen([ownFact("m-own")], {
+      shareAudiences: async () => {
+        await Promise.resolve();
+        throw Object.assign(new Error("The connection dropped"), {
+          code: "internal.unexpected",
+        });
+      },
+      publish: async () => {
+        asked += 1;
+        return await Promise.resolve(null);
+      },
+    });
+    await press(buttons("Share…")[0]);
+    expect({
+      ...dialogState(),
+      said: document.body.textContent.includes("The connection dropped"),
+      asked,
+    }).toStrictEqual({
+      options: [],
+      shareDisabled: true,
+      said: true,
+      asked: 0,
+    });
+  });
+
+  it("offers no Everyone in a company too small to share with, and says so when there is nobody", async () => {
+    await initechOpen([ownFact("m-own")], {
+      shareAudiences: async () =>
+        await Promise.resolve({ company: false, teams: [] }),
+    });
+    await press(buttons("Share…")[0]);
+    expect({
+      ...dialogState(),
+      hint: document.body.textContent.includes(
+        "once it has three people or more"
+      ),
+    }).toStrictEqual({ options: [], shareDisabled: true, hint: true });
   });
 });

@@ -7,6 +7,7 @@ import type {
   BrainMemoryPageNext,
   BrainMemoryShown,
   BrainShareAudience,
+  BrainShareAudiences,
   BrainSharedListed,
   BrainStoreCursor,
 } from "@grasp-os/shared/brain-memories";
@@ -57,6 +58,7 @@ import { useHeldCoreRead } from "../apps/use-core-read.ts";
 import { ErrorText } from "../error-text.tsx";
 import { formatDateTime } from "../format.ts";
 import { NotLoaded } from "../load-from-core.tsx";
+import type { Loaded } from "../load-from-core.tsx";
 import { useAsk, usePaged } from "./memories-asks.ts";
 
 // The Brain's memories, from the new Brain (GRA-1746): the facts sources
@@ -529,6 +531,66 @@ const audienceOf = (choice: string): BrainShareAudience =>
   choice === "everyone" ? "company" : { team: choice };
 
 /**
+ * Whom a share is for: the teams and everyone core lets the person share
+ * with (`loaded`), `choice` picked; a hint when there is no one yet, and
+ * why when that couldn't be read, offering no one then.
+ */
+const AudienceField = ({
+  loaded,
+  choice,
+  busy,
+  onPick,
+}: {
+  loaded: Loaded<BrainShareAudiences> | undefined;
+  choice: string | undefined;
+  busy: boolean;
+  onPick: (picked: string) => void;
+}) => {
+  const { t } = useLingui();
+  const fieldId = useId();
+  const audiences = loaded?.state === "ready" ? loaded.data : undefined;
+  return (
+    <>
+      <Field>
+        <FieldLabel htmlFor={fieldId}>
+          <Trans context="a memory shared with others">Who may read it</Trans>
+        </FieldLabel>
+        <NativeSelect
+          disabled={busy}
+          id={fieldId}
+          onChange={(event) => {
+            onPick(event.target.value);
+          }}
+          value={choice ?? ""}
+        >
+          {(audiences?.teams ?? []).map(({ id, name }) => (
+            <NativeSelectOption key={id} value={id}>
+              {t`Team ${name}`}
+            </NativeSelectOption>
+          ))}
+          {audiences?.company === true ? (
+            <NativeSelectOption value="everyone">
+              {t`Everyone`}
+            </NativeSelectOption>
+          ) : null}
+        </NativeSelect>
+        {audiences !== undefined && choice === undefined ? (
+          <FieldDescription>
+            <Trans>
+              You can share with a team of yours, or with everyone, once it has
+              three people or more.
+            </Trans>
+          </FieldDescription>
+        ) : null}
+      </Field>
+      {loaded === undefined || loaded.state === "ready" ? null : (
+        <NotLoaded page={loaded} />
+      )}
+    </>
+  );
+};
+
+/**
  * Shares `memory`, what `about` names, with a team of the person's or
  * everyone: core keeps a copy in their own word, exactly as shown here,
  * for those readers. One opening of it (`opening`) is one share, so a
@@ -552,18 +614,23 @@ const ShareDialog = ({
   onShared: () => void;
 }) => {
   const { t } = useLingui();
-  const ids = useId();
   const attributeLabel = useAttributeLabel();
-  // The teams core lets them share with: theirs of three people or more
-  // (with fewer, the other would know who shared it). Nothing is shared
-  // until they are read.
+  // Whom core lets them share with: everyone and their teams, each of
+  // three people or more (with fewer, the others would know who shared
+  // it). Nothing is shared until that is read; a read that failed offers
+  // no one, never "Everyone" alone.
   const { loaded } = useHeldCoreRead(
-    `share-teams#${opening}`,
-    async (session) => await session.brainMemories.shareTeams()
+    `share-audiences#${opening}`,
+    async (session) => await session.brainMemories.shareAudiences()
   );
-  const teams = loaded?.state === "ready" ? loaded.data : [];
+  const audiences = loaded?.state === "ready" ? loaded.data : undefined;
   const [chosen, setChosen] = useState<string>();
-  const choice = chosen ?? teams[0]?.id ?? "everyone";
+  const offered = [
+    ...(audiences?.teams ?? []).map(({ id }) => id),
+    ...(audiences?.company === true ? ["everyone"] : []),
+  ];
+  const choice =
+    chosen !== undefined && offered.includes(chosen) ? chosen : offered[0];
   const [change, setChange] = useState(opening);
   // The audience of a share that failed: another is a new share, with a
   // new id, while the same retries the same one.
@@ -582,14 +649,14 @@ const ShareDialog = ({
   const said = shownVisibly(statement);
   const from = validFrom === null ? null : formatDateTime(validFrom);
   const until = validUntil === null ? null : formatDateTime(validUntil);
-  const share = async (): Promise<void> => {
-    setTried(choice);
+  const share = async (to: string): Promise<void> => {
+    setTried(to);
     await ask(
       async (memories) =>
         await memories.publish({
           memory: { entity: memory.about, memory: memory.id },
           shown: { about, value, statement, validFrom, validUntil },
-          audience: audienceOf(choice),
+          audience: audienceOf(to),
           change,
         }),
       (shared) => {
@@ -623,8 +690,8 @@ const ShareDialog = ({
           className="flex flex-col gap-5"
           onSubmit={(event) => {
             event.preventDefault();
-            if (!busy && loaded !== undefined) {
-              void share();
+            if (!busy && choice !== undefined) {
+              void share(choice);
             }
           }}
         >
@@ -669,35 +736,18 @@ const ShareDialog = ({
               </span>
             )}
           </div>
-          <Field>
-            <FieldLabel htmlFor={`${ids}-audience`}>
-              <Trans context="a memory shared with others">
-                Who may read it
-              </Trans>
-            </FieldLabel>
-            <NativeSelect
-              disabled={busy}
-              id={`${ids}-audience`}
-              onChange={(event) => {
-                const picked = event.target.value;
-                if (tried !== undefined && picked !== tried) {
-                  setChange(crypto.randomUUID());
-                  setTried(undefined);
-                }
-                setChosen(picked);
-              }}
-              value={choice}
-            >
-              {teams.map(({ id, name }) => (
-                <NativeSelectOption key={id} value={id}>
-                  {t`Team ${name}`}
-                </NativeSelectOption>
-              ))}
-              <NativeSelectOption value="everyone">
-                {t`Everyone`}
-              </NativeSelectOption>
-            </NativeSelect>
-          </Field>
+          <AudienceField
+            busy={busy}
+            choice={choice}
+            loaded={loaded}
+            onPick={(picked) => {
+              if (tried !== undefined && picked !== tried) {
+                setChange(crypto.randomUUID());
+                setTried(undefined);
+              }
+              setChosen(picked);
+            }}
+          />
           <ErrorText>{failure}</ErrorText>
           <DialogFooter>
             <DialogClose
@@ -706,7 +756,7 @@ const ShareDialog = ({
             >
               <Trans>Cancel</Trans>
             </DialogClose>
-            <Button disabled={busy || loaded === undefined} type="submit">
+            <Button disabled={busy || choice === undefined} type="submit">
               <Trans>Share</Trans>
             </Button>
           </DialogFooter>
@@ -1279,11 +1329,14 @@ const shareFor = (
   ) => void
 ): ((memory: BrainMemoryShown, opener: HTMLElement) => void) | undefined => {
   const name = entity?.name ?? null;
+  // Named by a shared entity it stands for (a correction made it): a name
+  // others said, never shared (core's `publishAs`).
   if (
     entity === undefined ||
     entity === null ||
     name === null ||
     entity.unreadable ||
+    entity.borrowed ||
     entity.kind === "person"
   ) {
     return undefined;

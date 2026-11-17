@@ -1185,7 +1185,7 @@ type CorePersonMember =
   | "publishAs"
   | "unpublishAs"
   | "sharedAs"
-  | "shareTeamsAs";
+  | "shareAudiencesAs";
 
 /** The exports of core's brain-next.ts for code's entities, probed after them (`coreCodeEntities`). */
 type CoreCodeMember = "codeCardAs" | "codeEntitiesAs" | "isCodeEntitiesRequest";
@@ -6508,7 +6508,7 @@ interface ShareCalls {
   publish: (personId: string, share: unknown) => Promise<unknown>;
   unpublish: (personId: string, memory: unknown) => Promise<unknown>;
   shared: (personId: string, after?: unknown) => Promise<unknown>;
-  shareTeams: (personId: string) => Promise<unknown>;
+  shareAudiences: (personId: string) => Promise<unknown>;
 }
 
 /**
@@ -6771,15 +6771,15 @@ const memorySharingProbes = (calls: ShareCalls) => {
         ? asked
         : [...asked, await unpublish("one the reader shared", shared.memory)];
     },
-    shareTeams: async ({ personId }: Probing): Promise<Answer[]> => [
+    shareAudiences: async ({ personId }: Probing): Promise<Answer[]> => [
       // Their teams, by name: never one they aren't in.
       await answer(
-        "the teams the reader may share with",
-        async () => await calls.shareTeams(personId)
+        "whom the reader may share with",
+        async () => await calls.shareAudiences(personId)
       ),
       await answer(
         "as someone who isn't a member",
-        async () => await calls.shareTeams(stranger())
+        async () => await calls.shareAudiences(stranger())
       ),
     ],
     shared: async (probing: Probing): Promise<Answer[]> => {
@@ -6817,7 +6817,8 @@ const coreShareProbes = memorySharingProbes({
     await coreBrain.unpublishAs(env, personId, unchecked(memory)),
   shared: async (personId, after) =>
     await coreBrain.sharedAs(env, personId, after),
-  shareTeams: async (personId) => await coreBrain.shareTeamsAs(env, personId),
+  shareAudiences: async (personId) =>
+    await coreBrain.shareAudiencesAs(env, personId),
 });
 
 /** One probe per export of core's brain-next.ts for a person's memories. */
@@ -6842,7 +6843,7 @@ const corePersonMemories = {
   publishAs: coreShareProbes.publish,
   unpublishAs: coreShareProbes.unpublish,
   sharedAs: coreShareProbes.shared,
-  shareTeamsAs: coreShareProbes.shareTeams,
+  shareAudiencesAs: coreShareProbes.shareAudiences,
   // An entity of the reader's own store: one in the shared store, one in
   // someone else's own store and one no one added answer alike.
   ownEntityAs: async (probing) => {
@@ -7618,7 +7619,8 @@ export const memoriesProbes = (() => {
     // Not the callers': reads, through core's own functions.
     shared: async (personId, after) =>
       await coreBrain.sharedAs(env, personId, after),
-    shareTeams: async (personId) => await coreBrain.shareTeamsAs(env, personId),
+    shareAudiences: async (personId) =>
+      await coreBrain.shareAudiencesAs(env, personId),
   });
   return {
     rememberFor: probes.remember,
@@ -10592,7 +10594,8 @@ export const memoriesRpcProbes = {
       await memoriesAs(personId).unpublish(unchecked(memory)),
     shared: async (personId, after) =>
       await memoriesAs(personId).shared(unchecked(after)),
-    shareTeams: async (personId) => await memoriesAs(personId).shareTeams(),
+    shareAudiences: async (personId) =>
+      await memoriesAs(personId).shareAudiences(),
   }),
 } satisfies Record<
   | "forget"
@@ -10605,7 +10608,7 @@ export const memoriesRpcProbes = {
   | "publish"
   | "unpublish"
   | "shared"
-  | "shareTeams",
+  | "shareAudiences",
   Probe
 >;
 

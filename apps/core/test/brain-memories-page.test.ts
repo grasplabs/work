@@ -305,8 +305,22 @@ describe("the Brain's memories, as a person reads them", () => {
       read: await listedAs(anna.api, entity),
       memories: shown(memories),
     }).toStrictEqual({
-      listed: [{ entity, kind: "customer", name: "Acme", unreadable: false }],
-      read: { entity, kind: "customer", name: "Acme", unreadable: false },
+      listed: [
+        {
+          entity,
+          kind: "customer",
+          name: "Acme",
+          unreadable: false,
+          borrowed: false,
+        },
+      ],
+      read: {
+        entity,
+        kind: "customer",
+        name: "Acme",
+        unreadable: false,
+        borrowed: false,
+      },
       memories: [
         {
           store: "shared",
@@ -403,6 +417,7 @@ describe("the Brain's memories, as a person reads them", () => {
         kind: "customer",
         name: "Mine",
         unreadable: false,
+        borrowed: false,
       },
       count: memoriesPerAddMax + 2,
       distinct: memoriesPerAddMax + 2,
@@ -629,6 +644,7 @@ describe("the Brain's memories, as a person reads them", () => {
         kind: "customer",
         name: "Acme",
         unreadable: false,
+        borrowed: true,
       },
       sharedStill: [{ value: "Renewing", ended: false }],
       bens: null,
@@ -1145,7 +1161,13 @@ describe("the Brain's memories, as a person reads them", () => {
       gone: await anna.api.brainMemories.memories(entity),
       none: await anna.api.brainMemories.memories(nobody),
     }).toStrictEqual({
-      named: { entity, kind: "customer", name: "Vandelay", unreadable: false },
+      named: {
+        entity,
+        kind: "customer",
+        name: "Vandelay",
+        unreadable: false,
+        borrowed: false,
+      },
       gone: { entity: null, memories: [], next: null },
       none: { entity: null, memories: [], next: null },
     });

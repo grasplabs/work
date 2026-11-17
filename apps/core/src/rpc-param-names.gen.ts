@@ -104,7 +104,7 @@ export const rpcParamNames: ParamNames = {
     "memories": ["entity","next"],
     "ownEntity": [],
     "publish": ["share"],
-    "shareTeams": [],
+    "shareAudiences": [],
     "shared": ["next"],
     "unpublish": ["memory"],
   },

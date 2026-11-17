@@ -16878,6 +16878,10 @@ msgstr "You can close this page now. Come back here to see how far I am."
 msgid "You can no longer read this memory."
 msgstr "You can no longer read this memory."
 
+#: src/brain/memories-page.tsx
+msgid "You can share with a team of yours, or with everyone, once it has three people or more."
+msgstr "You can share with a team of yours, or with everyone, once it has three people or more."
+
 #: src/pages/frame-failure.tsx
 msgid "You can't open this App"
 msgstr "You can't open this App"

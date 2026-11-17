@@ -143,6 +143,7 @@ import {
   ownStoresTotals,
 } from "./brain-own-stores.ts";
 import type { OwnStoreHealth } from "./brain-own-stores.ts";
+import { largeEnoughAudiences } from "./brain-share-audiences.ts";
 import { inJurisdiction, workspace } from "./durable-objects.ts";
 import {
   embedInBulk,
@@ -4606,6 +4607,12 @@ export interface StoredEntity {
    * one there isn't.
    */
   unreadable: boolean;
+  /**
+   * The person's own entity stands for a shared one, whose name it is
+   * shown by (`liveNamed`): a name others said, so what is about it is
+   * never shared (`publishAs`).
+   */
+  borrowed: boolean;
 }
 
 /**
@@ -4625,7 +4632,7 @@ const liveNamed = async (
   store: MemoryStoreName,
   entity: Entity
 ): Promise<StoredEntity> => {
-  const plain = { store, ...entity, unreadable: false };
+  const plain = { store, ...entity, unreadable: false, borrowed: false };
   if (store !== "own" || entity.name !== null) {
     return plain;
   }
@@ -4643,8 +4650,8 @@ const liveNamed = async (
     reader,
   });
   return shared === null
-    ? { ...plain, unreadable: true }
-    : { ...plain, name: shared.name };
+    ? { ...plain, unreadable: true, borrowed: true }
+    : { ...plain, name: shared.name, borrowed: true };
 };
 
 const entitiesWantedSchema = z.strictObject({
@@ -5059,38 +5066,11 @@ const momentShown = (at: Date | null): string | null =>
   at === null ? null : at.toISOString();
 
 /**
- * Whether the group `group` alone may read the shared entity that the
- * person's own entity `entity` stands for (`sharedEntityRefOf`): false for
- * one that stands for none.
- */
-const mayReadStoodFor = async (
-  env: BrainEnv,
-  reader: PersonReader,
-  entity: EntityId,
-  group: string
-): Promise<boolean> => {
-  const { identifiers } = await entityNamesOf(
-    ownBrain(env, reader.person),
-    reader,
-    entity
-  );
-  const standsFor = identifiers.find(isSharedEntityRef);
-  if (standsFor === undefined) {
-    return false;
-  }
-  const read = await brain(env).readEntity({
-    entity: standsFor.value.slice(sharedEntityRefPrefix.length),
-    reader: { person: null, groups: [group] },
-  });
-  return read !== null;
-};
-
-/**
  * Memory `ref` of `reader`'s own store, what a share of it copies: the
- * memory, its entity's kind and the name the page shows for it
- * (`liveNamed`), read now. Null alike when there is none current, when it
- * isn't of a kind shared (`isShareable`), when its entity has no name the
- * page can show (a share would make a nameless entity for its readers),
+ * memory, its entity's kind and its entity's own earliest name, read now.
+ * Null alike when there is none current, when it isn't of a kind shared
+ * (`isShareable`), when its entity has no name of its own (none at all, or
+ * only one borrowed from the shared entity it stands for: `liveNamed`),
  * and when its name, value, statement or dates aren't exactly what
  * `shown` says.
  */
@@ -5098,8 +5078,7 @@ const toShare = async (
   env: BrainEnv,
   reader: PersonReader,
   ref: { entity: EntityId; memory: MemoryId },
-  shown: z.infer<typeof shareSchema>["shown"],
-  group: string
+  shown: z.infer<typeof shareSchema>["shown"]
 ): Promise<{ read: Memory; kind: EntityKind; name: string } | null> => {
   const own = ownBrain(env, reader.person);
   let read: Memory | undefined;
@@ -5112,83 +5091,52 @@ const toShare = async (
   } catch (error) {
     throw erasedAs(error);
   }
+  // Named only by its own names: one that takes its name from a shared
+  // entity it stands for (a correction made it, `liveNamed`) would carry
+  // a name others said, read by whoever may read it there, to readers who
+  // may not: never shared, as one with no name isn't.
+  const name = entity?.name ?? null;
   if (
     read === undefined ||
     entity === null ||
+    name === null ||
     !isShareable(read, entity.kind)
   ) {
     return null;
   }
-  const { name, unreadable } = await liveNamed(env, reader, "own", entity);
   const asShown =
-    !unreadable &&
-    name !== null &&
     name === shown.about &&
     read.value === shown.value &&
     read.statement === shown.statement &&
     momentShown(read.validFrom) === shown.validFrom &&
     momentShown(read.validUntil) === shown.validUntil;
-  if (!asShown || name === null) {
-    return null;
-  }
-  // A name the page shows from the shared entity this one stands for (a
-  // correction made it, `liveNamed`) goes only to an audience that may
-  // read that entity: never one wider than whoever said it there.
-  if (
-    entity.name === null &&
-    !(await mayReadStoodFor(env, reader, entity.id, group))
-  ) {
-    return null;
-  }
-  return { read, kind: entity.kind, name };
+  return asShown ? { read, kind: entity.kind, name } : null;
 };
 
 /**
- * Fewest members a team a memory is shared with has: in a team of the
- * sharer and one other, that other knows who shared it, so the copy
- * would not read as someone's own word, as the page says it does.
+ * Whom the member `personId` may share a memory with (`publishAs`): the
+ * company, when it has at least `shareAudienceMembersMin` members, and
+ * the teams they are in now with as many, by name. Refused once they are
+ * no longer a member.
  */
-const shareTeamMembersMin = 3;
-
-/** Of teams `teamIds`, those with at least `shareTeamMembersMin` members now. */
-const teamsLargeEnough = async (
-  env: Pick<Env, "DB">,
-  teamIds: readonly string[]
-): Promise<Set<string>> => {
-  if (teamIds.length === 0) {
-    return new Set();
-  }
-  const { results } = await env.DB.prepare(
-    `SELECT team_id FROM team_members
-    WHERE team_id IN (SELECT value FROM json_each(?1))
-    GROUP BY team_id HAVING count(*) >= ?2`
-  )
-    .bind(JSON.stringify(teamIds), shareTeamMembersMin)
-    .all<{ team_id: string }>();
-  return new Set(results.map(({ team_id: teamId }) => teamId));
-};
-
-/**
- * The teams the member `personId` may share a memory with (`publishAs`):
- * those they are in now with at least `shareTeamMembersMin` members, by
- * name. The company is always one. Refused once they are no longer a
- * member.
- */
-export const shareTeamsAs = async (
+export const shareAudiencesAs = async (
   env: ReaderEnv,
   personId: string
-): Promise<{ id: string; name: string }[]> => {
+): Promise<{ company: boolean; teams: { id: string; name: string }[] }> => {
   const member = await memberOf(env.DB, checked(idSchema, personId));
   if (member === undefined) {
     throw permissionErrors.create("permission.person_inactive");
   }
-  const large = await teamsLargeEnough(
-    env,
+  const large = await largeEnoughAudiences(
+    env.DB,
     member.teams.map(({ id }) => id)
   );
-  return member.teams
-    .filter(({ id }) => large.has(id))
-    .map(({ id, name }) => ({ id, name }));
+  return {
+    company: large.company,
+    teams: member.teams
+      .filter(({ id }) => large.teams.has(id))
+      .map(({ id, name }) => ({ id, name })),
+  };
 };
 
 /**
@@ -5228,20 +5176,24 @@ export const publishAs = async (
   const reader = await personReaderOf(env, personId);
   const group =
     audience === "company" ? companyGroup : teamGroup(audience.team);
-  // Their teams as core counts them now, large enough that a colleague
-  // can't tell who shared it (`shareTeamMembersMin`), and the company.
-  const large =
-    audience === "company"
-      ? undefined
-      : await teamsLargeEnough(env, [audience.team]);
-  const teamTooSmall =
-    audience !== "company" && large?.has(audience.team) !== true;
-  if (!reader.groups.includes(group) || teamTooSmall) {
+  // Their teams as core counts them now, and the company.
+  if (!reader.groups.includes(group)) {
     throw brainMemoryErrors.create("brain.audience_not_yours");
   }
-  const shared = await toShare(env, reader, memory, shown, group);
+  const shared = await toShare(env, reader, memory, shown);
   if (shared === null) {
     return null;
+  }
+  // Each large enough that a reader can't tell who shared it
+  // (`largeEnoughAudiences`): refused as a team they aren't in is.
+  const large = await largeEnoughAudiences(
+    env.DB,
+    audience === "company" ? [] : [audience.team]
+  );
+  const largeEnough =
+    audience === "company" ? large.company : large.teams.has(audience.team);
+  if (!largeEnough) {
+    throw brainMemoryErrors.create("brain.audience_not_yours");
   }
   const { read, kind, name } = shared;
   const { person } = reader;

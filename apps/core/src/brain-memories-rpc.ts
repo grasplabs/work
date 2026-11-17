@@ -17,7 +17,7 @@ import type {
   BrainShare,
   BrainShared,
   BrainSharedPage,
-  BrainShareTeam,
+  BrainShareAudiences,
   BrainStoreCursor,
 } from "@grasp-os/shared/brain-memories";
 
@@ -35,7 +35,7 @@ import {
   memoriesAs,
   ownEntityIdAs,
   sharedAs,
-  shareTeamsAs,
+  shareAudiencesAs,
 } from "./brain-next.ts";
 import type { StoredEntity, StoredMemory, StorePlace } from "./brain-next.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
@@ -132,11 +132,13 @@ const entityOut = ({
   kind,
   name,
   unreadable,
+  borrowed,
 }: StoredEntity): BrainEntityListed => ({
   entity: { store, id },
   kind,
   name,
   unreadable,
+  borrowed,
 });
 
 const memoryOut = (person: string, memory: StoredMemory): BrainMemoryShown => ({
@@ -274,10 +276,10 @@ export class BrainMemoriesRpc
     });
   }
 
-  async shareTeams(): Promise<BrainShareTeam[]> {
+  async shareAudiences(): Promise<BrainShareAudiences> {
     return await withPerson(
       this.#check,
-      async (person) => await shareTeamsAs(this.#env, person.userId)
+      async (person) => await shareAudiencesAs(this.#env, person.userId)
     );
   }
 

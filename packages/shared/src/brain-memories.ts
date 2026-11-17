@@ -140,6 +140,12 @@ export interface BrainEntityListed {
   kind: BrainEntityKind;
   name: string | null;
   unreadable: boolean;
+  /**
+   * One of their own named by the shared entity it stands for (a
+   * correction made it): a name others said, so what is about it is never
+   * shared.
+   */
+  borrowed: boolean;
 }
 
 /**
@@ -312,6 +318,16 @@ export interface BrainShareTeam {
   name: string;
 }
 
+/**
+ * Whom the person may share a memory with: everyone, when the company has
+ * three people or more, and their teams of three people or more (with
+ * fewer, the others would know who shared it).
+ */
+export interface BrainShareAudiences {
+  company: boolean;
+  teams: BrainShareTeam[];
+}
+
 /** A page of what the person shared, and where the next goes on: null at the last. */
 export interface BrainSharedPage {
   memories: BrainSharedListed[];
@@ -358,11 +374,8 @@ export interface BrainMemoriesApi {
   unpublish: (memory: string) => Promise<BrainMemoryOutcome>;
   /** A page of what they shared and haven't taken back, the oldest first. */
   shared: (next?: BrainStoreCursor | null) => Promise<BrainSharedPage>;
-  /**
-   * The teams of theirs they may share a memory with: those of three
-   * people or more (with fewer, the other would know who shared it).
-   */
-  shareTeams: () => Promise<BrainShareTeam[]>;
+  /** Whom they may share a memory with (`BrainShareAudiences`). */
+  shareAudiences: () => Promise<BrainShareAudiences>;
 }
 
 /** What core answers a correction it can't take as it is. */
@@ -370,7 +383,7 @@ export const brainMemoryErrors = defineErrorFamily({
   "brain.correction_reused":
     "This correction was saved before with other words. Start it again.",
   "brain.audience_not_yours":
-    "You can share only with a team of yours of three people or more, or with everyone.",
+    "You can share only with a team of yours, or with everyone, of three people or more.",
   "brain.share_reused":
     "This was shared before with other readers. Start it again.",
   "brain.share_taken_back":
