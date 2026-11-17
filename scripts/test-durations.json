@@ -207,7 +207,7 @@
   "@grasp-os/core test/brain-next-leaks-erasure.test.ts": 90.7,
   "@grasp-os/core test/brain-next-leaks-meaning.test.ts": 62.6,
   "@grasp-os/core test/brain-next-leaks.test.ts": 94.2,
-  "@grasp-os/core test/brain-next-opinions.test.ts": 7.4,
+  "@grasp-os/core test/brain-next-opinions.test.ts": 22.6,
   "@grasp-os/core test/brain-next-origins.test.ts": 3.6,
   "@grasp-os/core test/brain-next-own-work.test.ts": 0.8,
   "@grasp-os/core test/brain-next-pack.test.ts": 9.9,

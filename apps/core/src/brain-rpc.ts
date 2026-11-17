@@ -1050,7 +1050,7 @@ const opinionStatements = (opinions: readonly StandingOpinion[]): Statement[] =>
 /**
  * The one source the company's opinions name on the page, while any
  * stands: no team, no count of anyone, and the day of the earliest one
- * standing, which the company's daily run put together, never one
+ * standing, which a run of five people's changes put together, never one
  * person's moment. The page words its title in the reader's language.
  */
 const opinionsSource = (opinions: readonly StandingOpinion[]): Source[] => {

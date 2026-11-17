@@ -828,13 +828,31 @@ export const opinionCandidates = sqliteTable(
 );
 
 /**
- * What each team's candidates were put together from (`opinion_candidates`):
- * a hash of exactly what the model was given, so a team whose lines didn't
- * change asks no model again.
+ * What the company's opinions were last put together from (GRA-1987): a
+ * hash of exactly what a model was given, by what it was given for
+ * (`team:<id>`, a team's candidates; `merge`, the company's merge), so an
+ * input that didn't change asks no model again. A hash over people's
+ * lines and ids: it goes whenever what it was taken over loses one of
+ * them (the store's `#forgetOpinionsOf`), and all of it once the company
+ * can have no opinions.
  */
-export const opinionTeams = sqliteTable("opinion_teams", {
-  team: text().primaryKey(),
-  formedFrom: text("formed_from").notNull(),
+export const opinionInputs = sqliteTable("opinion_inputs", {
+  key: text().primaryKey(),
+  input: text().notNull(),
+});
+
+/**
+ * What each person's lines only counted anonymously were (a hash) when
+ * the company's opinions were last put together from them (`mergedFrom`),
+ * and when the run under way began (`runFrom`, null while none runs): a
+ * run starts once five people's differ from what was last merged, and
+ * takes in only what was agreed before it began (GRA-1987). Goes with the
+ * person, and with what they said once it no longer counts.
+ */
+export const opinionPeople = sqliteTable("opinion_people", {
+  person: text().primaryKey(),
+  mergedFrom: text("merged_from"),
+  runFrom: text("run_from"),
 });
 
 /**
@@ -857,7 +875,7 @@ export const brainOpinions = sqliteTable(
     /** What kind of thing it says, as the Brain page groups it. */
     kind: text().$type<StatementKind>().notNull(),
     text: text().notNull(),
-    /** The day it was put together (ISO 8601): the company's daily merge, never one person's moment. */
+    /** The day it was put together (ISO 8601): a run of five people's changes, never one person's moment. */
     at: text().notNull(),
     /** Whether it is to be erased: set once, never cleared. */
     erase: integer({ mode: "boolean" }).notNull().default(false),
@@ -877,14 +895,3 @@ export const opinionBackers = sqliteTable(
     index("opinion_backers_person").on(table.person),
   ]
 );
-
-/**
- * When something new for the company's opinions came in (ISO 8601), one
- * row while it waits: what came in on a day is put together once that day
- * is over (`opinionsNext`), so no opinion shows right after one person's
- * approval.
- */
-export const opinionsDue = sqliteTable("opinions_due", {
-  id: integer().primaryKey(),
-  dueAt: text("due_at").notNull(),
-});

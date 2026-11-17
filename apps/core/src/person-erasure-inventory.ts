@@ -442,8 +442,10 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "onboarding.brain_sent": { erased: "interview" },
   "onboarding.opinion_candidates": { erased: "interview" },
   "onboarding.opinion_backers": { erased: "interview" },
-  "onboarding.opinion_teams": noPerson,
-  "onboarding.opinions_due": noPerson,
+  // A hash over people's lines and ids, no person named: dropped whenever
+  // what it was taken over loses one (the store's `#forgetOpinionsOf`).
+  "onboarding.opinion_inputs": { erased: "interview" },
+  "onboarding.opinion_people": { erased: "interview" },
   "onboarding.interview_settings": { erased: "interview" },
   // An interview's (`link:<person>`) go with it; an admin's
   // (`admin:<user>`), hashes of what the voice said for them, go with
@@ -839,6 +841,7 @@ export const reviewedPersonColumns: Readonly<
   "onboarding.brain_sent": ["person"],
   "onboarding.opinion_candidates": ["person"],
   "onboarding.opinion_backers": ["person"],
+  "onboarding.opinion_people": ["person"],
   "onboarding.counted": ["person"],
   "onboarding.interview_settings": ["person"],
   "onboarding.interview_states": ["person"],

@@ -25,12 +25,13 @@ CREATE TABLE `opinion_candidates` (
 --> statement-breakpoint
 CREATE INDEX `opinion_candidates_team` ON `opinion_candidates` (`team`);--> statement-breakpoint
 CREATE INDEX `opinion_candidates_person` ON `opinion_candidates` (`person`);--> statement-breakpoint
-CREATE TABLE `opinion_teams` (
-	`team` text PRIMARY KEY NOT NULL,
-	`formed_from` text NOT NULL
+CREATE TABLE `opinion_inputs` (
+	`key` text PRIMARY KEY NOT NULL,
+	`input` text NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE `opinions_due` (
-	`id` integer PRIMARY KEY NOT NULL,
-	`due_at` text NOT NULL
+CREATE TABLE `opinion_people` (
+	`person` text PRIMARY KEY NOT NULL,
+	`merged_from` text,
+	`run_from` text
 );

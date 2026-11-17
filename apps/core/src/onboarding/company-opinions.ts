@@ -19,28 +19,32 @@ import type { Checks } from "./team-claims.ts";
 // (`companyMayHaveOpinions`), and it never names a team.
 //
 // Put together in two steps, because one prompt over a whole company's
-// lines does not fit:
+// lines does not fit, once five people's lines changed since the last
+// time (the store's `#opinionsRun`), so whatever tips an opinion to
+// standing hides among five people's changes:
 //
 // 1. `teamCandidates`: a team's lines, put together by the careful
-//    model into candidates, each resting on the people whose lines the
+//    model into candidates, each resting on every person whose lines the
 //    quick model checks say it, one line a call. A candidate may rest on
 //    one person, so it is kept in the onboarding's own store alone and
 //    read by nothing but step 2.
 // 2. `companyOpinions`: every team's candidates, as sentences alone (no
 //    person, no team), merged by the careful model into opinions, each
 //    cited candidate checked against its opinion apart. An opinion rests
-//    on the people behind the candidates checked to say it; checking
-//    stops once five do, as a team's claim does (team-claims.ts
-//    `supported`).
+//    on everyone behind the candidates checked to say it, so one person
+//    leaving drops only an opinion truly at five.
 //
 // The names on the staff list (each name word, `withoutNames`) and the
 // names of its teams (each whole name, `withoutTeams`) are taken out of
 // every line before any model sees it. An opinion whose words still hold
-// one, or that is word for word a line it rests on, is dropped, never
-// rewritten: no team, no person and no quote of anyone reaches it. What
-// can't be checked mechanically: a nickname, part of a team's name, and an
-// opinion about work only one team does, which points at that team by
-// what it says (accepted on GRA-1987).
+// one is dropped, never rewritten; so is one that is word for word a line
+// as the model saw it or a candidate, or that holds a figure or a
+// capitalised name fewer than five of its backers gave
+// (`saysOnlyWhatFiveSaid`): no team, no person and no quote of anyone
+// reaches it. What can't be checked mechanically: a nickname or a client's
+// name not on the list, part of a team's name, and an opinion about work
+// only one team does, which points at that team by what it says
+// (accepted on GRA-1987).
 
 /** Fewest people across the company an opinion stands on: the one floor. */
 export const opinionBackersMin = minTeamShown;
@@ -267,9 +271,9 @@ const askCareful = async <T>(
 /**
  * A team's candidates for the company's opinions, put together by the
  * careful model from the lines its people left only counted anonymously,
- * each resting on the people whose cited lines the quick model checks say
- * it, one at a time, until five do. None, and no call, without a line.
- * Throws when no model may do it, so the run is tried again.
+ * each resting on every person whose cited lines the quick model checks
+ * say it, one at a time. None, and no call, without a line. Throws when no
+ * model may do it, so the run is tried again.
  */
 export const teamCandidates = async (
   brief: CandidateBrief,
@@ -302,13 +306,10 @@ export const teamCandidates = async (
     const cited = [
       ...new Set(lines.flatMap((label) => byLabel.get(label.trim()) ?? [])),
     ];
+    // Every person whose line says it, one check at a time: an opinion
+    // rests on all who said it, so one leaving drops only one truly at five.
     const backers = new Set<string>();
-    // One check at a time; once five people's lines say it, the rest
-    // needn't be asked.
     for (const line of cited) {
-      if (backers.size >= opinionBackersMin) {
-        break;
-      }
       if (
         !backers.has(line.person) &&
         // oxlint-disable-next-line no-await-in-loop -- one check at a time
@@ -336,8 +337,8 @@ export interface MergeBrief {
   }[];
   names: readonly string[];
   teamNames: readonly string[];
-  /** Every line the candidates were put together from: an opinion is never one of them word for word. */
-  lines: readonly string[];
+  /** Each person's lines the candidates were put together from, as the record keeps them. */
+  lines: ReadonlyMap<string, readonly string[]>;
 }
 
 /** A text as compared for being the same words: case and spacing aside. */
@@ -348,12 +349,90 @@ const sameWords = (text: string): string =>
     .replaceAll(/[^\p{L}\p{N}]+/gu, " ")
     .trim();
 
+/** A word with a digit in it. */
+const figure = /\p{N}/u;
+/** A word that starts with a capital letter. */
+const capitalised = /^\p{Lu}/u;
+
+/**
+ * The words of `text` that can point at one person: each that holds a
+ * figure ("340"), and each but the first that starts with a capital (a
+ * product's, a place's or a day's name: "Exact", "Monday"), in the same
+ * words as compared (`sameWords`).
+ */
+const tellingWords = (text: string): string[] =>
+  text
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter((word) => word !== "")
+    .flatMap((word, at) =>
+      figure.test(word) || (at > 0 && capitalised.test(word))
+        ? [sameWords(word)]
+        : []
+    );
+
+/**
+ * A hash of exactly what the company's merge would be given: the
+ * candidates' sentences and who is behind each, the names no opinion may
+ * hold, and how it is asked. The same hash, the same opinions: no model is
+ * asked again (`opinion_inputs`). Someone's lines changing changes their
+ * candidates too, or they keep backing what they backed.
+ */
+export const mergeInputOf = async (brief: MergeBrief): Promise<string> =>
+  await sha256Hex(
+    canonicalJson([
+      opinionsSystem,
+      brief.candidates
+        .map(({ id, text, people }) => [id, text, [...people].toSorted()])
+        .toSorted((a, b) => String(a[0]).localeCompare(String(b[0]))),
+      [...brief.names].toSorted(),
+      [...brief.teamNames].toSorted(),
+    ])
+  );
+
+/**
+ * Whether opinion `said` may stand on `backers` as words: not word for
+ * word any line the candidates came from as the model saw it, nor any
+ * candidate; and each word that can point at one person
+ * (`tellingWords`) is in the lines of five or more of its backers.
+ */
+const saysOnlyWhatFiveSaid = (
+  said: string,
+  backers: ReadonlySet<string>,
+  linesOf: ReadonlyMap<string, readonly string[]>,
+  verbatim: ReadonlySet<string>
+): boolean => {
+  if (verbatim.has(sameWords(said))) {
+    return false;
+  }
+  const wordsOf = [...backers].map(
+    (person) =>
+      new Set(
+        (linesOf.get(person) ?? []).flatMap((line) =>
+          sameWords(line).split(" ")
+        )
+      )
+  );
+  return tellingWords(said).every(
+    (word) =>
+      wordsOf.filter((words) => words.has(word)).length >= opinionBackersMin
+  );
+};
+
+/** The checks a merge makes: the quick model, how what it took is counted, and no fixed most (pruned by what can reach five). */
+export const mergeChecks = (env: Env, count: Checks["count"]): Checks => ({
+  env,
+  count,
+  left: Number.POSITIVE_INFINITY,
+});
+
 /**
  * The company's opinions, merged by the careful model from every team's
- * candidates as sentences alone, each resting on the people behind the
- * candidates checked to say it, one at a time, until five do: only those
- * five or more back. None, and no call, while fewer than five people are
- * behind every candidate together. Throws when no model may do it.
+ * candidates as sentences alone, each resting on every person behind the
+ * candidates checked to say it: only those five or more back. Checking an
+ * opinion stops as soon as the candidates left to check can't bring it to
+ * five, and one whose cited candidates together hold fewer than five
+ * people is never checked. None, and no call, while fewer than five people
+ * are behind every candidate together. Throws when no model may do it.
  */
 export const companyOpinions = async (
   brief: MergeBrief,
@@ -379,16 +458,24 @@ export const companyOpinions = async (
   );
   const byLabel = new Map(shown.map((each) => [each.label, each]));
   const clean = cleanerOf(brief.names, brief.teamNames);
-  const lines = new Set(brief.lines.map(sameWords));
+  // What the model saw: the lines as cleaned, and the candidates.
+  const linesOf = new Map(
+    [...brief.lines].map(([person, lines]) => [person, lines.map(clean)])
+  );
+  const verbatim = new Set(
+    [
+      ...[...linesOf.values()].flat(),
+      ...brief.candidates.map(({ text }) => text),
+    ].map(sameWords)
+  );
   const opinions = new Map<string, CompanyOpinion>();
   for (const { kind, text, candidates } of output.opinions) {
     const said = claimOf(text);
-    // A name or a team's name in it, or someone's line as it stands: out.
+    // A name or a team's name in it: out.
     if (
       !isKind(kind) ||
       said === null ||
       clean(said) !== said ||
-      lines.has(sameWords(said)) ||
       opinions.has(said)
     ) {
       continue;
@@ -399,8 +486,12 @@ export const companyOpinions = async (
       ),
     ];
     const backers = new Set<string>();
-    for (const candidate of cited) {
-      if (backers.size >= opinionBackersMin) {
+    for (const [at, candidate] of cited.entries()) {
+      const reachable = new Set([
+        ...backers,
+        ...cited.slice(at).flatMap(({ people }) => people),
+      ]);
+      if (reachable.size < opinionBackersMin) {
         break;
       }
       if (
@@ -415,7 +506,10 @@ export const companyOpinions = async (
         }
       }
     }
-    if (backers.size >= opinionBackersMin) {
+    if (
+      backers.size >= opinionBackersMin &&
+      saysOnlyWhatFiveSaid(said, backers, linesOf, verbatim)
+    ) {
       opinions.set(said, {
         // oxlint-disable-next-line no-await-in-loop -- a hash each
         record: await ownId("op", said),
