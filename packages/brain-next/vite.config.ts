@@ -13,6 +13,14 @@ export default defineProject({
     // One after another, as listed: the runtime's check reports before
     // warm-store.ts fails on its `cloudflare:` import.
     sequence: { setupFiles: "list" },
+    // Integration tests in workerd, as core's are: exports and restores
+    // over several parts, ledger replays and erasures through the real
+    // store. On a CI runner, six Vitest workers share four CPUs with the
+    // workerd they drive and with the shard's long property tests, and the
+    // same test took four to seven times as long as on a laptop: one of
+    // 0.7 s locally passed 5 s, Vitest's default, twice in a row
+    // (November 2026). The same default as core's (apps/core/vite.config.ts).
+    testTimeout: 60_000,
   },
   plugins: [
     cloudflareTest({

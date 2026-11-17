@@ -361,19 +361,15 @@ describe("where a chunk is kept", () => {
     );
   });
 
-  it(
-    "answers every reader as with every block open to every set, for random stores",
-    { timeout: 60_000 },
-    async () => {
-      const differing: number[] = [];
-      for (const seed of seeds) {
-        // oxlint-disable-next-line no-await-in-loop -- one store at a time
-        if (!(await answersAsOpen(seed))) {
-          differing.push(seed);
-        }
+  it("answers every reader as with every block open to every set, for random stores", async () => {
+    const differing: number[] = [];
+    for (const seed of seeds) {
+      // oxlint-disable-next-line no-await-in-loop -- one store at a time
+      if (!(await answersAsOpen(seed))) {
+        differing.push(seed);
       }
-
-      expect(differing).toStrictEqual([]);
     }
-  );
+
+    expect(differing).toStrictEqual([]);
+  });
 });

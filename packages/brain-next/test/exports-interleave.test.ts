@@ -259,68 +259,64 @@ describe("a company's export, with writes between its parts", () => {
     empty = await copyOf(shared());
   });
 
-  it(
-    "is the store at its stamp, whatever is written between its parts",
-    { timeout: 60_000 },
-    async () => {
-      await restore(shared(), empty);
-      const fixture = await fixtureOf(crypto.randomUUID().slice(0, 8));
-      const asked = {
-        readers: fixture.readers,
-        entities: [fixture.acme],
-        names: ["Acme", "Acme BV", ...[0, 1, 2, 3, 4].map(late)],
-        emails: [`acme@${fixture.tag}.test`],
-        questions: [`status ${fixture.tag}`],
-        asOf: new Date(Date.now() + 60_000),
-      };
-      const before = await everyRead(shared(), asked);
+  it("is the store at its stamp, whatever is written between its parts", async () => {
+    await restore(shared(), empty);
+    const fixture = await fixtureOf(crypto.randomUUID().slice(0, 8));
+    const asked = {
+      readers: fixture.readers,
+      entities: [fixture.acme],
+      names: ["Acme", "Acme BV", ...[0, 1, 2, 3, 4].map(late)],
+      emails: [`acme@${fixture.tag}.test`],
+      questions: [`status ${fixture.tag}`],
+      asOf: new Date(Date.now() + 60_000),
+    };
+    const before = await everyRead(shared(), asked);
 
-      const flags = { held: 0, released: 0 };
-      await holdingParts(shared(), flags);
-      const { id } = await shared().startExport("test");
-      const settled: { state?: string; done: boolean } = { done: false };
-      const working = (async () => {
-        settled.state = await exportSettled(shared, id);
-        settled.done = true;
-      })();
-      const injected: string[] = [];
-      let parts = 0;
-      // Five parts are expected; a writes-into-the-export bug would make one
-      // more after every write: bounded, it fails fast.
-      for (; parts < 10;) {
-        const putSoFar = parts;
-        // oxlint-disable-next-line no-await-in-loop -- one part at a time
-        await until(() => flags.held > putSoFar || settled.done);
-        if (flags.held <= parts) {
-          break;
-        }
-        // oxlint-disable-next-line no-await-in-loop -- one part at a time
-        injected.push(...(await writeBetween(parts, fixture)));
-        parts += 1;
-        flags.released = parts;
+    const flags = { held: 0, released: 0 };
+    await holdingParts(shared(), flags);
+    const { id } = await shared().startExport("test");
+    const settled: { state?: string; done: boolean } = { done: false };
+    const working = (async () => {
+      settled.state = await exportSettled(shared, id);
+      settled.done = true;
+    })();
+    const injected: string[] = [];
+    let parts = 0;
+    // Five parts are expected; a writes-into-the-export bug would make one
+    // more after every write: bounded, it fails fast.
+    for (; parts < 10;) {
+      const putSoFar = parts;
+      // oxlint-disable-next-line no-await-in-loop -- one part at a time
+      await until(() => flags.held > putSoFar || settled.done);
+      if (flags.held <= parts) {
+        break;
       }
-      // Any part past those is let go at once.
-      flags.released = Number.POSITIVE_INFINITY;
-      await working;
-      const written = await writtenOf(id);
-      const restored = await restoredAfterLoss(shared, id, empty);
-      const after = await everyRead(shared(), asked);
-
-      expect({
-        exported: settled.state,
-        parts,
-        restored,
-        lateInExport: [...[0, 1, 2, 3, 4].map(late), ...injected].filter(
-          (marker) => written.includes(marker)
-        ),
-        differ: differences(before, after),
-      }).toStrictEqual({
-        exported: "done",
-        parts: 5,
-        restored: "done",
-        lateInExport: [],
-        differ: [],
-      });
+      // oxlint-disable-next-line no-await-in-loop -- one part at a time
+      injected.push(...(await writeBetween(parts, fixture)));
+      parts += 1;
+      flags.released = parts;
     }
-  );
+    // Any part past those is let go at once.
+    flags.released = Number.POSITIVE_INFINITY;
+    await working;
+    const written = await writtenOf(id);
+    const restored = await restoredAfterLoss(shared, id, empty);
+    const after = await everyRead(shared(), asked);
+
+    expect({
+      exported: settled.state,
+      parts,
+      restored,
+      lateInExport: [...[0, 1, 2, 3, 4].map(late), ...injected].filter(
+        (marker) => written.includes(marker)
+      ),
+      differ: differences(before, after),
+    }).toStrictEqual({
+      exported: "done",
+      parts: 5,
+      restored: "done",
+      lateInExport: [],
+      differ: [],
+    });
+  });
 });
