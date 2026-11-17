@@ -51,7 +51,8 @@ export const Destination = ({
   onMove,
   disabled = false,
 }: Pick<InterviewFact, "tag" | "share"> & {
-  of: string;
+  /** The id of the line's words, shown now; none while they aren't. */
+  of: string | undefined;
   onMove: () => void;
   disabled?: boolean;
 }) => {

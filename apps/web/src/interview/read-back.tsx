@@ -75,10 +75,6 @@ const ReadBackLine = ({
   };
   return (
     <div className="flex flex-col items-start gap-0.5 py-1">
-      {/* What describes where the line goes, there also while the line is being put right. */}
-      <span className="sr-only" id={words}>
-        {text}
-      </span>
       <div className="flex w-full items-center gap-3">
         <span className="min-w-0 flex-1">
           {draft === null ? (
@@ -91,7 +87,10 @@ const ReadBackLine = ({
               }}
               type="button"
             >
-              <span className={told === null ? undefined : toldLooks[told]}>
+              <span
+                className={told === null ? undefined : toldLooks[told]}
+                id={words}
+              >
                 {text}
               </span>
             </button>
@@ -134,7 +133,9 @@ const ReadBackLine = ({
         </Button>
       </div>
       <Destination
-        of={words}
+        // The line's words describe it; while they are being put right,
+        // the field holds them, and nothing that isn't there is named.
+        of={draft === null ? words : undefined}
         onMove={() => {
           moveLine(id, share);
         }}
