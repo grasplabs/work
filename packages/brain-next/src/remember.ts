@@ -151,8 +151,8 @@ const encoder = new TextEncoder();
 
 /**
  * The entities of an add as rows: the store's own entity for one named
- * `own` (own-entity.ts, made by the first; refused in the shared store),
- * each known `id` (of its kind), else
+ * `own` (own-entity.ts, made by the first), each known `id` (both checked
+ * on the add as asked, `checkAsAsked`), else
  * the first holding one of its identifiers, or another entity of the add
  * with one of them, else, given no identifier, the one entity of its kind
  * holding one of its names by memories of exactly the add's readers
@@ -160,9 +160,8 @@ const encoder = new TextEncoder();
  */
 const entityRowsOf = (
   sql: SqlStorage,
-  { entities, reader }: Adding,
+  { entities }: Adding,
   readers: string,
-  shared: boolean,
   /** Which entities the add gave identifiers, before any was left out (`writeAdd`): only the others link by name. */
   identified: readonly boolean[]
 ): number[] => {
@@ -173,13 +172,6 @@ const entityRowsOf = (
     );
     let row: number | undefined;
     if (entity.own === true) {
-      // Its person, in their own store alone: never one a name or an
-      // identifier finds, and never in the shared store.
-      if (shared) {
-        throw refused(
-          `entity ${index} names a person's own, which only their own store holds`
-        );
-      }
       row = ownEntityRow(sql);
     } else if (entity.id === undefined) {
       row =
@@ -191,27 +183,7 @@ const entityRowsOf = (
           ? undefined
           : linkedByName(sql, entity.kind, entity.names, readers));
     } else {
-      const known = entityRowOf(sql, entity.id);
-      // An id the add may not name is refused in the words of an unknown
-      // one: whether it exists is no answer of the store's.
-      if (
-        known === undefined ||
-        known.kind !== entity.kind ||
-        !mayName(sql, known.row, readers, reader)
-      ) {
-        throw refused(`entity ${index} names no entity of its kind`);
-      }
-      // The store's own entity, named by its id, takes no name or
-      // identifier either: no evidence may ever find it (own-entity.ts).
-      if (
-        isOwnEntityRow(sql, known.row) &&
-        (entity.names.length > 0 || entity.identifiers.length > 0)
-      ) {
-        throw refused(
-          `entity ${index}: the own entity is a person named by nothing else`
-        );
-      }
-      ({ row } = known);
+      row = entityRowOf(sql, entity.id)?.row;
     }
     row ??= sql
       .exec<{ row: number }>(
@@ -269,6 +241,69 @@ const holdVersion = (
     throw refused(
       "what one person alone may read is kept in that person's own store"
     );
+  }
+};
+
+/**
+ * Refuses `asked` for what its write would refuse, each part by its place
+ * in the add as asked: every version a memory rests on, and the one it
+ * marks extracted (`holdVersion`); every entity named as a person's own
+ * (in their own store alone: never one a name or an identifier finds, and
+ * never in the shared store) or by id (one of its kind the add may name,
+ * refused in the words of an unknown one, as whether it exists is no
+ * answer of the store's; the store's own entity, by its id, takes no name
+ * or identifier either: no evidence may ever find it, own-entity.ts). Run
+ * before a person's erasure leaves anything out (people.ts), so whether
+ * and how an add is refused never depends on who was erased.
+ */
+const checkAsAsked = (
+  sql: SqlStorage,
+  shared: boolean,
+  asked: Adding,
+  readers: string
+): void => {
+  for (const [index, { basis }] of asked.memories.entries()) {
+    if (basis.kind === "source") {
+      holdVersion(
+        { sql, shared },
+        basis.source,
+        basis.version,
+        `memory ${index} rests on a version this store doesn't hold`
+      );
+    }
+  }
+  if (asked.extracted !== undefined) {
+    holdVersion(
+      { sql, shared },
+      asked.extracted.source,
+      asked.extracted.version,
+      "it marks extracted a version this store doesn't hold"
+    );
+  }
+  for (const [index, entity] of asked.entities.entries()) {
+    if (entity.own === true && shared) {
+      throw refused(
+        `entity ${index} names a person's own, which only their own store holds`
+      );
+    }
+    if (entity.own !== true && entity.id !== undefined) {
+      const known = entityRowOf(sql, entity.id);
+      if (
+        known === undefined ||
+        known.kind !== entity.kind ||
+        !mayName(sql, known.row, readers, asked.reader)
+      ) {
+        throw refused(`entity ${index} names no entity of its kind`);
+      }
+      if (
+        isOwnEntityRow(sql, known.row) &&
+        (entity.names.length > 0 || entity.identifiers.length > 0)
+      ) {
+        throw refused(
+          `entity ${index}: the own entity is a person named by nothing else`
+        );
+      }
+    }
   }
 };
 
@@ -538,12 +573,7 @@ const markExtracted = (
   into: Into
 ): void => {
   const { learnedAt, readers, subjects } = into;
-  holdVersion(
-    into,
-    source,
-    version,
-    "it marks extracted a version this store doesn't hold"
-  );
+  // Its version held: checked for the add as asked (`checkAsAsked`).
   sql.exec(
     `INSERT OR IGNORE INTO memory_extractions
       (source, version, subject, lineage, at, readers)
@@ -667,18 +697,11 @@ export const writeAdd = (
     if (naming.speakers.some((person) => isErasedPerson(sql, person))) {
       throw refused("it is in the word of a person an erasure took");
     }
-    // Every version a memory rests on is checked as asked, by its place
-    // in it: whether an add is refused never depends on who was erased.
-    for (const [index, { basis }] of asked.memories.entries()) {
-      if (basis.kind === "source") {
-        holdVersion(
-          { sql, shared },
-          basis.source,
-          basis.version,
-          `memory ${index} rests on a version this store doesn't hold`
-        );
-      }
-    }
+    // Every check on the add as asked, then what an erasure leaves out,
+    // then the write: whether and how an add is refused never depends on
+    // who was erased.
+    const readers = readerSetKeyOf(asked.access);
+    checkAsAsked(sql, shared, asked, readers);
     const drawn =
       asked.extracted !== undefined ||
       asked.memories.some(({ basis }) => basis.kind === "source");
@@ -700,12 +723,10 @@ export const writeAdd = (
     // The set is stored (read sets match readers by it); memories name it
     // by its key alone, never its row id.
     readerSetOf(db, adding.access);
-    const readers = readerSetKeyOf(adding.access);
     const rows = entityRowsOf(
       sql,
       adding,
       readers,
-      shared,
       adding.entities.map((entity) => identified.has(entity.key))
     );
     const ids = rows.map(

@@ -1228,6 +1228,74 @@ describe("a person's erasure in the shared store", () => {
     }).toStrictEqual({ refused: [true, true], after: before });
   });
 
+  it.each([
+    ["her card under an id no entity has", "unknown", 0],
+    ["a second entity under an id no entity has", "second", 1],
+    ["her card under a project's id", "project", 0],
+  ] as const)(
+    "answers a write naming %s alike with and without her erasure",
+    async (_case, shape, place) => {
+      /** What a write of the shape answers in a store where her card is, erased or not. */
+      const answered = async (erased: boolean): Promise<string> => {
+        const group = unique("g");
+        const local = word();
+        const name = `Anna ${word()}`;
+        const note = await document(group, `${name} leads finance.`);
+        const fact = (about: string): NewMemory => ({
+          about,
+          type: "fact",
+          statement: `${about} leads finance`,
+          speaker: { kind: "agent", agent: "app:hr" },
+          basis: on(note, "leads finance"),
+        });
+        const card: NewEntity = {
+          key: "a",
+          kind: "person",
+          names: [name],
+          identifiers: [email(local)],
+        };
+        await remember(group, [card], [fact("a")]);
+        const project = await remember(
+          group,
+          [{ key: "p", kind: "project", names: [`Audit ${word()}`] }],
+          [fact("p")]
+        );
+        if (erased) {
+          await erase(unique("anna-"), [email(local)]);
+        }
+        const shapes = {
+          unknown: {
+            entities: [{ ...card, id: crypto.randomUUID() }],
+            memories: [fact("a")],
+          },
+          second: {
+            entities: [
+              card,
+              { key: "p", id: crypto.randomUUID(), kind: "project" as const },
+            ],
+            memories: [fact("a"), fact("p")],
+          },
+          project: {
+            entities: [{ ...card, id: project.entities.p ?? "" }],
+            memories: [fact("a")],
+          },
+        };
+        const { entities, memories } = shapes[shape];
+        return await remember(group, entities, memories).then(
+          () => "added",
+          String
+        );
+      };
+
+      const refusal = `Error: The Brain refused it: entity ${place} names no entity of its kind`;
+
+      expect({
+        without: await answered(false),
+        with: await answered(true),
+      }).toStrictEqual({ without: refusal, with: refusal });
+    }
+  );
+
   it("answers a write resting on a document tried again with the same change as it was made, whether her erasure came before it or in between", async () => {
     /** Her card and a project's fact, written on a note; then tried again. */
     const triedAgain = async (erasedBetween: boolean) => {

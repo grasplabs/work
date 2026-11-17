@@ -274,7 +274,11 @@ class OutOfTimeError extends Error {
  */
 const replayMemos = new WeakMap<DurableObjectStorage, ReplayMemo>();
 
-/** A step's end: once the replay is through, its hashes go. */
+/**
+ * A step's end: once the replay is through, what it kept goes. That only
+ * lets the memory go, and nothing observes it: an instance replays only
+ * until it is through, never again after.
+ */
 const stepEnded = (
   storage: DurableObjectStorage,
   stopped: string[],
