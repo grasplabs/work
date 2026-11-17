@@ -462,8 +462,19 @@ const lateWorld = async () => {
       )
     );
   }
+  const privateAddress: Identifier = {
+    type: "email",
+    value: `${word()}@private.test`,
+  };
   await add(
-    [{ key: "a", id: card, kind: "person", identifiers: [email(local)] }],
+    [
+      {
+        key: "a",
+        id: card,
+        kind: "person",
+        identifiers: [email(local), privateAddress],
+      },
+    ],
     [fromApp("a", `${name} leads finance ${marker.address}`)]
   );
   await add(
@@ -477,6 +488,25 @@ const lateWorld = async () => {
     ],
     [fromApp("d", `${doraName} signs ${marker.doraAddress}`)]
   );
+  // Her card in another group, with another address of hers, only in that
+  // late part: never written if it fails.
+  const otherAddress: Identifier = {
+    type: "email",
+    value: `${word()}@private.test`,
+  };
+  await shared().addMemories({
+    change: crypto.randomUUID(),
+    access: { kind: "audience", group: unique("g") },
+    entities: [
+      {
+        key: "o",
+        kind: "person",
+        names: [name],
+        identifiers: [email(local), otherAddress],
+      },
+    ],
+    memories: [fromApp("o", `${name} chairs the board ${mark()}`)],
+  });
   // Erik, whose card is only in that late part: never written if it fails.
   await add(
     [
@@ -508,6 +538,8 @@ const lateWorld = async () => {
     marker,
     cards: [card, bob.entities.b ?? "", project.entities.f ?? ""],
     group,
+    privateAddress,
+    otherAddress,
     dora: {
       person: unique("dora-"),
       local: doraLocal,
@@ -575,6 +607,20 @@ const cardsNotHeld = async (): Promise<number> =>
         )
         .toArray().length
   );
+
+/** How many files of export `id` the bucket holds. */
+const filesInBucket = async (id: string): Promise<number> => {
+  const listed = await env.BRAIN_OBJECTS.list();
+  return listed.objects.filter(({ key }) => key.includes(`exports/${id}/`))
+    .length;
+};
+
+/** What export `id` serves now: the files it lists, and its manifest. */
+const servedNow = async (id: string) => {
+  const status = await shared().exportStatus({ id });
+  const manifest = await shared().exportFile({ id, file: "manifest.json" });
+  return { files: status?.files.length ?? 0, manifest };
+};
 
 /** What of her any read or raw row of the store shows. */
 const herLeft = async (w: LateWorld): Promise<string[]> => {
@@ -822,8 +868,13 @@ describe("a person's erasure and restores", () => {
       const before = await herLeft(w);
       const recorded = await cardsKept(email(w.local));
       const erasedNow = await erased(w.anna, [email(w.local)]);
-      // The cards recorded by her address (hers and Greta's) go with it.
-      const keptAfter = await cardsKept(email(w.local));
+      // What the check recorded of her cards goes with them: by her address,
+      // and by her other addresses, which the erasure wasn't given (one on
+      // a card the restore never wrote).
+      const keptAfter =
+        (await cardsKept(email(w.local))) +
+        (await cardsKept(w.privateAddress)) +
+        (await cardsKept(w.otherAddress));
       await tick(shared());
       await tick(shared());
       const after = await herLeft(w);
@@ -904,6 +955,90 @@ describe("a person's erasure and restores", () => {
         dora: "erased",
         her: [],
         doraLeft: [],
+      });
+    });
+
+    it.each([
+      ["her erasure ran on the emptied store", "before"],
+      ["her erasure asked while the restore had failed", "while"],
+    ] as const)(
+      "keeps a failed restore and its export when %s, serves the export to no one, and a restart leaves her out",
+      async (_case, when) => {
+        const w = await lateWorld();
+        const id = await exportNow();
+        await restore(shared(), empty);
+        if (when === "before") {
+          await erase(w.anna, [email(w.local)]);
+        }
+        const failed = await failedAtHerAddress(id, w.local);
+        if (when === "while") {
+          await erase(w.anna, [email(w.local)]);
+        }
+        await tick(shared());
+        await tick(shared());
+        const status = await shared().restoreStatus(id);
+        const files = await filesInBucket(id);
+        const served = await servedNow(id);
+        await shared().startRestore(id, "test");
+        const state = await restoreEnded(id);
+        await tick(shared());
+        const unrelated = await shared().readMemories({
+          entity: w.cards[1] ?? "",
+          reader: w.reader,
+        });
+        const after = await shared().exportStatus({ id });
+
+        expect({
+          failed,
+          still: status?.state,
+          files: files > 0,
+          served,
+          state,
+          her: await herLeft(w),
+          bobChess: unrelated.memories.some(({ statement }) =>
+            statement.includes(w.marker.bobChess)
+          ),
+          after: after?.state,
+        }).toStrictEqual({
+          failed: "failed",
+          still: "failed",
+          files: true,
+          served: { files: 0, manifest: null },
+          state: "done",
+          her: [],
+          bobChess: true,
+          after: "erased",
+        });
+      }
+    );
+
+    it("takes her card a failed restore wrote by name, Dora erased on the emptied store before it", async () => {
+      const w = await lateWorld();
+      const id = await exportNow();
+      await restore(shared(), empty);
+      await erase(w.dora.person, [email(w.dora.local)]);
+      const failed = await failedAtHerAddress(id, w.local);
+      await tick(shared());
+      const status = await shared().restoreStatus(id);
+      const before = await herLeft(w);
+      const anna = await erased(w.anna, [email(w.local)]);
+      await tick(shared());
+      await tick(shared());
+
+      expect({
+        failed,
+        still: status?.state,
+        before: before.length > 0,
+        anna,
+        her: await herLeft(w),
+        dora: await doraLeft(w),
+      }).toStrictEqual({
+        failed: "failed",
+        still: "failed",
+        before: true,
+        anna: "erased",
+        her: [],
+        dora: [],
       });
     });
 

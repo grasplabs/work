@@ -1332,8 +1332,11 @@ const settleStuck = (storage: DurableObjectStorage): void => {
  * be on record, so they go), or one that failed with its export no longer
  * adopted (`handedBackSql`) or checked whole, once the store took
  * something since it failed (a version past `held_to`, but Grasp's own
- * skills, or a write of memories past `held_stamp`) or the ledger names a
- * version its export holds: to give up.
+ * skills, or a write of memories past `held_stamp`): to give up. Not for
+ * an erasure the ledger names in its export: a failed restore's export is
+ * served to no one, and started again it leaves out what the ledger
+ * erased (restore.ts), so the company keeps its backup; it is retired as
+ * erased once the restore is done (restore.ts `settle`).
  */
 const givenUpSql = `restores.state = 'failed' AND (
   (
@@ -1350,9 +1353,6 @@ const givenUpSql = `restores.state = 'failed' AND (
         != '${shippedSkillsPrefix}'
   )
   OR ${memoriesWrittenSinceSql}
-  OR EXISTS (
-    SELECT 1 FROM exports WHERE exports.id = restores.export AND ${staleSql}
-  )
 )`;
 
 /**

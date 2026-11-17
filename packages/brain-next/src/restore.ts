@@ -135,10 +135,12 @@ import type { WorkContext } from "./work.ts";
 // (written by a run the store stopped part-way) is passed over, so a run
 // repeated finds what the last one wrote and ends the same, and a failed
 // restore can be started again from the same export while the store holds
-// nothing but what it wrote: once anything is added (a version, or any
-// write of memories, which moves the write stamp), or the ledger names a
-// version the export holds, the restore is given up (`abandoned`), and its
-// export's files are no longer held (exports.ts `exportsStep`). It fails rather than
+// nothing but what it wrote, also once the ledger names what the export
+// holds (started again, it leaves that out, and its export is served to no
+// one meanwhile): once anything is added (a version, or any write of
+// memories, which moves the write stamp), or its check found a part
+// damaged, the restore is given up (`abandoned`), and its export's files
+// are no longer held (exports.ts `exportsStep`). It fails rather than
 // fill the store past its quota (contract.ts `storeBytesMax`). Its export
 // is recorded as one the store has (exports.ts `recordRestoredExport`), so
 // an erasure of what it holds deletes its files once the restore is done.
@@ -163,10 +165,10 @@ const refusals = {
   // One a newer release made may hold what this one doesn't know.
   newerFormat: `${refusalPrefix} that export was made by a newer release, which this one can't restore`,
   // An abandoned restore's export id is refused for good: the store it
-  // half-filled has been used since, or its export holds what the ledger
-  // erased (its files are then deleted), so restoring it again would mix
-  // what it wrote with what came after, or bring back nothing whole.
-  givenUp: `${refusalPrefix} that restore was given up: the store took something since, or the ledger names what the export holds`,
+  // half-filled has been used since, or its export is damaged, so restoring
+  // it again would mix what it wrote with what came after, or bring back
+  // nothing whole.
+  givenUp: `${refusalPrefix} that restore was given up: the store took something since, or its export is damaged`,
 } as const;
 
 /** A restore's row, as the store keeps it. */

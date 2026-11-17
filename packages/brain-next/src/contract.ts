@@ -1573,8 +1573,8 @@ export interface RestoreStatus {
   export: string;
   /**
    * Failed restores start again while the store holds nothing but what they
-   * wrote; abandoned once it took anything, or the ledger names what the
-   * export holds.
+   * wrote, also once an erasure names what the export holds (started
+   * again, they leave it out); abandoned once the store took anything.
    */
   state: "running" | "done" | "failed" | "abandoned";
   restored: number;

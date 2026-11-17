@@ -292,10 +292,7 @@ export const applyPerson = (
       .toArray()
       .map(({ entity }) => entityClosureOf(entity)),
   ];
-  sql.exec(
-    "DELETE FROM restore_cards WHERE subject IN (SELECT value FROM json_each(?1))",
-    JSON.stringify(subjects)
-  );
+
   // And each card the erasure closed by its id (a ledger entry's): in a
   // copy of the store from before her address reached it, it holds none.
   // An id is the store's own UUID, so it names that card and no other.
@@ -310,6 +307,20 @@ export const applyPerson = (
     .filter(({ row }) => !holding.some((entity) => entity.row === row))
     .map(({ row, id }) => ({ row, id, alone: true }));
   const entities = [...holding, ...byId];
+  // What a restore recorded by their identifiers, and of every card taken
+  // (its other identifiers too), goes: it explained nothing else.
+  sql.exec(
+    `DELETE FROM restore_cards
+    WHERE subject IN (SELECT value FROM json_each(?1))
+      OR entity IN (SELECT value FROM json_each(?2))`,
+    JSON.stringify(subjects),
+    JSON.stringify([
+      ...closing.flatMap((closed) =>
+        closed.startsWith("entity:") ? [closed.slice(7)] : []
+      ),
+      ...entities.flatMap(({ id, alone }) => (alone ? [id] : [])),
+    ])
+  );
   for (const closed of [
     ...closing,
     ...entities.flatMap(({ id, alone }) =>
