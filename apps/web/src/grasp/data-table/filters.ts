@@ -2,43 +2,10 @@
 // the condition it holds.
 import type { FilterCondition, FilterField } from "../filter-builder";
 import type { DataTableColumn } from "./types";
+import type { DataTableFilterWords } from "./words";
 
-/** The Filter builder's operators' words, so a product can translate them. */
-export interface DataTableFilterWords {
-  /**
-   * @default contains
-   */
-  contains: string;
-  /**
-   * @default does not contain
-   */
-  lacks: string;
-  /**
-   * @default is at least
-   */
-  atLeast: string;
-  /**
-   * @default is at most
-   */
-  atMost: string;
-  /**
-   * @default is
-   */
-  is: string;
-  /**
-   * @default is not
-   */
-  isNot: string;
-}
-
-export const englishFilterWords: DataTableFilterWords = {
-  contains: "contains",
-  lacks: "does not contain",
-  atLeast: "is at least",
-  atMost: "is at most",
-  is: "is",
-  isNot: "is not",
-};
+export type { DataTableFilterWords } from "./words";
+export { englishFilterWords } from "./words";
 
 const fieldFor = <Row>(
   column: DataTableColumn<Row>,

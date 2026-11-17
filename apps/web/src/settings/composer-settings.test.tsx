@@ -8,9 +8,9 @@ import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import { ComposerSettings } from "./composer-settings.tsx";
 
-// The chat box at work, chosen by sight: each tile is a box at work in
-// its look, and a press keeps that look for the person in this browser,
-// its colour and its edge apart.
+// The chat box at work, its look chosen beside it: one box at work in the
+// chosen look, and a press on a colour or an edge keeps it for the person
+// in this browser and shows it in the box at once.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -29,10 +29,10 @@ const shown = (): void => {
   });
 };
 
-/** The tile a person knows by `name`. */
-const tile = (name: string): HTMLLabelElement => {
-  const found = [...document.querySelectorAll("label")].find(
-    (label) => label.lastElementChild?.textContent === name
+/** The choice a person knows by `name`. */
+const choice = (name: string): HTMLButtonElement => {
+  const found = [...document.querySelectorAll("button")].find(
+    (button) => button.textContent.trim() === name
   );
   if (found === undefined) {
     throw new Error(`No ${name}`);
@@ -40,20 +40,14 @@ const tile = (name: string): HTMLLabelElement => {
   return found;
 };
 
-/** Chooses the tile `name`. */
-const choose = (name: string): void => {
-  act(() => {
-    tile(name).querySelector("input")?.click();
-  });
-};
-
-/** What each tile is, as drawn: chosen, and the edge its box draws. */
-const tiles = () =>
-  ["Light", "Mint", "Lavender", "Smooth", "Dither"].map((name) => ({
-    name,
-    chosen: tile(name).querySelector("input")?.checked,
-    edge: tile(name).querySelector<HTMLElement>("[data-edge]")?.dataset.edge,
-  }));
+/** What shows: the choices pressed, and the edge the one box draws. */
+const state = () => ({
+  pressed: ["Light", "Mint", "Lavender", "Smooth", "Dither"].filter(
+    (name) => choice(name).getAttribute("aria-pressed") === "true"
+  ),
+  boxes: document.querySelectorAll("[data-activity]").length,
+  edge: document.querySelector<HTMLElement>("[data-edge]")?.dataset.edge,
+});
 
 describe(ComposerSettings, () => {
   afterEach(() => {
@@ -65,35 +59,24 @@ describe(ComposerSettings, () => {
     document.body.replaceChildren();
   });
 
-  it("keeps the colour and the edge a person picks, each tile a box at work in its look", async () => {
+  it("keeps the colour and the edge a person picks, and shows them in the one box at once", () => {
     shown();
-    const first = tiles();
-    choose("Mint");
-    choose("Dither");
-    await act(async () => {
-      await Promise.resolve();
+    const first = state();
+    act(() => {
+      choice("Mint").click();
+    });
+    act(() => {
+      choice("Dither").click();
     });
 
     expect({
       first,
       kept: localStorage.getItem("grasp-composer:ada"),
-      picked: tiles(),
+      picked: state(),
     }).toStrictEqual({
-      first: [
-        { name: "Light", chosen: true, edge: "smooth" },
-        { name: "Mint", chosen: false, edge: "smooth" },
-        { name: "Lavender", chosen: false, edge: "smooth" },
-        { name: "Smooth", chosen: true, edge: "smooth" },
-        { name: "Dither", chosen: false, edge: "dither" },
-      ],
+      first: { pressed: ["Light", "Smooth"], boxes: 1, edge: "smooth" },
       kept: "mint:dither",
-      picked: [
-        { name: "Light", chosen: false, edge: "dither" },
-        { name: "Mint", chosen: true, edge: "dither" },
-        { name: "Lavender", chosen: false, edge: "dither" },
-        { name: "Smooth", chosen: false, edge: "smooth" },
-        { name: "Dither", chosen: true, edge: "dither" },
-      ],
+      picked: { pressed: ["Mint", "Dither"], boxes: 1, edge: "dither" },
     });
   });
 });

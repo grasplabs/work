@@ -42,23 +42,22 @@ import {
 } from "../pagination";
 import { Table, TableBody, TableHeader } from "../table";
 import { Toaster, createToaster } from "../toast";
+import { useWords, withGiven } from "../words/words";
 import { dataTableAgent } from "./agent";
 import { Bar } from "./bar";
 import { Body } from "./body";
 import { Confirm } from "./confirm";
 import { save, toCsv } from "./csv";
-import { englishFilterWords, fieldsFor } from "./filters";
+import { fieldsFor } from "./filters";
 import { HeadRow } from "./head-row";
 import { styles } from "./styles";
 import { toolsFor } from "./tools";
-import type { DataTableAction, DataTableProps, DataTableUnit } from "./types";
+import type { DataTableAction, DataTableProps } from "./types";
 import { useDataTable } from "./use-data-table";
 import { useEnd } from "./use-end";
 import { useView } from "./use-view";
-import { englishWords } from "./words";
+import { dataTableWords, englishFilterWords } from "./words";
 import type { DataTableWords } from "./words";
-
-const rowsUnit: DataTableUnit = { one: "row", other: "rows" };
 
 /** What holds focus now, when it is an element that can take it back. */
 const focused = () =>
@@ -146,9 +145,18 @@ const statusOf = <Row,>(
 /** A Table that sorts, searches, chooses rows and pages through them. */
 export const DataTable = <Row extends RowData>(props: DataTableProps<Row>) => {
   const { label, caption, pageSize, toaster } = props;
+  // Its words: the product's, by its catalogue, else English; the caller's `words`, `filterWords`
+  // and `unit` still win.
+  const { rows: rowsUnit, ...catalogued } = useWords(
+    "dataTable",
+    dataTableWords
+  );
   const unit = props.unit ?? rowsUnit;
-  const words = { ...englishWords, ...props.words };
-  const filterWords = { ...englishFilterWords, ...props.filterWords };
+  const words = withGiven(catalogued, props.words ?? {});
+  const filterWords = withGiven(
+    useWords("dataTableFilters", englishFilterWords),
+    props.filterWords ?? {}
+  );
   const { model, holder } = useDataTable(props);
   const id = useId();
   const toast = toaster ?? toasterFor(id);

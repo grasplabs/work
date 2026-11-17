@@ -1,11 +1,11 @@
 import { Trans, useLingui } from "@lingui/react/macro";
 import { createFileRoute } from "@tanstack/react-router";
-import { LayoutGridIcon } from "lucide-react";
 
 import { AppSettings, settingsSectionOf } from "../apps/app-settings.tsx";
 import type { AppSettingsSection } from "../apps/app-settings.tsx";
 import { PageLoading, PageNotLoaded } from "../frame/page-states.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
+import { AppWindow as AppWindowMark } from "../grasp/icons/index.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 
 // An App's settings (apps/app-settings.tsx), for everyone who opens the
@@ -23,7 +23,7 @@ const AppSettingsPage = () => {
     return (
       <PageNotLoaded
         crumbs={[{ label: t`Apps`, to: "/apps" }, { label: t`App` }]}
-        icon={LayoutGridIcon}
+        icon={AppWindowMark}
         notFound={t`App not found`}
         page={page}
       />

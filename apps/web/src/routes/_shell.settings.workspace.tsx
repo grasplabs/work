@@ -12,7 +12,11 @@ import { formatList } from "../format.ts";
 import { Combobox } from "../grasp/combobox/index.ts";
 import { EU, Flag } from "../grasp/flags/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
-import { SettingRow, SettingsRows } from "../grasp/setting-row/index.ts";
+import {
+  FactRow,
+  SettingRow,
+  SettingsRows,
+} from "../grasp/setting-row/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { loadFromCore } from "../load-from-core.tsx";
@@ -195,6 +199,7 @@ const TimeZoneField = ({
           placeholder={t`Search time zones`}
           // Read-only while its own save runs, not disabled: a disabled field drops the keyboard's focus.
           readOnly={!canChange || busy}
+          size="sm"
           triggerLabel={t`Show the time zones`}
           value={saved}
         />
@@ -214,18 +219,18 @@ const WorkspaceSettings = ({
   return (
     <>
       <SectionCard density="compact" flush title={t`Organization`}>
-        <LogoField
-          canChange={canChange}
-          logo={organization.logo}
-          name={organization.name}
-        />
         <SettingsRows>
           <NameField canChange={canChange} name={organization.name} />
+          <LogoField
+            canChange={canChange}
+            logo={organization.logo}
+            name={organization.name}
+          />
           <TimeZoneField
             canChange={canChange}
             timeZone={organization.timeZone}
           />
-          <SettingRow
+          <FactRow
             info={t`People sign in with an address in these. To change them, ask your Grasp contact.`}
             label={t`Sign-in domains`}
           >
@@ -235,8 +240,8 @@ const WorkspaceSettings = ({
                 organization.signInDomains.map((domain) => `@${domain}`)
               )}
             </Text>
-          </SettingRow>
-          <SettingRow
+          </FactRow>
+          <FactRow
             info={t`Everything Grasp stores for you stays here.`}
             label={t`Data location`}
           >
@@ -244,10 +249,10 @@ const WorkspaceSettings = ({
               <Flag flag={EU} />
               <Text size="sm">{t`European Union`}</Text>
             </span>
-          </SettingRow>
+          </FactRow>
         </SettingsRows>
       </SectionCard>
-      <SignInSection organization={organization.name} />
+      <SignInSection />
     </>
   );
 };

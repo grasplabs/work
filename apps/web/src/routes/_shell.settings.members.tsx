@@ -193,6 +193,12 @@ const MemberActions = ({
     }
     onNotice({ done: t`${name} is signed out everywhere.` });
   };
+  // With none to disconnect, the removal alone is said. Outside the `try`
+  // below, as the React Compiler can't compile a conditional within one.
+  const removedSaid = (count: number): string =>
+    count === 0
+      ? t`${name} is removed.`
+      : t`${name} is removed. ${plural(count, { one: "# personal connection was disconnected.", other: "# personal connections were disconnected." })}`;
   const remove = async (): Promise<void> => {
     onNotice({});
     try {
@@ -200,7 +206,7 @@ const MemberActions = ({
         async ({ members }) => await members.remove(member.userId)
       );
       onNotice({
-        done: t`${name} is removed. ${plural(count, { one: "# personal connection was disconnected.", other: "# personal connections were disconnected." })}`,
+        done: removedSaid(count),
       });
     } catch (error) {
       // Removed, with some connections still to disconnect: the row goes
@@ -588,7 +594,16 @@ const MembersPage = () => {
         </SectionCard>
       )}
       {/* Core refuses the teams to anyone else. */}
-      {isMemberAdmin(identity) ? <TeamsPanel /> : null}
+      {/* Read again whenever the people change, so a removed person leaves the teams' faces too. */}
+      {isMemberAdmin(identity) ? (
+        <TeamsPanel
+          key={
+            page.state === "ready"
+              ? page.data.members.map(({ userId }) => userId).join(" ")
+              : "unread"
+          }
+        />
+      ) : null}
     </div>
   );
 };

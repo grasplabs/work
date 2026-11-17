@@ -189,7 +189,7 @@ export const InviteButton = () => {
                   invalid: t`not valid`,
                 }}
                 onValueChange={setAddresses}
-                placeholder="name@company.com"
+                placeholder={t`name@company.com`}
                 value={addresses}
               />
               {problem === "" ? null : <FieldError match>{problem}</FieldError>}

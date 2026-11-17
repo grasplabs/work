@@ -10,6 +10,7 @@ import { useEffect, useLayoutEffect, useRef } from "react";
 import { Button } from "../button";
 import { focus } from "../focus/focus";
 import { Toggle, ToggleGroup } from "../toggle";
+import { useWords, withGiven } from "../words/words";
 import { startList, useSources } from "./context";
 import type { ListState, SourcesValue } from "./context";
 import { SourcePile } from "./pile";
@@ -17,6 +18,7 @@ import { SourceRow } from "./row";
 import { kindOf } from "./source";
 import { sourceStyles as styles } from "./styles";
 import type { Source, SourceKind } from "./types";
+import { sourcesWords } from "./words";
 
 /** Every prop a SourceList takes. */
 export interface SourceListProps {
@@ -246,11 +248,14 @@ const OpenList = ({
 
 /** The list of sources, numbered as their markers are: the pile, or the open list. */
 export const SourceList = ({
-  heading = "Sources",
+  heading: headingGiven,
   headingLevel = 3,
   defaultOpen = false,
   fold = 5,
 }: SourceListProps) => {
+  const { heading } = withGiven(useWords("sources", sourcesWords), {
+    heading: headingGiven,
+  });
   const shared = useSources();
   const state = shared?.list ?? startList;
   const open = state.opened ?? defaultOpen;

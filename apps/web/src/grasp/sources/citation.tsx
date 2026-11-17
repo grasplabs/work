@@ -20,12 +20,12 @@ import { popup } from "../tokens/tokens.values";
 import { SourceCard } from "./card";
 import { registerMark, useSources } from "./context";
 import type { SourcesValue } from "./context";
-import { accessOf } from "./source";
+import { accessOf, asMentioned } from "./source";
 import { sourceStyles as styles } from "./styles";
-import type { Source } from "./types";
+import type { Source, SourceMention } from "./types";
 
 /** Every prop a Citation takes. */
-export interface CitationProps {
+export interface CitationProps extends SourceMention {
   /** The source's number: its place in the Sources' `items`, from 1. */
   n: number;
 }
@@ -113,7 +113,7 @@ const escapeFirst = (close: () => void) => {
   };
 };
 
-export const Citation = ({ n }: CitationProps) => {
+export const Citation = ({ n, ...mention }: CitationProps) => {
   const shared = useSources();
   const source = shared?.sources[n - 1];
   const [element, setElement] = useState<HTMLElement | null>(null);
@@ -219,7 +219,7 @@ export const Citation = ({ n }: CitationProps) => {
             {...stylex.props(hoverCardStyles.panel, styles.cardGround)}
           >
             <SourceCard
-              source={source}
+              source={asMentioned(source, mention)}
               labels={labels}
               onOpen={
                 onOpen === undefined

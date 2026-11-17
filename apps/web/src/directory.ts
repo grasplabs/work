@@ -14,6 +14,8 @@ import { formatDateTime } from "./format.ts";
 export interface Directory {
   people: ReadonlyMap<string, string>;
   apps: ReadonlyMap<string, App>;
+  /** Agents' names, where the page read them (the audit trail, for admins). */
+  agents?: ReadonlyMap<string, string>;
 }
 
 /**
@@ -51,6 +53,10 @@ export const readDirectory = async (session: Session): Promise<Directory> => {
   ]);
   return { people, apps: appsById(apps) };
 };
+
+/** An agent's name, or its ID when it isn't known. */
+export const agentName = (directory: Directory, agentId: string): string =>
+  directory.agents?.get(agentId) ?? agentId;
 
 /** A person's name, or their ID when it isn't known. */
 export const personName = (directory: Directory, userId: string): string =>

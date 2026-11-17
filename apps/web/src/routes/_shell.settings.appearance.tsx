@@ -22,16 +22,21 @@ const Theme = () => {
       <ThemeSwitch
         variant="picker"
         label={t`Mode`}
+        iconLabel={(named, current, next) =>
+          t`${named}, ${current}. Switch to ${next}`
+        }
+        // No line under a tile: each is drawn as what it is, and its name
+        // says the rest (Ruben, 17 Nov: no subtitles unless needed).
         modeWords={{
-          light: { name: t`Light`, line: t`Always light` },
-          dark: { name: t`Dark`, line: t`Always dark` },
-          system: { name: t`System`, line: t`As your device` },
+          light: { name: t`Light`, line: "" },
+          dark: { name: t`Dark`, line: "" },
+          system: { name: t`System`, line: "" },
         }}
-        // The themes' names are their own, as a product's are; their lines are said.
+        // The themes' names are their own, as a product's are.
         themeWords={{
-          evergreen: { name: "Evergreen", line: t`Grasp as it is` },
-          pine: { name: "Pine", line: t`Night in the forest` },
-          paper: { name: "Paper", line: t`Warm and quiet` },
+          evergreen: { name: "Evergreen", line: "" },
+          pine: { name: "Pine", line: "" },
+          paper: { name: "Paper", line: "" },
         }}
         themesLabel={t`Colours`}
       />

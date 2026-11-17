@@ -3,6 +3,7 @@
 "use client";
 
 import * as stylex from "@stylexjs/stylex";
+import { useEffect, useRef, useState } from "react";
 import { XAxis, YAxis } from "recharts";
 import type {
   TextAnchor,
@@ -19,6 +20,12 @@ export interface ChartAxisProps {
   side: "x" | "y";
   /** Writes a value as people read it ("40k", "Jan"). */
   format?: (value: string | number) => string;
+  /**
+   * The y axis's width in pixels, room for its longest label: wider for currency or long numbers
+   * ("€5,000" needs about 52). The x axis takes the chart's width.
+   * @default 36
+   */
+  width?: number;
 }
 
 const styles = stylex.create({
@@ -62,8 +69,24 @@ const Tick = ({
   );
 };
 
-export const ChartAxis = ({ side, format }: ChartAxisProps) => {
-  const { xKey } = useChart();
+export const ChartAxis = ({ side, format, width = 36 }: ChartAxisProps) => {
+  const { xKey, setValueFormat } = useChart();
+  // The y axis writes the values: the chart's table writes them the same way. One wrapper for good,
+  // reading the latest format, so a format written inline never makes the chart draw again.
+  const latest = useRef(format);
+  useEffect(() => {
+    latest.current = format;
+  });
+  // oxlint-disable-next-line react/hook-use-state -- a writer made once, never replaced
+  const [written] = useState(
+    () => (value: number) => latest.current?.(value) ?? String(value)
+  );
+  const writes = side === "y" && format !== undefined;
+  useEffect(() => {
+    if (writes) {
+      setValueFormat?.(written);
+    }
+  }, [writes, written, setValueFormat]);
   const tick = (props: XAxisTickContentProps | YAxisTickContentProps) => (
     <Tick
       x={Number(props.x)}
@@ -87,7 +110,7 @@ export const ChartAxis = ({ side, format }: ChartAxisProps) => {
       axisLine={false}
       tickLine={false}
       tickMargin={4}
-      width={36}
+      width={width}
       tick={tick}
     />
   );

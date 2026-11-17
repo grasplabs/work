@@ -22,11 +22,12 @@ interface LineProps {
 }
 
 const DASH = 2;
-const GAP = 4;
+// 2 on 2, so the grid reads as lines, not as a scatter of dots.
+const GAP = 2;
 
 /**
  * One grid line, dotted so that it begins and ends on a dash: the gaps are stretched a little to
- * fit the line's length (a plain "2 4" ended in a gap, 4px short of the plot's end).
+ * fit the line's length (a plain "2 2" would end in a gap, 2px short of the plot's end).
  */
 const Dotted = ({ x1 = 0, y1 = 0, x2 = 0, y2 = 0 }: LineProps) => {
   const length = Math.hypot(x2 - x1, y2 - y1);

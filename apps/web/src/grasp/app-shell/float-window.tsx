@@ -14,6 +14,7 @@ import { grasp, media } from "../tokens/tokens.stylex";
 import { useWords } from "../words/words";
 import { cardLine } from "./card-line.stylex";
 import {
+  DOCK_SLACK,
   FLOAT_MARGIN,
   PULL,
   UNMEASURED,
@@ -93,6 +94,18 @@ const styles = stylex.create({
     width: { default: `${width}px`, [NARROW]: "auto" },
     height: { default: `${height}px`, [NARROW]: "auto" },
   }),
+  // Full screen from a window: the box full-screen panels take (panels.tsx `panelsCovering`, and
+  // `panelsAfterReopen`: after the folded sidebar's reopen button), the card's margin in.
+  fullBox: {
+    insetInlineEnd: grasp.shellInset,
+    insetBlockEnd: grasp.shellInset,
+    height: `calc(100% - 2 * ${grasp.shellInset})`,
+    width: {
+      default: `calc(100% - 2 * ${grasp.shellInset})`,
+      [stylex.when.ancestor("[data-sidebar-folded]")]:
+        `calc(100% - 2 * ${grasp.shellInset} - ${grasp.shellPageInline} - ${grasp.shellIcon} - ${grasp.space3})`,
+    },
+  },
   // In the docked panel's box, as the docked card looks: its ground, no lift.
   flat: { backgroundColor: grasp.shellCard, boxShadow: "none" },
   // The move between the two shapes: place, size, lift and ground together, on the interface's time.
@@ -149,6 +162,32 @@ const styles = stylex.create({
     cursor: { default: "nwse-resize", ":dir(rtl)": "nesw-resize" },
   },
 });
+
+/** How far toward the end side a pointer is, whichever way the page reads. */
+const endward = (clientX: number, backward: boolean) =>
+  backward ? -clientX : clientX;
+
+/**
+ * The wall at the shell's end, as a drag meets it: once the card is pushed against it, the pointer's
+ * furthest reach toward the end is kept, and the card counts as against the wall until the pointer
+ * draws back from that reach by more than the slack (DOCK_SLACK).
+ */
+const createWall = () => {
+  let reach: number | null = null;
+  return {
+    see: (pushed: boolean, at: number) => {
+      if (pushed) {
+        reach = reach === null ? at : Math.max(reach, at);
+        return true;
+      }
+      if (reach !== null && reach - at <= DOCK_SLACK) {
+        return true;
+      }
+      reach = null;
+      return false;
+    },
+  };
+};
 
 /** The shell the column stands in: the window's room is the shell, sidebar and bar included. */
 const shellOf = (column: HTMLElement) =>
@@ -238,12 +277,17 @@ const watchFrom = (
   };
 };
 
+/** The shapes the panels' card takes: beside the page, a window over it, or full screen from a window. */
+type Shape = "docked" | "floating" | "full";
+
 /**
- * Where the card is in moving between the two shapes: at rest; `lift`, laid over its docked box for a
- * frame; `float`, moving to the window's box; `drop`, laid at the window's box for a frame; `settle`,
- * moving to the docked box.
+ * Where the card is in moving from one shape to another: laid over the box it had for a frame
+ * (`from`), then moving to the new one (`to`); null at rest.
  */
-type Morph = "rest" | "lift" | "float" | "drop" | "settle";
+interface Morph {
+  from: Shape;
+  step: "from" | "to";
+}
 
 /** How long the card's move takes, in milliseconds, read from its own transition: 0 with reduced motion. */
 const moveTime = (column: HTMLElement | null) => {
@@ -251,8 +295,9 @@ const moveTime = (column: HTMLElement | null) => {
   if (card === null || card === undefined) {
     return 0;
   }
-  const [first = "0s"] = getComputedStyle(card).transitionDuration.split(",");
-  const time = first.trim();
+  const time = (
+    getComputedStyle(card).transitionDuration.split(",")[0] ?? ""
+  ).trim();
   const value = Number(time.replace(/m?s$/u, ""));
   if (Number.isNaN(value)) {
     return 0;
@@ -282,39 +327,36 @@ const afterTime = (time: number, done: () => void) => {
 
 /** The next step of a move under way: from its first frame to the move, from the move to rest. */
 const stepMorph = (
-  morph: Exclude<Morph, "rest">,
+  morph: Morph,
   column: HTMLElement | null,
-  setMorph: (morph: Morph) => void
+  setMorph: (morph: Morph | null) => void
 ) => {
-  if (morph === "lift" || morph === "drop") {
+  if (morph.step === "from") {
     return afterFrames(() => {
-      setMorph(morph === "lift" ? "float" : "settle");
+      setMorph({ from: morph.from, step: "to" });
     });
   }
   return afterTime(moveTime(column), () => {
-    setMorph("rest");
+    setMorph(null);
   });
 };
 
-/** The first step of the move to floating, or back to docked. */
-const startOf = (on: boolean): Morph => (on ? "lift" : "drop");
-
-/** The move between the two shapes, started each time the panels float or dock. */
+/** The move from one shape to another, started each time the shape changes. */
 const useMorph = (
-  on: boolean,
+  shape: Shape,
   column: RefObject<HTMLDivElement | null>,
   measured: boolean
 ) => {
-  const [was, setWas] = useState(on);
-  const [morph, setMorph] = useState<Morph>("rest");
-  if (was !== on) {
-    setWas(on);
-    // Before the column is measured there is no docked box to move from: at once.
-    setMorph(measured ? startOf(on) : "rest");
+  const [was, setWas] = useState(shape);
+  const [morph, setMorph] = useState<Morph | null>(null);
+  if (was !== shape) {
+    setWas(shape);
+    // Before the column is measured there is no box to move from: at once.
+    setMorph(measured ? { from: was, step: "from" } : null);
   }
   useEffect(
     () =>
-      morph === "rest" ? undefined : stepMorph(morph, column.current, setMorph),
+      morph === null ? undefined : stepMorph(morph, column.current, setMorph),
     [morph, column]
   );
   return morph;
@@ -346,29 +388,33 @@ interface Live {
   height?: number;
 }
 
-/** The card's look for where it is: at rest floating, at rest docked (none), or on its way. */
+type Box = ReturnType<typeof styles.at> | typeof styles.fullBox;
+
+/** The card's shape: a window, full screen from a window, or docked. */
+const shapeOf = (on: boolean, full: boolean): Shape => {
+  if (on) {
+    return "floating";
+  }
+  return full ? "full" : "docked";
+};
+
+/** A shape's box and look: the window lifted, the docked panel and full screen flat on the card's ground. */
+const boxLook = (shape: Shape, boxes: Record<Shape, Box>) =>
+  shape === "floating" ? [boxes.floating] : [boxes[shape], styles.flat];
+
+/** The card's look for where it is: a window at rest, nothing of ours at rest docked or full screen
+ * (the panels' own look), and on its way from one box to the other. */
 const lookOf = (
-  on: boolean,
-  morph: Morph,
-  box: ReturnType<typeof styles.at>,
-  dockedBox: ReturnType<typeof styles.at>
+  shape: Shape,
+  morph: Morph | null,
+  boxes: Record<Shape, Box>
 ) => {
-  const looks: Record<
-    Morph,
-    readonly (
-      | typeof styles.window
-      | typeof box
-      | typeof styles.flat
-      | typeof styles.moving
-    )[]
-  > = {
-    rest: on ? [styles.window, box] : [],
-    lift: [styles.window, dockedBox, styles.flat],
-    float: [styles.window, box, styles.moving],
-    drop: [styles.window, box],
-    settle: [styles.window, dockedBox, styles.flat, styles.moving],
-  };
-  return looks[morph];
+  if (morph === null) {
+    return shape === "floating" ? [styles.window, boxes.floating] : [];
+  }
+  return morph.step === "from"
+    ? [styles.window, ...boxLook(morph.from, boxes)]
+    : [styles.window, ...boxLook(shape, boxes), styles.moving];
 };
 
 /**
@@ -387,7 +433,11 @@ export const useFloat = (options: FloatOptions) => {
   const from = useRef<HTMLElement | null>(null);
   const allowed = !options.narrow && !options.covered;
   const on = placement === "floating" && allowed;
-  const morph = useMorph(on, column, measured);
+  // Full screen from a window (the host's `covered`): the card moves from the window's box to the
+  // whole card's and back, as between docked and floating.
+  const full = placement === "floating" && options.covered && !options.narrow;
+  const shape = shapeOf(on, full);
+  const morph = useMorph(shape, column, measured);
   useEffect(() => {
     const element = column.current;
     return on && element !== null ? watchFrom(element, from) : undefined;
@@ -414,32 +464,37 @@ export const useFloat = (options: FloatOptions) => {
   // it would dock, and letting go there docks it.
   const drag = (event: ReactPointerEvent<HTMLElement>) => {
     const start = place;
+    const wall = createWall();
+    let showing = false;
     followPointer(
       event,
       (dx, dy, pointer) => {
+        const wanted = start.x + (backward() ? dx : -dx);
         const next = floatPlace(
-          { x: start.x + (backward() ? dx : -dx), y: start.y - dy },
+          { x: wanted, y: start.y - dy },
           { width, height },
           room
         );
         setLive({ position: next });
         const shell = shellBox();
-        setHint(
-          options.onPlacementChange !== undefined &&
-            shell !== null &&
-            nearEnd(pointer.clientX, shell, backward())
+        // The ghost shows once the card can go no further toward the end (its end edge at the shell's
+        // end bound), or the pointer is near the end edge, whichever comes first; back away from the
+        // wall by more than the slack and it goes.
+        const against = wall.see(
+          wanted <= room.end,
+          endward(pointer.clientX, backward())
         );
+        showing =
+          options.onPlacementChange !== undefined &&
+          (against ||
+            (shell !== null && nearEnd(pointer.clientX, shell, backward())));
+        setHint(showing);
         options.onPositionChange?.(next);
       },
-      (_moved, pointer) => {
+      () => {
         setLive(null);
         setHint(false);
-        const shell = shellBox();
-        if (
-          pointer !== undefined &&
-          shell !== null &&
-          nearEnd(pointer.clientX, shell, backward())
-        ) {
+        if (showing) {
           dock();
         }
       }
@@ -621,31 +676,30 @@ export const useFloat = (options: FloatOptions) => {
   // The docked box, in the column: the card's margins (the token shell-inset, 6) in from its end, top
   // and foot, and the side's width less the margin at its end, as the docked card stands.
   const inset = 6;
-  const dockedBox = styles.at(
-    inset,
-    inset,
-    options.docked - inset,
-    room.height - 2 * inset
-  );
+  const boxes: Record<Shape, Box> = {
+    docked: styles.at(
+      inset,
+      inset,
+      options.docked - inset,
+      room.height - 2 * inset
+    ),
+    floating: styles.at(place.x, place.y, width, height),
+    full: styles.fullBox,
+  };
   const ghost = hint ? (
     <span
       aria-hidden="true"
       data-slot="app-shell-float-ghost"
-      {...stylex.props(styles.ghost, dockedBox)}
+      {...stylex.props(styles.ghost, boxes.docked)}
     />
   ) : null;
   return {
     on,
-    /** On its way between the two shapes: the page's side eases with it, and the gutter rests. */
-    moving: morph !== "rest",
+    /** On its way between two shapes: the page's side eases with it, and the gutter rests. */
+    moving: morph !== null,
     value,
     edges,
     ghost,
-    look: lookOf(
-      on,
-      morph,
-      styles.at(place.x, place.y, width, height),
-      dockedBox
-    ),
+    look: lookOf(shape, morph, boxes),
   };
 };

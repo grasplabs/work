@@ -7,7 +7,14 @@ import { AppShellBar } from "../grasp/app-shell/index.ts";
 
 /** A step on the way to the page; the last one is the page itself. */
 export type Crumb =
-  | { label: string }
+  | {
+      label: string;
+      /** The page's own name only: renamed in place (App shell's crumb). */
+      onRename?: (name: string) => void;
+      /** Whether its rename is open, when a menu's Rename opens it. */
+      renaming?: boolean;
+      onRenamingChange?: (renaming: boolean) => void;
+    }
   | {
       label: string;
       to:
@@ -100,9 +107,7 @@ export const SiteHeader = ({
       actions={actions}
       breadcrumbLabel={t`Breadcrumb`}
       crumbs={crumbs.map((crumb) =>
-        "to" in crumb
-          ? { label: crumb.label, render: crumbLink(crumb) }
-          : { label: crumb.label }
+        "to" in crumb ? { label: crumb.label, render: crumbLink(crumb) } : crumb
       )}
       phoneCrumbs={phoneCrumbs}
       end={trailing}

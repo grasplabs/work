@@ -127,9 +127,14 @@ class Recognition extends EventTarget {
     super();
     Recognition.made = this;
   }
+  /** A browser whose recognition never starts nor says why. */
+  static silent = false;
   start(): void {
     this.listening = true;
     this.results = [];
+    if (Recognition.silent) {
+      return;
+    }
     this.dispatchEvent(new Event("start"));
   }
   stop(): void {
@@ -406,6 +411,33 @@ describe(ChatComposer, () => {
       text: "Book the room for Friday at ten",
       listening: false,
     });
+  });
+
+  it("says a dictation failed when the browser's recognition never starts, keeping what was typed", async () => {
+    // A browser that can't reach its maker's service: it neither starts nor says why.
+    Recognition.silent = true;
+    window.SpeechRecognition = Recognition;
+    localStorage.setItem("grasp-dictation-told:grace", "1");
+    await shown({}, member);
+    type("Book the room");
+    vi.useFakeTimers();
+    try {
+      await press(button("Dictate"));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10_000);
+      });
+
+      expect({
+        said: document.body.textContent.includes(
+          "The words couldn't be written down. What you typed is kept."
+        ),
+        // The dictation's card shows what was typed in the field's place.
+        kept: document.body.textContent.includes("Book the room"),
+      }).toStrictEqual({ said: true, kept: true });
+    } finally {
+      vi.useRealTimers();
+      Recognition.silent = false;
+    }
   });
 
   it("tells a member, the first time they dictate, that their browser's maker writes it down", async () => {

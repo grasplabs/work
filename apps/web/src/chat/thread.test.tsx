@@ -46,6 +46,24 @@ const asked: ChatMessage = {
   at: "2026-10-27T09:00:00.000Z",
 };
 
+/** A finished answer, `text`. */
+const answer = (id: number, text: string): ChatMessage => ({
+  id,
+  role: "assistant",
+  text,
+  citations: [],
+  code: [],
+  tools: [],
+  end: "done",
+  at: "2026-10-27T09:00:05.000Z",
+});
+
+/** How many Ask again buttons show. */
+const askAgain = (): number =>
+  [...document.querySelectorAll("button")].filter(
+    (button) => button.getAttribute("aria-label") === "Ask again"
+  ).length;
+
 /**
  * The thread of `messages`, with `partial` being written while it runs,
  * and the calls its code made (`tools`), on a page of its own.
@@ -440,6 +458,10 @@ describe(ChatThread, () => {
     });
     const closed = thoughtLine();
     await press(thoughtButton());
+    // The thoughts come in at the pace an answer's words do.
+    await vi.waitFor(() => {
+      expect(thoughtLine().shows).toBe("Add two to two.");
+    });
 
     expect([closed, thoughtLine()]).toStrictEqual([
       { line: "Thinking", open: false, shows: undefined },
@@ -611,6 +633,50 @@ describe(ChatThread, () => {
       given: true,
       came: true,
       code: false,
+    });
+  });
+
+  it("says an answer was stopped part way, keeping its words without a link it was still writing", async () => {
+    await thread([
+      asked,
+      {
+        id: 2,
+        role: "assistant",
+        text: "Four, as the [policy](https://exam",
+        citations: [],
+        code: [],
+        tools: [],
+        end: "cancelled",
+        at: "2026-10-27T09:00:05.000Z",
+      },
+    ]);
+    const stopped = document.querySelector<HTMLElement>(
+      'article[data-from="agent"]'
+    );
+
+    await vi.waitFor(() => {
+      expect(document.querySelector("[data-slot=markdown]")?.textContent).toBe(
+        "Four, as the"
+      );
+    });
+    expect({
+      status: stopped?.dataset.status,
+      said: stopped?.textContent.includes("Stopped"),
+    }).toStrictEqual({ status: "stopped", said: true });
+  });
+
+  it("offers to ask again under an answer with words, and nothing under one without", async () => {
+    await thread([asked, answer(2, "Four.")]);
+    const worded = askAgain();
+    act(() => {
+      root?.unmount();
+    });
+    document.body.replaceChildren();
+    await thread([asked, answer(2, "")]);
+
+    expect({ worded, wordless: askAgain() }).toStrictEqual({
+      worded: 1,
+      wordless: 0,
     });
   });
 

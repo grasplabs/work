@@ -22,7 +22,6 @@ import {
   useNavigate,
   useRouter,
 } from "@tanstack/react-router";
-import { WorkflowIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { answeredAfterBuild } from "../chat/build-answered.ts";
@@ -45,6 +44,7 @@ import {
 import { SettingUp, SettingUpBar } from "../frame/setting-up.tsx";
 import type { SetUp } from "../frame/setting-up.tsx";
 import type { Crumb } from "../frame/site-header.tsx";
+import { Workflow as WorkflowMark } from "../grasp/icons/index.ts";
 import { TabsLink, TabsNav } from "../grasp/tabs/nav.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
@@ -628,7 +628,7 @@ const WorkflowResourcePage = () => {
     return (
       <PageNotLoaded
         crumbs={[back, { label: t`Workflow` }]}
-        icon={WorkflowIcon}
+        icon={WorkflowMark}
         notFound={t`Workflow not found`}
         page={resource}
       />

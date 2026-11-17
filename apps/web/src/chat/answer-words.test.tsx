@@ -133,6 +133,51 @@ const plan: ChatCitedDocument = {
   spans: [],
 };
 
+/** What the hover card of the citation named `name` shows, once it opens. */
+const cardOf = async (name: string): Promise<string> => {
+  const citation = document.querySelector<HTMLElement>(
+    `[aria-label="${name}"]`
+  );
+  if (citation === null) {
+    throw new Error(`No citation ${name}`);
+  }
+  await act(async () => {
+    for (const type of [
+      "pointerenter",
+      "mouseenter",
+      "pointermove",
+      "mousemove",
+    ]) {
+      citation.dispatchEvent(
+        new PointerEvent(type, {
+          bubbles: type.endsWith("move"),
+          pointerType: "mouse",
+        })
+      );
+    }
+    const { promise, resolve } = Promise.withResolvers<boolean>();
+    setTimeout(() => {
+      resolve(true);
+    }, 400);
+    await promise;
+  });
+  // The card this citation opened: the latest, should another still be leaving.
+  const card =
+    [...document.querySelectorAll("[data-slot=source-card]")].at(-1)
+      ?.textContent ?? "";
+  await act(async () => {
+    for (const type of ["pointerleave", "mouseleave"]) {
+      citation.dispatchEvent(new PointerEvent(type, { pointerType: "mouse" }));
+    }
+    const { promise, resolve } = Promise.withResolvers<boolean>();
+    setTimeout(() => {
+      resolve(true);
+    }, 400);
+    await promise;
+  });
+  return card;
+};
+
 describe(AnswerWords, () => {
   beforeEach(() => {
     window.open = (url?: string | URL, _target?: string, features?: string) => {
@@ -194,10 +239,7 @@ describe(AnswerWords, () => {
       ],
       citations: ["Source 1: Route plan", "Source 2: Parental leave"],
       travel: null,
-      listed: [
-        "Route plan1routes/plan.mdWhere the route goes, and when.",
-        "Parental leave2leave.mdParental leave lasts sixteen weeks.",
-      ],
+      listed: ["Route plan1routes/plan.md", "Parental leave2leave.md"],
       at: "/knowledge/handbook",
       search: { doc: "leave" },
     });
@@ -252,5 +294,33 @@ describe(AnswerWords, () => {
         document.body.textContent.includes(words)
       ),
     }).toStrictEqual({ drawn: null, words: ["Before", "A chart"] });
+  });
+
+  it("shows in a citation's card the passage it rests on, as core checked it, and nothing where core kept no quote", async () => {
+    // As core keeps an answer: its citations without their titles, each
+    // quote it checked given apart, with where its link starts.
+    const text =
+      "Leave lasts [sixteen weeks](grasp:note/leave), and is [unpaid](grasp:note/leave).";
+    const quoted: ChatCitedDocument = {
+      ...leave,
+      spans: [
+        {
+          at: text.indexOf("[sixteen"),
+          text: "sixteen weeks",
+          quote: 'Leave lasts sixteen "paid" weeks.',
+        },
+        { at: text.indexOf("[unpaid"), text: "unpaid", quote: null },
+      ],
+    };
+    await shown(text, [quoted]);
+
+    const first = await cardOf("Source 1, first mention: Parental leave");
+    const second = await cardOf("Source 1, second mention: Parental leave");
+
+    expect({
+      first: first.includes('Leave lasts sixteen "paid" weeks.'),
+      second: second.includes("Leave lasts sixteen"),
+      start: first.includes("Parental leave lasts sixteen weeks."),
+    }).toStrictEqual({ first: true, second: false, start: false });
   });
 });

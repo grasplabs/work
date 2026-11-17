@@ -342,7 +342,7 @@ export const AskedLine = ({ asked }: { asked: ChatAsked }) => {
   return (
     <p {...stylex.props(styles.line)}>
       <Icon icon={Question} />
-      <Text size="xs" tone="muted">
+      <Text element="span" size="xs" tone="muted">
         {topics.length === count
           ? t`Asked you about ${list}`
           : t`${plural(count, { one: "Asked you a question", other: "Asked you # questions" })}`}

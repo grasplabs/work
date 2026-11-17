@@ -44,6 +44,11 @@ export interface LiveLineOptions {
   onPartial: (text: string) => void;
   /** The line is listening, or not any more. */
   onLive: (live: boolean) => void;
+  /**
+   * Core said why it won't listen (its `transcription.*` code), before it
+   * closes the line: a caller that would rather stop than try again says so.
+   */
+  onRefused?: (code: string) => void;
 }
 
 /** A live line, as the ear uses it. */
@@ -61,7 +66,9 @@ export interface LiveLine {
 }
 
 /** What core says on the line, as far as the page reads it. */
-const messageOf = (data: unknown): { type: string; text: string } | null => {
+const messageOf = (
+  data: unknown
+): { type: string; text: string; code: string } | null => {
   if (typeof data !== "string") {
     return null;
   }
@@ -72,8 +79,13 @@ const messageOf = (data: unknown): { type: string; text: string } | null => {
     }
     const type = "type" in parsed ? parsed.type : undefined;
     const text = "text" in parsed ? parsed.text : undefined;
+    const code = "code" in parsed ? parsed.code : undefined;
     return typeof type === "string"
-      ? { type, text: typeof text === "string" ? text.trim() : "" }
+      ? {
+          type,
+          text: typeof text === "string" ? text.trim() : "",
+          code: typeof code === "string" ? code : "",
+        }
       : null;
   } catch {
     return null;
@@ -171,6 +183,8 @@ export const openLiveLine = (options: LiveLineOptions): LiveLine => {
       if (sending && owed.length === 0) {
         options.onPartial(both(settled, message.text));
       }
+    } else if (message.type === "error") {
+      options.onRefused?.(message.code);
     } else if (message.type === "final") {
       const entry = owed.shift();
       if (entry !== undefined) {

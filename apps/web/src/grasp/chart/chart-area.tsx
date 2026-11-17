@@ -36,9 +36,10 @@ const styles = stylex.create({
   },
   // The faint wash, opaque on the card's own ground, so the grid's lines stop at the area and do not
   // run through it (as a mark, it is whole).
+  // 16% of the line on a light card, 12% on a dark one, where the same share already reads strong.
   wash: {
     fill: {
-      default: `color-mix(in oklch, ${grasp.chartLine} 12%, ${grasp.raised})`,
+      default: `light-dark(color-mix(in oklch, ${grasp.chartLine} 16%, ${grasp.raised}), color-mix(in oklch, ${grasp.chartLine} 12%, ${grasp.raised}))`,
       [media.forced]: "transparent",
     },
   },

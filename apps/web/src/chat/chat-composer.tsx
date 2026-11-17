@@ -1,4 +1,5 @@
 import type { ModelEffort } from "@grasp-os/shared/models";
+import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useState } from "react";
@@ -69,8 +70,12 @@ export interface ChatComposerProps {
   failure?: string;
   /** Why a file the person chose stays out of the box. */
   fileProblem?: string;
-  /** Sends the question; rejects when it didn't go, which the box says (`failure`). */
+  /** Sends the question. */
   onSend: () => Promise<void> | void;
+  /** The last question didn't go: the box says Could not send, and why (`failure`), the words kept. */
+  sendFailed?: boolean;
+  /** Follows the box's own changes to `sendFailed`: typing again clears it. */
+  onSendFailedChange?: (failed: boolean) => void;
   onStop?: () => void;
   /** What the box is called, for a screen reader. */
   label?: string;
@@ -194,6 +199,8 @@ export const ChatComposer = ({
   failure,
   fileProblem,
   onSend,
+  sendFailed,
+  onSendFailedChange,
   onStop,
   label,
   placeholder,
@@ -245,6 +252,7 @@ export const ChatComposer = ({
               onAttach(chosen);
             }}
             uploadLabel={t`Attach a file`}
+            actionsLabel={t`This chat`}
           />
         )
       }
@@ -278,9 +286,20 @@ export const ChatComposer = ({
         }
       }}
       onStop={onStop}
+      sendFailed={sendFailed}
+      onSendFailedChange={onSendFailedChange}
       mentionItems={mentioning?.items}
       mentionKinds={mentioning?.kinds}
       mentionsEmptyLabel={t`Nothing found`}
+      mentionsFoundLabel={(count) =>
+        t`${plural(count, { one: "# result", other: "# results" })}`
+      }
+      mentionsLabel={t({ message: "Mention", context: "the mention menu" })}
+      mentionsLoadingLabel={t`Looking`}
+      commandsLabel={t`Commands`}
+      dropLabel={t`Drop to add`}
+      successLabel={t({ message: "Done", context: "an answer is done" })}
+      uploadingLabel={t`Sending waits for the files to upload`}
       mentionsLoading={mentioning?.loading}
       onMention={(item) => {
         mentioning?.onMention(item);

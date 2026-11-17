@@ -105,6 +105,9 @@ export default defineConfig({
   server: {
     // Core (wrangler dev) serves the API and Cap'n Web.
     proxy: {
+      // Live transcription is a WebSocket under /api: without its own rule the
+      // upgrade never reaches core in dev (dictation and the interview's live line).
+      "/api/transcription": { target: "ws://localhost:8787", ws: true },
       "/api": "http://localhost:8787",
       "/rpc": { target: "ws://localhost:8787", ws: true },
       // The document pages run in, with its own policy, and the modules

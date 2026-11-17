@@ -79,6 +79,8 @@ export const SavedField = ({
       onValueChange={setDraft}
       layout={controlStyles.fill}
       readOnly={readOnly}
+      // A row's control is the small size, as every settings row's: rows line up.
+      size="sm"
       {...(type === undefined ? {} : { type })}
       value={shown}
       {...field}

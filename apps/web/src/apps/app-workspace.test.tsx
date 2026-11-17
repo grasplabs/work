@@ -440,7 +440,15 @@ const settled = async (): Promise<void> => {
 
 /** What a button or menu item is called: its text, or its label without one. */
 const nameOf = (element: HTMLElement): string => {
-  const text = element.textContent?.trim() ?? "";
+  // Its words as a screen reader hears them: a button's hidden result
+  // words (done, failed) left out.
+  const copy = element.cloneNode(true);
+  if (copy instanceof HTMLElement) {
+    for (const hidden of copy.querySelectorAll('[aria-hidden="true"]')) {
+      hidden.remove();
+    }
+  }
+  const text = copy.textContent?.trim() ?? "";
   return text === "" ? (element.getAttribute("aria-label") ?? "") : text;
 };
 
@@ -1306,10 +1314,10 @@ describe(AppWorkspace, () => {
     expect({
       before,
       after: placeholder(),
-      plan:
-        document.querySelector(
-          'section[aria-label="Here\'s what Grasp will make"]'
-        ) !== null,
+      // The plan's card, by its heading.
+      plan: [...document.querySelectorAll("section h2")].some(
+        (heading) => heading.textContent === "Here's what Grasp will make"
+      ),
     }).toStrictEqual({
       before: "Say what should change",
       after: "Change something about the plan",

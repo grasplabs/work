@@ -1,36 +1,35 @@
-import { Button } from "@grasp-os/ui/components/button";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@grasp-os/ui/components/collapsible";
+import type { MessageDescriptor } from "@lingui/core";
+import { msg } from "@lingui/core/macro";
+import { Trans, useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
+
+import { PageFailed } from "../frame/page-failed.tsx";
+import { Button } from "../grasp/button/index.ts";
+import { CodeBlock } from "../grasp/code-block/index.ts";
+import { Collapsible } from "../grasp/collapsible/index.ts";
 import {
   Empty,
-  EmptyContent,
   EmptyDescription,
   EmptyHeader,
   EmptyMedia,
   EmptyTitle,
-} from "@grasp-os/ui/components/empty";
-import type { MessageDescriptor } from "@lingui/core";
-import { msg } from "@lingui/core/macro";
-import { Trans, useLingui } from "@lingui/react/macro";
-import {
-  ChevronRightIcon,
-  LogOutIcon,
-  RefreshCwIcon,
-  SparklesIcon,
-  TriangleAlertIcon,
-} from "lucide-react";
-
+} from "../grasp/empty/index.ts";
+import { SignOut, Sparkles } from "../grasp/icons/index.ts";
 import type { FailureReason, PageState } from "./page-host.ts";
 
 // What an App's frame shows in place of its page once the page failed
-// or its person signed out (page-frame.tsx): centred where the page would
-// be, what happened as a title, one plain sentence why, Try again, and
-// for a preview its draft broke, Fix with Grasp, which asks the App's
-// chat. What core or the browser said is there too, folded away, for
-// whoever wants it.
+// or its person signed out (page-frame.tsx): Grasp UI's failed page where
+// the page would be (frame/page-failed.tsx), what happened as its heading,
+// one plain sentence why, Try again, and for a preview its draft broke,
+// Fix with Grasp, which asks the App's chat. What core or the browser said
+// is there too, folded away, for whoever wants it. No line on whether
+// Grasp can be reached: a preview keeps a connection of its own, which the
+// tab's does not speak for.
+
+const styles = stylex.create({
+  // The fold runs the width of the words above it.
+  fold: { width: "100%" },
+});
 
 const titles: Readonly<Record<FailureReason, MessageDescriptor>> = {
   forbidden: msg`You can't open this App`,
@@ -104,15 +103,13 @@ export const FrameFailure = ({
   onRetry: () => void;
   onFix?: (() => void) | undefined;
 }) => {
-  const { i18n } = useLingui();
+  const { i18n, t } = useLingui();
   if (state.status === "signed-out") {
     return (
       <Empty>
         <EmptyHeader>
-          <EmptyMedia variant="icon">
-            <LogOutIcon />
-          </EmptyMedia>
-          <EmptyTitle>
+          <EmptyMedia icon={SignOut} />
+          <EmptyTitle headingLevel={2}>
             <Trans>Your session has ended</Trans>
           </EmptyTitle>
           <EmptyDescription>
@@ -125,51 +122,38 @@ export const FrameFailure = ({
   const { reason, detail } = state;
   const fixes = onFix !== undefined && fromTheDraft(reason);
   return (
-    <Empty>
-      <EmptyHeader>
-        <EmptyMedia variant="icon">
-          <TriangleAlertIcon />
-        </EmptyMedia>
-        <EmptyTitle>
-          {preview && previewStarts.has(reason) ? (
-            <Trans>The preview didn&apos;t start</Trans>
-          ) : (
-            i18n._(titles[reason])
-          )}
-        </EmptyTitle>
-        <EmptyDescription>
-          {preview && reason === "broken" ? (
-            <Trans>The draft&apos;s code doesn&apos;t build.</Trans>
-          ) : (
-            i18n._(reasons[reason])
-          )}
-        </EmptyDescription>
-      </EmptyHeader>
-      <EmptyContent>
-        <div className="flex flex-wrap justify-center gap-2">
-          <Button onClick={onRetry} variant="outline">
-            <RefreshCwIcon data-icon="inline-start" />
-            <Trans>Try again</Trans>
+    <PageFailed
+      heading="h2"
+      onRetry={onRetry}
+      reason={
+        preview && reason === "broken"
+          ? t`The draft's code doesn't build.`
+          : i18n._(reasons[reason])
+      }
+      title={
+        preview && previewStarts.has(reason)
+          ? t`The preview didn't start`
+          : i18n._(titles[reason])
+      }
+      wayOn={
+        fixes ? (
+          <Button icon={Sparkles} onClick={onFix} variant="ghost">
+            {t`Fix with Grasp`}
           </Button>
-          {fixes ? (
-            <Button onClick={onFix}>
-              <SparklesIcon data-icon="inline-start" />
-              <Trans>Fix with Grasp</Trans>
-            </Button>
-          ) : null}
-        </div>
-        <Collapsible>
-          <CollapsibleTrigger render={<Button size="sm" variant="ghost" />}>
-            <ChevronRightIcon data-icon="inline-start" />
-            <Trans>Technical details</Trans>
-          </CollapsibleTrigger>
-          <CollapsibleContent>
-            <pre className="bg-muted text-muted-foreground rounded-md p-3 text-left font-mono text-xs break-all whitespace-pre-wrap">
-              {detail === undefined ? reason : `${reason}\n${detail}`}
-            </pre>
-          </CollapsibleContent>
+        ) : undefined
+      }
+    >
+      <div {...stylex.props(styles.fold)}>
+        <Collapsible fit title={t`Technical details`}>
+          <CodeBlock
+            code={detail === undefined ? reason : `${reason}\n${detail}`}
+            copiedLabel={t`Copied`}
+            copyLabel={t`Copy the details`}
+            lineNumbers={false}
+            wrap
+          />
         </Collapsible>
-      </EmptyContent>
-    </Empty>
+      </div>
+    </PageFailed>
   );
 };
