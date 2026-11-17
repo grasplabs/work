@@ -4,4 +4,4 @@
 
 /** A column that names or holds a person, by its name in the database. */
 export const personColumn =
-  /(?:^|_)(?:user|person|principal|member|owner|author|actor|subject|behalf|sender|senders|recipient|recipients|decider|deciders|email|invited|inviter|speaker|participant)(?:_|s?$)|_by$/u;
+  /(?:^|_)(?:user|person|principal|member|owner|author|actor|subject|behalf|sender|senders|recipient|recipients|decider|deciders|email|invited|inviter|speaker|participant|writer)(?:_|s?$)|_by$/u;
