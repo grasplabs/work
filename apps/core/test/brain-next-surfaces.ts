@@ -233,6 +233,13 @@ export interface Answer {
 /** Calls one surface every way it can answer; returns what came back each time. */
 export type Probe = (probing: Probing) => Promise<Answer[]>;
 
+/** A person's erasure in the shared store, as the Brain takes it. */
+const sharedErasureOf = (person: string, identifiers: unknown[]) => ({
+  person,
+  identifiers,
+  reason: "person_erased",
+});
+
 /**
  * Every key of `value`: its own, named or Symbol, and for an error those
  * its prototypes define as far as `Error.prototype`, so a getter of an
@@ -2823,6 +2830,57 @@ export const coreProbes = {
       ),
     ];
   },
+  // No reader: core names the person and the address their sign-in
+  // verified. It answers nothing, alike whatever the Brain held of them.
+  erasePersonShared: async ({ markers }) => {
+    const erase = async (name: string, erased: unknown) =>
+      await answer(name, async () => {
+        await coreBrain.erasePersonShared(env, unchecked(erased));
+      });
+    const personId = stranger();
+    const email = `${stranger()}@example.test`;
+    await store().addMemories({
+      change: crypto.randomUUID(),
+      access: strangers(),
+      entities: [
+        {
+          key: "p",
+          kind: "person",
+          names: [markedText(markers)],
+          identifiers: [{ type: "email", value: email }],
+        },
+      ],
+      memories: [
+        {
+          about: "p",
+          type: "fact",
+          statement: markedText(markers),
+          speaker: { kind: "internal", person: personId },
+          basis: { kind: "writer", writer: `app:${stranger()}` },
+        },
+      ],
+    });
+    return [
+      await erase("a person with marked memories", { personId, email }),
+      await erase("the same erasure again", { personId, email }),
+      await erase("a person with nothing", {
+        personId: stranger(),
+        email: null,
+      }),
+      await erase("an address named by the markers", {
+        personId: stranger(),
+        email: `${markers.join("")}@example.test`,
+      }),
+      await erase("no address, named by the markers", {
+        personId: stranger(),
+        email: markers.join(" "),
+      }),
+      await erase("a person named by the markers, too long", {
+        personId: markers.join("").repeat(300),
+        email: null,
+      }),
+    ];
+  },
   // No reader: core names the writer (an App's own id). What it answers is
   // a time and a count; nothing of what was erased.
   eraseWriter: async ({ markers }) => {
@@ -3804,6 +3862,14 @@ export const coreProbes = {
         store: "shared",
         memory: crypto.randomUUID(),
       });
+    }),
+  ],
+  // Pure: whether an error is the Brain's refusal while it restores; a
+  // yes or no, whatever the error holds.
+  isBrainRestoring: async ({ markers }) => [
+    await answer("an error naming the markers", async () => {
+      await Promise.resolve();
+      return coreBrain.isBrainRestoring(new Error(markers.join(" ")));
     }),
   ],
   // Pure: a skill's key as a run keeps it, from what the caller names
@@ -8832,6 +8898,66 @@ export const storeProbes = {
           },
           contextTokens: null,
         });
+      }),
+    ];
+  },
+  // No reader either: the host names the person and their identifiers.
+  // It answers nothing, alike for a person with marked memories and one
+  // with none.
+  erasePersonShared: async ({ markers }) => {
+    const erase = async (name: string, request: unknown) =>
+      await answer(name, async () => {
+        await store().erasePersonShared(unchecked(request));
+      });
+    const person = stranger();
+    const email = `${stranger()}@example.test`;
+    await store().addMemories({
+      change: crypto.randomUUID(),
+      access: strangers(),
+      entities: [
+        {
+          key: "p",
+          kind: "person",
+          names: [markedText(markers)],
+          identifiers: [{ type: "email", value: email }],
+        },
+      ],
+      memories: [
+        {
+          about: "p",
+          type: "fact",
+          statement: markedText(markers),
+          speaker: { kind: "internal", person },
+          basis: { kind: "writer", writer: `app:${stranger()}` },
+        },
+      ],
+    });
+    const of = sharedErasureOf;
+    return [
+      await erase("a person with nothing", of(stranger(), [])),
+      await erase(
+        "a person with marked memories",
+        of(person, [{ type: "email", value: email }])
+      ),
+      await erase(
+        "the same erasure again",
+        of(person, [{ type: "email", value: email }])
+      ),
+      await erase(
+        "an identifier named by the markers",
+        of(stranger(), [{ type: "ref", value: `x:${markers.join("")}` }])
+      ),
+      await erase(
+        "no identifier, named by the markers",
+        of(stranger(), [{ type: "email", value: markers.join(" ") }])
+      ),
+      await erase(
+        "a person named by the markers, too long",
+        of(markers.join("").repeat(300), [])
+      ),
+      await erase("a reason named by the markers", {
+        ...of(stranger(), []),
+        reason: markers.join(" "),
       }),
     ];
   },
