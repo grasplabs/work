@@ -1327,6 +1327,10 @@ msgstr "{unnamed} of {total} seen in use, never named"
 msgid "{unseen, plural, one {# more run today, of a workflow you can't see} other {# more runs today, of workflows you can't see}}"
 msgstr "{unseen, plural, one {# more run today, of a workflow you can't see} other {# more runs today, of workflows you can't see}}"
 
+#: src/projects/project-connections.tsx
+msgid "{unseen, plural, one {# more that you can't see} other {# more that you can't see}}"
+msgstr "{unseen, plural, one {# more that you can't see} other {# more that you can't see}}"
+
 #: src/brain/brain-atlas.ts
 msgid "{unseen} of {total} named, not seen in use"
 msgstr "{unseen} of {total} named, not seen in use"
@@ -1979,9 +1983,14 @@ msgid "Add"
 msgstr "Add"
 
 #: src/projects/file-item-dialog.tsx
+#: src/projects/project-chats.tsx
 msgctxt "put in a project"
 msgid "Add"
 msgstr "Add"
+
+#: src/projects/project-chats.tsx
+msgid "Add a chat"
+msgstr "Add a chat"
 
 #: src/settings/ai-providers.tsx
 msgid "Add a fallback"
@@ -3760,6 +3769,7 @@ msgstr "Chat with {name}"
 #: src/chat/chat-switcher.tsx
 #: src/chat/chat-window.tsx
 #: src/grasp/frame/grasp-sidebar.tsx
+#: src/projects/project-view.tsx
 msgid "Chats"
 msgstr "Chats"
 
@@ -3961,6 +3971,7 @@ msgstr "Cliffs"
 #: src/knowledge/new-document.tsx
 #: src/knowledge/purge.tsx
 #: src/onboarding/place-picker.tsx
+#: src/projects/project-chats.tsx
 #: src/projects/project-dialog.tsx
 #: src/settings/ai-providers.tsx
 #: src/settings/audit-archive.tsx
@@ -4345,6 +4356,8 @@ msgstr "Connection trigger"
 
 #: src/brain/brain-log.tsx
 #: src/brain/brain.ts
+#: src/projects/project-connections.tsx
+#: src/projects/project-view.tsx
 msgid "Connections"
 msgstr "Connections"
 
@@ -7482,6 +7495,10 @@ msgstr "Its apps and workflows aren’t deleted, and nothing in it is shared wit
 msgid "Its apps and workflows aren’t deleted, but they stop being shared with everyone in it: {who} lose access to them, unless they are shared with them another way."
 msgstr "Its apps and workflows aren’t deleted, but they stop being shared with everyone in it: {who} lose access to them, unless they are shared with them another way."
 
+#: src/projects/project-connections.tsx
+msgid "Its apps and workflows use no connections."
+msgstr "Its apps and workflows use no connections."
+
 #: src/workflows/binding-approvals.tsx
 #: src/workflows/files-and-apps.tsx
 msgid "Its bindings"
@@ -9192,6 +9209,10 @@ msgstr "None of the App's integration permissions serves {contract} with every a
 #: src/interview/read-back.tsx
 msgid "None of this is right"
 msgstr "None of this is right"
+
+#: src/projects/project-chats.tsx
+msgid "None of your chats are in it. Only you see the chats you put here."
+msgstr "None of your chats are in it. Only you see the chats you put here."
 
 #: src/apps/app-settings.tsx
 #: src/brain/brain.ts
@@ -13481,6 +13502,7 @@ msgstr "Take {who} off {name}"
 msgid "Take off the dashboard"
 msgstr "Take off the dashboard"
 
+#: src/projects/project-chats.tsx
 #: src/projects/project-people.tsx
 #: src/projects/project-view.tsx
 msgid "Take out"
@@ -16962,6 +16984,10 @@ msgstr "You don't have access to this organization. Ask an admin."
 msgid "You finished this chat. Thank you for your time."
 msgstr "You finished this chat. Thank you for your time."
 
+#: src/projects/project-chats.tsx
+msgid "You have no chats to add."
+msgstr "You have no chats to add."
+
 #: src/brain/sources-page.tsx
 msgid "You have no connections yet."
 msgstr "You have no connections yet."
@@ -17065,6 +17091,10 @@ msgstr "Your changes go back to how they were then, for everyone who builds this
 #: src/inbox/items.ts
 msgid "Your chat's agent asked to start this workflow for you. Nothing runs until you confirm it, with exactly the input shown."
 msgstr "Your chat's agent asked to start this workflow for you. Nothing runs until you confirm it, with exactly the input shown."
+
+#: src/projects/project-chats.tsx
+msgid "Your chats"
+msgstr "Your chats"
 
 #: src/interview/before.tsx
 msgid "Your choice"

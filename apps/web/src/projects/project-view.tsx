@@ -1,5 +1,7 @@
+import type { ChatSummary } from "@grasp-os/shared/chat";
 import type {
   Project,
+  ProjectConnections as ProjectConnectionsList,
   ProjectItem,
   ProjectRole,
 } from "@grasp-os/shared/projects";
@@ -63,6 +65,8 @@ import { Text } from "../grasp/text/index.ts";
 import { roleLabel } from "../labels.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { FileItemDialog } from "./file-item-dialog.tsx";
+import { ProjectChats } from "./project-chats.tsx";
+import { ProjectConnections } from "./project-connections.tsx";
 import { ProjectDialog } from "./project-dialog.tsx";
 import { usePages } from "./project-pages.ts";
 import { namesInProject } from "./project-people-names.ts";
@@ -354,9 +358,14 @@ const ProjectMenu = ({
 /** A project's page, for someone in it. */
 export const ProjectView = ({
   project,
+  chats,
+  connections,
   identity,
 }: {
   project: Project;
+  /** The person's own chats in it. */
+  chats: readonly ChatSummary[];
+  connections: ProjectConnectionsList;
   identity: Pick<Identity, "role">;
 }) => {
   const { t } = useLingui();
@@ -422,6 +431,14 @@ export const ProjectView = ({
             <TabsTrigger value="workflows">
               <KindTab count={workflows}>{t`Workflows`}</KindTab>
             </TabsTrigger>
+            <TabsTrigger value="chats">
+              <KindTab count={chats.length}>{t`Chats`}</KindTab>
+            </TabsTrigger>
+            <TabsTrigger value="connections">
+              <KindTab count={project.counts.connections}>
+                {t`Connections`}
+              </KindTab>
+            </TabsTrigger>
             <TabsTrigger value="people">
               <KindTab count={project.people}>{t`People`}</KindTab>
             </TabsTrigger>
@@ -431,6 +448,12 @@ export const ProjectView = ({
           </TabsContent>
           <TabsContent value="workflows">
             <Items kind="workflow" pages={pages} project={project} />
+          </TabsContent>
+          <TabsContent value="chats">
+            <ProjectChats chats={chats} project={project} />
+          </TabsContent>
+          <TabsContent value="connections">
+            <ProjectConnections connections={connections} />
           </TabsContent>
           <TabsContent value="people">
             <ProjectPeople project={project} />

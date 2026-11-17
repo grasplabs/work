@@ -1327,6 +1327,10 @@ msgstr "{unnamed} de {total} vistas en uso, nunca nombradas"
 msgid "{unseen, plural, one {# more run today, of a workflow you can't see} other {# more runs today, of workflows you can't see}}"
 msgstr "{unseen, plural, one {# ejecución más hoy, de un flujo que no puedes ver} other {# ejecuciones más hoy, de flujos que no puedes ver}}"
 
+#: src/projects/project-connections.tsx
+msgid "{unseen, plural, one {# more that you can't see} other {# more that you can't see}}"
+msgstr "{unseen, plural, one {# más que no puedes ver} other {# más que no puedes ver}}"
+
 #: src/brain/brain-atlas.ts
 msgid "{unseen} of {total} named, not seen in use"
 msgstr "{unseen} de {total} nombradas, sin verse en uso"
@@ -1979,9 +1983,14 @@ msgid "Add"
 msgstr "Añadir"
 
 #: src/projects/file-item-dialog.tsx
+#: src/projects/project-chats.tsx
 msgctxt "put in a project"
 msgid "Add"
 msgstr "Añadir"
+
+#: src/projects/project-chats.tsx
+msgid "Add a chat"
+msgstr "Añadir un chat"
 
 #: src/settings/ai-providers.tsx
 msgid "Add a fallback"
@@ -3760,6 +3769,7 @@ msgstr "Chatear con {name}"
 #: src/chat/chat-switcher.tsx
 #: src/chat/chat-window.tsx
 #: src/grasp/frame/grasp-sidebar.tsx
+#: src/projects/project-view.tsx
 msgid "Chats"
 msgstr "Chats"
 
@@ -3961,6 +3971,7 @@ msgstr "Acantilados"
 #: src/knowledge/new-document.tsx
 #: src/knowledge/purge.tsx
 #: src/onboarding/place-picker.tsx
+#: src/projects/project-chats.tsx
 #: src/projects/project-dialog.tsx
 #: src/settings/ai-providers.tsx
 #: src/settings/audit-archive.tsx
@@ -4345,6 +4356,8 @@ msgstr "Disparador de conexión"
 
 #: src/brain/brain-log.tsx
 #: src/brain/brain.ts
+#: src/projects/project-connections.tsx
+#: src/projects/project-view.tsx
 msgid "Connections"
 msgstr "Conexiones"
 
@@ -7482,6 +7495,10 @@ msgstr "Sus apps y flujos de trabajo no se eliminan, y nada en él está compart
 msgid "Its apps and workflows aren’t deleted, but they stop being shared with everyone in it: {who} lose access to them, unless they are shared with them another way."
 msgstr "Sus apps y flujos de trabajo no se eliminan, pero dejan de compartirse con todos sus miembros: {who} pierden el acceso, salvo que se compartan con ellos de otra forma."
 
+#: src/projects/project-connections.tsx
+msgid "Its apps and workflows use no connections."
+msgstr "Sus apps y flujos de trabajo no usan ninguna conexión."
+
 #: src/workflows/binding-approvals.tsx
 #: src/workflows/files-and-apps.tsx
 msgid "Its bindings"
@@ -9192,6 +9209,10 @@ msgstr "Ninguno de los permisos de integración de la aplicación sirve {contrac
 #: src/interview/read-back.tsx
 msgid "None of this is right"
 msgstr "Nada de esto es correcto"
+
+#: src/projects/project-chats.tsx
+msgid "None of your chats are in it. Only you see the chats you put here."
+msgstr "Ninguno de tus chats está aquí. Solo tú ves los chats que pones aquí."
 
 #: src/apps/app-settings.tsx
 #: src/brain/brain.ts
@@ -13481,6 +13502,7 @@ msgstr "Quitar a {who} de {name}"
 msgid "Take off the dashboard"
 msgstr "Quitar del panel"
 
+#: src/projects/project-chats.tsx
 #: src/projects/project-people.tsx
 #: src/projects/project-view.tsx
 msgid "Take out"
@@ -16962,6 +16984,10 @@ msgstr "No tienes acceso a esta organización. Pregunta a un administrador."
 msgid "You finished this chat. Thank you for your time."
 msgstr "Has terminado este chat. Gracias por tu tiempo."
 
+#: src/projects/project-chats.tsx
+msgid "You have no chats to add."
+msgstr "No tienes chats que añadir."
+
 #: src/brain/sources-page.tsx
 msgid "You have no connections yet."
 msgstr "Aún no tienes conexiones."
@@ -17065,6 +17091,10 @@ msgstr "Tus cambios vuelven a como estaban entonces, para todos los que construy
 #: src/inbox/items.ts
 msgid "Your chat's agent asked to start this workflow for you. Nothing runs until you confirm it, with exactly the input shown."
 msgstr "El agente de tu chat pidió iniciar este flujo por ti. Nada se ejecuta hasta que lo confirmes, con exactamente la entrada que se muestra."
+
+#: src/projects/project-chats.tsx
+msgid "Your chats"
+msgstr "Tus chats"
 
 #: src/interview/before.tsx
 msgid "Your choice"

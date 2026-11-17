@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import type { ChatSummary } from "@grasp-os/shared/chat";
 import type {
   FileItem,
   NewProjectMember,
@@ -92,6 +93,22 @@ const invoicesMoved: ProjectItemsPage["items"][number] = {
   addedAt: "2026-11-01T12:00:00.000Z",
 };
 
+/** A chat of the person's, as their list gives it. */
+const chatOf = (id: string, title: string): ChatSummary => ({
+  id,
+  title,
+  agentId: "grasp",
+  createdAt: "2026-11-01T10:00:00.000Z",
+  lastAt: "2026-11-01T10:00:00.000Z",
+  running: false,
+  appId: null,
+  via: "web",
+  make: null,
+  archived: false,
+});
+
+const accruals = chatOf("chat-accruals", "Accruals");
+
 const fakeProjects = (
   pages: ProjectItemsPage[] = [{ items: [desk], more: false }],
   /** The people core offers to add. */
@@ -147,7 +164,18 @@ const fakeProjects = (
       return left.shift() ?? { items: [], more: false };
     },
   };
-  return { session: { projects, workflowResources }, asked };
+  const chats = {
+    // The person's chats: Lunch, and Accruals, which is in the project.
+    list: async (): Promise<ChatSummary[]> => {
+      await Promise.resolve();
+      return [chatOf("chat-lunch", "Lunch"), accruals];
+    },
+    setProject: async (chatId: string, inProject: string | null) => {
+      await Promise.resolve();
+      asked.push(["setProject", chatId, inProject]);
+    },
+  };
+  return { session: { projects, workflowResources, chats }, asked };
 };
 
 let root: Root | undefined;
@@ -165,7 +193,8 @@ const settled = async (): Promise<void> => {
 /** The page of `shownProject`, on what `session` holds. */
 const shown = async (
   session: ReturnType<typeof fakeProjects>["session"],
-  shownProject: Project
+  shownProject: Project,
+  chatsInIt: ChatSummary[] = []
 ) => {
   const core = {
     withSession: async <T,>(
@@ -174,7 +203,12 @@ const shown = async (
   };
   const rootRoute = createRootRoute({
     component: () => (
-      <ProjectView identity={{ role: "builder" }} project={shownProject} />
+      <ProjectView
+        chats={chatsInIt}
+        connections={{ connections: [], unseen: 0 }}
+        identity={{ role: "builder" }}
+        project={shownProject}
+      />
     ),
   });
   const router = createRouter({
@@ -473,6 +507,29 @@ describe("A project's page", () => {
       asked: [
         ["items", "workflow", "wf-invoices", "2026-11-01T10:00:00.000Z"],
         ["items", "workflow", "wf-invoices", "2026-11-01T12:00:00.000Z"],
+      ],
+    });
+  });
+
+  it("lists only the person's own chats in it, adds one of theirs not in it yet, and takes one out", async () => {
+    const { session, asked } = fakeProjects();
+    await shown(session, project("user"), [accruals]);
+    await press(tab("Chats"));
+
+    const listed = document.body.textContent?.includes("Accruals");
+    await press(button("Add a chat"));
+    const choices = [...document.querySelectorAll('[role="dialog"] li')].map(
+      (row) => row.textContent?.trim()
+    );
+    await press(button("Add"));
+    await press(button("Take out"));
+
+    expect({ listed, choices, asked }).toStrictEqual({
+      listed: true,
+      choices: ["LunchAdd"],
+      asked: [
+        ["setProject", "chat-lunch", "project-1"],
+        ["setProject", "chat-accruals", null],
       ],
     });
   });

@@ -1327,6 +1327,10 @@ msgstr "{unnamed} von {total} im Einsatz gesehen, nie genannt"
 msgid "{unseen, plural, one {# more run today, of a workflow you can't see} other {# more runs today, of workflows you can't see}}"
 msgstr "{unseen, plural, one {# weiterer Lauf heute, eines Workflows, den du nicht sehen kannst} other {# weitere Läufe heute, von Workflows, die du nicht sehen kannst}}"
 
+#: src/projects/project-connections.tsx
+msgid "{unseen, plural, one {# more that you can't see} other {# more that you can't see}}"
+msgstr "{unseen, plural, one {# weitere, die Sie nicht sehen können} other {# weitere, die Sie nicht sehen können}}"
+
 #: src/brain/brain-atlas.ts
 msgid "{unseen} of {total} named, not seen in use"
 msgstr "{unseen} von {total} genannt, nicht im Einsatz gesehen"
@@ -1979,9 +1983,14 @@ msgid "Add"
 msgstr "Hinzufügen"
 
 #: src/projects/file-item-dialog.tsx
+#: src/projects/project-chats.tsx
 msgctxt "put in a project"
 msgid "Add"
 msgstr "Hinzufügen"
+
+#: src/projects/project-chats.tsx
+msgid "Add a chat"
+msgstr "Chat hinzufügen"
 
 #: src/settings/ai-providers.tsx
 msgid "Add a fallback"
@@ -3760,6 +3769,7 @@ msgstr "Mit {name} chatten"
 #: src/chat/chat-switcher.tsx
 #: src/chat/chat-window.tsx
 #: src/grasp/frame/grasp-sidebar.tsx
+#: src/projects/project-view.tsx
 msgid "Chats"
 msgstr "Chats"
 
@@ -3961,6 +3971,7 @@ msgstr "Klippen"
 #: src/knowledge/new-document.tsx
 #: src/knowledge/purge.tsx
 #: src/onboarding/place-picker.tsx
+#: src/projects/project-chats.tsx
 #: src/projects/project-dialog.tsx
 #: src/settings/ai-providers.tsx
 #: src/settings/audit-archive.tsx
@@ -4345,6 +4356,8 @@ msgstr "Verbindungsauslöser"
 
 #: src/brain/brain-log.tsx
 #: src/brain/brain.ts
+#: src/projects/project-connections.tsx
+#: src/projects/project-view.tsx
 msgid "Connections"
 msgstr "Verbindungen"
 
@@ -7482,6 +7495,10 @@ msgstr "Seine Apps und Workflows werden nicht gelöscht, und nichts darin ist mi
 msgid "Its apps and workflows aren’t deleted, but they stop being shared with everyone in it: {who} lose access to them, unless they are shared with them another way."
 msgstr "Seine Apps und Workflows werden nicht gelöscht, aber nicht mehr mit allen darin geteilt: {who} verlieren den Zugriff darauf, sofern sie nicht anders mit ihnen geteilt sind."
 
+#: src/projects/project-connections.tsx
+msgid "Its apps and workflows use no connections."
+msgstr "Seine Apps und Workflows nutzen keine Verbindungen."
+
 #: src/workflows/binding-approvals.tsx
 #: src/workflows/files-and-apps.tsx
 msgid "Its bindings"
@@ -9192,6 +9209,10 @@ msgstr "Keine Integrationsberechtigung der App bedient {contract} mit allen dekl
 #: src/interview/read-back.tsx
 msgid "None of this is right"
 msgstr "Davon stimmt nichts"
+
+#: src/projects/project-chats.tsx
+msgid "None of your chats are in it. Only you see the chats you put here."
+msgstr "Keiner Ihrer Chats ist darin. Nur Sie sehen die Chats, die Sie hier ablegen."
 
 #: src/apps/app-settings.tsx
 #: src/brain/brain.ts
@@ -13481,6 +13502,7 @@ msgstr "{who} aus {name} entfernen"
 msgid "Take off the dashboard"
 msgstr "Vom Dashboard nehmen"
 
+#: src/projects/project-chats.tsx
 #: src/projects/project-people.tsx
 #: src/projects/project-view.tsx
 msgid "Take out"
@@ -16962,6 +16984,10 @@ msgstr "Sie haben keinen Zugang zu dieser Organisation. Fragen Sie einen Admin."
 msgid "You finished this chat. Thank you for your time."
 msgstr "Sie haben diesen Chat beendet. Vielen Dank für Ihre Zeit."
 
+#: src/projects/project-chats.tsx
+msgid "You have no chats to add."
+msgstr "Sie haben keine Chats, die Sie hinzufügen können."
+
 #: src/brain/sources-page.tsx
 msgid "You have no connections yet."
 msgstr "Sie haben noch keine Verbindungen."
@@ -17065,6 +17091,10 @@ msgstr "Ihre Änderungen gehen auf den damaligen Stand zurück, für alle, die a
 #: src/inbox/items.ts
 msgid "Your chat's agent asked to start this workflow for you. Nothing runs until you confirm it, with exactly the input shown."
 msgstr "Der Agent Ihres Chats möchte diesen Workflow für Sie starten. Nichts läuft, bis Sie es bestätigen, mit genau der gezeigten Eingabe."
+
+#: src/projects/project-chats.tsx
+msgid "Your chats"
+msgstr "Ihre Chats"
 
 #: src/interview/before.tsx
 msgid "Your choice"
