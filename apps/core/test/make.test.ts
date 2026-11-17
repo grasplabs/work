@@ -78,6 +78,10 @@ const pagePlan = {
   who: "Just me",
 } as const satisfies ChatPlan;
 
+/** A person's own skill named `name`, for building a close. */
+const skillOf = (name: string): string =>
+  `---\nname: ${name}\ndescription: How I build a close.\n---\n\nThe steps.\n`;
+
 const toolsSchema = z.object({
   tools: z.array(z.object({ name: z.string(), description: z.string() })),
 });
@@ -375,6 +379,32 @@ describe("Make something", { timeout: 120_000 }, () => {
       again: "agent.plan_not_found",
       chats: [chat.id, chat.id],
     });
+  });
+
+  // GRA-1868: the build Build it asks is a turn of its person's own chat,
+  // which their own skills steer, and nobody else's.
+  it("steers the build Build it asks with its person's own skills, never another builder's", async () => {
+    const [builder, other] = await Promise.all([
+      signedInApi(idp, "builder"),
+      signedInApi(idp, "builder"),
+    ]);
+    const theirs = `close-the-month-${unique()}`;
+    const others = `close-the-month-${unique()}`;
+    await builder.api.skills.save(skillOf(theirs));
+    await other.api.skills.save(skillOf(others));
+    const { chat, callId, provider } = await plannedChat(builder, closePlan);
+    await builder.api.chats.build(chat.id, {
+      plan: callId,
+      text: "Build it",
+      model,
+    });
+    await idle(builder, chat.id);
+    const build = JSON.stringify(provider.requests.at(-1)?.body);
+    expect({
+      built: build.includes("Build it"),
+      theirs: build.includes(`- ${theirs} (person`),
+      others: build.includes(others),
+    }).toStrictEqual({ built: true, theirs: true, others: false });
   });
 
   it("builds in the project the chat was started with, shared with everyone in it, and starts no such chat for someone who only uses the project", async () => {
