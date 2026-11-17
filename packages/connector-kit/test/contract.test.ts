@@ -13,6 +13,7 @@ import {
   redirectHostMatches,
 } from "../src/manifest.ts";
 import type { Route } from "../src/manifest.ts";
+import { defineSync } from "../src/sync.ts";
 
 // The connector contract, as a connector is defined: input parsed strictly
 // all the way down, one declared resource property, and only requests to
@@ -459,6 +460,22 @@ describe("a connector", () => {
             reach: "own",
             routes: [{ ...route, host: "evil.test" }],
             run: async () => await Promise.resolve({ output: {} }),
+          }),
+        ],
+      })
+    ).toThrow("Every route's host must be one of the connector's hosts");
+  });
+
+  it("syncs only from its own hosts", () => {
+    expect(() =>
+      connectorWith({
+        syncs: [
+          defineSync({
+            name: "items",
+            kind: "file",
+            routes: [{ ...route, host: "api.exmaple.test" }],
+            read: async () =>
+              await Promise.resolve({ items: [], cursor: "1", more: false }),
           }),
         ],
       })
