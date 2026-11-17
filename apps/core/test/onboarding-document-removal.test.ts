@@ -24,6 +24,7 @@ import {
   approveAgreed,
   onLink,
   openLinkAs,
+  participate,
   signedInAs,
 } from "./interview-link.ts";
 import { d1ColumnsWith, onboardingTablesWith } from "./kept-where.ts";
@@ -184,6 +185,7 @@ const fact = (id: string, tag: FactTag, record: string): InterviewFact => ({
   text: `You said: ${record}`,
   record,
   agreed: true,
+  ...(tag === "who" ? {} : { share: "team" as const }),
 });
 
 /** Saves someone's interview as agreed to, with `facts`, on `link` (opened anew unless given). */
@@ -206,6 +208,8 @@ const agree = async (
     adding: false,
     addedAt: 0,
   };
+  // They take part before anything they say is kept, as their page has them.
+  await participate(link);
   const response = await onLink({
     action: "save",
     ...link,

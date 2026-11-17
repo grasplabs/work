@@ -2,7 +2,10 @@ import { readdirSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
-import { interviewApiPath } from "@grasp-os/shared/interview-links";
+import {
+  interviewApiPath,
+  participationNotice,
+} from "@grasp-os/shared/interview-links";
 import type { InterviewProgress } from "@grasp-os/shared/interview-links";
 import { expect } from "@playwright/test";
 
@@ -178,6 +181,11 @@ const interviewOn = async (
   const secret = link.split("#")[1] ?? "";
   const cookie = await signInAs(email);
   await interviewCall({ action: "session", secret }, cookie);
+  // They take part before anything they say is kept, as their page has them.
+  await interviewCall(
+    { action: "participate", secret, notice: participationNotice.version },
+    cookie
+  );
   await interviewCall({ action: "save", secret, version: 0, progress }, cookie);
 };
 

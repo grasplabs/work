@@ -3467,6 +3467,7 @@ msgstr "Uitvoeren kan niet: {unread}"
 #: src/drafts/draft-history.tsx
 #: src/drafts/sharing.tsx
 #: src/inbox/item-detail.tsx
+#: src/interview/destination.tsx
 #: src/interview/transcript.tsx
 #: src/link-confirmation.tsx
 #: src/onboarding/document-drop.tsx
@@ -3912,6 +3913,10 @@ msgstr "Kies er een"
 msgid "Choose someone"
 msgstr "Kies iemand"
 
+#: src/interview/destination.tsx
+msgid "Choose where each line goes. A line you move counts again once you save."
+msgstr "Kies waar elke regel naartoe gaat. Een regel die je verplaatst, telt weer zodra je opslaat."
+
 #: src/interview/before.tsx
 msgid "Choose who you want to be interviewed by."
 msgstr "Kies door wie je geïnterviewd wilt worden."
@@ -3968,6 +3973,7 @@ msgstr "Filters wissen"
 #: src/dashboard/widget-block.tsx
 #: src/drafts/draft-history.tsx
 #: src/drafts/share-with-team.tsx
+#: src/interview/destination.tsx
 #: src/onboarding/place-picker.tsx
 #: src/settings/erasures.tsx
 #: src/settings/stephen-settings.tsx
@@ -6931,6 +6937,10 @@ msgstr "Hoe ziet het bedrijf dat het gehaald is?"
 msgid "How you appear in Grasp: on workflows you own, and in the audit trail."
 msgstr "Hoe je in Grasp verschijnt: bij workflows waarvan je eigenaar bent, en in de audittrail."
 
+#: src/interview/words.ts
+msgid "How you do the work is shared in your company as how your team works, never as what you said. What you think of it is only counted anonymously: it shows once five or more people across the company say the same, never with your name or your team."
+msgstr "Hoe je het werk doet, wordt in je bedrijf gedeeld als hoe je team werkt, nooit als wat jij zei. Wat je ervan vindt, telt alleen anoniem mee: het wordt pas zichtbaar als vijf of meer mensen in het hele bedrijf hetzelfde zeggen, nooit met je naam of je team."
+
 #: src/routes/_shell.settings.security.tsx
 msgid "How you get into Grasp. Passwords and two-step sign-in live with your organization’s account."
 msgstr "Hoe je in Grasp komt. Wachtwoorden en tweestapsverificatie lopen via het account van je organisatie."
@@ -9454,6 +9464,14 @@ msgstr "Nog niet gedraaid"
 msgid "Not saved yet. Trying again."
 msgstr "Nog niet opgeslagen. Nieuwe poging volgt."
 
+#: src/interview/destination.tsx
+msgid "Not saved yet. Until it is, the lines you moved count nowhere."
+msgstr "Nog niet opgeslagen. Tot dan tellen de regels die je verplaatste nergens mee."
+
+#: src/interview/destination.tsx
+msgid "Not saved yet. Until it is, your lines still go where they went before."
+msgstr "Nog niet opgeslagen. Tot dan gaan je regels nog waar ze eerst heen gingen."
+
 #: src/apps/resource-bindings.tsx
 msgid "Not served"
 msgstr "Niet bediend"
@@ -9957,6 +9975,10 @@ msgstr "Alleen beheerders kunnen teams wijzigen."
 msgid "Only an admin resets an App’s data: every record goes for good, and its current version runs again with no records."
 msgstr "Alleen een beheerder reset de gegevens van een App: alle records zijn voorgoed weg en de huidige versie draait opnieuw zonder records."
 
+#: src/interview/destination.tsx
+msgid "Only counted anonymously"
+msgstr "Telt alleen anoniem mee"
+
 #: src/workflows/workflow-diagram.tsx
 msgid "Only if its condition holds"
 msgstr "Alleen als de voorwaarde geldt"
@@ -10017,6 +10039,10 @@ msgstr "Alleen de tweede manier"
 #: src/workflows/resource-params.tsx
 msgid "Only the workflow's builders can change these."
 msgstr "Alleen de bouwers van de workflow kunnen deze wijzigen."
+
+#: src/interview/destination.tsx
+msgid "Only used to know whom to ask"
+msgstr "Alleen gebruikt om te weten wie we het vragen"
 
 #: src/agents/agent-page.tsx
 #: src/agents/agents-overview.tsx
@@ -10795,8 +10821,8 @@ msgid "Preference"
 msgstr "Voorkeur"
 
 #: src/interview/read-back.tsx
-msgid "Press a line to change it, take out what is wrong, or type what is missing. What you leave in is what counts."
-msgstr "Druk op een regel om hem aan te passen, haal weg wat niet klopt, of typ wat er ontbreekt. Wat je laat staan, telt."
+msgid "Press a line to change it, take out what is wrong, or type what is missing. Choose where each line goes. What you leave in is what counts."
+msgstr "Druk op een regel om hem aan te passen, haal weg wat niet klopt, of typ wat er ontbreekt. Kies waar elke regel naartoe gaat. Wat je laat staan, telt."
 
 #: src/pages/page-frame.tsx
 msgid "Preview: changes nothing, reads no real data"
@@ -12169,7 +12195,12 @@ msgstr "Link opslaan"
 msgid "Save the correction"
 msgstr "Correctie opslaan"
 
+#: src/interview/destination.tsx
+msgid "Save where they go"
+msgstr "Opslaan waar ze naartoe gaan"
+
 #: src/interview/composer.tsx
+#: src/interview/destination.tsx
 msgid "Saved"
 msgstr "Opgeslagen"
 
@@ -12208,6 +12239,7 @@ msgid "Saving to your memory"
 msgstr "Opslaan in je geheugen"
 
 #: src/interview/composer.tsx
+#: src/interview/destination.tsx
 msgid "Saving…"
 msgstr "Opslaan…"
 
@@ -12661,6 +12693,10 @@ msgstr "Delen…"
 #: src/brain/memories-page.tsx
 msgid "Shared {when}"
 msgstr "Gedeeld op {when}"
+
+#: src/interview/destination.tsx
+msgid "Shared as how your team works"
+msgstr "Gedeeld als hoe je team werkt"
 
 #: src/settings/stephen-settings.tsx
 msgid "Shared mailboxes, colleagues' calendars and the company's files."
@@ -15288,6 +15324,7 @@ msgstr "Proberen"
 #: src/chat/thread.tsx
 #: src/frame/page-states.tsx
 #: src/frame/setting-up.tsx
+#: src/interview/destination.tsx
 #: src/interview/sound-check.tsx
 #: src/pages/frame-failure.tsx
 msgid "Try again"
@@ -16593,6 +16630,10 @@ msgstr "Waar je bent in de brain"
 msgid "Where your data lives, and the time Grasp uses."
 msgstr "Waar je data staat, en welke tijdzone Grasp gebruikt."
 
+#: src/interview/destination.tsx
+msgid "Where your lines go"
+msgstr "Waar je regels naartoe gaan"
+
 #: src/onboarding/connect-steps.tsx
 msgid "Where, for example Dropbox"
 msgstr "Waar, bijvoorbeeld Dropbox"
@@ -17337,10 +17378,6 @@ msgstr "Jouw keuze"
 #: src/routes/_shell.settings.security.tsx
 msgid "Your company account. Leaving the company stops new sign-ins; an admin can end a session sooner in Members and roles."
 msgstr "Je bedrijfsaccount. Na vertrek uit het bedrijf kun je niet opnieuw inloggen; een beheerder kan een sessie eerder beëindigen bij Leden en rollen."
-
-#: src/interview/words.ts
-msgid "Your company never sees what one person said, or their name: only what five or more people told about the same work, put together by team."
-msgstr "Je bedrijf ziet nooit wat één persoon zei, of diens naam: alleen wat vijf of meer mensen over hetzelfde werk vertelden, samengenomen per team."
 
 #: src/interview/before.tsx
 msgid "Your company wants to know how the work really goes. First I ask how you work with AI today. Then I ask about one piece of your work. You tell me how you do it. That takes 12 to 15 minutes. Talking is the fastest. You can also type."

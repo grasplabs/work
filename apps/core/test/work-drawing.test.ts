@@ -116,6 +116,7 @@ const fact = (id: string, tag: FactTag, record: string): InterviewFact => ({
   text: record,
   record,
   agreed: true,
+  ...(tag === "who" ? {} : { share: "team" as const }),
 });
 
 /** Saves someone's interview as agreed to, with `facts`; returns the new version. */
@@ -143,6 +144,8 @@ const agree = async (
     adding: false,
     addedAt: 0,
   };
+  // They take part before anything they say is kept, as their page has them.
+  await participate(link);
   const response = await onLink({ action: "save", ...link, version, progress });
   const saved: InterviewSaved = await response.json();
   await approveAgreed(link, facts);

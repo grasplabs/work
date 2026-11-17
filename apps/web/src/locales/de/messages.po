@@ -3467,6 +3467,7 @@ msgstr "Ausführen nicht möglich: {unread}"
 #: src/drafts/draft-history.tsx
 #: src/drafts/sharing.tsx
 #: src/inbox/item-detail.tsx
+#: src/interview/destination.tsx
 #: src/interview/transcript.tsx
 #: src/link-confirmation.tsx
 #: src/onboarding/document-drop.tsx
@@ -3912,6 +3913,10 @@ msgstr "Eine auswählen"
 msgid "Choose someone"
 msgstr "Person auswählen"
 
+#: src/interview/destination.tsx
+msgid "Choose where each line goes. A line you move counts again once you save."
+msgstr "Wählen Sie, wohin jede Zeile geht. Eine Zeile, die Sie verschieben, zählt wieder, sobald Sie speichern."
+
 #: src/interview/before.tsx
 msgid "Choose who you want to be interviewed by."
 msgstr "Wählen Sie, von wem Sie interviewt werden möchten."
@@ -3968,6 +3973,7 @@ msgstr "Filter zurücksetzen"
 #: src/dashboard/widget-block.tsx
 #: src/drafts/draft-history.tsx
 #: src/drafts/share-with-team.tsx
+#: src/interview/destination.tsx
 #: src/onboarding/place-picker.tsx
 #: src/settings/erasures.tsx
 #: src/settings/stephen-settings.tsx
@@ -6931,6 +6937,10 @@ msgstr "Woran wird das Unternehmen sehen, dass es erreicht ist?"
 msgid "How you appear in Grasp: on workflows you own, and in the audit trail."
 msgstr "Wie Sie in Grasp erscheinen: bei Workflows, für die Sie verantwortlich sind, und im Audit-Trail."
 
+#: src/interview/words.ts
+msgid "How you do the work is shared in your company as how your team works, never as what you said. What you think of it is only counted anonymously: it shows once five or more people across the company say the same, never with your name or your team."
+msgstr "Wie Sie die Arbeit machen, wird in Ihrem Unternehmen als Arbeitsweise Ihres Teams geteilt, nie als das, was Sie gesagt haben. Was Sie davon halten, zählt nur anonym: Es wird erst sichtbar, wenn fünf oder mehr Personen im ganzen Unternehmen dasselbe sagen, nie mit Ihrem Namen oder Ihrem Team."
+
 #: src/routes/_shell.settings.security.tsx
 msgid "How you get into Grasp. Passwords and two-step sign-in live with your organization’s account."
 msgstr "Wie Sie sich bei Grasp anmelden. Passwörter und die zweistufige Anmeldung liegen beim Konto Ihrer Organisation."
@@ -9454,6 +9464,14 @@ msgstr "Noch nicht gelaufen"
 msgid "Not saved yet. Trying again."
 msgstr "Noch nicht gespeichert. Neuer Versuch folgt."
 
+#: src/interview/destination.tsx
+msgid "Not saved yet. Until it is, the lines you moved count nowhere."
+msgstr "Noch nicht gespeichert. Bis dahin zählen die Zeilen, die Sie verschoben haben, nirgends."
+
+#: src/interview/destination.tsx
+msgid "Not saved yet. Until it is, your lines still go where they went before."
+msgstr "Noch nicht gespeichert. Bis dahin gehen Ihre Zeilen noch dorthin, wohin sie vorher gingen."
+
 #: src/apps/resource-bindings.tsx
 msgid "Not served"
 msgstr "Nicht bedient"
@@ -9957,6 +9975,10 @@ msgstr "Nur Admins können Teams ändern."
 msgid "Only an admin resets an App’s data: every record goes for good, and its current version runs again with no records."
 msgstr "Nur ein Admin setzt die Daten einer App zurück: Alle Datensätze sind endgültig weg, und die aktuelle Version läuft ohne Datensätze neu."
 
+#: src/interview/destination.tsx
+msgid "Only counted anonymously"
+msgstr "Zählt nur anonym"
+
 #: src/workflows/workflow-diagram.tsx
 msgid "Only if its condition holds"
 msgstr "Nur wenn die Bedingung zutrifft"
@@ -10017,6 +10039,10 @@ msgstr "Nur der zweite Weg"
 #: src/workflows/resource-params.tsx
 msgid "Only the workflow's builders can change these."
 msgstr "Nur die Builder des Workflows können diese ändern."
+
+#: src/interview/destination.tsx
+msgid "Only used to know whom to ask"
+msgstr "Nur genutzt, um zu wissen, wen wir fragen"
 
 #: src/agents/agent-page.tsx
 #: src/agents/agents-overview.tsx
@@ -10795,8 +10821,8 @@ msgid "Preference"
 msgstr "Vorliebe"
 
 #: src/interview/read-back.tsx
-msgid "Press a line to change it, take out what is wrong, or type what is missing. What you leave in is what counts."
-msgstr "Drücken Sie auf eine Zeile, um sie zu ändern, nehmen Sie heraus, was nicht stimmt, oder tippen Sie, was fehlt. Was Sie stehen lassen, zählt."
+msgid "Press a line to change it, take out what is wrong, or type what is missing. Choose where each line goes. What you leave in is what counts."
+msgstr "Drücken Sie auf eine Zeile, um sie zu ändern, nehmen Sie heraus, was nicht stimmt, oder tippen Sie, was fehlt. Wählen Sie, wohin jede Zeile geht. Was Sie stehen lassen, zählt."
 
 #: src/pages/page-frame.tsx
 msgid "Preview: changes nothing, reads no real data"
@@ -12169,7 +12195,12 @@ msgstr "Link speichern"
 msgid "Save the correction"
 msgstr "Korrektur speichern"
 
+#: src/interview/destination.tsx
+msgid "Save where they go"
+msgstr "Speichern, wohin sie gehen"
+
 #: src/interview/composer.tsx
+#: src/interview/destination.tsx
 msgid "Saved"
 msgstr "Gespeichert"
 
@@ -12208,6 +12239,7 @@ msgid "Saving to your memory"
 msgstr "Wird in Ihrem Gedächtnis gespeichert"
 
 #: src/interview/composer.tsx
+#: src/interview/destination.tsx
 msgid "Saving…"
 msgstr "Wird gespeichert…"
 
@@ -12661,6 +12693,10 @@ msgstr "Teilen…"
 #: src/brain/memories-page.tsx
 msgid "Shared {when}"
 msgstr "Geteilt am {when}"
+
+#: src/interview/destination.tsx
+msgid "Shared as how your team works"
+msgstr "Geteilt als Arbeitsweise Ihres Teams"
 
 #: src/settings/stephen-settings.tsx
 msgid "Shared mailboxes, colleagues' calendars and the company's files."
@@ -15288,6 +15324,7 @@ msgstr "Versuchen"
 #: src/chat/thread.tsx
 #: src/frame/page-states.tsx
 #: src/frame/setting-up.tsx
+#: src/interview/destination.tsx
 #: src/interview/sound-check.tsx
 #: src/pages/frame-failure.tsx
 msgid "Try again"
@@ -16593,6 +16630,10 @@ msgstr "Wo du im Brain bist"
 msgid "Where your data lives, and the time Grasp uses."
 msgstr "Wo Ihre Daten liegen und welche Zeit Grasp verwendet."
 
+#: src/interview/destination.tsx
+msgid "Where your lines go"
+msgstr "Wohin Ihre Zeilen gehen"
+
 #: src/onboarding/connect-steps.tsx
 msgid "Where, for example Dropbox"
 msgstr "Wo, zum Beispiel Dropbox"
@@ -17337,10 +17378,6 @@ msgstr "Ihre Entscheidung"
 #: src/routes/_shell.settings.security.tsx
 msgid "Your company account. Leaving the company stops new sign-ins; an admin can end a session sooner in Members and roles."
 msgstr "Ihr Firmenkonto. Wer das Unternehmen verlässt, kann sich nicht mehr neu anmelden; ein Admin kann eine Sitzung unter Mitglieder und Rollen früher beenden."
-
-#: src/interview/words.ts
-msgid "Your company never sees what one person said, or their name: only what five or more people told about the same work, put together by team."
-msgstr "Ihr Unternehmen sieht nie, was eine einzelne Person gesagt hat, und auch nicht ihren Namen: nur was fünf oder mehr Personen über dieselbe Arbeit erzählt haben, nach Team zusammengefasst."
 
 #: src/interview/before.tsx
 msgid "Your company wants to know how the work really goes. First I ask how you work with AI today. Then I ask about one piece of your work. You tell me how you do it. That takes 12 to 15 minutes. Talking is the fastest. You can also type."

@@ -6,7 +6,7 @@
  * theirs is kept beside each answer, for the score card. Ported from the
  * prototype (grasplabs/prototype, packages/grasp: lab/play.ts).
  */
-import { factRevision } from "@grasp-os/shared/interview-links";
+import { factRevision, shareByDefault } from "@grasp-os/shared/interview-links";
 import type {
   InterviewFact,
   InterviewProgress,
@@ -19,7 +19,7 @@ import type {
   InterviewWants,
   StephenTurn,
 } from "@grasp-os/shared/interview-turn";
-import type { Interviewer } from "@grasp-os/shared/onboarding";
+import type { InterviewKind, Interviewer } from "@grasp-os/shared/onboarding";
 
 import type { Link } from "./core.ts";
 import { askedFor, awayLine, misreadable, pasteOf, splitOf } from "./events.ts";
@@ -89,19 +89,25 @@ const changed = (
 export const notesAfter = (
   notes: readonly InterviewFact[],
   turn: StephenTurn,
+  kind: InterviewKind,
   pin?: number
 ): InterviewFact[] => {
   const facts = notes.map((fact) => {
     const change = turn.changes.find((each) => each.id === fact.id);
     return change === undefined ? fact : changed(fact, change);
   });
-  const added = turn.facts.map((fact, at): InterviewFact => ({
-    id: `f${facts.length + at + 1}`,
-    tag: fact.tag,
-    text: fact.text,
-    record: fact.record,
-    ...(pin === undefined ? {} : { pin }),
-  }));
+  const added = turn.facts.map((fact, at): InterviewFact => {
+    // Where it goes starts from its kind, as on the page (progress.ts `afterTurn`).
+    const share = shareByDefault(fact.tag, kind);
+    return {
+      id: `f${facts.length + at + 1}`,
+      tag: fact.tag,
+      text: fact.text,
+      record: fact.record,
+      ...(pin === undefined ? {} : { pin }),
+      ...(share === undefined ? {} : { share }),
+    };
+  });
   return [...facts, ...added];
 };
 
@@ -109,6 +115,7 @@ export const notesAfter = (
 export const taken = (
   progress: InterviewProgress,
   turn: StephenTurn,
+  kind: InterviewKind,
   pin?: number
 ): InterviewProgress => {
   const readBackWants = turn.wants === "file" ? "file" : "readback";
@@ -118,7 +125,7 @@ export const taken = (
       turn.say === ""
         ? progress.lines
         : [...progress.lines, { from: "stephen", text: turn.say }],
-    facts: notesAfter(progress.facts, turn, pin),
+    facts: notesAfter(progress.facts, turn, kind, pin),
     phase: pin === undefined ? turn.phase : "readback",
     wants: pin === undefined ? turn.wants : readBackWants,
   };
@@ -153,11 +160,13 @@ export interface PlayOptions {
 }
 
 /** Opens the link: the version what was said is kept as. */
-const opened = async (link: Link): Promise<{ version: number }> => {
+const opened = async (
+  link: Link
+): Promise<{ version: number; kind: InterviewKind }> => {
   const session = await link.open();
   // They read what it is for and agree to take part, as their page asks; agreeing again changes nothing.
   await link.participate();
-  return { version: session.version };
+  return { version: session.version, kind: session.kind };
 };
 
 /** Plays one interview on `link`, start to end. */
@@ -166,7 +175,7 @@ export const playInterview = async (
   player: Player,
   { locale, interviewer, clock, events = [] }: PlayOptions
 ): Promise<Played> => {
-  const { version: opening } = await opened(link);
+  const { version: opening, kind: interview } = await opened(link);
   let version = opening;
   const startedAt = Date.now();
   let progress: InterviewProgress = {
@@ -284,7 +293,7 @@ export const playInterview = async (
   };
   /** His turn after their line, kept. */
   const answered = async () => {
-    progress = taken(progress, await turn("answer"));
+    progress = taken(progress, await turn("answer"), interview);
     played.wantsAt.push(progress.wants);
     await save();
   };
@@ -302,7 +311,7 @@ export const playInterview = async (
     await save();
     ({ version } = await opened(link));
     away += awayCountsMost;
-    progress = taken(progress, await turn("resume"));
+    progress = taken(progress, await turn("resume"), interview);
     await save();
     playedOut(later);
     return true;
@@ -345,7 +354,7 @@ export const playInterview = async (
     const first = await turn("answer");
     const waited = first.more || first.say === "";
     playedOut(event, { waited });
-    progress = taken(progress, first);
+    progress = taken(progress, first, interview);
     if (waited) {
       sentOn(rest, answer.said, answer.move ?? null, answer.untrue ?? []);
     } else {
@@ -398,7 +407,7 @@ export const playInterview = async (
   };
   const withEvents = events.length === 0 ? {} : { events: happened };
 
-  progress = taken(progress, await turn("start"));
+  progress = taken(progress, await turn("start"), interview);
   await save();
   while (
     played.answers < answersMost &&
@@ -453,7 +462,7 @@ export const playInterview = async (
         "readback",
         shown.map(({ id }) => id)
       );
-      progress = taken(progress, put, progress.confirmed);
+      progress = taken(progress, put, interview, progress.confirmed);
       if (put.approved) {
         progress = { ...progress, confirmed: progress.confirmed + 1 };
         tries = 0;

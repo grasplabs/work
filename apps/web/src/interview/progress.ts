@@ -3,6 +3,7 @@ import {
   interviewLimits,
   nextFactId,
   removedLine,
+  shareByDefault,
 } from "@grasp-os/shared/interview-links";
 import type {
   InterviewFact,
@@ -18,7 +19,7 @@ import type {
   InterviewWants,
   StephenTurn,
 } from "@grasp-os/shared/interview-turn";
-import type { Interviewer } from "@grasp-os/shared/onboarding";
+import type { InterviewKind, Interviewer } from "@grasp-os/shared/onboarding";
 
 // Where someone's interview stands, as their page keeps it and sends it to
 // core to be kept (`InterviewProgress`), and how each thing that happens
@@ -62,14 +63,18 @@ export const chose = (
 export const toldWhat = (progress: InterviewProgress): InterviewProgress =>
   progress.told ? progress : { ...progress, told: true };
 
-/** They pressed start, to talk or by typing: they have read what this is. */
+/**
+ * They pressed start, to talk or by typing: they have read what this is.
+ * An interview they agreed to stays agreed to: they read what it says now,
+ * and are back where they were.
+ */
 export const begun = (
   progress: InterviewProgress,
   now: number,
   by: "talk" | "type"
 ): InterviewProgress => ({
   ...progress,
-  person: "progress",
+  person: progress.person === "completed" ? "completed" : "progress",
   told: true,
   mode: by,
   startedAt: progress.startedAt ?? now,
@@ -163,12 +168,13 @@ const sameWords = (text: string): string =>
 
 /** A fact without the fields it doesn't have, as the store keeps it. */
 const withoutEmpty = (fact: InterviewFact): InterviewFact => {
-  const { out, pin, agreed, ...rest } = fact;
+  const { out, pin, agreed, share, ...rest } = fact;
   return {
     ...rest,
     ...(out === true ? { out } : {}),
     ...(pin === undefined ? {} : { pin }),
     ...(agreed === true ? { agreed } : {}),
+    ...(share === undefined ? {} : { share }),
   };
 };
 
@@ -182,7 +188,11 @@ const withoutEmpty = (fact: InterviewFact): InterviewFact => {
 export const afterTurn = (
   progress: InterviewProgress,
   turn: StephenTurn,
-  { answered, pin }: { answered: number; pin?: number }
+  {
+    answered,
+    pin,
+    kind,
+  }: { answered: number; pin?: number; kind: InterviewKind }
 ): InterviewProgress => {
   const marks = turn.facts
     .filter(({ quote }) => quote !== "")
@@ -228,12 +238,15 @@ export const afterTurn = (
       changed.length + added.length < interviewLimits.facts
     ) {
       have.add(words);
+      // Where it goes starts from what kind of thing it is: theirs to move before they agree.
+      const share = shareByDefault(fact.tag, kind);
       added.push({
         id: nextFactId([...changed, ...added]),
         tag: fact.tag,
         text: fact.text,
         record: fact.record,
         ...(pin === undefined ? {} : { pin }),
+        ...(share === undefined ? {} : { share }),
       });
     }
   }
@@ -274,6 +287,27 @@ export const withFactText = (
     }
     const { agreed: _agreed, ...rest } = fact;
     return { ...rest, text, record: text };
+  }),
+});
+
+/**
+ * Where the lines in `shares` go, as they chose: shared in their company
+ * as how their team works (`team`), or only counted anonymously (none). Approving
+ * binds where a line goes (`factRevision`), so a line moved after they
+ * agreed counts again only once it is approved where it goes now.
+ */
+export const withShares = (
+  progress: InterviewProgress,
+  shares: ReadonlyMap<string, InterviewFact["share"]>
+): InterviewProgress => ({
+  ...progress,
+  facts: progress.facts.map((fact) => {
+    if (!shares.has(fact.id)) {
+      return fact;
+    }
+    const { share: _was, ...rest } = fact;
+    const share = shares.get(fact.id);
+    return share === undefined ? rest : { ...rest, share };
   }),
 });
 

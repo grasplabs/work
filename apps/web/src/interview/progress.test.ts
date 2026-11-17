@@ -1,6 +1,7 @@
-import { erasedFact } from "@grasp-os/shared/interview-links";
+import { erasedFact, factTags } from "@grasp-os/shared/interview-links";
 import { readBackParts } from "@grasp-os/shared/interview-story";
 import type { StephenTurn } from "@grasp-os/shared/interview-turn";
+import type { InterviewKind } from "@grasp-os/shared/onboarding";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -17,6 +18,7 @@ import {
   withFactToggled,
   withLine,
   withoutLine,
+  withShares,
 } from "./progress.ts";
 
 // From the prototype's `data/interviews.ts` (`takeTurn`), which these steps
@@ -39,6 +41,98 @@ const said = withLine(
   { from: "person", text: "I open the invoice in Exact.", typed: true }
 );
 
+describe("where a line goes", () => {
+  /** Where each tag's line starts out, in an interview of `kind`. */
+  const startsOf = (kind: InterviewKind) =>
+    afterTurn(
+      said,
+      turn({
+        facts: factTags.map((tag) => ({
+          tag,
+          text: `A ${tag}.`,
+          record: `A ${tag}.`,
+          quote: "",
+        })),
+      }),
+      { answered: 1, kind }
+    ).facts.map(({ tag, share }) => `${tag}: ${share ?? "anonymous"}`);
+
+  it("starts from what kind of line it is: how the work runs as how the team works; a wish, AI, an own list or tool, and any tag not listed, only counted anonymously; who does it never shared, nor the work someone says they do instead in their own interview", () => {
+    expect({ own: startsOf("own"), lead: startsOf("lead") }).toStrictEqual({
+      own: [
+        "step: team",
+        "system: team",
+        "handoff: team",
+        "wait: team",
+        "exception: team",
+        "rule: team",
+        "judgment: team",
+        "workaround: anonymous",
+        "ai: anonymous",
+        "wish: anonymous",
+        "number: team",
+        "done: team",
+        "stop: team",
+        "case: team",
+        "term: team",
+        "next: team",
+        "work: anonymous",
+        "who: anonymous",
+      ],
+      lead: [
+        "step: team",
+        "system: team",
+        "handoff: team",
+        "wait: team",
+        "exception: team",
+        "rule: team",
+        "judgment: team",
+        "workaround: anonymous",
+        "ai: anonymous",
+        "wish: anonymous",
+        "number: team",
+        "done: team",
+        "stop: team",
+        "case: team",
+        "term: team",
+        "next: team",
+        "work: team",
+        "who: anonymous",
+      ],
+    });
+  });
+
+  it("is theirs to move either way, and is kept as they chose it", () => {
+    const written = afterTurn(
+      said,
+      turn({
+        facts: (["step", "wish"] as const).map((tag) => ({
+          tag,
+          text: `A ${tag}.`,
+          record: `A ${tag}.`,
+          quote: "",
+        })),
+      }),
+      { answered: 1, kind: "own" }
+    );
+    const idOf = (tag: string): string =>
+      written.facts.find((fact) => fact.tag === tag)?.id ?? "";
+    const moved = withShares(
+      approved(written),
+      new Map([
+        [idOf("step"), undefined],
+        [idOf("wish"), "team" as const],
+      ])
+    );
+    expect(
+      moved.facts.map(({ tag, share, agreed }) => [tag, share ?? null, agreed])
+    ).toStrictEqual([
+      ["step", null, true],
+      ["wish", "team", true],
+    ]);
+  });
+});
+
 describe("a line they remove", () => {
   it("keeps its place and nothing of it, and a turn under way puts no marks on it", () => {
     const marked = withLine(said, {
@@ -57,7 +151,7 @@ describe("a line they remove", () => {
           { tag: "system", text: "Exact.", record: "Exact.", quote: "Exact" },
         ],
       }),
-      { answered: 1 }
+      { answered: 1, kind: "own" }
     );
     expect(after.lines).toStrictEqual([
       { from: "stephen", text: "What do you do first?" },
@@ -100,7 +194,7 @@ describe("a statement erased", () => {
           { tag: "step", text: "You file it.", record: "File it.", quote: "" },
         ],
       }),
-      { answered: 1 }
+      { answered: 1, kind: "own" }
     );
     expect(after.facts.map(({ id }) => id)).toStrictEqual([
       "f2",
@@ -130,7 +224,7 @@ describe("a statement erased", () => {
           { tag: "step", text: "You book it.", record: "Book it.", quote: "" },
         ],
       }),
-      { answered: 1 }
+      { answered: 1, kind: "own" }
     );
     expect({
       ids: after.facts.map(({ id }) => id),
@@ -162,7 +256,7 @@ describe("a turn of Stephen's", () => {
         ],
         wants: "readback",
       }),
-      { answered: 1 }
+      { answered: 1, kind: "own" }
     );
     expect({
       marks: after.lines[1]?.marks,
@@ -177,6 +271,7 @@ describe("a turn of Stephen's", () => {
           tag: "system",
           text: "You open the invoice in Exact.",
           record: "Open the invoice in Exact.",
+          share: "team",
         },
       ],
       phase: "steps",
@@ -194,7 +289,7 @@ describe("a turn of Stephen's", () => {
             { tag: "step", text: "Two.", record: "Two.", quote: "" },
           ],
         }),
-        { answered: 1 }
+        { answered: 1, kind: "own" }
       )
     );
     const after = afterTurn(
@@ -206,7 +301,7 @@ describe("a turn of Stephen's", () => {
           { id: "f2", text: null, record: null },
         ],
       }),
-      { answered: 1, pin: 0 }
+      { answered: 1, pin: 0, kind: "own" }
     );
     expect(after.facts).toStrictEqual([
       {
@@ -214,9 +309,24 @@ describe("a turn of Stephen's", () => {
         tag: "step",
         text: "One, put right.",
         record: "One, put right.",
+        share: "team",
       },
-      { id: "f2", tag: "step", text: "Two.", record: "Two.", out: true },
-      { id: "f3", tag: "rule", text: "Three.", record: "Three.", pin: 0 },
+      {
+        id: "f2",
+        tag: "step",
+        text: "Two.",
+        record: "Two.",
+        out: true,
+        share: "team",
+      },
+      {
+        id: "f3",
+        tag: "rule",
+        text: "Three.",
+        record: "Three.",
+        pin: 0,
+        share: "team",
+      },
     ]);
   });
 });
@@ -243,7 +353,7 @@ describe("a line of the read-back", () => {
       turn({
         facts: [{ tag: "step", text: "One.", record: "One.", quote: "" }],
       }),
-      { answered: 1 }
+      { answered: 1, kind: "own" }
     );
     const out = withFactToggled(written, "f1");
     expect([
