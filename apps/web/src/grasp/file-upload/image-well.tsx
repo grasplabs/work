@@ -94,7 +94,7 @@ export interface ImageWellProps {
    */
   fit?: "cover" | "contain";
   /**
-   * `sm` 48px, at home in a setting row; `lg` 96px, for a page of its own.
+   * `sm` 40px, at home in a setting row (the row stays 56px); `lg` 96px, for a page of its own.
    * @default "sm"
    */
   size?: "sm" | "lg";
@@ -143,10 +143,11 @@ const styles = stylex.create({
     cornerShape: grasp.cornerShape,
   },
   // The initials at the size Grasp's Avatar gives them at that size.
+  // sm stands in a setting row's control column without making the row taller: 40px, the row 56.
   sm: {
-    width: grasp.space12,
-    height: grasp.space12,
-    fontSize: grasp.titleMd,
+    width: grasp.space10,
+    height: grasp.space10,
+    fontSize: grasp.titleSm,
     [iconVars.size]: grasp.iconSm,
   },
   lg: {

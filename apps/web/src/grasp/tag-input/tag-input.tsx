@@ -278,6 +278,30 @@ const wrongWords = (
   return verdict === true ? fallback : "";
 };
 
+/** A value refused, and why: already there, or one too many. */
+interface Refusal {
+  kind: "duplicate" | "full";
+  word: string;
+}
+
+/** The refusal's words while it still holds, else none. */
+const refusalNow = (
+  refused: Refusal | null,
+  values: readonly string[],
+  max: number | undefined,
+  messages: TagInputMessages
+): string => {
+  if (refused === null) {
+    return "";
+  }
+  if (refused.kind === "duplicate") {
+    return values.some((existing) => same(existing, refused.word))
+      ? messages.duplicate(refused.word)
+      : "";
+  }
+  return max !== undefined && values.length >= max ? messages.full(max) : "";
+};
+
 // The Combobox's chosen values, as the words they are: every value here is a string.
 const chosenWords = (chosen: unknown): string[] =>
   Array.isArray(chosen)
@@ -322,7 +346,14 @@ export const TagInput = ({
   const messages = { ...englishMessages, ...givenMessages };
   const values = value ?? own;
   const [query, setQuery] = useState("");
-  const [refusal, setRefusal] = useState("");
+  // Why the last value was refused: what it was about, so the words go once that no longer holds.
+  const [refused, setRefused] = useState<Refusal | null>(null);
+  const setRefusal = (next: Refusal | "") => {
+    setRefused(next === "" ? null : next);
+  };
+  // Said only while it is still true: a duplicate while its word is in the field, "full" while the
+  // field is full. Sent, cleared or reset from outside, the words go with what they spoke of.
+  const refusal = refusalNow(refused, values, max, messages);
   const refusalId = useId();
 
   const commit = (next: string[]) => {
@@ -335,12 +366,12 @@ export const TagInput = ({
   // Adds new words in order, refusing one already there (whatever its capitals) or one too many.
   const add = (words: string[]) => {
     const next = [...values];
-    let reason = "";
+    let reason: Refusal | "" = "";
     for (const word of words) {
       if (next.some((existing) => same(existing, word))) {
-        reason = messages.duplicate(word);
+        reason = { kind: "duplicate", word };
       } else if (max !== undefined && next.length >= max) {
-        reason = messages.full(max);
+        reason = { kind: "full", word };
       } else {
         next.push(word);
       }
