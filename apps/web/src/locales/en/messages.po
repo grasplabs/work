@@ -15447,6 +15447,10 @@ msgstr "Value"
 msgid "Value for {name}"
 msgstr "Value for {name}"
 
+#: src/brain/memories-page.tsx
+msgid "Value: {held}"
+msgstr "Value: {held}"
+
 #: src/apps/app-data.tsx
 msgid "Values aren't kept: the table is sensitive."
 msgstr "Values aren't kept: the table is sensitive."

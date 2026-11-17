@@ -532,6 +532,38 @@ const audienceOf = (choice: string): BrainShareAudience =>
   choice === "everyone" ? "company" : { team: choice };
 
 /**
+ * The attribute and value a share copies, as the dialog shows them: the
+ * attribute's label with the value, the label alone, or the value alone
+ * (a memory may hold one without an attribute). Nothing for neither.
+ */
+const SharedValue = ({
+  label,
+  held,
+}: {
+  label: string | null;
+  held: string | null;
+}) => {
+  if (label === null) {
+    return held === null ? null : (
+      <span className="break-words whitespace-pre-wrap">
+        <Trans>Value: {held}</Trans>
+      </span>
+    );
+  }
+  return (
+    <span className="break-words whitespace-pre-wrap">
+      {held === null ? (
+        label
+      ) : (
+        <Trans>
+          {label}: {held}
+        </Trans>
+      )}
+    </span>
+  );
+};
+
+/**
  * Whom a share is for: the teams and everyone core lets the person share
  * with (`loaded`), `choice` picked; a hint when there is no one yet, and
  * why when that couldn't be read, offering no one then.
@@ -656,7 +688,15 @@ const ShareDialog = ({
       async (memories) =>
         await memories.publish({
           memory: { entity: memory.about, memory: memory.id },
-          shown: { about, value, statement, validFrom, validUntil },
+          shown: {
+            about,
+            attribute: memory.attribute,
+            type: memory.type,
+            value,
+            statement,
+            validFrom,
+            validUntil,
+          },
           audience: audienceOf(to),
           change,
         }),
@@ -712,18 +752,11 @@ const ShareDialog = ({
             <span className="font-medium">
               <Trans>About {aboutShown}</Trans>
             </span>
-            {label === null ? null : (
-              <span>
-                {held === null ? (
-                  label
-                ) : (
-                  <Trans>
-                    {label}: {held}
-                  </Trans>
-                )}
-              </span>
-            )}
-            {statement === value ? null : (
+            {/* Every text a share copies shows, whatever else it has: the
+                value with its attribute or on its own, and the statement
+                unless it is the value shown right above. */}
+            <SharedValue held={held} label={label} />
+            {held !== null && statement === value ? null : (
               <span className="break-words whitespace-pre-wrap">{said}</span>
             )}
             {from === null ? null : (

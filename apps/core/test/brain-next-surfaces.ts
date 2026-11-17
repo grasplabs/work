@@ -6640,6 +6640,8 @@ const plainOwnMemory = async (personId: string) => {
     memory: { entity, memory },
     shown: {
       about: name,
+      attribute: null,
+      type: "fact",
       value: null,
       statement,
       validFrom: null,
@@ -6691,6 +6693,8 @@ const memorySharingProbes = (calls: ShareCalls) => {
       memory,
       shown: {
         about: text,
+        attribute: null,
+        type: "fact",
         value: text,
         statement: text,
         validFrom: null,

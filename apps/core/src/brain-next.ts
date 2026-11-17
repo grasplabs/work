@@ -5088,6 +5088,8 @@ const shareSchema = z.strictObject({
   memory: z.strictObject({ entity: entityIdSchema, memory: memoryIdSchema }),
   shown: z.strictObject({
     about: z.string(),
+    attribute: z.string().nullable(),
+    type: z.enum(memoryTypes),
     value: z.string().nullable(),
     statement: z.string(),
     validFrom: shownMoment,
@@ -5171,8 +5173,12 @@ const toShare = async (
   ) {
     return null;
   }
+  // Every field the copy carries, each as the page showed it: what it is
+  // about, its attribute and type, its value, statement and dates.
   const asShown =
     name === shown.about &&
+    read.attribute === shown.attribute &&
+    read.type === shown.type &&
     read.value === shown.value &&
     read.statement === shown.statement &&
     momentShown(read.validFrom) === shown.validFrom &&
@@ -5275,9 +5281,10 @@ export const publishAs = async (
       memories: [
         {
           about: "about",
-          ...(read.attribute === null
-            ? {}
-            : { attribute: read.attribute, value: read.value ?? undefined }),
+          // Each optional field on its own: a value may stand without an
+          // attribute, and is copied as it was shown.
+          ...(read.attribute === null ? {} : { attribute: read.attribute }),
+          ...(read.value === null ? {} : { value: read.value }),
           type: read.type,
           statement: read.statement,
           ...(read.validFrom === null ? {} : { validFrom: read.validFrom }),

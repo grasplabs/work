@@ -271,9 +271,9 @@ export type BrainShareAudience = { team: string } | "company";
 
 /**
  * A memory of the person's own store to share (GRA-1815): which one, the
- * texts they were shown of it (the name of what it is about, the value it
- * holds, its statement, and when it starts and stops being true, as the
- * page received them), whom with, and the id of this one share, minted
+ * fields they were shown of it (the name of what it is about, its
+ * attribute and type, the value it holds, its statement, and when it
+ * starts and stops being true, as the page received them), whom with, and the id of this one share, minted
  * once when they open it, so a retry shares it once. Core shares it only
  * while the memory still says exactly what was shown.
  */
@@ -281,6 +281,8 @@ export interface BrainShare {
   memory: { entity: string; memory: string };
   shown: {
     about: string;
+    attribute: BrainMemoryAttribute | null;
+    type: BrainMemoryShown["type"];
     value: string | null;
     statement: string;
     validFrom: string | null;

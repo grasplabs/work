@@ -160,6 +160,8 @@ const shareOf = (
   memory: { entity: shown.about, memory: shown.id },
   shown: {
     about,
+    attribute: shown.attribute,
+    type: shown.type,
     value: shown.value,
     statement: shown.statement,
     validFrom: shown.validFrom,
@@ -414,6 +416,14 @@ describe("sharing a memory of a person's own", () => {
       anna.api.brainMemories.publish({
         ...share,
         shown: { ...share.shown, about: "Someone else" },
+      }),
+      anna.api.brainMemories.publish({
+        ...share,
+        shown: { ...share.shown, attribute: "location" },
+      }),
+      anna.api.brainMemories.publish({
+        ...share,
+        shown: { ...share.shown, type: "decision" },
       }),
       // Of a kind never shared, or no longer current.
       anna.api.brainMemories.publish(shareOf(preference.shown, name, team)),
@@ -954,6 +964,45 @@ describe("sharing a memory of a person's own", () => {
     expect({ before, after }).toStrictEqual({
       before: [shared?.memory],
       after: [],
+    });
+  });
+
+  it("copies a value with no attribute as the person was shown it", async () => {
+    const [anna, dora] = await Promise.all([
+      signedInApi(idp, "user"),
+      signedInApi(idp, "user"),
+    ]);
+    const name = nameOf("Valueco");
+    const { shown } = await ownMemory(anna.api, anna.userId, {
+      about: { kind: "customer", names: [name] },
+      value: "Pending",
+      type: "fact",
+      statement: `${name} is pending a decision`,
+      quote: `${name} is pending a decision`,
+    });
+    const shared = await anna.api.brainMemories.publish(
+      shareOf(shown, name, "company")
+    );
+    const doras = await memoriesAbout(dora.api, {
+      store: "shared",
+      id: shared?.entity ?? "",
+    });
+    expect({
+      own: { attribute: shown.attribute, value: shown.value },
+      copy: doras.map(({ attribute, value, statement }) => ({
+        attribute,
+        value,
+        statement,
+      })),
+    }).toStrictEqual({
+      own: { attribute: null, value: "Pending" },
+      copy: [
+        {
+          attribute: null,
+          value: "Pending",
+          statement: `${name} is pending a decision`,
+        },
+      ],
     });
   });
 });

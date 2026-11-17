@@ -79,6 +79,8 @@ const sharedBy = async (
     memory: { entity, memory },
     shown: {
       about: name,
+      attribute: null,
+      type: "fact",
       value: null,
       statement,
       validFrom: null,

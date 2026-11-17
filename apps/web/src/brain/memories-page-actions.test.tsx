@@ -1128,6 +1128,8 @@ describe("the Memories page's paged lists, read again", () => {
         memory: { entity: "e-initech", memory: "m-own" },
         shown: {
           about: "Initech",
+          attribute: "status",
+          type: "fact",
           value: "Renewing",
           statement: "Initech renews in March",
           validFrom: null,
@@ -1226,6 +1228,8 @@ describe("the Memories page's paged lists, read again", () => {
       showsUntil: true,
       shown: {
         about: "Initech",
+        attribute: "status",
+        type: "fact",
         value: "Renewing",
         statement: "Initech renews in March",
         validFrom: null,
@@ -1418,5 +1422,79 @@ describe("the Memories page's paged lists, read again", () => {
         "once it has three people or more"
       ),
     }).toStrictEqual({ options: [], shareDisabled: true, hint: true });
+  });
+
+  /** Takes the page down, as each test's end does. */
+  const closePage = () => {
+    act(() => {
+      root?.unmount();
+    });
+    root = undefined;
+    document.body.replaceChildren();
+  };
+
+  it("shows in the dialog every text a share copies, in every combination the store allows, escaped as it shows them", async () => {
+    // What `publishAs` copies of a memory: its entity's name, its
+    // attribute, value and statement, and its dates (never its quote).
+    // Each text holds a character nobody sees, which the dialog must show
+    // as its escape (`shownVisibly`).
+    const hidden = "\u200B";
+    const statementText = `Initech renews${hidden} in March`;
+    const valueText = `Renewing${hidden} soon`;
+    const values = [null, valueText, statementText] as const;
+    const attributes = [null, "status"] as const;
+    const datings = [
+      { validFrom: null, validUntil: null },
+      {
+        validFrom: "2026-11-02T09:00:00.000Z",
+        validUntil: "2026-11-30T17:00:00.000Z",
+      },
+    ] as const;
+    const missing: string[] = [];
+    for (const attribute of attributes) {
+      for (const value of values) {
+        for (const dates of datings) {
+          const memoryShown = ownFact("m-own", {
+            attribute,
+            value,
+            statement: statementText,
+            quote: `what she said${hidden}`,
+            ...dates,
+          });
+          // oxlint-disable-next-line no-await-in-loop -- one dialog at a time
+          await initechOpen([memoryShown]);
+          // oxlint-disable-next-line no-await-in-loop -- one dialog at a time
+          await press(buttons("Share…")[0]);
+          const dialog =
+            document.querySelector("option[value=everyone]")?.closest("form")
+              ?.textContent ?? "";
+          const escaped = (text: string) =>
+            text.replaceAll(hidden, "\\u{200B}");
+          const copied = [
+            ["name", "About Initech"],
+            ["statement", escaped(statementText)],
+            ...(value === null ? [] : [["value", escaped(value)]]),
+            ...(attribute === null ? [] : [["attribute", "Status"]]),
+            ...(dates.validFrom === null ? [] : [["start", "True from"]]),
+            ...(dates.validUntil === null ? [] : [["end", "True until"]]),
+          ];
+          for (const [field, text] of copied) {
+            if (!dialog.includes(text ?? "")) {
+              missing.push(
+                `${field} of ${JSON.stringify({ attribute, value, dates })}`
+              );
+            }
+          }
+          // Nothing it doesn't copy, and nothing unescaped.
+          if (dialog.includes("what she said") || dialog.includes(hidden)) {
+            missing.push(
+              `more than copied: ${JSON.stringify({ attribute, value })}`
+            );
+          }
+          closePage();
+        }
+      }
+    }
+    expect(missing).toStrictEqual([]);
   });
 });

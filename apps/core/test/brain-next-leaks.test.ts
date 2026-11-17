@@ -885,6 +885,8 @@ describe(
         memory: { entity: kept.entity, memory: kept.memory },
         shown: {
           about: sharedName,
+          attribute: null,
+          type: "fact",
           value: null,
           statement: sharedStatement,
           validFrom: null,

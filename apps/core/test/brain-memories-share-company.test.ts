@@ -33,6 +33,8 @@ describe("sharing a memory with everyone in a small company", () => {
       memory: { entity, memory },
       shown: {
         about: name,
+        attribute: null,
+        type: "fact",
         value: null,
         statement,
         validFrom: null,
