@@ -125,6 +125,9 @@ export const useRecentChats = ({
       label: title,
       render: <Link {...chatLink(chat.id)} />,
       current: matchRoute(chatLink(chat.id)) !== false,
+      // Its agent is still answering: the Working mark at the row's end.
+      working: chat.running,
+      workingLabel: t`Answering`,
       actions,
       actionsLabel: t`More for ${title}`,
       renameLabel: t`Rename ${title}`,

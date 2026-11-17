@@ -369,10 +369,10 @@ describe("the Incoming events settings", () => {
     const said = document.body.textContent.includes("Starts 1 workflow");
     await press("Details");
 
-    const panel = document.querySelector('[role="dialog"]');
-    const links = [...(panel?.querySelectorAll("a") ?? [])].map(
-      (link) => link.textContent
-    );
+    // The workflow it starts, and the run it started: each opens the workflow.
+    const links = [...document.querySelectorAll("button")]
+      .map((button) => wordsOf(button))
+      .filter((words) => words.startsWith("Invoice check"));
     expect({ said, links }).toStrictEqual({
       said: true,
       // The workflow it starts, then its run: none of the other source's.

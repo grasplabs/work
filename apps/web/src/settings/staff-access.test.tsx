@@ -144,7 +144,7 @@ describe("Settings › Workspace › Grasp staff access", () => {
       until,
     });
     await shown(session);
-    expect(text()).toContain("They reach the onboarding alone.");
+    expect(text()).toContain("Onboarding only");
 
     await press("End staff access now");
     await press("Cancel");
@@ -178,7 +178,7 @@ describe("Settings › Workspace › Grasp staff access", () => {
       reason: text().includes(
         "Grasp's staff access could not be ended. Reference: req-42"
       ),
-      stillOpen: text().includes("They reach everything their role allows."),
+      stillOpen: text().includes("Full access"),
     }).toStrictEqual({ asked: ["end"], reason: true, stillOpen: true });
   });
 
@@ -197,7 +197,7 @@ describe("Settings › Workspace › Grasp staff access", () => {
     await shown(session, false);
 
     expect({
-      reach: text().includes("They reach everything their role allows."),
+      reach: text().includes("Full access"),
       end: button("End staff access now"),
     }).toStrictEqual({ reach: true, end: undefined });
   });

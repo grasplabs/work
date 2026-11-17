@@ -671,16 +671,15 @@ describe(ChatThread, () => {
     ]);
   });
 
-  it("fades each word of an answer in as it is written, where words come, and a kept answer stands still", async () => {
+  it("lets an answer's words out at a pace while it is written, and shows a kept answer whole", async () => {
+    const text = "It adds up. Four, as two and two, which is what you asked.";
     await thread([asked], {
-      text: "It adds up.\n\nFour, as **two** and two.",
+      text,
       code: [],
       tools: [],
       reasoning: "",
     });
-    const landing = [...document.querySelectorAll("span.animate-in")].map(
-      (word) => word.textContent
-    );
+    const writing = document.querySelector("[data-slot=markdown]")?.textContent;
     act(() => {
       root?.unmount();
     });
@@ -690,7 +689,7 @@ describe(ChatThread, () => {
       {
         id: 2,
         role: "assistant",
-        text: "Four, as **two** and two.",
+        text,
         citations: [],
         code: [],
         tools: [],
@@ -700,12 +699,9 @@ describe(ChatThread, () => {
     ]);
 
     expect({
-      landing,
-      kept: document.querySelectorAll("span.animate-in").length,
-    }).toStrictEqual({
-      landing: ["Four,", "as", "two", "and", "two."],
-      kept: 0,
-    });
+      paced: writing !== undefined && writing.length < text.length,
+      kept: document.querySelector("[data-slot=markdown]")?.textContent,
+    }).toStrictEqual({ paced: true, kept: text });
   });
 
   it("carries an answer's thinking as a picture that opens the brain, and the way there where it can't be drawn", async () => {

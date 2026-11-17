@@ -172,7 +172,6 @@ const TimeZoneField = ({
     <SettingRow
       {...words}
       {...(failure === undefined ? {} : { error: failure })}
-      help={t`For schedules and the times Grasp shows.`}
       label={t`Time zone`}
       onRetry={() => {
         if (tried !== undefined) {
@@ -230,7 +229,12 @@ const WorkspaceSettings = ({
             info={t`People sign in with an address in these. To change them, ask your Grasp contact.`}
             label={t`Sign-in domains`}
           >
-            <Text size="sm">{formatList(organization.signInDomains)}</Text>
+            {/* With the @ an address has, so a domain reads as where people sign in from. */}
+            <Text size="sm">
+              {formatList(
+                organization.signInDomains.map((domain) => `@${domain}`)
+              )}
+            </Text>
           </SettingRow>
           <SettingRow
             info={t`Everything Grasp stores for you stays here.`}

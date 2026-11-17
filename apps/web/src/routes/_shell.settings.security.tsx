@@ -1,6 +1,5 @@
 import type { SignInOption } from "@grasp-os/shared/rpc";
 import type { OwnSession, SessionDevice } from "@grasp-os/shared/sign-in";
-import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { createFileRoute, useRouter } from "@tanstack/react-router";
@@ -14,7 +13,6 @@ import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogContent,
-  AlertDialogDescription,
   AlertDialogFooter,
   AlertDialogTitle,
   AlertDialogTrigger,
@@ -197,9 +195,6 @@ const DeviceRow = ({ session }: { session: OwnSession }) => {
             </AlertDialogTrigger>
             <AlertDialogContent>
               <AlertDialogTitle>{t`Sign out this device?`}</AlertDialogTitle>
-              <AlertDialogDescription>
-                {t`${device} needs to sign in again to use Grasp.`}
-              </AlertDialogDescription>
               <AlertDialogFooter>
                 <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
                 <AlertDialogAction
@@ -246,10 +241,6 @@ const Devices = ({ sessions }: { sessions: Loaded<OwnSession[]> }) => {
   return (
     <SectionCard
       density="compact"
-      description={t`${plural(devices, {
-        one: "Signed in on # device. Sign out any you do not recognise.",
-        other: "Signed in on # devices. Sign out any you do not recognise.",
-      })}`}
       flush
       footer={
         shown.length < devices ? (

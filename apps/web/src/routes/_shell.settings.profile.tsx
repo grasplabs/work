@@ -80,7 +80,7 @@ const Profile = () => {
           <ProfileName name={identity.name} />
         )}
         <SettingRow
-          help={t`Your sign-in; your admin changes it.`}
+          info={t`Your sign-in; your admin changes it.`}
           label={t`Email`}
         >
           {(field) => (

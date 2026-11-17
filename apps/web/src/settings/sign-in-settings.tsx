@@ -108,7 +108,6 @@ export const SignInView = ({
   onRetry?: () => void;
 }) => {
   const { t } = useLingui();
-  const description = t`Your people sign in with their work accounts.`;
   const title = t`Sign-in`;
   if (
     signIn?.state === "ready" &&
@@ -116,12 +115,7 @@ export const SignInView = ({
     signIn.data.providers.length > 0
   ) {
     return (
-      <SectionCard
-        density="compact"
-        description={description}
-        flush
-        title={title}
-      >
+      <SectionCard density="compact" flush title={title}>
         <ItemGroup aria-label={title} separated>
           {signIn.data.providers.map((provider) => (
             <ProviderRow
@@ -135,7 +129,7 @@ export const SignInView = ({
     );
   }
   return (
-    <SectionCard density="compact" description={description} title={title}>
+    <SectionCard density="compact" title={title}>
       {signIn === undefined ? <LoadingLines lines={2} /> : null}
       {signIn !== undefined && signIn.state !== "ready" ? (
         <SectionNotLoaded

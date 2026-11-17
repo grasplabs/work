@@ -64,7 +64,8 @@ export const useOrganizationChange = () => {
         setStatus("failed");
         return;
       }
-      setStatus("saved");
+      // Success is silent for now: the row's "Saved" line under the label was rejected (Ruben, 17 Nov 2026); the library shows it beside the control from its main 0ebd48bd, not yet in its registry.
+      setStatus("idle");
       onSaved?.(saved);
       // The page reads again behind the field, which stays free meanwhile.
       void router.invalidate();
