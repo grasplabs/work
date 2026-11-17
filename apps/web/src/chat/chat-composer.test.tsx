@@ -279,12 +279,13 @@ describe(ChatComposer, () => {
     });
     type("What is 2 + 2?");
     await press(button("Send"));
+    // What a screen reader hears as it happens: the alerts' words.
     const said = await vi.waitFor(() => {
-      const alert = document.querySelector('[role="alert"]')?.textContent;
-      if (alert === undefined) {
+      const alerts = [...document.querySelectorAll('[role="alert"]')];
+      if (alerts.length === 0) {
         throw new Error("Nothing said");
       }
-      return `${alert} ${document.body.textContent}`;
+      return alerts.map((alert) => alert.textContent).join(" ");
     });
     const kept = field().value;
     await press(button("Send"));

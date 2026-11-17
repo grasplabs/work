@@ -122,10 +122,17 @@ const attachmentsOf = (files: readonly CardFile[]): ComposerFile[] =>
  * The line under the box: how to connect an AI provider while there is
  * none, else why a file stayed out or why the last question didn't go
  * (from the box, or from Try again in the thread). Said, never a reason to
- * hold the next question back, as `validation` would.
+ * hold the next question back, as `validation` would: an alert, so a screen
+ * reader hears it as it comes, since Composer's note is a plain line.
  */
-const noteOf = (noProvider: boolean, problem: string | undefined) =>
-  noProvider ? <ConnectAiProvider size="xs" /> : problem;
+const noteOf = (noProvider: boolean, problem: string | undefined) => {
+  if (noProvider) {
+    return <ConnectAiProvider size="xs" />;
+  }
+  return problem === undefined ? undefined : (
+    <span role="alert">{problem}</span>
+  );
+};
 
 /** What the box says as the text nears and reaches its longest, in the page's language. */
 const useLengthWords = () => {
