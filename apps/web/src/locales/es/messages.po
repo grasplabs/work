@@ -2143,6 +2143,10 @@ msgstr "Agente no encontrado"
 msgid "Agents"
 msgstr "Agentes"
 
+#: src/agents/agent-share.tsx
+msgid "Agents people made for themselves and offered to the company. Taking one on makes it the company's: it starts reaching nobody, with nothing it may do, until you say so."
+msgstr "Agentes que las personas crearon para sí mismas y ofrecieron a la empresa. Si adoptas uno, pasa a ser de la empresa: empieza sin llegar a nadie y sin poder hacer nada, hasta que tú lo decidas."
+
 #: src/agents/own-agents-admin.tsx
 msgid "Agents people make for themselves. Only their owner sees and asks them, and they do at most what Grasp may do for that person. You see how many each person has and what they cost, never what they are told."
 msgstr "Agentes que las personas crean para sí mismas. Solo su propietario los ve y les pregunta, y hacen como mucho lo que Grasp puede hacer por esa persona. Ves cuántos tiene cada persona y lo que cuestan, nunca lo que se les dice."
@@ -4552,6 +4556,7 @@ msgstr "Decisión no encontrada"
 msgid "Decisions"
 msgstr "Decisiones"
 
+#: src/agents/agent-share.tsx
 #: src/brain/skills-page.tsx
 #: src/inbox/item-detail.tsx
 msgid "Decline"
@@ -6017,6 +6022,14 @@ msgstr "De"
 msgctxt "where a decision comes from"
 msgid "From"
 msgstr "De"
+
+#: src/agents/agent-share.tsx
+msgid "From {from}"
+msgstr "De {from}"
+
+#: src/agents/agent-share.tsx
+msgid "From {from} · {job}"
+msgstr "De {from} · {job}"
 
 #: src/brain/memories-page.tsx
 msgid "From a chat, version {version}"
@@ -9341,6 +9354,10 @@ msgstr "Anotado: {name}. La conectaremos contigo. Mientras tanto, comprueba qui�
 msgid "Noted. We’ll get in touch to put it on the laptops with you."
 msgstr "Anotado. Nos pondremos en contacto para instalarlo contigo en los portátiles."
 
+#: src/agents/agent-share.tsx
+msgid "Nothing beyond Grasp's own rules."
+msgstr "Nada más allá de las reglas propias de Grasp."
+
 #: src/routes/_shell.integrations.index.tsx
 msgid "Nothing connected yet."
 msgstr "Aún no hay nada conectado."
@@ -9575,6 +9592,22 @@ msgstr "Desactivado, nadie puede conectarlo, tampoco los administradores. Las co
 #: src/connections/offer-switch.tsx
 msgid "Offer {name}"
 msgstr "Ofrecer {name}"
+
+#: src/agents/agent-share.tsx
+msgid "Offer {name} to your company's admins. If they take it on, it becomes one of the company's agents: they choose who may ask it and what it may do, and you no longer change it."
+msgstr "Ofrece {name} a los administradores de tu empresa. Si lo adoptan, pasa a ser un agente de la empresa: ellos eligen quién puede preguntarle y qué puede hacer, y tú ya no lo cambias."
+
+#: src/agents/agent-share.tsx
+msgid "Offer to the company"
+msgstr "Ofrecer a la empresa"
+
+#: src/agents/agent-share.tsx
+msgid "Offered on {since}. Your company's admins can now read what {name} is told, and may take it on."
+msgstr "Ofrecido el {since}. Los administradores de tu empresa ya pueden leer lo que se le dice a {name} y quedárselo."
+
+#: src/agents/agent-share.tsx
+msgid "Offered to the company"
+msgstr "Ofrecidos a la empresa"
 
 #: src/connections/offer-switch.tsx
 msgid "Offered to your organization"
@@ -12398,6 +12431,7 @@ msgstr "Compartir esta versión en su lugar"
 msgid "Share with a team"
 msgstr "Compartir con un equipo"
 
+#: src/agents/agent-share.tsx
 #: src/brain/skills-page.tsx
 msgid "Share with the company"
 msgstr "Compartir con la empresa"
@@ -12783,6 +12817,7 @@ msgstr "Alguien con quien ya no se comparte"
 msgid "Someone no longer here"
 msgstr "Alguien que ya no está"
 
+#: src/agents/agent-share.tsx
 #: src/agents/agent-wakes.tsx
 #: src/agents/own-agents-admin.tsx
 msgid "Someone no longer in the company"
@@ -13264,6 +13299,10 @@ msgstr "¿Quitar {itemName} de {projectName}?"
 msgid "Take {itemName} out of the project"
 msgstr "Quitar {itemName} del proyecto"
 
+#: src/agents/agent-share.tsx
+msgid "Take {name} on for the company"
+msgstr "Adoptar {name} para la empresa"
+
 #: src/projects/project-people.tsx
 msgid "Take {name} out of {projectName}?"
 msgstr "¿Quitar a {name} de {projectName}?"
@@ -13284,6 +13323,10 @@ msgstr "Quitar"
 msgid "Take off the dashboard"
 msgstr "Quitar del panel"
 
+#: src/agents/agent-share.tsx
+msgid "Take on"
+msgstr "Adoptar"
+
 #: src/projects/project-people.tsx
 #: src/projects/project-view.tsx
 msgid "Take out"
@@ -13296,6 +13339,10 @@ msgstr "Quitar: {text}"
 #: src/onboarding/hr-leads.tsx
 msgid "Take the leads from {name}"
 msgstr "Tomar los responsables de {name}"
+
+#: src/agents/agent-share.tsx
+msgid "Take the offer back"
+msgstr "Retirar la oferta"
 
 #: src/frame/person-menu.tsx
 msgid "Take the tour"
@@ -13783,12 +13830,12 @@ msgid "The Brain keeps nothing that only you may read yet, so your export holds 
 msgstr "El Brain todavía no guarda nada que solo tú puedas leer, así que tu exportación no contiene nada."
 
 #: src/brain/sources-page.tsx
-msgid "The Brain keeps one Gmail message or attachment, or one OneNote page, when an agent reads it for you through an account you connected yourself, and keeps it for you alone. Everything else agents search live when you ask, and the Brain keeps nothing of it."
-msgstr "El cerebro guarda un mensaje o un adjunto de Gmail, o una página de OneNote, cuando un agente lo lee para ti a través de una cuenta que conectaste tú mismo, y lo guarda solo para ti. Todo lo demás lo buscan los agentes en directo cuando lo pides, y el cerebro no guarda nada de ello."
+msgid "The Brain keeps one Gmail message or attachment, one OneNote page, or the answer of a read in an app that holds your own things, when an agent reads it for you through an account you connected yourself, and keeps it for you alone. Everything else agents search live when you ask, and the Brain keeps nothing of it."
+msgstr "El cerebro guarda un mensaje o un adjunto de Gmail, una página de OneNote, o la respuesta de una lectura en una app que contiene tus propias cosas, cuando un agente lo lee para ti a través de una cuenta que conectaste tú mismo, y lo guarda solo para ti. Todo lo demás lo buscan los agentes en directo cuando lo pides, y el cerebro no guarda nada de ello."
 
 #: src/brain/sources-page.tsx
-msgid "The Brain keeps the messages and pages an agent reads for you from this."
-msgstr "El cerebro guarda los mensajes y las páginas que un agente lee para ti desde aquí."
+msgid "The Brain may keep some of what an agent reads for you from this."
+msgstr "El cerebro puede guardar parte de lo que un agente lee para ti desde aquí."
 
 #: src/workflows/binding-approvals.tsx
 msgid "The Brain, as each run's person may read it"
@@ -15870,6 +15917,10 @@ msgstr "Para qué sirve"
 msgctxt "what an app is for, in a sentence"
 msgid "What it is for"
 msgstr "Para qué sirve"
+
+#: src/agents/agent-share.tsx
+msgid "What it is told"
+msgstr "Lo que se le dice"
 
 #: src/agents/agent-page.tsx
 #: src/chat/agent-draft-card.tsx

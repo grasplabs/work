@@ -1811,8 +1811,15 @@
     {
       "idx": 258,
       "version": "6",
-      "when": 1794837444112,
-      "tag": "0258_kickoff_records_removed",
+      "when": 1794874936233,
+      "tag": "0258_agent_offered",
+      "breakpoints": true
+    },
+    {
+      "idx": 259,
+      "version": "6",
+      "when": 1794877911407,
+      "tag": "0259_kickoff_records_removed",
       "breakpoints": true
     }
   ]
