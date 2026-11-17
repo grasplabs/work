@@ -33,7 +33,6 @@ import { setActiveChat, startAfresh } from "./active-chat.ts";
 import { AgentName, agentModelOf } from "./agent-choice.tsx";
 import { AskOrCompose } from "./asked-questions.tsx";
 import { BrainQuestions } from "./brain-questions.tsx";
-import { pendingPlan } from "./build-progress.tsx";
 import { BuildsFailure, workOf } from "./builds.tsx";
 import {
   chatWidth,
@@ -51,6 +50,7 @@ import { ConnectionRequests } from "./connection-requests.tsx";
 import { chatKey, useGlobalChat } from "./global-chat.tsx";
 import type { ModelsUnavailable } from "./global-chat.tsx";
 import { HeldWrites } from "./held-writes.tsx";
+import { pendingCard } from "./make-card.tsx";
 import { PackageRequests } from "./package-requests.tsx";
 import { RecentsButton } from "./recents.tsx";
 import { ChatSources } from "./sources.tsx";
@@ -389,11 +389,15 @@ const Footer = () => {
   const work = workOf(builds);
   // Which of the company's agents answers here, where there are several.
   const agents = offered?.agents ?? [];
-  // Under a plan that waits for the person, the box is where to change it.
+  // Under a card that waits for the person, the box is where to change it.
+  const waiting = pendingCard(view.messages, view.running)?.kind;
+  const changeWords = {
+    planned: t`Change something about the plan`,
+    agentDraft: t`Change something about the agent`,
+    agentChange: t`Change something about the change`,
+  };
   const placeholder =
-    pendingPlan(view.messages, view.running) === undefined
-      ? words.placeholder
-      : t`Change something about the plan`;
+    waiting === undefined ? words.placeholder : changeWords[waiting];
   // When the running turn began: its question's time.
   const turnSince = view.running
     ? view.messages.findLast(({ role }) => role === "user")?.at
