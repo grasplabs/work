@@ -1,29 +1,23 @@
 import { isGeneratedServerFile } from "@grasp-os/runtime/host";
 import type { AppDraft } from "@grasp-os/shared/app-drafts";
 import type { AppFiles, ViewedApp } from "@grasp-os/shared/apps";
-import {
-  Breadcrumb,
-  BreadcrumbItem,
-  BreadcrumbList,
-  BreadcrumbPage,
-  BreadcrumbSeparator,
-} from "@grasp-os/ui/components/breadcrumb";
-import { Button } from "@grasp-os/ui/components/button";
-import {
-  FileTree,
-  FileTreeFile,
-  FileTreeFolder,
-} from "@grasp-os/ui/components/file-tree";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
-import { CheckIcon, CopyIcon } from "lucide-react";
-import { Fragment, useState } from "react";
+import * as stylex from "@stylexjs/stylex";
+import { useState } from "react";
 import type { ReactNode } from "react";
 
 import { useCopy } from "../copy.ts";
 import { LoadingLines } from "../frame/page-states.tsx";
+import { Breadcrumb } from "../grasp/breadcrumb/index.ts";
+import { Button } from "../grasp/button/index.ts";
+import { Copy, Folder as FolderIcon, Tick } from "../grasp/icons/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
+import { Tree } from "../grasp/tree/index.ts";
+import type { TreeNode } from "../grasp/tree/index.ts";
 import { NotLoaded } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
-import { CodeFile, CodeScroller, PathIcon } from "./code-view.tsx";
+import { CodeFile, CodeScroller, fileIconOf } from "./code-view.tsx";
 import { useCoreRead } from "./use-core-read.ts";
 
 // An App's code in its workspace, for its builders (app-workspace.tsx's
@@ -68,65 +62,90 @@ const treeOf = (paths: readonly string[]): Folder => {
 
 const byName = (a: string, b: string): number => a.localeCompare(b);
 
+// How tall the file tree may grow above the code on a narrow screen, and
+// how wide it stands beside it on a wide one: Grasp UI has no token for a
+// side list's measure.
+const TREE_TALL = "12rem";
+const TREE_WIDE = "15rem";
+
+const styles = stylex.create({
+  editor: {
+    display: "flex",
+    flexDirection: { default: "column", [media.fromTablet]: "row" },
+    flexGrow: 1,
+    minHeight: 0,
+    overflow: "hidden",
+    backgroundColor: grasp.raised,
+  },
+  files: {
+    flexShrink: 0,
+    maxHeight: { default: TREE_TALL, [media.fromTablet]: "none" },
+    width: { default: "auto", [media.fromTablet]: TREE_WIDE },
+    overflowY: "auto",
+    padding: grasp.space2,
+    boxShadow: grasp.edge,
+  },
+  code: {
+    display: "flex",
+    flexDirection: "column",
+    flexGrow: 1,
+    minHeight: 0,
+    minWidth: 0,
+  },
+  bar: {
+    display: "flex",
+    flexShrink: 0,
+    alignItems: "center",
+    gap: grasp.space3,
+    paddingBlock: grasp.space1,
+    paddingInlineStart: grasp.space4,
+    paddingInlineEnd: grasp.space2,
+    boxShadow: grasp.edge,
+  },
+  crumbs: { flexGrow: 1, minWidth: 0 },
+  lines: { flexShrink: 0, fontVariantNumeric: "tabular-nums" },
+  scroller: { flexGrow: 1, minHeight: 0, overflow: "auto" },
+  fill: { display: "flex", flexDirection: "column", flexGrow: 1, minHeight: 0 },
+  padded: { padding: grasp.space4 },
+});
+
 /**
- * One folder's entries, as an editor sorts them: its folders, then its
- * files, each by name. A folder starts open: an App is a few files.
+ * One folder's entries as the tree's nodes, as an editor sorts them: its
+ * folders, then its files, each by name.
  */
-const FolderEntries = ({
-  folder,
-  open,
-  onOpen,
-}: {
-  folder: Folder;
-  open: string;
-  onOpen: (path: string) => void;
-}) => (
-  <>
-    {[...folder.folders.entries()]
-      .toSorted(([a], [b]) => byName(a, b))
-      .map(([name, inner]) => (
-        <FileTreeFolder defaultOpen key={`folder:${name}`} name={name}>
-          <FolderEntries folder={inner} onOpen={onOpen} open={open} />
-        </FileTreeFolder>
-      ))}
-    {folder.files
-      .toSorted((a, b) => byName(a.name, b.name))
-      .map((file) => (
-        <FileTreeFile
-          active={file.path === open}
-          icon={<PathIcon path={file.path} />}
-          key={file.path}
-          onClick={() => {
-            onOpen(file.path);
-          }}
-          title={file.path}
-        >
-          {file.name}
-        </FileTreeFile>
-      ))}
-  </>
-);
+const nodesOf = (folder: Folder, at = ""): TreeNode[] => [
+  ...[...folder.folders.entries()]
+    .toSorted(([a], [b]) => byName(a, b))
+    .map(([name, inner]) => ({
+      value: `folder:${at}${name}`,
+      label: name,
+      icon: FolderIcon,
+      children: nodesOf(inner, `${at}${name}/`),
+    })),
+  ...folder.files
+    .toSorted((a, b) => byName(a.name, b.name))
+    .map((file) => ({
+      value: file.path,
+      label: file.name,
+      icon: fileIconOf(file.path),
+    })),
+];
+
+/** Every folder of the tree's nodes: an App is a few files, so all stand open. */
+const foldersOf = (nodes: readonly TreeNode[]): string[] =>
+  nodes.flatMap((node) =>
+    node.children === undefined ? [] : [node.value, ...foldersOf(node.children)]
+  );
 
 /** Where the open file is, folder by folder, as a breadcrumb. */
 const PathCrumbs = ({ path }: { path: string }) => {
   const { t } = useLingui();
-  const parts = path.split("/");
-  const name = parts.pop() ?? path;
   return (
-    <Breadcrumb aria-label={t`Open file`} className="min-w-0 flex-1">
-      <BreadcrumbList className="flex-nowrap">
-        {parts.map((part, index) => (
-          // A folder's place in the path is all that tells it apart.
-          <Fragment key={`${index}:${part}`}>
-            <BreadcrumbItem className="min-w-0">{part}</BreadcrumbItem>
-            <BreadcrumbSeparator />
-          </Fragment>
-        ))}
-        <BreadcrumbItem className="min-w-0">
-          <BreadcrumbPage>{name}</BreadcrumbPage>
-        </BreadcrumbItem>
-      </BreadcrumbList>
-    </Breadcrumb>
+    <Breadcrumb
+      aria-label={t`Open file`}
+      items={path.split("/").map((label) => ({ label }))}
+      layout={styles.crumbs}
+    />
   );
 };
 
@@ -140,30 +159,29 @@ const FileBar = ({ path, text }: { path: string; text: string }) => {
   const { copied, copy } = useCopy();
   const lines = lineCount(text);
   return (
-    <div className="flex flex-none items-center gap-3 border-b py-1.5 ps-4 pe-2">
+    <div {...stylex.props(styles.bar)}>
       <PathCrumbs path={path} />
-      <span className="text-muted-foreground flex-none text-xs tabular-nums">
-        <Plural one="# line" other="# lines" value={lines} />
+      <span {...stylex.props(styles.lines)}>
+        <Text element="span" size="xs" tone="muted">
+          <Plural one="# line" other="# lines" value={lines} />
+        </Text>
       </span>
       <Button
+        icon={copied ? Tick : Copy}
         aria-label={copied ? t`Copied` : t`Copy code`}
         onClick={() => {
           void copy(text);
         }}
-        size="icon-sm"
+        size="sm"
         variant="ghost"
-      >
-        {copied ? <CheckIcon /> : <CopyIcon />}
-      </Button>
+      />
     </div>
   );
 };
 
-/** The editor's frame: what it shows, on the page's muted ground. */
+/** The editor's frame: the tree and the open file. */
 const EditorFrame = ({ children }: { children: ReactNode }) => (
-  <div className="bg-card flex min-h-0 flex-1 flex-col overflow-hidden md:flex-row">
-    {children}
-  </div>
+  <div {...stylex.props(styles.editor)}>{children}</div>
 );
 
 /** The first file of `folder`, as its tree lists them. */
@@ -192,6 +210,10 @@ const FilesView = ({ files, asked, onAsk }: OpenFile & { files: AppFiles }) => {
     (path) => !isGeneratedServerFile(path)
   );
   const tree = treeOf(paths);
+  const nodes = nodesOf(tree);
+  // Every folder open, a new one too, but those the person folded.
+  const folders = foldersOf(nodes);
+  const [folded, setFolded] = useState<string[]>([]);
   // The one asked for while this version has it, else its config, else
   // the tree's first.
   const file =
@@ -201,30 +223,38 @@ const FilesView = ({ files, asked, onAsk }: OpenFile & { files: AppFiles }) => {
   if (file === undefined) {
     return (
       <EditorFrame>
-        <p className="text-muted-foreground p-4 text-sm">
-          <Trans>This version has no files.</Trans>
-        </p>
+        <div {...stylex.props(styles.padded)}>
+          <Text size="sm" tone="muted">
+            <Trans>This version has no files.</Trans>
+          </Text>
+        </div>
       </EditorFrame>
     );
   }
   const text = files[file] ?? "";
   return (
     <EditorFrame>
-      <nav
-        aria-label={t`Files`}
-        className="max-h-48 flex-none overflow-y-auto border-b p-2 md:max-h-none md:w-60 md:border-e md:border-b-0"
-      >
-        <FileTree>
-          <FolderEntries folder={tree} onOpen={onAsk} open={file} />
-        </FileTree>
-      </nav>
-      <section
-        aria-label={t`Code of ${file}`}
-        className="flex min-h-0 min-w-0 flex-1 flex-col"
-      >
+      <div {...stylex.props(styles.files)}>
+        <Tree
+          aria-label={t`Files`}
+          expanded={folders.filter((folder) => !folded.includes(folder))}
+          items={nodes}
+          mode="single"
+          onExpandedChange={(expanded) => {
+            setFolded(folders.filter((folder) => !expanded.includes(folder)));
+          }}
+          onValueChange={(value) => {
+            if (typeof value === "string" && !value.startsWith("folder:")) {
+              onAsk(value);
+            }
+          }}
+          value={file}
+        />
+      </div>
+      <section aria-label={t`Code of ${file}`} {...stylex.props(styles.code)}>
         <FileBar path={file} text={text} />
         {/* Each file its own scroller: a file opens at its top. */}
-        <CodeScroller className="min-h-0 flex-1 overflow-auto" key={file}>
+        <CodeScroller key={file} {...stylex.props(styles.scroller)}>
           <CodeFile path={file} text={text} />
         </CodeScroller>
       </section>
@@ -234,7 +264,7 @@ const FilesView = ({ files, asked, onAsk }: OpenFile & { files: AppFiles }) => {
 
 /** A read not done: that it is being read, or why it failed. */
 const ReadState = ({ loaded }: { loaded: Loaded<unknown> | undefined }) => (
-  <div className="p-4">
+  <div {...stylex.props(styles.padded)}>
     {loaded === undefined ? (
       <LoadingLines lines={6} />
     ) : (
@@ -296,20 +326,24 @@ export const AppCode = ({
   const current = app.currentVersion;
   if (building !== undefined) {
     return (
-      <div className="flex min-h-0 flex-1 flex-col">
+      <div {...stylex.props(styles.fill)}>
         <DraftFiles app={app.id} revision={building.revision} />
       </div>
     );
   }
   if (current === null) {
     return (
-      <p className="text-muted-foreground p-4 md:px-6">
-        <Trans>No code yet: Grasp writes the first version in the chat.</Trans>
-      </p>
+      <div {...stylex.props(styles.padded)}>
+        <Text size="sm" tone="muted">
+          <Trans>
+            No code yet: Grasp writes the first version in the chat.
+          </Trans>
+        </Text>
+      </div>
     );
   }
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div {...stylex.props(styles.fill)}>
       <VersionFiles
         app={app.id}
         asked={file}

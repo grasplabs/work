@@ -216,9 +216,18 @@ const press = async (element: Element | undefined): Promise<void> => {
   await settled();
 };
 
+/** A tree entry's own name, without the entries inside it. */
+const entryName = (entry: Element): string =>
+  (entry.matches('[role="treeitem"]')
+    ? entry.querySelector('[data-slot="tree-label"]')?.textContent.trim()
+    : entry.textContent?.trim()) ?? "";
+
+/** The tree's entries. */
+const entries = '[role="tree"][aria-label="Files"] [role="treeitem"]';
+
 const named = (selector: string, name: string) =>
-  [...document.querySelectorAll(selector)].find(
-    (each) => each.textContent?.trim() === name
+  [...document.querySelectorAll<HTMLElement>(selector)].find(
+    (each) => entryName(each) === name
   );
 
 /**
@@ -244,23 +253,19 @@ const codeShown = (): string =>
 
 /** Where the open file is, as its bar says it. */
 const pathShown = (): string[] =>
-  [
-    ...document.querySelectorAll(
-      'nav[aria-label="Open file"] [data-slot="breadcrumb-item"]'
-    ),
-  ].map((item) => item.textContent.trim());
+  [...document.querySelectorAll('nav[aria-label="Open file"] li')].map((item) =>
+    item.textContent.trim()
+  );
 
 /** The tree's folders and files as they stand, top to bottom. */
 const treeShown = (): string[] =>
-  [...document.querySelectorAll('nav[aria-label="Files"] button')].map(
-    (entry) => entry.textContent.trim()
-  );
+  [...document.querySelectorAll(entries)].map((entry) => entryName(entry));
 
 /** The file the tree marks as open. */
 const openInTree = (): string | undefined =>
-  document
-    .querySelector('nav[aria-label="Files"] [aria-current="true"]')
-    ?.textContent.trim();
+  [...document.querySelectorAll(`${entries}[aria-selected="true"]`)].map(
+    (entry) => entryName(entry)
+  )[0];
 
 describe("An App's Code", () => {
   afterEach(() => {
@@ -292,14 +297,12 @@ describe("An App's Code", () => {
       },
     });
     const all = treeShown();
-    await press(named('nav[aria-label="Files"] button', "server"));
+    await press(named(entries, "server"));
     const folded = {
       tree: treeShown(),
-      expanded: named('nav[aria-label="Files"] button', "server")?.getAttribute(
-        "aria-expanded"
-      ),
+      expanded: named(entries, "server")?.getAttribute("aria-expanded"),
     };
-    await press(named('nav[aria-label="Files"] button', "server"));
+    await press(named(entries, "server"));
 
     expect({ all, folded, again: treeShown() }).toStrictEqual({
       all: [
@@ -343,7 +346,7 @@ describe("An App's Code", () => {
 
   it("opens the file picked, where it is in the tree", async () => {
     await shown("builder");
-    await press(named("button", "inbox.tsx"));
+    await press(named(entries, "inbox.tsx"));
     await expect.poll(codeShown).toContain("function Inbox()");
 
     expect({ path: pathShown(), open: openInTree() }).toStrictEqual({
@@ -355,7 +358,7 @@ describe("An App's Code", () => {
   it("shows the App's draft as a chat's agent writes it, the file open kept", async () => {
     revisionNow = 1;
     await shown("builder", 1, smallVersions, true);
-    await press(named("button", "notes.ts"));
+    await press(named(entries, "notes.ts"));
     await expect.poll(codeShown).toContain("export const limit = 10;");
     const first = treeShown();
     await act(async () => {
