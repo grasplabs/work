@@ -43,6 +43,9 @@ import {
   ownExportRequestSchema,
   ownExportStartSchema,
   personErasureSchema,
+  proposalRequestSchema,
+  proposalSettleSchema,
+  proposalsRequestSchema,
   sharedPersonErasureSchema,
   writerErasureSchema,
   readableMemoriesRequestSchema,
@@ -149,6 +152,10 @@ import type {
   VersionListRequest,
   VersionRequest,
   WorkOverview,
+  ProposalRequest,
+  ProposalSettle,
+  ProposalsRequest,
+  SkillProposal,
 } from "./contract.ts";
 import migrations from "./db/migrations/migrations.js";
 import {
@@ -234,6 +241,11 @@ import { addMemories } from "./remember.ts";
 import { isRemoved, removeSources } from "./removal.ts";
 import { checkRestore, restoreStatus, startRestore } from "./restore.ts";
 import { isRestoring } from "./restoring.ts";
+import {
+  enqueueProposal,
+  listProposals,
+  settleProposal,
+} from "./skill-proposals.ts";
 import {
   addVersion,
   changeVersion,
@@ -2222,6 +2234,49 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       }
       throw error;
     }
+  }
+
+  /**
+   * Puts a draft of a skill for this person on their own store's queue
+   * (skill-proposals.ts), unless one was drafted under its key already.
+   * Only for that person, by the host when what the sources have in common
+   * changed; refused once the store was erased whole, and by the shared
+   * store.
+   */
+  async proposeSkill(request: ProposalRequest): Promise<void> {
+    const { person, ...asked } = checked(proposalRequestSchema, request);
+    this.#ownOnly(person);
+    await this.#changing(async () => {
+      await this.#readyToWrite();
+      enqueueProposal(this.ctx.storage, asked);
+    });
+  }
+
+  /**
+   * This person's open skill proposals, each only while every version it
+   * rests on is still current and theirs to read (skill-proposals.ts): none
+   * from the shared store, and none once the store was erased whole.
+   */
+  async skillProposals(request: ProposalsRequest): Promise<SkillProposal[]> {
+    const { reader } = checked(proposalsRequestSchema, request);
+    this.#mayRead(reader);
+    if (this.#kind.kind !== "person" || !(await this.#readable())) {
+      return [];
+    }
+    return listProposals(this.ctx.storage.sql, reader);
+  }
+
+  /**
+   * Settles one of this person's proposals as they chose: its key alone is
+   * kept, so nothing is drafted under it again. Only for that person.
+   */
+  async settleSkillProposal(request: ProposalSettle): Promise<void> {
+    const { person, ...asked } = checked(proposalSettleSchema, request);
+    this.#ownOnly(person);
+    if (!(await this.#readable())) {
+      return;
+    }
+    settleProposal(this.ctx.storage.sql, asked);
   }
 
   /**

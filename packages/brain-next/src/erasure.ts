@@ -744,6 +744,15 @@ const apply = (
     sql.exec("DELETE FROM removed_sources WHERE source = ?", source);
     const rows = rowsOf(sql, source);
     sources += rows.length > 0 ? 1 : 0;
+    // A skill drafted from it (skill-proposals.ts) goes with it, open; one
+    // settled holds nothing of it.
+    sql.exec(
+      `DELETE FROM skill_proposals WHERE state = 'open' AND EXISTS (
+        SELECT 1 FROM json_each(rests_on)
+        WHERE json_extract(value, '$.source') = ?
+      )`,
+      source
+    );
     if (hideVersions(sql, source, rows, key)) {
       stopped.push(source);
     }

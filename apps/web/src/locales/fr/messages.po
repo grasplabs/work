@@ -406,6 +406,10 @@ msgstr "{count, plural, one {Revenir à la question} other {Revenir aux # questi
 msgid "{count, plural, one {Company Brain, read only. This App can recall what everyone in the company may read and what the team {teamNames} may read, as far as the person it works for is in that team, and look up the entities and memories everyone in the company may read. Only people in that team can use it, its owner and admins too. It can never write to the Brain. Every read is recorded} other {Company Brain, read only. This App can recall what everyone in the company may read and what the teams {teamNames} may read, as far as the person it works for is in them, and look up the entities and memories everyone in the company may read. Only people in all of them can use it, its owner and admins too. It can never write to the Brain. Every read is recorded}}"
 msgstr "{count, plural, one {Company Brain, en lecture seule. Cette App peut retrouver ce que tout le monde dans l’entreprise peut lire et ce que l’équipe {teamNames} peut lire, dans la mesure où la personne pour qui elle travaille fait partie de cette équipe, et consulter les entités et les souvenirs que tout le monde dans l’entreprise peut lire. Seules les personnes de cette équipe peuvent l’utiliser, son propriétaire et les administrateurs aussi. Elle ne peut jamais écrire dans le Brain. Chaque lecture est enregistrée} other {Company Brain, en lecture seule. Cette App peut retrouver ce que tout le monde dans l’entreprise peut lire et ce que les équipes {teamNames} peuvent lire, dans la mesure où la personne pour qui elle travaille en fait partie, et consulter les entités et les souvenirs que tout le monde dans l’entreprise peut lire. Seules les personnes qui font partie de toutes ces équipes peuvent l’utiliser, son propriétaire et les administrateurs aussi. Elle ne peut jamais écrire dans le Brain. Chaque lecture est enregistrée}}"
 
+#: src/brain/skills-page.tsx
+msgid "{count, plural, one {From your last run of {workflow}, version {version}, which succeeded on {ended}.} other {From your last # runs of {workflow}, version {version}, which all succeeded, the latest on {ended}.}}"
+msgstr "{count, plural, one {D'après votre dernière exécution de {workflow}, version {version}, réussie le {ended}.} other {D'après vos # dernières exécutions de {workflow}, version {version}, toutes réussies, la dernière le {ended}.}}"
+
 #: src/drafts/share-with-team.tsx
 msgid "{count, plural, one {It can't be shared yet: # problem} other {It can't be shared yet: # problems}}"
 msgstr "{count, plural, one {Il ne peut pas encore être partagé : # problème} other {Il ne peut pas encore être partagé : # problèmes}}"
@@ -2033,6 +2037,10 @@ msgstr "Ajouter ce planning"
 #: src/projects/file-item-dialog.tsx
 msgid "Add to {projectName}"
 msgstr "Ajouter à {projectName}"
+
+#: src/brain/skills-page.tsx
+msgid "Add to your skills"
+msgstr "Ajouter à vos skills"
 
 #: src/apps/app-webhooks.tsx
 msgid "Add webhook"
@@ -4983,6 +4991,11 @@ msgstr "Déconnecté le {since}."
 msgid "Dismiss"
 msgstr "Fermer"
 
+#: src/brain/skills-page.tsx
+msgctxt "a skill proposed to you"
+msgid "Dismiss"
+msgstr "Écarter"
+
 #: src/apps/app-workspace.tsx
 msgid "Dismiss the tip"
 msgstr "Fermer l’astuce"
@@ -5128,6 +5141,10 @@ msgstr "Télécharger le tableau en Markdown"
 #: src/workflows/workflows-table.tsx
 msgid "Draft"
 msgstr "Brouillon"
+
+#: src/brain/skills-page.tsx
+msgid "Drafted from your own runs of a workflow that keep succeeding. Only you see them, and none is used until you add it to your skills."
+msgstr "Rédigées d'après vos propres exécutions d'un workflow qui réussissent à chaque fois. Vous seul les voyez, et aucune n'est utilisée avant que vous l'ajoutiez à vos skills."
 
 #: src/settings/stephen-settings.tsx
 msgid "Drafts, events and files of their own, after they press a card."
@@ -10891,6 +10908,10 @@ msgstr "Proposé"
 msgctxt "a link Grasp proposed that nobody confirmed yet"
 msgid "Proposed"
 msgstr "Proposé"
+
+#: src/brain/skills-page.tsx
+msgid "Proposed for you"
+msgstr "Proposées pour vous"
 
 #: src/activity/audit-words.ts
 msgid "Proposed packages"

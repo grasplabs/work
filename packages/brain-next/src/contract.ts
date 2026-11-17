@@ -1570,6 +1570,54 @@ export const ownExportStartSchema = ownExportRequestSchema.extend({
 });
 export type OwnExportStart = z.infer<typeof ownExportStartSchema>;
 
+/**
+ * Skill proposals (skill-proposals.ts), in a person's own store alone: a
+ * draft of a skill of theirs, written by the host's model from sources of
+ * theirs that keep ending the same way. Its key is the host's, for what
+ * those sources have in common: the SHA-256 of it, as hex, so the store
+ * never names it.
+ */
+export const proposalKeySchema = z.string().regex(/^[0-9a-f]{64}$/u);
+
+/**
+ * A proposal to draft for `person` under `key`, unless one was drafted
+ * under it already, from the current versions of `sources` (at most a
+ * read of current versions: `currentReadMax`), and what the host says
+ * they have in common (`about`), as long as an instruction file at most.
+ */
+export const proposalRequestSchema = z.strictObject({
+  person: principalSchema,
+  key: proposalKeySchema,
+  about: wellFormedString().min(1).max(instructionsMaxLength),
+  sources: z.array(sourceIdSchema).min(1).max(currentReadMax),
+});
+export type ProposalRequest = z.infer<typeof proposalRequestSchema>;
+
+/** The open proposals of a person's own store, asked by that person. */
+export const proposalsRequestSchema = z.strictObject({
+  reader: personReaderSchema,
+});
+export type ProposalsRequest = z.infer<typeof proposalsRequestSchema>;
+
+/** An open proposal: its key, the `SKILL.md` drafted, and the versions it rests on. */
+export interface SkillProposal {
+  key: string;
+  text: string;
+  restsOn: SourceVersionRef[];
+  draftedAt: Date;
+}
+
+/** How a person settles one of their proposals. */
+export const proposalOutcomes = ["accepted", "dismissed"] as const;
+
+/** A person settling one of their own proposals. */
+export const proposalSettleSchema = z.strictObject({
+  person: principalSchema,
+  key: proposalKeySchema,
+  outcome: z.enum(proposalOutcomes),
+});
+export type ProposalSettle = z.infer<typeof proposalSettleSchema>;
+
 /** A file of a person's own export, asked by that person. */
 export const ownExportFileRequestSchema = exportFileRequestSchema.extend({
   person: principalSchema,
@@ -3283,6 +3331,25 @@ export interface Brain {
    * other, alike. Only their own store answers, and only them.
    */
   ownExportFile: (request: OwnExportFileRequest) => Promise<string | null>;
+  /**
+   * Puts a draft of a skill for `person` on their own store's queue
+   * (skill-proposals.ts): the host's model writes it from the current
+   * versions of the sources, as that person reads them, once per key,
+   * open or settled. Only their own store takes it, and only for them.
+   */
+  proposeSkill: (request: ProposalRequest) => Promise<void>;
+  /**
+   * The reader's open skill proposals, each only while every version it
+   * rests on is still current and theirs to read. Only their own store
+   * answers them; the shared store answers none.
+   */
+  skillProposals: (request: ProposalsRequest) => Promise<SkillProposal[]>;
+  /**
+   * Settles one of `person`'s open proposals as accepted or dismissed,
+   * keeping its key alone. Only their own store takes it, and only for
+   * them.
+   */
+  settleSkillProposal: (request: ProposalSettle) => Promise<void>;
   /**
    * Starts restoring the company export `id` of `deployment` from the
    * bucket into this shared store, which must hold no version: a part a

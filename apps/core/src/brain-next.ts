@@ -3658,6 +3658,90 @@ export const eraseOwnSkill = async (
   });
 };
 
+// Skill proposals (GRA-1756): a draft of a person's own skill, which the
+// Brain's model writes in their own store from sources of theirs that keep
+// ending the same way (@grasp-os/brain-next skill-proposals.ts). Core
+// decides when and from which (skill-proposals.ts); here they are named
+// for the store, each call for the member core verified alone, in their
+// own store alone.
+
+/** A person's open proposal, as core reads it: its card, its text, and the sources it rests on. */
+export interface OwnSkillProposal {
+  key: string;
+  name: string;
+  description: string;
+  text: string;
+  restsOn: SourceRef[];
+  draftedAt: Date;
+}
+
+/**
+ * Asks the member `personId`'s own store to draft a skill under `key`
+ * from the current versions of `sources` and `about`, unless it drafted
+ * one under it already. Refused once they are no longer a member.
+ */
+export const proposeOwnSkill = async (
+  env: BrainEnv & ReaderEnv,
+  personId: string,
+  {
+    key,
+    about,
+    sources,
+  }: { key: string; about: string; sources: readonly SourceRef[] }
+): Promise<void> => {
+  const { person } = await skillReaderOf(env, personId, "person");
+  await ownBrain(env, person).proposeSkill({
+    person,
+    key,
+    about,
+    sources: sources.map((source) =>
+      sourceKeyOf(checked(sourceRefSchema, source))
+    ),
+  });
+};
+
+/**
+ * The member `personId`'s open proposals, each only while every source
+ * version it rests on is still current and theirs to read, as their own
+ * store lists them. Refused once they are no longer a member.
+ */
+export const ownSkillProposalsAs = async (
+  env: BrainEnv & ReaderEnv,
+  personId: string
+): Promise<OwnSkillProposal[]> => {
+  const reader = await skillReaderOf(env, personId, "person");
+  const listed = await ownBrain(env, reader.person).skillProposals({ reader });
+  return listed.flatMap(({ key, text, restsOn, draftedAt }) => {
+    const card = skillCardOf(text);
+    return card === null
+      ? []
+      : [
+          {
+            key,
+            name: card.name,
+            description: card.description,
+            text,
+            restsOn: restsOn.map(({ source }) => sourceRefOf(source)),
+            draftedAt,
+          },
+        ];
+  });
+};
+
+/**
+ * Settles the member `personId`'s proposal `key` as `outcome`: nothing is
+ * drafted under it again. Refused once they are no longer a member.
+ */
+export const settleOwnSkillProposal = async (
+  env: BrainEnv & ReaderEnv,
+  personId: string,
+  key: string,
+  outcome: "accepted" | "dismissed"
+): Promise<void> => {
+  const { person } = await skillReaderOf(env, personId, "person");
+  await ownBrain(env, person).settleSkillProposal({ person, key, outcome });
+};
+
 /**
  * The gateway's refusals of a call as it is: the item's own failure. Every
  * other failure is of the way to a model, which the whole queue waits out.

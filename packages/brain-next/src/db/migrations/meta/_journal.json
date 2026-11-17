@@ -204,6 +204,13 @@
       "when": 1794922879415,
       "tag": "0028_extractors",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "6",
+      "when": 1794950480509,
+      "tag": "0029_skill_proposals",
+      "breakpoints": true
     }
   ]
 }
