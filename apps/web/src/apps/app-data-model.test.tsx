@@ -233,6 +233,12 @@ const button = (name: string) =>
       each.getAttribute("aria-label") === name
   );
 
+/** The asking dialog's confirming action: its last, after Cancel. */
+const confirmation = () =>
+  [...document.querySelectorAll<HTMLElement>('[role="alertdialog"] button')].at(
+    -1
+  );
+
 /** The last control named `label`. */
 const labelled = (label: string) =>
   [...document.querySelectorAll(`[aria-label="${label}"]`)].at(-1);
@@ -982,7 +988,7 @@ describe("an App's data model, changed in its workspace", () => {
     const warned = document.body.textContent.includes(
       "Every test record goes, for everyone who builds this App."
     );
-    await press(button("Reset"));
+    await press(confirmation());
 
     expect({
       before,

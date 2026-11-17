@@ -4555,6 +4555,10 @@ msgstr "Kon geen beheerder maken"
 msgid "Could not remove"
 msgstr "Verwijderen mislukt"
 
+#: src/apps/reset-test-data.tsx
+msgid "Could not reset"
+msgstr "Niet teruggezet"
+
 #: src/settings/workspace-name.tsx
 msgid "Could not save. Your change is kept."
 msgstr "Niet opgeslagen. Je wijziging blijft staan."
@@ -11487,6 +11491,10 @@ msgstr "Wat het bewaart resetten"
 msgid "Reset what it keeps?"
 msgstr "Wat het bewaart resetten?"
 
+#: src/apps/reset-test-data.tsx
+msgid "Resetting"
+msgstr "Wordt teruggezet"
+
 #: src/frame/app-frame.tsx
 msgid "Resize the chat"
 msgstr "Chatgrootte aanpassen"
@@ -14357,6 +14365,10 @@ msgstr "Het team in {field}"
 #: src/knowledge/purge.tsx
 msgid "The terms also go from everyone's memory records, interviews and answers. How many of those hold them isn't counted or shown."
 msgstr "De termen verdwijnen ook uit ieders herinneringen, interviews en antwoorden. Hoeveel daarvan ze bevatten, wordt niet geteld of getoond."
+
+#: src/apps/reset-test-data.tsx
+msgid "The test data wasn't reset. Try again."
+msgstr "De testgegevens zijn niet teruggezet. Probeer het opnieuw."
 
 #: src/settings/ai-providers.tsx
 msgid "The test didn't work. {model} didn't answer: {why}"

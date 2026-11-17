@@ -4555,6 +4555,10 @@ msgstr "No se pudo hacer administrador"
 msgid "Could not remove"
 msgstr "No se pudo eliminar"
 
+#: src/apps/reset-test-data.tsx
+msgid "Could not reset"
+msgstr "No se pudo restablecer"
+
 #: src/settings/workspace-name.tsx
 msgid "Could not save. Your change is kept."
 msgstr "No se ha guardado. Tu cambio se mantiene."
@@ -11487,6 +11491,10 @@ msgstr "Restablecer lo que guarda"
 msgid "Reset what it keeps?"
 msgstr "¿Restablecer lo que guarda?"
 
+#: src/apps/reset-test-data.tsx
+msgid "Resetting"
+msgstr "Restableciendo"
+
 #: src/frame/app-frame.tsx
 msgid "Resize the chat"
 msgstr "Cambiar el tamaño del chat"
@@ -14357,6 +14365,10 @@ msgstr "El equipo en {field}"
 #: src/knowledge/purge.tsx
 msgid "The terms also go from everyone's memory records, interviews and answers. How many of those hold them isn't counted or shown."
 msgstr "Los términos también desaparecen de los recuerdos, entrevistas y respuestas de todos. Cuántos de ellos los contienen no se cuenta ni se muestra."
+
+#: src/apps/reset-test-data.tsx
+msgid "The test data wasn't reset. Try again."
+msgstr "Los datos de prueba no se restablecieron. Inténtalo de nuevo."
 
 #: src/settings/ai-providers.tsx
 msgid "The test didn't work. {model} didn't answer: {why}"
