@@ -115,12 +115,16 @@ const AnswerLink = ({
   return <span>{link.children}</span>;
 };
 
-/** A cited document, as Sources lists it: a document of the company's, opened on its collection's page. */
-const sourceOf = ({ title, path, snippet }: ChatCitedDocument): Source => ({
+/**
+ * A cited document, as Sources lists it: a document of the company's,
+ * opened on its collection's page. No quote: Sources holds one a source,
+ * and the document's `snippet` is its start, not the passage cited; each
+ * citation's own quote comes with Grasp UI's Citation.
+ */
+const sourceOf = ({ title, path }: ChatCitedDocument): Source => ({
   kind: "file",
   title,
   origin: path,
-  ...(snippet === "" ? {} : { quote: snippet }),
 });
 
 /**

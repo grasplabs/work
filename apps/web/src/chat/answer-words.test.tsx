@@ -194,10 +194,7 @@ describe(AnswerWords, () => {
       ],
       citations: ["Source 1: Route plan", "Source 2: Parental leave"],
       travel: null,
-      listed: [
-        "Route plan1routes/plan.mdWhere the route goes, and when.",
-        "Parental leave2leave.mdParental leave lasts sixteen weeks.",
-      ],
+      listed: ["Route plan1routes/plan.md", "Parental leave2leave.md"],
       at: "/knowledge/handbook",
       search: { doc: "leave" },
     });

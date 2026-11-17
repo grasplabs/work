@@ -17,6 +17,9 @@ import { chatKey, useGlobalChat } from "./global-chat.tsx";
 // chat opens. While Grasp answers, its light runs round it and Stop stops
 // the answer. Back, it takes the cursor if the chat had it.
 
+/** How long the bar offers its box the cursor back as the chat closes: the dock's motion, in ms. */
+const returnWithinMs = 300;
+
 /** The chat's idle bar: on every page the chat shows on, while it is closed. */
 export const ChatBar = () => {
   const { t } = useLingui();
@@ -25,27 +28,43 @@ export const ChatBar = () => {
   const bar = useRef<HTMLDivElement>(null);
   // Back as the chat closes: the chat had the cursor, which it loses as it
   // goes. Only then: a menu or window closing elsewhere leaves the cursor
-  // nowhere for a moment too, and it belongs to what opens next. The App
-  // shell's panel the chat stood in is still there as the bar shows (it
-  // goes after), so the cursor may still stand in it.
+  // nowhere for a moment too, and it belongs to what opens next. The cursor
+  // may still stand in the closing panel (its Close). App shell's dock
+  // rises back from hidden, so the box can take the cursor only once it is
+  // seen: it is offered it each frame until it holds it, for as long as the
+  // dock's motion lasts, and not once the cursor went somewhere else.
   const chatWasOpen = useRef(false);
   useEffect(() => {
     if (stage.card) {
       chatWasOpen.current = true;
       return;
     }
-    if (!stage.bar) {
+    if (!(stage.bar && chatWasOpen.current)) {
       return;
     }
-    const { activeElement } = document;
-    const lost =
-      activeElement === null ||
-      activeElement === document.body ||
-      activeElement.closest("[data-slot=app-shell-panels]") !== null;
-    if (chatWasOpen.current && lost) {
-      bar.current?.querySelector("textarea")?.focus();
-    }
     chatWasOpen.current = false;
+    let frame = 0;
+    const until = performance.now() + returnWithinMs;
+    const offer = () => {
+      const box = bar.current?.querySelector("textarea");
+      const { activeElement } = document;
+      const lost =
+        activeElement === null ||
+        activeElement === document.body ||
+        activeElement.closest("[data-slot=app-shell-panels]") !== null;
+      if (box === null || box === undefined || !lost) {
+        return;
+      }
+      box.focus();
+      if (document.activeElement !== box && performance.now() < until) {
+        frame = requestAnimationFrame(offer);
+      }
+    };
+    frame = requestAnimationFrame(offer);
+    // oxlint-disable-next-line consistent-return -- the cleanup of the offer just made
+    return () => {
+      cancelAnimationFrame(frame);
+    };
   }, [stage.bar, stage.card]);
   if (!stage.bar) {
     return null;
