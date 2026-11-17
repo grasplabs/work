@@ -1,0 +1,78 @@
+# Keeps every model file of staging's releases bucket in the Actions cache
+# (`vp run model-files --all`, scripts/model-files.ts), on main, where
+# every run can restore it: the e2e stack runs the model core ships from it
+# (e2e-build in ci.yml, scripts/local-model-files.ts), as a deployment does
+# from its bucket. About 126 MB a model, so never in git. Reading the
+# bucket takes its keys, which only main's runs get (the staging
+# environment), so the merge queue and runs by hand restore what this
+# saved.
+#
+# A pull request that changes the model needs its files here before its
+# merge queue run: put them in the releases bucket
+# (`vp run release:model-files`), then run this by hand on main. It runs
+# nightly too, and when a push to main changes how it works or the model.
+name: Model files
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/model-files.yml
+      - packages/embed/src/model-files.ts
+      - scripts/model-files.ts
+  schedule:
+    # Every night, 01:41 UTC: before CI's nightly run.
+    - cron: "41 1 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: model-files
+  cancel-in-progress: false
+
+jobs:
+  model-files:
+    name: model-files
+    # It holds the staging 1Password token: GitHub-hosted runners only, so
+    # no secret leaves GitHub's machines.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: staging
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      # What an earlier run kept: only what the bucket gained since is read.
+      - id: restore
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/grasp-os/model-files
+          key: model-files-${{ github.run_id }}
+          restore-keys: model-files-
+      # Staging's releases bucket and the account's R2 endpoint, by the names
+      # module.
+      - run: |
+          set -euo pipefail
+          echo "R2_BUCKET=$(vp exec node scripts/platform-names.ts staging releasesBucket)" >> "$GITHUB_ENV"
+          echo "R2_ENDPOINT=$(vp exec node scripts/platform-names.ts staging r2Endpoint)" >> "$GITHUB_ENV"
+      - uses: ./.github/actions/load-1password
+        with:
+          environment: staging
+          service-account-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+          secrets: R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY
+          required: R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY
+      - run: vp run model-files --all
+      # Named by the files it holds, each named by its SHA-256: saved only
+      # when that changed.
+      - id: key
+        run: |
+          set -euo pipefail
+          echo "key=model-files-$(ls ~/.cache/grasp-os/model-files | sort | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+      - if: steps.restore.outputs.cache-matched-key != steps.key.outputs.key
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/grasp-os/model-files
+          key: ${{ steps.key.outputs.key }}
