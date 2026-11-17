@@ -196,7 +196,7 @@ const refusalOf = (error: unknown): Error => {
 const platformProvider = (
   env: Env,
   provider: AiProviderId
-): NonNullable<AiPlatformUse["provider"]> => ({
+): AiPlatformUse["provider"] => ({
   id: provider,
   label: aiProviders[provider].label,
   whereItRuns:
@@ -207,14 +207,11 @@ const platformProvider = (
 /**
  * Who handles Grasp's own AI features for this deployment (platform-ai.ts),
  * on Grasp's keys whatever the organization connected: its admins can't
- * switch them off here, but they see where that data goes. Documents are
- * converted on the deployment itself: every upload is read in core's
- * sandbox (files/extract.ts, `localExtractor`), and nothing is sent out.
+ * switch them off here, but they see where that data goes.
  */
 const platformUses = (env: Env): AiPlatformUse[] => {
   const { transcription, speech } = platformAi;
   return [
-    { feature: "conversion", provider: null },
     {
       feature: "transcription",
       provider: platformProvider(env, transcription.provider),
