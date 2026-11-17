@@ -42,9 +42,9 @@ import { signedInApi, unique } from "./sign-in.ts";
 //    and people in the order of their names, never ranked.
 // 4b. A person is named for a document that matched only the question's
 //    commonest words, which recall says are no answer by themselves.
-// 4c. Someone whose document recall found by meaning alone (one in
-//    another language) goes unnamed: they are named, as recall's pack
-//    holds it, and a hidden better match changes nothing.
+// 4c. Someone whose document recall found by meaning (one in another
+//    language) goes unnamed, also when it shares a common word with the
+//    question: they are named, and a hidden better match changes nothing.
 // 5. It reads wider than its recall: in Grasp and in a chat app's direct
 //    message, their teams and the company; in a turn nobody started, the
 //    company alone.
@@ -494,13 +494,26 @@ describe("a chat's code asking who knows about a topic", setUpTime, () => {
     );
     await embedEverything();
     const after = await askedInOwnChat(admin, asker, question);
-    const cited = peopleIn(before).find(({ id }) => id === colleague.userId);
+    // The same question sharing one common word with it ("is"): its
+    // meaning found it as well, so it answers all the same.
+    const sharing = await askedInOwnChat(
+      admin,
+      asker,
+      "Wanneer is de leverancier te betalen?"
+    );
+    /** How `answer` cites the colleague, if it names them. */
+    const citedIn = (answer: WhoKnowsAnswer | undefined) => {
+      const cited = peopleIn(answer).find(({ id }) => id === colleague.userId);
+      return { source: cited?.source.id, found: cited?.found };
+    };
 
     expect({
-      cited: { source: cited?.source.id, found: cited?.found },
+      cited: citedIn(before),
+      sharing: citedIn(sharing),
       after,
     }).toStrictEqual({
       cited: { source: upload, found: "meaning" },
+      sharing: { source: upload, found: "meaning" },
       after: before,
     });
   });

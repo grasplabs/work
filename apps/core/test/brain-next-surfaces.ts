@@ -2422,6 +2422,9 @@ export const coreProbes = {
     return { ...pack, fromOwn };
   }),
   recallPassagesAs: recallProbe(coreBrain.recallPassagesAs),
+  // `recallPassagesAs`'s, less what only the question's commonest words
+  // found (brain-recall.ts `whoKnowsFor`): held as recall is.
+  answeringPassagesAs: recallProbe(coreBrain.answeringPassagesAs),
   // Adds without a check of who writes (instruction-files.ts checks
   // first): only to files no reader is, and its refusals.
   addInstructionFile: async ({ markers }) => {
@@ -5655,7 +5658,7 @@ export const recallProbes = {
   // Who knows (GRA-1744), as a chat's code asks anywhere but its person's
   // own chat: under an agent's grant, acting for the reader, as the
   // company, as code's recall is probed (its teams' reach is recall's,
-  // probed through `recallPassagesAs`, and the uploads it names are held
+  // probed through `answeringPassagesAs`, and the uploads it names are held
   // in agent-brain-who-knows.test.ts). Asked of the markers and of their
   // twins, whose answers must match: an upload the reader may not read
   // names nobody. Then every way it refuses, the markers in what is

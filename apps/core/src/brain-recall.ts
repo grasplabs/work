@@ -26,6 +26,7 @@ import {
   codeEntitiesAs,
   codeRecallOf,
   isCodeEntitiesRequest,
+  answeringPassagesAs,
   recallPassagesAs,
   skillVersionRefOf,
 } from "./brain-next.ts";
@@ -266,8 +267,9 @@ export const recallFor = async (
 //   document they may no longer read themselves: only an uploader who is
 //   an active member now, in that team still.
 // - A person is named for what doesn't answer the question: never for a
-//   passage found by its commonest words alone (`stop words`), which
-//   recall says is no answer by itself.
+//   passage found by its commonest words and nothing else (`stop words`),
+//   which recall says is no answer by itself; one its meaning found too
+//   answers (`answeringPassagesAs`).
 // - Monitoring of individuals: people one at a time, in the order of
 //   their names, never ranked, scored or counted (one citation each,
 //   never how many of their documents answer), and never two related to
@@ -369,17 +371,20 @@ export const whoKnowsFor = async (
     // their own store (`personal: false`): a second layer, as the shared
     // store keeps nothing only one person may read.
     const reachesTeams = caller.reach === "teams";
-    const passages = await recallPassagesAs(env, caller.authority.onBehalfOf, {
-      question: asked.question,
-      budget: asked.budget,
-      personal: false,
-      company: !reachesTeams,
-    });
-    // Only what answers the question names anyone: never a passage
-    // found by the question's commonest words alone, which recall says is
-    // no answer by itself, and whose text code never sees here to judge.
-    // Every other way recall finds a passage (an exact part, its telling
-    // words, or by meaning) is an answer as recall's own pack gives it.
+    const passages = await answeringPassagesAs(
+      env,
+      caller.authority.onBehalfOf,
+      {
+        question: asked.question,
+        budget: asked.budget,
+        personal: false,
+        company: !reachesTeams,
+      }
+    );
+    // Only what answers the question names anyone (`answeringPassagesAs`):
+    // never a passage found by the question's commonest words and nothing
+    // else, which recall says is no answer by itself, and whose text code
+    // never sees here to judge.
     const uploads = passages.items.flatMap(({ source, version, found }) =>
       source.producer === "upload" && found !== "stop words"
         ? [{ id: source.id, version, found }]

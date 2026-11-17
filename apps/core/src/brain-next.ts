@@ -1345,6 +1345,59 @@ export const recallPassagesAs = async (
   return { items: recalledItems(items), notFound, truncated };
 };
 
+/** A found passage's place in its store, as one string. */
+const foundPlace = ({
+  source,
+  version,
+  position,
+}: {
+  source: SourceId;
+  version: number;
+  position: number;
+}): string => JSON.stringify([source, version, position]);
+
+/**
+ * The passages of `recallPassagesAs` that answer the question: never one
+ * found by its commonest words and by nothing else, which recall says is
+ * no answer by itself. Recall's `found` names the first way of its list
+ * that found a passage (contract.ts `FoundBy`: stop words before
+ * meaning), so a passage its commonest words and its meaning both found
+ * says `stop words` there: here it is kept, and says `meaning`, the way
+ * that answers. For who knows (brain-recall.ts `whoKnowsFor`), whose
+ * caller is handed no passage's text to judge. As `recallPassagesAs`,
+ * from the same findings: `notFound` and `truncated` are its.
+ */
+export const answeringPassagesAs = async (
+  env: BrainEnv & ReaderEnv & Pick<Env, "EMBEDDER">,
+  personId: string,
+  recall: Recall
+): Promise<RecalledPassages> => {
+  const request = await recallRequestAs(env, personId, recall);
+  const findings = await findingsOf(env, request, "findPassages");
+  const { items, notFound, truncated } = packAcross(
+    request.question,
+    request.budget.tokens,
+    findings
+  );
+  const byMeaning = new Set(
+    findings.flatMap(({ meaning }) => meaning.map((found) => foundPlace(found)))
+  );
+  return {
+    items: recalledItems(
+      items.flatMap((item) => {
+        if (item.found !== "stop words") {
+          return [item];
+        }
+        return byMeaning.has(foundPlace(item))
+          ? [{ ...item, found: "meaning" as const }]
+          : [];
+      })
+    ),
+    notFound,
+    truncated,
+  };
+};
+
 /** Where an item of a pack is: its source, version and place. */
 const placeOf = ({ source, version, position }: RecalledItem): string =>
   JSON.stringify([sourceKeyOf(source), version, position]);
