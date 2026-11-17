@@ -69,6 +69,10 @@ export const threadStyles = stylex.create({
       ":is([data-under-start][data-under-end])": `linear-gradient(to bottom, ${fadeTop}, ${fadeBottom})`,
     },
   },
+  // While an old chat loads: nothing to scroll to, the shapes stand at the foot, cut at the top.
+  still: {
+    overflowY: "hidden",
+  },
   // The rows' box, as tall as all of them; each row brings its own room.
   // Down by the lead while a wheel is under way (thread.stylex.ts); at rest it stands at the top.
   box: {

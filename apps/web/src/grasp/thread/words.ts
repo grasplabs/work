@@ -12,6 +12,8 @@ export const threadWords = {
   unreadFrom: "Unread messages from here",
   /** While older messages load at the top. */
   loadingOlder: "Loading older messages",
+  /** Said once while the whole conversation loads (`loading`). */
+  loading: "Loading the conversation",
   /** The way back down when a message has come in since the reader left, from the jump's words. */
   jumpToNew: (jumpLabel: string) => `${jumpLabel}, new messages`,
   /** What a screen reader hears for the messages that came in, from their count. */

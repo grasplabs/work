@@ -98,6 +98,14 @@ msgstr "{about} hat {open, plural, one {# offene Entscheidung} other {# offene E
 msgid "{account} on {provider}"
 msgstr "{account} bei {provider}"
 
+#: src/frame/part-words.tsx
+msgid "{action} {count} {unit}?"
+msgstr "{action}: {count} {unit}?"
+
+#: src/frame/part-words.tsx
+msgid "{action}: {count} {unit}"
+msgstr "{action}: {count} {unit}"
+
 #: src/activity/audit-log.tsx
 msgid "{agent} for {person}"
 msgstr "{agent} für {person}"
@@ -483,6 +491,10 @@ msgstr "{count, plural, other {# noch nicht gezählt}}"
 #: src/workflows/requests/request-needs.tsx
 msgid "{count} of {reach} asked him"
 msgstr "{count} von {reach} haben ihn gefragt"
+
+#: src/frame/part-words.tsx
+msgid "{count} of {total} chosen"
+msgstr "{count} von {total} ausgewählt"
 
 #: src/routes/_shell.knowledge.index.tsx
 msgid "{count} or more files"
@@ -1095,6 +1107,10 @@ msgstr "{person} hat {alias} für Version {version} widerrufen"
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "{person}, {date}"
 msgstr "{person}, {date}"
+
+#: src/frame/part-words.tsx
+msgid "{place, selectordinal, one {, sorted #st} two {, sorted #nd} few {, sorted #rd} other {, sorted #th}}"
+msgstr "{place, selectordinal, other {, als #. sortiert}}"
 
 #: src/dashboard/todo-pile.tsx
 msgid "{place} of {count}"
@@ -2003,6 +2019,7 @@ msgstr "Aktion"
 #: src/apps/app-sharing.tsx
 #: src/apps/app-workflows.tsx
 #: src/apps/resource-bindings.tsx
+#: src/frame/part-words.tsx
 msgid "Actions"
 msgstr "Aktionen"
 
@@ -2014,6 +2031,7 @@ msgstr "Aktionen für {email}"
 msgid "Actions for {label}"
 msgstr "Aktionen für {label}"
 
+#: src/frame/part-words.tsx
 #: src/settings/teams.tsx
 msgid "Actions for {name}"
 msgstr "Aktionen für {name}"
@@ -4006,6 +4024,10 @@ msgstr "Prüfen oder ersetzen Sie ihn unter Einstellungen › KI-Anbieter."
 msgid "Check sound and microphone"
 msgstr "Ton und Mikrofon prüfen"
 
+#: src/frame/part-words.tsx
+msgid "Check the connection, then try again."
+msgstr "Prüfen Sie die Verbindung und versuchen Sie es erneut."
+
 #: src/activity/audit-words.ts
 msgid "Checked the audit trail's chain"
 msgstr "Die Kette des Audit-Trails geprüft"
@@ -4041,6 +4063,15 @@ msgctxt "a kind of field"
 msgid "Choice"
 msgstr "Auswahl"
 
+#: src/frame/part-words.tsx
+msgctxt "a table's checkbox column"
+msgid "Choose"
+msgstr "Auswählen"
+
+#: src/frame/part-words.tsx
+msgid "Choose {name}"
+msgstr "{name} auswählen"
+
 #: src/apps/resource-bindings.tsx
 msgid "Choose a collection"
 msgstr "Sammlung wählen"
@@ -4068,6 +4099,10 @@ msgstr "Daten wählen"
 #: src/onboarding/place-picker.tsx
 msgid "Choose documents"
 msgstr "Dokumente auswählen"
+
+#: src/frame/part-words.tsx
+msgid "Choose every {one} shown"
+msgstr "Jede angezeigte {one} auswählen"
 
 #: src/frame/part-words.tsx
 msgid "Choose files"
@@ -4127,6 +4162,11 @@ msgstr "Zitiert eine Quelle, auf die Sie keinen Zugriff mehr haben"
 msgid "Clear"
 msgstr "Zurücksetzen"
 
+#: src/frame/part-words.tsx
+msgctxt "rows chosen in a table"
+msgid "Clear"
+msgstr "Aufheben"
+
 #. placeholder {0}: field.name
 #: src/workflows/start-run.tsx
 msgid "Clear {0}"
@@ -4136,6 +4176,7 @@ msgstr "{0} zurücksetzen"
 msgid "Clear filters"
 msgstr "Filter zurücksetzen"
 
+#: src/frame/part-words.tsx
 #: src/routes/_shell.settings.profile.tsx
 msgid "Clear search"
 msgstr "Suche löschen"
@@ -4205,6 +4246,7 @@ msgid "Close"
 msgstr "Schließen"
 
 #: src/brain/brain-nav.tsx
+#: src/frame/part-words.tsx
 #: src/knowledge/nav.tsx
 msgid "Close {name}"
 msgstr "{name} schließen"
@@ -4303,6 +4345,14 @@ msgstr "Farbe"
 #: src/routes/_shell.settings.appearance.tsx
 msgid "Colours"
 msgstr "Farben"
+
+#: src/frame/part-words.tsx
+msgid "Column: {header}"
+msgstr "Spalte: {header}"
+
+#: src/frame/part-words.tsx
+msgid "Columns"
+msgstr "Spalten"
 
 #: src/chat/chat-composer.tsx
 #: src/chat/mentions.tsx
@@ -4586,6 +4636,11 @@ msgstr "Zustimmen und verbinden"
 #: src/connections/connect-dialog.tsx
 msgid "Consent and sign in"
 msgstr "Zustimmen und anmelden"
+
+#: src/frame/part-words.tsx
+msgctxt "a filter's operator"
+msgid "contains"
+msgstr "enthält"
 
 #: src/brain/brain-transcript.tsx
 msgctxt "heading: the headings of a document, as a table of contents"
@@ -4989,6 +5044,7 @@ msgid "Date"
 msgstr "Datum"
 
 #: src/dashboard/runs-widget.tsx
+#: src/settings/ai-spend.tsx
 msgid "Day"
 msgstr "Tag"
 
@@ -5413,6 +5469,11 @@ msgstr "Dokumente und Workflow-Läufe erscheinen hier, sobald sie im Gehirn anko
 #: src/routes/_shell.knowledge.$collection.tsx
 msgid "Documents written here, and files uploaded to it, show up here for Grasp and its agents to read."
 msgstr "Hier geschriebene Dokumente und hochgeladene Dateien erscheinen hier, damit Grasp und seine Agenten sie lesen können."
+
+#: src/frame/part-words.tsx
+msgctxt "a filter's operator"
+msgid "does not contain"
+msgstr "enthält nicht"
 
 #: src/frame/part-words.tsx
 msgid "Does something that needs your yes"
@@ -6074,6 +6135,10 @@ msgstr "Exportieren"
 msgid "Export as CSV"
 msgstr "Als CSV exportieren"
 
+#: src/frame/part-words.tsx
+msgid "Export CSV"
+msgstr "CSV exportieren"
+
 #: src/apps/app-definition.tsx
 msgid "Export definition"
 msgstr "Definition exportieren"
@@ -6254,6 +6319,10 @@ msgstr "Filter"
 msgctxt "open the filters"
 msgid "Filter"
 msgstr "Filter"
+
+#: src/frame/part-words.tsx
+msgid "Filter {name}"
+msgstr "{name} filtern"
 
 #: src/routes/_shell.integrations.index.tsx
 msgid "Filter integrations"
@@ -7103,6 +7172,10 @@ msgstr "Hallo {name}, ich bin {who}. Ich bin eine KI und arbeite für Grasp."
 msgid "Hi everyone,"
 msgstr "Hallo zusammen,"
 
+#: src/frame/part-words.tsx
+msgid "Hide column"
+msgstr "Spalte ausblenden"
+
 #: src/chat/held-writes.tsx
 msgid "Hide exactly what was sent"
 msgstr "Genau Gesendetes ausblenden"
@@ -7577,6 +7650,26 @@ msgstr "Für Schritt 2 eingeladen"
 #: src/activity/audit-words.ts
 msgid "Invited someone"
 msgstr "Hat jemanden eingeladen"
+
+#: src/frame/part-words.tsx
+msgctxt "a filter's operator"
+msgid "is"
+msgstr "ist"
+
+#: src/frame/part-words.tsx
+msgctxt "a filter's operator"
+msgid "is at least"
+msgstr "ist mindestens"
+
+#: src/frame/part-words.tsx
+msgctxt "a filter's operator"
+msgid "is at most"
+msgstr "ist höchstens"
+
+#: src/frame/part-words.tsx
+msgctxt "a filter's operator"
+msgid "is not"
+msgstr "ist nicht"
 
 #: src/interview/words.ts
 msgid "Is that correct?"
@@ -8487,8 +8580,20 @@ msgid "Loading"
 msgstr "Wird geladen"
 
 #: src/frame/part-words.tsx
+msgid "Loading {many}"
+msgstr "{many} werden geladen"
+
+#: src/frame/part-words.tsx
+msgid "Loading more {many}"
+msgstr "Weitere {many} werden geladen"
+
+#: src/frame/part-words.tsx
 msgid "Loading older messages"
 msgstr "Ältere Nachrichten werden geladen"
+
+#: src/frame/part-words.tsx
+msgid "Loading the conversation"
+msgstr "Das Gespräch wird geladen"
 
 #: src/frame/part-words.tsx
 msgid "Loading the page"
@@ -8497,7 +8602,6 @@ msgstr "Seite wird geladen"
 #: src/activity/audit-log.tsx
 #: src/apps/app-workspace.tsx
 #: src/apps/publish.tsx
-#: src/chat/thread-loading.tsx
 #: src/frame/page-states.tsx
 #: src/knowledge/nav.tsx
 #: src/settings/erasures.tsx
@@ -8765,6 +8869,7 @@ msgstr "Menü"
 msgid "Message actions"
 msgstr "Aktionen zur Nachricht"
 
+#: src/chat/chat-body.tsx
 #: src/chat/thread.tsx
 #: src/routes/guest.tsx
 msgid "Messages"
@@ -8971,6 +9076,14 @@ msgstr "{title} verschieben: ziehen oder die Pfeiltasten verwenden"
 #: src/apps/field-editor.tsx
 msgid "Move {value}"
 msgstr "{value} verschieben"
+
+#: src/frame/part-words.tsx
+msgid "Move earlier"
+msgstr "Nach vorne"
+
+#: src/frame/part-words.tsx
+msgid "Move later"
+msgstr "Nach hinten"
 
 #: src/frame/part-words.tsx
 msgid "Move the panel"
@@ -9261,6 +9374,18 @@ msgstr "Nächstes Mal: {0}"
 #: src/apps/field-editor.tsx
 msgid "No"
 msgstr "Nein"
+
+#: src/frame/part-words.tsx
+msgid "No {many} match “{query}”."
+msgstr "Keine {many} passen zu „{query}“."
+
+#: src/frame/part-words.tsx
+msgid "No {many} meet the filter."
+msgstr "Keine {many} entsprechen dem Filter."
+
+#: src/frame/part-words.tsx
+msgid "No {many} yet."
+msgstr "Noch keine {many}."
 
 #: src/onboarding/setup-steps.tsx
 msgid "No {onlySignIn}? A staff list works too."
@@ -10465,6 +10590,7 @@ msgid "Open"
 msgstr "Öffnen"
 
 #: src/brain/brain-nav.tsx
+#: src/frame/part-words.tsx
 #: src/knowledge/nav.tsx
 #: src/knowledge/uploads.tsx
 msgid "Open {name}"
@@ -10829,6 +10955,10 @@ msgctxt "files of an App"
 msgid "Pages"
 msgstr "Seiten"
 
+#: src/frame/part-words.tsx
+msgid "Pages of {name}"
+msgstr "Seiten von {name}"
+
 #: src/activity/audit-log.tsx
 msgid "Pages of events"
 msgstr "Seiten der Ereignisse"
@@ -11116,6 +11246,14 @@ msgstr "Bild"
 #: src/onboarding/interviews-progress.tsx
 msgid "pieces of work found"
 msgstr "Aufgaben gefunden"
+
+#: src/frame/part-words.tsx
+msgid "Pin to the end"
+msgstr "Am Ende anheften"
+
+#: src/frame/part-words.tsx
+msgid "Pin to the start"
+msgstr "Am Anfang anheften"
 
 #: src/settings/backdrop-settings.tsx
 msgid "Pixel sand"
@@ -12417,9 +12555,19 @@ msgstr "Geheimnis erneuern"
 msgid "Rotate the secret of {name}?"
 msgstr "Das Geheimnis von {name} erneuern?"
 
+#: src/frame/part-words.tsx
+msgctxt "a table's rows, counted"
+msgid "row"
+msgstr "Zeile"
+
 #: src/apps/app-data.tsx
 msgid "Row {row} {where}: {message}"
 msgstr "Zeile {row} {where}: {message}"
+
+#: src/frame/part-words.tsx
+msgctxt "a table's rows, counted"
+msgid "rows"
+msgstr "Zeilen"
 
 #: src/brain/brain.ts
 #: src/interview/words.ts
@@ -12805,6 +12953,11 @@ msgstr "Zeitplan-Auslöser"
 msgid "Search"
 msgstr "Suchen"
 
+#: src/frame/part-words.tsx
+msgid "Search {many}"
+msgstr "{many} durchsuchen"
+
+#: src/frame/part-words.tsx
 #: src/onboarding/place-picker.tsx
 msgid "Search {name}"
 msgstr "{name} durchsuchen"
@@ -13700,6 +13853,18 @@ msgctxt "inbox: sort button"
 msgid "Sort"
 msgstr "Sortieren"
 
+#: src/frame/part-words.tsx
+msgid "Sort by this next"
+msgstr "Danach hiernach sortieren"
+
+#: src/frame/part-words.tsx
+msgid "Sort high to low"
+msgstr "Absteigend sortieren"
+
+#: src/frame/part-words.tsx
+msgid "Sort low to high"
+msgstr "Aufsteigend sortieren"
+
 #: src/brain/brain.ts
 #: src/workflows/workflow-triggers.tsx
 msgid "Source"
@@ -14447,6 +14612,10 @@ msgstr "Damit kann ich gut anfangen. Machen wir weiter."
 #: src/tour/tour-script.ts
 msgid "That’s the tour. Ask me anything, on any page. You’ll find me right here."
 msgstr "Das war der Rundgang. Fragen Sie mich gern, auf jeder Seite. Sie finden mich genau hier."
+
+#: src/frame/part-words.tsx
+msgid "The {many} did not load"
+msgstr "Die {many} wurden nicht geladen"
 
 #: src/activity/audit-event.tsx
 msgid "the action"
@@ -15294,6 +15463,10 @@ msgstr "Dieser Browser ist zu alt für App-Seiten. Aktualisieren Sie ihn oder ö
 msgid "This can't be undone. Confirm by {until}, or prepare it again."
 msgstr "Das lässt sich nicht rückgängig machen. Bestätigen Sie bis {until} oder bereiten Sie es erneut vor."
 
+#: src/frame/part-words.tsx
+msgid "This cannot be undone."
+msgstr "Dies kann nicht rückgängig gemacht werden."
+
 #: src/apps/publish-errors.ts
 msgid "This changes the App's data in a way that needs a migration in code. Ask Grasp to write one, then share."
 msgstr "Das ändert die Daten der App auf eine Weise, die eine Migration im Code braucht. Bitten Sie Grasp, eine zu schreiben, dann teilen Sie."
@@ -15906,6 +16079,7 @@ msgstr "Im Gange"
 #: src/brain/region-edit.tsx
 #: src/chat/approval-words.ts
 #: src/chat/saved-memory.tsx
+#: src/frame/part-words.tsx
 #: src/settings/workspace-name.tsx
 msgid "Undo"
 msgstr "Rückgängig"
@@ -15992,6 +16166,10 @@ msgstr "Stummschaltung aufheben"
 msgctxt "turn your microphone back on"
 msgid "Unmute"
 msgstr "Stummschaltung aufheben"
+
+#: src/frame/part-words.tsx
+msgid "Unpin"
+msgstr "Lösen"
 
 #: src/frame/part-words.tsx
 msgid "Unread"
@@ -16293,6 +16471,11 @@ msgstr "Über Composio"
 #: src/routes/_shell.settings.workspace.tsx
 msgid "Vienna"
 msgstr "Wien"
+
+#: src/frame/part-words.tsx
+msgctxt "a table's view menu"
+msgid "View"
+msgstr "Ansicht"
 
 #: src/apps/app-history.tsx
 msgid "View changes"
@@ -17257,6 +17440,10 @@ msgstr "Warum er fehlschlug"
 msgid "Why now"
 msgstr "Warum jetzt"
 
+#: src/frame/part-words.tsx
+msgid "Width of {header}"
+msgstr "Breite von {header}"
+
 #: src/brain/brain.ts
 #: src/interview/words.ts
 msgid "Wish"
@@ -17287,6 +17474,10 @@ msgstr "Mit KI"
 #: src/brain/brain.ts
 msgid "With the board"
 msgstr "Mit dem Vorstand"
+
+#: src/frame/part-words.tsx
+msgid "With the chosen {many}"
+msgstr "Mit den ausgewählten {many}"
 
 #: src/chat/package-requests.tsx
 msgid "With what they bring"

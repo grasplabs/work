@@ -1,4 +1,4 @@
-import { plural } from "@lingui/core/macro";
+import { plural, selectOrdinal } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import type { ReactNode } from "react";
 
@@ -12,6 +12,10 @@ import { buttonWords } from "../grasp/button/words.ts";
 import { chatMessageWords } from "../grasp/chat-message/words.ts";
 import { codeBlockWords } from "../grasp/code-block/words.ts";
 import { copyFieldWords } from "../grasp/copy-field/words.ts";
+import {
+  dataTableWords,
+  englishFilterWords,
+} from "../grasp/data-table/words.ts";
 import { dialogWords } from "../grasp/dialog/words.ts";
 import { emptyWords } from "../grasp/empty/words.ts";
 import { fileUploadWords, imageWellWords } from "../grasp/file-upload/words.ts";
@@ -48,6 +52,8 @@ export const englishPartWords: GraspWordsCatalog = {
   chatMessage: chatMessageWords,
   codeBlock: codeBlockWords,
   copyField: copyFieldWords,
+  dataTable: dataTableWords,
+  dataTableFilters: englishFilterWords,
   dialog: dialogWords,
   empty: emptyWords,
   fileUpload: fileUploadWords,
@@ -91,6 +97,78 @@ export const usePartWords = (): GraspWordsCatalog => {
       approve: t({ message: "Approve", context: "an agent's request" }),
       changesPlaceholder: t`Say what should change`,
       viewer: t({ message: "You", context: "who answered an agent's request" }),
+    },
+    // `one` and `many` are the table's own nouns ("report", "reports"),
+    // which the page gives in its language.
+    dataTable: {
+      search: (many) => t`Search ${many}`,
+      searchLabel: (label) => {
+        const name = label.toLowerCase();
+        return t`Search ${name}`;
+      },
+      clearSearch: t`Clear search`,
+      filterLabel: (label) => {
+        const name = label.toLowerCase();
+        return t`Filter ${name}`;
+      },
+      chosen: (count, total) => t`${count} of ${total} chosen`,
+      chooseAll: (one) => t`Choose every ${one} shown`,
+      choose: (name) => t`Choose ${name}`,
+      chooseColumn: t({
+        message: "Choose",
+        context: "a table's checkbox column",
+      }),
+      withChosen: (many) => t`With the chosen ${many}`,
+      clear: t({ message: "Clear", context: "rows chosen in a table" }),
+      done: (action, count, unit) => t`${action}: ${count} ${unit}`,
+      undo: t`Undo`,
+      confirm: (action, count, unit) => t`${action} ${count} ${unit}?`,
+      confirmDetail: t`This cannot be undone.`,
+      cancel: t`Cancel`,
+      view: t({ message: "View", context: "a table's view menu" }),
+      columns: t`Columns`,
+      columnMenu: (header) => t`Column: ${header}`,
+      sortUp: t`Sort low to high`,
+      sortDown: t`Sort high to low`,
+      sortNext: t`Sort by this next`,
+      pinStart: t`Pin to the start`,
+      pinEnd: t`Pin to the end`,
+      unpin: t`Unpin`,
+      moveEarlier: t`Move earlier`,
+      moveLater: t`Move later`,
+      hide: t`Hide column`,
+      width: (header) => t`Width of ${header}`,
+      sortedPlace: (place) =>
+        t`${selectOrdinal(place, { one: ", sorted #st", two: ", sorted #nd", few: ", sorted #rd", other: ", sorted #th" })}`,
+      exportCsv: t`Export CSV`,
+      actions: t`Actions`,
+      actionsFor: (name) => t`Actions for ${name}`,
+      open: (name) => t`Open ${name}`,
+      close: (name) => t`Close ${name}`,
+      noneYet: (many) => t`No ${many} yet.`,
+      noMatch: (many, query) => t`No ${many} match “${query}”.`,
+      noneMeet: (many) => t`No ${many} meet the filter.`,
+      loading: (many) => t`Loading ${many}`,
+      loadingMore: (many) => t`Loading more ${many}`,
+      failed: (many) => t`The ${many} did not load`,
+      failedDetail: t`Check the connection, then try again.`,
+      tryAgain: t`Try again`,
+      pages: (label) => {
+        const name = label.toLowerCase();
+        return t`Pages of ${name}`;
+      },
+      rows: {
+        one: t({ message: "row", context: "a table's rows, counted" }),
+        other: t({ message: "rows", context: "a table's rows, counted" }),
+      },
+    },
+    dataTableFilters: {
+      contains: t({ message: "contains", context: "a filter's operator" }),
+      lacks: t({ message: "does not contain", context: "a filter's operator" }),
+      atLeast: t({ message: "is at least", context: "a filter's operator" }),
+      atMost: t({ message: "is at most", context: "a filter's operator" }),
+      is: t({ message: "is", context: "a filter's operator" }),
+      isNot: t({ message: "is not", context: "a filter's operator" }),
     },
     empty: { failed: t`This did not load` },
     fileUpload: {
@@ -197,6 +275,7 @@ export const usePartWords = (): GraspWordsCatalog => {
       unread: t`Unread`,
       unreadFrom: t`Unread messages from here`,
       loadingOlder: t`Loading older messages`,
+      loading: t`Loading the conversation`,
       jumpToNew: (jump) => t`${jump}, new messages`,
       arrived: (count) =>
         t`${plural(count, { one: "# new message", other: "# new messages" })}`,

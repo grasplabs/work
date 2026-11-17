@@ -6,6 +6,7 @@ import type { FilterField } from "../filter-builder";
 import type { DataTableTools } from "./agent";
 import type { DataTableProps } from "./types";
 import type { Model } from "./use-data-table";
+import { agentErrors } from "./words";
 
 const most = 200;
 
@@ -65,10 +66,10 @@ export const toolsFor = <Row extends RowData>(
       const column = props.columns.find((each) => each.key === key);
       if (column?.sortable !== true) {
         return {
-          error: `No sortable column "${key}". Sortable: ${columns
-            .filter((each) => each.sortable)
-            .map((each) => each.key)
-            .join(", ")}.`,
+          error: agentErrors.noSort(
+            key,
+            columns.filter((each) => each.sortable).map((each) => each.key)
+          ),
         };
       }
       table
@@ -81,14 +82,14 @@ export const toolsFor = <Row extends RowData>(
     },
     search: ({ query }) => {
       if (props.searchable !== true) {
-        return { error: "This table has no search." };
+        return { error: agentErrors.noSearch };
       }
       table.setGlobalFilter(query);
       return { query };
     },
     filter: (input) => {
       if (props.filterable !== true) {
-        return { error: "This table has no filter." };
+        return { error: agentErrors.noFilter };
       }
       if (input === null) {
         own.setCondition({ fieldId: null, operatorId: null, value: null });
@@ -97,12 +98,19 @@ export const toolsFor = <Row extends RowData>(
       const field = fields.find((each) => each.id === input.field);
       if (field === undefined) {
         return {
-          error: `No filter on "${input.field}". Fields: ${fields.map((each) => each.id).join(", ")}.`,
+          error: agentErrors.noField(
+            input.field,
+            fields.map((each) => each.id)
+          ),
         };
       }
       if (!field.operators.some((each) => each.id === input.operator)) {
         return {
-          error: `"${input.operator}" is not an operator of ${field.id}: ${field.operators.map((each) => each.id).join(", ")}.`,
+          error: agentErrors.noOperator(
+            input.operator,
+            field.id,
+            field.operators.map((each) => each.id)
+          ),
         };
       }
       own.setCondition({
@@ -115,19 +123,19 @@ export const toolsFor = <Row extends RowData>(
     },
     choose: ({ keys }) => {
       if (props.selectable !== true) {
-        return { error: "Rows cannot be chosen in this table." };
+        return { error: agentErrors.noChoosing };
       }
       const known = new Set(found().map((row) => row.id));
       const unknown = keys.filter((key) => !known.has(key));
       if (unknown.length > 0) {
-        return { error: `No rows with the keys ${unknown.join(", ")}.` };
+        return { error: agentErrors.noRows(unknown) };
       }
       own.setChosen([...keys]);
       return { chosen: keys };
     },
     page: ({ page }) => {
       if (!Number.isInteger(page) || page < 1 || page > pages()) {
-        return { error: `There are pages 1 to ${String(pages())}.` };
+        return { error: agentErrors.pages(pages()) };
       }
       table.setPageIndex(page - 1);
       return { page };

@@ -3,6 +3,7 @@
 /* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
 import { Popover, PopoverContent, PopoverTrigger } from "@ui-sdk/react/popover";
+import { mergeProps } from "@ui-sdk/react/primitive";
 import { useId, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 
@@ -13,6 +14,7 @@ import { iconVars } from "../icons/icon.stylex";
 import { popoverStyles } from "../popover/styles";
 import { grasp, media } from "../tokens/tokens.stylex";
 import { popup } from "../tokens/tokens.values";
+import { ChipTip } from "./chip-tip";
 import { useComposerDisabled } from "./context";
 import { controlStyles } from "./control";
 import { ComposerEffort } from "./effort";
@@ -201,25 +203,46 @@ const styles = stylex.create({
   lit: {
     color: grasp.ink,
   },
-  // The model's name in the chip: in ink, and the first thing cut when room is short.
-  chipName: {
+  // The chip's mark, words and nothing else: they can shrink, so the chevron keeps its room.
+  chipValue: {
+    minWidth: 0,
     flexShrink: 1,
+  },
+  // The name and the level: one line tall, wrapping, so a level that no longer fits goes to a
+  // second line that is never seen (it is still in the chip's name, its tooltip and the surface).
+  // The name always stands first on the seen line. Never cut to one letter: the words keep 4ch,
+  // three letters and the ellipsis.
+  chipWords: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignContent: "flex-start",
+    alignItems: "center",
+    columnGap: grasp.space1,
+    rowGap: 0,
+    flexShrink: 1,
+    minWidth: "4ch",
+    height: grasp.textXsLine,
+    overflow: "hidden",
+  },
+  // The model's name, in ink. Short of room it is cut first, but only to about eight characters
+  // (its basis, 9ch with the ellipsis, or the whole name when shorter): the line breaks on that
+  // basis, so below it the level wraps out of sight before the name is cut further.
+  chipName: {
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: "9ch",
+    maxWidth: "max-content",
     minWidth: 0,
     overflow: "hidden",
     textOverflow: "ellipsis",
     whiteSpace: "nowrap",
     color: grasp.ink,
   },
-  // The level in the chip: quieter, never cut.
+  // The level: quieter, never cut; it leaves the line whole when the name needs the room.
   chipLevel: {
     flexShrink: 0,
     whiteSpace: "nowrap",
     color: grasp.muted,
-  },
-  // The chip's words can shrink, so the name is cut and the level and chevron keep their room.
-  chipValue: {
-    minWidth: 0,
-    flexShrink: 1,
   },
   chipShrinks: {
     flexShrink: 1,
@@ -340,20 +363,22 @@ const Chip = ({
     {lit ? <LitEdge /> : null}
     <span key={value} {...stylex.props(controlStyles.value, styles.chipValue)}>
       {mark === undefined ? null : <Icon icon={mark} />}
-      <span
-        data-slot="composer-model-effort-name"
-        {...stylex.props(styles.chipName)}
-      >
-        {name}
-      </span>
-      {level === undefined ? null : (
+      <span {...stylex.props(styles.chipWords)}>
         <span
-          data-slot="composer-model-effort-level"
-          {...stylex.props(styles.chipLevel)}
+          data-slot="composer-model-effort-name"
+          {...stylex.props(styles.chipName)}
         >
-          {level}
+          {name}
         </span>
-      )}
+        {level === undefined ? null : (
+          <span
+            data-slot="composer-model-effort-level"
+            {...stylex.props(styles.chipLevel)}
+          >
+            {level}
+          </span>
+        )}
+      </span>
     </span>
     <Icon icon={ChevronDown} />
   </button>
@@ -491,14 +516,20 @@ export const ComposerModelEffort = ({
       <PopoverTrigger
         disabled={disabled}
         aria-label={`${label}: ${said}`}
+        // Too narrow for its words, the chip shows them whole in a tooltip.
         render={(props: Record<string, unknown>) => (
-          <Chip
-            props={props}
-            mark={mark}
-            name={name}
-            level={level}
-            lit={lit}
-            value={`${model} ${effort}`}
+          <ChipTip
+            label={said}
+            render={(tip) => (
+              <Chip
+                props={mergeProps(props, tip)}
+                mark={mark}
+                name={name}
+                level={level}
+                lit={lit}
+                value={`${model} ${effort}`}
+              />
+            )}
           />
         )}
       />

@@ -666,7 +666,10 @@
   --grasp-diff-fold-fill: var(--grasp-soft);
   --grasp-chart-line: var(--grasp-mint-deep);
   --grasp-chart-plain: var(--grasp-mint-deep);
-  --grasp-chart-grid: var(--grasp-line);
+  --grasp-chart-grid: light-dark(
+    oklch(0.29 0.05 162 / 0.18),
+    oklch(0.96 0.02 150 / 0.2)
+  );
   --grasp-chart-dither-lit: var(--grasp-light-mint);
   --grasp-chart-dither-ground: var(--grasp-light-pine);
   --grasp-chart-tick: var(--grasp-muted);
@@ -1504,7 +1507,10 @@
   --grasp-diff-fold-fill: var(--grasp-soft);
   --grasp-chart-line: var(--grasp-mint-deep);
   --grasp-chart-plain: var(--grasp-mint-deep);
-  --grasp-chart-grid: var(--grasp-line);
+  --grasp-chart-grid: light-dark(
+    oklch(0.29 0.1 178 / 0.18),
+    oklch(0.96 0.04 178 / 0.2)
+  );
   --grasp-chart-dither-lit: var(--grasp-light-mint);
   --grasp-chart-dither-ground: var(--grasp-light-pine);
   --grasp-chart-tick: var(--grasp-muted);
@@ -2336,7 +2342,10 @@
   --grasp-diff-fold-fill: var(--grasp-soft);
   --grasp-chart-line: var(--grasp-mint-deep);
   --grasp-chart-plain: var(--grasp-mint-deep);
-  --grasp-chart-grid: var(--grasp-line);
+  --grasp-chart-grid: light-dark(
+    oklch(0.29 0.011 75 / 0.18),
+    oklch(0.96 0.004 75 / 0.2)
+  );
   --grasp-chart-dither-lit: var(--grasp-light-mint);
   --grasp-chart-dither-ground: var(--grasp-light-pine);
   --grasp-chart-tick: var(--grasp-muted);

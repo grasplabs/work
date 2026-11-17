@@ -181,6 +181,7 @@ export const SpendSummary = ({ spend }: { spend: ModelMonthSpend }) => {
           layout={styles.chart}
           summary={t`${total} so far this month.`}
           xKey="day"
+          xLabel={t`Day`}
         >
           <ChartGrid />
           <ChartAxis side="x" />

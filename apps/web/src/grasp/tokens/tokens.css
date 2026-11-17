@@ -1650,8 +1650,11 @@
   --grasp-chart-line: var(--grasp-mint-deep);
   /* A plain bar's fill. */
   --grasp-chart-plain: var(--grasp-mint-deep);
-  /* The chart's faint grid. */
-  --grasp-chart-grid: var(--grasp-line);
+  /* The chart's grid: its own value, a step above the hairline (line), so the axes' lines read on a white card (Ruben: "no visible axes"). */
+  --grasp-chart-grid: light-dark(
+    oklch(0.29 0.05 162 / 0.18),
+    oklch(0.96 0.02 150 / 0.2)
+  );
   /* The lit cells of a dither fill, near the value. */
   --grasp-chart-dither-lit: var(--grasp-light-mint);
   /* The ground of a dither fill, at the floor: evergreen. */

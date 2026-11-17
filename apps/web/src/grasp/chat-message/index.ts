@@ -7,3 +7,5 @@ export type {
 export { ChatMessageAction } from "./action";
 export type { ChatMessageActionProps } from "./action";
 export type { ChatMessageThoughtsLook } from "./thoughts";
+export { ChatMessageSkeleton } from "./skeleton";
+export type { ChatMessageSkeletonProps } from "./skeleton";

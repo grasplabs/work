@@ -62,6 +62,11 @@ export interface ChartProps {
   data: readonly Record<string, string | number>[];
   /** The key along the bottom (a month, a day). */
   xKey: string;
+  /**
+   * What the key along the bottom is called, in words: the heading of its column in the table a
+   * screen reader reads ("Month"). Left out, the key itself in sentence case.
+   */
+  xLabel?: string;
   /** The series drawn, by their key in each row, with their names. */
   config: ChartConfig;
   /** The grid, the axes, the marks, the tooltip and the legend. */
@@ -129,6 +134,7 @@ export const useReducedMotion = () =>
   );
 
 interface Kept {
+  setValueFormat: (format: (value: number) => string) => void;
   live: HTMLElement | null;
   bars: boolean;
   setBars: (bars: boolean) => void;
@@ -152,6 +158,25 @@ const contextOf = (
   ...kept,
 });
 
+/** A key as words: "day" is "Day". */
+const sentenceCase = (key: string) =>
+  key.charAt(0).toUpperCase() + key.slice(1);
+
+const plainNumber = new Intl.NumberFormat(undefined, {
+  maximumFractionDigits: 2,
+});
+
+/** A value as the table says it: through the chart's format, else a plain number, never raw. */
+const writtenValue = (
+  value: string | number | undefined,
+  format: ((value: number) => string) | undefined
+) => {
+  if (typeof value !== "number") {
+    return value;
+  }
+  return format === undefined ? plainNumber.format(value) : format(value);
+};
+
 // The drawing's margin: a little at the top and the right, and at the right the room the names at
 // the lines' ends ask for.
 const marginOf = (room: number) => ({
@@ -167,6 +192,7 @@ export const Chart = ({
   summary,
   data,
   xKey,
+  xLabel,
   config,
   children,
   height = 240,
@@ -189,6 +215,15 @@ export const Chart = ({
       was[series] === look ? was : { ...was, [series]: look }
     );
   };
+  // How the table writes a value: as the y axis or the tooltip writes it, else a plain number.
+  const [writer, setWriter] = useState<{
+    format: (value: number) => string;
+  } | null>(null);
+  const setValueFormat = (format: (value: number) => string) => {
+    setWriter((was) => (was?.format === format ? was : { format }));
+  };
+  const written = (value: string | number | undefined) =>
+    writtenValue(value, writer?.format);
   const context = contextOf(config, xKey, id, data, {
     live,
     bars,
@@ -196,6 +231,7 @@ export const Chart = ({
     setRoom,
     looks,
     setLook,
+    setValueFormat,
   });
   return (
     <ChartContext.Provider value={context}>
@@ -233,7 +269,7 @@ export const Chart = ({
           <caption>{label}</caption>
           <thead>
             <tr>
-              <th scope="col">{xKey}</th>
+              <th scope="col">{xLabel ?? sentenceCase(xKey)}</th>
               {keys.map((key) => (
                 <th key={key} scope="col">
                   {config[key]?.label}
@@ -246,7 +282,7 @@ export const Chart = ({
               <tr key={String(row[xKey])}>
                 <th scope="row">{row[xKey]}</th>
                 {keys.map((key) => (
-                  <td key={key}>{row[key]}</td>
+                  <td key={key}>{written(row[key])}</td>
                 ))}
               </tr>
             ))}

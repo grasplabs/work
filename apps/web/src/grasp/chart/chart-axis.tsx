@@ -3,6 +3,7 @@
 "use client";
 
 import * as stylex from "@stylexjs/stylex";
+import { useEffect, useRef, useState } from "react";
 import { XAxis, YAxis } from "recharts";
 import type {
   TextAnchor,
@@ -69,7 +70,23 @@ const Tick = ({
 };
 
 export const ChartAxis = ({ side, format, width = 36 }: ChartAxisProps) => {
-  const { xKey } = useChart();
+  const { xKey, setValueFormat } = useChart();
+  // The y axis writes the values: the chart's table writes them the same way. One wrapper for good,
+  // reading the latest format, so a format written inline never makes the chart draw again.
+  const latest = useRef(format);
+  useEffect(() => {
+    latest.current = format;
+  });
+  // oxlint-disable-next-line react/hook-use-state -- a writer made once, never replaced
+  const [written] = useState(
+    () => (value: number) => latest.current?.(value) ?? String(value)
+  );
+  const writes = side === "y" && format !== undefined;
+  useEffect(() => {
+    if (writes) {
+      setValueFormat?.(written);
+    }
+  }, [writes, written, setValueFormat]);
   const tick = (props: XAxisTickContentProps | YAxisTickContentProps) => (
     <Tick
       x={Number(props.x)}

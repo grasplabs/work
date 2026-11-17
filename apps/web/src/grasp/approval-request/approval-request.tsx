@@ -382,13 +382,14 @@ const styles = stylex.create({
       [NARROW_CARD]: "repeat(2, minmax(0, 1fr))",
     },
   },
-  // Why Approve is held: one quiet line under the row, at its end.
+  // Why Approve is held: one quiet line under the row, on the card's own start line (where Details
+  // begins), never alone at the far end under a button.
   held: {
     margin: 0,
     fontSize: grasp.textXs,
     lineHeight: grasp.textXsLine,
     color: grasp.muted,
-    textAlign: { default: "end", [NARROW_CARD]: "start" },
+    textAlign: "start",
     textWrap: "pretty",
   },
   // The answer not pressed fades where it stands while the other works: its room stays.

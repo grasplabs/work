@@ -53,7 +53,6 @@ import { SavedMemoryLine } from "./saved-memory.tsx";
 import { readingFileOf, signOf } from "./sign.ts";
 import type { WorkState } from "./sign.ts";
 import { AnswerCited, useCitedDocuments } from "./sources.tsx";
-import { ThreadLoading } from "./thread-loading.tsx";
 import { turnsOf, workedFor } from "./turns.ts";
 import { widgetLinesOf } from "./widget-lines.ts";
 
@@ -1167,19 +1166,13 @@ export const ChatThread = ({
   const answerTo = running
     ? rows.findLast((row) => row.kind === "question")?.id
     : undefined;
-  if (!loaded) {
-    return (
-      <div {...stylex.props(!compact && styles.column)}>
-        <ThreadLoading />
-      </div>
-    );
-  }
   return (
     <div {...stylex.props(styles.room)}>
       <Thread
         answerTo={answerTo}
         aria-label={t`Messages`}
         items={items}
+        loading={!loaded}
         renderItem={(row) => (
           <div {...stylex.props(!compact && styles.column)}>
             {row.kind === "question" ? (

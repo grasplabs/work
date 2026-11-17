@@ -1,5 +1,8 @@
 // Every word a Data table shows or says, so a product can put them in its own language. Each has an
-// English default; pass `words` with the ones to replace. `one` and `many` are the table's `unit`.
+// English default. The product gives them in its languages through GraspWords (src/words), as the
+// catalogue's `dataTable` and `dataTableFilters`; a caller's `words`, `filterWords` and `unit` still
+// win until the breaking release's step 5. `one` and `many` are the table's `unit`.
+import type { DataTableUnit } from "./types";
 
 /** The words of a Data table. */
 export interface DataTableWords {
@@ -253,4 +256,75 @@ export const englishWords: DataTableWords = {
   failedDetail: "Check the connection, then try again.",
   tryAgain: "Try again",
   pages: (label) => `Pages of ${label.toLowerCase()}`,
+};
+
+/** The Filter builder's operators' words, so a product can translate them. */
+export interface DataTableFilterWords {
+  /**
+   * @default contains
+   */
+  contains: string;
+  /**
+   * @default does not contain
+   */
+  lacks: string;
+  /**
+   * @default is at least
+   */
+  atLeast: string;
+  /**
+   * @default is at most
+   */
+  atMost: string;
+  /**
+   * @default is
+   */
+  is: string;
+  /**
+   * @default is not
+   */
+  isNot: string;
+}
+
+export const englishFilterWords: DataTableFilterWords = {
+  contains: "contains",
+  lacks: "does not contain",
+  atLeast: "is at least",
+  atMost: "is at most",
+  is: "is",
+  isNot: "is not",
+};
+
+/** The table's words in the catalogue: its own, and what it counts when no `unit` is given. */
+export const dataTableWords = {
+  ...englishWords,
+  rows: { one: "row", other: "rows" } satisfies DataTableUnit,
+};
+
+export type DataTableCatalogueWords = typeof dataTableWords;
+
+declare module "../words/words" {
+  interface GraspWordsCatalog {
+    dataTable: DataTableCatalogueWords;
+    dataTableFilters: DataTableFilterWords;
+  }
+}
+
+/**
+ * What the table's agent tools answer when they cannot do what was asked. For the agent, which reads
+ * English: kept here with the words, and not in the catalogue, as no person reads them.
+ */
+export const agentErrors = {
+  noSort: (key: string, sortable: string[]) =>
+    `No sortable column "${key}". Sortable: ${sortable.join(", ")}.`,
+  noSearch: "This table has no search.",
+  noFilter: "This table has no filter.",
+  noField: (field: string, fields: string[]) =>
+    `No filter on "${field}". Fields: ${fields.join(", ")}.`,
+  noOperator: (operator: string, field: string, operators: string[]) =>
+    `"${operator}" is not an operator of ${field}: ${operators.join(", ")}.`,
+  noChoosing: "Rows cannot be chosen in this table.",
+  noRows: (keys: readonly string[]) =>
+    `No rows with the keys ${keys.join(", ")}.`,
+  pages: (count: number) => `There are pages 1 to ${String(count)}.`,
 };

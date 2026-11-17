@@ -7,6 +7,7 @@ import { Button } from "../grasp/button/index.ts";
 import { Empty, EmptyHeader, EmptyDescription } from "../grasp/empty/index.ts";
 import { Retry } from "../grasp/icons/index.ts";
 import { Text } from "../grasp/text/index.ts";
+import { Thread } from "../grasp/thread/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { NotLoaded } from "../load-from-core.tsx";
 import { agentModelOf } from "./agent-choice.tsx";
@@ -23,7 +24,6 @@ import { HeldWrites } from "./held-writes.tsx";
 import { PackageRequests } from "./package-requests.tsx";
 import { ChatSources } from "./sources.tsx";
 import { SubjectBarContent, subjectBarOf } from "./subject-bar.tsx";
-import { ThreadLoading } from "./thread-loading.tsx";
 
 // One chat's conversation and the box to ask in under it, as the dock
 // (chat-panel.tsx) and a chat's own page (chat-page.tsx) both show it: the
@@ -100,12 +100,20 @@ const Welcome = ({ text }: { text: string }) => (
   </div>
 );
 
-/** The chat loading, in the thread's place. */
-const Loading = () => (
-  <div {...stylex.props(styles.grow)}>
-    <ThreadLoading />
-  </div>
-);
+/** The chat loading, in the thread's place: Grasp UI's Thread, loading. */
+const Loading = () => {
+  const { t } = useLingui();
+  return (
+    <div {...stylex.props(styles.grow)}>
+      <Thread
+        aria-label={t`Messages`}
+        items={[]}
+        loading
+        renderItem={() => null}
+      />
+    </div>
+  );
+};
 
 /** The conversation, or what to ask before there is one; `focusBox` takes the person to the box. */
 export const ChatConversation = ({
