@@ -18,7 +18,7 @@ import { onboardingStore } from "../src/onboarding/store.ts";
 import { allEvents } from "./audit-events.ts";
 import { copyOfStore, restoreStore } from "./brain-next-store-copy.ts";
 import { mockIdp } from "./idp.ts";
-import { answering, holdAlarm, onLink } from "./interview-link.ts";
+import { aloneInTheStore, answering, onLink } from "./interview-link.ts";
 import { agree, fact, openLink, team } from "./onboarding-team.ts";
 import { auditedDuring, outcome, signedInApi, unique } from "./sign-in.ts";
 
@@ -170,7 +170,7 @@ describe("the company's teams in the new Brain", { timeout: 180_000 }, () => {
   // The tests draw the maps themselves, each with the model's answer it
   // gives: the store's own alarm drawing one first, with no answer to
   // give, would put it off.
-  beforeEach(holdAlarm);
+  beforeEach(aloneInTheStore);
 
   it("never gives anyone what a lead's map says a team does, nor times a drawing in the audit log, and takes it from staff too when the lead deletes their interview", async () => {
     const [admin, member] = await Promise.all([

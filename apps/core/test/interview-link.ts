@@ -319,3 +319,41 @@ export const holdAlarm = async (): Promise<void> => {
     vi.spyOn(instance, "alarm").mockResolvedValue();
   });
 };
+
+/** A day on: past every wait before a failed drawing or intake is tried again, and every clock a test moves on. */
+const pastEveryWaitMs = 24 * 60 * 60 * 1000;
+
+/** Most things earlier tests of a file leave due: more is a test that keeps making work. */
+const leftDueMax = 200;
+
+/**
+ * Holds the store's alarm (`holdAlarm`), and moves what earlier tests of
+ * the file left due out of this test's way. Tests share the one store, and
+ * a drawing or intake that failed waits a minute before it is tried again:
+ * on a slow runner it came due amid a later test, and was the one that
+ * test's `drawNext` or `intakeNext` took (GRA-1974). Each is tried once
+ * here, as by a clock a day on, with no model answering: it fails and
+ * waits past the test, or is done or given up. From then on only what the
+ * test makes due is drawn or taken in.
+ */
+export const aloneInTheStore = async (): Promise<void> => {
+  await holdAlarm();
+  const store = onboardingStore(env);
+  const later = Date.now() + pastEveryWaitMs;
+  // No reply queued: every model call fails.
+  const settled = await answering([], async () => {
+    for (let round = 0; round < leftDueMax; round += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one at a time, as the alarm takes them
+      const drew = await store.drawNext(later);
+      // oxlint-disable-next-line no-await-in-loop -- one at a time, as the alarm takes them
+      const took = await store.intakeNext(later);
+      if (drew === null && took === null) {
+        return true;
+      }
+    }
+    return false;
+  });
+  if (!settled.result) {
+    throw new Error(`Earlier tests left more than ${leftDueMax} things due.`);
+  }
+};

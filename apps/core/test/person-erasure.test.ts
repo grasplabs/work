@@ -28,7 +28,7 @@ import { allEvents, eventsAfter, logHead } from "./audit-events.ts";
 import { finishedByTheClock } from "./brain-next-own-store.ts";
 import { consentCode } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
-import { answering, answeringWith, holdAlarm } from "./interview-link.ts";
+import { aloneInTheStore, answering, answeringWith } from "./interview-link.ts";
 import { runMinuteTasks } from "./maintenance.ts";
 import { onboardingLog } from "./onboarding-log.ts";
 import {
@@ -469,8 +469,8 @@ const removedPerson = async (): Promise<{ admin: Person; person: Person }> => {
  * What the referral then saved: who Max named, and whether Max moved.
  */
 const referralWhileErased = async (erased: "max" | "pim") => {
-  // The test draws the referral itself, inside its faked provider (holdAlarm).
-  await holdAlarm();
+  // The test draws the referral itself, inside its faked provider (aloneInTheStore).
+  await aloneInTheStore();
   onTestFinished(() => {
     vi.restoreAllMocks();
   });
@@ -1401,8 +1401,8 @@ describe("erasing a person", () => {
     // A referral is due as soon as it is made: the store's own alarm, armed
     // half a second on by the list and the erasure, would draw the ones
     // below and drop them, as neither names work to put right. The test
-    // reads them before any drawing (holdAlarm).
-    await holdAlarm();
+    // reads them before any drawing (aloneInTheStore).
+    await aloneInTheStore();
     onTestFinished(() => {
       vi.restoreAllMocks();
     });
@@ -1599,8 +1599,8 @@ describe("erasing a person", () => {
     // The test draws the referral itself, inside its faked provider: the
     // store's own alarm, armed half a second on by Max's agreement, would
     // otherwise draw it first outside it, fail, and put it off a minute
-    // (holdAlarm).
-    await holdAlarm();
+    // (aloneInTheStore).
+    await aloneInTheStore();
     onTestFinished(() => {
       vi.restoreAllMocks();
     });
@@ -1716,8 +1716,8 @@ describe("erasing a person", () => {
   });
 
   it("leaves nothing of a referral that named them before their erasure but the company's records of it", async () => {
-    // The test draws the referral itself, inside its faked provider (holdAlarm).
-    await holdAlarm();
+    // The test draws the referral itself, inside its faked provider (aloneInTheStore).
+    await aloneInTheStore();
     onTestFinished(() => {
       vi.restoreAllMocks();
     });
