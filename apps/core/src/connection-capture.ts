@@ -22,6 +22,7 @@ import { connectionOwnersOf } from "./connections.ts";
 import { nativeItemReads } from "./native-tool-classes.gen.ts";
 import { classOf } from "./tool-classes.ts";
 import type { CallingRun } from "./workflows/resource-authority.ts";
+import { markCaptured } from "./workflows/run-evidence.ts";
 
 // Capture (GRA-1730): what a chat's agent reads through its person's own
 // connection is kept in the Brain, an item a source, so every connected
@@ -139,8 +140,12 @@ import type { CallingRun } from "./workflows/resource-authority.ts";
 // then: it keeps nothing. Nor does a call that passes a sensitive
 // argument (`sensitive`): the key hashes the call's input, and the answer
 // may carry what the value gave. What a run keeps is not a read of the
-// Brain, so nothing of it joins the run's evidence (run-evidence.ts): the
-// run read the connection, whose authority is decided again on each call.
+// Brain, so nothing of it is pinned with the run (run-evidence.ts), whose
+// checks read as the company: the run read the connection, whose
+// authority is decided again on each call. The run is marked as one that
+// kept something before the Brain is written (`markCaptured`), so it
+// hands over only how it ended, never what it returned: a copy of what it
+// read that disconnecting the connection wouldn't erase.
 
 type CaptureEvent =
   | "brain.capture.kept"
@@ -157,6 +162,11 @@ interface Capturer {
   readonly personId: string;
   readonly where: { readonly chat: string } | { readonly run: string };
   readonly actor: () => AuditActor;
+  /**
+   * Asked just before anything is written to the Brain; throws to keep
+   * it nowhere. A run's marks it as one whose result copies what it kept.
+   */
+  readonly beforeKeep?: () => Promise<void>;
 }
 
 /** A chat's agent's read, kept for the chat's person. */
@@ -243,6 +253,7 @@ const keptAs = async (
   text: string,
   readAt: Date
 ): Promise<Ended> => {
+  await capturer.beforeKeep?.();
   try {
     // Owner content: core's Brain module keeps it in the person's own
     // store, never the shared one.
@@ -492,6 +503,13 @@ export const captureRunRead = async (
     // As the run's call receipts name it (resource-calls.ts): the
     // workflow, as a run, is the system's.
     actor: () => ({ type: "system" }),
+    // Marked before the Brain is written, so a run whose read may be kept
+    // hands over only how it ended, never a copy of it in what it returned
+    // that disconnecting wouldn't erase (brain-sources.ts). Unmarked, the
+    // read is kept nowhere: the item fails.
+    beforeKeep: async () => {
+      await markCaptured(env, run.runId);
+    },
   };
   if (sensitive) {
     // Counted as the items it named, and at least one, as a failure is.

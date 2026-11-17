@@ -9,7 +9,9 @@ import type { Identity } from "@grasp-os/shared/rpc";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import { recallAs } from "../src/brain-next.ts";
+import { drainAuditOutboxes } from "../src/audit-drains.ts";
+import { readSourceVersionAs, recallAs, workBrain } from "../src/brain-next.ts";
+import { producersOf, relayHandOvers } from "../src/brain-sources.ts";
 import { answerCaptureIdOf } from "../src/connection-capture-key.ts";
 import { createTriggerResource } from "../src/trigger-resources.ts";
 import { approveWorkflowBinding } from "../src/workflow-bindings.ts";
@@ -228,6 +230,22 @@ const captures = async (
   return await capturesOf(connectionId);
 };
 
+/** Hands over what changed, as core's clock does: drain, relay, a tick. */
+const handedOver = async (): Promise<void> => {
+  await drainAuditOutboxes(env);
+  await relayHandOvers(env);
+  await workBrain(env, new Date(Date.now() + 60_000), producersOf(env));
+};
+
+/** What the Brain keeps in `personId`'s own store of run `runId`: its text. */
+const keptOf = async (personId: string, runId: string) => {
+  const kept = await readSourceVersionAs(env, personId, {
+    source: { producer: "run", id: runId },
+    version: 1,
+  });
+  return kept?.text;
+};
+
 /** An event as the tests compare it. */
 const shown = ({ action, actor, detail }: AuditEvent) => ({
   action,
@@ -257,6 +275,7 @@ describe("what a workflow run reads through a connection", setUpTime, () => {
     );
     const run = await ended(ada, workflow.id, runId);
     const events = await captures(mail.id, 1);
+    await handedOver();
     const kept = `capture:${await answerCaptureIdOf(
       mail.id,
       ada.userId,
@@ -274,6 +293,9 @@ describe("what a workflow run reads through a connection", setUpTime, () => {
       ben: await recalled(ben.userId, marker),
       // As an App, a workflow or the SDK asks: the shared store alone.
       asCode: await recalled(ada.userId, marker, false),
+      // What it returned copies what it kept: the Brain keeps only how it
+      // ended, so no copy outlives the capture's erasure on a disconnect.
+      handedOver: await keptOf(ada.userId, runId),
     }).toStrictEqual({
       executable: true,
       end: { status: "completed", output: { status: `Ada's quote ${marker}` } },
@@ -287,6 +309,37 @@ describe("what a workflow run reads through a connection", setUpTime, () => {
       ada: [kept],
       ben: [],
       asCode: [],
+      handedOver: "Workflow run completed.",
+    });
+  });
+
+  it("keeps nothing of an answer the run doesn't take, outside its contract", async () => {
+    const [admin, ada] = await Promise.all([
+      person("admin"),
+      person("builder"),
+    ]);
+    const marker = markerOf();
+    const mail = await ownMail(ada.userId, []);
+    // Text, where the contract has `{ messages }`: the step refuses it.
+    await mail.answer("mail.search", {
+      content: [{ type: "text", text: `Ada's quote ${marker}` }],
+    });
+    const { workflow, serving } = await searching(ada, admin, mail.id);
+    const runId = await startedAs(
+      serving,
+      { type: "person", person: ada },
+      workflow.id,
+      marker
+    );
+    const end = endOf(await ended(ada, workflow.id, runId));
+    expect({
+      end,
+      events: await capturesOf(mail.id),
+      ada: await recalled(ada.userId, marker),
+    }).toStrictEqual({
+      end: { status: "failed", code: "workflow.call_invalid" },
+      events: [],
+      ada: [],
     });
   });
 
@@ -402,7 +455,10 @@ describe("what a workflow run reads through a connection", setUpTime, () => {
     // A colleague's own connection is no run's of Ada's at all: connect
     // refuses the call (`connect.not_owner`). A shared one is the shared
     // Brain's (GRA-1831), never a person's own.
-    const shared = await ownMail(undefined, [`The team's quote ${marker}`]);
+    const secret = `hunter${markerOf()}`;
+    const shared = await ownMail(undefined, [
+      `The team's quote ${marker} password=${secret}`,
+    ]);
     const { workflow, serving } = await searching(ada, admin, shared.id);
     const runId = await startedAs(
       serving,
@@ -412,17 +468,27 @@ describe("what a workflow run reads through a connection", setUpTime, () => {
     );
     const end = endOf(await ended(ada, workflow.id, runId));
     const events = await captures(shared.id, 1);
+    await handedOver();
+    const handed = (await keptOf(ada.userId, runId)) ?? "";
     expect({
       end: end.status,
       events: events.map(({ action, detail }) => ({
         action,
         reason: detail.reason,
       })),
-      ada: await recalled(ada.userId, marker),
+      ada: await recalled(ada.userId, marker).then((ids) =>
+        ids.filter((id) => !id.startsWith("run:"))
+      ),
+      // Nothing kept, so what it returned is handed over, redacted.
+      handedOver: {
+        result: handed.includes(marker),
+        secret: handed.includes(secret),
+      },
     }).toStrictEqual({
       end: "completed",
       events: [{ action: "brain.capture.skipped", reason: "shared" }],
       ada: [],
+      handedOver: { result: true, secret: false },
     });
   });
 });
