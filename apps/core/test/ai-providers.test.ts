@@ -870,21 +870,10 @@ describe("AI providers", { timeout: 60_000 }, () => {
       }).toStrictEqual({ models: ["gpt-5.4"], ticketsByPim: true });
     });
 
-    it("arranges the company's teams with the organization's default model once the staff list is saved", async () => {
+    it("proposes the company's groups of teams with the organization's default model", async () => {
       const key = await connected(openaiCase);
       const { admin: by } = await admin();
       const tag = unique();
-      const sales = `team-sales-${tag}`;
-      const support = `team-support-${tag}`;
-      await plan(key, [
-        answered(
-          openaiCase.api,
-          JSON.stringify({
-            groups: [{ name: "Customers", teamIds: [sales, support] }],
-          })
-        ),
-      ]);
-
       await by.api.onboarding.saveRoster({
         teams: [
           { id: `sales-${tag}`, name: "Sales", lead: null },
@@ -899,7 +888,18 @@ describe("AI providers", { timeout: 60_000 }, () => {
           },
         ],
       });
-      const { teamGroups } = await by.api.brain.read();
+      const sales = `team-sales-${tag}`;
+      const support = `team-support-${tag}`;
+      await plan(key, [
+        answered(
+          openaiCase.api,
+          JSON.stringify({
+            groups: [{ name: "Customers", teamIds: [sales, support] }],
+          })
+        ),
+      ]);
+
+      const groups = await by.api.brain.proposeTeamGroups();
 
       const sent = await carrying(key);
       expect({
@@ -907,10 +907,12 @@ describe("AI providers", { timeout: 60_000 }, () => {
           ({ body }) =>
             z.object({ model: z.string() }).parse(JSON.parse(body)).model
         ),
-        arranged: teamGroups.map(({ teamIds }) => teamIds.toSorted()),
+        proposed: groups
+          .filter(({ confirmed }) => !confirmed)
+          .map(({ teamIds }) => teamIds.toSorted()),
       }).toStrictEqual({
         models: ["gpt-5.4"],
-        arranged: [[sales, support].toSorted()],
+        proposed: [[sales, support].toSorted()],
       });
     });
   });

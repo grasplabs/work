@@ -1,7 +1,9 @@
 import type { RosterInput } from "@grasp-os/shared/onboarding";
+import type { Identity } from "@grasp-os/shared/rpc";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
+import { proposeTeamGroups } from "../src/brain-team-groups.ts";
 import { mockIdp } from "./idp.ts";
 import { fakeProvider } from "./model-provider.ts";
 import { auditedDuring, outcome, signedInApi, unique } from "./sign-in.ts";
@@ -10,10 +12,10 @@ import { auditedDuring, outcome, signedInApi, unique } from "./sign-in.ts";
 // brain-team-groups.ts). What can go wrong, tried here: someone who isn't
 // an admin regrouping the company; a group naming a team the brain
 // doesn't have, or one team in two groups; a change kept without its
-// audit event, or an earlier set lost to it; Grasp's arrangement given
-// more than the teams' names, trusted when it leaves a team out or
-// invents one, moving a team an admin placed, or failing the save of the
-// staff list when the model fails or takes too long.
+// audit event, or an earlier set lost to it; Grasp's proposal taken for
+// the company's word, given more
+// than the teams' names, or trusted when it leaves a team out or invents
+// one.
 
 const idp = mockIdp();
 
@@ -157,6 +159,7 @@ describe("the company's groups of teams", { timeout: 120_000 }, () => {
           { id: "mine", name: "Mine", teamIds: [finance] },
         ])
       ),
+      memberProposes: await outcome(member.api.brain.proposeTeamGroups()),
       unknownTeam: await outcome(
         admin.api.brain.saveTeamGroups([
           { id: "ghost", name: "Ghosts", teamIds: [`team-ghost-${tag}`] },
@@ -179,6 +182,7 @@ describe("the company's groups of teams", { timeout: 120_000 }, () => {
     expect({ outcomes, kept: teamGroups.map(({ id }) => id) }).toStrictEqual({
       outcomes: {
         member: "role.forbidden",
+        memberProposes: "role.forbidden",
         unknownTeam: "brain.team_groups_invalid",
         twice: "brain.team_groups_invalid",
         empty: "brain.team_groups_invalid",
@@ -187,13 +191,18 @@ describe("the company's groups of teams", { timeout: 120_000 }, () => {
     });
   });
 
-  it("are arranged by Grasp once the staff list is saved, from the teams' names alone, checked, and count at once", async () => {
+  it("are proposed by Grasp for the teams in none, from their names alone, checked and kept as proposals", async () => {
     const admin = await signedInApi(idp, "admin");
     const tag = unique();
+    await admin.api.onboarding.saveRoster(rosterOf(tag));
     const finance = `team-finance-${tag}`;
     const sales = `team-sales-${tag}`;
     const support = `team-support-${tag}`;
-    // The model groups two teams, invents one, and leaves Support out.
+    await admin.api.brain.saveTeamGroups([
+      { id: "back", name: "Back office", teamIds: [finance] },
+    ]);
+    const { teams } = await admin.api.brain.read();
+    // The model groups one team, invents another, and leaves Support out.
     const provider = await fakeProvider({
       text: JSON.stringify({
         groups: [
@@ -204,120 +213,58 @@ describe("the company's groups of teams", { timeout: 120_000 }, () => {
       inputTokens: 40,
       outputTokens: 20,
     });
+    const person: Identity = {
+      userId: admin.userId,
+      email: "admin@acme.test",
+      name: "Admin",
+      role: "admin",
+      teams: [],
+      staff: false,
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    };
 
+    let groups: unknown;
     const events = await auditedDuring(async () => {
-      await admin.api.onboarding.saveRoster(rosterOf(tag));
+      groups = await proposeTeamGroups(
+        env,
+        person,
+        async () => await Promise.resolve(teams)
+      );
     });
-    const { teamGroups } = await admin.api.brain.read();
     const sent = JSON.stringify(provider.requests.map(({ body }) => body));
 
     expect({
-      teamGroups,
-      supportPlaced: teamGroups.some(({ teamIds }) =>
-        teamIds.includes(support)
-      ),
+      groups,
       sentNames: sent.includes("Support") && sent.includes("Sales"),
       // Nothing about the teams but their names: not who is in them.
       sentPeople: sent.includes("Ann Example"),
       audited: events
-        .filter(({ action }) => action === "brain.team_groups.arranged")
-        .map(({ actor, detail }) => ({
-          actor: actor.type,
-          groups: detail?.groups,
-          arranged: detail?.arranged,
-        })),
+        .filter(({ action }) => action === "brain.team_groups.proposed")
+        .map(({ detail }) => detail),
     }).toStrictEqual({
-      // Support, left out, waits in no region: the map shows it under
-      // "Other teams" until the next save.
-      teamGroups: [
+      groups: [
         {
-          id: "group-revenue",
-          name: "Revenue",
-          teamIds: [sales],
-          confirmed: true,
-        },
-        {
-          id: "group-back-office",
+          id: "back",
           name: "Back office",
           teamIds: [finance],
           confirmed: true,
         },
+        {
+          id: "group-revenue",
+          name: "Revenue",
+          teamIds: [sales],
+          confirmed: false,
+        },
+        {
+          id: "group-support",
+          name: "Support",
+          teamIds: [support],
+          confirmed: false,
+        },
       ],
-      supportPlaced: false,
       sentNames: true,
       sentPeople: false,
-      audited: [{ actor: "person", groups: 2, arranged: 2 }],
+      audited: [{ groups: 2 }],
     });
-  });
-
-  it("never move a team an admin placed, when the staff list is saved again", async () => {
-    const admin = await signedInApi(idp, "admin");
-    const tag = unique();
-    const finance = `team-finance-${tag}`;
-    const sales = `team-sales-${tag}`;
-    const support = `team-support-${tag}`;
-    const legal = `team-legal-${tag}`;
-    // No reply at first: arranging fails, and the admin places the teams.
-    const first = await fakeProvider({ status: 500 });
-    await admin.api.onboarding.saveRoster(rosterOf(tag));
-    await admin.api.brain.saveTeamGroups([
-      { id: "mine", name: "Mine", teamIds: [finance, sales, support] },
-    ]);
-    // The staff list again, with a team more; the model would take Finance.
-    const second = await fakeProvider({
-      text: JSON.stringify({
-        groups: [{ name: "Money", teamIds: [finance, legal] }],
-      }),
-      inputTokens: 40,
-      outputTokens: 20,
-    });
-    const roster = rosterOf(tag);
-    await admin.api.onboarding.saveRoster({
-      ...roster,
-      teams: [
-        ...roster.teams,
-        { id: `legal-${tag}`, name: "Legal", lead: null },
-      ],
-    });
-    const { teamGroups } = await admin.api.brain.read();
-    const sent = JSON.stringify(second.requests.map(({ body }) => body));
-
-    expect({
-      teamGroups: teamGroups.map(({ id, teamIds }) => ({ id, teamIds })),
-      // Only the team in no region was asked about.
-      askedFinance: sent.includes(finance),
-      askedLegal: sent.includes(legal),
-      firstAsked: first.requests.length > 0,
-    }).toStrictEqual({
-      teamGroups: [
-        { id: "mine", teamIds: [finance, sales, support] },
-        { id: "group-money", teamIds: [legal] },
-      ],
-      askedFinance: false,
-      askedLegal: true,
-      firstAsked: true,
-    });
-  });
-
-  it("leave the staff list saved when arranging fails or takes too long, its teams in no region", async () => {
-    const admin = await signedInApi(idp, "admin");
-    for (const reply of [{ status: 500 }, { hang: true }] as const) {
-      const tag = unique();
-      // oxlint-disable-next-line no-await-in-loop -- one case after the other
-      await fakeProvider(reply);
-      // oxlint-disable-next-line no-await-in-loop -- one case after the other
-      const view = await admin.api.onboarding.saveRoster(rosterOf(tag));
-      // oxlint-disable-next-line no-await-in-loop -- one case after the other
-      const { teams, teamGroups } = await admin.api.brain.read();
-      expect({
-        saved: view.roster?.teams.map(({ id }) => id),
-        teams: teams.some(({ id }) => id === `team-finance-${tag}`),
-        placed: teamGroups.flatMap(({ teamIds }) => teamIds),
-      }).toStrictEqual({
-        saved: [`finance-${tag}`, `sales-${tag}`, `support-${tag}`],
-        teams: true,
-        placed: [],
-      });
-    }
   });
 });

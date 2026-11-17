@@ -118,10 +118,9 @@ const stemName = msg({
 export const OTHER_TEAMS = "group-other";
 
 /**
- * The company's groups of teams, one for each lobe, in its order, as Grasp arranged them or an
- * admin changed them. The teams in none (waiting for Grasp to arrange them on the next save of the
- * staff list, or arrived since from a reading) share the last lobe as "Other teams", and so do the
- * groups the four lobes have no room for.
+ * The company's groups of teams, one for each lobe, in its order, as an admin arranged them on
+ * the map (region-edit.tsx). The teams in none share the last lobe as "Other teams", until an admin
+ * moves them, and so do the groups the four lobes have no room for.
  */
 export const groupsOf = (ws: Workspace): TeamGroup[] => {
   const known = new Set(ws.teams.map((team) => team.id));

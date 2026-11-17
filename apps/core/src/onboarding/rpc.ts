@@ -61,8 +61,6 @@ import { requireAdmin } from "@grasp-os/shared/roles";
 import { uploadMaxBytes } from "@grasp-os/shared/uploads";
 import { z } from "zod";
 
-import { readBrain } from "../brain-rpc.ts";
-import { arrangeTeams } from "../brain-team-groups.ts";
 import { CoreRpcTarget } from "../rpc-target.ts";
 import { withPerson } from "../session-check.ts";
 import type { SessionCheck } from "../session-check.ts";
@@ -181,19 +179,11 @@ export class OnboardingRpc extends CoreRpcTarget implements OnboardingApi {
         rosterSchema,
         roster
       );
-      const view = await onboardingStore(this.#env).saveRoster(
+      return await onboardingStore(this.#env).saveRoster(
         parsed,
         actorOf(person),
         { confirmed }
       );
-      // The staff list stands; then Grasp puts its teams in no region into
-      // the Brain's regions, within the time a Save may take, or leaves
-      // them for the next save (brain-team-groups.ts).
-      await arrangeTeams(this.#env, person, async () => {
-        const { teams } = await readBrain(this.#env, person);
-        return teams;
-      });
-      return view;
     });
   }
 

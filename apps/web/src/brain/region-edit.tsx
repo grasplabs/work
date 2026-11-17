@@ -25,11 +25,12 @@ import { LOBES } from "./brain-atlas.ts";
 import { useBrainData } from "./brain-data.ts";
 
 // The brain's regions as an admin arranges them, right on the Brain's map
-// (brain-nav.tsx): Grasp arranges the teams into regions by itself and that
-// counts at once (core's brain-team-groups.ts); an admin renames a region
-// in place, or moves a team to another region or to a new one of its own.
-// Each change is saved as it is made, the regions whole, and a toast offers
-// to put back the regions as they were. Anyone else sees the regions only.
+// (brain-nav.tsx): an admin renames a region in place, or moves a team to
+// another region or to a new one of its own. Each change is saved as it is
+// made, the regions whole (core's `brain.saveTeamGroups`), and a toast
+// offers to put back the regions as they were. A team in no region stands
+// under "Other teams" until an admin moves it; Grasp arranging the teams by
+// itself is core's to build. Anyone else sees the regions only.
 
 /** A region as kept: no `confirmed`, which is always so now. */
 type Kept = Omit<TeamGroup, "confirmed">;
@@ -50,7 +51,7 @@ export const keptRegions = (ws: Workspace): Kept[] => {
     .filter((group) => group.teamIds.length > 0);
 };
 
-/** The regions the Brain's map has room for: its four lobes (core's `regionsMax`). */
+/** The regions the Brain's map has room for: its four lobes. */
 const regionsMax = LOBES.length;
 
 /** `regions` with `teamId` moved into `regionId`; a region left empty goes. */
