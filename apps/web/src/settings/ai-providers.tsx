@@ -47,11 +47,11 @@ import {
 } from "../grasp/field/index.ts";
 import { Form } from "../grasp/form/index.ts";
 import {
+  Cable,
   ChevronDown,
   ChevronUp,
   Cross,
   Icon,
-  Key,
   Plus,
 } from "../grasp/icons/index.ts";
 import { Input } from "../grasp/input/index.ts";
@@ -161,17 +161,26 @@ const styles = stylex.create({
 
 type Change = (session: Session) => Promise<unknown>;
 
-/** A provider's mark: its brand's, or a key where the Brand icons have none. */
+/**
+ * A provider's mark, one size in every row of Settings (the library's
+ * answer, 17 Nov 2026): its brand's mark alone at 20px, no tile; a plug
+ * for a custom endpoint, which is no brand; and no mark at all where the
+ * Brand icons have none yet (Mistral, OpenRouter: asked of the library),
+ * never one drawn here.
+ */
 const Mark = ({ provider }: { provider: OrganizationProviderId }) => {
+  if (provider === "openai-compatible") {
+    return <Icon icon={Cable} />;
+  }
   const brand = marks[provider];
-  return brand === undefined ? (
-    <Icon icon={Key} />
-  ) : (
-    // The mark alone, no tile round it (Ruben, 17 Nov 2026): without a
-    // tile the mark is half its size's box, so `lg` draws it at 24px.
-    <BrandIcon brand={brand} decorative size="lg" tile={false} />
+  return brand === undefined ? null : (
+    <BrandIcon brand={brand} decorative size="md" tile={false} />
   );
 };
+
+/** Whether `provider` shows a mark, so a row with none has no empty media. */
+const hasMark = (provider: OrganizationProviderId): boolean =>
+  provider === "openai-compatible" || marks[provider] !== undefined;
 
 /** How a provider's calls went lately: a word for its badge, and why where they fail. */
 const useStatus = () => {
@@ -432,9 +441,11 @@ const ProviderRow = ({
     testFailure === undefined ? status.why : t`Test failed: ${testFailure}`;
   return (
     <Item size="xs">
-      <ItemMedia>
-        <Mark provider={provider.provider} />
-      </ItemMedia>
+      {hasMark(provider.provider) ? (
+        <ItemMedia>
+          <Mark provider={provider.provider} />
+        </ItemMedia>
+      ) : null}
       <ItemContent>
         <ItemTitle>
           {label}
@@ -566,32 +577,30 @@ const AddProviderDialog = ({
                 void add.run();
               }}
             >
-              <Field>
-                <FieldLabel>{t`Provider`}</FieldLabel>
-                <RadioGroup
-                  onValueChange={(value) => {
-                    setChosen(
-                      offered.find((each) => each.provider === value)?.provider
-                    );
-                  }}
-                  value={provider.provider}
-                >
-                  {offered.map((each) => (
-                    <Field key={each.provider} orientation="horizontal">
-                      <RadioGroupItem value={each.provider} />
-                      <FieldContent>
-                        <FieldLabel>
-                          <ProviderChoice
-                            label={each.label}
-                            provider={each.provider}
-                          />
-                        </FieldLabel>
-                        <FieldDescription>{each.whereItRuns}</FieldDescription>
-                      </FieldContent>
-                    </Field>
-                  ))}
-                </RadioGroup>
-              </Field>
+              <RadioGroup
+                aria-label={t`Provider`}
+                onValueChange={(value) => {
+                  setChosen(
+                    offered.find((each) => each.provider === value)?.provider
+                  );
+                }}
+                value={provider.provider}
+              >
+                {offered.map((each) => (
+                  <Field key={each.provider} orientation="horizontal">
+                    <RadioGroupItem value={each.provider} />
+                    <FieldContent>
+                      <FieldLabel>
+                        <ProviderChoice
+                          label={each.label}
+                          provider={each.provider}
+                        />
+                      </FieldLabel>
+                      <FieldDescription>{each.whereItRuns}</FieldDescription>
+                    </FieldContent>
+                  </Field>
+                ))}
+              </RadioGroup>
               {custom ? (
                 <Field>
                   <FieldLabel>{t`Address`}</FieldLabel>

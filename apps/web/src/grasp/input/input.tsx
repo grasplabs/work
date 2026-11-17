@@ -48,10 +48,11 @@ export interface InputProps extends Omit<
   size?: InputSize;
   /**
    * What kind of text: `text`, `email`, `password`, `search`, `tel` or `url`. It brings the right
-   * keyboard on a phone and the browser's own check.
+   * keyboard on a phone and the browser's own check. `time` is a time of day in the field's look:
+   * typed or stepped with the arrow keys, a phone's own picker on a tap; its value is `HH:mm`.
    * @default "text"
    */
-  type?: "text" | "email" | "password" | "search" | "tel" | "url";
+  type?: "text" | "email" | "password" | "search" | "tel" | "url" | "time";
   /**
    * The value it starts with. A form reset returns here. For a value you keep in state, pass
    * `value` and `onValueChange` instead.
@@ -237,6 +238,10 @@ export const inputStyles = stylex.create({
     // empties it where the browser does that.
     // display: none, not appearance: none: WebKit draws its own cross with appearance none too.
     "::-webkit-search-cancel-button": { display: "none" },
+    // A time field in one look in every engine: Chromium's clock button goes (Firefox and Safari
+    // draw none on a computer); its parts sit on the field's own line.
+    "::-webkit-calendar-picker-indicator": { display: "none" },
+    "::-webkit-datetime-edit": { padding: 0 },
     // Selected words in our own tone (field-selection), never the browser's blue.
     "::selection": { backgroundColor: grasp.fieldSelection, color: grasp.ink },
     "::placeholder": {

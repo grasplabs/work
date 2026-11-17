@@ -31,7 +31,10 @@ const styles = stylex.create({
     listStyle: "none",
   },
   apart: { gap: grasp.space2 },
-  lined: { rowGap: grasp.space1 },
+  // Between two rows the list's gap stands under the one above, the row's own under its line: 4px
+  // each side. The same 4px at the list's top and foot gives the first and last rows as much room
+  // from the card's edge or head line, so every row is as tall and its words centred in it.
+  lined: { rowGap: grasp.space1, paddingBlock: grasp.space1 },
 });
 
 /** A list of Items. */

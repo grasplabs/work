@@ -77,7 +77,7 @@ import {
 //
 // A webhook trigger (GRA-1560) starts on the events of one of the
 // workspace's event sources, of one type, chosen by name: an admin makes
-// the sources, with their URLs and secrets, in Settings › Webhooks.
+// the sources, with their URLs and secrets, in Settings › Incoming events.
 
 /** The provider whose connections report events of `type`. */
 const providerOf = (type: ConnectorEventType): string =>

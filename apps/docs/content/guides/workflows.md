@@ -132,7 +132,7 @@ Before its first start, `useWorkflow` is `idle`, and `loading` while the run you
 
 ## Events from outside
 
-An outside system, such as a payment provider or a shop, sends events into Grasp through a webhook source. An admin creates one per sender in Settings › Webhooks, and gives the sender its URL and secret. The sender POSTs each event as JSON, with its type and its data, signed with the secret as [Standard Webhooks](https://www.standardwebhooks.com) describes:
+An outside system, such as a payment provider or a shop, sends events into Grasp through a webhook source. An admin creates one per sender in Settings › Incoming events, and gives the sender its URL and secret. The sender POSTs each event as JSON, with its type and its data, signed with the secret as [Standard Webhooks](https://www.standardwebhooks.com) describes:
 
 ```json
 { "type": "payment.paid", "data": { "invoice": "INV-42", "amount": 120 } }

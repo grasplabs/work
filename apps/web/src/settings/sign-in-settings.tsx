@@ -108,7 +108,7 @@ export const SignInView = ({
   onRetry?: () => void;
 }) => {
   const { t } = useLingui();
-  const description = t`Your people sign in with the work accounts your organization already has. Grasp set this up with you; to change it, ask your Grasp contact.`;
+  const description = t`Your people sign in with their work accounts.`;
   const title = t`Sign-in`;
   if (
     signIn?.state === "ready" &&

@@ -287,10 +287,10 @@ test("invites someone with a role, says what each role may do, and withdraws the
   const { admin } = peopleIn("memberInvites");
   await signInTo(context, admin);
   await page.goto("/settings/members");
-  // What each role may do stands on the same page, under the members.
-  const roles = page.getByRole("region", { name: "Roles" });
+  // What each role may do sits behind the Roles row over the members.
+  await page.getByRole("button", { name: "What each role may do" }).focus();
   await expect(
-    roles.getByRole("row", { name: /^Invite people, change roles/u })
+    page.getByRole("tooltip").getByText(/^Admin: Manages people/u)
   ).toBeVisible();
 
   await page.getByRole("button", { name: "Invite", exact: true }).click();

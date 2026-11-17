@@ -1,13 +1,35 @@
-// The Sidebar's words for a row's own menu and its rename (row-actions.tsx): every word is a prop on
-// the row, with these English defaults, so a product can translate all of it.
+// The Sidebar's own words, in English. The product gives them in its languages through GraspWords
+// (src/words); a row's `actionsLabel`, `renamedLabel` and `workingLabel` still win where a caller
+// passes them. Renaming a row reads the shared rename words (src/words/rename.ts), as App shell's
+// panel title does.
 
-/** The three dots' name: which row's menu they open. */
-export const defaultActionsLabel = (label: string): string =>
-  `More for ${label}`;
+export const sidebarWords = {
+  /** The sidebar's name, said as its landmark. */
+  name: "Sidebar",
+  /** The main list's navigation, said as its landmark. */
+  main: "Main",
+  /** The search button's name. */
+  search: "Search",
+  /** The fold button's name. */
+  fold: "Show or hide the sidebar",
+  /** The tabs' name, over the main list. */
+  views: "Views",
+  /** A section's way back. */
+  back: "Back",
+  /** The theme's row in the person's menu. */
+  appearance: "Appearance",
+  /** The three dots' name: which row's menu they open. */
+  actions: (label: string) => `More for ${label}`,
+  /** What a screen reader hears once a row is renamed. */
+  renamed: (name: string) => `Renamed to ${name}`,
+  /** Said after a row's name while the agent works there. */
+  working: "Working",
+};
 
-/** The rename field's name: which row it renames. */
-export const defaultRenameLabel = (label: string): string => `Rename ${label}`;
+export type SidebarWords = typeof sidebarWords;
 
-/** What a screen reader hears once a row is renamed. */
-export const defaultRenamedLabel = (name: string): string =>
-  `Renamed to ${name}`;
+declare module "../words/words" {
+  interface GraspWordsCatalog {
+    sidebar: SidebarWords;
+  }
+}

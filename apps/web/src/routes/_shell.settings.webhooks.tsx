@@ -2,18 +2,22 @@ import { isMemberAdmin } from "@grasp-os/shared/roles";
 import { createFileRoute, redirect } from "@tanstack/react-router";
 
 import { loadFromCore } from "../load-from-core.tsx";
-import { EventSourcesSettings } from "../settings/event-sources.tsx";
+import {
+  EventSourcesSettings,
+  sourceStartsOf,
+} from "../settings/event-sources.tsx";
 import { SettingsError, SettingsLoading } from "../settings/section.tsx";
 
-// Settings › Webhooks, for the organization's own admins: the event
-// sources outside systems send events to (settings/event-sources.tsx),
-// which stays mounted whatever the list's read came to, so a secret just
-// shown outlives a read after it that fails. Core checks the role on
-// every call.
+// Settings › Incoming events (at /settings/webhooks, kept for links), for
+// the organization's own admins: the event sources outside systems send
+// events to (settings/event-sources.tsx), which stays mounted whatever the
+// list's read came to, so a secret just shown outlives a read after it that
+// fails. Core checks the role on every call.
 
-const WebhooksPage = () => (
-  <EventSourcesSettings page={Route.useLoaderData()} />
-);
+const IncomingEventsPage = () => {
+  const { sources, starts } = Route.useLoaderData();
+  return <EventSourcesSettings page={sources} starts={starts} />;
+};
 
 export const Route = createFileRoute("/_shell/settings/webhooks")({
   // Only the organization's own admins manage sources: anyone else who
@@ -27,10 +31,16 @@ export const Route = createFileRoute("/_shell/settings/webhooks")({
   },
   pendingComponent: SettingsLoading,
   errorComponent: SettingsError,
-  component: WebhooksPage,
-  loader: async ({ context: { core } }) =>
-    await loadFromCore(
-      core,
-      async (session) => await session.workflowResources.sources.list()
-    ),
+  component: IncomingEventsPage,
+  loader: async ({ context: { core } }) => {
+    const [sources, starts] = await Promise.all([
+      loadFromCore(
+        core,
+        async (session) => await session.workflowResources.sources.list()
+      ),
+      // The workflows each source starts: read once for the page.
+      sourceStartsOf(core),
+    ]);
+    return { sources, starts };
+  },
 });

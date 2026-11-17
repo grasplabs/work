@@ -17,7 +17,6 @@ import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
-import type { ReactNode } from "react";
 
 import type { Session } from "../core.ts";
 import { appName, personName, readDirectory } from "../directory.ts";
@@ -27,6 +26,8 @@ import { Badge } from "../grasp/badge/index.ts";
 import { Button } from "../grasp/button/index.ts";
 import { CodeBlock } from "../grasp/code-block/index.ts";
 import { CopyField } from "../grasp/copy-field/index.ts";
+import { DataTable } from "../grasp/data-table/index.ts";
+import type { DataTableColumn } from "../grasp/data-table/index.ts";
 import { DateRangePicker } from "../grasp/date-range-picker/index.ts";
 import {
   Dialog,
@@ -57,14 +58,6 @@ import {
   SelectValue,
   SelectContent,
 } from "../grasp/select/index.ts";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "../grasp/table/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { RowAlert } from "../settings/section.tsx";
@@ -598,22 +591,6 @@ const RecordDetails = ({
 /** How many events a page shows. */
 const pageSize = 25;
 
-/**
- * One column of the events table, as the library's Data table takes one:
- * its stable id, its header's words, and how a record fills its cell.
- * `EventsTable` draws them; swapping it for Data table keeps the columns.
- */
-interface EventColumn {
-  id: string;
-  header: string;
-  /** The header is said, not seen: an actions column. */
-  headerHidden?: boolean;
-  align?: "end";
-  /** The cell that names the row. */
-  lead?: boolean;
-  cell: (record: AuditRecord) => ReactNode;
-}
-
 /** The words the columns say, translated where they are made. */
 interface EventColumnWords {
   when: string;
@@ -625,7 +602,7 @@ interface EventColumnWords {
   detailsOf: (seq: number) => string;
 }
 
-/** The events table's columns: when, what, by whom, and its marks and details. */
+/** The events table's columns, as Data table takes them: when, what, by whom, and its marks and details. */
 const columns = ({
   directory,
   onDetails,
@@ -634,28 +611,31 @@ const columns = ({
   directory: Directory;
   onDetails: (record: AuditRecord) => void;
   words: EventColumnWords;
-}): EventColumn[] => [
+}): DataTableColumn<AuditRecord>[] => [
   {
-    id: "when",
+    key: "when",
     header: words.when,
+    value: (record) => record.receivedAt,
     cell: (record) => entryTime(record.receivedAt),
   },
   {
-    id: "event",
+    key: "event",
     header: words.event,
-    lead: true,
+    value: (record) => record.event?.action ?? "",
     cell: (record) => entryWords(record.event?.action),
   },
   {
-    id: "by",
+    key: "by",
     header: words.by,
+    value: (record) => record.event?.actor.type ?? "",
     cell: (record) => <EntryWho directory={directory} record={record} />,
   },
   {
-    id: "actions",
+    key: "actions",
     header: words.actions,
-    headerHidden: true,
     align: "end",
+    control: true,
+    value: () => "",
     cell: (record) => (
       <span {...stylex.props(styles.marks)}>
         {record.verified ? null : (
@@ -678,54 +658,6 @@ const columns = ({
     ),
   },
 ];
-
-/**
- * The events as a table, one row a record, from `columns`: the one place
- * that draws them, so the library's Data table takes its place alone.
- */
-const EventsTable = ({
-  columns: shownColumns,
-  rows,
-  label,
-}: {
-  columns: readonly EventColumn[];
-  rows: readonly AuditRecord[];
-  label: string;
-}) => (
-  <Table aria-label={label} density="compact">
-    <TableHeader>
-      <TableRow>
-        {shownColumns.map((column) => (
-          <TableHead
-            key={column.id}
-            {...(column.align === undefined ? {} : { align: column.align })}
-          >
-            {column.headerHidden === true ? (
-              <span {...stylex.props(styles.hidden)}>{column.header}</span>
-            ) : (
-              column.header
-            )}
-          </TableHead>
-        ))}
-      </TableRow>
-    </TableHeader>
-    <TableBody>
-      {rows.map((record) => (
-        <TableRow key={record.seq}>
-          {shownColumns.map((column) => (
-            <TableCell
-              key={column.id}
-              {...(column.align === undefined ? {} : { align: column.align })}
-              {...(column.lead === true ? { lead: true } : {})}
-            >
-              {column.cell(record)}
-            </TableCell>
-          ))}
-        </TableRow>
-      ))}
-    </TableBody>
-  </Table>
-);
 
 /**
  * The events that match, newest first, 25 a page with Newer and Older:
@@ -812,7 +744,14 @@ export const LogRecords = ({
   const lastShown = at * pageSize + shown.length;
   return (
     <>
-      <EventsTable columns={eventColumns} label={t`Events`} rows={shown} />
+      {/* One page of the log at a time: Newer and Older below page through core's. */}
+      <DataTable
+        columns={eventColumns}
+        density="compact"
+        label={t`Events`}
+        rowKey={(record) => String(record.seq)}
+        rows={shown}
+      />
       <nav aria-label={t`Pages of events`} {...stylex.props(styles.pager)}>
         <Text size="sm" tone="muted">
           {t`${firstShown}–${lastShown}`}

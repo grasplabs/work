@@ -609,7 +609,6 @@ export const grasp = stylex.defineConsts({
   shellGutter: "var(--grasp-shell-gutter)",
   shellInset: "var(--grasp-shell-inset)",
   shellHead: "var(--grasp-shell-head)",
-  pickerTile: "var(--grasp-picker-tile)",
   shellRow: "var(--grasp-shell-row)",
   shellRowGap: "var(--grasp-shell-row-gap)",
   shellSwitchInset: "var(--grasp-shell-switch-inset)",
@@ -635,6 +634,7 @@ export const grasp = stylex.defineConsts({
   shellPageRoomBelow: "var(--grasp-shell-page-room-below)",
   shellPageRoomChat: "var(--grasp-shell-page-room-chat)",
   pageMeasure: "var(--grasp-page-measure)",
+  pickerTile: "var(--grasp-picker-tile)",
   pageColumnMeasure: "var(--grasp-page-column-measure)",
   pageMeasureWide: "var(--grasp-page-measure-wide)",
   // Carousel: carousel.

@@ -4,17 +4,17 @@ import { isAdmin, isMemberAdmin } from "@grasp-os/shared/roles";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 
 import { formatList } from "../format.ts";
 import { Combobox } from "../grasp/combobox/index.ts";
+import { EU, Flag } from "../grasp/flags/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
-import {
-  FactRow,
-  SettingRow,
-  SettingsRows,
-} from "../grasp/setting-row/index.ts";
+import { SettingRow, SettingsRows } from "../grasp/setting-row/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import {
@@ -116,6 +116,11 @@ const zones: { value: string; label: MessageDescriptor }[] = [
     label: msg({ message: "Athens", comment: "A time zone, by its city" }),
   },
 ];
+const styles = stylex.create({
+  // A place: its flag, then its name.
+  place: { display: "inline-flex", alignItems: "center", gap: grasp.space2 },
+});
+
 /** `timeZone`'s offset from UTC now, such as "GMT+2", in the reader's language. */
 const offsetOf = (timeZone: string, locale: string): string =>
   new Intl.DateTimeFormat(locale, { timeZone, timeZoneName: "shortOffset" })
@@ -210,29 +215,32 @@ const WorkspaceSettings = ({
   return (
     <>
       <SectionCard density="compact" flush title={t`Organization`}>
+        <LogoField
+          canChange={canChange}
+          logo={organization.logo}
+          name={organization.name}
+        />
         <SettingsRows>
           <NameField canChange={canChange} name={organization.name} />
-          <LogoField
-            canChange={canChange}
-            logo={organization.logo}
-            name={organization.name}
-          />
           <TimeZoneField
             canChange={canChange}
             timeZone={organization.timeZone}
           />
-          <FactRow
-            help={t`People sign in with an address in these. To change them, ask your Grasp contact.`}
+          <SettingRow
+            info={t`People sign in with an address in these. To change them, ask your Grasp contact.`}
             label={t`Sign-in domains`}
           >
-            {formatList(organization.signInDomains)}
-          </FactRow>
-          <FactRow
-            help={t`Everything Grasp stores for you stays here.`}
+            <Text size="sm">{formatList(organization.signInDomains)}</Text>
+          </SettingRow>
+          <SettingRow
+            info={t`Everything Grasp stores for you stays here.`}
             label={t`Data location`}
           >
-            {t`European Union`}
-          </FactRow>
+            <span {...stylex.props(styles.place)}>
+              <Flag flag={EU} />
+              <Text size="sm">{t`European Union`}</Text>
+            </span>
+          </SettingRow>
         </SettingsRows>
       </SectionCard>
       <SignInSection organization={organization.name} />

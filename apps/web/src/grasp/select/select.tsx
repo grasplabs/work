@@ -82,7 +82,11 @@ export type SelectSize = "sm" | "md" | "lg";
 /** How the closed control reads: a field's box, or words with a small chevron. */
 export type SelectVariant = "field" | "text";
 
-/** The items: plain strings, `{ value, label }`, groups `{ type: "group", label, items }` and separators `{ type: "separator" }`. */
+/**
+ * The items: plain strings, `{ value, label }` (with an optional `description`, a quiet line under
+ * the item's words in the list), groups `{ type: "group", label, items }` and separators
+ * `{ type: "separator" }`.
+ */
 export type SelectItems = ListData;
 
 /** What a caller may style: where the select sits and how wide it is. Never its look or height. */
@@ -202,6 +206,11 @@ export interface SelectItemProps {
   children?: ReactNode;
   /** The words the trigger shows and typing finds, when `children` is not plain text. */
   label?: string;
+  /**
+   * One quiet line under its words in the list, saying what choosing it means ("Builds Apps and
+   * workflows"). The trigger shows the words alone.
+   */
+  description?: string;
   /**
    * Cannot be chosen: the keyboard and the pointer skip it.
    * @default false
@@ -569,8 +578,16 @@ const styles = stylex.create({
     cursor: "not-allowed",
   },
   itemWords: {
+    display: "grid",
     flexGrow: 1,
     minWidth: 0,
+  },
+  // An item's line under its words: what choosing it means, quiet, and allowed to wrap.
+  itemDescription: {
+    fontSize: grasp.textXs,
+    lineHeight: grasp.textXsLine,
+    color: grasp.muted,
+    whiteSpace: "normal",
   },
   tick: {
     display: "inline-flex",
@@ -644,6 +661,12 @@ const isInvalid = (value: unknown) => value === true || value === "true";
 
 const className = (...parts: (stylex.StyleXStyles | false)[]) =>
   stylex.props(...parts).className;
+
+/** An item's quiet line, when the data gives one (`{ value, label, description }`). */
+const descriptionOf = (item: ListItem) =>
+  "description" in item && typeof item.description === "string"
+    ? item.description
+    : undefined;
 
 const asItem = (entry: ListItem | string): ListItem =>
   typeof entry === "string" ? { value: entry, label: entry } : entry;
@@ -745,11 +768,18 @@ export const SelectItem = ({
   value,
   children,
   label,
+  description,
   disabled,
 }: SelectItemProps) => (
   <ItemPrimitive
     value={value}
-    label={label}
+    // With a line under it, the trigger and typing take the words alone, not the line too.
+    label={
+      label ??
+      (description !== undefined && typeof children === "string"
+        ? children
+        : undefined)
+    }
     disabled={disabled}
     className={(state: SelectItemState) =>
       className(
@@ -760,7 +790,12 @@ export const SelectItem = ({
       )
     }
   >
-    <span {...stylex.props(styles.itemWords)}>{children}</span>
+    <span {...stylex.props(styles.itemWords)}>
+      {children}
+      {description !== undefined && description !== "" && (
+        <span {...stylex.props(styles.itemDescription)}>{description}</span>
+      )}
+    </span>
     <SelectItemIndicator {...stylex.props(styles.tick)}>
       <Icon icon={Tick} />
     </SelectItemIndicator>
@@ -811,6 +846,7 @@ const Options = ({ items }: { items: SelectItems }) =>
               <SelectItem
                 key={item.value}
                 value={item.value}
+                description={descriptionOf(item)}
                 disabled={item.disabled}
               >
                 {item.label}
@@ -822,7 +858,12 @@ const Options = ({ items }: { items: SelectItems }) =>
     }
     const item = asItem(entry);
     return (
-      <SelectItem key={item.value} value={item.value} disabled={item.disabled}>
+      <SelectItem
+        key={item.value}
+        value={item.value}
+        description={descriptionOf(item)}
+        disabled={item.disabled}
+      >
         {item.label}
       </SelectItem>
     );
