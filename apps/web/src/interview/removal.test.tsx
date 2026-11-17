@@ -111,7 +111,12 @@ const shown = async (
       }
     )
   );
-  holdInterview({ secret: "s".repeat(43), version: 1, progress: finished });
+  holdInterview({
+    secret: "s".repeat(43),
+    kind: "own",
+    version: 1,
+    progress: finished,
+  });
   const rootRoute = createRootRoute({ component: Outlet });
   const page = createRoute({
     getParentRoute: () => rootRoute,

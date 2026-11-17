@@ -42,7 +42,7 @@ import { signedInApi, unique } from "./sign-in.ts";
 //   anything at all.
 // - A team's or a person's name, or a count of anyone, reaching what a
 //   member reads; a team's or a person's name reaching any model.
-// - A backer's withdrawal, or a line moved to their team, leaving an
+// - A backer's withdrawal, or a line moved to how their team works, leaving an
 //   opinion readable after the change commits; and the change going
 //   through while the Brain can't take it out.
 // - Code (an App, a workflow, a chat's code) reading one, or telling that

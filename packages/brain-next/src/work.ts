@@ -216,6 +216,12 @@ export interface AskRequest {
   role?: ModelRole;
 }
 
+/** What the host's model answered a handler: its text, and the model that answered, as the host names it. */
+export interface Answered {
+  text: string;
+  model: string;
+}
+
 /** A step's name: one lowercase word. */
 const stepPattern = /^[a-z][a-z0-9_]{0,31}$/u;
 
@@ -229,7 +235,7 @@ export interface WorkContext {
    * `WorkError` for the item's own failures, and `WorkWaitsError` while the
    * queue is paused: let both through.
    */
-  ask: (request: AskRequest) => Promise<string>;
+  ask: (request: AskRequest) => Promise<Answered>;
   /**
    * The host's embedders: the model they run now (null while none ships),
    * and `embed`, which embeds passages with it in what is left of the
@@ -1002,7 +1008,7 @@ const askWithin = async (
   kind: string,
   { system, input, step, role = "careful" }: AskRequest,
   attempt: Attempt
-): Promise<string> => {
+): Promise<Answered> => {
   const { now, signal, deadline } = attempt;
   signal.throwIfAborted();
   const purpose =
@@ -1049,7 +1055,7 @@ const askWithin = async (
     );
   }
   answered(storage, now());
-  return parsed.data.text;
+  return { text: parsed.data.text, model: parsed.data.model };
 };
 
 /**

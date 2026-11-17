@@ -11,8 +11,9 @@ import type { Checks } from "./team-claims.ts";
 
 // What people across the company think of their work (GRA-1987, rule 2,
 // the owner's decision of 17 November): what someone told and left only
-// counted anonymously (a line with no `share`, never who does the work)
-// is never their team's. It counts only towards the company's opinions:
+// counted anonymously (a line with no `share`, never one only used to
+// know whom to ask, `onlyForAsking`) is never shared in the company as how
+// their team works. It counts only towards the company's opinions:
 // one stands while five or more people across the company back it
 // (`opinionBackersMin`), in a company where seven or more have such a line
 // (`companyMayHaveOpinions`), and it never names a team.

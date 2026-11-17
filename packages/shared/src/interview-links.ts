@@ -176,8 +176,9 @@ export const interviewFactSchema = z.strictObject({
   /** Read back and agreed to before. */
   agreed: z.literal(true).optional(),
   /**
-   * Where the person chose this line goes (GRA-1987): `team`, shared with
-   * their team as how they work; missing, only counted anonymously. Missing
+   * Where the person chose this line goes (GRA-1987): `team`, shared in
+   * their company as how their team works; missing, only counted
+   * anonymously. Missing
    * is the strict side, so an interview saved before there was a choice
    * reaches no team result. Approving binds it (`factRevision`).
    */
@@ -186,33 +187,58 @@ export const interviewFactSchema = z.strictObject({
 export type InterviewFact = z.output<typeof interviewFactSchema>;
 
 /**
- * The tags whose lines start out only counted anonymously: what someone
- * wishes, what they use AI for and think of it, and their own list or
- * unofficial tool, any of which can get someone in trouble. Who does the
- * work names a colleague and is never shared (`neverShared`). Every other
- * tag describes how the work runs and starts out shared with the team.
- * Only where a line starts: the person moves any line before approving.
+ * The tags whose lines start out shared as how the team works: what
+ * describes how the work runs. Every tag not listed, a tag added later
+ * included, starts out only counted anonymously: what someone wishes,
+ * what they use AI for and think of it, and their own list or unofficial
+ * tool, any of which can get someone in trouble. Only where a line
+ * starts: the person moves any line before approving.
  */
-const anonymousByDefault: ReadonlySet<FactTag> = new Set([
-  "wish",
-  "ai",
-  "workaround",
-  "who",
+const teamByDefault: ReadonlySet<FactTag> = new Set([
+  "step",
+  "system",
+  "handoff",
+  "wait",
+  "exception",
+  "rule",
+  "judgment",
+  "number",
+  "done",
+  "stop",
+  "case",
+  "term",
+  "next",
+  "work",
 ]);
 
-/** The tag whose line is only used to know whom to ask: never shared with the team. */
-export const neverShared = "who" satisfies FactTag;
+/**
+ * Whether a line of `tag`, in an interview of `kind`, is only used to know
+ * whom to ask, and is never shared: who does the work names a colleague,
+ * and the work someone says they do instead of what they were asked about
+ * decides which colleague is asked (core's onboarding/store.ts
+ * `#queueReferral`). A lead's work is their team's: what their map is drawn
+ * from.
+ */
+export const onlyForAsking = (tag: FactTag, kind: InterviewKind): boolean =>
+  tag === "who" || (tag === "work" && kind === "own");
 
-/** Where a line of `tag` starts out, as Stephen writes it down. */
-export const shareByDefault = (tag: FactTag): InterviewFact["share"] =>
-  anonymousByDefault.has(tag) ? undefined : "team";
+/** Where a line of `tag`, in an interview of `kind`, starts out as Stephen writes it down. */
+export const shareByDefault = (
+  tag: FactTag,
+  kind: InterviewKind
+): InterviewFact["share"] =>
+  teamByDefault.has(tag) && !onlyForAsking(tag, kind) ? "team" : undefined;
 
-/** Whether `fact` is shared with the team as how they work: chosen so, and of a tag that may be. */
-export const sharedWithTeam = ({
-  tag,
-  share,
-}: Pick<InterviewFact, "tag" | "share">): boolean =>
-  share === "team" && tag !== neverShared;
+/**
+ * Whether `fact`, in an interview of `kind`, is shared as how the team
+ * works: chosen so, and not a line only used to know whom to ask. The one
+ * rule for what of an interview reaches a team's results (core's
+ * onboarding/store.ts `drawInput`).
+ */
+export const sharedWithTeam = (
+  { tag, share }: Pick<InterviewFact, "tag" | "share">,
+  kind: InterviewKind
+): boolean => share === "team" && !onlyForAsking(tag, kind);
 
 /**
  * A fact as an interview keeps it: one erased (`erasedFact`) keeps its id
@@ -229,10 +255,6 @@ const keptFactSchema = interviewFactSchema
           fact.share === undefined
         : true,
     "An erased fact holds nothing"
-  )
-  .refine(
-    (fact) => fact.tag !== neverShared || fact.share === undefined,
-    "Who does the work is never shared"
   );
 
 /**
@@ -316,11 +338,12 @@ export const participationNotice = {
   /** Why: how their team's work is done, for the company's Grasp. */
   purpose: "onboarding.interview",
   /**
-   * Who reads it (GRA-1987): their team, the lines they chose to share, as
-   * how the team works; the company, what they think, only counted
+   * Who reads it (GRA-1987): everyone in the company, the lines they chose
+   * to share, as how their team works (a team's claims and drawings are
+   * read by every member, GRA-1748); what they think, only counted
    * anonymously across it. Never by name.
    */
-  audience: "team.work_and_company.views",
+  audience: "company.team_work_and_anonymous_views",
 } as const;
 
 /** A fact's revision: the SHA-256 (hex) of exactly what was read back and what the record keeps. */

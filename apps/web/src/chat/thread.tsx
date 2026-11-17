@@ -56,8 +56,8 @@ import type { ThinkingOf } from "../brain/thinking/play.ts";
 import { useCopy } from "../copy.ts";
 import { ConnectAiProvider } from "../frame/connect-ai-provider.tsx";
 import { useMemberAdmin } from "../use-member-admin.ts";
-import { pendingAgentChange, ThreadAgentChange } from "./agent-change-card.tsx";
-import { pendingAgentDraft, ThreadAgentDraft } from "./agent-draft-card.tsx";
+import { ThreadAgentChange } from "./agent-change-card.tsx";
+import { ThreadAgentDraft } from "./agent-draft-card.tsx";
 import { AnswerMarkdown } from "./answer-markdown.tsx";
 import {
   SeeInBrain,
@@ -66,7 +66,7 @@ import {
 } from "./answer-thinking.tsx";
 import { answeredOf } from "./answered.ts";
 import { AskedLine } from "./asked-questions.tsx";
-import { pendingPlan, ThreadPlan } from "./build-progress.tsx";
+import { ThreadPlan } from "./build-progress.tsx";
 import type { ThreadBuild } from "./build-progress.tsx";
 import { FileCards } from "./chat-files.tsx";
 import {
@@ -76,6 +76,7 @@ import {
 } from "./conversation.tsx";
 import { failureMessage } from "./failure.ts";
 import { GraspSign } from "./grasp-sign.tsx";
+import { pendingCard } from "./make-card.tsx";
 import { recoveredSteps } from "./recovered.ts";
 import { SavedMemoryLine } from "./saved-memory.tsx";
 import { readingFileOf, signOf } from "./sign.ts";
@@ -1232,9 +1233,8 @@ export const ChatThread = ({
       </>
     );
   const writtenGoesOn = written !== null && items.at(-1)?.kind === "answer";
-  const waiting = pendingPlan(messages, running);
-  const drafted = pendingAgentDraft(messages, running);
-  const changing = pendingAgentChange(messages, running);
+  // The one card that waits for the person, whichever it is.
+  const waiting = pendingCard(messages, running);
   const reading =
     doing === "reading" ? (
       <div aria-busy="true">
@@ -1284,7 +1284,7 @@ export const ChatThread = ({
             build={build}
             chatId={chatId}
             draft={message.agentDraft}
-            waiting={drafted?.callId === message.agentDraft.callId}
+            waiting={waiting?.callId === message.agentDraft.callId}
           />
         )}
         {message.agentChange === undefined ? null : (
@@ -1292,7 +1292,7 @@ export const ChatThread = ({
             build={build}
             change={message.agentChange}
             chatId={chatId}
-            waiting={changing?.callId === message.agentChange.callId}
+            waiting={waiting?.callId === message.agentChange.callId}
           />
         )}
       </Fragment>

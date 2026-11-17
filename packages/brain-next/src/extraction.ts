@@ -31,11 +31,17 @@ import type {
   Speaker,
 } from "./contract.ts";
 import { bucketCallMs } from "./embedding.ts";
+import {
+  extractionCallSchema,
+  extractorSchema,
+  promptVersionOf,
+} from "./extractors.ts";
+import type { ExtractionCall, Extractor } from "./extractors.ts";
 import { fileKeyOf, hashOf } from "./files.ts";
 import { isErasedPerson, namingOf } from "./people.ts";
 import { accessOfKey } from "./reader-sets.ts";
 import { hashesOf, writeAdd } from "./remember.ts";
-import type { Adding } from "./remember.ts";
+import type { DrawnAdding } from "./remember.ts";
 import { isRestoring } from "./restoring.ts";
 import { dayOf, endOfDay, resolveWhen, whenSchema } from "./when.ts";
 import type { Resolved, When } from "./when.ts";
@@ -131,7 +137,13 @@ const payloadSchema = z.strictObject({
     .strictObject({
       entities: z.array(newEntitySchema),
       memories: z.array(z.record(z.string(), z.unknown())),
+      /** The calls that drew each memory, by its place in `memories`. */
+      extractors: z.array(extractorSchema),
     })
+    .refine(
+      ({ memories, extractors }) => memories.length === extractors.length,
+      "An extractor for each memory"
+    )
     .optional(),
   /** Where the piece of `kept` ended, and whether it was the version's last. */
   cut: z
@@ -141,11 +153,14 @@ const payloadSchema = z.strictObject({
    * A piece part-way through its checks, recorded after its read call and
    * after each check call (`WorkContext.keep`): where the piece ends, how
    * many memories the read proposed, what code kept of them (each a
-   * statement the checker is shown, by its place in `candidates`), and
-   * of those the ones checked so far and the ones supported. A run that
-   * reaches the queue's calls for one attempt goes on in the next, from
-   * here, asking nothing again; the same statements and entities are
-   * shown, as they are replayed, never asked anew.
+   * statement the checker is shown, by its place in `candidates`), the
+   * read call, and each check call so far, with the statements it was
+   * shown and those it supported. A run that reaches the queue's calls for
+   * one attempt goes on in the next, from here, asking nothing again; the
+   * same statements and entities are shown, as they are replayed, never
+   * asked anew. Each call as its memories record it (extractors.ts): an
+   * admin may change the model, or a release the check's prompt, between
+   * two check calls of one piece.
    */
   checking: z
     .strictObject({
@@ -156,8 +171,14 @@ const payloadSchema = z.strictObject({
         entities: z.array(newEntitySchema),
         memories: z.array(z.record(z.string(), z.unknown())),
       }),
-      checked: z.array(z.int().nonnegative()),
-      supported: z.array(z.int().nonnegative()),
+      read: extractionCallSchema,
+      checks: z.array(
+        z.strictObject({
+          call: extractionCallSchema,
+          shown: z.array(z.int().nonnegative()),
+          supported: z.array(z.int().nonnegative()),
+        })
+      ),
     })
     .optional(),
 });
@@ -471,6 +492,11 @@ interface Proposal extends Candidates {
   proposed: number;
 }
 
+/** What a piece writes: its supported memories, each with the calls that drew it, by its place in `memories`. */
+interface Drawn extends Candidates {
+  extractors: Extractor[];
+}
+
 /** What of the model's `answer` holds against the text (above). */
 const candidatesOf = (
   seen: Seen,
@@ -515,6 +541,27 @@ const keeping = (entities: NewEntity[], memories: NewMemory[]): Candidates => {
   return {
     entities: entities.filter(({ key }) => mentioned.has(key)),
     memories,
+  };
+};
+
+/** `drawn`'s memories that `keeps` keeps, each with its extractor, and only the entities they mention. */
+const drawnKeeping = (
+  { entities, memories, extractors }: Drawn,
+  keeps: (index: number) => boolean
+): Drawn => {
+  const kept = memories.flatMap((memory, index) => {
+    const extractor = extractors[index];
+    if (extractor === undefined) {
+      throw new Error("A memory drawn without its extractor");
+    }
+    return keeps(index) ? [{ memory, extractor }] : [];
+  });
+  return {
+    ...keeping(
+      entities,
+      kept.map(({ memory }) => memory)
+    ),
+    extractors: kept.map(({ extractor }) => extractor),
   };
 };
 
@@ -646,13 +693,19 @@ const checkMessagesOf = (
   return messages;
 };
 
-/** An add as the item keeps it: its memories' ends as milliseconds. */
-const keptJsonOf = ({ entities, memories }: Candidates) => ({
+/** Candidates as the item keeps them: their memories' ends as milliseconds. */
+const candidatesJsonOf = ({ entities, memories }: Candidates) => ({
   entities,
   memories: memories.map(({ validUntil, ...memory }) => ({
     ...memory,
     ...(validUntil === undefined ? {} : { validUntil: validUntil.getTime() }),
   })),
+});
+
+/** An add as the item keeps it, with the calls that drew each memory. */
+const keptJsonOf = (drawn: Drawn): NonNullable<Payload["kept"]> => ({
+  ...candidatesJsonOf(drawn),
+  extractors: drawn.extractors,
 });
 
 /** `checking` as the item keeps it. */
@@ -662,10 +715,17 @@ const checkingJsonOf = (
   next: checking.next,
   last: checking.last,
   proposed: checking.proposed,
-  candidates: keptJsonOf(checking.candidates),
-  checked: [...checking.checked],
-  supported: [...checking.supported],
+  candidates: candidatesJsonOf(checking.candidates),
+  read: checking.read,
+  checks: checking.checks,
 });
+
+/** A check call, its statements by their place among a piece's candidates. */
+interface Check {
+  call: ExtractionCall;
+  shown: number[];
+  supported: number[];
+}
 
 /** A piece part-way through its checks (`Payload["checking"]`), as a run works with it. */
 interface Checking {
@@ -673,8 +733,8 @@ interface Checking {
   last: boolean;
   proposed: number;
   candidates: Candidates;
-  checked: Set<number>;
-  supported: Set<number>;
+  read: ExtractionCall;
+  checks: Check[];
 }
 
 /**
@@ -697,9 +757,11 @@ const checkOn = async (
   called: number
 ): Promise<boolean> => {
   const { entities, memories } = checking.candidates;
+  const checked = new Set(checking.checks.flatMap(({ shown }) => shown));
   const pending = memories.flatMap((memory, index) =>
-    checking.checked.has(index) ? [] : [[index, memory] as const]
+    checked.has(index) ? [] : [[index, memory] as const]
   );
+  const prompt = await promptVersionOf(checkInstructions);
   let calls = called;
   let progress = 0;
   for (const { input, indexes } of checkMessagesOf(
@@ -715,7 +777,7 @@ const checkOn = async (
     }
     calls += 1;
     // oxlint-disable-next-line no-await-in-loop -- one check call at a time, each its turn in the queue's rate
-    const answer = await context.ask({
+    const { text: answer, model } = await context.ask({
       step: "check",
       role: "quick",
       system: checkInstructions,
@@ -725,16 +787,17 @@ const checkOn = async (
     if (!verdict.success) {
       throw new WorkError("invalid_answer");
     }
-    for (const index of indexes) {
-      checking.checked.add(index);
-    }
     // Only what this message showed: a verdict never speaks for a
     // statement it wasn't shown.
-    for (const index of verdict.data.supported) {
-      if (indexes.has(index)) {
-        checking.supported.add(index);
-      }
-    }
+    checking.checks.push({
+      call: { prompt, model },
+      shown: [...indexes],
+      supported: [
+        ...new Set(
+          verdict.data.supported.filter((index) => indexes.has(index))
+        ),
+      ],
+    });
     context.keep({ ...payload, checking: checkingJsonOf(checking) });
     progress += 1;
   }
@@ -962,7 +1025,7 @@ const writePiece = async (
     version,
     last,
   }: {
-    adding: Candidates;
+    adding: Drawn;
     change: string;
     access: Access;
     source: SourceId;
@@ -971,11 +1034,12 @@ const writePiece = async (
   }
 ): Promise<"written" | "superseded"> => {
   const { sql } = storage;
-  const addOf = (kept: Candidates): Adding => ({
+  const addOf = (kept: Drawn): DrawnAdding => ({
     change,
     access,
     entities: kept.entities,
     memories: kept.memories,
+    extractors: kept.extractors,
     ...(last ? { extracted: { source, version } } : {}),
   });
   // What is in the word of a person an erasure took is left out here
@@ -989,11 +1053,9 @@ const writePiece = async (
     [],
     adding.memories.map(({ speaker }) => speaker)
   );
-  const kept = keeping(
-    adding.entities,
-    adding.memories.filter(
-      (_memory, index) => !isErasedPerson(sql, speakers[index])
-    )
+  const kept = drawnKeeping(
+    adding,
+    (index) => !isErasedPerson(sql, speakers[index])
   );
   const whole = addOf(adding);
   const full = addOf(kept);
@@ -1046,11 +1108,11 @@ const withoutKept = ({
   ...payload
 }: Payload): Payload => payload;
 
-/** An add as the item kept it (`keptJsonOf`), as an add takes it again. */
-const keptOf = ({
+/** Candidates as the item kept them (`candidatesJsonOf`), as an add takes them again. */
+const storedCandidatesOf = ({
   entities,
   memories,
-}: NonNullable<Payload["kept"]>): Candidates => ({
+}: NonNullable<Payload["checking"]>["candidates"]): Candidates => ({
   entities,
   memories: memories.map((memory) =>
     newMemorySchema.parse({
@@ -1062,13 +1124,19 @@ const keptOf = ({
   ),
 });
 
+/** An add as the item kept it (`keptJsonOf`), as an add takes it again. */
+const keptOf = (kept: NonNullable<Payload["kept"]>): Drawn => ({
+  ...storedCandidatesOf(kept),
+  extractors: kept.extractors,
+});
+
 /**
  * What a run of the item's piece kept, as its one add (none when it
  * writes nothing), and where the piece ended; neither before a run did.
  */
 const keptRecordOf = (
   payload: Payload
-): { kept: Candidates | undefined; cut: Payload["cut"] } => ({
+): { kept: Drawn | undefined; cut: Payload["cut"] } => ({
   kept: payload.kept === undefined ? undefined : keptOf(payload.kept),
   cut: payload.cut,
 });
@@ -1095,18 +1163,18 @@ const proposalOf = async (
     words: sequenceOf(piece.text),
     emails: emailsOf(piece.text),
   };
-  const proposal = candidatesOf(
-    seen,
-    drawingOf(payload),
-    await context.ask({ system: proposeInstructions, input: piece.text })
-  );
+  const { text, model } = await context.ask({
+    system: proposeInstructions,
+    input: piece.text,
+  });
+  const proposal = candidatesOf(seen, drawingOf(payload), text);
   return {
     next: piece.next,
     last: piece.last,
     proposed: proposal.proposed,
     candidates: keeping(proposal.entities, proposal.memories),
-    checked: new Set(),
-    supported: new Set(),
+    read: { prompt: await promptVersionOf(proposeInstructions), model },
+    checks: [],
   };
 };
 
@@ -1115,30 +1183,45 @@ const checkingOf = (payload: Payload): Checking | undefined => {
   if (payload.checking === undefined) {
     return undefined;
   }
-  const { candidates, checked, supported, ...rest } = payload.checking;
+  const { candidates, checks, ...rest } = payload.checking;
   return {
     ...rest,
-    candidates: keptOf(candidates),
-    checked: new Set(checked),
-    supported: new Set(supported),
+    candidates: storedCandidatesOf(candidates),
+    // A copy: a run adds its check calls to it as they come.
+    checks: [...checks],
   };
 };
 
 /**
- * What a checked piece writes: its supported memories as one add; none
- * when nothing was kept, but on the last piece, whose add says the
- * version is extracted. One event for the piece: counts alone, nothing
- * of the text.
+ * What a checked piece writes: its supported memories as one add, each
+ * with the read call and the check call that supported it; none when
+ * nothing was kept, but on the last piece, whose add says the version is
+ * extracted. One event for the piece: counts alone, nothing of the text.
  */
 const addOfChecked = (
   payload: Payload,
   checking: Checking
-): Candidates | undefined => {
+): Drawn | undefined => {
   const { entities, memories } = checking.candidates;
-  const kept = keeping(
-    entities,
-    memories.filter((_memory, index) => checking.supported.has(index))
+  // Each statement is shown to one check call (`checkOn`): its verdict.
+  const supportedBy = new Map(
+    checking.checks.flatMap(({ call, supported }) =>
+      supported.map((index) => [index, call] as const)
+    )
   );
+  const drawn = memories.flatMap((memory, index) => {
+    const check = supportedBy.get(index);
+    return check === undefined
+      ? []
+      : [{ memory, extractor: { read: checking.read, check } }];
+  });
+  const kept: Drawn = {
+    ...keeping(
+      entities,
+      drawn.map(({ memory }) => memory)
+    ),
+    extractors: drawn.map(({ extractor }) => extractor),
+  };
   log.info("brain.extract", {
     version: payload.version,
     from: payload.from,

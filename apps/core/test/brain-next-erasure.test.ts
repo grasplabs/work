@@ -460,7 +460,7 @@ describe("erasing a source", { timeout: 120_000 }, () => {
     await brainOf(inJurisdiction(env, env.BRAIN_STORE)).work({
       ask: async () => {
         await Promise.resolve();
-        return { kind: "answer", text: "" };
+        return { kind: "answer", text: "", model: "test/model" };
       },
       at: new Date(),
       embedders: {

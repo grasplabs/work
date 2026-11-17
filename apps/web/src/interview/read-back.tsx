@@ -133,7 +133,9 @@ const ReadBackLine = ({
         </Button>
       </div>
       <Destination
-        of={words}
+        // The line's words describe it; while they are being put right,
+        // the field holds them, and nothing that isn't there is named.
+        of={draft === null ? words : undefined}
         onMove={() => {
           moveLine(id, share);
         }}

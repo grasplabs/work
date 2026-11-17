@@ -216,6 +216,10 @@ const ProducerBadge = ({ producer }: { producer: BrainSourceProducer }) => {
       message: "The company's teams",
       context: "a source of the Brain",
     }),
+    connected: t({
+      message: "Read from a shared connection",
+      context: "a source of the Brain",
+    }),
   }[producer];
   return <Badge variant="outline">{label}</Badge>;
 };

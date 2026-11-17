@@ -1,21 +1,15 @@
 import { unmetNeeds } from "@grasp-os/shared/chat";
-import type {
-  ChatBuilt,
-  ChatMessage,
-  ChatPlanned,
-} from "@grasp-os/shared/chat";
+import type { ChatBuilt, ChatPlanned } from "@grasp-os/shared/chat";
 import type { ModelEffort } from "@grasp-os/shared/models";
-import { Button } from "@grasp-os/ui/components/button";
-import { Trans, useLingui } from "@lingui/react/macro";
+import { useLingui } from "@lingui/react/macro";
 import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 
 import { markMade } from "../apps/made-tip.ts";
 import { useCoreRead } from "../apps/use-core-read.ts";
-import { ErrorText } from "../error-text.tsx";
-import { useCoreAction } from "../use-core-action.ts";
 import { setActiveChat } from "./active-chat.ts";
 import { slotOf } from "./chat-subject.ts";
+import { MakeActions } from "./make-card.tsx";
 import { PlanCard } from "./plan-card.tsx";
 
 // Making something new in a chat (any chat): the plan Grasp's agent
@@ -34,18 +28,6 @@ export interface ThreadBuild {
   /** Takes the person to the box, to say what to change about the plan. */
   onChangePlan: () => void;
 }
-
-/** The plan waiting for the person: the latest reply's, while nothing runs and nothing was said since. */
-export const pendingPlan = (
-  messages: readonly ChatMessage[],
-  running: boolean
-): ChatPlanned | undefined => {
-  if (running) {
-    return undefined;
-  }
-  const last = messages.findLast(({ role }) => role !== "result");
-  return last?.role === "assistant" ? last.planned : undefined;
-};
 
 /** How many times the window came back to the page: when what was connected meanwhile is read again. */
 const useReturns = (): number => {
@@ -76,8 +58,6 @@ const PlanActions = ({
 }) => {
   const { t } = useLingui();
   const navigate = useNavigate();
-  const { busy, failure, run } = useCoreAction();
-  const { model, effort } = build;
   const land = (built: ChatBuilt): void => {
     const { app, workflow } = built;
     if (app !== undefined) {
@@ -93,44 +73,16 @@ const PlanActions = ({
     }
   };
   return (
-    <div className="flex flex-col gap-2">
-      <div className="flex flex-wrap gap-2">
-        <Button
-          disabled={!ready || busy || model === undefined}
-          onClick={() => {
-            if (model === undefined) {
-              return;
-            }
-            void (async () => {
-              const built = await run(
-                async (session) =>
-                  await session.chats.build(chatId, {
-                    plan: plan.callId,
-                    text: t`Build it`,
-                    model,
-                    ...(effort === undefined ? {} : { effort }),
-                  })
-              );
-              if (built !== undefined) {
-                land(built);
-              }
-            })();
-          }}
-          variant="highlight"
-        >
-          <Trans>Build it</Trans>
-        </Button>
-        <Button
-          onClick={() => {
-            build.onChangePlan();
-          }}
-          variant="outline"
-        >
-          <Trans>Change the plan</Trans>
-        </Button>
-      </div>
-      <ErrorText>{failure}</ErrorText>
-    </div>
+    <MakeActions
+      build={build}
+      changeLabel={t`Change the plan`}
+      label={t`Build it`}
+      onDone={land}
+      press={async (session, asked) =>
+        await session.chats.build(chatId, { plan: plan.callId, ...asked })
+      }
+      ready={ready}
+    />
   );
 };
 

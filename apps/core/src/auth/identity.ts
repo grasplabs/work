@@ -6,12 +6,37 @@ import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
+import type { DrizzleD1Database } from "drizzle-orm/d1";
 
 import { accounts, members, teamMembers, teams } from "../db/core/schema.ts";
 import { staffMayStay } from "../onboarding/gate.ts";
 import { reachesWorkspace } from "../session-check.ts";
 import { authFor, currentMembership, organizationId } from "./auth.ts";
 import { providerIds, signInConfig } from "./config.ts";
+
+/**
+ * A member's reads as `memberOf` makes them, for one batch with others,
+ * so what else is read is of the same snapshot of the database (core's
+ * Brain module reads the shared connections' audiences so).
+ */
+export const memberReads = (db: DrizzleD1Database, userId: string) =>
+  [
+    db
+      .select({ role: members.role })
+      .from(members)
+      .where(currentMembership(userId)),
+    db
+      .select({ id: teams.id, name: teams.name })
+      .from(teamMembers)
+      .innerJoin(teams, eq(teams.id, teamMembers.teamId))
+      .where(
+        and(
+          eq(teamMembers.userId, userId),
+          eq(teams.organizationId, organizationId)
+        )
+      )
+      .orderBy(teams.name),
+  ] as const;
 
 /**
  * A person's role in the organization, read now. `undefined` when they have
@@ -22,11 +47,8 @@ export const memberRole = async (
   database: D1Database,
   userId: string
 ): Promise<Role | undefined> => {
-  const db = drizzle(database);
-  const [membership] = await db
-    .select({ role: members.role })
-    .from(members)
-    .where(currentMembership(userId));
+  const [read] = memberReads(drizzle(database), userId);
+  const [membership] = await read;
   const role = roleSchema.safeParse(membership?.role);
   return role.success ? role.data : undefined;
 };
@@ -35,18 +57,10 @@ export const memberRole = async (
 export const teamsOf = async (
   database: D1Database,
   userId: string
-): Promise<Identity["teams"]> =>
-  await drizzle(database)
-    .select({ id: teams.id, name: teams.name })
-    .from(teamMembers)
-    .innerJoin(teams, eq(teams.id, teamMembers.teamId))
-    .where(
-      and(
-        eq(teamMembers.userId, userId),
-        eq(teams.organizationId, organizationId)
-      )
-    )
-    .orderBy(teams.name);
+): Promise<Identity["teams"]> => {
+  const [, read] = memberReads(drizzle(database), userId);
+  return await read;
+};
 
 /**
  * A member of the organization, as the checks on what they may do see
@@ -62,6 +76,18 @@ export type Acting = Member & {
   actor?: AuditActor;
   /** The chat's agent acting, as what it writes records it. */
   via?: AgentProposer;
+};
+
+/** The member `userId`, from what `memberReads` read; `undefined` with no current membership. */
+export const memberFrom = (
+  userId: string,
+  membership: readonly { role: string }[],
+  memberTeams: Identity["teams"]
+): Member | undefined => {
+  const role = roleSchema.safeParse(membership[0]?.role);
+  return role.success
+    ? { userId, role: role.data, teams: memberTeams, staff: false }
+    : undefined;
 };
 
 /**

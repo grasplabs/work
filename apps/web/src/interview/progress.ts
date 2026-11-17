@@ -19,7 +19,7 @@ import type {
   InterviewWants,
   StephenTurn,
 } from "@grasp-os/shared/interview-turn";
-import type { Interviewer } from "@grasp-os/shared/onboarding";
+import type { InterviewKind, Interviewer } from "@grasp-os/shared/onboarding";
 
 // Where someone's interview stands, as their page keeps it and sends it to
 // core to be kept (`InterviewProgress`), and how each thing that happens
@@ -184,7 +184,11 @@ const withoutEmpty = (fact: InterviewFact): InterviewFact => {
 export const afterTurn = (
   progress: InterviewProgress,
   turn: StephenTurn,
-  { answered, pin }: { answered: number; pin?: number }
+  {
+    answered,
+    pin,
+    kind,
+  }: { answered: number; pin?: number; kind: InterviewKind }
 ): InterviewProgress => {
   const marks = turn.facts
     .filter(({ quote }) => quote !== "")
@@ -231,7 +235,7 @@ export const afterTurn = (
     ) {
       have.add(words);
       // Where it goes starts from what kind of thing it is: theirs to move before they agree.
-      const share = shareByDefault(fact.tag);
+      const share = shareByDefault(fact.tag, kind);
       added.push({
         id: nextFactId([...changed, ...added]),
         tag: fact.tag,
@@ -283,8 +287,8 @@ export const withFactText = (
 });
 
 /**
- * Where the lines in `shares` go, as they chose: shared with their team as
- * how they work (`team`), or only counted anonymously (none). Approving
+ * Where the lines in `shares` go, as they chose: shared in their company
+ * as how their team works (`team`), or only counted anonymously (none). Approving
  * binds where a line goes (`factRevision`), so a line moved after they
  * agreed counts again only once it is approved where it goes now.
  */
