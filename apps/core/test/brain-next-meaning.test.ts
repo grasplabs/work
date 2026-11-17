@@ -362,6 +362,69 @@ describe("recall by meaning, through core", () => {
     });
   });
 
+  it.for<{
+    when: "after a failed question" | "while the files are missing";
+    bucket: "throws" | "hangs";
+    reason: string;
+  }>([
+    { when: "after a failed question", bucket: "throws", reason: "failed" },
+    { when: "after a failed question", bucket: "hangs", reason: "failed" },
+    { when: "while the files are missing", bucket: "throws", reason: "failed" },
+    // The look at the bucket takes the whole limit, so the question is late.
+    {
+      when: "while the files are missing",
+      bucket: "hangs",
+      reason: "timed_out",
+    },
+  ])(
+    "answers by words within the question's limit when the model files bucket $bucket $when",
+    async ({ when, bucket, reason }) => {
+      const files = env.MODEL_FILES;
+      await questions().breakAs("crash");
+      if (when === "while the files are missing") {
+        await Promise.all(
+          modelFilesOf(shippedModel).map(async (file) => {
+            await files.delete(modelFileKey(file));
+          })
+        );
+        // Core now knows they are missing, and looks at the bucket first.
+        await recalled(withWords);
+      }
+      // A bucket that is down, or one that never answers.
+      const broken = {
+        head: async (): Promise<never> =>
+          bucket === "throws"
+            ? await Promise.reject(new Error("The bucket is down"))
+            : await Promise.withResolvers<never>().promise,
+      };
+      Reflect.set(env, "MODEL_FILES", broken);
+      const startedAt = Date.now();
+      try {
+        const { value, warned } = await recalled(withWords);
+        const tookMs = Date.now() - startedAt;
+        Reflect.set(env, "MODEL_FILES", files);
+        await questions().breakAs(null);
+        const byWords = await withoutMeaning(withWords);
+
+        expect({
+          pack: value,
+          warned,
+          inTime: tookMs < 2000,
+        }).toStrictEqual({
+          pack: byWords,
+          warned: [{ event: "brain.recall.without_meaning", reason }],
+          inTime: true,
+        });
+      } finally {
+        Reflect.set(env, "MODEL_FILES", files);
+        await putTestModel(files, shippedModel);
+        await questions().breakAs(null);
+        // So no later test starts with the files known missing.
+        await recalled(question);
+      }
+    }
+  );
+
   it("asks the question embedder nothing as of a moment, and logs nothing", async () => {
     // Held: a call would wait for the deadline and log it.
     await questions().breakAs("held");

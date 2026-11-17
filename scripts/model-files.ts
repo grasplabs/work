@@ -24,7 +24,7 @@
  *      R2_SECRET_ACCESS_KEY
  * Usage: vp run model-files [--dir <dir> | --all]
  */
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   constants,
   copyFileSync,
@@ -64,17 +64,29 @@ export const modelCacheDir = path.join(
 export const cachedModelFile = (file: ModelFile): string =>
   path.join(modelCacheDir, file.sha256);
 
-/** Whether the cache holds `file`, at its size (it was checked as it came in). */
-export const isCached = (file: ModelFile): boolean =>
-  existsSync(cachedModelFile(file)) &&
-  statSync(cachedModelFile(file)).size === file.size;
-
 /** The SHA-256 of the file at `at`, hex. */
 const sha256Of = async (at: string): Promise<string> => {
   const hash = createHash("sha256");
   await pipeline(createReadStream(at), hash);
   return hash.digest("hex");
 };
+
+/**
+ * Whether the cache holds `file`, byte for byte: one changed since it was
+ * kept is fetched again, over it.
+ */
+export const isCached = async (file: ModelFile): Promise<boolean> =>
+  existsSync(cachedModelFile(file)) &&
+  statSync(cachedModelFile(file)).size === file.size &&
+  (await sha256Of(cachedModelFile(file))) === file.sha256;
+
+/**
+ * A file of this fill's own to write `file` to before it is kept: two
+ * fills at once, from any checkout, never write, move or remove each
+ * other's.
+ */
+const partOf = (file: ModelFile): string =>
+  `${cachedModelFile(file)}.${randomUUID()}.part`;
 
 /**
  * Keeps the file written to `written` as `file` if it is `file`, byte for
@@ -96,13 +108,16 @@ const keepIf = async (written: string, file: ModelFile): Promise<boolean> => {
 };
 
 /** A file of `file`'s size from `dir` that is `file`, kept; whether one was. */
-const keepFromDir = async (dir: string, file: ModelFile): Promise<boolean> => {
+export const keepFromDir = async (
+  dir: string,
+  file: ModelFile
+): Promise<boolean> => {
   const candidates = readdirSync(dir, { withFileTypes: true }).filter(
     (entry) =>
       entry.isFile() && statSync(path.join(dir, entry.name)).size === file.size
   );
   for (const { name } of candidates) {
-    const written = `${cachedModelFile(file)}.part`;
+    const written = partOf(file);
     // A copy-on-write clone where the disk can make one: the folder's file
     // is only read, never moved or changed.
     copyFileSync(path.join(dir, name), written, constants.COPYFILE_FICLONE);
@@ -131,7 +146,7 @@ const keepFromBucket = async (
     await response.body?.cancel();
     throw new Error(`GET ${key}: ${response.status}`);
   }
-  const written = `${cachedModelFile(file)}.part`;
+  const written = partOf(file);
   await pipeline(response.body, createWriteStream(written));
   return await keepIf(written, file);
 };
@@ -207,7 +222,8 @@ if (import.meta.main) {
       : listed.map((file) => ({ ...file, which: file.sha256 }));
   const missing: string[] = [];
   for (const file of wanted) {
-    if (isCached(file)) {
+    // oxlint-disable-next-line no-await-in-loop -- one file at a time
+    if (await isCached(file)) {
       console.info(`${file.which}: already cached`);
       continue;
     }
