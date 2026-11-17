@@ -9,14 +9,14 @@ import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
-import { readableVersionsAs } from "../brain-next.ts";
+import { readableMemoriesAs, readableVersionsAs } from "../brain-next.ts";
 import type { PinnedVersionRef } from "../brain-next.ts";
 import { runChatSources } from "../db/core/schema.ts";
 import { readableSources } from "../history-access.ts";
 import { authorize } from "../permissions.ts";
 import { runAuthority, runContext } from "./resource-authority.ts";
 import type { CallingRun } from "./resource-authority.ts";
-import { evidenceOf } from "./run-evidence.ts";
+import { evidenceOf, memoryEvidenceOf } from "./run-evidence.ts";
 
 // What a run read, checked before anything of the run leaves it: the
 // Brain's versions its recalls pinned (run-evidence.ts) and what the chat
@@ -76,8 +76,11 @@ const requireOwnEvidenceReadable = async (
   run: Pick<CallingRun, "runId" | "workflowId" | "principal">
 ): Promise<void> => {
   await requireChatPinsReadable(env, run.runId);
-  const rows = await evidenceOf(env, run.runId);
-  if (rows.length === 0) {
+  const [rows, memoryRows] = await Promise.all([
+    evidenceOf(env, run.runId),
+    memoryEvidenceOf(env, run.runId),
+  ]);
+  if (rows.length === 0 && memoryRows.length === 0) {
     return;
   }
   // SAFETY: core wrote each row from a pack's own item or a skill it
@@ -90,7 +93,9 @@ const requireOwnEvidenceReadable = async (
       ({ source: { producer, id: sourceId }, version }) as PinnedVersionRef
   );
   try {
-    for (const permissionId of new Set(rows.map((row) => row.permissionId))) {
+    for (const permissionId of new Set(
+      [...rows, ...memoryRows].map((row) => row.permissionId)
+    )) {
       // oxlint-disable-next-line no-await-in-loop -- one per grant, few
       await authorize(
         env,
@@ -100,6 +105,21 @@ const requireOwnEvidenceReadable = async (
         permissionIdSchema.parse(permissionId),
         runContext(run)
       );
+    }
+    // What its entity reads rested on, as they read: the company alone, a
+    // memory its writer retired since still readable, as history; one a
+    // person's erasure took, or resting on a source erased or narrowed
+    // away from the company, is not (GRA-1985). Paged by the Brain's
+    // check, 500 a call.
+    const memories = [...new Set(memoryRows.map(({ memoryId }) => memoryId))];
+    const readableMemories = await readableMemoriesAs(
+      env,
+      run.principal,
+      memories.map((memory) => ({ store: "shared" as const, memory })),
+      { reach: "company", history: true }
+    );
+    if (readableMemories.length < memories.length) {
+      throw workflowResourceErrors.create("brain.revoked");
     }
     // As the run's recalls read them: the company alone.
     const readable = await readableVersionsAs(env, run.principal, versions, {

@@ -8,6 +8,7 @@ import type {
   WorkflowResourceRun,
 } from "@grasp-os/shared/workflow-resources";
 import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
+import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
@@ -16,7 +17,11 @@ import { callAppFunction } from "../src/app-functions.ts";
 import type { Release } from "../src/app-releases.ts";
 import { appFor, appKind } from "../src/apps.ts";
 import { teamsOf } from "../src/auth/identity.ts";
-import { eraseSource } from "../src/brain-next.ts";
+import {
+  erasePersonShared,
+  eraseSource,
+  workBrain,
+} from "../src/brain-next.ts";
 import type { SourceRef } from "../src/brain-next.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
@@ -35,6 +40,13 @@ import {
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { testApp } from "./app-definitions.ts";
 import { allEvents } from "./audit-events.ts";
+import {
+  copyOfStore,
+  killStore,
+  restoreStore,
+} from "./brain-next-store-copy.ts";
+import { runQuarterHourTasks } from "./maintenance.ts";
+import { noProducers } from "./no-producers.ts";
 import { appWith, person, seal } from "./sealed-apps.ts";
 import type { Fixture } from "./sealed-apps.ts";
 import { unique } from "./sign-in.ts";
@@ -409,7 +421,11 @@ describe("entities, as an App reads them", setUpTime, () => {
  * entities by its args' name, its `brain` permission bound by `admin` to
  * a grant of its own.
  */
-const entitiesWorkflow = async (by: Member, admin: Member) => {
+const entitiesWorkflow = async (
+  by: Member,
+  admin: Member,
+  { hold = false }: { hold?: boolean } = {}
+) => {
   const key = `brain-${unique()}`;
   await publishCatalogContract(env, admin, { key, kind: "brain" });
   const workflow = await createWorkflowResource(
@@ -458,6 +474,8 @@ const entitiesWorkflow = async (by: Member, admin: Member) => {
           action: "entities.find",
           args: { name: { $expr: "args.name" } },
         },
+        // A moment after it read, before its output leaves it.
+        ...(hold ? [{ id: "hold", type: "wait", for: "5 seconds" }] : []),
       ],
     })
   );
@@ -1135,3 +1153,315 @@ describe("entities, as a workflow reads them", setUpTime, () => {
     });
   });
 });
+
+// What a run read of a member a person's erasure took (GRA-1985, the
+// threat model on the issue): her card, its names and facts, rest on
+// memories her erasure takes, though the documents they were drawn from
+// stay. Every memory an entity read rests on is kept with the run
+// (`run_brain_memories`), and checked before anything leaves it, as the
+// versions are: the run is refused (`brain.revoked`), its output withheld.
+
+/**
+ * Anna's card, for everyone: her name and address, and a fact about her
+ * drawn from a document everyone may read, which stays; and a desk whose
+ * address was hers, given by another group's memory, with a fact of its
+ * own for everyone.
+ */
+const annasCard = async () => {
+  const personId = crypto.randomUUID();
+  const address = `anna.${crypto.randomUUID()}@acme.test`;
+  const name = `Anna ${unique()}`;
+  const fact = `${name} leads finance`;
+  const note = await sourceForEveryone(`${fact}.`);
+  const deskName = `Desk ${unique()}`;
+  const deskFact = `${deskName} opens at eight`;
+  const group = `team:${crypto.randomUUID()}`;
+  // The desk's address, hers, in a memory only another group may read: a
+  // card of the company's is never joined with it by that address.
+  const desk = await store().addMemories({
+    change: crypto.randomUUID(),
+    access: { kind: "audience", group },
+    entities: [
+      {
+        key: "d",
+        kind: "team",
+        names: [deskName],
+        identifiers: [{ type: "email", value: address }],
+      },
+    ],
+    memories: [
+      {
+        about: "d",
+        type: "fact",
+        statement: `${deskName} is shared`,
+        speaker: { kind: "system" },
+        basis: { kind: "writer", writer: "app:desks" },
+      },
+    ],
+  });
+  const deskId = desk.entities.d ?? "";
+  await store().addMemories({
+    change: crypto.randomUUID(),
+    access: { kind: "audience", group: "company" },
+    reader: { person: null, groups: [group, "company"] },
+    entities: [{ key: "d", id: deskId, kind: "team", names: [deskName] }],
+    memories: [
+      {
+        about: "d",
+        type: "fact",
+        statement: deskFact,
+        speaker: { kind: "system" },
+        basis: { kind: "writer", writer: "app:desks" },
+      },
+    ],
+  });
+  const card = await store().addMemories({
+    change: crypto.randomUUID(),
+    access: { kind: "audience", group: "company" },
+    entities: [
+      {
+        key: "a",
+        kind: "person",
+        names: [name],
+        identifiers: [{ type: "email", value: address }],
+      },
+    ],
+    memories: [memoryFrom("a", note, fact)],
+  });
+  return {
+    personId,
+    address,
+    name,
+    fact,
+    card: card.entities.a ?? "",
+    desk: deskId,
+    deskFact,
+  };
+};
+
+/** A run of `id` for `by` on `args`, started: its ID. */
+const startedRun = async (
+  by: Member,
+  id: string,
+  args: { entity: string; name: string }
+): Promise<string> => {
+  const { runId } = await startWorkflow(
+    env,
+    { type: "person", person: by },
+    id,
+    { expected: 1, args, key: unique() }
+  );
+  if (runId === null) {
+    throw new Error("The start admitted no run");
+  }
+  return runId;
+};
+
+/** How run `runId` of `id` ended: its status and error's code, once it has. */
+const endingOf = async (by: Member, id: string, runId: string) =>
+  await vi.waitFor(
+    async () => {
+      const run = await resourceRunFor(env, by, id, runId);
+      expect(run.endedAt).not.toBeNull();
+      return { status: run.status, error: run.error?.code ?? null };
+    },
+    { timeout: 30_000, interval: 100 }
+  );
+
+/** How many memories run `runId` keeps of what its entity reads rested on. */
+const memoriesKeptBy = async (runId: string): Promise<number> =>
+  (await env.DB.prepare(
+    "SELECT count(*) AS n FROM run_brain_memories WHERE run_id = ?"
+  )
+    .bind(runId)
+    .first<number>("n")) ?? 0;
+
+/** How many memories people's erasures still hide in the shared store. */
+const hiddenByErasures = async (): Promise<number> =>
+  await runInDurableObject(
+    inJurisdiction(env, env.BRAIN_STORE).getByName("brain"),
+    (_instance, state) =>
+      state.storage.sql
+        .exec<{ count: number }>(
+          "SELECT count(*) AS count FROM person_erasure_memories"
+        )
+        .one().count
+  );
+
+describe(
+  "entities, as a workflow read them, once a person is erased",
+  setUpTime,
+  () => {
+    it("refuses a run under way and withholds an ended run's output once a person's erasure took the card it read or found, also after the tick, an older copy and a lost storage; a desk that only held her address goes on", async () => {
+      const admin = await person("admin");
+      const ada = await person("builder");
+      const workflow = await entitiesWorkflow(ada, admin);
+      const holding = await entitiesWorkflow(ada, admin, { hold: true });
+      const anna = await annasCard();
+      const nobody = unique();
+      const ended = {
+        card: await endedRun(ada, workflow.id, {
+          entity: anna.card,
+          name: nobody,
+        }),
+        found: await endedRun(ada, workflow.id, {
+          entity: crypto.randomUUID(),
+          name: anna.name,
+        }),
+        desk: await endedRun(ada, workflow.id, {
+          entity: anna.desk,
+          name: nobody,
+        }),
+      };
+      const underWay = {
+        card: await startedRun(ada, holding.id, {
+          entity: anna.card,
+          name: nobody,
+        }),
+        found: await startedRun(ada, holding.id, {
+          entity: crypto.randomUUID(),
+          name: anna.name,
+        }),
+      };
+      // Each has read, and waits before its output leaves it.
+      await vi.waitFor(
+        async () => {
+          const kept = await Promise.all(
+            Object.values(underWay).map(async (runId) => {
+              const memories = await memoriesKeptBy(runId);
+              return memories > 0;
+            })
+          );
+          expect(kept).toStrictEqual([true, true]);
+        },
+        { timeout: 10_000, interval: 50 }
+      );
+      const names = [anna.name, anna.fact, anna.deskFact];
+      const shown = async () => ({
+        card: await showsOf(admin, workflow.id, ended.card, names),
+        found: await showsOf(admin, workflow.id, ended.found, names),
+        desk: await showsOf(admin, workflow.id, ended.desk, names),
+      });
+      const before = await shown();
+      const older = await copyOfStore();
+
+      await erasePersonShared(env, {
+        personId: anna.personId,
+        email: anna.address,
+      });
+      const refused = {
+        card: await endingOf(ada, holding.id, underWay.card),
+        found: await endingOf(ada, holding.id, underWay.found),
+      };
+      const afterErasure = await shown();
+      for (let ticks = 0; ticks < 10; ticks += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- a tick at a time
+        if ((await hiddenByErasures()) === 0) {
+          break;
+        }
+        // oxlint-disable-next-line no-await-in-loop -- a tick at a time
+        await workBrain(env, new Date(), noProducers);
+      }
+      const left = await hiddenByErasures();
+      const afterTick = await shown();
+      const now = await copyOfStore();
+      await restoreStore(older);
+      const olderCopy = await shown();
+      await runInDurableObject(
+        inJurisdiction(env, env.BRAIN_STORE).getByName("brain"),
+        async (_instance, state) => {
+          await state.storage.deleteAll();
+        }
+      );
+      await killStore();
+      const lost = await shown();
+      await restoreStore(now);
+
+      const withheld = {
+        status: "completed",
+        error: "brain.revoked",
+        shows: [],
+      };
+      const takenAfter = {
+        card: withheld,
+        found: withheld,
+        desk: { status: "completed", error: null, shows: [anna.deskFact] },
+      };
+      expect({
+        before,
+        refused,
+        afterErasure,
+        left,
+        afterTick,
+        olderCopy,
+        lost,
+      }).toStrictEqual({
+        before: {
+          card: {
+            status: "completed",
+            error: null,
+            shows: [anna.name, anna.fact],
+          },
+          found: { status: "completed", error: null, shows: [anna.name] },
+          desk: { status: "completed", error: null, shows: [anna.deskFact] },
+        },
+        refused: {
+          card: { status: "failed", error: "brain.revoked" },
+          found: { status: "failed", error: "brain.revoked" },
+        },
+        afterErasure: takenAfter,
+        left: 0,
+        afterTick: takenAfter,
+        olderCopy: takenAfter,
+        // A store holding nothing: no memory the desk's run rests on either.
+        lost: { ...takenAfter, desk: withheld },
+      });
+    });
+
+    it("gives a run's step nothing it read of her card when what it rests on can't be kept with the run first", async () => {
+      const admin = await person("admin");
+      const ada = await person("builder");
+      const workflow = await entitiesWorkflow(ada, admin);
+      const anna = await annasCard();
+      // Core's database refuses to keep a memory with a run.
+      await env.DB.prepare(
+        `CREATE TRIGGER test_refuse_run_memories BEFORE INSERT ON run_brain_memories
+      BEGIN SELECT RAISE(ABORT, 'refused by the test'); END`
+      ).run();
+      let ran: Awaited<ReturnType<typeof showsOf>>;
+      try {
+        const runId = await endedRun(ada, workflow.id, {
+          entity: anna.card,
+          name: anna.name,
+        });
+        ran = await showsOf(admin, workflow.id, runId, [anna.name, anna.fact]);
+      } finally {
+        await env.DB.prepare("DROP TRIGGER test_refuse_run_memories").run();
+      }
+
+      expect({ status: ran.status, shows: ran.shows }).toStrictEqual({
+        status: "failed",
+        shows: [],
+      });
+    });
+
+    it("drops what a run's entity reads rested on with the run's details, once its retention is over", async () => {
+      const admin = await person("admin");
+      const ada = await person("builder");
+      const workflow = await entitiesWorkflow(ada, admin);
+      const anna = await annasCard();
+      const runId = await endedRun(ada, workflow.id, {
+        entity: anna.card,
+        name: anna.name,
+      });
+      const kept = await memoriesKeptBy(runId);
+      const day = 24 * 60 * 60 * 1000;
+      await runQuarterHourTasks({}, new Date(Date.now() + 31 * day));
+
+      expect({
+        kept: kept > 0,
+        after: await memoriesKeptBy(runId),
+      }).toStrictEqual({ kept: true, after: 0 });
+    });
+  }
+);

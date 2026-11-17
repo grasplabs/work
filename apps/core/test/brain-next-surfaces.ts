@@ -8275,12 +8275,17 @@ export const storeProbes = {
     const check = async (
       name: string,
       memories: readonly string[],
-      about?: Answer["about"]
+      about?: Answer["about"],
+      history?: true
     ) =>
       await answer(
         name,
         async () =>
-          await store().readableMemories({ memories: [...memories], reader }),
+          await store().readableMemories({
+            memories: [...memories],
+            reader,
+            ...(history === undefined ? {} : { history }),
+          }),
         about
       );
     const hidden = [
@@ -8295,6 +8300,15 @@ export const storeProbes = {
         "nothing"
       ),
       await check("the hidden memories", hidden, "hidden"),
+      // A retired memory counts as history (a run's check): a hidden one
+      // never does.
+      await check(
+        "memories no one holds, as history",
+        hidden.map(() => crypto.randomUUID()),
+        "nothing",
+        true
+      ),
+      await check("the hidden memories, as history", hidden, "hidden", true),
       await check("the reader's own memory", [fixture.seenMemory]),
       await check(
         "too many memories",

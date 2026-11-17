@@ -22,7 +22,7 @@ import {
 } from "../brain-recall.ts";
 import { runAuthority, runContext } from "./resource-authority.ts";
 import type { CallingRun, FrozenCatalogBinding } from "./resource-authority.ts";
-import { recordRunVersions } from "./run-evidence.ts";
+import { recordRunMemories, recordRunVersions } from "./run-evidence.ts";
 
 // A run's recall of the Brain (`ctx.brain.<alias>.recall`), and its
 // skills (`ctx.brain.<alias>.skills.select` and `.read`), one of its
@@ -159,12 +159,19 @@ export const callBrain = async (
         actor: delegateActorOf(authority),
         target: { type: "workflow_run", id: run.runId },
         // Pinned with the run before it gets them, as a recall's pack: each
-        // version of a source. A memory in a writer's own word has no
-        // version, and a run keeps no pin of a memory: retiring one leaves
-        // it as history, still naming its entity to everyone who may read
-        // it (Known on #2245).
-        keep: async ({ versions }) => {
+        // version of a source, and each memory the answer rests on, so a
+        // person's erasure of one (their card, their word) refuses the run
+        // though the documents stay (GRA-1985). Retiring a memory leaves it
+        // as history, still naming its entity to everyone who may read it,
+        // so it refuses nothing (Known on #2245).
+        keep: async ({ versions, memories }) => {
           await recordRunVersions(env, run.runId, permissionId, versions);
+          await recordRunMemories(
+            env,
+            run.runId,
+            permissionId,
+            memories.map(({ memory }) => memory)
+          );
         },
       },
       call.operation,

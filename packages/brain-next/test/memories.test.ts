@@ -3821,11 +3821,19 @@ describe("which memories a reader may still read", () => {
       memories: asked,
       reader,
     });
+    // As history (a workflow run's check): the retired one stays, a hidden
+    // one never comes.
+    const asHistory = await shared().readableMemories({
+      memories: asked,
+      reader,
+      history: true,
+    });
 
-    expect({ before, left, retired }).toStrictEqual({
+    expect({ before, left, retired, asHistory }).toStrictEqual({
       before: [sourced, mine],
       left: [],
       retired: [sourced],
+      asHistory: [sourced, mine],
     });
   });
 
