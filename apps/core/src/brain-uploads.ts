@@ -82,8 +82,8 @@ import { onboardingStore } from "./onboarding/store.ts";
 // may read it: only them, one of their teams, or everyone. The file is
 // checked as every upload is, by what arrived (its size, and that it
 // starts as the type its name says), and its text read by the local
-// extractor in its sandbox, as a chat's file is (chat-files.ts): never a
-// model's conversion, so nothing of it leaves the deployment's Workers.
+// extractor in its sandbox, as a chat's file is (chat-files.ts), so
+// nothing of it leaves the deployment's Workers.
 // Its text, under its file name, goes to the Brain at once as a version of
 // the source `upload:<id>` (`uploadSource`), within the request: an upload
 // is a person's deliberate act, so no queue stands between.
