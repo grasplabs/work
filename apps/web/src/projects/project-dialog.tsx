@@ -28,6 +28,7 @@ import { Trans, useLingui } from "@lingui/react/macro";
 import { useId, useState } from "react";
 
 import { ErrorText } from "../error-text.tsx";
+import { Icon } from "../grasp/icons/index.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { projectIconShapes } from "./project-icon.tsx";
 
@@ -158,18 +159,15 @@ const ProjectForm = ({
           value={[icon]}
           variant="outline"
         >
-          {projectIcons.map((each) => {
-            const Shape = projectIconShapes[each];
-            return (
-              <ToggleGroupItem
-                aria-label={i18n._(iconNames[each])}
-                key={each}
-                value={each}
-              >
-                <Shape />
-              </ToggleGroupItem>
-            );
-          })}
+          {projectIcons.map((each) => (
+            <ToggleGroupItem
+              aria-label={i18n._(iconNames[each])}
+              key={each}
+              value={each}
+            >
+              <Icon icon={projectIconShapes[each]} />
+            </ToggleGroupItem>
+          ))}
         </ToggleGroup>
       </Field>
       <ErrorText>{failure}</ErrorText>

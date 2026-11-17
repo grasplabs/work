@@ -2787,10 +2787,6 @@ msgstr "Applications et connexions"
 msgid "Apps and workflows"
 msgstr "Apps et workflows"
 
-#: src/routes/_shell.projects.index.tsx
-msgid "Apps and workflows grouped by process, team or goal. Putting something in a project shares it with nobody."
-msgstr "Des apps et des workflows regroupés par processus, équipe ou objectif. Placer quelque chose dans un projet ne le partage avec personne."
-
 #: src/workflows/files-and-apps.tsx
 msgid "Apps it works in"
 msgstr "Applications dans lesquelles il travaille"
@@ -8230,6 +8226,7 @@ msgid "Make project"
 msgstr "Créer le projet"
 
 #: src/make/make-link.tsx
+#: src/projects/project-view.tsx
 msgid "Make something"
 msgstr "Créer quelque chose"
 
@@ -8440,6 +8437,7 @@ msgid "More for {name}"
 msgstr "Plus pour {name}"
 
 #: src/chat/chat-menus.tsx
+#: src/projects/project-view.tsx
 msgid "More for {title}"
 msgstr "Plus pour {title}"
 
@@ -8831,7 +8829,6 @@ msgid "No App is called “{asked}”"
 msgstr "Aucune application ne s’appelle « {asked} »"
 
 #: src/apps/apps-overview.tsx
-#: src/projects/project-counts.tsx
 msgid "No Apps yet"
 msgstr "Aucune application pour l’instant"
 
@@ -9082,7 +9079,6 @@ msgstr "Pas encore de workflow avec des heures comptées ici."
 msgid "No workflow yet"
 msgstr "Pas encore de workflow"
 
-#: src/projects/project-counts.tsx
 #: src/workflows/workflows-table.tsx
 msgid "No workflows yet"
 msgstr "Pas encore de workflows"

@@ -16,25 +16,40 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@grasp-os/ui/components/alert-dialog";
-import { Badge } from "@grasp-os/ui/components/badge";
-import { Button } from "@grasp-os/ui/components/button";
+import { Button as KitButton } from "@grasp-os/ui/components/button";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { Link, useNavigate, useRouter } from "@tanstack/react-router";
-import { LayoutGridIcon, WorkflowIcon } from "lucide-react";
+import { useNavigate, useRouter } from "@tanstack/react-router";
 import { useState } from "react";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
 import { ErrorText } from "../error-text.tsx";
 import { formatList } from "../format.ts";
-import { EmptyCard, Page, PageHeading, SectionTitle } from "../frame/page.tsx";
+import { Page, PageHeading } from "../frame/page.tsx";
+import { RouterLink } from "../frame/router-link.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
+import { Button } from "../grasp/button/index.ts";
+import {
+  DropdownMenu,
+  DropdownMenuItem,
+  DropdownMenuPanel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "../grasp/dropdown-menu/index.ts";
+import { Empty } from "../grasp/empty/index.ts";
+import {
+  AppPanels,
+  Edit,
+  More,
+  Plus,
+  Trash,
+  Workflow,
+} from "../grasp/icons/index.ts";
+import { Item, ItemGroup } from "../grasp/item/index.ts";
+import { SectionCard } from "../grasp/section-card/index.ts";
 import { roleLabel } from "../labels.ts";
-import { MakeSomethingLink } from "../make/make-link.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { FileItemDialog } from "./file-item-dialog.tsx";
-import { ProjectCountsLine } from "./project-counts.tsx";
 import { ProjectDialog } from "./project-dialog.tsx";
-import { ProjectIcon } from "./project-icon.tsx";
 import { usePages } from "./project-pages.ts";
 import { namesInProject } from "./project-people-names.ts";
 import { ProjectPeople } from "./project-people.tsx";
@@ -49,21 +64,13 @@ import { ProjectPeople } from "./project-people.tsx";
 /** An item's link: to its App or workflow page. */
 const ItemLink = ({ item }: { item: ProjectItem }) =>
   item.type === "app" ? (
-    <Link
-      className="truncate font-medium"
-      params={{ app: item.id }}
-      to="/apps/$app"
-    >
+    <RouterLink params={{ app: item.id }} to="/apps/$app">
       {item.name}
-    </Link>
+    </RouterLink>
   ) : (
-    <Link
-      className="truncate font-medium"
-      params={{ workflow: item.id }}
-      to="/workflows/$workflow"
-    >
+    <RouterLink params={{ workflow: item.id }} to="/workflows/$workflow">
       {item.name}
-    </Link>
+    </RouterLink>
   );
 
 /** Taking an item out, after naming who loses it. */
@@ -86,7 +93,7 @@ const RemoveItem = ({
         <AlertDialogTrigger
           disabled={busy}
           render={
-            <Button
+            <KitButton
               aria-label={t`Take ${itemName} out of the project`}
               size="sm"
               variant="ghost"
@@ -149,14 +156,13 @@ const RemoveItem = ({
   );
 };
 
-/** That everyone in the project has an item, and in which role. */
-const SharedBadge = ({ role }: { role: ProjectRole }) => {
+/** Whether everyone in the project has an item, and in which role. */
+const SharedWords = ({ role }: { role: ProjectRole | null }) => {
+  if (role === null) {
+    return <Trans>Not shared with the project</Trans>;
+  }
   const shownRole = roleLabel(role);
-  return (
-    <Badge variant="secondary">
-      <Trans>Everyone in it · {shownRole}</Trans>
-    </Badge>
-  );
+  return <Trans>Everyone in it · {shownRole}</Trans>;
 };
 
 /**
@@ -177,40 +183,24 @@ const Items = ({ project }: { project: Project }) => {
   );
   const items = pages.all;
   if (items.length === 0) {
-    return <EmptyCard>{t`Nothing in it that you can open.`}</EmptyCard>;
+    return <Empty size="inline">{t`Nothing in it that you can open.`}</Empty>;
   }
   return (
-    <div className="flex flex-col gap-2">
-      <ul className="flex flex-col divide-y rounded-md border">
+    <>
+      <ItemGroup aria-label={t`Apps and workflows`} separated>
         {items.map((item) => (
-          <li
-            className="flex flex-wrap items-center justify-between gap-2 px-3 py-2"
+          <Item
+            actions={
+              builds ? <RemoveItem item={item} project={project} /> : undefined
+            }
+            description={<SharedWords role={item.sharedAs} />}
+            icon={item.type === "app" ? AppPanels : Workflow}
             key={`${item.type}:${item.id}`}
-          >
-            <span className="flex min-w-0 items-center gap-2">
-              {item.type === "app" ? (
-                <LayoutGridIcon
-                  aria-hidden="true"
-                  className="size-4 flex-none"
-                />
-              ) : (
-                <WorkflowIcon aria-hidden="true" className="size-4 flex-none" />
-              )}
-              <ItemLink item={item} />
-            </span>
-            <span className="flex items-center gap-2">
-              {item.sharedAs === null ? (
-                <Badge variant="outline">
-                  <Trans>Not shared with the project</Trans>
-                </Badge>
-              ) : (
-                <SharedBadge role={item.sharedAs} />
-              )}
-              {builds ? <RemoveItem item={item} project={project} /> : null}
-            </span>
-          </li>
+            size="sm"
+            title={<ItemLink item={item} />}
+          />
         ))}
-      </ul>
+      </ItemGroup>
       {pages.more ? (
         <Button
           disabled={pages.busy}
@@ -218,71 +208,102 @@ const Items = ({ project }: { project: Project }) => {
             void pages.readMore();
           }}
           size="sm"
-          variant="outline"
+          variant="quiet"
         >
-          <Trans>Show more</Trans>
+          {t`Show more`}
         </Button>
       ) : null}
       <ErrorText>{pages.failure}</ErrorText>
-    </div>
+    </>
   );
 };
 
-/** Deleting the project, after naming who loses what is shared with it. */
-const DeleteProject = ({ project }: { project: Project }) => {
+/**
+ * Deleting the project, after naming who loses what is shared with it;
+ * opened from the page's menu.
+ */
+const DeleteProject = ({
+  project,
+  open,
+  onOpenChange,
+}: {
+  project: Project;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) => {
   const navigate = useNavigate();
-  const { busy, failure, run } = useCoreAction();
+  const { failure, run } = useCoreAction();
   const projectName = project.name;
   const who = formatList(namesInProject(project));
   return (
-    <>
-      <AlertDialog>
-        <AlertDialogTrigger
-          disabled={busy}
-          render={<Button variant="outline" />}
-        >
-          <Trans>Delete</Trans>
-        </AlertDialogTrigger>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              <Trans>Delete {projectName}?</Trans>
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              {project.shared === 0 ? (
-                <Trans>
-                  Its apps and workflows aren’t deleted, and nothing in it is
-                  shared with the project, so nobody loses access.
-                </Trans>
-              ) : (
-                <Trans>
-                  Its apps and workflows aren’t deleted, but they stop being
-                  shared with everyone in it: {who} lose access to them, unless
-                  they are shared with them another way.
-                </Trans>
-              )}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>
-              <Trans>Cancel</Trans>
-            </AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => {
-                void run(async (session) => {
-                  await session.projects.remove(project.id);
-                  await navigate({ to: "/projects" });
-                });
-              }}
-              variant="destructive"
-            >
-              <Trans>Delete project</Trans>
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-      <ErrorText>{failure}</ErrorText>
-    </>
+    <AlertDialog onOpenChange={onOpenChange} open={open}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>
+            <Trans>Delete {projectName}?</Trans>
+          </AlertDialogTitle>
+          <AlertDialogDescription>
+            {project.shared === 0 ? (
+              <Trans>
+                Its apps and workflows aren’t deleted, and nothing in it is
+                shared with the project, so nobody loses access.
+              </Trans>
+            ) : (
+              <Trans>
+                Its apps and workflows aren’t deleted, but they stop being
+                shared with everyone in it: {who} lose access to them, unless
+                they are shared with them another way.
+              </Trans>
+            )}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <ErrorText>{failure}</ErrorText>
+        <AlertDialogFooter>
+          <AlertDialogCancel>
+            <Trans>Cancel</Trans>
+          </AlertDialogCancel>
+          <AlertDialogAction
+            onClick={() => {
+              void run(async (session) => {
+                await session.projects.remove(project.id);
+                await navigate({ to: "/projects" });
+              });
+            }}
+            variant="destructive"
+          >
+            <Trans>Delete project</Trans>
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+};
+
+/** The page's menu, for the project's builders: change it, or delete it. */
+const ProjectMenu = ({
+  project,
+  onChange,
+  onDelete,
+}: {
+  project: Project;
+  onChange: () => void;
+  onDelete: () => void;
+}) => {
+  const { t } = useLingui();
+  const title = project.name;
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger icon={More} label={t`More for ${title}`} />
+      <DropdownMenuPanel align="end">
+        <DropdownMenuItem icon={Edit} onSelect={onChange}>
+          {t`Change`}
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem danger icon={Trash} onSelect={onDelete}>
+          {t`Delete`}
+        </DropdownMenuItem>
+      </DropdownMenuPanel>
+    </DropdownMenu>
   );
 };
 
@@ -297,7 +318,9 @@ export const ProjectView = ({
   const { t } = useLingui();
   const router = useRouter();
   const [editing, setEditing] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const builds = project.role === "builder";
+  const makes = builds && canBuild(identity.role);
   return (
     <>
       <SiteHeader
@@ -306,57 +329,55 @@ export const ProjectView = ({
           { label: project.name },
         ]}
       />
-      <Page wide>
+      <Page>
         <PageHeading
           action={
             builds ? (
-              <div className="flex flex-wrap gap-2">
-                {canBuild(identity.role) ? (
-                  <MakeSomethingLink kind="app" project={project.id} />
-                ) : null}
-                <FileItemDialog project={project} />
-                <Button
-                  onClick={() => {
+              <>
+                <ProjectMenu
+                  onChange={() => {
                     setEditing(true);
                   }}
-                  variant="outline"
-                >
-                  <Trans>Change</Trans>
-                </Button>
-                <DeleteProject project={project} />
-              </div>
+                  onDelete={() => {
+                    setDeleting(true);
+                  }}
+                  project={project}
+                />
+                {makes ? (
+                  <Button
+                    icon={Plus}
+                    render={
+                      <RouterLink
+                        search={{ make: "app", project: project.id }}
+                        to="/"
+                      />
+                    }
+                  >
+                    {t`Make something`}
+                  </Button>
+                ) : null}
+              </>
             ) : undefined
           }
           clamp
           description={
             project.description === "" ? undefined : project.description
           }
-          meta={<ProjectCountsLine counts={project.counts} />}
-          title={
-            <span className="inline-flex items-center gap-3">
-              <ProjectIcon icon={project.icon} />
-              {project.name}
-            </span>
-          }
+          title={project.name}
         />
-        <section className="flex flex-col gap-2">
-          <SectionTitle>
-            <Trans>Apps and workflows</Trans>
-          </SectionTitle>
+        <SectionCard
+          actions={builds ? <FileItemDialog project={project} /> : undefined}
+          flush
+          title={t`Apps and workflows`}
+        >
           <Items project={project} />
-        </section>
-        <section className="flex flex-col gap-2">
-          <SectionTitle>
-            <Trans>People</Trans>
-          </SectionTitle>
-          <p className="text-muted-foreground">
-            <Trans>
-              Being in the project reaches only what is shared with everyone in
-              it.
-            </Trans>
-          </p>
+        </SectionCard>
+        <SectionCard
+          description={t`Being in the project reaches only what is shared with everyone in it.`}
+          title={t`People`}
+        >
           <ProjectPeople project={project} />
-        </section>
+        </SectionCard>
       </Page>
       <ProjectDialog
         editing={project}
@@ -366,6 +387,13 @@ export const ProjectView = ({
         onOpenChange={setEditing}
         open={editing}
       />
+      {builds ? (
+        <DeleteProject
+          onOpenChange={setDeleting}
+          open={deleting}
+          project={project}
+        />
+      ) : null}
     </>
   );
 };
