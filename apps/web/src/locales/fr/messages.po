@@ -6730,10 +6730,6 @@ msgstr "Nom de l'en-tête"
 msgid "Hear both again"
 msgstr "Réécouter les deux"
 
-#: src/brain/work-knowledge.tsx
-msgid "Heard from enough people"
-msgstr "Entendu de suffisamment de personnes"
-
 #: src/interview/words.ts
 msgid "Hello"
 msgstr "Bonjour"
@@ -6878,7 +6874,7 @@ msgstr "Quelle certitude"
 #: src/brain/aggregate.tsx
 #: src/brain/brain.ts
 msgid "How the team works, as its people told it"
-msgstr "Comment l’équipe travaille, telle que ses membres l’ont racontée"
+msgstr "Comment l’équipe travaille, tel que ses membres l’ont raconté"
 
 #: src/brain/work-knowledge.tsx
 msgid "How the work goes today"
@@ -15155,6 +15151,10 @@ msgstr "Aujourd’hui"
 #: src/onboarding/hr-leads.tsx
 msgid "Token"
 msgstr "Jeton"
+
+#: src/brain/work-knowledge.tsx
+msgid "Told by the team that does it"
+msgstr "Raconté par l’équipe qui le fait"
 
 #: src/onboarding/send-plan-form.tsx
 msgid "Tomorrow"

@@ -221,12 +221,7 @@ import { SourcesFallError } from "./sources-fall.ts";
 import type { FallingSource, SourceRemover } from "./sources-fall.ts";
 import { interviewBrief, setupView } from "./stephen-setup.ts";
 import { onboardingStoreName } from "./store-name.ts";
-import {
-  checksFor,
-  claimChecksMax,
-  teamClaims,
-  TooManyClaimChecksError,
-} from "./team-claims.ts";
+import { checksFor, teamClaims } from "./team-claims.ts";
 import { assignWork, companyName, drawTeamMap } from "./team-map.ts";
 import { drawWork, knownOf } from "./work-drawing.ts";
 import type { WorkBrief, WorkKnown } from "./work-drawing.ts";
@@ -2637,14 +2632,6 @@ export class Onboarding extends DurableObject<Env> {
         tries,
         error: error instanceof Error ? error.name : "unknown",
       });
-      // Too many checks to put its claims together: nothing was written,
-      // and the audit log says so (GRA-1084).
-      if (error instanceof TooManyClaimChecksError) {
-        this.#changed({ type: "system" }, "onboarding.claims.capped", {
-          checks: claimChecksMax,
-        });
-        this.#deliverAudit();
-      }
       const wait = drawRetryMs[tries - 1];
       this.ctx.storage.transactionSync(() => {
         if (wait === undefined) {
@@ -6401,7 +6388,6 @@ export class Onboarding extends DurableObject<Env> {
     // (GRA-1084, GRA-1987): never one person's fact as they said it, never
     // a judgment. A failing model throws, and the intake is
     // tried again, with nothing written.
-    // One budget of checks for both: past it, nothing is written.
     const checks = checksFor(this.env, (took) => {
       this.meter(took, at);
     });
@@ -7563,6 +7549,27 @@ export class Onboarding extends DurableObject<Env> {
           .update(brainDrawings)
           .set({ erase: true })
           .where(inList(brainDrawings.source, ofProducer("drawing")))
+          .run();
+        // The differences the admin's review shows were checked in these
+        // drawings (`#reviewed`): one that falls (someone it rests on
+        // moved, went or took back a line) takes its team's differences
+        // with it, here, before the change commits. Its team's next intake
+        // checks them again from who still counts.
+        const fallenTeams = this.#db
+          .select({ team: brainDrawings.team })
+          .from(brainDrawings)
+          .where(inList(brainDrawings.source, ofProducer("drawing")))
+          .all()
+          .map(({ team }) => team);
+        const fallenWorks = this.#db
+          .select({ id: works.id })
+          .from(works)
+          .where(inList(works.team, [...new Set(fallenTeams)]))
+          .all()
+          .map(({ id }) => id);
+        this.#db
+          .delete(checkedDifferences)
+          .where(inList(checkedDifferences.work, fallenWorks))
           .run();
       });
       if (this.#removeFallen === undefined) {

@@ -8,7 +8,6 @@ import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { Onboarding, onboardingStore } from "../src/onboarding/store.ts";
-import { claimChecksMax } from "../src/onboarding/team-claims.ts";
 import { setObjectEnv } from "./agent-chat.ts";
 import { erasuresFailing } from "./brain-erasures-failing.ts";
 import { intakesWith, namedIn } from "./brain-intakes.ts";
@@ -41,7 +40,7 @@ import {
   zendeskSaid,
 } from "./onboarding-team.ts";
 import type { Ids } from "./onboarding-team.ts";
-import { auditedDuring, outcome, signedInApi } from "./sign-in.ts";
+import { outcome, signedInApi } from "./sign-in.ts";
 
 // What the onboarding learned, in the brain (GRA-367,
 // src/onboarding/brain-intake.ts): once a piece of work is drawn, its
@@ -393,26 +392,26 @@ describe("what a team said, put together", { timeout: 120_000 }, () => {
     expect(records.map(({ type }) => type)).toStrictEqual([]);
   });
 
-  it("writes nothing, and audits it, when its claims would take more checks than an intake may make", async () => {
+  it("checks no more claims than the team has facts to back them: a runaway answer withholds only what it names past that", async () => {
     const ids = await drawnTeam();
-    // Forty-one claims of five facts each, none of which says it.
+    // The plain claim first, then forty-one no fact says.
     const many = Array.from({ length: 41 }, (_, index) => ({
       kind: "tool",
-      text: `Zendesk is used in way ${index + 1}.`,
+      text: `Zendesk is used in way ${["one", "two", "three", "four", "five", "six"][index % 6]} ${"x".repeat(index + 1)}.`,
       cites: zendeskSaid,
       says: [],
     }));
-    const events = await auditedDuring(async () => {
-      const { requests } = await intake(ids, many);
-      expect(requests).toHaveLength(1 + claimChecksMax);
-    });
-    const records = await kept(ids);
+    const { requests } = await intake(ids, [zendeskClaim, ...many]);
+    const member = await signedInApi(idp, "user");
+    // Max, Mia, Mo, Noor and Pim gave six facts of the kinds that describe
+    // the work: six claims are checked, the plain one among them.
     expect({
-      records: records.map(({ type }) => type),
-      audited: events
-        .filter(({ action }) => action === "onboarding.claims.capped")
-        .map(({ detail }) => detail),
-    }).toStrictEqual({ records: [], audited: [{ checks: claimChecksMax }] });
+      statements: await statementsFor(member.api, ids),
+      checked: checkedClaimsIn(requests).length,
+    }).toStrictEqual({
+      statements: ["Tickets come in through Zendesk."],
+      checked: 6,
+    });
   });
 
   it("counts towards a claim only the people behind it now: one at five drops at once when someone withdraws, with no model", async () => {

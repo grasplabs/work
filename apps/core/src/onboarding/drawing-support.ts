@@ -24,9 +24,11 @@ import type { Checks } from "./team-claims.ts";
 // person's facts back it only when they say it of this work and as that
 // kind, never when they say the same words of other work or of something
 // else. A part rests on those people, or on nobody: then the brain
-// doesn't show it (brain-intake.ts `versionOf`). These checks count
-// against the intake's, with its claims' (team-claims.ts): past the most,
-// nothing is written.
+// doesn't show it (brain-intake.ts `versionOf`). What is checked is
+// bounded by what is read: the drawing's parts (as many as its schema
+// holds) and the people named for each, until `checkedEnough` say yes, and
+// one judgment check per part someone told. No budget: a part that can't
+// be checked is the only thing withheld.
 //
 // A part is checked in its bare words: a step's action, a case's when, a
 // term's word, the other way a step is told. What comes with it (who does

@@ -46,8 +46,11 @@ import type { Took } from "./store.ts";
 // the first model writes it, and a fact may steer it into a claim that
 // speaks to the checker. The check gets it as data, and answers no to
 // anything that speaks to it. Checking stops once `checkedEnough` people's
-// facts say a claim, and an intake makes at most `claimChecksMax` checks:
-// past that nothing is written, and it is audited (store.ts).
+// facts say a claim. There is no budget of checks: what is checked is
+// bounded by what is read, the claims that could show and the facts they
+// cite, and an answer naming more claims than there are facts to back
+// them is cut at that number (`teamClaims`), so a runaway answer costs no
+// more than the team's lines and withholds only what it cut.
 //
 // Ways it can fail, each held by apps/core/test/brain-intake-teams.test.ts
 // and apps/core/test/team-work.test.ts:
@@ -76,8 +79,8 @@ const descriptiveKinds: ReadonlySet<StatementKind> = new Set([
 /**
  * Checking whether people say a description stops once this many are
  * checked to say it (`supported`, drawing-support.ts): one is enough for
- * it to show (GRA-1987); a number is a median over at most this many. It
- * keeps an intake's checks what they were when five had to say each.
+ * it to show (GRA-1987); a number is a median over at most this many.
+ * Checking more people would change nothing shown.
  */
 export const checkedEnough = minTeamShown;
 
@@ -271,52 +274,34 @@ const candidatesOf = (
   return [...claims.values()].filter(({ facts: of }) => of.length > 0);
 };
 
-/** Most checks an intake makes, over all its claims: what a run may cost. */
-export const claimChecksMax = 200;
-
-/** Thrown when putting a team's claims together would take more checks than `claimChecksMax`: nothing is written. */
-export class TooManyClaimChecksError extends Error {
-  override name = "TooManyClaimChecksError";
-}
-
 /**
  * What an intake checks with: the quick model, found when first needed,
- * how what it took is counted, and how many checks are left of
- * `claimChecksMax`, shared by its claims and its drawings
+ * and how what it took is counted, for its claims and its drawings
  * (drawing-support.ts).
  */
 export interface Checks {
   env: Env;
   count: (took: Took) => void;
-  left: number;
 }
 
-/** An intake's checks: none made yet. */
+/** An intake's checks. */
 export const checksFor = (env: Env, count: (took: Took) => void): Checks => ({
   env,
   count,
-  left: claimChecksMax,
 });
 
 const checkSchema = z.object({ says: z.boolean() });
 
 /**
  * One yes or no of the quick model, on `data` given as JSON between tags,
- * with nothing else in the call. Counts against the intake's checks:
- * past `claimChecksMax`, it throws, and nothing is written. Throws too
- * when no model may check.
+ * with nothing else in the call. Throws when no model may check, or the
+ * call fails: the intake writes nothing then and is tried again.
  */
 export const check = async (
   checks: Checks,
   system: string,
   data: unknown
 ): Promise<boolean> => {
-  if (checks.left <= 0) {
-    throw new TooManyClaimChecksError(
-      `Putting the team's claims and drawings together takes more than ${claimChecksMax} checks.`
-    );
-  }
-  checks.left -= 1;
   const { env, count } = checks;
   const model = modelForRole(await modelSettings(env), "quick");
   const { output, usage } = await models(env).call({
@@ -365,9 +350,9 @@ Answer in JSON with one field:
  * it; this keeps what they think of the work, a feeling, blame or anything
  * about a person out of it. The answer is a yes or no in a fixed schema
  * (`check`), so a line someone wrote can at most keep or drop the one
- * description made from it. Throws when no model may check, or past the
- * intake's checks: the intake then writes nothing and is tried again, so
- * a description is never shown unchecked.
+ * description made from it. Throws when no model may check, or the call
+ * fails: the intake then writes nothing and is tried again, so a
+ * description is never shown unchecked.
  */
 export const onlyHowItRuns = async (
   checks: Checks,
@@ -387,7 +372,7 @@ const supported = async (
   const checked: Labelled[] = [];
   // One check at a time: the intake waits for nobody, and calls at once
   // only held each other up. Once enough people's facts say it, the rest
-  // needn't be asked; past the most an intake may check, none is kept.
+  // needn't be asked.
   for (const fact of claim.facts) {
     if (peopleBehind(checked).length >= checkedEnough) {
       break;
@@ -444,7 +429,14 @@ export const teamClaims = async (
   // time: the quick model says yes or no, seeing that claim and that fact
   // alone (GRA-1084, M1).
   const claims: TeamClaim[] = [];
-  for (const candidate of candidatesOf(output, facts, brief.names)) {
+  // A team has no more descriptions than facts that back them: an answer
+  // naming more is cut there, in the order it gave them, so what is
+  // checked stays bounded by what the team said (the facts each claim
+  // cites, and one judgment each). What it cuts is withheld, nothing else.
+  for (const candidate of candidatesOf(output, facts, brief.names).slice(
+    0,
+    facts.length
+  )) {
     // oxlint-disable-next-line no-await-in-loop -- a claim at a time
     claims.push(...(await supported(checks, candidate)));
   }

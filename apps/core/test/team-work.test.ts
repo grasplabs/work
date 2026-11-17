@@ -111,6 +111,27 @@ const recalled = async (
     .filter((text) => text.includes(word));
 };
 
+/** How many sources of `producer` `userId` recalls holding `word`: one, however many passages of it are found. */
+const recalledSources = async (
+  userId: string,
+  word: string,
+  producer: "claim" | "drawing"
+): Promise<number> => {
+  const { items } = await recallAs(env, userId, {
+    question: word,
+    budget: { tokens: 2000 },
+    personal: true,
+  });
+  return new Set(
+    items
+      .filter(
+        ({ source, text }) =>
+          source.producer === producer && text.includes(word)
+      )
+      .map(({ source }) => source.id)
+  ).size;
+};
+
 /** Each of the team's pieces of work on the Brain page, as a member reads it: its drawings, whole. */
 const workOnPage = async (ids: { team: string }) => {
   const member = await signedInApi(idp, "user");
@@ -322,9 +343,7 @@ const readOf = (ids: Ids, reader: string) => async () => {
   const page = await workOnPage(ids);
   return {
     claims: await recalled(reader, "Zendesk", "claim"),
-    drawings: await recalled(reader, "ticket", "drawing").then(
-      ({ length }) => length
-    ),
+    drawings: await recalledSources(reader, "ticket", "drawing"),
     page: { claims: page.claims, drawings: page.drawings.length },
   };
 };
@@ -346,6 +365,110 @@ describe(
     // The test gives the brain each team itself, step by step, with a model
     // faked: the store's own alarm, which has none, would try first.
     beforeEach(aloneInTheStore);
+
+    it("shows a team of three's claim and long drawing whole: what it checks is bounded by what it reads, not by a budget", async () => {
+      const reader = await colleague();
+      // Twenty-seven steps, each told by all three, in plain words.
+      const words = [
+        "alpha",
+        "bravo",
+        "charlie",
+        "delta",
+        "echo",
+        "foxtrot",
+        "golf",
+        "hotel",
+        "india",
+        "juliet",
+        "kilo",
+        "lima",
+        "mike",
+        "november",
+        "oscar",
+        "papa",
+        "quebec",
+        "romeo",
+        "sierra",
+        "tango",
+        "uniform",
+        "victor",
+        "whiskey",
+        "xray",
+        "yankee",
+        "zulu",
+        "omega",
+      ];
+      const ids = await toldBy(["max", "mia", "mo"], {
+        reply: (each) => {
+          const tellers = [each.max, each.mia, each.mo];
+          return {
+            text: JSON.stringify({
+              starts: "A customer email arrives as a ticket in Zendesk.",
+              starts_by: tellers,
+              steps: words.map((word) => ({
+                text: `Do the ${word} check on the ticket.`,
+                who: "Agent",
+                tool: "Zendesk",
+                by: tellers,
+                minutes_by: tellers.map((person) => ({
+                  person,
+                  minutes: [1, 2, 3],
+                })),
+              })),
+              numbers: tellers.map((person) => ({
+                person,
+                quiet: 30,
+                busy: 50,
+                of: "team",
+                per: "week",
+                minutes: [3, 10, 45],
+                wrong: 2,
+              })),
+            }),
+            inputTokens: 4000,
+            outputTokens: 900,
+          };
+        },
+      });
+      await givenToBrain(ids.team);
+      const { drawings } = await workOnPage(ids);
+      expect({
+        read: await readOf(ids, reader)(),
+        steps: drawings.flatMap(({ steps }) => steps).length,
+      }).toStrictEqual({ read: shown, steps: words.length });
+    });
+
+    it("shows nothing of a team where everyone kept every line to themselves: no interviews source, no interview weeks, and its intake asks no model", async () => {
+      const read = async (ids: Ids) => {
+        const member = await signedInApi(idp, "user");
+        const brain = await member.api.brain.read();
+        return {
+          source: brain.sources.some(
+            ({ teamIds }) => teamIds?.includes(`team-${ids.team}`) === true
+          ),
+          weeks: brain.interviewWeeks.reduce(
+            (sum, { interviews }) => sum + interviews,
+            0
+          ),
+        };
+      };
+      const tellers: Key[] = ["max", "mia", "mo", "noor", "pim"];
+      const ids = await team(["lea", ...tellers], addressOf);
+      await mapped(ids);
+      const before = await read(ids);
+      // Five agree in the same week, each line only counted anonymously.
+      for (const key of tellers) {
+        // oxlint-disable-next-line no-await-in-loop -- one interview after another
+        await agree(ids[key], sharedLines(key).map(anonymous));
+      }
+      await drawAll(ticketsBy(tellers.map((key) => ids[key])));
+      const requests = await givenToBrain(ids.team);
+      expect({ asked: requests.length, ...(await read(ids)) }).toStrictEqual({
+        asked: 0,
+        source: false,
+        weeks: before.weeks,
+      });
+    });
 
     it("shows for a team where one, two or three told it, with no count of people anywhere a member reads it", async () => {
       const reader = await colleague();

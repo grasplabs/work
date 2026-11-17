@@ -400,6 +400,42 @@ describe("what needs the admin", { timeout: 120_000 }, () => {
     }).toStrictEqual({ withdrawn: [], deleted: [] });
   });
 
+  it("drops a way as the save that moves everyone who told it to another team commits, before any drawing again", async () => {
+    const ids = await team();
+    await drawn(ids);
+    const { api } = await signedInApi(idp, "admin");
+    const before = await api.onboarding.review();
+    // The five who told the Salesforce way move to Billing.
+    const { roster } = await onboardingStore(env).view();
+    const movers = new Set(ids.doers.slice(5));
+    await onboardingStore(env).saveRoster(
+      {
+        teams: [
+          ...(roster?.teams ?? []),
+          {
+            id: `${ids.team}-b`,
+            name: "Billing",
+            lead: null,
+            does: "",
+            off: false,
+          },
+        ],
+        people: (roster?.people ?? []).map((person) =>
+          movers.has(person.id) ? { ...person, team: `${ids.team}-b` } : person
+        ),
+      },
+      { type: "system" }
+    );
+    const after = await api.onboarding.review();
+    expect({
+      before: before.differences.map(({ other }) => other),
+      after: after.differences.map(({ other }) => other),
+    }).toStrictEqual({
+      before: ["Look up the customer in Salesforce, as someone does."],
+      after: [],
+    });
+  });
+
   it("shows no difference whose other way nobody is checked to tell, the drawing's word notwithstanding", async () => {
     const ids = await team();
     // Nobody's facts say the other way, as the check finds.
@@ -439,7 +475,7 @@ describe("what needs the admin", { timeout: 120_000 }, () => {
     }).toStrictEqual({ checked: 1, redrawn: 0, again: 1 });
   });
 
-  it("shows no difference of a team whose results may not show: switched off, or on again but waiting for the admin's confirmation", async () => {
+  it("shows no difference of a team whose results may not show: switched off, or on again but waiting for the admin's confirmation, and shows it again at the team's next intake once confirmed", async () => {
     const ids = await team();
     await drawn(ids);
     const { api } = await signedInApi(idp, "admin");
@@ -464,11 +500,21 @@ describe("what needs the admin", { timeout: 120_000 }, () => {
     const waiting = await count();
     await store.saveRoster(listed, by);
     const confirmed = await count();
-    expect({ checked, off, waiting, confirmed }).toStrictEqual({
+    // Switching off took its drawing out, and the difference checked in it
+    // with it: the team's next intake checks it again, as it draws again.
+    await intake(ids, []);
+    expect({
+      checked,
+      off,
+      waiting,
+      confirmed,
+      again: await count(),
+    }).toStrictEqual({
       checked: 1,
       off: 0,
       waiting: 0,
-      confirmed: 1,
+      confirmed: 0,
+      again: 1,
     });
   });
 

@@ -6730,10 +6730,6 @@ msgstr "Header-Name"
 msgid "Hear both again"
 msgstr "Beide noch einmal hören"
 
-#: src/brain/work-knowledge.tsx
-msgid "Heard from enough people"
-msgstr "Von genug Menschen gehört"
-
 #: src/interview/words.ts
 msgid "Hello"
 msgstr "Hallo"
@@ -15155,6 +15151,10 @@ msgstr "Heute"
 #: src/onboarding/hr-leads.tsx
 msgid "Token"
 msgstr "Token"
+
+#: src/brain/work-knowledge.tsx
+msgid "Told by the team that does it"
+msgstr "Vom Team erzählt, das es macht"
 
 #: src/onboarding/send-plan-form.tsx
 msgid "Tomorrow"
