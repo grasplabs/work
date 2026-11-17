@@ -22,33 +22,30 @@ import { plainPart } from "./plain-text.ts";
 import type { TeamClaim } from "./team-claims.ts";
 import { inUnitOf } from "./work-drawing.ts";
 
-// What the onboarding learned, as the brain's records (GRA-367): each
-// team as a team record, one source for all its interviews, what five or
-// more of its people said, put together, as statements (GRA-1084,
-// team-claims.ts), and each piece of work as a workflow
-// with every drawing a new version. Decided in GRA-359: nothing in them
-// points at one person. So:
+// What the onboarding learned of a team (GRA-367, GRA-1748): what five or
+// more of its people said, put together, as its claims (GRA-1084,
+// team-claims.ts), and a drawing of each piece of its work. The onboarding
+// keeps both itself and hands each to the new Brain as a source of its
+// own; none is a record of the brain's (`brain_records`). Decided in
+// GRA-359: nothing in them points at one person. So:
 //
-// - No source per person: one per team, served live by the brain
+// - No source per person: one per team, served live by the Brain page
 //   (brain-rpc.ts) with how many people it rests on, never who.
-// - A statement is a claim of the team's that five or more of its people
-//   made, never one person's fact, nor their words (`text`) or quote;
-//   never resting on the lead, whose role alone says who they are; and a
-//   name on the staff list in it is taken out.
+// - A claim is the team's that five or more of its people made, never one
+//   person's fact, nor their words (`text`) or quote; never resting on the
+//   lead, whose role alone says who they are; and a name on the staff list
+//   in it is taken out.
 // - A drawing keeps no `from` and no `told`: its numbers are ranges over
 //   everyone who gave one, and how many did, never whose; and only what
 //   five or more of its people told, each part apart (`versionOf`,
 //   GRA-1084).
-// - A team reaches the brain only once `minTeamShown` (five) of its people
-//   agreed, as many as the company's numbers need and the interview's
-//   notice promises (GRA-329); the store holds it back until then.
+// - A team is taken in only while its results may be shown: seven or more
+//   tell their own work, so five can back a claim (the store's
+//   `#teamShowsResults`); the store holds it back until then.
 //
-// Who each record rests on is kept apart, in the onboarding's own store
-// (`brain_sent`), so deleting an interview can find what it is in
-// (GRA-368, the store's `purgeBrain`): the brain itself never holds it.
-
-/** The staff list, as the source the brain found each team in. */
-export const rosterSource = "src-roster";
+// Who each claim and drawing rests on is kept apart, in the onboarding's
+// own store (`brain_sent`), so deleting an interview can find what it is
+// in (GRA-368, the store's `#recountStanding`): the Brain never holds it.
 
 /** An id the onboarding owns, from what it stands for: the same thing is the same id. */
 export const ownId = async (
@@ -59,9 +56,9 @@ export const ownId = async (
   return `${onboardingIdPrefix}${kind}-${hash.slice(0, 32)}`;
 };
 
-/** The brain's ids for what the onboarding gives it. */
+/** The Brain page's ids for what the onboarding shows on it. */
 export const intakeIds = {
-  /** A roster team, as the brain names it, and its team record. */
+  /** A roster team, as the Brain page names it. */
   team: (team: string): string => `team-${team}`,
   /** The source that stands for all of a team's interviews. */
   interviews: async (team: string): Promise<string> => await ownId("src", team),
@@ -86,7 +83,7 @@ export const statementKinds: Partial<Record<FactTag, StatementKind>> = {
   wish: "wish",
 };
 
-/** What a team gives the brain, from the store. */
+/** What a team's intake is made from, from the store. */
 export interface TeamIntake {
   team: { id: string; name: string };
   /** Everyone on the staff list, by name: no record says one. */
@@ -108,13 +105,11 @@ export interface TeamIntake {
   }[];
 }
 
-/** One record and the person it rests on: what deleting their interview takes out. */
+/** A claim (`statement`) or drawing (`workflowVersion`) and a person it rests on: what deleting their interview takes down. */
 export interface Rest {
   record: string;
-  type: BrainRecord["type"];
+  type: "statement" | "workflowVersion";
   person: string;
-  /** A drawing's workflow: it goes once none of its drawings is left. */
-  parent?: string;
 }
 
 /**
@@ -146,9 +141,8 @@ export interface IntakeDrawing {
   drawing: WorkflowVersionRecord;
 }
 
-/** The records a team gives the brain, in the order they may be kept, its claims and drawings, and who each rests on. */
+/** A team's claims and drawings, and who each rests on. */
 export interface Intake {
-  records: BrainRecord[];
   claims: IntakeClaim[];
   drawings: IntakeDrawing[];
   rests: Rest[];
@@ -428,12 +422,11 @@ export const recordOf = (record: BrainRecordInput): BrainRecord[] => {
 };
 
 /**
- * What a team gives the brain: its team record, naming the staff list
- * (`rosterSource`); and its claims (`claims`, each resting on five or more
- * people) and the drawings of its pieces of work (`drawings`), each
- * naming the one source of its interviews, which the onboarding keeps
- * itself and the Brain page reads there (GRA-1748). The same claim or
- * drawing is the same id, so giving it again keeps nothing twice; a
+ * What a team's intake notes: its claims (`claims`, each resting on five
+ * or more people) and the drawings of its pieces of work (`drawings`),
+ * each naming the one source of its interviews, which the onboarding
+ * keeps itself and the Brain page reads there (GRA-1748). The same claim
+ * or drawing is the same id, so noting it again keeps nothing twice; a
  * drawing drawn anew is a new one.
  */
 export const intakeOf = async (
@@ -444,12 +437,6 @@ export const intakeOf = async (
   const clean = withoutNames(intake.names);
   const teamId = intakeIds.team(intake.team.id);
   const sourceId = await intakeIds.interviews(intake.team.id);
-  const records: BrainRecord[] = recordOf({
-    type: "team",
-    id: teamId,
-    name: intake.team.name,
-    sourceId: rosterSource,
-  });
   const rests: Rest[] = [];
   const kept: IntakeClaim[] = [];
   // Only what five or more of its people said, put together
@@ -517,9 +504,8 @@ export const intakeOf = async (
         record: id,
         type: "workflowVersion" as const,
         person,
-        parent: workflowId,
       }))
     );
   }
-  return { records, claims: kept, drawings, rests };
+  return { claims: kept, drawings, rests };
 };

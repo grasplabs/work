@@ -7,7 +7,7 @@ import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { onboardingStore } from "../src/onboarding/store.ts";
+import { Onboarding, onboardingStore } from "../src/onboarding/store.ts";
 import { claimChecksMax } from "../src/onboarding/team-claims.ts";
 import { setObjectEnv } from "./agent-chat.ts";
 import { erasuresFailing } from "./brain-erasures-failing.ts";
@@ -82,6 +82,20 @@ const drawTickets = async (ids: Ids) => {
     [ticketsReply(ids)],
     async () => await onboardingStore(env).drawNext()
   );
+};
+
+/** Draws everything due, as the alarm would, one drawing at a time. */
+const drawAllDue = async (ids: Ids) => {
+  for (let round = 0; round < 5; round += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- one drawing at a time, as the alarm draws
+    const { result } = await answering(
+      [ticketsReply(ids)],
+      async () => await onboardingStore(env).drawNext()
+    );
+    if (result === null) {
+      return;
+    }
+  }
 };
 
 /** Max's interview as he saves it, saying `zendesk` and `handoff`. */
@@ -405,15 +419,202 @@ describe("what a team said, put together", { timeout: 120_000 }, () => {
     await intake(ids, [zendeskClaim]);
     const member = await signedInApi(idp, "user");
     const before = await statementsFor(member.api, ids);
-    // Pim withdraws: the alarm takes it out at once, with no model.
+    // Pim withdraws: it drops as the withdrawal commits, with no model.
     await onLink({ action: "withdraw", ...(await openLink(ids.pim)) });
-    await onboardingStore(env).purgeBrain();
     expect({
       before,
       after: await statementsFor(member.api, ids),
     }).toStrictEqual({
       before: ["Tickets come in through Zendesk."],
       after: [],
+    });
+  });
+
+  it("rests a claim six make on the five checked first, so one of them withdrawing takes it down and leaves nothing of them behind", async () => {
+    // Eight tell their own work: Pim leaving leaves the team seven.
+    const ids = await eightTeam();
+    await mapped(ids);
+    await eightTold(ids);
+    const riks = "Our tickets land in Zendesk.";
+    await agree(
+      ids.rik,
+      [
+        fact("r1", "step", "Checks the queue at noon."),
+        fact("r2", "system", riks),
+      ],
+      1
+    );
+    // Everything due drawn, Rik's new line among it.
+    await drawAllDue(ids);
+    // Six say it: the five, and Rik, cited last.
+    await intake(ids, [{ ...zendeskClaim, cites: [...zendeskSaid, riks] }]);
+    const member = await signedInApi(idp, "user");
+    const store = onboardingStore(env);
+    const backs = async (person: string) => {
+      const sent = await store.sentFor(person);
+      return sent.flatMap(({ type }) => (type === "statement" ? [type] : []));
+    };
+    const before = {
+      statements: await statementsFor(member.api, ids),
+      pim: await backs(ids.pim),
+      // Checking stops at five: Rik isn't asked.
+      rik: await backs(ids.rik),
+    };
+    await onLink({ action: "withdraw", ...(await openLink(ids.pim)) });
+    expect({
+      before,
+      after: await statementsFor(member.api, ids),
+      // Whom it rested on names Pim no more, nor him as gone.
+      restsOn: await store.sentFor(ids.pim),
+      gone: await store.sentFor(`gone:${ids.pim}`),
+    }).toStrictEqual({
+      before: {
+        statements: [zendeskClaim.text],
+        pim: ["statement"],
+        rik: [],
+      },
+      after: [],
+      restsOn: [],
+      gone: [],
+    });
+  });
+
+  it("rebuilds a claim on who backs it now, never keeping someone who took back their part while its intake ran, though their take-back waits on the voice's cache", async () => {
+    // Eight tell their own work; the claim rests first on Max, Mia, Mo,
+    // Noor and Pim.
+    const ids = await eightTeam();
+    await mapped(ids);
+    await eightTold(ids);
+    await drawAllDue(ids);
+    await intake(ids);
+    const store = onboardingStore(env);
+    const noorBacked = await store.sentFor(ids.noor);
+    // Rik says it too, and is checked first: put together again, it rests
+    // on Rik, Max, Mia, Pim and Mo.
+    const riks = "Our tickets land in Zendesk.";
+    await agree(
+      ids.rik,
+      [
+        fact("r1", "step", "Checks the queue at noon."),
+        fact("r2", "system", riks),
+      ],
+      1
+    );
+    await drawAllDue(ids);
+    const anew = [{ ...zendeskClaim, cites: [riks, ...zendeskSaid] }];
+    // A line of an earlier interview still waits for the voice's cache, and
+    // the cache holds every delete until the test lets it go.
+    await runInDurableObject(store, (_instance, state) => {
+      state.storage.sql.exec(
+        "INSERT INTO forget_lines (key, queued) VALUES (?, 1)",
+        `held/${ids.team}`
+      );
+    });
+    const asked = Promise.withResolvers<boolean>();
+    const cacheAnswers = Promise.withResolvers<boolean>();
+    const files = env.FILES;
+    const restore = await setObjectEnv(store, {
+      FILES: new Proxy(files, {
+        get: (target, name): unknown => {
+          const member: unknown = Reflect.get(target, name);
+          if (name !== "delete" || typeof member !== "function") {
+            return member;
+          }
+          return async (...given: unknown[]): Promise<unknown> => {
+            asked.resolve(true);
+            await cacheAnswers.promise;
+            return await Reflect.apply(member, target, given);
+          };
+        },
+      }),
+    });
+    // While the model puts the claim together again, Noor changes a line
+    // she had approved and doesn't approve it again: her take-back commits,
+    // then waits on the cache before anything follows it.
+    let tookBack: Promise<Response> | undefined;
+    const reply = claimsReply(anew);
+    const respond = async (requests: Parameters<typeof reply>[0]) => {
+      if (tookBack === undefined) {
+        tookBack = (async () => {
+          const link = await openLink(ids.noor);
+          const facts = [
+            fact("n1", "step", "Reads the ticket first."),
+            fact("n2", "system", "Zendesk is where the tickets land, mostly."),
+          ];
+          return await onLink({
+            action: "save",
+            ...link,
+            version: 1,
+            progress: {
+              person: "completed",
+              told: true,
+              mode: "type",
+              lines: [{ from: "stephen", text: "What starts one?" }],
+              facts,
+              phase: "readback",
+              wants: "end",
+              startedAt: Date.now(),
+              confirmed: facts.length,
+              adding: false,
+              addedAt: 0,
+            },
+          });
+        })();
+        await asked.promise;
+      }
+      return reply(requests);
+    };
+    let gave: string | null = null;
+    let saved: number | undefined;
+    try {
+      for (
+        let round = 0;
+        round < 5 && gave !== `brain:${ids.team}`;
+        round += 1
+      ) {
+        // oxlint-disable-next-line no-await-in-loop -- one team at a time, as the alarm gives them
+        ({ result: gave } = await answeringWith(
+          respond,
+          async () => await store.intakeNext()
+        ));
+      }
+    } finally {
+      cacheAnswers.resolve(true);
+      const response = await tookBack;
+      saved = response?.status;
+      await restore();
+    }
+    /** What names Noor behind a claim, as herself or as gone; and anything as gone. */
+    const noorRests = async () => {
+      const own = await store.sentFor(ids.noor);
+      const gone = await store.sentFor(`gone:${ids.noor}`);
+      return [...own.filter(({ type }) => type === "statement"), ...gone];
+    };
+    const rightAfter = await noorRests();
+    // Its work is drawn again without what Noor took back, and its next
+    // intake notes the claim again; then the alarm.
+    await drawAllDue(ids);
+    await intake(ids, anew);
+    await runInDurableObject(store, async (instance) => {
+      await Onboarding.prototype.alarm.call(instance);
+    });
+    await holdAlarm();
+    const member = await signedInApi(idp, "user");
+    expect({
+      before: noorBacked.map(({ type }) => type),
+      gave,
+      saved,
+      rightAfter,
+      claims: await statementsFor(member.api, ids),
+      afterTheAlarm: await noorRests(),
+    }).toStrictEqual({
+      before: ["statement", "workflowVersion"],
+      gave: `brain:${ids.team}`,
+      saved: 200,
+      rightAfter: [],
+      // It stands on the five behind it now, and names Noor nowhere.
+      claims: [zendeskClaim.text],
+      afterTheAlarm: [],
     });
   });
 
@@ -526,7 +727,6 @@ describe("what a team said, put together", { timeout: 120_000 }, () => {
     const member = await signedInApi(idp, "user");
     const before = await statementsFor(member.api, ids);
     await onLink({ action: "withdraw", ...(await openLink(ids.pim)) });
-    await onboardingStore(env).purgeBrain();
     expect({
       before,
       after: await statementsFor(member.api, ids),
@@ -568,115 +768,6 @@ describe("what a team said, put together", { timeout: 120_000 }, () => {
       reworded: ["Zendesk is the ticket inbox."],
       none: [],
     });
-  });
-
-  it("takes an earlier claim out by the alarm when taking it out fails as the claims are put together anew", async () => {
-    const ids = await drawnTeam();
-    await intake(ids);
-    await agree(
-      ids.rik,
-      [
-        fact("r1", "step", "Checks the queue at noon."),
-        fact("r2", "step", "Closes the ticket once answered."),
-      ],
-      1
-    );
-    await drawTickets(ids);
-    // The brain can't take records out while the claims are put together
-    // anew: every try of this intake fails to.
-    // The brain's records deleted, known by what was prepared: drizzle
-    // binds a statement before the batch, so the bound copy is marked too.
-    const prepare = env.DB.prepare.bind(env.DB);
-    const batch = env.DB.batch.bind(env.DB);
-    const deletes = new WeakSet<D1PreparedStatement>();
-    const prepared = vi.spyOn(env.DB, "prepare").mockImplementation((query) => {
-      const statement = prepare(query);
-      if (query.startsWith('delete from "brain_records"')) {
-        deletes.add(statement);
-        const bind = statement.bind.bind(statement);
-        statement.bind = (...values) => {
-          const bound = bind(...values);
-          deletes.add(bound);
-          return bound;
-        };
-      }
-      return statement;
-    });
-    const spy = vi
-      .spyOn(env.DB, "batch")
-      .mockImplementation(async (statements) => {
-        if (statements.some((statement) => deletes.has(statement))) {
-          throw new Error("The brain can't be reached.");
-        }
-        return await batch(statements);
-      });
-    let given: string | null;
-    try {
-      ({ gave: given } = await intake(ids, [
-        { ...zendeskClaim, text: "Zendesk is the ticket inbox." },
-      ]));
-    } finally {
-      spy.mockRestore();
-      prepared.mockRestore();
-    }
-    // The alarm, now or already, once the brain answers again.
-    await onboardingStore(env).purgeBrain();
-    const member = await signedInApi(idp, "user");
-    expect({
-      given,
-      statements: await statementsFor(member.api, ids),
-    }).toStrictEqual({
-      given: `brain:${ids.team}`,
-      statements: ["Zendesk is the ticket inbox."],
-    });
-  });
-
-  it("never holds a claim without whom it rests on: none while the intake fails just after writing the brain's records", async () => {
-    const ids = await drawnTeam();
-    // The brain keeps the team's records, and the intake fails right
-    // after: the batch that writes them lands, and its answer is lost.
-    const prepare = env.DB.prepare.bind(env.DB);
-    const batch = env.DB.batch.bind(env.DB);
-    // The brain's records written, known by what was prepared: drizzle
-    // binds a statement before the batch, so the bound copy is marked too.
-    const writes = new WeakSet<D1PreparedStatement>();
-    let failed = 0;
-    const prepared = vi.spyOn(env.DB, "prepare").mockImplementation((query) => {
-      const statement = prepare(query);
-      if (query.startsWith('insert into "brain_records"')) {
-        writes.add(statement);
-        const bind = statement.bind.bind(statement);
-        statement.bind = (...values) => {
-          const bound = bind(...values);
-          writes.add(bound);
-          return bound;
-        };
-      }
-      return statement;
-    });
-    const spy = vi
-      .spyOn(env.DB, "batch")
-      .mockImplementation(async (statements) => {
-        const results = await batch(statements);
-        if (statements.some((statement) => writes.has(statement))) {
-          failed += 1;
-          throw new Error("Lost on the way back.");
-        }
-        return results;
-      });
-    try {
-      await intake(ids);
-    } finally {
-      spy.mockRestore();
-      prepared.mockRestore();
-    }
-    const member = await signedInApi(idp, "user");
-    // The claim is noted with whom it rests on, in one transaction, only
-    // once the intake gets that far (GRA-1748).
-    expect({
-      failed: failed > 0,
-      held: await statementsFor(member.api, ids),
-    }).toStrictEqual({ failed: true, held: [] });
   });
 
   it("never counts someone who took back what they approved while the claims were put together", async () => {
@@ -734,8 +825,7 @@ describe("what a team said, put together", { timeout: 120_000 }, () => {
       },
       async () => await onboardingStore(env).intakeNext()
     );
-    // The alarm, now or already: four are behind it.
-    await onboardingStore(env).purgeBrain();
+    // Four are behind it now.
     const member = await signedInApi(idp, "user");
     expect({
       // This team's intake, never another's picked first.
@@ -794,7 +884,6 @@ describe("what a team said, put together", { timeout: 120_000 }, () => {
     } finally {
       vi.useRealTimers();
     }
-    await onboardingStore(env).purgeBrain();
     const member = await signedInApi(idp, "user");
     // Four still stand behind it: it goes.
     await expect(statementsFor(member.api, ids)).resolves.toStrictEqual([]);
@@ -841,14 +930,12 @@ describe("what a team said, put together", { timeout: 120_000 }, () => {
         addedAt: 0,
       },
     });
-    await onboardingStore(env).purgeBrain();
     const gone = await drawings();
     // He puts it back as it was, and approves it again: the same drawing,
     // the same day, from the same people, so the same record.
     await agree(ids.max, maxFacts, 2);
     await drawTickets(ids);
     await intake(ids);
-    await onboardingStore(env).purgeBrain();
     const back = await drawings();
     // Mia agrees again to what she had: drawn again, given again.
     await agree(
@@ -865,7 +952,6 @@ describe("what a team said, put together", { timeout: 120_000 }, () => {
     );
     await drawTickets(ids);
     await intake(ids);
-    await onboardingStore(env).purgeBrain();
     const again = await drawings();
     expect({ gone, back, again }).toStrictEqual({
       gone: [],
@@ -879,7 +965,7 @@ describe("what a team said, put together", { timeout: 120_000 }, () => {
     const ids = await drawnTeam();
     await intake(ids);
     // As the migrations leave a finished onboarding: the team due again,
-    // its statements gone, and no alarm.
+    // and no alarm.
     await runInDurableObject(onboardingStore(env), async (_instance, state) => {
       state.storage.sql.exec(
         "UPDATE brain_teams SET due_at = ? WHERE team = ?",
@@ -888,9 +974,6 @@ describe("what a team said, put together", { timeout: 120_000 }, () => {
       );
       await state.storage.deleteAlarm();
     });
-    await env.DB.prepare(
-      "DELETE FROM brain_records WHERE type = 'statement' AND id LIKE 'onb-st-%'"
-    ).run();
     // The store starts again, as it does after a deploy.
     await runInDurableObject(onboardingStore(env), (_instance, state) => {
       try {
@@ -903,7 +986,7 @@ describe("what a team said, put together", { timeout: 120_000 }, () => {
       onboardingStore(env),
       async (_instance, state) => await state.storage.getAlarm()
     );
-    // The alarm gives the team to the brain again.
+    // The alarm takes the team in again.
     await intake(ids);
     const member = await signedInApi(idp, "user");
     expect({
@@ -971,7 +1054,6 @@ describe("what a team said, put together", { timeout: 120_000 }, () => {
       },
       { type: "system" }
     );
-    await onboardingStore(env).purgeBrain();
     expect({
       before,
       after: await statementsFor(member.api, ids),
