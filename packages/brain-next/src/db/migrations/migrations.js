@@ -25,6 +25,7 @@ import m0022 from './0022_memory_outs.sql';
 import m0023 from './0023_memory_judging.sql';
 import m0024 from './0024_chunk_days.sql';
 import m0025 from './0025_own_entity.sql';
+import m0026 from './0026_chunk_blocks.sql';
 
   export default {
     journal,
@@ -54,7 +55,8 @@ m0021,
 m0022,
 m0023,
 m0024,
-m0025
+m0025,
+m0026
     }
   }
   
