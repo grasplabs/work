@@ -230,9 +230,8 @@ describe("requesting an app", () => {
     await type(field("request-name"), "Exact Online");
     await type(field("request-why"), "Read invoices");
     await click("Send request");
-    const requested = document.querySelector(
-      '[aria-labelledby="integrations-requested"]'
-    );
+    // The Requested list, as its rows name it.
+    const requested = document.querySelector('ul[aria-label="Requested"]');
     expect(requested?.textContent).toContain("Exact Online");
     expect(requested?.textContent).toContain("Read invoices");
   });

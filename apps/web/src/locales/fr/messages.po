@@ -878,6 +878,7 @@ msgid "{name} isn't ready yet"
 msgstr "{name} n’est pas encore prêt"
 
 #: src/connections/app-logo.tsx
+#: src/connections/provider-mark.tsx
 msgid "{name} logo"
 msgstr "Logo {name}"
 
@@ -980,6 +981,10 @@ msgstr "{open, plural, one {# question ouverte} other {# questions ouvertes}}"
 #: src/onboarding/setup-steps.tsx
 msgid "{openCount, plural, =0 {Nothing needs you} =1 {Just one thing for you} other {# things for you}}"
 msgstr "{openCount, plural, =0 {Rien ne vous attend} =1 {Une seule chose pour vous} other {# choses pour vous}}"
+
+#: src/connections/http-connections.tsx
+msgid "{origin} · {methods} under {paths} · sent in {header} · added {added}"
+msgstr "{origin} · {methods} sous {paths} · envoyé dans {header} · ajouté le {added}"
 
 #: src/knowledge/purge.tsx
 msgid "{originals, plural, one {# uploaded original deleted} other {# uploaded originals deleted}}"
@@ -3940,6 +3945,7 @@ msgid "Clear filters"
 msgstr "Effacer les filtres"
 
 #: src/agents/agents-overview.tsx
+#: src/routes/_shell.integrations.index.tsx
 msgid "Clear search"
 msgstr "Effacer la recherche"
 
@@ -4211,6 +4217,7 @@ msgid "Confirmed by the board"
 msgstr "Confirmé par le conseil"
 
 #: src/chat/plan-card.tsx
+#: src/connections/integration-item.tsx
 #: src/connections/integration-row.tsx
 #: src/connections/request-app-dialog.tsx
 #: src/onboarding/connect-steps.tsx
@@ -4219,6 +4226,7 @@ msgid "Connect"
 msgstr "Connecter"
 
 #: src/connections/connect-dialog.tsx
+#: src/connections/integration-item.tsx
 #: src/connections/integration-row.tsx
 msgid "Connect {app}"
 msgstr "Connecter {app}"
@@ -4288,6 +4296,14 @@ msgstr "A connecté un compte"
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Connected by"
 msgstr "Connexion par"
+
+#: src/connections/integration-item.tsx
+msgid "Connected for everyone"
+msgstr "Connecté pour tout le monde"
+
+#: src/connections/integration-item.tsx
+msgid "Connected for you"
+msgstr "Connecté pour vous"
 
 #: src/connections/connection-list.tsx
 msgid "Connected on"
@@ -4591,6 +4607,10 @@ msgstr "Impossible de charger qui peut en répondre."
 #: src/apps/app-settings.tsx
 msgid "Couldn't refresh. This may be out of date."
 msgstr "Impossible d’actualiser. Ces informations ne sont peut-être plus à jour."
+
+#: src/connections/http-connections.tsx
+msgid "Couldn't revoke"
+msgstr "Révocation impossible"
 
 #: src/settings/audit-archive.tsx
 msgid "Counted from when each event was recorded; then deleted."
@@ -5119,6 +5139,10 @@ msgstr "Agit pour les personnes ici"
 #: src/settings/stephen-settings.tsx
 msgid "Does things for people in {name}"
 msgstr "Agit pour les personnes dans {name}"
+
+#: src/connections/http-connections.tsx
+msgid "Doesn't work now"
+msgstr "Ne fonctionne pas pour l'instant"
 
 #: src/inbox/inbox-kind.tsx
 msgctxt "inbox item kind"
@@ -8199,9 +8223,14 @@ msgstr "Faire la modification"
 msgid "Makes {table} sensitive: its history keeps no values, and every read is recorded."
 msgstr "Rend {table} sensible : son historique ne garde aucune valeur, et chaque lecture est enregistrée."
 
+#: src/connections/integration-item.tsx
 #: src/connections/integration-row.tsx
 msgid "Manage"
 msgstr "Gérer"
+
+#: src/connections/integration-item.tsx
+msgid "Manage {app}"
+msgstr "Gérer {app}"
 
 #: src/connections/integration-row.tsx
 msgid "Manage {app}, connected for everyone"
@@ -8427,10 +8456,6 @@ msgstr "La suite, si ça se passe autrement."
 msgid "More people are asked about it in the next interviews."
 msgstr "Davantage de personnes seront interrogées à ce sujet lors des prochains entretiens."
 
-#: src/routes/_shell.integrations.index.tsx
-msgid "More than {about} apps your workflows can work in. Grasp only does what you allow per app."
-msgstr "Plus de {about} applications dans lesquelles vos workflows peuvent travailler. Grasp ne fait que ce que vous autorisez pour chaque application."
-
 #: src/brain/sources-page.tsx
 msgid "More was found than fits: these are the best of it."
 msgstr "Il y a plus de résultats que de place : voici les meilleurs."
@@ -8581,6 +8606,11 @@ msgstr "À vérifier"
 msgid "Needs attention"
 msgstr "À traiter"
 
+#: src/connections/integration-item.tsx
+msgid "Needs its own sign-in app"
+msgstr "Nécessite sa propre app de connexion"
+
+#: src/connections/integration-item.tsx
 #: src/connections/integration-row.tsx
 msgid "Needs signing in again"
 msgstr "Reconnexion nécessaire"
@@ -9236,6 +9266,7 @@ msgstr "Non nommé par le fournisseur"
 msgid "Not now"
 msgstr "Pas maintenant"
 
+#: src/connections/integration-item.tsx
 #: src/connections/integration-row.tsx
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Not offered"
@@ -12684,6 +12715,7 @@ msgid "Sign in"
 msgstr "Se connecter"
 
 #: src/connections/connection-list.tsx
+#: src/connections/integration-item.tsx
 #: src/connections/integration-row.tsx
 #: src/connections/integrations-banner.tsx
 #: src/dashboard/to-do.tsx
@@ -12701,6 +12733,7 @@ msgid "Sign in to {app}"
 msgstr "Se connecter à {app}"
 
 #: src/connections/connect-dialog.tsx
+#: src/connections/integration-item.tsx
 #: src/connections/integration-row.tsx
 #: src/dashboard/to-do.tsx
 #: src/inbox/items.ts
@@ -13814,10 +13847,6 @@ msgstr "Les applications que ce chat crée n’ont pas été chargées."
 #: src/apps/apps-overview.tsx
 msgid "The Apps your colleagues share with you show here."
 msgstr "Les Apps que vos collègues partagent avec vous apparaissent ici."
-
-#: src/routes/_shell.integrations.index.tsx
-msgid "The apps your workflows can work in. Grasp only does what you allow per app."
-msgstr "Les applications dans lesquelles vos workflows peuvent travailler. Grasp ne fait que ce que vous autorisez, application par application."
 
 #: src/agents/agent-page.tsx
 msgid "The asker's"

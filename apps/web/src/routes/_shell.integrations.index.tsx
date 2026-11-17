@@ -3,25 +3,11 @@ import { catalogGroups } from "@grasp-os/shared/connect-names";
 import type { CatalogGroup } from "@grasp-os/shared/connect-names";
 import { isAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { Button } from "@grasp-os/ui/components/button";
-import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupInput,
-} from "@grasp-os/ui/components/input-group";
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@grasp-os/ui/components/select";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg, plural } from "@lingui/core/macro";
-import { Trans, useLingui } from "@lingui/react/macro";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { Await, createFileRoute, useNavigate } from "@tanstack/react-router";
-import { PlusIcon, SearchIcon } from "lucide-react";
 import { useState } from "react";
 
 import { connectionErrorMessage } from "../connection-errors.ts";
@@ -31,14 +17,13 @@ import {
   HttpConnections,
   httpConnectionsMatching,
 } from "../connections/http-connections.tsx";
-import { IntegrationRow } from "../connections/integration-row.tsx";
+import { IntegrationItem } from "../connections/integration-item.tsx";
 import { IntegrationsBanner } from "../connections/integrations-banner.tsx";
 import { loadIntegrations } from "../connections/integrations-data.ts";
 import { IntegrationsSection } from "../connections/integrations-section.tsx";
 import {
   filterCounts,
   integrationsOf,
-  roundedDown,
   sectionsOf,
 } from "../connections/integrations.ts";
 import type {
@@ -50,12 +35,45 @@ import { RequestAppDialog } from "../connections/request-app-dialog.tsx";
 import { RequestedApps } from "../connections/requested-apps.tsx";
 import { RevocationsByHand } from "../connections/revocations-by-hand.tsx";
 import type { ConnectionUses } from "../connections/workflows-using.tsx";
-import { ErrorText } from "../error-text.tsx";
 import { formatNumber } from "../format.ts";
 import { PageLoading } from "../frame/page-states.tsx";
-import { PageHeading } from "../frame/page.tsx";
+import { Page, PageHeading } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
+import { Alert } from "../grasp/alert/index.ts";
+import { Button } from "../grasp/button/index.ts";
+import { Empty } from "../grasp/empty/index.ts";
+import { visuallyHidden } from "../grasp/hidden/hidden.ts";
+import { Plus, Search as SearchIcon } from "../grasp/icons/index.ts";
+import {
+  InputGroup,
+  InputGroupClear,
+  InputGroupInput,
+  InputGroupText,
+} from "../grasp/input-group/index.ts";
+import {
+  Select,
+  SelectContent,
+  SelectTrigger,
+  SelectValue,
+} from "../grasp/select/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { loadFromCore, NotLoaded } from "../load-from-core.tsx";
+
+const styles = stylex.create({
+  // The filter and the search on one line where there is room for both.
+  tools: {
+    display: "grid",
+    gridTemplateColumns: {
+      default: "minmax(0, 1fr)",
+      "@media (min-width: 40rem)": "14rem minmax(0, 1fr)",
+    },
+    alignItems: "center",
+    gap: grasp.space2,
+  },
+  filter: { width: "100%" },
+  search: { width: "100%" },
+  mark: { display: "block", height: "1px" },
+});
 
 // Integrations, as in the prototype (`routes/integrations/index.tsx`): one
 // column of lists by where each app stands. First what someone has to
@@ -131,11 +149,11 @@ const Search = ({ q }: { q: string | undefined }) => {
     }
   }
   return (
-    <InputGroup>
+    <InputGroup layout={styles.search}>
+      <InputGroupText icon={SearchIcon} />
       <InputGroupInput
         aria-label={t`Search integrations`}
-        onChange={(event) => {
-          const typed = event.target.value;
+        onValueChange={(typed) => {
           setText(typed);
           void navigate({
             replace: true,
@@ -149,9 +167,7 @@ const Search = ({ q }: { q: string | undefined }) => {
         type="search"
         value={text}
       />
-      <InputGroupAddon>
-        <SearchIcon />
-      </InputGroupAddon>
+      <InputGroupClear aria-label={t`Clear search`} />
     </InputGroup>
   );
 };
@@ -167,7 +183,7 @@ const Rows = ({
   uses: ConnectionUses;
 }) =>
   integrations.map((integration) => (
-    <IntegrationRow
+    <IntegrationItem
       identity={identity}
       integration={integration}
       key={integration.key}
@@ -195,14 +211,12 @@ const OwnSections = ({
     <>
       <IntegrationsSection
         count={sections.lapsed.length}
-        id="lapsed"
         title={t`Needs someone to sign in again`}
       >
         <Rows identity={identity} integrations={sections.lapsed} uses={uses} />
       </IntegrationsSection>
       <IntegrationsSection
         count={sections.connected.length}
-        id="connected"
         title={t({
           message: "Connected",
           context: "apps that are connected and that workflows use",
@@ -216,7 +230,6 @@ const OwnSections = ({
       </IntegrationsSection>
       <IntegrationsSection
         count={sections.unused.length}
-        id="unused"
         title={t`Connected, used by no workflow you can open`}
       >
         <Rows identity={identity} integrations={sections.unused} uses={uses} />
@@ -267,7 +280,6 @@ const MoreApps = ({
       <IntegrationsSection
         about={t`Every other app Grasp can connect to.`}
         count={others.length}
-        id="more"
         title={t({
           message: "More apps",
           context: "the catalog's apps nobody connected",
@@ -280,7 +292,12 @@ const MoreApps = ({
         />
       </IntegrationsSection>
       {others.length > drawn ? (
-        <span aria-hidden="true" className="h-px" key={drawn} ref={watch} />
+        <span
+          aria-hidden="true"
+          key={drawn}
+          ref={watch}
+          {...stylex.props(styles.mark)}
+        />
       ) : null}
     </>
   );
@@ -376,26 +393,19 @@ const FilterSelect = ({
         value: choice.id,
         label: labelOf(choice),
       }))}
+      layout={styles.filter}
       onValueChange={(value) => {
         const choice = choices.find(({ id }) => id === value);
         if (choice !== undefined) {
           void navigate({ search: searchFor(choice.filter, q) });
         }
       }}
-      value={selected?.id}
+      value={selected?.id ?? null}
     >
-      <SelectTrigger aria-label={t`Filter integrations`} className="w-full">
+      <SelectTrigger aria-label={t`Filter integrations`}>
         <SelectValue />
       </SelectTrigger>
-      <SelectContent>
-        <SelectGroup>
-          {choices.map((choice) => (
-            <SelectItem key={choice.id} value={choice.id}>
-              {labelOf(choice)}
-            </SelectItem>
-          ))}
-        </SelectGroup>
-      </SelectContent>
+      <SelectContent />
     </Select>
   );
 };
@@ -461,7 +471,6 @@ const Integrations = () => {
     first.others.length +
     httpShown;
   const loaded = catalog.state === "ready" && connections.state === "ready";
-  const about = formatNumber(roundedDown(integrations.length));
   const [requesting, setRequesting] = useState(false);
   return (
     <>
@@ -471,128 +480,101 @@ const Integrations = () => {
         open={requesting}
       />
       <SiteHeader crumbs={[{ label: t`Integrations` }]} />
-      <div className="min-h-0 flex-1 overflow-y-auto text-sm" data-scroller>
-        {/* Columns follow the room this area has, not the window. */}
-        <div className="@container mx-auto flex w-full max-w-5xl flex-col gap-8">
-          <PageHeading
-            description={
-              catalog.state === "ready" &&
-              catalog.data.composio === "listed" ? (
-                <Trans>
-                  More than {about} apps your workflows can work in. Grasp only
-                  does what you allow per app.
-                </Trans>
-              ) : (
-                <Trans>
-                  The apps your workflows can work in. Grasp only does what you
-                  allow per app.
-                </Trans>
-              )
-            }
-            title={t`Integrations`}
+      <Page>
+        <PageHeading
+          action={
+            <Button
+              icon={Plus}
+              onClick={() => {
+                setRequesting(true);
+              }}
+            >
+              {t`Request app`}
+            </Button>
+          }
+          title={t`Integrations`}
+        />
+        <Returned connection={connection} integrations={integrations} />
+        {connectionError === undefined ? null : (
+          <Alert
+            title={connectionErrorMessage(connectionError)}
+            variant="danger"
           />
-          <Returned connection={connection} integrations={integrations} />
-          {connectionError === undefined ? null : (
-            <ErrorText>{connectionErrorMessage(connectionError)}</ErrorText>
-          )}
-          {/* The band, and under it on the right the filter, the search and the way to ask for an app. */}
-          <div className="flex flex-col gap-3">
-            <IntegrationsBanner integrations={integrations} />
-            {identity.staff ? (
-              <p className="text-muted-foreground">
-                <Trans>
-                  Grasp staff can&apos;t connect accounts or change what is
-                  offered here: that is for the organization&apos;s own people.
-                </Trans>
-              </p>
-            ) : null}
-            {catalog.state === "ready" &&
-            catalog.data.composio === "unavailable" ? (
-              <p className="text-muted-foreground">
-                <Trans>
-                  Composio&apos;s toolkits can&apos;t be listed right now. Try
-                  again shortly.
-                </Trans>
-              </p>
-            ) : null}
-            <div className="flex flex-wrap items-center justify-end gap-2">
-              <div className="w-full @md:w-48">
-                <FilterSelect choices={choices} filter={filter} q={q} />
-              </div>
-              <div className="min-w-0 flex-1 @md:w-56 @md:flex-none">
-                <Search q={q} />
-              </div>
-              <Button
-                onClick={() => {
-                  setRequesting(true);
-                }}
-                variant="outline"
-              >
-                <PlusIcon data-icon="inline-start" />
-                <Trans>Request app</Trans>
-              </Button>
-            </div>
-          </div>
-          <RevocationsByHand
-            nameOf={(provider) =>
-              integrations.find(
-                (each) => each.source === "native" && each.id === provider
-              )?.name ?? provider
-            }
-            toDos={toRevoke}
+        )}
+        <IntegrationsBanner integrations={integrations} />
+        {identity.staff ? (
+          <Alert
+            title={t`Grasp staff can't connect accounts or change what is offered here: that is for the organization's own people.`}
           />
-          <NotLoaded page={catalog} />
-          <NotLoaded page={connections} />
-          <output className="sr-only">
-            {q !== undefined || filter.show !== "all"
-              ? t`${plural(shown, { one: "# integration shown", other: "# integrations shown" })}`
-              : ""}
-          </output>
-          {loaded && shown === 0 ? (
-            <p className="text-muted-foreground py-16 text-center">
-              {i18n._(emptyTextOf(filter, q))}
-            </p>
-          ) : null}
-          <Await
-            fallback={
-              <OwnSections identity={identity} sections={first} uses={uses} />
-            }
-            promise={uses}
-          >
-            {(read) => (
-              <OwnSections
-                identity={identity}
-                sections={sectionsOf(
-                  integrations,
-                  filter,
-                  q,
-                  read.state === "ready" ? read.data : undefined
-                )}
-                uses={uses}
-              />
-            )}
-          </Await>
-          {/* Outside APIs an admin approved: no catalog app, so no kind. */}
-          {filter.show === "group" ? null : (
-            <HttpConnections
-              connections={listed}
+        ) : null}
+        {catalog.state === "ready" &&
+        catalog.data.composio === "unavailable" ? (
+          <Alert
+            title={t`Composio's toolkits can't be listed right now. Try again shortly.`}
+            variant="attention"
+          />
+        ) : null}
+        <div {...stylex.props(styles.tools)}>
+          <FilterSelect choices={choices} filter={filter} q={q} />
+          <Search q={q} />
+        </div>
+        <RevocationsByHand
+          nameOf={(provider) =>
+            integrations.find(
+              (each) => each.source === "native" && each.id === provider
+            )?.name ?? provider
+          }
+          toDos={toRevoke}
+        />
+        <NotLoaded page={catalog} />
+        <NotLoaded page={connections} />
+        <output {...stylex.props(visuallyHidden)}>
+          {q !== undefined || filter.show !== "all"
+            ? t`${plural(shown, { one: "# integration shown", other: "# integrations shown" })}`
+            : ""}
+        </output>
+        {loaded && shown === 0 ? (
+          <Empty size="section">{i18n._(emptyTextOf(filter, q))}</Empty>
+        ) : null}
+        <Await
+          fallback={
+            <OwnSections identity={identity} sections={first} uses={uses} />
+          }
+          promise={uses}
+        >
+          {(read) => (
+            <OwnSections
               identity={identity}
-              search={q}
+              sections={sectionsOf(
+                integrations,
+                filter,
+                q,
+                read.state === "ready" ? read.data : undefined
+              )}
+              uses={uses}
             />
           )}
-          {/* The apps asked for have no kind, and none is connected. */}
-          {filter.show === "all" ? (
-            <RequestedApps requests={requests} search={q} />
-          ) : null}
-          {/* Mounted anew for another kind or another search, so it starts at its first apps again. */}
-          <MoreApps
+        </Await>
+        {/* Outside APIs an admin approved: no catalog app, so no kind. */}
+        {filter.show === "group" ? null : (
+          <HttpConnections
+            connections={listed}
             identity={identity}
-            key={`${JSON.stringify(filter)}·${q ?? ""}`}
-            others={first.others}
-            uses={uses}
+            search={q}
           />
-        </div>
-      </div>
+        )}
+        {/* The apps asked for have no kind, and none is connected. */}
+        {filter.show === "all" ? (
+          <RequestedApps requests={requests} search={q} />
+        ) : null}
+        {/* Mounted anew for another kind or another search, so it starts at its first apps again. */}
+        <MoreApps
+          identity={identity}
+          key={`${JSON.stringify(filter)}·${q ?? ""}`}
+          others={first.others}
+          uses={uses}
+        />
+      </Page>
     </>
   );
 };

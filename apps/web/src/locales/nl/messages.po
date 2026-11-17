@@ -878,6 +878,7 @@ msgid "{name} isn't ready yet"
 msgstr "{name} is nog niet klaar"
 
 #: src/connections/app-logo.tsx
+#: src/connections/provider-mark.tsx
 msgid "{name} logo"
 msgstr "Logo van {name}"
 
@@ -980,6 +981,10 @@ msgstr "{open, plural, one {# open vraag} other {# open vragen}}"
 #: src/onboarding/setup-steps.tsx
 msgid "{openCount, plural, =0 {Nothing needs you} =1 {Just one thing for you} other {# things for you}}"
 msgstr "{openCount, plural, =0 {Niets wacht op jou} =1 {Nog maar één ding voor jou} other {# dingen voor jou}}"
+
+#: src/connections/http-connections.tsx
+msgid "{origin} · {methods} under {paths} · sent in {header} · added {added}"
+msgstr "{origin} · {methods} onder {paths} · verstuurd in {header} · toegevoegd op {added}"
 
 #: src/knowledge/purge.tsx
 msgid "{originals, plural, one {# uploaded original deleted} other {# uploaded originals deleted}}"
@@ -3940,6 +3945,7 @@ msgid "Clear filters"
 msgstr "Filters wissen"
 
 #: src/agents/agents-overview.tsx
+#: src/routes/_shell.integrations.index.tsx
 msgid "Clear search"
 msgstr "Zoekopdracht wissen"
 
@@ -4211,6 +4217,7 @@ msgid "Confirmed by the board"
 msgstr "Bevestigd door de directie"
 
 #: src/chat/plan-card.tsx
+#: src/connections/integration-item.tsx
 #: src/connections/integration-row.tsx
 #: src/connections/request-app-dialog.tsx
 #: src/onboarding/connect-steps.tsx
@@ -4219,6 +4226,7 @@ msgid "Connect"
 msgstr "Koppelen"
 
 #: src/connections/connect-dialog.tsx
+#: src/connections/integration-item.tsx
 #: src/connections/integration-row.tsx
 msgid "Connect {app}"
 msgstr "{app} koppelen"
@@ -4288,6 +4296,14 @@ msgstr "Een account gekoppeld"
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Connected by"
 msgstr "Gekoppeld door"
+
+#: src/connections/integration-item.tsx
+msgid "Connected for everyone"
+msgstr "Verbonden voor iedereen"
+
+#: src/connections/integration-item.tsx
+msgid "Connected for you"
+msgstr "Verbonden voor jou"
 
 #: src/connections/connection-list.tsx
 msgid "Connected on"
@@ -4591,6 +4607,10 @@ msgstr "Kon niet laden wie ervoor verantwoordelijk mag zijn."
 #: src/apps/app-settings.tsx
 msgid "Couldn't refresh. This may be out of date."
 msgstr "Kon niet vernieuwen. Dit is misschien niet meer actueel."
+
+#: src/connections/http-connections.tsx
+msgid "Couldn't revoke"
+msgstr "Intrekken mislukt"
 
 #: src/settings/audit-archive.tsx
 msgid "Counted from when each event was recorded; then deleted."
@@ -5119,6 +5139,10 @@ msgstr "Doet hier dingen voor mensen"
 #: src/settings/stephen-settings.tsx
 msgid "Does things for people in {name}"
 msgstr "Doet dingen voor mensen in {name}"
+
+#: src/connections/http-connections.tsx
+msgid "Doesn't work now"
+msgstr "Werkt nu niet"
 
 #: src/inbox/inbox-kind.tsx
 msgctxt "inbox item kind"
@@ -8199,9 +8223,14 @@ msgstr "Wijziging maken"
 msgid "Makes {table} sensitive: its history keeps no values, and every read is recorded."
 msgstr "Maakt {table} gevoelig: de geschiedenis bewaart geen waarden, en elke keer lezen wordt vastgelegd."
 
+#: src/connections/integration-item.tsx
 #: src/connections/integration-row.tsx
 msgid "Manage"
 msgstr "Beheren"
+
+#: src/connections/integration-item.tsx
+msgid "Manage {app}"
+msgstr "{app} beheren"
 
 #: src/connections/integration-row.tsx
 msgid "Manage {app}, connected for everyone"
@@ -8427,10 +8456,6 @@ msgstr "Nog meer over als het anders gaat."
 msgid "More people are asked about it in the next interviews."
 msgstr "In de volgende interviews worden meer mensen erover gevraagd."
 
-#: src/routes/_shell.integrations.index.tsx
-msgid "More than {about} apps your workflows can work in. Grasp only does what you allow per app."
-msgstr "Meer dan {about} apps waarin je workflows kunnen werken. Grasp doet per app alleen wat jij toestaat."
-
 #: src/brain/sources-page.tsx
 msgid "More was found than fits: these are the best of it."
 msgstr "Er is meer gevonden dan er past: dit is het beste ervan."
@@ -8581,6 +8606,11 @@ msgstr "Te controleren"
 msgid "Needs attention"
 msgstr "Vraagt aandacht"
 
+#: src/connections/integration-item.tsx
+msgid "Needs its own sign-in app"
+msgstr "Heeft een eigen aanmeldapp nodig"
+
+#: src/connections/integration-item.tsx
 #: src/connections/integration-row.tsx
 msgid "Needs signing in again"
 msgstr "Opnieuw aanmelden nodig"
@@ -9236,6 +9266,7 @@ msgstr "Niet benoemd door de provider"
 msgid "Not now"
 msgstr "Nu niet"
 
+#: src/connections/integration-item.tsx
 #: src/connections/integration-row.tsx
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Not offered"
@@ -12684,6 +12715,7 @@ msgid "Sign in"
 msgstr "Aanmelden"
 
 #: src/connections/connection-list.tsx
+#: src/connections/integration-item.tsx
 #: src/connections/integration-row.tsx
 #: src/connections/integrations-banner.tsx
 #: src/dashboard/to-do.tsx
@@ -12701,6 +12733,7 @@ msgid "Sign in to {app}"
 msgstr "Aanmelden bij {app}"
 
 #: src/connections/connect-dialog.tsx
+#: src/connections/integration-item.tsx
 #: src/connections/integration-row.tsx
 #: src/dashboard/to-do.tsx
 #: src/inbox/items.ts
@@ -13814,10 +13847,6 @@ msgstr "De apps die deze chat bouwt, zijn niet geladen."
 #: src/apps/apps-overview.tsx
 msgid "The Apps your colleagues share with you show here."
 msgstr "De Apps die je collega's met je delen, verschijnen hier."
-
-#: src/routes/_shell.integrations.index.tsx
-msgid "The apps your workflows can work in. Grasp only does what you allow per app."
-msgstr "De apps waarin je workflows kunnen werken. Grasp doet alleen wat je per app toestaat."
 
 #: src/agents/agent-page.tsx
 msgid "The asker's"
