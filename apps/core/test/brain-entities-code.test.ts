@@ -1,4 +1,5 @@
 import { brainOf } from "@grasp-os/brain-next/contract";
+import { v } from "@grasp-os/runtime/app";
 import type { FunctionResult } from "@grasp-os/shared/functions";
 import { httpContract } from "@grasp-os/shared/http-contract";
 import { teamIdSchema } from "@grasp-os/shared/ids";
@@ -18,14 +19,24 @@ import { z } from "zod";
 import { callAppFunction } from "../src/app-functions.ts";
 import type { Release } from "../src/app-releases.ts";
 import { appFor, appKind } from "../src/apps.ts";
+import { drainAuditOutboxes } from "../src/audit-drains.ts";
 import { teamsOf } from "../src/auth/identity.ts";
 import {
   erasePersonShared,
   eraseSource,
+  readSourceVersionAs,
   workBrain,
 } from "../src/brain-next.ts";
 import type { SourceRef } from "../src/brain-next.ts";
+import { producersOf, relayHandOvers } from "../src/brain-sources.ts";
 import { builtins, fingerprintOf, thisRelease } from "../src/builtins.ts";
+import {
+  answerDecision,
+  confirmDecision,
+  decisionFor,
+  reviewDecision,
+  waitingDecisions,
+} from "../src/decisions/decisions.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
 import { grantPermission, requestPermission } from "../src/permissions.ts";
@@ -45,6 +56,7 @@ import {
 } from "../src/workflows/candidate-runs.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { runFilesFor } from "../src/workflows/run-file-downloads.ts";
+import { workflowsToday } from "../src/workflows/today.ts";
 import { testApp } from "./app-definitions.ts";
 import { allEvents } from "./audit-events.ts";
 import {
@@ -60,7 +72,7 @@ import { fakeProviderFor } from "./model-provider.ts";
 import { noProducers } from "./no-producers.ts";
 import { appWith, person, seal } from "./sealed-apps.ts";
 import type { Fixture } from "./sealed-apps.ts";
-import { routed, unique } from "./sign-in.ts";
+import { outcome, routed, unique } from "./sign-in.ts";
 import { testBinding } from "./test-env.ts";
 import { publishDefinition } from "./workflow-publishing.ts";
 
@@ -1902,6 +1914,350 @@ describe(
       }).toStrictEqual({
         ending: { status: "failed", error: "brain.revoked" },
         sent: [],
+      });
+    });
+  }
+);
+
+// What a run asks people about what it read (GRA-1988, the threat model on
+// the issue): a decision's prompt and input are kept when it opens, and
+// read by its recipients while it waits. Once the run may no longer read
+// what they rest on, every way a recipient reads the ask shows it
+// withheld, and an answer to it is never taken.
+
+/**
+ * A workflow of `by`'s that reads a card (`entities.get`) and asks
+ * `reviewer` about it: its prompt names the card's entity, its input holds
+ * the whole card. Its `brain` and decision bindings approved by `admin`.
+ */
+const askingAboutCard = async (by: Member, admin: Member, reviewer: Member) => {
+  const brain = `brain-${unique()}`;
+  await publishCatalogContract(env, admin, { key: brain, kind: "brain" });
+  const contract = `card-review-${unique()}`;
+  await publishCatalogContract(env, admin, {
+    key: contract,
+    kind: "decision",
+    input: JSON.stringify(v.object({ card: v.string() }).descriptor),
+    response: JSON.stringify(v.null().descriptor),
+  });
+  const workflow = await createWorkflowResource(env, by, `ask-${unique()}`);
+  await publishDefinition(
+    env,
+    by,
+    workflow.id,
+    JSON.stringify({
+      $schema: workflowSchemaUrl,
+      // As `startedRun` starts one: `name` goes unread.
+      args: {
+        kind: "object",
+        fields: { entity: { kind: "string" }, name: { kind: "string" } },
+      },
+      permissions: {
+        brain: { docs: { contract: brain } },
+        decisions: { review: { contract } },
+      },
+      steps: [
+        {
+          id: "card",
+          type: "call",
+          brain: "docs",
+          action: "entities.get",
+          args: { entity: { $expr: "args.entity" } },
+        },
+        {
+          id: "asked",
+          type: "decide",
+          decision: "review",
+          recipients: [`person:${reviewer.userId}`],
+          prompt: { $expr: '"Go ahead with " + card?.entity.name + "?"' },
+          input: { card: { $expr: "JSON.stringify(card)" } },
+        },
+      ],
+    })
+  );
+  const permissionId = await granted(
+    by,
+    admin,
+    brainGrant({ type: "workflow", workflowId: workflow.id })
+  );
+  await approveWorkflowBinding(env, admin, workflow.id, {
+    alias: "docs",
+    target: { kind: "brain", permissionId },
+    reviewed: { version: 1 },
+  });
+  await approveWorkflowBinding(env, admin, workflow.id, {
+    alias: "review",
+    target: { kind: "decision", deciders: [`person:${reviewer.userId}`] },
+    reviewed: { version: 1 },
+  });
+  return workflow;
+};
+
+/** The decision run `runId` asked `reviewer`, once it waits in their inbox. */
+const askedOfReviewer = async (
+  reviewer: Member,
+  runId: string
+): Promise<string> =>
+  await vi.waitFor(
+    async () => {
+      const row = await env.DB.prepare(
+        "SELECT id FROM workflow_decisions WHERE resource_run_id = ?"
+      )
+        .bind(runId)
+        .first<{ id: string }>();
+      const waiting = await waitingDecisions(env, reviewer);
+      const id = row?.id ?? "";
+      expect(waiting.map((decision) => decision.id)).toContain(id);
+      return id;
+    },
+    { timeout: 30_000, interval: 100 }
+  );
+
+/**
+ * What `reviewer` reads of `decision`, every way they read it: its page,
+ * their inbox, the review before an answer and their day's runs; whether
+ * it is listed and shows an input, and which of `names` any of them shows.
+ */
+const askReadBy = async (
+  reviewer: Member,
+  decision: string,
+  names: readonly string[]
+) => {
+  const page = await decisionFor(env, reviewer, decision);
+  const waiting = await waitingDecisions(env, reviewer);
+  const inbox = waiting.filter(({ id }) => id === decision);
+  const review = await reviewDecision(env, reviewer, decision, {
+    approved: false,
+  });
+  const today = await workflowsToday(env, reviewer);
+  const asks = today.lanes
+    .flatMap(({ runs }) => runs)
+    .flatMap(({ waits }) => (waits?.decision === decision ? [waits.asks] : []));
+  const text = JSON.stringify({ page, inbox, review, asks });
+  return {
+    inbox: inbox.length,
+    today: asks.length,
+    input: [page, ...inbox, review.decision].some(
+      (view) => view.input !== undefined
+    ),
+    shows: names.filter((name) => text.includes(name)),
+  };
+};
+
+/**
+ * `by`'s answers to `decision` through the trusted host decision UI: an
+ * approval, at each step it could be given (reviewed, confirmed, then
+ * answered), each refused or not; then a rejection, reviewed, confirmed
+ * and answered. Which of `names` any of it shows, and the refusals the
+ * audit log keeps.
+ */
+const answeredBy = async (
+  by: Member,
+  decision: string,
+  names: readonly string[]
+) => {
+  const approval = { approved: true };
+  const { revision } = await decisionFor(env, by, decision);
+  const approve = {
+    review: await outcome(reviewDecision(env, by, decision, approval)),
+    confirm: await outcome(
+      confirmDecision(env, by, decision, revision, approval)
+    ),
+    // With no confirmation of it: none could be had.
+    answer: await outcome(answerDecision(env, by, decision, approval, "")),
+  };
+  const review = await reviewDecision(env, by, decision, { approved: false });
+  if (review.state === "recorded") {
+    throw new Error("Answered already");
+  }
+  const { confirmation } = await confirmDecision(
+    env,
+    by,
+    decision,
+    review.decision.revision,
+    review.response
+  );
+  const answered = await answerDecision(
+    env,
+    by,
+    decision,
+    review.response,
+    confirmation
+  );
+  const events = await allEvents();
+  const text = JSON.stringify({ review, answered });
+  return {
+    approve,
+    refusalsAudited: events.filter(
+      ({ action, target, detail }) =>
+        action === "workflow.decision.answer_refused" &&
+        target?.id === decision &&
+        detail?.errorCode === "decision.withheld"
+    ).length,
+    status: answered.status,
+    shows: names.filter((name) => text.includes(name)),
+  };
+};
+
+/** What answering a withheld ask comes to: a rejection alone taken. */
+const declinedOnly = {
+  approve: {
+    review: "decision.withheld",
+    confirm: "decision.withheld",
+    answer: "decision.withheld",
+  },
+  // The confirmation's and the answer's, as any refusal of them is.
+  refusalsAudited: 2,
+  status: "rejected",
+  shows: [],
+};
+
+describe(
+  "a decision's ask, once its run may no longer read it",
+  setUpTime,
+  () => {
+    it("is withheld from its recipient everywhere they read it once a source the card it asks about rests on is erased: it can only be declined, and its run never goes on", async () => {
+      const admin = await person("admin");
+      const ada = await person("builder");
+      // An admin sees every run of the day, so the ask shows there too.
+      const reviewer = await person("admin");
+      const workflow = await askingAboutCard(ada, admin, reviewer);
+      const name = `Globex ${unique()}`;
+      const source = await sourceForEveryone(`${name} is active.`);
+      const drawn = await written(name, { source });
+      const runId = await startedRun(ada, workflow.id, {
+        entity: drawn.entity,
+        name,
+      });
+      const decision = await askedOfReviewer(reviewer, runId);
+      const before = await askReadBy(reviewer, decision, [name]);
+      const { revision } = await decisionFor(env, reviewer, decision);
+
+      await eraseSource(env, {
+        source,
+        readers: { kind: "none" },
+        reason: "deleted",
+      });
+      const after = await askReadBy(reviewer, decision, [name]);
+      const withheld = await decisionFor(env, reviewer, decision);
+      const answered = await answeredBy(reviewer, decision, [name]);
+
+      expect({
+        before,
+        after,
+        sameRevision: withheld.revision === revision,
+        answered,
+        ending: await endingOf(ada, workflow.id, runId),
+      }).toStrictEqual({
+        before: { inbox: 1, today: 1, input: true, shows: [name] },
+        // Still waiting for them, its words withheld, its input gone.
+        after: { inbox: 1, today: 1, input: false, shows: [] },
+        // What a reviewer confirms against holds nothing of what it asked.
+        sameRevision: false,
+        answered: declinedOnly,
+        ending: { status: "failed", error: "brain.revoked" },
+      });
+    });
+
+    it("is withheld from its recipient everywhere they read it once a person's erasure took the card it asks about: it can only be declined, and its run never goes on", async () => {
+      const admin = await person("admin");
+      const ada = await person("builder");
+      const reviewer = await person("admin");
+      const workflow = await askingAboutCard(ada, admin, reviewer);
+      const anna = await annasCard();
+      const names = [anna.name, anna.fact];
+      const runId = await startedRun(ada, workflow.id, {
+        entity: anna.card,
+        name: unique(),
+      });
+      const decision = await askedOfReviewer(reviewer, runId);
+      const before = await askReadBy(reviewer, decision, names);
+
+      await erasePersonShared(env, {
+        personId: anna.personId,
+        email: anna.address,
+      });
+      const after = await askReadBy(reviewer, decision, names);
+      const answered = await answeredBy(reviewer, decision, names);
+
+      expect({
+        before,
+        after,
+        answered,
+        ending: await endingOf(ada, workflow.id, runId),
+      }).toStrictEqual({
+        before: { inbox: 1, today: 1, input: true, shows: names },
+        after: { inbox: 1, today: 1, input: false, shows: [] },
+        answered: declinedOnly,
+        ending: { status: "failed", error: "brain.revoked" },
+      });
+    });
+  }
+);
+
+/** Hands over what changed, as core's clock does: drain, relay, a tick. */
+const handedOver = async (): Promise<void> => {
+  await drainAuditOutboxes(env);
+  await relayHandOvers(env);
+  await workBrain(env, new Date(Date.now() + 60_000), producersOf(env));
+};
+
+/** What the Brain keeps in `by`'s own store of run `runId`: its text. */
+const keptOf = async (by: Member, runId: string) => {
+  const kept = await readSourceVersionAs(env, by.userId, {
+    source: { producer: "run", id: runId },
+    version: 1,
+  });
+  return kept?.text;
+};
+
+describe(
+  "what the Brain keeps of a run that read what may be withheld later",
+  setUpTime,
+  () => {
+    it("keeps only how it ended, never the card it returned, when the card rests on memories alone, so nothing of it outlives a person's erasure", async () => {
+      const admin = await person("admin");
+      const ada = await person("builder");
+      const workflow = await entitiesWorkflow(ada, admin);
+      // A card in its writer's own word, drawn from no document: the run
+      // keeps the memories it rests on, and no version.
+      const name = `Anna ${unique()}`;
+      const card = await store().addMemories({
+        change: crypto.randomUUID(),
+        access: { kind: "audience", group: "company" },
+        entities: [{ key: "a", kind: "person", names: [name] }],
+        memories: [
+          {
+            about: "a",
+            type: "fact",
+            statement: `${name} leads finance`,
+            speaker: { kind: "system" },
+            basis: { kind: "writer", writer: "app:directory" },
+          },
+        ],
+      });
+      const runId = await endedRun(ada, workflow.id, {
+        entity: card.entities.a ?? "",
+        name: unique(),
+      });
+      const versions = await env.DB.prepare(
+        "SELECT count(*) AS n FROM run_brain_versions WHERE run_id = ?"
+      )
+        .bind(runId)
+        .first<number>("n");
+      const returned = await recordOf(ada, workflow.id, runId);
+      await handedOver();
+
+      expect({
+        versions,
+        memories: (await memoriesKeptBy(runId)) > 0,
+        returnedTheCard: JSON.stringify(returned.result).includes(name),
+        kept: await keptOf(ada, runId),
+      }).toStrictEqual({
+        versions: 0,
+        memories: true,
+        returnedTheCard: true,
+        kept: "Workflow run completed.",
       });
     });
   }

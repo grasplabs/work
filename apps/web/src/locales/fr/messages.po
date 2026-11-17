@@ -1023,6 +1023,10 @@ msgstr "{query} cherche dans cette table, qui n’a pas de recherche."
 msgid "{rating} of 5"
 msgstr "{rating} sur 5"
 
+#: src/brain/sources-page.tsx
+msgid "{records, plural, one {# record kept} other {# records kept}}"
+msgstr "{records, plural, one {# enregistrement conservé} other {# enregistrements conservés}}"
+
 #. A length of time, said short: 21 seconds.
 #: src/chat/thread.tsx
 msgid "{rest}s"
@@ -1639,11 +1643,11 @@ msgstr "Un enregistrement d’une autre table"
 msgid "A run of {name} waits for your answer. Nothing more happens in it until someone answers, or until it stops waiting."
 msgstr "Une exécution de {name} attend votre réponse. Rien d'autre ne s'y passe tant que personne ne répond ou qu'elle n'arrête pas d'attendre."
 
-#: src/routes/decisions.$decision.tsx
+#: src/decision-card.tsx
 msgid "A run of a workflow asked for this answer."
 msgstr "Une exécution d’un workflow a demandé cette réponse."
 
-#: src/routes/decisions.$decision.tsx
+#: src/decision-card.tsx
 msgid "A run of a workflow waits for this answer."
 msgstr "Une exécution d’un workflow attend cette réponse."
 
@@ -1760,8 +1764,8 @@ msgctxt "note property: what a note is about"
 msgid "About"
 msgstr "Sujet"
 
+#: src/decision-card.tsx
 #: src/decision-confirmation.tsx
-#: src/routes/decisions.$decision.tsx
 msgctxt "what a decision is about, as its workflow run passed it"
 msgid "About"
 msgstr "Objet"
@@ -2669,9 +2673,9 @@ msgstr "Appliquez-la si le domaine de l’expéditeur est {domain}."
 #: src/brain/skills-page.tsx
 #: src/chat/package-requests.tsx
 #: src/dashboard/pile-cards.tsx
+#: src/decision-card.tsx
 #: src/decision-confirmation.tsx
 #: src/inbox/item-detail.tsx
-#: src/routes/decisions.$decision.tsx
 #: src/workflows/binding-approvals.tsx
 msgid "Approve"
 msgstr "Approuver"
@@ -2727,7 +2731,7 @@ msgstr "A approuvé le code d’une page"
 msgid "Approved by {approver} on {at}"
 msgstr "Approuvé par {approver} le {at}"
 
-#: src/routes/decisions.$decision.tsx
+#: src/decision-card.tsx
 msgid "Approved by {name} on {date}."
 msgstr "Approuvé par {name} le {date}."
 
@@ -3455,6 +3459,7 @@ msgstr "Impossible de proposer Exécuter : {unread}"
 #: src/chat/answer-markdown.tsx
 #: src/chat/brain-questions.tsx
 #: src/confirmed.tsx
+#: src/connections/brain-audience.tsx
 #: src/connections/connect-dialog.tsx
 #: src/connections/http-connections.tsx
 #: src/connections/request-app-dialog.tsx
@@ -3958,6 +3963,7 @@ msgstr "Effacer les filtres"
 #: src/brain/forget.tsx
 #: src/brain/memories-page.tsx
 #: src/chat/chat-panel.tsx
+#: src/connections/brain-audience.tsx
 #: src/connections/connect-dialog.tsx
 #: src/connections/connected-dialog.tsx
 #: src/connections/connection-list.tsx
@@ -4044,7 +4050,7 @@ msgctxt "a comment on an answer to a decision"
 msgid "Comment"
 msgstr "Commentaire"
 
-#: src/routes/decisions.$decision.tsx
+#: src/decision-card.tsx
 msgid "Comment (optional)"
 msgstr "Commentaire (facultatif)"
 
@@ -5344,6 +5350,7 @@ msgid "Erase {who}"
 msgstr "Effacer {who}"
 
 #: src/brain/sources-page.tsx
+#: src/connections/brain-audience.tsx
 msgid "Erase for good"
 msgstr "Effacer définitivement"
 
@@ -5358,6 +5365,14 @@ msgstr "Effacer ce fichier importé définitivement"
 #: src/brain/sources-page.tsx
 msgid "Erase this upload for good?"
 msgstr "Effacer ce fichier importé définitivement ?"
+
+#: src/connections/brain-audience.tsx
+msgid "Erase what the Brain kept"
+msgstr "Effacer ce que le Brain a conservé"
+
+#: src/connections/brain-audience.tsx
+msgid "Erase what the Brain kept from {label}?"
+msgstr "Effacer ce que le Brain a conservé de {label} ?"
 
 #: src/onboarding/forget-teams.tsx
 msgid "Erase your teams from your Brain"
@@ -5523,6 +5538,10 @@ msgstr "Chacun a son propre lien. Il ne s’ouvre qu’une fois la personne conn
 msgid "Everyone in {project}"
 msgstr "Tout le monde dans {project}"
 
+#: src/connections/brain-audience.tsx
+msgid "Everyone in {team} will be able to find what agents read through {label}, including what was kept before."
+msgstr "Tout le monde dans {team} pourra trouver ce que les agents lisent via {label}, y compris ce qui a été conservé avant."
+
 #: src/drafts/sharing.tsx
 msgid "Everyone in a project you aren’t in"
 msgstr "Tout le monde dans un projet dont vous ne faites pas partie"
@@ -5532,8 +5551,13 @@ msgid "Everyone in it · {shownRole}"
 msgstr "Tous ses membres · {shownRole}"
 
 #: src/chat/agent-draft-card.tsx
+#: src/connections/brain-audience.tsx
 msgid "Everyone in the company"
 msgstr "Tout le monde dans l’entreprise"
+
+#: src/connections/brain-audience.tsx
+msgid "Everyone in the company will be able to find what agents read through {label}, including what was kept before. Choose a team if not everyone should see it."
+msgstr "Tout le monde dans l’entreprise pourra trouver ce que les agents lisent via {label}, y compris ce qui a été conservé avant. Choisissez une équipe si tout le monde ne doit pas le voir."
 
 #: src/settings/team-members-dialog.tsx
 msgid "Everyone in the organization is in this team."
@@ -5610,6 +5634,10 @@ msgstr "Tout ce que je lis et chaque conversation que je mène passe par un mod�
 #: src/connections/connection-list.tsx
 msgid "Everything the Brain kept from it is erased for good."
 msgstr "Tout ce que le Brain en avait conservé est effacé définitivement."
+
+#: src/connections/brain-audience.tsx
+msgid "Everything the Brain kept of what agents read through it is erased for good, and nobody reads it from now on. This can't be undone. To keep what agents read through it again, choose who may read it once the erasure is done."
+msgstr "Tout ce que le Brain a conservé de ce que les agents y ont lu est effacé définitivement, et plus personne ne le lit désormais. C’est irréversible. Pour conserver à nouveau ce que les agents y lisent, choisissez qui peut le lire une fois l’effacement terminé."
 
 #: src/interview/closed.tsx
 msgid "Everything you told me is removed for good and cannot be brought back. Is only something wrong? Then put it right with “Add something” instead."
@@ -6135,8 +6163,8 @@ msgstr "Fréquence"
 msgid "From"
 msgstr "Source"
 
+#: src/decision-card.tsx
 #: src/decision-confirmation.tsx
-#: src/routes/decisions.$decision.tsx
 msgctxt "where a decision comes from"
 msgid "From"
 msgstr "De"
@@ -6409,10 +6437,6 @@ msgstr "Grasp a modifié un widget de votre tableau de bord."
 msgctxt "“Requested” is the name of a section on the Integrations page."
 msgid "Grasp checks what it takes to connect it. You find it under Requested."
 msgstr "Grasp vérifie ce qu’il faut pour la connecter. Vous la trouvez sous Demandées."
-
-#: src/settings/ai-providers.tsx
-msgid "Grasp converts uploaded documents on this deployment: nothing is sent out."
-msgstr "Grasp convertit les documents importés sur ce déploiement : rien n'est envoyé à l'extérieur."
 
 #: src/chat/failure.ts
 msgid "Grasp could not be reached. Try again."
@@ -6734,10 +6758,6 @@ msgstr "Nom de l'en-tête"
 msgid "Hear both again"
 msgstr "Réécouter les deux"
 
-#: src/brain/work-knowledge.tsx
-msgid "Heard from enough people"
-msgstr "Entendu de suffisamment de personnes"
-
 #: src/interview/words.ts
 msgid "Hello"
 msgstr "Bonjour"
@@ -6876,6 +6896,13 @@ msgstr "À quelle fréquence"
 #: src/brain/work-knowledge.tsx
 msgid "How sure"
 msgstr "Quelle certitude"
+
+#. Under a statement put together from the interviews
+#. Under a statement put together from the interviews
+#: src/brain/aggregate.tsx
+#: src/brain/brain.ts
+msgid "How the team works, as its people told it"
+msgstr "Comment l’équipe travaille, tel que ses membres l’ont raconté"
 
 #: src/brain/work-knowledge.tsx
 msgid "How the work goes today"
@@ -7740,6 +7767,10 @@ msgstr "Maintenez appuyé"
 msgid "Keep it"
 msgstr "Le garder"
 
+#: src/connections/brain-audience.tsx
+msgid "Keep it for them"
+msgstr "Le conserver pour eux"
+
 #: src/workflows/stop-run.tsx
 #: src/workflows/workflow-status.tsx
 msgid "Keep it running"
@@ -7764,6 +7795,14 @@ msgstr "Suis la clôture mensuelle : qui fait quoi, et relance les gens quand il
 #: src/make/examples.ts
 msgid "Keep track of the yearly compliance checks: who does each one, by when, and proof that it was done."
 msgstr "Suis les contrôles de conformité annuels : qui fait chacun, pour quand, et la preuve qu’il a été fait."
+
+#: src/connections/brain-audience.tsx
+msgid "Keep what agents read through {label} in the Brain?"
+msgstr "Conserver dans le Brain ce que les agents lisent via {label} ?"
+
+#: src/connections/brain-audience.tsx
+msgid "Keep what agents read through it for"
+msgstr "Conserver ce que les agents y lisent pour"
 
 #: src/dashboard/signals.tsx
 msgid "Keeps failing"
@@ -7868,6 +7907,10 @@ msgstr "Le mois dernier"
 #: src/agents/agent-wakes.tsx
 msgid "Last ran {when}"
 msgstr "Dernière exécution : {when}"
+
+#: src/brain/sources-page.tsx
+msgid "Last read {lastRead}"
+msgstr "Lu pour la dernière fois {lastRead}"
 
 #: src/workflows/workflows-table.tsx
 msgid "Last run"
@@ -9157,10 +9200,11 @@ msgid "No: its hash or its link to the event before it doesn't match."
 msgstr "Non : son hachage ou son lien avec l’événement précédent ne correspond pas."
 
 #: src/apps/access-view.tsx
+#: src/connections/brain-audience.tsx
 msgid "Nobody"
 msgstr "Personne"
 
-#: src/routes/decisions.$decision.tsx
+#: src/decision-card.tsx
 msgid "Nobody answered in time, so this decision has closed."
 msgstr "Personne n’a répondu à temps : cette décision est donc close."
 
@@ -9297,10 +9341,6 @@ msgstr "Aucun."
 #: src/brain/skills-page.tsx
 msgid "Not added yet"
 msgstr "Pas encore ajouté"
-
-#: src/chat/agent-draft-card.tsx
-msgid "Not all of it could be set, so the agent is paused. <0>Finish it on its page</0>."
-msgstr "Tout n’a pas pu être appliqué, l’agent est donc en pause. <0>Terminez-le sur sa page</0>."
 
 #: src/routes/_shell.integrations.$integration.tsx
 #: src/workflows/workflow-triggers.tsx
@@ -10195,8 +10235,8 @@ msgstr "Ouvrir l’exécution lancée le {started}"
 msgid "Open this link again whenever you like, and carry on where you stopped."
 msgstr "Rouvrez ce lien quand vous voulez, et reprenez là où vous vous êtes arrêté."
 
+#: src/decision-card.tsx
 #: src/decision-confirmation.tsx
-#: src/routes/decisions.$decision.tsx
 msgctxt "until when a decision can be answered"
 msgid "Open until"
 msgstr "Ouverte jusqu’au"
@@ -11039,9 +11079,17 @@ msgid "Read everyone's calls of unknown outcome"
 msgstr "A lu les appels au résultat inconnu de tout le monde"
 
 #: src/brain/sources-page.tsx
+msgid "Read from {name} on {readOn}"
+msgstr "Lu depuis {name} le {readOn}"
+
+#: src/brain/sources-page.tsx
 msgctxt "a source of the Brain"
 msgid "Read from a shared connection"
 msgstr "Lu depuis une connexion partagée"
+
+#: src/brain/sources-page.tsx
+msgid "Read from a shared connection on {readOn}"
+msgstr "Lu depuis une connexion partagée le {readOn}"
 
 #: src/brain/memories-page.tsx
 msgid "Read from a shared connection, version {version}"
@@ -11251,16 +11299,16 @@ msgstr "Région"
 
 #: src/chat/held-writes.tsx
 #: src/dashboard/pile-cards.tsx
+#: src/decision-card.tsx
 #: src/decision-confirmation.tsx
 #: src/inbox/item-detail.tsx
-#: src/routes/decisions.$decision.tsx
 msgid "Reject"
 msgstr "Rejeter"
 
 #: src/workflows/today-lanes.tsx
 msgctxt "send a waiting item back to people"
 msgid "Reject"
-msgstr "Refuser"
+msgstr "Rejeter"
 
 #: src/chat/held-writes.tsx
 msgid "Reject {what}"
@@ -11284,7 +11332,7 @@ msgstr "Rejeter cette demande ?"
 msgid "Rejected"
 msgstr "Rejeté"
 
-#: src/routes/decisions.$decision.tsx
+#: src/decision-card.tsx
 msgid "Rejected by {name} on {date}."
 msgstr "Rejeté par {name} le {date}."
 
@@ -11898,8 +11946,8 @@ msgctxt "start a workflow's run by hand"
 msgid "Run"
 msgstr "Exécuter"
 
+#: src/decision-card.tsx
 #: src/decision-confirmation.tsx
-#: src/routes/decisions.$decision.tsx
 msgctxt "the run of a workflow a decision is for"
 msgid "Run"
 msgstr "Exécution"
@@ -12026,13 +12074,6 @@ msgstr "Exécutions : {total}"
 msgctxt "what something known rests on: people said it"
 msgid "Said"
 msgstr "Dit"
-
-#. Under a statement put together from the interviews
-#. Under a statement put together from the interviews
-#: src/brain/aggregate.tsx
-#: src/brain/brain.ts
-msgid "Said by five or more people"
-msgstr "Dit par cinq personnes ou plus"
 
 #. Under a statement put together from what people across the company told, only counted anonymously
 #. Under a statement put together from what people across the company told, only counted anonymously
@@ -13660,6 +13701,7 @@ msgstr "Équipe"
 
 #: src/brain/memories-page.tsx
 #: src/brain/sources-page.tsx
+#: src/connections/brain-audience.tsx
 msgid "Team {name}"
 msgstr "Équipe {name}"
 
@@ -14062,6 +14104,10 @@ msgstr "La direction n’a pas encore confirmé la vision."
 msgid "The brain"
 msgstr "Brain"
 
+#: src/connections/brain-audience.tsx
+msgid "The Brain"
+msgstr "Le Brain"
+
 #: src/routes/_shell.settings.brain.tsx
 msgid "The brain has no teams to group yet."
 msgstr "Le Brain n’a pas encore d’équipes à regrouper."
@@ -14075,12 +14121,12 @@ msgid "The Brain keeps nothing that only you may read yet, so your export holds 
 msgstr "Le Brain ne garde encore rien que vous seul puissiez lire, donc votre export ne contient rien."
 
 #: src/brain/sources-page.tsx
-msgid "The Brain keeps one Gmail message or attachment, one OneNote page, or the answer of a read in an app that holds your own things, when an agent reads it for you through an account you connected yourself, and keeps it for you alone. Everything else agents search live when you ask, and the Brain keeps nothing of it."
-msgstr "Le cerveau garde un message ou une pièce jointe Gmail, une page OneNote, ou la réponse d'une lecture dans une app qui contient vos propres données, quand un agent le lit pour vous via un compte que vous avez connecté vous-même, et le garde pour vous seul. Tout le reste, les agents le cherchent en direct quand vous le demandez, et le cerveau n'en garde rien."
+msgid "The Brain keeps what agents read through these connections an admin shared, for the people the admin chose. It is what each system said when it was read, not kept up to date."
+msgstr "Le Brain conserve ce que les agents lisent via ces connexions qu’un administrateur a partagées, pour les personnes qu’il a choisies. C’est ce que chaque système disait au moment de la lecture, sans mise à jour."
 
 #: src/brain/sources-page.tsx
-msgid "The Brain may keep some of what an agent reads for you from this."
-msgstr "Le cerveau peut garder une partie de ce qu'un agent lit pour vous par ici."
+msgid "The Brain may keep, for you alone, some of what an agent reads for you through this connection, while it stays connected."
+msgstr "Le cerveau peut garder, pour vous seul, une partie de ce qu'un agent lit pour vous via cette connexion, tant qu'elle reste connectée."
 
 #: src/workflows/binding-approvals.tsx
 msgid "The Brain, as each run's person may read it"
@@ -14584,7 +14630,7 @@ msgstr "Le workflow est supprimé, mais son nom n’a pas été libéré : {reas
 msgid "The workflow isn't open to him"
 msgstr "Le workflow ne lui est pas ouvert"
 
-#: src/routes/decisions.$decision.tsx
+#: src/decision-card.tsx
 msgid "The workflow run that asked this has ended, so this decision has closed."
 msgstr "L’exécution du workflow qui l’a demandé est terminée : cette décision est donc close."
 
@@ -14810,7 +14856,7 @@ msgstr "Cette connexion doit être rétablie."
 msgid "This couldn't be read when the report was made."
 msgstr "Impossible de le lire au moment où le rapport a été réalisé."
 
-#: src/routes/decisions.$decision.tsx
+#: src/decision-card.tsx
 msgid "This decision has closed."
 msgstr "Cette décision est close."
 
@@ -15167,6 +15213,10 @@ msgstr "Aujourd’hui"
 msgid "Token"
 msgstr "Jeton"
 
+#: src/brain/work-knowledge.tsx
+msgid "Told by the team that does it"
+msgstr "Raconté par l’équipe qui le fait"
+
 #: src/onboarding/send-plan-form.tsx
 msgid "Tomorrow"
 msgstr "Demain"
@@ -15271,6 +15321,7 @@ msgstr "Essayer"
 #: src/chat/builds.tsx
 #: src/chat/chat-panel.tsx
 #: src/chat/thread.tsx
+#: src/decision-card.tsx
 #: src/frame/page-states.tsx
 #: src/frame/setting-up.tsx
 #: src/interview/destination.tsx
@@ -16021,6 +16072,10 @@ msgstr "Ce que <0/> a changé"
 msgid "What a builder’s chat about this App starts with. Only its builders read and change it."
 msgstr "Ce par quoi commence la conversation d’un créateur sur cette App. Seuls ses créateurs les lisent et les modifient."
 
+#: src/brain/sources-page.tsx
+msgid "What agents read through shared connections"
+msgstr "Ce que les agents lisent via des connexions partagées"
+
 #: src/routes/_shell.settings.billing.tsx
 msgid "What appears on every invoice."
 msgstr "Ce qui figure sur chaque facture."
@@ -16309,6 +16364,10 @@ msgstr "Ce que le Brain conserve et que seule cette personne peut lire"
 msgid "What the Brain keeps that you may read, and search through it as your agents recall it."
 msgstr "Ce que le cerveau conserve et que vous pouvez lire, et la recherche dedans telle que vos agents s'en souviennent."
 
+#: src/connections/brain-audience.tsx
+msgid "What the Brain kept from {label} is being erased. You can choose who may read it again once that is done."
+msgstr "Ce que le Brain a conservé de {label} est en cours d’effacement. Vous pourrez de nouveau choisir qui peut le lire une fois l’effacement terminé."
+
 #: src/brain/brain-log.tsx
 msgid "What the brain kept of it"
 msgstr "Ce que le cerveau en a gardé"
@@ -16377,6 +16436,18 @@ msgstr "Ce qu’ils nous ont dit"
 #: src/brain/work-knowledge.tsx
 msgid "What they want instead"
 msgstr "Ce qu’ils veulent à la place"
+
+#: src/decision-confirmation.tsx
+msgid "What this decision asks can't be shown right now, so it can't be answered yet. Try again in a moment."
+msgstr "Ce que demande cette décision ne peut pas être affiché pour le moment : elle ne peut donc pas encore recevoir de réponse. Réessayez dans un instant."
+
+#: src/decision-card.tsx
+msgid "What this decision asks can't be shown right now."
+msgstr "Ce que demande cette décision ne peut pas être affiché pour le moment."
+
+#: src/decision-confirmation.tsx
+msgid "What this decision asks is withheld, so you can only reject it."
+msgstr "Ce que demande cette décision est retenu : vous ne pouvez donc que la rejeter."
 
 #: src/agents/agent-wakes.tsx
 msgid "What to ask it each time"
@@ -16464,6 +16535,10 @@ msgstr "Quand"
 #: src/workflows/trigger-description.ts
 msgid "When {account} reports an event"
 msgstr "Quand {account} signale un événement"
+
+#: src/brain/sources-page.tsx
+msgid "When an agent reads for you through an account you connected yourself, the Brain keeps what it read for you alone, while that account stays connected: one Gmail message or attachment, one OneNote page, or the answer of a read in another app, the company’s records included. Everything else agents search live when you ask, and the Brain keeps nothing of it."
+msgstr "Quand un agent lit pour vous via un compte que vous avez connecté vous-même, le cerveau garde ce qu'il a lu pour vous seul, tant que ce compte reste connecté : un message ou une pièce jointe Gmail, une page OneNote, ou la réponse d'une lecture dans une autre app, les données de l'entreprise comprises. Tout le reste, les agents le cherchent en direct quand vous le demandez, et le cerveau n'en garde rien."
 
 #: src/workflows/trigger-description.ts
 msgid "When an email arrives at its own address"
@@ -16703,6 +16778,14 @@ msgstr "Qui peut le lire"
 msgctxt "a memory shared with others"
 msgid "Who may read it"
 msgstr "Qui peut le lire"
+
+#: src/connections/brain-audience.tsx
+msgid "Who may read it is decided inside Grasp, not by the permissions in {label}: choose a team if not everyone should see it."
+msgstr "Qui peut le lire se décide dans Grasp, pas par les droits dans {label} : choisissez une équipe si tout le monde ne doit pas le voir."
+
+#: src/connections/brain-audience.tsx
+msgid "Who may read what agents read through {label} was changed in the meantime. This is who may read it now: choose again if you still want to change it."
+msgstr "Qui peut lire ce que les agents lisent via {label} a été modifié entre-temps. Voici qui peut le lire maintenant : choisissez de nouveau si vous voulez encore le modifier."
 
 #: src/agents/agent-page.tsx
 msgid "Who may use {name}"

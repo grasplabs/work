@@ -57,6 +57,7 @@ import {
 import type { WorkflowCaller } from "./page-workflows.ts";
 import { loadWorkflowBuild } from "./workflow-builds.ts";
 import { historyEntries } from "./workflows/history.ts";
+import { runsEvidence } from "./workflows/resource-reads.ts";
 import { detailsRemoved } from "./workflows/retention.ts";
 import { sealedStepOf, sealedStepsOf } from "./workflows/sealed-steps.ts";
 import type { SealedSteps } from "./workflows/sealed-steps.ts";
@@ -903,6 +904,8 @@ interface DecisionRow {
   readonly workflowId: string;
   readonly version: number;
   readonly manifestHash: string;
+  /** The person its run acts for. */
+  readonly principalId: string;
   /** Whether it still takes answers (`resourceDecisionPending`). */
   readonly pending: number;
   /** Whether its run is restricted (restricted.ts). */
@@ -947,6 +950,7 @@ const decisionRows = (env: Env, where: ReturnType<typeof and>) =>
       workflowId: workflowResourceRuns.workflowResourceId,
       version: workflowResourceRuns.version,
       manifestHash: workflowResourceRuns.manifestHash,
+      principalId: workflowResourceRuns.principalId,
       pending: sql<number>`${resourceDecisionPending(new Date())}`,
       restricted: workflowResourceRuns.restricted,
     })
@@ -1120,9 +1124,10 @@ const decisionsPage = async (
 
 /**
  * Decision `decisionId` of run `runId` as `caller` reviews it through the
- * reference: its detail while it takes answers, null once it doesn't, and
- * refused alike (`workflow.decision_unavailable`) when the caller may not
- * read it through this reference, an unknown ID included.
+ * reference: its detail while it takes answers, null once it doesn't or
+ * what it asks is withheld, and refused alike
+ * (`workflow.decision_unavailable`) when the caller may not read it
+ * through this reference, an unknown ID included.
  */
 const decisionDetail = async (
   env: Env,
@@ -1166,6 +1171,20 @@ const decisionDetail = async (
   // authorized decision that takes no answer. Its context may be JSON
   // `null`, a value its contract can take, so that says nothing.
   if (row.pending !== 1 || row.description === "") {
+    return null;
+  }
+  // Nor what it asks once its run may no longer read what it read, or
+  // can't be checked (GRA-1988), as its decision's page withholds it: the App's code gets
+  // none of it, nor a context of its contract's type standing for it. Its
+  // person answers it on its own page.
+  const states = await runsEvidence(env, [
+    {
+      runId: row.runId,
+      workflowId: row.workflowId,
+      principal: row.principalId,
+    },
+  ]);
+  if (states.get(row.runId) !== "holds") {
     return null;
   }
   // Answerable only where the run's restricted mode is the App's

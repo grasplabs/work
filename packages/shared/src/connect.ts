@@ -736,18 +736,22 @@ export interface ConnectionsApi extends StephenReachApi, AgentsApi {
   ) => Promise<void>;
   /**
    * The shared connections an admin chose who may read in the Brain what
-   * agents read through them (GRA-1831), and for whom. Admins only.
+   * agents read through them (GRA-1831), and for whom, and those whose
+   * kept reads are being erased. Admins only.
    */
   brainAudiences: () => Promise<ConnectionBrainAudienceSetting[]>;
   /**
    * Chooses who may read in the Brain what agents read through the shared
    * connection `connectionId`: one team, everyone, or nobody. Admins only,
    * never Grasp staff; audited. Refused (`connection.brain_erasing`) while
-   * what the Brain kept of it is being erased.
+   * what the Brain kept of it is being erased. `from` is the audience the
+   * admin was looking at: refused (`connection.brain_audience_changed`),
+   * with nothing changed, once another is held.
    */
   setBrainAudience: (
     connectionId: string,
-    audience: ConnectionBrainAudience
+    audience: ConnectionBrainAudience,
+    from: ConnectionBrainAudience
   ) => Promise<void>;
   /**
    * Erases everything the Brain kept from the shared connection
@@ -1135,11 +1139,17 @@ export type ConnectionBrainAudience = z.infer<
 /** A shared connection's Brain audience, as an admin last chose it. */
 export interface ConnectionBrainAudienceSetting {
   connectionId: string;
-  audience: Exclude<ConnectionBrainAudience, { kind: "nobody" }>;
-  /** The admin who last changed it. */
-  changedBy: string;
-  /** ISO 8601. */
-  changedAt: string;
+  /** Who may read it now: nobody while an erasure is under way. */
+  audience: ConnectionBrainAudience;
+  /**
+   * Whether what the Brain kept of it is being erased: no audience can
+   * be chosen until that has ended.
+   */
+  erasing: boolean;
+  /** The admin who last chose its audience: null while it is nobody. */
+  changedBy: string | null;
+  /** When (ISO 8601): null while it is nobody. */
+  changedAt: string | null;
 }
 
 /**
@@ -2214,6 +2224,8 @@ export interface ConnectApi
 /** Why connecting or disconnecting an account didn't work. */
 export const connectionErrors = defineErrorFamily({
   "connection.invalid": "That isn't a valid connection request.",
+  "connection.brain_audience_changed":
+    "Who may read this in the Brain was changed in the meantime. Look at it again before you change it.",
   "connection.brain_erasing":
     "What the Brain kept from this connection is still being erased. Choose who may read it once that is done.",
   "connection.provider_unavailable":

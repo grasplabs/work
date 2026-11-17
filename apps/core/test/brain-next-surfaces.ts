@@ -2364,6 +2364,15 @@ export const coreProbes = {
     );
     return asked;
   },
+  // The shared connections whose kept reads the reader may read
+  // (GRA-1831): a connection outside their audience is never named, and
+  // its ID may hold a marker.
+  readableConnectionsOf: async ({ personId }) => [
+    await answer(
+      "the shared connections they may read",
+      async () => await coreBrain.readableConnectionsOf(env, personId)
+    ),
+  ],
   versionChangeAs: showingEntities(
     versionChangeProbe(
       async (as, source, version) =>
@@ -11177,6 +11186,15 @@ export const sourcesProbes = {
         )
     ),
   ],
+  // The shared connections whose kept reads the reader may read
+  // (GRA-1831): never one outside their audience, by its ID, name or
+  // count; a connection's ID may hold a marker.
+  connections: async ({ personId }) => [
+    await answer(
+      "the shared connections they may read",
+      async () => await sourcesAs(personId).connections()
+    ),
+  ],
   // An admin's listing of shared uploads: each by its file's name, team
   // and uploader, never its text; refused to anyone else.
   sharedUploads: async ({ personId, markers }) => {
@@ -11209,6 +11227,7 @@ export const sourcesProbes = {
   | "read"
   | "learned"
   | "search"
+  | "connections"
   | "uploadOf"
   | "uploadVersion"
   | "deleteUpload"

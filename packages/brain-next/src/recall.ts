@@ -16,6 +16,7 @@ import { monthDayOf } from "./dates.ts";
 import { exactsOf } from "./exact.ts";
 import type { Exact } from "./exact.ts";
 import { readMoment, usedAtOf } from "./memories.ts";
+import { readAtOf } from "./read-at.ts";
 import { readableSql } from "./reader-sets.ts";
 import type { WayRunner } from "./recall-counts.ts";
 import { findMemories, memoriesByTheirWords } from "./recall-memories.ts";
@@ -144,7 +145,8 @@ const foundBy = (
 const chunkColumns = `chunks.row AS row, source_versions.source AS source,
   source_versions.version AS version, chunks.position AS position,
   chunks.text AS text, length(chunks.text) AS length,
-  source_versions.added_at AS added_at`;
+  source_versions.added_at AS added_at,
+  ${readAtOf("chunks.version_row")} AS read_at`;
 
 /**
  * `?1` the question's telling terms (JSON, words.ts `Term`), `?2` the
@@ -313,6 +315,7 @@ interface Row extends Record<string, SqlStorageValue> {
   text: string;
   length: number;
   added_at: number;
+  read_at: number | null;
 }
 
 /** The indexes in a statement's JSON array. */
@@ -335,6 +338,7 @@ const passageOf = ({
   text,
   length,
   added_at: addedAt,
+  read_at: readAt,
 }: Row): OrderedPassage => ({
   row,
   source,
@@ -343,6 +347,7 @@ const passageOf = ({
   text,
   length,
   addedAt,
+  ...(readAt === null ? {} : { readAt }),
 });
 
 /**

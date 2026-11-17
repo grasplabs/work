@@ -136,7 +136,19 @@ const linesSchema = z.array(
   })
 );
 const viewsSchema = z.array(z.object({ id: z.string(), text: z.string() }));
-const checkSchema = z.object({ claim: z.string(), fact: z.string() });
+/** A backing check as sent (team-claims.ts `backingOf`): lines by label, and items each with the labels of their own. */
+const backingSchema = z.object({
+  about: z.string(),
+  lines: z.array(z.object({ id: z.string(), text: z.string() })),
+  items: z.array(
+    z.object({ id: z.string(), text: z.string(), lines: z.array(z.string()) })
+  ),
+});
+
+/** A judgment check as sent (`verdictsOf`): the items' own words alone. */
+const judgedSchema = z.strictObject({
+  items: z.array(z.strictObject({ id: z.string(), text: z.string() })),
+});
 
 /** The fake model's answer `value`. */
 const reply = (value: unknown): ProviderReply => ({
@@ -155,24 +167,57 @@ interface FakeOpinion {
 /**
  * The model putting the company's opinions together, faked: a team's
  * lines become the view of `views` whose `when` they hold; the merge
- * makes `opinions`, citing the views of the words they cite; every check
- * says yes unless `says` answers.
+ * makes `opinions`, citing the views of the words they cite. A backing
+ * check answers, for each item, the labels of its own lines that `says`
+ * it (all, unless `says` answers), and those `alsoCites` adds; a
+ * judgment check finds each opinion points at no one unless
+ * `pointsAtSomeone` says so.
  */
 const opinionsModel =
   ({
     views,
     opinions,
     says = () => true,
+    alsoCites = () => [],
+    pointsAtSomeone = () => false,
   }: {
     views: readonly { when: string; view: string }[];
     opinions: readonly FakeOpinion[];
-    says?: (claim: string, fact: string) => boolean;
+    says?: (item: string, line: string) => boolean;
+    alsoCites?: (
+      item: string,
+      shown: readonly { id: string; text: string }[]
+    ) => string[];
+    pointsAtSomeone?: (text: string) => boolean;
   }) =>
   (requests: readonly SentRequest[]): ProviderReply => {
     const request = requests.at(-1);
-    const check = checkSchema.safeParse(dataOf(request, "data"));
-    if (check.success) {
-      return reply({ says: says(check.data.claim, check.data.fact) });
+    const data = dataOf(request, "data");
+    const backing = backingSchema.safeParse(data);
+    if (backing.success) {
+      const text = new Map(
+        backing.data.lines.map(({ id, text: words }) => [id, words])
+      );
+      return reply({
+        backing: backing.data.items.map((item) => ({
+          id: item.id,
+          lines: [
+            ...item.lines.filter((label) =>
+              says(item.text, text.get(label) ?? "")
+            ),
+            ...alsoCites(item.text, backing.data.lines),
+          ],
+        })),
+      });
+    }
+    const judged = judgedSchema.safeParse(data);
+    if (judged.success) {
+      return reply({
+        verdicts: judged.data.items.map(({ id, text }) => ({
+          id,
+          pointsAtNoOne: !pointsAtSomeone(text),
+        })),
+      });
     }
     const lines = linesSchema.safeParse(dataOf(request, "lines"));
     if (lines.success) {
@@ -1166,27 +1211,28 @@ describe(
       }).toStrictEqual({ asked: true, invoiceInPrompt: false, page: [] });
     });
 
-    it("check every line a team's view cites however many a team says: three people of seventy lines each hold up no opinion", async () => {
-      const ids = await company([3, 3, 3]);
-      const [finance = [], sales = [], it3 = []] = ids;
-      for (const person of finance) {
-        const lines = Array.from({ length: 69 }, (_, at) =>
+    /**
+     * The model calls of one run, from a fresh company of `sizes`: the
+     * first team's people each say `lines` lines about invoices'
+     * screens and one about re-typing them, everyone else one line.
+     */
+    const callsOfARun = async (sizes: readonly number[], lines: number) => {
+      const ids = await company(sizes);
+      const [first = [], ...rest] = ids;
+      for (const person of first) {
+        const many = Array.from({ length: lines - 1 }, (_, at) =>
           anonymous(
             fact(`v${at}`, "wish", `The invoice screen point ${at} is clunky.`)
           )
         );
         // oxlint-disable-next-line no-await-in-loop -- one interview at a time
-        await agree(person, [...lines, said("v70", "invoice")]);
+        await agree(person, [...many, said(`v${lines}`, "invoice")]);
       }
-      for (const person of [sales[0], sales[1]]) {
+      for (const [index, person] of rest.flat().entries()) {
         // oxlint-disable-next-line no-await-in-loop -- one interview at a time
-        await agree(person ?? "", [said("v1", "invoice")]);
+        await agree(person, [said("v1", index < 2 ? "invoice" : "meeting")]);
       }
-      for (const person of [sales[2], ...it3]) {
-        // oxlint-disable-next-line no-await-in-loop -- one interview at a time
-        await agree(person ?? "", [said("v1", "meeting")]);
-      }
-      const { requests } = await overTheHour(
+      const { requests } = await formOpinions(
         opinionsModel({
           views: [
             { when: "invoice", view: invoiceView },
@@ -1194,15 +1240,101 @@ describe(
           ],
           opinions: [invoices],
           // Only the line about re-typing says it: the screen's don't.
-          says: (claim, line) =>
-            claim === invoiceView ? line.includes("waste") : true,
+          says: (item, line) =>
+            item === invoiceView ? line.includes("waste") : true,
         })
       );
+      return { calls: requests.length, page: await pageOpinions() };
+    };
+
+    it("cost the same model calls however many lines people say, and two more a team: two a changed team, three for the merge", async () => {
+      const seven = await callsOfARun([3, 3, 3], 7);
+      const seventy = await callsOfARun([3, 3, 3], 70);
+      const twoTeams = await callsOfARun([5, 4], 7);
+      expect({ seven, seventy, twoTeams }).toStrictEqual({
+        seven: { calls: 9, page: [invoices.text] },
+        seventy: { calls: 9, page: [invoices.text] },
+        twoTeams: { calls: 7, page: [invoices.text] },
+      });
+    });
+
+    it("count a label an answer gives for an opinion only when it is one of that opinion's own candidates, never another's", async () => {
+      // Five tell of invoices, six of the meeting: each opinion's own
+      // candidates could reach five.
+      const ids = await company([4, 4, 3]);
+      const everyone = ids.flat();
+      for (const [index, person] of everyone.entries()) {
+        // oxlint-disable-next-line no-await-in-loop -- one interview at a time
+        await agree(person, [said("v1", index < 5 ? "invoice" : "meeting")]);
+      }
+      const meetings: FakeOpinion = {
+        kind: "timeSink",
+        text: "The weekly meeting takes too long for people.",
+        cites: [meetingView],
+      };
+      // Its words would pass the rules on the meeting's backers too: only
+      // whose backing counts can keep it out.
+      const typing: FakeOpinion = {
+        kind: "timeSink",
+        text: "The invoices take people too long to type.",
+        cites: [invoiceView],
+      };
+      await formOpinions(
+        opinionsModel({
+          views: [
+            { when: "invoice", view: invoiceView },
+            { when: "meeting", view: meetingView },
+          ],
+          opinions: [typing, meetings],
+          // No candidate of its own says the invoices opinion; the answer
+          // cites, for it, the meeting's candidate instead: a real label,
+          // of another opinion's.
+          says: (item, line) => (item === typing.text ? false : line !== ""),
+          alsoCites: (item, shown) =>
+            item === typing.text
+              ? shown
+                  .filter(({ text }) => text === meetingView)
+                  .map(({ id }) => id)
+              : [],
+        })
+      );
+      await expect(pageOpinions()).resolves.toStrictEqual([meetings.text]);
+    });
+
+    it("drop an opinion that points at one person, judged on its own words alone, never a line anyone said", async () => {
+      await threeTeamsTold();
+      const lead: FakeOpinion = {
+        kind: "blocker",
+        text: "Typing invoices waits on the director signing every one of them.",
+        cites: [invoiceView],
+      };
+      const { requests } = await formOpinions(
+        opinionsModel({
+          views: [
+            { when: "invoice", view: invoiceView },
+            { when: "meeting", view: meetingView },
+          ],
+          opinions: [invoices, lead],
+          pointsAtSomeone: (text) => text.includes("director"),
+        })
+      );
+      const judged = requests.flatMap((request) => {
+        const asked = judgedSchema.safeParse(dataOf(request, "data"));
+        return asked.success ? [JSON.stringify(asked.data)] : [];
+      });
       expect({
-        checked: requests.length > 210,
         page: await pageOpinions(),
-        backers: await backerCount(),
-      }).toStrictEqual({ checked: true, page: [invoices.text], backers: 5 });
+        judged: judged.length,
+        anyLine: judged.some((sent) =>
+          sent.includes("Re-typing every invoice")
+        ),
+        anyCandidate: judged.some((sent) => sent.includes(invoiceView)),
+      }).toStrictEqual({
+        page: [invoices.text],
+        judged: 1,
+        anyLine: false,
+        anyCandidate: false,
+      });
     });
 
     it("go on without a team whose candidates keep failing: given up on until its lines change, the other teams and the merge still make the opinion", async () => {

@@ -11,6 +11,7 @@ import { z } from "zod";
 
 import { offeredApps } from "./agent-apps-offered.ts";
 import type { OfferedApp } from "./agent-apps-offered.ts";
+import type { MadeFrom } from "./agent-builder.ts";
 import { wakeScheduleOf } from "./agent-wakes.ts";
 import {
   agentInstructionFile,
@@ -101,7 +102,8 @@ export const setAgentApp = async (
   identity: Identity,
   agentId: unknown,
   app: unknown,
-  on: unknown
+  on: unknown,
+  { from }: MadeFrom = {}
 ): Promise<void> => {
   const agent = await changeableAgent(env, identity, agentId);
   if (
@@ -138,7 +140,7 @@ export const setAgentApp = async (
       actor: actorOf(identity),
       action: "agent.app.changed",
       target: { type: "agent", id: agent.id },
-      detail: { app, on: String(on) },
+      detail: { app, on: String(on), ...(from === undefined ? {} : { from }) },
     }),
   ]);
 };

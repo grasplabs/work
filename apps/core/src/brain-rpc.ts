@@ -210,19 +210,19 @@ interface CameIn {
 
 /**
  * Each team's interviews while its results may show, as the one source
- * its claims and drawings name (onboarding/brain-intake.ts): how many of
- * its people agreed, and the week the first did, never who.
+ * its claims and drawings name (onboarding/brain-intake.ts): the week the
+ * first agreed, never who, nor how many: a team's work shows from the
+ * first person who told it (GRA-1987), so a count would say whose it is.
  */
 const teamInterviews = async (env: Env): Promise<CameIn[]> => {
   const teams = await onboardingStore(env).interviewSources();
   return await Promise.all(
-    teams.map(async ({ team, name, people, since }) => ({
+    teams.map(async ({ team, name, since }) => ({
       source: {
         id: await intakeIds.interviews(team),
         kind: "interview",
         title: `Interviews with ${name}`,
         date: mondayOf(since),
-        how: people === 1 ? "1 person" : `${people} people`,
         step: 2,
         interviewee: "employee",
         teamIds: [ids.rosterTeam(team)],
@@ -1146,8 +1146,8 @@ const readBrainCore = async (
 /**
  * The brain's teams, what they said and its workflows, as `person` may
  * read them, as `readBrain` reads them: what a step of a chat's thinking
- * may name (agent-thinking.ts). What a team said is a claim five or more
- * of its people made, or none.
+ * may name (agent-thinking.ts). What a team said is a claim of how it
+ * works, from what its people shared as how it works (GRA-1987), or none.
  */
 export const readThinkingBrain = async (
   env: Env,

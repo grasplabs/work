@@ -93,6 +93,8 @@ export const composioClasses: Record<string, Record<string, ToolClass>> = {
   mail_own: {
     "mail.search": "read-own",
     "mail.read": "read-own",
+    // Reads someone else's mail: never kept (GRA-1845).
+    "mail.others": "read-others",
     "mail.send": "reach-others",
   },
 } satisfies ComposioClasses;

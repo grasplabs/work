@@ -36,6 +36,7 @@ import {
   vi,
 } from "vite-plus/test";
 
+import { formatDateTime } from "../format.ts";
 import { SourcesPage } from "./sources-page.tsx";
 
 // The Brain's Sources page, against core's `brainSources` as the page
@@ -76,7 +77,14 @@ const listed = (
   versions,
 });
 
+/** When the source read through a connection was last read. */
+const lastReadAt = "2026-11-12T10:00:00.000Z";
+
+/** A record agents read through a shared connection an admin opened to the person. */
+const deal: BrainSourceRef = { producer: "connected", id: "conn-1/0/abc" };
+
 const texts: Record<string, string> = {
+  "conn-1/0/abc@1": "Deal Rotterdam warehouse",
   "u-1@2": "Handbook\nInvoices are paid on Fridays.",
   "u-1@1": "Handbook draft\nInvoices are paid monthly.",
   "c-1@1": "Board minutes",
@@ -191,6 +199,8 @@ interface Faked {
   deleteAnswerLost?: boolean;
   /** Refuses the first new version with this, as a lost answer would. */
   firstVersionRefused?: string;
+  /** A shared connection keeps records the person may read, and search finds one. */
+  kept?: boolean;
   /**
    * What the Brain learned from each version (`<id>@<version>`, and
    * `#<cursor's memory>` for a page after the first), as core answers:
@@ -225,6 +235,7 @@ const shown = async (
     handbookDeletes = "erase",
     deleteAnswerLost = false,
     firstVersionRefused,
+    kept = false,
     learned = {},
   }: Faked = {}
 ) => {
@@ -253,7 +264,11 @@ const shown = async (
             ],
             next: { addedAt: "2026-11-10T09:00:00.000Z", source: minutes },
           }
-        : { sources: [listed(older, "")], next: null };
+        : {
+            // Read through a connection: core says when it was last read.
+            sources: [{ ...listed(older, ""), readAt: lastReadAt }],
+            next: null,
+          };
     },
     versions: async (source: BrainSourceRef) => {
       await Promise.resolve();
@@ -305,7 +320,37 @@ const shown = async (
           truncated: false,
         };
       }
+      if (kept) {
+        return {
+          ...pack,
+          memories: [],
+          items: [
+            {
+              source: deal,
+              version: 1,
+              position: 0,
+              text: "Deal Rotterdam warehouse",
+              whole: true,
+              found: "words" as const,
+            },
+          ],
+        };
+      }
       return question === remembered ? { ...pack, items: [] } : pack;
+    },
+    connections: async () => {
+      await Promise.resolve();
+      return kept
+        ? [
+            {
+              connectionId: "conn-1",
+              name: "HubSpot",
+              account: "sales@acme.test",
+              records: 3,
+              lastReadAt: "2026-11-12T10:00:00.000Z",
+            },
+          ]
+        : [];
     },
     upload: async (
       file: { name: string; bytes: Uint8Array },
@@ -662,7 +707,7 @@ describe(SourcesPage, () => {
     vi.unstubAllGlobals();
   });
 
-  it("lists the sources core gives a page at a time, and opens one at its newest version, then an older one", async () => {
+  it("lists the sources core gives a page at a time, says when one read through a connection was last read, and opens one at its newest version, then an older one", async () => {
     const { calls } = await shown([]);
     await press("Show more");
     const listedText = document.body.textContent;
@@ -681,12 +726,17 @@ describe(SourcesPage, () => {
         "Those marked Only you are yours alone",
       ].map((text) => listedText.includes(text)),
       moreGone: listedText.includes("Show more"),
+      // Once, for the one source core gave a read time, in the page's
+      // own date format.
+      lastRead: listedText.split(`Last read ${formatDateTime(lastReadAt)}`)
+        .length,
       newest: newest.includes("Invoices are paid on Fridays."),
       oldest: oldest.includes("Invoices are paid monthly."),
       calls,
     }).toStrictEqual({
       listed: [true, true, true, true, true, true],
       moreGone: false,
+      lastRead: 2,
       newest: true,
       oldest: true,
       calls: [
@@ -889,11 +939,39 @@ describe(SourcesPage, () => {
     expect({ feeds, none }).toStrictEqual({
       feeds:
         "How your connections feed the Brain" +
-        "The Brain keeps one Gmail message or attachment, one OneNote page, or the answer of a read in an app that holds your own things, when an agent reads it for you through an account you connected yourself, and keeps it for you alone. Everything else agents search live when you ask, and the Brain keeps nothing of it." +
-        "GmailThe Brain may keep some of what an agent reads for you from this." +
+        "When an agent reads for you through an account you connected yourself, the Brain keeps what it read for you alone, while that account stays connected: one Gmail message or attachment, one OneNote page, or the answer of a read in another app, the company’s records included. Everything else agents search live when you ask, and the Brain keeps nothing of it." +
+        "GmailThe Brain may keep, for you alone, some of what an agent reads for you through this connection, while it stays connected." +
         "Microsoft 365Searched live, nothing kept." +
         "HubSpotSearched live, nothing kept.",
       none: "How your connections feed the BrainYou have no connections yet.",
+    });
+  });
+
+  it("shows each shared connection the person may read once, with its count and last read, and a record from one with when it was read", async () => {
+    await shown([], { kept: true });
+    const kept = section("What agents read through shared connections");
+    await search("rotterdam");
+    await press("Deal Rotterdam warehouse");
+    const opened = panel();
+    act(() => {
+      root?.unmount();
+    });
+    document.body.replaceChildren();
+    await shown([]);
+
+    expect({
+      kept: ["HubSpot (sales@acme.test)", "3 records kept", "Last read"].map(
+        (text) => kept.includes(text)
+      ),
+      opened: ["Deal Rotterdam warehouse", "Read from HubSpot on"].map((text) =>
+        opened.includes(text)
+      ),
+      // None the person may read: no section at all.
+      none: section("What agents read through shared connections"),
+    }).toStrictEqual({
+      kept: [true, true, true],
+      opened: [true, true],
+      none: "",
     });
   });
 

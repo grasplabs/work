@@ -3,7 +3,12 @@ import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import { and, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
-import { runBrainMemories, runBrainVersions } from "../db/core/schema.ts";
+import {
+  runBrainMemories,
+  runBrainVersions,
+  runChatSources,
+} from "../db/core/schema.ts";
+import { inList } from "../db/d1.ts";
 
 // What a workflow run recalled stays pinned to the run (GRA-299, kept on
 // the new Brain by GRA-1731): every version its recalls handed it, and
@@ -95,17 +100,18 @@ export const recordRunVersions = async (
   }
 };
 
-/** What run `runId` was handed, as its evidence keeps it. */
-export const evidenceOf = async (env: Env, runId: string) =>
+/** What each of runs `runIds` was handed, as their evidence keeps it. */
+export const evidenceOfRuns = async (env: Env, runIds: readonly string[]) =>
   await drizzle(env.DB)
     .select({
+      runId: runBrainVersions.runId,
       producer: runBrainVersions.producer,
       sourceId: runBrainVersions.sourceId,
       version: runBrainVersions.version,
       permissionId: runBrainVersions.permissionId,
     })
     .from(runBrainVersions)
-    .where(eq(runBrainVersions.runId, runId));
+    .where(inList(runBrainVersions.runId, runIds));
 
 /**
  * Adds `memories` (of the shared store), what an entity read handed run
@@ -131,12 +137,39 @@ export const recordRunMemories = async (
     .onConflictDoNothing();
 };
 
-/** What run `runId`'s entity reads rested on, as its evidence keeps it. */
-export const memoryEvidenceOf = async (env: Env, runId: string) =>
+/**
+ * What the entity reads of each of runs `runIds` rested on, as their
+ * evidence keeps it.
+ */
+export const memoryEvidenceOfRuns = async (
+  env: Env,
+  runIds: readonly string[]
+) =>
   await drizzle(env.DB)
     .select({
+      runId: runBrainMemories.runId,
       memoryId: runBrainMemories.memoryId,
       permissionId: runBrainMemories.permissionId,
     })
     .from(runBrainMemories)
-    .where(eq(runBrainMemories.runId, runId));
+    .where(inList(runBrainMemories.runId, runIds));
+
+/**
+ * Whether run `runId` keeps any evidence of what it read: a version its
+ * recalls were handed, a memory its entity reads rested on (GRA-1985), or
+ * what the chat that started it had read (`runChatSources`). What it
+ * returned may then copy what can later be erased or narrowed, so the
+ * Brain keeps only how it ended (brain-sources.ts, GRA-1996). One
+ * statement.
+ */
+export const readAnything = async (
+  env: Env,
+  runId: string
+): Promise<boolean> => {
+  const [row] = await drizzle(env.DB).all<{ read: number }>(
+    sql`SELECT (EXISTS (SELECT 1 FROM ${runBrainVersions} WHERE ${runBrainVersions.runId} = ${runId})
+      OR EXISTS (SELECT 1 FROM ${runBrainMemories} WHERE ${runBrainMemories.runId} = ${runId})
+      OR EXISTS (SELECT 1 FROM ${runChatSources} WHERE ${runChatSources.runId} = ${runId})) AS read`
+  );
+  return row?.read === 1;
+};

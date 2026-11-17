@@ -946,7 +946,7 @@ export const teamClaimBasis = (statementId: string): string =>
           "Under a statement put together from what people across the company told, only counted anonymously",
       })
     : t({
-        message: "Said by five or more people",
+        message: "How the team works, as its people told it",
         comment: "Under a statement put together from the interviews",
       });
 

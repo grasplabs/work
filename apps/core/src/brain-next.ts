@@ -324,11 +324,12 @@ const kindsWithoutColon = <const K extends string>(
 // `capture`: what a chat's agent read through its person's own connection
 // (connection-capture.ts, GRA-1730), in their own store alone.
 // `interview`: a person's interview, theirs alone, in their own store;
-// `claim`: what five or more people of a staff-list team said in theirs,
-// readable by that team (onboarding/new-brain.ts, GRA-1790, GRA-1741).
+// `claim`: how a staff-list team works, as its people shared it in theirs,
+// readable by every member as themselves (onboarding/new-brain.ts,
+// GRA-1790, GRA-1741, GRA-1987).
 // `drawing`: a drawing of a staff-list team's piece of work, only what
-// five or more of its people told, readable by every member as themselves
-// (onboarding/new-brain.ts, GRA-1748).
+// its people are checked to have told, readable by every member as
+// themselves (onboarding/new-brain.ts, GRA-1748).
 // `opinion`: what five or more people across the company say, from what
 // they left only counted anonymously, readable by every member as
 // themselves; never a team's (onboarding/new-brain.ts, GRA-1987).
@@ -1234,13 +1235,14 @@ const findingsOf = async (
 
 /** `items` of a pack, each citing its source as its producer named it. */
 const recalledItems = (items: Pack["items"]): RecalledItem[] =>
-  items.map(({ source, version, position, text, whole, found }) => ({
+  items.map(({ source, version, position, text, whole, found, readAt }) => ({
     source: sourceRefOf(source),
     version,
     position,
     text,
     whole,
     found,
+    ...(readAt === undefined ? {} : { readAt }),
   }));
 
 /**
@@ -1656,6 +1658,8 @@ export interface ListedSource {
   firstLine: string;
   personal: boolean;
   versions: number;
+  /** When its current version was last read where it lives, if its producer said. */
+  readAt?: Date;
 }
 
 /** A page of sources, and where the next one starts: null at the last. */
@@ -1663,6 +1667,24 @@ export interface SourcePage {
   sources: ListedSource[];
   next: SourcesAfter | null;
 }
+
+/**
+ * The shared connections whose Brain audience holds the member
+ * `personId` now, as their own reader does (`personReaderOf`): those
+ * whose kept reads every read of theirs may return (GRA-1831), by ID.
+ * Refused once they are no longer a member.
+ */
+export const readableConnectionsOf = async (
+  env: ReaderEnv,
+  personId: string
+): Promise<string[]> => {
+  const { groups } = await personReaderOf(env, personId);
+  return groups.flatMap((group) =>
+    group.startsWith(connectionPrefix)
+      ? [group.slice(connectionPrefix.length)]
+      : []
+  );
+};
 
 /**
  * A page of the sources the member `personId` may read, of every
@@ -1712,6 +1734,7 @@ export const listSourcesAs = async (
       opening,
       personal,
       versions,
+      readAt,
     }): ListedSource => ({
       source: sourceRefOf(source),
       version,
@@ -1719,6 +1742,7 @@ export const listSourcesAs = async (
       firstLine: firstLineOf(opening),
       personal,
       versions,
+      ...(readAt === undefined ? {} : { readAt }),
     })
   );
   const last = listed.at(-1);

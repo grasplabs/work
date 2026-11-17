@@ -1,6 +1,7 @@
 import type { BrainStoreCursor } from "@grasp-os/shared/brain-memories";
 import { brainSearchBudget } from "@grasp-os/shared/brain-sources";
 import type {
+  BrainConnectedSource,
   BrainLearned,
   BrainSearchMemory,
   BrainSearchPack,
@@ -28,6 +29,7 @@ import {
   listSourcesAs,
   listVersionsAs,
   readSourceVersionAs,
+  readableConnectionsOf,
   recallAs,
   versionChangeAs,
 } from "./brain-next.ts";
@@ -44,9 +46,11 @@ import {
   uploadToBrain,
   uploadVersionToBrain,
 } from "./brain-uploads.ts";
+import { connectionOwnersOf } from "./connections.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
+import { keptOf } from "./shared-reads.ts";
 
 // The Brain's sources over `/rpc` (`session.brainSources`), for anyone
 // signed in who is a member: each call is the Brain's own as that person
@@ -80,6 +84,7 @@ const listedOf = ({
   firstLine,
   personal,
   versions,
+  readAt,
 }: ListedSource): BrainSourceListed => ({
   source,
   version,
@@ -87,6 +92,7 @@ const listedOf = ({
   firstLine,
   personal,
   versions,
+  ...(readAt === undefined ? {} : { readAt: readAt.toISOString() }),
 });
 
 /** `memory` of a pack as the page shows it. */
@@ -243,6 +249,45 @@ export class BrainSourcesRpc extends CoreRpcTarget implements BrainSourcesApi {
         notFound,
         truncated,
       };
+    });
+  }
+
+  async connections(): Promise<BrainConnectedSource[]> {
+    return await withPerson(this.#check, async (person) => {
+      // Only those the person's own reader holds now, as every read of
+      // theirs: one outside its audience is as one that keeps nothing.
+      const ids = await readableConnectionsOf(this.#env, person.userId);
+      const kept = await keptOf(this.#env, ids);
+      if (kept.length === 0) {
+        return [];
+      }
+      const [owners, catalog] = await Promise.all([
+        connectionOwnersOf(
+          this.#env,
+          kept.map(({ connectionId }) => connectionId)
+        ),
+        this.#env.CONNECT.catalog(),
+      ]);
+      const ownerOf = new Map(owners.map((owner) => [owner.id, owner]));
+      const names = new Map(
+        catalog.entries.map(({ source, id, name }) => [`${source}:${id}`, name])
+      );
+      return kept.flatMap(({ connectionId, records, lastReadAt }) => {
+        const owner = ownerOf.get(connectionId);
+        return owner === undefined
+          ? []
+          : [
+              {
+                connectionId,
+                name:
+                  names.get(`${owner.source}:${owner.provider}`) ??
+                  owner.provider,
+                account: owner.accountName,
+                records,
+                lastReadAt: lastReadAt.toISOString(),
+              },
+            ];
+      });
     });
   }
 

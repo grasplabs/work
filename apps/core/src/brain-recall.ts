@@ -222,7 +222,9 @@ export const recallFor = async (
     // thrown over.
     const pack: BrainPack = {
       ...recalled,
-      items: recalled.items.flatMap((item) => {
+      // When a version was last read where it lives is a fact of what
+      // an agent read for its person, never code's.
+      items: recalled.items.flatMap(({ readAt: _read, ...item }) => {
         const { producer, id } = item.source;
         return producer === "capture" ||
           producer === "interview" ||

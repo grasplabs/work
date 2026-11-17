@@ -1,5 +1,6 @@
 import type { AuditEntry } from "@grasp-os/shared/audit";
 import { log } from "@grasp-os/shared/log";
+import { redact } from "@grasp-os/shared/redact";
 import { and, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
@@ -52,7 +53,7 @@ import { claimSource } from "./onboarding/team-claims.ts";
 import { personalWorkspaceId } from "./personal-workspace.ts";
 import { resultOf, runOf } from "./workflows/resource-runs.ts";
 import { detailsRemoved } from "./workflows/retention.ts";
-import { evidenceOf } from "./workflows/run-evidence.ts";
+import { readAnything } from "./workflows/run-evidence.ts";
 
 // What core hands over to the new Brain (GRA-1727), each source with who
 // may read it, read from core's own records when the Brain's work queue
@@ -62,7 +63,10 @@ import { evidenceOf } from "./workflows/run-evidence.ts";
 // note it in brain-hand-overs.ts:
 //
 // - An independent workflow run that ended (`run:<id>`): once, change
-//   `end`, how it ended and what it returned (or its failure's code), for
+//   `end`, how it ended and what it returned (or its failure's code), as
+//   one text with its credentials redacted (`redact`, once, over exactly
+//   that text: a result is often a copy of what a connection answered;
+//   not yet behind an escaped newline in a JSON string, GRA-1880), for
 //   the person it acted for alone; nothing from a run started in
 //   restricted mode, or whose details are past their retention. A run
 //   reads only what its person may read, so its person never reads more
@@ -74,10 +78,12 @@ import { evidenceOf } from "./workflows/run-evidence.ts";
 //   for its person is shown on the App's page to whoever uses the App, so
 //   the workflow's role decides nothing of it: it is handed over as on its
 //   own, and its App's rule for taking it out of use is GRA-1926. A run that
-//   recalled from the Brain (its recall evidence, run-evidence.ts) hands
-//   over only how it ended, never what it returned: the Brain never holds
-//   a second copy of what it recalled, which would outlive that source
-//   being narrowed or erased (GRA-1731).
+//   read anything that may be withheld later (run-evidence.ts
+//   `readAnything`: a version its recalls were handed, a memory its entity
+//   reads rested on, what the chat that started it had read) hands over
+//   only how it ended, never what it returned: the Brain never holds a
+//   second copy of what it read, which would outlive that source being
+//   narrowed or erased, or a person's erasure (GRA-1731, GRA-1996).
 //
 // - A turn of a person's own chat (`chat:<person>/<chat>/<answer>`), in
 //   their own store alone, in its chat's group (brain-next-origins.ts):
@@ -166,11 +172,11 @@ const runOfId = async (env: Env, id: string): Promise<Handed> => {
   ) {
     return { kind: "gone", skipped: "past_retention" };
   }
-  const [{ result, error }, recalled] = await Promise.all([
+  const [{ result, error }, read] = await Promise.all([
     resultOf(env, row),
-    evidenceOf(env, row.id),
+    readAnything(env, row.id),
   ]);
-  const returned = recalled.length > 0 ? undefined : result;
+  const returned = read ? undefined : result;
   // How it ended, and a failure by its code alone, which the run's row
   // keeps: the same text whether the engine still answers or not.
   const ending = [
@@ -182,10 +188,15 @@ const runOfId = async (env: Env, id: string): Promise<Handed> => {
   return {
     kind: "source",
     change: "end",
-    text: [
-      ...ending,
-      ...(returned === undefined ? [] : [JSON.stringify(returned)]),
-    ].join("\n\n"),
+    // Credentials redacted once, over exactly the text kept: what a run
+    // returns may copy an outside system's answer (GRA-2002). The run
+    // itself still shows what it returned.
+    text: redact(
+      [
+        ...ending,
+        ...(returned === undefined ? [] : [JSON.stringify(returned)]),
+      ].join("\n\n")
+    ),
     // Never a cut part of a result, which would read as half a document.
     whenTooLarge: [...ending, "Its result was too large to keep."].join("\n\n"),
     readers,

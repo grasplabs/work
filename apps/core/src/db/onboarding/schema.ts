@@ -288,6 +288,14 @@ export const interviewStates = sqliteTable("interview_states", {
    * once they agree.
    */
   leadOf: text("lead_of"),
+  /**
+   * The team they were in on the list as they agreed to their interview
+   * (GRA-1984); null before they did, and for an interview agreed to before
+   * this was kept. Settled, as `leadOf`, once they agree: what they told
+   * counts only for this team, and only while they are in it, so after a
+   * move it counts for neither until they have a new interview.
+   */
+  toldIn: text("told_in"),
   startedAt: text("started_at"),
   /** When they first agreed to what was read back (ISO 8601). */
   completedAt: text("completed_at"),
