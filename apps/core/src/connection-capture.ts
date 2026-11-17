@@ -85,7 +85,9 @@ import { classOf } from "./tool-classes.ts";
 //   Sources page and in the passage the model reads. A read again of the
 //   same text adds that read time to its version, and no version.
 // - Credentials are redacted inside every JSON string the text holds as
-//   well as over the rest of it (`redactJsonText`, GRA-1880).
+//   well as over the rest of it (`redactJsonText`, GRA-1880), once, over
+//   exactly the text kept (a toolkit's blocks joined first): what is kept
+//   never holds anything `redact` removes from that same text.
 // - Capturing never holds up or fails the call: it runs once the agent
 //   has its answer (`waitUntil`). Every call ends in one audit event, of
 //   IDs and counts alone (items, kept, failed, skipped, adding up to
@@ -256,7 +258,9 @@ const answerCaptured = async (
     const [event, detail] = skippedAll("no_text", 1);
     return [event, { ...detail, ...counted }];
   }
-  const text = texts.map((each) => redactJsonText(each)).join("\n\n");
+  // Redacted once, over exactly the text kept: a credential's name in one
+  // block and its value in the next are one credential.
+  const text = redactJsonText(texts.join("\n\n"));
   let ended: Ended;
   try {
     const id = await answerCaptureIdOf(

@@ -1,6 +1,8 @@
 import { personalBrainOf } from "@grasp-os/brain-next/contract";
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import { chatIdSchema } from "@grasp-os/shared/ids";
+import { redactedSpans } from "@grasp-os/shared/redact";
+import { redactJsonText } from "@grasp-os/shared/redact-json";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
@@ -313,6 +315,85 @@ describe("what a chat's agent reads through a toolkit", setUpTime, () => {
       keepsReads: true,
     });
     expect(JSON.stringify(events)).not.toContain(found);
+  });
+
+  it("keeps an answer of mixed blocks redacted once over the text it keeps, so a credential split across blocks is gone", async () => {
+    const person = await signedInApi(idp, "user");
+    const own = await ownToolkit(person);
+    const image = { type: "image", data: pixel, mimeType: "image/png" };
+    const secret = ["hunt", "er2", crypto.randomUUID().slice(0, 8)].join("");
+    const token = [
+      "abcd",
+      "efgh",
+      crypto.randomUUID().replaceAll("-", ""),
+    ].join("");
+    const session = ["s3ss", "10n", crypto.randomUUID().slice(0, 8)].join("");
+    // Each answer's text blocks, and the image between them that keeps
+    // connect from joining them itself.
+    const answers = [
+      ["password:", secret],
+      ["Authorization: Bearer", token],
+      [
+        JSON.stringify({ note: `password: ${secret}\nCookie: sid=${session}` }),
+        `and token=${token}`,
+      ],
+    ];
+    const chat = await chatOf(
+      person.userId,
+      ...answers.flatMap((_, index) => [
+        step(calling("MAIL", "mail.read", { message: `m${index}` })),
+        says("Read it."),
+      ])
+    );
+    await grant(chat, own.id, "MAIL", ["mail.read"]);
+
+    const stored: string[] = [];
+    for (const [index, [first = "", second = ""]] of answers.entries()) {
+      // oxlint-disable-next-line no-await-in-loop -- one answer at a time
+      await own.answer(
+        "mail.read",
+        blocks({ type: "text", text: first }, image, {
+          type: "text",
+          text: second,
+        })
+      );
+      // oxlint-disable-next-line no-await-in-loop -- one turn at a time
+      await chat.ask("Read it.");
+      // oxlint-disable-next-line no-await-in-loop -- its capture first
+      await captures(own.id, index + 1);
+      // oxlint-disable-next-line no-await-in-loop -- one answer at a time
+      const id = await answerCaptureIdOf(own.id, person.userId, "mail.read", {
+        message: `m${index}`,
+      });
+      // oxlint-disable-next-line no-await-in-loop -- one answer at a time
+      const read = await person.api.brainSources.read(
+        { producer: "capture", id },
+        1
+      );
+      stored.push(read?.text ?? "");
+    }
+    // The text an answer's blocks make, a blank line between them.
+    const joined = answers.map((texts) => texts.join("\n\n"));
+
+    expect({
+      stored,
+      // Nothing `redact` removes from the same text is kept.
+      kept: stored.map((text, index) =>
+        redactedSpans(joined[index] ?? "")
+          .map(([from, to]) => (joined[index] ?? "").slice(from, to))
+          .filter((removed) => removed.length >= 6 && text.includes(removed))
+      ),
+      secrets: stored.map(
+        (text) =>
+          text.includes(secret) ||
+          text.includes(token) ||
+          text.includes(session)
+      ),
+    }).toStrictEqual({
+      stored: joined.map((text) => redactJsonText(text)),
+      kept: [[], [], []],
+      secrets: [false, false, false],
+    });
   });
 
   it("keeps nothing of an answer with no text in it, and counts the blocks it left out", async () => {
