@@ -186,6 +186,11 @@ test("a builder writes a workflow's definition, fixes what core finds, shares it
   await page.getByLabel("workflow.json").fill(mine);
   const other = await pageOf(builder);
   await other.goto(page.url());
+  // While theirs is on its way, the editor holds still: nothing typed then
+  // is overwritten when it arrives. Held from before they save, as this
+  // tab follows the shared draft and reads theirs as soon as core tells
+  // of it, which may come after the conflict below shows.
+  reads.hold();
   await save(other, definition("theirs"));
   await expect(other.getByText(passes)).toBeVisible();
   await page.getByRole("button", { name: "Check and save" }).click();
@@ -195,11 +200,10 @@ test("a builder writes a workflow's definition, fixes what core finds, shares it
     })
   ).toBeVisible();
   await expect(page.getByLabel("workflow.json")).toHaveValue(mine);
-  // While theirs is on its way, the editor holds still: nothing typed then
-  // is overwritten when it arrives.
-  reads.hold();
+  // Two reads of theirs held: the one following their save, and Take
+  // theirs.
   await page.getByRole("button", { name: "Take theirs" }).click();
-  await expect.poll(reads.stalled).toBe(1);
+  await expect.poll(reads.stalled).toBe(2);
   await expect(page.getByLabel("workflow.json")).not.toBeEditable();
   reads.release();
   await expect(page.getByLabel("workflow.json")).toHaveValue(
