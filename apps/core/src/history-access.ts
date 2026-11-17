@@ -154,10 +154,47 @@ const brainCompanyMemoryPrefix = "brain-company-memory:";
  */
 const brainProfileMemoryPrefix = "brain-profile-memory:";
 
+// What a chat's code read of the Brain's entities (agent-brain.ts) shows
+// is pinned beside what it rests on (GRA-1982): each memory it hands over,
+// with what it rests on (`brainMemoryRead`), and each entity whose name it
+// shows, by its id, under the prefix of the reach it read at. A person's
+// erasure takes an entity whole (her card: people.ts in the Brain), and
+// nothing else a run rests on tells it: the documents her card was drawn
+// from stay. An entity's pin is readable until an erasure took it for
+// good (`erasedForGoodAs`), and is then erased: every other way an entity
+// goes dark for the reader (a narrowed or erased source, a retired
+// memory, a person out of a team) withholds the run by the versions and
+// memories it rests on. An id is never used again, so a pin names the
+// same entity for as long as it is kept.
+
+const brainEntityPrefix = "brain-entity:";
+const brainCompanyEntityPrefix = "brain-company-entity:";
+
+/** The source an entity whose name code was shown, in its person's own chat, is recorded as. */
+export const brainEntityRead = (entity: string): string =>
+  `${brainEntityPrefix}${entity}`;
+
+/** The source an entity whose name code was shown, read as the company, is recorded as. */
+export const brainCompanyEntityRead = (entity: string): string =>
+  `${brainCompanyEntityPrefix}${entity}`;
+
+/** The entity `source` pins, at whatever reach it was read; none for any other source. */
+const entityPinOf = (source: string): string | undefined => {
+  const prefix = [brainEntityPrefix, brainCompanyEntityPrefix].find((each) =>
+    source.startsWith(each)
+  );
+  if (prefix === undefined) {
+    return undefined;
+  }
+  const entity = z.uuid().safeParse(source.slice(prefix.length));
+  return entity.success ? entity.data : undefined;
+};
+
 /** Whether `source` is a pin of a recall as the company. */
 const isCompanyPin = (source: string): boolean =>
   source.startsWith(brainCompanyVersionPrefix) ||
-  source.startsWith(brainCompanyMemoryPrefix);
+  source.startsWith(brainCompanyMemoryPrefix) ||
+  source.startsWith(brainCompanyEntityPrefix);
 
 /**
  * Of the versions in `sources` pinned under `prefix`, those `reach` may
@@ -453,6 +490,43 @@ const readableBrainCompanyMemories = async (
 };
 
 /**
+ * Of the entities pinned in `sources` (above), those no erasure took for
+ * good, in one ask of the Brain per 500: none read as the company while
+ * the chat's audience cuts them (`cut`). A pin that names no entity is
+ * read by no one: its run is withheld.
+ */
+const readableBrainEntities = async (
+  env: Env,
+  scope: Omit<AgentScope, "runId">,
+  sources: readonly string[],
+  cut: Promise<AudienceCut | undefined>
+): Promise<string[]> => {
+  const pins = sources.flatMap((source) => {
+    const entity = entityPinOf(source);
+    return entity === undefined ? [] : [{ source, entity }];
+  });
+  if (pins.length === 0) {
+    return [];
+  }
+  const asked =
+    (await cut) === undefined
+      ? pins
+      : pins.filter(({ source }) => !isCompanyPin(source));
+  if (asked.length === 0) {
+    return [];
+  }
+  const erased = await erasedForGoodAs(env, scope.personId, {
+    sources: [],
+    memories: [],
+    entities: [...new Set(asked.map(({ entity }) => entity))],
+  });
+  const gone = new Set(erased.entities);
+  return asked.flatMap(({ source, entity }) =>
+    gone.has(entity) ? [] : [source]
+  );
+};
+
+/**
  * Of the Brain reads in `sources`, the agent's `brain` grant, while it
  * holds it (`hasBrainGrant`), as the Brain's recall decides it.
  */
@@ -524,6 +598,7 @@ const appReadNeeds = (
 /** Each kind of read a source is, as the withheld event counts them. */
 type WithheldKind =
   | "memories"
+  | "entities"
   | "passages"
   | "grants"
   | "connections"
@@ -538,6 +613,12 @@ const withheldKindOf = (source: string): WithheldKind => {
     source.startsWith(brainCompanyMemoryPrefix)
   ) {
     return "memories";
+  }
+  if (
+    source.startsWith(brainEntityPrefix) ||
+    source.startsWith(brainCompanyEntityPrefix)
+  ) {
+    return "entities";
   }
   if (
     [
@@ -704,7 +785,8 @@ const readableApps = async (
  * agent's `brain` grant, while it holds it; a version of the Brain, while the person may read it (their teams and
  * the company, for what code's recall handed over); a memory of the new
  * Brain, while the person (or, as the company read it, the company) may
- * read it and its writer has not retired it, replaced or expired or not.
+ * read it and its writer has not retired it, replaced or expired or not;
+ * an entity whose name code was shown, until an erasure took it for good.
  * Anything else, an unknown source or a bare connection included, is
  * not. With why the chat's audience cuts what a recall as the company
  * handed over, when it holds any (`audience`). Throws what the reads
@@ -730,6 +812,7 @@ export const readableSources = async (
     companyVersions,
     memories,
     companyMemories,
+    entities,
   ] = await Promise.all([
     readableApps(env, scope, sourceIds),
     readableConnections(env, scope, sourceIds),
@@ -739,6 +822,7 @@ export const readableSources = async (
     readableBrainCompanyVersions(env, scope, sourceIds, cut),
     readableBrainMemories(env, scope, sourceIds),
     readableBrainCompanyMemories(env, scope, sourceIds, cut),
+    readableBrainEntities(env, scope, sourceIds, cut),
   ]);
   const audience = await cut;
   const readable = new Set([
@@ -750,6 +834,7 @@ export const readableSources = async (
     ...companyVersions,
     ...memories,
     ...companyMemories,
+    ...entities,
   ]);
   return audience === undefined ? { readable } : { readable, audience };
 };
@@ -779,7 +864,8 @@ const sourceKey = ({ producer, id }: SourceVersionRef["source"]): string =>
 /**
  * Of the new Brain's pins in `sourceIds`, those whose content an erasure
  * took for good (`erasedForGoodAs`), at whatever reach the read pinned them: a
- * version whose source was erased, a memory an erasure deleted. What a
+ * version whose source was erased, a memory an erasure deleted, an entity
+ * a person's erasure took. What a
  * chat of `personId`'s shows of a run resting on one is replaced
  * (workspace.ts `#replaceErased`); one only no longer readable (narrowed,
  * retired, the person out of a team) never is, as the person saw it while
@@ -803,21 +889,30 @@ export const erasedSources = async (
       ? []
       : [{ source, pin: { ...pin, basis: pin.basis } }];
   });
-  if (versions.length === 0 && memories.length === 0) {
+  const entities = sourceIds.flatMap((source) => {
+    const entity = entityPinOf(source);
+    return entity === undefined ? [] : [{ source, entity }];
+  });
+  if (versions.length === 0 && memories.length === 0 && entities.length === 0) {
     return new Set();
   }
   const erased = await erasedForGoodAs(env, personId, {
     sources: versions.map(({ pin }) => pin.source),
     memories: memories.map(({ pin }) => pin),
+    entities: [...new Set(entities.map(({ entity }) => entity))],
   });
   const keys = new Set(erased.sources.map((ref) => sourceKey(ref)));
   const places = new Set(erased.memories.map((place) => memoryKeyOf(place)));
+  const gone = new Set(erased.entities);
   return new Set([
     ...versions.flatMap(({ source, pin }) =>
       keys.has(sourceKey(pin.source)) ? [source] : []
     ),
     ...memories.flatMap(({ source, pin }) =>
       places.has(memoryKeyOf(pin)) ? [source] : []
+    ),
+    ...entities.flatMap(({ source, entity }) =>
+      gone.has(entity) ? [source] : []
     ),
   ]);
 };

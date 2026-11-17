@@ -1143,12 +1143,17 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       seen.add(memory);
       return true;
     });
+    const entities = [...new Set(asked.entities)];
     if (await this.#erasedWhole()) {
-      return { sources, memories: memories.map(({ memory }) => memory) };
+      return {
+        sources,
+        memories: memories.map(({ memory }) => memory),
+        entities,
+      };
     }
     await this.#ready();
     if (!this.#schema) {
-      return { sources: [], memories: [] };
+      return { sources: [], memories: [], entities: [] };
     }
     const { sql } = this.ctx.storage;
     // What a restore brings back isn't in place yet: asked again later.
@@ -1209,14 +1214,14 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
         isErasedPerson(sql, subject) ? [person] : []
       )
     );
-    const closedCards = closedOf(
-      sql,
-      memories.flatMap(({ about, object }) =>
+    const closedCards = closedOf(sql, [
+      ...memories.flatMap(({ about, object }) =>
         (object === null ? [about] : [about, object]).map((entity) =>
           entityClosureOf(entity)
         )
-      )
-    );
+      ),
+      ...entities.map((entity) => entityClosureOf(entity)),
+    ]);
     const takenByPerson = ({ speaker, about, object }: ErasedMemory): boolean =>
       (speaker.kind === "internal" && erasedPeople.has(speaker.person)) ||
       closedCards.has(entityClosureOf(about)) ||
@@ -1232,6 +1237,9 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
             takenByPerson(memory)
         )
         .map(({ memory }) => memory),
+      entities: entities.filter((entity) =>
+        closedCards.has(entityClosureOf(entity))
+      ),
     };
   }
 

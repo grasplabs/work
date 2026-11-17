@@ -2338,12 +2338,14 @@ export const erasedMemorySchema = z.strictObject({
 export type ErasedMemory = z.infer<typeof erasedMemorySchema>;
 
 /**
- * Keys and memories to ask whether an erasure took them for good
- * (`Brain.erasedOf`): what a host once read itself.
+ * Keys, memories and entities to ask whether an erasure took them for
+ * good (`Brain.erasedOf`): what a host once read itself. An entity is one
+ * whose name it was shown.
  */
 export const erasedRequestSchema = z.strictObject({
   sources: z.array(sourceIdSchema).max(readableCheckMax),
   memories: z.array(erasedMemorySchema).max(readableCheckMax),
+  entities: z.array(entityIdSchema).max(readableCheckMax),
 });
 export type ErasedRequest = z.infer<typeof erasedRequestSchema>;
 
@@ -2351,6 +2353,7 @@ export type ErasedRequest = z.infer<typeof erasedRequestSchema>;
 export interface Erased {
   sources: SourceId[];
   memories: MemoryId[];
+  entities: EntityId[];
 }
 
 /**
@@ -3231,7 +3234,8 @@ export interface Brain {
    * whose source's key is so erased, whose writer was erased after the
    * store learned it (`eraseWriter`), or that a person's erasure takes
    * (`erasePersonShared`): in that person's word, or about or relating to
-   * an entity it closed (their card). Never a retired memory, a key whose
+   * an entity it closed (their card); and an entity it closed. Never a
+   * retired memory, a key whose
    * readers only changed, nor a memory only because the store doesn't
    * hold it now: a lost storage, until a restore puts it back, lacks what
    * was never erased. For the host only, which asks of what it once read

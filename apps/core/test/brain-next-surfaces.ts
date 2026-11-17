@@ -2257,18 +2257,26 @@ export const coreProbes = {
   erasedForGoodAs: async (probing) => {
     const { personId, hiddenVersions, markers } = probing;
     const fixture = await recallFixture(probing);
+    // Entities whose names code was shown, each hidden from the reader.
+    const hiddenEntities = [
+      fixture.appEntity,
+      fixture.builtEntity,
+      fixture.erasedEntity,
+    ];
     // It answers the caller's own ids back: what it tells is which of
     // them, by their places in what was asked.
     const ask = async (
       name: string,
       sources: readonly SourceRef[],
       memories: readonly coreBrain.PinnedMemory[],
-      as = personId
+      as = personId,
+      entities: readonly string[] = hiddenEntities
     ) =>
       await answer(name, async () => {
         const erased = await coreBrain.erasedForGoodAs(env, as, {
           sources,
           memories,
+          entities,
         });
         return {
           sources: sources.map((asked) =>
@@ -2283,6 +2291,7 @@ export const coreProbes = {
                 kind === asked.store && memory === asked.memory
             )
           ),
+          entities: entities.map((entity) => erased.entities.includes(entity)),
         };
       });
     // Each as a pin holds it, resting on a hidden source or no one's.
@@ -8214,7 +8223,12 @@ export const storeProbes = {
     // them, by their places in what was asked.
     const ask = async (
       name: string,
-      request: { sources: string[]; memories: ErasedMemory[]; extra?: string }
+      request: {
+        sources: string[];
+        memories: ErasedMemory[];
+        entities: string[];
+        extra?: string;
+      }
     ) =>
       await answer(name, async () => {
         const erased = await store().erasedOf(unchecked(request));
@@ -8222,6 +8236,9 @@ export const storeProbes = {
           sources: request.sources.map((key) => erased.sources.includes(key)),
           memories: request.memories.map(({ memory }) =>
             erased.memories.includes(memory)
+          ),
+          entities: request.entities.map((entity) =>
+            erased.entities.includes(entity)
           ),
         };
       });
@@ -8234,10 +8251,16 @@ export const storeProbes = {
           storePin(fixture.drawnMemory, hiddenKeys[1] ?? null),
           storePin(fixture.othersOwnMemory, null),
         ],
+        entities: [
+          fixture.appEntity,
+          fixture.builtEntity,
+          fixture.erasedEntity,
+        ],
       }),
       await ask("what no one added", {
         sources: [keyOf(missingSource())],
         memories: [storePin(crypto.randomUUID(), keyOf(missingSource()))],
+        entities: [crypto.randomUUID()],
       }),
       await ask("a key and a writer named by the markers", {
         sources: [`upload:${markers.join(" ")}`],
@@ -8248,10 +8271,12 @@ export const storeProbes = {
             `app:${markers.join("")}`
           ),
         ],
+        entities: [],
       }),
       await ask("a request with an unknown field", {
         sources: [],
         memories: [],
+        entities: [],
         extra: markers.join(" "),
       }),
     ];

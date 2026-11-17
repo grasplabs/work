@@ -2740,46 +2740,57 @@ const pinnedMemoriesSchema = z.array(
 );
 
 /**
- * Of `keys` and `memories`, those an erasure took for good in `store`
- * (`erasedOf`): one call for as many of both as a check takes, one more
- * for each part past that (`checkedInParts`).
+ * Of `keys`, `memories` and `entities`, those an erasure took for good in
+ * `store` (`erasedOf`): one call for as many of them as a check takes,
+ * one more for each part past that (`checkedInParts`).
  */
 const erasedIn = async (
   store: Brain,
   keys: readonly string[],
-  memories: readonly ErasedMemory[]
-): Promise<{ sources: string[]; memories: string[] }> => {
-  const asked: ({ source: string } | { memory: ErasedMemory })[] = [
+  memories: readonly ErasedMemory[],
+  entities: readonly EntityId[] = []
+): Promise<{ sources: string[]; memories: string[]; entities: EntityId[] }> => {
+  const asked: (
+    | { source: string }
+    | { memory: ErasedMemory }
+    | { entity: EntityId }
+  )[] = [
     ...keys.map((source) => ({ source })),
     ...memories.map((memory) => ({ memory })),
+    ...entities.map((entity) => ({ entity })),
   ];
   const erased = await checkedInParts(asked, async (part) => {
     const answer = await store.erasedOf({
       sources: part.flatMap((item) => ("source" in item ? [item.source] : [])),
       memories: part.flatMap((item) => ("memory" in item ? [item.memory] : [])),
+      entities: part.flatMap((item) => ("entity" in item ? [item.entity] : [])),
     });
     return [
       ...answer.sources.map((source) => ({ source })),
       ...answer.memories.map((memory) => ({ memory })),
+      ...answer.entities.map((entity) => ({ entity })),
     ];
   });
   return {
     sources: erased.flatMap((item) => ("source" in item ? [item.source] : [])),
     memories: erased.flatMap((item) => ("memory" in item ? [item.memory] : [])),
+    entities: erased.flatMap((item) => ("entity" in item ? [item.entity] : [])),
   };
 };
 
 const sourceRefsSchema = z.array(sourceRefSchema);
+const entityIdsSchema = z.array(entityIdSchema);
 
 /**
- * Of `sources` and `memories` a chat of the member `personId`'s once
+ * Of `sources`, `memories` and `entities` (of the shared store, whose
+ * names its code was shown) a chat of the member `personId`'s once
  * read, those an erasure took for good, as the erasure ledger says it
  * (`erasedOf`), whoever may read them now, in the order given: for core
  * to replace what the chat shows of them (history-access.ts
  * `erasedSources`). Never one whose readers only changed, a retired
  * memory, an older version, nor a memory a lost storage lacks: the chat
- * keeps showing those. Sources and the shared memories are asked of the
- * shared store, whose ledger an erasure from a person's own store closes
+ * keeps showing those. Sources, the shared memories and the entities
+ * are asked of the shared store, whose ledger an erasure from a person's own store closes
  * too, in one call; then, in one more, their own store: the sources it
  * didn't call erased (a key under an erased group of theirs: a deleted
  * chat's turns) and the memories of their own. Refused once they are no
@@ -2794,15 +2805,22 @@ export const erasedForGoodAs = async (
   {
     sources,
     memories,
+    entities,
   }: {
     sources: readonly SourceRef[];
     memories: readonly PinnedMemory[];
+    entities: readonly EntityId[];
   }
-): Promise<{ sources: SourceRef[]; memories: StoredMemoryPlace[] }> => {
+): Promise<{
+  sources: SourceRef[];
+  memories: StoredMemoryPlace[];
+  entities: EntityId[];
+}> => {
   const refs = checked(sourceRefsSchema, sources);
   const pins = checked(pinnedMemoriesSchema, memories);
-  if (refs.length === 0 && pins.length === 0) {
-    return { sources: [], memories: [] };
+  const named = [...new Set(checked(entityIdsSchema, entities))];
+  if (refs.length === 0 && pins.length === 0 && named.length === 0) {
+    return { sources: [], memories: [], entities: [] };
   }
   const own = ownBrainOf(env, await readerOf(env, personId, "person"));
   if (own === undefined) {
@@ -2825,7 +2843,8 @@ export const erasedForGoodAs = async (
           ]
         : []
     );
-  const shared = await erasedIn(brain(env), keys, askedIn("shared"));
+  // Entities are the shared store's alone: code reads no one's own.
+  const shared = await erasedIn(brain(env), keys, askedIn("shared"), named);
   const closed = new Set(shared.sources);
   const inOwn = await erasedIn(
     own,
@@ -2846,6 +2865,7 @@ export const erasedForGoodAs = async (
     memories: pins.flatMap(({ store, memory }) =>
       gone.has(memoryKeyOf({ store, memory })) ? [{ store, memory }] : []
     ),
+    entities: shared.entities,
   };
 };
 
@@ -5573,27 +5593,49 @@ export interface CodeEntity {
  * Everything what code is handed rests on (contract `restsOn`,
  * `restsOnWords`), core's to keep with the run or the chat and never
  * code's to see: each version of a source, and each memory in a writer's
- * own word, of the shared store.
+ * own word, of the shared store; and what a person's erasure can take of
+ * what it shows (GRA-1982): each memory it hands over, with what it rests
+ * on (`PinnedMemory`), and each entity whose name it shows, by id.
  */
 export interface CodeRestsOn {
   versions: SourceVersionRef[];
   words: StoredMemoryPlace[];
+  memories: PinnedMemory[];
+  entities: EntityId[];
 }
 
 /**
- * What `answer` of the shared store rests on, as core names it. A version
- * of a kind no producer has fails the read (`sourceRefOf`): what can't be
- * pinned is never handed over.
+ * What `answer` of the shared store rests on, as core names it, with the
+ * memories it hands over (`handed`) and the entities whose names it shows
+ * (`named`). A version of a kind no producer has fails the read
+ * (`sourceRefOf`): what can't be pinned is never handed over.
  */
-const codeRestsOnOf = (answer: {
-  restsOn: readonly { source: SourceId; version: number }[];
-  restsOnWords: readonly string[];
-}): CodeRestsOn => ({
+const codeRestsOnOf = (
+  answer: {
+    restsOn: readonly { source: SourceId; version: number }[];
+    restsOnWords: readonly string[];
+  },
+  handed: readonly Memory[],
+  named: readonly EntityId[]
+): CodeRestsOn => ({
   versions: answer.restsOn.map(({ source, version }) => ({
     source: sourceRefOf(source),
     version,
   })),
   words: answer.restsOnWords.map((memory) => ({ store: "shared", memory })),
+  memories: handed.map((memory) => ({
+    store: "shared",
+    memory: memory.id,
+    basis: {
+      source: memory.source === null ? null : sourceRefOf(memory.source.source),
+      writer: memory.writer,
+      learnedAt: memory.learnedAt.getTime(),
+      speaker: memory.speaker,
+      about: memory.about,
+      object: memory.object,
+    },
+  })),
+  entities: [...new Set(named)],
 });
 
 /**
@@ -5671,7 +5713,15 @@ export const codeCardAs = async (
     })),
     notes: card.notes.map((memory) => cardMemoryOf(memory)),
     next: cursorTextOf(card.next),
-    restsOn: codeRestsOnOf(card),
+    restsOn: codeRestsOnOf(
+      card,
+      [
+        ...card.attributes.flatMap(({ memories }) => memories),
+        ...card.relations.map(({ memory }) => memory),
+        ...card.notes,
+      ],
+      [card.entity.id, ...card.relations.map(({ other }) => other.id)]
+    ),
   };
 };
 
@@ -5728,7 +5778,11 @@ export const codeEntitiesAs = async (
   return {
     entities: page.entities,
     next: cursorTextOf(page.next),
-    restsOn: codeRestsOnOf(page),
+    restsOn: codeRestsOnOf(
+      page,
+      [],
+      page.entities.map(({ id }) => id)
+    ),
   };
 };
 

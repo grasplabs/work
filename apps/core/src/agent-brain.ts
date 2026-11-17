@@ -21,8 +21,10 @@ import { entitiesCallFor, recallFor } from "./brain-recall.ts";
 import type { CodeEntitiesOperation, RecallCaller } from "./brain-recall.ts";
 import { brainGaps } from "./brain-rpc.ts";
 import {
+  brainCompanyEntityRead,
   brainCompanyMemoryRead,
   brainCompanyVersionRead,
+  brainEntityRead,
   brainGrantRead,
   brainMemoryRead,
   brainTeamVersionRead,
@@ -159,7 +161,10 @@ const handedOf = (
  * the shared store it names is their teams and the company); elsewhere
  * as `brain-company-version` and `brain-company-memory`, checked as the
  * company, and cut while the chat has anyone Grasp can't name
- * (history-access.ts). Recorded as every call of its code is, refused or
+ * (history-access.ts). Beside them, what a person's erasure can take of
+ * what it shows (GRA-1982): each memory it hands over with what it rests
+ * on, and each entity whose name it shows (`brain-entity`,
+ * `brain-company-entity`), withheld and replaced once an erasure took it. Recorded as every call of its code is, refused or
  * not; `entitiesCallFor` keeps its own audit event.
  */
 const entitiesRead = async (
@@ -179,7 +184,7 @@ const entitiesRead = async (
       {
         ...caller,
         ...(ownChat ? { reach: "teams" as const } : {}),
-        keep: async ({ versions, words }) => {
+        keep: async ({ versions, words, memories, entities }) => {
           await recordRunReads(env, scope, [
             ...versions.map((version) =>
               ownChat
@@ -191,6 +196,15 @@ const entitiesRead = async (
               ownChat
                 ? brainMemoryRead({ ...memory, basis: null })
                 : brainCompanyMemoryRead({ ...memory, basis: null })
+            ),
+            // What it shows, as a person's erasure takes it (GRA-1982):
+            // each memory it hands over with what it rests on, and each
+            // entity whose name it shows.
+            ...memories.map((memory) =>
+              ownChat ? brainMemoryRead(memory) : brainCompanyMemoryRead(memory)
+            ),
+            ...entities.map((entity) =>
+              ownChat ? brainEntityRead(entity) : brainCompanyEntityRead(entity)
             ),
           ]);
         },

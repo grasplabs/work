@@ -2235,6 +2235,7 @@ describe("exports and restores", () => {
                 : []
           )
         ),
+        entities: [],
       };
       await shared().eraseSource({ source: erased, reason: "deleted" });
       await shared().eraseWriter({
@@ -2245,6 +2246,7 @@ describe("exports and restores", () => {
       const erasedOnly = {
         sources: [erased],
         memories: [onErased, byErased],
+        entities: [],
       };
       const before = await shared().erasedOf(asked);
 
