@@ -3061,8 +3061,8 @@ msgid "At work"
 msgstr "À l’œuvre"
 
 #: src/agents/agent-wakes.tsx
-msgid "At, company time"
-msgstr "À, heure de l'entreprise"
+msgid "At, in the company's time zone"
+msgstr ""
 
 #. A time zone, by its city
 #: src/routes/_shell.settings.workspace.tsx

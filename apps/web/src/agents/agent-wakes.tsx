@@ -2,6 +2,7 @@ import type { Agent, AgentWake } from "@grasp-os/shared/agents";
 import { agentWakeOpeningMax } from "@grasp-os/shared/agents";
 import type { Member } from "@grasp-os/shared/members";
 import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { useId, useState } from "react";
 
 import type { Session } from "../core.ts";
@@ -19,6 +20,7 @@ import { Empty } from "../grasp/empty/index.ts";
 import { Field, FieldLabel } from "../grasp/field/index.ts";
 import { Form, FormRow } from "../grasp/form/index.ts";
 import { Plus, Trash } from "../grasp/icons/index.ts";
+import { inputStyles, sizeStyles } from "../grasp/input/input.tsx";
 import { Item, ItemGroup } from "../grasp/item/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
 import { Select } from "../grasp/select/index.ts";
@@ -32,8 +34,7 @@ import { Textarea } from "../grasp/textarea/index.ts";
 // anything more often than hourly. A woken turn only reads: what the
 // agent wants to change waits for the person it works for, in their chat.
 // Each wake-up says how its last one went. A card of Grasp UI's Items,
-// a new one asked for in a dialog. Grasp UI has no time field, so the
-// time is picked from the day's half hours.
+// a new one asked for in a dialog.
 
 /** What a page change asks of core, then the page read again. */
 type Change = (action: (session: Session) => Promise<unknown>) => Promise<void>;
@@ -122,11 +123,34 @@ const useLast = () => {
   };
 };
 
-/** The day's half hours, `HH:MM`: the times a wake-up made here can start at. */
-const halfHours = Array.from({ length: 48 }, (_, index) => {
-  const hour = String(Math.floor(index / 2)).padStart(2, "0");
-  return `${hour}:${index % 2 === 0 ? "00" : "30"}`;
-});
+/**
+ * A time of day, `HH:MM`, to the minute: the browser's own time field in
+ * Grasp UI's input look (`inputStyles`), as Grasp UI has no time field
+ * yet. Its label names it by `id`.
+ */
+const TimeInput = ({
+  id,
+  value,
+  disabled,
+  onChange,
+}: {
+  id: string;
+  value: string;
+  disabled: boolean;
+  onChange: (time: string) => void;
+}) => (
+  <input
+    disabled={disabled}
+    id={id}
+    onChange={(event) => {
+      onChange(event.target.value);
+    }}
+    required
+    type="time"
+    value={value}
+    {...stylex.props(inputStyles.input, sizeStyles.md)}
+  />
+);
 
 /** Add a time: its button, and the dialog that asks when, for whom and what. */
 const NewWake = ({
@@ -142,6 +166,7 @@ const NewWake = ({
 }) => {
   const { t } = useLingui();
   const formId = useId();
+  const timeId = useId();
   const [open, setOpen] = useState(false);
   const [rhythm, setRhythm] = useState<Rhythm>("weekdays");
   const [time, setTime] = useState("09:00");
@@ -213,14 +238,13 @@ const NewWake = ({
                   />
                 </Field>
                 <Field disabled={!can}>
-                  <FieldLabel>{t`At, company time`}</FieldLabel>
-                  <Select
-                    items={halfHours}
-                    onValueChange={(value) => {
-                      if (value !== null) {
-                        setTime(value);
-                      }
-                    }}
+                  <FieldLabel htmlFor={timeId}>
+                    {t`At, in the company's time zone`}
+                  </FieldLabel>
+                  <TimeInput
+                    disabled={!can}
+                    id={timeId}
+                    onChange={setTime}
                     value={time}
                   />
                 </Field>

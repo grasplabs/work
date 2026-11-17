@@ -701,6 +701,7 @@ describe("an agent's page", () => {
     const { connections, asked } = fakeConnections();
     await shown(connections, { agent: "Stephen", tab: "schedule" });
     await press(button("Add a time"));
+    await set(field("At, in the company's time zone"), "07:30", "input");
     await set(
       field("What to ask it each time"),
       " Look for invoices that are overdue. ",
@@ -712,25 +713,25 @@ describe("an agent's page", () => {
         "wake",
         "organization",
         {
-          cron: "0 9 * * 1-5",
+          cron: "30 7 * * 1-5",
           personId: "user-anna",
           opening: "Look for invoices that are overdue.",
         },
       ],
     ]);
     // Shown in words, for whom and with what it is asked.
-    expect(document.body.textContent).toContain("Every weekday at 09:00");
+    expect(document.body.textContent).toContain("Every weekday at 07:30");
     expect(document.body.textContent).toContain(
       "For Anna de Vries: Look for invoices that are overdue."
     );
 
-    await press(rowSwitch("Every weekday at 09:00"));
-    await press(button("Remove Every weekday at 09:00, for Anna de Vries"));
+    await press(rowSwitch("Every weekday at 07:30"));
+    await press(button("Remove Every weekday at 07:30, for Anna de Vries"));
     expect(asked.slice(1)).toStrictEqual([
       ["wake paused", "wake-1", true],
       ["wake deleted", "wake-1"],
     ]);
-    expect(document.body.textContent).not.toContain("Every weekday at 09:00");
+    expect(document.body.textContent).not.toContain("Every weekday at 07:30");
   });
 
   it("keeps what is typed of a new time while another change saves, and when core refuses it", async () => {
