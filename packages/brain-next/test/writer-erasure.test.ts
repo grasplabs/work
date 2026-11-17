@@ -901,8 +901,9 @@ describe("a writer's erasure", () => {
         // The table of memories that failed to delete is the release's own,
         // and so are the quotes' (migration 0022, quotes.ts), the days
         // chunks mention (migration 0024, dates.ts), where each set of
-        // readers' chunks are (migration 0026, chunk-blocks.ts) and a
-        // person's erasure's (migration 0027, people.ts).
+        // readers' chunks are (migration 0026, chunk-blocks.ts), a
+        // person's erasure's (migration 0027, people.ts) and the calls
+        // that drew memories (migration 0028, extractors.ts).
         tables: now.tables
           .filter(
             ({ name }) =>
@@ -920,6 +921,7 @@ describe("a writer's erasure", () => {
                 "person_erasure_subjects",
                 "person_erasure_memories",
                 "restore_cards",
+                "extractors",
               ].includes(name)
           )
           .map((table) => {
@@ -952,9 +954,18 @@ describe("a writer's erasure", () => {
                   ...table,
                   created: table.created
                     .replace(/,\s*`writer_subject` text/u, "")
-                    .replace(/,\s*`retired_change` text/u, ""),
+                    .replace(/,\s*`retired_change` text/u, "")
+                    .replace(
+                      /,\s*`extractor` integer REFERENCES extractors\(row\)/u,
+                      ""
+                    ),
                   rows: table.rows.map((row) =>
-                    without(row, "writer_subject", "retired_change")
+                    without(
+                      row,
+                      "writer_subject",
+                      "retired_change",
+                      "extractor"
+                    )
                   ),
                 };
               }
@@ -1022,7 +1033,8 @@ describe("a writer's erasure", () => {
             !made.includes("person_erasure_subjects") &&
             !made.includes("restore_cards") &&
             !made.includes("memories_speaker_idx") &&
-            !made.includes("memory_confirmations_person_idx")
+            !made.includes("memory_confirmations_person_idx") &&
+            !made.includes("extractors_calls_unique")
         ),
       };
       expect(

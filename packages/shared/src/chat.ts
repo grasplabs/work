@@ -1,6 +1,11 @@
 import { z } from "zod";
 
-import type { AgentDraftMade, AgentDraftMake, AgentDrafted } from "./agents.ts";
+import type {
+  AgentChangeDrafted,
+  AgentDraftMade,
+  AgentDraftMake,
+  AgentDrafted,
+} from "./agents.ts";
 import type { ChatSavedMemory } from "./brain-memories.ts";
 import type { DependencyRequest } from "./dependencies.ts";
 import type { AppId } from "./ids.ts";
@@ -848,6 +853,11 @@ export type ChatMessage =
        * (`draftAgent`): shown as a card with Make it.
        */
       agentDraft?: AgentDrafted;
+      /**
+       * The change to an agent it drafted, if it ended its response
+       * drafting one (`draftAgentChange`): shown as a card with Change it.
+       */
+      agentChange?: AgentChangeDrafted;
       end: ChatReplyEnd;
       /**
        * Why it failed, as one of the model gateway's error codes: the page
@@ -1290,6 +1300,19 @@ export interface ChatsApi {
    * refused (`agent.draft_not_found`), with nothing made.
    */
   makeDraftedAgent: (
+    chatId: string,
+    make: AgentDraftMake
+  ) => Promise<AgentDraftMade>;
+  /**
+   * Change it: changes the agent the chat drafted a change to
+   * (`make.draft`), as its card showed it, by the agent page's own checks,
+   * each draft once; then asks the chat's agent on, in the person's words.
+   * Refused, with nothing changed, for a draft the chat doesn't hold or
+   * changed already (`agent.draft_not_found`), an agent the person may
+   * not change (`agent.unknown`), and one changed since the chat drafted
+   * it (`agent.draft_stale`).
+   */
+  changeDraftedAgent: (
     chatId: string,
     make: AgentDraftMake
   ) => Promise<AgentDraftMade>;

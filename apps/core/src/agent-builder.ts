@@ -17,6 +17,7 @@ import {
   inArray,
   isNotNull,
   isNull,
+  max,
   ne,
   or,
   sql,
@@ -616,6 +617,41 @@ export const deleteAgent = async (
       detail: agent.ownerId === null ? { name: agent.name } : { own: "true" },
     }),
   ]);
+};
+
+/**
+ * When the agent `agent`, or anything a card from the chat could change of
+ * it, last changed: itself, whom it reaches, its kinds of work, its apps
+ * and its wake-ups. Null when nothing ever did.
+ */
+export const agentChangedAt = async (
+  env: Env,
+  agent: Pick<Agent, "id" | "changedAt">
+): Promise<Date | null> => {
+  const db = drizzle(env.DB);
+  const [reach, classes, apps, wakes] = await Promise.all([
+    db
+      .select({ at: max(agentReach.changedAt) })
+      .from(agentReach)
+      .where(eq(agentReach.agentId, agent.id)),
+    db
+      .select({ at: max(agentToolClasses.changedAt) })
+      .from(agentToolClasses)
+      .where(eq(agentToolClasses.agentId, agent.id)),
+    db
+      .select({ at: max(agentApps.changedAt) })
+      .from(agentApps)
+      .where(eq(agentApps.agentId, agent.id)),
+    db
+      .select({ at: max(agentWakes.changedAt) })
+      .from(agentWakes)
+      .where(eq(agentWakes.agentId, agent.id)),
+  ]);
+  const times = [
+    agent.changedAt === null ? null : new Date(agent.changedAt),
+    ...[reach, classes, apps, wakes].map(([row]) => row?.at ?? null),
+  ].flatMap((each) => (each === null ? [] : [each.getTime()]));
+  return times.length === 0 ? null : new Date(Math.max(...times));
 };
 
 /** An agent whose reach and classes are set here: any but the first. */
