@@ -94,13 +94,13 @@ export interface ConnectResult {
    */
   provenance: string[];
   /**
-   * Set when core may keep `output` as a source in the Brain (GRA-1730),
-   * the source of the one item `provenance` names: a call that names more
-   * than one is not kept. Only on a read connect
-   * carried out just now (no side effect, never held, never a stored
-   * answer), whose server named the items it read, from a connection
-   * whose provider's terms allow copies. Absent, nothing of the call is
-   * kept.
+   * Set when core may keep `output` as a source in the Brain: a native
+   * connector's as the source of the one item `provenance` names
+   * (GRA-1730), a toolkit's as the whole answer of the call (GRA-1845).
+   * Only on a read connect carried out just now (no side effect, never
+   * held, never a stored answer), from a connection whose provider's
+   * terms allow copies; for any but a toolkit, only when its server named
+   * the items it read. Absent, nothing of the call is kept.
    */
   keep?: true;
   /**
@@ -490,8 +490,9 @@ export interface ListedConnection extends ConnectionSummary {
   /** `connectedBy`'s name, while core knows them. */
   connectedByName: string | null;
   /**
-   * The Brain keeps what agents read for the person through it (core's
-   * connection-capture.ts), and erases it when it is disconnected.
+   * The Brain may keep some of what agents read for the person through
+   * it (core's connection-capture.ts): it is their own connection of a
+   * kind capture keeps reads from. Disconnecting it erases what was kept.
    */
   keepsReads?: true;
 }

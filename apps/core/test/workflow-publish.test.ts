@@ -376,7 +376,9 @@ describe("publishing a workflow", { timeout: 60_000 }, () => {
       DB: new Proxy(env.DB, {
         get: (target, name): unknown => {
           if (name !== "batch") {
-            return Reflect.get(target, name);
+            // Called on D1 itself: its private fields aren't the proxy's.
+            const value: unknown = Reflect.get(target, name);
+            return typeof value === "function" ? value.bind(target) : value;
           }
           return async (statements: D1PreparedStatement[]) => {
             const result = await target.batch(statements);
@@ -433,7 +435,9 @@ describe("publishing a workflow", { timeout: 60_000 }, () => {
       DB: new Proxy(env.DB, {
         get: (target, name): unknown => {
           if (name !== "batch") {
-            return Reflect.get(target, name);
+            // Called on D1 itself: its private fields aren't the proxy's.
+            const value: unknown = Reflect.get(target, name);
+            return typeof value === "function" ? value.bind(target) : value;
           }
           return async (statements: D1PreparedStatement[]) => {
             const result = await target.batch(statements);

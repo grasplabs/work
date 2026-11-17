@@ -74,8 +74,8 @@ const unkeyable = (connectionId: string): boolean =>
 
 /**
  * Erases the captures of each connection a disconnect among `events`
- * stopped, when it is its owner's own native connection
- * (`mayHoldCapturesOf`): no other connection holds any. Each on its own:
+ * stopped, when it is its owner's own connection of a kind capture
+ * keeps reads from (`mayHoldCapturesOf`): no other connection holds any. Each on its own:
  * what each erased is answered, and the disconnects that failed, which
  * the caller holds. One the Brain could never have kept a capture under
  * (an id with "/", or one it refuses as invalid) holds none: it is
