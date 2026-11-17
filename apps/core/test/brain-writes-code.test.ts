@@ -1,4 +1,5 @@
 import { sha256Hex } from "@grasp-os/shared/encoding";
+import { redact } from "@grasp-os/shared/redact";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -267,6 +268,83 @@ describe("an App's code remembers and forgets for its users", setUpTime, () => {
       ],
       said: false,
       conflicts: 0,
+    });
+  });
+
+  it("keeps what it remembers without the credentials an outside system's answer carried, each text redacted whole, and a call made again answers what it kept; never an identifier that holds one", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const app = await appOf(ada, admin);
+    const name = `Acme ${unique()}`;
+    const secret = `S3cret${unique()}`;
+    const token = `ghp_${"a".repeat(24)}${unique()}`;
+    // As code copies a connection's answer into what it remembers.
+    const remembered = {
+      about: {
+        kind: "customer",
+        names: [name, `${name} ${token}`],
+        identifiers: [{ type: "ref", value: `crm:${unique()}` }],
+      },
+      attribute: "status",
+      value: `active, password=${secret}`,
+      statement: `${name} signs in with password: "${secret}" and ${token}`,
+    };
+    const key = `call-${unique()}`;
+
+    const written = rememberedSchema.parse(
+      await onPage(app, ada, "remember", remembered, { key })
+    );
+    const again = await onPage(app, ada, "remember", remembered, { key });
+    const card = await onPage(app, ada, "get", { entity: written.entity });
+    const kept = await runInDurableObject(shared(), (_i, state) => ({
+      memory: state.storage.sql
+        .exec<{ statement: string; value: string | null }>(
+          "SELECT statement, value FROM memories WHERE id = ?",
+          written.memory
+        )
+        .one(),
+      // Every text kept of the entity, by name or identifier.
+      names: state.storage.sql
+        .exec<{ value: string }>(
+          "SELECT n.value FROM entity_names AS n JOIN entities AS e ON e.row = n.entity WHERE e.id = ? AND n.type = 'name' ORDER BY n.value",
+          written.entity
+        )
+        .toArray()
+        .map(({ value }) => value),
+    }));
+    const withIdentifier = (value: string) => ({
+      ...remembered,
+      about: { ...remembered.about, identifiers: [{ type: "ref", value }] },
+    });
+
+    expect({
+      again,
+      kept,
+      read: statementsOf(card),
+      shown: [JSON.stringify(card), JSON.stringify(kept)].some(
+        (text) => text.includes(secret) || text.includes(token)
+      ),
+      // An identifier finds an entity: one holding a credential is never
+      // rewritten, the write refused at its request check.
+      identifiers: {
+        plain: isCodeWriteRequest("remember", withIdentifier("crm:ACME-1")),
+        credential: isCodeWriteRequest(
+          "remember",
+          withIdentifier(`token:${secret}`)
+        ),
+      },
+    }).toStrictEqual({
+      again: written,
+      kept: {
+        memory: {
+          statement: redact(remembered.statement),
+          value: redact(remembered.value),
+        },
+        names: remembered.about.names.map((each) => redact(each)).toSorted(),
+      },
+      read: [redact(remembered.statement)],
+      shown: false,
+      identifiers: { plain: true, credential: false },
     });
   });
 

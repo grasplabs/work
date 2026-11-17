@@ -137,6 +137,7 @@ import { log } from "@grasp-os/shared/log";
 import { modelErrors } from "@grasp-os/shared/models";
 import type { ModelErrorCode } from "@grasp-os/shared/models";
 import { permissionErrors } from "@grasp-os/shared/permissions";
+import { redact } from "@grasp-os/shared/redact";
 import { skillErrors } from "@grasp-os/shared/skills";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
@@ -6028,7 +6029,14 @@ const codeAttributes = attributeNames.filter(
 /** A fact App code remembers (`rememberForAppAs`). */
 const codeRememberSchema = z.strictObject({
   // Never a person's own entity: App code writes to the shared store.
-  about: memoryAboutSchema.omit({ own: true }),
+  // Never an identifier `redact` would change (GRA-2003): one finds an
+  // entity, so it can't be redacted without moving the memory, and a
+  // credential is never kept as one.
+  about: memoryAboutSchema
+    .omit({ own: true })
+    .refine(({ identifiers }) =>
+      identifiers.every(({ value }) => redact(value) === value)
+    ),
   attribute: z.enum(codeAttributes).optional(),
   value: memoryText(valueMaxLength).optional(),
   statement: memoryText(statementMaxLength),
@@ -6058,7 +6066,8 @@ export const isCodeWriteRequest = (
   codeWriteRequests[operation].safeParse(input).success;
 
 /**
- * Remembers a fact App `app`'s code says, in the App's word, for the
+ * Remembers a fact App `app`'s code says, in the App's word, its
+ * credentials redacted (`redact`, each text whole), for the
  * member `personId` (admitted to the App by the caller), in the shared
  * store, read by the App's users alone: about an entity the App's code
  * may see (by id), or one an exact identifier finds there, or a new one;
@@ -6076,7 +6085,10 @@ export const rememberForAppAs = async (
   { app, change }: { app: AppId; change: string },
   request: unknown
 ): Promise<{ memory: MemoryId; entity: EntityId; learnedAt: Date }> => {
-  const { about, statement, ...memory } = checked(codeRememberSchema, request);
+  const { about, statement, value, attribute } = checked(
+    codeRememberSchema,
+    request
+  );
   const writer = appWriterOf(app);
   const reader = await codeReaderOf(env, personId, "company", app);
   let added: Awaited<ReturnType<Brain["addMemories"]>>;
@@ -6086,13 +6098,24 @@ export const rememberForAppAs = async (
       access: { kind: "audience", group: appUsersGroup(app) },
       // An entity's id is taken only as the App's code may see it.
       reader,
-      entities: [{ key: "about", ...about }],
+      // Credentials redacted from what is kept and recalled, each text
+      // whole (GRA-2003): code may copy an outside system's answer. The
+      // same request redacts the same, so a repeat of `change` compares
+      // as what was kept.
+      entities: [
+        {
+          key: "about",
+          ...about,
+          names: about.names.map((name) => redact(name)),
+        },
+      ],
       memories: [
         {
           about: "about",
-          ...memory,
+          ...(attribute === undefined ? {} : { attribute }),
+          ...(value === undefined ? {} : { value: redact(value) }),
           type: "fact",
-          statement,
+          statement: redact(statement),
           speaker: { kind: "agent", agent: writer },
           basis: { kind: "writer", writer },
         },
