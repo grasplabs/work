@@ -85,7 +85,7 @@ export interface Asked {
  * The card's press and the way to change it: the press asks core with
  * the box's model and effort (`press`), then `onDone` with what it made;
  * off while it isn't `ready` (a plan's connection still missing). Why it
- * failed shows under it, and what only part of it made (`notice`).
+ * failed shows under it.
  */
 export const MakeActions = <T,>({
   label,
@@ -94,7 +94,6 @@ export const MakeActions = <T,>({
   press,
   onDone,
   ready = true,
-  notice,
 }: {
   /** Build it, Make it, Change it. */
   label: string;
@@ -104,7 +103,6 @@ export const MakeActions = <T,>({
   press: (session: Session, asked: Asked) => Promise<T>;
   onDone: (made: T) => void;
   ready?: boolean;
-  notice?: ReactNode;
 }) => {
   const { busy, failure, run } = useCoreAction();
   const { model, effort } = build;
@@ -145,7 +143,6 @@ export const MakeActions = <T,>({
         </Button>
       </div>
       <ErrorText>{failure}</ErrorText>
-      {notice}
     </div>
   );
 };
