@@ -3,28 +3,36 @@ import { useLingui } from "@lingui/react/macro";
 import type { ReactNode } from "react";
 
 import { useApprovalWords } from "../chat/approval-words.ts";
+import { formatList } from "../format.ts";
 import { agentActivityWords } from "../grasp/agent-activity/words.ts";
 import { alertWords } from "../grasp/alert/words.ts";
 import { appShellPanelWords, appShellWords } from "../grasp/app-shell/words.ts";
 import { approvalRequestWords } from "../grasp/approval-request/words.ts";
+import { avatarGroupWords } from "../grasp/avatar/words.ts";
 import { badgeWords } from "../grasp/badge/words.ts";
 import { buttonWords } from "../grasp/button/words.ts";
+import { calendarWords } from "../grasp/calendar/words.ts";
 import { chatMessageWords } from "../grasp/chat-message/words.ts";
 import { codeBlockWords } from "../grasp/code-block/words.ts";
+import { comboboxWords } from "../grasp/combobox/words.ts";
 import { copyFieldWords } from "../grasp/copy-field/words.ts";
 import {
   dataTableWords,
   englishFilterWords,
 } from "../grasp/data-table/words.ts";
+import { datePickerWords } from "../grasp/date-picker/words.ts";
+import { dateRangePickerWords } from "../grasp/date-range-picker/words.ts";
 import { dialogWords } from "../grasp/dialog/words.ts";
 import { emptyWords } from "../grasp/empty/words.ts";
 import { fileUploadWords, imageWellWords } from "../grasp/file-upload/words.ts";
+import { languageSwitchWords } from "../grasp/language-switch/words.ts";
 import { markdownWords } from "../grasp/markdown/words.ts";
 import { paginationWords } from "../grasp/pagination/words.ts";
 import { settingRowWords } from "../grasp/setting-row/words.ts";
 import { sheetWords } from "../grasp/sheet/words.ts";
 import { sidebarWords } from "../grasp/sidebar/words.ts";
 import { sourcesWords } from "../grasp/sources/words.ts";
+import { tagInputWords } from "../grasp/tag-input/words.ts";
 import { tagWords } from "../grasp/tag/words.ts";
 import { dayWritten } from "../grasp/thread/rows.ts";
 import { threadWords } from "../grasp/thread/words.ts";
@@ -48,7 +56,14 @@ export const englishPartWords: GraspWordsCatalog = {
   alert: alertWords,
   appShell: appShellWords,
   approvalRequest: approvalRequestWords,
+  avatarGroup: avatarGroupWords,
   badge: badgeWords,
+  calendar: calendarWords,
+  combobox: comboboxWords,
+  datePicker: datePickerWords,
+  dateRangePicker: dateRangePickerWords,
+  languageSwitch: languageSwitchWords,
+  tagInput: tagInputWords,
   button: buttonWords,
   chatMessage: chatMessageWords,
   codeBlock: codeBlockWords,
@@ -328,6 +343,53 @@ export const usePartWords = (): GraspWordsCatalog => {
       less: t`Show less`,
     },
     copyField: { copied: t`Copied`, failed: t`Could not copy` },
+    avatarGroup: {
+      more: (count) => t`+${count}`,
+      // The names shown and how many more, joined as the language joins a list.
+      name: (shown, rest) =>
+        formatList(
+          rest > 0
+            ? [
+                ...shown,
+                t`${plural(rest, { one: "# other", other: "# others" })}`,
+              ]
+            : shown
+        ),
+    },
+    calendar: {
+      previous: t`Previous month`,
+      next: t`Next month`,
+      day: t({ message: "Day", context: "a calendar's grid of one day" }),
+    },
+    combobox: {
+      empty: t`No results`,
+      trigger: t`Show the choices`,
+      failed: t({ message: "Failed", context: "a list row's action" }),
+    },
+    datePicker: { choose: t`Choose date` },
+    dateRangePicker: {
+      presets: t`Presets`,
+      today: t`Today`,
+      last7: t`Last 7 days`,
+      last30: t`Last 30 days`,
+      thisMonth: t`This month`,
+    },
+    languageSwitch: {
+      label: t`Language`,
+      search: t`Search languages`,
+      clearSearch: t`Clear search`,
+      suggested: t`Suggested`,
+      all: t`All languages`,
+      empty: t`No language found`,
+      helpTranslate: t`Help translate`,
+      button: (label, current) => t`${label}, ${current}`,
+    },
+    tagInput: {
+      duplicate: (word) => t`“${word}” is already added.`,
+      full: (most) => t`Up to ${most}.`,
+      empty: t`Press Enter to add it.`,
+      invalid: t({ message: "not valid", context: "a tag typed" }),
+    },
     dialog: { close: t`Close` },
     sheet: { close: t`Close` },
     pagination: {

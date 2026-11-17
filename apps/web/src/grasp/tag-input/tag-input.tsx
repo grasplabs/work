@@ -44,6 +44,8 @@ import type { LayoutStyle } from "../layout/layout";
 import { Tag } from "../tag/tag";
 import { grasp, media } from "../tokens/tokens.stylex";
 import { popup } from "../tokens/tokens.values";
+import { useWords, withGiven } from "../words/words";
+import { tagInputWords } from "./words";
 
 /** What a caller may style: where it sits and how wide it is. */
 export type TagInputLayoutStyle = LayoutStyle;
@@ -255,14 +257,6 @@ export interface TagInputMessages {
   invalid: string;
 }
 
-/** What it says, in English: replace any of it through `messages`. */
-const englishMessages: TagInputMessages = {
-  duplicate: (word) => `"${word}" is already added.`,
-  full: (most) => `Up to ${most}.`,
-  empty: "Press Enter to add it.",
-  invalid: "not valid",
-};
-
 // One empty list for every TagInput, so the default never changes between renders.
 const noTags: string[] = [];
 
@@ -343,7 +337,11 @@ export const TagInput = ({
   layout,
 }: TagInputProps) => {
   const [own, setOwn] = useState(defaultValue);
-  const messages = { ...englishMessages, ...givenMessages };
+  // What it says: the product's, by its catalogue, else English; the caller's `messages` still win.
+  const messages = withGiven(
+    useWords("tagInput", tagInputWords),
+    givenMessages ?? {}
+  );
   const values = value ?? own;
   const [query, setQuery] = useState("");
   // Why the last value was refused: what it was about, so the words go once that no longer holds.

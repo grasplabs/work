@@ -84,8 +84,8 @@ export interface CalendarProps extends Omit<
 /** A month of days to choose from, with Previous and Next. */
 export const Calendar = ({
   months = 1,
-  previousLabel = "Previous month",
-  nextLabel = "Next month",
+  previousLabel,
+  nextLabel,
   showOutsideDays,
   ...rest
 }: CalendarProps) => {

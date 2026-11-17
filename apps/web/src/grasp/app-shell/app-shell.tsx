@@ -13,7 +13,7 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import type { MouseEvent, ReactNode, RefObject } from "react";
+import type { MouseEvent, ReactNode, RefObject, UIEvent } from "react";
 
 import { Button } from "../button";
 import { focus } from "../focus/focus";
@@ -526,6 +526,11 @@ const styles = stylex.create({
     gridColumn: "1",
     minWidth: 0,
     minHeight: 0,
+    // The page scrolls down, never sideways: a child wider than the page is cut at its edge, as the
+    // card cuts what leaves it. A part that may be wide (a Table, a Code block, a Data grid) scrolls
+    // in its own box. (Beside a scroll down, a clip computes to hidden: no wheel, swipe or key moves
+    // it sideways, and handlePageScroll puts back what a focus or a script moved.)
+    overflowX: "hidden",
     overflowY: "auto",
     overscrollBehavior: "auto",
     // No bar (PRODUCT-RULES, src/scroll), the page's own scroller too.
@@ -1458,6 +1463,16 @@ const isWhole = (
   page: "padded" | "whole" | undefined
 ) => bar === "none" || page === "whole";
 
+/**
+ * The page never stands scrolled sideways: a focus moved into a child wider than the page, or a
+ * script, can scroll a hidden axis, and the page goes back to its start at once.
+ */
+const handlePageScroll = (event: UIEvent<HTMLElement>) => {
+  if (event.currentTarget.scrollLeft !== 0) {
+    event.currentTarget.scrollLeft = 0;
+  }
+};
+
 /** The white card: the frame's bar or the floating Menu button, the page, and the dock. */
 const ShellCard = ({
   sidebar,
@@ -1603,6 +1618,7 @@ const ShellCard = ({
         data-slot="app-shell-page"
         data-page-whole={whole ? "" : undefined}
         inert={pageInert}
+        onScroll={handlePageScroll}
         {...stylex.props(
           styles.main,
           room === "chat" && styles.roomForChat,

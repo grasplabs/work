@@ -66,7 +66,8 @@ const ProviderRow = ({ provider }: { provider: SignInProvider }) => {
         <BrandIcon
           brand={microsoft ? "microsoft" : "google"}
           decorative
-          size="xs"
+          size="md"
+          tile={false}
         />
       </ItemMedia>
       <ItemContent>

@@ -1,5 +1,6 @@
-// The Language switch's own words: every visible word is a prop, with these English defaults, so a
-// product can translate all of it. The languages' names are the caller's, never these.
+// The Language switch's own words, in English. The product gives them in its languages through
+// GraspWords (src/words), as the catalogue's `languageSwitch`; a caller's `…Label` props still win
+// until the breaking release's step 5. The languages' names are the caller's, never these.
 
 /** Every word the switch shows or says of its own. */
 export interface LanguageSwitchWords {
@@ -32,3 +33,17 @@ export const defaultWords: LanguageSwitchWords = {
 /** The button's name: what it is, and the language it shows ("Language, Nederlands"). */
 export const defaultButtonLabel = (label: string, current: string): string =>
   `${label}, ${current}`;
+
+/** The switch's words in the catalogue: its own, and the button's name. */
+export const languageSwitchWords = {
+  ...defaultWords,
+  button: defaultButtonLabel,
+};
+
+export type LanguageSwitchCatalogueWords = typeof languageSwitchWords;
+
+declare module "../words/words" {
+  interface GraspWordsCatalog {
+    languageSwitch: LanguageSwitchCatalogueWords;
+  }
+}

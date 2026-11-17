@@ -11,8 +11,10 @@
 import * as stylex from "@stylexjs/stylex";
 
 import { grasp, media } from "../tokens/tokens.stylex";
+import { useWords, withGiven } from "../words/words";
 import { Avatar, AvatarFallback, AvatarImage, initialsOf } from "./avatar";
 import type { AvatarSize } from "./avatar";
+import { avatarGroupWords } from "./words";
 
 /** Someone in the group: their name, and their picture if they have one. */
 export interface AvatarGroupPerson {
@@ -50,19 +52,6 @@ export interface AvatarGroupWords {
   /** The group's name. @default "Anna de Vries, Ravi Menon and 2 others" */
   name: (shown: readonly string[], rest: number) => string;
 }
-
-const english: AvatarGroupWords = {
-  more: (count) => `+${count}`,
-  name: (shown, rest) => {
-    if (rest > 0) {
-      return `${shown.join(", ")} and ${rest === 1 ? "1 other" : `${rest} others`}`;
-    }
-    if (shown.length < 2) {
-      return shown.join("");
-    }
-    return `${shown.slice(0, -1).join(", ")} and ${shown.at(-1) ?? ""}`;
-  },
-};
 
 const sizes: Record<AvatarSize, string> = {
   "2xs": grasp.avatar2xs,
@@ -135,7 +124,11 @@ export const AvatarGroup = ({
   "aria-label": label,
   words: given,
 }: AvatarGroupProps) => {
-  const words = { ...english, ...given };
+  // Its words: the product's, by its catalogue, else English; the caller's `words` still win.
+  const words = withGiven(
+    useWords("avatarGroup", avatarGroupWords),
+    given ?? {}
+  );
   const face = sizes[size];
   const shown = people.slice(0, max);
   const rest = people.length - shown.length;

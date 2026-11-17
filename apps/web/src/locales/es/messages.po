@@ -16,6 +16,10 @@ msgstr "«{action}» aún no existe"
 msgid "“{text}”"
 msgstr "«{text}»"
 
+#: src/frame/part-words.tsx
+msgid "“{word}” is already added."
+msgstr "«{word}» ya está añadido."
+
 #: src/routes/_shell.knowledge.index.tsx
 msgid "(company)"
 msgstr "(empresa)"
@@ -614,14 +618,6 @@ msgstr "{failed, plural, one {Un correo no llegó a alguien} other {# correos no
 msgid "{field} in {table} needs a change in code before this can be published."
 msgstr "{field} en {table} necesita un cambio en el código antes de poder publicarse."
 
-#: src/settings/workspace-name.tsx
-msgid "{file} is not a kind of picture this takes."
-msgstr "{file} no es un tipo de imagen admitido."
-
-#: src/settings/workspace-name.tsx
-msgid "{file} is too large."
-msgstr "{file} es demasiado grande."
-
 #: src/onboarding/document-drop.tsx
 msgid "{file} removed"
 msgstr "{file} eliminado"
@@ -755,6 +751,10 @@ msgstr "{label} no responde desde {since}."
 #: src/onboarding/ai-step.tsx
 msgid "{label} refused that key. Check it in your provider's console and paste it again."
 msgstr "{label} ha rechazado esa clave. Compruébala en la consola de tu proveedor y pégala de nuevo."
+
+#: src/frame/part-words.tsx
+msgid "{label}, {current}"
+msgstr "{label}, {current}"
 
 #: src/onboarding/setup-parts.tsx
 msgid "{label}, on Grasp’s support site, in a new tab"
@@ -1028,10 +1028,6 @@ msgstr "{name}: los agentes lo buscan en directo cuando preguntas. El cerebro no
 msgid "{name}: share of this month"
 msgstr "{name}: parte de este mes"
 
-#: src/routes/_shell.settings.profile.tsx
-msgid "{named}, {current}"
-msgstr "{named}, {current}"
-
 #: src/routes/_shell.settings.appearance.tsx
 msgid "{named}, {current}. Switch to {next}"
 msgstr "{named}, {current}. Cambiar a {next}"
@@ -1169,6 +1165,10 @@ msgstr "{quietTeam} está en silencio. Unas palabras de {quietLead}, su responsa
 #: src/interview/closed.tsx
 msgid "{rating} of 5"
 msgstr "{rating} de 5"
+
+#: src/frame/part-words.tsx
+msgid "{rest, plural, one {# other} other {# others}}"
+msgstr "{rest, plural, one {# más} other {# más}}"
 
 #: src/brain/work-knowledge.tsx
 msgid "{rests} · {role}, {team} · week {week}"
@@ -1605,6 +1605,10 @@ msgstr "**Tú:**"
 #: src/workflows/requests/request-parts.tsx
 msgid "+{by}"
 msgstr "+{by}"
+
+#: src/frame/part-words.tsx
+msgid "+{count}"
+msgstr "+{count}"
 
 #: src/brain/brain.ts
 msgid "1 Vision"
@@ -2475,7 +2479,7 @@ msgstr "Todos los chats"
 msgid "All items"
 msgstr "Todos los elementos"
 
-#: src/routes/_shell.settings.profile.tsx
+#: src/frame/part-words.tsx
 msgid "All languages"
 msgstr "Todos los idiomas"
 
@@ -4179,6 +4183,10 @@ msgstr "Elige una versión"
 msgid "Choose a workflow"
 msgstr "Elige un flujo de trabajo"
 
+#: src/frame/part-words.tsx
+msgid "Choose date"
+msgstr "Elige una fecha"
+
 #: src/activity/audit-log.tsx
 msgid "Choose dates"
 msgstr "Elegir fechas"
@@ -4264,7 +4272,6 @@ msgid "Clear filters"
 msgstr "Borrar filtros"
 
 #: src/frame/part-words.tsx
-#: src/routes/_shell.settings.profile.tsx
 msgid "Clear search"
 msgstr "Borrar búsqueda"
 
@@ -5137,6 +5144,11 @@ msgstr "Fecha"
 
 #: src/dashboard/runs-widget.tsx
 #: src/settings/ai-spend.tsx
+msgid "Day"
+msgstr "Día"
+
+#: src/frame/part-words.tsx
+msgctxt "a calendar's grid of one day"
 msgid "Day"
 msgstr "Día"
 
@@ -6275,6 +6287,11 @@ msgctxt "a figure of the report"
 msgid "Failed"
 msgstr "Fallidas"
 
+#: src/frame/part-words.tsx
+msgctxt "a list row's action"
+msgid "Failed"
+msgstr "Falló"
+
 #: src/chat/thread.tsx
 #: src/frame/part-words.tsx
 msgctxt "a step's state"
@@ -7131,6 +7148,14 @@ msgstr "La IA de Grasp funciona con la clave propia de un proveedor de IA de tu 
 msgid "Grasp's chat"
 msgstr "El chat de Grasp"
 
+#: src/settings/staff-access.tsx
+msgid "Grasp's own team can sign in here to help only while Grasp has opened a window, for at most 7 days, and you can end it at any time. Full access: they can do everything their role allows in the whole workspace, not only the onboarding."
+msgstr "El propio equipo de Grasp solo puede iniciar sesión aquí para ayudar mientras Grasp tenga abierto un periodo, de 7 días como máximo, y puedes terminarlo en cualquier momento. Acceso completo: pueden hacer todo lo que su rol permite en todo el espacio de trabajo, no solo en el onboarding."
+
+#: src/settings/staff-access.tsx
+msgid "Grasp's own team can sign in here to help only while Grasp has opened a window, for at most 7 days, and you can end it at any time. Onboarding only: they reach the onboarding alone, and lose access 7 days after Grasp's go."
+msgstr "El propio equipo de Grasp solo puede iniciar sesión aquí para ayudar mientras Grasp tenga abierto un periodo, de 7 días como máximo, y puedes terminarlo en cualquier momento. Solo onboarding: solo llegan al onboarding y pierden el acceso 7 días después del visto bueno de Grasp."
+
 #: src/settings/backdrop-settings.tsx
 msgid "Grid"
 msgstr "Cuadrícula"
@@ -7227,7 +7252,7 @@ msgstr "Escuchado de suficientes personas"
 msgid "Hello"
 msgstr "Hola"
 
-#: src/routes/_shell.settings.profile.tsx
+#: src/frame/part-words.tsx
 msgid "Help translate"
 msgstr "Ayuda a traducir"
 
@@ -8361,6 +8386,7 @@ msgstr "Conocido"
 msgid "Known about your organization"
 msgstr "Conocido de tu organización"
 
+#: src/frame/part-words.tsx
 #: src/routes/_shell.settings.profile.tsx
 msgid "Language"
 msgstr "Idioma"
@@ -8369,11 +8395,11 @@ msgstr "Idioma"
 msgid "Language: {name}"
 msgstr "Idioma: {name}"
 
-#: src/activity/audit-log.tsx
+#: src/frame/part-words.tsx
 msgid "Last 30 days"
 msgstr "Últimos 30 días"
 
-#: src/activity/audit-log.tsx
+#: src/frame/part-words.tsx
 msgid "Last 7 days"
 msgstr "Últimos 7 días"
 
@@ -9067,6 +9093,10 @@ msgstr "Presupuesto mensual para IA"
 msgid "More"
 msgstr "Más"
 
+#: src/settings/staff-access.tsx
+msgid "More about Grasp staff access"
+msgstr "Más sobre el acceso del personal de Grasp"
+
 #: src/onboarding/connect-steps.tsx
 msgid "More about Pulse"
 msgstr "Más sobre Pulse"
@@ -9452,7 +9482,7 @@ msgstr "Siguiente"
 msgid "Next match"
 msgstr "Siguiente coincidencia"
 
-#: src/activity/audit-log.tsx
+#: src/frame/part-words.tsx
 msgid "Next month"
 msgstr "Mes siguiente"
 
@@ -9610,7 +9640,7 @@ msgstr "Aún no hay integraciones."
 msgid "No job written yet"
 msgstr "Aún no se ha descrito su tarea"
 
-#: src/routes/_shell.settings.profile.tsx
+#: src/frame/part-words.tsx
 msgid "No language found"
 msgstr "No se encontró ningún idioma"
 
@@ -9705,6 +9735,10 @@ msgstr "Ninguna solicitud en {month}"
 #: src/routes/_shell.workflows.requests.tsx
 msgid "No requests in the last twelve months"
 msgstr "Ninguna solicitud en los últimos doce meses"
+
+#: src/frame/part-words.tsx
+msgid "No results"
+msgstr "Sin resultados"
 
 #: src/dashboard/report.ts
 msgid "No run asked anyone for a decision."
@@ -9912,6 +9946,10 @@ msgstr "Ninguno: su proveedor se eliminó."
 msgid "None."
 msgstr "Ninguno."
 
+#: src/settings/workspace-name.tsx
+msgid "Not a PNG, JPEG or WebP picture"
+msgstr "No es una imagen PNG, JPEG o WebP"
+
 #: src/routes/_shell.integrations.$integration.tsx
 #: src/workflows/workflow-triggers.tsx
 msgid "Not allowed"
@@ -10083,6 +10121,11 @@ msgid "Not used yet"
 msgstr "Aún sin usar"
 
 #: src/settings/invitations.tsx
+msgid "not valid"
+msgstr "no válido"
+
+#: src/frame/part-words.tsx
+msgctxt "a tag typed"
 msgid "not valid"
 msgstr "no válido"
 
@@ -10808,7 +10851,7 @@ msgstr "Abierta hasta"
 
 #: src/settings/staff-access.tsx
 msgid "Open until {until}"
-msgstr "Abierta hasta {until}"
+msgstr "Abierto hasta {until}"
 
 #: src/inbox/interviews-item.tsx
 msgid "Open your onboarding"
@@ -11429,7 +11472,7 @@ msgstr "Praga"
 msgid "Preference"
 msgstr "Preferencia"
 
-#: src/activity/audit-log.tsx
+#: src/frame/part-words.tsx
 msgid "Presets"
 msgstr "Predefinidos"
 
@@ -11437,6 +11480,7 @@ msgstr "Predefinidos"
 msgid "Press a line to change it, take out what is wrong, or type what is missing. What you leave in is what counts."
 msgstr "Pulsa una línea para cambiarla, quita lo que esté mal o escribe qué falta. Lo que dejes es lo que cuenta."
 
+#: src/frame/part-words.tsx
 #: src/settings/invitations.tsx
 msgid "Press Enter to add it."
 msgstr "Pulsa Intro para añadirlo."
@@ -11465,7 +11509,7 @@ msgstr "Hash anterior"
 msgid "Previous match"
 msgstr "Coincidencia anterior"
 
-#: src/activity/audit-log.tsx
+#: src/frame/part-words.tsx
 msgid "Previous month"
 msgstr "Mes anterior"
 
@@ -13089,7 +13133,7 @@ msgstr "Buscar integraciones"
 msgid "Search Knowledge"
 msgstr "Buscar en Conocimiento"
 
-#: src/routes/_shell.settings.profile.tsx
+#: src/frame/part-words.tsx
 msgid "Search languages"
 msgstr "Buscar idiomas"
 
@@ -13624,6 +13668,10 @@ msgstr "Mostrar u ocultar la barra lateral"
 #: src/workflows/requests/request-who.tsx
 msgid "Show people one by one"
 msgstr "Mostrar personas una a una"
+
+#: src/frame/part-words.tsx
+msgid "Show the choices"
+msgstr "Mostrar las opciones"
 
 #: src/settings/ai-providers.tsx
 msgid "Show the models"
@@ -14338,7 +14386,7 @@ msgstr "Detenido."
 msgid "Such as: look for invoices that are overdue and say which."
 msgstr "Por ejemplo: busca las facturas vencidas y di cuáles son."
 
-#: src/routes/_shell.settings.profile.tsx
+#: src/frame/part-words.tsx
 msgid "Suggested"
 msgstr "Sugeridos"
 
@@ -15731,7 +15779,7 @@ msgstr "Este modelo no puede dar una respuesta tan larga. Elige otro modelo o pi
 msgid "This model has one level of effort."
 msgstr "Este modelo tiene un solo nivel de esfuerzo."
 
-#: src/activity/audit-log.tsx
+#: src/frame/part-words.tsx
 #: src/settings/ai-spend.tsx
 #: src/workflows/requests/request-plan.tsx
 msgid "This month"
@@ -15939,7 +15987,6 @@ msgstr "A los responsables de equipo. Los demás siguen en cuanto su responsable
 msgid "To these teams"
 msgstr "A estos equipos"
 
-#: src/activity/audit-log.tsx
 #: src/brain/brain-log.tsx
 #: src/frame/part-words.tsx
 msgid "Today"
@@ -15967,6 +16014,10 @@ msgstr "Mañana"
 #: src/onboarding/setup-steps.tsx
 msgid "Too large to read"
 msgstr "Demasiado grande para leerlo"
+
+#: src/settings/workspace-name.tsx
+msgid "Too large: at most {most}"
+msgstr "Demasiado grande: {most} como máximo"
 
 #: src/pages/page-files.ts
 msgid "Too many files are moving at once. Try again shortly."
@@ -16297,6 +16348,10 @@ msgstr "Dejar de compartir"
 #: src/onboarding/no-sender.tsx
 msgid "Until Grasp support sets one, interview links can’t go out by email. Send each one their link by hand from Interviews."
 msgstr "Hasta que el soporte de Grasp configure uno, los enlaces de entrevista no pueden enviarse por correo. Envía a cada uno su enlace a mano desde Entrevistas."
+
+#: src/frame/part-words.tsx
+msgid "Up to {most}."
+msgstr "Hasta {most}."
 
 #: src/activity/audit-words.ts
 msgid "Updated Grasp"

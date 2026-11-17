@@ -419,15 +419,6 @@ const LogFiltersControl = ({ search }: { search: LogSearch }) => {
                 t({ message: "mm", context: "a date's month, as typed" }),
                 t({ message: "yyyy", context: "a date's year, as typed" }),
               ]}
-              presetLabels={[
-                t`Today`,
-                t`Last 7 days`,
-                t`Last 30 days`,
-                t`This month`,
-              ]}
-              presetsLabel={t`Presets`}
-              previousLabel={t`Previous month`}
-              nextLabel={t`Next month`}
               triggerLabel={t`Choose dates`}
               size="sm"
               value={period}
