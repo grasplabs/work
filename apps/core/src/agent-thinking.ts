@@ -18,9 +18,9 @@ import { showThinkingName } from "./agent-messages.ts";
 // Grasp does, names what it looks at, and the shape the brain takes
 // (@grasp-os/shared/thinking). The tool takes only teams, what they said
 // and workflows that are in the brain as the asker may read it, as the
-// brain page reads it for them (`readBrain`): what was said is a claim of
-// five or more of a team's people, or none, so no one person's words can
-// be named. A team or a workflow may be named by its id, its name, or an
+// brain page reads it for them (`readBrain`): what was said is a team's
+// claim of how it works, never one person's words (GRA-1987), so no one
+// person's words can be named. A team or a workflow may be named by its id, its name, or an
 // id the model makes of its name. Anything else is refused, with a reason
 // the model can act on. An accepted step is kept with the answer, as the
 // call's result (`details`), so the page plays it as it comes and again

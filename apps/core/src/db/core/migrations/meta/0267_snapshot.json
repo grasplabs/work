@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "5df9c0e1-2bac-4406-9289-0b3abcd33c39",
-  "prevId": "11f7c375-ce7a-4f84-81ac-5efaffd5796f",
+  "id": "01e542fa-e3d9-4d42-8961-3f03fd510f18",
+  "prevId": "c0388866-23a0-458d-af73-7aaa59a96228",
   "tables": {
     "access_revocations": {
       "name": "access_revocations",
@@ -986,13 +986,6 @@
         },
         "job": {
           "name": "job",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "instructions": {
-          "name": "instructions",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
@@ -4413,13 +4406,6 @@
           "notNull": true,
           "autoincrement": false
         },
-        "purged_at": {
-          "name": "purged_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
         "retired_at": {
           "name": "retired_at",
           "type": "integer",
@@ -5642,46 +5628,6 @@
         }
       },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "collection_teams": {
-      "name": "collection_teams",
-      "columns": {
-        "collection_id": {
-          "name": "collection_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "team_id": {
-          "name": "team_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "collection_teams_team_id_idx": {
-          "name": "collection_teams_team_id_idx",
-          "columns": [
-            "team_id"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {
-        "collection_teams_collection_id_team_id_pk": {
-          "columns": [
-            "collection_id",
-            "team_id"
-          ],
-          "name": "collection_teams_collection_id_team_id_pk"
-        }
-      },
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
@@ -10608,46 +10554,6 @@
         }
       },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "run_state_writers": {
-      "name": "run_state_writers",
-      "columns": {
-        "run_id": {
-          "name": "run_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "writer_run_id": {
-          "name": "writer_run_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "run_state_writers_writer_idx": {
-          "name": "run_state_writers_writer_idx",
-          "columns": [
-            "writer_run_id"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {
-        "run_state_writers_run_id_writer_run_id_pk": {
-          "columns": [
-            "run_id",
-            "writer_run_id"
-          ],
-          "name": "run_state_writers_run_id_writer_run_id_pk"
-        }
-      },
       "uniqueConstraints": {},
       "checkConstraints": {}
     },

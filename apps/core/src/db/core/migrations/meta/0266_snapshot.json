@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "11f7c375-ce7a-4f84-81ac-5efaffd5796f",
+  "id": "c0388866-23a0-458d-af73-7aaa59a96228",
   "prevId": "d5b26316-3a11-4754-930a-330a89e4d444",
   "tables": {
     "access_revocations": {
@@ -986,13 +986,6 @@
         },
         "job": {
           "name": "job",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "instructions": {
-          "name": "instructions",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
@@ -4413,13 +4406,6 @@
           "notNull": true,
           "autoincrement": false
         },
-        "purged_at": {
-          "name": "purged_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
         "retired_at": {
           "name": "retired_at",
           "type": "integer",
@@ -5642,46 +5628,6 @@
         }
       },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "collection_teams": {
-      "name": "collection_teams",
-      "columns": {
-        "collection_id": {
-          "name": "collection_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "team_id": {
-          "name": "team_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "collection_teams_team_id_idx": {
-          "name": "collection_teams_team_id_idx",
-          "columns": [
-            "team_id"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {
-        "collection_teams_collection_id_team_id_pk": {
-          "columns": [
-            "collection_id",
-            "team_id"
-          ],
-          "name": "collection_teams_collection_id_team_id_pk"
-        }
-      },
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
@@ -7769,30 +7715,6 @@
           "isUnique": false
         }
       },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "kept_run_evidence": {
-      "name": "kept_run_evidence",
-      "columns": {
-        "run_id": {
-          "name": "run_id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "kept_at": {
-          "name": "kept_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
@@ -16709,15 +16631,7 @@
           "autoincrement": false
         }
       },
-      "indexes": {
-        "workflow_state_run_idx": {
-          "name": "workflow_state_run_idx",
-          "columns": [
-            "run_id"
-          ],
-          "isUnique": false
-        }
-      },
+      "indexes": {},
       "foreignKeys": {
         "workflow_state_workflow_resource_id_workflow_resources_id_fk": {
           "name": "workflow_state_workflow_resource_id_workflow_resources_id_fk",
