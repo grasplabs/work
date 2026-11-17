@@ -26,6 +26,19 @@ export const filledMark = (icon: IconData): IconData => {
   return icon;
 };
 
+// The filled forms (index.ts, such as ThumbsUpFilled): the same Hugeicons drawing with its own closed
+// shapes filled in the ink as well as stroked, for an action that stays on. Hugeicons' solid set
+// is not in the free package this library uses, so the filled form is the outline's own geometry,
+// never a shape drawn here.
+const solids = new WeakSet<object>();
+
+/** The filled form of a drawing: a copy of it, drawn with its closed shapes filled in the ink. */
+export const solidForm = (icon: IconData): IconData => {
+  const copy: IconData = [...icon];
+  solids.add(copy);
+  return copy;
+};
+
 /** Marks a drawing as one that points along the line, so it mirrors in right-to-left text. */
 export const pointing = (icon: IconData): IconData => {
   pointers.add(icon);
@@ -45,6 +58,7 @@ const styles = stylex.create({
     pointerEvents: "none",
   },
   filled: { stroke: "none" },
+  solid: { fill: "currentColor" },
   mirror: {
     transform: { default: null, ":dir(rtl)": "scaleX(-1)" },
   },
@@ -127,6 +141,7 @@ export const Icon = ({ icon, label, style }: IconProps) => {
       {...stylex.props(
         styles.icon,
         filled.has(icon) && styles.filled,
+        solids.has(icon) && styles.solid,
         pointers.has(icon) && styles.mirror,
         style
       )}

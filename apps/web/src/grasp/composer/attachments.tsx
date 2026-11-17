@@ -292,10 +292,13 @@ export const ComposerAttachments = ({
   return (
     <div {...stylex.props(styles.shell, files.length > 0 && styles.shellOpen)}>
       <div {...stylex.props(styles.clip)}>
-        {/* The fades start at none; watchEdges sets them straight on the strip as it scrolls. */}
+        {/* The fades start at none; watchEdges sets them straight on the strip as it scrolls. Out of
+            the tab order (C3, PROOF-2026-11-17.md): Firefox makes a box that scrolls a Tab stop of
+            its own, with no ring; each file's own button takes the keys and scrolls it into view. */}
         <ul
           ref={strip}
           aria-label={label}
+          tabIndex={-1}
           {...stylex.props(
             styles.strip,
             scroll.bar,

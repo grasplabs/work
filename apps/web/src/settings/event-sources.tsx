@@ -21,6 +21,8 @@ import {
 } from "../grasp/alert-dialog/index.ts";
 import { Alert } from "../grasp/alert/index.ts";
 import { Badge } from "../grasp/badge/index.ts";
+import { BrandIcon, brands } from "../grasp/brand-icon/index.ts";
+import type { Brand } from "../grasp/brand-icon/index.ts";
 import { Button } from "../grasp/button/index.ts";
 import { CodeBlock } from "../grasp/code-block/index.ts";
 import { CopyField } from "../grasp/copy-field/index.ts";
@@ -66,6 +68,7 @@ import {
   ItemContent,
   ItemDescription,
   ItemGroup,
+  ItemMedia,
   ItemTitle,
 } from "../grasp/item/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
@@ -87,6 +90,18 @@ import { SectionNotLoaded, SettingsStack } from "./section.tsx";
 // it started. A new source is made in two steps of one dialog: its name,
 // then what to give the sender, the secret shown that once. Core keeps no
 // record of deliveries, so nothing here speaks of them.
+
+/**
+ * The mark of a source named after a brand Grasp has one for ("Stripe"),
+ * by its name as the admin wrote it; none for any other.
+ */
+/** Whether a name is a brand's key. */
+const isBrand = (key: string): key is Brand => Object.hasOwn(brands, key);
+
+const markOf = (name: string): Brand | undefined => {
+  const key = name.trim().toLowerCase();
+  return isBrand(key) ? key : undefined;
+};
 
 const styles = stylex.create({
   form: { display: "grid", gap: grasp.space3 },
@@ -391,8 +406,16 @@ const SourceRow = ({
   const url =
     source.delivery === null ? undefined : urlOf(source.delivery.token);
   const line = useStartsLine(starts);
+  const mark = markOf(name);
   return (
     <Item size="xs">
+      {mark === undefined ? (
+        <ItemMedia icon={Link} iconLook="inline" />
+      ) : (
+        <ItemMedia>
+          <BrandIcon brand={mark} decorative size="md" tile={false} />
+        </ItemMedia>
+      )}
       <ItemContent>
         <ItemTitle>
           {name}{" "}

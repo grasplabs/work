@@ -901,8 +901,7 @@ const Models = ({
     setLast(next);
     setStatus("saving");
     void (async () => {
-      // Success is silent for now: the row's "Saved" line under the label was rejected (Ruben, 17 Nov 2026); the library shows it beside the control from its main 0ebd48bd, not yet in its registry.
-      setStatus((await onChoose(next)) ? "idle" : "failed");
+      setStatus((await onChoose(next)) ? "saved" : "failed");
     })();
   };
   const chooseFallbacks = (next: string[]): void => {

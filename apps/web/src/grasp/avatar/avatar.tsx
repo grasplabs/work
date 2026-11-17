@@ -34,7 +34,7 @@ import type { ReactNode } from "react";
 import { arrive } from "../motion/arrive";
 import { grasp, media } from "../tokens/tokens.stylex";
 
-export type AvatarSize = "xs" | "sm" | "md" | "lg" | "xl";
+export type AvatarSize = "2xs" | "xs" | "sm" | "md" | "lg" | "xl";
 
 /** Every prop an Avatar takes. */
 export interface AvatarProps {
@@ -48,7 +48,8 @@ export interface AvatarProps {
   /** @deprecated Use `AvatarImage.src`. */
   src?: string;
   /**
-   * `xs` 24px, `sm` 32px, `md` 40px, `lg` 48px, `xl` 64px.
+   * `2xs` 16px (in a control's own line; its initials one letter), `xs` 24px, `sm` 32px, `md`
+   * 40px, `lg` 48px, `xl` 64px.
    * @default "md"
    */
   size?: AvatarSize;
@@ -102,6 +103,13 @@ const styles = stylex.create({
   // The initials stand at about half the avatar's size, never under 13px.
   // The initials keep the same share of the circle as at sm: three quarters of sm's letters, as 24px
   // is of 32. The extra-small words step was larger than that and filled the circle.
+  // In a control's own line (the agent a Composer asks): one letter, at the share of its circle xs's
+  // two letters take of theirs.
+  "2xs": {
+    width: grasp.avatar2xs,
+    height: grasp.avatar2xs,
+    fontSize: `calc(${grasp.textXs} * 0.75)`,
+  },
   xs: {
     width: grasp.avatarXs,
     height: grasp.avatarXs,
@@ -166,6 +174,8 @@ export const initialsOf = (name: string) => {
 
 // The Avatar's name, for an AvatarFallback that shows its initials.
 const AvatarName = createContext("");
+// Whether the Avatar is small enough that its initials are one letter (2xs).
+const AvatarOneLetter = createContext(false);
 
 /** The picture, over the initials once it has loaded. The Avatar names it, so its own alt is empty. */
 export const AvatarImage = ({ src, eager = false }: AvatarImageProps) =>
@@ -185,9 +195,10 @@ export const AvatarImage = ({ src, eager = false }: AvatarImageProps) =>
 /** What shows until the picture loads, and for good if it fails: the name's initials by default. */
 export const AvatarFallback = ({ children }: AvatarFallbackProps) => {
   const name = useContext(AvatarName);
+  const one = useContext(AvatarOneLetter);
   return (
     <FallbackPrimitive aria-hidden="true" {...stylex.props(styles.fallback)}>
-      {children ?? initialsOf(name)}
+      {children ?? (one ? firstOf(initialsOf(name)) : initialsOf(name))}
     </FallbackPrimitive>
   );
 };
@@ -213,12 +224,14 @@ export const Avatar = ({
       {...stylex.props(styles.avatar, styles[size])}
     >
       <AvatarName value={name}>
-        {children ?? (
-          <>
-            <AvatarImage src={src} eager={eager} />
-            <AvatarFallback />
-          </>
-        )}
+        <AvatarOneLetter value={size === "2xs"}>
+          {children ?? (
+            <>
+              <AvatarImage src={src} eager={eager} />
+              <AvatarFallback />
+            </>
+          )}
+        </AvatarOneLetter>
       </AvatarName>
       <span aria-hidden="true" {...stylex.props(styles.edge)} />
     </AvatarPrimitive>

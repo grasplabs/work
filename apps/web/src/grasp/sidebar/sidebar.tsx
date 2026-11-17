@@ -330,6 +330,9 @@ const COARSE = media.coarse;
 const FORCED = media.forced;
 // A row whose dots' menu is open.
 const HELD_OPEN = ":has([data-row-dots] [aria-expanded='true'])";
+// A row being renamed: the field lies over its link (row-actions.tsx).
+const RENAMING = ":has(> [data-row-rename])";
+const REDUCED = media.reduced;
 
 // The fade past a peek's end (F85): twice the page's room wide; the card's ground whole for its first
 // 12px, three quarters at 24px, clear at its end.
@@ -638,6 +641,7 @@ const styles = stylex.create({
         [HOVER]: grasp.shellText,
       },
       [stylex.when.ancestor(HELD_OPEN, rowActionsMarker)]: grasp.shellText,
+      [stylex.when.ancestor(RENAMING, rowActionsMarker)]: grasp.shellText,
     },
     backgroundColor: {
       default: "transparent",
@@ -647,6 +651,7 @@ const styles = stylex.create({
         [HOVER]: grasp.shellHover,
       },
       [stylex.when.ancestor(HELD_OPEN, rowActionsMarker)]: grasp.shellHover,
+      [stylex.when.ancestor(RENAMING, rowActionsMarker)]: grasp.shellHover,
     },
     cursor: "pointer",
     transitionProperty: "color, background-color",
@@ -795,6 +800,18 @@ const styles = stylex.create({
     minWidth: 0,
     overflow: "hidden",
     textOverflow: "ellipsis",
+    // Renaming, the field over the row shows the words: the row's own stand hidden in their place.
+    visibility: {
+      default: null,
+      [stylex.when.ancestor(RENAMING, rowActionsMarker)]: "hidden",
+    },
+  },
+  // What stands at a row's end (its time, its count, its Working mark): hidden while it is renamed.
+  hidesRenaming: {
+    visibility: {
+      default: null,
+      [stylex.when.ancestor(RENAMING, rowActionsMarker)]: "hidden",
+    },
   },
   // A row with a second line (Activity): as tall as its lines, its name in ink (it asks for the
   // person, so it never reads as dimmed), its second line and its end quiet.
@@ -847,7 +864,27 @@ const styles = stylex.create({
     display: "inline-flex",
     flexShrink: 0,
     alignItems: "center",
+    justifyContent: "center",
     marginInlineStart: "auto",
+  },
+  workingSlot: {
+    position: { default: "absolute", [COARSE]: "static" },
+    insetBlock: 0,
+    insetInlineEnd: grasp.space1,
+    width: { default: grasp.shellIconButton, [COARSE]: "auto" },
+    opacity: {
+      default: 1,
+      [stylex.when.ancestor(":hover", rowActionsMarker)]: {
+        default: 1,
+        [HOVER]: 0,
+      },
+      [stylex.when.ancestor(":focus-within", rowActionsMarker)]: 0,
+      [stylex.when.ancestor(HELD_OPEN, rowActionsMarker)]: 0,
+      [COARSE]: 1,
+    },
+    transitionProperty: "opacity",
+    transitionDuration: { default: grasp.shellAnswer, [REDUCED]: "0s" },
+    transitionTimingFunction: grasp.ease,
   },
   // A group's last row, to all of its kind: quieter than the rows, in the muted ink and regular
   // weight, its words where the rows' names start.
@@ -950,6 +987,7 @@ interface LinkProps {
   children?: ReactNode;
   "aria-current"?: "page";
   "aria-describedby"?: string;
+  inert?: boolean;
   "data-sidebar-item"?: string;
   onClick?: (event: MouseEvent<HTMLElement>) => void;
 }
@@ -976,6 +1014,7 @@ const Linked = ({
   const shared: LinkProps = mergeProps(trigger ?? {}, {
     "aria-current": row.current === true ? ("page" as const) : undefined,
     "aria-describedby": extras?.["aria-describedby"],
+    inert: extras?.inert,
     "data-sidebar-item": item ? "" : undefined,
     onClick,
   });
@@ -1045,7 +1084,10 @@ const RowEnd = ({
   const said = label !== undefined && label !== "";
   return (
     <>
-      <span aria-hidden={said ? true : undefined} {...stylex.props(styles.end)}>
+      <span
+        aria-hidden={said ? true : undefined}
+        {...stylex.props(styles.end, styles.hidesRenaming)}
+      >
         {end}
       </span>
       {said && <Unseen>{` ${label}`}</Unseen>}
@@ -1090,7 +1132,7 @@ const SubRow = ({ sub, item }: { sub: SidebarSubRow; item: boolean }) => {
     focus.inside
   );
   return (
-    <RowActions {...sub} look={look} inList={item}>
+    <RowActions {...sub} inList={item}>
       {(extras) => (
         <RowTip
           label={sub.label}
@@ -1117,9 +1159,11 @@ const SubRow = ({ sub, item }: { sub: SidebarSubRow; item: boolean }) => {
 const RowWorking = ({
   working,
   label,
+  slot,
 }: {
   working: boolean | undefined;
   label: string | undefined;
+  slot: boolean;
 }) => {
   const words = useWords("sidebar", sidebarWords);
   if (working !== true) {
@@ -1127,7 +1171,14 @@ const RowWorking = ({
   }
   return (
     <>
-      <span data-slot="sidebar-row-working" {...stylex.props(styles.working)}>
+      <span
+        data-slot="sidebar-row-working"
+        {...stylex.props(
+          styles.working,
+          slot && styles.workingSlot,
+          styles.hidesRenaming
+        )}
+      >
         <AgentIndicator />
       </span>
       <Unseen>{` ${label ?? words.working}`}</Unseen>
@@ -1162,10 +1213,17 @@ const RowLinked = ({
       <RowIcon icon={row.icon} tall={hasDetail(row)} />
       <RowWords label={row.label} detail={row.detail} />
       <RowEnd end={row.end} label={row.endLabel} />
-      <RowWorking working={row.working} label={row.workingLabel} />
+      <RowWorking
+        working={row.working}
+        label={row.workingLabel}
+        slot={hasActions(row)}
+      />
       {counted && (
         <>
-          <span aria-hidden="true" {...stylex.props(styles.count)}>
+          <span
+            aria-hidden="true"
+            {...stylex.props(styles.count, styles.hidesRenaming)}
+          >
             {row.count}
           </span>
           <Unseen>{` ${row.countLabel ?? String(row.count)}`}</Unseen>
@@ -1228,7 +1286,7 @@ const Row = ({ row, item }: { row: SidebarRow; item: boolean }) => {
   );
   return (
     <li>
-      <RowActions {...row} look={look} inList={item}>
+      <RowActions {...row} inList={item}>
         {(extras) => (
           <RowLink row={row} item={item} look={look} extras={extras} />
         )}

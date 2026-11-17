@@ -62,10 +62,9 @@ const axisDollars = (value: string | number): string => {
     style: "currency",
     currency: "USD",
     notation: amount < 1 ? "standard" : "compact",
-    // Quarter steps under a dollar keep their third decimal ($0.025), so
-    // the axis never reads 0.03 for 0.025.
-    minimumFractionDigits: amount < 1 ? 2 : 0,
-    maximumFractionDigits: amount < 1 ? 3 : 1,
+    // Two decimals at most: the axis has room for about four characters
+    // (Grasp UI's ChartAxis), so a quarter step under a dollar rounds.
+    maximumFractionDigits: amount < 1 ? 2 : 1,
   }).format(amount);
 };
 

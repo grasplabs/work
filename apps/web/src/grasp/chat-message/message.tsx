@@ -47,6 +47,13 @@ export interface ChatMessageProps {
   children?: ReactNode;
   /** The agent's name over its message ("Assistant"). A person's messages need none. */
   name?: string;
+  /**
+   * Keeps the name off the page while a screen reader still hears who speaks: the message stays
+   * named by `name`, and no name is drawn over it. For a chat with one agent, where its name on
+   * every answer is noise.
+   * @default false
+   */
+  nameHidden?: boolean;
   /** When it was sent, as people say it ("2 min ago"), small beside the name or under the bubble. */
   time?: string;
   /** When it was sent, for machines: an ISO date and time ("2026-11-13T14:02"). */
@@ -438,17 +445,21 @@ const ActionRow = ({
 
 interface HeadProps {
   name: string | undefined;
+  nameHidden: boolean | undefined;
   time: string | undefined;
   dateTime: string | undefined;
 }
 
-const Head = ({ name, time, dateTime }: HeadProps) =>
-  filled(name) || filled(time) ? (
+const Head = ({ name: given, nameHidden, time, dateTime }: HeadProps) => {
+  // Hidden, the name is still the message's name for a screen reader (the article's), not drawn.
+  const name = nameHidden === true ? undefined : given;
+  return filled(name) || filled(time) ? (
     <div {...stylex.props(styles.head)}>
       {filled(name) && <h3 {...stylex.props(styles.name)}>{name}</h3>}
       <Stamp time={time} dateTime={dateTime} person={false} />
     </div>
   ) : null;
+};
 
 /** How long the thinking took, in whole seconds, once it has ended; null until then. */
 const useTook = (thinking: boolean) => {
@@ -698,6 +709,7 @@ export const ChatMessage = ({
   from,
   children,
   name,
+  nameHidden,
   time,
   dateTime,
   personLabel = "You",
@@ -795,7 +807,12 @@ export const ChatMessage = ({
         focus.words
       )}
     >
-      <Head name={name} time={time} dateTime={dateTime} />
+      <Head
+        name={name}
+        nameHidden={nameHidden}
+        time={time}
+        dateTime={dateTime}
+      />
       <Thought
         thinking={status === "thinking"}
         thoughts={thoughts}
