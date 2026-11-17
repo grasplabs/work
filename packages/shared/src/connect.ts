@@ -1118,11 +1118,6 @@ export const sharedMailboxSchema = z
   .transform((mailbox) => mailbox.toLowerCase());
 
 /**
- * A shared mailbox Stephen is pointed at, and for whom (`audience`): the
- * chat's agent reaches a mailbox other than its person's own only when
- * pointed at it for them, whatever classes are on.
- */
-/**
  * Who may read in the Brain what agents read through a shared connection
  * (GRA-1831), as an admin chooses: nobody, which it is until one chooses,
  * one team, or everyone in the company. The choice an uploaded document
@@ -1147,6 +1142,25 @@ export interface ConnectionBrainAudienceSetting {
   changedAt: string;
 }
 
+/**
+ * A shared connection's ID, as the Brain's groups and keys take it
+ * (GRA-1831): well-formed, never "/" nor ":", and at most 245 characters,
+ * so its group (`connection:` and it) fits a Brain principal (256).
+ */
+export const brainConnectionIdSchema = z
+  .string()
+  .min(1)
+  .max(245)
+  .refine(
+    (id) => id.isWellFormed() && !(id.includes("/") || id.includes(":")),
+    { message: "Not a connection's ID" }
+  );
+
+/**
+ * A shared mailbox Stephen is pointed at, and for whom (`audience`): the
+ * chat's agent reaches a mailbox other than its person's own only when
+ * pointed at it for them, whatever classes are on.
+ */
 export interface SharedMailboxSetting {
   mailbox: string;
   audience: ToolClassAudience;

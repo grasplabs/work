@@ -366,7 +366,7 @@ const MemoryOrigin = ({ memory }: { memory: BrainMemoryShown }) => {
     drawing: <Trans>From how a team works, version {version}</Trans>,
     kickoff: <Trans>From the company&apos;s vision, version {version}</Trans>,
     roster: <Trans>From the company&apos;s teams, version {version}</Trans>,
-    shared: <Trans>Read from a shared connection, version {version}</Trans>,
+    connected: <Trans>Read from a shared connection, version {version}</Trans>,
   }[source.source.producer];
   return label;
 };

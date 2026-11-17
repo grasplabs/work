@@ -669,7 +669,10 @@ describe(
       const sharedReadId = await add(
         `Deal pipeline ${sharedWord} ${sharedReadMarker}`,
         { kind: "connection", connectionId: sharedConnection },
-        { producer: "shared", id: `${sharedConnection}/${crypto.randomUUID()}` }
+        {
+          producer: "connected",
+          id: `${sharedConnection}/${crypto.randomUUID()}`,
+        }
       );
       const teamSource = `Board minutes ${sharedWord} ${teamMarker}`;
       const teamId = await add(teamSource, {
@@ -1074,7 +1077,7 @@ describe(
           source: captureId,
           reader: holder,
         },
-        shared: {
+        connected: {
           marker:
             "what an agent read through a shared connection for a team the outsider isn't in",
           source: sharedReadId,

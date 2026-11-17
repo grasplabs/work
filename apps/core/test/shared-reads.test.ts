@@ -108,7 +108,8 @@ const finds = async (personId: string, marker: string): Promise<boolean> => {
     budget: { tokens: recallBudgetMax },
   });
   return items.some(
-    ({ source, text }) => source.producer === "shared" && text.includes(marker)
+    ({ source, text }) =>
+      source.producer === "connected" && text.includes(marker)
   );
 };
 
@@ -192,7 +193,7 @@ describe("what the Brain kept from a shared connection", setUpTime, () => {
     expect({ before, first, again }).toStrictEqual({
       before: "not claimed",
       first: {
-        producer: "shared",
+        producer: "connected",
         id: `${connectionId}/0/${await hashOf("deals")}`,
       },
       // The same call again: the same source, its next version.
@@ -226,7 +227,7 @@ describe("what the Brain kept from a shared connection", setUpTime, () => {
       // A read whose add was under way: its key is closed.
       late: await outcome(
         addSource(env, {
-          source: sources[0] ?? { producer: "shared", id: "" },
+          source: sources[0] ?? { producer: "connected", id: "" },
           change: crypto.randomUUID(),
           text: `Deal one late ${marker}`,
           readers: { kind: "connection", connectionId },
@@ -264,7 +265,7 @@ describe("what the Brain kept from a shared connection", setUpTime, () => {
         claimed: "not claimed",
       },
       newer: {
-        producer: "shared",
+        producer: "connected",
         id: `${connectionId}/1/${await hashOf("deal 1")}`,
       },
       foundNewer: true,
@@ -285,7 +286,7 @@ describe("what the Brain kept from a shared connection", setUpTime, () => {
     const marker = uniqueWord();
     const record = await kept(connectionId, "deal", `Deal ${marker}`);
     const source: SourceRef =
-      typeof record === "string" ? { producer: "shared", id: "" } : record;
+      typeof record === "string" ? { producer: "connected", id: "" } : record;
     const copy = await copyOfStore();
     const disconnect = await disconnectRecorded(connectionId);
 
@@ -331,7 +332,7 @@ describe("what the Brain kept from a shared connection", setUpTime, () => {
     const marker = uniqueWord();
     const record = await kept(connectionId, "deal", `Deal ${marker}`);
     const source: SourceRef =
-      typeof record === "string" ? { producer: "shared", id: "" } : record;
+      typeof record === "string" ? { producer: "connected", id: "" } : record;
     const failing = erasuresFailing();
     const requestedAt = new Date();
 

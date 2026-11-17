@@ -6,6 +6,7 @@ import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
+import type { DrizzleD1Database } from "drizzle-orm/d1";
 
 import { accounts, members, teamMembers, teams } from "../db/core/schema.ts";
 import { staffMayStay } from "../onboarding/gate.ts";
@@ -65,6 +66,42 @@ export type Acting = Member & {
 };
 
 /**
+ * The reads of `memberOf`, for one batch with others: a member and what
+ * else is read with them in the same snapshot of the database (core's
+ * Brain module reads the shared connections' audiences so).
+ */
+export const memberReads = (db: DrizzleD1Database, userId: string) =>
+  [
+    db
+      .select({ role: members.role })
+      .from(members)
+      .where(currentMembership(userId)),
+    db
+      .select({ id: teams.id, name: teams.name })
+      .from(teamMembers)
+      .innerJoin(teams, eq(teams.id, teamMembers.teamId))
+      .where(
+        and(
+          eq(teamMembers.userId, userId),
+          eq(teams.organizationId, organizationId)
+        )
+      )
+      .orderBy(teams.name),
+  ] as const;
+
+/** The member `userId`, from what `memberReads` read; `undefined` with no current membership. */
+export const memberFrom = (
+  userId: string,
+  membership: readonly { role: string }[],
+  memberTeams: Identity["teams"]
+): Member | undefined => {
+  const role = roleSchema.safeParse(membership[0]?.role);
+  return role.success
+    ? { userId, role: role.data, teams: memberTeams, staff: false }
+    : undefined;
+};
+
+/**
  * A member's role and teams, read now; `undefined` once they have no
  * current membership. What `identify` finds of a signed-in member, for
  * whoever acts on a member's behalf without their session (an agent).
@@ -73,13 +110,9 @@ export const memberOf = async (
   database: D1Database,
   userId: string
 ): Promise<Member | undefined> => {
-  const [role, memberTeams] = await Promise.all([
-    memberRole(database, userId),
-    teamsOf(database, userId),
-  ]);
-  return role === undefined
-    ? undefined
-    : { userId, role, teams: memberTeams, staff: false };
+  const db = drizzle(database);
+  const [membership, memberTeams] = await db.batch(memberReads(db, userId));
+  return memberFrom(userId, membership, memberTeams);
 };
 
 /**

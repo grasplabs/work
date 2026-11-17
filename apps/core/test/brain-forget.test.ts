@@ -2,7 +2,6 @@ import type { BrainRecordInput } from "@grasp-os/shared/brain-records";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import { keepOnboardingRecords } from "../src/brain-records.ts";
 import { mockIdp } from "./idp.ts";
 import { auditedDuring, outcome, signedInApi, unique } from "./sign-in.ts";
 
@@ -108,28 +107,6 @@ describe("taking things out of the brain", { timeout: 120_000 }, () => {
     const member = await signedInApi(idp, "user");
     const { ids, words, records } = said(unique());
     await admin.api.brain.addRecords(records);
-    // The onboarding draws a workflow whose numbers rest on the source.
-    const workflow = `wf-${ids.source}`;
-    await keepOnboardingRecords(
-      env,
-      [
-        {
-          type: "team",
-          id: `team-${ids.source}`,
-          name: `Finance ${ids.source}`,
-          sourceId: ids.other,
-        },
-        {
-          type: "workflow",
-          id: workflow,
-          name: "Invoice entry",
-          teamId: `team-${ids.source}`,
-          sourceId: ids.source,
-          status: "drawn",
-        },
-      ],
-      { sources: new Set(), teams: new Set() }
-    );
     const before = await member.api.brain.read();
 
     const preview = await admin.api.brain.forgetPreview({ source: ids.source });
@@ -152,8 +129,6 @@ describe("taking things out of the brain", { timeout: 120_000 }, () => {
         .map(({ id }) => id)
         .toSorted(),
       source: after.sources.find(({ id }) => id === ids.source),
-      // The workflow keeps its number, which still names the source.
-      workflow: after.workflows.find(({ id }) => id === workflow)?.id,
       // What said it after stands on its own; the gap is no longer about it.
       followUp: after.statements.find(({ id }) => id === ids.followUp)
         ?.followsUp,
@@ -171,7 +146,6 @@ describe("taking things out of the brain", { timeout: 120_000 }, () => {
       preview: {
         source: ids.source,
         statements: [ids.blocker],
-        workflows: [workflow],
       },
       forgotten: preview,
       wentAsPreviewed: [ids.blocker],
@@ -182,7 +156,6 @@ describe("taking things out of the brain", { timeout: 120_000 }, () => {
         date: "2026-10-20",
         removedAt: new Date().toISOString().slice(0, 10),
       },
-      workflow,
       followUp: undefined,
       gapAbout: [ids.elsewhere],
       // The gap's question stays: it is the other source's.
@@ -224,7 +197,6 @@ describe("taking things out of the brain", { timeout: 120_000 }, () => {
       preview: {
         source: null,
         statements: [ids.followUp, ids.elsewhere].toSorted(),
-        workflows: [],
       },
       left: [ids.blocker],
       other: "Close checklist",
@@ -241,8 +213,7 @@ describe("taking things out of the brain", { timeout: 120_000 }, () => {
     const events = await auditedDuring(async () => {
       again = await admin.api.brain.forget({ source: ids.source });
     });
-    // Sent again exactly as it was (a retry, or the onboarding giving it
-    // again): left as removed.
+    // Sent again exactly as it was (a retry): left as removed.
     const resent = await admin.api.brain.addRecords(records);
     // Something new resting on what is gone is refused.
     const onGone = await outcome(
@@ -279,7 +250,7 @@ describe("taking things out of the brain", { timeout: 120_000 }, () => {
       blocker: after.statements.some(({ id }) => id === ids.blocker),
       title: after.sources.find(({ id }) => id === ids.source)?.title,
     }).toStrictEqual({
-      again: { source: null, statements: [], workflows: [] },
+      again: { source: null, statements: [] },
       events: 0,
       resent: { added: 0, unchanged: records.length },
       onGone: "brain.record_missing",

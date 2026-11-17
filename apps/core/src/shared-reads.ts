@@ -4,7 +4,10 @@ import {
   createAuditEvent,
 } from "@grasp-os/shared/audit";
 import type { AuditActor, AuditEvent } from "@grasp-os/shared/audit";
-import { connectionErrors } from "@grasp-os/shared/connect";
+import {
+  brainConnectionIdSchema,
+  connectionErrors,
+} from "@grasp-os/shared/connect";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { errorName, log } from "@grasp-os/shared/log";
 import { requireAdmin, roleErrors } from "@grasp-os/shared/roles";
@@ -56,14 +59,6 @@ import {
 /** A record's key under its connection: its generation, then a hash. */
 const hashSchema = z.string().regex(/^[0-9a-f]{64}$/u);
 
-/** A connection's ID as a key part: never "/" nor ":". */
-const connectionIdSchema = z
-  .string()
-  .min(1)
-  .refine((id) => !(id.includes("/") || id.includes(":")), {
-    message: "Holds a / or a :",
-  });
-
 /**
  * How many records one erasure step erases at most: within Workers' own
  * bound of 1,000 subrequests an invocation (one call to the Brain's store
@@ -91,8 +86,8 @@ export const claimSharedRead = async (
   connectionId: string,
   hash: string,
   readAt: Date
-): Promise<{ producer: "shared"; id: string } | undefined> => {
-  const connection = connectionIdSchema.parse(connectionId);
+): Promise<{ producer: "connected"; id: string } | undefined> => {
+  const connection = brainConnectionIdSchema.parse(connectionId);
   const hashed = hashSchema.parse(hash);
   const generation = sql`COALESCE((SELECT ${connectionBrainErasures.generation} FROM ${connectionBrainErasures} WHERE ${connectionBrainErasures.connectionId} = ${connection}), 0)`;
   const [named] = await drizzle(env.DB)
@@ -109,7 +104,7 @@ export const claimSharedRead = async (
     .returning({ sourceId: connectionBrainReads.sourceId });
   return named === undefined
     ? undefined
-    : { producer: "shared", id: named.sourceId };
+    : { producer: "connected", id: named.sourceId };
 };
 
 /** Who asked for an erasure, and as which request: an audit event's id. */
@@ -294,7 +289,7 @@ export const stepErasure = async (
     await eraseSources(
       env,
       ids.map((id) => ({
-        source: { producer: "shared", id },
+        source: { producer: "connected", id },
         readers: { kind: "connection", connectionId },
       })),
       "deleted"
@@ -406,7 +401,7 @@ export const eraseBrainReads = async (
   if (identity.staff) {
     throw roleErrors.create("role.forbidden");
   }
-  const id = connectionIdSchema.safeParse(connectionId);
+  const id = brainConnectionIdSchema.safeParse(connectionId);
   if (!id.success) {
     throw connectionErrors.create("connection.invalid");
   }
