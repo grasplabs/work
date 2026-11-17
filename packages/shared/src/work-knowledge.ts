@@ -4,16 +4,20 @@
 // day. Threat model, each held by apps/core/test/work-knowledge.test.ts:
 //
 // - A statement pointing at one person. Only the brain's own sentences
-//   are served, which are claims five or more people made (GRA-1084) and
-//   a drawing's parts five or more told; never a source's title, how it
-//   was collected, its transcript or its interviewee.
+//   are served: claims and a drawing's parts of how a team works, from the
+//   lines its people chose to share as that, from the first who told it,
+//   checked to hold no judgment (GRA-1084, GRA-1987), and an admin's
+//   statements; never a source's title, how it was collected, its
+//   transcript or its interviewee.
 // - A date pointing at the one person who talked that day. A sentence
 //   carries its ISO week alone (`2026-W42`), never a day.
-// - A role pointing at one person. A role is named only where five or more
-//   people of its team hold it, and only once five or more people told
-//   about the work; otherwise the team alone, or nothing.
-// - Counting the people who talked. The confidence says only whether
-//   enough did (`heard`) or not yet (`waiting`), never how many.
+// - A role pointing at one person. A role is named only beside a statement
+//   five or more conversations said, and only where five or more people of
+//   its team hold it; otherwise the team alone, or nothing. A drawing names
+//   its team alone, as how that team works.
+// - Counting the people who talked. The confidence says only whether the
+//   team told it (`heard`: a drawing of it stands, or five or more
+//   conversations said it) or not yet (`waiting`), never how many.
 // - Keeping what was erased. Nothing is kept per reader or per person:
 //   each read derives from the brain as it is, so a claim or a drawing the
 //   brain lets go of (an erasure, a purge) is gone from the tab with it.
@@ -43,9 +47,10 @@ export interface KnownSentence {
   /** The ISO week it came in: `2026-W42`. */
   week: string;
   /**
-   * Who said it, as the company may read it: their role in their team
-   * where five or more of the team hold that role, else the team; null
-   * until five or more people told about the work.
+   * Who said it, as the company may read it: for a drawing, its team; for
+   * another statement, their role in their team where five or more of the
+   * team hold that role, else the team, and null until five or more
+   * conversations said it.
    */
   by: { team: string; role: string | null } | null;
 }
@@ -56,7 +61,7 @@ export interface WorkKnowledge {
   id: string;
   name: string;
   sentences: KnownSentence[];
-  /** Whether enough people told about it, never how many. */
+  /** Whether its team told it (a drawing stands, or five or more conversations said it), never how many. */
   confidence: "heard" | "waiting";
   /** Whether the reader may ask for it in Stephen's next interviews. */
   canAskMore: boolean;
