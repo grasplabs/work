@@ -471,6 +471,37 @@ describe("what a team said, put together", { timeout: 120_000 }, () => {
     });
   });
 
+  it("notes the team's claims and drawings while someone on the list hasn't agreed to anything", async () => {
+    // Ada is on the list and never agrees: nothing of hers is in the
+    // intake, so she is no one who went while it ran.
+    const ids = await team([
+      "lea",
+      "max",
+      "mia",
+      "mo",
+      "noor",
+      "pim",
+      "rik",
+      "sam",
+      "ada",
+    ]);
+    await mapped(ids);
+    await sevenTold(ids);
+    await drawTickets(ids);
+    await intake(ids);
+    const member = await signedInApi(idp, "user");
+    const { workflows } = await member.api.brain.read();
+    expect({
+      statements: await statementsFor(member.api, ids),
+      drawn: workflows
+        .filter(({ teamId }) => teamId === `team-${ids.team}`)
+        .map(({ name }) => name),
+    }).toStrictEqual({
+      statements: ["Tickets come in through Zendesk."],
+      drawn: ["handling new tickets"],
+    });
+  });
+
   it("shows members and admins the team's claims, and Grasp's staff none", async () => {
     const ids = await drawnTeam();
     await intake(ids);
@@ -649,6 +680,18 @@ describe("what a team said, put together", { timeout: 120_000 }, () => {
   });
 
   it("never counts someone who took back what they approved while the claims were put together", async () => {
+    // Every team an earlier test of this file left due is given first, so
+    // the one intake below is this team's (they share one store).
+    for (let round = 0; round < 10; round += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one team at a time, as the alarm gives them
+      const { result } = await answeringWith(
+        claimsReply([zendeskClaim]),
+        async () => await onboardingStore(env).intakeNext()
+      );
+      if (result === null) {
+        break;
+      }
+    }
     // Eight tell their own work: Max's taking-back leaves the team seven,
     // so the claim falls by its own backers alone.
     const ids = await eightTeam();
@@ -682,7 +725,7 @@ describe("what a team said, put together", { timeout: 120_000 }, () => {
       changed = true;
     };
     const reply = claimsReply([zendeskClaim]);
-    await answeringWith(
+    const { result: gave } = await answeringWith(
       async (requests) => {
         if (!changed) {
           await changeMax();
@@ -695,10 +738,17 @@ describe("what a team said, put together", { timeout: 120_000 }, () => {
     await onboardingStore(env).purgeBrain();
     const member = await signedInApi(idp, "user");
     expect({
+      // This team's intake, never another's picked first.
+      gave,
       changed,
       after: await statementsFor(member.api, ids),
       restsOn: await onboardingStore(env).sentFor(ids.max),
-    }).toStrictEqual({ changed: true, after: [], restsOn: [] });
+    }).toStrictEqual({
+      gave: `brain:${ids.team}`,
+      changed: true,
+      after: [],
+      restsOn: [],
+    });
   });
 
   it("tells two takings-back apart in the same millisecond: support taken back while the claims were put together never counts", async () => {

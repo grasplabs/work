@@ -5,7 +5,7 @@ import { erasureBegun } from "../brain-hand-overs.ts";
 import { addSource, eraseSource } from "../brain-next.ts";
 import type { Handed, SourceReaders, SourceRef } from "../brain-next.ts";
 import { onboardingStore } from "./store.ts";
-import type { OwedErasure } from "./store.ts";
+import type { OwedErasure, StandingDrawing } from "./store.ts";
 import { claimSource } from "./team-claims.ts";
 
 // What the onboarding gives the new Brain (GRA-1790, GRA-1741, GRA-1748), and takes
@@ -29,6 +29,13 @@ import { claimSource } from "./team-claims.ts";
 //   (counted by the store, never in the Brain). Noted by an audit event
 //   for the hand-over (brain-hand-overs.ts), which reads it here
 //   (`claimOf`) when it runs: a team's, never a person's.
+// - A drawing of a team's piece of work (`drawing:<id>`, GRA-1748): only
+//   the parts five or more of its people told, checked, never who told
+//   what, readable by every member reading as themselves (`members`, as a
+//   claim), only while everyone it rests on still counts, its team has
+//   five or more who tell their own work, and its map stands on its lead's
+//   facts (counted by the store). Noted and read like a claim
+//   (`drawingOf`); one drawn anew is a new source.
 // - The kickoff (`kickoff:<id>`, GRA-1748): what every member reads of it
 //   (kickoff-company.ts), readable by everyone, under an id minted for
 //   each kickoff. Noted for the hand-over like a claim, and read here
@@ -45,9 +52,10 @@ import { claimSource } from "./team-claims.ts";
 //   version (`eraseOwedRosters`); the next confirmed save gives it afresh
 //   under a new id.
 //
-// A claim that stops standing is out of use in the shared store before the
-// change that drops it commits (the store's `#claimsFirst`), so no read
-// after that change finds it (GRA-1946); its erasure follows.
+// A claim or a drawing that stops standing is out of use in the shared
+// store before the change that drops it commits (the store's
+// `#fallenFirst`), so no read after that change finds it (GRA-1946); its
+// erasure follows.
 //
 // What no longer stands is erased with `eraseSource`, directly: at once
 // after anything that takes an interview out (links.ts, admin-command.ts,
@@ -117,6 +125,57 @@ export const claimOf = async (env: Env, id: string): Promise<Handed> => {
         change: id,
         text: held.text,
         whenTooLarge: "A claim of the team's too large to keep.",
+        readers: { kind: "members" },
+      };
+};
+
+/** A drawing's source, by the store's id for it (`brain_drawings.source`). */
+export const drawingSource = (id: string): SourceRef => ({
+  producer: "drawing",
+  id,
+});
+
+/**
+ * Drawing `drawing` of `name` (`local` in its people's words) as the new
+ * Brain's source text, for recall: written for a model to read, in
+ * English like the rest of Grasp's own words to it. Its parts are only
+ * what five or more told, with no one's name in them (brain-intake.ts).
+ */
+export const drawingText = ({
+  name,
+  local,
+  drawing,
+}: Pick<StandingDrawing, "name" | "local" | "drawing">): string => {
+  const steps = drawing.steps.map(({ text, who, tool, minutes }, at) => {
+    const about = [
+      who,
+      tool,
+      minutes === null ? "" : `about ${minutes.normal} minutes`,
+    ].filter((part) => part !== "");
+    return `${at + 1}. ${text}${about.length === 0 ? "" : ` (${about.join(", ")})`}`;
+  });
+  return [
+    `How a team does ${name}${local === undefined ? "" : ` (${local})`}, as ${drawing.people} of its people told it`,
+    drawing.starts === "" ? "" : `What starts one: ${drawing.starts}`,
+    steps.length === 0 ? "" : `Its steps:\n${steps.join("\n")}`,
+    drawing.waits.length === 0
+      ? ""
+      : `Where it waits: ${drawing.waits.join("; ")}`,
+  ]
+    .filter((part) => part !== "")
+    .join("\n\n");
+};
+
+/** Drawing `id` as the onboarding holds it now: what five or more told of the piece of work; nothing once it no longer stands. */
+export const drawingOf = async (env: Env, id: string): Promise<Handed> => {
+  const held = await onboardingStore(env).drawingToHand(id);
+  return held === null
+    ? gone
+    : {
+        kind: "source",
+        change: id,
+        text: drawingText(held),
+        whenTooLarge: "A drawing of the team's work too large to keep.",
         readers: { kind: "members" },
       };
 };
@@ -232,7 +291,10 @@ const erase = async (env: Env, owed: OwedErasure): Promise<void> => {
     return;
   }
   await eraseSource(env, {
-    source: claimSource(owed.source),
+    source:
+      owed.kind === "claim"
+        ? claimSource(owed.source)
+        : drawingSource(owed.source),
     readers: { kind: "members" },
     reason: "deleted",
   });

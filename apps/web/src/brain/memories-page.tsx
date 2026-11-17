@@ -363,6 +363,7 @@ const MemoryOrigin = ({ memory }: { memory: BrainMemoryShown }) => {
     capture: <Trans>Fetched from a connection, version {version}</Trans>,
     interview: <Trans>From your interview, version {version}</Trans>,
     claim: <Trans>From what your team said, version {version}</Trans>,
+    drawing: <Trans>From how a team works, version {version}</Trans>,
     kickoff: <Trans>From the company&apos;s vision, version {version}</Trans>,
     roster: <Trans>From the company&apos;s teams, version {version}</Trans>,
   }[source.source.producer];

@@ -288,6 +288,13 @@
       "when": 1794887277940,
       "tag": "0040_zippy_fabian_cortez",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "6",
+      "when": 1794893920454,
+      "tag": "0041_plain_franklin_storm",
+      "breakpoints": true
     }
   ]
 }
