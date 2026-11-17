@@ -12,7 +12,7 @@ export const agentErrors = defineErrorFamily({
   "agent.held_call_not_found":
     "Nothing like this waits for you in this chat: it was decided already, or waited past its day.",
   "agent.held_call_in_chat_app":
-    "This chat used something only its person can read, so a write to an App waits for them to confirm it, and this chat app can't show them that yet. Nothing was written: tell them they can do it from a chat in Grasp.",
+    "This chat used something only its person can read, so a write to an App waits for them to confirm it, which they can do only in a chat in Grasp or in their direct message with you. Nothing was written: tell them they can do it there.",
   "agent.held_call_failed":
     "The App refused or failed this write, so it may not have been done. It no longer waits for you.",
   "agent.private_shared_request":
