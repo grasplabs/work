@@ -9,6 +9,7 @@ import { z } from "zod";
 import { drainAuditOutboxes } from "../src/audit-drains.ts";
 import { drainObjectOutbox } from "../src/audit-outbox.ts";
 import {
+  addSource,
   brainExportFile,
   brainExportStatus,
   erasePerson,
@@ -16,6 +17,7 @@ import {
   listVersionsAs,
   readSourceVersionAs,
   recallAs,
+  recallPassagesAs,
   startBrainExport,
   workBrain,
 } from "../src/brain-next.ts";
@@ -400,8 +402,35 @@ const settled = async (): Promise<void> => {
 const accountOfPerson = async (person: string): Promise<string> =>
   await accountOf(await openLink(person));
 
+/** An interview added for `readers`, as a producer that got them wrong would: `added`, or why it was refused. */
+const interviewAddedFor = async (
+  readers: Parameters<typeof addSource>[1]["readers"]
+): Promise<string> =>
+  await addSource(env, {
+    source: { producer: "interview", id: crypto.randomUUID() },
+    change: crypto.randomUUID(),
+    text: `Approved facts ${unique()}`,
+    readers,
+  }).then(() => "added", String);
+
 describe("interviews in the new Brain", { timeout: 120_000 }, () => {
   beforeEach(holdAlarm);
+
+  it("are refused for any readers but their own person, so none is ever in the shared store", async () => {
+    await expect(
+      Promise.all([
+        interviewAddedFor({ kind: "everyone" }),
+        interviewAddedFor({ kind: "members" }),
+        interviewAddedFor({ kind: "team", teamId: crypto.randomUUID() }),
+        interviewAddedFor({ kind: "none" }),
+      ])
+    ).resolves.toStrictEqual(
+      Array.from(
+        { length: 4 },
+        () => "Error: Refused: an interview is for one person alone"
+      )
+    );
+  });
 
   it("are read by the account the link opened under alone, never by whoever the list's address names later", async () => {
     const marker = `marker${unique()}`;
@@ -1856,6 +1885,37 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
       withdrew: true,
       shared: "erased",
       owed: false,
+    });
+  });
+
+  it("are handed over for members reading as themselves: code's recall as an App or a workflow, and as a chat's code, misses one a member finds", async () => {
+    const { ids, max } = await drawnTeam();
+    await intakeOf(ids, [zendeskClaim]);
+    await handOverNow();
+    // Code's recall as brain-recall.ts asks it (`recallFor`): an App's and
+    // a workflow's as the company, a chat's code as its person's teams;
+    // never as the person, so never their own store. Read before that
+    // module's own narrowing, so the claim's readers alone keep it out.
+    const codeReads = async (company: boolean) => {
+      const { items } = await recallPassagesAs(env, max, {
+        question: "Zendesk",
+        budget: { tokens: 2000 },
+        personal: false,
+        company,
+        teams: [],
+      });
+      return items
+        .filter(({ source }) => source.producer === "claim")
+        .map(({ text }) => text);
+    };
+    expect({
+      member: await recalled(max, "Zendesk", "claim"),
+      appOrWorkflow: await codeReads(true),
+      chatCode: await codeReads(false),
+    }).toStrictEqual({
+      member: [zendeskClaim.text],
+      appOrWorkflow: [],
+      chatCode: [],
     });
   });
 

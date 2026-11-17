@@ -32,8 +32,11 @@ import { drainAuditOutboxes } from "../src/audit-drains.ts";
 import { teamsOf } from "../src/auth/identity.ts";
 import {
   addSource,
+  brainWorkOverview,
   eraseSource,
   recallAs,
+  recallPassagesAs,
+  recalledTokens,
   workBrain,
 } from "../src/brain-next.ts";
 import type { SourceReaders, SourceRef } from "../src/brain-next.ts";
@@ -61,6 +64,7 @@ import { chatOf, codeResults, codeStep, says } from "./agent-chat.ts";
 import { testApp } from "./app-definitions.ts";
 import { allEvents } from "./audit-events.ts";
 import { failingAuditLog } from "./failing-audit-log.ts";
+import { noProducers } from "./no-producers.ts";
 import { appWith, person, seal } from "./sealed-apps.ts";
 import type { Fixture } from "./sealed-apps.ts";
 import { unique } from "./sign-in.ts";
@@ -220,6 +224,23 @@ const forEveryone = async (text: string): Promise<SourceRef> => {
  */
 const claimed = async (text: string): Promise<SourceRef> =>
   await added(text, { kind: "members" }, "claim");
+
+/** Most ticks of the Brain's work `embeddedAll` waits for. */
+const embedTicksMax = 30;
+
+/** Runs the Brain's work until every current chunk of the shared store is embedded, or found unembeddable. */
+const embeddedAll = async (): Promise<void> => {
+  for (let tick = 1; tick <= embedTicksMax; tick += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- one tick at a time
+    await workBrain(env, new Date(Date.now() + tick * 60_000), noProducers);
+    // oxlint-disable-next-line no-await-in-loop -- one tick at a time
+    const { embedding } = await brainWorkOverview(env);
+    if (embedding.embedded + embedding.unembeddable === embedding.chunks) {
+      return;
+    }
+  }
+  throw new Error(`Not every chunk was embedded in ${embedTicksMax} ticks.`);
+};
 
 /** A WebVTT file saying `text`, as a person uploads one. */
 const vttFile = (text: string) => ({
@@ -633,8 +654,34 @@ describe("recall, as an App, a workflow and a chat reach it", setUpTime, () => {
 
   it("answers an App, a workflow and a chat's code exactly as before any team claim, however many match and however small the budget, while the member reads them", async () => {
     const { word, admin, ada } = await company();
-    // A budget that holds one passage: whatever takes a place shows.
-    const request = { question: `${word} rota`, budget: { tokens: 40 } };
+    const question = `${word} rota`;
+    // A budget that holds one passage: what the company may read for the
+    // question, recalled with room to spare and counted as the Brain
+    // counts it. Whatever else took a place would show.
+    await embeddedAll();
+    const { items: roomy } = await recallPassagesAs(env, ada.userId, {
+      question,
+      budget: { tokens: 2000 },
+      personal: false,
+      company: true,
+      teams: [],
+    });
+    const [onePassage] = roomy;
+    if (onePassage === undefined) {
+      throw new Error("Nothing the company may read answers the question.");
+    }
+    const request = {
+      question,
+      budget: {
+        tokens: recalledTokens({
+          items: [onePassage],
+          memories: [],
+          contested: [],
+          notFound: [],
+          truncated: false,
+        }),
+      },
+    };
     const app = await askOf(ada, []);
     const appGrant = await granted(
       ada,
@@ -662,6 +709,7 @@ describe("recall, as an App, a workflow and a chat reach it", setUpTime, () => {
       app: await askedOf(app, ada, asked),
       run: await ranOf(ada, workflow.id, asked),
     });
+    await embeddedAll();
     const before = await codeRecalls();
     await ask("What about leave?");
     // Claims that match the question better than anything code may read,
@@ -676,6 +724,8 @@ describe("recall, as an App, a workflow and a chat reach it", setUpTime, () => {
       // oxlint-disable-next-line no-await-in-loop -- one claim at a time
       await claimed(text);
     }
+    // Embedded too, so the search by meaning is asked of them as well.
+    await embeddedAll();
     const after = await codeRecalls();
     await ask("And now?");
     const [chatBefore, chatAfter] = await codeResults(stub, chat.id);
@@ -685,10 +735,12 @@ describe("recall, as an App, a workflow and a chat reach it", setUpTime, () => {
       personal: true,
     });
     expect({
+      heldBefore: textsOf(before.app).length,
       after,
       chat: returnedOf(chatAfter?.text),
       ownFindsClaims: own.items.some(({ text }) => claims.includes(text)),
     }).toStrictEqual({
+      heldBefore: 1,
       after: before,
       chat: returnedOf(chatBefore?.text),
       ownFindsClaims: true,

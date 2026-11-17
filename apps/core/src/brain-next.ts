@@ -902,10 +902,16 @@ export const addSource = async (
     );
   }
   // What an agent read through a person's own connection is theirs alone
-  // (connection-capture.ts): never in the shared store, so never in a
+  // (connection-capture.ts), and so is their interview (GRA-1790,
+  // onboarding/new-brain.ts): never in the shared store, so never in a
   // recall that doesn't read their own store, such as code's.
-  if (source.producer === "capture" && readers.kind !== "owner") {
-    throw new Error("Refused: a capture is for one person alone");
+  if (
+    (source.producer === "capture" || source.producer === "interview") &&
+    readers.kind !== "owner"
+  ) {
+    throw new Error(
+      `Refused: ${source.producer === "capture" ? "a capture" : "an interview"} is for one person alone`
+    );
   }
   // The store's own rules for a text, here, so a producer is told what is
   // wrong with it by a code, not by trying.
