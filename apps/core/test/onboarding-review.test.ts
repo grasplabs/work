@@ -12,9 +12,9 @@ import { beforeEach, describe, expect, it } from "vite-plus/test";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { mockIdp } from "./idp.ts";
 import {
+  aloneInTheStore,
   answering,
   approveAgreed,
-  holdAlarm,
   onLink,
   openLinkAs,
   signedInAs,
@@ -267,7 +267,7 @@ const onLinkOf = async (person: string, action: string) => {
 };
 
 describe("what needs the admin", { timeout: 120_000 }, () => {
-  beforeEach(holdAlarm);
+  beforeEach(aloneInTheStore);
 
   it("is a step told two ways that nobody could explain, by five or more each, never who told which or anyone's name, and keeps how the admin settled it", async () => {
     const ids = await team();
