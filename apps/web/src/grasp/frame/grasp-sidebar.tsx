@@ -199,7 +199,18 @@ const useGroups = (
   // sections, named, so they never stand between the sections. The Chats
   // tab holds the same list alone.
   const chats: SidebarGroup[] =
-    recent.rows.length === 0 ? [] : [{ label: t`Chats`, rows: recent.rows }];
+    recent.rows.length === 0
+      ? []
+      : [
+          {
+            id: "chats",
+            label: t`Chats`,
+            // Its label folds the list away; the sidebar remembers it.
+            collapsible: true,
+            count: recent.rows.length,
+            rows: recent.rows,
+          },
+        ];
   return tab === "chats"
     ? [{ rows: recent.rows }]
     : [sections, ...chats, ...fromApps];
@@ -358,6 +369,8 @@ export const useGraspSidebar = ({
     open,
     profile,
     searchLabel: t`Search chats`,
+    // Where the sidebar keeps which of its groups are folded, in this browser.
+    storageKey: "grasp.sidebar",
     ...(searching
       ? {
           tabs: [
