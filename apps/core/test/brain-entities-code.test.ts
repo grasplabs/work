@@ -2,7 +2,7 @@ import { brainOf } from "@grasp-os/brain-next/contract";
 import { v } from "@grasp-os/runtime/app";
 import type { FunctionResult } from "@grasp-os/shared/functions";
 import { httpContract } from "@grasp-os/shared/http-contract";
-import { teamIdSchema } from "@grasp-os/shared/ids";
+import { teamIdSchema, workspaceIdSchema } from "@grasp-os/shared/ids";
 import type { PermissionRequest } from "@grasp-os/shared/permissions";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { runFileContentPath } from "@grasp-os/shared/run-files";
@@ -19,13 +19,16 @@ import { z } from "zod";
 import { callAppFunction } from "../src/app-functions.ts";
 import type { Release } from "../src/app-releases.ts";
 import { appFor, appKind } from "../src/apps.ts";
+import { drainAuditOutboxes } from "../src/audit-drains.ts";
 import { teamsOf } from "../src/auth/identity.ts";
 import {
   erasePersonShared,
   eraseSource,
+  readSourceVersionAs,
   workBrain,
 } from "../src/brain-next.ts";
 import type { SourceRef } from "../src/brain-next.ts";
+import { producersOf, relayHandOvers } from "../src/brain-sources.ts";
 import { builtins, fingerprintOf, thisRelease } from "../src/builtins.ts";
 import {
   answerDecision,
@@ -34,7 +37,8 @@ import {
   reviewDecision,
   waitingDecisions,
 } from "../src/decisions/decisions.ts";
-import { inJurisdiction } from "../src/durable-objects.ts";
+import { inJurisdiction, workspace } from "../src/durable-objects.ts";
+import { brainVersionRead } from "../src/history-access.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
 import { grantPermission, requestPermission } from "../src/permissions.ts";
 import { rollback } from "../src/publish.ts";
@@ -2187,6 +2191,93 @@ describe(
         after: { inbox: 1, today: 1, input: false, shows: [] },
         answered: declinedOnly,
         ending: { status: "failed", error: "brain.revoked" },
+      });
+    });
+  }
+);
+
+/** Hands over what changed, as core's clock does: drain, relay, a tick. */
+const handedOver = async (): Promise<void> => {
+  await drainAuditOutboxes(env);
+  await relayHandOvers(env);
+  await workBrain(env, new Date(Date.now() + 60_000), producersOf(env));
+};
+
+/** What the Brain keeps in `by`'s own store of run `runId`: its text. */
+const keptOf = async (by: Member, runId: string) => {
+  const kept = await readSourceVersionAs(env, by.userId, {
+    source: { producer: "run", id: runId },
+    version: 1,
+  });
+  return kept?.text;
+};
+
+describe(
+  "what the Brain keeps of a run that read what may be withheld later",
+  setUpTime,
+  () => {
+    it("keeps only how it ended, never the card it returned, so nothing of it outlives a person's erasure", async () => {
+      const admin = await person("admin");
+      const ada = await person("builder");
+      const workflow = await entitiesWorkflow(ada, admin);
+      const anna = await annasCard();
+      const runId = await endedRun(ada, workflow.id, {
+        entity: anna.card,
+        name: unique(),
+      });
+      const returned = await recordOf(ada, workflow.id, runId);
+      await handedOver();
+
+      expect({
+        returnedTheCard: JSON.stringify(returned.result).includes(anna.name),
+        kept: await keptOf(ada, runId),
+      }).toStrictEqual({
+        returnedTheCard: true,
+        kept: "Workflow run completed.",
+      });
+    });
+
+    it("keeps only how a run ended when the chat that started it had read something, never what it returned", async () => {
+      const admin = await person("admin");
+      const ada = await person("builder");
+      const workflow = await entitiesWorkflow(ada, admin);
+      // A run that reads no card of the Brain's itself.
+      const runId = await endedRun(ada, workflow.id, {
+        entity: crypto.randomUUID(),
+        name: unique(),
+      });
+      const returned = await recordOf(ada, workflow.id, runId);
+      // What a real chat of Ada's had read as its agent started the run,
+      // still the chat's to read: pinned onto the run as a start from a
+      // chat copies what the chat read (workflow-starts.ts).
+      const pinned = await sourceForEveryone(`Invoice ${unique()} is due.`);
+      const agentId = `agent-${unique()}`;
+      const workspaceId = workspaceIdSchema.parse(crypto.randomUUID());
+      const chat = await workspace(env, workspaceId).createChat(
+        "Questions",
+        ada.userId,
+        agentId
+      );
+      await env.DB.prepare(
+        "INSERT INTO run_chat_sources (run_id, source_id, workspace_id, chat_id, agent_id, person_id) VALUES (?, ?, ?, ?, ?, ?)"
+      )
+        .bind(
+          runId,
+          brainVersionRead({ source: pinned, version: 1 }),
+          workspaceId,
+          chat.id,
+          agentId,
+          ada.userId
+        )
+        .run();
+      await handedOver();
+
+      expect({
+        returned: returned.result !== null,
+        kept: await keptOf(ada, runId),
+      }).toStrictEqual({
+        returned: true,
+        kept: "Workflow run completed.",
       });
     });
   }
