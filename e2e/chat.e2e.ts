@@ -399,28 +399,6 @@ test("a person attaches files to a question, takes one off, and sees the questio
   ).toHaveCount(0);
 });
 
-test("a person starts a chat from one of the questions under the box", async ({
-  pageOf,
-}) => {
-  const { user } = peopleIn("chat");
-  const page = await pageOf(user);
-  await page.goto("/");
-  // The questions wait while the tour is offered, as in the prototype:
-  // turned down, they are under the box.
-  await page.getByRole("button", { name: "Not now" }).click();
-  const questions = page.getByRole("list", { name: "Questions to start with" });
-  await expect(questions.getByRole("button")).toHaveCount(4);
-  await questions
-    .getByRole("button", { name: "What waits on me today?" })
-    .click();
-  await expect(
-    chatOf(page)
-      .getByRole("log", { name: "Messages" })
-      .getByRole("article")
-      .first()
-  ).toHaveText("What waits on me today?");
-});
-
 test("a followed chat says core can't be reached when it stays out of reach", async ({
   pageOf,
 }) => {

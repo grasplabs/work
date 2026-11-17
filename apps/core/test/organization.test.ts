@@ -27,13 +27,14 @@ describe("the organization", () => {
     ).run();
   });
 
-  it("reads the same for everyone: its name, UTC until set, its region and sign-in domains", async () => {
+  it("reads the same for everyone: its name, UTC until set, its region, sign-in domains and no logo until one is set", async () => {
     const person = await signedInApi(idp, "user");
     await expect(person.api.organization.get()).resolves.toStrictEqual({
       name: "Organization",
       timeZone: "UTC",
       dataRegion: "eu",
       signInDomains: signInConfig.domains,
+      logo: null,
     });
   });
 
