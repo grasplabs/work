@@ -3,6 +3,7 @@ import type { DrizzleSqliteDODatabase } from "drizzle-orm/durable-sqlite";
 import { z } from "zod";
 
 import type { BrainBucket } from "./bucket.ts";
+import { placeChunks } from "./chunk-blocks.ts";
 import { chunksOf } from "./chunks.ts";
 import {
   attributeRuleOf,
@@ -560,11 +561,14 @@ const restoreVersion = async (
       )
       .one();
     const memo: WordMemo = new Map();
+    // In its set of readers' own block, as an add places them.
+    const first = placeChunks(sql, readerSet, chunks.length);
     for (const [position, chunk] of chunks.entries()) {
       const written = sql
         .exec<{ row: number }>(
-          `INSERT INTO chunks (version_row, position, text, hash)
-          VALUES (?, ?, ?, ?) RETURNING row`,
+          `INSERT INTO chunks (row, version_row, position, text, hash)
+          VALUES (?, ?, ?, ?, ?) RETURNING row`,
+          first + position,
           row,
           position,
           chunk.text,
