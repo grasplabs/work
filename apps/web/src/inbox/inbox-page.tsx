@@ -17,9 +17,28 @@ import { RouterLink } from "../frame/router-link.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { Alert } from "../grasp/alert/index.ts";
 import { Badge } from "../grasp/badge/index.ts";
-import { Empty } from "../grasp/empty/index.ts";
-import { Item, ItemGroup } from "../grasp/item/index.ts";
-import { Tabs, TabsList, TabsPanel, TabsTab } from "../grasp/tabs/index.ts";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "../grasp/empty/index.ts";
+import {
+  Item,
+  ItemContent,
+  ItemDescription,
+  ItemDetail as ItemNote,
+  ItemGroup,
+  ItemMedia,
+  ItemTitle,
+} from "../grasp/item/index.ts";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "../grasp/tabs/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { notLoadedText } from "../load-from-core.tsx";
@@ -202,23 +221,30 @@ const ItemList = ({
       <ItemGroup aria-label={t`What waits on you`}>
         {list.map((item) => (
           <Item
-            description={`${i18n._(kindLabel[item.kind])} · ${formatDayMonth(item.date)}`}
-            detail={
-              item.urgent ? (
-                <Badge size="sm" tone="attention">
-                  <Trans context="inbox: something waits on this item">
-                    Blocks work
-                  </Trans>
-                </Badge>
-              ) : undefined
-            }
             href={itemHref(router, item.id)}
-            icon={kindMark[item.kind]}
             key={item.id}
             size="sm"
-            title={item.context}
             variant={item.id === selected?.id ? "soft" : "plain"}
-          />
+          >
+            <ItemMedia icon={kindMark[item.kind]} />
+            <ItemContent>
+              <ItemTitle>
+                {item.context}
+                {item.urgent ? (
+                  <ItemNote>
+                    <Badge size="sm" tone="attention">
+                      <Trans context="inbox: something waits on this item">
+                        Blocks work
+                      </Trans>
+                    </Badge>
+                  </ItemNote>
+                ) : null}
+              </ItemTitle>
+              <ItemDescription>
+                {`${i18n._(kindLabel[item.kind])} · ${formatDayMonth(item.date)}`}
+              </ItemDescription>
+            </ItemContent>
+          </Item>
         ))}
       </ItemGroup>
     </div>
@@ -310,12 +336,22 @@ const ToDo = ({
   const failed = notLoaded.flatMap((part) => notLoadedText(part, i18n) ?? []);
   if (items.length === 0) {
     return failed.length === 0 ? (
-      <Empty picture="done" size="page" title={t`Nothing waits on you`}>
-        {t`What Grasp asks you, and what waits for your yes, comes here.`}
+      <Empty size="lg">
+        <EmptyHeader>
+          <EmptyMedia picture="done" />
+          <EmptyTitle>{t`Nothing waits on you`}</EmptyTitle>
+          <EmptyDescription>
+            {t`What Grasp asks you, and what waits for your yes, comes here.`}
+          </EmptyDescription>
+        </EmptyHeader>
       </Empty>
     ) : (
-      <Empty kind="error" size="page" title={t`The inbox didn't load`}>
-        {failed.join(" ")}
+      <Empty size="lg" tone="danger">
+        <EmptyHeader>
+          <EmptyMedia />
+          <EmptyTitle>{t`The inbox didn't load`}</EmptyTitle>
+          <EmptyDescription>{failed.join(" ")}</EmptyDescription>
+        </EmptyHeader>
       </Empty>
     );
   }
@@ -342,9 +378,9 @@ const ToDo = ({
           >
             <TabsList aria-label={t`Show`}>
               {(["all", ...shownGroups] as const).map((each) => (
-                <TabsTab key={each} value={each}>
+                <TabsTrigger key={each} value={each}>
                   {i18n._(groupLabel[each])}
-                </TabsTab>
+                </TabsTrigger>
               ))}
             </TabsList>
           </Tabs>
@@ -408,16 +444,21 @@ const ActivityRow = ({
   const actor =
     record.event === null ? "–" : actorOf(record.event.actor, directory).label;
   return (
-    <Item
-      description={`${actor} · ${formatDateTime(record.receivedAt)}`}
-      detail={
-        record.type === null ? undefined : (
-          <Badge size="sm">{i18n._(typeLabels[record.type])}</Badge>
-        )
-      }
-      size="sm"
-      title={sentence}
-    />
+    <Item size="sm">
+      <ItemContent>
+        <ItemTitle>
+          {sentence}
+          {record.type === null ? null : (
+            <ItemNote>
+              <Badge size="sm">{i18n._(typeLabels[record.type])}</Badge>
+            </ItemNote>
+          )}
+        </ItemTitle>
+        <ItemDescription>
+          {`${actor} · ${formatDateTime(record.receivedAt)}`}
+        </ItemDescription>
+      </ItemContent>
+    </Item>
   );
 };
 
@@ -448,13 +489,13 @@ const ActivityList = ({ activity }: { activity: InboxActivity }) => {
           variant="segmented"
         >
           <TabsList aria-label={t`Show activity by`}>
-            <TabsTab value="all">
+            <TabsTrigger value="all">
               <Trans context="activity filter: everyone">All</Trans>
-            </TabsTab>
-            <TabsTab value="grasp">Grasp</TabsTab>
-            <TabsTab value="people">
+            </TabsTrigger>
+            <TabsTrigger value="grasp">Grasp</TabsTrigger>
+            <TabsTrigger value="people">
               <Trans context="activity filter: what people did">People</Trans>
-            </TabsTab>
+            </TabsTrigger>
           </TabsList>
         </Tabs>
         <RouterLink to="/settings/audit">
@@ -514,29 +555,35 @@ export const InboxPage = ({
         ) : (
           <Tabs defaultValue="todo">
             <TabsList aria-label={t`Inbox`}>
-              <TabsTab value="todo">
+              <TabsTrigger value="todo">
                 <Trans context="inbox tab: what waits on you">To do</Trans>
-              </TabsTab>
-              <TabsTab value="activity">
+              </TabsTrigger>
+              <TabsTrigger value="activity">
                 <Trans context="inbox tab: what Grasp and people did">
                   Activity
                 </Trans>
-              </TabsTab>
+              </TabsTrigger>
             </TabsList>
-            <TabsPanel value="todo">{toDo}</TabsPanel>
-            <TabsPanel value="activity">
+            <TabsContent value="todo">{toDo}</TabsContent>
+            <TabsContent value="activity">
               <Await fallback={<LoadingLines />} promise={activity}>
                 {(loaded) =>
                   loaded.state === "ready" ? (
                     <ActivityList activity={loaded.data} />
                   ) : (
-                    <Empty kind="error">
-                      {notLoadedText(loaded, i18n) ?? t`It didn't load`}
+                    <Empty tone="danger">
+                      <EmptyHeader>
+                        <EmptyMedia />
+                        <EmptyTitle />
+                        <EmptyDescription>
+                          {notLoadedText(loaded, i18n) ?? t`It didn't load`}
+                        </EmptyDescription>
+                      </EmptyHeader>
                     </Empty>
                   )
                 }
               </Await>
-            </TabsPanel>
+            </TabsContent>
           </Tabs>
         )}
       </div>

@@ -22,7 +22,7 @@ import {
   AlertDialogAction,
   AlertDialogDescription,
   AlertDialogFooter,
-  AlertDialogPanel,
+  AlertDialogContent,
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "../grasp/alert-dialog/index.ts";
@@ -164,7 +164,7 @@ const ActButton = ({
       >
         {act.label}
       </AlertDialogTrigger>
-      <AlertDialogPanel>
+      <AlertDialogContent>
         <AlertDialogTitle>{confirm.title}</AlertDialogTitle>
         <AlertDialogDescription>{confirm.description}</AlertDialogDescription>
         <AlertDialogFooter>
@@ -177,7 +177,7 @@ const ActButton = ({
             {act.label}
           </AlertDialogAction>
         </AlertDialogFooter>
-      </AlertDialogPanel>
+      </AlertDialogContent>
     </AlertDialog>
   );
 };
@@ -264,7 +264,7 @@ const ItemFrame = ({
       {failure === undefined ? null : <Alert variant="danger">{failure}</Alert>}
       {/* What `extra` shows says these already, in its own words. */}
       {extra === undefined && facts.length > 0 ? (
-        <KeyValueList items={facts} layout="inline" />
+        <KeyValueList items={facts} variant="inline" />
       ) : null}
     </article>
   );
