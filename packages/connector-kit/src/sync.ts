@@ -3,6 +3,7 @@ import type { SyncItemKind, SyncPage } from "@grasp-os/shared/sync";
 import { z } from "zod";
 
 import { ToolError } from "./connector.ts";
+import { maxContentBytes } from "./content.ts";
 import {
   syncManifestSchema,
   syncNameSchema,
@@ -24,6 +25,20 @@ export const syncFailureSchema = z.strictObject({
   retryAfterSeconds: z.number().int().nonnegative().optional(),
 });
 export type SyncFailure = z.infer<typeof syncFailureSchema>;
+
+/**
+ * What one page may take, so it fits what connect gives a connector's
+ * isolate and reads of its answer: `requests`, the provider requests a
+ * page may send, of the 50 a connector's isolate may (connect's
+ * connector-isolate.ts); `contentBytes`, its items' content together, as
+ * JSON, the same bound a tool's file read has (`maxContentBytes`, half of
+ * the 16 MiB connect reads, for the rest of the page). A file larger than
+ * a tool reads (`maxReadBytes`) comes without content.
+ */
+export const syncPageLimits = {
+  requests: 45,
+  contentBytes: maxContentBytes,
+} as const;
 
 /** A connector's answer to `syncMethod`: a page, or why there is none. */
 export const syncResultSchema = z.union([
