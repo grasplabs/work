@@ -327,6 +327,10 @@ msgstr "{count, plural, one {# Interview in Kalenderwoche {week}} other {# Inter
 msgid "{count, plural, one {# invited team not interviewed yet: {teams}.} other {# invited teams not interviewed yet: {teams}.}}"
 msgstr "{count, plural, one {# eingeladenes Team noch nicht interviewt: {teams}.} other {# eingeladene Teams noch nicht interviewt: {teams}.}}"
 
+#: src/inbox/inbox-page.tsx
+msgid "{count, plural, one {# item} other {# items}}"
+msgstr "{count, plural, one {# Eintrag} other {# Einträge}}"
+
 #: src/settings/teams.tsx
 msgid "{count, plural, one {# member} other {# members}}"
 msgstr "{count, plural, one {# Mitglied} other {# Mitglieder}}"
@@ -1187,10 +1191,6 @@ msgstr "{still, plural, one {Eine Suche findet einen Begriff noch an # Stelle.} 
 #: src/dashboard/pile-cards.tsx
 msgid "{subject} gets this permission from now on."
 msgstr "{subject} erhält diese Berechtigung ab jetzt."
-
-#: src/inbox/items.ts
-msgid "{subject} gets this permission once it is granted."
-msgstr "{subject} erhält diese Berechtigung, sobald sie erteilt ist."
 
 #: src/dashboard/pile-cards.tsx
 #: src/inbox/items.ts

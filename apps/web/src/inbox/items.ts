@@ -292,8 +292,9 @@ const requestItems = (pending: PendingRequests): InboxItem[] =>
       id: `request:${request.id}`,
       kind: "permissionRequest",
       title: t`Grant ${who}?`,
-      context: who,
-      body: [t`${subject} gets this permission once it is granted.`],
+      // The row names who asks; the title says what.
+      context: subject,
+      body: [],
       facts: [
         { label: t`Binding`, value: binding },
         { label: t`Asked`, value: formatDateTime(request.requestedAt) },

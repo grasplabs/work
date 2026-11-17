@@ -1,6 +1,6 @@
 import type { AuditRecord } from "@grasp-os/shared/audit-log";
 import type { MessageDescriptor } from "@lingui/core";
-import { msg } from "@lingui/core/macro";
+import { msg, plural } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { Await, useNavigate, useRouter } from "@tanstack/react-router";
@@ -33,6 +33,7 @@ import {
   ItemMedia,
   ItemTitle,
 } from "../grasp/item/index.ts";
+import { SectionCard } from "../grasp/section-card/index.ts";
 import {
   Tabs,
   TabsContent,
@@ -80,7 +81,7 @@ const styles = stylex.create({
       [WIDE]: "minmax(18rem, 24rem) minmax(0, 1fr)",
     },
     alignItems: "start",
-    gap: grasp.space6,
+    gap: grasp.space4,
   },
   list: {
     display: "flex",
@@ -97,25 +98,8 @@ const styles = stylex.create({
     maxHeight: { default: null, [WIDE]: "calc(100dvh - 6rem)" },
     overflowY: { default: null, [WIDE]: "auto" },
     minWidth: 0,
-    borderRadius: grasp.corner,
-    cornerShape: grasp.cornerShape,
-    backgroundColor: grasp.raised,
-    boxShadow: grasp.edge,
   },
   itemAway: { display: { default: "none", [WIDE]: "block" } },
-  activity: {
-    display: "flex",
-    flexDirection: "column",
-    gap: grasp.space3,
-    maxWidth: "48rem",
-  },
-  activityHead: {
-    display: "flex",
-    flexWrap: "wrap",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: grasp.space3,
-  },
   unseen: {
     position: "absolute",
     width: grasp.hairline,
@@ -218,15 +202,15 @@ const ItemList = ({
   }, []);
   return (
     <div ref={element}>
-      <ItemGroup aria-label={t`What waits on you`}>
+      <ItemGroup aria-label={t`What waits on you`} separated>
         {list.map((item) => (
           <Item
             href={itemHref(router, item.id)}
             key={item.id}
-            size="sm"
+            size="xs"
             variant={item.id === selected?.id ? "soft" : "plain"}
           >
-            <ItemMedia icon={kindMark[item.kind]} />
+            <ItemMedia icon={kindMark[item.kind]} iconLook="inline" />
             <ItemContent>
               <ItemTitle>
                 {item.context}
@@ -279,6 +263,7 @@ const ToDo = ({
   // A group that has emptied falls back to everything.
   const current = group === "all" || counts.has(group) ? group : "all";
   const list = listed(items, current, "urgent");
+  const count = list.length;
   const index = list.findIndex(({ id }) => id === chosen);
   if (index !== -1 && index !== at) {
     setAt(index);
@@ -357,35 +342,40 @@ const ToDo = ({
   }
   return (
     <div {...stylex.props(styles.split)}>
-      <section
-        aria-label={t`What waits on you`}
-        {...stylex.props(styles.list, reading && styles.listAway)}
-      >
+      <div {...stylex.props(styles.list, reading && styles.listAway)}>
         {failed.map((text) => (
           <Alert key={text} variant="attention">
             {text}
           </Alert>
         ))}
-        {shownGroups.length < 2 ? null : (
-          <Tabs
-            onValueChange={(value) => {
-              if (isGroup(value)) {
-                setGroup(value);
-              }
-            }}
-            value={current}
-            variant="segmented"
-          >
-            <TabsList aria-label={t`Show`}>
-              {(["all", ...shownGroups] as const).map((each) => (
-                <TabsTrigger key={each} value={each}>
-                  {i18n._(groupLabel[each])}
-                </TabsTrigger>
-              ))}
-            </TabsList>
-          </Tabs>
-        )}
-        <ItemList list={list} onOpen={open} selected={selected} />
+        <SectionCard
+          actions={
+            shownGroups.length < 2 ? undefined : (
+              <Tabs
+                onValueChange={(value) => {
+                  if (isGroup(value)) {
+                    setGroup(value);
+                  }
+                }}
+                value={current}
+                variant="segmented"
+              >
+                <TabsList aria-label={t`Show`}>
+                  {(["all", ...shownGroups] as const).map((each) => (
+                    <TabsTrigger key={each} value={each}>
+                      {i18n._(groupLabel[each])}
+                    </TabsTrigger>
+                  ))}
+                </TabsList>
+              </Tabs>
+            )
+          }
+          density="compact"
+          flush
+          title={t`${plural(count, { one: "# item", other: "# items" })}`}
+        >
+          <ItemList list={list} onOpen={open} selected={selected} />
+        </SectionCard>
         {olderFailures ? (
           <Text size="xs" tone="muted">
             <Trans>
@@ -394,7 +384,7 @@ const ToDo = ({
             </Trans>
           </Text>
         ) : null}
-      </section>
+      </div>
       <div {...stylex.props(styles.item, !reading && styles.itemAway)}>
         {selected === undefined ? null : (
           <ItemDetail
@@ -444,7 +434,7 @@ const ActivityRow = ({
   const actor =
     record.event === null ? "–" : actorOf(record.event.actor, directory).label;
   return (
-    <Item size="sm">
+    <Item size="xs">
       <ItemContent>
         <ItemTitle>
           {sentence}
@@ -477,31 +467,37 @@ const ActivityList = ({ activity }: { activity: InboxActivity }) => {
     return who === "grasp" ? byGrasp(record) : !byGrasp(record);
   });
   return (
-    <div {...stylex.props(styles.activity)}>
-      <div {...stylex.props(styles.activityHead)}>
-        <Tabs
-          onValueChange={(value) => {
-            if (isWho(value)) {
-              setWho(value);
-            }
-          }}
-          value={who}
-          variant="segmented"
-        >
-          <TabsList aria-label={t`Show activity by`}>
-            <TabsTrigger value="all">
-              <Trans context="activity filter: everyone">All</Trans>
-            </TabsTrigger>
-            <TabsTrigger value="grasp">Grasp</TabsTrigger>
-            <TabsTrigger value="people">
-              <Trans context="activity filter: what people did">People</Trans>
-            </TabsTrigger>
-          </TabsList>
-        </Tabs>
-        <RouterLink to="/settings/audit">
-          <Trans>The full audit trail</Trans>
-        </RouterLink>
-      </div>
+    <SectionCard
+      actions={
+        <>
+          <Tabs
+            onValueChange={(value) => {
+              if (isWho(value)) {
+                setWho(value);
+              }
+            }}
+            value={who}
+            variant="segmented"
+          >
+            <TabsList aria-label={t`Show activity by`}>
+              <TabsTrigger value="all">
+                <Trans context="activity filter: everyone">All</Trans>
+              </TabsTrigger>
+              <TabsTrigger value="grasp">Grasp</TabsTrigger>
+              <TabsTrigger value="people">
+                <Trans context="activity filter: what people did">People</Trans>
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
+          <RouterLink to="/settings/audit">
+            <Trans>The full audit trail</Trans>
+          </RouterLink>
+        </>
+      }
+      density="compact"
+      flush
+      title={t`Latest activity`}
+    >
       <ItemGroup aria-label={t`Latest activity`} separated>
         {shown.map((record) => (
           <ActivityRow
@@ -511,7 +507,7 @@ const ActivityList = ({ activity }: { activity: InboxActivity }) => {
           />
         ))}
       </ItemGroup>
-    </div>
+    </SectionCard>
   );
 };
 

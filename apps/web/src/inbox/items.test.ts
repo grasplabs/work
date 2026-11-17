@@ -415,15 +415,15 @@ describe(inboxItems, () => {
 
     const titles = inboxItems(read, admin, readAt)
       .filter(({ kind }) => kind === "permissionRequest")
-      .map(({ context }) => context);
+      .map(({ title }) => title);
 
     expect(titles.toSorted()).toStrictEqual(
       [
-        "Schedule trigger (On the schedule 0 9 * * 1-5, in Europe/Berlin): start on Workflow workflow-1",
-        "Connection trigger (New mail in Microsoft 365, at connection-1): mail.list on Connection connection-1",
-        "Email trigger (When an email arrives at its own address): start on Workflow workflow-1",
-        "Webhook trigger (On order.paid events from Shop system): start on Workflow workflow-1",
-        "Trigger unknown-1: start on Workflow workflow-1",
+        "Grant Schedule trigger (On the schedule 0 9 * * 1-5, in Europe/Berlin): start on Workflow workflow-1?",
+        "Grant Connection trigger (New mail in Microsoft 365, at connection-1): mail.list on Connection connection-1?",
+        "Grant Email trigger (When an email arrives at its own address): start on Workflow workflow-1?",
+        "Grant Webhook trigger (On order.paid events from Shop system): start on Workflow workflow-1?",
+        "Grant Trigger unknown-1: start on Workflow workflow-1?",
       ].toSorted()
     );
   });

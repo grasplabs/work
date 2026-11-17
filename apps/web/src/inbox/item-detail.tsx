@@ -30,10 +30,10 @@ import { Alert } from "../grasp/alert/index.ts";
 import { Badge } from "../grasp/badge/index.ts";
 import { Button } from "../grasp/button/index.ts";
 import { CodeBlock } from "../grasp/code-block/index.ts";
-import { Heading } from "../grasp/heading/index.ts";
 import { ArrowLeft, External } from "../grasp/icons/index.ts";
 import { KeyValueList } from "../grasp/key-value/index.ts";
 import { QuestionTool } from "../grasp/question-tool/index.ts";
+import { SectionCard } from "../grasp/section-card/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { useCoreAction } from "../use-core-action.ts";
@@ -55,29 +55,20 @@ const styles = stylex.create({
   item: {
     display: "flex",
     flexDirection: "column",
-    gap: grasp.space5,
-    width: "100%",
-    maxWidth: "44rem",
-    marginInline: "auto",
-    paddingBlock: grasp.space6,
-    paddingInline: grasp.space6,
-    boxSizing: "border-box",
-  },
-  head: {
-    display: "flex",
-    flexDirection: "column",
     gap: grasp.space2,
+    minWidth: 0,
   },
-  meta: {
+  back: { alignSelf: "flex-start" },
+  marks: {
     display: "flex",
     flexWrap: "wrap",
     alignItems: "center",
-    gap: grasp.space2,
+    gap: grasp.space1,
   },
-  words: {
+  body: {
     display: "flex",
     flexDirection: "column",
-    gap: grasp.space2,
+    gap: grasp.space3,
   },
   actions: {
     display: "flex",
@@ -213,60 +204,66 @@ const ItemFrame = ({
       ? [{ label: t`Open`, to: item.about }]
       : acts;
   return (
-    <article aria-label={item.title} {...stylex.props(styles.item)}>
+    <div {...stylex.props(styles.item)}>
       {onBack === undefined ? null : (
-        <Button icon={ArrowLeft} onClick={onBack} size="sm" variant="ghost">
+        <Button
+          icon={ArrowLeft}
+          layout={styles.back}
+          onClick={onBack}
+          size="sm"
+          variant="ghost"
+        >
           {t`All items`}
         </Button>
       )}
-      <header {...stylex.props(styles.head)}>
-        <div {...stylex.props(styles.meta)}>
-          <Badge icon={kindMark[item.kind]}>
-            {i18n._(kindLabel[item.kind])}
-          </Badge>
-          {item.urgent ? (
-            <Badge tone="attention">
-              <Trans context="inbox: something waits on this item">
-                Blocks work
-              </Trans>
+      <SectionCard
+        aside={
+          <span {...stylex.props(styles.marks)}>
+            <Badge icon={kindMark[item.kind]} size="sm">
+              {i18n._(kindLabel[item.kind])}
             </Badge>
-          ) : null}
-          <Text element="span" size="xs" tone="muted">
-            {formatDate(item.date)}
-          </Text>
-        </div>
-        <Heading level={2} size="sm">
-          {item.title}
-        </Heading>
-      </header>
-      {item.body.length === 0 ? null : (
-        <div {...stylex.props(styles.words)}>
+            {item.urgent ? (
+              <Badge size="sm" tone="attention">
+                <Trans context="inbox: something waits on this item">
+                  Blocks work
+                </Trans>
+              </Badge>
+            ) : null}
+          </span>
+        }
+        density="compact"
+        description={formatDate(item.date)}
+        title={item.title}
+      >
+        <div {...stylex.props(styles.body)}>
           {item.body.map((paragraph) => (
             <Text key={paragraph} size="sm" tone="text">
               {paragraph}
             </Text>
           ))}
+          {extra}
+          {shown.length === 0 ? null : (
+            <div {...stylex.props(styles.actions)}>
+              {shown.map((act, index) => (
+                <ActButton
+                  act={act}
+                  busy={busy}
+                  first={index === 0}
+                  key={act.label}
+                />
+              ))}
+            </div>
+          )}
+          {failure === undefined ? null : (
+            <Alert variant="danger">{failure}</Alert>
+          )}
+          {/* What `extra` shows says these already, in its own words. */}
+          {extra === undefined && facts.length > 0 ? (
+            <KeyValueList items={facts} variant="inline" />
+          ) : null}
         </div>
-      )}
-      {extra}
-      {shown.length === 0 ? null : (
-        <div {...stylex.props(styles.actions)}>
-          {shown.map((act, index) => (
-            <ActButton
-              act={act}
-              busy={busy}
-              first={index === 0}
-              key={act.label}
-            />
-          ))}
-        </div>
-      )}
-      {failure === undefined ? null : <Alert variant="danger">{failure}</Alert>}
-      {/* What `extra` shows says these already, in its own words. */}
-      {extra === undefined && facts.length > 0 ? (
-        <KeyValueList items={facts} variant="inline" />
-      ) : null}
-    </article>
+      </SectionCard>
+    </div>
   );
 };
 
