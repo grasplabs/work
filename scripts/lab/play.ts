@@ -6,7 +6,7 @@
  * theirs is kept beside each answer, for the score card. Ported from the
  * prototype (grasplabs/prototype, packages/grasp: lab/play.ts).
  */
-import { factRevision } from "@grasp-os/shared/interview-links";
+import { factRevision, shareByDefault } from "@grasp-os/shared/interview-links";
 import type {
   InterviewFact,
   InterviewProgress,
@@ -95,13 +95,18 @@ export const notesAfter = (
     const change = turn.changes.find((each) => each.id === fact.id);
     return change === undefined ? fact : changed(fact, change);
   });
-  const added = turn.facts.map((fact, at): InterviewFact => ({
-    id: `f${facts.length + at + 1}`,
-    tag: fact.tag,
-    text: fact.text,
-    record: fact.record,
-    ...(pin === undefined ? {} : { pin }),
-  }));
+  const added = turn.facts.map((fact, at): InterviewFact => {
+    // Where it goes starts from its kind, as on the page (progress.ts `afterTurn`).
+    const share = shareByDefault(fact.tag);
+    return {
+      id: `f${facts.length + at + 1}`,
+      tag: fact.tag,
+      text: fact.text,
+      record: fact.record,
+      ...(pin === undefined ? {} : { pin }),
+      ...(share === undefined ? {} : { share }),
+    };
+  });
   return [...facts, ...added];
 };
 
