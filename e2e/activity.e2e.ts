@@ -103,45 +103,49 @@ test("an admin approves a permission request, finds it in the audit log, and exp
   } finally {
     reader.core[Symbol.dispose]();
   }
-  // A link to the audit trail keeps its filters.
+  // A link to the audit trail keeps its filters: the event's target,
+  // under Filters.
   await page.goto(`/settings/audit?target=${approved}`);
-  await expect(page.getByRole("textbox", { name: "Target ID" })).toHaveValue(
+  const filters = page.getByRole("button", { name: /^Filters/u });
+  await expect(filters).toHaveAccessibleName("Filters, 1 set");
+  await filters.click();
+  await expect(page.getByRole("textbox", { name: "About, by ID" })).toHaveValue(
     approved
   );
-  // Each entry in words, under who did it and to what.
-  const entries = page
-    .getByRole("list", { name: "Entries" })
-    .getByRole("listitem");
+  await page.keyboard.press("Escape");
+  // Each event a row: what happened, who did it, and its type.
+  const entries = page.getByRole("table", { name: "Events" }).getByRole("row");
   const granted = entries.filter({ hasText: "Granted a permission" });
   await expect(granted).toHaveCount(1);
   await expect(granted).toContainText("Permission");
-  await expect(granted).toContainText(`permission ${approved}`);
   await expect(
     entries.filter({ hasText: "Asked for a permission" })
   ).toHaveCount(1);
+  // Its details, beside the table: to what, and what core recorded.
   await granted.getByRole("button", { name: /^Details of event /u }).click();
-  await expect(
-    page.getByText(`"requestedBy": "${builder.userId}"`)
-  ).toBeVisible();
-  await expect(granted).toContainText("permission.granted");
+  const details = page.getByRole("dialog");
+  await expect(details).toContainText(approved);
+  await expect(details).toContainText("permission.granted");
+  await page.keyboard.press("Escape");
 
   // Narrowed to grants, the request drops out; the action is taken as
   // core takes it, whatever its case and a trailing dot.
-  await page.getByRole("combobox", { name: "Type" }).click();
-  await page.getByRole("option", { name: "Permission" }).click();
-  await page
-    .getByRole("textbox", { name: "Action" })
-    .fill("Permission.Granted.");
-  await page.getByRole("button", { name: "Filter" }).click();
-  await expect(page).toHaveURL(/action=permission\.granted/u);
+  await page.goto(
+    `/settings/audit?target=${approved}&action=${encodeURIComponent("Permission.Granted.")}`
+  );
+  await filters.click();
+  await expect(page.getByRole("textbox", { name: "Action" })).toHaveValue(
+    "permission.granted"
+  );
+  await page.keyboard.press("Escape");
   await expect(
     entries.filter({ hasText: "Asked for a permission" })
   ).toHaveCount(0);
   await expect(granted).toHaveCount(1);
 
   const downloading = page.waitForEvent("download");
-  await page.getByRole("button", { name: "Export the audit trail" }).click();
-  await page.getByRole("menuitem", { name: "Export CSV" }).click();
+  await page.getByRole("button", { name: "Export" }).click();
+  await page.getByRole("menuitem", { name: "CSV", exact: true }).click();
   const download = await downloading;
   expect(download.suggestedFilename()).toMatch(/^audit-log-.+\.csv$/u);
   const csv = await readFile(await download.path(), "utf-8");
@@ -152,16 +156,17 @@ test("an admin approves a permission request, finds it in the audit log, and exp
   expect(lines[1]).toContain(approved);
 
   // Text that can't start an action is dropped, not refused by core, and
-  // so is a day no calendar has, rather than searched as the next month's.
+  // so is a day no calendar has, rather than searched as the next month's:
+  // the target and the leap day stay, as two filters.
   await page.goto(
     `/settings/audit?target=${approved}&action=${encodeURIComponent("no such action!")}&from=2024-02-29&to=2099-02-29`
   );
-  await expect(page.getByRole("textbox", { name: "Action" })).toHaveValue("");
-  // A leap day is a day; 2099 has none.
-  await expect(page.getByLabel("From")).toHaveValue("2024-02-29");
-  await expect(page.getByLabel("To", { exact: true })).toHaveValue("");
+  await expect(filters).toHaveAccessibleName("Filters, 2 set");
   await expect(granted).toHaveCount(1);
-  await expect(page.getByRole("alert")).toHaveCount(0);
+  await expect(page.getByRole("main").getByRole("alert")).toHaveCount(0);
+  // 2099 has no leap day: alone, it sets nothing.
+  await page.goto(`/settings/audit?target=${approved}&to=2099-02-29`);
+  await expect(filters).toHaveAccessibleName("Filters, 1 set");
 });
 
 test("an admin sees a grant asked for again after a new version, and approves only the version the list shows", async ({
