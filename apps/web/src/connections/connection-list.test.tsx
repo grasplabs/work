@@ -151,6 +151,8 @@ type Asked = [string, ...unknown[]][];
 interface Held {
   audience: { kind: string; teamId?: string };
   erasing: boolean;
+  /** Core refuses to list the audiences, as when it is out of reach. */
+  refusingReads?: boolean;
 }
 
 /** How often the page read the audiences and the teams of core. */
@@ -192,6 +194,10 @@ const asAdmin = async (
       // As core lists them: one with an audience or being erased.
       brainAudiences: async () => {
         reads.audiences += 1;
+        if (held.refusingReads === true) {
+          await Promise.resolve();
+          throw new Error(refusal);
+        }
         return await Promise.resolve(
           held.audience.kind === "nobody" && !held.erasing
             ? []
@@ -304,6 +310,17 @@ const press = async (text: string): Promise<void> => {
   );
   await act(async () => {
     button?.click();
+    await Promise.resolve();
+  });
+};
+
+/** The window comes back to the page, and what it reads again is answered. */
+const returnToWindow = async (): Promise<void> => {
+  await act(async () => {
+    window.dispatchEvent(new Event("focus"));
+    await Promise.resolve();
+  });
+  await act(async () => {
     await Promise.resolve();
   });
 };
@@ -539,6 +556,83 @@ describe("a shared connection's Brain audience, for an admin", () => {
       whileErasing,
       back: document.querySelector("select")?.disabled,
     }).toStrictEqual({ whileErasing: true, back: false });
+  });
+
+  it("refuses a widening confirmed after another admin changed the audience behind the open question", async () => {
+    const held: Held = { audience: { kind: "nobody" }, erasing: false };
+    const asked = await asAdmin(shared, undefined, held);
+    await choose("everyone");
+    const asking = dialogText() !== "";
+    // Another admin opens it to Sales; the window comes back and the
+    // card reads it again behind the question.
+    held.audience = { kind: "team", teamId: "t1" };
+    await returnToWindow();
+    await press("Keep it for them");
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect({
+      asking,
+      asked,
+      held: held.audience,
+      says: document.body.textContent.includes(
+        "Who may read what agents read through Notes was changed in the meantime."
+      ),
+    }).toStrictEqual({
+      asking: true,
+      asked: [
+        ["setBrainAudience", "c1", { kind: "everyone" }, { kind: "nobody" }],
+      ],
+      held: { kind: "team", teamId: "t1" },
+      says: true,
+    });
+  });
+
+  it("keeps the card through a refused re-read, saying why, and is whole again on the next one, also when the first read was refused", async () => {
+    const held: Held = { audience: { kind: "everyone" }, erasing: false };
+    const reads: Reads = { audiences: 0, teams: 0 };
+    await asAdmin(shared, undefined, held, { reads });
+    held.refusingReads = true;
+    await returnToWindow();
+    const refused = {
+      shown: document.querySelector("select")?.value,
+      says: document.body.textContent.includes(refusal),
+    };
+    held.refusingReads = false;
+    held.audience = { kind: "team", teamId: "t1" };
+    await returnToWindow();
+    const back = {
+      shown: document.querySelector("select")?.value,
+      says: document.body.textContent.includes(refusal),
+      // After the refusal, a whole read: the teams too.
+      teamsRead: reads.teams,
+    };
+    act(() => {
+      root?.unmount();
+    });
+    document.body.replaceChildren();
+    const firstRefused: Held = {
+      audience: { kind: "everyone" },
+      erasing: false,
+      refusingReads: true,
+    };
+    await asAdmin(shared, undefined, firstRefused);
+    const opened = document.querySelector("select");
+    firstRefused.refusingReads = false;
+    await returnToWindow();
+
+    expect({
+      refused,
+      back,
+      opened,
+      later: document.querySelector("select")?.value,
+    }).toStrictEqual({
+      refused: { shown: "everyone", says: true },
+      back: { shown: "t1", says: false, teamsRead: 2 },
+      opened: null,
+      later: "everyone",
+    });
   });
 
   it("is never shown to someone who isn't an admin, nor on a person's own connection", async () => {

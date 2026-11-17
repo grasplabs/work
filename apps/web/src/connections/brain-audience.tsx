@@ -52,7 +52,12 @@ interface Audiences {
 export type AudiencesRead =
   | { state: "loading" }
   | { state: "refused"; message: string }
-  | { state: "ready"; data: Audiences };
+  | {
+      state: "ready";
+      data: Audiences;
+      /** A re-read was refused: the data read before stays, with why. */
+      refused?: string;
+    };
 
 /**
  * Every shared connection's audience, or why not: one read of core's
@@ -97,6 +102,8 @@ const readAudiences = async (core: CoreConnection): Promise<AudiencesRead> => {
  * says, never a copy of their own. Read again too when the window comes
  * back to the page, as other lists are (chat/build-progress.tsx): so an
  * erasure that ended, or another admin's choice, shows without a reload.
+ * A refused re-read keeps what was read before and says why beside it;
+ * after any refusal the next read is a whole one, teams too.
  */
 export const useBrainAudiences = (
   wanted: boolean
@@ -118,16 +125,27 @@ export const useBrainAudiences = (
       left = true;
     };
   }, [core, wanted]);
+  const whole = read.state !== "ready" || read.refused !== undefined;
   const onChanged = (): void => {
     void (async () => {
+      if (whole) {
+        const answer = await readAudiences(core);
+        setRead((before) =>
+          answer.state === "refused" && before.state === "ready"
+            ? { ...before, refused: answer.message }
+            : answer
+        );
+        return;
+      }
       const settings = await readSettings(core);
       setRead((before) => {
-        if ("refused" in settings) {
-          return { state: "refused", message: settings.refused };
+        if (before.state !== "ready") {
+          return before;
         }
-        return before.state === "ready"
-          ? { state: "ready", data: { ...before.data, settings } }
-          : before;
+        if ("refused" in settings) {
+          return { ...before, refused: settings.refused };
+        }
+        return { state: "ready", data: { ...before.data, settings } };
       });
     })();
   };
@@ -337,7 +355,13 @@ export const BrainAudience = ({
   const { t } = useLingui();
   const selectId = useId();
   const { busy, failure, change } = useChange();
-  const [asked, setAsked] = useState<ConnectionBrainAudience>();
+  // The widening asked about, and the audience it was asked from: what
+  // core is told the choice was made from, so another admin's change
+  // meanwhile is refused, not overwritten.
+  const [asked, setAsked] = useState<{
+    next: ConnectionBrainAudience;
+    from: ConnectionBrainAudience;
+  }>();
   // Refused as the audience changed meanwhile: said until the next choice.
   const [changedMeanwhile, setChangedMeanwhile] = useState(false);
   if (audiences.state === "loading") {
@@ -354,17 +378,15 @@ export const BrainAudience = ({
     kind: "nobody",
   };
   const erasing = setting?.erasing ?? false;
-  const choose = (next: ConnectionBrainAudience): void => {
+  const choose = (
+    next: ConnectionBrainAudience,
+    from: ConnectionBrainAudience
+  ): void => {
     setAsked(undefined);
     setChangedMeanwhile(false);
     void (async () => {
       await change(async (session) => {
-        const outcome = await chosenFrom(
-          session,
-          connection.id,
-          next,
-          audience
-        );
+        const outcome = await chosenFrom(session, connection.id, next, from);
         setChangedMeanwhile(outcome === "changed");
       });
       onChanged();
@@ -385,10 +407,10 @@ export const BrainAudience = ({
           onChange={(event) => {
             const next = audienceOf(event.target.value);
             if (widens(audience, next)) {
-              setAsked(next);
+              setAsked({ next, from: audience });
               return;
             }
-            choose(next);
+            choose(next, audience);
           }}
           value={valueOf(audience)}
         >
@@ -427,15 +449,16 @@ export const BrainAudience = ({
         </p>
       ) : null}
       <ErrorText>{failure}</ErrorText>
+      <ErrorText>{audiences.refused}</ErrorText>
       {asked === undefined ? null : (
         <WidenDialog
           label={label}
-          next={asked}
+          next={asked.next}
           onCancel={() => {
             setAsked(undefined);
           }}
           onConfirm={() => {
-            choose(asked);
+            choose(asked.next, asked.from);
           }}
           teams={teams}
         />

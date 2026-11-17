@@ -140,7 +140,8 @@ export interface KeptOf {
  * decides it (connection-audiences.ts `audiencesRead`): an erasure that
  * starts after the reader's groups were read, and before this, shows
  * nothing of what it erases. For connections a reader holds (brain-next.ts
- * `readableConnectionsOf`).
+ * `readableConnectionsOf`). The team is not checked here: a member moved
+ * out of a team audience meanwhile may once see a count and a date, never content.
  */
 export const keptOf = async (
   env: Pick<Env, "DB">,
