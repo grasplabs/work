@@ -6,7 +6,7 @@ import { addSource, eraseSource } from "../brain-next.ts";
 import type { Filed, Handed, SourceReaders, SourceRef } from "../brain-next.ts";
 import { drawingText, routineFacts } from "./routine.ts";
 import { onboardingStore } from "./store.ts";
-import type { HeldDrawing, OwedErasure } from "./store.ts";
+import type { OwedErasure, StandingDrawing } from "./store.ts";
 import { claimSource } from "./team-claims.ts";
 
 // What the onboarding gives the new Brain (GRA-1790, GRA-1741, GRA-1748), and takes
@@ -142,10 +142,11 @@ export const drawingSource = (id: string): SourceRef => ({
  * The routine a drawing makes (routine.ts, GRA-1749), filed on the
  * drawing's version as it is handed over: the routine and its team, each
  * found again by an exact identifier of the onboarding's own, so every
- * drawing of the same piece of work is the same routine. Nothing when no
- * step of it stands.
+ * drawing of the same piece of work is the same routine. Only from what
+ * the drawing's row holds, never the staff list as it is now: every
+ * attempt files the same. Nothing when no step of it stands.
  */
-const routineFiled = (held: HeldDrawing): { filed?: Filed } => {
+const routineFiled = (held: StandingDrawing): { filed?: Filed } => {
   const facts = routineFacts(held);
   if (facts.length === 0) {
     return {};
@@ -162,10 +163,12 @@ const routineFiled = (held: HeldDrawing): { filed?: Filed } => {
             { type: "ref", value: `grasp:routine:${held.workflow}` },
           ],
         },
+        // By its identifier alone: a name would be the staff list's at the
+        // moment of each attempt, and a retry after a rename would file
+        // other memories under the same change.
         {
           key: "team",
           kind: "team",
-          names: [held.teamName],
           identifiers: [{ type: "ref", value: `grasp:team:${held.team}` }],
         },
       ],

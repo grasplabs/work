@@ -1,6 +1,6 @@
 import type { WorkflowVersionRecord } from "@grasp-os/shared/brain-records";
 
-import type { HeldDrawing } from "./store.ts";
+import type { StandingDrawing } from "./store.ts";
 
 // A team's routine, as the Brain keeps it (GRA-1749): the drawing of one
 // of its pieces of work (brain-intake.ts) as a `routine` entity, each of
@@ -35,10 +35,15 @@ export interface RoutineFact {
   line: string;
 }
 
-/** A drawing as its routine is drawn from it: its words, and its team's name. */
+/**
+ * A drawing as its routine is drawn from it: its words as noted, never
+ * its team's name, which the staff list may change while a hand-over is
+ * tried again: its text and its routine are the same on every attempt,
+ * and the team is named by its identifier alone (new-brain.ts).
+ */
 export type RoutineDrawing = Pick<
-  HeldDrawing,
-  "name" | "local" | "drawing" | "teamName"
+  StandingDrawing,
+  "name" | "local" | "drawing"
 >;
 
 /** The count of how often, as it is said: "about 30" or "30 to 40". */
@@ -52,14 +57,25 @@ const whose: Record<WorkflowVersionRecord["volumes"][number]["of"], string> = {
   unknown: "",
 };
 
-/** How often, a line for each count the drawing gives. */
-const frequencyLines = (
+/**
+ * How often, every count the drawing gives in one value: `frequency` holds
+ * one value, so two counts filed apart would end each other.
+ */
+const frequencyOf = (
   drawing: WorkflowVersionRecord
-): readonly { value: string; line: string }[] =>
-  drawing.volumes.map(({ of, per, low, high, people }) => {
-    const value = `${between(low, high)} a ${per}${whose[of]}`;
-    return { value, line: `How often: ${value}, as ${people} of them said.` };
-  });
+): { value: string; line: string } | null => {
+  const counts = drawing.volumes.map(({ of, per, low, high, people }) => ({
+    said: `${between(low, high)} a ${per}${whose[of]}`,
+    people,
+  }));
+  if (counts.length === 0) {
+    return null;
+  }
+  return {
+    value: counts.map(({ said }) => said).join("; "),
+    line: `How often: ${counts.map(({ said, people }) => `${said}, as ${people} of them said`).join("; ")}.`,
+  };
+};
 
 /**
  * The lines of `routine`'s drawing in order, each with the fact it files:
@@ -70,7 +86,6 @@ export const routineLines = ({
   name,
   local,
   drawing,
-  teamName,
 }: RoutineDrawing): {
   /** The heading, filed as the team that does it and the evidence. */
   title: string;
@@ -78,7 +93,7 @@ export const routineLines = ({
   lines: readonly { line: string; fact?: RoutineFact }[];
 } => {
   const called = `${name}${local === undefined ? "" : ` (${local})`}`;
-  const title = `How ${teamName} does ${called}, as ${drawing.people} of its people told it.`;
+  const title = `How a team does ${called}, as ${drawing.people} of its people told it.`;
   const steps = drawing.steps.map(({ text, who, tool, minutes }, at) => {
     const about = [
       who,
@@ -108,6 +123,7 @@ export const routineLines = ({
     };
   });
   const { takes, wrong } = drawing;
+  const frequency = frequencyOf(drawing);
   const duration =
     takes === null
       ? []
@@ -122,14 +138,18 @@ export const routineLines = ({
       ? []
       : [{ line: `What starts one: ${drawing.starts}` }]),
     ...(steps.length === 0 ? [] : [{ line: "Its steps:" }, ...steps]),
-    ...frequencyLines(drawing).map(({ value, line }) => ({
-      line,
-      fact: {
-        attribute: "frequency",
-        value,
-        statement: `${name} is done ${value}.`,
-      } as const,
-    })),
+    ...(frequency === null
+      ? []
+      : [
+          {
+            line: frequency.line,
+            fact: {
+              attribute: "frequency",
+              value: frequency.value,
+              statement: `${name} is done ${frequency.value}.`,
+            } as const,
+          },
+        ]),
     ...duration.map(({ value, people }) => ({
       line: `How long one takes: ${value}, as ${people} of them said.`,
       fact: {
@@ -189,17 +209,17 @@ export const routineFacts = (routine: RoutineDrawing): RoutineFact[] => {
   if (!facts.some(({ attribute }) => attribute === "step")) {
     return [];
   }
-  const { name, teamName, drawing } = routine;
+  const { name, drawing } = routine;
   return [
     {
       attribute: "team",
-      statement: `${teamName} does ${name}.`,
+      statement: `${name} is done by the team it is drawn for.`,
       line: title,
     },
     {
       attribute: "evidence",
       value: `described by ${drawing.people} people in interviews`,
-      statement: `${name} is described by ${drawing.people} people of ${teamName} in interviews.`,
+      statement: `${name} is described by ${drawing.people} people of its team in interviews.`,
       line: title,
     },
     ...facts,

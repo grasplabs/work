@@ -1,3 +1,4 @@
+import type { WorkflowVersionRecord } from "@grasp-os/shared/brain-records";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
@@ -12,6 +13,7 @@ import {
 import type { StoredMemory } from "../src/brain-next.ts";
 import { producersOf, relayHandOvers } from "../src/brain-sources.ts";
 import { eraseOwedOnboardingSources } from "../src/onboarding/new-brain.ts";
+import { routineFacts } from "../src/onboarding/routine.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import {
   accountOf,
@@ -26,6 +28,7 @@ import {
   intake,
   mapped,
   openLink,
+  rosterOf,
   team,
   told,
   zendeskClaim,
@@ -46,6 +49,41 @@ import type { Key, PartJudge } from "./onboarding-team.ts";
 
 const clock = { at: Date.now() };
 
+/** A drawing as the Brain keeps it, of one step and nothing else. */
+const drawingWithSteps: WorkflowVersionRecord = {
+  type: "workflowVersion",
+  id: "onb-wfv-0123456789abcdef0123456789abcdef",
+  workflowId: "onb-wf-0123456789abcdef0123456789abcdef",
+  sourceId: "onb-src-0123456789abcdef0123456789abcdef",
+  date: "2026-11-17",
+  state: "mapping",
+  people: 7,
+  starts: "",
+  steps: [
+    {
+      text: "Open the ticket.",
+      who: "",
+      tool: "",
+      minutes: null,
+      documented: false,
+    },
+  ],
+  waits: [],
+  differently: [],
+  decides: "",
+  own: "",
+  ai: "",
+  right: "",
+  ask: "",
+  next: "",
+  term: null,
+  differs: null,
+  volumes: [],
+  takes: null,
+  wrong: null,
+  open: [],
+};
+
 /** Hands over what the onboarding noted, through the relay and one tick of the Brain's work. */
 const handOverNow = async (into: Env = env): Promise<void> => {
   await runInDurableObject(onboardingStore(env), async (_, state) => {
@@ -61,10 +99,12 @@ const pastFirstBackoffMs = 61_000;
 
 /**
  * Core's env with the Brain's stores reached through stubs whose first
- * `addMemories` is made and its answer lost, as a connection dropped on
- * the way back would, and work from then on; and how many calls it saw.
+ * `addMemories` fails: `lost`, made and its answer lost, as a connection
+ * dropped on the way back would; `unmade`, refused before it is made, as
+ * a store out of reach would. They work from then on. And how many calls
+ * they saw.
  */
-const filingFailsOnce = () => {
+const filingFailsOnce = (how: "lost" | "unmade") => {
   const seen = { calls: 0 };
   const stubOf = <T extends object>(stub: T): T =>
     new Proxy(stub, {
@@ -75,12 +115,16 @@ const filingFailsOnce = () => {
         }
         // An RPC stub's members are its own: called with Reflect.
         return async (...given: unknown[]): Promise<unknown> => {
-          const answer: unknown = await Reflect.apply(member, target, given);
+          const first = name === "addMemories" && seen.calls === 0;
           if (name === "addMemories") {
             seen.calls += 1;
-            if (seen.calls === 1) {
-              throw new Error("The answer was lost on the way back.");
-            }
+          }
+          if (first && how === "unmade") {
+            throw new Error("The Brain is out of reach.");
+          }
+          const answer: unknown = await Reflect.apply(member, target, given);
+          if (first) {
+            throw new Error("The answer was lost on the way back.");
           }
           return answer;
         };
@@ -110,6 +154,9 @@ const filingFailsOnce = () => {
   return { env: failing, seen };
 };
 
+/** An address on the list, from a person's id. */
+const addressOf = (person: string): string => `${person}@acme.test`;
+
 /** Seven who tell their own work besides Lea, the lead: a team whose results may show. */
 const seven: readonly Key[] = [
   "lea",
@@ -129,7 +176,7 @@ const seven: readonly Key[] = [
  * and the id of the tickets' drawing standing now, if one does.
  */
 const drawnTeam = async (part?: PartJudge, into: Env = env) => {
-  const ids = await team(seven);
+  const ids = await team(seven, addressOf);
   await mapped(ids);
   await told(ids);
   await agree(ids.sam, [fact("s1", "step", "Answers the phone.")]);
@@ -227,7 +274,10 @@ describe("routines in the new Brain", { timeout: 120_000 }, () => {
       name: routine?.name,
       // Read in the store's order: each step's value says its place.
       steps: valuesOf(routine, "step").toSorted(byText),
-      team: valuesOf(routine, "team"),
+      // The team by its identifier alone: never a name the list may change.
+      team: (routine?.memories ?? []).filter(
+        ({ attribute, object }) => attribute === "team" && object !== null
+      ).length,
       evidence: valuesOf(routine, "evidence"),
       frequency: valuesOf(routine, "frequency").length,
       duration: valuesOf(routine, "duration").length,
@@ -236,7 +286,7 @@ describe("routines in the new Brain", { timeout: 120_000 }, () => {
       name: "handling new tickets",
       // Max alone told the step that asks Noor: it stays out.
       steps: ["1. Open the ticket.", "2. Send the answer."],
-      team: ["Ops"],
+      team: 1,
       // Drawn from all seven who tell their own work.
       evidence: ["described by 7 people in interviews"],
       frequency: 1,
@@ -245,7 +295,7 @@ describe("routines in the new Brain", { timeout: 120_000 }, () => {
   });
 
   it("file a routine once when its filing's answer is lost and its hand-over is tried again", async () => {
-    const failing = filingFailsOnce();
+    const failing = filingFailsOnce("lost");
     const { max, drawing } = await drawnTeam(undefined, failing.env);
     // The queue tries the hand-over again after its backoff: the same
     // version, and its routine filed under the same change, which answers
@@ -261,6 +311,71 @@ describe("routines in the new Brain", { timeout: 120_000 }, () => {
       calls: 2,
       steps: ["1. Open the ticket.", "2. Send the answer."],
     });
+  });
+
+  it("file a routine whose first filing failed after its team was renamed on the list, before its hand-over is tried again", async () => {
+    const failing = filingFailsOnce("unmade");
+    const { ids, max, drawing } = await drawnTeam(undefined, failing.env);
+    // The admin renames the team before the queue tries again.
+    const roster = rosterOf(
+      ids,
+      seven,
+      Object.fromEntries(seven.map((key) => [key, addressOf(ids[key])]))
+    );
+    await onboardingStore(env).saveRoster(
+      {
+        ...roster,
+        teams: roster.teams.map((each) => ({ ...each, name: "Support" })),
+      },
+      { type: "system" }
+    );
+    for (let tick = 0; tick < 4; tick += 1) {
+      clock.at += pastFirstBackoffMs * 2 ** tick;
+      // oxlint-disable-next-line no-await-in-loop -- one tick at a time, as the clock gives them
+      await workBrain(
+        failing.env,
+        new Date(clock.at),
+        producersOf(failing.env)
+      );
+    }
+    const routine = await routineOn(max, drawing ?? "");
+    expect({
+      calls: failing.seen.calls,
+      steps: valuesOf(routine, "step").toSorted(byText),
+    }).toStrictEqual({
+      calls: 2,
+      steps: ["1. Open the ticket.", "2. Send the answer."],
+    });
+  });
+
+  it("file every count of how often as one figure, as `frequency` holds one value", () => {
+    const counts = routineFacts({
+      name: "handling new tickets",
+      drawing: {
+        ...drawingWithSteps,
+        volumes: [
+          {
+            of: "me",
+            per: "week",
+            low: 30,
+            high: 50,
+            people: 5,
+            basis: "estimated",
+          },
+          {
+            of: "team",
+            per: "week",
+            low: 200,
+            high: 200,
+            people: 5,
+            basis: "estimated",
+          },
+        ],
+      },
+    }).filter(({ attribute }) => attribute === "frequency");
+    expect(counts.map(({ value }) => value)).toStrictEqual([
+      "30 to 50 a week, each by their own count; about 200 a week, for the whole team",
+    ]);
   });
 
   it("file no routine from a drawing whose steps only four people told", async () => {
