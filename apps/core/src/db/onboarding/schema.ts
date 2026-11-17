@@ -2,6 +2,7 @@
  * The onboarding's Durable Object SQLite (onboarding/store.ts): one per
  * deployment. Migrates itself on first wake-up after a release.
  */
+import type { StatementKind } from "@grasp-os/shared/brain";
 import { sql } from "drizzle-orm";
 import {
   check,
@@ -723,9 +724,11 @@ export const brainInterviews = sqliteTable(
  * the team's people back, as the intake counts them here (`brain_sent`,
  * record `record`), given to the Brain as a source of its own
  * (`claim:<source>`) under an id minted here each time it stands. Who
- * backs it is counted here alone, never in the Brain. Once the recount
- * drops it below five it is erased (`erase`), and the row goes once the
- * Brain's erasure returned; a claim backed again later is a new source.
+ * backs it is counted here alone, never in the Brain. Once a change drops
+ * it (below five, its team below seven, or no longer made), it is marked
+ * to be erased (`erase`), then taken out of use and erased in the Brain,
+ * all before that change commits; the row goes once the Brain's erasure
+ * returned. A claim backed again later is a new source.
  */
 export const brainClaims = sqliteTable(
   "brain_claims",
@@ -735,6 +738,16 @@ export const brainClaims = sqliteTable(
     /** The intake's statement record it stands for. */
     record: text().notNull(),
     team: text().notNull(),
+    /**
+     * What kind of thing was said (a goal, a blocker, ...), as the Brain
+     * page groups the team's claims (GRA-1748). None on a row from before
+     * it was kept: onboarding migration 0040 owes those an erasure. None
+     * also on a claim noted while the admin rolled back past 0040 and
+     * rolled forward again: such a claim stays off the page for good
+     * (hidden, never shown wrongly) until its team's claims are put
+     * together anew.
+     */
+    kind: text().$type<StatementKind>(),
     text: text().notNull(),
     /** Whether it is to be erased: set once, never cleared. */
     erase: integer({ mode: "boolean" }).notNull().default(false),

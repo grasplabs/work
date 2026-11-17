@@ -458,12 +458,14 @@ const rowOf = (sql: SqlStorage, id: string): ExportRow | undefined =>
  * expressions): a source's erasure names every version. A writer's memory
  * is held by its writer's subject and when it was learned
  * (`memoriesLineOf`): a writer's erasure names every one learned before
- * it. The one rule of staleness (above).
+ * it. A person's erasure in the shared store names every export started
+ * before it, by a row naming its subject it adds to each (people.ts
+ * `applyPerson`). The one rule of staleness (above).
  */
 const namedSql = (subject: string, version: string): string => `(
   EXISTS (
     SELECT 1 FROM erasures
-    WHERE erasures.kind = 'source' AND erasures.subject = ${subject}
+    WHERE erasures.kind IN ('source', 'person') AND erasures.subject = ${subject}
   )
   OR EXISTS (
     SELECT 1 FROM erasures
@@ -1330,8 +1332,11 @@ const settleStuck = (storage: DurableObjectStorage): void => {
  * be on record, so they go), or one that failed with its export no longer
  * adopted (`handedBackSql`) or checked whole, once the store took
  * something since it failed (a version past `held_to`, but Grasp's own
- * skills, or a write of memories past `held_stamp`) or the ledger names a
- * version its export holds: to give up.
+ * skills, or a write of memories past `held_stamp`): to give up. Not for
+ * an erasure the ledger names in its export: a failed restore's export is
+ * served to no one, and started again it leaves out what the ledger
+ * erased (restore.ts), so the company keeps its backup; it is retired as
+ * erased once the restore is done (restore.ts `settle`).
  */
 const givenUpSql = `restores.state = 'failed' AND (
   (
@@ -1348,9 +1353,6 @@ const givenUpSql = `restores.state = 'failed' AND (
         != '${shippedSkillsPrefix}'
   )
   OR ${memoriesWrittenSinceSql}
-  OR EXISTS (
-    SELECT 1 FROM exports WHERE exports.id = restores.export AND ${staleSql}
-  )
 )`;
 
 /**
@@ -1401,6 +1403,14 @@ const giveUpRestores = (storage: DurableObjectStorage): void => {
       `UPDATE restores SET state = 'abandoned' WHERE ${givenUpSql} RETURNING export`
     )
     .toArray();
+  // Never started again: the cards its export gives go, but those it
+  // wrote something of, which the store holds by their name alone; their
+  // rows go with them (forget.ts) or with an erasure that takes them.
+  if (given.length > 0) {
+    storage.sql.exec(
+      "DELETE FROM restore_cards WHERE entity NOT IN (SELECT id FROM entities)"
+    );
+  }
   for (const restore of given) {
     // Adopted, and its check found a damaged part: what its files hold is
     // not all on record, so they go.

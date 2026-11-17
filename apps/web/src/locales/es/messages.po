@@ -2310,6 +2310,10 @@ msgstr "Un administrador"
 msgid "An admin abandoned the data change this version needs, so it can't be shared. Ask Grasp to build the change again."
 msgstr "Un administrador abandonó el cambio de datos que necesita esta versión, así que no se puede compartir. Pide a Grasp que vuelva a construir el cambio."
 
+#: src/settings/erasures.tsx
+msgid "An admin can still delete a specific document."
+msgstr "Un administrador todavía puede eliminar un documento concreto."
+
 #: src/routes/_shell.settings.profile.tsx
 msgid "An admin changes it, in Members and roles."
 msgstr "Lo cambia un administrador, en Miembros y roles."
@@ -3436,6 +3440,10 @@ msgstr "Mayúsculas, dígitos y guiones bajos, empezando por una letra, como CRM
 #: src/routes/_shell.settings.billing.tsx
 msgid "Card"
 msgstr "Tarjeta"
+
+#: src/settings/erasures.tsx
+msgid "Cards about them without the address they signed in with can remain. Those built from documents go when an admin deletes those documents, and those an App wrote go when that App’s data is reset."
+msgstr "Las fichas sobre esa persona sin la dirección con la que iniciaba sesión pueden quedar. Las creadas a partir de documentos desaparecen cuando un administrador borra esos documentos, y las que escribió una App, cuando se restablecen los datos de esa App."
 
 #: src/activity/audit-words.ts
 msgid "Carried out a confirmed write to an App, or failed to"
@@ -4911,6 +4919,10 @@ msgstr "Documentos"
 #: src/brain/sources-page.tsx
 msgid "Documents and workflow runs show here once they reach the Brain."
 msgstr "Los documentos y las ejecuciones de flujos de trabajo aparecen aquí cuando llegan al cerebro."
+
+#: src/settings/erasures.tsx
+msgid "Documents they or others shared with a team or the company stay, and their text can still name them."
+msgstr "Los documentos que esa persona u otras compartieron con un equipo o con la empresa se conservan, y su texto aún puede nombrarla."
 
 #: src/settings/stephen-settings.tsx
 msgid "Does things for people here"
@@ -16098,6 +16110,10 @@ msgstr "Lo que el cerebro guarda y puedes leer, y la búsqueda en ello tal como 
 #: src/brain/brain-log.tsx
 msgid "What the brain kept of it"
 msgstr "Lo que el cerebro guardó"
+
+#: src/settings/erasures.tsx
+msgid "What the Brain learned about them under the address they signed in with, and what they said, where others may read it"
+msgstr "Lo que el Brain aprendió sobre esa persona con la dirección con la que iniciaba sesión y lo que dijo, donde otros pueden leerlo"
 
 #: src/brain/memories-page.tsx
 msgid "What the Brain learns from sources and from what you tell it shows here."

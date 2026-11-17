@@ -419,6 +419,20 @@ export const told = async (ids: Ids) => {
   await agree(ids.rik, [fact("r1", "step", "Checks the queue at noon.")]);
 };
 
+/**
+ * The team with Sam in it too: with him seven tell their own work (the
+ * lead isn't counted), as a team needs before it has any claims at all
+ * (`teamMayClaim`), so the Brain and its page hold the team's claims.
+ */
+export const sevenTeam = async () =>
+  await team(["lea", "max", "mia", "mo", "noor", "pim", "rik", "sam"]);
+
+/** What the six tell (`told`), and Sam a step of his own. */
+export const sevenTold = async (ids: Ids) => {
+  await told(ids);
+  await agree(ids.sam, [fact("s1", "step", "Answers the phone.")]);
+};
+
 /** What the five who spoke of Zendesk said of it, in their own words. */
 export const zendeskSaid = [
   "Tickets arrive in Zendesk.",
@@ -654,7 +668,7 @@ export const intake = async (
 };
 
 /** Every record the brain keeps whose id is the onboarding's, for a team: as stored. */
-export const kept = async (ids: Ids) => {
+const records = async (ids: Ids) => {
   const { results } = await env.DB.prepare(
     "SELECT type, id, body FROM brain_records WHERE id LIKE 'onb-%' OR id = ? ORDER BY position"
   )
@@ -670,4 +684,24 @@ export const kept = async (ids: Ids) => {
     }
     return mine;
   });
+};
+
+/**
+ * Every record the brain keeps whose id is the onboarding's, for a team,
+ * as stored, and the team's claims standing now, which the onboarding
+ * keeps itself (GRA-1748): each as a statement of the team, by its id on
+ * the Brain page.
+ */
+export const kept = async (ids: Ids) => {
+  const claims = await onboardingStore(env).standingClaims();
+  return [
+    ...(await records(ids)),
+    ...claims
+      .filter(({ team: of }) => of === ids.team)
+      .map(({ source, kind, text }) => ({
+        type: "statement",
+        id: `onb-claim-${source}`,
+        body: JSON.stringify({ kind, text, teamIds: [`team-${ids.team}`] }),
+      })),
+  ];
 };

@@ -2310,6 +2310,10 @@ msgstr "An admin"
 msgid "An admin abandoned the data change this version needs, so it can't be shared. Ask Grasp to build the change again."
 msgstr "An admin abandoned the data change this version needs, so it can't be shared. Ask Grasp to build the change again."
 
+#: src/settings/erasures.tsx
+msgid "An admin can still delete a specific document."
+msgstr "An admin can still delete a specific document."
+
 #: src/routes/_shell.settings.profile.tsx
 msgid "An admin changes it, in Members and roles."
 msgstr "An admin changes it, in Members and roles."
@@ -3436,6 +3440,10 @@ msgstr "Capital letters, digits and underscores, starting with a letter, such as
 #: src/routes/_shell.settings.billing.tsx
 msgid "Card"
 msgstr "Card"
+
+#: src/settings/erasures.tsx
+msgid "Cards about them without the address they signed in with can remain. Those built from documents go when an admin deletes those documents, and those an App wrote go when that App’s data is reset."
+msgstr "Cards about them without the address they signed in with can remain. Those built from documents go when an admin deletes those documents, and those an App wrote go when that App’s data is reset."
 
 #: src/activity/audit-words.ts
 msgid "Carried out a confirmed write to an App, or failed to"
@@ -4911,6 +4919,10 @@ msgstr "Documents"
 #: src/brain/sources-page.tsx
 msgid "Documents and workflow runs show here once they reach the Brain."
 msgstr "Documents and workflow runs show here once they reach the Brain."
+
+#: src/settings/erasures.tsx
+msgid "Documents they or others shared with a team or the company stay, and their text can still name them."
+msgstr "Documents they or others shared with a team or the company stay, and their text can still name them."
 
 #: src/settings/stephen-settings.tsx
 msgid "Does things for people here"
@@ -16098,6 +16110,10 @@ msgstr "What the Brain keeps that you may read, and search through it as your ag
 #: src/brain/brain-log.tsx
 msgid "What the brain kept of it"
 msgstr "What the brain kept of it"
+
+#: src/settings/erasures.tsx
+msgid "What the Brain learned about them under the address they signed in with, and what they said, where others may read it"
+msgstr "What the Brain learned about them under the address they signed in with, and what they said, where others may read it"
 
 #: src/brain/memories-page.tsx
 msgid "What the Brain learns from sources and from what you tell it shows here."

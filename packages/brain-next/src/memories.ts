@@ -108,16 +108,22 @@ export const erasedBySql = (memory: string, erasure: string): string =>
 
 /**
  * Whether no erasure of the memory `alias`'s writer came after it was
- * learned (erasure.ts `eraseWriter`): a writer's erasure hides, from the
- * statement that records it on, every memory of that writer learned
- * before it, until the tick deletes them, also those an older copy of the
- * store comes back with (a restore of an export writes none: restore.ts
+ * learned (erasure.ts `eraseWriter`), and no person's erasure hides it
+ * (erasure.ts `erasePersonShared`, people.ts): a writer's erasure hides,
+ * from the statement that records it on, every memory of that writer
+ * learned before it, and a person's every memory it covers, until the
+ * tick deletes them, also those an older copy of the store comes back
+ * with (a restore of an export writes none: restore.ts
  * `passesOverMemory`); what the writer adds afterwards is learned after it.
  * Asked of every memory a statement may read, count, link or export.
  */
 export const unerasedSql = (alias: string): string => `(
-  ${alias}.writer_subject IS NULL OR NOT EXISTS (
+  (${alias}.writer_subject IS NULL OR NOT EXISTS (
     SELECT 1 FROM erasures AS gone WHERE ${erasedBySql(alias, "gone")}
+  ))
+  AND NOT EXISTS (
+    SELECT 1 FROM person_erasure_memories AS hidden
+    WHERE hidden.memory = ${alias}.row
   )
 )`;
 

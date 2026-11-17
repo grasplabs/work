@@ -1573,8 +1573,11 @@ export interface RestoreStatus {
   export: string;
   /**
    * Failed restores start again while the store holds nothing but what they
-   * wrote; abandoned once it took anything, or the ledger names what the
-   * export holds.
+   * wrote, also once a source's or a person's erasure names what the export
+   * holds (started again, they leave it out). Abandoned once the store took
+   * anything since (a version, or a write of memories; a writer's erasure,
+   * as an App's data reset, counts as one, as it moves the store's write
+   * stamp), or once its check found a part of the export damaged.
    */
   state: "running" | "done" | "failed" | "abandoned";
   restored: number;
@@ -1925,6 +1928,28 @@ export const identifierSchema = z.discriminatedUnion("type", [
 ]);
 export type Identifier = z.infer<typeof identifierSchema>;
 
+/**
+ * A person to erase from the shared store (`Brain.erasePersonShared`):
+ * the host's id for them, as it names them whose word a memory is or who
+ * confirmed one, and the exact identifiers the host verified as theirs
+ * (their sign-in email). A name is never one: only exact evidence says
+ * which entity is theirs.
+ */
+export const sharedPersonErasureSchema = z.strictObject({
+  person: principalSchema,
+  identifiers: z.array(identifierSchema).max(namesPerEntityMax),
+  reason: z.literal("person_erased"),
+});
+export type SharedPersonErasure = z.infer<typeof sharedPersonErasureSchema>;
+
+/**
+ * Who confirmed a memory (`Memory.confirmed.by`) once a person's erasure
+ * took who it was (`Brain.erasePersonShared`): the confirmation stands, so
+ * the memory doesn't turn contested because someone left, and no
+ * principal is ever this.
+ */
+export const erasedConfirmer = "";
+
 /** A short text a memory holds: some text, at most `max` characters. */
 const someText = (max: number) =>
   wellFormedString().regex(/\S/u, { message: "Holds no text" }).max(max);
@@ -2151,6 +2176,7 @@ export interface Memory {
   validUntil: Date | null;
   learnedAt: Date;
   endedAt: Date | null;
+  /** `by` is `erasedConfirmer` once an erasure took who it was. */
   confirmed: { by: string; at: Date } | null;
   contested: boolean;
 }
@@ -3043,6 +3069,35 @@ export interface Brain {
    */
   eraseWriter: (request: WriterErasure) => Promise<WriterErased>;
   /**
+   * Erases from the shared store what it derived about `person`, and what
+   * is in their own word, for an erasure of the person (erasure.ts
+   * `erasePersonShared`, people.ts): every memory whose speaker is them;
+   * on an entity of kind `person` holding one of `identifiers`, their card,
+   * every memory about it or relating to it, so it goes whole with its
+   * names; on any other entity holding one of them, that identifier alone.
+   * Hidden from every read at once, recorded in the ledger, deleted by the
+   * tick if not by the call. Their confirmations stand, the confirmer
+   * replaced by `erasedConfirmer`; every export started before it is
+   * stale, when it changed anything. Their identifiers stay closed: a
+   * write leaves one out and writes the rest, answering as for an
+   * identifier held nowhere; what is drawn from a source (extraction, a
+   * write resting on a version) also leaves out a person's card holding
+   * one, with what is about it or relates to it, and their word. A restore
+   * of an export (`startRestore`), before it writes any line and again on
+   * every start, closes each `person` card the export gives with one, and
+   * then passes over every line about it or relating to it, whichever
+   * comes first, and every line in their word; another entity only loses
+   * the identifier. Closed for good: nothing opens one again, also once
+   * the host gives the address to someone else. The sources stay. Safe
+   * to repeat: the same person is the same erasure, its identifiers those
+   * of its first call. Refused while a restore runs (`restoringNow`), to
+   * be asked again once it is through or given up; not held by one that
+   * failed.
+   * Returns only once its entry is in the ledger: one that throws must be
+   * repeated. The shared store's alone: a person's own store refuses.
+   */
+  erasePersonShared: (request: SharedPersonErasure) => Promise<void>;
+  /**
    * Whether a source was erased, from the store's record of its ledger
    * alone (`ErasureStatus`). For staff, who name what a client
    * gave them: it reads nothing but that record, so what was never erased
@@ -3119,8 +3174,11 @@ export interface Brain {
    * object or names one of another kind, a value is missing or given to a
    * relation, a source version isn't one this store holds (erased ones
    * included), a person's own store is given anyone else's readers, or the
-   * change was added before with other memories. The same change again
-   * answers what it added.
+   * change was added before with other memories. An identifier a person's
+   * erasure closed is left out (`erasePersonShared`); when the add is
+   * drawn from a source, so is that person's card with what is about it
+   * or relates to it, which the answer then doesn't name. The same change
+   * again answers what it added.
    */
   addMemories: (memories: NewMemories) => Promise<AddedMemories>;
   /**

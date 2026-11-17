@@ -1633,7 +1633,8 @@ const leavingNone = [
   "readProfile",
   // One read of which keys and memories an erasure took.
   "erasedOf",
-  // The shared store's alone: a person's own store refuses it.
+  // The shared store's alone: a person's own store refuses them.
+  "erasePersonShared",
   "eraseWriter",
   "erasureStatus",
   "exportFile",
