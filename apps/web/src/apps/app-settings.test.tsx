@@ -224,8 +224,18 @@ const opened = async (
 };
 
 /** The App's name field, in General. */
-const nameField = (): HTMLInputElement | null =>
-  document.querySelector<HTMLInputElement>("#app-name");
+/** The field its label names `label`, as a person finds it. */
+const fieldLabelled = (label: string): HTMLInputElement | null => {
+  const named = [...document.querySelectorAll("label")].find(
+    (each) => each.firstChild?.textContent?.trim() === label
+  );
+  const id = named?.htmlFor;
+  return id === undefined || id === ""
+    ? null
+    : document.querySelector<HTMLInputElement>(`[id="${id}"]`);
+};
+
+const nameField = (): HTMLInputElement | null => fieldLabelled("Name");
 
 const nameOf = (element: HTMLElement): string => element.textContent.trim();
 
@@ -319,7 +329,7 @@ describe(AppSettings, () => {
   it("shows someone who uses the App its settings to read, and nothing to change", async () => {
     await opened(fakeCore("user"));
 
-    const name = document.querySelector<HTMLInputElement>("#app-name");
+    const name = nameField();
     expect({
       name: name?.value,
       readOnly: name?.readOnly,
@@ -394,7 +404,7 @@ describe(AppSettings, () => {
     await opened(fakeCore("builder", { surfacesRefused: true }));
 
     expect({
-      name: document.querySelector<HTMLInputElement>("#app-name")?.value,
+      name: nameField()?.value,
       sections: sections().map(({ name }) => name),
     }).toStrictEqual({
       name: "Invoices",
