@@ -8,9 +8,6 @@ import type { ReactNode } from "react";
 import { useStill } from "./still-context";
 import { popoverStyles as styles } from "./styles";
 
-// Every prop is documented once, where it is first declared; the props on the docs page are read
-// from the type below, so they cannot drift from what the code accepts.
-
 /** Every prop a PopoverTitle takes. */
 export interface PopoverTitleProps {
   /** What the popover is for, in sentence case: it names the popover for a screen reader and an agent. */

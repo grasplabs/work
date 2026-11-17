@@ -4,4 +4,5 @@ export type {
   SelectLayoutStyle,
   SelectProps,
   SelectSize,
+  SelectVariant,
 } from "./select";

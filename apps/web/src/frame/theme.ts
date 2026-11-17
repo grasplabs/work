@@ -1,3 +1,6 @@
+import { isThemeId } from "../grasp/theme/index.ts";
+import type { ThemeId } from "../grasp/theme/index.ts";
+
 // Light, dark or the system's: a UI preference, the person's own, kept in
 // this browser's storage, one entry per person, so someone else signing in
 // here keeps theirs. public/theme.js applies it: `grasp-theme` is the choice
@@ -57,4 +60,48 @@ export const chooseTheme = (userId: string, theme: Theme): void => {
     // Storage blocked: theme.js follows the system whatever is chosen.
   }
   applyTheme(theme);
+};
+
+// The theme's colours (Grasp UI's themes: Evergreen, Pine, Paper), kept
+// beside the mode in the same way: one entry per person, and
+// `grasp-theme-id`, the one applied last, which theme.js puts on <html> as
+// `data-grasp-theme` before first paint. Not under Grasp UI's own
+// `grasp-theme` key, which holds the mode here.
+
+/** The colours theme.js applies. */
+const appliedIdKey = "grasp-theme-id";
+
+const personIdKey = (userId: string): string => `grasp-theme-id:${userId}`;
+
+/** Until someone chooses: Grasp as it is. */
+export const defaultThemeId: ThemeId = "evergreen";
+
+/** The colours `userId` chose in this browser; Evergreen until they choose. */
+export const readThemeId = (userId: string): ThemeId => {
+  try {
+    const kept = localStorage.getItem(personIdKey(userId));
+    return isThemeId(kept) ? kept : defaultThemeId;
+  } catch {
+    return defaultThemeId;
+  }
+};
+
+/** Has theme.js apply the colours `id` now, and on the next load before first paint. */
+export const applyThemeId = (id: ThemeId): void => {
+  try {
+    localStorage.setItem(appliedIdKey, id);
+  } catch {
+    // Storage blocked: theme.js shows Evergreen.
+  }
+  document.dispatchEvent(new Event("grasp-theme"));
+};
+
+/** Keeps the colours `id` as `userId`'s choice in this browser, and applies them. */
+export const chooseThemeId = (userId: string, id: ThemeId): void => {
+  try {
+    localStorage.setItem(personIdKey(userId), id);
+  } catch {
+    // Storage blocked: theme.js shows Evergreen whatever is chosen.
+  }
+  applyThemeId(id);
 };

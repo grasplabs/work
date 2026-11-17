@@ -26,5 +26,9 @@ export const intent = {
     { name: 'side="start"', when: "Places to go." },
     { name: 'size="md"', when: "The default: a form or details." },
     { name: 'size="wide"', when: "A layout of its own." },
+    {
+      name: 'size="full"',
+      when: "A chart or a table opened in full beside the page.",
+    },
   ],
 };

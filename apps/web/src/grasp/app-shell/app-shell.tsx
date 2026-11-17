@@ -1,43 +1,10 @@
-// AppShell: the frame a product's pages stand in, as Ruben drew it for Grasp's product (the product
-// repo, frame/app-frame.tsx and grasp/frame/page-bar.tsx, 14 November 2026). The Sidebar stands on
-// the window's ground at the start; the page is a white card on the same ground, a hair off the
-// window's edges and lifted by a hair. Across the card's top runs the page bar, flush on the card
-// with no edge: where the page is (its crumbs) at the start, what it is about after them, and the
-// page's actions at the end. Under it the page scrolls on its own, so the bar stays.
-//
-// The bar is the frame's (`bar="frame"`, from its props), a page's own (`bar="page"`: the page
-// renders AppShellBar at its top), or none (`bar="none"`, Chat's start over a backdrop). Beside the
-// card, at the end, the shell's panels (a docked chat, a second page) stand as a card of their own,
-// as wide as the host keeps them; `covered` puts them over the page, which fades out and goes
-// inert. Over the card's foot, centred, the dock (the chat's idle bar) stays put as the page
-// scrolls, and the page keeps room under its last row for it.
-//
-// On a narrow window (under 40rem, measured on the shell itself, so it also works in a narrow
-// panel) the card is the whole window, the sidebar folds away, and a menu button at the card's top
-// start opens the same sidebar in a Sheet from the start: in the frame's bar, at the start of a
-// page's own bar, or floating on its own with no bar. Following a link in it closes the sheet; so
-// does widening the window. Panels on a narrow window take the window under the bar's row, over
-// the page; the row stays, with the Menu button at its start and, at its end, a button that sets
-// the panels aside for the page and brings them back.
-// Folded on a wide window, the Sidebar's own button to open it again stands at the bar's start,
-// and the bar begins after it; with no bar it floats there, raised.
-//
-//   <AppShell
-//     sidebar={<Sidebar groups={...} />}
-//     crumbs={[{ label: "Projects", href: "/projects" }, { label: "Spring launch" }]}
-//     actions={<Button>Share</Button>}
-//   >
-//     <PageHeader title="Spring launch" />
-//   </AppShell>
-//
-// Plain semantic HTML: a header for the page bar, a nav for the crumbs, a main for the page. Every
-// value is a token (src/tokens). A caller may set layout only (the `style` prop).
 "use client";
 
 import * as stylex from "@stylexjs/stylex";
+import { DrawerClose as ClosePrimitive } from "@ui-sdk/react/drawer";
 import {
-  createElement,
   isValidElement,
+  useContext,
   useEffect,
   useId,
   useLayoutEffect,
@@ -45,63 +12,62 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import type { MouseEvent, ReactElement, ReactNode, RefObject } from "react";
+import type { MouseEvent, ReactNode, RefObject } from "react";
 
 import { Button } from "../button";
-import { PanelToggle, SidebarToggle } from "../icons";
+import { focus } from "../focus/focus";
+import { Cross, Icon, PanelToggle, SidebarToggle } from "../icons";
+import type { LayoutStyle } from "../layout/layout";
 import { simply } from "../motion/simply.stylex";
-import {
-  Sheet,
-  SheetClose,
-  SheetPanel,
-  SheetTitle,
-  SheetTrigger,
-} from "../sheet";
+import { Sheet, SheetPanel, SheetTitle, SheetTrigger } from "../sheet";
+import { SidebarShellProvider } from "../sidebar/shell";
 import { grasp, media } from "../tokens/tokens.stylex";
 import { PageBar } from "./bar";
 import type { AppShellCrumb } from "./bar";
 import { FOCUSABLE, placeOf } from "./focus-place";
-import { Panels } from "./panels";
-
-type Layout = string | number | null;
+import { Panels, ShellCoverContext } from "./panels";
+import type { Cover } from "./panels";
 
 /** What a caller may style: the shell's size and where it sits. Never its look. */
-export type AppShellLayoutStyle = stylex.StyleXStyles<{
-  width?: Layout;
-  maxWidth?: Layout;
-  height?: Layout;
-  minHeight?: Layout;
-  maxHeight?: Layout;
-  margin?: Layout;
-  gridArea?: Layout;
-}>;
+export type AppShellLayoutStyle = LayoutStyle;
 
 /** Every prop an AppShell takes. */
 export interface AppShellProps {
   /**
-   * The product's main navigation: a Sidebar. It stands down the start, or in a sheet when narrow.
+   * The product's main navigation: a Sidebar, or a component of your own that renders one (with its
+   * own data and hooks); the shell reaches the Sidebar inside through context, never by its type.
+   * It stands down the start, or in a sheet when narrow.
    * `false` for a page with none, such as a start page: the card takes the whole width, with no
    * menu button.
    */
   sidebar: ReactNode;
-  /** The page: usually a PageHeader, then what the page holds. */
+  /**
+   * The page: usually a PageHeader, then what the page holds. It stands in a block that scrolls
+   * under the bar. A page that fills the card (an open chat with its box at the foot) takes
+   * `height: 100%` with `page="whole"`, and lays out its own column inside.
+   */
   children: ReactNode;
   /**
    * Who draws the page bar: `frame`, the shell, from `crumbs`, `trailing` and `actions`; `page`, the
    * page itself, with an AppShellBar at its top; `none`, nobody, and the page has the whole card.
+   * The frame's bar with nothing to hold (no crumbs, trailing, actions, brand or middle, and no
+   * sidebar or panels) is not drawn: the page starts at the card's top with its usual room.
    * @default "frame"
    */
   bar?: "frame" | "page" | "none";
   /** Where the page is, in the frame's page bar: its steps, the page itself last. */
   crumbs?: readonly AppShellCrumb[];
   /**
-   * Which crumbs a narrow shell keeps: the page and the step before it, the page alone, or the
-   * first step alone. However many stay, the steps before the page give way before the page's own
-   * name is cut.
+   * Which crumbs a phone-wide card (under 40rem) keeps: the page and the step before it, the page
+   * alone, or the first step alone. At any width a step that does not fit whole goes, the first
+   * first, and the page's own name is cut only when no step is left beside it.
    * @default "last-two"
    */
   phoneCrumbs?: "last-two" | "last" | "first";
-  /** In the frame's page bar after the crumbs: where the page's subject stands, such as a status. */
+  /**
+   * In the frame's page bar after the crumbs: where the page's subject stands, such as a status.
+   * Where the page's name would be cut beside it, it gives way first, so the name is cut last.
+   */
   trailing?: ReactNode;
   /** At the end of the frame's page bar: the page's own buttons. */
   actions?: ReactNode;
@@ -113,6 +79,11 @@ export interface AppShellProps {
    * @default "40rem"
    */
   sheetBelow?: "40rem" | "64rem" | "68rem";
+  /**
+   * Above the page's bar, across the card: a notice for the whole product on every page, such as a
+   * Banner. The page's bar, or its floating Menu button, stands under it.
+   */
+  banner?: ReactNode;
   /** At the start of the frame's page bar, before the crumbs: the product's mark and name. */
   brand?: ReactNode;
   /**
@@ -171,9 +142,22 @@ export interface AppShellProps {
    * where the room beside the sidebar cannot hold it next to the panels at their least, the panels
    * cover the page as a card of their own, over the page faded out and out of reach, until there
    * is room again. Then they take the page's focus, and close on Escape or their close button
-   * (`onPanelsClose`).
+   * (`onPanelsClose`). While they go full screen or dock again, what is in them keeps the width it
+   * ends at and rides their moving start; a head whose end button should keep to the card's seen
+   * end takes `inline-size: 100cqi` (the card is a size container).
    */
   panels?: ReactNode;
+  /**
+   * Whether the panels show, when you keep `panels` given: they come in from the end as the page
+   * narrows beside them, and turning this off plays their leaving, after which `onPanelsGone` runs.
+   * Clearing `panels` itself still works, and takes them away at once.
+   * @default true
+   */
+  panelsOpen?: boolean;
+  /** Runs once the panels have arrived and stand still. */
+  onPanelsShown?: () => void;
+  /** Runs once the panels have left, after `panelsOpen` was turned off. */
+  onPanelsGone?: () => void;
   /**
    * Closes the panels while they cover the page for want of room: shows a close button on them
    * and closes them on Escape. Clear `panels` in it.
@@ -216,6 +200,18 @@ export interface AppShellProps {
   /** Over the card's foot, centred: what stays at hand as the page scrolls, such as the chat's idle bar. */
   dock?: ReactNode;
   /**
+   * Whether the dock shows, when you keep `dock` given: off, it sinks away and takes no presses or
+   * keys, and what is in it keeps its state; on, it rises back.
+   * @default true
+   */
+  dockShown?: boolean;
+  /**
+   * Where the dock stands across the card's foot: `center`, the chat's idle bar; `end`, a chat box
+   * floating at the foot's end. Either way it keeps the page's room from the card's sides.
+   * @default "center"
+   */
+  dockAlign?: "center" | "end";
+  /**
    * A panel lies over the whole page: the panels, or one of your own. The page fades out and takes
    * no presses or keys.
    * @default false
@@ -231,6 +227,8 @@ export interface AppShellProps {
    * parent that shrinks to fit its content (a flex item, a float), give it a width.
    */
   style?: AppShellLayoutStyle;
+  /** The same as `style`, by a name a style lint does not take for an inline style attribute. */
+  layout?: AppShellLayoutStyle;
 }
 
 // The width under which the sidebar folds into a sheet: the system's phone width, 40rem. A
@@ -317,6 +315,20 @@ const styles = stylex.create({
   },
   // No bar from the frame: the page has the card from its top.
   cardNoBar: { gridTemplateRows: "minmax(0, 1fr)" },
+  // A banner above them (row 5): a row of its own at the card's top.
+  cardBanner: { gridTemplateRows: "auto auto minmax(0, 1fr)" },
+  cardNoBarBanner: { gridTemplateRows: "auto minmax(0, 1fr)" },
+  banner: { minWidth: 0 },
+  // With a banner, a floating Menu or panels button stands in the page's own cell, at its top,
+  // instead of the card's: under the banner by the grid, its insets the same offsets as before.
+  floatUnderBanner: {
+    position: "relative",
+    gridRow: "-2 / -1",
+    gridColumn: "1",
+    alignSelf: "start",
+    justifySelf: "start",
+  },
+  floatUnderBannerEnd: { justifySelf: "end" },
   // Panels beside it: the gutter between the two cards is the handle that resizes them. On a narrow
   // shell the card spans the column, under the panels.
   cardBeside: {
@@ -358,6 +370,22 @@ const styles = stylex.create({
     transitionTimingFunction: grasp.ease,
   },
   faded: { opacity: 0, transitionDelay: "0s" },
+  // While panels beside the page go full screen or come back (panels.tsx `ShellCoverContext`), the
+  // page stays shown, at once and with no delay: the panels' card slides over it or off it, so its
+  // head and words are there from the first frame the card is seen, never an empty card (FRESH.md
+  // F82, batch 4). On a phone the panels are see-through over the page, which stays faded there.
+  shownMoving: {
+    opacity: { default: 1, [NARROW]: 0 },
+    transitionDuration: { default: "0s", [NARROW]: simply.ui },
+    transitionDelay: "0s",
+  },
+  shownMovingBar: {
+    opacity: 1,
+    transitionDuration: { default: "0s", [NARROW]: simply.ui },
+    transitionDelay: "0s",
+  },
+  // Once they lie over it, the page goes at once: the panels are see-through then.
+  goneCovered: { transitionDuration: { default: "0s", [NARROW]: simply.ui } },
   fadedNarrow: {
     opacity: { default: 1, [NARROW]: 0 },
     transitionDelay: { default: simply.stagger, [NARROW]: "0s" },
@@ -438,8 +466,14 @@ const styles = stylex.create({
     borderStyle: "solid",
     borderColor: "CanvasText",
   },
-  // The page under the bar, which scrolls on its own.
+  // The page under the bar, which scrolls on its own. A block, on purpose: as a flex column a child
+  // with a height of its own (a chart's box, a frame) shrank under it and the page stopped scrolling.
+  // A page that must fill the card (an open chat, its thread scrolling inside and its box at the
+  // foot) takes height 100% with page="whole" and lays its own column out inside (full-height.tsx).
   main: {
+    // Always the card's last row, so a banner's row above and a button laid in its cell never move it.
+    gridRow: "-2 / -1",
+    gridColumn: "1",
     minWidth: 0,
     minHeight: 0,
     overflowY: "auto",
@@ -456,18 +490,50 @@ const styles = stylex.create({
   // No bar: the page has the whole card, edge to edge, such as a backdrop.
   mainWhole: { paddingBlockStart: 0, paddingBlockEnd: 0, paddingInline: 0 },
   roomForChat: { paddingBlockEnd: grasp.shellPageRoomChat },
-  // The dock: over the card's foot, centred, clear of its edges. It lets presses through where it
-  // has nothing.
+  // The dock: over the card's foot, centred, its sides the page's room in from the card's (FLAWS.md
+  // F36: at a phone's width it stood 8px wider than the words each side). It lets presses through
+  // where it has nothing.
   dock: {
     position: "absolute",
-    insetInline: grasp.space4,
+    insetInline: grasp.shellPageInline,
     insetBlockEnd: grasp.space4,
     zIndex: grasp.shellPageLayer,
     display: "flex",
     justifyContent: "center",
     pointerEvents: "none",
   },
+  // At the foot's end (dockAlign="end"): a chat box floating there, its end where the words end (F37).
+  dockEnd: { justifyContent: "flex-end" },
   dockHeld: { maxWidth: "100%", pointerEvents: "auto" },
+  // The dock comes up and sinks away as a movement; away, nothing in it can be seen or reached.
+  dockMoves: {
+    transitionProperty: "opacity, translate, visibility",
+    transitionDuration: simply.ui,
+    transitionTimingFunction: grasp.ease,
+  },
+  dockAway: {
+    opacity: 0,
+    translate: `0 ${grasp.space2}`,
+    visibility: "hidden",
+    transitionDuration: simply.leave,
+  },
+  // Behind the dock the page fades into the card's ground (F36). Taller than the dock by a group's
+  // room, and whole by the dock's top edge: the page's words are gone before the dock begins, so no
+  // line is cut by its edge. At the page's end, where the room below is clear, it lies on nothing.
+  dockFade: {
+    position: "absolute",
+    insetInline: 0,
+    insetBlockEnd: 0,
+    height: `calc(${grasp.shellPageRoomChat} + ${grasp.space8})`,
+    zIndex: grasp.shellPageLayer,
+    pointerEvents: "none",
+    backgroundImage: `linear-gradient(to bottom, transparent, ${grasp.shellCard} calc(100% - ${grasp.space4} - ${grasp.space12} - ${grasp.space2}))`,
+    transitionProperty: "opacity",
+    transitionDuration: simply.ui,
+    transitionTimingFunction: grasp.ease,
+    display: { default: "block", [FORCED]: "none" },
+  },
+  dockFadeAway: { opacity: 0 },
   // In the sheet the sidebar runs the rest of the panel, on its own ground from edge to edge, so
   // the sheet reads as the sidebar itself, and scrolls when the links outrun the window.
   sheetSidebar: {
@@ -477,10 +543,48 @@ const styles = stylex.create({
     overflowY: "auto",
     scrollbarWidth: "none",
     backgroundColor: grasp.shellGround,
-    // The panel's own corners, all four: the sidebar's head is the menu's top now (no title bar
-    // above it), so its ground must not square off the top corners either (Ruben, 15 November).
     borderRadius: "inherit",
     cornerShape: "inherit",
+    // The sidebar's head stands on the bar's row the menu opens from (F17): the row's centre below
+    // the shell's top (measured from the Menu button, useMenuBounds; else the card's inset and half
+    // the bar) less the sheet's own inset and half the head's icon button (a tap's on a touch
+    // screen), never under nothing. A banner's height is not counted (placeMenu, F59).
+    "--grasp-shell-head": {
+      default: `max(0px, calc(var(--grasp-shell-menu-row, ${grasp.shellInset} + ${grasp.shellBar} / 2) - ${grasp.sheetInset} - ${grasp.shellIconButton} / 2))`,
+      [media.coarse]: `max(0px, calc(var(--grasp-shell-menu-row, ${grasp.shellInset} + ${grasp.shellBar} / 2) - ${grasp.sheetInset} - ${grasp.tap} / 2))`,
+    },
+  },
+  // The menu's close, in the sidebar's head beside its search: the head's own icon button look
+  // (sidebar.tsx iconButton), one ink, corner, size and fill under the pointer with it (F34).
+  sheetClose: {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+    boxSizing: "border-box",
+    width: { default: grasp.shellIconButton, [media.coarse]: grasp.tap },
+    height: { default: grasp.shellIconButton, [media.coarse]: grasp.tap },
+    padding: 0,
+    borderWidth: { default: 0, [FORCED]: grasp.hairline },
+    borderStyle: "solid",
+    borderColor: "ButtonText",
+    borderRadius: `min(${grasp.corner}, calc(${grasp.shellIconButton} / 2))`,
+    cornerShape: grasp.cornerShape,
+    color: {
+      default: grasp.shellTextSecondary,
+      [media.hover]: {
+        default: grasp.shellTextSecondary,
+        ":hover": grasp.shellText,
+      },
+    },
+    backgroundColor: {
+      default: "transparent",
+      [media.hover]: { default: "transparent", ":hover": grasp.shellHover },
+    },
+    cursor: "pointer",
+    transitionProperty: "color, background-color",
+    transitionDuration: grasp.shellAnswer,
+    transitionTimingFunction: grasp.ease,
   },
   // Before the page wakes, or with no script at all: the browser's own popover holds the sidebar,
   // down the start, over the page; it opens from the menu button and closes on Escape or a press
@@ -533,65 +637,74 @@ const watchFold = (
   };
 };
 
-/** The sidebar in the sheet, asked to fill it through its own `fill` prop, and open there, though
- * it is folded beside the page. */
+/** The sidebar in the sheet, asked through the shell's context (sidebar/shell.ts) to fill it and
+ * stay open there, though it is folded beside the page; the menu's head always says which product
+ * it is, so the brand goes there wherever it stands beside the page (F18). Any element: a bare
+ * Sidebar or a product's own component that renders one. */
 const Filled = ({
   sidebar,
+  brand,
   headEnd,
   headBelow,
 }: {
-  sidebar: ReactElement<{
-    fill?: boolean;
-    headEnd?: ReactNode;
-    headBelow?: ReactNode;
-  }>;
+  sidebar: ReactNode;
+  brand?: ReactNode;
   headEnd?: ReactNode;
   headBelow?: ReactNode;
-}) =>
-  createElement(sidebar.type, {
-    ...sidebar.props,
-    fill: true,
-    open: true,
-    defaultOpen: true,
-    ...(headEnd === undefined ? {} : { headEnd }),
-    ...(headBelow === undefined ? {} : { headBelow }),
-  });
-
-/** The sidebar given the brand for its head, when the brand follows the sidebar. */
-const withBrand = (
-  sidebar: ReactNode,
-  { brand, brandIn }: { brand?: ReactNode; brandIn?: "bar" | "sidebar" }
-): ReactNode =>
-  brandIn === "sidebar" &&
-  brand !== undefined &&
-  isValidElement<{ brand?: ReactNode }>(sidebar)
-    ? createElement(sidebar.type, { ...sidebar.props, brand })
-    : sidebar;
+}) => (
+  <SidebarShellProvider value={{ place: "sheet", brand, headEnd, headBelow }}>
+    {sidebar}
+  </SidebarShellProvider>
+);
 
 /** The sidebar in its column. Folded, its reopen button stands in the white page bar, so it is the
- * quiet one; with no bar it floats over the page, so it keeps its raised look. */
+ * quiet one; with no bar it floats over the page, so it keeps its raised look. The shell hears each
+ * fold through the context, whoever keeps the sidebar's state. */
 const InColumn = ({
   sidebar,
   look,
+  brand,
+  peekBrand,
   onFold,
+  onPeek,
 }: {
-  sidebar: ReactElement<{
-    reopenLook?: "raised" | "quiet";
-    cover?: boolean;
-    onOpenChange?: (open: boolean) => void;
-  }>;
+  sidebar: ReactNode;
   look: "raised" | "quiet";
+  brand?: ReactNode;
+  peekBrand?: ReactNode;
   onFold: (open: boolean) => void;
-}) =>
-  createElement(sidebar.type, {
-    reopenLook: look,
-    cover: false,
-    ...sidebar.props,
-    onOpenChange: (open: boolean) => {
-      onFold(open);
-      sidebar.props.onOpenChange?.(open);
-    },
-  });
+  onPeek: (peeking: boolean) => void;
+}) => (
+  <SidebarShellProvider
+    value={{
+      place: "column",
+      reopenLook: look,
+      brand,
+      peekBrand,
+      onOpen: onFold,
+      onPeek,
+    }}
+  >
+    {sidebar}
+  </SidebarShellProvider>
+);
+
+/** An attribute that is there, empty, while `on`, and gone otherwise. */
+const presence = (on: boolean) => (on ? "" : undefined);
+
+/** The brands the sidebar in its column is handed: its own head's where the brand stands in the
+ * sidebar; else, where the frame's bar holds it, the bar's for the head of a peek that covers the bar
+ * (FRESH.md F76). */
+const columnBrands = (
+  bar: AppShellProps["bar"],
+  brand: ReactNode,
+  brandIn: AppShellProps["brandIn"]
+) => {
+  if (brandIn === "sidebar") {
+    return { brand, peekBrand: undefined };
+  }
+  return { brand: undefined, peekBrand: bar === "frame" ? brand : undefined };
+};
 
 /** Whether the sidebar in the column is open, as the shell knows it: its own `open` when the page
  * keeps it, else followed through its fold. The shell's grid says so (data-sidebar-folded), so the
@@ -688,10 +801,12 @@ const useAwake = () =>
 /** The menu with no script: a plain button that opens the browser's own popover of the sidebar. */
 const AsleepMenu = ({
   sidebar,
+  brand,
   label,
   top,
 }: {
   sidebar: ReactNode;
+  brand?: ReactNode;
   label: string;
   top: ReactNode;
 }) => {
@@ -720,21 +835,165 @@ const AsleepMenu = ({
         {top !== undefined && (
           <div {...stylex.props(styles.sheetTop)}>{top}</div>
         )}
-        {isValidElement<{ fill?: boolean }>(sidebar) ? (
-          <Filled sidebar={sidebar} />
-        ) : (
-          sidebar
-        )}
+        <Filled sidebar={sidebar} brand={brand} />
       </div>
     </>
   );
 };
 
+// Where the shell stands in the window, for the menu and its shade to keep to it (F33): the sheet
+// stands in the browser's top layer, over the window, and a shell may be narrower (an example, a
+// pane). Read while the menu is open, on the shell's own element, from which the sheet inherits it.
+// And the centre of the Menu button's row, below the shell's top, for the menu's head to stand on.
+const BOUNDS = [
+  "--grasp-shell-menu-start",
+  "--grasp-shell-menu-top",
+  "--grasp-shell-menu-width",
+  "--grasp-shell-menu-height",
+  "--grasp-shell-menu-row",
+  "--grasp-shell-menu-corner",
+  "--grasp-shell-menu-corner-shape",
+] as const;
+
+/** How many boxes up from the shell a window round it is looked for. */
+const WINDOW_DEPTH = 4;
+
+/** The corner of the window the shell fills, when it has one (F62): the nearest box from the shell
+ * up that clips what is in it, is rounded and stands where the shell does (an example's window, a
+ * host's pane). The menu's shade takes it, so it never shows past the window's round corners. */
+const windowCorner = (
+  element: HTMLElement,
+  box: DOMRect
+): [string | null, string | null] => {
+  let at: HTMLElement | null = element;
+  for (let depth = 0; at !== null && depth < WINDOW_DEPTH; depth += 1) {
+    const style = getComputedStyle(at);
+    const rect = at.getBoundingClientRect();
+    const same =
+      Math.abs(rect.left - box.left) < 1 &&
+      Math.abs(rect.top - box.top) < 1 &&
+      Math.abs(rect.width - box.width) < 1 &&
+      Math.abs(rect.height - box.height) < 1;
+    if (!same) {
+      return [null, null];
+    }
+    // One corner read for all four: a window's corners are one.
+    const radius = style.borderTopLeftRadius;
+    if (style.overflowX !== "visible" && radius !== "" && radius !== "0px") {
+      const shape = style.getPropertyValue("corner-top-left-shape");
+      return [radius, shape === "" ? null : shape];
+    }
+    at = at.parentElement;
+  }
+  return [null, null];
+};
+
+/** How tall the banner above the Menu button's row is, when the card has one: 0 without. */
+const bannerAbove = (button: HTMLElement | null) => {
+  const banner = button
+    ?.closest("[data-slot=app-shell-card]")
+    ?.querySelector(":scope > [data-slot=app-shell-banner]");
+  return banner === null || banner === undefined
+    ? 0
+    : banner.getBoundingClientRect().height;
+};
+
+/** A length in pixels, or nothing. */
+const px = (value: number | null) => (value === null ? null : `${value}px`);
+
+/** Writes where the shell stands, from the window's start edge (its right one, right to left), and
+ * where the Menu button's row is centred in it. A banner above the row is left out (F59): the sheet
+ * covers the banner too, so its head stands at the sheet's top, as it does with no banner, never on
+ * the row the banner pushed down with an empty band above it. */
+const placeMenu = (element: HTMLElement, button: HTMLElement | null) => {
+  const box = element.getBoundingClientRect();
+  const start =
+    getComputedStyle(element).direction === "rtl"
+      ? document.documentElement.clientWidth - box.right
+      : box.left;
+  const at = button?.getBoundingClientRect();
+  const row =
+    at === undefined || at.height === 0
+      ? null
+      : at.top + at.height / 2 - box.top - bannerAbove(button);
+  const [corner, shape] = windowCorner(element, box);
+  const values = [
+    px(start),
+    px(box.top),
+    px(box.width),
+    px(box.height),
+    px(row),
+    corner,
+    shape,
+  ];
+  for (const [index, name] of BOUNDS.entries()) {
+    const value = values[index];
+    if (value === null || value === undefined) {
+      element.style.removeProperty(name);
+    } else {
+      element.style.setProperty(name, value);
+    }
+  }
+};
+
+/** The cleanup of an effect that watched nothing. */
+const keepOpen = () => {
+  // Nothing was watched, so nothing stops.
+};
+
+/** While the menu is open, keeps where the shell stands written on it: before the sheet is first
+ * painted, and again as the shell or the window changes. */
+const useMenuBounds = (
+  open: boolean,
+  shell: RefObject<HTMLDivElement | null>,
+  menu: RefObject<HTMLSpanElement | null>
+) => {
+  useLayoutEffect(() => {
+    const element = shell.current;
+    if (!open || element === null) {
+      return keepOpen;
+    }
+    const place = () => {
+      placeMenu(element, menu.current);
+    };
+    place();
+    const watch =
+      typeof ResizeObserver === "undefined" ? null : new ResizeObserver(place);
+    watch?.observe(element);
+    window.addEventListener("resize", place);
+    window.addEventListener("scroll", place, true);
+    return () => {
+      watch?.disconnect();
+      window.removeEventListener("resize", place);
+      window.removeEventListener("scroll", place, true);
+    };
+  }, [open, shell, menu]);
+};
+
+/** The menu's close, in the look of the sidebar's head it stands in (F34). */
+const MenuClose = ({ label }: { label: string }) => (
+  <ClosePrimitive
+    render={(props: Record<string, unknown>) => (
+      <button
+        type="button"
+        {...props}
+        aria-label={label}
+        title={label}
+        {...stylex.props(styles.sheetClose, focus.ring)}
+      >
+        <Icon icon={Cross} />
+      </button>
+    )}
+  />
+);
+
 /** The phone's Menu button and the sheet it opens with the sidebar in it. */
 const ShellMenu = ({
   shell,
   sidebar,
+  brand,
   bar,
+  underBanner = false,
   label,
   closeLabel = "Close the menu",
   middle,
@@ -747,7 +1006,11 @@ const ShellMenu = ({
   setOpen: (open: boolean) => void;
   shell: RefObject<HTMLDivElement | null>;
   sidebar: ReactNode;
+  /** The product's mark and name for the menu's head, wherever the brand stands beside the page. */
+  brand?: ReactNode;
   bar: "frame" | "page" | "none";
+  /** It floats (no frame bar) under a banner: it stands in the page's cell (floatUnderBanner). */
+  underBanner?: boolean;
   label: string;
   closeLabel?: string;
   /** The bar's middle: at the top of the menu, above the sidebar, when `phoneMiddle` is `sheet`. */
@@ -760,6 +1023,7 @@ const ShellMenu = ({
   const [byPointer, setByPointer] = useState(false);
   const menu = useRef<HTMLSpanElement>(null);
   const awake = useAwake();
+  useMenuBounds(open, shell, menu);
 
   // Widened past the fold, the menu button is hidden and the sidebar is back in its column: the
   // sheet has no reason to stay. The CSS decides the fold; this only reads what it decided.
@@ -787,8 +1051,6 @@ const ShellMenu = ({
       setOpen(false);
     });
   };
-  // On a phone the bar's middle stands under the sidebar's head in the menu (Ruben, 15 November:
-  // the head first, then the switch, across the menu's width).
   const sheetTop =
     top === undefined ? undefined : (
       <div
@@ -813,6 +1075,7 @@ const ShellMenu = ({
         bar === "frame" && styles.menuInBar,
         bar === "page" && styles.menuOverBar,
         bar === "none" && styles.menuRaised,
+        underBanner && styles.floatUnderBanner,
         stylex.defaultMarker()
       )}
     >
@@ -841,6 +1104,7 @@ const ShellMenu = ({
           <SheetPanel
             close="none"
             corner="shell"
+            bounds="shell"
             initialFocus={byPointer ? "content" : "auto"}
           >
             <SheetTitle hidden>{label}</SheetTitle>
@@ -852,20 +1116,17 @@ const ShellMenu = ({
               onClick={followed}
               {...stylex.props(styles.sheetSidebar)}
             >
-              {isValidElement<{ fill?: boolean }>(sidebar) ? (
-                <Filled
-                  sidebar={sidebar}
-                  headEnd={<SheetClose label={closeLabel} size="xs" />}
-                  headBelow={sheetTop}
-                />
-              ) : (
-                sidebar
-              )}
+              <Filled
+                sidebar={sidebar}
+                brand={brand}
+                headEnd={<MenuClose label={closeLabel} />}
+                headBelow={sheetTop}
+              />
             </div>
           </SheetPanel>
         </Sheet>
       ) : (
-        <AsleepMenu sidebar={sidebar} label={label} top={top} />
+        <AsleepMenu sidebar={sidebar} brand={brand} label={label} top={top} />
       )}
     </span>
   );
@@ -879,11 +1140,13 @@ const PanelsToggle = ({
   label,
   aside,
   setAside,
+  underBanner = false,
 }: {
   bar: "frame" | "page" | "none";
   label: string;
   aside: boolean;
   setAside: (aside: boolean) => void;
+  underBanner?: boolean;
 }) => (
   <span
     data-slot="app-shell-panels-toggle"
@@ -891,7 +1154,9 @@ const PanelsToggle = ({
       styles.toggle,
       bar === "frame" && styles.menuInBar,
       bar === "page" && styles.toggleOverBar,
-      bar === "none" && styles.toggleRaised
+      bar === "none" && styles.toggleRaised,
+      underBanner && styles.floatUnderBanner,
+      underBanner && styles.floatUnderBannerEnd
     )}
   >
     <Button
@@ -927,6 +1192,9 @@ type CardProps = Pick<
   | "menuLabel"
   | "menuCloseLabel"
   | "dock"
+  | "dockShown"
+  | "dockAlign"
+  | "banner"
 > & {
   sidebar: ReactNode;
   bar: "frame" | "page" | "none";
@@ -941,6 +1209,10 @@ type CardProps = Pick<
   /** The page under the panels: on a phone the bar's row stays, the page goes under them. */
   under: boolean;
   covered: boolean;
+  /** The card is laid over the column, out of its side: panels cover it for want of room, or before
+   * the column is measured. Full screen by the host's word, its side takes the column instead, so
+   * the change is a movement (F13). */
+  spans: boolean;
   /** On a phone, the panels set aside for the page, and the button that does it. */
   aside: boolean;
   setAside: (aside: boolean) => void;
@@ -956,25 +1228,37 @@ const fadesOf = ({
   guessing,
   covered,
   aside,
+  cover,
 }: {
   paneled: boolean;
   guessing: boolean;
   covered: boolean;
   aside: boolean;
-}) => ({
-  fading: [
-    styles.fades,
-    paneled && !aside && styles.fadedNarrow,
-    guessing && styles.fadedGuess,
-    covered && !aside && styles.faded,
-    covered && aside && styles.fadedWide,
-  ],
-  barFading: [
-    styles.fades,
-    guessing && styles.fadedGuessWide,
-    covered && (paneled ? styles.fadedWide : styles.faded),
-  ],
-});
+  cover: Cover;
+}) => {
+  // The panels moving between beside the page and over it: the page stays shown (F82, batch 4).
+  const moving =
+    cover === "lifting" || cover === "covering" || cover === "docking";
+  const settled = cover === "covered" && styles.goneCovered;
+  return {
+    fading: [
+      styles.fades,
+      paneled && !aside && styles.fadedNarrow,
+      guessing && styles.fadedGuess,
+      covered && !aside && styles.faded,
+      covered && aside && styles.fadedWide,
+      moving && !aside && styles.shownMoving,
+      settled,
+    ],
+    barFading: [
+      styles.fades,
+      guessing && styles.fadedGuessWide,
+      covered && (paneled ? styles.fadedWide : styles.faded),
+      moving && styles.shownMovingBar,
+      settled,
+    ],
+  };
+};
 
 /** Notes where focus stands in the card, or the last thing pressed in it, as the card goes. */
 const notePlace = (card: HTMLElement, keep: RefObject<number>) => {
@@ -998,6 +1282,123 @@ const notePlace = (card: HTMLElement, keep: RefObject<number>) => {
   };
 };
 
+/** The dock over the card's foot, and the fade behind it: it sinks away while it is not shown. */
+const ShellDock = ({
+  dock,
+  shown = true,
+  align = "center",
+  under,
+  inert,
+  fading,
+}: {
+  dock: ReactNode;
+  shown?: boolean;
+  align?: "center" | "end";
+  under: boolean;
+  inert: boolean;
+  fading: ReturnType<typeof fadesOf>["fading"];
+}) => (
+  <>
+    <div
+      aria-hidden="true"
+      data-slot="app-shell-dock-fade"
+      {...stylex.props(
+        styles.dockFade,
+        (!shown || under) && styles.dockFadeAway
+      )}
+    />
+    <div
+      data-slot="app-shell-dock"
+      data-shown={shown ? "" : undefined}
+      inert={inert || !shown}
+      {...stylex.props(styles.dock, align === "end" && styles.dockEnd, fading)}
+    >
+      <div
+        {...stylex.props(
+          styles.dockHeld,
+          styles.dockMoves,
+          !shown && styles.dockAway
+        )}
+      >
+        {dock}
+      </div>
+    </div>
+  </>
+);
+
+/** Whether there are panels to stand beside the page: given, and not turned off. */
+const hasPanels = (panels: ReactNode, open: boolean | undefined) =>
+  panels !== undefined && panels !== null && open !== false;
+
+/** The card's rows: a banner's at the top when there is one, the frame's bar when it draws it, then the page. */
+const cardRowsOf = (framed: boolean, banner: ReactNode) => {
+  if (banner === undefined || banner === null || banner === false) {
+    return [!framed && styles.cardNoBar];
+  }
+  return [framed ? styles.cardBanner : styles.cardNoBarBanner];
+};
+
+/** Whether a part of the bar is left out. */
+const isNone = (node: ReactNode) =>
+  node === undefined || node === null || node === false;
+
+/** Whether the frame's bar would hold nothing (F05): no crumbs, nothing trailing them, no actions,
+ * no middle, no brand in it, and no sidebar or panels to put a button at its ends. It is not drawn
+ * then (an empty 48px header was an empty banner landmark): the page has the card from its top, with
+ * its usual room above its words. */
+const frameBarEmpty = ({
+  sidebar,
+  paneled,
+  crumbs,
+  trailing,
+  actions,
+  middle,
+  brand,
+  brandIn,
+}: Pick<
+  CardProps,
+  | "sidebar"
+  | "paneled"
+  | "crumbs"
+  | "trailing"
+  | "actions"
+  | "middle"
+  | "brand"
+  | "brandIn"
+>) =>
+  sidebar === false &&
+  !paneled &&
+  (crumbs === undefined || crumbs.length === 0) &&
+  isNone(trailing) &&
+  isNone(actions) &&
+  isNone(middle) &&
+  (isNone(brand) || brandIn === "sidebar");
+
+/** Whether a floating Menu or panels button stands under a banner: a banner, and no frame bar to hold them. */
+const floatsUnderBanner = (bar: "frame" | "page" | "none", banner: ReactNode) =>
+  bar !== "frame" &&
+  banner !== undefined &&
+  banner !== null &&
+  banner !== false;
+
+/** The banner's row, when there is one. */
+const BannerRow = ({ banner }: { banner: ReactNode }) =>
+  banner === undefined || banner === null || banner === false ? null : (
+    // Marked, so a Banner in it can square its corners to the card's (banner.tsx, FRESH.md F71).
+    <div
+      data-slot="app-shell-banner"
+      {...stylex.props(styles.banner, stylex.defaultMarker())}
+    >
+      {banner}
+    </div>
+  );
+
+/** Whether the page has the whole card, edge to edge, with no side room: no bar, or `page="whole"`. */
+const isWhole = (
+  bar: "frame" | "page" | "none",
+  page: "padded" | "whole" | undefined
+) => bar === "none" || page === "whole";
+
 /** The white card: the frame's bar or the floating Menu button, the page, and the dock. */
 const ShellCard = ({
   sidebar,
@@ -1010,6 +1411,7 @@ const ShellCard = ({
   inertCard,
   under,
   covered,
+  spans,
   aside,
   setAside,
   panelsToggleLabel,
@@ -1027,16 +1429,44 @@ const ShellCard = ({
   menuLabel = "Menu",
   menuCloseLabel,
   dock,
+  dockShown,
+  dockAlign,
   menuOpen,
   setMenuOpen,
+  banner,
 }: CardProps) => {
   const room = roomBelow ?? (dock === undefined ? "page" : "chat");
-  const { fading, barFading } = fadesOf({ paneled, guessing, covered, aside });
+  const whole = isWhole(bar, page);
+  const framed =
+    bar === "frame" &&
+    !frameBarEmpty({
+      sidebar,
+      paneled,
+      crumbs,
+      trailing,
+      actions,
+      middle,
+      brand,
+      brandIn,
+    });
+  const underBanner = floatsUnderBanner(bar, banner);
+  const cover = useContext(ShellCoverContext);
+  const { fading, barFading } = fadesOf({
+    paneled,
+    guessing,
+    covered,
+    aside,
+    cover,
+  });
+  // The menu covers the bar, its brand too: the menu's head says which product it is (F18), whichever
+  // place the brand has beside the page.
   const menuButton = (
     <ShellMenu
       shell={shell}
       sidebar={sidebar}
+      brand={brand}
       bar={bar}
+      underBanner={underBanner}
       label={menuLabel}
       closeLabel={menuCloseLabel}
       middle={middle}
@@ -1053,12 +1483,13 @@ const ShellCard = ({
       label={panelsToggleLabel}
       aside={aside}
       setAside={setAside}
+      underBanner={underBanner}
     />
   ) : undefined;
   const own = useRef<HTMLDivElement>(null);
 
-  // Panels coming or going draw the card again in a new place: note where focus stood in it as it
-  // goes, so the panels can take it from there and give it back there.
+  // Note where focus stands in the card, so panels that come to cover it can take focus from there
+  // and give it back there. (The card itself stays the same element: panels.tsx.)
   // A press counts too: not every browser focuses a button it presses.
   useLayoutEffect(() => {
     const element = own.current;
@@ -1073,13 +1504,14 @@ const ShellCard = ({
       inert={inertCard}
       {...stylex.props(
         styles.card,
-        bar !== "frame" && styles.cardNoBar,
-        paneled && styles.cardBeside,
+        ...cardRowsOf(framed, banner),
+        styles.cardBeside,
         guessing && styles.cardGuess,
-        covered && styles.cardCovered
+        spans && styles.cardCovered
       )}
     >
-      {bar === "frame" ? (
+      <BannerRow banner={banner} />
+      {framed ? (
         <div {...stylex.props(barFading)}>
           <PageBar
             look="frame"
@@ -1101,27 +1533,32 @@ const ShellCard = ({
           {toggle}
         </>
       )}
+      {/* A whole page has no side room: a page's own bar at its top (bar.tsx pageBar) does not reach
+          out over room that is not there (row 33). */}
       <main
         data-slot="app-shell-page"
+        data-page-whole={whole ? "" : undefined}
         inert={pageInert}
         {...stylex.props(
           styles.main,
           room === "chat" && styles.roomForChat,
           bar === "page" && styles.mainUnderOwnBar,
-          (bar === "none" || page === "whole") && styles.mainWhole,
-          fading
+          whole && styles.mainWhole,
+          fading,
+          stylex.defaultMarker()
         )}
       >
         {children}
       </main>
       {dock !== undefined && (
-        <div
-          data-slot="app-shell-dock"
+        <ShellDock
+          dock={dock}
+          shown={dockShown}
+          align={dockAlign}
+          under={under}
           inert={pageInert}
-          {...stylex.props(styles.dock, fading)}
-        >
-          <div {...stylex.props(styles.dockHeld)}>{dock}</div>
-        </div>
+          fading={fading}
+        />
       )}
     </div>
   );
@@ -1189,24 +1626,29 @@ export const AppShell = ({
   sidebar: given,
   bar = "frame",
   panels,
+  panelsOpen,
+  onPanelsShown,
+  onPanelsGone,
   panelWidth = PANEL_WIDTH,
   onPanelWidthChange,
   minPanelWidth = 340,
   maxPanelWidth = 720,
-  panelResizeLabel = "Resize the panel",
+  panelResizeLabel,
   onPanelsClose,
   panelsCloseLabel = "Close the panel",
   panelsToggleLabel = "Show or hide the panel",
   covered = false,
   inert = false,
   sheetBelow,
-  style,
+  style: styleProp,
+  layout,
   menuOpen: menuOpenGiven,
   onMenuOpenChange,
   ...page
 }: AppShellProps) => {
-  const sidebar = withBrand(given, page);
+  const sidebar = given;
   const [sidebarOpen, setSidebarOpen] = useSidebarOpen(sidebar);
+  const [sidebarPeeking, setSidebarPeeking] = useState(false);
   const look = shellLook(sheetBelow, sidebar, sidebarOpen);
   // The phone's menu, open or not: kept here so the grid can say so to the bar's brand; the page's
   // own `menuOpen` when it keeps it (F47).
@@ -1225,7 +1667,7 @@ export const AppShell = ({
   const shell = useRef<HTMLDivElement>(null);
   const keep = useRef(-1);
 
-  const paneled = panels !== undefined && panels !== null;
+  const paneled = hasPanels(panels, panelsOpen);
   const { aside, setAside, over, guessing, phone, inertCard, under } =
     usePanelsPlace({ paneled, covered, crowded, narrow });
 
@@ -1241,6 +1683,7 @@ export const AppShell = ({
       inertCard={inertCard}
       under={under}
       covered={over}
+      spans={over && !(covered && crowded === false)}
       aside={phone && aside}
       setAside={setAside}
       panelsToggleLabel={panelsToggleLabel}
@@ -1254,47 +1697,47 @@ export const AppShell = ({
       ref={shell}
       data-slot="app-shell"
       inert={inert}
-      {...stylex.props(...look.shell, style)}
+      {...stylex.props(...look.shell, layout ?? styleProp)}
     >
       <div
         data-menu-open={menuOpen ? "" : undefined}
         data-sidebar-folded={look.folded}
+        // While the sidebar peeks over the page: the bar fades what the peek covers (F76).
+        data-sidebar-peeking={presence(sidebarPeeking)}
         data-shell-panels={paneled ? "" : undefined}
         {...stylex.props(...look.grid, stylex.defaultMarker())}
       >
         {sidebar !== false && (
           <div {...stylex.props(styles.side)}>
-            {isValidElement<{ reopenLook?: "raised" | "quiet" }>(sidebar) ? (
-              <InColumn
-                sidebar={sidebar}
-                look={bar === "none" ? "raised" : "quiet"}
-                onFold={setSidebarOpen}
-              />
-            ) : (
-              sidebar
-            )}
+            <InColumn
+              sidebar={sidebar}
+              look={bar === "none" ? "raised" : "quiet"}
+              {...columnBrands(bar, page.brand, page.brandIn)}
+              onFold={setSidebarOpen}
+              onPeek={setSidebarPeeking}
+            />
           </div>
         )}
-        {paneled ? (
-          <Panels
-            card={card}
-            panels={panels}
-            width={panelWidth}
-            min={minPanelWidth}
-            max={maxPanelWidth}
-            covered={over}
-            aside={phone && aside}
-            resizeLabel={panelResizeLabel}
-            onWidthChange={onPanelWidthChange}
-            onNarrowChange={setNarrow}
-            onCrowdedChange={setCrowded}
-            onClose={onPanelsClose}
-            keep={keep}
-            closeLabel={panelsCloseLabel}
-          />
-        ) : (
-          card
-        )}
+        {/* Always in the group, so the card never changes place in the tree (panels.tsx). */}
+        <Panels
+          card={card}
+          panels={panels}
+          open={panelsOpen !== false}
+          onShown={onPanelsShown}
+          onGone={onPanelsGone}
+          width={panelWidth}
+          min={minPanelWidth}
+          max={maxPanelWidth}
+          covered={over}
+          aside={phone && aside}
+          resizeLabel={panelResizeLabel}
+          onWidthChange={onPanelWidthChange}
+          onNarrowChange={setNarrow}
+          onCrowdedChange={setCrowded}
+          onClose={onPanelsClose}
+          keep={keep}
+          closeLabel={panelsCloseLabel}
+        />
       </div>
     </div>
   );

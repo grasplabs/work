@@ -18,9 +18,6 @@ import { sureClose } from "../dialog/sure-close";
 
 type ContentPrimitiveProps = ComponentProps<typeof ContentPrimitive>;
 
-// Every prop is documented once, where it is first declared; the props on the docs page are read
-// from the type below, so they cannot drift from what the code accepts.
-
 /** Every prop an AlertDialogPanel takes: these, and the rest of UI SDK's AlertDialogContent. */
 export interface AlertDialogPanelProps extends Omit<
   ContentPrimitiveProps,

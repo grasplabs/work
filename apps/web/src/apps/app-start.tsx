@@ -1,7 +1,7 @@
 import { useLingui } from "@lingui/react/macro";
 
+import { ChatComposer } from "../chat/chat-composer.tsx";
 import { slotOf } from "../chat/chat-subject.ts";
-import { Composer } from "../chat/composer.tsx";
 import { useGlobalChat } from "../chat/global-chat.tsx";
 import { useAsk } from "../chat/use-ask.ts";
 import { ItemStart } from "../frame/item-shell.tsx";
@@ -25,7 +25,7 @@ export const AppStart = ({ app }: { app: string }) => {
   return (
     <ItemStart
       composer={
-        <Composer
+        <ChatComposer
           {...composer}
           label={t`Describe the App`}
           placeholder={t`An App that… (what it shows, and for whom)`}

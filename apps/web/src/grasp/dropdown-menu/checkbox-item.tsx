@@ -16,9 +16,6 @@ import { menuStyles as styles } from "./styles";
 
 type CheckboxPrimitiveProps = ComponentProps<typeof CheckboxPrimitive>;
 
-// Every prop is documented once, where it is first declared; the props on the docs page are read
-// from the type below, so they cannot drift from what the code accepts.
-
 /** Every prop a DropdownMenuCheckboxItem takes: these, and the rest of UI SDK's MenuCheckboxItem. */
 export interface DropdownMenuCheckboxItemProps extends Omit<
   CheckboxPrimitiveProps,

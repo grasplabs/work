@@ -1,11 +1,14 @@
-import { Input } from "@grasp-os/ui/components/input";
-import { Textarea } from "@grasp-os/ui/components/textarea";
 import { useState } from "react";
 
+import { Input } from "../grasp/input/index.ts";
+import { Textarea } from "../grasp/textarea/index.ts";
+import type { SettingField } from "./section.tsx";
+
 // A setting's text, saved as the person leaves the field (or presses
-// Enter in a one-line field), as the workspace's name is: an emptied
-// field saves none, Escape puts back what was saved, and nothing is sent
-// while it is what was saved.
+// Enter in a one-line field): an emptied field saves none, Escape puts
+// back what was saved, and nothing is sent while it is what was saved.
+// Read-only for whoever may not change it. The control alone: a
+// SettingRow (settings/section.tsx) names it and says what it is for.
 
 /** What a field is saved as: its text, trimmed; null when emptied. */
 const savedAs = (draft: string): string | null => {
@@ -14,17 +17,18 @@ const savedAs = (draft: string): string | null => {
 };
 
 export const SavedField = ({
-  id,
+  field,
   value,
-  disabled,
+  readOnly,
   multiline = false,
   maxLength,
   type,
   onSave,
 }: {
-  id: string;
+  /** The row's id and help, which name and describe it. */
+  field: SettingField;
   value: string | null;
-  disabled: boolean;
+  readOnly: boolean;
   /** An address: several lines, saved as the field is left. */
   multiline?: boolean;
   maxLength: number;
@@ -43,35 +47,25 @@ export const SavedField = ({
     }
   };
   const shown = draft ?? value ?? "";
-  if (multiline) {
-    return (
-      <Textarea
-        disabled={disabled}
-        id={id}
-        maxLength={maxLength}
-        onBlur={save}
-        onChange={(event) => {
-          setDraft(event.target.value);
-        }}
-        onKeyDown={(event) => {
-          if (event.key === "Escape") {
-            setDraft(null);
-          }
-        }}
-        rows={3}
-        value={shown}
-      />
-    );
-  }
-  return (
-    <Input
-      disabled={disabled}
-      id={id}
+  return multiline ? (
+    <Textarea
       maxLength={maxLength}
       onBlur={save}
-      onChange={(event) => {
-        setDraft(event.target.value);
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          setDraft(null);
+        }
       }}
+      onValueChange={setDraft}
+      readOnly={readOnly}
+      rows={2}
+      value={shown}
+      {...field}
+    />
+  ) : (
+    <Input
+      maxLength={maxLength}
+      onBlur={save}
       onKeyDown={(event) => {
         if (event.key === "Enter") {
           event.currentTarget.blur();
@@ -80,8 +74,11 @@ export const SavedField = ({
           setDraft(null);
         }
       }}
-      type={type}
+      onValueChange={setDraft}
+      readOnly={readOnly}
+      {...(type === undefined ? {} : { type })}
       value={shown}
+      {...field}
     />
   );
 };

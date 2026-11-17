@@ -1,7 +1,15 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import { leastCostPairs } from "./assign.ts";
-import { seeded } from "./sign-body.ts";
+
+/** A steady stream of numbers from 0 to 1, the same for the same seed. */
+const seeded = (seed: number): (() => number) => {
+  let state = seed;
+  return () => {
+    state = (state * 16_807) % 2_147_483_647;
+    return (state - 1) / 2_147_483_646;
+  };
+};
 
 // Pairing rows with columns at the least summed cost (assign.ts), ported
 // with the prototype's own tests of it.

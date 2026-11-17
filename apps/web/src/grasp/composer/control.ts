@@ -28,7 +28,12 @@ export const controlStyles = stylex.create({
     borderWidth: { default: 0, [media.forced]: 1 },
     borderStyle: "solid",
     borderColor: "transparent",
-    borderRadius: `min(${grasp.corner}, calc(${grasp.controlXs} / 2))`,
+    // First in a footer that leads with it, it stands at the card's corner and nests in it: the card's
+    // corner less its room, when that is the smaller (corner.ts, F71).
+    borderRadius: {
+      default: `min(${grasp.corner}, calc(${grasp.controlXs} / 2))`,
+      ":first-child": `min(${grasp.corner}, calc(${grasp.controlXs} / 2), var(--grasp-composer-first, ${grasp.corner}))`,
+    },
     cornerShape: grasp.cornerShape,
     backgroundColor: {
       default: "transparent",

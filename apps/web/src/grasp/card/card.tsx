@@ -8,34 +8,18 @@
 //     <CardDescription>Due on Friday. Three people are working on it.</CardDescription>
 //   </Card>
 //   <Card ground="soft" padding="lg" element="article">…</Card>
+//   <Card fill>…</Card>                          the height of its grid cell, what does not fit clipped
 //
 // A card has no behaviour of its own: it is a box, so it needs no primitive. Every value is a token
 // (src/tokens). A caller may set layout and width only (the `style` prop).
 import * as stylex from "@stylexjs/stylex";
 import type { ReactNode } from "react";
 
+import type { LayoutStyle } from "../layout/layout";
 import { grasp, media } from "../tokens/tokens.stylex";
 
-type Layout = string | number | null;
-
 /** What a caller may style: where the card sits and how wide it is. Never its look. */
-export type CardLayoutStyle = stylex.StyleXStyles<{
-  alignSelf?: Layout;
-  justifySelf?: Layout;
-  flexGrow?: Layout;
-  flexShrink?: Layout;
-  flexBasis?: Layout;
-  gridArea?: Layout;
-  gridColumn?: Layout;
-  gridRow?: Layout;
-  order?: Layout;
-  width?: Layout;
-  minWidth?: Layout;
-  maxWidth?: Layout;
-  margin?: Layout;
-  marginBlock?: Layout;
-  marginInline?: Layout;
-}>;
+export type CardLayoutStyle = LayoutStyle;
 
 /** Every prop a Card takes. */
 export interface CardProps {
@@ -58,8 +42,17 @@ export interface CardProps {
    * @default "div"
    */
   element?: "div" | "article" | "section" | "li";
+  /**
+   * The card takes the height it is given (a dashboard's fixed grid cell) and clips what does not
+   * fit. A single child, a Section card's inside or a chart, stretches to fill it; several stand
+   * from the top. Without it the card is as tall as what it holds.
+   * @default false
+   */
+  fill?: boolean;
   /** Layout only: margins, alignment and width. */
   style?: CardLayoutStyle;
+  /** The same as `style`, by a name a style lint does not take for an inline style attribute. */
+  layout?: CardLayoutStyle;
 }
 
 /** Every prop a CardTitle takes. */
@@ -105,6 +98,14 @@ const styles = stylex.create({
   raised: { backgroundColor: grasp.raised },
   // A panel lies in the page: its edge, no lift.
   soft: { backgroundColor: grasp.soft, boxShadow: grasp.edge },
+  // As tall as its cell: one child stretches to it, several stand from the top, and what runs past
+  // the foot is clipped (the card's own lift is drawn outside it, so it stays).
+  fill: {
+    height: "100%",
+    minHeight: 0,
+    overflow: "hidden",
+    alignContent: { default: "start", ":has(> :only-child)": "stretch" },
+  },
   none: { padding: 0 },
   md: { padding: grasp.space4 },
   lg: { padding: grasp.space6 },
@@ -135,13 +136,22 @@ export const Card = ({
   ground = "raised",
   padding = "md",
   element = "div",
-  style,
+  fill = false,
+  style: styleProp,
+  layout,
 }: CardProps) => {
   const Element = element;
   return (
     <Element
       data-slot="card"
-      {...stylex.props(styles.card, styles[ground], styles[padding], style)}
+      data-fill={fill || undefined}
+      {...stylex.props(
+        styles.card,
+        styles[ground],
+        styles[padding],
+        fill && styles.fill,
+        layout ?? styleProp
+      )}
     >
       {children}
     </Element>

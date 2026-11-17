@@ -1,36 +1,24 @@
 import { isAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
+// The kit's mark: Grasp UI has no Grasp mark yet.
 import { GraspMark } from "@grasp-os/ui/components/grasp-mark";
-import { Sheet, SheetContent, SheetTitle } from "@grasp-os/ui/components/sheet";
-import { useSidebar } from "@grasp-os/ui/components/sidebar";
 import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
-import * as stylex from "@stylexjs/stylex";
-import {
-  Link,
-  useLocation,
-  useMatchRoute,
-  useRouter,
-} from "@tanstack/react-router";
-import { useEffect, useSyncExternalStore } from "react";
+import { Link, useMatchRoute } from "@tanstack/react-router";
 
 import { chatsKey, useChatsWindow } from "../../chat/chat-switcher.tsx";
 import type { CoreConnection } from "../../core-connection.ts";
 import { useWaitingCount } from "../../dashboard/nav-item.tsx";
-import { useSignOut } from "../../frame/person-menu.tsx";
-import { organizationOf, useShownName } from "../../frame/sidebar-brand.tsx";
-import { useSidebarApps } from "../../frame/surface-nav.tsx";
 import {
-  applyTheme,
-  chooseTheme,
-  isTheme,
-  onThemeChange,
-  readTheme,
-} from "../../frame/theme.ts";
+  organizationOf,
+  useShownName,
+} from "../../frame/organization-name.tsx";
+import { useSignOut } from "../../frame/person-menu.tsx";
+import { usePersonTheme } from "../../frame/person-theme.tsx";
+import { useSidebarApps } from "../../frame/surface-nav.tsx";
+import { chooseTheme, isTheme } from "../../frame/theme.ts";
 import { appSplat } from "../../pages/app-address.ts";
 import { shortcutLabel } from "../../shortcuts.ts";
-import { tourStops } from "../../tour/tour-script.ts";
-import { startTour } from "../../tour/tour-state.ts";
 import { useWorkflowsWaiting } from "../../workflows/nav-item.tsx";
 import {
   AgentPerson,
@@ -38,7 +26,6 @@ import {
   AppWindow,
   Brain,
   Cable,
-  Checklist,
   Conversation,
   Cycle,
   Inbox,
@@ -48,43 +35,23 @@ import {
   SignOut,
   Swap,
 } from "../icons/index.ts";
-import { Sidebar } from "../sidebar/index.ts";
 import type {
   SidebarGroup,
   SidebarMenuEntry,
   SidebarProfileProps,
+  SidebarProps,
 } from "../sidebar/index.ts";
-import { grasp } from "../tokens/tokens.stylex.ts";
 
 // The product's sidebar: Grasp UI's Sidebar (grasp/sidebar), filled with
 // the product's sections, the Apps' own entries, and the person's menu.
-// On a wider window it stands beside the page and folds away, as the
-// person left it in this browser (the kit's sidebar state, which the
-// frame keeps); on a phone it is a sheet over the page.
+// App shell stands it beside the page, folded as the person left it in this
+// browser (the frame keeps that), and on a phone in its menu's sheet.
 
-const styles = stylex.create({
-  // The phone's sheet: the sidebar fills it.
-  sheet: {
-    display: "flex",
-    flexGrow: 1,
-    height: "100%",
-    backgroundColor: grasp.shellGround,
-  },
-  unseen: {
-    position: "absolute",
-    width: "1px",
-    height: "1px",
-    overflow: "hidden",
-    clipPath: "inset(50%)",
-    whiteSpace: "nowrap",
-  },
-});
-
-/** What a screen reader hears of the Dashboard's count, as the old sidebar said it. */
+/** The Dashboard's count in words, for a screen reader: the badge shows the number alone. */
 const thingsWaiting = (waiting: number): string =>
   plural(waiting, { one: "# thing waiting", other: "# things waiting" });
 
-/** What a screen reader hears of the Workflows' count, as the old sidebar said it. */
+/** The Workflows' count in words, for a screen reader: the badge shows the number alone. */
 const workflowsWaitingLabel = (waiting: number): string =>
   plural(waiting, {
     one: "# workflow needs you",
@@ -216,38 +183,17 @@ const useGroups = (
   return [sections, ...fromApps];
 };
 
-/** The person at the foot, and their menu: the tour, Settings, Appearance, Support, their organization, Sign out. */
+/** The person at the foot, and their menu: Settings, Appearance, Support, their organization, Sign out. */
 const useProfile = (
   core: CoreConnection,
-  identity: Identity,
-  onLeave: () => void
+  identity: Identity
 ): SidebarProfileProps => {
   const { t } = useLingui();
-  const { pathname } = useLocation();
   const organization = useShownName(organizationOf(core));
   const signOut = useSignOut(core);
-  // Read where it is kept, so a choice made in another tab shows here too.
-  const theme = useSyncExternalStore(onThemeChange, () =>
-    readTheme(identity.userId)
-  );
-  // What theme.js painted first was whoever was here last; this is theirs.
-  useEffect(() => {
-    applyTheme(readTheme(identity.userId));
-  }, [identity.userId]);
+  // The same choice the Theme switch in Settings › Appearance changes.
+  const { mode: theme } = usePersonTheme(identity.userId);
   const items: SidebarMenuEntry[] = [
-    ...(tourStops(identity).length > 0
-      ? [
-          {
-            label: t`Getting started`,
-            icon: Checklist,
-            onSelect: () => {
-              // On a phone the menu is in a sheet over the page: it goes, so the tour isn't told behind it.
-              onLeave();
-              startTour(identity.userId, pathname);
-            },
-          },
-        ]
-      : []),
     {
       label: t`Settings`,
       icon: Settings,
@@ -304,71 +250,51 @@ const useProfile = (
   };
 };
 
-/** Grasp UI's sidebar, beside the page or, on a phone, in a sheet over it. */
-export const GraspSidebar = ({
+/**
+ * The props of the product's sidebar (Grasp UI's Sidebar): App shell stands
+ * it in its column, or, on a phone, in its menu's sheet, and folds it, so
+ * the frame passes the Sidebar itself, with these.
+ */
+export const useGraspSidebar = ({
   core,
   identity,
+  open,
+  onOpenChange,
+  closeMenu,
 }: {
   core: CoreConnection;
   identity: Identity;
-}) => {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  /** Closes the phone's menu, for a row that starts something over the page. */
+  closeMenu: () => void;
+}): SidebarProps => {
   const { t } = useLingui();
-  const router = useRouter();
-  const { isMobile, openMobile, setOpenMobile, open, setOpen } = useSidebar();
   const openChats = useChatsWindow();
   const groups = useGroups(core, identity);
-  const profile = useProfile(core, identity, () => {
-    setOpenMobile(false);
-  });
-  // Following a link on a phone goes to its page: the sheet goes with it.
-  useEffect(
-    () =>
-      router.subscribe("onResolved", () => {
-        setOpenMobile(false);
-      }),
-    [router, setOpenMobile]
-  );
+  const profile = useProfile(core, identity);
   const searching = identity.onboardingOnly !== true;
-  const sidebar = (
-    <Sidebar
-      // In the phone's sheet it fills the sheet.
-      fill={isMobile}
-      foldLabel={t`Show or hide the sidebar`}
-      groups={groups}
-      head={<GraspMark aria-hidden />}
-      label={t`Sidebar`}
-      navLabel={t`Main`}
-      onOpenChange={(next) => {
-        if (isMobile) {
-          setOpenMobile(next);
-        } else {
-          setOpen(next);
+  return {
+    foldLabel: t`Show or hide the sidebar`,
+    groups,
+    head: <GraspMark aria-hidden />,
+    label: t`Sidebar`,
+    navLabel: t`Main`,
+    onOpenChange,
+    open,
+    profile,
+    searchLabel: t`Search chats`,
+    searchShortcut: shortcutLabel(chatsKey),
+    ...(searching
+      ? {
+          // The phone's menu goes first: App shell closes it on its own
+          // only behind a layer marked aria-modal, which the chats window
+          // is not yet.
+          onSearch: () => {
+            closeMenu();
+            openChats(true);
+          },
         }
-      }}
-      open={isMobile ? true : open}
-      profile={profile}
-      searchLabel={t`Search chats`}
-      searchShortcut={shortcutLabel(chatsKey)}
-      {...(searching
-        ? {
-            onSearch: () => {
-              openChats(true);
-            },
-          }
-        : {})}
-    />
-  );
-  if (isMobile) {
-    return (
-      <Sheet onOpenChange={setOpenMobile} open={openMobile}>
-        <SheetContent showCloseButton={false} side="left">
-          <span {...stylex.props(styles.unseen)}>
-            <SheetTitle>{t`Sidebar`}</SheetTitle>
-          </span>
-          <div {...stylex.props(styles.sheet)}>{sidebar}</div>
-        </SheetContent>
-      </Sheet>
-    );
-  }
-  return sidebar;
+      : {}),
+  };
 };

@@ -34,9 +34,6 @@ import { useReturnFocus } from "../focus/return-focus";
 
 type RootProps = ComponentProps<typeof AlertDialogPrimitive>;
 
-// Every prop is documented once, where it is first declared; the props on the docs page are read
-// from the type below, so they cannot drift from what the code accepts.
-
 /** Every prop an AlertDialog takes: these, and the rest of UI SDK's AlertDialog. */
 export interface AlertDialogProps extends Omit<RootProps, "children"> {
   /** The trigger and the panel. */

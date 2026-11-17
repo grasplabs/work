@@ -1,6 +1,6 @@
 import type { Blueprint } from "@grasp-os/shared/apps";
 import type { ChatMake } from "@grasp-os/shared/chat";
-import { Trans, useLingui } from "@lingui/react/macro";
+import { Trans } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { Await, useRouteContext } from "@tanstack/react-router";
 import { useRef, useState } from "react";
@@ -8,7 +8,6 @@ import { useRef, useState } from "react";
 import type { Session } from "../core.ts";
 import { BackdropField } from "../grasp/field/backdrop.tsx";
 import { schemeOf, useLook } from "../grasp/field/look.ts";
-import { SidebarButton } from "../grasp/frame/page-bar.tsx";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import type { Loaded } from "../load-from-core.tsx";
 import { examplesFor } from "../make/examples.ts";
@@ -17,10 +16,10 @@ import { BlueprintIdeas, WorkflowIdeas } from "../make/make-ideas.tsx";
 import { TourOffer } from "../tour/tour-layer.tsx";
 import { useTour } from "../tour/tour-state.ts";
 import { AgentPicker, startingAgent } from "./agent-choice.tsx";
+import { ChatComposer } from "./chat-composer.tsx";
 import { openChat } from "./chat-layout.ts";
 import { useGlobalChat } from "./global-chat.tsx";
 import { RecentsButton } from "./recents.tsx";
-import { StartComposer } from "./start-composer.tsx";
 import { useAsk } from "./use-ask.ts";
 
 // Chat's own page (routes/_shell.index.tsx): where to start. The question
@@ -38,15 +37,12 @@ import { useAsk } from "./use-ask.ts";
 
 // The page's look, from Grasp UI's tokens (grasp/tokens), in StyleX.
 const styles = stylex.create({
+  // App shell's page area is a block: the page fills it by its own height.
   page: {
     display: "flex",
     flexDirection: "column",
-    flexGrow: 1,
-    flexShrink: 1,
-    flexBasis: "0%",
-    minHeight: 0,
+    minHeight: "100%",
     minWidth: 0,
-    overflowY: "auto",
     fontSize: grasp.textSm,
     lineHeight: grasp.textSmLine,
     color: grasp.text,
@@ -180,7 +176,6 @@ export const ChatStart = ({
   ideas: Promise<Loaded<MakeIdeas>> | undefined;
   agent?: string | undefined;
 }) => {
-  const { t } = useLingui();
   const { offered } = useGlobalChat();
   const { identity } = useRouteContext({ from: "/_shell" });
   const look = useLook(identity.userId);
@@ -218,8 +213,6 @@ export const ChatStart = ({
         {...stylex.props(styles.centre, scheme === "dark" && styles.onNight)}
       >
         <BackdropField clear={page} look={look} />
-        {/* Chat has no bar above it: the sidebar's way back floats here. */}
-        <SidebarButton floating label={t`Show or hide the sidebar`} />
         <div ref={page} {...stylex.props(styles.column)}>
           <div {...stylex.props(styles.head)}>
             {offeredTour ? (
@@ -236,16 +229,18 @@ export const ChatStart = ({
               <Greeting making={make !== undefined} />
             )}
           </div>
-          <StartComposer
-            ask={{ ...composer, models: offered?.models }}
-            end={<RecentsButton />}
-            start={
+          <ChatComposer
+            {...composer}
+            actions={<RecentsButton />}
+            agent={
               <AgentPicker
                 agentId={agentId}
                 agents={agents}
                 onAgent={setPicked}
               />
             }
+            models={offered?.models}
+            running={false}
           />
           {offeredTour || ideas === undefined ? null : (
             <Ideas

@@ -12,9 +12,6 @@ import { scroll } from "../scroll/scroll";
 import { dialogStyles as styles } from "./styles";
 import { watchBody } from "./watch-body";
 
-// Every prop is documented once, where it is first declared; the props on the docs page are read
-// from the type below, so they cannot drift from what the code accepts.
-
 /** Every prop a DialogBody takes. */
 export interface DialogBodyProps {
   /** The task: fields, a list, words, one under another. */

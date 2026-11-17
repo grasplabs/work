@@ -37,8 +37,24 @@ export const intent = {
     { name: 'variant="soft"', when: "A row on a quieter fill." },
     { name: 'size="sm"', when: "A dense list." },
     {
+      name: "detail",
+      when: 'A quieter word on the name\'s line: a role, "You", a count.',
+    },
+    {
+      name: 'size="xs"',
+      when: "A list among setting rows (members, providers): the setting rows' height and inset.",
+    },
+    {
       name: "separated",
       when: "A hairline between plain rows in a long list.",
+    },
+    {
+      name: "media",
+      when: "A person (an Avatar) or a provider (a Brand icon) by the row's name.",
+    },
+    {
+      name: 'iconLook="inline"',
+      when: "A dense row whose icon needs no square.",
     },
   ],
 };

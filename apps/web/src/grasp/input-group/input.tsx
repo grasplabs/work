@@ -4,6 +4,7 @@
 
 import * as stylex from "@stylexjs/stylex";
 import { Input as InputPrimitive } from "@ui-sdk/react/input";
+import { useEffect, useState } from "react";
 import type { ComponentProps, Ref } from "react";
 
 import { grasp, media } from "../tokens/tokens.stylex";
@@ -45,10 +46,6 @@ export interface InputGroupInputProps extends Omit<
   ref?: Ref<HTMLInputElement>;
 }
 
-// Where the words can be painted through a gradient, a long value fades at its end.
-// Not in Firefox: it passes the test, but a form control's words are not clipped there, so the
-// gradient filled the whole box and every value drew as a dark bar (16 November). There a long value
-// is cut by the box's edge as it scrolls, as before.
 const CLIP_TEXT =
   "@supports (background-clip: text) and (not (-moz-appearance: none))";
 const FADE_END = `linear-gradient(to right, currentColor calc(100% - ${grasp.space5}), transparent)`;
@@ -80,7 +77,9 @@ const styles = stylex.create({
     font: "inherit",
     letterSpacing: "normal",
     textAlign: "start",
-    textOverflow: "clip",
+    // A placeholder too long ends in an ellipsis, never mid-word: Chromium reads the input's own
+    // text-overflow for it, so it is set while the placeholder shows (third look A3-text-04).
+    textOverflow: { default: "clip", ":placeholder-shown": "ellipsis" },
     // A value longer than the input fades out at its end, as Input's does, never a cut through a
     // letter: the words are painted through a gradient that ends in transparent over the last
     // space-5. Plain ink while it has focus, so the caret's end always shows.
@@ -92,6 +91,7 @@ const styles = stylex.create({
         [media.forced]: "currentColor",
       },
     },
+    // Drawn only while the value is longer than the input (fits, below: third look A3-text-05).
     // In forced colours the background is dropped, so the words keep their own colour there.
     backgroundImage: {
       default: null,
@@ -114,6 +114,14 @@ const styles = stylex.create({
       textOverflow: "ellipsis",
     },
   },
+  // A value that fits: no fade, every letter at full ink.
+  fits: {
+    WebkitTextFillColor: null,
+    backgroundImage: null,
+    backgroundOrigin: null,
+    backgroundClip: null,
+    backgroundRepeat: null,
+  },
   // Room at each end: the field's own padding at the group's edge, a small gap beside a neighbour.
   // The group's touch area is always its first child, so the first part is the second.
   md: {
@@ -132,18 +140,69 @@ const styles = stylex.create({
   },
 });
 
+/** Whether an input's value is longer than the input shows. */
+const overflows = (input: HTMLInputElement) =>
+  input.scrollWidth > input.clientWidth + 1;
+
+/** Sets whether the input's value runs long; nothing when there is no input yet. */
+const measureInto = (
+  input: HTMLInputElement | null,
+  setLong: (long: boolean) => void
+) => {
+  if (input !== null) {
+    setLong(overflows(input));
+  }
+};
+
 /** The input inside an InputGroup. */
 export const InputGroupInput = ({
   type = "text",
+  ref,
   ...rest
 }: InputGroupInputProps) => {
   const size = useGroupSize();
+  // The end fade only while the value runs past the input (Input's useRunsLong, the same here).
+  const [input, setInput] = useState<HTMLInputElement | null>(null);
+  const [long, setLong] = useState(false);
+  const attach = (element: HTMLInputElement | null) => {
+    setInput(element);
+    if (typeof ref === "function") {
+      ref(element);
+    } else if (ref) {
+      ref.current = element;
+    }
+  };
+  // Read on typing, on leaving the field (a value set from code is read then too), and on a resize.
+  useEffect(() => {
+    const measure = () => {
+      measureInto(input, setLong);
+    };
+    measure();
+    input?.addEventListener("input", measure);
+    input?.addEventListener("focusout", measure);
+    const observer =
+      input === null || typeof ResizeObserver === "undefined"
+        ? null
+        : new ResizeObserver(measure);
+    if (input !== null) {
+      observer?.observe(input);
+    }
+    return () => {
+      input?.removeEventListener("input", measure);
+      input?.removeEventListener("focusout", measure);
+      observer?.disconnect();
+    };
+  }, [input]);
   return (
     <InputPrimitive
       {...rest}
       type={type}
+      ref={attach}
       render={(props: Record<string, unknown>) => (
-        <input {...props} {...stylex.props(styles.input, styles[size])} />
+        <input
+          {...props}
+          {...stylex.props(styles.input, !long && styles.fits, styles[size])}
+        />
       )}
     />
   );

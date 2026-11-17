@@ -1,4 +1,6 @@
-import { Button } from "@grasp-os/ui/components/button";
+// The kit's dialog for a widget opened in full: it shows a chart or a table
+// up to 1024px wide, where Grasp UI's Dialog is one fixed width (30rem) and
+// its widest Sheet 37.5rem.
 import {
   Dialog,
   DialogContent,
@@ -6,25 +8,24 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@grasp-os/ui/components/dialog";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@grasp-os/ui/components/tooltip";
 import { cn } from "@grasp-os/ui/lib/utils";
-import { Trans, useLingui } from "@lingui/react/macro";
-import { Maximize2Icon } from "lucide-react";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { createContext, use, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import { LoadingLines } from "../frame/page-states.tsx";
+import { Button } from "../grasp/button/index.ts";
+import { Expand } from "../grasp/icons/index.ts";
+import type { IconData } from "../grasp/icons/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 
-// A block of the dashboard's widget board, as the prototype draws one
-// (`components/dashboard/widget-parts.tsx`: `WidgetShell`, `WidgetCard`;
-// `widget-board.tsx`: the dialog): every block as high as the next
+// A block of the dashboard's widget board: every block as high as the next
 // whatever is in it, its title with its buttons, and what doesn't fit
-// fading out at its foot. A block that has more opens in full, in a
-// dialog that has the title and the whole of it. On the board, the
+// fading out at its foot. A block that has more opens in full, in a wide
+// dialog with the title and the whole of it. The block's own
+// frame waits on Grasp UI's SectionCard taking the height it is given
+// (filling a grid cell, clipping and fading what doesn't fit). On the board, the
 // buttons that move a block and take it off stand beside its title too,
 // and the block is taken by its title to move it (`WidgetControls`).
 
@@ -43,31 +44,32 @@ export const WidgetFull = createContext(false);
 /** Whether the widget is shown in full, so a part shows everything it has. */
 export const useFull = (): boolean => use(WidgetFull);
 
-/** A block's button, named in its tooltip. */
+const styles = stylex.create({
+  full: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space5,
+    containerType: "inline-size",
+  },
+});
+
+/** A block's button: an icon, named for a screen reader and a voice. */
 export const BlockButton = ({
   label,
+  icon,
   onClick,
-  children,
 }: {
   label: string;
+  icon: IconData;
   onClick: () => void;
-  children: ReactNode;
 }) => (
-  <Tooltip>
-    <TooltipTrigger
-      render={
-        <Button
-          aria-label={label}
-          onClick={onClick}
-          size="icon-sm"
-          variant="ghost"
-        />
-      }
-    >
-      {children}
-    </TooltipTrigger>
-    <TooltipContent>{label}</TooltipContent>
-  </Tooltip>
+  <Button
+    icon={icon}
+    label={label}
+    onClick={onClick}
+    size="xs"
+    variant="ghost"
+  />
 );
 
 /**
@@ -133,7 +135,7 @@ export const WidgetBlock = ({
   title: string;
   /** Everything it shows, opened from the block; none when there is nothing more to see. */
   full?: ReactNode;
-  /** What the full view says under its title; a quiet line for screen readers without it. */
+  /** What the full view says under its title; nothing without it, its title names it. */
   description?: string;
   children: ReactNode;
 }) => {
@@ -145,13 +147,12 @@ export const WidgetBlock = ({
   const fullButton =
     full === undefined ? null : (
       <BlockButton
+        icon={Expand}
         label={opens}
         onClick={() => {
           setOpen(true);
         }}
-      >
-        <Maximize2Icon />
-      </BlockButton>
+      />
     );
   return (
     <>
@@ -179,18 +180,12 @@ export const WidgetBlock = ({
               <DialogTitle ref={heading} tabIndex={-1}>
                 {title}
               </DialogTitle>
-              {description === undefined ? (
-                <DialogDescription className="sr-only">
-                  <Trans>
-                    The whole widget: every line, and what its colours mean.
-                  </Trans>
-                </DialogDescription>
-              ) : (
+              {description === undefined ? null : (
                 <DialogDescription>{description}</DialogDescription>
               )}
             </DialogHeader>
             <WidgetFull value>
-              <div className="@container flex flex-col gap-5">{full}</div>
+              <div {...stylex.props(styles.full)}>{full}</div>
             </WidgetFull>
           </DialogContent>
         </Dialog>

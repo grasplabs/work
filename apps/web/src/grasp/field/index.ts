@@ -6,4 +6,4 @@ export type {
   FieldProps,
 } from "./field";
 export { FieldError } from "./field-error";
-export type { FieldErrorProps } from "./field-error";
+export type { FieldErrorProps, FieldErrorWords } from "./field-error";

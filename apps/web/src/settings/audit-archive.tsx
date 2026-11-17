@@ -1,48 +1,41 @@
 import type { AuditPage, AuditRetention } from "@grasp-os/shared/audit-log";
-import { Button } from "@grasp-os/ui/components/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@grasp-os/ui/components/dropdown-menu";
-import { Plural, Trans, useLingui } from "@lingui/react/macro";
-import { BracesIcon, DownloadIcon, SheetIcon } from "lucide-react";
+import { plural } from "@lingui/core/macro";
+import { useLingui } from "@lingui/react/macro";
 import { useEffect, useState } from "react";
 
-import {
-  auditFilterOf,
-  exportHref,
-  LogRecords,
-} from "../activity/audit-log.tsx";
+import { auditFilterOf, LogRecords } from "../activity/audit-log.tsx";
 import type { LogSearch } from "../activity/log-search.ts";
 import type { Directory } from "../directory.ts";
-import { ErrorText } from "../error-text.tsx";
-import { LoadingLines } from "../frame/page-states.tsx";
-import { loadFromCore, NotLoaded } from "../load-from-core.tsx";
+import { Alert } from "../grasp/alert/index.ts";
+import {
+  Dialog,
+  DialogBody,
+  DialogDescription,
+  DialogPanel,
+  DialogTitle,
+  DialogTrigger,
+} from "../grasp/dialog/index.ts";
+import { SectionCard } from "../grasp/section-card/index.ts";
+import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
 import {
-  SettingsBody,
-  SettingsRow,
-  SettingsSection,
-} from "./settings-parts.tsx";
+  FactRow,
+  LoadingLines,
+  SectionNotLoaded,
+  SettingsRows,
+} from "./section.tsx";
 
-// Settings › Audit trail, below the log: how long Grasp keeps
-// what it records (`audit.retention`), and the events retention moved out
-// of the log into its archive, searched with the page's own filters
-// (`audit.searchArchive`), a stretch of the archive per page. The log's
+// Settings › Audit trail: how long Grasp keeps what it records
+// (`audit.retention`), as facts in a card, and the events retention moved
+// out of the log into its archive, searched in a Dialog with the page's own
+// filters (`audit.searchArchive`), 25 a page. The log's
 // search finds only what the log still holds, so without this an archived
 // event could only be found by verifying the chain. Core keeps both to
 // admins, and records each search of the archive as a search.
 
-/** A number of days. */
-const Days = ({ days }: { days: number }) => (
-  <Plural one="# day" other="# days" value={days} />
-);
-
-/** How long Grasp keeps events and run details, as core answered. */
+/** How long Grasp keeps events and run details, as core answered: a card of facts. */
 export const RetentionView = ({
   retention,
 }: {
@@ -50,85 +43,55 @@ export const RetentionView = ({
   retention: Loaded<AuditRetention> | undefined;
 }) => {
   const { t } = useLingui();
+  const dayCount = (days: number): string =>
+    t({
+      message: plural(days, { one: "# day", other: "# days" }),
+      context: "how long something is kept",
+    });
   if (retention === undefined || retention.state !== "ready") {
     return (
-      <SettingsSection title={t`Retention`}>
-        <SettingsBody>
-          {retention === undefined ? (
-            <LoadingLines lines={3} />
-          ) : (
-            <NotLoaded page={retention} />
-          )}
-        </SettingsBody>
-      </SettingsSection>
+      <SectionCard title={t`Retention`}>
+        {retention === undefined ? (
+          <LoadingLines lines={3} />
+        ) : (
+          <SectionNotLoaded page={retention} />
+        )}
+      </SectionCard>
     );
   }
   const { auditDays, archiveDays, runDays } = retention.data;
   return (
-    <SettingsSection
-      description={t`How long Grasp keeps what it records.`}
-      title={t`Retention`}
-    >
-      <SettingsRow
-        description={t`Searched above. After this, events move to the archive.`}
-        label={t`Audit trail`}
-      >
-        <Days days={auditDays} />
-      </SettingsRow>
-      <SettingsRow
-        description={t`From when each event was recorded, archive included. After this, archived events are deleted.`}
-        label={t({
-          message: "Archive",
-          context: "where retention keeps older audit events",
-        })}
-      >
-        <Days days={archiveDays} />
-      </SettingsRow>
-      <SettingsRow
-        description={t`After a run ends. After this, its inputs, outputs and messages are removed.`}
-        label={t`Workflow run details`}
-      >
-        <Days days={runDays} />
-      </SettingsRow>
-    </SettingsSection>
+    <SectionCard flush title={t`Retention`}>
+      <SettingsRows>
+        <FactRow help={t`Then events move to the archive.`} label={t`Events`}>
+          {dayCount(auditDays)}
+        </FactRow>
+        <FactRow
+          help={t`Counted from when each event was recorded; then deleted.`}
+          label={t({
+            message: "Archive",
+            context: "where retention keeps older audit events",
+          })}
+        >
+          {dayCount(archiveDays)}
+        </FactRow>
+        <FactRow
+          help={t`After a run ends; then its inputs, outputs and messages go.`}
+          label={t`Workflow run details`}
+        >
+          {dayCount(runDays)}
+        </FactRow>
+      </SettingsRows>
+    </SectionCard>
   );
 };
 
 /**
- * The audit trail with its archive, as one download in the chain's order,
- * filtered as shown: core records the export, checks the session as it
- * reads, and names in JSON what archive retention already purged.
+ * Archived events that match the page's filters, in a Dialog from the
+ * events card's head: retention moved them out of the log, so its search
+ * finds them only here. Core searches as the dialog opens.
  */
-const ArchiveExport = ({ search }: { search: LogSearch }) => (
-  <DropdownMenu>
-    <DropdownMenuTrigger render={<Button size="sm" variant="outline" />}>
-      <DownloadIcon data-icon="inline-start" />
-      <Trans>Export with archive</Trans>
-    </DropdownMenuTrigger>
-    <DropdownMenuContent align="end" className="w-44">
-      <DropdownMenuItem
-        onClick={() => {
-          // Core sends it as a file to save: the page stays.
-          window.location.assign(exportHref(search, "csv", true));
-        }}
-      >
-        <SheetIcon />
-        <Trans>Export CSV</Trans>
-      </DropdownMenuItem>
-      <DropdownMenuItem
-        onClick={() => {
-          window.location.assign(exportHref(search, "json", true));
-        }}
-      >
-        <BracesIcon />
-        <Trans>Export JSON</Trans>
-      </DropdownMenuItem>
-    </DropdownMenuContent>
-  </DropdownMenu>
-);
-
-/** Archived events that match the page's filters, once asked for. */
-const ArchivedEvents = ({
+export const ArchiveSearch = ({
   search,
   directory,
 }: {
@@ -138,7 +101,8 @@ const ArchivedEvents = ({
   const { t } = useLingui();
   const { busy, failure, run } = useCoreAction();
   const [first, setFirst] = useState<AuditPage>();
-  const open = async (): Promise<void> => {
+  const [open, setOpen] = useState(false);
+  const read = async (): Promise<void> => {
     const page = await run(
       async ({ audit }) => await audit.searchArchive(auditFilterOf(search))
     );
@@ -147,55 +111,44 @@ const ArchivedEvents = ({
     }
   };
   return (
-    <SettingsSection
-      action={
-        <div className="flex flex-wrap gap-2">
-          {first === undefined ? (
-            <Button
-              disabled={busy}
-              onClick={() => {
-                void open();
-              }}
-              size="sm"
-              variant="outline"
-            >
-              <Trans>Search the archive</Trans>
-            </Button>
-          ) : null}
-          <ArchiveExport search={search} />
-        </div>
-      }
-      description={t`Events older than the audit trail keeps, moved to the archive. The search and the export use the filters above.`}
-      title={t`Archived events`}
+    <Dialog
+      onOpenChange={(next) => {
+        setOpen(next);
+        if (next && first === undefined) {
+          void read();
+        }
+      }}
+      open={open}
     >
-      {failure === undefined ? null : (
-        <div className="border-t px-5 py-3">
-          <ErrorText>{failure}</ErrorText>
-        </div>
-      )}
-      {first === undefined ? null : (
-        <LogRecords
-          archive
-          directory={directory}
-          first={first}
-          search={search}
-        />
-      )}
-    </SettingsSection>
+      <DialogTrigger size="sm" variant="ghost">
+        {t`Search the archive`}
+      </DialogTrigger>
+      <DialogPanel closeLabel={t`Close`}>
+        <DialogTitle>{t`Archived events`}</DialogTitle>
+        <DialogDescription>
+          {t`Older events, searched with the filters on the page.`}
+        </DialogDescription>
+        <DialogBody>
+          {busy && first === undefined ? <LoadingLines lines={5} /> : null}
+          {failure === undefined ? null : (
+            <Alert variant="danger">{failure}</Alert>
+          )}
+          {first === undefined ? null : (
+            <LogRecords
+              archive
+              directory={directory}
+              first={first}
+              search={search}
+            />
+          )}
+        </DialogBody>
+      </DialogPanel>
+    </Dialog>
   );
 };
 
-/**
- * Retention and the archive, for an admin on Settings › Audit trail.
- * Keyed by the page's filters, so new filters ask the archive afresh.
- */
-export const AuditArchive = ({
-  search,
-  directory,
-}: {
-  search: LogSearch;
-  directory: Directory;
-}) => {
+/** Retention, for an admin on Settings › Audit trail, read as the page shows. */
+export const RetentionCard = () => {
   const core = useCore();
   const [retention, setRetention] = useState<Loaded<AuditRetention>>();
   useEffect(() => {
@@ -215,10 +168,5 @@ export const AuditArchive = ({
       left.abort();
     };
   }, [core]);
-  return (
-    <>
-      <ArchivedEvents directory={directory} search={search} />
-      <RetentionView retention={retention} />
-    </>
-  );
+  return <RetentionView retention={retention} />;
 };

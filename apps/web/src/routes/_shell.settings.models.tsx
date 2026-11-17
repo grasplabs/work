@@ -1,5 +1,11 @@
 import type { ModelSettings } from "@grasp-os/shared/models";
+import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { isMemberAdmin } from "@grasp-os/shared/roles";
+import { Trans, useLingui } from "@lingui/react/macro";
+import { createFileRoute } from "@tanstack/react-router";
+
+import { RouterLink } from "../frame/router-link.tsx";
+import { SectionCard } from "../grasp/section-card/index.ts";
 import {
   Table,
   TableBody,
@@ -7,185 +13,35 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@grasp-os/ui/components/table";
-import { Trans, useLingui } from "@lingui/react/macro";
-import { createFileRoute, Link } from "@tanstack/react-router";
-import type { ReactNode } from "react";
-
-import { NotLoadedState } from "../frame/page-states.tsx";
+} from "../grasp/table/index.ts";
+import { Text } from "../grasp/text/index.ts";
 import { loadFromCore } from "../load-from-core.tsx";
-import { dollars } from "../settings/money.ts";
 import {
-  SettingsBody,
+  FactRow,
+  SectionNotLoaded,
   SettingsError,
   SettingsLoading,
-  SettingsSection,
-} from "../settings/settings-parts.tsx";
+  SettingsRows,
+} from "../settings/section.tsx";
 
 // Models, for admins: the models the organization's calls may use. They
 // are the organization's own choice, made with its AI provider keys in
 // Settings › AI providers, so the page only shows them and points there:
 // its own admins get the link, anyone else (Grasp staff, who read but
 // never change whose key pays) who to ask; core checks the role. Beside
-// them, the one limit every run has, and what each App's model binding
-// spent this month. What all calls spent is AI spend's
-// (`_shell.settings.spend.tsx`). Nothing here limits spend: the
-// organization pays its providers on its own keys.
+// them, the one limit every run has (`platformLimits.lineageModelRequests`,
+// which core holds a run to). What each App's model and all calls spent
+// is AI spend's (`_shell.settings.spend.tsx`). Nothing here limits spend:
+// the organization pays its providers on its own keys.
 
-const Section = ({
-  title,
-  description,
-  children,
-}: {
-  title: string;
-  description?: ReactNode;
-  children: ReactNode;
-}) => (
-  <SettingsSection description={description} title={title}>
-    <SettingsBody>{children}</SettingsBody>
-  </SettingsSection>
-);
-
-const AllowedModels = ({ models }: { models: string[] }) => (
-  <Table>
-    <TableHeader>
-      <TableRow>
-        <TableHead>
-          <Trans>Model</Trans>
-        </TableHead>
-      </TableRow>
-    </TableHeader>
-    <TableBody>
-      {models.map((model) => (
-        <TableRow key={model}>
-          <TableCell>{model}</TableCell>
-        </TableRow>
-      ))}
-    </TableBody>
-  </Table>
-);
-
-/** The limit on requests every run has. */
-const RunRequests = () => (
-  <p className="text-muted-foreground text-sm">
-    <Trans>
-      Each workflow run, with the runs it starts, may make at most 100 model
-      requests, retries included.
-    </Trans>
-  </p>
-);
-
-/** Each App's model binding, and what it spent this month. */
-const BindingSpend = ({
-  bindings,
-}: {
-  bindings: ModelSettings["bindings"];
-}) => {
-  const { listed: bound, more } = bindings;
-  if (bound.length === 0) {
-    return (
-      <p className="text-muted-foreground text-sm">
-        <Trans>No App has a model bound to it.</Trans>
-      </p>
-    );
-  }
-  const shown = bound.length;
-  return (
-    <div className="flex flex-col gap-3">
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>
-              <Trans>App</Trans>
-            </TableHead>
-            <TableHead className="text-right">
-              <Trans>This month</Trans>
-            </TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {bound.map((binding) => (
-            <TableRow key={`${binding.appId}/${binding.alias}`}>
-              <TableCell>
-                <span className="flex flex-col gap-0.5">
-                  <Link
-                    className="underline underline-offset-4"
-                    params={{ app: binding.appId }}
-                    to="/apps/$app/settings"
-                  >
-                    {binding.appName}
-                  </Link>
-                  <span className="text-muted-foreground font-mono">
-                    {binding.alias}
-                  </span>
-                  {binding.model === null ? (
-                    <span className="text-status-attention text-xs">
-                      <Trans>
-                        What it is bound to can&apos;t be read, so it serves
-                        nothing.
-                      </Trans>
-                    </span>
-                  ) : (
-                    // A model ID can be long: cut, with all of it on hover.
-                    <span
-                      className="text-muted-foreground block max-w-64 truncate font-mono text-xs"
-                      title={binding.model}
-                    >
-                      {binding.model}
-                    </span>
-                  )}
-                </span>
-              </TableCell>
-              <TableCell className="text-right">
-                <span className="tabular-nums">
-                  {dollars(binding.thisMonth)}
-                </span>
-              </TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-      {more ? (
-        <p className="text-muted-foreground text-sm">
-          <Trans>The first {shown} by App; more Apps have models bound.</Trans>
-        </p>
-      ) : null}
-    </div>
-  );
-};
-
-/** What each App's model spent: shown whether or not models are chosen. */
-const AppSpend = ({ settings }: { settings: ModelSettings }) => {
-  const { t } = useLingui();
-  return (
-    <Section
-      description={
-        <Trans>
-          What each App&apos;s actions spent through its model this month. A
-          workflow&apos;s own AI steps don&apos;t count here.
-        </Trans>
-      }
-      title={t`App spend`}
-    >
-      <BindingSpend bindings={settings.bindings} />
-    </Section>
-  );
-};
-
-/**
- * Where the models are changed: Settings › AI providers, for the
- * organization's own admins; anyone else asks them.
- */
+/** Where the models are changed: Settings › AI providers, for the organization's own admins; anyone else asks them. */
 const WhereToChange = ({ canChange }: { canChange: boolean }) =>
   canChange ? (
     <Trans>
       To change them, go to{" "}
-      <Link
-        className="underline underline-offset-4"
-        to="/settings/ai-providers"
-      >
+      <RouterLink to="/settings/ai-providers">
         Settings › AI providers
-      </Link>
+      </RouterLink>
       .
     </Trans>
   ) : (
@@ -200,41 +56,57 @@ const Settings = ({
   canChange: boolean;
 }) => {
   const { t } = useLingui();
+  const requests = platformLimits.lineageModelRequests;
   if (settings.models.length === 0) {
     return (
-      <>
-        <Section title={t`Allowed models`}>
-          <p className="text-muted-foreground text-sm">
-            <Trans>
-              No model is chosen for your organization yet, so no model call can
-              be made.
-            </Trans>{" "}
-            <WhereToChange canChange={canChange} />
-          </p>
-        </Section>
-        <AppSpend settings={settings} />
-      </>
+      <SectionCard title={t`Allowed models`}>
+        <Text tone="muted">
+          <Trans>
+            No model is chosen for your organization yet, so no model call can
+            be made.
+          </Trans>{" "}
+          <WhereToChange canChange={canChange} />
+        </Text>
+      </SectionCard>
     );
   }
   return (
     <>
-      <Section
+      <SectionCard
         description={
           <>
-            <Trans>
-              Your organization chooses these with its own AI provider keys.
-            </Trans>{" "}
+            {t`Your organization chooses these with its own AI provider keys.`}{" "}
             <WhereToChange canChange={canChange} />
           </>
         }
+        flush
         title={t`Allowed models`}
       >
-        <AllowedModels models={settings.models} />
-      </Section>
-      <Section title={t`Limits`}>
-        <RunRequests />
-      </Section>
-      <AppSpend settings={settings} />
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>{t`Model`}</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {settings.models.map((model) => (
+              <TableRow key={model}>
+                <TableCell wrap>{model}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </SectionCard>
+      <SectionCard flush title={t`Limits`}>
+        <SettingsRows>
+          <FactRow
+            help={t`With the runs it starts, retries included.`}
+            label={t`Each workflow run`}
+          >
+            {t`At most ${requests} model requests`}
+          </FactRow>
+        </SettingsRows>
+      </SectionCard>
     </>
   );
 };
@@ -245,9 +117,9 @@ const Models = () => {
   const { identity } = Route.useRouteContext();
   if (page.state !== "ready") {
     return (
-      <SettingsSection title={t`Models`}>
-        <NotLoadedState heading="h3" page={page} />
-      </SettingsSection>
+      <SectionCard title={t`Models`}>
+        <SectionNotLoaded page={page} />
+      </SectionCard>
     );
   }
   return <Settings canChange={isMemberAdmin(identity)} settings={page.data} />;

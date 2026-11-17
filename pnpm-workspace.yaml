@@ -51,6 +51,10 @@ catalog:
   typedoc: 0.28.20
   typedoc-plugin-markdown: 4.14.1
   mdast-util-from-markdown: 2.1.0
+  mdast-util-gfm: 3.1.0
+  micromark-extension-gfm: 3.0.0
+  prismjs: 1.30.0
+  "@types/prismjs": 1.26.6
   "@types/mdast": 4.0.4
   # Reads the built pages for the hashes of their inline code (apps/docs).
   parse5: 8.1.0

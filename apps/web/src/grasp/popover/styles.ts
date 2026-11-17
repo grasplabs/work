@@ -22,6 +22,9 @@ const surface = {
 // The gap between the panel's rows: the title, the fields, the footer. The description stands
 // closer under its title.
 const ROW = grasp.space4;
+// The ring, as src/focus/focus.ts draws it (focus.ring), here so the panel can draw it for its body too.
+const RING_LINE = `${grasp.ringWidth} solid ${grasp.ring}`;
+const RING_FORCED = `calc(2 * ${grasp.ringWidth}) solid Highlight`;
 
 // Where a popover stands while it opens and as it closes: a little smaller and clear. It grows
 // from `--transform-origin`, the point on the trigger UI SDK placed it against, so it comes from
@@ -31,13 +34,17 @@ const moving = ":is([data-starting-style], [data-ending-style])";
 // The body's ends fade while there is more past them: the bottom one at the top, both in between,
 // the top one at the end, so a line cut on the panel's edge reads as more to come. The panel's own
 // edge is round, so a fade, not a hairline that would bend with its corners. Where there is more,
-// the body's padding stays an empty inset and the fade stands inside it, so no line is sliced on
-// the panel's edge (A2-popover-01); at an end with nothing past it the padding shows as it is.
+// the fade runs on through the body's padding as a faint tail, to nothing at the edge: a line cut
+// on the panel's edge is never a crisp slice (A2-popover-01), yet a line that starts in the padding
+// still shows faintly, so a cut in a gap between paragraphs still says there is more (A3-layers-02;
+// an empty inset hid the next note whenever it began there). At an end with nothing past it the
+// padding shows as it is.
 const FADE = grasp.space6;
 const INSET = grasp.popoverPadding;
-const fadeBelow = `linear-gradient(to bottom, black calc(100% - ${INSET} - ${FADE}), transparent calc(100% - ${INSET}))`;
-const fadeBoth = `linear-gradient(to bottom, transparent ${INSET}, black calc(${INSET} + ${FADE}), black calc(100% - ${INSET} - ${FADE}), transparent calc(100% - ${INSET}))`;
-const fadeAbove = `linear-gradient(to bottom, transparent ${INSET}, black calc(${INSET} + ${FADE}))`;
+const TAIL = "rgb(0 0 0 / 30%)";
+const fadeBelow = `linear-gradient(to bottom, black calc(100% - ${INSET} - ${FADE}), ${TAIL} calc(100% - ${INSET}), transparent)`;
+const fadeBoth = `linear-gradient(to bottom, transparent, ${TAIL} ${INSET}, black calc(${INSET} + ${FADE}), black calc(100% - ${INSET} - ${FADE}), ${TAIL} calc(100% - ${INSET}), transparent)`;
+const fadeAbove = `linear-gradient(to bottom, transparent, ${TAIL} ${INSET}, black calc(${INSET} + ${FADE}))`;
 const ends = stylex.keyframes({
   "0%": { maskImage: fadeBelow },
   "1%, 99%": { maskImage: fadeBoth },
@@ -128,6 +135,29 @@ export const popoverStyles = stylex.create({
       default: null,
       "@supports (animation-timeline: scroll())": "scroll(self)",
     },
+  },
+
+  // The panel's ring: on the panel when it holds focus itself, and when the body does (a body that
+  // scrolls takes focus, panel.tsx). Drawn on the body, inside its edge, the body's own end fades
+  // faded the ring away with the words, leaving two loose lines down the sides (A3-layers-01); on
+  // the panel it stands whole round the rounded edge, off it as every ring does.
+  ring: {
+    outline: {
+      default: "none",
+      ":focus-visible": { default: RING_LINE, [media.forced]: RING_FORCED },
+      ':has(> [data-slot="popover-body"]:focus-visible)': {
+        default: RING_LINE,
+        [media.forced]: RING_FORCED,
+      },
+    },
+    outlineOffset: {
+      default: grasp.ringOffset,
+      [media.forced]: grasp.ringOffsetMark,
+    },
+  },
+  // The body draws no ring of its own: the panel draws it (ring, above).
+  bodyRing: {
+    outline: "none",
   },
 
   // In and out from the trigger's side. Leaving is faster than arriving. With reduced motion it is

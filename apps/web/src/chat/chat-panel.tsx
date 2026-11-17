@@ -1,34 +1,37 @@
-import { Button } from "@grasp-os/ui/components/button";
 import {
   DockablePanel,
   DockablePanelHandle,
   DockablePanelHeader,
-  useDockablePanel,
 } from "@grasp-os/ui/components/dockable-panel";
 import type { DockablePlacement } from "@grasp-os/ui/components/dockable-panel";
-import {
-  Empty,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle,
-} from "@grasp-os/ui/components/empty";
-import { GraspMark } from "@grasp-os/ui/components/grasp-mark";
-import { Panel } from "@grasp-os/ui/components/panel";
-import { Spinner } from "@grasp-os/ui/components/spinner";
 import { Trans, useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { useMatch, useRouteContext, useRouter } from "@tanstack/react-router";
-import {
-  Maximize2Icon,
-  Minimize2Icon,
-  SquarePenIcon,
-  XIcon,
-} from "lucide-react";
 import { Suspense, lazy, useEffect, useEffectEvent, useRef } from "react";
 import type { ReactNode } from "react";
 
-import { ErrorText } from "../error-text.tsx";
+import { Alert } from "../grasp/alert/index.ts";
+import { Button } from "../grasp/button/index.ts";
+import { Empty } from "../grasp/empty/index.ts";
+import {
+  AppWindow,
+  Cross,
+  Edit,
+  Expand,
+  PanelToggle,
+  Retry,
+} from "../grasp/icons/index.ts";
+import type { IconData } from "../grasp/icons/index.ts";
+import { Spinner } from "../grasp/spinner/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
+import {
+  Tooltip,
+  TooltipPanel,
+  TooltipShortcut,
+  TooltipTrigger,
+} from "../grasp/tooltip/index.ts";
 import { NotLoaded } from "../load-from-core.tsx";
-import { shortcutLabel } from "../shortcuts.ts";
 import { setActiveChat, startAfresh } from "./active-chat.ts";
 import { AgentName, agentModelOf } from "./agent-choice.tsx";
 import { AskOrCompose } from "./asked-questions.tsx";
@@ -46,15 +49,97 @@ import {
 } from "./chat-layout.ts";
 import { ChatTitleMenu } from "./chat-more.tsx";
 import { allows } from "./chat-presence.ts";
-import { HeaderIcon } from "./chat-switcher.tsx";
 import { ConnectionRequests } from "./connection-requests.tsx";
 import { chatKey, useGlobalChat } from "./global-chat.tsx";
 import type { ModelsUnavailable } from "./global-chat.tsx";
 import { HeldWrites } from "./held-writes.tsx";
 import { PackageRequests } from "./package-requests.tsx";
+import { reading } from "./reading.stylex.ts";
 import { RecentsButton } from "./recents.tsx";
 import { ChatSources } from "./sources.tsx";
 import { SubjectBarContent, subjectBarOf } from "./subject-bar.tsx";
+
+const panelStyles = stylex.create({
+  // The chat in App shell's panel: its head over its body, filling the panel.
+  content: {
+    display: "flex",
+    flexDirection: "column",
+    height: "100%",
+    minHeight: 0,
+  },
+  head: {
+    display: "flex",
+    alignItems: "center",
+    gap: grasp.space1,
+    paddingBlock: grasp.space2,
+    paddingInline: grasp.space3,
+  },
+  // The title takes the room the buttons leave, and gives way first: a
+  // Button can't cut its words short (asked of Grasp UI), so it is clipped.
+  title: {
+    display: "flex",
+    flexGrow: 1,
+    minWidth: 0,
+    overflow: "hidden",
+  },
+  // The head's buttons, at its end.
+  actions: {
+    display: "flex",
+    flexShrink: 0,
+    alignItems: "center",
+    gap: grasp.space1,
+    marginInlineStart: "auto",
+  },
+  grow: {
+    display: "grid",
+    flexGrow: 1,
+  },
+  centre: {
+    display: "flex",
+    flexDirection: "column",
+    flexGrow: 1,
+    alignItems: "center",
+    gap: grasp.space3,
+    paddingBlock: grasp.space8,
+  },
+  stack: {
+    display: "grid",
+    gap: grasp.space2,
+  },
+  start: {
+    justifySelf: "start",
+  },
+  // The box at the chat's foot, and what stands with it.
+  footer: {
+    display: "flex",
+    flexDirection: "column",
+    flexShrink: 0,
+    gap: grasp.space1,
+    paddingInline: grasp.space4,
+    paddingBlockStart: grasp.space2,
+    paddingBlockEnd: grasp.space4,
+  },
+  body: {
+    display: "flex",
+    flexDirection: "column",
+    flexGrow: 1,
+    minHeight: 0,
+  },
+  column: {
+    width: "100%",
+    marginInline: "auto",
+  },
+  // Full screen, the conversation reads as one column in the middle.
+  reading: {
+    maxWidth: reading.width,
+  },
+  notice: {
+    display: "flex",
+    alignItems: "center",
+    gap: grasp.space2,
+    paddingInline: grasp.space1,
+  },
+});
 
 // Grasp's chat open (global-chat.tsx): one panel, docked beside the page or
 // floating over it as a window the person moves by its header. A header with
@@ -78,9 +163,9 @@ const ChatTitle = () => {
   const { summary, sourceNames, retitle } = useGlobalChat();
   if (summary === undefined) {
     return (
-      <span className="text-muted-foreground truncate px-2 text-sm font-medium">
+      <Text size="sm" tone="muted" weight="medium">
         <Trans>New chat</Trans>
-      </span>
+      </Text>
     );
   }
   return (
@@ -98,25 +183,47 @@ const ChatTitle = () => {
 interface Move {
   to: DockablePlacement;
   label: string;
-  icon: ReactNode;
+  icon: IconData;
 }
 
+/** A button in the chat's head: an icon, named, its name and shortcut in a tooltip. */
+const HeaderButton = ({
+  icon,
+  label,
+  shortcut,
+  onClick,
+}: {
+  icon: IconData;
+  label: string;
+  /** Its keys, as Tooltip names them ("mod+j"). */
+  shortcut?: string;
+  onClick: () => void;
+}) => (
+  <Tooltip shortcut={shortcut}>
+    <TooltipTrigger
+      icon={icon}
+      label={label}
+      onClick={() => {
+        onClick();
+      }}
+      size="sm"
+      variant="ghost"
+    />
+    <TooltipPanel>
+      {label}
+      {shortcut === undefined ? null : <TooltipShortcut />}
+    </TooltipPanel>
+  </Tooltip>
+);
+
 /**
- * The chat's grip, at the head of the chat: floating, it moves the chat,
- * or docks it, dragged to its dock or double-clicked; docked, dragged out
- * of its dock or double-clicked, it undocks it.
+ * The floating chat's grip, at its head: it moves the chat, or docks it,
+ * dragged to its dock or double-clicked.
  */
 const ChatGrip = () => {
   const { t } = useLingui();
-  const { placement } = useDockablePanel();
   return (
-    <DockablePanelHandle
-      label={
-        placement === "floating"
-          ? t`Drag to move, or double-click to dock`
-          : t`Drag or double-click to undock`
-      }
-    />
+    <DockablePanelHandle label={t`Drag to move, or double-click to dock`} />
   );
 };
 
@@ -127,32 +234,43 @@ const ChatGrip = () => {
  */
 const MoveButtons = () => {
   const { t } = useLingui();
-  const { placement } = useDockablePanel();
-  const { presence } = useGlobalChat();
+  const {
+    presence,
+    roomBeside,
+    stage: { placement },
+  } = useGlobalChat();
   const moves: Record<DockablePlacement, Move[]> = {
-    // Undocking is the grip's: dragged out, or double-clicked (ChatGrip).
+    // In App shell's panel there is no grip to drag it out by: a button floats it.
     docked: [
-      { to: "fullscreen", label: t`Full screen`, icon: <Maximize2Icon /> },
+      { to: "floating", label: t`Float over the page`, icon: AppWindow },
+      { to: "fullscreen", label: t`Full screen`, icon: Expand },
     ],
     fullscreen: [
-      { to: "docked", label: t`Exit full screen`, icon: <Minimize2Icon /> },
+      // Grasp UI has no exit-full-screen icon yet (asked of the library):
+      // the panel toggle, the closest in its set, stands in.
+      { to: "docked", label: t`Exit full screen`, icon: PanelToggle },
     ],
     // Docking is the grip's: pushed into the dock, or double-clicked.
     floating: [],
   };
-  return moves[placement]
-    .filter(({ to }) => allows(presence, to))
-    .map(({ to, label, icon }) => (
-      <HeaderIcon
-        key={to}
-        label={label}
-        onClick={() => {
-          openChat(to);
-        }}
-      >
-        {icon}
-      </HeaderIcon>
-    ));
+  return (
+    moves[placement]
+      // On a phone there is no page beside it to float over, and full
+      // screen looks as docked does: neither is offered there.
+      .filter(
+        ({ to }) => allows(presence, to) && (roomBeside || to === "docked")
+      )
+      .map(({ to, label, icon }) => (
+        <HeaderButton
+          icon={icon}
+          key={to}
+          label={label}
+          onClick={() => {
+            openChat(to);
+          }}
+        />
+      ))
+  );
 };
 
 /**
@@ -164,9 +282,10 @@ const HeaderActions = () => {
   const { t } = useLingui();
   const { chatId, slot, keptOpen } = useGlobalChat();
   return (
-    <div className="ml-auto flex items-center gap-0.5">
+    <div {...stylex.props(panelStyles.actions)}>
       {chatId === undefined ? null : (
-        <HeaderIcon
+        <HeaderButton
+          icon={Edit}
           label={t`New chat`}
           onClick={() => {
             // A subject's slot would find the chat that last worked on it
@@ -177,20 +296,17 @@ const HeaderActions = () => {
               startAfresh(slot);
             }
           }}
-        >
-          <SquarePenIcon />
-        </HeaderIcon>
+        />
       )}
       <MoveButtons />
       {/* About the page's subject it stays open (chat-subject.ts). */}
       {keptOpen ? null : (
-        <HeaderIcon
+        <HeaderButton
+          icon={Cross}
           label={t`Close`}
           onClick={closeChat}
-          shortcut={shortcutLabel(chatKey)}
-        >
-          <XIcon />
-        </HeaderIcon>
+          shortcut={`mod+${chatKey}`}
+        />
       )}
     </div>
   );
@@ -198,41 +314,49 @@ const HeaderActions = () => {
 
 /** What the chat says before anything is asked in it. */
 const Welcome = ({ text }: { text: string }) => (
-  <div className="animate-in fade-in-0 flex flex-1 flex-col motion-reduce:animate-none">
-    <Empty className="flex-1">
-      <EmptyHeader>
-        <EmptyMedia variant="icon">
-          <GraspMark />
-        </EmptyMedia>
-        <EmptyTitle>{text}</EmptyTitle>
-      </EmptyHeader>
-    </Empty>
+  <div {...stylex.props(panelStyles.grow)}>
+    <Empty shape="thread">{text}</Empty>
   </div>
 );
+
+/** The chat loading, in the thread's place. */
+const Loading = () => {
+  const { t } = useLingui();
+  return (
+    <div {...stylex.props(panelStyles.centre)}>
+      <Spinner label={t`Loading…`} />
+    </div>
+  );
+};
 
 /** The conversation, or what to ask before there is one; `focusBox` takes the person to the box. */
 const Thread = ({ focusBox }: { focusBox: () => void }) => {
   const { t } = useLingui();
-  const { chatId, finding, view, failure, empty, words, ask, composer } =
-    useGlobalChat();
-  const { placement } = useDockablePanel();
+  const {
+    chatId,
+    finding,
+    view,
+    failure,
+    empty,
+    words,
+    ask,
+    composer,
+    stage: { placement },
+  } = useGlobalChat();
   // A subject's chat, while core finds it, or why it gave none.
   if (finding.searching || finding.failure !== undefined) {
     return finding.failure === undefined ? (
-      <div className="flex flex-1 justify-center py-8">
-        <Spinner aria-label={t`Loading…`} />
-      </div>
+      <Loading />
     ) : (
-      <div className="flex flex-1 flex-col items-center gap-3 py-8">
+      <div {...stylex.props(panelStyles.centre)}>
         <NotLoaded page={finding.failure} />
         <Button
           onClick={() => {
             finding.retry();
           }}
           size="sm"
-          variant="outline"
         >
-          <Trans>Try again</Trans>
+          {t`Try again`}
         </Button>
       </div>
     );
@@ -242,13 +366,7 @@ const Thread = ({ focusBox }: { focusBox: () => void }) => {
   }
   const lastQuestion = view.messages.findLast(({ role }) => role === "user");
   return (
-    <Suspense
-      fallback={
-        <div className="flex flex-1 justify-center py-8">
-          <Spinner aria-label={t`Loading…`} />
-        </div>
-      }
-    >
+    <Suspense fallback={<Loading />}>
       <ChatThread
         chatId={chatId}
         compact={placement !== "fullscreen"}
@@ -271,23 +389,27 @@ const Thread = ({ focusBox }: { focusBox: () => void }) => {
         }}
       >
         {failure === undefined && view.stopped === null ? null : (
-          <div className="flex flex-col gap-2">
-            <ErrorText>{failure}</ErrorText>
-            <ErrorText>{view.stopped ?? undefined}</ErrorText>
+          <div {...stylex.props(panelStyles.stack)}>
+            {failure === undefined ? null : (
+              <Alert variant="danger">{failure}</Alert>
+            )}
+            {view.stopped === null ? null : (
+              <Alert variant="danger">{view.stopped}</Alert>
+            )}
             {/* A question stopped before the agent answered (a deploy, say)
               is asked again from here: it may be the chat's first. */}
             {view.stopped !== null &&
             !view.running &&
             lastQuestion !== undefined ? (
               <Button
-                className="self-start"
+                icon={Retry}
+                layout={panelStyles.start}
                 onClick={() => {
                   void ask(lastQuestion.text);
                 }}
                 size="sm"
-                variant="outline"
               >
-                <Trans>Try again</Trans>
+                {t`Try again`}
               </Button>
             ) : null}
           </div>
@@ -347,14 +469,22 @@ const ModelsUnavailableNotice = ({
     return null;
   }
   return (
-    <p className="text-muted-foreground flex items-center gap-2 px-1 text-xs">
-      {why.text}
+    <div {...stylex.props(panelStyles.notice)}>
+      <Text size="xs" tone="muted">
+        {why.text}
+      </Text>
       {onRetry === undefined ? null : (
-        <Button onClick={onRetry} size="xs" variant="link">
+        <Button
+          onClick={() => {
+            onRetry();
+          }}
+          size="xs"
+          variant="ghost"
+        >
           <Trans>Try again</Trans>
         </Button>
       )}
-    </p>
+    </div>
   );
 };
 
@@ -394,7 +524,7 @@ const Footer = () => {
       ? undefined
       : { ...subject.about, name: subject.name };
   return (
-    <div className="flex flex-none flex-col gap-1 px-4 pt-2 pb-4">
+    <div {...stylex.props(panelStyles.footer)}>
       <BuildsFailure read={builds} />
       <ChatSources names={sourceNames} provenance={view.provenance} />
       <AskOrCompose
@@ -435,13 +565,26 @@ const Footer = () => {
 };
 
 /**
+ * Where the cursor goes in the chat: its box's text, or, while Grasp's
+ * questions stand in its place, the option picked, or the first.
+ */
+const boxOf = (body: HTMLElement | null): HTMLElement | null | undefined =>
+  body?.querySelector<HTMLElement>("textarea") ??
+  body?.querySelector<HTMLElement>('[aria-checked="true"]') ??
+  body?.querySelector<HTMLElement>('[role="radio"], [role="checkbox"]');
+
+/**
  * The open chat's body: its thread, the brain's questions on its pages,
  * and the box, which takes the cursor as the chat opens or moves.
  */
 const Body = ({ open }: { open: boolean }) => {
   const body = useRef<HTMLDivElement>(null);
-  const { placement } = useDockablePanel();
-  const { summary, words, keptOpen } = useGlobalChat();
+  const {
+    summary,
+    words,
+    keptOpen,
+    stage: { placement },
+  } = useGlobalChat();
   // Escape closes it, or, where it stays open, takes it out of full screen.
   const onEscape = useEffectEvent(() => {
     if (keptOpen) {
@@ -450,10 +593,15 @@ const Body = ({ open }: { open: boolean }) => {
       closeChat();
     }
   });
-  // Each time it opens: the panel's stays mounted while it is closed.
+  // Each time it opens, or is drawn anew (App shell may mount its panels
+  // again as a layer elsewhere closes): never away from a dialog or menu
+  // that has the cursor now, such as the chats window just opened.
   useEffect(() => {
-    if (open) {
-      body.current?.querySelector<HTMLElement>('[role="textbox"]')?.focus();
+    const elsewhere = document.activeElement?.closest(
+      '[role="dialog"], [role="alertdialog"], [role="menu"]'
+    );
+    if (open && (elsewhere === null || elsewhere === undefined)) {
+      boxOf(body.current)?.focus();
     }
   }, [open]);
   useEffect(() => {
@@ -465,7 +613,12 @@ const Body = ({ open }: { open: boolean }) => {
     }
     const onKey = (event: KeyboardEvent) => {
       // What has its own use for Escape (a menu, the questions) keeps it.
-      if (event.key === "Escape" && !event.defaultPrevented) {
+      // Grasp's questions are the Composer's takeover, whose Escape (back
+      // to the text) React hears only after this listener: left to it.
+      const inQuestions =
+        event.target instanceof Element &&
+        event.target.closest('[data-slot="composer-takeover-room"]') !== null;
+      if (event.key === "Escape" && !event.defaultPrevented && !inQuestions) {
         event.preventDefault();
         onEscape();
       }
@@ -476,19 +629,20 @@ const Body = ({ open }: { open: boolean }) => {
     };
   }, []);
   return (
-    <div className="flex min-h-0 flex-1 flex-col" ref={body}>
+    <div ref={body} {...stylex.props(panelStyles.body)}>
       {/* Full screen, the conversation reads as a column in the middle,
         named by its chat. */}
       <section
         aria-label={summary?.title ?? words.title}
-        className="mx-auto flex min-h-0 w-full flex-1 flex-col data-[placement=fullscreen]:max-w-3xl"
-        data-placement={placement}
+        {...stylex.props(
+          panelStyles.body,
+          panelStyles.column,
+          placement === "fullscreen" && panelStyles.reading
+        )}
       >
         <Thread
           focusBox={() => {
-            body.current
-              ?.querySelector<HTMLElement>('[role="textbox"]')
-              ?.focus();
+            boxOf(body.current)?.focus();
           }}
         />
         <BrainGaps />
@@ -499,71 +653,95 @@ const Body = ({ open }: { open: boolean }) => {
 };
 
 /**
- * Grasp's chat, open: one panel, docked beside the page or floating over it,
- * where the person last had it. It stays mounted while closed, so the
- * conversation and the box never render anew as it opens, closes or moves.
- * The shell's right Panel is the room it docks into; each shows as the
- * stage says (chat-stage.ts), and says when it has finished moving.
+ * Grasp's chat floating over the page, where the person last moved it.
+ * Docked and full screen it lives in App shell's panels (`useChatPanels`).
+ * It stays mounted while closed, so its card comes and goes as the stage
+ * says (chat-stage.ts), and says when it has finished moving.
  */
 export const ChatPanel = () => {
   const { t } = useLingui();
   const { stage, delays, settled, presence } = useGlobalChat();
-  const { offset, width } = useChatLayout();
+  const { offset } = useChatLayout();
+  const floating = stage.card && stage.placement === "floating";
   return (
-    <Panel
-      delayed={delays.room}
+    <DockablePanel
+      defaultOffset={offset ?? undefined}
+      delayed={delays.card}
+      label={t`Chat`}
+      onOffsetChange={moveChat}
+      // Dragged to its dock, it docks, where this page allows that.
+      onDock={
+        allows(presence, "docked")
+          ? () => {
+              openChat("docked");
+            }
+          : undefined
+      }
       onOpenChangeComplete={() => {
-        settled("room");
+        settled("card");
       }}
-      open={stage.room}
-      side="right"
-      // Resizable docked; full screen, its edge is under the chat.
-      {...(stage.placement === "docked"
-        ? {
-            maxSize: chatWidth.max,
-            minSize: chatWidth.min,
-            onSizeChange: resizeChat,
-            resizeLabel: t`Resize the chat`,
-            size: width,
-          }
-        : { size: width })}
+      open={floating}
+      placement="floating"
     >
-      <DockablePanel
-        defaultOffset={offset ?? undefined}
-        delayed={delays.card}
-
-        label={t`Chat`}
-        onOffsetChange={moveChat}
-        // Out of its dock, it floats, where this page allows that.
-        onDetach={
-          allows(presence, "floating")
-            ? () => {
-                openChat("floating");
-              }
-            : undefined
-        }
-        // Dragged to its dock, it docks, where this page allows that.
-        onDock={
-          allows(presence, "docked")
-            ? () => {
-                openChat("docked");
-              }
-            : undefined
-        }
-        onOpenChangeComplete={() => {
-          settled("card");
-        }}
-        open={stage.card}
-        placement={stage.placement}
-      >
-        <DockablePanelHeader>
-          {/* Only where the chat can leave its dock, or go back to it. */}
-          {allows(presence, "floating") ? <ChatGrip /> : null}
+      <DockablePanelHeader>
+        <ChatGrip />
+        <div {...stylex.props(panelStyles.title)}>
           <ChatTitle />
-          <HeaderActions />
-        </DockablePanelHeader>
-        <Body open={stage.card} />
-      </DockablePanel>
-    </Panel>
+        </div>
+        <HeaderActions />
+      </DockablePanelHeader>
+      <Body open={floating} />
+    </DockablePanel>
   );
+};
+
+/** The open chat as App shell's panel holds it: its head and body, with no frame of its own. */
+const ChatPanelContent = () => {
+  const { stage } = useGlobalChat();
+  return (
+    <div {...stylex.props(panelStyles.content)}>
+      <div {...stylex.props(panelStyles.head)}>
+        <div {...stylex.props(panelStyles.title)}>
+          <ChatTitle />
+        </div>
+        <HeaderActions />
+      </div>
+      <Body open={stage.card} />
+    </div>
+  );
+};
+
+/** What App shell needs of Grasp's chat for its `panels` slot. */
+export interface ChatPanels {
+  /** The chat's content while it is docked or full screen; null otherwise. */
+  panels: ReactNode;
+  /** How wide the docked chat is, in pixels. */
+  width: number;
+  onWidthChange: (width: number) => void;
+  minWidth: number;
+  maxWidth: number;
+  /** Closes the chat to its idle bar; undefined where it stays open (about the page's subject). */
+  onClose: (() => void) | undefined;
+  /** Full screen: the chat covers the page. */
+  covered: boolean;
+}
+
+/**
+ * Grasp's chat for App shell's `panels`: its content while docked or full
+ * screen, how wide it is and how to resize and close it. Floating stays
+ * the old ChatPanel's until App shell has a place for it.
+ */
+export const useChatPanels = (): ChatPanels => {
+  const { stage, keptOpen } = useGlobalChat();
+  const { width } = useChatLayout();
+  const shown = stage.card && stage.placement !== "floating";
+  return {
+    panels: shown ? <ChatPanelContent /> : null,
+    width,
+    onWidthChange: resizeChat,
+    minWidth: chatWidth.min,
+    maxWidth: chatWidth.max,
+    onClose: keptOpen ? undefined : closeChat,
+    covered: shown && stage.placement === "fullscreen",
+  };
 };

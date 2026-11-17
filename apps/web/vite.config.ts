@@ -1,3 +1,4 @@
+import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 
 import linguiMacro from "@lingui/babel-plugin-lingui-macro";
@@ -19,6 +20,26 @@ const linguiConfigPath = fileURLToPath(
   new URL("lingui.config.ts", import.meta.url)
 );
 const linguiConfig = getConfig({ configPath: linguiConfigPath });
+
+// Grasp UI's components import UI SDK one entry at a time
+// (`@ui-sdk/react/dialog`). Vite finds an entry only when a page first
+// imports it, bundles it then and reloads the page, so every component
+// added to `src/grasp` cost a reload. All its entries are named up front
+// instead, read from the package so the list is never out of date.
+const uiSdkPackage: unknown = createRequire(import.meta.url)(
+  "@ui-sdk/react/package.json"
+);
+const uiSdkExports =
+  typeof uiSdkPackage === "object" &&
+  uiSdkPackage !== null &&
+  "exports" in uiSdkPackage &&
+  typeof uiSdkPackage.exports === "object" &&
+  uiSdkPackage.exports !== null
+    ? Object.keys(uiSdkPackage.exports)
+    : [];
+const uiSdkEntries = uiSdkExports
+  .filter((entry) => entry.startsWith("./") && entry !== "./package.json")
+  .map((entry) => `@ui-sdk/react/${entry.slice(2)}`);
 
 export default defineConfig({
   plugins: [
@@ -68,6 +89,9 @@ export default defineConfig({
     "import.meta.env.VITE_GRASP_BUILD": JSON.stringify(
       process.env.GITHUB_SHA ?? "local"
     ),
+  },
+  optimizeDeps: {
+    include: ["@ui-sdk/core", ...uiSdkEntries],
   },
   build: {
     // Fonts are always files of their own: Vite would inline the smallest

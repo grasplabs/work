@@ -1,47 +1,46 @@
 import type { OwnSession, SessionDevice } from "@grasp-os/shared/sign-in";
-import { Badge } from "@grasp-os/ui/components/badge";
-import { Button } from "@grasp-os/ui/components/button";
-import { Plural, Trans, useLingui } from "@lingui/react/macro";
+import { plural } from "@lingui/core/macro";
+import { useLingui } from "@lingui/react/macro";
 import { createFileRoute, useRouter } from "@tanstack/react-router";
-import { LaptopIcon, SmartphoneIcon } from "lucide-react";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
 import type { CoreConnection } from "../core-connection.ts";
 import { deadline, unlessAborted } from "../core.ts";
-import { ErrorText } from "../error-text.tsx";
 import { formatDateTime } from "../format.ts";
-import { NotLoadedState } from "../frame/page-states.tsx";
+import { Badge } from "../grasp/badge/index.ts";
+import { Button } from "../grasp/button/index.ts";
+import { Item, ItemGroup } from "../grasp/item/index.ts";
+import { SectionCard } from "../grasp/section-card/index.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { ChatAccountsSection } from "../settings/chat-accounts.tsx";
 import type { ChatAccounts } from "../settings/chat-accounts.tsx";
 import { pendingChatLink } from "../settings/chat-link.ts";
 import {
+  FactRow,
+  RowNote,
+  SectionNotLoaded,
   SettingsError,
   SettingsLoading,
-  SettingsRow,
-  SettingsSection,
-} from "../settings/settings-parts.tsx";
+  SettingsRows,
+  TitleLine,
+} from "../settings/section.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 
-// Settings → Security, as in the prototype (`routes/settings/security.tsx`):
-// how the person gets into Grasp, the devices they are signed in on, and
-// the link for AI apps outside it. Each device but this one can be signed
-// out here; this one signs out from the person menu. Core names no place
-// a session signed in from, so the prototype's places aren't here. Then
-// the chat apps where Grasp knows them (settings/chat-accounts.tsx); never
-// for Grasp staff, who aren't the company's people. Grasp has no link for
-// AI apps yet: it stays off.
+// Settings → Security: how the person gets into Grasp, and the devices
+// they are signed in on. Each device but this one can be signed out here;
+// this one signs out from the person menu. Core names no place a session
+// signed in from. Then the chat apps where Grasp knows them
+// (settings/chat-accounts.tsx), since Grasp answers a linked account as
+// them; never for Grasp staff, who aren't the company's people.
 
 /** The way people sign in here, when there is just the one; core's own name for it. */
-const SignedInWith = ({ labels }: { labels: string[] }) => {
+const useSignedInWith = (labels: string[]): string => {
   const { t } = useLingui();
   const [only] = labels;
-  return labels.length === 1 && only !== undefined ? (
-    <span>{only}</span>
-  ) : (
-    <span>{t`Your organization’s account`}</span>
-  );
+  return labels.length === 1 && only !== undefined
+    ? only
+    : t`Your organization’s account`;
 };
 
 /** What a session signed in on, in the page's language: "Chrome on macOS". */
@@ -53,18 +52,6 @@ const useDeviceName = ({ browser, system }: SessionDevice): string => {
   return browser ?? system ?? t`Unknown device`;
 };
 
-/** The device this page is open on, and when it signed in. */
-const ThisDevice = ({ session }: { session: OwnSession }) => {
-  const { t } = useLingui();
-  const time = formatDateTime(session.signedInAt);
-  const device = useDeviceName(session.device);
-  return (
-    <SettingsRow description={t`Signed in ${time}`} label={t`This device`}>
-      <span className="truncate">{device}</span>
-    </SettingsRow>
-  );
-};
-
 /** One device the person is signed in on, and a way to sign it out unless it is this one. */
 const DeviceRow = ({ session }: { session: OwnSession }) => {
   const { t } = useLingui();
@@ -72,7 +59,6 @@ const DeviceRow = ({ session }: { session: OwnSession }) => {
   const { busy, failure, run } = useCoreAction();
   const time = formatDateTime(session.signedInAt);
   const device = useDeviceName(session.device);
-  const Icon = session.device.mobile ? SmartphoneIcon : LaptopIcon;
   const signOut = async (): Promise<void> => {
     // Gone either way once core answers: ended now, or ended already.
     await run(async ({ sessions }) => {
@@ -86,39 +72,35 @@ const DeviceRow = ({ session }: { session: OwnSession }) => {
     });
   };
   return (
-    <div className="flex items-center gap-3 border-t px-5 py-3">
-      <Icon
-        aria-hidden="true"
-        className="text-muted-foreground size-4 flex-none"
-      />
-      <div className="flex min-w-0 flex-1 flex-col">
-        <span className="flex items-center gap-2">
-          <span className="truncate">{device}</span>
-          {session.current ? (
-            <Badge variant="secondary">
-              <Trans>This device</Trans>
-            </Badge>
-          ) : null}
-        </span>
-        <span className="text-muted-foreground">
-          <Trans>Signed in {time}</Trans>
-        </span>
-        <ErrorText>{failure}</ErrorText>
-      </div>
-      {session.current ? null : (
-        <Button
-          aria-label={t`Sign out ${device}, signed in ${time}`}
-          disabled={busy}
-          onClick={() => {
-            void signOut();
-          }}
-          size="sm"
-          variant="ghost"
+    <Item
+      {...(session.current
+        ? {}
+        : {
+            actions: (
+              // Plain words: a Button with a result reserves the width of its longest words, which leaves a phone's row no room.
+              <Button
+                aria-label={t`Sign out ${device}, signed in ${time}`}
+                disabled={busy}
+                onClick={() => {
+                  void signOut();
+                }}
+                size="sm"
+                variant="ghost"
+              >
+                {t`Sign out`}
+              </Button>
+            ),
+          })}
+      size="sm"
+      title={
+        <TitleLine
+          detail={<RowNote failure={failure}>{t`Signed in ${time}`}</RowNote>}
         >
-          <Trans>Sign out</Trans>
-        </Button>
-      )}
-    </div>
+          {device}
+          {session.current ? <Badge size="sm">{t`This device`}</Badge> : null}
+        </TitleLine>
+      }
+    />
   );
 };
 
@@ -127,20 +109,20 @@ const Devices = ({ sessions }: { sessions: OwnSession[] }) => {
   const { t } = useLingui();
   const devices = sessions.length;
   return (
-    <SettingsSection
-      description={
-        <Plural
-          one="Signed in on # device. Sign out any you do not recognise."
-          other="Signed in on # devices. Sign out any you do not recognise."
-          value={devices}
-        />
-      }
+    <SectionCard
+      description={t`${plural(devices, {
+        one: "Signed in on # device. Sign out any you do not recognise.",
+        other: "Signed in on # devices. Sign out any you do not recognise.",
+      })}`}
+      flush
       title={t`Devices`}
     >
-      {sessions.map((session) => (
-        <DeviceRow key={session.id} session={session} />
-      ))}
-    </SettingsSection>
+      <ItemGroup aria-label={t`Devices`} separated>
+        {sessions.map((session) => (
+          <DeviceRow key={session.id} session={session} />
+        ))}
+      </ItemGroup>
+    </SectionCard>
   );
 };
 
@@ -148,37 +130,31 @@ const Security = () => {
   const { t } = useLingui();
   const { identity } = Route.useRouteContext();
   const { labels, sessions, chat } = Route.useLoaderData();
-  const current =
-    sessions.state === "ready"
-      ? sessions.data.find((session) => session.current)
-      : undefined;
+  const signedInWith = useSignedInWith(labels);
   return (
     <>
-      <SettingsSection
-        description={t`How you get into Grasp. Passwords and two-step sign-in live with your organization’s account.`}
+      <SectionCard
+        description={t`Passwords and two-step sign-in live with your organization’s account.`}
+        flush
         title={t`Sign-in`}
       >
-        <SettingsRow
-          description={t`Your company account. Leaving the company stops new sign-ins; an admin can end a session sooner in Members and roles.`}
-          label={t`Signed in with`}
-        >
-          <SignedInWith labels={labels} />
-        </SettingsRow>
-        <SettingsRow
-          description={t`The account you signed in with.`}
-          label={t`Email`}
-        >
-          <span className="truncate">{identity.email}</span>
-        </SettingsRow>
-        {current === undefined ? null : <ThisDevice session={current} />}
-      </SettingsSection>
+        <SettingsRows>
+          <FactRow
+            help={t`Leaving the company stops new sign-ins.`}
+            label={t`Signed in with`}
+          >
+            {signedInWith}
+          </FactRow>
+          <FactRow label={t`Email`}>{identity.email}</FactRow>
+        </SettingsRows>
+      </SectionCard>
 
       {sessions.state === "ready" ? (
         <Devices sessions={sessions.data} />
       ) : (
-        <SettingsSection title={t`Devices`}>
-          <NotLoadedState heading="h3" page={sessions} />
-        </SettingsSection>
+        <SectionCard title={t`Devices`}>
+          <SectionNotLoaded page={sessions} />
+        </SectionCard>
       )}
 
       {chat === undefined ? null : <ChatAccountsSection chat={chat} />}

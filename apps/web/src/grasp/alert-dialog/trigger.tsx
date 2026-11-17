@@ -19,9 +19,6 @@ import type { IconData } from "../icons";
 
 type TriggerPrimitiveProps = ComponentProps<typeof TriggerPrimitive>;
 
-// Every prop is documented once, where it is first declared; the props on the docs page are read
-// from the type below, so they cannot drift from what the code accepts.
-
 /**
  * A trigger with words, and an icon before them if it helps.
  */
@@ -62,6 +59,8 @@ export type AlertDialogTriggerProps = Omit<
     size?: ButtonSize;
     /** Layout only: margins and alignment, as on a Button. */
     style?: ButtonLayoutStyle;
+    /** The same as `style`, by a name a style lint does not take for an inline style attribute. */
+    layout?: ButtonLayoutStyle;
   };
 
 /** The button that opens the alert dialog: a Grasp Button that UI SDK's trigger behaviour drives. */
@@ -71,14 +70,22 @@ export const AlertDialogTrigger = ({
   icon,
   label,
   children,
-  style,
+  style: styleProp,
+  layout,
   ...rest
 }: AlertDialogTriggerProps) => {
   const still = useStill();
   // One of the two shapes above, as the Button takes it.
   // SAFETY: the props above are one of the two shapes, words or icon only, as the Button takes them.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-  const look = { variant, size, icon, label, style, children } as ButtonProps;
+  const look = {
+    variant,
+    size,
+    icon,
+    label,
+    layout: layout ?? styleProp,
+    children,
+  } as ButtonProps;
   if (still) {
     // While the panel stands over it, the panel covers it.
     if (still.phase === "opening" || still.phase === "open") {

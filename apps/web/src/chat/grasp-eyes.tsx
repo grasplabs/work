@@ -1,7 +1,7 @@
 // Grasp in a guest's chat (routes/guest.tsx): the buddy's eyes on a dark
 // tile, beside each answer (grasplabs/prototype
-// `components/chat/grasp-eyes.tsx`). The person's own chat has Grasp's
-// sign instead (grasp-sign.tsx). They show what it is doing: scanning
+// `components/chat/grasp-eyes.tsx`). The person's own chat says it in
+// words instead (thread.tsx). They show what it is doing: scanning
 // while it reads, looking up while it thinks, following the line while it
 // writes, squinting while it runs code, and a double blink when it is
 // done. Only the newest answer's eyes move (`live`).

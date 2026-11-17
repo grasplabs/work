@@ -2,12 +2,14 @@
 // Dictate. It is UI SDK's Button drawn as a small quiet Grasp Button, so an agent finds it by name.
 "use client";
 
+import * as stylex from "@stylexjs/stylex";
 import { Button as PressPrimitive } from "@ui-sdk/react/button";
 import type { MouseEvent } from "react";
 
 import { Button } from "../button";
 import type { IconData } from "../icons";
 import { useComposerDisabled, useVoiceAlone } from "./context";
+import { cornerStyles } from "./corner";
 
 /** Every prop a ComposerAction takes. */
 export interface ComposerActionProps {
@@ -40,22 +42,25 @@ export const ComposerAction = ({
   const disabled = useComposerDisabled() || own;
   // Voice input standing alone in send's place is filled, as send is; so is an action pressed on.
   const alone = useVoiceAlone();
+  // First or last in its side of the footer, it nests in the card's corner (corner.ts).
   return (
-    <PressPrimitive
-      onClick={onClick}
-      disabled={disabled}
-      pendingAnnouncement=""
-      aria-pressed={pressed}
-      render={(props: Record<string, unknown>) => (
-        <Button
-          {...props}
-          variant={alone || pressed === true ? "ink" : "quiet"}
-          size="sm"
-          icon={icon}
-          label={label}
-          disabled={disabled}
-        />
-      )}
-    />
+    <span {...stylex.props(cornerStyles.nest)}>
+      <PressPrimitive
+        onClick={onClick}
+        disabled={disabled}
+        pendingAnnouncement=""
+        aria-pressed={pressed}
+        render={(props: Record<string, unknown>) => (
+          <Button
+            {...props}
+            variant={alone || pressed === true ? "ink" : "quiet"}
+            size="sm"
+            icon={icon}
+            label={label}
+            disabled={disabled}
+          />
+        )}
+      />
+    </span>
   );
 };

@@ -1,42 +1,16 @@
-// PageHeader: the title row of a page. The page's title in the serif (Geist Serif 32/40, as Ruben's
-// product sets it) with one line under it, the page's actions at the end of the row, and its tabs
-// underneath. In an App shell the page's crumbs stand in the page bar; a page without one may put
-// a Breadcrumb above the title. Palermo has no page header; this follows Grasp's type (title-lg is
-// "a page title in the product", text-lg "the sentence under a page title").
-//
-//   <PageHeader
-//     title="Spring launch"
-//     description="Everything the team ships in March."
-//     actions={<Button variant="ink">Share</Button>}
-//     tabs={<Tabs ...>...</Tabs>}
-//   />
-//
-// The title is the page's h1. Every value is a token (src/tokens). A caller may set layout only
-// (the `style` prop). Words that replace their placeholders fade in (src/motion/arrive.ts).
 "use client";
 
 import * as stylex from "@stylexjs/stylex";
 import { useState } from "react";
 import type { ReactNode } from "react";
 
+import type { LayoutStyle } from "../layout/layout";
 import { arrive } from "../motion/arrive";
 import { Skeleton } from "../skeleton/skeleton";
 import { grasp } from "../tokens/tokens.stylex";
 
-type Layout = string | number | null;
-
 /** What a caller may style: where the header sits, and how wide it is. Never its look. */
-export type PageHeaderLayoutStyle = stylex.StyleXStyles<{
-  width?: Layout;
-  maxWidth?: Layout;
-  alignSelf?: Layout;
-  gridArea?: Layout;
-  gridColumn?: Layout;
-  margin?: Layout;
-  marginBlock?: Layout;
-  marginBlockEnd?: Layout;
-  marginInline?: Layout;
-}>;
+export type PageHeaderLayoutStyle = LayoutStyle;
 
 /** Every prop a PageHeader takes. */
 export interface PageHeaderProps {
@@ -63,6 +37,13 @@ export interface PageHeaderProps {
   aside?: ReactNode;
   /** At the end of the title row: the page's own buttons, the main one last. */
   actions?: ReactNode;
+  /**
+   * `lg` for a page of its own: the serif title-lg with a lead. `sm` for a sub-page whose crumbs
+   * already say where you are (a settings page): the title at title-sm in the sans, and a sentence,
+   * if any, at text-sm. Leave the lead out on a sub-page.
+   * @default "lg"
+   */
+  size?: "lg" | "sm";
   /** Under the title: the page's Tabs, when it has views. */
   tabs?: ReactNode;
   /**
@@ -72,6 +53,8 @@ export interface PageHeaderProps {
   loading?: boolean;
   /** Layout only: margins and width. The look belongs to the header. */
   style?: PageHeaderLayoutStyle;
+  /** The same as `style`, by a name a style lint does not take for an inline style attribute. */
+  layout?: PageHeaderLayoutStyle;
 }
 
 const styles = stylex.create({
@@ -147,6 +130,21 @@ const styles = stylex.create({
     height: grasp.titleLg,
     marginBlock: `calc((${grasp.titleLgLine} - ${grasp.titleLg}) / 2)`,
   },
+  // A sub-page's title: a step down, in the sans, as a component's own title; its line, and the
+  // actions' and the placeholder's, follow it.
+  titleSm: {
+    fontFamily: grasp.fontSans,
+    fontSize: grasp.titleSm,
+    lineHeight: grasp.titleSmLine,
+    fontWeight: grasp.weightMedium,
+    letterSpacing: grasp.trackingUiTitle,
+  },
+  descriptionSm: { fontSize: grasp.textSm, lineHeight: grasp.textSmLine },
+  actionsSm: { minHeight: grasp.titleSmLine },
+  titleWaitSm: {
+    height: grasp.titleSm,
+    marginBlock: `calc((${grasp.titleSmLine} - ${grasp.titleSm}) / 2)`,
+  },
   // A description cut short at its line, with an ellipsis. Its height never changes.
   clamp: {
     display: "-webkit-box",
@@ -160,6 +158,17 @@ const styles = stylex.create({
   // Its lines stacked as the description's own lines stand: no gap between them.
   descriptionWaitLines: { display: "grid", minWidth: 0 },
 });
+
+/** Each size's own look, over the large one's (none for `lg`). */
+const sizeLooks = {
+  lg: { title: null, description: null, actions: null, titleWait: null },
+  sm: {
+    title: styles.titleSm,
+    description: styles.descriptionSm,
+    actions: styles.actionsSm,
+    titleWait: styles.titleWaitSm,
+  },
+} as const;
 
 /** The description's placeholder: one Skeleton line per line it will take (the hint, else the clamp, else one). */
 const DescriptionWait = ({
@@ -181,6 +190,15 @@ const DescriptionWait = ({
   </div>
 );
 
+/** Words that replace the placeholders fade in; a header that never waited is simply there. */
+const useArrived = (loading: boolean) => {
+  const [waited, setWaited] = useState(loading);
+  if (loading && !waited) {
+    setWaited(true);
+  }
+  return waited && !loading;
+};
+
 export const PageHeader = ({
   title,
   description,
@@ -191,26 +209,27 @@ export const PageHeader = ({
   actions,
   tabs,
   loading = false,
-  style,
+  size = "lg",
+  style: styleProp,
+  layout,
 }: PageHeaderProps) => {
-  // Words that replace the placeholders fade in; a header that never waited is simply there.
-  const [waited, setWaited] = useState(loading);
-  if (loading && !waited) {
-    setWaited(true);
-  }
-  const arrived = waited && !loading;
+  const look = sizeLooks[size];
+  const arrived = useArrived(loading);
   return (
     <header
       data-slot="page-header"
       aria-busy={loading ? true : undefined}
-      {...stylex.props(styles.header, style)}
+      {...stylex.props(styles.header, layout ?? styleProp)}
     >
       {breadcrumb}
       <div {...stylex.props(styles.row)}>
         <div {...stylex.props(styles.words)}>
           {loading ? (
             <>
-              <Skeleton shape="block" layout={styles.titleWait} />
+              <Skeleton
+                shape="block"
+                layout={[styles.titleWait, look.titleWait]}
+              />
               {description !== undefined && (
                 <DescriptionWait
                   lines={loadingLines}
@@ -221,7 +240,7 @@ export const PageHeader = ({
           ) : (
             <>
               <div {...stylex.props(styles.titleRow, arrived && arrive.in)}>
-                <h1 {...stylex.props(styles.title)}>{title}</h1>
+                <h1 {...stylex.props(styles.title, look.title)}>{title}</h1>
                 {aside}
               </div>
               {description !== undefined && (
@@ -234,6 +253,7 @@ export const PageHeader = ({
                   }
                   {...stylex.props(
                     styles.description,
+                    look.description,
                     descriptionLines !== "all" && styles.clamp,
                     descriptionLines === 1 && styles.clampOne,
                     descriptionLines === 2 && styles.clampTwo,
@@ -247,7 +267,7 @@ export const PageHeader = ({
           )}
         </div>
         {actions !== undefined && (
-          <div {...stylex.props(styles.actions)}>{actions}</div>
+          <div {...stylex.props(styles.actions, look.actions)}>{actions}</div>
         )}
       </div>
       {tabs !== undefined && <div {...stylex.props(styles.tabs)}>{tabs}</div>}

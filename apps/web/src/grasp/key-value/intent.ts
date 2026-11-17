@@ -33,5 +33,25 @@ export const intent = {
       when: "The default: each name above its value.",
     },
     { name: 'layout="inline"', when: "A short list in a small space." },
+    {
+      name: "detail",
+      when: "Side by side, a fact with more to say, opened in place: a facts rail beside an agent's brief (Model, Runs).",
+    },
+    {
+      name: 'valueAlign="start"',
+      when: "A rail where each value should read close to its name, on one column after the widest name.",
+    },
+    {
+      name: "icon",
+      when: "A rail whose facts read faster with a mark before each name.",
+    },
+    {
+      name: 'names="icon"',
+      when: "A tight rail: the icons alone, each naming its row in a Tooltip.",
+    },
+    {
+      name: "pending",
+      when: "A value still on its way, waiting at its own width.",
+    },
   ],
 };

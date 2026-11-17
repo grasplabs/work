@@ -1,15 +1,3 @@
-// Brand icons: other companies' own marks, for integrations, sources and sign-in. The one place in
-// Grasp UI where a drawing is not Hugeicons: a brand is drawn as the brand draws itself, filled and
-// in its own colours, never as a line redraw. Vendored 16 November 2026, each with its source on
-// the line above it: Simple Icons (CC0, simpleicons.org) for the shapes and single colours, the
-// brand's own published colours and parts for the marks with more than one.
-//
-// Each mark is a list of filled parts on the 24 grid (a brand's own grid is scaled into it), and a
-// scale that sizes it by eye, so a tile-shaped mark (Trello, LinkedIn, Zoom) weighs as much as a
-// free shape (Apple, X). A part in `currentColor` follows the ink in each theme: the marks whose
-// colour is black or white (Apple, ChatGPT, GitHub, Notion, X). A part keyed `knockout` is the
-// white inside a mark (YouTube's play, LinkedIn's letters); the one-colour tone leaves it out, so
-// it is a hole there. `monoMark` gives that one-colour tone.
 import type { IconData } from "./icon";
 import { filledMark } from "./icon";
 
@@ -67,7 +55,6 @@ const brandMark = (
     ),
   ]);
 
-// Source: Simple Icons 13.21.0, apple.svg (CC0); follows ink. Fetched 16 November 2026.
 /** Apple. */
 export const BrandApple: IconData = brandMark(
   "translate(0.72 0.72) scale(0.94)",
@@ -78,7 +65,6 @@ export const BrandApple: IconData = brandMark(
     },
   ]
 );
-// Source: Simple Icons 13.21.0, openai.svg (CC0); follows ink. Fetched 16 November 2026.
 /** ChatGPT (OpenAI). */
 export const BrandChatGpt: IconData = brandMark(
   "translate(0.72 0.72) scale(0.94)",
@@ -89,7 +75,6 @@ export const BrandChatGpt: IconData = brandMark(
     },
   ]
 );
-// Source: Simple Icons 13.21.0, claude.svg (CC0); #D97757. Fetched 16 November 2026.
 /** Claude. */
 export const BrandClaude: IconData = brandMark(
   "translate(0.48 0.48) scale(0.96)",
@@ -100,7 +85,6 @@ export const BrandClaude: IconData = brandMark(
     },
   ]
 );
-// Source: Simple Icons 13.21.0, discord.svg (CC0); #5865F2. Fetched 16 November 2026.
 /** Discord. */
 export const BrandDiscord: IconData = brandMark("", [
   {
@@ -108,7 +92,6 @@ export const BrandDiscord: IconData = brandMark("", [
     fill: "#5865F2",
   },
 ]);
-// Source: Simple Icons 13.21.0, dropbox.svg (CC0); #0061FF. Fetched 16 November 2026.
 /** Dropbox. */
 export const BrandDropbox: IconData = brandMark(
   "translate(0.48 0.48) scale(0.96)",
@@ -119,7 +102,6 @@ export const BrandDropbox: IconData = brandMark(
     },
   ]
 );
-// Source: Simple Icons 13.21.0, facebook.svg (CC0); #0866FF, the f in white under it. Fetched 16 November 2026.
 /** Facebook. */
 export const BrandFacebook: IconData = brandMark(
   "translate(1.2 1.2) scale(0.9)",
@@ -135,7 +117,6 @@ export const BrandFacebook: IconData = brandMark(
     },
   ]
 );
-// Source: Figma's own five shapes (figma.com/using-the-figma-brand), redrawn on its 38 by 57 grid. Fetched 16 November 2026.
 /** Figma. */
 export const BrandFigma: IconData = brandMark(
   "translate(4.64 0.96) scale(0.3874)",
@@ -156,7 +137,6 @@ export const BrandFigma: IconData = brandMark(
     },
   ]
 );
-// Source: Simple Icons 13.21.0, googlegemini.svg (CC0); Gemini's blue-to-violet gradient composed here. Fetched 16 November 2026.
 /** Gemini. */
 export const BrandGemini: IconData = brandMark(
   "",
@@ -168,7 +148,18 @@ export const BrandGemini: IconData = brandMark(
   ],
   { x1: 3, y1: 21, x2: 21, y2: 3, stops: "0 #1BA1E3;.5 #5489D6;1 #9B72CB" }
 );
-// Source: Simple Icons 13.21.0, github.svg (CC0); follows ink. Fetched 16 November 2026.
+// Source: Grasp's own mark, public/brand/grasp-mark-ink.svg (the docs' head draws it), its four parts
+// as one path on its 29.2 by 24.7 grid, centred in the 24 grid; follows ink.
+/** Grasp, our own mark. */
+export const BrandGrasp: IconData = brandMark(
+  "translate(0 1.85) scale(0.8219)",
+  [
+    {
+      d: "M5.73655 0L4.92188 4.55021H26.6572L27.4668 0H5.73655ZM15.1424 6.70117H2.0083L1.19531 11.2497H14.3277L15.1424 6.70117ZM13.9454 13.4023H0.812992L0 17.9509H13.1324L13.9454 13.4023ZM17.5191 6.70117L15.5077 17.9794H20.1365L21.3366 11.2497H23.6982L22.1193 20.1056H2.148L1.33838 24.6524H25.9352L29.1383 6.70117H17.5191Z",
+      fill: "currentColor",
+    },
+  ]
+);
 /** GitHub. */
 export const BrandGitHub: IconData = brandMark(
   "translate(0.72 0.72) scale(0.94)",
@@ -179,7 +170,6 @@ export const BrandGitHub: IconData = brandMark(
     },
   ]
 );
-// Source: Google's four-colour G, as on its sign-in button (developers.google.com/identity/branding-guidelines), on its 48 grid. Fetched 16 November 2026.
 /** Google. */
 export const BrandGoogle: IconData = brandMark(
   "translate(0.96 0.96) scale(0.46)",
@@ -202,7 +192,6 @@ export const BrandGoogle: IconData = brandMark(
     },
   ]
 );
-// Source: Simple Icons 13.21.0, googledocs.svg (CC0); split: page #4285F4, fold #A1C2FA, lines white. Fetched 16 November 2026.
 /** Google Docs. */
 export const BrandGoogleDocs: IconData = brandMark(
   "translate(0.72 0.72) scale(0.94)",
@@ -219,7 +208,6 @@ export const BrandGoogleDocs: IconData = brandMark(
     { d: "M14.727 6h6l-6-6v6z", fill: "#A1C2FA" },
   ]
 );
-// Source: Google Drive's six-part triangle (Google Workspace brand assets), on its 87.3 by 78 grid. Fetched 16 November 2026.
 /** Google Drive. */
 export const BrandGoogleDrive: IconData = brandMark(
   "translate(0 1.2784) scale(0.2749)",
@@ -250,7 +238,6 @@ export const BrandGoogleDrive: IconData = brandMark(
     },
   ]
 );
-// Source: Simple Icons 13.21.0, googlesheets.svg (CC0); split: page and cells #34A853, fold #87CEAC, grid white. Fetched 16 November 2026.
 /** Google Sheets. */
 export const BrandGoogleSheets: IconData = brandMark(
   "translate(0.72 0.72) scale(0.94)",
@@ -267,7 +254,6 @@ export const BrandGoogleSheets: IconData = brandMark(
     { d: "M14.728 0v6h6l-6-6z", fill: "#87CEAC" },
   ]
 );
-// Source: Simple Icons 13.21.0, instagram.svg (CC0); Instagram's glyph gradient (yellow to violet) composed here. Fetched 16 November 2026.
 /** Instagram. */
 export const BrandInstagram: IconData = brandMark(
   "translate(1.2 1.2) scale(0.9)",
@@ -285,7 +271,6 @@ export const BrandInstagram: IconData = brandMark(
     stops: "0 #FFD600;.3 #FF7A00;.55 #FF0069;.8 #D300C5;1 #7638FA",
   }
 );
-// Source: Simple Icons 13.21.0, linkedin.svg (CC0); #0A66C2, the letters white on it. Fetched 16 November 2026.
 /** LinkedIn. */
 export const BrandLinkedIn: IconData = brandMark(
   "translate(1.68 1.68) scale(0.86)",
@@ -301,7 +286,6 @@ export const BrandLinkedIn: IconData = brandMark(
     },
   ]
 );
-// Source: Simple Icons 9.21.0, microsoft.svg (CC0) (gone from later versions); split into Microsoft's four squares. Fetched 16 November 2026.
 /** Microsoft. */
 export const BrandMicrosoft: IconData = brandMark(
   "translate(1.92 1.92) scale(0.84)",
@@ -312,7 +296,6 @@ export const BrandMicrosoft: IconData = brandMark(
     { d: "M12.594 12.594H24V24H12.594z", fill: "#FFB900" },
   ]
 );
-// Source: Simple Icons 13.21.0, notion.svg (CC0); follows ink. Fetched 16 November 2026.
 /** Notion. */
 export const BrandNotion: IconData = brandMark(
   "translate(0.96 0.96) scale(0.92)",
@@ -323,7 +306,6 @@ export const BrandNotion: IconData = brandMark(
     },
   ]
 );
-// Source: Simple Icons 13.21.0, perplexity.svg (CC0); #1FB8CD. Fetched 16 November 2026.
 /** Perplexity. */
 export const BrandPerplexity: IconData = brandMark(
   "translate(0.48 0.48) scale(0.96)",
@@ -334,7 +316,6 @@ export const BrandPerplexity: IconData = brandMark(
     },
   ]
 );
-// Source: Simple Icons 13.21.0, shopify.svg (CC0); #7AB55C. Fetched 16 November 2026.
 /** Shopify. */
 export const BrandShopify: IconData = brandMark(
   "translate(0.48 0.48) scale(0.96)",
@@ -345,7 +326,6 @@ export const BrandShopify: IconData = brandMark(
     },
   ]
 );
-// Source: Simple Icons 13.21.0, slack.svg (CC0); split into Slack's four colours. Fetched 16 November 2026.
 /** Slack. */
 export const BrandSlack: IconData = brandMark(
   "translate(0.72 0.72) scale(0.94)",
@@ -368,7 +348,6 @@ export const BrandSlack: IconData = brandMark(
     },
   ]
 );
-// Source: Simple Icons 13.21.0, stripe.svg (CC0); #635BFF. Fetched 16 November 2026.
 /** Stripe. */
 export const BrandStripe: IconData = brandMark(
   "translate(1.2 1.2) scale(0.9)",
@@ -379,7 +358,6 @@ export const BrandStripe: IconData = brandMark(
     },
   ]
 );
-// Source: composed here: Microsoft Teams' tile with its T and two people, in Teams' purples (#4B53BC, #5059C9, #7B83EB); the shapes follow Simple Icons 9.21.0, microsoftteams.svg (CC0). Fetched 16 November 2026.
 /** Microsoft Teams. */
 export const BrandTeams: IconData = brandMark(
   "translate(0.48 0.48) scale(0.96)",
@@ -400,7 +378,6 @@ export const BrandTeams: IconData = brandMark(
     { d: "M3 8.25h7V10H7.4v6.25H5.6V10H3z", fill: "#FFFFFF", knockout: true },
   ]
 );
-// Source: Simple Icons 13.21.0, trello.svg (CC0); #0052CC, the lists white on it. Fetched 16 November 2026.
 /** Trello. */
 export const BrandTrello: IconData = brandMark(
   "translate(1.68 1.68) scale(0.86)",
@@ -416,7 +393,6 @@ export const BrandTrello: IconData = brandMark(
     },
   ]
 );
-// Source: Simple Icons 13.21.0, whatsapp.svg (CC0); #25D366. Fetched 16 November 2026.
 /** WhatsApp. */
 export const BrandWhatsApp: IconData = brandMark(
   "translate(0.72 0.72) scale(0.94)",
@@ -427,7 +403,6 @@ export const BrandWhatsApp: IconData = brandMark(
     },
   ]
 );
-// Source: Simple Icons 13.21.0, x.svg (CC0); follows ink. Fetched 16 November 2026.
 /** X. */
 export const BrandX: IconData = brandMark("translate(1.44 1.44) scale(0.88)", [
   {
@@ -435,7 +410,6 @@ export const BrandX: IconData = brandMark("translate(1.44 1.44) scale(0.88)", [
     fill: "currentColor",
   },
 ]);
-// Source: Simple Icons 13.21.0, youtube.svg (CC0); #FF0000, the play in white. Fetched 16 November 2026.
 /** YouTube. */
 export const BrandYouTube: IconData = brandMark("", [
   {
@@ -448,7 +422,6 @@ export const BrandYouTube: IconData = brandMark("", [
     knockout: true,
   },
 ]);
-// Source: composed here: Zoom's app mark, a rounded tile in #0B5CFF with a white camera (Simple Icons' zoom.svg is the wordmark). Fetched 16 November 2026.
 /** Zoom. */
 export const BrandZoom: IconData = brandMark(
   "translate(1.68 1.68) scale(0.86)",

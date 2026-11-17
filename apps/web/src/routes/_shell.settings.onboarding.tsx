@@ -1,26 +1,20 @@
-import { Button } from "@grasp-os/ui/components/button";
-import {
-  Item,
-  ItemActions,
-  ItemContent,
-  ItemDescription,
-  ItemMedia,
-  ItemTitle,
-} from "@grasp-os/ui/components/item";
 import { useLingui } from "@lingui/react/macro";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { ArrowRightIcon, CircleDashedIcon } from "lucide-react";
 
-import { NotLoadedState } from "../frame/page-states.tsx";
+import { Button } from "../grasp/button/index.ts";
+import { ArrowRight, Checklist } from "../grasp/icons/index.ts";
+import { Item } from "../grasp/item/index.ts";
+import { SectionCard } from "../grasp/section-card/index.ts";
+import { Text } from "../grasp/text/index.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import { InterviewsProgress } from "../onboarding/interviews-progress.tsx";
 import { listeningOf } from "../onboarding/setup.ts";
 import {
-  SettingsBody,
+  SectionNotLoaded,
   SettingsError,
   SettingsLoading,
-  SettingsSection,
-} from "../settings/settings-parts.tsx";
+  SettingsStack,
+} from "../settings/section.tsx";
 
 // Settings, Onboarding, for admins: while Stephen talks to the team, where
 // the interviews stand and the links to send, as the onboarding's own step
@@ -37,9 +31,9 @@ const OnboardingPage = () => {
   const title = t`Onboarding`;
   if (page.state !== "ready") {
     return (
-      <SettingsSection title={title}>
-        <NotLoadedState heading="h3" page={page} />
-      </SettingsSection>
+      <SectionCard title={title}>
+        <SectionNotLoaded page={page} />
+      </SectionCard>
     );
   }
   const { view, links } = page.data;
@@ -53,44 +47,39 @@ const OnboardingPage = () => {
     step = { step: "listening" };
   }
   return (
-    <SettingsSection
-      action={
+    <SectionCard
+      actions={
         <Button
-          nativeButton={false}
+          iconEnd={ArrowRight}
           render={<Link search={step} to="/setup" />}
           size="sm"
-          variant="outline"
         >
           {t`Open your onboarding`}
-          <ArrowRightIcon data-icon="inline-end" />
         </Button>
       }
       description={t`While Stephen talks to your team: how far the interviews are, team by team, and everyone’s own link to send.`}
       title={title}
     >
-      <SettingsBody>
+      <SettingsStack>
         {linksToDo ? (
-          <Item variant="outline">
-            <ItemMedia variant="icon">
-              <CircleDashedIcon />
-            </ItemMedia>
-            <ItemContent>
-              <ItemTitle>{t`To do: let your team know, and send the interview links`}</ItemTitle>
-              <ItemDescription>{t`Stephen talks to nobody until you pick the day the interviews start.`}</ItemDescription>
-            </ItemContent>
-            <ItemActions>
+          <Item
+            actions={
               <Button
-                nativeButton={false}
                 render={<Link search={{ step: "team" }} to="/setup" />}
                 size="sm"
+                variant="ink"
               >
                 {t`Do it now`}
               </Button>
-            </ItemActions>
-          </Item>
+            }
+            description={t`Stephen talks to nobody until you pick the day the interviews start.`}
+            icon={Checklist}
+            title={t`To do: let your team know, and send the interview links`}
+            variant="outline"
+          />
         ) : null}
         {view.plan === null && !linksToDo ? (
-          <p className="text-muted-foreground">{t`The interviews aren’t planned yet. You plan them at the end of your onboarding.`}</p>
+          <Text tone="muted">{t`The interviews aren’t planned yet. You plan them at the end of your onboarding.`}</Text>
         ) : null}
         {view.plan === null ? null : (
           <InterviewsProgress
@@ -101,8 +90,8 @@ const OnboardingPage = () => {
             view={view}
           />
         )}
-      </SettingsBody>
-    </SettingsSection>
+      </SettingsStack>
+    </SectionCard>
   );
 };
 

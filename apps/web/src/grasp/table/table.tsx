@@ -21,14 +21,12 @@ import { useEffect, useId, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import { focus } from "../focus/focus";
+import { visuallyHidden } from "../hidden/hidden";
 import { HeadLookContext, RangeLookContext, tableLook } from "./look";
 import type { TableHeadLook, TableRangeLook } from "./look";
 import { DensityContext, StickyHeadContext } from "./section-context";
 import type { TableDensity } from "./section-context";
 import { tablePlace, tableStyles as styles } from "./styles";
-
-// Every prop is documented once, where it is first declared; the props on the docs page are read
-// from the type below, so they cannot drift from what the code accepts.
 
 /** Every prop a Table takes. */
 export interface TableProps {
@@ -194,7 +192,7 @@ export const Table = ({
               sees stand under the box (below), so the box's ring and its sideways scroll leave
               them alone: the ring took the caption in and touched its words. */}
             {hasCaption && (
-              <caption id={captionId} {...stylex.props(styles.captionNamed)}>
+              <caption id={captionId} {...stylex.props(visuallyHidden)}>
                 {caption}
               </caption>
             )}

@@ -643,7 +643,7 @@ export const SourcesPage = ({
     // A page of the brain as its memory is (memory-page.tsx): the title in
     // the serif, in the brain's column, with room at the foot for the chat.
     <div className="min-h-0 flex-1 overflow-y-auto">
-      <div className="pb-chat mx-auto flex w-full max-w-5xl flex-col gap-8 px-6 pt-8 md:px-12">
+      <div className="mx-auto flex w-full max-w-5xl flex-col gap-8 px-6 md:px-12">
         <PageHeader>
           <PageHeaderTitle>
             <Trans context="the Brain's sources page">Sources</Trans>

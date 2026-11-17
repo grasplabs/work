@@ -18,9 +18,6 @@ import { useStill } from "./still-context";
 
 type ClosePrimitiveProps = ComponentProps<typeof ClosePrimitive>;
 
-// Every prop is documented once, where it is first declared; the props on the docs page are read
-// from the type below, so they cannot drift from what the code accepts.
-
 /** What every action takes. */
 interface ActionBase extends Omit<
   ClosePrimitiveProps,

@@ -30,4 +30,11 @@ export const intent = {
       source: "docs/components/alert-dialog.mdx",
     },
   ],
+  variants: [
+    { name: 'size="md"', when: "The default: a form or a short task." },
+    {
+      name: 'size="full"',
+      when: "A chart or a table opened in full, the page out of the way.",
+    },
+  ],
 };

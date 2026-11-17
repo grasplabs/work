@@ -1,16 +1,5 @@
-import { isAdmin } from "@grasp-os/shared/roles";
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectLabel,
-  SelectTrigger,
-  SelectValue,
-} from "@grasp-os/ui/components/select";
-import type { MessageDescriptor } from "@lingui/core";
-import { msg } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import {
   createFileRoute,
   Link,
@@ -18,237 +7,199 @@ import {
   useLocation,
   useNavigate,
 } from "@tanstack/react-router";
-import {
-  BrainIcon,
-  BuildingIcon,
-  CircleHelpIcon,
-  CoinsIcon,
-  CreditCardIcon,
-  HistoryIcon,
-  ImageIcon,
-  KeyRoundIcon,
-  PlugIcon,
-  RocketIcon,
-  SparklesIcon,
-  UserRoundIcon,
-  UsersIcon,
-  WebhookIcon,
-} from "lucide-react";
-import type { LucideIcon } from "lucide-react";
 
 import { Page, PageHeading } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
+import { ActiveBar } from "../grasp/active-bar/index.ts";
+import { focus } from "../grasp/focus/focus.ts";
+import { Icon } from "../grasp/icons/index.ts";
+import { Select } from "../grasp/select/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
+import { groupedSectionsFor } from "../settings/sections.ts";
+import type {
+  SettingsGroup,
+  SettingsHref,
+  SettingsSection,
+} from "../settings/sections.ts";
 
-// Settings, as in the prototype (`routes/settings.tsx`): the workspace and
-// who may do what in it, then one's own account, one section at a time.
-// The workspace's sections are for admins (Members and roles, Webhooks and
-// calls of unknown outcome, never for Grasp staff); the account's for
-// everyone.
-// Core checks the role on every call whatever is listed. Onboarding is the
-// company admin's own view of the interviews, as their onboarding shows
-// it; what only Grasp's staff do there is in Grasp's admin.
+// Settings: the workspace and who may do what in it, then one's own
+// account, one section at a time, each under its own name as the page's
+// one header. The sections, their groups and who sees
+// each are data (settings/sections.ts); this lists them beside the
+// section, until Grasp UI's Sidebar can take them over.
 
-type SettingsPath =
-  | "/settings/workspace"
-  | "/settings/members"
-  | "/settings/ai-providers"
-  | "/settings/models"
-  | "/settings/spend"
-  | "/settings/onboarding"
-  | "/settings/brain"
-  | "/settings/audit"
-  | "/settings/webhooks"
-  | "/settings/outcomes"
-  | "/settings/billing"
-  | "/settings/profile"
-  | "/settings/appearance"
-  | "/settings/security";
+// Whether the page (not the window: Grasp's own sidebar takes its share)
+// has the room for the list of sections beside the section.
+const WIDE = "@container (width >= 48rem)";
 
-interface SettingsItem {
-  /** Stephen is a name and stays as it is; the other labels are translated. */
-  label: MessageDescriptor | string;
-  to: SettingsPath;
-  icon: LucideIcon;
-}
-
-interface SettingsGroup {
-  id: string;
-  title: MessageDescriptor;
-  items: SettingsItem[];
-}
-
-/** The sections this person may open, in their groups. */
-const groupsFor = ({
-  admin,
-  staff,
-}: {
-  admin: boolean;
-  staff: boolean;
-}): SettingsGroup[] => {
-  const workspace: SettingsItem[] = admin
-    ? [
-        {
-          label: msg`Workspace`,
-          to: "/settings/workspace",
-          icon: BuildingIcon,
-        },
-        ...(staff
-          ? []
-          : [
-              {
-                label: msg`Members and roles`,
-                to: "/settings/members" as const,
-                icon: UsersIcon,
-              },
-            ]),
-        {
-          label: msg`AI providers`,
-          to: "/settings/ai-providers",
-          icon: PlugIcon,
-        },
-        { label: msg`Models`, to: "/settings/models", icon: SparklesIcon },
-        { label: msg`AI spend`, to: "/settings/spend", icon: CoinsIcon },
-        // Its groups of teams, the brain's regions.
-        { label: msg`Brain`, to: "/settings/brain", icon: BrainIcon },
-        {
-          label: msg`Onboarding`,
-          to: "/settings/onboarding",
-          icon: RocketIcon,
-        },
-        { label: msg`Audit trail`, to: "/settings/audit", icon: HistoryIcon },
-        ...(staff
-          ? []
-          : [
-              // The event sources outside systems send events to.
-              {
-                label: msg`Webhooks`,
-                to: "/settings/webhooks" as const,
-                icon: WebhookIcon,
-              },
-              {
-                label: msg`Unknown outcomes`,
-                to: "/settings/outcomes" as const,
-                icon: CircleHelpIcon,
-              },
-            ]),
-        { label: msg`Billing`, to: "/settings/billing", icon: CreditCardIcon },
-      ]
-    : [];
-  return [
-    ...(workspace.length === 0
-      ? []
-      : [
-          {
-            id: "workspace",
-            title: msg({ message: "Workspace", context: "settings group" }),
-            items: workspace,
-          },
-        ]),
-    {
-      id: "account",
-      title: msg`Your account`,
-      items: [
-        { label: msg`Profile`, to: "/settings/profile", icon: UserRoundIcon },
-        {
-          label: msg`Appearance`,
-          to: "/settings/appearance",
-          icon: ImageIcon,
-        },
-        { label: msg`Security`, to: "/settings/security", icon: KeyRoundIcon },
-      ],
+const styles = stylex.create({
+  frame: { containerType: "inline-size" },
+  columns: {
+    display: "flex",
+    flexDirection: { default: "column", [WIDE]: "row" },
+    alignItems: { default: "stretch", [WIDE]: "flex-start" },
+    gap: { default: grasp.space6, [WIDE]: grasp.space8 },
+  },
+  // On a narrow page the sections are one control above the section.
+  picker: { display: { default: "block", [WIDE]: "none" } },
+  nav: {
+    display: { default: "none", [WIDE]: "flex" },
+    flexDirection: "column",
+    gap: grasp.space5,
+    flexShrink: 0,
+    width: grasp.outlineWidth,
+    position: "sticky",
+    top: grasp.space16,
+  },
+  group: { display: "flex", flexDirection: "column", gap: grasp.space1 },
+  groupTitle: { paddingInline: grasp.space3 },
+  // The list Active bar slides in: relative, its items each active-bar-item tall.
+  list: { position: "relative", display: "flex", flexDirection: "column" },
+  item: {
+    position: "relative",
+    zIndex: 1,
+    display: "flex",
+    alignItems: "center",
+    gap: grasp.space2,
+    height: grasp.activeBarItem,
+    paddingInline: grasp.space3,
+    borderRadius: grasp.corner,
+    cornerShape: grasp.cornerShape,
+    fontFamily: grasp.fontSans,
+    fontSize: grasp.textSm,
+    lineHeight: grasp.textSmLine,
+    textDecorationLine: "none",
+    color: {
+      default: grasp.muted,
+      ":hover": { default: null, [media.hover]: grasp.ink },
     },
-  ];
+    // On a touch screen each item is pressed over 44px, drawn as before.
+    "::after": {
+      content: '""',
+      position: "absolute",
+      insetInline: 0,
+      insetBlock: {
+        default: 0,
+        [media.coarse]: `calc((${grasp.activeBarItem} - ${grasp.tap}) / 2)`,
+      },
+    },
+  },
+  current: { color: grasp.ink },
+  section: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space5,
+    flexGrow: 1,
+    minWidth: 0,
+  },
+});
+
+/** One group's links, the current one marked by Active bar. */
+const SectionLinks = ({
+  group,
+  sections,
+  current,
+}: {
+  group: SettingsGroup;
+  sections: SettingsSection[];
+  current: SettingsHref | undefined;
+}) => {
+  const { i18n } = useLingui();
+  const index = sections.findIndex((section) => section.href === current);
+  return (
+    <div {...stylex.props(styles.group)}>
+      <div {...stylex.props(styles.groupTitle)}>
+        <Text element="span" size="xs" tone="muted">
+          {i18n._(group.title)}
+        </Text>
+      </div>
+      <div {...stylex.props(styles.list)}>
+        <ActiveBar {...(index === -1 ? {} : { index })} />
+        {sections.map((section) => (
+          <Link
+            aria-current={section.href === current ? "page" : undefined}
+            key={section.id}
+            to={section.href}
+            {...stylex.props(
+              styles.item,
+              section.href === current && styles.current,
+              focus.ring
+            )}
+          >
+            <Icon icon={section.icon} />
+            {i18n._(section.label)}
+          </Link>
+        ))}
+      </div>
+    </div>
+  );
 };
 
 /**
  * Settings: the workspace and who may do what in it, then one's own account. One section at a time.
- * The list of sections stands beside the section only where the page has the room for both, which
- * is about the page and not the window: Grasp's own sidebar takes its share. With less room the
- * sections are one control above the section, so a section is never squeezed into a sliver.
+ * The list of sections stands beside the section only where the page has the room for both. With
+ * less room the sections are one control above the section, so a section is never squeezed.
  */
 const SettingsLayout = () => {
   const { t, i18n } = useLingui();
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const { identity } = Route.useRouteContext();
-  const groups = groupsFor({
-    admin: isAdmin(identity.role),
-    staff: identity.staff,
-  });
-  const labelOf = (label: MessageDescriptor | string): string =>
-    typeof label === "string" ? label : i18n._(label);
-  const items = groups.flatMap((group) => group.items);
-  const current = items.find((item) => pathname.startsWith(item.to));
+  const groups = groupedSectionsFor(identity);
+  const sections = groups.flatMap((each) => each.sections);
+  const current = sections.find((section) => pathname.startsWith(section.href));
   return (
     <>
       <SiteHeader
         crumbs={
           current === undefined
             ? [{ label: t`Settings` }]
-            : [{ label: t`Settings` }, { label: labelOf(current.label) }]
+            : [{ label: t`Settings` }, { label: i18n._(current.label) }]
         }
       />
       <Page wide>
-        <PageHeading
-          description={t`Your workspace, who may do what in it, and your own account.`}
-          title={t`Settings`}
-        />
-        <div className="@container">
-          <div className="flex flex-col gap-6 text-sm @3xl:flex-row @3xl:items-start @3xl:gap-8">
-            <div className="@3xl:hidden">
+        <div {...stylex.props(styles.frame)}>
+          <div {...stylex.props(styles.columns)}>
+            <div {...stylex.props(styles.picker)}>
               <Select
-                items={items.map((item) => ({
-                  value: item.to,
-                  label: labelOf(item.label),
+                aria-label={t`Settings`}
+                items={groups.map((each) => ({
+                  type: "group" as const,
+                  label: i18n._(each.group.title),
+                  items: each.sections.map((section) => ({
+                    value: section.href,
+                    label: i18n._(section.label),
+                  })),
                 }))}
-                value={current?.to ?? null}
                 onValueChange={(value) => {
-                  const to = items.find((item) => item.to === value)?.to;
+                  const to = sections.find(
+                    (section) => section.href === value
+                  )?.href;
                   if (to !== undefined) {
                     void navigate({ to });
                   }
                 }}
-              >
-                <SelectTrigger aria-label={t`Settings`} className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {groups.map((group) => (
-                    <SelectGroup key={group.id}>
-                      <SelectLabel>{i18n._(group.title)}</SelectLabel>
-                      {group.items.map((item) => (
-                        <SelectItem key={item.to} value={item.to}>
-                          {labelOf(item.label)}
-                        </SelectItem>
-                      ))}
-                    </SelectGroup>
-                  ))}
-                </SelectContent>
-              </Select>
+                value={current?.href ?? null}
+              />
             </div>
-            <nav
-              aria-label={t`Settings`}
-              className="hidden w-52 flex-none flex-col gap-5 @3xl:sticky @3xl:top-16 @3xl:flex"
-            >
-              {groups.map((group) => (
-                <div className="flex flex-col gap-0.5" key={group.id}>
-                  <span className="text-muted-foreground px-2 pb-1 text-xs">
-                    {i18n._(group.title)}
-                  </span>
-                  {group.items.map(({ label, to, icon: Icon }) => (
-                    <Link
-                      className="text-muted-foreground hover:bg-accent data-[status=active]:bg-muted data-[status=active]:text-foreground hover:text-foreground focus-visible:ring-ring/50 flex items-center gap-2 rounded-md px-2 py-1.5 outline-none focus-visible:ring-3"
-                      key={to}
-                      to={to}
-                    >
-                      <Icon aria-hidden="true" className="size-4" />
-                      {labelOf(label)}
-                    </Link>
-                  ))}
-                </div>
+            <nav aria-label={t`Settings`} {...stylex.props(styles.nav)}>
+              {groups.map((each) => (
+                <SectionLinks
+                  current={current?.href}
+                  group={each.group}
+                  key={each.group.id}
+                  sections={each.sections}
+                />
               ))}
             </nav>
-            <div className="flex max-w-5xl min-w-0 flex-1 flex-col gap-6">
+            <div {...stylex.props(styles.section)}>
+              {/* One header: the section's own name; the crumbs above already say Settings. */}
+              <PageHeading
+                title={
+                  current === undefined ? t`Settings` : i18n._(current.label)
+                }
+              />
               <Outlet />
             </div>
           </div>

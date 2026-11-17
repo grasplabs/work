@@ -29,5 +29,9 @@ export const intent = {
     { name: 'tone="danger"', when: "It failed or is blocked." },
     { name: 'tone="info"', when: "A note." },
     { name: 'size="sm"', when: "A dense table." },
+    {
+      name: "pending",
+      when: "Something is happening to it now: an invitation sending, a member being removed.",
+    },
   ],
 };

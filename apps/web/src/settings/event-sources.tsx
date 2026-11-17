@@ -1,22 +1,43 @@
 import { eventSourcePath } from "@grasp-os/shared/event-source-path";
 import { eventSourceHeaders } from "@grasp-os/shared/event-sources";
 import type { EventSource } from "@grasp-os/shared/event-sources";
-import { Badge } from "@grasp-os/ui/components/badge";
-import { Button } from "@grasp-os/ui/components/button";
-import { Input } from "@grasp-os/ui/components/input";
-import { Label } from "@grasp-os/ui/components/label";
 import { Trans, useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { useRouter } from "@tanstack/react-router";
-import { useId, useState } from "react";
+import { useState } from "react";
 
-import { Confirmed } from "../confirmed.tsx";
-import { ErrorText } from "../error-text.tsx";
 import { formatDate, formatList } from "../format.ts";
-import { NotLoadedState } from "../frame/page-states.tsx";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogPanel,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "../grasp/alert-dialog/index.ts";
+import { Alert } from "../grasp/alert/index.ts";
+import { Badge } from "../grasp/badge/index.ts";
+import { Button } from "../grasp/button/index.ts";
+import { CopyField } from "../grasp/copy-field/index.ts";
+import {
+  Dialog,
+  DialogAction,
+  DialogBody,
+  DialogDescription,
+  DialogFooter,
+  DialogPanel,
+  DialogTitle,
+} from "../grasp/dialog/index.ts";
+import { Field, FieldError, FieldLabel } from "../grasp/field/index.ts";
+import { Input } from "../grasp/input/index.ts";
+import { Link } from "../grasp/link/index.ts";
+import { SectionCard } from "../grasp/section-card/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import type { Loaded } from "../load-from-core.tsx";
-import { CopyButton, ShownOnceDialog } from "../shown-once.tsx";
 import { useCoreAction } from "../use-core-action.ts";
-import { SettingsBody, SettingsSection } from "./settings-parts.tsx";
+import { SectionNotLoaded, SettingsStack } from "./section.tsx";
 
 // Settings › Webhooks, for the organization's own admins: the event
 // sources outside systems send events to (core's event-sources.ts), one
@@ -28,6 +49,32 @@ import { SettingsBody, SettingsSection } from "./settings-parts.tsx";
 // the list and never takes away a secret not yet copied. Rotating,
 // revoking and deleting ask first. Builders start workflows on a source's
 // events from a workflow's Triggers tab.
+
+const styles = stylex.create({
+  list: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space5,
+    margin: 0,
+    padding: 0,
+    listStyle: "none",
+  },
+  source: { display: "flex", flexDirection: "column", gap: grasp.space2 },
+  head: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: grasp.space2,
+  },
+  actions: { display: "flex", flexWrap: "wrap", gap: grasp.space2 },
+  add: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "flex-end",
+    gap: grasp.space2,
+  },
+  name: { flexGrow: 1, minWidth: "12rem" },
+});
 
 /**
  * Where source `token` takes deliveries: on this page's own origin, as
@@ -41,22 +88,66 @@ const SigningNote = () => {
   const headers = formatList(Object.values(eventSourceHeaders));
   const example = '{ "type": "payment.paid", "data": { … } }';
   return (
-    <p className="text-muted-foreground text-sm">
+    <Text size="sm" tone="muted">
       <Trans>
         The sender POSTs each event as JSON, with its type and data (
-        <code className="font-mono">{example}</code>), signed with the secret as{" "}
-        <a
-          className="underline underline-offset-2"
-          href="https://www.standardwebhooks.com"
-          rel="noopener noreferrer"
-          target="_blank"
-        >
+        <code>{example}</code>), signed with the secret as{" "}
+        <Link external href="https://www.standardwebhooks.com">
           Standard Webhooks
-        </a>{" "}
+        </Link>{" "}
         describes, in the headers {headers}. A delivery more than five minutes
         old is refused.
       </Trans>
-    </p>
+    </Text>
+  );
+};
+
+/** A change to a source that asks first, from a button that says what it does. */
+const Confirmed = ({
+  button,
+  label,
+  confirm,
+  title,
+  description,
+  danger = false,
+  busy,
+  onConfirm,
+}: {
+  button: string;
+  /** The button's full name, naming the source, so one row's is told from another's. */
+  label: string;
+  confirm: string;
+  title: string;
+  description: string;
+  danger?: boolean;
+  busy: boolean;
+  onConfirm: () => void;
+}) => {
+  const { t } = useLingui();
+  return (
+    <AlertDialog>
+      <AlertDialogTrigger
+        aria-label={label}
+        disabled={busy}
+        size="sm"
+        variant={danger ? "danger" : "quiet"}
+      >
+        {button}
+      </AlertDialogTrigger>
+      <AlertDialogPanel>
+        <AlertDialogTitle>{title}</AlertDialogTitle>
+        <AlertDialogDescription>{description}</AlertDialogDescription>
+        <AlertDialogFooter>
+          <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
+          <AlertDialogAction
+            onClick={onConfirm}
+            variant={danger ? "danger" : "ink"}
+          >
+            {confirm}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogPanel>
+    </AlertDialog>
   );
 };
 
@@ -85,43 +176,38 @@ const SourceRow = ({
   };
 
   return (
-    <li className="flex flex-col gap-3 px-5 py-4">
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="font-medium">{name}</span>
-        {revoked ? (
-          <Badge variant="attention">
-            <Trans>Secret revoked</Trans>
-          </Badge>
-        ) : null}
-        <span className="text-muted-foreground text-xs">
-          <Trans>Created {created}</Trans>
-        </span>
+    <li {...stylex.props(styles.source)}>
+      <div {...stylex.props(styles.head)}>
+        <Text element="span" tone="ink" weight="medium">
+          {name}
+        </Text>
+        {revoked ? <Badge tone="attention">{t`Secret revoked`}</Badge> : null}
+        <Text element="span" size="xs" tone="quiet">
+          {t`Created ${created}`}
+        </Text>
       </div>
       {url === undefined ? null : (
-        <div className="flex min-w-0 items-center gap-2">
-          <Input aria-label={t`URL of ${name}`} readOnly value={url} />
-          <CopyButton label={t`Copy the URL of ${name}`} text={url} />
-        </div>
+        <CopyField label={t`Copy the URL of ${name}`} value={url} />
       )}
       {revoked ? (
-        <p className="text-muted-foreground text-sm">
-          <Trans>It takes no event until you make it a new secret.</Trans>
-        </p>
+        <Text size="sm" tone="muted">
+          {t`It takes no event until you make it a new secret.`}
+        </Text>
       ) : null}
-      <div className="flex flex-wrap items-center gap-2">
+      <div {...stylex.props(styles.actions)}>
         <Confirmed
           busy={busy}
           button={revoked ? t`Make a new secret` : t`Rotate the secret`}
-          confirm={revoked ? t`Make a new secret` : t`Rotate the secret`}
-          description={
-            revoked
-              ? t`The sender must sign with the new secret, which you see only once.`
-              : t`The current secret stops working at once: the sender must sign with the new one, which you see only once.`
-          }
           label={
             revoked
               ? t`Make a new secret for ${name}`
               : t`Rotate the secret of ${name}`
+          }
+          confirm={revoked ? t`Make it` : t`Rotate`}
+          description={
+            revoked
+              ? t`The sender must sign with the new secret, which you see only once.`
+              : t`The current secret stops working at once: the sender must sign with the new one, which you see only once.`
           }
           onConfirm={() => {
             void change(async (session) => {
@@ -136,9 +222,9 @@ const SourceRow = ({
           <Confirmed
             busy={busy}
             button={t`Revoke the secret`}
-            confirm={t`Revoke the secret`}
-            description={t`No event from this source starts anything until you make it a new secret.`}
             label={t`Revoke the secret of ${name}`}
+            confirm={t`Revoke`}
+            description={t`No event from this source starts anything until you make it a new secret.`}
             onConfirm={() => {
               void change(async (session) => {
                 await session.workflowResources.sources.revokeSecret(source.id);
@@ -150,9 +236,10 @@ const SourceRow = ({
         <Confirmed
           busy={busy}
           button={t`Delete`}
-          confirm={t`Delete the source`}
-          description={t`Its URL takes nothing more, and no workflow starts on its events. This can't be undone.`}
           label={t`Delete ${name}`}
+          confirm={t`Delete the source`}
+          danger
+          description={t`Its URL takes nothing more, and no workflow starts on its events. This can't be undone.`}
           onConfirm={() => {
             void change(async (session) => {
               await session.workflowResources.sources.delete(source.id);
@@ -161,7 +248,7 @@ const SourceRow = ({
           title={t`Delete this source?`}
         />
       </div>
-      <ErrorText>{failure}</ErrorText>
+      {failure === undefined ? null : <Alert variant="danger">{failure}</Alert>}
     </li>
   );
 };
@@ -174,7 +261,7 @@ const AddSource = ({
   onSecret: (secret: string) => void;
   onChanged: () => Promise<void>;
 }) => {
-  const ids = useId();
+  const { t } = useLingui();
   const { busy, failure, run } = useCoreAction();
   const [name, setName] = useState("");
   const add = async (): Promise<void> => {
@@ -190,32 +277,78 @@ const AddSource = ({
   };
   return (
     <form
-      className="flex flex-col gap-2 border-t px-5 py-4"
+      aria-label={t`New source`}
       onSubmit={(submitted) => {
         submitted.preventDefault();
         void add();
       }}
+      {...stylex.props(styles.add)}
     >
-      <Label htmlFor={`${ids}-name`}>
-        <Trans>New source, named after its sender</Trans>
-      </Label>
-      <div className="flex flex-wrap items-center gap-2">
-        <Input
-          id={`${ids}-name`}
-          maxLength={80}
-          onChange={(changed) => {
-            setName(changed.target.value);
-          }}
-          placeholder="Stripe"
-          required
-          value={name}
-        />
-        <Button disabled={busy} size="sm" type="submit">
-          <Trans>Add the source</Trans>
-        </Button>
+      <div {...stylex.props(styles.name)}>
+        <Field invalid={failure !== undefined}>
+          <FieldLabel>{t`New source, named after its sender`}</FieldLabel>
+          <Input
+            maxLength={80}
+            onValueChange={setName}
+            placeholder="Stripe"
+            required
+            value={name}
+          />
+          {failure === undefined ? null : (
+            <FieldError match>{failure}</FieldError>
+          )}
+        </Field>
       </div>
-      <ErrorText>{failure}</ErrorText>
+      <Button disabled={busy} type="submit">
+        {t`Add the source`}
+      </Button>
     </form>
+  );
+};
+
+/** A secret core answered once: shown with the way to copy it until it is closed on purpose. */
+const SecretDialog = ({
+  secret,
+  onClose,
+}: {
+  secret: string | undefined;
+  onClose: () => void;
+}) => {
+  const { t } = useLingui();
+  return (
+    <Dialog
+      // A stray press beside it never takes the secret away: Done or the close button does.
+      dismissible={false}
+      onOpenChange={(open) => {
+        if (!open) {
+          onClose();
+        }
+      }}
+      open={secret !== undefined}
+    >
+      <DialogPanel closeLabel={t`Close`}>
+        <DialogTitle>{t`The source's secret`}</DialogTitle>
+        <DialogDescription>
+          {t`The sender signs every event with it, so Grasp can tell an event is theirs.`}
+        </DialogDescription>
+        <DialogBody>
+          <SettingsStack>
+            {/* Mounted with each secret, so Copied never carries over. */}
+            <CopyField
+              key={secret}
+              label={t`Copy the secret`}
+              value={secret ?? ""}
+            />
+            <Alert variant="attention">
+              {t`Copy it now: you won't see it again. Lost, it can only be replaced.`}
+            </Alert>
+          </SettingsStack>
+        </DialogBody>
+        <DialogFooter>
+          <DialogAction variant="ink">{t`Done`}</DialogAction>
+        </DialogFooter>
+      </DialogPanel>
+    </Dialog>
   );
 };
 
@@ -237,55 +370,36 @@ export const EventSourcesSettings = ({
     await router.invalidate({ sync: true });
   };
   return (
-    <SettingsSection
-      description={
-        <Trans>
-          Where outside systems send events, such as a payment that came in.
-          Give each sender its source&apos;s URL and secret; workflows start on
-          its events from their Triggers tab, once you allow it.
-        </Trans>
-      }
+    <SectionCard
+      description={t`Where outside systems send events, such as a payment that came in. Give each sender its source's URL and secret; workflows start on its events from their Triggers tab, once you allow it.`}
       title={t`Webhooks`}
     >
-      <ShownOnceDialog
-        description={
-          <Trans>
-            The sender signs every event with it, so Grasp can tell an event is
-            theirs.
-          </Trans>
-        }
+      <SecretDialog
         onClose={() => {
           setSecret(undefined);
         }}
         secret={secret}
-        title={<Trans>The source&apos;s secret</Trans>}
       />
-      <SettingsBody>
+      <SettingsStack>
         <SigningNote />
-      </SettingsBody>
-      {page.state !== "ready" && (
-        <div className="border-t">
-          <NotLoadedState heading="h3" page={page} />
-        </div>
-      )}
-      {page.state === "ready" && page.data.length === 0 && (
-        <p className="text-muted-foreground border-t px-5 py-4">
-          <Trans>No source yet.</Trans>
-        </p>
-      )}
-      {page.state === "ready" && page.data.length > 0 && (
-        <ul className="flex flex-col divide-y border-t">
-          {page.data.map((source) => (
-            <SourceRow
-              key={source.id}
-              onChanged={changed}
-              onSecret={setSecret}
-              source={source}
-            />
-          ))}
-        </ul>
-      )}
-      <AddSource onChanged={changed} onSecret={setSecret} />
-    </SettingsSection>
+        {page.state === "ready" ? null : <SectionNotLoaded page={page} />}
+        {page.state === "ready" && page.data.length === 0 ? (
+          <Text tone="muted">{t`No source yet.`}</Text>
+        ) : null}
+        {page.state === "ready" && page.data.length > 0 ? (
+          <ul aria-label={t`Sources`} {...stylex.props(styles.list)}>
+            {page.data.map((source) => (
+              <SourceRow
+                key={source.id}
+                onChanged={changed}
+                onSecret={setSecret}
+                source={source}
+              />
+            ))}
+          </ul>
+        ) : null}
+        <AddSource onChanged={changed} onSecret={setSecret} />
+      </SettingsStack>
+    </SectionCard>
   );
 };

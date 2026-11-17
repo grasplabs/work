@@ -53,5 +53,9 @@ export const intent = {
       name: "hold",
       when: "A small loss that cannot be undone (a draft, a member): the press itself is the yes.",
     },
+    {
+      name: "truncate",
+      when: "A long name in a narrow head, where wrapping would push the next control off.",
+    },
   ],
 };

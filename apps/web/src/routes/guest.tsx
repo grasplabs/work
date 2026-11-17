@@ -9,7 +9,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 
 import { GraspBuddy } from "../buddy/grasp-buddy.tsx";
-import { Composer } from "../chat/composer.tsx";
+import { ChatComposer } from "../chat/chat-composer.tsx";
 import { GraspEyes } from "../chat/grasp-eyes.tsx";
 import { ErrorText } from "../error-text.tsx";
 import { formatDateTime } from "../format.ts";
@@ -159,7 +159,7 @@ const Chat = ({ secret, first }: { secret: string; first: GuestView }) => {
       {open ? (
         <div className="flex w-full flex-col gap-2">
           {view.turnsLeft > 0 ? (
-            <Composer
+            <ChatComposer
               busy={pending === "send"}
               compact
               // Not while the chat is being finished.

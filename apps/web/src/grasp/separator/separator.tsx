@@ -14,31 +14,13 @@
 import * as stylex from "@stylexjs/stylex";
 import { Separator as SeparatorPrimitive } from "@ui-sdk/react/separator";
 
+import type { LayoutStyle } from "../layout/layout";
 import { grasp, media } from "../tokens/tokens.stylex";
 
 export type SeparatorOrientation = "horizontal" | "vertical";
 
-type Layout = string | number | null;
-
 /** What a caller may style: the room around the line and where it sits. Never its look. */
-export type SeparatorLayoutStyle = stylex.StyleXStyles<{
-  alignSelf?: Layout;
-  flexGrow?: Layout;
-  flexShrink?: Layout;
-  flexBasis?: Layout;
-  justifySelf?: Layout;
-  gridArea?: Layout;
-  gridColumn?: Layout;
-  gridRow?: Layout;
-  order?: Layout;
-  margin?: Layout;
-  marginBlock?: Layout;
-  marginBlockStart?: Layout;
-  marginBlockEnd?: Layout;
-  marginInline?: Layout;
-  marginInlineStart?: Layout;
-  marginInlineEnd?: Layout;
-}>;
+export type SeparatorLayoutStyle = LayoutStyle;
 
 /** Every prop a Separator takes. */
 export interface SeparatorProps {

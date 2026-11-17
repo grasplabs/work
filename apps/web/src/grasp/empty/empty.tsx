@@ -6,6 +6,8 @@
 //   <Empty title="No projects yet">Projects appear here once someone creates one.</Empty>
 //   <Empty size="section">Comments will appear here.</Empty>             no title in a card
 //   <Empty kind="error">The projects did not load.</Empty>               says so, out loud
+//   <Empty size="page" titleLevel={1} picture="lost" title="No page here">…</Empty>   a page's h1
+//   <Empty kind="error" announce={false} titleLevel={1} title="…">…</Empty>   a route's error page
 //   <Empty shape="rows" title="No projects yet" action={<Button>New project</Button>}>…</Empty>
 //
 // `shape` draws what will stand here (a list's rows, a grid's cards, a chart's bars, a thread's
@@ -21,6 +23,7 @@ import type { ReactNode } from "react";
 import { Alert, Icon } from "../icons";
 import type { IconData } from "../icons";
 import { iconVars } from "../icons/icon.stylex";
+import type { LayoutStyle } from "../layout/layout";
 import { grasp } from "../tokens/tokens.stylex";
 import { EmptyPictureDrawing } from "./pictures";
 import type { EmptyPicture } from "./pictures";
@@ -30,21 +33,8 @@ import type { EmptyShape } from "./shape";
 export type { EmptyPicture } from "./pictures";
 export type { EmptyShape } from "./shape";
 
-type Layout = string | number | null;
-
 /** What a caller may style: where it sits. */
-export type EmptyLayoutStyle = stylex.StyleXStyles<{
-  alignSelf?: Layout;
-  justifySelf?: Layout;
-  flexGrow?: Layout;
-  gridArea?: Layout;
-  gridColumn?: Layout;
-  gridRow?: Layout;
-  width?: Layout;
-  margin?: Layout;
-  marginBlock?: Layout;
-  marginInline?: Layout;
-}>;
+export type EmptyLayoutStyle = LayoutStyle;
 
 /** Every prop an Empty takes. */
 export interface EmptyProps {
@@ -56,10 +46,24 @@ export interface EmptyProps {
    */
   title?: string;
   /**
+   * The title as a heading of this level, for when the state is the page or a section of it: `1`
+   * on a not-found or error page, where the title is the page's h1; `2` or `3` in a section. The
+   * look stays the same. Leave it out and the title is plain text, as the page's own heading names
+   * the list.
+   */
+  titleLevel?: 1 | 2 | 3 | 4;
+  /**
    * `empty`: there is nothing here. `error`: it did not load, said to a screen reader at once.
    * @default "empty"
    */
   kind?: "empty" | "error";
+  /**
+   * An error's title and sentence are said to a screen reader as they appear (an alert), never its
+   * actions. Set `false` where the page itself is the error, a route's error page, which is read
+   * as any page is, not as a live update. Nothing is announced for `kind="empty"`.
+   * @default true
+   */
+  announce?: boolean;
   /**
    * `page` stands for a whole list or page (at least 400px tall), `section` for a card or one tab
    * (at least 150px), `inline` for a small box, with no height of its own.
@@ -74,6 +78,12 @@ export interface EmptyProps {
    * `offline` no connection, `broken` it failed, `lost` no page at this address. A picture only: the title says the same in words.
    */
   picture?: EmptyPicture;
+  /**
+   * In the icon's place, a part of its own: the Working mark (or a Spinner) while the place is
+   * being set up ("Setting up your workspace"), sized and centred as the icon is. The Working mark
+   * stands still with reduced motion. Leave `icon` and `picture` out with it.
+   */
+  media?: ReactNode;
   /**
    * What will stand here, drawn faint behind the words so the place keeps its shape: `rows` for a
    * list or a table, `cards` for a grid, `chart` for bars, `thread` for a conversation. A picture
@@ -94,6 +104,8 @@ export interface EmptyProps {
   action?: ReactNode;
   /** Layout only: where it sits. */
   style?: EmptyLayoutStyle;
+  /** The same as `style`, by a name a style lint does not take for an inline style attribute. */
+  layout?: EmptyLayoutStyle;
 }
 
 const styles = stylex.create({
@@ -163,6 +175,9 @@ const styles = stylex.create({
   page: { minHeight: grasp.emptyPage },
   section: { minHeight: grasp.emptySection },
   inline: { padding: grasp.space4 },
+  // The title and sentence together: the part said out loud for an error, never its actions. Its
+  // own grid, at the words' gap, so the lines stand where they did before it held them.
+  message: { display: "grid", rowGap: grasp.space2, minWidth: 0 },
   words: {
     display: "grid",
     rowGap: grasp.space2,
@@ -177,6 +192,13 @@ const styles = stylex.create({
     color: grasp.muted,
   },
   iconStart: { justifySelf: "start" },
+  // A part in the icon's place keeps the icon's box: its height and width, centred in it.
+  media: {
+    alignItems: "center",
+    justifyContent: "center",
+    width: grasp.iconMd,
+    height: grasp.iconMd,
+  },
   iconError: {
     color: grasp.danger,
   },
@@ -202,14 +224,28 @@ const styles = stylex.create({
 /** The icon above the title, when there is no picture. */
 const Mark = ({
   mark,
+  media: part,
   error,
   top,
 }: {
   mark: IconData | undefined;
+  media: ReactNode;
   error: boolean;
   top: boolean;
-}) =>
-  mark ? (
+}) => {
+  // A part of its own in the icon's place (the Working mark): the icon's box, centred, its own
+  // colours; its words, if any, are its own.
+  if (part !== undefined && part !== null && part !== false) {
+    return (
+      <span
+        data-slot="empty-media"
+        {...stylex.props(styles.icon, styles.media, top && styles.iconStart)}
+      >
+        {part}
+      </span>
+    );
+  }
+  return mark ? (
     <span
       aria-hidden="true"
       {...stylex.props(
@@ -221,6 +257,7 @@ const Mark = ({
       <Icon icon={mark} />
     </span>
   ) : null;
+};
 
 /** The way on, under the sentence. */
 const Way = ({ action, top }: { action: ReactNode; top: boolean }) =>
@@ -232,6 +269,38 @@ const Way = ({ action, top }: { action: ReactNode; top: boolean }) =>
       {action}
     </div>
   );
+
+/**
+ * The title and the sentence. A failure is said when it replaces what was loading: these two, not
+ * the way on (read again on each render otherwise). Nothing-here is read where it stands.
+ */
+const Message = ({
+  heading,
+  titleLevel,
+  said,
+  top,
+  children,
+}: {
+  heading: string;
+  titleLevel: EmptyProps["titleLevel"];
+  said: boolean;
+  top: boolean;
+  children: ReactNode;
+}) => {
+  const Title = titleLevel === undefined ? "p" : (`h${titleLevel}` as const);
+  return (
+    <div
+      data-slot="empty-message"
+      role={said ? "alert" : undefined}
+      {...stylex.props(styles.message, top && styles.topWords)}
+    >
+      {heading !== "" && (
+        <Title {...stylex.props(styles.title)}>{heading}</Title>
+      )}
+      <p {...stylex.props(styles.sentence)}>{children}</p>
+    </div>
+  );
+};
 
 /** The picture of the place: round the words, or under them when they stand at its head. */
 const Place = ({
@@ -257,14 +326,18 @@ const Place = ({
 export const Empty = ({
   children,
   title,
+  titleLevel,
   kind = "empty",
+  announce = true,
   size = "section",
   icon,
   picture,
+  media: part,
   shape,
   place = "middle",
   action,
-  style,
+  style: styleProp,
+  layout,
 }: EmptyProps) => {
   const error = kind === "error";
   const top = place === "top";
@@ -278,15 +351,13 @@ export const Empty = ({
       data-slot="empty"
       data-kind={kind}
       data-place={place}
-      // A failure is said when it replaces what was loading; nothing-here is read where it stands.
-      role={error ? "alert" : undefined}
       {...stylex.props(
         styles.box,
         styles[size],
         behind && styles.shaped,
         behind && shape === "chart" && styles.shapedChart,
         top && styles.top,
-        style
+        layout ?? styleProp
       )}
     >
       <div
@@ -297,9 +368,15 @@ export const Empty = ({
         )}
       >
         {picture && <EmptyPictureDrawing picture={picture} start={top} />}
-        <Mark mark={mark} error={error} top={top} />
-        {heading !== "" && <p {...stylex.props(styles.title)}>{heading}</p>}
-        <p {...stylex.props(styles.sentence)}>{children}</p>
+        <Mark mark={mark} media={part} error={error} top={top} />
+        <Message
+          heading={heading}
+          titleLevel={titleLevel}
+          said={error && announce}
+          top={top}
+        >
+          {children}
+        </Message>
         <Way action={action} top={top} />
       </div>
       {/* After the words in the page: the words are what is met first. */}

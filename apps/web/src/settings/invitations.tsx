@@ -1,92 +1,97 @@
+import { failureText } from "@grasp-os/shared/errors";
 import type { Invitation } from "@grasp-os/shared/members";
 import { roleSchema } from "@grasp-os/shared/roles";
 import type { Role } from "@grasp-os/shared/roles";
-import { Button } from "@grasp-os/ui/components/button";
+import { useLingui } from "@lingui/react/macro";
+import { useRouter } from "@tanstack/react-router";
+import { useId, useState } from "react";
+
+import { changeThenRefresh } from "../change-then-refresh.ts";
+import { formatDate } from "../format.ts";
+import { Button, useAction } from "../grasp/button/index.ts";
 import {
   Dialog,
-  DialogClose,
-  DialogContent,
+  DialogAction,
+  DialogBody,
   DialogDescription,
   DialogFooter,
-  DialogHeader,
+  DialogPanel,
   DialogTitle,
-} from "@grasp-os/ui/components/dialog";
+} from "../grasp/dialog/index.ts";
 import {
   Field,
   FieldDescription,
   FieldError,
   FieldLabel,
-} from "@grasp-os/ui/components/field";
-import { Input } from "@grasp-os/ui/components/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@grasp-os/ui/components/select";
-import { Trans, useLingui } from "@lingui/react/macro";
-import { useRouter } from "@tanstack/react-router";
-import { MailIcon, PlusIcon } from "lucide-react";
-import { useId, useState } from "react";
-
-import { changeThenRefresh } from "../change-then-refresh.ts";
-import { ErrorText } from "../error-text.tsx";
-import { formatDate } from "../format.ts";
+} from "../grasp/field/index.ts";
+import { Form } from "../grasp/form/index.ts";
+import { Plus } from "../grasp/icons/index.ts";
+import { Input } from "../grasp/input/index.ts";
+import { Item } from "../grasp/item/index.ts";
+import { Select } from "../grasp/select/index.ts";
 import { roleLabel } from "../labels.ts";
 import { useCoreAction } from "../use-core-action.ts";
+import { useCore } from "../use-core.ts";
+import { RowNote, TitleLine } from "./section.tsx";
 
-// Invitations, as the prototype has them (`routes/settings/members.tsx`):
-// an admin names someone's address and the role they get when they first
-// sign in with the organization's account. Grasp sends no email, so the
-// dialog says to tell them. Core checks the address, the role and the
-// admin on every call.
+// Invitations: an admin names someone's address and the role they get
+// when they first sign in with the organization's account. Grasp sends no
+// email, so the dialog says to tell them. Core checks the address, the
+// role and the admin on every call.
 
 const isRole = (value: unknown): value is Role =>
   roleSchema.safeParse(value).success;
 
 /** The Invite button, and its dialog. */
 export const InviteButton = () => {
+  const { t } = useLingui();
+  const core = useCore();
   const router = useRouter();
-  const { busy, failure, run } = useCoreAction();
   const [open, setOpen] = useState(false);
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<Role>("user");
-  const emailId = useId();
-  const roleId = useId();
-  const roles = roleSchema.options.map((value) => ({
-    label: roleLabel(value),
-    value,
-  }));
+  const [refused, setRefused] = useState<string>();
+  const formId = useId();
   const close = (): void => {
     setOpen(false);
     setEmail("");
     setRole("user");
+    setRefused(undefined);
   };
-  const invite = async (): Promise<void> => {
-    const invited = await run(async (session) => {
+  const invite = useAction(
+    async () => {
+      setRefused(undefined);
       await changeThenRefresh(
-        async () => await session.members.invite(email, role),
+        async () =>
+          await core.withSession(
+            async (session) => await session.members.invite(email, role)
+          ),
         async () => {
           await router.invalidate({ sync: true });
         }
       );
-      return true;
-    });
-    if (invited === true) {
       close();
+    },
+    {
+      working: t`Inviting`,
+      done: t`Invited`,
+      failed: t`Could not invite`,
+      onError: (error) => {
+        setRefused(failureText(error));
+      },
     }
-  };
+  );
   return (
     <>
       <Button
+        icon={Plus}
         onClick={() => {
           setOpen(true);
         }}
         size="sm"
+        variant="ink"
       >
-        <PlusIcon data-icon="inline-start" />
-        <Trans>Invite</Trans>
+        {t`Invite`}
       </Button>
       <Dialog
         onOpenChange={(next) => {
@@ -98,82 +103,72 @@ export const InviteButton = () => {
         }}
         open={open}
       >
-        <DialogContent>
-          <form
-            className="flex flex-col gap-4"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void invite();
-            }}
-          >
-            <DialogHeader>
-              <DialogTitle>
-                <Trans>Invite someone</Trans>
-              </DialogTitle>
-              <DialogDescription>
-                <Trans>
-                  They get this role when they first sign in with your
-                  organization’s account. Grasp sends no email, so let them
-                  know.
-                </Trans>
-              </DialogDescription>
-            </DialogHeader>
-            <Field data-invalid={failure === undefined ? undefined : true}>
-              <FieldLabel htmlFor={emailId}>
-                <Trans>Email</Trans>
-              </FieldLabel>
-              <Input
-                aria-invalid={failure === undefined ? undefined : true}
-                autoComplete="off"
-                id={emailId}
-                onChange={(event) => {
-                  setEmail(event.target.value);
-                }}
-                type="email"
-                value={email}
-              />
-              {failure === undefined ? null : (
-                <FieldError>{failure}</FieldError>
-              )}
-            </Field>
-            <Field>
-              <FieldLabel htmlFor={roleId}>
-                <Trans>Role</Trans>
-              </FieldLabel>
-              <Select
-                items={roles}
-                onValueChange={(value: unknown) => {
-                  if (isRole(value)) {
-                    setRole(value);
-                  }
-                }}
-                value={role}
-              >
-                <SelectTrigger className="w-full" id={roleId}>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {roles.map((item) => (
-                    <SelectItem key={item.value} value={item.value}>
-                      {item.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <FieldDescription>
-                <Trans>The roles above say what each may do.</Trans>
-              </FieldDescription>
-            </Field>
-            <DialogFooter>
-              <DialogClose render={<Button type="button" variant="outline" />}>
-                <Trans>Cancel</Trans>
-              </DialogClose>
-              <Button disabled={busy || email.trim() === ""} type="submit">
-                <Trans>Invite</Trans>
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
+        <DialogPanel closeLabel={t`Close`}>
+          <DialogTitle>{t`Invite someone`}</DialogTitle>
+          <DialogDescription>
+            {t`They get this role when they first sign in with your organization’s account. Grasp sends no email, so let them know.`}
+          </DialogDescription>
+          <DialogBody>
+            <Form
+              aria-label={t`Invite someone`}
+              id={formId}
+              onSubmit={(event) => {
+                // Sent only once every field is right; sent here, not by the browser.
+                event.preventDefault();
+                void invite.run();
+              }}
+            >
+              <Field invalid={refused !== undefined}>
+                <FieldLabel>{t`Email`}</FieldLabel>
+                <Input
+                  autoComplete="off"
+                  onValueChange={setEmail}
+                  required
+                  type="email"
+                  value={email}
+                />
+                <FieldError match="valueMissing">
+                  {t`Enter the email of the person to invite.`}
+                </FieldError>
+                <FieldError match="typeMismatch">
+                  {t`Enter an email address, such as name@company.com.`}
+                </FieldError>
+                {refused === undefined ? null : (
+                  <FieldError match>{refused}</FieldError>
+                )}
+              </Field>
+              <Field>
+                <FieldLabel>{t`Role`}</FieldLabel>
+                <Select
+                  items={roleSchema.options.map((value) => ({
+                    label: roleLabel(value),
+                    value,
+                  }))}
+                  onValueChange={(value) => {
+                    if (isRole(value)) {
+                      setRole(value);
+                    }
+                  }}
+                  value={role}
+                />
+                <FieldDescription>
+                  {t`Roles, at the foot of this page, say what each may do.`}
+                </FieldDescription>
+              </Field>
+            </Form>
+          </DialogBody>
+          <DialogFooter>
+            <DialogAction>{t`Cancel`}</DialogAction>
+            <Button
+              form={formId}
+              type="submit"
+              variant="ink"
+              {...invite.status}
+            >
+              {t`Invite`}
+            </Button>
+          </DialogFooter>
+        </DialogPanel>
       </Dialog>
     </>
   );
@@ -189,22 +184,8 @@ export const InvitationRow = ({ invitation }: { invitation: Invitation }) => {
   const role = roleLabel(invitation.role);
   const inviter = invitation.invitedBy;
   return (
-    <div className="flex items-center gap-3 border-t px-5 py-3">
-      <span
-        aria-hidden="true"
-        className="bg-muted flex size-8 flex-none items-center justify-center rounded-full"
-      >
-        <MailIcon className="text-muted-foreground size-4" />
-      </span>
-      <div className="flex min-w-0 flex-1 flex-col">
-        <span className="truncate">{email}</span>
-        <span className="text-muted-foreground truncate">
-          <Trans>
-            Invited as {role} by {inviter} on {date} · hasn’t signed in yet
-          </Trans>
-        </span>
-      </div>
-      <div className="flex flex-col items-end gap-1">
+    <Item
+      actions={
         <Button
           aria-label={t`Withdraw the invitation of ${email}`}
           disabled={busy}
@@ -223,10 +204,21 @@ export const InvitationRow = ({ invitation }: { invitation: Invitation }) => {
           size="sm"
           variant="ghost"
         >
-          <Trans>Withdraw</Trans>
+          {t`Withdraw`}
         </Button>
-        <ErrorText>{failure}</ErrorText>
-      </div>
-    </div>
+      }
+      size="sm"
+      title={
+        <TitleLine
+          detail={
+            <RowNote failure={failure}>
+              {t`Invited as ${role} by ${inviter} on ${date}`}
+            </RowNote>
+          }
+        >
+          {email}
+        </TitleLine>
+      }
+    />
   );
 };

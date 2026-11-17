@@ -32,6 +32,13 @@ export interface ComposerAttachmentWords {
   failed: string;
   retry: string;
   remove: string;
+  /**
+   * A file's size as people read it, from its bytes ("820 KB", "1.4 MB"): the host formats the
+   * number and the unit for its language.
+   */
+  size: (bytes: number) => string;
+  /** A document's pages, from their count, with the plural the language takes ("1 page", "12 pages"). */
+  pages: (count: number) => string;
 }
 
 /** Every prop a ComposerAttachment takes. */
@@ -65,16 +72,11 @@ export interface ComposerAttachmentProps {
   words?: Partial<ComposerAttachmentWords>;
 }
 
-const defaultWords: ComposerAttachmentWords = {
-  uploading: "Uploading",
-  done: "Uploaded",
-  failed: "Could not upload",
-  retry: "Try again",
-  remove: "Remove",
-};
-
-/** "820 KB", "1.4 MB": a size as people read it. */
-export const readableSize = (bytes: number) => {
+// A size in English, in steps of a thousand: "820 KB", "1.4 MB".
+const englishSize = (bytes: number) => {
+  if (bytes === 0) {
+    return "Empty";
+  }
   const units = ["B", "KB", "MB", "GB"];
   let value = bytes;
   let unit = 0;
@@ -83,6 +85,17 @@ export const readableSize = (bytes: number) => {
     unit += 1;
   }
   return `${unit === 0 || value >= 10 ? Math.round(value) : value.toFixed(1)} ${units[unit]}`;
+};
+
+const defaultWords: ComposerAttachmentWords = {
+  uploading: "Uploading",
+  done: "Uploaded",
+  failed: "Could not upload",
+  retry: "Try again",
+  remove: "Remove",
+  size: englishSize,
+  pages: (count) =>
+    count === 0 ? "No pages" : `${count} ${count === 1 ? "page" : "pages"}`,
 };
 
 /** A name cut in the middle: its start, and its last few characters with the extension. */
@@ -276,12 +289,12 @@ const metaOf = ({
     return reason ?? say.failed;
   }
   if (pages !== undefined && pages !== 0) {
-    return `${pages} ${pages === 1 ? "page" : "pages"}`;
+    return say.pages(pages);
   }
   if (size === undefined) {
     return say.done;
   }
-  return readableSize(size);
+  return say.size(size);
 };
 
 /** A file waiting to be sent: its picture or mark, its name and size, and how its upload stands. */

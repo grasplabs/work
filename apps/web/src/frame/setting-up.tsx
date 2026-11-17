@@ -1,23 +1,14 @@
-import { Badge } from "@grasp-os/ui/components/badge";
-import { Button } from "@grasp-os/ui/components/button";
-import {
-  Empty,
-  EmptyContent,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle,
-} from "@grasp-os/ui/components/empty";
-import { Spinner } from "@grasp-os/ui/components/spinner";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@grasp-os/ui/components/tooltip";
-import { Trans, useLingui } from "@lingui/react/macro";
-import { TriangleAlertIcon, UsersIcon } from "lucide-react";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
+import { useId } from "react";
 
 import { useGlobalChat } from "../chat/global-chat.tsx";
+import { Badge } from "../grasp/badge/index.ts";
+import { Button } from "../grasp/button/index.ts";
+import { Empty } from "../grasp/empty/index.ts";
+import { People, Spinner } from "../grasp/icons/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { ItemBar } from "./item-shell.tsx";
 import type { Crumb } from "./site-header.tsx";
 
@@ -30,40 +21,61 @@ import type { Crumb } from "./site-header.tsx";
 // draft passing) with Grasp's turn over. Only a turn that ended without
 // one says so, with Try again, which asks the chat.
 
+const styles = stylex.create({
+  // In place of the preview or the Flow, on the page's soft ground.
+  place: {
+    display: "flex",
+    flexGrow: 1,
+    minHeight: 0,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: grasp.space6,
+    backgroundColor: grasp.soft,
+  },
+});
+
 /** Where something new stands: ready, being set up, or not set up once Grasp's turn ended without a version that works. */
 export type SetUp = "ready" | "setting-up" | "failed";
 
-/** Share, off while Grasp sets it up, saying when it comes. */
-const ShareOnceReady = () => (
-  <Tooltip>
-    {/* Focusable while off, so its tooltip says why. */}
-    <TooltipTrigger
-      render={
-        <Button disabled focusableWhenDisabled size="sm" variant="highlight" />
-      }
-    >
-      <UsersIcon data-icon="inline-start" />
-      <Trans>Share with your team</Trans>
-    </TooltipTrigger>
-    <TooltipContent>
-      <Trans>Share once it&apos;s ready</Trans>
-    </TooltipContent>
-  </Tooltip>
-);
+/**
+ * Share, off while Grasp sets it up, with why beside it on every width, as
+ * a disabled button's reason stands (Grasp UI's tooltip never opens on a
+ * button that is off). Still reached by the keys, so its reason is read.
+ */
+const ShareOnceReady = () => {
+  const { t } = useLingui();
+  const why = useId();
+  return (
+    <>
+      <Text element="span" id={why} size="xs" tone="muted">
+        {t`Share once it's ready`}
+      </Text>
+      <Button
+        aria-describedby={why}
+        disabled
+        focusableWhenDisabled
+        icon={People}
+        size="sm"
+        variant="ink"
+      >
+        {t`Share with your team`}
+      </Button>
+    </>
+  );
+};
 
 /** The bar while Grasp sets it up: the way back, its name, "Setting up", and Share off. */
-export const SettingUpBar = ({ back, name }: { back: Crumb; name: string }) => (
-  <ItemBar
-    actions={<ShareOnceReady />}
-    back={back}
-    name={name}
-    state={
-      <Badge variant="outline">
-        <Trans>Setting up</Trans>
-      </Badge>
-    }
-  />
-);
+export const SettingUpBar = ({ back, name }: { back: Crumb; name: string }) => {
+  const { t } = useLingui();
+  return (
+    <ItemBar
+      actions={<ShareOnceReady />}
+      back={back}
+      name={name}
+      state={<Badge>{t`Setting up`}</Badge>}
+    />
+  );
+};
 
 /**
  * In place of what is set up: "Setting up {name}…" while Grasp builds it,
@@ -80,44 +92,28 @@ export const SettingUp = ({
   const { t } = useLingui();
   const chat = useGlobalChat();
   return (
-    <div className="bg-muted flex min-h-0 flex-1 items-center justify-center p-6">
-      <Empty>
-        <EmptyHeader>
-          <EmptyMedia variant="icon">
-            {failed ? (
-              <TriangleAlertIcon />
-            ) : (
-              <Spinner aria-label={t`Setting up`} />
-            )}
-          </EmptyMedia>
-          <EmptyTitle>
-            {failed ? (
-              <Trans>{name} isn&apos;t ready yet</Trans>
-            ) : (
-              <Trans>Setting up {name}…</Trans>
-            )}
-          </EmptyTitle>
-          <EmptyDescription>
-            {failed ? (
-              <Trans>Grasp couldn&apos;t finish setting it up this time.</Trans>
-            ) : (
-              <Trans>Grasp is building it. This takes a minute or two.</Trans>
-            )}
-          </EmptyDescription>
-        </EmptyHeader>
-        {failed ? (
-          <EmptyContent>
+    <div {...stylex.props(styles.place)}>
+      {failed ? (
+        <Empty
+          action={
             <Button
               onClick={() => {
                 void chat.ask(t`Try again to set up ${name}.`);
               }}
-              variant="outline"
             >
-              <Trans>Try again</Trans>
+              {t`Try again`}
             </Button>
-          </EmptyContent>
-        ) : null}
-      </Empty>
+          }
+          kind="error"
+          title={t`${name} isn't ready yet`}
+        >
+          {t`Grasp couldn't finish setting it up this time.`}
+        </Empty>
+      ) : (
+        <Empty icon={Spinner} title={t`Setting up ${name}…`}>
+          {t`Grasp is building it. This takes a minute or two.`}
+        </Empty>
+      )}
     </div>
   );
 };
@@ -129,19 +125,9 @@ export const SettingUp = ({
 export const Updating = ({ name }: { name: string }) => {
   const { t } = useLingui();
   return (
-    <div className="bg-muted flex min-h-0 flex-1 items-center justify-center p-6">
-      <Empty>
-        <EmptyHeader>
-          <EmptyMedia variant="icon">
-            <Spinner aria-label={t`Updating`} />
-          </EmptyMedia>
-          <EmptyTitle>
-            <Trans>Updating {name}…</Trans>
-          </EmptyTitle>
-          <EmptyDescription>
-            <Trans>Grasp is still working on it.</Trans>
-          </EmptyDescription>
-        </EmptyHeader>
+    <div {...stylex.props(styles.place)}>
+      <Empty icon={Spinner} title={t`Updating ${name}…`}>
+        {t`Grasp is still working on it.`}
       </Empty>
     </div>
   );

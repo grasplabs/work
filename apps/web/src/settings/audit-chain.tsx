@@ -3,20 +3,32 @@ import type {
   ChainVerification,
   FullVerification,
 } from "@grasp-os/shared/audit-log";
-import { Button } from "@grasp-os/ui/components/button";
-import { Spinner } from "@grasp-os/ui/components/spinner";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
-import { Trans, useLingui } from "@lingui/react/macro";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { useState } from "react";
 
 import type { Session } from "../core.ts";
-import { ErrorText } from "../error-text.tsx";
 import { formatDateTime } from "../format.ts";
-import { NotLoaded } from "../load-from-core.tsx";
+import { Badge } from "../grasp/badge/index.ts";
+import { Button } from "../grasp/button/index.ts";
+import { SectionCard } from "../grasp/section-card/index.ts";
+import { Spinner } from "../grasp/spinner/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
-import { SettingsRow, SettingsSection } from "./settings-parts.tsx";
+import {
+  FactRow,
+  RowAlert,
+  SectionNotLoaded,
+  SettingsRows,
+} from "./section.tsx";
+
+const styles = stylex.create({
+  running: { display: "flex", alignItems: "center", gap: grasp.space2 },
+});
 
 // Settings › Audit trail › Chain check: verifies the whole hash chain of
 // the audit log, archived stretches included, from its first entry to its
@@ -69,7 +81,7 @@ const verifyChain = async (
   }
 };
 
-/** What the last full pass found, or how far the running one got. */
+/** What the last full pass found, or how far the running one got, as rows of the card. */
 const Outcome = ({
   running,
   through,
@@ -79,67 +91,55 @@ const Outcome = ({
   through: number;
   ended: FullVerification | null;
 }) => {
-  const { i18n } = useLingui();
+  const { t, i18n } = useLingui();
   if (running) {
     return (
-      <span className="text-muted-foreground flex items-center gap-2">
-        <Spinner />
-        <Trans>Checked through entry {through}…</Trans>
-      </span>
+      <FactRow label={t`Checking`}>
+        <span {...stylex.props(styles.running)}>
+          <Spinner />
+          <Text element="span" size="sm">
+            {t`Through entry ${through}…`}
+          </Text>
+        </span>
+      </FactRow>
     );
   }
   if (ended === null) {
-    return (
-      <span className="text-muted-foreground">
-        <Trans>The whole chain has not been verified yet.</Trans>
-      </span>
-    );
+    return <FactRow label={t`Last check`}>{t`Not checked yet`}</FactRow>;
   }
   const time = formatDateTime(ended.finishedAt);
   if (ended.ok && ended.through === 0) {
-    return (
-      <span>
-        <Trans>
-          The audit trail has no entries yet: there is nothing to verify.
-        </Trans>
-      </span>
-    );
+    return <FactRow label={t`Last check`}>{t`Nothing to check yet`}</FactRow>;
   }
   if (ended.ok) {
     const entries = ended.through;
     const purged = ended.purgedThrough;
     return (
-      <span>
-        <Trans>
-          The whole chain verified, through entry {entries}, on {time}.
-        </Trans>
-        {purged === undefined ? null : (
-          <>
-            {" "}
-            <Trans>
-              Entries through {purged} were removed when their retention ended:
-              they still link up, but could not be checked.
-            </Trans>
-          </>
-        )}
-      </span>
+      <FactRow
+        help={
+          purged === undefined
+            ? time
+            : t`${time}. Entries through ${purged} were removed when their retention ended; they still link up.`
+        }
+        label={t`Last check`}
+      >
+        <Badge tone="success">{t`Verified through ${entries}`}</Badge>
+      </FactRow>
     );
   }
   const entry = ended.brokenAt;
+  const reason = i18n._(breakReasons[ended.reason]);
   return (
-    <span className="text-destructive" role="alert">
-      <Trans>
-        On {time}, the chain broke at entry {entry}: nothing from there on is
-        verified.
-      </Trans>{" "}
-      {i18n._(breakReasons[ended.reason])}
-    </span>
+    <RowAlert variant="danger">
+      {t`On ${time}, the chain broke at entry ${entry}: nothing from there on is verified. ${reason}`}
+    </RowAlert>
   );
 };
 
 /**
  * The chain check, for an admin: `last`, the last full pass core kept,
- * until the page runs one of its own.
+ * until the page runs one of its own. One card, its result as a row, and
+ * Verify now in its head.
  */
 export const AuditChainCheck = ({
   last,
@@ -160,37 +160,38 @@ export const AuditChainCheck = ({
     }
   };
   return (
-    <SettingsSection
-      description={t`Check that no entry of the audit trail was removed or changed since it was written, from the first to the latest.`}
-      title={t`Chain check`}
-    >
-      <SettingsRow label={t`Verify the chain`}>
+    <SectionCard
+      actions={
         <Button
           disabled={busy}
           onClick={() => {
             void verify();
           }}
           size="sm"
-          variant="outline"
         >
-          <Trans>Verify now</Trans>
+          {t`Verify now`}
         </Button>
-      </SettingsRow>
-      <div
-        className="flex flex-col gap-1 border-t px-5 py-4"
-        aria-live="polite"
-      >
+      }
+      description={t`Checks that no entry was removed or changed since it was written.`}
+      flush
+      title={t`Chain check`}
+    >
+      <div aria-live="polite">
         {own === null && !busy && last.state !== "ready" ? (
-          <NotLoaded page={last} />
+          <SectionNotLoaded page={last} />
         ) : (
-          <Outcome
-            ended={own ?? (last.state === "ready" ? last.data : null)}
-            running={busy}
-            through={through}
-          />
+          <SettingsRows>
+            <Outcome
+              ended={own ?? (last.state === "ready" ? last.data : null)}
+              running={busy}
+              through={through}
+            />
+            {failure === undefined ? null : (
+              <RowAlert variant="danger">{failure}</RowAlert>
+            )}
+          </SettingsRows>
         )}
-        <ErrorText>{failure}</ErrorText>
       </div>
-    </SettingsSection>
+    </SectionCard>
   );
 };

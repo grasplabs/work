@@ -1,4 +1,7 @@
-import { Button } from "@grasp-os/ui/components/button";
+// The kit's Empty, not Grasp UI's, in these four states alone: they head
+// the page (its h1) or a section, and Grasp UI's Empty has no heading level
+// for its title yet. Their icons are Lucide's for the same reason, as the
+// pages that name what wasn't found pass them.
 import {
   Empty,
   EmptyContent,
@@ -7,21 +10,65 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@grasp-os/ui/components/empty";
-import { Skeleton } from "@grasp-os/ui/components/skeleton";
 import { Trans, useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { Link, useRouter, useRouterState } from "@tanstack/react-router";
-import { RotateCcwIcon, SearchXIcon, TriangleAlertIcon } from "lucide-react";
+import { SearchXIcon, TriangleAlertIcon } from "lucide-react";
 import { use } from "react";
 import type { ComponentType, ReactNode, SVGProps } from "react";
 
 import { ErrorText } from "../error-text.tsx";
+import { Button } from "../grasp/button/index.ts";
+import { Retry } from "../grasp/icons/index.ts";
+import { Skeleton } from "../grasp/skeleton/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { notLoadedText } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { InFrame } from "./in-frame.ts";
 import { SiteHeader } from "./site-header.tsx";
 import type { Crumb } from "./site-header.tsx";
 
-/** What wasn't found, as the sidebar draws it: a Lucide icon or one of Grasp's own. */
+const styles = stylex.create({
+  // Under the page's bar, the state fills what is left of the card.
+  inFrame: {
+    display: "flex",
+    flexDirection: "column",
+    flexGrow: 1,
+  },
+  // Outside the frame, it fills the window.
+  alone: {
+    display: "flex",
+    flexDirection: "column",
+    minHeight: "100svh",
+  },
+  ways: {
+    display: "flex",
+    flexWrap: "wrap",
+    justifyContent: "center",
+    gap: grasp.space2,
+  },
+  lines: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space2,
+    width: "100%",
+  },
+  lastLine: { width: "66%" },
+  loading: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space6,
+  },
+  heading: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space2,
+  },
+  title: { width: "12rem", maxWidth: "100%" },
+  description: { width: "18rem", maxWidth: "100%" },
+});
+
+/** What wasn't found, drawn as its page draws it: a workflow's icon, say. */
 type StateIcon = ComponentType<SVGProps<SVGSVGElement>>;
 
 // How every page finds nothing, fails and loads, the same on each: the
@@ -45,10 +92,10 @@ const Place = ({
   use(InFrame) ? (
     <>
       <SiteHeader crumbs={crumbs} />
-      <div className="flex flex-1 flex-col">{children}</div>
+      <div {...stylex.props(styles.inFrame)}>{children}</div>
     </>
   ) : (
-    <main className="flex min-h-svh flex-col">{children}</main>
+    <main {...stylex.props(styles.alone)}>{children}</main>
   );
 
 /**
@@ -67,11 +114,10 @@ const offersChat = (heading: StateHeading, inFrame: boolean): boolean =>
   heading === "h1" && inFrame;
 
 /** The way on from a page that isn't there or didn't load: Chat, the product's home. */
-const GoToChat = () => (
-  <Button nativeButton={false} render={<Link to="/" />} variant="outline">
-    <Trans>Go to Chat</Trans>
-  </Button>
-);
+const GoToChat = () => {
+  const { t } = useLingui();
+  return <Button render={<Link to="/" />}>{t`Go to Chat`}</Button>;
+};
 
 /** Not found, in a page that keeps its own frame, such as Knowledge with its sidebar. */
 export const NotFoundState = ({
@@ -148,6 +194,7 @@ const TryAgain = ({ trying, reload }: { trying: boolean; reload: boolean }) => {
   return (
     <Button
       disabled={trying}
+      icon={Retry}
       onClick={() => {
         if (reload) {
           window.location.reload();
@@ -155,8 +202,8 @@ const TryAgain = ({ trying, reload }: { trying: boolean; reload: boolean }) => {
         }
         void router.invalidate();
       }}
+      variant="ink"
     >
-      <RotateCcwIcon data-icon="inline-start" />
       {trying ? t`Trying again…` : t`Try again`}
     </Button>
   );
@@ -195,7 +242,7 @@ export const ErrorState = ({
         </EmptyDescription>
       </EmptyHeader>
       <EmptyContent>
-        <div className="flex flex-wrap justify-center gap-2">
+        <div {...stylex.props(styles.ways)}>
           <TryAgain reload={reload} trying={trying} />
           {offersChat(Heading, inFrame) ? <GoToChat /> : null}
         </div>
@@ -286,12 +333,13 @@ export const LoadingLines = ({ lines = 3 }: { lines?: number }) => {
     <output
       aria-busy="true"
       aria-label={t`Loading…`}
-      className="flex w-full flex-col gap-2"
+      {...stylex.props(styles.lines)}
     >
       {Array.from({ length: lines }, (_, line) => (
         <Skeleton
-          className={line === lines - 1 ? "h-4 w-2/3" : "h-4 w-full"}
           key={line}
+          text="md"
+          {...(line === lines - 1 ? { layout: styles.lastLine } : {})}
         />
       ))}
     </output>
@@ -311,10 +359,10 @@ export const LoadingLines = ({ lines = 3 }: { lines?: number }) => {
 export const PageLoading = () => (
   <>
     <SiteHeader crumbs={[]} />
-    <div className="flex flex-col gap-6 p-6">
-      <div className="flex flex-col gap-2">
-        <Skeleton className="h-8 w-48" />
-        <Skeleton className="h-4 w-72 max-w-full" />
+    <div {...stylex.props(styles.loading)}>
+      <div {...stylex.props(styles.heading)}>
+        <Skeleton layout={styles.title} text="lg" />
+        <Skeleton layout={styles.description} text="md" />
       </div>
       <LoadingLines lines={4} />
     </div>

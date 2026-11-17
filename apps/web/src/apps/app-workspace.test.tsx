@@ -25,7 +25,6 @@ import type { Permission } from "@grasp-os/shared/permissions";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { SidebarProvider } from "@grasp-os/ui/components/sidebar";
 import { Toaster } from "@grasp-os/ui/components/toast";
-import { typeInPrompt } from "@grasp-os/ui/testing";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
 import {
@@ -574,8 +573,19 @@ const off = (element: HTMLElement): boolean =>
 
 /** What the box to ask in says while it is empty. */
 const placeholder = (): string | undefined =>
-  document.querySelector<HTMLElement>('[role="textbox"] p')?.dataset
-    .placeholder;
+  document.querySelector("textarea")?.placeholder;
+
+/** Types `text` into the box `box`, as typing does: its own setter, then the input React hears. */
+const typeInPrompt = (box: Element, text: string): void => {
+  if (!(box instanceof HTMLTextAreaElement)) {
+    throw new Error("The box is no text field");
+  }
+  Object.getOwnPropertyDescriptor(
+    HTMLTextAreaElement.prototype,
+    "value"
+  )?.set?.call(box, text);
+  box.dispatchEvent(new Event("input", { bubbles: true }));
+};
 
 /** The line under the bar of changes only the builders see, if shown. */
 const changesLine = (): HTMLElement | null =>
@@ -608,14 +618,12 @@ const status = (): string | null | undefined =>
 /** Whether the App's chat takes a question: its box, in a chat not closed. */
 const askable = (): boolean =>
   document.querySelector(
-    '[role="textbox"][aria-label="Ask for a change"]:not([inert] *)'
+    'textarea[aria-label="Ask for a change"]:not([inert] *)'
   ) !== null;
 
 /** Types `text` in the App's chat and sends it. */
 const typeAndSend = async (text: string): Promise<void> => {
-  const box = document.querySelector(
-    '[role="textbox"][aria-label="Ask for a change"]'
-  );
+  const box = document.querySelector('textarea[aria-label="Ask for a change"]');
   if (box === null) {
     throw new Error("No box to ask in");
   }
@@ -819,7 +827,7 @@ describe(AppWorkspace, () => {
     );
     await settled();
     const box = document.querySelector(
-      '[role="textbox"][aria-label="Describe the App"]'
+      'textarea[aria-label="Describe the App"]'
     );
     if (box === null) {
       throw new Error("No box to say what the App should do");
@@ -1086,8 +1094,9 @@ describe(AppWorkspace, () => {
       "chat-about-app"
     );
     await settled();
+    // The band over the box, which says what each question is about.
     const bar = document.querySelector(
-      '[data-slot="prompt-input-subject-bar"]'
+      '[data-slot="composer-surface"]'
     )?.textContent;
     await typeAndSend("Add a due date column");
     await typeAndSend("What's a good name for it?");

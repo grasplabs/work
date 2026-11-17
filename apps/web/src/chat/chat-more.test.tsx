@@ -202,10 +202,10 @@ const choose = async (name: string, under?: string): Promise<void> => {
   await press(byRole("menuitem", name));
 };
 
-/** The chat's title, a click away from renaming it. */
+/** The chat's title, which opens its menu. */
 const titleButton = (): HTMLElement => {
   const found = document.querySelector<HTMLElement>(
-    '[data-slot="editable-title-field"]'
+    'button[aria-label="More for this chat"]'
   );
   if (found === null) {
     throw new Error("No title");
@@ -284,7 +284,7 @@ describe("the open chat's menu", () => {
 
   it("renames the chat where its title stands, to the name typed", async () => {
     const { writes } = await opened(leave);
-    await press(titleButton());
+    await choose("Rename");
     const field = nameField();
     expect(field.value).toBe("Leave");
     await typeInto(field, "  Annual leave  ");
@@ -300,7 +300,7 @@ describe("the open chat's menu", () => {
 
   it("keeps the name as it was on Escape, and renames nothing", async () => {
     const { writes } = await opened(leave);
-    await press(titleButton());
+    await choose("Rename");
     const field = nameField();
     await typeInto(field, "Pay");
     await act(async () => {
@@ -333,22 +333,20 @@ describe("the open chat's menu", () => {
     await openMenu();
     const disabled = (name: string): string | null =>
       byRole("menuitem", name).getAttribute("aria-disabled");
-    expect([disabled("Copy as Markdown"), disabled("Download")]).toStrictEqual([
-      "true",
-      "true",
-    ]);
+    const offs = (): (string | null)[] =>
+      ["Copy as Markdown", "Download as Markdown", "Download as PDF"].map(
+        disabled
+      );
+    expect(offs()).toStrictEqual(["true", "true", "true"]);
 
     await answerWatch();
-    expect([disabled("Copy as Markdown"), disabled("Download")]).toStrictEqual([
-      null,
-      null,
-    ]);
+    expect(offs()).toStrictEqual([null, null, null]);
   });
 
   it("leaves the name being typed when another chat opens, renaming neither", async () => {
     const other: ChatSummary = { ...leave, id: "chat-2", title: "Pay" };
     const { writes, router } = await opened(leave, { others: [other] });
-    await press(titleButton());
+    await choose("Rename");
     expect(
       document.querySelector('input[aria-label="Chat name"]')
     ).not.toBeNull();

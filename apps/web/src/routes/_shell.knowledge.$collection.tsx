@@ -377,6 +377,8 @@ const CollectionView = () => {
 };
 
 export const Route = createFileRoute("/_shell/knowledge/$collection")({
+  // It fills the page\'s card, its panes scrolling on their own (frame/page-fill.ts).
+  staticData: { page: "fill" },
   validateSearch: (
     search: Record<string, unknown>
   ): { doc?: string; version?: number } => {

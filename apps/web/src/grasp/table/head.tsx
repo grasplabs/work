@@ -6,6 +6,7 @@ import * as stylex from "@stylexjs/stylex";
 import type { MouseEvent, ReactNode, ThHTMLAttributes } from "react";
 
 import { focus } from "../focus/focus";
+import { visuallyHidden } from "../hidden/hidden";
 import { Icon, Sortable, SortDown, SortUp } from "../icons";
 import { useHeadLook } from "./look";
 import type { TableHeadLook } from "./look";
@@ -134,7 +135,7 @@ const SortButton = ({
         <span aria-hidden="true" {...stylex.props(chip && styles.orderChip)}>
           {order}
         </span>
-        <span {...stylex.props(styles.unseen)}>{orderWords(order)}</span>
+        <span {...stylex.props(visuallyHidden)}>{orderWords(order)}</span>
       </span>
     )}
   </button>

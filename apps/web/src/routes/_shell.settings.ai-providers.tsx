@@ -2,14 +2,14 @@ import { isMemberAdmin } from "@grasp-os/shared/roles";
 import { useLingui } from "@lingui/react/macro";
 import { createFileRoute } from "@tanstack/react-router";
 
-import { NotLoadedState } from "../frame/page-states.tsx";
+import { SectionCard } from "../grasp/section-card/index.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import { AiProvidersSettings } from "../settings/ai-providers.tsx";
 import {
+  SectionNotLoaded,
   SettingsError,
   SettingsLoading,
-  SettingsSection,
-} from "../settings/settings-parts.tsx";
+} from "../settings/section.tsx";
 
 // Settings › AI providers, for admins: the organization's own AI provider
 // keys and the models its calls use (settings/ai-providers.tsx). Grasp
@@ -22,9 +22,9 @@ const AiProvidersPage = () => {
   const { identity } = Route.useRouteContext();
   if (page.state !== "ready") {
     return (
-      <SettingsSection title={t`AI providers`}>
-        <NotLoadedState heading="h3" page={page} />
-      </SettingsSection>
+      <SectionCard title={t`AI providers`}>
+        <SectionNotLoaded page={page} />
+      </SectionCard>
     );
   }
   return (

@@ -28,15 +28,11 @@ import { Trans, useLingui } from "@lingui/react/macro";
 import { Link, useNavigate, useRouter } from "@tanstack/react-router";
 import {
   ArchiveIcon,
-  CodeIcon,
-  DatabaseIcon,
-  EyeIcon,
   LayoutGridIcon,
   LinkIcon,
   Maximize2Icon,
   MoreHorizontalIcon,
   PanelRightIcon,
-  SettingsIcon,
   SparklesIcon,
   TriangleAlertIcon,
   UsersIcon,
@@ -50,16 +46,12 @@ import { answeredAfterBuild } from "../chat/build-answered.ts";
 import { slotOf, useChatSubject } from "../chat/chat-subject.ts";
 import { useGlobalChat } from "../chat/global-chat.tsx";
 import { ErrorText } from "../error-text.tsx";
-import {
-  ItemBar,
-  ItemShell,
-  ItemSwitch,
-  ItemSwitchLink,
-} from "../frame/item-shell.tsx";
+import { ItemBar, ItemShell } from "../frame/item-shell.tsx";
 import { LoadingLines } from "../frame/page-states.tsx";
 import { SettingUp, SettingUpBar, Updating } from "../frame/setting-up.tsx";
 import type { SetUp } from "../frame/setting-up.tsx";
 import type { Crumb } from "../frame/site-header.tsx";
+import { TabsLink, TabsNav } from "../grasp/tabs/nav.tsx";
 import { PageFrame } from "../pages/page-frame.tsx";
 import type { FrameFix } from "../pages/page-frame.tsx";
 import { useVersionPushes } from "../pages/use-version-pushes.ts";
@@ -137,12 +129,7 @@ const shownKey = (shown: ReadOnlyShown | undefined): string => {
 };
 
 /** The switch's entries, in order. */
-const views = [
-  { view: "preview", icon: EyeIcon },
-  { view: "code", icon: CodeIcon },
-  { view: "data", icon: DatabaseIcon },
-  { view: "settings", icon: SettingsIcon },
-] as const;
+const views = ["preview", "code", "data", "settings"] as const;
 
 /** Preview | Code | Data | Settings: links, so each is an address of its own. */
 const ViewSwitch = ({ app, view }: { app: string; view: WorkspaceView }) => {
@@ -154,29 +141,31 @@ const ViewSwitch = ({ app, view }: { app: string; view: WorkspaceView }) => {
     settings: t({ message: "Settings", context: "an app's workspace view" }),
   };
   return (
-    <ItemSwitch label={t`Workspace views`}>
-      {views.map(({ view: each, icon: Icon }) => (
-        <ItemSwitchLink
+    <TabsNav label={t`Workspace views`} variant="segmented">
+      {views.map((each) => (
+        <TabsLink
           current={each === view}
-          icon={<Icon data-icon="inline-start" />}
           key={each}
-          label={labels[each]}
-          renderLink={(look) => (
+          render={
             <Link
-              {...look}
+              // The App's own view has no `view` in its address: said
+              // so, so the router's own match marks it only there.
+              activeOptions={{ explicitUndefined: true }}
               params={{ app }}
               replace
               search={(held) => ({
                 env: held.env,
                 project: held.project,
-                ...(each === "preview" ? {} : { view: each }),
+                view: each === "preview" ? undefined : each,
               })}
               to="/apps/$app"
             />
-          )}
-        />
+          }
+        >
+          {labels[each]}
+        </TabsLink>
       ))}
-    </ItemSwitch>
+    </TabsNav>
   );
 };
 

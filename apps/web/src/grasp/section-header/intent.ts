@@ -29,4 +29,10 @@ export const intent = {
       source: "docs/components/heading.mdx",
     },
   ],
+  variants: [
+    {
+      name: 'size="sm"',
+      when: "The head of a dense card: title and sentence at text-sm (Section card's compact density).",
+    },
+  ],
 };

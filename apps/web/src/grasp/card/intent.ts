@@ -33,5 +33,9 @@ export const intent = {
       name: 'padding="none"',
       when: "A table or a picture that runs to the edge.",
     },
+    {
+      name: "fill",
+      when: "A cell of a fixed grid, a dashboard's: the card takes the cell's height and clips what does not fit.",
+    },
   ],
 };

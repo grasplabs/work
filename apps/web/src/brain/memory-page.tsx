@@ -503,7 +503,7 @@ export const MemoryPage = ({
     // serif, the kinds of record as a line of tabs under it, in the brain's
     // column, with room at the foot for the chat.
     <div className="min-h-0 flex-1 overflow-y-auto">
-      <div className="pb-chat mx-auto flex w-full max-w-5xl flex-col gap-6 px-6 pt-8 md:px-12">
+      <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-6 md:px-12">
         <PageHeader>
           <PageHeaderTitle>
             <Trans>Memory</Trans>

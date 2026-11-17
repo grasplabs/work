@@ -22,7 +22,7 @@ test("an admin removes someone, erases them by typing their name, follows it to 
   await page.getByRole("button", { name: `Actions for ${who}` }).click();
   await page.getByRole("menuitem", { name: "Remove" }).click();
   await page
-    .getByRole("dialog", { name: "Remove Person?" })
+    .getByRole("alertdialog", { name: "Remove Person?" })
     .getByRole("button", { name: "Remove" })
     .click();
   const removed = page.getByRole("region", { name: "Removed people" });
@@ -63,7 +63,7 @@ test("an admin removes someone, erases them by typing their name, follows it to 
   // The company gave their address to someone else: it may sign in again.
   // Someone erased on an earlier try may be listed too, under the same name.
   const releases = removed.getByRole("button", {
-    name: "Let the old address of Person in again",
+    name: /^Release address of Person/u,
   });
   await expect(releases.first()).toBeVisible();
   const kept = await releases.count();

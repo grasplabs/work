@@ -1,13 +1,65 @@
+// The kit's mark, sized by its own class: Grasp UI has no Grasp mark yet.
 import { GraspMark } from "@grasp-os/ui/components/grasp-mark";
+import * as stylex from "@stylexjs/stylex";
 import type { ReactNode } from "react";
 
+import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
 import { LanguageButton } from "../language-picker.tsx";
+
+// The foot's height, and the same room kept at the top so the column
+// stands in the middle of the window.
+const FOOT = "4.5rem";
+// How wide the column is: a form, or a chat (`wide`).
+const NARROW_COLUMN = "24rem";
+const WIDE_COLUMN = "42rem";
+
+const styles = stylex.create({
+  window: {
+    display: "flex",
+    flexDirection: "column",
+    minHeight: "100svh",
+    backgroundColor: grasp.paper,
+    color: grasp.text,
+    fontSize: grasp.textSm,
+    lineHeight: grasp.textSmLine,
+  },
+  top: { flexShrink: 0, height: FOOT },
+  main: {
+    display: "flex",
+    flexDirection: "column",
+    flexGrow: 1,
+    alignItems: "center",
+    paddingInline: grasp.space4,
+    paddingBlock: grasp.space2,
+  },
+  column: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: grasp.space8,
+    width: "100%",
+    maxWidth: NARROW_COLUMN,
+    marginBlock: "auto",
+    textAlign: "center",
+  },
+  wide: { maxWidth: WIDE_COLUMN, textAlign: "start" },
+  foot: {
+    position: "sticky",
+    insetBlockEnd: 0,
+    display: "flex",
+    flexShrink: 0,
+    alignItems: "center",
+    justifyContent: "space-between",
+    height: FOOT,
+    paddingInline: { default: grasp.space10, [media.belowPhone]: grasp.space4 },
+    backgroundColor: grasp.paper,
+  },
+});
 
 /**
  * A page for someone outside the product (sign-in, a guest's chat) in the
- * onboarding's frame (grasplabs/prototype
- * `components/onboarding/onboarding-frame.tsx`): one centred column, the
- * mark bottom left and the language bottom right. `wide` holds a chat.
+ * onboarding's frame: one centred column, the mark bottom left and the
+ * language bottom right. `wide` holds a chat.
  */
 export const OnboardingFrame = ({
   children,
@@ -16,20 +68,14 @@ export const OnboardingFrame = ({
   children: ReactNode;
   wide?: boolean;
 }) => (
-  <div className="bg-background flex min-h-svh flex-col text-sm">
-    <div aria-hidden="true" className="h-18 flex-none" />
-    <main className="flex flex-1 flex-col items-center px-4 py-2">
-      <div
-        className={
-          wide
-            ? "my-auto flex w-full max-w-2xl flex-col items-center gap-8"
-            : "my-auto flex w-full max-w-sm flex-col items-center gap-8 text-center"
-        }
-      >
+  <div {...stylex.props(styles.window)}>
+    <div aria-hidden="true" {...stylex.props(styles.top)} />
+    <main {...stylex.props(styles.main)}>
+      <div {...stylex.props(styles.column, wide && styles.wide)}>
         {children}
       </div>
     </main>
-    <footer className="bg-background sticky bottom-0 flex h-18 flex-none items-center justify-between px-4 sm:px-10">
+    <footer {...stylex.props(styles.foot)}>
       <GraspMark className="size-5" />
       <LanguageButton />
     </footer>

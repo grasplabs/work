@@ -1,7 +1,3 @@
-// The table's look, where Ruben is still choosing (the fixture: examples/data-table/looks.tsx).
-// His choice is one line: the defaults below. A table can also take another look as a prop.
-// Provisional: the Data grid's wash on chosen rows and its soft head, so Table, Data table and Data
-// grid read as one family.
 import { createContext, useContext } from "react";
 
 /** How a chosen row shows: today's grey band, a soft mint wash, or the grey band with a pine bar. */

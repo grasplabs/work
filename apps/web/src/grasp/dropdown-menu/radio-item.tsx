@@ -14,9 +14,6 @@ import { menuStyles as styles } from "./styles";
 
 type RadioPrimitiveProps = ComponentProps<typeof RadioPrimitive>;
 
-// Every prop is documented once, where it is first declared; the props on the docs page are read
-// from the type below, so they cannot drift from what the code accepts.
-
 /** Every prop a DropdownMenuRadioItem takes: these, and the rest of UI SDK's MenuRadioItem. */
 export interface DropdownMenuRadioItemProps extends Omit<
   RadioPrimitiveProps,

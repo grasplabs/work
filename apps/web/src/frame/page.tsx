@@ -1,43 +1,50 @@
-import { Card } from "@grasp-os/ui/components/card";
-import {
-  Empty,
-  EmptyDescription,
-  EmptyHeader,
-} from "@grasp-os/ui/components/empty";
+import * as stylex from "@stylexjs/stylex";
 import type { ReactNode } from "react";
 
+import { Card } from "../grasp/card/index.ts";
+import { Empty } from "../grasp/empty/index.ts";
+import { Heading } from "../grasp/heading/index.ts";
 import { PageHeader } from "../grasp/page-header/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 
-// A page's body and heading, as the prototype has them
-// (`components/page.tsx`).
+// A page's body and heading. App shell gives the page its side room, the
+// room under its bar and the room over the chat's bar at its foot; the
+// page keeps its column to a readable width in the middle of the card.
 
-/**
- * The page body: centred, generous whitespace. Its foot leaves room for
- * the chat box, so the last row of a page is never under it. Its text is
- * the body's 16px, as the prototype's page: a smaller part says so itself.
- */
+// How wide a page's column grows: most pages, and those that lay out a
+// grid (`wide`). Grasp UI has no token for a page's measure yet.
+const PAGE_MEASURE = "64rem";
+const WIDE_MEASURE = "80rem";
+
+const styles = stylex.create({
+  page: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space6,
+    width: "100%",
+    maxWidth: PAGE_MEASURE,
+    marginInline: "auto",
+  },
+  wide: {
+    maxWidth: WIDE_MEASURE,
+  },
+});
+
+/** The page body: a column in the middle of the card. */
 export const Page = ({
   children,
   wide = false,
 }: {
   children: ReactNode;
   wide?: boolean;
-}) => (
-  <div
-    className={
-      wide
-        ? "pb-chat mx-auto flex w-full max-w-7xl flex-col gap-6 px-6 pt-7"
-        : "pb-chat mx-auto flex w-full max-w-5xl flex-col gap-6 px-6 pt-7"
-    }
-  >
-    {children}
-  </div>
-);
+}) => <div {...stylex.props(styles.page, wide && styles.wide)}>{children}</div>;
 
 /**
- * Every page's heading, the one way to head a page: Grasp UI's PageHeader
- * (grasp/page-header), with the page's title, one quiet line under it, and
- * the page's actions at the end of the title row; `clamp` keeps a description someone wrote to two lines.
+ * Every page's heading, the one way to head a page: Grasp UI's PageHeader,
+ * with the page's title, one quiet line under it, and the page's actions
+ * at the end of the title row; `clamp` keeps a description someone wrote
+ * to two lines.
  */
 export const PageHeading = ({
   title,
@@ -63,20 +70,17 @@ export const PageHeading = ({
   />
 );
 
-/** A list with nothing in it: one quiet line in a card, where the list would be. */
+/** A list with nothing in it: one quiet sentence in a card, where the list would be. */
 export const EmptyCard = ({ children }: { children: ReactNode }) => (
   <Card>
-    <Empty size="xs">
-      <EmptyHeader>
-        <EmptyDescription>{children}</EmptyDescription>
-      </EmptyHeader>
-    </Empty>
+    <Empty size="inline">{children}</Empty>
   </Card>
 );
 
 /**
- * A section title inside a page; with `count`, how many it holds beside
- * it, small and quiet, as the prototype's Integrations lists have it.
+ * A section title inside a page, in Grasp UI's smallest heading; with
+ * `count`, how many it holds beside it, small and quiet, inside the
+ * heading so a list it names (`aria-labelledby`) is named with it.
  */
 export const SectionTitle = ({
   children,
@@ -86,16 +90,16 @@ export const SectionTitle = ({
   children: ReactNode;
   count?: string;
   id?: string;
-}) =>
-  count === undefined ? (
-    <h2 className="text-sm font-medium" id={id}>
-      {children}
-    </h2>
-  ) : (
-    <h2 className="flex items-baseline gap-2 text-sm font-medium" id={id}>
-      {children}
-      <span className="text-muted-foreground text-xs font-normal tabular-nums">
-        {count}
-      </span>
-    </h2>
-  );
+}) => (
+  <Heading level={2} size="ui" {...(id === undefined ? {} : { id })}>
+    {children}
+    {count === undefined ? null : (
+      <>
+        {" "}
+        <Text element="span" size="xs" tone="muted">
+          {count}
+        </Text>
+      </>
+    )}
+  </Heading>
+);

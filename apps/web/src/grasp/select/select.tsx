@@ -41,6 +41,7 @@ import { useEffect, useRef } from "react";
 import { focus } from "../focus/focus";
 import { ChevronDown, Icon, Tick } from "../icons";
 import { iconVars } from "../icons/icon.stylex";
+import type { LayoutStyle } from "../layout/layout";
 import { simply } from "../motion/simply.stylex";
 import { scroll } from "../scroll/scroll";
 import { grasp, media } from "../tokens/tokens.stylex";
@@ -56,44 +57,34 @@ const more = stylex.keyframes({
   "100%": { opacity: 0 },
 });
 
+// And at its head, once rows lie above (A3-choice-03): gone at the top.
+const moreAbove = stylex.keyframes({
+  "0%": { opacity: 0 },
+  "6%, 100%": { opacity: 1 },
+});
+
 // A row the list's foot cuts dims as it comes in, and only that row: a row in view whole is never
 // greyed (second look A2-select-01). A filter, so an option out of use keeps its own opacity.
 const cut = stylex.keyframes({
   "0%": { filter: "opacity(0.2)" },
   "100%": { filter: "opacity(1)" },
 });
+// The same for a row the list's head cuts, as it goes out under it.
+const cutAbove = stylex.keyframes({
+  "0%": { filter: "opacity(1)" },
+  "100%": { filter: "opacity(0.2)" },
+});
 
 export type SelectSize = "sm" | "md" | "lg";
+
+/** How the closed control reads: a field's box, or words with a small chevron. */
+export type SelectVariant = "field" | "text";
 
 /** The items: plain strings, `{ value, label }`, groups `{ type: "group", label, items }` and separators `{ type: "separator" }`. */
 export type SelectItems = ListData;
 
-type Layout = string | number | null;
-
 /** What a caller may style: where the select sits and how wide it is. Never its look or height. */
-export type SelectLayoutStyle = stylex.StyleXStyles<{
-  alignSelf?: Layout;
-  justifySelf?: Layout;
-  flexGrow?: Layout;
-  flexShrink?: Layout;
-  flexBasis?: Layout;
-  gridArea?: Layout;
-  gridColumn?: Layout;
-  gridRow?: Layout;
-  order?: Layout;
-  width?: Layout;
-  minWidth?: Layout;
-  maxWidth?: Layout;
-  margin?: Layout;
-  marginBlock?: Layout;
-  marginBlockStart?: Layout;
-  marginBlockEnd?: Layout;
-  marginInline?: Layout;
-  marginInlineStart?: Layout;
-  marginInlineEnd?: Layout;
-}>;
-
-// Every prop is documented once, here; the props on the docs page are read from SelectProps.
+export type SelectLayoutStyle = LayoutStyle;
 
 /** Every prop a Select takes. */
 export interface SelectProps {
@@ -123,6 +114,13 @@ export interface SelectProps {
    * @default "md"
    */
   size?: SelectSize;
+  /**
+   * How the closed control reads. `field` is a field's box, for a form. `text` is its words and a
+   * small chevron with no box, at a ghost button's height and with its hover, for a choice inside a
+   * sentence or a row ("Can use" beside a person in a share list). Same keys, list and items.
+   * @default "field"
+   */
+  variant?: SelectVariant;
   /** The name the value is sent under in a form. Inside a Field, the Field's `name` serves. */
   name?: string;
   /**
@@ -151,6 +149,8 @@ export interface SelectProps {
   id?: string;
   /** Layout only: margins, alignment and width. Colours, heights and corners belong to the select. */
   style?: SelectLayoutStyle;
+  /** The same as `style`, by a name a style lint does not take for an inline style attribute. */
+  layout?: SelectLayoutStyle;
 }
 
 // ---- The look --------------------------------------------------------------------------------------
@@ -185,8 +185,8 @@ const styles = stylex.create({
     },
     color: grasp.ink,
     fontFamily: grasp.fontSans,
-    // 16px on a touch screen, as in an Input, so the two match in one form.
-    fontSize: { default: grasp.textSm, [COARSE]: grasp.fieldTextTouch },
+    // 16px on a phone or a touch screen (media.typing), as in an Input, so the two match in one form.
+    fontSize: { default: grasp.textSm, [media.typing]: grasp.fieldTextTouch },
     lineHeight: grasp.textSmLine,
     fontWeight: grasp.weightRegular,
     textAlign: "start",
@@ -279,6 +279,26 @@ const styles = stylex.create({
   },
   targetLg: { insetBlock: 0 },
 
+  // Text: the words and a small chevron, no box: as wide as its words, a ghost button's hover and
+  // press, and the ring of every control for the keyboard. A wrong one keeps its danger edge.
+  text: {
+    width: "auto",
+    maxWidth: "100%",
+    gap: grasp.space1,
+    paddingInlineStart: grasp.space2,
+    paddingInlineEnd: grasp.space1,
+    backgroundColor: {
+      default: "transparent",
+      ":hover": { default: null, [HOVER]: grasp.ghostFillHover },
+      ":active": grasp.ghostFillPress,
+    },
+    boxShadow: "none",
+  },
+  // Open: the press's fill stays while the list is out, as a held ghost button's.
+  textOpen: { backgroundColor: grasp.ghostFillPress },
+  // Read-only or out of use: no fill under a pointer.
+  textStill: { backgroundColor: "transparent" },
+
   // The chosen item's words, or the placeholder. A long label wraps; it is never cut off.
   value: {
     flexGrow: 1,
@@ -330,7 +350,7 @@ const styles = stylex.create({
     boxShadow: grasp.popupLift,
     color: grasp.ink,
     fontFamily: grasp.fontSans,
-    fontSize: { default: grasp.textSm, [COARSE]: grasp.fieldTextTouch },
+    fontSize: { default: grasp.textSm, [media.typing]: grasp.fieldTextTouch },
     lineHeight: grasp.textSmLine,
     outline: "none",
     transformOrigin: "var(--transform-origin)",
@@ -354,12 +374,13 @@ const styles = stylex.create({
     transitionTimingFunction: grasp.ease,
   },
 
-  // A row while the list's foot cuts it: dimmed by how much of it is hidden, clear once whole.
+  // A row while the list's foot or head cuts it: dimmed by how much of it is hidden, clear once
+  // whole (the head too, A3-choice-03: the list opens at its choice, rows above unseen).
   cut: {
     animationName: {
       default: null,
       [SCROLLS]: {
-        default: cut,
+        default: `${cut}, ${cutAbove}`,
         [stylex.when.ancestor("[data-ending-style]", selectPopupMarker)]:
           "none",
         [stylex.when.ancestor("[data-closed]", selectPopupMarker)]: "none",
@@ -368,8 +389,43 @@ const styles = stylex.create({
     animationDuration: { default: null, [SCROLLS]: "auto" },
     animationTimingFunction: { default: null, [SCROLLS]: "linear" },
     animationFillMode: { default: null, [SCROLLS]: "none" },
-    animationTimeline: { default: null, [SCROLLS]: "view(block 0px)" },
-    animationRange: { default: null, [SCROLLS]: "entry 0% entry 100%" },
+    animationTimeline: {
+      default: null,
+      [SCROLLS]: "view(block 0px), view(block 0px)",
+    },
+    animationRange: {
+      default: null,
+      [SCROLLS]: "entry 0% entry 100%, exit 0% exit 100%",
+    },
+  },
+  // At the list's head, over its start padding, while rows lie above: the foot's fade, turned.
+  moreAbove: {
+    display: "block",
+    position: "sticky",
+    zIndex: 1,
+    insetBlockStart: `calc(-1 * ${grasp.popupPadding})`,
+    height: grasp.popupPadding,
+    marginBlockEnd: `calc(-1 * ${grasp.popupPadding})`,
+    marginInline: `calc(-1 * ${grasp.popupPadding})`,
+    backgroundImage: {
+      default: `linear-gradient(to top, transparent, ${grasp.popupFill})`,
+      [FORCED]: "none",
+    },
+    opacity: 0,
+    pointerEvents: "none",
+    animationName: {
+      default: null,
+      [SCROLLS]: {
+        default: moreAbove,
+        [stylex.when.ancestor("[data-ending-style]", selectPopupMarker)]:
+          "none",
+        [stylex.when.ancestor("[data-closed]", selectPopupMarker)]: "none",
+      },
+    },
+    animationDuration: { default: null, [SCROLLS]: "auto" },
+    animationTimingFunction: { default: null, [SCROLLS]: "linear" },
+    animationFillMode: { default: null, [SCROLLS]: "both" },
+    animationTimeline: { default: null, [SCROLLS]: "scroll(nearest)" },
   },
 
   // A list that goes on says so: a fade at its foot, over the last rows, while there is more below
@@ -505,6 +561,17 @@ const targetStyles = {
   lg: styles.targetLg,
 } as const;
 
+/** A variant's own look over the field's, for the trigger's state, and its focus. */
+const variantLook = (variant: SelectVariant, state: SelectTriggerState) =>
+  variant === "text"
+    ? [
+        styles.text,
+        state.open && styles.textOpen,
+        (state.disabled || state.readOnly) && styles.textStill,
+      ]
+    : [];
+const variantFocus = { field: focus.field, text: focus.ring } as const;
+
 const isInvalid = (value: unknown) => value === true || value === "true";
 
 const className = (...parts: (stylex.StyleXStyles | false)[]) =>
@@ -575,7 +642,9 @@ const Options = ({ items }: { items: SelectItems }) =>
 export const Select = ({
   items,
   size = "md",
-  style,
+  variant = "field",
+  style: styleProp,
+  layout,
   "aria-label": ariaLabel,
   id,
   ...options
@@ -621,9 +690,10 @@ export const Select = ({
               state.open && styles.open,
               state.readOnly && styles.readOnly,
               state.disabled && styles.disabled,
+              variantLook(variant, state),
               isInvalid(props["aria-invalid"]) && styles.invalid,
-              focus.field,
-              style
+              variantFocus[variant],
+              layout ?? styleProp
             )}
           />
         )}
@@ -657,6 +727,7 @@ export const Select = ({
         collisionPadding={popup.gutter}
         {...stylex.props(selectPopupMarker, styles.content, scroll.bar)}
       >
+        <span aria-hidden="true" {...stylex.props(styles.moreAbove)} />
         <Options items={items} />
         <span aria-hidden="true" {...stylex.props(styles.more)} />
       </SelectContent>

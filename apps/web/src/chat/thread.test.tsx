@@ -19,6 +19,7 @@ import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { ChatThread } from "./thread.tsx";
+import "./test-thread-room.ts";
 
 // An answer's steps as one trace in the thread. What the model thought:
 // while it thinks, its words stream in, open under "Thinking"; once the
@@ -121,22 +122,78 @@ const thread = async (
   });
 };
 
-/** The first step that folds open: its line, whether it is open, and what it shows. */
-const firstStep = () => {
-  const line = document.querySelector("button[aria-expanded]");
+/** What an element says, its copies hidden from assistive technology left out. */
+const said = (element: Element | null | undefined): string | undefined => {
+  if (element === null || element === undefined) {
+    return undefined;
+  }
+  const copy = element.cloneNode(true);
+  if (!(copy instanceof Element)) {
+    return undefined;
+  }
+  for (const hidden of copy.querySelectorAll('[aria-hidden="true"]')) {
+    hidden.remove();
+  }
+  return copy.textContent;
+};
+
+/** A line that folds open: what it says, whether it is open, and what it shows. */
+const foldOf = (line: Element | null | undefined) => {
   const shows = line?.getAttribute("aria-controls");
+  const open = line?.getAttribute("aria-expanded") === "true";
   return {
-    line: line?.textContent,
-    open: line?.getAttribute("aria-expanded") === "true",
+    line: said(line),
+    open,
     shows:
-      shows === null || shows === undefined
+      !open || shows === null || shows === undefined
         ? undefined
         : document.querySelector(`#${shows}`)?.textContent,
   };
 };
 
-/** What the thread's live status line says now. */
-const status = () => document.querySelector("output")?.textContent;
+/** The answer's thinking line: what it says, whether it is open, and what it shows. */
+const thoughtButton = () =>
+  [...document.querySelectorAll("article button[aria-expanded]")].find(
+    (button) => /^(?:Thinking|Thought for)/u.test(said(button) ?? "")
+  );
+
+const thoughtLine = () => foldOf(thoughtButton());
+
+/** Presses `button`, and lets what it opens settle. */
+const press = async (button: Element | null | undefined): Promise<void> => {
+  await act(async () => {
+    if (button instanceof HTMLElement) {
+      button.click();
+    }
+    await Promise.resolve();
+  });
+};
+
+/** The line over each answer's steps. */
+const activityLines = () => [
+  ...document.querySelectorAll(
+    'section[aria-label="What Grasp did"] button[aria-expanded]:not(li *)'
+  ),
+];
+
+/** Opens every answer's steps. */
+const openSteps = async (): Promise<void> => {
+  for (const line of activityLines()) {
+    // oxlint-disable-next-line no-await-in-loop -- one at a time, as a person opens them
+    await press(line);
+  }
+};
+
+/** Each step's line, as it reads. */
+const stepLines = () =>
+  [
+    ...document.querySelectorAll(
+      'section[aria-label="What Grasp did"] li button[aria-expanded]'
+    ),
+  ].map((line) => said(line));
+
+/** The line over the answer Grasp works on: what it is doing now. */
+const workingLine = () => said(activityLines()[0]);
 
 /** The way to the brain under an answer, if there is one. */
 const findWay = () =>
@@ -344,6 +401,7 @@ describe(ChatThread, () => {
         saved: { memory, type: "fact", statement: "Acme renews on 1 March" },
       },
     ]);
+    await openSteps();
     const shown = document.body.textContent;
     const undo = [...document.querySelectorAll("button")].find(
       (button) => button.textContent === "Undo"
@@ -373,19 +431,20 @@ describe(ChatThread, () => {
     });
   });
 
-  it("streams what the model thinks, open under Thinking, before it says a word", async () => {
+  it("streams what the model thinks under Thinking, to open, before it says a word", async () => {
     await thread([asked], {
       text: "",
       code: [],
       tools: [],
       reasoning: "Add two to two.",
     });
+    const closed = thoughtLine();
+    await press(thoughtButton());
 
-    expect(firstStep()).toStrictEqual({
-      line: "Thinking",
-      open: true,
-      shows: "Add two to two.",
-    });
+    expect([closed, thoughtLine()]).toStrictEqual([
+      { line: "Thinking", open: false, shows: undefined },
+      { line: "Thinking", open: true, shows: "Add two to two." },
+    ]);
   });
 
   it("says it checks the App while its turn checks the drafts it wrote, past its answer", async () => {
@@ -403,7 +462,7 @@ describe(ChatThread, () => {
       },
     ];
     await thread(answered, null, [], undefined, true);
-    const checking = status();
+    const checking = workingLine();
     act(() => {
       root?.unmount();
     });
@@ -411,7 +470,7 @@ describe(ChatThread, () => {
     // Running on without a check: what it does otherwise.
     await thread(answered, null, [], undefined, false);
 
-    expect({ checking, otherwise: status() }).toStrictEqual({
+    expect({ checking, otherwise: workingLine() }).toStrictEqual({
       checking: "Checking the App…",
       otherwise: "Thinking",
     });
@@ -432,15 +491,12 @@ describe(ChatThread, () => {
         at: "2026-10-27T09:00:05.000Z",
       },
     ]);
-    const folded = firstStep();
-    await act(async () => {
-      document.querySelector<HTMLElement>("button[aria-expanded]")?.click();
-      await Promise.resolve();
-    });
+    const folded = thoughtLine();
+    await press(thoughtButton());
 
-    expect([folded, firstStep()]).toStrictEqual([
-      { line: "Thought for 3s", open: false, shows: undefined },
-      { line: "Thought for 3s", open: true, shows: "Add two to two." },
+    expect([folded, thoughtLine()]).toStrictEqual([
+      { line: "Thought for 3 seconds", open: false, shows: undefined },
+      { line: "Thought for 3 seconds", open: true, shows: "Add two to two." },
     ]);
   });
 
@@ -483,13 +539,14 @@ describe(ChatThread, () => {
       ]
     );
     const way = document.querySelector('a[href="/dashboard"]');
+    await openSteps();
 
     expect({
-      said: way?.parentElement?.textContent,
-      step: document.querySelector("button[aria-expanded]")?.textContent,
+      said: said(way?.parentElement),
+      steps: stepLines(),
     }).toStrictEqual({
       said: "Grasp added a widget to your dashboard. Open the dashboard",
-      step: "Code stepDone",
+      steps: ["Ran a code step, Done"],
     });
   });
 
@@ -532,25 +589,24 @@ describe(ChatThread, () => {
         at,
       },
     ]);
-    const lines = [...document.querySelectorAll("button[aria-expanded]")].map(
-      (line) => line.textContent
+    await openSteps();
+    const lines = stepLines();
+    const first = document.querySelector(
+      'section[aria-label="What Grasp did"] li button[aria-expanded]'
     );
-    await act(async () => {
-      document.querySelector<HTMLElement>("button[aria-expanded]")?.click();
-      await Promise.resolve();
-    });
-    const opened = firstStep().shows;
+    await press(first);
+    const opened = foldOf(first).shows;
 
     expect({
       lines,
       given: opened?.includes('"src/routes/index.tsx": "export default"'),
       came: opened?.includes('{"changed":["src/routes/index.tsx"]}'),
-      code: document.body.textContent.includes("Code step"),
+      code: document.body.textContent.includes("code step"),
     }).toStrictEqual({
       // The search has no result yet, and Grasp has stopped: it never ran.
       lines: [
-        "Wrote src/routes/index.tsx",
-        "Searching the brain for expense policyStopped",
+        "Wrote src/routes/index.tsx, Done",
+        "Searching the brain for expense policy, Stopped",
       ],
       given: true,
       came: true,
@@ -606,11 +662,13 @@ describe(ChatThread, () => {
       done(5, "edit"),
     ]);
 
-    expect(
-      [...document.querySelectorAll("button[aria-expanded]")].map(
-        (line) => line.textContent
-      )
-    ).toStrictEqual(["Wrote 2 files", "Code stepDone", "Edited app.ts"]);
+    await openSteps();
+
+    expect(stepLines()).toStrictEqual([
+      "Wrote 2 files, Done",
+      "Ran a code step, Done",
+      "Edited app.ts, Done",
+    ]);
   });
 
   it("fades each word of an answer in as it is written, where words come, and a kept answer stands still", async () => {
@@ -714,6 +772,77 @@ describe(ChatThread, () => {
         text: "Reading the workWeekly reportWeekly reportSee it in the brain",
         picture: true,
       },
+    });
+  });
+
+  it("opens a link out of Grasp from an answer only once the person says so: a web page, an email, even Grasp's own address", async () => {
+    const opened: string[] = [];
+    vi.stubGlobal("open", (url: string) => {
+      opened.push(url);
+      return null;
+    });
+    const links = [
+      "https://example.com/leave",
+      "mailto:finance@example.com?subject=Leave",
+      `${window.location.origin}/settings`,
+    ];
+    await thread([
+      asked,
+      {
+        id: 2,
+        role: "assistant",
+        text: links.map((href, at) => `[Link ${at + 1}](${href})`).join(" "),
+        citations: [],
+        code: [],
+        tools: [],
+        end: "done",
+        at: "2026-10-27T09:00:05.000Z",
+      },
+    ]);
+    // No address on the page to follow past the question: not a middle
+    // press, the browser's own "open link", a drag or a long press.
+    const addresses = document.querySelectorAll("article a[href]").length;
+    const questions: (string | undefined)[] = [];
+    for (const [at] of links.entries()) {
+      // oxlint-disable-next-line no-await-in-loop -- one link at a time, as a person presses them
+      await press(
+        [...document.querySelectorAll("button")].find(
+          (button) => said(button) === `Link ${at + 1}`
+        )
+      );
+      questions.push(
+        document.querySelector('[role="alertdialog"]')?.textContent
+      );
+      // oxlint-disable-next-line no-await-in-loop -- one link at a time
+      await press(
+        [...document.querySelectorAll('[role="alertdialog"] button')].find(
+          (button) => said(button) === "Cancel"
+        )
+      );
+    }
+    const before = [...opened];
+    await press(
+      [...document.querySelectorAll("button")].find(
+        (button) => said(button) === "Link 2"
+      )
+    );
+    await press(
+      [...document.querySelectorAll('[role="alertdialog"] button')].find(
+        (button) => said(button) === "Open link"
+      )
+    );
+    vi.unstubAllGlobals();
+
+    expect({
+      addresses,
+      asked: questions.map((text, at) => text?.includes(links[at] ?? "")),
+      before,
+      after: opened,
+    }).toStrictEqual({
+      addresses: 0,
+      asked: [true, true, true],
+      before: [],
+      after: [links[1]],
     });
   });
 });

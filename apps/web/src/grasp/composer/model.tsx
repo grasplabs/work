@@ -25,9 +25,10 @@ import {
 } from "@ui-sdk/react/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@ui-sdk/react/popover";
 import { useId, useState } from "react";
-import type { ReactNode } from "react";
+import type { KeyboardEvent, ReactNode } from "react";
 
 import { focus } from "../focus/focus";
+import { visuallyHidden } from "../hidden/hidden";
 import { ChevronDown, Icon, Search, Star, Tick } from "../icons";
 import type { IconData } from "../icons";
 import { iconVars } from "../icons/icon.stylex";
@@ -36,6 +37,7 @@ import { grasp, media } from "../tokens/tokens.stylex";
 import { popup } from "../tokens/tokens.values";
 import { useComposerDisabled } from "./context";
 import { controlStyles } from "./control";
+import { stopEscape } from "./escape";
 
 /** One model a person can choose. */
 export interface ComposerModelOption {
@@ -142,7 +144,7 @@ const styles = stylex.create({
     outline: "none",
     color: grasp.ink,
     fontFamily: grasp.fontSans,
-    fontSize: { default: grasp.textSm, [media.coarse]: grasp.fieldTextTouch },
+    fontSize: { default: grasp.textSm, [media.typing]: grasp.fieldTextTouch },
     lineHeight: grasp.textSmLine,
     "::placeholder": { color: grasp.muted, opacity: 1 },
   },
@@ -249,15 +251,6 @@ const styles = stylex.create({
   connect: {
     paddingBlock: grasp.space1,
     paddingInline: grasp.space2,
-  },
-  unseen: {
-    position: "absolute",
-    width: grasp.hairline,
-    height: grasp.hairline,
-    margin: 0,
-    overflow: "hidden",
-    clipPath: "inset(50%)",
-    whiteSpace: "nowrap",
   },
 });
 
@@ -378,6 +371,14 @@ export const ComposerModel = ({
         )}
       />
       <PopoverContent
+        onKeyDown={(event: KeyboardEvent<HTMLElement>) => {
+          // The picker closes on Escape itself, so the Escape can stop here: no listener of the
+          // host's on the document hears it and closes more (the product's row 52).
+          if (event.key === "Escape") {
+            setOpen(false);
+          }
+          stopEscape(event);
+        }}
         side="top"
         align="start"
         sideOffset={popup.popoverGap}
@@ -494,7 +495,7 @@ export const ComposerModel = ({
                           )}
                         {model.description !== undefined &&
                           model.description !== "" && (
-                            <span {...stylex.props(styles.unseen)}>
+                            <span {...stylex.props(visuallyHidden)}>
                               {model.description}
                             </span>
                           )}

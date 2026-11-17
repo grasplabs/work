@@ -25,6 +25,24 @@ import type { LucideIcon } from "lucide-react";
 
 import { AppLogo } from "../connections/app-logo.tsx";
 import { ItemMark as DashboardMark } from "../dashboard/dashboard-card.tsx";
+import {
+  Agent,
+  Alert,
+  Bell,
+  CalendarIcon,
+  Checklist,
+  Done,
+  Edit,
+  Lock,
+  Mail,
+  Play,
+  Question,
+  Swap,
+  Upload,
+  Web,
+  Workflow,
+} from "../grasp/icons/index.ts";
+import type { IconData } from "../grasp/icons/index.ts";
 import type { InboxItem, InboxKind } from "./items.ts";
 
 // The marks of the inbox's items, as the prototype draws them
@@ -104,6 +122,35 @@ export const kindIcon: Record<InboxKind, LucideIcon> = {
   appMessage: BellIcon,
   bindingApproval: LockKeyholeIcon,
   decision: ScaleIcon,
+};
+
+/**
+ * Each kind's icon from Grasp UI's set, for rows drawn with its Item. Where
+ * the set has none of Lucide's (a rocket, a key, a scale, a split, two
+ * sources compared, sparkles, a calendar crossed out, a shield, a mail
+ * warning), the nearest that says the same.
+ */
+export const kindMark: Record<InboxKind, IconData> = {
+  checkDrawing: Workflow,
+  checkProposal: Swap,
+  goLive: Upload,
+  approveChange: Edit,
+  confirmResult: Done,
+  conflict: Swap,
+  openQuestion: Question,
+  unknownAiTool: Agent,
+  signInAgain: Lock,
+  externalDomain: Web,
+  heldWrite: Edit,
+  heldStart: Play,
+  unknownOutcome: Question,
+  permissionRequest: Lock,
+  stoppedSchedule: CalendarIcon,
+  packageNotice: Alert,
+  stoppedEvents: Mail,
+  appMessage: Bell,
+  bindingApproval: Lock,
+  decision: Checklist,
 };
 
 /** What an item is about, as a square: the app's tile, or the icon of its kind (the dashboard's mark). */

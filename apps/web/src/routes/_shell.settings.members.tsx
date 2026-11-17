@@ -1,37 +1,48 @@
+import { failureText } from "@grasp-os/shared/errors";
 import { memberErrors } from "@grasp-os/shared/members";
 import type { Invitation, Member } from "@grasp-os/shared/members";
 import { roleSchema } from "@grasp-os/shared/roles";
 import type { Role } from "@grasp-os/shared/roles";
-import { Avatar, AvatarFallback } from "@grasp-os/ui/components/avatar";
-import { Badge } from "@grasp-os/ui/components/badge";
-import { Button } from "@grasp-os/ui/components/button";
+import type { MessageDescriptor } from "@lingui/core";
+import { msg, plural } from "@lingui/core/macro";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
+import { createFileRoute, useRouter } from "@tanstack/react-router";
+import { useRef, useState } from "react";
+
+import { changeThenRefresh } from "../change-then-refresh.ts";
+import { formatList } from "../format.ts";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@grasp-os/ui/components/dialog";
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogPanel,
+  AlertDialogTitle,
+} from "../grasp/alert-dialog/index.ts";
+import { Alert } from "../grasp/alert/index.ts";
+import { Badge } from "../grasp/badge/index.ts";
 import {
   DropdownMenu,
-  DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuPanel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from "@grasp-os/ui/components/dropdown-menu";
+} from "../grasp/dropdown-menu/index.ts";
 import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupInput,
-} from "@grasp-os/ui/components/input-group";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@grasp-os/ui/components/select";
+  Icon,
+  Minus,
+  More,
+  Search,
+  SignOut,
+  Tick,
+  Trash,
+} from "../grasp/icons/index.ts";
+import { Input } from "../grasp/input/index.ts";
+import { Item, ItemGroup } from "../grasp/item/index.ts";
+import { KeyValueList } from "../grasp/key-value/index.ts";
+import { SectionCard } from "../grasp/section-card/index.ts";
+import { Select } from "../grasp/select/index.ts";
 import {
   Table,
   TableBody,
@@ -39,230 +50,239 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@grasp-os/ui/components/table";
-import type { MessageDescriptor } from "@lingui/core";
-import { msg, plural } from "@lingui/core/macro";
-import { Plural, Trans, useLingui } from "@lingui/react/macro";
-import { createFileRoute, useRouter } from "@tanstack/react-router";
-import {
-  CheckIcon,
-  EllipsisIcon,
-  LogOutIcon,
-  SearchIcon,
-  UserMinusIcon,
-} from "lucide-react";
-import { useRef, useState } from "react";
-
-import { changeThenRefresh } from "../change-then-refresh.ts";
-import type { Session } from "../core.ts";
-import { ErrorText } from "../error-text.tsx";
-import { NotLoadedState } from "../frame/page-states.tsx";
-import { initials } from "../frame/person-menu.tsx";
+} from "../grasp/table/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
 import { roleLabel } from "../labels.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import { RemovedPeople } from "../settings/erasures.tsx";
 import { InvitationRow, InviteButton } from "../settings/invitations.tsx";
 import { MembersTabs } from "../settings/members-tabs.tsx";
 import {
+  SectionNotLoaded,
   SettingsError,
   SettingsLoading,
-  SettingsSection,
-} from "../settings/settings-parts.tsx";
+  TitleLine,
+} from "../settings/section.tsx";
 import { useCoreAction } from "../use-core-action.ts";
+import { useCore } from "../use-core.ts";
 
-// Offboarding, for admins: the organization's members, each with their
-// role, a way to end their sessions, and a way to remove them for good;
-// then the people removed, and a way to erase them (settings/erasures.tsx).
-// Core checks the role on every call; anyone else sees why they can't.
-// The admin's own row has no actions: core refuses removing yourself or
-// ending your own sessions, and demoting yourself (which core allows while
-// another admin exists) is left out so nobody loses this page by accident.
+// Settings → Members and roles, for admins: the organization's members,
+// each with their role, a way to end their sessions, and a way to remove
+// them for good; the invitations nobody has taken up yet; then the people
+// removed, and a way to erase them (settings/erasures.tsx); and, last,
+// what each role may do. Core checks the role on every call; anyone else
+// sees why they can't. The admin's own row has no actions: core refuses
+// removing yourself or ending your own sessions, and demoting yourself
+// (which core allows while another admin exists) is left out so nobody
+// loses this page by accident.
+
+// Wide enough for the longest role in every language.
+const roleWidth = "8rem";
+
+const styles = stylex.create({
+  tools: { display: "flex", alignItems: "center", gap: grasp.space2 },
+  // Narrower on a phone: Section card's actions never shrink, so Invite would run past its edge.
+  search: { width: { default: "14rem", [media.belowPhone]: "8rem" } },
+  notice: { padding: grasp.space4 },
+  rowEnd: { display: "flex", alignItems: "center", gap: grasp.space1 },
+  role: { width: roleWidth },
+  // Your own row has no menu: its role sits where the others' Selects start.
+  own: {
+    display: "flex",
+    width: `calc(${roleWidth} + ${grasp.space1} + ${grasp.controlSm})`,
+  },
+  rolesNarrow: {
+    display: { default: "none", [media.belowPhone]: "block" },
+    padding: grasp.space5,
+  },
+  rolesWide: { display: { default: "block", [media.belowPhone]: "none" } },
+});
 
 /** The roles to pick from, in the page's language. */
 const roleItems = (): { label: string; value: Role }[] =>
   roleSchema.options.map((role) => ({ label: roleLabel(role), value: role }));
 
-type Change = (members: Session["members"]) => Promise<unknown>;
+/** What a change did, or why it failed. */
+interface Notice {
+  failure?: string;
+  done?: string;
+}
 
-/** Shows why a change failed, or what it did, or clears both when given nothing. */
-type Report = (failure?: string, done?: string) => void;
-
+/** A member's role and the menu of what else may be done to them. */
 const MemberActions = ({
   member,
   onNotice,
   onRemoved,
 }: {
   member: Member;
-  onNotice: Report;
+  onNotice: (notice: Notice) => void;
   /** Once they are removed: their row, and what had the focus in it, is gone. */
   onRemoved: () => void;
 }) => {
-  const router = useRouter();
-  const { busy, failure, run: runAction } = useCoreAction();
-  const [confirming, setConfirming] = useState(false);
-  const [promoting, setPromoting] = useState(false);
   const { t } = useLingui();
-  const roles = roleItems();
+  const core = useCore();
+  const router = useRouter();
+  const { busy, run } = useCoreAction();
+  const [asking, setAsking] = useState<"promote" | "remove">();
   const { name } = member;
   // Names needn't be unique; with the email, each row's controls are.
   const who = `${member.name} (${member.email})`;
-  const run = async (change: Change, report?: Report): Promise<void> => {
-    onNotice();
-    setConfirming(false);
-    setPromoting(false);
-    await runAction(async (session) => {
-      // `sync` waits for the loader; without it, the router reloads the
-      // page's data in the background and resolves at once.
-      await changeThenRefresh(
-        async () => await change(session.members),
-        async () => {
-          await router.invalidate({ sync: true });
-        }
-      );
-    }, report);
+  const refresh = async (): Promise<void> => {
+    // `sync` waits for the loader; without it, the router reloads the
+    // page's data in the background and resolves at once.
+    await router.invalidate({ sync: true });
+  };
+  const setRole = async (role: Role): Promise<void> => {
+    onNotice({});
+    await run(
+      async ({ members }) => {
+        await changeThenRefresh(async () => {
+          await members.setRole(member.userId, role);
+        }, refresh);
+      },
+      (failure) => {
+        onNotice({ failure });
+      }
+    );
+  };
+  const signOutEverywhere = async (): Promise<void> => {
+    onNotice({});
+    try {
+      await changeThenRefresh(async () => {
+        await core.withSession(async ({ members }) => {
+          await members.revokeSessions(member.userId);
+        });
+      }, refresh);
+    } catch (error) {
+      // Core's reason, with its reference to quote; the item says it failed.
+      onNotice({ failure: failureText(error) });
+      throw error;
+    }
+    onNotice({ done: t`${name} is signed out everywhere.` });
   };
   const remove = async (): Promise<void> => {
-    // Shown on the page: a removal that went through takes this row with
-    // it, even when it failed to disconnect everything
-    // (`member.connections_pending`).
-    let removed = false;
-    await run(async (members) => {
-      try {
-        const { connectionsDisconnected: count } = await members.remove(
-          member.userId
-        );
-        removed = true;
-        onNotice(
-          undefined,
-          t`${name} is removed. ${plural(count, { one: "# personal connection was disconnected.", other: "# personal connections were disconnected." })}`
-        );
-      } catch (error) {
-        // Removed, with some connections still to disconnect: the row
-        // goes all the same, and the notice says why.
-        removed = memberErrors.codeOf(error) === "member.connections_pending";
+    onNotice({});
+    try {
+      const { connectionsDisconnected: count } = await core.withSession(
+        async ({ members }) => await members.remove(member.userId)
+      );
+      onNotice({
+        done: t`${name} is removed. ${plural(count, { one: "# personal connection was disconnected.", other: "# personal connections were disconnected." })}`,
+      });
+    } catch (error) {
+      // Removed, with some connections still to disconnect: the row goes
+      // all the same, and the notice says why.
+      // Core's reason, with its reference to quote, either way.
+      onNotice({ failure: failureText(error) });
+      if (memberErrors.codeOf(error) !== "member.connections_pending") {
+        await refresh();
         throw error;
       }
-    }, onNotice);
-    if (removed) {
-      onRemoved();
     }
-  };
-  const setRole = (role: Role): void => {
-    void run(async (members) => {
-      await members.setRole(member.userId, role);
-    });
+    setAsking(undefined);
+    await refresh();
+    onRemoved();
   };
   return (
-    <div className="flex flex-col items-end gap-1">
-      <div className="flex items-center gap-1">
+    <div {...stylex.props(styles.rowEnd)}>
+      <div {...stylex.props(styles.role)}>
         <Select
-          items={roles}
-          value={member.role}
+          aria-label={t`Role of ${who}`}
           disabled={busy}
-          onValueChange={(role: Role | null) => {
+          items={roleItems()}
+          onValueChange={(role) => {
             if (role === "admin") {
-              setPromoting(true);
-            } else if (role !== null) {
-              setRole(role);
+              setAsking("promote");
+            } else if (roleSchema.safeParse(role).success && role !== null) {
+              void setRole(roleSchema.parse(role));
             }
           }}
-        >
-          <SelectTrigger aria-label={t`Role of ${who}`} className="w-36">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {roles.map((role) => (
-              <SelectItem key={role.value} value={role.value}>
-                {role.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Dialog open={promoting} onOpenChange={setPromoting}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>
-                <Trans>Make {name} an admin?</Trans>
-              </DialogTitle>
-              <DialogDescription>
-                <Trans>
-                  Admins can change anyone&apos;s role, end their sessions and
-                  remove them, other admins included.
-                </Trans>
-              </DialogDescription>
-            </DialogHeader>
-            <DialogFooter showCloseButton>
-              <Button
-                disabled={busy}
-                onClick={() => {
-                  setRole("admin");
-                }}
-              >
-                <Trans>Make admin</Trans>
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            aria-label={t`Actions for ${who}`}
-            disabled={busy}
-            render={<Button size="icon-sm" variant="ghost" />}
-          >
-            <EllipsisIcon />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-56">
-            <DropdownMenuItem
-              onClick={() => {
-                void run(async (members) => {
-                  await members.revokeSessions(member.userId);
-                  onNotice(undefined, t`${name} is signed out everywhere.`);
-                });
-              }}
-            >
-              <LogOutIcon />
-              <Trans>Sign out everywhere</Trans>
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              onClick={() => {
-                setConfirming(true);
-              }}
-              variant="destructive"
-            >
-              <UserMinusIcon />
-              <Trans>Remove</Trans>
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-        <Dialog open={confirming} onOpenChange={setConfirming}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>
-                <Trans>Remove {name}?</Trans>
-              </DialogTitle>
-              <DialogDescription>
-                <Trans>
-                  They are signed out everywhere, their personal connections are
-                  disconnected, and they cannot sign in again.
-                </Trans>
-              </DialogDescription>
-            </DialogHeader>
-            <DialogFooter showCloseButton>
-              <Button
-                variant="destructive"
-                disabled={busy}
-                onClick={() => {
-                  void remove();
-                }}
-              >
-                <Trans>Remove</Trans>
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+          size="sm"
+          value={member.role}
+        />
       </div>
-      <ErrorText>{failure}</ErrorText>
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          icon={More}
+          label={t`Actions for ${who}`}
+          size="sm"
+          variant="ghost"
+        />
+        <DropdownMenuPanel align="end">
+          <DropdownMenuItem
+            action={signOutEverywhere}
+            failedLabel={t`Could not sign out`}
+            icon={SignOut}
+            mirrorIcon
+          >
+            {t`Sign out everywhere`}
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            danger
+            icon={Trash}
+            onSelect={() => {
+              setAsking("remove");
+            }}
+          >
+            {t`Remove`}
+          </DropdownMenuItem>
+        </DropdownMenuPanel>
+      </DropdownMenu>
+      <AlertDialog
+        onOpenChange={(open) => {
+          if (!open) {
+            setAsking(undefined);
+          }
+        }}
+        open={asking === "promote"}
+      >
+        <AlertDialogPanel>
+          <AlertDialogTitle>{t`Make ${name} an admin?`}</AlertDialogTitle>
+          <AlertDialogDescription>
+            {t`Admins can change anyone's role, end their sessions and remove them, other admins included.`}
+          </AlertDialogDescription>
+          <AlertDialogFooter>
+            <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
+            <AlertDialogAction
+              action={async () => {
+                await setRole("admin");
+              }}
+              failedLabel={t`Could not make admin`}
+              variant="ink"
+            >
+              {t`Make admin`}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogPanel>
+      </AlertDialog>
+      <AlertDialog
+        onOpenChange={(open) => {
+          if (!open) {
+            setAsking(undefined);
+          }
+        }}
+        open={asking === "remove"}
+      >
+        <AlertDialogPanel>
+          <AlertDialogTitle>{t`Remove ${name}?`}</AlertDialogTitle>
+          <AlertDialogDescription>
+            {t`They are signed out everywhere, their personal connections are disconnected, and they cannot sign in again.`}
+          </AlertDialogDescription>
+          <AlertDialogFooter>
+            <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
+            <AlertDialogAction
+              action={remove}
+              failedLabel={t`Could not remove`}
+              variant="danger"
+              workingLabel={t`Removing`}
+            >
+              {t`Remove`}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogPanel>
+      </AlertDialog>
     </div>
   );
 };
@@ -299,31 +319,34 @@ const capabilities: { label: MessageDescriptor; roles: Role[] }[] = [
   },
 ];
 
-/** What each role may do, as in the prototype: a column a role where there is room for them. */
+/** What each role may do: a column a role, a tick where it may. */
 const Roles = () => {
   const { t, i18n } = useLingui();
   const roles = roleSchema.options;
   return (
-    <SettingsSection
-      description={t`What each role may do in Grasp. An admin gives each member theirs.`}
-      title={t`Roles`}
-    >
-      {/* A column a role where there is room for them; on a phone the roles that may stand under what they may. */}
-      <div className="@container border-t">
+    <SectionCard flush title={t`Roles`}>
+      {/* On a phone, what each may do with the roles that may under it: four columns don't fit. */}
+      <div {...stylex.props(styles.rolesNarrow)}>
+        <KeyValueList
+          items={capabilities.map((capability) => ({
+            key: i18n._(capability.label),
+            value: formatList(capability.roles.map((role) => roleLabel(role))),
+          }))}
+        />
+      </div>
+      <div {...stylex.props(styles.rolesWide)}>
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead variant="section">
-                <Trans comment="Heading of a list of what each role is allowed to do">
-                  May
-                </Trans>
+              <TableHead>
+                {t({
+                  message: "May",
+                  comment:
+                    "Heading of a list of what each role is allowed to do",
+                })}
               </TableHead>
               {roles.map((role) => (
-                <TableHead
-                  className="hidden w-20 text-center @lg:table-cell"
-                  variant="section"
-                  key={role}
-                >
+                <TableHead align="center" key={role}>
                   {roleLabel(role)}
                 </TableHead>
               ))}
@@ -332,34 +355,13 @@ const Roles = () => {
           <TableBody>
             {capabilities.map((capability) => (
               <TableRow key={capability.label.id}>
-                <TableCell className="whitespace-normal" variant="section">
-                  <span className="flex flex-col gap-0.5">
-                    <span>{i18n._(capability.label)}</span>
-                    <span className="text-muted-foreground text-xs @lg:hidden">
-                      {capability.roles
-                        .map((role) => roleLabel(role))
-                        .join(" · ")}
-                    </span>
-                  </span>
-                </TableCell>
+                <TableCell lead>{i18n._(capability.label)}</TableCell>
                 {roles.map((role) => (
-                  <TableCell
-                    className="hidden text-center @lg:table-cell"
-                    key={role}
-                    variant="section"
-                  >
+                  <TableCell align="center" key={role}>
                     {capability.roles.includes(role) ? (
-                      <CheckIcon
-                        aria-label={t`Yes`}
-                        className="mx-auto size-4"
-                      />
+                      <Icon icon={Tick} label={t`Yes`} />
                     ) : (
-                      <span
-                        aria-label={t`No`}
-                        className="text-muted-foreground"
-                      >
-                        –
-                      </span>
+                      <Icon icon={Minus} label={t`No`} />
                     )}
                   </TableCell>
                 ))}
@@ -368,7 +370,7 @@ const Roles = () => {
           </TableBody>
         </Table>
       </div>
-    </SettingsSection>
+    </SectionCard>
   );
 };
 
@@ -385,11 +387,7 @@ const matches = (
   );
 };
 
-/**
- * The members, as the prototype lists them (`routes/settings/members.tsx`):
- * each with their avatar, name and email, their role and a menu. The
- * admin's own row only shows their role.
- */
+/** The members and the invitations not yet taken up, found by name or email. */
 const MembersList = ({
   members,
   invitations,
@@ -400,7 +398,7 @@ const MembersList = ({
   me: string;
 }) => {
   const { t } = useLingui();
-  const [notice, setNotice] = useState<{ failure?: string; done?: string }>({});
+  const [notice, setNotice] = useState<Notice>({});
   const [search, setSearch] = useState("");
   const searchField = useRef<HTMLInputElement>(null);
   const people = members.length;
@@ -409,91 +407,81 @@ const MembersList = ({
     matches(invitation, search)
   );
   return (
-    <SettingsSection
-      action={
-        <div className="flex items-center gap-2">
-          <InputGroup className="w-56">
-            <InputGroupInput
+    <SectionCard
+      actions={
+        <div {...stylex.props(styles.tools)}>
+          <div {...stylex.props(styles.search)}>
+            <Input
               aria-label={t`Search members`}
-              onChange={(event) => {
-                setSearch(event.target.value);
-              }}
+              icon={Search}
+              onValueChange={setSearch}
               placeholder={t`Search`}
               ref={searchField}
+              size="sm"
               value={search}
             />
-            <InputGroupAddon>
-              <SearchIcon />
-            </InputGroupAddon>
-          </InputGroup>
+          </div>
           <InviteButton />
         </div>
       }
-      description={
-        <Plural
-          one="# person has access. People join by signing in with your organization’s account; invite them to give them a role from the start."
-          other="# people have access. People join by signing in with your organization’s account; invite them to give them a role from the start."
-          value={people}
-        />
-      }
+      description={t`${plural(people, {
+        one: "# person has access. Invite someone to set their role up front.",
+        other:
+          "# people have access. Invite someone to set their role up front.",
+      })}`}
+      flush
       title={t`Members`}
     >
       {notice.failure === undefined && notice.done === undefined ? null : (
-        <div className="border-t px-5 py-3">
-          <ErrorText>{notice.failure}</ErrorText>
-          {notice.done === undefined ? null : (
-            <output className="text-muted-foreground">{notice.done}</output>
+        <div {...stylex.props(styles.notice)}>
+          {notice.failure === undefined ? (
+            <Alert variant="success">{notice.done}</Alert>
+          ) : (
+            <Alert variant="danger">{notice.failure}</Alert>
           )}
         </div>
       )}
       {shown.length === 0 && invited.length === 0 ? (
-        <p className="text-muted-foreground border-t px-5 py-6 text-center">
-          <Trans>Nobody matches.</Trans>
-        </p>
-      ) : null}
-      {shown.map((member) => (
-        <div
-          className="flex items-center gap-3 border-t px-5 py-3"
-          key={member.userId}
-        >
-          <Avatar className="size-8">
-            <AvatarFallback>{initials(member.name)}</AvatarFallback>
-          </Avatar>
-          <div className="flex min-w-0 flex-1 flex-col">
-            <span className="flex items-center gap-2">
-              <span className="truncate">{member.name}</span>
-              {member.userId === me ? (
-                <Badge variant="secondary">
-                  <Trans>You</Trans>
-                </Badge>
-              ) : null}
-            </span>
-            <span className="text-muted-foreground truncate">
-              {member.email}
-            </span>
-          </div>
-          {member.userId === me ? (
-            <Badge variant="outline">{roleLabel(member.role)}</Badge>
-          ) : (
-            <MemberActions
-              member={member}
-              onRemoved={() => {
-                searchField.current?.focus();
-              }}
-              onNotice={(failure, done) => {
-                setNotice({
-                  ...(failure === undefined ? {} : { failure }),
-                  ...(done === undefined ? {} : { done }),
-                });
-              }}
-            />
-          )}
+        <div {...stylex.props(styles.notice)}>
+          <Text tone="muted">{t`Nobody matches.`}</Text>
         </div>
-      ))}
-      {invited.map((invitation) => (
-        <InvitationRow invitation={invitation} key={invitation.id} />
-      ))}
-    </SettingsSection>
+      ) : (
+        <ItemGroup aria-label={t`Members`} separated>
+          {shown.map((member) => (
+            <Item
+              actions={
+                member.userId === me ? (
+                  <div {...stylex.props(styles.own)}>
+                    <Badge>{roleLabel(member.role)}</Badge>
+                  </div>
+                ) : (
+                  <MemberActions
+                    member={member}
+                    onNotice={setNotice}
+                    onRemoved={() => {
+                      searchField.current?.focus();
+                    }}
+                  />
+                )
+              }
+              key={member.userId}
+              size="sm"
+              title={
+                <TitleLine detail={member.email}>
+                  {member.name}
+                  {member.userId === me ? (
+                    <Badge size="sm">{t`You`}</Badge>
+                  ) : null}
+                </TitleLine>
+              }
+            />
+          ))}
+          {invited.map((invitation) => (
+            <InvitationRow invitation={invitation} key={invitation.id} />
+          ))}
+        </ItemGroup>
+      )}
+    </SectionCard>
   );
 };
 
@@ -501,30 +489,25 @@ const Members = () => {
   const { t } = useLingui();
   const page = Route.useLoaderData();
   const { identity } = Route.useRouteContext();
-  return (
+  return page.state === "ready" ? (
     <>
-      <Roles />
-      {page.state === "ready" ? (
-        <>
-          <MembersList
-            invitations={page.data.invitations}
-            me={identity.userId}
-            members={page.data.members}
-          />
-          <RemovedPeople page={page.data.removed} />
-        </>
-      ) : (
-        <SettingsSection title={t`Members`}>
-          <NotLoadedState heading="h3" page={page} />
-        </SettingsSection>
-      )}
+      <MembersList
+        invitations={page.data.invitations}
+        me={identity.userId}
+        members={page.data.members}
+      />
+      <RemovedPeople page={page.data.removed} />
     </>
+  ) : (
+    <SectionCard title={t`Members`}>
+      <SectionNotLoaded page={page} />
+    </SectionCard>
   );
 };
 
-/** The members, and for the organization's admins a tab of their teams. */
+/** The members, and for the organization's admins tabs of their teams and of what each role may do. */
 const MembersPage = () => (
-  <MembersTabs>
+  <MembersTabs roles={<Roles />}>
     <Members />
   </MembersTabs>
 );

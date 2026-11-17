@@ -1,7 +1,3 @@
-// The system's dither, as numbers: ordered dither on a 4×4 Bayer matrix, in two textures. The
-// charts draw it as SVG patterns (chart-patterns.tsx); Empty draws what will stand in a place
-// with it; the docs' overview tiles draw the same one (site/overview/pen.ts). One matrix and one set of sizes, so every dither in Grasp is this dither.
-
 /** The ordered-dither thresholds, 0 to 15: a cell is lit while the level is above its number. */
 export const BAYER: readonly (readonly number[])[] = [
   [0, 8, 2, 10],

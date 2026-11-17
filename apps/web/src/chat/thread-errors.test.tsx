@@ -18,6 +18,7 @@ import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import { ChatThread } from "./thread.tsx";
+import "./test-thread-room.ts";
 
 // A failed answer as the thread shows it: why it failed in people's
 // words for every code the model gateway sends, never the gateway's own
@@ -151,8 +152,7 @@ const alertsFor = async (messages: ChatMessage[]): Promise<string[]> => {
   await showThread(messages);
   // What each alert says went wrong, apart from the way to ask again under it.
   const said = [...document.querySelectorAll('[role="alert"]')].map(
-    (alert) =>
-      alert.querySelector('[data-slot="alert-title"]')?.textContent ?? ""
+    (alert) => alert.textContent ?? ""
   );
   cleared();
   return said;
@@ -168,15 +168,14 @@ const shownFor = async (
 ): Promise<{ said: string[]; links: string[] }> => {
   await showThread(messages, identity);
   const alerts = [...document.querySelectorAll('[role="alert"]')];
-  // What each alert says went wrong, apart from the way to ask again under it.
-  const said = alerts.map(
-    (alert) =>
-      alert.querySelector('[data-slot="alert-title"]')?.textContent ?? ""
-  );
-  const links = alerts.flatMap((alert) =>
-    [...alert.querySelectorAll("a")].map(
-      (link) => link.getAttribute("href") ?? ""
-    )
+  // What each alert says went wrong, apart from the way to ask again beside it.
+  const said = alerts.map((alert) => alert.textContent ?? "");
+  // The ways out the failed answers offer.
+  const links = [
+    ...document.querySelectorAll('article[aria-label="Grasp"] a'),
+  ].map(
+    (link) =>
+      `${link.textContent?.trim() ?? ""} → ${link.getAttribute("href") ?? ""}`
   );
   cleared();
   return { said, links };
@@ -284,10 +283,10 @@ describe("a failed answer", () => {
     };
     expect(shown).toStrictEqual({
       admin: {
-        said: [
-          "Your AI provider is refusing your key. Check or replace it in Settings › AI providers",
+        said: ["Your AI provider is refusing your key."],
+        links: [
+          "Check or replace it in Settings › AI providers → /settings/ai-providers",
         ],
-        links: ["/settings/ai-providers"],
       },
       member: askAdmin,
       staff: askAdmin,

@@ -33,9 +33,6 @@ import { useStill } from "./still-context";
 
 type RootProps = ComponentProps<typeof DrawerPrimitive>;
 
-// Every prop is documented once, where it is first declared; the props on the docs page are read
-// from the type below, so they cannot drift from what the code accepts.
-
 /** Every prop a Drawer takes: these, and the rest of UI SDK's Drawer. */
 export interface DrawerProps extends Omit<
   RootProps,

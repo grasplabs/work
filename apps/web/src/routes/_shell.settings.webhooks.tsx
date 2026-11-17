@@ -3,7 +3,7 @@ import { createFileRoute, redirect } from "@tanstack/react-router";
 
 import { loadFromCore } from "../load-from-core.tsx";
 import { EventSourcesSettings } from "../settings/event-sources.tsx";
-import { SettingsError, SettingsLoading } from "../settings/settings-parts.tsx";
+import { SettingsError, SettingsLoading } from "../settings/section.tsx";
 
 // Settings › Webhooks, for the organization's own admins: the event
 // sources outside systems send events to (settings/event-sources.tsx),

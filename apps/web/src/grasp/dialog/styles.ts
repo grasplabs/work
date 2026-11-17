@@ -28,6 +28,16 @@ const edges = stylex.keyframes({
   "100%": { boxShadow: lineAbove },
 });
 
+// While there is more below, the last of the body fades into the panel's ground just above its
+// bottom hairline, as a Sheet's does (src/components/drawer/styles.ts, A3-layers-03): a line cut at
+// that edge reads as more to come. Its own layer (::after), not a mask, which would take the
+// hairline with it. At the end it is gone.
+const FADE = grasp.space6;
+const more = stylex.keyframes({
+  "0%, 99%": { opacity: 1 },
+  "100%": { opacity: 0 },
+});
+
 export const dialogStyles = stylex.create({
   // The shade over the page. It follows the panel in and out.
   scrim: {
@@ -86,6 +96,15 @@ export const dialogStyles = stylex.create({
     maxHeight: {
       default: `calc(var(--visual-viewport-height, 100dvh) - 2 * ${grasp.dialogGutter})`,
       [PHONE]: `calc(var(--visual-viewport-height, 100dvh) - ${grasp.dialogGutter})`,
+    },
+  },
+
+  // A full dialog: a chart or a table opened in full, dialog-width-full wide, never closer than the
+  // gutter to the window's edges. On a phone, the same sheet as any dialog.
+  full: {
+    width: {
+      default: `min(${grasp.dialogWidthFull}, 100% - 2 * ${grasp.dialogGutter})`,
+      [PHONE]: "100%",
     },
   },
 
@@ -193,6 +212,42 @@ export const dialogStyles = stylex.create({
     // ring is focus.inside (src/focus), drawn inside it, where the panel does not cut it. Square
     // otherwise, so the hairlines run straight to its sides instead of bending up at its corners.
     borderRadius: { default: 0, ":focus-visible": grasp.cornerMark },
+    "::after": {
+      content: '""',
+      position: "sticky",
+      insetBlockEnd: `calc(-1 * ${grasp.space2})`,
+      display: "block",
+      height: FADE,
+      marginBlockStart: `calc(-1 * ${FADE})`,
+      marginInline: `calc(-1 * ${grasp.space6})`,
+      pointerEvents: "none",
+      backgroundImage: `linear-gradient(to bottom, transparent, ${grasp.raised} calc(100% - ${grasp.hairline}), transparent calc(100% - ${grasp.hairline}))`,
+      opacity: 0,
+      animationName: {
+        default: null,
+        "@supports (animation-timeline: scroll())": {
+          default: more,
+          [stylex.when.ancestor("[data-ending-style]", panelMarker)]: "none",
+          [stylex.when.ancestor("[data-closed]", panelMarker)]: "none",
+        },
+      },
+      animationDuration: {
+        default: null,
+        "@supports (animation-timeline: scroll())": "auto",
+      },
+      animationTimingFunction: {
+        default: null,
+        "@supports (animation-timeline: scroll())": "linear",
+      },
+      animationFillMode: {
+        default: null,
+        "@supports (animation-timeline: scroll())": "both",
+      },
+      animationTimeline: {
+        default: null,
+        "@supports (animation-timeline: scroll())": "scroll(nearest)",
+      },
+    },
   },
 
   // The actions, at the end of the line, the main one last. On a phone they share the width, so

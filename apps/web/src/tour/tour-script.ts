@@ -17,7 +17,7 @@ export type TourPage = "/brain" | "/apps" | "/workflows" | "/integrations";
 export interface TourViewer {
   role: string;
   staff: boolean;
-  /** Grasp staff who reach the onboarding alone (app-sidebar.tsx). */
+  /** Grasp staff who reach the onboarding alone (grasp/frame/grasp-sidebar.tsx). */
   onboardingOnly?: true;
 }
 
@@ -34,7 +34,7 @@ interface ScriptStop {
 
 /**
  * The product's sections are in the sidebar for everyone but staff who
- * reach the onboarding alone, as app-sidebar.tsx lists them.
+ * reach the onboarding alone, as grasp/frame/grasp-sidebar.tsx lists them.
  */
 const seesSections = (viewer: TourViewer): boolean =>
   viewer.onboardingOnly !== true;

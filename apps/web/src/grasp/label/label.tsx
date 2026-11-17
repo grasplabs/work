@@ -13,26 +13,11 @@ import * as stylex from "@stylexjs/stylex";
 import { Label as LabelPrimitive } from "@ui-sdk/react/label";
 import type { ComponentProps, ReactNode } from "react";
 
+import type { LayoutStyle } from "../layout/layout";
 import { grasp } from "../tokens/tokens.stylex";
 
-type Layout = string | number | null;
-
 /** What a caller may style: where the label sits. Never its type or colour. */
-export type LabelLayoutStyle = stylex.StyleXStyles<{
-  alignSelf?: Layout;
-  justifySelf?: Layout;
-  gridArea?: Layout;
-  gridColumn?: Layout;
-  gridRow?: Layout;
-  order?: Layout;
-  margin?: Layout;
-  marginBlock?: Layout;
-  marginBlockStart?: Layout;
-  marginBlockEnd?: Layout;
-  marginInline?: Layout;
-  marginInlineStart?: Layout;
-  marginInlineEnd?: Layout;
-}>;
+export type LabelLayoutStyle = LayoutStyle;
 
 // The look of every label in Grasp UI. FieldLabel uses the same styles, so a label is one thing.
 export const labelStyles = stylex.create({
@@ -91,18 +76,21 @@ export interface LabelProps extends Omit<
   required?: boolean;
   /** Layout only: margins and alignment. Type and colour belong to the label. */
   style?: LabelLayoutStyle;
+  /** The same as `style`, by a name a style lint does not take for an inline style attribute. */
+  layout?: LabelLayoutStyle;
 }
 
 export const Label = ({
   children,
   required = false,
-  style,
+  style: styleProp,
+  layout,
   ...rest
 }: LabelProps) => (
   <LabelPrimitive
     {...rest}
     data-slot="label"
-    {...stylex.props(labelStyles.label, style)}
+    {...stylex.props(labelStyles.label, layout ?? styleProp)}
   >
     {children}
     {required && <RequiredMark />}

@@ -473,7 +473,7 @@ const Integrations = () => {
       <SiteHeader crumbs={[{ label: t`Integrations` }]} />
       <div className="min-h-0 flex-1 overflow-y-auto text-sm" data-scroller>
         {/* Columns follow the room this area has, not the window. */}
-        <div className="pb-chat @container mx-auto flex w-full max-w-5xl flex-col gap-8 px-6 pt-7 md:px-9">
+        <div className="@container mx-auto flex w-full max-w-5xl flex-col gap-8">
           <PageHeading
             description={
               catalog.state === "ready" &&

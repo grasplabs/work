@@ -600,7 +600,7 @@ const Workflows = () => {
         }
         crumbs={[{ label: t`Workflows` }]}
       />
-      <div className="pb-chat mx-auto flex w-full max-w-7xl flex-col gap-6 px-6 pt-7 text-sm">
+      <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 text-sm">
         <h1 className="sr-only">
           <Trans>Workflows</Trans>
         </h1>

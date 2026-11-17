@@ -32,5 +32,23 @@ export type {
   ComposerReasoningProps,
 } from "./reasoning";
 export { ComposerAdd } from "./add";
-export type { ComposerAddProps, ComposerKind } from "./add";
+export type { ComposerAddAction, ComposerAddProps, ComposerKind } from "./add";
+export { ComposerModelEffort } from "./model-effort";
+export type {
+  ComposerModelEffortOption,
+  ComposerModelEffortProps,
+} from "./model-effort";
 export type { ComposerMentionItem } from "./mention";
+export { ComposerVoice, composerVoiceWords } from "./voice";
+export type {
+  ComposerVoicePhase,
+  ComposerVoiceProblem,
+  ComposerVoiceProps,
+  ComposerVoiceWords,
+  VoiceReading,
+} from "./voice";
+export { useComposerMicrophone } from "./microphone";
+export type {
+  ComposerMicrophone,
+  ComposerMicrophoneStatus,
+} from "./microphone";

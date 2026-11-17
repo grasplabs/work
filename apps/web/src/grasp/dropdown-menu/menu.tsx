@@ -43,9 +43,6 @@ const WorkContext = createContext<MenuWork | null>(null);
 export const MenuWorkProvider = WorkContext.Provider;
 export const useMenuWork = () => useContext(WorkContext);
 
-// Every prop is documented once, where it is first declared; the props on the docs page are read
-// from the type below, so they cannot drift from what the code accepts.
-
 /** Every prop a DropdownMenu takes. */
 export interface DropdownMenuProps {
   /** The trigger and the panel. */

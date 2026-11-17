@@ -26,9 +26,6 @@ import { menuStyles as styles } from "./styles";
 
 type ItemPrimitiveProps = ComponentProps<typeof ItemPrimitive>;
 
-// Every prop is documented once, where it is first declared; the props on the docs page are read
-// from the type below, so they cannot drift from what the code accepts.
-
 /** What every item takes. */
 interface ItemBase extends Omit<
   ItemPrimitiveProps,

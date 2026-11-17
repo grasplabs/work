@@ -4,6 +4,7 @@
 "use client";
 
 import { MenuTrigger as TriggerPrimitive } from "@ui-sdk/react/menu";
+import { mergeProps } from "@ui-sdk/react/primitive";
 import type { ComponentProps } from "react";
 
 import { Button } from "../button";
@@ -16,11 +17,9 @@ import type {
 } from "../button";
 import { ChevronDown } from "../icons";
 import type { IconData } from "../icons";
+import { WithTip } from "../tooltip/lazy-tip";
 
 type TriggerPrimitiveProps = ComponentProps<typeof TriggerPrimitive>;
-
-// Every prop is documented once, where it is first declared; the props on the docs page are read
-// from the type below, so they cannot drift from what the code accepts.
 
 /**
  * A trigger with words, and an icon before them if it helps.
@@ -68,6 +67,13 @@ export type DropdownMenuTriggerProps = Omit<
     size?: ButtonSize;
     /** Layout only: margins and alignment, as on a Button. */
     style?: ButtonLayoutStyle;
+    /** The same as `style`, by a name a style lint does not take for an inline style attribute. */
+    layout?: ButtonLayoutStyle;
+    /**
+     * Words for a tooltip on the trigger: what the menu is for, when the trigger alone does not
+     * say it (an icon only). It never shows while the menu is open.
+     */
+    tooltip?: string;
   };
 
 /** The button that opens the menu: a Grasp Button that UI SDK's trigger behaviour drives. */
@@ -78,7 +84,9 @@ export const DropdownMenuTrigger = ({
   label,
   chevron = false,
   children,
-  style,
+  style: styleProp,
+  layout,
+  tooltip,
   ...rest
 }: DropdownMenuTriggerProps) => {
   // SAFETY: the props above are one of the two shapes, words or icon only, as the Button takes them.
@@ -88,15 +96,20 @@ export const DropdownMenuTrigger = ({
     size,
     icon,
     label,
-    style,
+    layout: layout ?? styleProp,
     children,
     iconEnd: chevron ? ChevronDown : undefined,
   } as ButtonProps;
   return (
-    <TriggerPrimitive
-      {...rest}
-      render={(props: Record<string, unknown>) => (
-        <Button {...props} {...look} />
+    <WithTip
+      tooltip={tooltip}
+      render={(tip) => (
+        <TriggerPrimitive
+          {...rest}
+          render={(props: Record<string, unknown>) => (
+            <Button {...mergeProps(tip, props)} {...look} />
+          )}
+        />
       )}
     />
   );

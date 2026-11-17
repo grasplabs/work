@@ -1,26 +1,12 @@
-// The page bar: across the top of the page's card, flush on it with no edge, one line high. Where
-// the page is (its crumbs) at the start, what it is about after them, and the page's actions at the
-// end (Ruben's grasp/frame/page-bar.tsx). App shell draws it itself from its own props
-// (`bar="frame"`); a page that draws its own (`bar="page"`) renders AppShellBar at its top, where it
-// stays as the page scrolls under it.
-//
-//   <AppShell bar="page" sidebar={<Sidebar … />}>
-//     <AppShellBar crumbs={[{ label: "Projects", href: "/projects" }, { label: "Spring launch" }]} />
-//     <PageHeader title="Spring launch" />
-//   </AppShell>
 "use client";
 
 import * as stylex from "@stylexjs/stylex";
-import {
-  Fragment,
-  createElement,
-  isValidElement,
-  useEffect,
-  useState,
-} from "react";
+import { createElement, isValidElement, useEffect, useState } from "react";
 import type { ReactElement, ReactNode } from "react";
 
 import { focus } from "../focus/focus";
+import { simply } from "../motion/simply.stylex";
+import { Skeleton } from "../skeleton";
 import { grasp, media } from "../tokens/tokens.stylex";
 
 /** A step on the way to the page, in the page bar. The last is the page itself. */
@@ -38,13 +24,16 @@ export interface AppShellBarProps {
   /** Where the page is: its steps, the page itself last. */
   crumbs?: readonly AppShellCrumb[];
   /**
-   * Which crumbs a narrow shell keeps: the page and the step before it, the page alone, or the
-   * first step alone. However many stay, the steps before the page give way before the page's own
-   * name is cut.
+   * Which crumbs a phone-wide card (under 40rem) keeps: the page and the step before it, the page
+   * alone, or the first step alone. At any width a step that does not fit whole goes, the first
+   * first, and the page's own name is cut only when no step is left beside it.
    * @default "last-two"
    */
   phoneCrumbs?: "last-two" | "last" | "first";
-  /** After the crumbs: where the page's subject stands, such as a status. */
+  /**
+   * After the crumbs: where the page's subject stands, such as a status. Where the page's name
+   * would be cut beside it, it gives way first, so the name is cut last.
+   */
   trailing?: ReactNode;
   /** At the bar's start, before the crumbs: the product's mark and name, as a link home. */
   brand?: ReactNode;
@@ -63,6 +52,12 @@ export interface AppShellBarProps {
    * @default "Breadcrumb"
    */
   breadcrumbLabel?: string;
+  /**
+   * The crumbs are not known yet: the bar keeps its height and shows a placeholder in their place
+   * (Skeleton's dot field), and says it is busy, so nothing jumps when they arrive.
+   * @default false
+   */
+  loading?: boolean;
 }
 
 // The width under which the sidebar folds into a sheet: the system's phone width, 40rem, measured
@@ -75,6 +70,12 @@ const PHONE = "@media (width < 40rem)";
 // takes its own row. Read on the card round the bar, which is the bar's width (the card beside a
 // sidebar may be narrow in a wide window): the bar cannot ask its own width how to lay itself out.
 const CARD_NARROW = "@container app-shell-card (width < 34rem)";
+// A small phone's window (under 22.5rem, 360px: a 320px phone), as PHONE is read on the window: the
+// brand keeps its mark and gives its words to a screen reader, so the page's name beside it reads
+// whole (FRESH.md F75b).
+const SMALL_PHONE = "@media (width < 22.5rem)";
+// A card a phone's width (40rem): where `phoneCrumbs` keeps only some crumbs.
+const CARD_PHONE = "@container app-shell-card (width < 40rem)";
 // A bar with a middle (F14): two equal sides round it; the start's least is what in it never gives
 // way, the end's its actions whole.
 const SIDES = "minmax(auto, 1fr) auto minmax(max-content, 1fr)";
@@ -87,9 +88,9 @@ const CARD_TIGHT = "@container app-shell-card (width < 20rem)";
 // in as the page's words (shellPageInline), at both ends and every width, and every part stands the
 // bar's gap (space3) from the next, ink to ink. An icon button's glyph sits inside its box, so the
 // bar hangs the empty rim of its fill out into that room. Folded, the Sidebar's reopen button stands
-// over the bar's start (sidebar.tsx `reveal`: shellGutter in from the window, the card shellInset):
-// the crumbs begin the gap after its glyph.
-const REOPEN_INK_END = `calc(${grasp.shellGutter} + ${grasp.shellIconButton} - (${grasp.shellIconButton} - ${grasp.shellIcon}) / 2 - ${grasp.shellInset})`;
+// over the bar's start (sidebar.tsx `reveal`: its glyph the page's room in from the card, F09): the
+// crumbs begin the gap after its glyph.
+const REOPEN_INK_END = `calc(${grasp.shellPageInline} + ${grasp.shellIcon})`;
 const AFTER_REOPEN = `calc(${REOPEN_INK_END} + ${grasp.space3})`;
 // The room a crumb's link keeps round its words, inside the box its ring is drawn round (F40): with
 // it the ring stands about as far from the first and last letters (4.5–5px) as from the capitals'
@@ -103,7 +104,13 @@ const RING_REACH = `calc(${grasp.ringWidth} + ${grasp.ringOffsetWords} + ${CRUMB
 const PAGE_LEAST = grasp.space8;
 
 const styles = stylex.create({
+  // Where the crumbs will stand while they load: about two crumbs' width, never past the bar's room.
+  crumbsLoading: { width: "min(12rem, 40%)", flexShrink: 1, minWidth: 0 },
   bar: {
+    // A menu opened from the bar (its actions, its middle) stands on the shell's own surfaces, as the
+    // person's menu in the sidebar does (FRESH.md F84): popups in the bar read these.
+    "--grasp-popup-fill": grasp.shellPopup,
+    "--grasp-popup-line": grasp.shellPopupLine,
     display: "flex",
     alignItems: "center",
     gap: grasp.space3,
@@ -119,6 +126,11 @@ const styles = stylex.create({
       [NARROW]: grasp.shellPageInline,
     },
     paddingInlineEnd: grasp.shellPageInline,
+    // The room for the reopen button opens and closes with the fold, as the card moves: the crumbs
+    // ease along with it, never a step of their own (FLAWS.md F12).
+    transitionProperty: "padding-inline-start",
+    transitionDuration: simply.ui,
+    transitionTimingFunction: grasp.ease,
     // One row of 48px (shellBar, F16) by mouse or finger: on a touch screen a crumb's link is 44px
     // tall (tap), and the room above and below it gives way so the row stays 48.
     paddingBlock: {
@@ -136,8 +148,17 @@ const styles = stylex.create({
     position: "sticky",
     insetBlockStart: 0,
     zIndex: grasp.shellPageLayer,
-    marginInline: `calc(-1 * ${grasp.shellPageInline})`,
-    marginBlockEnd: grasp.space7,
+    // Out over the page's side room; on a whole page (page="whole") there is none, so it stays on
+    // the card's edges and its crumbs keep the page's inset (row 33: they stood flush on the edge).
+    marginInline: {
+      default: `calc(-1 * ${grasp.shellPageInline})`,
+      [stylex.when.ancestor("[data-page-whole]")]: 0,
+    },
+    // The room under it, as a padded page has above its words; a whole page lays out its own.
+    marginBlockEnd: {
+      default: grasp.space7,
+      [stylex.when.ancestor("[data-page-whole]")]: 0,
+    },
     paddingInlineStart: {
       default: grasp.shellPageInline,
       [stylex.when.ancestor("[data-sidebar-folded]")]: AFTER_REOPEN,
@@ -154,25 +175,38 @@ const styles = stylex.create({
       },
     },
   },
+  // The crumbs' list (F02, A3-shell-02): one line, the page's name first to take its room and the
+  // steps before it after, nearest first, each whole or not at all: what does not fit wraps onto a
+  // second line, which the nav's clip hides. So the first step goes first, its slash with it, a step
+  // is never cut to "Co…", and the page's name is cut only when it stands alone; nothing runs past
+  // the room, with or without a script (a docs preview sleeps until it nears the screen). Laid end
+  // to start (row-reverse, the steps' `order`), so the eye still reads first step to page.
   crumbs: {
     display: "flex",
+    flexDirection: "row-reverse",
+    flexWrap: "wrap",
+    justifyContent: "flex-end",
     alignItems: "center",
-    gap: grasp.space2,
+    alignContent: "flex-start",
+    columnGap: grasp.space2,
+    // A second line starts past the nav's clip (its padding, RING_REACH, below this line).
+    rowGap: RING_REACH,
+    blockSize: { default: grasp.textXsLine, [media.coarse]: grasp.tap },
     minWidth: 0,
     margin: 0,
     padding: 0,
     listStyle: "none",
   },
-  // The steps before the page give way first, cut short, so the page's own name is cut last.
+  // A step: its link, then the slash before the next, whole (it never gives way to an ellipsis).
   crumb: {
-    // A step the bar's measure took away (data-gone, `fitCrumbs`): no room for it at its least.
+    // A step the bar's measure took away (data-gone, `thinSteps`): it wrapped, so it is put away.
     display: { default: "flex", ":is([data-gone])": "none" },
-    flexShrink: 100,
+    flexShrink: 0,
     alignItems: "center",
-    // Never to nothing: a step keeps its first letter and its ellipsis, so no bare slash leads. On a
-    // touch screen never narrower than its link, which a finger needs 44px wide: the step stays in
-    // its own box, never laid over the slash after it.
-    minWidth: { default: grasp.space6, [media.coarse]: grasp.tap },
+    gap: grasp.space2,
+    // Each the line's height (a tap's on a touch screen, where a link is), so a step that wrapped
+    // always starts below the line, under the nav's clip.
+    minBlockSize: { default: null, [media.coarse]: grasp.tap },
     color: grasp.shellTextSecondary,
   },
   // A step's words, cut short with an ellipsis inside its link, so the link's ring is never cut.
@@ -182,18 +216,22 @@ const styles = stylex.create({
     textOverflow: "ellipsis",
     whiteSpace: "nowrap",
   },
-  last: { flexShrink: 1, minWidth: PAGE_LEAST },
+  // The page's name: first on the line, whole while a step stands beside it; alone on the line it
+  // is cut to fit, never under its stub.
+  last: { order: -100, flexShrink: 1, minWidth: PAGE_LEAST },
   // The middle in the phone's menu instead: gone from the bar on a phone's window only (40rem), so a
   // shell folded sooner (sheetBelow) keeps it in its bar while there is room.
   middleInSheet: { display: { default: "flex", [PHONE]: "none" } },
-  separator: {
-    display: { default: "flex", ":is([data-gone])": "none" },
-    flexShrink: 0,
-    color: grasp.shellTextTertiary,
-  },
-  // On a narrow shell only some crumbs stay (`phoneCrumbs`).
+  separator: { display: "flex", flexShrink: 0, color: grasp.shellTextTertiary },
+  // On a phone-wide card only some crumbs stay (`phoneCrumbs`): read on the card, not the shell,
+  // so a shell that folds its sidebar into the menu early (sheetBelow) keeps every step while its
+  // card has room (A3-shell-03); past that, steps go only when they do not fit (`crumbs`).
   narrowHidden: {
-    display: { default: "flex", ":is([data-gone])": "none", [NARROW]: "none" },
+    display: {
+      default: "flex",
+      ":is([data-gone])": "none",
+      [CARD_PHONE]: "none",
+    },
   },
   // The crumbs' list may shrink, so the page's name is cut short rather than the bar overflowing.
   // Never wider than its room: what does not fit is cut at its own edge, never laid over the next
@@ -240,11 +278,87 @@ const styles = stylex.create({
     color: grasp.shellText,
     fontWeight: grasp.weightMedium,
   },
+  // What trails the crumbs: whole, or not at all. Where the page's name would be cut beside it, it
+  // gives way first (the bar's measure, `thinTrailing`, F61): F02's order, the page's name cut last.
   trailing: {
-    display: "flex",
+    display: { default: "flex", ":is([data-gone])": "none" },
     flexShrink: 0,
     alignItems: "center",
     gap: grasp.space2,
+  },
+  // What a peeking Sidebar covers of the bar's start (its brand, its crumbs and what trails them) is
+  // covered whole: it fades as the panel comes in and back as it leaves, so no crumb stands cut
+  // beside the panel's edge as if its own (FRESH.md F76), and the peek's head carries the brand.
+  underPeek: {
+    // While the Sidebar peeks over it: the shell's grid says so, as it says the fold (app-shell.tsx).
+    opacity: {
+      default: 1,
+      [stylex.when.ancestor("[data-sidebar-peeking]")]: 0,
+    },
+    visibility: {
+      default: "visible",
+      [stylex.when.ancestor("[data-sidebar-peeking]")]: "hidden",
+    },
+    transitionProperty: "opacity, visibility",
+    transitionDuration: simply.leave,
+    transitionTimingFunction: grasp.ease,
+  },
+  // Between the brand, a link home, and where the page is: a short rule, as the bar's parts stand the
+  // bar's gap apart, so the two never read as one phrase or as a first crumb (FRESH.md F75).
+  brandRule: {
+    flexShrink: 0,
+    width: grasp.separatorWidth,
+    height: grasp.iconSm,
+    backgroundColor: { default: grasp.line, [media.forced]: "CanvasText" },
+  },
+  // The brand's words (AppShellBrandName): on a small phone's window only a screen reader has them, in
+  // the link's name, and the mark stands for the product; the crumbs get the room (F75b).
+  // Only the bar's own brand gives way there: the same brand in the sidebar's head (a peek, the
+  // phone's menu, which stands inside the bar's header) keeps its name.
+  brandName: {
+    position: {
+      default: null,
+      [stylex.when.ancestor('[data-slot="app-shell-bar-brand"]')]: {
+        default: null,
+        [SMALL_PHONE]: "absolute",
+      },
+    },
+    width: {
+      default: null,
+      [stylex.when.ancestor('[data-slot="app-shell-bar-brand"]')]: {
+        default: null,
+        [SMALL_PHONE]: 1,
+      },
+    },
+    height: {
+      default: null,
+      [stylex.when.ancestor('[data-slot="app-shell-bar-brand"]')]: {
+        default: null,
+        [SMALL_PHONE]: 1,
+      },
+    },
+    margin: {
+      default: null,
+      [stylex.when.ancestor('[data-slot="app-shell-bar-brand"]')]: {
+        default: null,
+        [SMALL_PHONE]: -1,
+      },
+    },
+    overflow: {
+      default: null,
+      [stylex.when.ancestor('[data-slot="app-shell-bar-brand"]')]: {
+        default: null,
+        [SMALL_PHONE]: "hidden",
+      },
+    },
+    clipPath: {
+      default: null,
+      [stylex.when.ancestor('[data-slot="app-shell-bar-brand"]')]: {
+        default: null,
+        [SMALL_PHONE]: "inset(50%)",
+      },
+    },
+    whiteSpace: "nowrap",
   },
   // The mark and name never give way, nor wrap: what the bar's start keeps whole (F14).
   brand: {
@@ -293,6 +407,13 @@ const styles = stylex.create({
       ":is([data-rows=three])": '"start" "end" "middle"',
     },
     rowGap: { default: grasp.space1, [media.coarse]: grasp.space3 },
+    // The first row is the bar's one row at any number of rows: centred where a one-row bar's parts
+    // are (half of shellBar down), level with the sidebar head's row; the next row starts under it
+    // (FRESH.md F74: two rows put the first 2px higher).
+    gridTemplateRows: {
+      default: `minmax(calc(${grasp.shellBar} - 2 * ${grasp.shellRowBlock}), auto)`,
+      [media.coarse]: `minmax(${grasp.tap}, auto)`,
+    },
   },
   // The same where the middle moves into the phone's menu: on a phone's window the bar is the start
   // and the end alone.
@@ -355,7 +476,11 @@ const styles = stylex.create({
     columnGap: grasp.space3,
   },
   whereTrailed: {
-    gridTemplateColumns: `minmax(${grasp.space8}, max-content) auto`,
+    gridTemplateColumns: {
+      default: `minmax(${grasp.space8}, max-content) auto`,
+      // What trails gave way (F61): the crumbs' column alone, with no gap kept for it.
+      ":has(> [data-gone])": `minmax(${grasp.space8}, max-content)`,
+    },
   },
   middle: {
     gridArea: "middle",
@@ -388,6 +513,39 @@ const styles = stylex.create({
     gap: grasp.space2,
   },
 });
+
+// Each step's place on the line (`crumbs`): the nearer the page, the sooner it takes its room. A
+// bar holds a handful of steps; past the last of these they keep the farthest place.
+const stepPlaces = stylex.create({
+  s0: { order: 0 },
+  s1: { order: -1 },
+  s2: { order: -2 },
+  s3: { order: -3 },
+  s4: { order: -4 },
+  s5: { order: -5 },
+  s6: { order: -6 },
+  s7: { order: -7 },
+  s8: { order: -8 },
+  s9: { order: -9 },
+  s10: { order: -10 },
+  s11: { order: -11 },
+});
+const STEP_PLACES = [
+  stepPlaces.s0,
+  stepPlaces.s1,
+  stepPlaces.s2,
+  stepPlaces.s3,
+  stepPlaces.s4,
+  stepPlaces.s5,
+  stepPlaces.s6,
+  stepPlaces.s7,
+  stepPlaces.s8,
+  stepPlaces.s9,
+  stepPlaces.s10,
+  stepPlaces.s11,
+];
+const stepPlace = (index: number) =>
+  STEP_PLACES[Math.min(index, STEP_PLACES.length - 1)];
 
 /** A crumb that leads somewhere: the caller's link, or a plain one, in the bar's link look. */
 const CrumbLink = ({ crumb }: { crumb: AppShellCrumb }) => {
@@ -456,7 +614,7 @@ const Crumbs = ({
   label: string;
 }) => {
   const last = crumbs.length - 1;
-  // Whether step `index` (and the slash before it) is left out on a narrow shell.
+  // Whether step `index` (and the slash after it) is left out on a narrow shell.
   const hidden = (index: number): boolean => {
     if (phoneCrumbs === "first") {
       return index > 0;
@@ -467,34 +625,44 @@ const Crumbs = ({
     <nav
       aria-label={label}
       data-slot="app-shell-crumbs"
-      {...stylex.props(styles.nav)}
+      {...stylex.props(styles.nav, styles.underPeek)}
     >
       <ol {...stylex.props(styles.crumbs)}>
-        {crumbs.map((crumb, index) => (
-          <Fragment key={`${crumb.label}-${crumb.href ?? ""}`}>
-            {index > 0 && (
-              <li
-                aria-hidden="true"
-                {...stylex.props(
-                  styles.separator,
-                  (hidden(index) || hidden(index - 1)) && styles.narrowHidden
-                )}
-              >
-                /
-              </li>
-            )}
+        {crumbs.map((crumb, index) =>
+          index === last ? (
             <li
-              data-crumb-step={index === last ? undefined : ""}
+              key={`${crumb.label}-${crumb.href ?? ""}`}
               {...stylex.props(
                 styles.crumb,
-                index === last && styles.last,
+                styles.last,
                 hidden(index) && styles.narrowHidden
               )}
             >
-              <CrumbStep crumb={crumb} current={index === last} />
+              <CrumbStep crumb={crumb} current />
             </li>
-          </Fragment>
-        ))}
+          ) : (
+            <li
+              key={`${crumb.label}-${crumb.href ?? ""}`}
+              data-crumb-step=""
+              {...stylex.props(
+                styles.crumb,
+                stepPlace(index),
+                hidden(index) && styles.narrowHidden
+              )}
+            >
+              <CrumbStep crumb={crumb} current={false} />
+              <span
+                aria-hidden="true"
+                {...stylex.props(
+                  styles.separator,
+                  hidden(index + 1) && styles.narrowHidden
+                )}
+              >
+                /
+              </span>
+            </li>
+          )
+        )}
       </ol>
     </nav>
   );
@@ -534,36 +702,32 @@ const isCut = (words: HTMLElement) => {
 /** Whether anything in the bar runs past its end. */
 const overflows = (bar: HTMLElement) => bar.scrollWidth > bar.clientWidth + 1;
 
-/** Whether the crumbs at their least run past their navigation's room. */
+/** Whether a crumb at its least did not fit the crumbs' room: it wrapped past their one line
+ * (`crumbs`), under the nav's clip. */
 const crowded = (bar: HTMLElement) => {
-  const nav = bar.querySelector<HTMLElement>('[data-slot="app-shell-crumbs"]');
-  const list = nav?.querySelector<HTMLElement>(":scope > ol");
-  if (
-    nav === null ||
-    nav === undefined ||
-    list === null ||
-    list === undefined
-  ) {
+  const list = bar.querySelector<HTMLElement>(
+    '[data-slot="app-shell-crumbs"] > ol'
+  );
+  if (list === null) {
     return false;
   }
-  // The nav's room is inside its padding (the ring's reach, which its margin gives back); a
-  // computed padding is always in px.
-  const look = getComputedStyle(nav);
-  const pad =
-    Number(look.paddingInlineStart.replace("px", "")) +
-    Number(look.paddingInlineEnd.replace("px", ""));
-  return list.scrollWidth > nav.clientWidth - pad + 1;
+  const line = list.getBoundingClientRect().bottom;
+  return [...list.children].some(
+    (each) =>
+      each.getClientRects().length > 0 &&
+      each.getBoundingClientRect().top >= line
+  );
 };
 
-/** Every step and slash the measure took away, back. */
+/** Every step the measure took away, and what trails the crumbs, back. */
 const restoreSteps = (bar: HTMLElement) => {
   for (const each of bar.querySelectorAll<HTMLElement>("[data-gone]")) {
     delete each.dataset.gone;
   }
 };
 
-/** Takes the steps before the page away, the first first, with the slash after each, while the
- * crumbs at their least do not fit their room. */
+/** Takes the steps before the page away, the first first (each with the slash after it), while the
+ * crumbs at their least do not fit their room: what wrapped out of sight, out of the tab order too. */
 const thinSteps = (bar: HTMLElement) => {
   const steps = [
     ...bar.querySelectorAll<HTMLElement>("[data-crumb-step]"),
@@ -573,8 +737,33 @@ const thinSteps = (bar: HTMLElement) => {
       return;
     }
     step.toggleAttribute("data-gone", true);
-    step.nextElementSibling?.toggleAttribute("data-gone", true);
   }
+};
+
+/** Whether the page's own name is cut short where it shows. */
+const pageCut = (bar: HTMLElement) => {
+  const page = bar.querySelector<HTMLElement>(
+    '[data-slot="app-shell-crumbs"] li:not([data-crumb-step]) [title]'
+  );
+  return page !== null && page.getClientRects().length > 0 && isCut(page);
+};
+
+/** After the steps: while the page's name is cut and something trails it, what trails it gives way
+ * (F61), so the name is cut last (F02's order). It comes back with the next measure, when there is
+ * room. */
+const thinTrailing = (bar: HTMLElement) => {
+  const trailing = bar.querySelector<HTMLElement>(
+    '[data-slot="app-shell-bar-trailing"]'
+  );
+  if (trailing !== null && pageCut(bar)) {
+    trailing.toggleAttribute("data-gone", true);
+  }
+};
+
+/** What gives way while the crumbs do not fit: the steps before the page, then what trails it. */
+const thin = (bar: HTMLElement) => {
+  thinSteps(bar);
+  thinTrailing(bar);
 };
 
 const ROWS = ["one", "two", "three"] as const;
@@ -586,7 +775,7 @@ const fitBar = (bar: HTMLElement) => {
     '[data-slot="app-shell-bar-middle"]'
   );
   if (middle === null) {
-    thinSteps(bar);
+    thin(bar);
     return;
   }
   // A middle in the phone's menu is not in the bar: its sides alone, one row or two.
@@ -596,11 +785,11 @@ const fitBar = (bar: HTMLElement) => {
     restoreSteps(bar);
     bar.dataset.rows = each;
     if (each === "one") {
-      if (!overflows(bar) && !wordsShown(bar).some(isCut)) {
+      if (!overflows(bar) && !crowded(bar) && !wordsShown(bar).some(isCut)) {
         return;
       }
     } else {
-      thinSteps(bar);
+      thin(bar);
       if (!overflows(bar)) {
         return;
       }
@@ -608,12 +797,21 @@ const fitBar = (bar: HTMLElement) => {
   }
 };
 
+// What the measure changes itself, so it is not watched: the start that holds the crumbs, their
+// column and the crumbs.
+const MEASURED = new Set([
+  "app-shell-bar-start",
+  "app-shell-bar-where",
+  "app-shell-crumbs",
+]);
+
 /** The cleanup of an effect that started nothing. */
 const keep = () => {
   // Nothing was started, so nothing stops.
 };
 
-/** Measures the bar when it is drawn, and again a frame after its card changes size or a font loads. */
+/** Measures the bar when it is drawn, and again a frame after its card or a part beside the crumbs
+ * changes size, or a font loads. */
 const useFitBar = (bar: HTMLElement | null) => {
   // After every draw: the crumbs, the brand or the actions may have changed.
   useEffect(() => {
@@ -635,6 +833,15 @@ const useFitBar = (bar: HTMLElement | null) => {
     };
     const watch = new ResizeObserver(later);
     watch.observe(card);
+    // And the parts beside the crumbs (the brand, the trailing words, the actions): one may change
+    // its words without a new draw of the bar. Not the crumbs, which the measure itself changes.
+    for (const part of bar.querySelectorAll<HTMLElement>(
+      ':scope > *, [data-slot="app-shell-bar-start"] > *'
+    )) {
+      if (!MEASURED.has(part.dataset.slot ?? "")) {
+        watch.observe(part);
+      }
+    }
     document.fonts.addEventListener("loadingdone", later);
     return () => {
       cancelAnimationFrame(frame);
@@ -648,6 +855,44 @@ const useFitBar = (bar: HTMLElement | null) => {
 const NO_CRUMBS: readonly AppShellCrumb[] = [];
 
 /** The bar itself, drawn by the frame (with its menu button at the start) or by a page. */
+/** The bar says it is busy only while its crumbs load. */
+const busyOf = (loading: boolean): true | undefined =>
+  loading ? true : undefined;
+
+/** Where the page is: its crumbs, a placeholder while they load, or nothing. */
+const whereOf = ({
+  loading,
+  crumbs,
+  phoneCrumbs,
+  label,
+}: {
+  loading: boolean;
+  crumbs: readonly AppShellCrumb[];
+  phoneCrumbs: AppShellBarProps["phoneCrumbs"];
+  label: string;
+}) => {
+  if (loading) {
+    return <Skeleton text="sm" layout={styles.crumbsLoading} />;
+  }
+  return crumbs.length > 0 ? (
+    <Crumbs
+      crumbs={crumbs}
+      phoneCrumbs={phoneCrumbs ?? "last-two"}
+      label={label}
+    />
+  ) : null;
+};
+
+/** The rule between the brand and the crumbs (F75): only where crumbs follow a brand. */
+const ruleOf = (brand: ReactNode, where: ReactNode) =>
+  brand === undefined || where === null ? null : (
+    <span
+      aria-hidden="true"
+      data-slot="app-shell-bar-rule"
+      {...stylex.props(styles.brandRule, styles.underPeek)}
+    />
+  );
+
 export const PageBar = ({
   look,
   start,
@@ -659,6 +904,7 @@ export const PageBar = ({
   phoneMiddle = "bar",
   actions,
   breadcrumbLabel = "Breadcrumb",
+  loading = false,
   end,
 }: AppShellBarProps & {
   look: "frame" | "page";
@@ -667,21 +913,34 @@ export const PageBar = ({
 }) => {
   const [bar, setBar] = useState<HTMLElement | null>(null);
   useFitBar(bar);
+  const where = whereOf({
+    loading,
+    crumbs,
+    phoneCrumbs,
+    label: breadcrumbLabel,
+  });
   const head =
     brand === undefined ? null : (
-      <div {...stylex.props(styles.brand)}>{brand}</div>
+      <div
+        data-slot="app-shell-bar-brand"
+        {...stylex.props(
+          styles.brand,
+          styles.underPeek,
+          stylex.defaultMarker()
+        )}
+      >
+        {brand}
+      </div>
     );
-  const where =
-    crumbs.length > 0 ? (
-      <Crumbs
-        crumbs={crumbs}
-        phoneCrumbs={phoneCrumbs}
-        label={breadcrumbLabel}
-      />
-    ) : null;
+  const rule = ruleOf(brand, where);
   const trail =
     trailing === undefined ? null : (
-      <div {...stylex.props(styles.trailing)}>{trailing}</div>
+      <div
+        data-slot="app-shell-bar-trailing"
+        {...stylex.props(styles.trailing, styles.underPeek)}
+      >
+        {trailing}
+      </div>
     );
   // The end: the page's actions, then what the shell puts after them (the panels' button on a phone).
   const tail =
@@ -703,10 +962,12 @@ export const PageBar = ({
       <header
         ref={setBar}
         data-slot="app-shell-bar"
+        aria-busy={busyOf(loading)}
         {...stylex.props(styles.bar, look === "page" && styles.pageBar)}
       >
         {start}
         {head}
+        {rule}
         {where}
         {trail}
         {tail}
@@ -717,6 +978,7 @@ export const PageBar = ({
     <header
       ref={setBar}
       data-slot="app-shell-bar"
+      aria-busy={busyOf(loading)}
       {...stylex.props(
         styles.bar,
         look === "page" && styles.pageBar,
@@ -727,6 +989,7 @@ export const PageBar = ({
       <div data-slot="app-shell-bar-start" {...stylex.props(styles.start)}>
         {start}
         {head}
+        {rule}
         {(where !== null || trail !== null) && (
           <div
             data-slot="app-shell-bar-where"
@@ -753,6 +1016,21 @@ export const PageBar = ({
     </header>
   );
 };
+
+export interface AppShellBrandNameProps {
+  /** The product's name, as words. On a small phone's window only a screen reader has it in the bar. */
+  children: ReactNode;
+}
+
+/**
+ * The product's name inside `brand`, after its mark: `<a href="/"><Mark /><AppShellBrandName>Grasp
+ * UI</AppShellBrandName></a>`. In the bar on a small phone's window (under 22.5rem) only the mark shows,
+ * and the name stays the link's name for a screen reader, so the page's name beside it reads whole.
+ * Elsewhere (the sidebar's head, the menu's) it shows as it is.
+ */
+export const AppShellBrandName = ({ children }: AppShellBrandNameProps) => (
+  <span {...stylex.props(styles.brandName)}>{children}</span>
+);
 
 /**
  * A page's own page bar, for an App shell with `bar="page"`: render it first in the page. It runs

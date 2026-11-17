@@ -174,8 +174,8 @@ test("a person asks in a new chat, follows the answer, renames it, and reads and
   const chat = chatOf(page);
   await expect(chat).toBeVisible();
   await expect(page).toHaveURL(/\/$/u);
-  const messages = chat.getByRole("list", { name: "Messages" });
-  await expect(messages.getByRole("listitem").first()).toHaveText(question);
+  const messages = chat.getByRole("log", { name: "Messages" });
+  await expect(messages.getByRole("article").first()).toHaveText(question);
   // The local stack's provider refuses unscripted requests' keys
   // (e2e/model-fake.ts): the answer says so once the turn ends, and who can
   // put it right.
@@ -196,7 +196,7 @@ test("a person asks in a new chat, follows the answer, renames it, and reads and
   await box.fill(draft);
   await messages.getByRole("button", { name: "Try again" }).click();
   await expect(
-    messages.getByRole("listitem").filter({ hasText: question })
+    messages.getByRole("article").filter({ hasText: question })
   ).toHaveCount(2);
   await expect(box).toHaveText(draft);
   // The first try's failure stays where it was; the new one is last.
@@ -341,8 +341,8 @@ test("a person asks, and reads the agent's answer once its turn ends", async ({
   await page.getByLabel("Your question").fill(question);
   await page.getByRole("button", { name: "Send", exact: true }).click();
 
-  const messages = page.getByRole("list", { name: "Messages" });
-  await expect(messages.getByRole("listitem").first()).toHaveText(question);
+  const messages = page.getByRole("log", { name: "Messages" });
+  await expect(messages.getByRole("article").first()).toHaveText(question);
   await expect(messages.getByText(answer.text)).toBeVisible({
     timeout: 30_000,
   });
@@ -390,8 +390,8 @@ test("a person attaches files to a question, takes one off, and sees the questio
   await page.getByRole("button", { name: "Send" }).click();
   // The question shows the file it carried; the box is empty again.
   const asked = chatOf(page)
-    .getByRole("list", { name: "Messages" })
-    .getByRole("listitem")
+    .getByRole("log", { name: "Messages" })
+    .getByRole("article")
     .first();
   await expect(asked).toContainText(question);
   await expect(asked).toContainText(plan);
@@ -416,8 +416,8 @@ test("a person starts a chat from one of the questions under the box", async ({
     .click();
   await expect(
     chatOf(page)
-      .getByRole("list", { name: "Messages" })
-      .getByRole("listitem")
+      .getByRole("log", { name: "Messages" })
+      .getByRole("article")
       .first()
   ).toHaveText("What waits on me today?");
 });
@@ -444,8 +444,8 @@ test("a followed chat says core can't be reached when it stays out of reach", as
   // The turn has ended (the local stack's provider refuses unscripted
   // requests' keys), so nothing else is on its way when the connection drops.
   const chat = chatOf(page);
-  const messages = chat.getByRole("list", { name: "Messages" });
-  await expect(messages.getByRole("listitem").first()).toHaveText(
+  const messages = chat.getByRole("log", { name: "Messages" });
+  await expect(messages.getByRole("article").first()).toHaveText(
     `Out of reach ${tag}.`
   );
   await expect(messages.getByRole("alert")).toContainText(
@@ -524,7 +524,7 @@ test("one control picks the model and how hard it thinks, sends both with the qu
   await page.getByRole("button", { name: "Send", exact: true }).click();
   const chat = chatOf(page);
   await expect(
-    chat.getByRole("list", { name: "Messages" }).getByRole("listitem").first()
+    chat.getByRole("log", { name: "Messages" }).getByRole("article").first()
   ).toHaveText(question);
   // The question, not the new chat named after it.
   const asked = sent.find(
@@ -576,8 +576,8 @@ test("the chat on every other page carries on the open chat, which is the same c
   await box.fill(question);
   await expect(send).toBeEnabled();
   await box.press("Enter");
-  const messages = chat.getByRole("list", { name: "Messages" });
-  await expect(messages.getByRole("listitem").first()).toHaveText(question);
+  const messages = chat.getByRole("log", { name: "Messages" });
+  await expect(messages.getByRole("article").first()).toHaveText(question);
   await expect(messages.getByRole("alert")).toContainText(
     "Your AI provider is refusing your key. Ask your admin to check or replace it in Settings › AI providers.",
     { timeout: 30_000 }
@@ -592,14 +592,14 @@ test("the chat on every other page carries on the open chat, which is the same c
   await expect(box).toBeFocused();
   await box.fill(`Half a thought ${tag}`);
   await page.keyboard.press("ControlOrMeta+j");
-  await expect(messages.getByRole("listitem").first()).toHaveText(question);
+  await expect(messages.getByRole("article").first()).toHaveText(question);
   await expect(box).toBeFocused();
   await expect(box).toHaveText(`Half a thought ${tag}`);
 
   // On another page it is still open, on the same chat; a new chat starts
   // afresh.
   await page.goto("/knowledge");
-  await expect(messages.getByRole("listitem").first()).toHaveText(question);
+  await expect(messages.getByRole("article").first()).toHaveText(question);
   await chat.getByRole("button", { name: "New chat" }).click();
   await expect(messages).toHaveCount(0);
   await expect(chat).toContainText("Ask anything, or describe a process");
@@ -608,7 +608,7 @@ test("the chat on every other page carries on the open chat, which is the same c
   // A page load reads the models again.
   await expect(send).toBeEnabled();
   await box.press("Enter");
-  await expect(messages.getByRole("listitem").first()).toHaveText(second);
+  await expect(messages.getByRole("article").first()).toHaveText(second);
 
   // On Chat, from the sidebar, it is still beside the page on that chat,
   // with no idle bar (the page is where to ask), and both chats are in its
@@ -618,7 +618,7 @@ test("the chat on every other page carries on the open chat, which is the same c
     .getByRole("link", { name: "Chat" })
     .click();
   await expect(page).toHaveURL(/\/$/u);
-  await expect(messages.getByRole("listitem").first()).toHaveText(second);
+  await expect(messages.getByRole("article").first()).toHaveText(second);
   await expect(page.getByRole("button", { name: "Open the chat" })).toHaveCount(
     0
   );

@@ -18,28 +18,10 @@ import * as stylex from "@stylexjs/stylex";
 import { Resizable as ResizablePrimitive } from "@ui-sdk/react/resizable";
 import type { ComponentProps, ReactNode } from "react";
 
-type Layout = string | number | null;
+import type { LayoutStyle } from "../layout/layout";
 
 /** What a caller may style: its size and where it sits. */
-export type ResizableLayoutStyle = stylex.StyleXStyles<{
-  width?: Layout;
-  height?: Layout;
-  minWidth?: Layout;
-  minHeight?: Layout;
-  maxWidth?: Layout;
-  maxHeight?: Layout;
-  alignSelf?: Layout;
-  justifySelf?: Layout;
-  flexGrow?: Layout;
-  flexShrink?: Layout;
-  flexBasis?: Layout;
-  gridArea?: Layout;
-  gridColumn?: Layout;
-  gridRow?: Layout;
-  margin?: Layout;
-  marginBlock?: Layout;
-  marginInline?: Layout;
-}>;
+export type ResizableLayoutStyle = LayoutStyle;
 
 type ResizablePrimitiveProps = ComponentProps<typeof ResizablePrimitive>;
 

@@ -31,5 +31,29 @@ export const intent = {
       when: "It stands on a backdrop, which shows through.",
     },
     { name: "accent", when: "The light in an agent's own colour." },
+    {
+      name: "maxLength",
+      when: "The text has a hard limit: typing and paste stop there, a quiet count shows near it.",
+    },
+    {
+      name: "ComposerModelEffort",
+      when: "The model and its effort in one control: lead with it.",
+    },
+    {
+      name: "ComposerModel and ComposerReasoning",
+      when: "Many makers to search, or effort that is not the model's own.",
+    },
+    {
+      name: "actions (ComposerAdd)",
+      when: "Actions about this chat (instructions, memory, shortcuts), in the plus menu's last group, not a second button.",
+    },
+    {
+      name: "onDictate and dictation",
+      when: "Dictation: the microphone hands the card to ComposerVoice while the host listens.",
+    },
+    {
+      name: "top (a reasoning level)",
+      when: "The strongest reasoning level: its row is lit, and chosen, the footer's control.",
+    },
   ],
 };

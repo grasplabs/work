@@ -15,8 +15,17 @@ import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import { formatSince } from "../format.ts";
-import { AiKeyBanner, failingUpFront } from "./ai-key-banner.tsx";
-import type { FailingProvider } from "./ai-key-banner.tsx";
+import {
+  FailingBanner,
+  failingUpFront,
+  useFailingProviders,
+} from "./ai-key-banner.tsx";
+import type { BannerReads, FailingProvider } from "./ai-key-banner.tsx";
+
+/** The banner as the frame shows it: what it reads, drawn. */
+const AiKeyBanner = (reads: BannerReads) => (
+  <FailingBanner failing={useFailingProviders(reads)} />
+);
 
 // The banner over every page while one of the organization's AI provider
 // providers fails its calls, from what core's listing says of each one:
@@ -223,7 +232,7 @@ describe("the AI key banner", () => {
 
     expect({ down, ownEndpoint, limited }).toStrictEqual({
       down: {
-        said: `OpenAI isn't answering since ${since}.This is usually an outage on their side; Grasp keeps retrying. If it lasts, check status.openai.com or switch provider.`,
+        said: `OpenAI isn't answering since ${since}.This is usually an outage on their side; Grasp keeps retrying. If it lasts, check status.openai.com (opens in a new tab) or switch provider.`,
         links: ["https://status.openai.com"],
       },
       ownEndpoint: {

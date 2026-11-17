@@ -15,8 +15,10 @@
 import * as stylex from "@stylexjs/stylex";
 import { useEffect, useRef, useState } from "react";
 
+import { visuallyHidden } from "../hidden/hidden";
 import { Icon, Tick } from "../icons";
 import { iconVars } from "../icons/icon.stylex";
+import type { LayoutStyle } from "../layout/layout";
 import { grasp, media } from "../tokens/tokens.stylex";
 import { markVars as v } from "./working-mark.stylex";
 
@@ -32,25 +34,8 @@ export type WorkingMarkPath = "wave" | "circle" | "snake";
  */
 export const workingMarkVariant: WorkingMarkVariant = "dither";
 
-type Layout = string | number | null;
-
 /** What a caller may style: where the mark sits. Never its look. */
-export type WorkingMarkLayoutStyle = stylex.StyleXStyles<{
-  alignSelf?: Layout;
-  justifySelf?: Layout;
-  flexShrink?: Layout;
-  gridArea?: Layout;
-  gridColumn?: Layout;
-  gridRow?: Layout;
-  order?: Layout;
-  margin?: Layout;
-  marginBlock?: Layout;
-  marginBlockStart?: Layout;
-  marginBlockEnd?: Layout;
-  marginInline?: Layout;
-  marginInlineStart?: Layout;
-  marginInlineEnd?: Layout;
-}>;
+export type WorkingMarkLayoutStyle = LayoutStyle;
 
 /** Every prop a WorkingMark takes. */
 export interface WorkingMarkProps {
@@ -271,17 +256,6 @@ const styles = stylex.create({
     animationTimingFunction: grasp.ease,
     animationFillMode: "backwards",
   },
-
-  // The label, said to a screen reader, never seen.
-  said: {
-    position: "absolute",
-    width: 1,
-    height: 1,
-    margin: -1,
-    overflow: "hidden",
-    clipPath: "inset(50%)",
-    whiteSpace: "nowrap",
-  },
 });
 
 // The order the light reaches each of the nine dots, per path (-1: a dot it never reaches), and
@@ -431,7 +405,7 @@ export const WorkingMark = ({
     // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- not every screen reader treats <output> as a live region; role="status" is
     <span role="status">
       {mark}
-      <span {...stylex.props(styles.said)}>{label}</span>
+      <span {...stylex.props(visuallyHidden)}>{label}</span>
     </span>
   );
 };

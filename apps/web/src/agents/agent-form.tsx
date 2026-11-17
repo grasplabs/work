@@ -17,7 +17,7 @@ import { msg } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { useId, useState } from "react";
 
-import { modelName } from "../chat/composer.tsx";
+import { modelName } from "../chat/model-names.tsx";
 import { AgentAvatar, faceOf } from "./agent-avatar.tsx";
 
 // What an admin says of an agent: its name, what it is for, the picture

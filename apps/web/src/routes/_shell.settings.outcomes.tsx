@@ -1,141 +1,19 @@
-import type { UnknownOutcomeListing } from "@grasp-os/shared/connect";
 import { isMemberAdmin } from "@grasp-os/shared/roles";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@grasp-os/ui/components/table";
-import { Trans, useLingui } from "@lingui/react/macro";
 import { createFileRoute, redirect } from "@tanstack/react-router";
 
-import { loadEveryPage } from "../dashboard/outcome-pages.ts";
-import { readPeople } from "../directory.ts";
-import { formatDateTime } from "../format.ts";
-import { NotLoadedState } from "../frame/page-states.tsx";
-import { loadFromCore } from "../load-from-core.tsx";
-import type { Loaded } from "../load-from-core.tsx";
+import { SettingsError, SettingsLoading } from "../settings/section.tsx";
 import {
-  SettingsError,
-  SettingsLoading,
-  SettingsSection,
-} from "../settings/settings-parts.tsx";
+  readOutcomes,
+  UnknownOutcomes,
+} from "../settings/unknown-outcomes.tsx";
 
 // Settings → Unknown outcomes, for the organization's own admins: every
-// person's open calls of unknown outcome, changes Grasp sent for them
-// whose answer was lost, so an admin can follow up with each person. Read
-// only: only the person a call acted for says what became of it, on their
-// dashboard, and only they see what was sent (core's unknown-outcomes.ts
-// lists these without it). Each shows its receipt, the effect key's hash
-// the audit log's events of the call and of its resolution carry, so the
-// trail of each is found in an export. Core checks the role on every read.
+// person's open calls of unknown outcome (settings/unknown-outcomes.tsx).
+// Core checks the role on every read.
 
-interface Outcomes {
-  listed: UnknownOutcomeListing[];
-  people: ReadonlyMap<string, string>;
-}
-
-const OutcomeRows = ({ outcomes }: { outcomes: Outcomes }) => {
-  const { listed, people } = outcomes;
-  if (listed.length === 0) {
-    return (
-      <p className="text-muted-foreground border-t px-5 py-4">
-        <Trans>No call of unknown outcome is open.</Trans>
-      </p>
-    );
-  }
-  return (
-    <div className="border-t">
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>
-              <Trans>Person</Trans>
-            </TableHead>
-            <TableHead>
-              <Trans>Change</Trans>
-            </TableHead>
-            <TableHead>
-              <Trans>Connection</Trans>
-            </TableHead>
-            <TableHead>
-              <Trans>Sent</Trans>
-            </TableHead>
-            <TableHead>
-              <Trans>Receipt</Trans>
-            </TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {listed.map((outcome) => (
-            <TableRow key={outcome.id}>
-              <TableCell>
-                {people.get(outcome.onBehalfOf) ?? outcome.onBehalfOf}
-              </TableCell>
-              <TableCell>
-                <span className="flex flex-col">
-                  <span>{outcome.title ?? outcome.action}</span>
-                  {outcome.title === undefined ? null : (
-                    <span className="text-muted-foreground text-xs">
-                      {outcome.action}
-                    </span>
-                  )}
-                </span>
-              </TableCell>
-              <TableCell>
-                <span className="flex flex-col">
-                  <span>{outcome.connectionName ?? outcome.connectionId}</span>
-                  {outcome.resource === null ? null : (
-                    <span className="text-muted-foreground text-xs">
-                      {outcome.resource}
-                    </span>
-                  )}
-                </span>
-              </TableCell>
-              <TableCell>
-                <time dateTime={outcome.sentAt}>
-                  {formatDateTime(outcome.sentAt)}
-                </time>
-              </TableCell>
-              <TableCell>
-                <code className="font-mono text-xs break-all">
-                  {outcome.effectKeyHash}
-                </code>
-              </TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-    </div>
-  );
-};
-
-const UnknownOutcomes = () => {
-  const { t } = useLingui();
-  const page = Route.useLoaderData();
-  return (
-    <SettingsSection
-      description={
-        <Trans>
-          Changes Grasp sent for someone whose answer was lost, so nobody can
-          tell whether they took effect. Only that person can say what happened,
-          on their dashboard; follow up with them.
-        </Trans>
-      }
-      title={t`Unknown outcomes`}
-    >
-      {page.state === "ready" ? (
-        <OutcomeRows outcomes={page.data} />
-      ) : (
-        <div className="border-t">
-          <NotLoadedState heading="h3" page={page} />
-        </div>
-      )}
-    </SettingsSection>
-  );
-};
+const UnknownOutcomesPage = () => (
+  <UnknownOutcomes page={Route.useLoaderData()} />
+);
 
 export const Route = createFileRoute("/_shell/settings/outcomes")({
   // Only the organization's own admins list everyone's: anyone else who
@@ -149,32 +27,8 @@ export const Route = createFileRoute("/_shell/settings/outcomes")({
   },
   pendingComponent: SettingsLoading,
   errorComponent: SettingsError,
-  component: UnknownOutcomes,
-  loader: async ({
-    abortController,
-    context: { core },
-  }): Promise<Loaded<Outcomes>> => {
-    // Each page of the listing within its own few seconds, and no more
-    // pages once the page is left.
-    const left = abortController.signal;
-    const [listed, people] = await Promise.all([
-      loadEveryPage(
-        core,
-        async (session, before) =>
-          await session.unknownOutcomes.listAll(before),
-        left
-      ),
-      loadFromCore(core, readPeople, left),
-    ]);
-    if (listed.state !== "ready") {
-      return listed;
-    }
-    if (people.state !== "ready") {
-      return people;
-    }
-    return {
-      state: "ready",
-      data: { listed: listed.data, people: people.data },
-    };
-  },
+  component: UnknownOutcomesPage,
+  // Each page of the listing within its own few seconds, and no more pages once the page is left.
+  loader: async ({ abortController, context: { core } }) =>
+    await readOutcomes(core, abortController.signal),
 });

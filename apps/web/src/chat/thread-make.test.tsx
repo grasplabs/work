@@ -22,6 +22,7 @@ import { activeChat } from "./active-chat.ts";
 import { answersText } from "./asked-questions.tsx";
 import { slotOf } from "./chat-subject.ts";
 import { ChatThread } from "./thread.tsx";
+import "./test-thread-room.ts";
 
 // Making something in a chat's thread: the plan the agent proposes, as a
 // card whose Build it waits for every connection it needs (core's own
@@ -294,6 +295,18 @@ describe("making something in a chat's thread", () => {
       result(7, 4, "call-2", false),
       reply(8, 5, { text: "It's ready to try." }),
     ]);
+    // Each answer's steps, opened as a person opens them.
+    for (const line of document.querySelectorAll(
+      'section[aria-label="What Grasp did"] button[aria-expanded]:not(li *)'
+    )) {
+      // oxlint-disable-next-line no-await-in-loop -- one at a time, as a person opens them
+      await act(async () => {
+        if (line instanceof HTMLElement) {
+          line.click();
+        }
+        await Promise.resolve();
+      });
+    }
     const shown = document.body.textContent ?? "";
 
     expect({

@@ -7,19 +7,6 @@ import type {
   WidgetViewPart,
 } from "@grasp-os/shared/widgets";
 import {
-  CartesianGrid,
-  ChartContainer,
-  ChartTooltip,
-  ChartTooltipContent,
-  Line,
-  LineChart,
-  XAxis,
-  YAxis,
-  chartColor,
-} from "@grasp-os/ui/components/chart";
-import type { ChartConfig } from "@grasp-os/ui/components/chart";
-import { Stat } from "@grasp-os/ui/components/stat";
-import {
   Table,
   TableBody,
   TableCell,
@@ -33,6 +20,14 @@ import { msg } from "@lingui/core/macro";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
 
 import { formatNumber } from "../format.ts";
+import {
+  Chart,
+  ChartArea,
+  ChartAxis,
+  ChartGrid,
+  ChartTooltip,
+} from "../grasp/chart/index.ts";
+import { Highlight } from "../grasp/highlights/index.ts";
 import { BarList } from "./bar-list.tsx";
 import { WidgetBlock } from "./widget-block.tsx";
 
@@ -98,21 +93,31 @@ const PartLabel = ({ label }: { label: string | null }) =>
     <h3 className="text-muted-foreground text-xs font-medium">{label}</h3>
   );
 
-const trendConfig = {
-  value: { color: "chart-1" },
-} satisfies ChartConfig;
+/** How tall a trend is drawn in a block, in CSS pixels. */
+const TREND_HEIGHT = 112;
+
+/** What a trend's numbers say, for a screen reader: where it started and where it is now. */
+const trendSummary = (
+  points: readonly { value: number }[],
+  measure: string,
+  i18n: I18n
+): string => {
+  const first = points.at(0)?.value;
+  const last = points.at(-1)?.value;
+  if (first === undefined || last === undefined) {
+    return i18n._(msg`Nothing to show yet.`);
+  }
+  const from = formatNumber(first);
+  const to = formatNumber(last);
+  return i18n._(msg`${measure}: from ${from} to ${to}.`);
+};
 
 /** One part of a widget. */
 const Part = ({ part }: { part: WidgetViewPart }) => {
   const { i18n } = useLingui();
   switch (part.type) {
     case "number": {
-      return (
-        <div className="flex flex-col gap-0.5">
-          <Stat>{formatNumber(part.value)}</Stat>
-          <span className="text-muted-foreground">{part.label}</span>
-        </div>
-      );
+      return <Highlight title={part.label} value={formatNumber(part.value)} />;
     }
     case "bars": {
       const measure = i18n._(measureNames[part.measure]);
@@ -143,41 +148,22 @@ const Part = ({ part }: { part: WidgetViewPart }) => {
       return (
         <div className="flex flex-col gap-2">
           <PartLabel label={part.label} />
-          <ChartContainer
-            aria-label={part.label ?? measure}
-            className="aspect-auto h-28 w-full"
-            config={trendConfig}
+          <Chart
+            config={{ value: { label: measure } }}
+            data={part.points}
+            height={TREND_HEIGHT}
+            label={part.label ?? measure}
+            summary={trendSummary(part.points, measure, i18n)}
+            xKey="day"
           >
-            <LineChart
-              data={part.points}
-              margin={{ top: 4, right: 4, bottom: 0, left: 0 }}
-            >
-              <CartesianGrid vertical={false} />
-              <XAxis axisLine={false} dataKey="day" hide tickLine={false} />
-              <YAxis
-                allowDecimals={false}
-                axisLine={false}
-                tickLine={false}
-                width={28}
-              />
-              <ChartTooltip
-                content={
-                  <ChartTooltipContent
-                    formatter={(value) =>
-                      `${measure}: ${formatNumber(Number(value))}`
-                    }
-                  />
-                }
-              />
-              <Line
-                dataKey="value"
-                dot={false}
-                stroke={chartColor("chart-1")}
-                strokeWidth={2}
-                type="monotone"
-              />
-            </LineChart>
-          </ChartContainer>
+            <ChartGrid />
+            <ChartAxis
+              format={(value) => formatNumber(Number(value))}
+              side="y"
+            />
+            <ChartArea series="value" />
+            <ChartTooltip format={formatNumber} />
+          </Chart>
         </div>
       );
     }

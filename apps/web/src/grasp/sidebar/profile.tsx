@@ -1,9 +1,3 @@
-// The foot of the Sidebar, as Ruben drew it (the product repo, grasp/frame/profile-menu.tsx): the
-// person signed in and their organisation, a button as wide as the sidebar that opens their menu
-// above it, as wide as it. What the menu holds is the product's: a list of actions and links,
-// submenus of choices (switching organisation), and the theme. Our DropdownMenu gives the menu its
-// behaviour (the keys, focus, an agent's reach); this file gives it his look. Its icons stay
-// still, as his frame keeps them.
 "use client";
 
 import * as stylex from "@stylexjs/stylex";
@@ -21,14 +15,24 @@ import {
   MenuTrigger,
 } from "@ui-sdk/react/menu";
 import { Fragment, createElement } from "react";
-import type { JSX, ReactElement } from "react";
+import type { JSX, KeyboardEvent, ReactElement } from "react";
 
 import { Avatar } from "../avatar";
 import { DropdownMenu, menuStyles } from "../dropdown-menu";
 import { focus } from "../focus/focus";
-import { ChevronRight, Contrast, Icon, Tick, UpDown } from "../icons";
+import {
+  ChevronRight,
+  Computer,
+  Contrast,
+  Icon,
+  Moon,
+  Sun,
+  Tick,
+  UpDown,
+} from "../icons";
 import type { IconData } from "../icons";
 import { iconVars } from "../icons/icon.stylex";
+import { switchStyles } from "../theme-switch/styles";
 import { grasp, media } from "../tokens/tokens.stylex";
 import { popup } from "../tokens/tokens.values";
 
@@ -38,6 +42,11 @@ export interface SidebarChoice {
   label: string;
   /** Its value, given to `onValueChange`. */
   value: string;
+  /**
+   * An icon before its words in a submenu of choices; in the theme's row, the icon its segment
+   * shows (its words are then its name). From the icons entry (`@/components/grasp/icons`).
+   */
+  icon?: IconData;
 }
 
 /** An item in the person's menu that does something, or goes somewhere. */
@@ -101,28 +110,30 @@ export interface SidebarProfileProps {
   /** What the menu holds, top to bottom. */
   items?: readonly SidebarMenuEntry[];
   /**
-   * The theme chosen now. With it, the menu has a submenu to choose it: where `items` has
-   * `"appearance"`, or else before the first separator.
+   * The theme chosen now. With it, the menu has a row to choose it, the Theme switch's segmented
+   * look inline (its words at the start, a segment per theme at the end, each with its icon): where
+   * `items` has `"appearance"`, or else before the first separator. Choosing changes it at once and
+   * the menu stays open.
    */
   theme?: string;
   /** Called with the theme the person chooses. */
   onThemeChange?: (theme: string) => void;
   /**
-   * The themes to choose from.
-   * @default Light, Dark and System
+   * The themes to choose from, each a segment of the row; give each an `icon`.
+   * @default Light, Dark and System, with the Sun, Moon and Computer icons
    */
   themes?: readonly SidebarChoice[];
   /**
-   * The words of the theme's submenu.
+   * The words of the theme's row, at its start, and its name to a screen reader.
    * @default "Appearance"
    */
   themeLabel?: string;
 }
 
 const defaultThemes: readonly SidebarChoice[] = [
-  { label: "Light", value: "light" },
-  { label: "Dark", value: "dark" },
-  { label: "System", value: "system" },
+  { label: "Light", value: "light", icon: Sun },
+  { label: "Dark", value: "dark", icon: Moon },
+  { label: "System", value: "system", icon: Computer },
 ];
 
 // How far the menu stands off the button: the frame's inset, as his. A submenu overlaps its menu
@@ -151,11 +162,17 @@ const styles = stylex.create({
     },
     margin: 0,
     paddingBlock: 0,
-    paddingInline: grasp.shellInset,
+    // A row's side room: the avatar starts where the rows' icons and the mark do, 16px in, and the
+    // chevrons end where the rows' ink ends (FLAWS.md F27: 14px, 2px before them).
+    paddingInline: grasp.shellRowInline,
     borderWidth: 0,
     borderStyle: "solid",
     borderColor: "CanvasText",
-    borderRadius: grasp.shellCorner,
+    // At the sidebar's foot corner, its fill nests in the surface it stands on: that corner less the
+    // foot's room. The window round the shell by default, 10px (App shell FRESH.md F71, batch 4; a
+    // row's 6px before); a card where the sidebar is one (a peek, a sheet, a covering card), 4px
+    // (F71b): the Sidebar says which (`--grasp-sidebar-corner`).
+    borderRadius: `calc(var(--grasp-sidebar-corner, ${grasp.shellWindowCorner}) - ${grasp.shellGutter})`,
     backgroundColor: {
       default: "transparent",
       [HOVER]: { default: "transparent", ":hover": grasp.shellHover },
@@ -199,9 +216,12 @@ const styles = stylex.create({
   // The person with no menu: the same place and words, no hover, no pointer.
   still: { cursor: "default", backgroundColor: "transparent" },
 
-  // The menu: as wide as the button, on the popup's fill at a menu's lift.
+  // The menu: as wide as the button, on the shell's popup at a menu's lift (App shell FRESH.md F84:
+  // the system's popup, tinted, stood on the shell's neutral greys). Said here too, so it holds where
+  // a browser with no top layer puts the menu at the document's end, outside the sidebar.
   panel: {
     width: "var(--anchor-width)",
+    backgroundColor: grasp.shellPopup,
     minWidth: 0,
     maxWidth: `calc(100vw - 2 * ${grasp.popupGutter})`,
     borderRadius: grasp.shellMenuCorner,
@@ -211,6 +231,7 @@ const styles = stylex.create({
   // A submenu is as wide as its longest choice.
   subPanel: {
     width: "auto",
+    backgroundColor: grasp.shellPopup,
     minWidth: 0,
     borderRadius: grasp.shellMenuCorner,
     cornerShape: "round",
@@ -284,11 +305,63 @@ const styles = stylex.create({
     insetInlineEnd: grasp.shellRowInline,
     display: "inline-flex",
   },
+  // The theme's row: its words at the start, the Theme switch's segments at the end, on one row.
+  themeRow: {
+    [iconVars.size]: grasp.shellIcon,
+    [iconVars.stroke]: grasp.iconStroke,
+    display: "flex",
+    alignItems: "center",
+    gap: grasp.space2,
+    minHeight: { default: grasp.shellRow, [COARSE]: grasp.tap },
+    paddingInlineStart: grasp.shellRowInline,
+    color: { default: grasp.ink, [FORCED]: "CanvasText" },
+    fontSize: grasp.textSm,
+    lineHeight: grasp.textSmLine,
+  },
+  themeWords: {
+    display: "flex",
+    alignItems: "center",
+    gap: grasp.space2,
+    flexGrow: 1,
+    minWidth: 0,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  },
+  // The segments as many as the themes, each the icon alone.
+  themeSegments: {
+    flexShrink: 0,
+    gridTemplateColumns: "none",
+    gridAutoFlow: "column",
+    gridAutoColumns: "minmax(0, 1fr)",
+  },
+  themeSegment: {
+    minHeight: { default: grasp.space6, [COARSE]: grasp.tap },
+    paddingInline: grasp.space1,
+    outline: "none",
+    // The menu moves its highlight by the keys: the highlighted segment takes the ring.
+    outlineStyle: {
+      default: "none",
+      ":is([data-highlighted]):focus-visible": "solid",
+    },
+    outlineWidth: grasp.ringWidth,
+    outlineColor: grasp.ring,
+    outlineOffset: `calc(-1 * ${grasp.ringWidth})`,
+    color: {
+      default: grasp.muted,
+      [HIGHLIGHTED]: grasp.ink,
+      [FORCED]: "CanvasText",
+    },
+  },
+  // Chosen, when the pill cannot stand for it (other than three themes): the pill's own fill.
+  themeChosen: { backgroundColor: grasp.shellPopup, boxShadow: grasp.liftLow },
+  // The chosen theme's pill: the menu's own ground lifted, as a raised pill on a raised menu (F84).
+  themePill: { backgroundColor: grasp.shellPopup },
   separator: {
     height: grasp.hairline,
     marginBlock: grasp.space1,
     marginInline: `calc(-1 * ${grasp.popupPadding})`,
-    backgroundColor: { default: grasp.line, [FORCED]: "CanvasText" },
+    backgroundColor: { default: grasp.shellPopupLine, [FORCED]: "CanvasText" },
   },
 });
 
@@ -362,6 +435,11 @@ const Choices = ({ entry }: { entry: SidebarMenuChoices }) => {
                   .className
               }
             >
+              {choice.icon !== undefined && (
+                <span aria-hidden="true" {...stylex.props(styles.icon)}>
+                  <Icon icon={choice.icon} />
+                </span>
+              )}
               <span {...stylex.props(styles.words)}>{choice.label}</span>
               <MenuItemIndicator {...stylex.props(styles.tick)}>
                 <Icon icon={Tick} />
@@ -371,6 +449,98 @@ const Choices = ({ entry }: { entry: SidebarMenuChoices }) => {
         </MenuRadioGroup>
       </MenuSubContent>
     </MenuSub>
+  );
+};
+
+const pills = [
+  switchStyles.pill0,
+  switchStyles.pill1,
+  switchStyles.pill2,
+] as const;
+
+/** ←/→ move along the theme's segments and choose, as on the Theme switch; ↑/↓ stay the menu's. */
+const alongRow = (event: KeyboardEvent<HTMLElement>) => {
+  if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") {
+    return;
+  }
+  const row = event.currentTarget.closest("[role=group]");
+  const all =
+    row === null
+      ? []
+      : [...row.querySelectorAll<HTMLElement>("[role=menuitemradio]")];
+  const at = all.indexOf(event.currentTarget);
+  const rtl = getComputedStyle(event.currentTarget).direction === "rtl";
+  const step = (event.key === "ArrowRight") === rtl ? -1 : 1;
+  const next = all[at + step];
+  if (at === -1 || next === undefined) {
+    return;
+  }
+  event.preventDefault();
+  next.focus();
+  next.click();
+};
+
+/** The theme's row: its words, then the Theme switch's segments, one per theme, each its icon. */
+const ThemeRow = ({
+  label,
+  theme,
+  themes,
+  onThemeChange,
+}: {
+  label: string;
+  theme: string;
+  themes: readonly SidebarChoice[];
+  onThemeChange?: (theme: string) => void;
+}) => {
+  const chosen = themes.findIndex((choice) => choice.value === theme);
+  const pill = themes.length === pills.length ? pills[chosen] : undefined;
+  return (
+    <MenuRadioGroup
+      value={theme}
+      onValueChange={(value: string) => onThemeChange?.(value)}
+      aria-label={label}
+      data-slot="sidebar-theme-row"
+      {...stylex.props(styles.themeRow)}
+    >
+      <span aria-hidden="true" {...stylex.props(styles.themeWords)}>
+        <Icon icon={Contrast} />
+        {label}
+      </span>
+      <span {...stylex.props(switchStyles.segments, styles.themeSegments)}>
+        {pill !== undefined && (
+          <span
+            aria-hidden="true"
+            {...stylex.props(switchStyles.pill, pill, styles.themePill)}
+          />
+        )}
+        {themes.map((choice) => (
+          <MenuRadioItem
+            key={choice.value}
+            value={choice.value}
+            label={choice.label}
+            aria-label={choice.label}
+            title={choice.label}
+            onKeyDown={alongRow}
+            className={
+              stylex.props(
+                switchStyles.segment,
+                choice.value === theme && switchStyles.segmentOn,
+                styles.themeSegment,
+                pill === undefined &&
+                  choice.value === theme &&
+                  styles.themeChosen
+              ).className
+            }
+          >
+            {choice.icon === undefined ? (
+              choice.label
+            ) : (
+              <Icon icon={choice.icon} />
+            )}
+          </MenuRadioItem>
+        ))}
+      </span>
+    </MenuRadioGroup>
   );
 };
 
@@ -411,15 +581,7 @@ export const SidebarProfile = ({
   }
   if (theme !== undefined) {
     const at = placed === -1 ? entries.indexOf("separator") : placed;
-    const themeEntry: SidebarMenuChoices = {
-      label: themeLabel,
-      icon: Contrast,
-      choices: themes,
-      value: theme,
-      onValueChange: onThemeChange,
-      showValue: true,
-    };
-    entries.splice(at === -1 ? entries.length : at, 0, themeEntry);
+    entries.splice(at === -1 ? entries.length : at, 0, "appearance");
   }
   const who = (
     <>
@@ -464,7 +626,16 @@ export const SidebarProfile = ({
                 : `${entry.label}-${index}`
             }
           >
-            <Entry entry={entry} />
+            {entry === "appearance" && theme !== undefined ? (
+              <ThemeRow
+                label={themeLabel}
+                theme={theme}
+                themes={themes}
+                onThemeChange={onThemeChange}
+              />
+            ) : (
+              <Entry entry={entry} />
+            )}
           </Fragment>
         ))}
       </MenuContent>

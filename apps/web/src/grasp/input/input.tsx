@@ -17,46 +17,22 @@
 import * as stylex from "@stylexjs/stylex";
 import { Input as InputPrimitive, InputGroup } from "@ui-sdk/react/input";
 import type { InputState } from "@ui-sdk/react/input";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ComponentProps, Ref } from "react";
 
 import { focus } from "../focus/focus";
 import { Icon } from "../icons";
 import type { IconData } from "../icons";
 import { iconVars } from "../icons/icon.stylex";
+import type { LayoutStyle } from "../layout/layout";
 import { grasp, media } from "../tokens/tokens.stylex";
 
 export type InputSize = "sm" | "md" | "lg";
 
-type Layout = string | number | null;
-
 /** What a caller may style: where the input sits and how wide it is. Never its look or height. */
-export type InputLayoutStyle = stylex.StyleXStyles<{
-  alignSelf?: Layout;
-  justifySelf?: Layout;
-  flexGrow?: Layout;
-  flexShrink?: Layout;
-  flexBasis?: Layout;
-  gridArea?: Layout;
-  gridColumn?: Layout;
-  gridRow?: Layout;
-  order?: Layout;
-  width?: Layout;
-  minWidth?: Layout;
-  maxWidth?: Layout;
-  margin?: Layout;
-  marginBlock?: Layout;
-  marginBlockStart?: Layout;
-  marginBlockEnd?: Layout;
-  marginInline?: Layout;
-  marginInlineStart?: Layout;
-  marginInlineEnd?: Layout;
-}>;
+export type InputLayoutStyle = LayoutStyle;
 
 type PrimitiveProps = ComponentProps<typeof InputPrimitive>;
-
-// Every prop is documented once, where it is first declared; the props on the docs page are read
-// from InputProps, so they cannot drift from what the code accepts.
 
 /** Every prop an Input takes: these, and the rest of UI SDK's Input and an <input>. */
 export interface InputProps extends Omit<
@@ -120,6 +96,8 @@ export interface InputProps extends Omit<
   icon?: IconData;
   /** Layout only: margins, alignment and width. Colours, heights and corners belong to the input. */
   style?: InputLayoutStyle;
+  /** The same as `style`, by a name a style lint does not take for an inline style attribute. */
+  layout?: InputLayoutStyle;
   /** The <input> itself, to focus it or read it. */
   ref?: Ref<HTMLInputElement>;
 }
@@ -130,10 +108,6 @@ export interface InputProps extends Omit<
 const HOVER = media.hover;
 const COARSE = media.coarse;
 const FORCED = media.forced;
-// Where the words can be painted through a gradient, a long value fades at its end (below).
-// Not in Firefox: it passes the test, but a form control's words are not clipped there, so the
-// gradient filled the whole box and every value drew as a dark bar (16 November). There a long value
-// is cut by the box's edge as it scrolls, as before.
 const CLIP_TEXT =
   "@supports (background-clip: text) and (not (-moz-appearance: none))";
 const FADE_END = `linear-gradient(to right, currentColor calc(100% - ${grasp.space5}), transparent), linear-gradient(transparent, transparent)`;
@@ -216,19 +190,23 @@ export const inputStyles = stylex.create({
     color: grasp.ink,
     caretColor: grasp.ink,
     fontFamily: grasp.fontSans,
-    // 16px on a touch screen, or iOS zooms the page in when the field takes focus.
-    fontSize: { default: grasp.textSm, [COARSE]: grasp.fieldTextTouch },
+    // 16px on a phone or a touch screen (media.typing), or Safari zooms the page in when the field takes focus.
+    fontSize: { default: grasp.textSm, [media.typing]: grasp.fieldTextTouch },
     lineHeight: grasp.textSmLine,
     fontWeight: grasp.weightRegular,
     letterSpacing: "normal",
     textAlign: "start",
-    textOverflow: "clip",
+    // A placeholder too long for the field ends in an ellipsis, never mid-word: Chromium reads the
+    // input's own text-overflow for its placeholder, so it is set while the placeholder shows
+    // (third look A3-text-04). A typed value fades instead (below).
+    textOverflow: { default: "clip", ":placeholder-shown": "ellipsis" },
     paddingInline: grasp.space3,
     // A value longer than the field fades out at its end, as Tabs and Code block do, never a cut
     // through a letter. The words are painted through a gradient (clipped to the text) that ends in
     // transparent over the last space-5 of the content box; a short value never reaches it. While
     // the field has focus the words are plain ink, so the caret's end of the value always shows.
     // The second, empty layer keeps the field's fill on its whole box.
+    // Input draws it only while the value is longer than the field (fits, below).
     WebkitTextFillColor: {
       default: null,
       [CLIP_TEXT]: {
@@ -268,6 +246,15 @@ export const inputStyles = stylex.create({
       // A hint too long for the field ends in an ellipsis, never mid-word.
       textOverflow: "ellipsis",
     },
+  },
+  // A value that fits the field: no fade, every letter at full ink (third look A3-text-05). Input
+  // adds it while its value fits (useRunsLong); parts that share these styles keep the fade on.
+  fits: {
+    WebkitTextFillColor: null,
+    backgroundImage: null,
+    backgroundOrigin: null,
+    backgroundClip: null,
+    backgroundRepeat: null,
   },
 
   // Sizes: the same heights, corners and side padding as Button's. The height comes from the line
@@ -348,19 +335,68 @@ export const iconStartStyles = {
 
 export const isInvalid = (value: unknown) => value === true || value === "true";
 
+/** Whether an input's value is longer than the input shows. */
+const overflows = (input: HTMLInputElement) =>
+  input.scrollWidth > input.clientWidth + 1;
+
+/** Sets whether the input's value runs long; nothing when there is no input yet. */
+const measureInto = (
+  input: HTMLInputElement | null,
+  setLong: (long: boolean) => void
+) => {
+  if (input !== null) {
+    setLong(overflows(input));
+  }
+};
+
+/**
+ * Watches an input for a value longer than it shows: on typing, on leaving it, and when it is
+ * resized. Returns `setInput`, to call with the input element, and
+ * whether the value runs long, so the end fade is drawn only then (third look A3-text-05).
+ */
+export const useRunsLong = () => {
+  const [input, setInput] = useState<HTMLInputElement | null>(null);
+  const [long, setLong] = useState(false);
+  // Read on typing, on leaving the field (a value set from code is read then too), and on a resize.
+  useEffect(() => {
+    const measure = () => {
+      measureInto(input, setLong);
+    };
+    measure();
+    input?.addEventListener("input", measure);
+    input?.addEventListener("focusout", measure);
+    const observer =
+      input === null || typeof ResizeObserver === "undefined"
+        ? null
+        : new ResizeObserver(measure);
+    if (input !== null) {
+      observer?.observe(input);
+    }
+    return () => {
+      input?.removeEventListener("input", measure);
+      input?.removeEventListener("focusout", measure);
+      observer?.disconnect();
+    };
+  }, [input]);
+  return { setInput, long };
+};
+
 export const Input = ({
   size = "md",
   type = "text",
   secret = false,
   icon,
-  style,
+  style: styleProp,
+  layout,
   ref,
   ...rest
 }: InputProps) => {
+  const { setInput, long } = useRunsLong();
   // In development, say so when nothing names the input: no Field label, no aria-label.
   const own = useRef<HTMLInputElement | null>(null);
   const attach = (element: HTMLInputElement | null) => {
     own.current = element;
+    setInput(element);
     if (typeof ref === "function") {
       ref(element);
     } else if (ref) {
@@ -384,7 +420,7 @@ export const Input = ({
   }, []);
 
   return (
-    <InputGroup {...stylex.props(styles.box, style)}>
+    <InputGroup {...stylex.props(styles.box, layout ?? styleProp)}>
       <span
         aria-hidden="true"
         {...stylex.props(styles.target, targetStyles[size])}
@@ -408,6 +444,7 @@ export const Input = ({
             {...props}
             {...stylex.props(
               styles.input,
+              !long && styles.fits,
               sizeStyles[size],
               icon && iconStartStyles[size],
               !(state.disabled || state.readOnly) && styles.live,

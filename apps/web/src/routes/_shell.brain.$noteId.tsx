@@ -915,7 +915,7 @@ const WorkTabs = ({ note, children }: { note: Note; children: ReactNode }) => {
       </div>
       <TabsContent value="note">{children}</TabsContent>
       <TabsContent value="knowledge">
-        <div className="pb-chat px-6 pt-8">
+        <div className="px-6">
           <WorkKnowledgeTab work={note.id} />
         </div>
       </TabsContent>

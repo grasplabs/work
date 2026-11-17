@@ -75,12 +75,20 @@ const styles = stylex.create({
   shell: {
     display: "grid",
     gridTemplateRows: "0fr",
-    transitionProperty: "grid-template-rows",
+    marginBlockEnd: 0,
+    transitionProperty: "grid-template-rows, margin-block-end",
     transitionDuration: simply.ui,
     transitionTimingFunction: grasp.ease,
   },
+  // Open, the text stands space-3 under the cards: the card's gap between its parts and the text's
+  // own top room are for a composer with no files, so the strip takes them back (they made 44px).
   shellOpen: {
     gridTemplateRows: "1fr",
+    marginBlockEnd: `calc(${grasp.space3} - ${grasp.space1} - ${grasp.space6} - ${grasp.space4})`,
+    // Its foot now lies over the text's empty top room: above it, so a press on a card's lower
+    // edge (or its focus ring) is the card's, not the text's.
+    position: "relative",
+    zIndex: 1,
   },
   clip: {
     minHeight: 0,
@@ -99,7 +107,9 @@ const styles = stylex.create({
     overflowY: "hidden",
     // A card's widest is the strip's own width (attachment.tsx), so a long name never runs past it.
     containerType: "inline-size",
-    scrollPaddingInline: grasp.space4,
+    // Room the width of an edge's fade: a control the keyboard brings into view stands clear of
+    // it, whole, never pale under the fade (eyes-b, B3-composer-03).
+    scrollPaddingInline: `calc(${grasp.space10} + ${grasp.space2})`,
     // More files than room: the side with more beyond it fades out to the ground, so a card is
     // never cut off in silence and the strip says it scrolls without a bar. The fade is wide, and
     // its last band shows only the ground, so a card's border dissolves before the composer's edge

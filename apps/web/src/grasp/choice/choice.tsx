@@ -25,6 +25,7 @@ import { Label as LabelPrimitive } from "@ui-sdk/react/label";
 import type { ReactNode } from "react";
 
 import { FieldDescription, FieldError } from "../field";
+import type { FieldErrorWords } from "../field";
 import { noteStyles } from "../field/field";
 import { fieldMarker } from "../field/field.stylex";
 import { RequiredMark, labelStyles } from "../label/label";
@@ -78,6 +79,8 @@ export const reachStyles = stylex.create({
 export interface ChoiceWiring {
   "aria-labelledby": string;
   "aria-describedby"?: string;
+  /** In a group, where no field of its own says it: the control is wrong. */
+  "aria-invalid"?: true;
 }
 
 export interface ChoiceRowProps {
@@ -85,8 +88,8 @@ export interface ChoiceRowProps {
   box: string;
   label: ReactNode;
   description?: ReactNode;
-  /** The error under the words; only a row that is its own field shows one. */
-  error?: ReactNode;
+  /** The error under the words, alone or in a group. */
+  error?: FieldErrorWords;
   required?: boolean;
   invalid?: boolean;
   disabled?: boolean;
@@ -103,6 +106,84 @@ export interface ChoiceRowProps {
   children: (wiring: ChoiceWiring) => ReactNode;
 }
 
+interface GroupedRowProps extends Pick<
+  ChoiceRowProps,
+  | "box"
+  | "label"
+  | "description"
+  | "error"
+  | "invalid"
+  | "disabled"
+  | "children"
+> {
+  end: boolean;
+  mark: ReactNode;
+  row: ReturnType<typeof stylex.props>;
+}
+
+/**
+ * A row in a group. The group's field holds the group's validity; this row wires its words by id,
+ * and says its own error under them, tied to its control, as its own field would. `data-disabled`
+ * dims the words as a field would.
+ */
+const GroupedRow = ({
+  box,
+  label,
+  description,
+  error,
+  invalid,
+  disabled,
+  end,
+  mark,
+  row,
+  children,
+}: GroupedRowProps) => {
+  const name = `${box}-label`;
+  const said = `${box}-description`;
+  const wrong = `${box}-error`;
+  const off = disabled === true ? true : undefined;
+  const says = error !== undefined && error !== null && error !== "";
+  const describedBy = [description !== undefined && said, says && wrong]
+    .filter(Boolean)
+    .join(" ");
+  const control = children({
+    "aria-labelledby": name,
+    ...(describedBy !== "" && { "aria-describedby": describedBy }),
+    ...(invalid === true && { "aria-invalid": true }),
+  });
+  return (
+    <div {...row}>
+      {!end && control}
+      <div {...stylex.props(rowStyles.words)}>
+        <LabelPrimitive
+          id={name}
+          htmlFor={box}
+          data-disabled={off}
+          {...stylex.props(labelStyles.label)}
+        >
+          {label}
+          {mark}
+        </LabelPrimitive>
+        {description !== undefined && (
+          <p
+            id={said}
+            data-disabled={off}
+            {...stylex.props(noteStyles.note, noteStyles.description)}
+          >
+            {description}
+          </p>
+        )}
+        {says && (
+          <p id={wrong} {...stylex.props(noteStyles.note, noteStyles.error)}>
+            {error}
+          </p>
+        )}
+      </div>
+      {end && control}
+    </div>
+  );
+};
+
 export const ChoiceRow = ({
   box,
   label,
@@ -118,7 +199,6 @@ export const ChoiceRow = ({
   children,
 }: ChoiceRowProps) => {
   const name = `${box}-label`;
-  const said = `${box}-description`;
   const row = stylex.props(
     choiceMarker,
     rowStyles.row,
@@ -131,38 +211,20 @@ export const ChoiceRow = ({
   const mark = required && <RequiredMark />;
 
   if (grouped) {
-    // The group's field holds the validity; this row wires its words by id. `data-disabled` dims
-    // the words as a field would.
-    const off = disabled === true ? true : undefined;
-    const control = children({
-      "aria-labelledby": name,
-      ...(description !== undefined && { "aria-describedby": said }),
-    });
     return (
-      <div {...row}>
-        {!end && control}
-        <div {...stylex.props(rowStyles.words)}>
-          <LabelPrimitive
-            id={name}
-            htmlFor={box}
-            data-disabled={off}
-            {...stylex.props(labelStyles.label)}
-          >
-            {label}
-            {mark}
-          </LabelPrimitive>
-          {description !== undefined && (
-            <p
-              id={said}
-              data-disabled={off}
-              {...stylex.props(noteStyles.note, noteStyles.description)}
-            >
-              {description}
-            </p>
-          )}
-        </div>
-        {end && control}
-      </div>
+      <GroupedRow
+        box={box}
+        label={label}
+        description={description}
+        error={error}
+        invalid={invalid}
+        disabled={disabled}
+        end={end}
+        mark={mark}
+        row={row}
+      >
+        {children}
+      </GroupedRow>
     );
   }
 
@@ -183,7 +245,9 @@ export const ChoiceRow = ({
           <FieldDescription>{description}</FieldDescription>
         )}
         {/* Only when there is something to say: an empty error would still take its gap. */}
-        {(error !== undefined || required) && <FieldError>{error}</FieldError>}
+        {error !== undefined && error !== null && error !== "" && (
+          <FieldError>{error}</FieldError>
+        )}
       </div>
       {end && control}
     </FieldPrimitive>

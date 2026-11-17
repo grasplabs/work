@@ -1,35 +1,11 @@
-// Text: running words from the type scale, built for Grasp. shadcn has none (it styles p, lead,
-// large, small and muted in its typography page). One component with a size, a weight and an
-// ink, so a product never sets a font size, a line height or a grey by hand.
-//
-//   <Text>Reports appear here once a review is closed.</Text>         15px body, in text
-//   <Text size="lg">Everything the workspace is working on.</Text>    a lead under a title
-//   <Text size="xs" tone="muted">Edited 12 November</Text>             a quiet note
-//   <Text element="span" weight="medium">Amara Okafor</Text>         inside another line
-//
-// Geist, at the sizes and line heights of the tokens, in one of four inks. Every value is a token
-// (src/tokens). A caller may set layout only (the `style` prop).
 import * as stylex from "@stylexjs/stylex";
 import type { ReactNode } from "react";
 
+import type { LayoutStyle } from "../layout/layout";
 import { grasp } from "../tokens/tokens.stylex";
 
-type Layout = string | number | null;
-
 /** What a caller may style: where the words sit and how wide they may run. Never their type. */
-export type TextLayoutStyle = stylex.StyleXStyles<{
-  alignSelf?: Layout;
-  justifySelf?: Layout;
-  gridArea?: Layout;
-  gridColumn?: Layout;
-  maxWidth?: Layout;
-  margin?: Layout;
-  marginBlock?: Layout;
-  marginBlockStart?: Layout;
-  marginBlockEnd?: Layout;
-  marginInline?: Layout;
-  textAlign?: Layout;
-}>;
+export type TextLayoutStyle = LayoutStyle;
 
 /** A size of running text, from the smallest there is to a lead. */
 export type TextSize = "xs" | "sm" | "md" | "lg";
@@ -63,10 +39,20 @@ export interface TextProps {
    * @default "p"
    */
   element?: "p" | "span" | "div";
+  /**
+   * How a line too long for its room breaks: `words` at a space, and inside a word only when it
+   * alone is wider; `anywhere` at any letter, for an email or an id in a one-line row; `truncate`
+   * one line cut with an ellipsis, the whole text still read by a screen reader and shown as the
+   * pointer's tooltip when it is words.
+   * @default "words"
+   */
+  wrap?: "words" | "anywhere" | "truncate";
   /** An id, so `aria-describedby` can point at it. */
   id?: string;
   /** Layout only: margins, alignment and width. The type belongs to the words. */
   style?: TextLayoutStyle;
+  /** The same as `style`, by a name a style lint does not take for an inline style attribute. */
+  layout?: TextLayoutStyle;
 }
 
 const styles = stylex.create({
@@ -86,6 +72,15 @@ const styles = stylex.create({
   tone: { color: grasp.text },
   muted: { color: grasp.muted },
   quiet: { color: grasp.quiet },
+  // How a long line breaks; `words` is the text's own.
+  words: {},
+  anywhere: { overflowWrap: "anywhere" },
+  truncate: {
+    overflow: "hidden",
+    whiteSpace: "nowrap",
+    textOverflow: "ellipsis",
+    minWidth: 0,
+  },
 });
 
 export const Text = ({
@@ -94,18 +89,24 @@ export const Text = ({
   weight = "regular",
   tone = "text",
   element: Tag = "p",
+  wrap = "words",
   id,
-  style,
+  style: styleProp,
+  layout,
 }: TextProps) => (
   <Tag
     id={id}
     data-slot="text"
+    title={
+      wrap === "truncate" && typeof children === "string" ? children : undefined
+    }
     {...stylex.props(
       styles.text,
       styles[size],
       styles[weight],
       tone === "text" ? styles.tone : styles[tone],
-      style
+      styles[wrap],
+      layout ?? styleProp
     )}
   >
     {children}

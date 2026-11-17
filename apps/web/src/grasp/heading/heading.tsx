@@ -5,34 +5,22 @@
 //   <Heading level={1} size="lg">Reports</Heading>
 //   <Heading level={2}>This quarter</Heading>             size follows the level by default
 //   <Heading level={3} size="ui">Team members</Heading>   a component's own title, in the sans
+//   <Heading level={4} size="ui-sm">Notifications</Heading>  a section title inside a page or panel
 //
 // Titles from title-sm up are Geist Serif at 400, drawn closer (tracking-title); `ui` is the
-// sans at 500, as a card's title. Every value is a token (src/tokens). A caller may set layout
+// sans at 500, as a card's title, and `ui-sm` the same at the interface's own size (text-sm). Every value is a token (src/tokens). A caller may set layout
 // only (the `style` prop).
 import * as stylex from "@stylexjs/stylex";
 import type { ReactNode } from "react";
 
+import type { LayoutStyle } from "../layout/layout";
 import { grasp, media } from "../tokens/tokens.stylex";
 
-type Layout = string | number | null;
-
 /** What a caller may style: where the heading sits and how wide it may run. Never its type. */
-export type HeadingLayoutStyle = stylex.StyleXStyles<{
-  alignSelf?: Layout;
-  justifySelf?: Layout;
-  gridArea?: Layout;
-  gridColumn?: Layout;
-  maxWidth?: Layout;
-  margin?: Layout;
-  marginBlock?: Layout;
-  marginBlockStart?: Layout;
-  marginBlockEnd?: Layout;
-  marginInline?: Layout;
-  textAlign?: Layout;
-}>;
+export type HeadingLayoutStyle = LayoutStyle;
 
 /** A title's look, from the largest: an opening title down to a component's own. */
-export type HeadingSize = "xl" | "lg" | "md" | "sm" | "ui";
+export type HeadingSize = "xl" | "lg" | "md" | "sm" | "ui" | "ui-sm";
 
 /** Every prop a Heading takes. */
 export interface HeadingProps {
@@ -42,7 +30,8 @@ export interface HeadingProps {
   level: 1 | 2 | 3 | 4;
   /**
    * The look: `xl` 44px, an opening title (32px on a phone); `lg` 32px, a page title; `md` 24px,
-   * a section; `sm` 20px, a card or panel; `ui` 18px in the sans, a component's own title.
+   * a section; `sm` 20px, a card or panel; `ui` 18px in the sans, a component's own title;
+   * `ui-sm` 14px in the sans, a section's title inside a page or panel (the size of its words).
    * Defaults by level: 1 is `lg`, 2 is `md`, 3 is `sm`, 4 is `ui`.
    */
   size?: HeadingSize;
@@ -50,6 +39,8 @@ export interface HeadingProps {
   id?: string;
   /** Layout only: margins, alignment and width. The type belongs to the heading. */
   style?: HeadingLayoutStyle;
+  /** The same as `style`, by a name a style lint does not take for an inline style attribute. */
+  layout?: HeadingLayoutStyle;
 }
 
 const bySize: Record<HeadingProps["level"], HeadingSize> = {
@@ -89,6 +80,15 @@ const styles = stylex.create({
     lineHeight: grasp.titleUiLine,
     letterSpacing: grasp.trackingUiTitle,
   },
+  // The interface's own size, so a title over a group of settings stands as tall as its words and
+  // is told apart by weight: text-sm, at 500.
+  "ui-sm": {
+    fontFamily: grasp.fontSans,
+    fontWeight: grasp.weightMedium,
+    fontSize: grasp.textSm,
+    lineHeight: grasp.textSmLine,
+    letterSpacing: grasp.trackingUi,
+  },
 });
 
 export const Heading = ({
@@ -96,7 +96,8 @@ export const Heading = ({
   level,
   size = bySize[level],
   id,
-  style,
+  style: styleProp,
+  layout,
 }: HeadingProps) => {
   const Tag = `h${level}` as const;
   return (
@@ -106,9 +107,9 @@ export const Heading = ({
       data-size={size}
       {...stylex.props(
         styles.heading,
-        size !== "ui" && styles.serif,
+        size !== "ui" && size !== "ui-sm" && styles.serif,
         styles[size],
-        style
+        layout ?? styleProp
       )}
     >
       {children}

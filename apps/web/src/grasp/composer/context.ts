@@ -16,3 +16,15 @@ export const MentionContext = createContext<
 >(null);
 
 export const useOpenMentions = () => useContext(MentionContext);
+
+/** A level the card's working edge follows, read at each frame: dictation's drawn level. */
+export interface ComposerListener {
+  read: () => number;
+}
+
+// Lets a dictation (voice.tsx) hand the card its level, so the dithered edge listens with it.
+export const ListenContext = createContext<
+  ((listener: ComposerListener | null) => void) | null
+>(null);
+
+export const useComposerListen = () => useContext(ListenContext);

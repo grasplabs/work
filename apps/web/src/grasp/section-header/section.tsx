@@ -19,6 +19,8 @@ export interface SectionProps {
   "aria-labelledby"?: string;
   /** Layout only: margins and alignment. */
   style?: SectionHeaderLayoutStyle;
+  /** The same as `style`, by a name a style lint does not take for an inline style attribute. */
+  layout?: SectionHeaderLayoutStyle;
 }
 
 const styles = stylex.create({
@@ -33,12 +35,13 @@ const styles = stylex.create({
 export const Section = ({
   children,
   "aria-labelledby": labelledBy,
-  style,
+  style: styleProp,
+  layout,
 }: SectionProps) => (
   <section
     aria-labelledby={labelledBy}
     data-slot="section"
-    {...stylex.props(styles.section, style)}
+    {...stylex.props(styles.section, layout ?? styleProp)}
   >
     {children}
   </section>

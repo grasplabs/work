@@ -1,16 +1,12 @@
-import { Button } from "@grasp-os/ui/components/button";
-import {
-  Empty,
-  EmptyContent,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle,
-} from "@grasp-os/ui/components/empty";
-import { Trans } from "@lingui/react/macro";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { Link } from "@tanstack/react-router";
-import { KeyRoundIcon } from "lucide-react";
 
+import { Button } from "../grasp/button/index.ts";
+import { Empty } from "../grasp/empty/index.ts";
+import { Icon, Lock } from "../grasp/icons/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { useMemberAdmin } from "../use-member-admin.ts";
 
 // What an AI feature shows while the organization has no AI provider to
@@ -20,48 +16,52 @@ import { useMemberAdmin } from "../use-member-admin.ts";
 // connect one gets the link; anyone else, Grasp staff included (who may
 // read but never change whose key pays), is told who can.
 
+const styles = stylex.create({
+  line: {
+    display: "flex",
+    alignItems: "center",
+    gap: grasp.space2,
+  },
+});
+
+/** Empty's size for each of the sizes callers ask for. */
+const emptySize = {
+  default: "section",
+  sm: "section",
+  xs: "inline",
+} as const;
+
+/** The way to Settings › AI providers. */
+const GoToAiProviders = () => {
+  const { t } = useLingui();
+  return (
+    <Button render={<Link to="/settings/ai-providers" />} size="sm">
+      {t`Go to AI providers`}
+    </Button>
+  );
+};
+
 /**
  * Connect an AI provider: a link to Settings › AI providers for whoever can,
- * and who to ask for anyone else. `size` as `Empty`'s: `xs` in a thread or
- * under a box to ask in.
+ * and who to ask for anyone else. `xs` in a thread or under a box to ask in.
  */
 export const ConnectAiProvider = ({
   size = "sm",
 }: {
   size?: "default" | "sm" | "xs";
 }) => {
+  const { t } = useLingui();
   const canConnect = useMemberAdmin();
   return (
-    <Empty size={size}>
-      <EmptyHeader>
-        <EmptyMedia variant="icon">
-          <KeyRoundIcon aria-hidden="true" />
-        </EmptyMedia>
-        <EmptyTitle>
-          <Trans>Connect an AI provider</Trans>
-        </EmptyTitle>
-        <EmptyDescription>
-          {canConnect ? (
-            <Trans>
-              Grasp&apos;s AI works with your organization&apos;s own AI
-              provider key. Connect one and choose a model to start.
-            </Trans>
-          ) : (
-            <Trans>Ask your admin to connect an AI provider.</Trans>
-          )}
-        </EmptyDescription>
-      </EmptyHeader>
-      {canConnect ? (
-        <EmptyContent>
-          <Button
-            nativeButton={false}
-            render={<Link to="/settings/ai-providers" />}
-            size="sm"
-          >
-            <Trans>Go to AI providers</Trans>
-          </Button>
-        </EmptyContent>
-      ) : null}
+    <Empty
+      icon={Lock}
+      size={emptySize[size]}
+      title={t`Connect an AI provider`}
+      {...(canConnect ? { action: <GoToAiProviders /> } : {})}
+    >
+      {canConnect
+        ? t`Grasp's AI works with your organization's own AI provider key. Connect one and choose a model to start.`
+        : t`Ask your admin to connect an AI provider.`}
     </Empty>
   );
 };
@@ -72,25 +72,20 @@ export const ConnectAiProvider = ({
  * one, and who to ask for anyone else.
  */
 export const ConnectAiProviderCover = () => {
+  const { t } = useLingui();
   const canConnect = useMemberAdmin();
   return (
     <>
-      <p className="flex items-center gap-2 font-medium">
-        <KeyRoundIcon aria-hidden="true" className="size-4" />
-        <Trans>Connect an AI provider to start asking</Trans>
-      </p>
+      <div {...stylex.props(styles.line)}>
+        <Icon icon={Lock} />
+        <Text element="span" weight="medium">
+          {t`Connect an AI provider to start asking`}
+        </Text>
+      </div>
       {canConnect ? (
-        <Button
-          nativeButton={false}
-          render={<Link to="/settings/ai-providers" />}
-          size="sm"
-        >
-          <Trans>Go to AI providers</Trans>
-        </Button>
+        <GoToAiProviders />
       ) : (
-        <p className="text-muted-foreground">
-          <Trans>Ask your admin to connect one.</Trans>
-        </p>
+        <Text tone="muted">{t`Ask your admin to connect one.`}</Text>
       )}
     </>
   );

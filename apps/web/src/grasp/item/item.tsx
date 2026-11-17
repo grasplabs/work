@@ -6,6 +6,11 @@
 //   <Item icon={Folder} title="Spring launch" description="Updated 2 hours ago" />
 //   <Item variant="outline" title="Two-step sign-in" description="On" actions={<Button>Manage</Button>} />
 //   <Item href="/settings/billing" title="Billing" description="Plan, invoices and payment" />
+//   <Item media={<Avatar name="Anna de Vries" size="xs" />} title="Anna de Vries" description="anna@…" actions={…} />
+//   <Item icon={Key} iconLook="inline" title="API key" description="Ending in 4f2a" />
+//
+// In a narrow row the actions drop under the words, on the row's end edge, rather than squeeze
+// them: by the row's own width, not the window's.
 //
 // Every value is a token (src/tokens). A caller may set layout only (the `style` prop).
 "use client";
@@ -18,59 +23,58 @@ import { focus } from "../focus/focus";
 import { ChevronRight, Icon } from "../icons";
 import type { IconData } from "../icons";
 import { iconVars } from "../icons/icon.stylex";
+import type { LayoutStyle } from "../layout/layout";
 import { Separator } from "../separator";
 import { grasp, media } from "../tokens/tokens.stylex";
 import { ItemGroupContext } from "./context";
 import { itemRowMarker } from "./markers.stylex";
 
 export type ItemVariant = "plain" | "outline" | "soft";
-export type ItemSize = "sm" | "md";
-
-type Layout = string | number | null;
+export type ItemSize = "xs" | "sm" | "md";
 
 /** What a caller may style: where the item sits and how wide it is. Never its look. */
-export type ItemLayoutStyle = stylex.StyleXStyles<{
-  alignSelf?: Layout;
-  justifySelf?: Layout;
-  flexGrow?: Layout;
-  flexShrink?: Layout;
-  flexBasis?: Layout;
-  gridArea?: Layout;
-  gridColumn?: Layout;
-  gridRow?: Layout;
-  order?: Layout;
-  width?: Layout;
-  minWidth?: Layout;
-  maxWidth?: Layout;
-  margin?: Layout;
-  marginBlock?: Layout;
-  marginBlockStart?: Layout;
-  marginBlockEnd?: Layout;
-  marginInline?: Layout;
-  marginInlineStart?: Layout;
-  marginInlineEnd?: Layout;
-}>;
+export type ItemLayoutStyle = LayoutStyle;
 
 /** What every item takes. */
 interface ItemBase {
   /** Its name, in a few words ("Spring launch"). */
   title: ReactNode;
+  /**
+   * A quieter word or two on the title's line, after the name: a role, "you", a count ("Admin").
+   * In the muted ink at the regular weight; it wraps with the title, never cut off.
+   */
+  detail?: ReactNode;
   /** One line about it: a date, a state, a count ("Updated 2 hours ago"). It wraps; never cut off. */
   description?: ReactNode;
   /** An icon in a square before the words, when it says what kind of thing it is. From the icons entry (`@/components/grasp/icons`). */
   icon?: IconData;
+  /**
+   * How the icon stands: `square` in its 40px box (32px at `sm`), or `inline`, the bare icon in
+   * line with the title, for a row that is dense or carries its kind in its words already.
+   * @default "square"
+   */
+  iconLook?: "square" | "inline";
+  /**
+   * Before the words, in place of an icon: an Avatar for a person (`xs` or `sm`), or a Brand icon
+   * for a provider. Centred on the title's line, with the row's gap after it.
+   */
+  media?: ReactNode;
   /**
    * `plain` in a list on the page, `outline` for a row that stands alone, `soft` on a quieter fill.
    * @default "plain"
    */
   variant?: ItemVariant;
   /**
-   * The room round it: `md` for a list someone reads, `sm` for a dense one.
+   * The room round it: `md` for a list someone reads, `sm` for a dense one, `xs` for a list
+   * among setting rows (members, providers): their row height (setting-row, 48px; 56px with a
+   * description) and their inset, so a page has one rhythm.
    * @default "md"
    */
   size?: ItemSize;
   /** Layout only: margins, alignment and width. The look belongs to the item. */
   style?: ItemLayoutStyle;
+  /** The same as `style`, by a name a style lint does not take for an inline style attribute. */
+  layout?: ItemLayoutStyle;
 }
 
 /**
@@ -122,6 +126,15 @@ const styles = stylex.create({
     paddingBlock: grasp.space3,
     paddingInline: grasp.space4,
   },
+  // The setting rows' rhythm: 8px above and below, a table cell's inset, setting-row at least.
+  xs: {
+    gap: grasp.space3,
+    paddingBlock: grasp.space2,
+    paddingInline: grasp.tableCellInline,
+    minHeight: grasp.settingRow,
+  },
+  // Its title and description one line each, with no room between, as a setting row's.
+  wordsXs: { gap: 0 },
   plain: { backgroundColor: "transparent" },
   outline: {
     backgroundColor: grasp.raised,
@@ -175,18 +188,49 @@ const styles = stylex.create({
     height: grasp.controlSm,
     borderRadius: `min(${grasp.corner}, calc(${grasp.controlSm} / 2))`,
   },
+  // The words take the room, but never under 10rem: past that the actions wrap under them.
   words: {
     display: "grid",
     flexGrow: 1,
+    flexBasis: "10rem",
     minWidth: 0,
     gap: grasp.space1,
   },
+  // A row whose actions may wrap: under the words, a gap between the lines.
+  wraps: { flexWrap: "wrap", rowGap: grasp.space2 },
+  // An icon in line with the title: the bare icon, centred on its line.
+  mediaInline: {
+    display: "flex",
+    flexShrink: 0,
+    alignItems: "center",
+    alignSelf: "flex-start",
+    height: grasp.textSmLine,
+    color: grasp.muted,
+  },
+  // A person's or a provider's mark before the words: centred on the title's line, so a row with a
+  // line under its title keeps the mark by its name.
+  mediaSlot: {
+    display: "flex",
+    flexShrink: 0,
+    alignItems: "center",
+    alignSelf: "flex-start",
+    height: grasp.textSmLine,
+  },
+  leadAlone: { alignSelf: "center" },
+  // On a line of their own the actions keep to the row's end edge.
+  actionsEnd: { marginInlineStart: "auto" },
   title: {
     fontSize: grasp.textSm,
     lineHeight: grasp.textSmLine,
     fontWeight: grasp.weightMedium,
     overflowWrap: "anywhere",
     hyphens: "manual",
+  },
+  // On the title's line, after a space and a little more room: quieter, not bolder.
+  detail: {
+    marginInlineStart: grasp.space1,
+    fontWeight: grasp.weightRegular,
+    color: grasp.muted,
   },
   description: {
     fontSize: grasp.textSm,
@@ -218,35 +262,97 @@ const linkLook = {
 } as const;
 
 // The row itself: a link, or a plain box.
+/** What stands before the words: a mark, an icon in its square, or the bare icon in line. */
+const Lead = ({
+  icon,
+  iconLook,
+  media: mark,
+  size,
+  alone,
+}: Pick<ItemProps, "icon" | "iconLook" | "media" | "size"> & {
+  alone: boolean;
+}) => {
+  // On the title's line: at the top with a line under the title, centred when the title is alone
+  // (the row centres its one line).
+  if (mark !== undefined && mark !== null) {
+    return (
+      <span {...stylex.props(styles.mediaSlot, alone && styles.leadAlone)}>
+        {mark}
+      </span>
+    );
+  }
+  if (!icon) {
+    return null;
+  }
+  return (
+    <span
+      aria-hidden="true"
+      {...stylex.props(
+        iconLook === "inline"
+          ? [styles.mediaInline, alone && styles.leadAlone]
+          : [styles.media, size !== "md" && styles.mediaSm]
+      )}
+    >
+      <Icon icon={icon} />
+    </span>
+  );
+};
+
+/** The title, and its quieter detail on the same line. */
+const Title = ({ title, detail }: Pick<ItemProps, "title" | "detail">) => (
+  <span {...stylex.props(styles.title)}>
+    {title}
+    {detail !== undefined && detail !== null && detail !== false && (
+      <>
+        {" "}
+        <span data-slot="item-detail" {...stylex.props(styles.detail)}>
+          {detail}
+        </span>
+      </>
+    )}
+  </span>
+);
+
 const ItemRow = ({
   title,
+  detail,
   description,
   icon,
+  iconLook = "square",
+  media: mark,
   variant = "plain",
   size = "md",
   actions,
   href,
-  style,
+  style: styleProp,
+  layout,
 }: ItemProps) => {
   const linked = href !== undefined && href !== "";
+  const acting = Boolean(actions);
   const inside = (
     <>
-      {icon && (
-        <span
-          aria-hidden="true"
-          {...stylex.props(styles.media, size === "sm" && styles.mediaSm)}
-        >
-          <Icon icon={icon} />
-        </span>
-      )}
-      <span {...stylex.props(styles.words)}>
-        <span {...stylex.props(styles.title)}>{title}</span>
+      <Lead
+        icon={icon}
+        iconLook={iconLook}
+        media={mark}
+        size={size}
+        alone={
+          description === undefined ||
+          description === null ||
+          description === false ||
+          description === ""
+        }
+      />
+      <span {...stylex.props(styles.words, size === "xs" && styles.wordsXs)}>
+        <Title title={title} detail={detail} />
         {Boolean(description) && (
           <span {...stylex.props(styles.description)}>{description}</span>
         )}
       </span>
-      {Boolean(actions) && (
-        <span {...stylex.props(styles.actions)}>{actions}</span>
+      {acting && (
+        <span {...stylex.props(styles.actions, styles.actionsEnd)}>
+          {actions}
+        </span>
       )}
       {linked && (
         <span aria-hidden="true" {...stylex.props(styles.chevron)}>
@@ -267,7 +373,7 @@ const ItemRow = ({
           styles.link,
           linkLook[variant],
           focus.ring,
-          style
+          layout ?? styleProp
         )}
       >
         {inside}
@@ -277,7 +383,13 @@ const ItemRow = ({
   return (
     <div
       data-slot="item"
-      {...stylex.props(styles.item, styles[size], styles[variant], style)}
+      {...stylex.props(
+        styles.item,
+        styles[size],
+        styles[variant],
+        acting && styles.wraps,
+        layout ?? styleProp
+      )}
     >
       {inside}
     </div>

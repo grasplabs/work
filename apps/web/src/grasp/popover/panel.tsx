@@ -8,7 +8,6 @@ import { PopoverContent as ContentPrimitive } from "@ui-sdk/react/popover";
 import { useState } from "react";
 import type { ComponentProps, ReactNode } from "react";
 
-import { focus } from "../focus/focus";
 import { scroll } from "../scroll/scroll";
 import { popup } from "../tokens/tokens.values";
 import { popoverMarker } from "./popover.stylex";
@@ -16,12 +15,6 @@ import { useStill } from "./still-context";
 import { popoverStyles as styles } from "./styles";
 
 type ContentPrimitiveProps = ComponentProps<typeof ContentPrimitive>;
-
-// The gap to the trigger and the room kept from the window's edges, as UI SDK takes them: numbers,
-// generated from the popover-gap and popup-gutter tokens (src/tokens/tokens.values.ts), the same
-// tokens the panel's width is drawn with (styles.ts).
-// Every prop is documented once, where it is first declared; the props on the docs page are read
-// from the type below, so they cannot drift from what the code accepts.
 
 /** Every prop a PopoverPanel takes: these, and the rest of UI SDK's PopoverContent. */
 export interface PopoverPanelProps extends Omit<
@@ -115,7 +108,7 @@ export const PopoverPanel = ({ children, ...rest }: PopoverPanelProps) => {
         styles.panel,
         styles.placed,
         styles.motion,
-        focus.ring
+        styles.ring
       )}
     >
       <div
@@ -124,7 +117,7 @@ export const PopoverPanel = ({ children, ...rest }: PopoverPanelProps) => {
         tabIndex={scrolls ? 0 : undefined}
         role={scrolls ? "region" : undefined}
         aria-labelledby={scrolls ? title : undefined}
-        {...stylex.props(styles.body, scroll.bar, focus.inside)}
+        {...stylex.props(styles.body, scroll.bar, styles.bodyRing)}
       >
         {children}
       </div>

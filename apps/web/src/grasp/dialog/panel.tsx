@@ -14,14 +14,12 @@ import type { ComponentProps, ReactNode } from "react";
 import { Button } from "../button";
 import { Cross } from "../icons";
 import { panelMarker } from "./dialog.stylex";
+import { useSize } from "./size-context";
 import { useStill } from "./still-context";
 import { dialogStyles as styles } from "./styles";
 import { sureClose } from "./sure-close";
 
 type ContentPrimitiveProps = ComponentProps<typeof ContentPrimitive>;
-
-// Every prop is documented once, where it is first declared; the props on the docs page are read
-// from the type below, so they cannot drift from what the code accepts.
 
 /** Every prop a DialogPanel takes: these, and the rest of UI SDK's DialogContent. */
 export interface DialogPanelProps extends Omit<
@@ -39,7 +37,8 @@ export interface DialogPanelProps extends Omit<
 
 /**
  * The panel, with the shade behind it and the close button in its corner. Over the page in the
- * middle of the window; a sheet along the bottom under 640px.
+ * middle of the window, `dialog-width` wide or `dialog-width-full` when the dialog is full; a sheet
+ * along the bottom under 640px.
  */
 export const DialogPanel = ({
   children,
@@ -47,6 +46,7 @@ export const DialogPanel = ({
   ...rest
 }: DialogPanelProps) => {
   const still = useStill();
+  const full = useSize() === "full";
   const cross = (
     <Button variant="ghost" size="sm" icon={Cross} label={closeLabel} />
   );
@@ -62,7 +62,12 @@ export const DialogPanel = ({
         />
         <div
           data-slot="dialog-content"
-          {...stylex.props(styles.panel, styles.placed, still.look.panel)}
+          {...stylex.props(
+            styles.panel,
+            styles.placed,
+            full && styles.full,
+            still.look.panel
+          )}
         >
           {children}
           <span {...stylex.props(styles.close)}>{cross}</span>
@@ -79,6 +84,7 @@ export const DialogPanel = ({
           panelMarker,
           styles.panel,
           styles.placed,
+          full && styles.full,
           styles.motion
         )}
       >

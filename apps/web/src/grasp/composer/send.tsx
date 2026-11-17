@@ -3,10 +3,12 @@
 // It is UI SDK's Button, so an agent presses it by name and its press returns the send's Promise.
 "use client";
 
+import * as stylex from "@stylexjs/stylex";
 import { Button as PressPrimitive } from "@ui-sdk/react/button";
 
 import { Button } from "../button";
 import { ArrowUp, Stop } from "../icons";
+import { cornerStyles } from "./corner";
 
 interface SendProps {
   working: boolean;
@@ -19,7 +21,7 @@ interface SendProps {
 }
 
 /** Send, or Stop while working. */
-export const ComposerSend = ({
+const SendOrStop = ({
   working,
   empty,
   disabled,
@@ -68,3 +70,10 @@ export const ComposerSend = ({
     />
   );
 };
+
+/** Send, or Stop while working, in its corner's nest: last in the row, it nests in the card's corner (corner.ts). */
+export const ComposerSend = (props: SendProps) => (
+  <span {...stylex.props(cornerStyles.nest)}>
+    <SendOrStop {...props} />
+  </span>
+);

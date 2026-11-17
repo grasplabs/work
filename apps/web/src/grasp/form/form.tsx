@@ -1,7 +1,8 @@
 // Form: the layout of a form, the room between its fields, its groups and its buttons. The
 // product's own part: shadcn's form is a react-hook-form recipe, which Field (src/components/field)
 // already answers with UI SDK's own checks, so this is only the layout. A plain <form>: the
-// browser sends it, checks it and resets it; each Field shows its own error.
+// browser sends it, checks it and resets it; each Field shows its own error. Give every Field that
+// can be wrong a FieldError with its words: a Field without one falls back to the browser's bubble.
 //
 //   <Form onSubmit={save} aria-label="Profile">
 //     <FormGroup title="Your details" description="As your team sees them.">
@@ -21,23 +22,11 @@
 import * as stylex from "@stylexjs/stylex";
 import type { ReactNode, SubmitEvent, SyntheticEvent } from "react";
 
+import type { LayoutStyle } from "../layout/layout";
 import { grasp } from "../tokens/tokens.stylex";
 
-type Layout = string | number | null;
-
 /** What a caller may style: where the form sits and how wide it is. Never its rhythm. */
-export type FormLayoutStyle = stylex.StyleXStyles<{
-  alignSelf?: Layout;
-  justifySelf?: Layout;
-  gridArea?: Layout;
-  gridColumn?: Layout;
-  gridRow?: Layout;
-  width?: Layout;
-  maxWidth?: Layout;
-  margin?: Layout;
-  marginBlock?: Layout;
-  marginInline?: Layout;
-}>;
+export type FormLayoutStyle = LayoutStyle;
 
 /** Every prop a Form takes. */
 export interface FormProps {
@@ -55,6 +44,8 @@ export interface FormProps {
   "aria-label"?: string;
   /** Layout only: where it sits and how wide it is. It stands at most `form-width` wide. */
   style?: FormLayoutStyle;
+  /** The same as `style`, by a name a style lint does not take for an inline style attribute. */
+  layout?: FormLayoutStyle;
 }
 
 const styles = stylex.create({
@@ -69,8 +60,17 @@ const styles = stylex.create({
 });
 
 /** The layout of a form: its fields, groups and buttons, with the room between them. */
-export const Form = ({ children, style, ...rest }: FormProps) => (
-  <form data-slot="form" {...rest} {...stylex.props(styles.form, style)}>
+export const Form = ({
+  children,
+  style: styleProp,
+  layout,
+  ...rest
+}: FormProps) => (
+  <form
+    data-slot="form"
+    {...rest}
+    {...stylex.props(styles.form, layout ?? styleProp)}
+  >
     {children}
   </form>
 );

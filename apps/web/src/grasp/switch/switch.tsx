@@ -38,41 +38,20 @@ import { choiceMarker } from "../choice/choice.stylex";
 import { focus } from "../focus/focus";
 import { Icon, Spinner } from "../icons";
 import { iconVars } from "../icons/icon.stylex";
+import type { LayoutStyle } from "../layout/layout";
 import { simply } from "../motion/simply.stylex";
 import { grasp, media } from "../tokens/tokens.stylex";
 
 /** Where a switch's save is: at rest, saving, or failed to save. */
 export type SaveState = "idle" | "working" | "failed";
 
-type Layout = string | number | null;
-
 /** What a caller may style: where the switch sits. Never its look. */
-export type SwitchLayoutStyle = stylex.StyleXStyles<{
-  alignSelf?: Layout;
-  justifySelf?: Layout;
-  flexGrow?: Layout;
-  flexShrink?: Layout;
-  flexBasis?: Layout;
-  gridArea?: Layout;
-  gridColumn?: Layout;
-  gridRow?: Layout;
-  order?: Layout;
-  margin?: Layout;
-  marginBlock?: Layout;
-  marginBlockStart?: Layout;
-  marginBlockEnd?: Layout;
-  marginInline?: Layout;
-  marginInlineStart?: Layout;
-  marginInlineEnd?: Layout;
-}>;
+export type SwitchLayoutStyle = LayoutStyle;
 
 type SwitchPrimitiveProps = ComponentProps<typeof SwitchPrimitive>;
 
 /** What `onCheckedChange` is called with: the new state, and why it changed. */
 export type SwitchChange = NonNullable<SwitchPrimitiveProps["onCheckedChange"]>;
-
-// Every prop is documented once, where it is first declared; the props on the docs page are read
-// from SwitchProps, so they cannot drift from what the code accepts.
 
 /** What every switch takes, besides UI SDK's own options. */
 interface SwitchBase {
@@ -107,6 +86,8 @@ interface SwitchBase {
   readOnly?: boolean;
   /** Layout only: margins and alignment. The look belongs to the switch. */
   style?: SwitchLayoutStyle;
+  /** The same as `style`, by a name a style lint does not take for an inline style attribute. */
+  layout?: SwitchLayoutStyle;
 }
 
 /** A switch whose setting your code saves elsewhere, or a form sends. */
@@ -739,7 +720,8 @@ export const Switch = (allProps: SwitchProps) => {
   const {
     label,
     description,
-    style,
+    style: styleProp,
+    layout,
     id,
     onSave,
     failedLabel,
@@ -837,7 +819,7 @@ export const Switch = (allProps: SwitchProps) => {
       invalid={life === "failed" || undefined}
       disabled={rest.disabled}
       end
-      layout={[style]}
+      layout={[layout ?? styleProp]}
     >
       {(wiring) => (
         <SwitchPrimitive

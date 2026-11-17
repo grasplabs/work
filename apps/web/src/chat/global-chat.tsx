@@ -249,6 +249,8 @@ const useGlobalChatValue = () => {
     open,
     /** Whether it stays open here, about the page's subject: no closing it. */
     keptOpen,
+    /** Whether there is room beside the page to dock into: not on a phone. */
+    roomBeside,
     /** Where it opens, or is. */
     placement,
     /** What of it shows now, on its way to the layout. */

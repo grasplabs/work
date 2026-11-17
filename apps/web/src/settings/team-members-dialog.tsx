@@ -1,27 +1,24 @@
 import type { Member, OrganizationTeam } from "@grasp-os/shared/members";
-import { Avatar, AvatarFallback } from "@grasp-os/ui/components/avatar";
-import { Button } from "@grasp-os/ui/components/button";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
+import { useState } from "react";
+
+import { Alert } from "../grasp/alert/index.ts";
+import { Button } from "../grasp/button/index.ts";
+import { Combobox } from "../grasp/combobox/index.ts";
 import {
   Dialog,
-  DialogContent,
+  DialogBody,
   DialogDescription,
-  DialogHeader,
+  DialogPanel,
   DialogTitle,
-} from "@grasp-os/ui/components/dialog";
-import { Field, FieldLabel } from "@grasp-os/ui/components/field";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@grasp-os/ui/components/select";
-import { Trans, useLingui } from "@lingui/react/macro";
-import { UserMinusIcon } from "lucide-react";
-import { useId, useState } from "react";
-
-import { ErrorText } from "../error-text.tsx";
-import { initials } from "../frame/person-menu.tsx";
+} from "../grasp/dialog/index.ts";
+import { Field, FieldError, FieldLabel } from "../grasp/field/index.ts";
+import { Form, FormActions } from "../grasp/form/index.ts";
+import { Minus } from "../grasp/icons/index.ts";
+import { Item, ItemGroup } from "../grasp/item/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { addTeamMember, removeTeamMember } from "./team-changes.ts";
 import { useTeamChange } from "./use-team-change.ts";
 
@@ -61,6 +58,10 @@ const othersOf = (
     }));
 };
 
+const styles = stylex.create({
+  body: { display: "flex", flexDirection: "column", gap: grasp.space5 },
+});
+
 export const TeamMembersDialog = ({
   team,
   members,
@@ -75,16 +76,18 @@ export const TeamMembersDialog = ({
   onChanged: () => Promise<void>;
 }) => {
   const { t } = useLingui();
-  const pickId = useId();
   const [chosen, setChosen] = useState<string | null>(null);
-  const { busy, failure, run } = useTeamChange(onChanged);
+  // Adding and taking off fail apart, each saying so where it was asked.
+  const adding = useTeamChange(onChanged);
+  const takingOff = useTeamChange(onChanged);
+  const busy = adding.busy || takingOff.busy;
   const { name } = team;
   const people = peopleIn(team, members);
   const others = othersOf(team, members);
   // One that was added since, or left the organization, is no longer offered.
   const picked = others.some((other) => other.value === chosen) ? chosen : null;
   const add = async (userId: string): Promise<void> => {
-    const refused = await run(
+    const refused = await adding.run(
       async () => {
         await addTeamMember(team.id, userId);
       },
@@ -96,7 +99,7 @@ export const TeamMembersDialog = ({
   };
   const remove = async (person: InTeam): Promise<void> => {
     const who = person.name;
-    await run(
+    await takingOff.run(
       async () => {
         await removeTeamMember(team.id, person.userId);
       },
@@ -105,101 +108,83 @@ export const TeamMembersDialog = ({
   };
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>
-            <Trans>Members of {name}</Trans>
-          </DialogTitle>
-          <DialogDescription>
-            <Trans>
-              What is shared with {name} is shared with each of them.
-            </Trans>
-          </DialogDescription>
-        </DialogHeader>
-        {others.length === 0 ? (
-          <p className="text-muted-foreground">
-            <Trans>Everyone in the organization is in this team.</Trans>
-          </p>
-        ) : (
-          <form
-            className="flex items-end gap-2"
-            onSubmit={(event) => {
-              event.preventDefault();
-              if (picked !== null) {
-                void add(picked);
-              }
-            }}
-          >
-            <Field className="min-w-0 flex-1">
-              <FieldLabel htmlFor={pickId}>
-                <Trans>Add a member</Trans>
-              </FieldLabel>
-              <Select
-                items={others}
-                onValueChange={(value: string | null) => {
-                  setChosen(value);
+      <DialogPanel closeLabel={t`Close`}>
+        <DialogTitle>{t`Members of ${name}`}</DialogTitle>
+        <DialogDescription>
+          {t`What is shared with ${name} is shared with each of them.`}
+        </DialogDescription>
+        <DialogBody>
+          <div {...stylex.props(styles.body)}>
+            {others.length === 0 ? (
+              <Text tone="muted">
+                {t`Everyone in the organization is in this team.`}
+              </Text>
+            ) : (
+              <Form
+                aria-label={t`Add a member`}
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  if (picked !== null) {
+                    void add(picked);
+                  }
                 }}
-                value={picked}
               >
-                <SelectTrigger className="w-full" id={pickId}>
-                  <SelectValue placeholder={t`Choose someone`} />
-                </SelectTrigger>
-                <SelectContent>
-                  {others.map((other) => (
-                    <SelectItem key={other.value} value={other.value}>
-                      {other.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </Field>
-            <Button disabled={busy || picked === null} type="submit">
-              <Trans>Add</Trans>
-            </Button>
-          </form>
-        )}
-        <ErrorText>{failure}</ErrorText>
-        {people.length === 0 ? (
-          <p className="text-muted-foreground">
-            <Trans>Nobody is in this team yet.</Trans>
-          </p>
-        ) : (
-          <ul aria-label={t`Members of ${name}`} className="flex flex-col">
-            {people.map((person) => {
-              const who = person.name;
-              return (
-                <li
-                  className="flex items-center gap-3 border-t py-2"
-                  key={person.userId}
-                >
-                  <Avatar className="size-8">
-                    <AvatarFallback>{initials(person.name)}</AvatarFallback>
-                  </Avatar>
-                  <div className="flex min-w-0 flex-1 flex-col">
-                    <span className="truncate">{person.name}</span>
-                    {person.email === undefined ? null : (
-                      <span className="text-muted-foreground truncate">
-                        {person.email}
-                      </span>
-                    )}
-                  </div>
-                  <Button
-                    aria-label={t`Take ${who} off ${name}`}
-                    disabled={busy}
-                    onClick={() => {
-                      void remove(person);
-                    }}
-                    size="icon-sm"
-                    variant="ghost"
-                  >
-                    <UserMinusIcon />
+                <Field invalid={adding.failure !== undefined}>
+                  <FieldLabel>{t`Add a member`}</FieldLabel>
+                  <Combobox
+                    empty={t`Nobody by that name`}
+                    items={others}
+                    onValueChange={setChosen}
+                    placeholder={t`Choose someone`}
+                    triggerLabel={t`Show the members`}
+                    value={picked}
+                  />
+                  {adding.failure === undefined ? null : (
+                    <FieldError match>{adding.failure}</FieldError>
+                  )}
+                </Field>
+                <FormActions align="start">
+                  <Button disabled={busy || picked === null} type="submit">
+                    {t`Add`}
                   </Button>
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </DialogContent>
+                </FormActions>
+              </Form>
+            )}
+            {takingOff.failure === undefined ? null : (
+              <Alert variant="danger">{takingOff.failure}</Alert>
+            )}
+            {people.length === 0 ? (
+              <Text tone="muted">{t`Nobody is in this team yet.`}</Text>
+            ) : (
+              <ItemGroup aria-label={t`Members of ${name}`} separated>
+                {people.map((person) => {
+                  const who = person.name;
+                  return (
+                    <Item
+                      actions={
+                        <Button
+                          disabled={busy}
+                          icon={Minus}
+                          label={t`Take ${who} off ${name}`}
+                          onClick={() => {
+                            void remove(person);
+                          }}
+                          size="sm"
+                          variant="ghost"
+                        />
+                      }
+                      description={person.email}
+                      key={person.userId}
+                      size="sm"
+                      title={person.name}
+                    />
+                  );
+                })}
+              </ItemGroup>
+            )}
+          </div>
+        </DialogBody>
+      </DialogPanel>
     </Dialog>
   );
 };

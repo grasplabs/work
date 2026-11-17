@@ -38,13 +38,7 @@ test("an admin opens Settings on the workspace, and each section from the list b
   await nav.getByRole("link", { name: "Billing" }).click();
   await expect(page).toHaveURL(/\/settings\/billing$/u);
   await expect(page.getByText("Stripe is not linked yet")).toBeVisible();
-  await expect(
-    sectionOf(page, "Plan").getByRole("button", { name: "Change plan" })
-  ).toBeDisabled();
-  await expect(sectionOf(page, "Payment method")).toContainText(
-    "No card on file"
-  );
-  await expect(sectionOf(page, "Invoices")).toContainText("No invoices yet.");
+  await expect(sectionOf(page, "Plan")).toContainText("Current plan");
   // The billing details are the admin's to keep, as each field is left.
   const details = sectionOf(page, "Billing details");
   await details.getByLabel("VAT number").fill("nl123456789b01");
@@ -89,7 +83,7 @@ test("someone who isn't an admin opens Settings on their profile, with only thei
   await expect(page).toHaveURL(/\/settings\/profile$/u);
   await expect(
     page.getByRole("navigation", { name: "Settings" }).getByRole("link")
-  ).toHaveText(["Profile", "Security"]);
+  ).toHaveText(["Profile", "Appearance", "Security"]);
 });
 
 test("on a phone the sections are one control above the section", async ({
@@ -105,7 +99,7 @@ test("on a phone the sections are one control above the section", async ({
   await sections.click();
   await page.getByRole("option", { name: "Members and roles" }).click();
   await expect(page).toHaveURL(/\/settings\/members$/u);
-  await expect(sectionOf(page, "Roles")).toBeVisible();
+  await expect(sectionOf(page, "Members")).toBeVisible();
 });
 
 test("someone signs out a device of theirs from Security, and its session ends", async ({

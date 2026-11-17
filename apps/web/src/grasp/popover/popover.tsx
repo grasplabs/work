@@ -1,25 +1,3 @@
-// Popover: a small task beside the control that opened it, from shadcn's (registry/bases/base/ui/
-// popover.tsx, on Base UI, read from shadcn-ui/ui main on 13 November 2026), converted from Tailwind to
-// StyleX and rebuilt on UI SDK's Popover, then made Grasp's: a raised panel with the one corner,
-// placed beside its trigger and kept inside the window, a title that names it, and actions that are
-// Grasp's Buttons and show their work. It never takes the page: the page still scrolls and can be
-// pressed, and focus is not trapped.
-//
-//   <Popover>
-//     <PopoverTrigger icon={UserAdd}>Share</PopoverTrigger>
-//     <PopoverPanel>
-//       <PopoverTitle>Share this report</PopoverTitle>
-//       <PopoverDescription>People you add can read it and comment.</PopoverDescription>
-//       <Field>…</Field>
-//       <PopoverFooter>
-//         <PopoverAction>Cancel</PopoverAction>
-//         <PopoverAction variant="ink" action={send} workingLabel="Sending"
-//           failedLabel="Could not send">Send invite</PopoverAction>
-//       </PopoverFooter>
-//     </PopoverPanel>
-//   </Popover>
-//
-// Every value is a token (src/tokens).
 "use client";
 
 import {
@@ -49,9 +27,6 @@ interface PopoverWork {
 }
 const ControllerContext = createContext<PopoverWork | null>(null);
 export const usePopoverController = () => useContext(ControllerContext);
-
-// Every prop is documented once, where it is first declared; the props on the docs page are read
-// from the type below, so they cannot drift from what the code accepts.
 
 /** Every prop a Popover takes: these, and the rest of UI SDK's Popover. */
 export interface PopoverProps extends Omit<

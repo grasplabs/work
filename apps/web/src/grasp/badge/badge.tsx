@@ -6,38 +6,23 @@
 //   <Badge>Draft</Badge>
 //   <Badge tone="success" icon={Tick}>Ready</Badge>
 //   <Badge tone="danger" size="sm">Failed</Badge>
+//   <Badge pending={sending} icon={Tick}>{sending ? "Sending" : "Invited"}</Badge>   working on it
 //
 // Every value is a token (src/tokens). A caller may set layout only (the `style` prop).
 import * as stylex from "@stylexjs/stylex";
 import type { ReactNode } from "react";
 
-import { Icon } from "../icons";
+import { Icon, Spinner as Turning } from "../icons";
 import type { IconData } from "../icons";
 import { iconVars } from "../icons/icon.stylex";
+import type { LayoutStyle } from "../layout/layout";
 import { grasp, media } from "../tokens/tokens.stylex";
 
 export type BadgeTone = "neutral" | "success" | "attention" | "danger" | "info";
 export type BadgeSize = "sm" | "md";
 
-type Layout = string | number | null;
-
 /** What a caller may style: where the badge sits. Never its look. */
-export type BadgeLayoutStyle = stylex.StyleXStyles<{
-  alignSelf?: Layout;
-  justifySelf?: Layout;
-  flexShrink?: Layout;
-  gridArea?: Layout;
-  gridColumn?: Layout;
-  gridRow?: Layout;
-  order?: Layout;
-  margin?: Layout;
-  marginBlock?: Layout;
-  marginBlockStart?: Layout;
-  marginBlockEnd?: Layout;
-  marginInline?: Layout;
-  marginInlineStart?: Layout;
-  marginInlineEnd?: Layout;
-}>;
+export type BadgeLayoutStyle = LayoutStyle;
 
 /** Every prop a Badge takes. */
 export interface BadgeProps {
@@ -56,11 +41,33 @@ export interface BadgeProps {
   size?: BadgeSize;
   /** An icon before the words, in their colour. Import it from the icons entry (`@/components/grasp/icons`). */
   icon?: IconData;
+  /**
+   * Working on it ("Sending", "Being removed"): a turning mark in the icon's place, still with
+   * reduced motion. A badge given `pending`, true or false, says its words politely as they
+   * change (a status), once each. Give it an icon for when it settles, and its width stays put.
+   */
+  pending?: boolean;
   /** Layout only: margins and alignment. The look belongs to the badge. */
   style?: BadgeLayoutStyle;
+  /** The same as `style`, by a name a style lint does not take for an inline style attribute. */
+  layout?: BadgeLayoutStyle;
 }
 
+const turn = stylex.keyframes({
+  from: { transform: "rotate(0turn)" },
+  to: { transform: "rotate(1turn)" },
+});
+
 const styles = stylex.create({
+  // The working mark: the icon's box, turning; standing still with reduced motion.
+  turning: {
+    display: "inline-flex",
+    flexShrink: 0,
+    animationName: { default: turn, [media.reduced]: "none" },
+    animationDuration: grasp.durationSpin,
+    animationTimingFunction: "linear",
+    animationIterationCount: "infinite",
+  },
   badge: {
     [iconVars.size]: grasp.badgeIcon,
     [iconVars.stroke]: grasp.iconStroke,
@@ -136,19 +143,49 @@ const styles = stylex.create({
   },
 });
 
+/** Before the words: the working mark while pending, else the icon. */
+const Mark = ({ icon, pending }: { icon?: IconData; pending: boolean }) => {
+  if (pending) {
+    return (
+      <span
+        aria-hidden="true"
+        data-slot="badge-pending"
+        {...stylex.props(styles.turning)}
+      >
+        <Icon icon={Turning} />
+      </span>
+    );
+  }
+  return icon ? <Icon icon={icon} /> : null;
+};
+
 export const Badge = ({
   children,
   tone = "neutral",
   size = "md",
   icon,
-  style,
+  pending,
+  style: styleProp,
+  layout,
 }: BadgeProps) => (
   <span
     data-slot="badge"
     data-tone={tone}
-    {...stylex.props(styles.badge, styles[size], styles[tone], style)}
+    data-pending={pending === true ? "" : undefined}
+    {...stylex.props(
+      styles.badge,
+      styles[size],
+      styles[tone],
+      layout ?? styleProp
+    )}
   >
-    {icon && <Icon icon={icon} />}
-    <span {...stylex.props(styles.words)}>{children}</span>
+    <Mark icon={icon} pending={pending === true} />
+    {/* A badge that may be pending is a polite status: its words are said as they change. */}
+    <span
+      role={pending === undefined ? undefined : "status"}
+      {...stylex.props(styles.words)}
+    >
+      {children}
+    </span>
   </span>
 );

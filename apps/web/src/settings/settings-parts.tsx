@@ -9,15 +9,9 @@ import {
   CardRowLabel,
   CardTitle,
 } from "@grasp-os/ui/components/card";
-import { Skeleton } from "@grasp-os/ui/components/skeleton";
 import { cn } from "@grasp-os/ui/lib/utils";
-import type { ErrorComponentProps } from "@tanstack/react-router";
 import { useId } from "react";
 import type { ReactNode } from "react";
-
-import { isFileGone } from "../error-reports.ts";
-import { ErrorState, LoadingLines } from "../frame/page-states.tsx";
-import { useRouteErrorReason } from "../route-error.tsx";
 
 // Settings' building blocks, as in the prototype (`components/settings.tsx`):
 // a section on a card of its own, and its rows.
@@ -102,31 +96,4 @@ export const SettingsRow = ({
 /** What fills a section's card below its heading: rows' worth of room. */
 export const SettingsBody = ({ children }: { children: ReactNode }) => (
   <CardContent>{children}</CardContent>
-);
-
-/** A section while its read is slow: its card, with skeletons where its title and rows will be. */
-export const SettingsLoading = () => (
-  <Card variant="panel">
-    <div className="flex flex-col gap-2 px-5 py-4">
-      <Skeleton className="h-4 w-40" />
-      <Skeleton className="h-4 w-72 max-w-full" />
-    </div>
-    <SettingsBody>
-      <LoadingLines lines={4} />
-    </SettingsBody>
-  </Card>
-);
-
-/**
- * A section that failed as it rendered: the error on its card, in the
- * Settings layout, rather than a page of its own with a second header.
- */
-export const SettingsError = ({ error }: ErrorComponentProps) => (
-  <Card variant="panel">
-    <ErrorState
-      heading="h2"
-      reason={useRouteErrorReason(error)}
-      reload={isFileGone(error)}
-    />
-  </Card>
 );

@@ -19,7 +19,8 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { AuditArchive } from "./audit-archive.tsx";
+import { LogExport } from "../activity/audit-log.tsx";
+import { ArchiveSearch, RetentionCard } from "./audit-archive.tsx";
 
 // Settings › Audit trail › Archived events and Retention against core's
 // audit API as the page reaches it over RPC (the boundary from the web
@@ -117,10 +118,14 @@ const shown = async (
   };
   const rootRoute = createRootRoute({
     component: () => (
-      <AuditArchive
-        directory={{ people: new Map(), apps: new Map() }}
-        search={action === undefined ? {} : { action }}
-      />
+      <>
+        <ArchiveSearch
+          directory={{ people: new Map(), apps: new Map() }}
+          search={action === undefined ? {} : { action }}
+        />
+        <LogExport search={action === undefined ? {} : { action }} />
+        <RetentionCard />
+      </>
     ),
   });
   const router = createRouter({
@@ -156,9 +161,9 @@ const press = async (name: string) => {
   await settled();
 };
 
-/** The entries listed, by the action each names. */
+/** The events listed in the archive's dialog. */
 const listed = (): number =>
-  document.querySelectorAll('ul[aria-label="Entries"] > li').length;
+  document.querySelectorAll('[role="dialog"] table tbody tr').length;
 
 const text = (): string => document.body.textContent ?? "";
 
@@ -186,7 +191,7 @@ describe("Settings › Audit trail › Archive and retention", () => {
 
     await press("Search the archive");
     const first = listed();
-    await press("Load older");
+    await press("Older");
 
     expect({ before, asked, first, older: listed() }).toStrictEqual({
       before: 0,
@@ -211,9 +216,10 @@ describe("Settings › Audit trail › Archive and retention", () => {
     try {
       for (const format of ["CSV", "JSON"]) {
         // oxlint-disable-next-line no-await-in-loop -- one menu at a time
-        await press("Export with archive");
+        await press("Export");
         const item = [...document.querySelectorAll('[role="menuitem"]')].find(
-          (each) => each.textContent?.trim() === `Export ${format}`
+          (each) =>
+            each.textContent?.trim() === `Export ${format} with the archive`
         );
         // oxlint-disable-next-line no-await-in-loop -- as above
         await act(async () => {

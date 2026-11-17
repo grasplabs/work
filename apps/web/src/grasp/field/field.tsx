@@ -23,33 +23,12 @@ import { createContext, useContext } from "react";
 import type { ComponentProps, ReactNode } from "react";
 
 import { RequiredMark, labelStyles } from "../label/label";
+import type { LayoutStyle } from "../layout/layout";
 import { grasp } from "../tokens/tokens.stylex";
 import { fieldMarker } from "./field.stylex";
 
-type Layout = string | number | null;
-
 /** What a caller may style: where the field sits, and how wide it is. Never its look. */
-export type FieldLayoutStyle = stylex.StyleXStyles<{
-  alignSelf?: Layout;
-  justifySelf?: Layout;
-  flexGrow?: Layout;
-  flexShrink?: Layout;
-  flexBasis?: Layout;
-  gridArea?: Layout;
-  gridColumn?: Layout;
-  gridRow?: Layout;
-  order?: Layout;
-  width?: Layout;
-  minWidth?: Layout;
-  maxWidth?: Layout;
-  margin?: Layout;
-  marginBlock?: Layout;
-  marginBlockStart?: Layout;
-  marginBlockEnd?: Layout;
-  marginInline?: Layout;
-  marginInlineStart?: Layout;
-  marginInlineEnd?: Layout;
-}>;
+export type FieldLayoutStyle = LayoutStyle;
 
 const styles = stylex.create({
   // Label, control, description and error, one under the other, 8px apart.
@@ -117,6 +96,8 @@ export interface FieldProps extends Omit<
   invalid?: boolean;
   /** Layout only: margins, alignment and width. The look belongs to the field. */
   style?: FieldLayoutStyle;
+  /** The same as `style`, by a name a style lint does not take for an inline style attribute. */
+  layout?: FieldLayoutStyle;
 }
 
 // The field's name, for a control that must render its own native input before the script runs
@@ -126,11 +107,11 @@ const FieldName = createContext<string | undefined>(undefined);
 /** The name of the Field around a control, if it has one. */
 export const useFieldName = () => useContext(FieldName);
 
-export const Field = ({ style, ...rest }: FieldProps) => (
+export const Field = ({ style: styleProp, layout, ...rest }: FieldProps) => (
   <FieldName.Provider value={rest.name}>
     <FieldPrimitive
       {...rest}
-      {...stylex.props(fieldMarker, styles.field, style)}
+      {...stylex.props(fieldMarker, styles.field, layout ?? styleProp)}
     />
   </FieldName.Provider>
 );

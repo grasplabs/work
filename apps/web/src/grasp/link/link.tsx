@@ -11,26 +11,20 @@
 // Plain semantic HTML (an `a`): UI SDK has no link primitive, and a link needs none. Every value
 // is a token (src/tokens). A caller may set layout only (the `style` prop).
 import * as stylex from "@stylexjs/stylex";
+import { renderElement } from "@ui-sdk/react/primitive";
+import type { RenderProp } from "@ui-sdk/react/primitive";
 import type { AnchorHTMLAttributes, ReactNode } from "react";
 
 import { focus } from "../focus/focus";
+import { visuallyHidden } from "../hidden/hidden";
 import { External, Icon } from "../icons";
 import { iconVars } from "../icons/icon.stylex";
+import type { LayoutStyle } from "../layout/layout";
 import { simply } from "../motion/simply.stylex";
 import { grasp, media } from "../tokens/tokens.stylex";
 
-type Layout = string | number | null;
-
 /** What a caller may style: where the link sits. Never its look. */
-export type LinkLayoutStyle = stylex.StyleXStyles<{
-  alignSelf?: Layout;
-  justifySelf?: Layout;
-  margin?: Layout;
-  marginBlock?: Layout;
-  marginInline?: Layout;
-  marginInlineStart?: Layout;
-  marginInlineEnd?: Layout;
-}>;
+export type LinkLayoutStyle = LayoutStyle;
 
 /** How a link stands: inside a sentence, or on its own. */
 export type LinkVariant = "inline" | "standalone";
@@ -42,8 +36,14 @@ export interface LinkProps extends Omit<
 > {
   /** The words: where it goes, said plainly ("Sharing guide"), never "Click here". */
   children: ReactNode;
-  /** Where it goes. */
-  href: string;
+  /** Where it goes. Leave it out when `render` is a router's own link that carries it. */
+  href?: string;
+  /**
+   * The element it is drawn as, for a router's link (`render={<RouterLink to="/reports" />}`): it
+   * gets the look, the words, the external mark and the props given here, and keeps its own, so
+   * no wrapper is needed. Without it, an `<a href>`.
+   */
+  render?: RenderProp;
   /**
    * `inline` inside a sentence: the sentence's own colour and size, always underlined, so it is
    * found without colour. `standalone` on its own line ("View all reports"): ink, medium,
@@ -65,6 +65,8 @@ export interface LinkProps extends Omit<
   externalLabel?: string;
   /** Layout only: margins and alignment. The look belongs to the link. */
   style?: LinkLayoutStyle;
+  /** The same as `style`, by a name a style lint does not take for an inline style attribute. */
+  layout?: LinkLayoutStyle;
 }
 
 const styles = stylex.create({
@@ -157,54 +159,54 @@ const styles = stylex.create({
     width: `calc(${grasp.linkMark} * 0.73)`,
     overflow: "hidden",
   },
-  // The spoken words: read by a screen reader, never seen.
-  said: {
-    position: "absolute",
-    width: 1,
-    height: 1,
-    margin: -1,
-    overflow: "hidden",
-    clipPath: "inset(50%)",
-    whiteSpace: "nowrap",
-  },
 });
 
 export const Link = ({
   children,
   href,
+  render,
   variant = "inline",
   external = false,
   externalLabel = "opens in a new tab",
-  style,
+  style: styleProp,
+  layout,
   target,
   rel,
   ...rest
-}: LinkProps) => (
-  <a
-    {...rest}
-    href={href}
-    target={external ? "_blank" : target}
-    // An external link always takes these two words, written out so a linter can see them; a
-    // caller's own `rel` is for a link that stays in the product.
-    rel={external ? "noopener noreferrer" : rel}
-    data-slot="link"
-    data-variant={variant}
-    {...stylex.props(
-      styles.link,
-      styles[variant],
-      focus.words,
-      external && styles.external,
-      style
-    )}
-  >
-    {children}
-    {external ? (
-      <>
-        <span {...stylex.props(styles.mark, styles.markCut)}>
-          <Icon icon={External} />
-        </span>
-        <span {...stylex.props(styles.said)}>{` (${externalLabel})`}</span>
-      </>
-    ) : null}
-  </a>
-);
+}: LinkProps) =>
+  renderElement(
+    "a",
+    {
+      ...rest,
+      href,
+      target: external ? "_blank" : target,
+      // An external link always takes these two words, written out so a linter can see them; a
+      // caller's own `rel` is for a link that stays in the product.
+      rel: external ? "noopener noreferrer" : rel,
+      "data-slot": "link",
+      "data-variant": variant,
+      ...stylex.props(
+        styles.link,
+        styles[variant],
+        focus.words,
+        external && styles.external,
+        layout ?? styleProp
+      ),
+      children: (
+        <>
+          {children}
+          {external ? (
+            <>
+              <span {...stylex.props(styles.mark, styles.markCut)}>
+                <Icon icon={External} />
+              </span>
+              <span
+                {...stylex.props(visuallyHidden)}
+              >{` (${externalLabel})`}</span>
+            </>
+          ) : null}
+        </>
+      ),
+    },
+    render
+  );

@@ -66,6 +66,15 @@ export interface NavGroup<Row extends NavRow> {
   count?: number;
 }
 
+// The list's end fades out over its last rows (black to here, clear by its end, less a hair).
+const END_FADE = `calc(100% - ${grasp.space10}), transparent calc(100% - ${grasp.space1})`;
+// Where the sticky filter's ground ends in the list: its field and the room above and below it.
+const FILTER_END = `calc(2 * ${grasp.shellGutter} + ${grasp.controlMd})`;
+// The end's fade mirrored, from the list's top or from under the filter down: whole above it, clear
+// just under it, whole again a fade's length on.
+const START_FADE = `black 0px, transparent 0px, transparent ${grasp.space1}, black ${grasp.space10}`;
+const START_FADE_FILTER = `black ${FILTER_END}, transparent ${FILTER_END}, transparent calc(${FILTER_END} + ${grasp.space1}), black calc(${FILTER_END} + ${grasp.space10})`;
+
 export const navStyles = stylex.create({
   body: {
     display: "flex",
@@ -79,8 +88,27 @@ export const navStyles = stylex.create({
     overflowY: "auto",
     // No bar (PRODUCT-RULES, src/scroll): the rows still scroll by wheel, touch and keys.
     scrollbarWidth: "none",
+    // While more rows lie below, the list's end fades out (data-under-end, set by watchEnd), so it
+    // never reads as cut at the foot's hairline. While rows lie above it (scrolled), its start fades
+    // the same way, mirrored (data-under-start): from the list's top, or from under the filter, which
+    // stays at the top (its 36px field and its room above and below), so a row passing under it is
+    // never seen cut at its edge (App shell FRESH.md F86b). At rest at the top, nothing fades.
+    maskImage: {
+      default: null,
+      ":is([data-under-end])": `linear-gradient(to bottom, black ${END_FADE})`,
+      ":is([data-under-start])": `linear-gradient(to bottom, ${START_FADE})`,
+      ":is([data-under-start][data-under-end])": `linear-gradient(to bottom, ${START_FADE}, black ${END_FADE})`,
+      ":is([data-under-start]:has(> [data-slot=sidebar-filter]))": `linear-gradient(to bottom, ${START_FADE_FILTER})`,
+      ":is([data-under-start][data-under-end]:has(> [data-slot=sidebar-filter]))": `linear-gradient(to bottom, ${START_FADE_FILTER}, black ${END_FADE})`,
+    },
   },
   group: { display: "flex", flexDirection: "column", gap: grasp.shellRowGap },
+  // A run of groups that fold reads as a tree (App shell FRESH.md F67): a folding group right after
+  // another stands a row's gap under it, as a row under a row, not the groups' wider gap, so a run of
+  // folded groups keeps the rows' pitch.
+  groupInRun: {
+    marginBlockStart: `calc(${grasp.shellRowGap} - ${grasp.shellGutter})`,
+  },
   // A part's name over the groups that follow it: a level above a group's label, in the rows'
   // own size and a step quieter than a row, with room above it to start a new part.
   // A hairline over it starts the part; its name stands in the shell's ink, above the rows' quieter
@@ -142,18 +170,18 @@ export const navStyles = stylex.create({
     lineHeight: grasp.textXsLine,
     fontWeight: grasp.weightMedium,
     textAlign: "start",
-    color: grasp.shellTextTertiary,
+    // The rows' own quiet colour: the label tells itself from them by its smaller size and its
+    // weight. In the tertiary colour it read 3.0:1 in light, under the 4.5:1 its small words need,
+    // and paler than the rows it holds (A3-shell-04).
+    color: grasp.shellTextSecondary,
   },
   // A label that folds its group: the same words, a button, the chevron at its end.
   groupButton: {
     minHeight: { default: null, [COARSE]: grasp.tap },
     cursor: "pointer",
     color: {
-      default: grasp.shellTextTertiary,
-      [HOVER]: {
-        default: grasp.shellTextTertiary,
-        ":hover": grasp.shellTextSecondary,
-      },
+      default: grasp.shellTextSecondary,
+      [HOVER]: { default: grasp.shellTextSecondary, ":hover": grasp.shellText },
     },
   },
   groupWords: {
@@ -184,6 +212,9 @@ export const navStyles = stylex.create({
     padding: 0,
     listStyle: "none",
   },
+  // The rows of a group that folds stand in from its label, so the open group and its rows read as a
+  // tree, not one column (F67).
+  listUnder: { paddingInlineStart: grasp.space3 },
   // The filter stays at the top while the rows scroll under it, on the sidebar's own ground.
   filterGroup: {
     position: "sticky",
@@ -215,6 +246,23 @@ const matches = (row: NavRow, query: string) => {
     ...(row.rows ?? []).map((sub) => sub.label),
   ];
   return words.some((word) => word.toLocaleLowerCase().includes(query));
+};
+
+/** Whether a group folds and follows one that folds, with no part's name between: a run of them is a tree. */
+const inRun = (
+  groups: readonly { collapsible?: boolean; part?: string }[],
+  index: number,
+  shown: (index: number) => boolean
+) => {
+  const group = groups[index];
+  // The group drawn before it: one a filter has emptied is not drawn.
+  const at = groups.findLastIndex((_, each) => each < index && shown(each));
+  const before = at === -1 ? undefined : groups[at];
+  return (
+    group?.collapsible === true &&
+    before?.collapsible === true &&
+    (group.part === undefined || group.part === "")
+  );
 };
 
 /** Each group's key: its id, else its label, else its place. */
@@ -315,6 +363,30 @@ const writeScroll = (storageKey: string | undefined, top: number) => {
   } catch {
     // A shut store keeps nothing: Back brings the current row into view instead.
   }
+};
+
+/** Marks the list while more rows lie below its end or above its start (the fades there), on scroll
+ * and as it or its rows change size; never a render per scroll. Returns the clean-up. */
+const watchEnd = (element: HTMLElement) => {
+  const measure = () => {
+    element.toggleAttribute(
+      "data-under-end",
+      element.scrollHeight - element.clientHeight - element.scrollTop > 1
+    );
+    element.toggleAttribute("data-under-start", element.scrollTop > 1);
+  };
+  measure();
+  element.addEventListener("scroll", measure, { passive: true });
+  const observer =
+    typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+  observer?.observe(element);
+  for (const child of element.children) {
+    observer?.observe(child);
+  }
+  return () => {
+    observer?.disconnect();
+    element.removeEventListener("scroll", measure);
+  };
 };
 
 const STEPS: Record<
@@ -428,7 +500,7 @@ const FilterField = ({
   onQuery: (query: string) => void;
   onDown: () => boolean;
 }) => (
-  <div {...stylex.props(navStyles.filterGroup)}>
+  <div data-slot="sidebar-filter" {...stylex.props(navStyles.filterGroup)}>
     <InputGroup>
       <InputGroupText icon={Search} />
       <InputGroupInput
@@ -658,6 +730,13 @@ export const SidebarNav = <Row extends NavRow>({
     };
   }, [storageKey]);
 
+  // The fade at the list's end while more lies below; watched afresh after each draw, as the
+  // groups and their folds change what the list holds.
+  useEffect(() => {
+    const element = nav.current;
+    return element === null ? undefined : watchEnd(element);
+  });
+
   // Awake once the kept folds are drawn by React: the head's fold style (fold-script.ts) lets go
   // only then. While the page wakes, the first draw still holds the server's folds (none kept), so
   // letting go there would open the groups for a frame.
@@ -712,6 +791,8 @@ export const SidebarNav = <Row extends NavRow>({
     group.rows.filter((row) => matches(row, needle))
   );
   const none = needle !== "" && visible.every((rows) => rows.length === 0);
+  const drawn = (index: number) =>
+    needle === "" || (visible[index]?.length ?? 0) > 0;
 
   return (
     <nav ref={nav} aria-label={label} {...stylex.props(navStyles.body)}>
@@ -737,7 +818,13 @@ export const SidebarNav = <Row extends NavRow>({
         const listId = `${id}-list-${index}`;
         const shut = folding.folded(index);
         return (
-          <div key={keyOf(group, index)} {...stylex.props(navStyles.group)}>
+          <div
+            key={keyOf(group, index)}
+            {...stylex.props(
+              navStyles.group,
+              inRun(groups, index, drawn) && navStyles.groupInRun
+            )}
+          >
             <PartLabel
               part={group.part}
               href={group.partHref}
@@ -768,7 +855,10 @@ export const SidebarNav = <Row extends NavRow>({
                   ? keyOf(group, index)
                   : undefined
               }
-              {...stylex.props(navStyles.list)}
+              {...stylex.props(
+                navStyles.list,
+                group.collapsible === true && navStyles.listUnder
+              )}
             >
               {rows.map((row) => renderRow(row, list))}
             </ul>

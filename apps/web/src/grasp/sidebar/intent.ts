@@ -7,6 +7,14 @@ export const intent = {
     {
       when: "A product's main places to go, in groups, with the person signed in at the foot.",
     },
+    {
+      when: "A part of the product with pages of its own (Settings, one agent): pass it as `section`, and its list takes the sidebar with Back on top.",
+      source: "handover/sidebar-modes/STUDY.md",
+    },
+    {
+      when: "A glance at what waits on the person beside the main list: `tabs` (Home, Activity) with a live count.",
+      source: "handover/sidebar-modes/STUDY.md",
+    },
   ],
   notWhen: [
     {

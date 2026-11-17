@@ -158,7 +158,7 @@ describe("Settings › Audit trail › Chain check", () => {
       last: earlier,
     });
     await shown(session);
-    expect(text()).toContain("The whole chain verified, through entry 120");
+    expect(text()).toContain("Verified through 120");
 
     await verify();
 
@@ -169,14 +169,14 @@ describe("Settings › Audit trail › Chain check", () => {
       asked: [0, 100, 200],
       kept: { ok: true, through: 250 },
     });
-    expect(text()).toContain("The whole chain verified, through entry 250");
+    expect(text()).toContain("Verified through 250");
   });
 
   it("says when the chain was never verified", async () => {
     const { session } = fakeAudit({ head: 250, stretch: 100 });
     await shown(session);
 
-    expect(text()).toContain("The whole chain has not been verified yet.");
+    expect(text()).toContain("Not checked yet");
   });
 
   it("names the first entry where the chain breaks, and why, and checks nothing after it", async () => {
@@ -191,6 +191,7 @@ describe("Settings › Audit trail › Chain check", () => {
     await verify();
 
     expect(asked).toStrictEqual([0, 100]);
+    // What broke, then why, said at once.
     expect(document.querySelector('[role="alert"]')?.textContent).toMatch(
       /the chain broke at entry 142: nothing from there on is verified\. An entry was changed after it was written\.$/u
     );
@@ -203,9 +204,7 @@ describe("Settings › Audit trail › Chain check", () => {
     await verify();
 
     expect(asked).toStrictEqual([0]);
-    expect(text()).toContain(
-      "The audit trail has no entries yet: there is nothing to verify."
-    );
+    expect(text()).toContain("Nothing to check yet");
   });
 
   it("says why the last pass couldn't be read, and still verifies", async () => {
@@ -215,6 +214,6 @@ describe("Settings › Audit trail › Chain check", () => {
 
     await verify();
 
-    expect(text()).toContain("The whole chain verified, through entry 50");
+    expect(text()).toContain("Verified through 50");
   });
 });

@@ -1,56 +1,97 @@
 import type { Identity } from "@grasp-os/shared/rpc";
-import {
-  AppShell,
-  AppShellContent,
-  AppShellDock,
-  AppShellMain,
-} from "@grasp-os/ui/components/app-shell";
+// The kit's toasts and tooltips stay mounted beside Grasp UI's while pages
+// in other areas still call the kit's; each goes when its last caller
+// moves to Grasp UI.
 import { Toaster } from "@grasp-os/ui/components/toast";
 import { TooltipProvider } from "@grasp-os/ui/components/tooltip";
+import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { useState } from "react";
+import { useEffect, useEffectEvent, useState } from "react";
 import type { ReactNode } from "react";
 
+import type { ChatPanels } from "../chat/chat-panel.tsx";
 import type { CoreConnection } from "../core-connection.ts";
 import { keepFolded, readFolded } from "../fold.ts";
-import {
-  FrameStyleProvider,
-  readFrameStyle,
-} from "../grasp/frame/frame-style.ts";
-import { frame } from "../grasp/frame/frame.stylex.ts";
-import { GraspSidebar } from "../grasp/frame/grasp-sidebar.tsx";
-import { media } from "../grasp/tokens/tokens.stylex.ts";
+import { AppShell } from "../grasp/app-shell/index.ts";
+import { useGraspSidebar } from "../grasp/frame/grasp-sidebar.tsx";
+import { Sidebar } from "../grasp/sidebar/index.ts";
+import { Toaster as GraspToaster } from "../grasp/toast/index.ts";
 import { TourLayer } from "../tour/tour-layer.tsx";
 import { useTour } from "../tour/tour-state.ts";
-import { AiKeyBanner, providersOf } from "./ai-key-banner.tsx";
+import {
+  FailingBanner,
+  providersOf,
+  useFailingProviders,
+} from "./ai-key-banner.tsx";
 import type { FailingProvider } from "./ai-key-banner.tsx";
-import { AppSidebar } from "./app-sidebar.tsx";
+import { FrameBanner } from "./frame-banner.ts";
 import { InFrame } from "./in-frame.ts";
+import { usePageFills } from "./page-fill.ts";
+import { PersonTheme } from "./person-theme.tsx";
 
-// Grasp UI's frame: the sidebar on the window's ground, the page a card on
-// it a hair off the window's edges, lifted by a hair (frame.stylex.ts).
 const styles = stylex.create({
+  // The window's height, which App shell fills.
   shell: {
-    backgroundColor: frame.ground,
+    height: "100svh",
   },
-  // On a phone the sidebar is a sheet: the card is the whole window.
-  card: {
-    margin: { default: frame.inset, [media.belowTablet]: 0 },
-    borderRadius: { default: frame.cardCorner, [media.belowTablet]: 0 },
-    backgroundColor: frame.card,
-    boxShadow: { default: frame.cardShadow, [media.belowTablet]: "none" },
+  // The page lays itself out down the card, at least as tall as it, as
+  // pages do: Chat's start fills it, a page's own bar stays at its top.
+  page: {
+    display: "flex",
+    flexDirection: "column",
+    minHeight: "100%",
+  },
+  // A page that fills the card (no bar, as Chat's start, or one whose
+  // route says so, frame/page-fill.ts): as tall as the card, no taller, so
+  // its own panes scroll inside it.
+  fill: {
+    height: "100%",
   },
 });
 
+/** Whether a key goes to a field someone is typing in, which keeps it. */
+const typing = (target: EventTarget | null): boolean =>
+  target instanceof HTMLElement &&
+  (target.isContentEditable ||
+    target instanceof HTMLInputElement ||
+    target instanceof HTMLTextAreaElement ||
+    target instanceof HTMLSelectElement);
+
 /**
- * The signed-in product's frame (the kit's AppShell): the app's sidebar
- * beside the page, which scrolls inside its card so its site header stays
- * in view; over the page, at its foot, what stays at hand on every page
- * (`dock`); and beside or over the page, its panels (`panels`): an App's
- * page opened beside it, and Grasp's chat. The shell's pages are in it,
- * with all of them, and a page
- * outside the shell for someone signed in, such as a decision opened from
- * a link, with none of them.
+ * Cmd/Ctrl+B folds or opens the sidebar, as the kit's sidebar did, unless
+ * someone is typing (Bold, in a text box). Grasp UI's Sidebar has no key of
+ * its own yet. The tour holds every key before it reaches the window
+ * (tour/tour-layer.tsx).
+ */
+const useFoldKey = (toggle: () => void) => {
+  const onKey = useEffectEvent((event: KeyboardEvent) => {
+    if (
+      event.key.toLowerCase() === "b" &&
+      (event.metaKey || event.ctrlKey) &&
+      !event.altKey &&
+      !event.shiftKey &&
+      !typing(event.target)
+    ) {
+      event.preventDefault();
+      toggle();
+    }
+  });
+  useEffect(() => {
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+    };
+  }, []);
+};
+
+/**
+ * The signed-in product's frame, Grasp UI's App shell: the product's
+ * sidebar beside the page, or in the menu on a phone; the page's card, its
+ * bar drawn by each page (`SiteHeader`), or none (`bar="none"`, Chat's start);
+ * over the card's foot what stays at hand on every page (`dock`); beside
+ * the page, Grasp's chat (`panels`), or over it, floating (`floating`). A page outside the shell for someone
+ * signed in, such as a decision opened from a link, has the frame with none
+ * of them.
  *
  * While Stephen gives the tour, from his question whether the person is
  * ready to its end, the frame is inert: no press or key reaches a page
@@ -62,69 +103,106 @@ export const AppFrame = ({
   core,
   identity,
   failing,
+  bar = "page",
   dock,
   panels,
-  covered = false,
+  floating,
   children,
 }: {
   core: CoreConnection;
   identity: Identity;
   /** The AI providers that fail, read before the page showed (`failingUpFront`). */
   failing?: FailingProvider[];
+  /** `page`: the page draws its own bar (`SiteHeader`); `none`: the page has the whole card. */
+  bar?: "page" | "none";
   /** Over the page, centred at its foot: the chat's idle bar. */
   dock?: ReactNode;
-  /** Beside or over the page: an App's page opened beside it, and the chat. */
-  panels?: ReactNode;
-  /** A panel is full screen over the page, whose content fades out under it. */
-  covered?: boolean;
+  /** Beside the page, or over it full screen: Grasp's chat. */
+  panels?: ChatPanels;
+  /** Over the frame, where it was put: the chat floating. */
+  floating?: ReactNode;
   children: ReactNode;
 }) => {
+  const { t } = useLingui();
   // Folded as the person left it in this browser.
   const [open, setOpen] = useState(() => readFolded("sidebar") !== true);
-  // oxlint-disable-next-line react/hook-use-state -- read once, never set
-  const [style] = useState(readFrameStyle);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const fold = (next: boolean) => {
+    setOpen(next);
+    void keepFolded("sidebar", !next);
+  };
+  useFoldKey(() => {
+    fold(!open);
+  });
+  const fills = usePageFills() || bar === "none";
+  const sidebar = useGraspSidebar({
+    core,
+    identity,
+    open,
+    onOpenChange: fold,
+    closeMenu: () => {
+      setMenuOpen(false);
+    },
+  });
+  // Read here, where it stays as pages come and go; drawn under each page's bar.
+  const banner = (
+    <FailingBanner
+      failing={useFailingProviders({
+        identity,
+        providers: providersOf(core),
+        ...(failing === undefined ? {} : { failing }),
+      })}
+    />
+  );
   const { phase } = useTour();
   const touring = phase === "opening" || phase === "running";
   return (
     // What the frame says of an action outside any page, such as a
     // sign-out from the person menu that core didn't carry out.
-    <Toaster>
-      <TooltipProvider>
-        <FrameStyleProvider value={style}>
-          <AppShell
-            {...(style.frame === "grasp" ? stylex.props(styles.shell) : {})}
-            data-frame={style.frame}
-            inert={touring}
-            onOpenChange={(next) => {
-              setOpen(next);
-              void keepFolded("sidebar", !next);
-            }}
-            open={open}
-          >
-            {style.frame === "grasp" ? (
-              <GraspSidebar core={core} identity={identity} />
-            ) : (
-              <AppSidebar core={core} identity={identity} />
-            )}
-            <AppShellMain
-              {...(style.frame === "grasp" ? stylex.props(styles.card) : {})}
-              covered={covered}
+    <PersonTheme userId={identity.userId}>
+      <Toaster>
+        <TooltipProvider>
+          {/* The floating chat inside it too, so the tour holds it as well. */}
+          <div inert={touring} {...stylex.props(styles.shell)}>
+            <AppShell
+              bar={bar}
+              covered={panels?.covered ?? false}
+              dock={dock}
+              maxPanelWidth={panels?.maxWidth}
+              menuCloseLabel={t`Close the menu`}
+              menuLabel={t`Menu`}
+              menuOpen={menuOpen}
+              minPanelWidth={panels?.minWidth}
+              onMenuOpenChange={setMenuOpen}
+              onPanelWidthChange={panels?.onWidthChange}
+              onPanelsClose={panels?.onClose}
+              panelResizeLabel={t`Resize the chat`}
+              panelWidth={panels?.width}
+              panels={panels?.panels}
+              panelsCloseLabel={t`Close the chat`}
+              panelsToggleLabel={t`Show or hide the chat`}
+              sidebar={<Sidebar {...sidebar} />}
             >
-              <AppShellContent>
-                <AiKeyBanner
-                  failing={failing}
-                  identity={identity}
-                  providers={providersOf(core)}
-                />
-                <InFrame value>{children}</InFrame>
-              </AppShellContent>
-              {dock === undefined ? null : <AppShellDock>{dock}</AppShellDock>}
-            </AppShellMain>
-            {panels}
-          </AppShell>
-        </FrameStyleProvider>
-        <TourLayer identity={identity} />
-      </TooltipProvider>
-    </Toaster>
+              <div {...stylex.props(styles.page, fills && styles.fill)}>
+                {/* With no bar (Chat's start) at the page's top; else under the page's bar (SiteHeader). */}
+                {bar === "none" ? banner : null}
+                <FrameBanner value={bar === "none" ? null : banner}>
+                  <InFrame value>{children}</InFrame>
+                </FrameBanner>
+              </div>
+            </AppShell>
+            {floating}
+          </div>
+          {/* Grasp UI's toasts, for what the page and the chat say of an action. */}
+          <GraspToaster
+            closeLabel={t`Close`}
+            failedLabel={t`Could not finish`}
+            label={t`Notifications`}
+            pendingLabel={t`Still working`}
+          />
+          <TourLayer identity={identity} />
+        </TooltipProvider>
+      </Toaster>
+    </PersonTheme>
   );
 };

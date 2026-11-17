@@ -5,25 +5,23 @@ import type {
   ChannelReach,
 } from "@grasp-os/shared/channel-accounts";
 import { chatPlatformName } from "@grasp-os/shared/chat";
-import {
-  Alert,
-  AlertAction,
-  AlertDescription,
-  AlertTitle,
-} from "@grasp-os/ui/components/alert";
-import { Button } from "@grasp-os/ui/components/button";
-import { Trans, useLingui } from "@lingui/react/macro";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { useRouter } from "@tanstack/react-router";
-import { MessageSquareIcon } from "lucide-react";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
-import { ErrorText } from "../error-text.tsx";
 import { formatDateTime } from "../format.ts";
-import { NotLoadedState } from "../frame/page-states.tsx";
+import { Button } from "../grasp/button/index.ts";
+import { Chat } from "../grasp/icons/index.ts";
+import { Item, ItemGroup } from "../grasp/item/index.ts";
+import { SectionCard } from "../grasp/section-card/index.ts";
+import { Separator } from "../grasp/separator/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { forgetChatLink } from "./chat-link.ts";
-import { SettingsBody, SettingsSection } from "./settings-parts.tsx";
+import { RowNote, SectionNotLoaded, TitleLine } from "./section.tsx";
 import { WhereStephen } from "./where-stephen.tsx";
 
 // Settings › Security › Chat apps: the person's accounts on chat platforms
@@ -32,6 +30,11 @@ import { WhereStephen } from "./where-stephen.tsx";
 // press here, never opening the link (chat apps open links to preview
 // them), and the card says whose account it is, by the platform's own
 // name for it, so a link someone forwarded doesn't pass for theirs.
+
+const styles = stylex.create({
+  // In the rows' inline padding, so the card's parts share a left edge.
+  pad: { paddingBlock: grasp.space3, paddingInline: grasp.tableCellInline },
+});
 
 /**
  * What the section shows: where to reach Stephen, the linked accounts,
@@ -70,15 +73,12 @@ const useRefusalText = (reason: ChannelLinkRefusal): string => {
 
 /** A link that links nothing, and a way to put it away. */
 const RefusedLink = ({ reason }: { reason: ChannelLinkRefusal }) => {
+  const { t } = useLingui();
   const router = useRouter();
   const text = useRefusalText(reason);
   return (
-    <Alert>
-      <AlertTitle>
-        <Trans>This link can’t be used</Trans>
-      </AlertTitle>
-      <AlertDescription>{text}</AlertDescription>
-      <AlertAction>
+    <Item
+      actions={
         <Button
           onClick={() => {
             forgetChatLink();
@@ -87,10 +87,13 @@ const RefusedLink = ({ reason }: { reason: ChannelLinkRefusal }) => {
           size="sm"
           variant="ghost"
         >
-          <Trans>Dismiss</Trans>
+          {t`Dismiss`}
         </Button>
-      </AlertAction>
-    </Alert>
+      }
+      description={text}
+      title={t`This link can’t be used`}
+      variant="outline"
+    />
   );
 };
 
@@ -106,6 +109,7 @@ const OpenLink = ({
   platformUserId: string;
   name: string | null;
 }) => {
+  const { t } = useLingui();
   const router = useRouter();
   const { busy, failure, run } = useCoreAction();
   const app = chatPlatformName(platform);
@@ -127,21 +131,9 @@ const OpenLink = ({
     });
   };
   return (
-    <Alert>
-      <AlertTitle>
-        <Trans>
-          Link your {app} account {account}?
-        </Trans>
-      </AlertTitle>
-      <AlertDescription>
-        <Trans>
-          Grasp sent this link to that account in {app}. Link it only if it is
-          yours: Grasp then answers it as you, with what you can see.
-        </Trans>
-        <ErrorText>{failure}</ErrorText>
-      </AlertDescription>
-      <AlertAction>
-        <div className="flex gap-2">
+    <Item
+      actions={
+        <>
           <Button
             disabled={busy}
             onClick={() => {
@@ -151,7 +143,7 @@ const OpenLink = ({
             size="sm"
             variant="ghost"
           >
-            <Trans>Not mine</Trans>
+            {t`Not mine`}
           </Button>
           <Button
             disabled={busy}
@@ -159,12 +151,21 @@ const OpenLink = ({
               void link();
             }}
             size="sm"
+            variant="ink"
           >
-            <Trans>Link</Trans>
+            {t`Link`}
           </Button>
-        </div>
-      </AlertAction>
-    </Alert>
+        </>
+      }
+      description={
+        <RowNote failure={failure}>
+          {t`Grasp sent this link to that account in ${app}. Link it only if it is yours: Grasp then answers it as you, with what you can see.`}
+        </RowNote>
+      }
+      icon={Chat}
+      title={t`Link your ${app} account ${account}?`}
+      variant="outline"
+    />
   );
 };
 
@@ -187,32 +188,29 @@ const AccountRow = ({ account }: { account: ChannelAccount }) => {
     });
   };
   return (
-    <div className="flex items-center gap-3 border-t px-5 py-3">
-      <MessageSquareIcon
-        aria-hidden="true"
-        className="text-muted-foreground size-4 flex-none"
-      />
-      <div className="flex min-w-0 flex-1 flex-col">
-        <span className="truncate">
-          {app} · {shown}
-        </span>
-        <span className="text-muted-foreground">
-          <Trans>Linked {time}</Trans>
-        </span>
-        <ErrorText>{failure}</ErrorText>
-      </div>
-      <Button
-        aria-label={t`Unlink ${app} account ${shown}`}
-        disabled={busy}
-        onClick={() => {
-          void unlink();
-        }}
-        size="sm"
-        variant="ghost"
-      >
-        <Trans>Unlink</Trans>
-      </Button>
-    </div>
+    <Item
+      actions={
+        <Button
+          aria-label={t`Unlink ${app} account ${shown}`}
+          disabled={busy}
+          onClick={() => {
+            void unlink();
+          }}
+          size="sm"
+          variant="ghost"
+        >
+          {t`Unlink`}
+        </Button>
+      }
+      size="sm"
+      title={
+        <TitleLine
+          detail={<RowNote failure={failure}>{t`Linked ${time}`}</RowNote>}
+        >
+          {t`${app} · ${shown}`}
+        </TitleLine>
+      }
+    />
   );
 };
 
@@ -243,34 +241,37 @@ export const ChatAccountsSection = ({
   chat: Loaded<ChatAccounts>;
 }) => {
   const { t } = useLingui();
-  const description = t`Chat apps where Grasp knows it’s you. Write to Grasp in one, and it sends you a link to connect your account here. Unlink one you no longer use.`;
+  const description = t`Where Grasp knows it’s you. Write to Grasp in one to link it here.`;
   if (chat.state !== "ready") {
     return (
-      <SettingsSection description={description} title={t`Chat apps`}>
-        <NotLoadedState heading="h3" page={chat} />
-      </SettingsSection>
+      <SectionCard description={description} title={t`Chat apps`}>
+        <SectionNotLoaded page={chat} />
+      </SectionCard>
     );
   }
   const { reach, accounts, pending } = chat.data;
   return (
-    <SettingsSection description={description} title={t`Chat apps`}>
-      <WhereStephen reach={reach} />
+    <SectionCard description={description} flush title={t`Chat apps`}>
       {pending === undefined ? null : (
-        <SettingsBody>
+        <div {...stylex.props(styles.pad)}>
           <PendingLink pending={pending} />
-        </SettingsBody>
+        </div>
       )}
+      <WhereStephen reach={reach} />
+      {reach.length === 0 ? null : <Separator decorative />}
       {accounts.length === 0 ? (
-        <SettingsBody>
-          <p className="text-muted-foreground">
-            <Trans>No chat app accounts are linked.</Trans>
-          </p>
-        </SettingsBody>
+        <div {...stylex.props(styles.pad)}>
+          <Text size="sm" tone="muted">
+            {t`No chat app accounts are linked.`}
+          </Text>
+        </div>
       ) : (
-        accounts.map((account) => (
-          <AccountRow account={account} key={account.id} />
-        ))
+        <ItemGroup aria-label={t`Linked accounts`} separated>
+          {accounts.map((account) => (
+            <AccountRow account={account} key={account.id} />
+          ))}
+        </ItemGroup>
       )}
-    </SettingsSection>
+    </SectionCard>
   );
 };

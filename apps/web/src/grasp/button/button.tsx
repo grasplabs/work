@@ -1,21 +1,3 @@
-// Button: Grasp's button, from shadcn's (registry/bases/base/ui/button.tsx), converted from Tailwind
-// to StyleX and then made Grasp's: the website's Bevel finish, one corner, and the whole life of an
-// action on the control itself. Its behaviour is UI SDK's Button, so an agent on the page finds it by
-// its name and presses it (site/behaviour/agent.ts). A danger or approve button waits for the person's
-// yes before an agent's press runs; a press while it shows its result fails with a message.
-//
-//   <Button variant="ink">Save changes</Button>
-//   <Button variant="approve">Approve the plan</Button>
-//   <Button icon={Plus}>Invite people</Button>
-//   <Button icon={More} label="More actions" />          icon only: the label is its name
-//   <Button render={<a href="/settings" />}>Settings</Button>   a link that looks like a button
-//   <Button variant="ink" {...save.props}>Save changes</Button> with useAction (use-action.ts)
-//   <Button variant="danger" agentConfirm="Deletes the workspace">Delete</Button>
-//
-// Drawn by another UI SDK part (a dialog's trigger, a toast's action), it takes that part's props
-// and is only its face: one element is never two UI SDK buttons, which an agent would see twice.
-//
-// Every value is a token (src/tokens). A caller may set layout only (the `style` prop).
 "use client";
 
 import * as stylex from "@stylexjs/stylex";
@@ -41,6 +23,7 @@ import { focus } from "../focus/focus";
 import { Failed, Icon, Tick } from "../icons";
 import type { IconData } from "../icons";
 import { iconVars } from "../icons/icon.stylex";
+import type { LayoutStyle } from "../layout/layout";
 import { simply } from "../motion/simply.stylex";
 import { Spinner } from "../spinner";
 import { spinnerVars } from "../spinner/spinner.stylex";
@@ -55,40 +38,8 @@ export type ButtonSize = "xs" | "sm" | "md" | "lg";
 /** Where an action is: at rest, working on it, done, or failed. */
 export type ActionState = "idle" | "working" | "done" | "failed";
 
-type Layout = string | number | null;
-
-/**
- * A floor that follows the words, never a fixed width: `fit-content` keeps a growing button from
- * wrapping its words while they fit the line, so a row of equal buttons wraps before a label does.
- */
-type ContentFloor =
-  | "fit-content"
-  | "max-content"
-  | "min-content"
-  | "auto"
-  | 0
-  | null;
-
-/** What a caller may style: where the button sits. Never its look, and never a fixed width. */
-export type ButtonLayoutStyle = stylex.StyleXStyles<{
-  minWidth?: ContentFloor;
-  alignSelf?: Layout;
-  justifySelf?: Layout;
-  flexGrow?: Layout;
-  flexShrink?: Layout;
-  flexBasis?: Layout;
-  gridArea?: Layout;
-  gridColumn?: Layout;
-  gridRow?: Layout;
-  order?: Layout;
-  margin?: Layout;
-  marginBlock?: Layout;
-  marginBlockStart?: Layout;
-  marginBlockEnd?: Layout;
-  marginInline?: Layout;
-  marginInlineStart?: Layout;
-  marginInlineEnd?: Layout;
-}>;
+/** What a caller may style: where the button sits and how much room it takes (src/layout). Never its look. */
+export type ButtonLayoutStyle = LayoutStyle;
 
 /**
  * The words on a button. Text or elements, never empty: `false`, `null` and `""` are not words,
@@ -99,9 +50,6 @@ export type ButtonWords =
   | number
   | ReactElement
   | readonly (string | number | ReactElement)[];
-
-// Every prop is documented once, where it is first declared; the props on the docs page are read
-// from ButtonProps, the union below, so they cannot drift from what the code accepts.
 
 /**
  * A button with words, and an icon before or after them if it helps.
@@ -142,6 +90,13 @@ interface ButtonBase {
    */
   size?: ButtonSize;
   /**
+   * Squeezed, the words stay on one line and end in an ellipsis instead of wrapping. They stay the
+   * button's name, and a tooltip shows them whole while they are cut. For a narrow head where a long
+   * label would push the next control off. The icon and the spinner keep their place.
+   * @default false
+   */
+  truncate?: boolean;
+  /**
    * Render another element in its place, with the button's look: `<a href>` or a router's link.
    * It keeps its own role: a link stays a link.
    */
@@ -163,7 +118,11 @@ interface ButtonBase {
    * @default false
    */
   disabled?: boolean;
-  /** Layout only: margins, alignment, and a floor that follows the words (`minWidth: "fit-content"`). Colours, sizes, corners and widths belong to the button. */
+  /**
+   * Layout only: where it sits and how much room it takes, as on every part (src/layout): margins,
+   * alignment, `display`, a full width in a phone's footer, or a floor that follows the words
+   * (`minWidth: "fit-content"`). Its colours, corners and height belong to the button: use `size`.
+   */
   style?: ButtonLayoutStyle;
   /** The same as `style`, by a name a style lint does not take for an inline style attribute. */
   layout?: ButtonLayoutStyle;
@@ -240,6 +199,11 @@ const shake = stylex.keyframes({
   "75%": { transform: `translateX(calc(-0.5 * ${grasp.resultShake}))` },
 });
 
+const ITEM =
+  ':not([data-slot$="-content"], [data-slot$="-positioner"], [data-slot$="-backdrop"], [role=menu], [role=dialog], [role=listbox], [role=tooltip])';
+const FIRST = `:nth-child(1 of ${ITEM})`;
+const LAST = `:nth-last-child(1 of ${ITEM})`;
+
 const styles = stylex.create({
   base: {
     // The icon inside follows these (the icons entry (`@/components/grasp/icons`)/icon.stylex.ts).
@@ -269,7 +233,7 @@ const styles = stylex.create({
     textAlign: "center",
     textDecorationLine: "none",
     // A long label wraps between words (balanced), and only breaks a word longer than the
-    // column it stands in. It is never cut off.
+    // column it stands in. It is never cut off, unless the caller asks for `truncate` (cut, below).
     whiteSpace: "normal",
     overflowWrap: "anywhere",
     hyphens: "auto",
@@ -318,6 +282,34 @@ const styles = stylex.create({
     paddingInline: grasp.space4,
     borderRadius: `min(${grasp.corner}, calc(${grasp.controlLg} / 2))`,
   },
+  // Inside a Button group: one shape with its neighbours. Square between buttons, and at the
+  // group's ends its corner, taken from the group, so a chosen, open or pressed fill sits inside the
+  // group's shape (A3-actions-01: it was a loose rounded tile over the group's edge, with notches
+  // at its neighbours). Logical corners, so right to left holds too.
+  inGroup: {
+    borderStartStartRadius: {
+      default: null,
+      ":is([data-slot=button-group] > *)": 0,
+      [`:is([data-slot=button-group] > ${FIRST})`]: "inherit",
+    },
+    borderEndEndRadius: {
+      default: null,
+      ":is([data-slot=button-group] > *)": 0,
+      [`:is([data-slot=button-group] > ${LAST})`]: "inherit",
+    },
+    borderEndStartRadius: {
+      default: null,
+      ":is([data-slot=button-group] > *)": 0,
+      [`:is([data-slot=button-group]:not([aria-orientation=vertical]) > ${FIRST}, [data-slot=button-group][aria-orientation=vertical] > ${LAST})`]:
+        "inherit",
+    },
+    borderStartEndRadius: {
+      default: null,
+      ":is([data-slot=button-group] > *)": 0,
+      [`:is([data-slot=button-group]:not([aria-orientation=vertical]) > ${LAST}, [data-slot=button-group][aria-orientation=vertical] > ${FIRST})`]:
+        "inherit",
+    },
+  },
   // Icon only: a square of the same height.
   square: {
     paddingInline: 0,
@@ -330,8 +322,9 @@ const styles = stylex.create({
   // Variants, at rest. `live` adds hover and press; a button that is disabled, working or
   // showing a result gets only the rest.
   ink: {
-    // On the fill a working spinner's last bars stay seen (Spinner's floor).
+    // On the fill a working spinner's last bars stay seen (Spinner's floor), and its ring is drawn heavier.
     [spinnerVars.floor]: grasp.spinnerFadeOnFill,
+    [spinnerVars.stroke]: grasp.spinnerStrokeOnFill,
     color: grasp.actionText,
     backgroundColor: grasp.actionFill,
     boxShadow: grasp.bevelInk,
@@ -342,9 +335,15 @@ const styles = stylex.create({
       ":hover": { default: null, [HOVER]: grasp.bevelInkHover },
       ":active": grasp.bevelInkPress,
     },
+    // Under a pointer the fill lightens a step as the bevel brightens (in light: it barely moved,
+    // 10 levels against approve's 25, A3-actions-04); in dark it goes to white, as it did. The
+    // words stay 8.8:1 on it.
     backgroundColor: {
       default: grasp.actionFill,
-      ":hover": { default: null, [HOVER]: grasp.actionFillHover },
+      ":hover": {
+        default: null,
+        [HOVER]: `light-dark(oklch(from ${grasp.actionFill} calc(l + 0.08) c h), ${grasp.actionFillHover})`,
+      },
       ":active": grasp.actionFillPress,
     },
   },
@@ -383,8 +382,9 @@ const styles = stylex.create({
     },
   },
   danger: {
-    // On the fill a working spinner's last bars stay seen (Spinner's floor).
+    // On the fill a working spinner's last bars stay seen (Spinner's floor), and its ring is drawn heavier.
     [spinnerVars.floor]: grasp.spinnerFadeOnFill,
+    [spinnerVars.stroke]: grasp.spinnerStrokeOnFill,
     color: grasp.dangerText,
     backgroundColor: grasp.dangerFill,
     boxShadow: grasp.bevelDanger,
@@ -395,9 +395,14 @@ const styles = stylex.create({
       ":hover": { default: null, [HOVER]: grasp.bevelDangerHover },
       ":active": grasp.bevelDangerPress,
     },
-    // A press also deepens the fill, so it shows beyond the scale. Hover stays on the drop.
+    // Under a pointer the fill lightens a step as the bevel brightens (it moved 9 levels against
+    // approve's 25, A3-actions-04), the words still 4.6:1 on it; a press deepens it past rest.
     backgroundColor: {
       default: grasp.dangerFill,
+      ":hover": {
+        default: null,
+        [HOVER]: `oklch(from ${grasp.dangerFill} calc(l + 0.06) c h)`,
+      },
       ":active": grasp.dangerFillPress,
     },
   },
@@ -405,8 +410,9 @@ const styles = stylex.create({
   // into mint. The light is wider than the button, so it can move: under a pointer it leans in,
   // pressed it draws back. Its fill is under it, for forced colours and a failed action.
   approve: {
-    // On the fill a working spinner's last bars stay seen (Spinner's floor).
+    // On the fill a working spinner's last bars stay seen (Spinner's floor), and its ring is drawn heavier.
     [spinnerVars.floor]: grasp.spinnerFadeOnFill,
+    [spinnerVars.stroke]: grasp.spinnerStrokeOnFill,
     color: grasp.approveText,
     backgroundColor: grasp.approveFill,
     backgroundImage: grasp.approveLight,
@@ -439,6 +445,21 @@ const styles = stylex.create({
     opacity: grasp.dim,
     cursor: "not-allowed",
     borderColor: { default: "currentColor", [FORCED]: "GrayText" },
+  },
+  // The ink button out of use draws its quiet fill and ink, not the full fill at half strength:
+  // at night the full fill is near white, and dimmed it was still the brightest thing in a box
+  // that can do nothing. On paper it looks as it did.
+  inkDisabled: {
+    opacity: 1,
+    color: { default: grasp.actionTextDisabled, [FORCED]: "GrayText" },
+    backgroundColor: {
+      default: grasp.actionFillDisabled,
+      [FORCED]: "ButtonFace",
+    },
+    boxShadow: {
+      default: `inset 0 0 0 ${grasp.hairline} ${grasp.edgeTone}`,
+      [FORCED]: "none",
+    },
   },
   // Working or showing a result: it looks like itself, and the pointer says it is busy.
   busy: {
@@ -621,6 +642,18 @@ const styles = stylex.create({
       [stylex.when.ancestor("[data-shown]", layerMarker)]: simply.follow,
     },
   },
+  // Truncated: the button may shrink to its square floor (each size's minWidth), and its words
+  // stay on one line.
+  cut: {
+    flexShrink: 1,
+    whiteSpace: "nowrap",
+  },
+  // The words end in an ellipsis where the button ends.
+  wordsCut: {
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  },
   words: {
     minWidth: 0,
     // Only the style of wrapping: the text-wrap shorthand would also set text-wrap-mode to wrap and
@@ -653,6 +686,7 @@ interface Layers {
   state: ActionState | undefined;
   doneLabel?: string | undefined;
   failedLabel?: string | undefined;
+  truncate?: boolean;
 }
 
 const Layer = ({
@@ -687,6 +721,24 @@ const spinnerPlace = (
   alone: working && icon === undefined && iconEnd === undefined,
 });
 
+/** A span of words: on one line with an ellipsis when truncated, marked so the cut can be read. */
+const Words = ({
+  truncate,
+  look,
+  children,
+}: {
+  truncate: boolean;
+  look: stylex.StyleXStyles;
+  children: ReactNode;
+}) => (
+  <span
+    data-words={truncate ? "" : undefined}
+    {...stylex.props(look, truncate && styles.wordsCut)}
+  >
+    {children}
+  </span>
+);
+
 const Content = ({
   icon,
   iconEnd,
@@ -694,6 +746,7 @@ const Content = ({
   state,
   doneLabel,
   failedLabel,
+  truncate = false,
 }: Layers) => {
   const current = state ?? "idle";
   // Working, as Palermo: with an icon, the spinner takes the icon's place and the words stay; without
@@ -710,9 +763,12 @@ const Content = ({
           icon !== undefined && <Icon icon={icon} />
         )}
         {words !== undefined && (
-          <span {...stylex.props(styles.words, beside && styles.wordsBeside)}>
+          <Words
+            truncate={truncate}
+            look={[styles.words, beside && styles.wordsBeside]}
+          >
             {words}
-          </span>
+          </Words>
         )}
         {spinner.atEnd ? (
           <Spinner />
@@ -736,7 +792,9 @@ const Content = ({
               <Icon icon={Tick} />
             </span>
             {words !== undefined && (
-              <span {...stylex.props(styles.resultWords)}>{doneLabel}</span>
+              <Words truncate={truncate} look={styles.resultWords}>
+                {doneLabel}
+              </Words>
             )}
           </Layer>
           {/* Failed: the alert icon directly before the words, as one group, as any button with an
@@ -746,7 +804,9 @@ const Content = ({
               <Icon icon={Failed} />
             </span>
             {words !== undefined && (
-              <span {...stylex.props(styles.resultWords)}>{failedLabel}</span>
+              <Words truncate={truncate} look={styles.resultWords}>
+                {failedLabel}
+              </Words>
             )}
           </Layer>
         </>
@@ -859,6 +919,7 @@ interface Look {
   busy: boolean;
   failed: boolean;
   held: HoldLook | null;
+  truncate: boolean;
   style: ButtonLayoutStyle | undefined;
 }
 
@@ -871,21 +932,25 @@ const lookOf = ({
   busy,
   failed,
   held,
+  truncate,
   style,
 }: Look) =>
   stylex.props(
     buttonMarker,
     styles.base,
     styles[size],
+    styles.inGroup,
     iconOnly && styles.square,
     iconOnly && squares[size],
     variantStyles[variant][0],
     pressable && variantStyles[variant][1],
     !pressable && styles.still,
     disabled && styles.disabled,
+    disabled && variant === "ink" && styles.inkDisabled,
     busy && !disabled && styles.busy,
     failed && styles.failed,
     held !== null && holdLook(variant, held.holding),
+    truncate && styles.cut,
     focus.ring,
     styles.forcedFocus,
     style
@@ -982,6 +1047,10 @@ const faceOf = ({
   "aria-disabled": off && keepsFocus ? true : extra["aria-disabled"],
 });
 
+/** A name the caller gave, as aria-label, when it is words. */
+const givenName = (extra: Record<string, unknown>) =>
+  typeof extra["aria-label"] === "string" ? extra["aria-label"] : undefined;
+
 /** The button's own props: its look, its data attributes, its name and what an agent is told. */
 const ownOf = ({
   look,
@@ -1000,16 +1069,23 @@ const ownOf = ({
 }) => {
   const { variant, size, busy, iconOnly, held } = look;
   const name = busy ? undefined : held?.name;
+  // Drawn by another part (a dialog's trigger), the element keeps that part's slot and state, which
+  // its own selectors and the page's read, and says it is a Button with data-button (audit B19).
+  const part =
+    typeof extra["data-slot"] === "string" ? extra["data-slot"] : undefined;
   return {
     ...lookOf(look),
-    "data-slot": "button",
+    "data-slot": part ?? "button",
+    "data-button": part === undefined ? undefined : "",
     "data-variant": variant,
     "data-size": size,
-    "data-state": busy ? state : undefined,
+    "data-state": busy ? state : extra["data-state"],
     // A danger or approve button never runs for an agent without the person's yes (UI SDK's mark).
     // One that only opens something (a dialog's trigger) does not ask: the action inside it does.
     "data-agent-confirm": confirmFor(variant, words, agentConfirm, extra),
-    "aria-label": name ?? (iconOnly ? label : undefined),
+    // A hold's name, else an icon-only button's label, else the caller's own aria-label: a button
+    // with words keeps a name it is given ("Delete Spring launch" on a row's Delete), never drops it.
+    "aria-label": name ?? (iconOnly ? label : givenName(extra)),
     "aria-busy": state === "working" || undefined,
   };
 };
@@ -1035,6 +1111,7 @@ const Pressable = ({
     render,
     style,
     layout,
+    truncate = false,
     agentConfirm,
     disabled = false,
     focusableWhenDisabled = false,
@@ -1058,6 +1135,7 @@ const Pressable = ({
     busy,
     failed,
     held,
+    truncate,
     style: layout ?? style,
   };
 
@@ -1108,6 +1186,7 @@ const Pressable = ({
         state,
         doneLabel,
         failedLabel,
+        truncate,
       }}
     />
   );
@@ -1201,11 +1280,37 @@ const LazyHold = (allProps: ButtonProps) => {
   );
 };
 
+// Loaded only for a Button with `truncate`, so a plain Button never ships Tooltip.
+const CutButton = lazy(async () => {
+  const module = await import("./cut");
+  return { default: module.CutButton };
+});
+
+/** Until cut.tsx has loaded, the button stands as it is: truncated, without the tooltip yet. */
+const LazyCut = (allProps: ButtonProps) => (
+  <Suspense fallback={<Pressable {...allProps} held={null} />}>
+    <CutButton {...allProps} />
+  </Suspense>
+);
+
+/** Whether another UI SDK part draws this button (its props carry that part's data-slot). */
+const drawnByPart = (props: Record<string, unknown>) =>
+  typeof props["data-slot"] === "string";
+
 export const Button = (allProps: ButtonProps) => {
   // A hold is a popover's trigger first (hold.tsx), which draws this Button inside it.
   const held = useContext(HoldContext);
   if (allProps.hold === undefined || allProps.hold === false || held !== null) {
-    return <Pressable {...allProps} held={held} />;
+    // A truncated button is a tooltip's trigger (cut.tsx), unless a part already draws it.
+    const cut =
+      allProps.truncate === true &&
+      held === null &&
+      !drawnByPart({ ...allProps });
+    return cut ? (
+      <LazyCut {...allProps} />
+    ) : (
+      <Pressable {...allProps} held={held} />
+    );
   }
   return <LazyHold {...allProps} />;
 };

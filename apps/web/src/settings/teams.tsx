@@ -1,40 +1,49 @@
 import type { Member, OrganizationTeam } from "@grasp-os/shared/members";
-import { Button } from "@grasp-os/ui/components/button";
-import {
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@grasp-os/ui/components/dialog";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@grasp-os/ui/components/dropdown-menu";
-import { Field, FieldError, FieldLabel } from "@grasp-os/ui/components/field";
-import { Input } from "@grasp-os/ui/components/input";
-import { Plural, Trans, useLingui } from "@lingui/react/macro";
-import {
-  EllipsisIcon,
-  PencilIcon,
-  PlusIcon,
-  Trash2Icon,
-  UsersIcon,
-} from "lucide-react";
+import { plural } from "@lingui/core/macro";
+import { useLingui } from "@lingui/react/macro";
 import { useEffect, useId, useState } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
-import { ErrorText } from "../error-text.tsx";
-import { LoadingLines, NotLoadedState } from "../frame/page-states.tsx";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogPanel,
+  AlertDialogTitle,
+} from "../grasp/alert-dialog/index.ts";
+import { Button } from "../grasp/button/index.ts";
+import {
+  Dialog,
+  DialogAction,
+  DialogBody,
+  DialogFooter,
+  DialogPanel,
+  DialogTitle,
+} from "../grasp/dialog/index.ts";
+import {
+  DropdownMenu,
+  DropdownMenuItem,
+  DropdownMenuPanel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "../grasp/dropdown-menu/index.ts";
+import { Field, FieldError, FieldLabel } from "../grasp/field/index.ts";
+import { Form } from "../grasp/form/index.ts";
+import { Edit, More, Plus, Trash } from "../grasp/icons/index.ts";
+import { Input } from "../grasp/input/index.ts";
+import { Item, ItemGroup } from "../grasp/item/index.ts";
+import { SectionCard } from "../grasp/section-card/index.ts";
+import { Text } from "../grasp/text/index.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
-import { SettingsBody, SettingsSection } from "./settings-parts.tsx";
+import {
+  LoadingLines,
+  RowNote,
+  SectionNotLoaded,
+  TitleLine,
+} from "./section.tsx";
 import { createTeam, deleteTeam, renameTeam } from "./team-changes.ts";
 import { TeamMembersDialog } from "./team-members-dialog.tsx";
 import { useTeamChange } from "./use-team-change.ts";
@@ -103,13 +112,16 @@ const TeamNameDialog = ({
   onSave: (name: string) => Promise<string | undefined>;
 }) => {
   const { t } = useLingui();
-  const nameId = useId();
+  const formId = useId();
   const [name, setName] = useState(initial);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string>();
   const taken = isTaken(name, teams, except);
   const problem = taken ? t`There is a team with this name already.` : failure;
   const save = async (): Promise<void> => {
+    if (taken) {
+      return;
+    }
     setBusy(true);
     const refused = await onSave(name.trim());
     setBusy(false);
@@ -129,46 +141,42 @@ const TeamNameDialog = ({
       }}
       open={open}
     >
-      <DialogContent>
-        <form
-          className="flex flex-col gap-4"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void save();
-          }}
-        >
-          <DialogHeader>
-            <DialogTitle>{title}</DialogTitle>
-          </DialogHeader>
-          <Field data-invalid={problem === undefined ? undefined : true}>
-            <FieldLabel htmlFor={nameId}>
-              <Trans>Name</Trans>
-            </FieldLabel>
-            <Input
-              aria-invalid={problem === undefined ? undefined : true}
-              autoComplete="off"
-              id={nameId}
-              onChange={(event) => {
-                setName(event.target.value);
-                setFailure(undefined);
-              }}
-              value={name}
-            />
-            {problem === undefined ? null : <FieldError>{problem}</FieldError>}
-          </Field>
-          <DialogFooter>
-            <DialogClose render={<Button type="button" variant="outline" />}>
-              <Trans>Cancel</Trans>
-            </DialogClose>
-            <Button
-              disabled={busy || taken || name.trim() === ""}
-              type="submit"
-            >
-              {submit}
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
+      <DialogPanel closeLabel={t`Close`}>
+        <DialogTitle>{title}</DialogTitle>
+        <DialogBody>
+          <Form
+            aria-label={title}
+            id={formId}
+            onSubmit={(event) => {
+              event.preventDefault();
+              void save();
+            }}
+          >
+            <Field invalid={problem !== undefined}>
+              <FieldLabel>{t`Name`}</FieldLabel>
+              <Input
+                autoComplete="off"
+                onValueChange={(value) => {
+                  setName(value);
+                  setFailure(undefined);
+                }}
+                required
+                value={name}
+              />
+              <FieldError match="valueMissing">{t`Enter a name for the team.`}</FieldError>
+              {problem === undefined ? null : (
+                <FieldError match>{problem}</FieldError>
+              )}
+            </Field>
+          </Form>
+        </DialogBody>
+        <DialogFooter>
+          <DialogAction>{t`Cancel`}</DialogAction>
+          <Button disabled={busy} form={formId} type="submit" variant="ink">
+            {submit}
+          </Button>
+        </DialogFooter>
+      </DialogPanel>
     </Dialog>
   );
 };
@@ -187,13 +195,14 @@ const NewTeamButton = ({
   return (
     <>
       <Button
+        icon={Plus}
         onClick={() => {
           setOpen(true);
         }}
         size="sm"
+        variant="ink"
       >
-        <PlusIcon data-icon="inline-start" />
-        <Trans>New team</Trans>
+        {t`New team`}
       </Button>
       <TeamNameDialog
         initial=""
@@ -228,12 +237,15 @@ const TeamRow = ({
   onChanged: () => Promise<void>;
 }) => {
   const { t } = useLingui();
-  const [renaming, setRenaming] = useState(false);
-  const [deleting, setDeleting] = useState(false);
-  const [showing, setShowing] = useState(false);
+  const [open, setOpen] = useState<"rename" | "delete" | "members">();
   const { busy, failure, run } = useTeamChange(onChanged);
   const { name } = team;
   const count = team.memberIds.length;
+  const close = (next: boolean): void => {
+    if (!next) {
+      setOpen(undefined);
+    }
+  };
   const remove = async (): Promise<void> => {
     const refused = await run(
       async () => {
@@ -241,68 +253,73 @@ const TeamRow = ({
       },
       t`${name} couldn't be deleted. Try again.`
     );
-    if (refused === undefined) {
-      setDeleting(false);
+    if (refused !== undefined) {
+      throw new Error(refused);
     }
   };
   return (
-    <div className="flex items-center gap-3 border-t px-5 py-3">
-      <span
-        aria-hidden="true"
-        className="bg-muted flex size-8 flex-none items-center justify-center rounded-full"
-      >
-        <UsersIcon className="text-muted-foreground size-4" />
-      </span>
-      <div className="flex min-w-0 flex-1 flex-col">
-        <span className="truncate">{name}</span>
-        <span className="text-muted-foreground">
-          <Plural one="# member" other="# members" value={count} />
-        </span>
-        <ErrorText>{deleting ? undefined : failure}</ErrorText>
-      </div>
-      <Button
-        aria-label={t`Members of ${name}`}
-        onClick={() => {
-          setShowing(true);
-        }}
+    <>
+      <Item
+        actions={
+          <>
+            <Button
+              aria-label={t`Members of ${name}`}
+              onClick={() => {
+                setOpen("members");
+              }}
+              size="sm"
+            >
+              {t`Members`}
+            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                icon={More}
+                label={t`Actions for ${name}`}
+                size="sm"
+                variant="ghost"
+              />
+              <DropdownMenuPanel align="end">
+                <DropdownMenuItem
+                  disabled={busy}
+                  icon={Edit}
+                  onSelect={() => {
+                    setOpen("rename");
+                  }}
+                >
+                  {t`Rename`}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  danger
+                  disabled={busy}
+                  icon={Trash}
+                  onSelect={() => {
+                    setOpen("delete");
+                  }}
+                >
+                  {t`Delete`}
+                </DropdownMenuItem>
+              </DropdownMenuPanel>
+            </DropdownMenu>
+          </>
+        }
         size="sm"
-        variant="outline"
-      >
-        <Trans>Members</Trans>
-      </Button>
-      <DropdownMenu>
-        <DropdownMenuTrigger
-          aria-label={t`Actions for ${name}`}
-          disabled={busy}
-          render={<Button size="icon-sm" variant="ghost" />}
-        >
-          <EllipsisIcon />
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-48">
-          <DropdownMenuItem
-            onClick={() => {
-              setRenaming(true);
-            }}
+        title={
+          <TitleLine
+            detail={
+              <RowNote failure={open === "delete" ? undefined : failure}>
+                {t`${plural(count, { one: "# member", other: "# members" })}`}
+              </RowNote>
+            }
           >
-            <PencilIcon />
-            <Trans>Rename</Trans>
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem
-            onClick={() => {
-              setDeleting(true);
-            }}
-            variant="destructive"
-          >
-            <Trash2Icon />
-            <Trans>Delete</Trans>
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+            {name}
+          </TitleLine>
+        }
+      />
       <TeamNameDialog
         except={team.id}
         initial={name}
-        onOpenChange={setRenaming}
+        onOpenChange={close}
         onSave={async (renamed) =>
           await run(
             async () => {
@@ -311,47 +328,38 @@ const TeamRow = ({
             t`${name} couldn't be renamed. Try again.`
           )
         }
-        open={renaming}
+        open={open === "rename"}
         submit={t`Rename`}
         teams={teams}
         title={t`Rename ${name}`}
       />
-      <Dialog onOpenChange={setDeleting} open={deleting}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>
-              <Trans>Delete {name}?</Trans>
-            </DialogTitle>
-            <DialogDescription>
-              <Trans>
-                What is shared with this team stops being shared with its
-                members through it, and the workflows it owns no longer have a
-                team. Its members stay in the organization.
-              </Trans>
-            </DialogDescription>
-          </DialogHeader>
-          <ErrorText>{failure}</ErrorText>
-          <DialogFooter showCloseButton>
-            <Button
-              disabled={busy}
-              onClick={() => {
-                void remove();
-              }}
-              variant="destructive"
+      <AlertDialog onOpenChange={close} open={open === "delete"}>
+        <AlertDialogPanel>
+          <AlertDialogTitle>{t`Delete ${name}?`}</AlertDialogTitle>
+          <AlertDialogDescription>
+            {t`What is shared with this team stops being shared with its members through it, and the workflows it owns no longer have a team. Its members stay in the organization.`}
+          </AlertDialogDescription>
+          <AlertDialogFooter>
+            <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
+            <AlertDialogAction
+              action={remove}
+              failedLabel={t`Could not delete`}
+              variant="danger"
+              workingLabel={t`Deleting`}
             >
-              <Trans>Delete</Trans>
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+              {t`Delete`}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogPanel>
+      </AlertDialog>
       <TeamMembersDialog
         members={members}
         onChanged={onChanged}
-        onOpenChange={setShowing}
-        open={showing}
+        onOpenChange={close}
+        open={open === "members"}
         team={team}
       />
-    </div>
+    </>
   );
 };
 
@@ -366,31 +374,28 @@ const TeamsList = ({
   const { t } = useLingui();
   const { teams, members } = data;
   return (
-    <SettingsSection
-      action={<NewTeamButton onChanged={onChanged} teams={teams} />}
-      description={
-        <Trans>
-          Teams group the people who work together, so apps, Knowledge and
-          workflows can be shared with a whole team at once.
-        </Trans>
-      }
+    <SectionCard
+      actions={<NewTeamButton onChanged={onChanged} teams={teams} />}
+      description={t`Share Apps, Knowledge and workflows with a whole team at once.`}
+      flush={teams.length > 0}
       title={t`Teams`}
     >
       {teams.length === 0 ? (
-        <p className="text-muted-foreground border-t px-5 py-6 text-center">
-          <Trans>No teams yet.</Trans>
-        </p>
-      ) : null}
-      {teams.map((team) => (
-        <TeamRow
-          key={team.id}
-          members={members}
-          onChanged={onChanged}
-          team={team}
-          teams={teams}
-        />
-      ))}
-    </SettingsSection>
+        <Text tone="muted">{t`No teams yet.`}</Text>
+      ) : (
+        <ItemGroup aria-label={t`Teams`} separated>
+          {teams.map((team) => (
+            <TeamRow
+              key={team.id}
+              members={members}
+              onChanged={onChanged}
+              team={team}
+              teams={teams}
+            />
+          ))}
+        </ItemGroup>
+      )}
+    </SectionCard>
   );
 };
 
@@ -417,18 +422,21 @@ export const TeamsPanel = () => {
   };
   if (loaded === undefined) {
     return (
-      <SettingsSection title={t`Teams`}>
-        <SettingsBody>
-          <LoadingLines lines={3} />
-        </SettingsBody>
-      </SettingsSection>
+      <SectionCard title={t`Teams`}>
+        <LoadingLines lines={3} />
+      </SectionCard>
     );
   }
   return loaded.state === "ready" ? (
     <TeamsList data={loaded.data} onChanged={reload} />
   ) : (
-    <SettingsSection title={t`Teams`}>
-      <NotLoadedState heading="h3" page={loaded} />
-    </SettingsSection>
+    <SectionCard title={t`Teams`}>
+      <SectionNotLoaded
+        onRetry={() => {
+          void reload();
+        }}
+        page={loaded}
+      />
+    </SectionCard>
   );
 };

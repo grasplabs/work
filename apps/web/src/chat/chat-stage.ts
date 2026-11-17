@@ -195,6 +195,24 @@ export const nextStep = (
 };
 
 /**
+ * Whether the part a step waits for says when it has finished moving: only
+ * the floating card does (ChatPanel). Docked and full screen the chat lives
+ * in App shell's panels, and the idle bar in its dock (chat-bar.tsx), which
+ * show and hide with no word when done, so a step waits for neither. The card a step takes away is where it was;
+ * the one it brings, where it goes.
+ */
+const saysSettled = (
+  part: ChatPart,
+  from: ChatStage,
+  to: ChatStage
+): boolean => {
+  if (part !== "card") {
+    return false;
+  }
+  return (from.card ? from.placement : to.placement) === "floating";
+};
+
+/**
  * The stage, moving toward `target`, with which parts move a beat later in its
  * step; `settled` is what each part calls once it has finished moving, for
  * the next step to start.
@@ -215,7 +233,11 @@ export const useChatStage = (
     if (next !== undefined) {
       setStage(next.stage);
       setDelays(next.delays);
-      setWaiting(next.waitFor);
+      setWaiting(
+        next.waitFor !== null && saysSettled(next.waitFor, stage, next.stage)
+          ? next.waitFor
+          : null
+      );
     }
   }
   return {

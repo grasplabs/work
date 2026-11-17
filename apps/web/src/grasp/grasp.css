@@ -4,6 +4,8 @@
  * colour scheme of the element, so the theme's `dark` class sets it.
  */
 @import "./tokens/tokens.css";
+/* Grasp UI's themes (Evergreen, Pine, Paper), on <html> as public/theme.js sets them. */
+@import "./theme/themes.css";
 
 /*
  * Geist Serif, for titles (Grasp UI's --grasp-font-serif), self-hosted as
@@ -46,6 +48,58 @@
 
 :root:is(.dark, [data-theme="dark"]) {
   color-scheme: dark;
+}
+
+/*
+ * The old kit (@grasp-os/ui, packages/ui/src/styles.css) on Grasp UI's
+ * themes: its neutrals, surfaces, lines, focus, sidebar and statuses restated
+ * as the theme's variables, so a page still drawn with the kit follows the
+ * person's Evergreen, Pine or Paper (Settings › Appearance), light and dark.
+ * The theme's variables follow light and dark through light-dark(), so one
+ * block holds both; it comes after the kit's own `:root` and `.dark` blocks
+ * and matches them, so it wins. The kit's brand colours stay its own, as
+ * the themes keep mint and lime: --highlight, --chart-*,
+ * --graph-*, --brain-*, the mentions and the syntax colours. This block goes
+ * when the kit goes.
+ */
+:root,
+:root.dark {
+  --background: var(--grasp-paper);
+  --foreground: var(--grasp-ink);
+  --card: var(--grasp-raised);
+  --card-foreground: var(--grasp-ink);
+  --popover: var(--grasp-raised);
+  --popover-foreground: var(--grasp-ink);
+  /* Ink is the one main action (Ruben): the kit's primary is the library's. */
+  --primary: var(--grasp-action-fill);
+  --primary-foreground: var(--grasp-action-text);
+  --secondary: var(--grasp-soft);
+  --secondary-foreground: var(--grasp-ink);
+  --muted: var(--grasp-soft);
+  --muted-foreground: var(--grasp-muted);
+  --faint: var(--grasp-quiet);
+  --accent: var(--grasp-ghost-fill-hover);
+  --accent-foreground: var(--grasp-ink);
+  --border: var(--grasp-line);
+  --input: var(--grasp-field-edge);
+  --ring: var(--grasp-ring);
+  --tile: var(--grasp-raised);
+  --tile-foreground: var(--grasp-ink);
+  --tinted: var(--grasp-soft);
+  --tinted-foreground: var(--grasp-ink);
+  --row-group: var(--grasp-soft);
+  --row-group-foreground: var(--grasp-ink);
+  --sidebar: var(--grasp-shell-ground);
+  --sidebar-foreground: var(--grasp-ink);
+  --sidebar-primary: var(--grasp-ink);
+  --sidebar-primary-foreground: var(--grasp-paper);
+  --sidebar-accent: var(--grasp-ghost-fill-hover);
+  --sidebar-accent-foreground: var(--grasp-ink);
+  --sidebar-border: var(--grasp-line);
+  --sidebar-ring: var(--grasp-ring);
+  --destructive: var(--grasp-danger);
+  --status-agreed: var(--grasp-success);
+  --status-attention: var(--grasp-attention);
 }
 
 /*

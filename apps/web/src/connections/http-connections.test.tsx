@@ -446,7 +446,7 @@ describe(HttpConnections, () => {
       read: document.querySelector("#integrations-http")?.textContent,
     }).toStrictEqual({
       whileUnread: "HTTP connections",
-      read: "HTTP connections1",
+      read: "HTTP connections 1",
     });
   });
 });

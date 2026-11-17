@@ -7,9 +7,6 @@ import type { ComponentProps, ReactNode } from "react";
 
 type GroupPrimitiveProps = ComponentProps<typeof GroupPrimitive>;
 
-// Every prop is documented once, where it is first declared; the props on the docs page are read
-// from the type below, so they cannot drift from what the code accepts.
-
 /** Every prop a DropdownMenuRadioGroup takes: these, and the rest of UI SDK's MenuRadioGroup. */
 export interface DropdownMenuRadioGroupProps extends Omit<
   GroupPrimitiveProps,

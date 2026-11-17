@@ -1,11 +1,16 @@
 import { useLingui } from "@lingui/react/macro";
-import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
+import {
+  createFileRoute,
+  Outlet,
+  redirect,
+  useMatchRoute,
+} from "@tanstack/react-router";
 import type { ErrorComponentProps } from "@tanstack/react-router";
 
 import { ChatBar } from "../chat/chat-bar.tsx";
-import { ChatPanel } from "../chat/chat-panel.tsx";
+import { ChatPanel, useChatPanels } from "../chat/chat-panel.tsx";
 import { ChatSwitcherProvider } from "../chat/chat-switcher.tsx";
-import { GlobalChatProvider, useGlobalChat } from "../chat/global-chat.tsx";
+import { GlobalChatProvider } from "../chat/global-chat.tsx";
 import { readWithin, shellStatus } from "../core-connection.ts";
 import { failingUpFront, providersOf } from "../frame/ai-key-banner.tsx";
 import { AppFrame } from "../frame/app-frame.tsx";
@@ -24,21 +29,24 @@ import { signInErrorSearch } from "../sign-in-errors.ts";
 
 /**
  * The frame, with Grasp's one chat (chat/global-chat.tsx): its idle bar over
- * the page, and the chat itself, docked beside the page or floating over it.
+ * the page, and the chat itself, docked beside the page, full screen over
+ * it, or floating.
  */
 const ShellFrame = () => {
   const { core, identity } = Route.useRouteContext();
-  const { stage } = useGlobalChat();
+  const panels = useChatPanels();
   const { failing } = Route.useLoaderData();
+  // Chat's start has no bar: its backdrop takes the whole card.
+  const chatStart = useMatchRoute()({ to: "/" }) !== false;
   return (
     <AppFrame
+      bar={chatStart ? "none" : "page"}
       core={core}
-      // The chat full screen: the page's content fades out under it.
-      covered={stage.card && stage.placement === "fullscreen"}
       dock={<ChatBar />}
       failing={failing}
       identity={identity}
-      panels={<ChatPanel />}
+      floating={<ChatPanel />}
+      panels={panels}
     >
       <Outlet />
     </AppFrame>

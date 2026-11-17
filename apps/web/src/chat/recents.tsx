@@ -1,43 +1,29 @@
+import { useLingui } from "@lingui/react/macro";
+import { useState } from "react";
+
+import { Clock } from "../grasp/icons/index.ts";
 import {
   Popover,
-  PopoverContent,
+  PopoverPanel,
   PopoverTrigger,
-} from "@grasp-os/ui/components/popover";
-import { PromptInputButton } from "@grasp-os/ui/components/prompt-input";
-import { Trans, useLingui } from "@lingui/react/macro";
-import { HistoryIcon } from "lucide-react";
-import { useState } from "react";
-import type { ReactElement, ReactNode } from "react";
-
+} from "../grasp/popover/index.ts";
 import { ChatList, useSelectChat } from "./chat-window.tsx";
 
 /**
- * The person's recent chats, behind `trigger` (what it says, `children`):
- * the box's Recents on Chat's own page, and the open chat's title at the
- * head of the chat. One opens in Grasp's chat, where this page allows it.
+ * The box's Recents: the person's recent chats, from where they ask, on
+ * Chat's own page and in the open chat. One opens in Grasp's chat, where
+ * this page allows it.
  */
-export const Recents = ({
-  trigger,
-  align = "end",
-  children,
-}: {
-  trigger: ReactElement;
-  /** Which of the trigger's edges the list lines up with. */
-  align?: "start" | "end";
-  children: ReactNode;
-}) => {
+export const RecentsButton = () => {
   const { t } = useLingui();
   const [open, setOpen] = useState(false);
   const selectChat = useSelectChat();
   return (
     <Popover onOpenChange={setOpen} open={open}>
-      <PopoverTrigger render={trigger}>{children}</PopoverTrigger>
-      <PopoverContent
-        align={align}
-        aria-label={t`Recent chats`}
-        className="w-80"
-        variant="flush"
-      >
+      <PopoverTrigger icon={Clock} size="sm" variant="ghost">
+        {t`Recents`}
+      </PopoverTrigger>
+      <PopoverPanel align="end" aria-label={t`Recent chats`}>
         <ChatList
           onOpen={(chatId) => {
             setOpen(false);
@@ -45,15 +31,7 @@ export const Recents = ({
           }}
           shown={open}
         />
-      </PopoverContent>
+      </PopoverPanel>
     </Popover>
   );
 };
-
-/** The box's Recents: the person's recent chats, from where they ask. */
-export const RecentsButton = () => (
-  <Recents trigger={<PromptInputButton />}>
-    <HistoryIcon />
-    <Trans>Recents</Trans>
-  </Recents>
-);

@@ -6,9 +6,6 @@ import type { ReactNode } from "react";
 
 import { popoverStyles as styles } from "./styles";
 
-// Every prop is documented once, where it is first declared; the props on the docs page are read
-// from the type below, so they cannot drift from what the code accepts.
-
 /** Every prop a PopoverFooter takes. */
 export interface PopoverFooterProps {
   /** The actions, the main one last: Cancel, then Send invite. */

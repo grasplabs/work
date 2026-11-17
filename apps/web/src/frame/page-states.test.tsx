@@ -1,5 +1,4 @@
 // @vitest-environment happy-dom
-import { SidebarProvider } from "@grasp-os/ui/components/sidebar";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
 import {
@@ -76,11 +75,9 @@ const opened = async (path: string, inFrame = true) => {
     root = createRoot(host);
     root.render(
       <I18nProvider i18n={i18n}>
-        <SidebarProvider>
-          <InFrame value={inFrame}>
-            <RouterProvider router={router} />
-          </InFrame>
-        </SidebarProvider>
+        <InFrame value={inFrame}>
+          <RouterProvider router={router} />
+        </InFrame>
       </I18nProvider>
     );
     await router.load();

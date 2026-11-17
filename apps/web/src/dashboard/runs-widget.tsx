@@ -3,7 +3,6 @@ import type {
   RunActivityDay,
   RunActivityWorkflow,
 } from "@grasp-os/shared/workflows";
-import { Stat } from "@grasp-os/ui/components/stat";
 import {
   Table,
   TableBody,
@@ -20,6 +19,7 @@ import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import { Link } from "@tanstack/react-router";
 import { useId } from "react";
 
+import { HighlightsGrid, Highlight } from "../grasp/highlights/index.ts";
 import {
   columnsOf,
   fullDays,
@@ -234,22 +234,19 @@ const Headline = ({ days }: { days: readonly RunActivityDay[] }) => {
   }
   const without = percent(share, i18n.locale);
   return (
-    <p className="flex flex-wrap items-baseline gap-x-2">
-      <span>
-        <Trans>
-          <Stat>{without}</Stat> without a person
-        </Trans>
-      </span>
-      <span className="text-muted-foreground text-xs">
-        <Plural one="of # run" other="of # runs" value={runs} />
-      </span>
-    </p>
+    <Highlight
+      title={plural(runs, {
+        one: "Without a person, of # run",
+        other: "Without a person, of # runs",
+      })}
+      value={without}
+    />
   );
 };
 
 /** The decisions the runs asked people for, by how they ended. */
 const Decisions = ({ activity }: { activity: RunActivity }) => {
-  const { i18n } = useLingui();
+  const { i18n, t } = useLingui();
   const id = useId();
   const { approved, rejected, timedOut, open } = activity.decisions;
   const { total, withPerson } = activity.runs;
@@ -271,14 +268,14 @@ const Decisions = ({ activity }: { activity: RunActivity }) => {
           value={total}
         />
       </p>
-      <dl className="grid grid-cols-2 gap-4 @md:grid-cols-4">
-        {counts.map(({ key, name, count }) => (
-          <div className="flex flex-col" key={key}>
-            <dt className="text-muted-foreground text-xs">{i18n._(name)}</dt>
-            <Stat render={<dd />}>{count}</Stat>
-          </div>
-        ))}
-      </dl>
+      <HighlightsGrid
+        aria-label={t`Decisions, by how they ended`}
+        columns={4}
+        items={counts.map(({ name, count }) => ({
+          title: i18n._(name),
+          value: String(count),
+        }))}
+      />
     </section>
   );
 };

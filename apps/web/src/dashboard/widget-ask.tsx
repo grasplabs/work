@@ -3,29 +3,36 @@ import type {
   WidgetMade,
   WidgetProgress,
 } from "@grasp-os/shared/widgets";
-import { Button } from "@grasp-os/ui/components/button";
-import { Field, FieldLabel } from "@grasp-os/ui/components/field";
-import {
-  Popover,
-  PopoverContent,
-  PopoverHeader,
-  PopoverTitle,
-  PopoverTrigger,
-} from "@grasp-os/ui/components/popover";
-import { Spinner } from "@grasp-os/ui/components/spinner";
-import { Textarea } from "@grasp-os/ui/components/textarea";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@grasp-os/ui/components/tooltip";
-import { Trans, useLingui } from "@lingui/react/macro";
-import { SparklesIcon } from "lucide-react";
-import { useId, useState } from "react";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
+import { useState } from "react";
 
 import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
+import { Button } from "../grasp/button/index.ts";
+import { Field, FieldLabel } from "../grasp/field/index.ts";
+import { Thought } from "../grasp/icons/index.ts";
+import {
+  Popover,
+  PopoverPanel,
+  PopoverTitle,
+  PopoverTrigger,
+} from "../grasp/popover/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { Textarea } from "../grasp/textarea/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { useCoreAction } from "../use-core-action.ts";
+
+/** The most a request may say: core takes no longer. */
+const MAX_REQUEST = 500;
+
+const styles = stylex.create({
+  form: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space3,
+  },
+});
 
 // Asking Grasp for a widget, as the prototype's board does: from the empty
 // card for a new one (`makeWidget`, widget-board.tsx), and from a made
@@ -68,7 +75,7 @@ export const WidgetAsk = ({
   const { busy, failure, run } = useCoreAction();
   const [request, setRequest] = useState("");
   const [note, setNote] = useState<string | null>(null);
-  const requestId = useId();
+  const { t } = useLingui();
   const send = async () => {
     const asked = request.trim();
     if (asked === "" || busy) {
@@ -100,32 +107,33 @@ export const WidgetAsk = ({
   };
   return (
     <form
-      className="flex flex-col gap-3"
+      {...stylex.props(styles.form)}
       onSubmit={(event) => {
         event.preventDefault();
         void send();
       }}
     >
-      <Field>
-        <FieldLabel htmlFor={requestId}>{label}</FieldLabel>
+      <Field disabled={busy}>
+        <FieldLabel>{label}</FieldLabel>
         <Textarea
-          disabled={busy}
-          id={requestId}
-          maxLength={500}
-          onChange={(event) => {
-            setRequest(event.target.value);
-          }}
+          maxLength={MAX_REQUEST}
+          onValueChange={setRequest}
           placeholder={placeholder}
           value={request}
         />
       </Field>
       <ErrorText>{failure}</ErrorText>
       {note === null ? null : (
-        <output className="text-muted-foreground">{note}</output>
+        <output>
+          <Text tone="muted">{note}</Text>
+        </output>
       )}
-      <Button disabled={busy || request.trim() === ""} type="submit">
-        {busy ? <Spinner data-icon="inline-start" /> : null}
-        {busy ? <Trans>Grasp is making it…</Trans> : <Trans>Ask Grasp</Trans>}
+      <Button
+        disabled={busy || request.trim() === ""}
+        type="submit"
+        variant="ink"
+      >
+        {busy ? t`Grasp is making it…` : t`Ask Grasp`}
       </Button>
     </form>
   );
@@ -152,24 +160,9 @@ export const ChangeWidget = ({
   const { title } = widget.view;
   return (
     <Popover onOpenChange={setOpen} open={open}>
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <PopoverTrigger
-              render={
-                <Button aria-label={label} size="icon-sm" variant="ghost" />
-              }
-            />
-          }
-        >
-          <SparklesIcon />
-        </TooltipTrigger>
-        <TooltipContent>{label}</TooltipContent>
-      </Tooltip>
-      <PopoverContent className="w-80">
-        <PopoverHeader>
-          <PopoverTitle>{t`Change ${title}`}</PopoverTitle>
-        </PopoverHeader>
+      <PopoverTrigger icon={Thought} label={label} size="xs" variant="ghost" />
+      <PopoverPanel>
+        <PopoverTitle>{t`Change ${title}`}</PopoverTitle>
         <WidgetAsk
           ask={async (session, asked, progress) =>
             await session.dashboard.changeWidget(widget.id, asked, progress)
@@ -183,7 +176,7 @@ export const ChangeWidget = ({
           onProgress={onProgress}
           placeholder={t`Show only the failed runs.`}
         />
-      </PopoverContent>
+      </PopoverPanel>
     </Popover>
   );
 };

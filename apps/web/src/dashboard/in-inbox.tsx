@@ -1,8 +1,9 @@
-import { buttonVariants } from "@grasp-os/ui/components/button";
-import { Trans, useLingui } from "@lingui/react/macro";
+import { useLingui } from "@lingui/react/macro";
 import { Link } from "@tanstack/react-router";
 
-import { ItemMark, kindLabel } from "../inbox/inbox-kind.tsx";
+import { Button } from "../grasp/button/index.ts";
+import { Item } from "../grasp/item/index.ts";
+import { kindLabel, kindMark } from "../inbox/inbox-kind.tsx";
 import { inboxItems } from "../inbox/items.ts";
 import type { InboxItem, InboxSource } from "../inbox/items.ts";
 import { DashboardGroup } from "./dashboard-card.tsx";
@@ -39,27 +40,30 @@ export const inInbox = (
     settledInInbox.has(source.type)
   );
 
+/** One of them, by its kind's icon and name, with the way to it in the inbox. */
 const InboxRow = ({ item }: { item: InboxItem }) => {
   const { t, i18n } = useLingui();
   const { title } = item;
   return (
-    <li className="flex min-h-14 items-center gap-3 border-t px-4 py-2">
-      <ItemMark item={item} />
-      <div className="flex min-w-0 flex-1 flex-col">
-        <span className="text-muted-foreground text-xs">
-          {i18n._(kindLabel[item.kind])}
-        </span>
-        <span className="truncate">{title}</span>
-      </div>
-      <Link
-        aria-label={t`Open in the inbox: ${title}`}
-        className={buttonVariants({ size: "xs" })}
-        search={{ item: item.id }}
-        to="/inbox"
-      >
-        <Trans>Open</Trans>
-      </Link>
-    </li>
+    <Item
+      actions={
+        <Button
+          render={
+            <Link
+              aria-label={t`Open in the inbox: ${title}`}
+              search={{ item: item.id }}
+              to="/inbox"
+            />
+          }
+          size="xs"
+        >
+          {t`Open`}
+        </Button>
+      }
+      description={i18n._(kindLabel[item.kind])}
+      icon={kindMark[item.kind]}
+      title={title}
+    />
   );
 };
 
@@ -71,11 +75,9 @@ export const InboxGroup = ({ items }: { items: readonly InboxItem[] }) => {
   }
   return (
     <DashboardGroup title={t`In your inbox`}>
-      <ul aria-label={t`In your inbox`}>
-        {items.map((item) => (
-          <InboxRow item={item} key={item.id} />
-        ))}
-      </ul>
+      {items.map((item) => (
+        <InboxRow item={item} key={item.id} />
+      ))}
     </DashboardGroup>
   );
 };

@@ -55,10 +55,11 @@ export interface SheetProps extends Omit<
    */
   side?: "start" | "end";
   /**
-   * How wide it is: `md` for a form or details, `wide` for a layout of its own.
+   * How wide it is: `md` for a form or details, `wide` for a layout of its own, `full` for a chart
+   * or a table opened in full. Never closer than its inset to the window's edges.
    * @default "md"
    */
-  size?: "md" | "wide";
+  size?: "md" | "wide" | "full";
   /**
    * Open now. Pass it with `onOpenChange` to open and close the sheet yourself. It may be mounted only
    * while open: focus still goes back to what opened it.

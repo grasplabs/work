@@ -115,7 +115,7 @@ const validateSearch = (
 export const Route = createFileRoute("/_shell/apps/$app")({
   // Grasp's chat is no part of the live App; for its builders, the App's
   // chat docks beside the workspace, about it (chat/chat-subject.ts).
-  staticData: { chat: chatPresence.hidden },
+  staticData: { chat: chatPresence.hidden, page: "fill" },
   pendingComponent: PageLoading,
   component: AppRoute,
   validateSearch,

@@ -35,5 +35,17 @@ export const intent = {
     },
     { name: 'size="inline"', when: "A small box." },
     { name: 'kind="error"', when: "The request failed." },
+    {
+      name: "media",
+      when: "The place is being set up: the Working mark in the icon's place, with words that say what is set up.",
+    },
+    {
+      name: "titleLevel={1}",
+      when: "The state is the whole page, a page with nothing at its address: its title is the page's h1.",
+    },
+    {
+      name: 'kind="error" announce={false}',
+      when: "A route's error page: read as a page, not said as a live update.",
+    },
   ],
 };

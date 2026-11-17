@@ -10,32 +10,17 @@
 // Every value is a token (src/tokens). A caller may set layout only (the `style` prop).
 import * as stylex from "@stylexjs/stylex";
 
+import { visuallyHidden } from "../hidden/hidden";
 import { Icon, Spinner as SpinnerIcon } from "../icons";
 import { iconVars } from "../icons/icon.stylex";
+import type { LayoutStyle } from "../layout/layout";
 import { grasp, media } from "../tokens/tokens.stylex";
 import { spinnerVars } from "./spinner.stylex";
 
 export type SpinnerSize = "sm" | "md" | "lg";
 
-type Layout = string | number | null;
-
 /** What a caller may style: where the spinner sits. Never its look. */
-export type SpinnerLayoutStyle = stylex.StyleXStyles<{
-  alignSelf?: Layout;
-  justifySelf?: Layout;
-  flexShrink?: Layout;
-  gridArea?: Layout;
-  gridColumn?: Layout;
-  gridRow?: Layout;
-  order?: Layout;
-  margin?: Layout;
-  marginBlock?: Layout;
-  marginBlockStart?: Layout;
-  marginBlockEnd?: Layout;
-  marginInline?: Layout;
-  marginInlineStart?: Layout;
-  marginInlineEnd?: Layout;
-}>;
+export type SpinnerLayoutStyle = LayoutStyle;
 
 /** Every prop a Spinner takes. */
 export interface SpinnerProps {
@@ -51,6 +36,8 @@ export interface SpinnerProps {
   size?: SpinnerSize;
   /** Layout only: margins and alignment. The look belongs to the spinner. */
   style?: SpinnerLayoutStyle;
+  /** The same as `style`, by a name a style lint does not take for an inline style attribute. */
+  layout?: SpinnerLayoutStyle;
 }
 
 const spin = stylex.keyframes({
@@ -65,7 +52,7 @@ const breathe = stylex.keyframes({
 
 const styles = stylex.create({
   spinner: {
-    [iconVars.stroke]: grasp.iconStroke,
+    [iconVars.stroke]: spinnerVars.stroke,
     display: "inline-flex",
     flexShrink: 0,
     verticalAlign: "middle",
@@ -87,24 +74,19 @@ const styles = stylex.create({
   sm: { [iconVars.size]: grasp.iconSm },
   md: { [iconVars.size]: grasp.iconMd },
   lg: { [iconVars.size]: grasp.spinnerLg },
-  // The label, said to a screen reader, never seen.
-  said: {
-    position: "absolute",
-    width: 1,
-    height: 1,
-    margin: -1,
-    overflow: "hidden",
-    clipPath: "inset(50%)",
-    whiteSpace: "nowrap",
-  },
 });
 
-export const Spinner = ({ label, size = "sm", style }: SpinnerProps) => {
+export const Spinner = ({
+  label,
+  size = "sm",
+  style: styleProp,
+  layout,
+}: SpinnerProps) => {
   const spinner = (
     <span
       aria-hidden="true"
       data-slot="spinner"
-      {...stylex.props(styles.spinner, styles[size], style)}
+      {...stylex.props(styles.spinner, styles[size], layout ?? styleProp)}
     >
       <Icon icon={SpinnerIcon} />
     </span>
@@ -117,7 +99,7 @@ export const Spinner = ({ label, size = "sm", style }: SpinnerProps) => {
     // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- not every screen reader treats <output> as a live region; role="status" is
     <span role="status">
       {spinner}
-      <span {...stylex.props(styles.said)}>{label}</span>
+      <span {...stylex.props(visuallyHidden)}>{label}</span>
     </span>
   );
 };

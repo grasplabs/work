@@ -21,23 +21,12 @@ import type { ReactNode } from "react";
 import { focus } from "../focus/focus";
 import { ChevronDown, Icon } from "../icons";
 import { iconVars } from "../icons/icon.stylex";
+import type { LayoutStyle } from "../layout/layout";
 import { simply } from "../motion/simply.stylex";
 import { grasp, media } from "../tokens/tokens.stylex";
 
-type Layout = string | number | null;
-
 /** What a caller may style: where it sits and how wide it is. */
-export type CollapsibleLayoutStyle = stylex.StyleXStyles<{
-  alignSelf?: Layout;
-  justifySelf?: Layout;
-  gridArea?: Layout;
-  gridColumn?: Layout;
-  width?: Layout;
-  maxWidth?: Layout;
-  margin?: Layout;
-  marginBlock?: Layout;
-  marginInline?: Layout;
-}>;
+export type CollapsibleLayoutStyle = LayoutStyle;
 
 /** Every prop a Collapsible takes. */
 export interface CollapsibleProps {
@@ -72,6 +61,8 @@ export interface CollapsibleProps {
   disabled?: boolean;
   /** Layout only: where it sits and how wide it is. */
   style?: CollapsibleLayoutStyle;
+  /** The same as `style`, by a name a style lint does not take for an inline style attribute. */
+  layout?: CollapsibleLayoutStyle;
 }
 
 const HOVER = media.hover;
@@ -232,7 +223,8 @@ export const Collapsible = ({
   variant = "ghost",
   fit = false,
   disabled,
-  style,
+  style: styleProp,
+  layout,
 }: CollapsibleProps) => (
   <CollapsiblePrimitive
     data-slot="collapsible"
@@ -246,7 +238,7 @@ export const Collapsible = ({
         : undefined
     }
     disabled={disabled}
-    {...stylex.props(styles.root, style)}
+    {...stylex.props(styles.root, layout ?? styleProp)}
   >
     <CollapsibleTrigger
       {...stylex.props(
@@ -271,7 +263,7 @@ export const Collapsible = ({
         </>
       )}
     </CollapsibleTrigger>
-    {/* The class only: UI SDK writes the panel's measured height as its own inline style. */}
+    {/* The class only: UI SDK writes the panel's measured height as its own inline (layout ?? styleProp). */}
     <CollapsiblePanel
       hiddenUntilFound
       className={stylex.props(styles.panel, styles.panelMoving).className}

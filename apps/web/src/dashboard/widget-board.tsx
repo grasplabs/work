@@ -15,6 +15,8 @@ import {
   PopoverTitle,
   PopoverTrigger,
 } from "@grasp-os/ui/components/popover";
+// The kit's Stat for a figure centred in a ring or a column: Grasp UI's
+// Highlight stands a name over its value, from the start edge.
 import { Stat } from "@grasp-os/ui/components/stat";
 import {
   Tooltip,
@@ -26,13 +28,14 @@ import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Await, Link } from "@tanstack/react-router";
-import { GripVerticalIcon, PlusIcon, XIcon } from "lucide-react";
+import { GripVerticalIcon, PlusIcon } from "lucide-react";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import type { KeyboardEvent, PointerEvent, ReactNode } from "react";
 import { flushSync } from "react-dom";
 
 import { ErrorText } from "../error-text.tsx";
 import { formatDate } from "../format.ts";
+import { Cross } from "../grasp/icons/index.ts";
 import { NotLoaded } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
@@ -1041,13 +1044,12 @@ export const WidgetBoard = ({ board }: { board: Board }) => {
                           />
                         )}
                         <BlockButton
+                          icon={Cross}
                           label={t`Take off the dashboard`}
                           onClick={() => {
                             remove(id);
                           }}
-                        >
-                          <XIcon />
-                        </BlockButton>
+                        />
                       </span>
                     ),
                   }}

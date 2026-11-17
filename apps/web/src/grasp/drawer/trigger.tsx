@@ -3,6 +3,7 @@
 "use client";
 
 import { DrawerTrigger as TriggerPrimitive } from "@ui-sdk/react/drawer";
+import { mergeProps } from "@ui-sdk/react/primitive";
 import type { ComponentProps } from "react";
 
 import { Button } from "../button";
@@ -14,6 +15,7 @@ import type {
   ButtonWords,
 } from "../button";
 import type { IconData } from "../icons";
+import { WithTip } from "../tooltip/lazy-tip";
 import { useStill } from "./still-context";
 
 type TriggerPrimitiveProps = ComponentProps<typeof TriggerPrimitive>;
@@ -58,6 +60,13 @@ export type DrawerTriggerProps = Omit<
     size?: ButtonSize;
     /** Layout only: margins and alignment, as on a Button. */
     style?: ButtonLayoutStyle;
+    /** The same as `style`, by a name a style lint does not take for an inline style attribute. */
+    layout?: ButtonLayoutStyle;
+    /**
+     * Words for a tooltip on the trigger: what the drawer or sheet is for, when the trigger alone does not
+     * say it (an icon only). It never shows while the drawer or sheet is open.
+     */
+    tooltip?: string;
   };
 
 /** The button that opens the drawer: a Grasp Button that UI SDK's trigger behaviour drives. */
@@ -67,21 +76,35 @@ export const DrawerTrigger = ({
   icon,
   label,
   children,
-  style,
+  style: styleProp,
+  layout,
+  tooltip,
   ...rest
 }: DrawerTriggerProps) => {
   // SAFETY: the props above are one of the two shapes, words or icon only, as the Button takes them.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-  const look = { variant, size, icon, label, style, children } as ButtonProps;
+  const look = {
+    variant,
+    size,
+    icon,
+    label,
+    layout: layout ?? styleProp,
+    children,
+  } as ButtonProps;
   // Drawn standing still for the docs: the open panel covers the page, so the trigger is not drawn.
   if (useStill()) {
     return null;
   }
   return (
-    <TriggerPrimitive
-      {...rest}
-      render={(props: Record<string, unknown>) => (
-        <Button {...props} {...look} />
+    <WithTip
+      tooltip={tooltip}
+      render={(tip) => (
+        <TriggerPrimitive
+          {...rest}
+          render={(props: Record<string, unknown>) => (
+            <Button {...mergeProps(tip, props)} {...look} />
+          )}
+        />
       )}
     />
   );

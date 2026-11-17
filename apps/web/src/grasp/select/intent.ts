@@ -27,5 +27,9 @@ export const intent = {
     { name: 'size="sm"', when: "A dense table or a toolbar." },
     { name: 'size="md"', when: "The default." },
     { name: 'size="lg"', when: "The one choice that matters on a phone." },
+    {
+      name: 'variant="text"',
+      when: 'A choice that reads as words in a row or a sentence: a level beside a person in a share list ("Can use").',
+    },
   ],
 };

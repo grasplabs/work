@@ -22,7 +22,7 @@ import {
   useNavigate,
   useRouter,
 } from "@tanstack/react-router";
-import { HistoryIcon, SettingsIcon, WorkflowIcon } from "lucide-react";
+import { WorkflowIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { answeredAfterBuild } from "../chat/build-answered.ts";
@@ -34,8 +34,6 @@ import {
   backCrumb,
   ItemBar,
   ItemShell,
-  ItemSwitch,
-  ItemSwitchLink,
   projectSearchOf,
   readItemProject,
 } from "../frame/item-shell.tsx";
@@ -47,6 +45,7 @@ import {
 import { SettingUp, SettingUpBar } from "../frame/setting-up.tsx";
 import type { SetUp } from "../frame/setting-up.tsx";
 import type { Crumb } from "../frame/site-header.tsx";
+import { TabsLink, TabsNav } from "../grasp/tabs/nav.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { ActivityBar } from "../workflows/activity-bar.tsx";
@@ -239,44 +238,39 @@ const ViewSwitch = ({
       ? [
           {
             view: "flow",
-            icon: WorkflowIcon,
             label: t({ message: "Flow", context: "a workflow's view" }),
           } as const,
         ]
       : []),
     {
       view: "runs",
-      icon: HistoryIcon,
       label: t({ message: "Runs", context: "a workflow's view" }),
     },
     {
       view: "settings",
-      icon: SettingsIcon,
       label: t({ message: "Settings", context: "a workflow's view" }),
     },
   ] as const;
   return (
-    <ItemSwitch label={t`Workflow views`}>
-      {views.map(({ view: each, icon: Icon, label }) => (
-        <ItemSwitchLink
+    <TabsNav label={t`Workflow views`} variant="segmented">
+      {views.map(({ view: each, label }) => (
+        <TabsLink
           current={each === view}
-          icon={<Icon data-icon="inline-start" />}
           key={each}
-          label={label}
-          renderLink={(look) => (
+          render={
             <Link
-              {...look}
               params={{ workflow }}
               replace
               search={(held) => ({ project: held.project, view: each })}
               to="/workflows/$workflow"
             />
-          )}
+          }
         >
+          {label}
           {each === "runs" ? <ListedCount count={runs} of="runs" /> : null}
-        </ItemSwitchLink>
+        </TabsLink>
       ))}
-    </ItemSwitch>
+    </TabsNav>
   );
 };
 
@@ -670,7 +664,7 @@ interface WorkflowSearch {
 export const Route = createFileRoute("/_shell/workflows/$workflow")({
   // Grasp's chat has no place here but its builders', about the workflow,
   // docked beside it (chat/chat-subject.ts).
-  staticData: { chat: chatPresence.hidden },
+  staticData: { chat: chatPresence.hidden, page: "fill" },
   validateSearch: (search: Record<string, unknown>): WorkflowSearch => {
     const view = viewOf(search.view);
     const section = workflowSettingsSectionOf(search.section);

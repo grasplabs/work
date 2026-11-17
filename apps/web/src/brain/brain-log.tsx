@@ -302,7 +302,7 @@ export const BrainLog = () => {
   };
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
-      <div className="pb-chat mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 pt-8 sm:px-6 md:px-12">
+      <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 sm:px-6 md:px-12">
         <PageHeaderTitle>
           <Trans context="the brain's log">Activity</Trans>
         </PageHeaderTitle>

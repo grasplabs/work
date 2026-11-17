@@ -5,14 +5,16 @@ import type {
   ChatPlanned,
 } from "@grasp-os/shared/chat";
 import type { ModelEffort } from "@grasp-os/shared/models";
-import { Button } from "@grasp-os/ui/components/button";
-import { Trans, useLingui } from "@lingui/react/macro";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 
 import { markMade } from "../apps/made-tip.ts";
 import { useCoreRead } from "../apps/use-core-read.ts";
-import { ErrorText } from "../error-text.tsx";
+import { Alert } from "../grasp/alert/index.ts";
+import { Button } from "../grasp/button/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { setActiveChat } from "./active-chat.ts";
 import { slotOf } from "./chat-subject.ts";
@@ -26,6 +28,18 @@ import { PlanCard } from "./plan-card.tsx";
 // the App first, with this chat docked beside it, where the agent goes on
 // building it and the page says it is setting it up until it works
 // (apps/app-workspace.tsx). That turn shows in the chat as any other.
+
+const styles = stylex.create({
+  stack: {
+    display: "grid",
+    gap: grasp.space2,
+  },
+  row: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: grasp.space2,
+  },
+});
 
 /** What Build it asks with: the model and effort the box names, and the way to the box. */
 export interface ThreadBuild {
@@ -93,8 +107,8 @@ const PlanActions = ({
     }
   };
   return (
-    <div className="flex flex-col gap-2">
-      <div className="flex flex-wrap gap-2">
+    <div {...stylex.props(styles.stack)}>
+      <div {...stylex.props(styles.row)}>
         <Button
           disabled={!ready || busy || model === undefined}
           onClick={() => {
@@ -116,20 +130,19 @@ const PlanActions = ({
               }
             })();
           }}
-          variant="highlight"
+          variant="ink"
         >
-          <Trans>Build it</Trans>
+          {t`Build it`}
         </Button>
         <Button
           onClick={() => {
             build.onChangePlan();
           }}
-          variant="outline"
         >
-          <Trans>Change the plan</Trans>
+          {t`Change the plan`}
         </Button>
       </div>
-      <ErrorText>{failure}</ErrorText>
+      {failure === undefined ? null : <Alert variant="danger">{failure}</Alert>}
     </div>
   );
 };

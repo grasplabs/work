@@ -5,6 +5,7 @@ import * as stylex from "@stylexjs/stylex";
 import { DrawerTitle as TitlePrimitive } from "@ui-sdk/react/drawer";
 import type { ReactNode } from "react";
 
+import { visuallyHidden } from "../hidden/hidden";
 import { useKind } from "./kind-context";
 import { useStill } from "./still-context";
 import { drawerStyles as styles } from "./styles";
@@ -24,7 +25,7 @@ export interface DrawerTitleProps {
 export const DrawerTitle = ({ children, hidden = false }: DrawerTitleProps) => {
   const kind = useKind();
   const look = hidden
-    ? stylex.props(styles.titleHidden)
+    ? stylex.props(visuallyHidden)
     : stylex.props(
         styles.title,
         kind === "drawer" ? styles.titleUnderGrip : styles.titleBesideClose

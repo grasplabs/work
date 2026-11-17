@@ -1,18 +1,9 @@
-import {
-  SidebarMenuBadge,
-  SidebarMenuButton,
-  SidebarMenuItem,
-} from "@grasp-os/ui/components/sidebar";
-import { Plural, Trans, useLingui } from "@lingui/react/macro";
-import { Link, useMatchRoute } from "@tanstack/react-router";
-import { LayoutDashboardIcon } from "lucide-react";
-
 import { readWithin } from "../core-connection.ts";
 import type { CoreConnection } from "../core-connection.ts";
 import { useFrameRead } from "../frame/frame-read.ts";
 
-// The nav's way to the dashboard, with how many things wait on the person
-// (as the prototype's badge, `app-sidebar.tsx`): everything core's feed of
+// How many things wait on the person, beside the sidebar's Dashboard
+// (grasp/frame/grasp-sidebar.tsx): everything core's feed of
 // what waits lists (`session.waiting`), the failed workflows, questions,
 // stopped schedules, sources and package notices among it only while
 // unread. Read again after every change on a page, and on the way to
@@ -45,38 +36,3 @@ const readCount = async (core: CoreConnection): Promise<number | undefined> => {
 /** How many things wait on the person; `undefined` until core says. */
 export const useWaitingCount = (): number | undefined =>
   useFrameRead(readCount).value;
-
-/** The sidebar's Dashboard entry, with how many things wait. */
-export const DashboardItem = () => {
-  const { t } = useLingui();
-  const matchRoute = useMatchRoute();
-  const waiting = useWaitingCount();
-  const shown = waiting !== undefined && waiting > 0;
-  return (
-    <SidebarMenuItem>
-      <SidebarMenuButton
-        isActive={matchRoute({ to: "/dashboard" }) !== false}
-        render={<Link to="/dashboard" />}
-        tooltip={t`Dashboard`}
-      >
-        <LayoutDashboardIcon />
-        <span>
-          <Trans>Dashboard</Trans>
-        </span>
-        {/* Inside the link, so its name says how many wait. */}
-        {shown ? (
-          <SidebarMenuBadge placement="inside">
-            <span aria-hidden="true">{waiting}</span>
-            <span className="sr-only">
-              <Plural
-                one="# thing waiting"
-                other="# things waiting"
-                value={waiting}
-              />
-            </span>
-          </SidebarMenuBadge>
-        ) : null}
-      </SidebarMenuButton>
-    </SidebarMenuItem>
-  );
-};

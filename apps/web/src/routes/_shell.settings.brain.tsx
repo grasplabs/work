@@ -1,28 +1,27 @@
 import type { Team, TeamGroup } from "@grasp-os/shared/brain";
-import { Badge } from "@grasp-os/ui/components/badge";
-import { Button } from "@grasp-os/ui/components/button";
-import { Input } from "@grasp-os/ui/components/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@grasp-os/ui/components/select";
-import { Trans, useLingui } from "@lingui/react/macro";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { createFileRoute, useRouter } from "@tanstack/react-router";
-import { PlusIcon, SparklesIcon } from "lucide-react";
 import { useState } from "react";
 
-import { ErrorText } from "../error-text.tsx";
-import { NotLoadedState } from "../frame/page-states.tsx";
+import { Alert } from "../grasp/alert/index.ts";
+import { Badge } from "../grasp/badge/index.ts";
+import { Button } from "../grasp/button/index.ts";
+import { Heading } from "../grasp/heading/index.ts";
+import { Agent, Plus } from "../grasp/icons/index.ts";
+import { Input } from "../grasp/input/index.ts";
+import { Item, ItemGroup } from "../grasp/item/index.ts";
+import { SectionCard } from "../grasp/section-card/index.ts";
+import { Select } from "../grasp/select/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import {
-  SettingsBody,
+  SectionNotLoaded,
   SettingsError,
   SettingsLoading,
-  SettingsSection,
-} from "../settings/settings-parts.tsx";
+  SettingsStack,
+} from "../settings/section.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 
 // Settings → Brain: the company's groups of teams, the brain's regions
@@ -56,6 +55,21 @@ const moved = (
     };
   });
 
+const styles = stylex.create({
+  part: { display: "flex", flexDirection: "column", gap: grasp.space2 },
+  group: { display: "flex", alignItems: "center", gap: grasp.space2 },
+  name: { flexGrow: 1, minWidth: 0 },
+  // Narrower on a phone, so a team keeps the room for its name.
+  choice: { width: { default: "12rem", [media.belowPhone]: "8.5rem" } },
+  foot: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    gap: grasp.space3,
+  },
+});
+
 /** One team, and the group it is in, to choose another. */
 const TeamRow = ({
   team,
@@ -72,35 +86,33 @@ const TeamRow = ({
   const { name } = team;
   const inGroup =
     groups.find(({ teamIds }) => teamIds.includes(team.id))?.id ?? none;
-  const items = [
-    ...groups.map(({ id, name: group }) => ({ value: id, label: group })),
-    { value: none, label: t`No group` },
-  ];
   return (
-    <li className="flex items-center justify-between gap-4 py-1">
-      <span className="min-w-0 truncate">{name}</span>
-      <Select
-        disabled={disabled}
-        items={items}
-        onValueChange={(value: unknown) => {
-          if (typeof value === "string") {
-            onMove(value);
-          }
-        }}
-        value={inGroup}
-      >
-        <SelectTrigger aria-label={t`Group of ${name}`} className="w-48">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          {items.map((item) => (
-            <SelectItem key={item.value} value={item.value}>
-              {item.label}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-    </li>
+    <Item
+      actions={
+        <div {...stylex.props(styles.choice)}>
+          <Select
+            aria-label={t`Group of ${name}`}
+            disabled={disabled}
+            items={[
+              ...groups.map(({ id, name: group }) => ({
+                value: id,
+                label: group,
+              })),
+              { value: none, label: t`No group` },
+            ]}
+            onValueChange={(value) => {
+              if (typeof value === "string") {
+                onMove(value);
+              }
+            }}
+            size="sm"
+            value={inGroup}
+          />
+        </div>
+      }
+      size="sm"
+      title={name}
+    />
   );
 };
 
@@ -145,58 +157,56 @@ const TeamGroups = ({
     })();
   };
   return (
-    <SettingsSection
-      action={
+    <SectionCard
+      actions={
         <Button
           disabled={busy || teams.length === 0}
+          icon={Agent}
           onClick={propose}
           size="sm"
-          variant="outline"
         >
-          <SparklesIcon data-icon="inline-start" />
-          <Trans>Propose groups</Trans>
+          {t`Propose groups`}
         </Button>
       }
       description={t`The brain's regions: your teams, grouped the way your company is. Grasp can propose groups; they count once you confirm them.`}
       title={t`Groups of teams`}
     >
       {teams.length === 0 ? (
-        <SettingsBody>
-          <p className="text-muted-foreground">
-            <Trans>The brain has no teams to group yet.</Trans>
-          </p>
-        </SettingsBody>
+        <Text tone="muted">{t`The brain has no teams to group yet.`}</Text>
       ) : (
-        <>
-          <SettingsBody>
+        <SettingsStack>
+          <div {...stylex.props(styles.part)}>
+            <Heading level={3} size="ui">
+              {t`Groups`}
+            </Heading>
             {groups.map((group) => (
-              <div className="flex items-center gap-2" key={group.id}>
-                <Input
-                  aria-label={t`Group name`}
-                  disabled={busy}
-                  maxLength={80}
-                  onChange={(event) => {
-                    const { value } = event.target;
-                    setGroups(
-                      groups.map((each) =>
-                        each.id === group.id ? { ...each, name: value } : each
-                      )
-                    );
-                  }}
-                  value={group.name}
-                />
+              <div key={group.id} {...stylex.props(styles.group)}>
+                <div {...stylex.props(styles.name)}>
+                  <Input
+                    aria-label={t`Group name`}
+                    disabled={busy}
+                    maxLength={80}
+                    onValueChange={(value) => {
+                      setGroups(
+                        groups.map((each) =>
+                          each.id === group.id ? { ...each, name: value } : each
+                        )
+                      );
+                    }}
+                    value={group.name}
+                  />
+                </div>
                 {held.some(
                   ({ id, confirmed }) => id === group.id && !confirmed
                 ) ? (
-                  <Badge variant="secondary">
-                    <Trans>Proposed</Trans>
-                  </Badge>
+                  <Badge tone="info">{t`Proposed`}</Badge>
                 ) : null}
               </div>
             ))}
             <div>
               <Button
                 disabled={busy}
+                icon={Plus}
                 onClick={() => {
                   setGroups([
                     ...groups,
@@ -206,13 +216,15 @@ const TeamGroups = ({
                 size="sm"
                 variant="ghost"
               >
-                <PlusIcon data-icon="inline-start" />
-                <Trans>Add a group</Trans>
+                {t`Add a group`}
               </Button>
             </div>
-          </SettingsBody>
-          <SettingsBody>
-            <ul aria-label={t`Teams`} className="flex flex-col">
+          </div>
+          <div {...stylex.props(styles.part)}>
+            <Heading level={3} size="ui">
+              {t`Teams`}
+            </Heading>
+            <ItemGroup aria-label={t`Teams`} separated>
               {teams.map((team) => (
                 <TeamRow
                   disabled={busy}
@@ -224,22 +236,24 @@ const TeamGroups = ({
                   team={team}
                 />
               ))}
-            </ul>
-          </SettingsBody>
-          <div className="flex flex-wrap items-center justify-end gap-3 border-t px-5 py-3">
-            <ErrorText>{failure}</ErrorText>
+            </ItemGroup>
+          </div>
+          {failure === undefined ? null : (
+            <Alert variant="danger">{failure}</Alert>
+          )}
+          <div {...stylex.props(styles.foot)}>
             {proposed ? (
-              <span className="text-muted-foreground">
-                <Trans>Grasp’s proposal counts once you confirm it.</Trans>
-              </span>
+              <Text size="sm" tone="muted">
+                {t`Grasp’s proposal counts once you confirm it.`}
+              </Text>
             ) : null}
-            <Button disabled={busy || unnamed} onClick={confirm} size="sm">
-              <Trans>Confirm groups</Trans>
+            <Button disabled={busy || unnamed} onClick={confirm} variant="ink">
+              {t`Confirm groups`}
             </Button>
           </div>
-        </>
+        </SettingsStack>
       )}
-    </SettingsSection>
+    </SectionCard>
   );
 };
 
@@ -248,9 +262,9 @@ const BrainSettings = () => {
   const page = Route.useLoaderData();
   if (page.state !== "ready") {
     return (
-      <SettingsSection title={t`Groups of teams`}>
-        <NotLoadedState heading="h3" page={page} />
-      </SettingsSection>
+      <SectionCard title={t`Groups of teams`}>
+        <SectionNotLoaded page={page} />
+      </SectionCard>
     );
   }
   const { teams, teamGroups } = page.data;

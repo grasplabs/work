@@ -44,6 +44,13 @@ export interface SheetPanelProps extends Omit<
    * @default "sheet"
    */
   corner?: "sheet" | "shell";
+  /**
+   * What it and its shade keep to: `window`, the browser's window; `shell`, the box App shell writes
+   * on itself while its menu is open (where the shell stands), so the menu opens at the shell's
+   * edge and never wider than it, in a shell narrower than the window.
+   * @default "window"
+   */
+  bounds?: "window" | "shell";
 }
 
 /** The sheet's close button, for content that places its own (`SheetPanel close="none"`). */
@@ -73,6 +80,7 @@ export const SheetPanel = ({
   closeLabel = "Close",
   close = "corner",
   corner = "sheet",
+  bounds = "window",
   ...rest
 }: SheetPanelProps) => {
   const size = useSize();
@@ -93,6 +101,7 @@ export const SheetPanel = ({
             {...stylex.props(
               styles.panel,
               size === "wide" && styles.wide,
+              size === "full" && styles.full,
               corner === "shell" && styles.shellCorner
             )}
           >
@@ -112,13 +121,22 @@ export const SheetPanel = ({
   }
   return (
     <KindContext.Provider value="sheet">
-      <BackdropPrimitive {...stylex.props(styles.scrim)} />
+      <BackdropPrimitive
+        {...stylex.props(
+          styles.scrim,
+          bounds === "shell" && styles.scrimInShell
+        )}
+      />
       <ContentPrimitive
         {...rest}
         {...stylex.props(
           drawerMarker,
           styles.panel,
           size === "wide" && styles.wide,
+          size === "full" && styles.full,
+          bounds === "shell" && styles.inShell,
+          bounds === "shell" && size === "wide" && styles.inShellWide,
+          bounds === "shell" && size === "full" && styles.inShellFull,
           close === "none" && styles.panelClipped,
           corner === "shell" && styles.shellCorner
         )}

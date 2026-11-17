@@ -19,4 +19,10 @@ export const intent = {
       instead: ["app-shell"],
     },
   ],
+  variants: [
+    {
+      name: 'size="sm"',
+      when: "A sub-page whose crumbs say where you are (a settings page): a smaller title in the sans, no lead.",
+    },
+  ],
 };

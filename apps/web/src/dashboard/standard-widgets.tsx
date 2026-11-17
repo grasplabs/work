@@ -1,3 +1,5 @@
+// The kit's Stat for a figure centred in a ring or a column: Grasp UI's
+// Highlight stands a name over its value, from the start edge.
 import { Stat } from "@grasp-os/ui/components/stat";
 import {
   Table,
@@ -7,6 +9,8 @@ import {
   TableHeader,
   TableRow,
 } from "@grasp-os/ui/components/table";
+// The kit's tooltip on a ring's arcs: Grasp UI's tooltip opens only on its
+// own Button, and its Chart has no ring.
 import {
   Tooltip,
   TooltipContent,

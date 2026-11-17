@@ -33,42 +33,36 @@ import type {
 } from "react";
 import { flushSync } from "react-dom";
 
-import { Alert, Icon } from "../icons";
+import { visuallyHidden } from "../hidden/hidden";
+import { Alert, Icon, Mic } from "../icons";
 import { iconVars } from "../icons/icon.stylex";
+import type { LayoutStyle } from "../layout/layout";
 import { scroll } from "../scroll/scroll";
 import { TextShimmer } from "../text-shimmer";
 import { grasp, media } from "../tokens/tokens.stylex";
 import { WorkingMark } from "../working-mark";
+import { ComposerAction } from "./action";
 import type { ComposerKind } from "./add";
 import type { ComposerAttachmentWords } from "./attachment";
 import { ComposerAttachments } from "./attachments";
 import type { ComposerFile } from "./attachments";
-import { DisabledContext, MentionContext, VoiceContext } from "./context";
+import {
+  DisabledContext,
+  ListenContext,
+  MentionContext,
+  VoiceContext,
+} from "./context";
+import type { ComposerListener } from "./context";
 import { ComposerGlow } from "./glow";
 import type { ComposerAccent, ComposerEdge } from "./glow";
 import { MentionMenu, caretPoint, mentionRows } from "./mention";
 import type { ComposerMentionItem, MentionRow } from "./mention";
 import { ComposerSend } from "./send";
-
-type Layout = string | number | null;
+import { ComposerVoice } from "./voice";
+import type { ComposerVoiceProps } from "./voice";
 
 /** What a caller may style: where the composer sits and how wide it is. Never its look. */
-export type ComposerLayoutStyle = stylex.StyleXStyles<{
-  alignSelf?: Layout;
-  justifySelf?: Layout;
-  flexGrow?: Layout;
-  flexShrink?: Layout;
-  gridArea?: Layout;
-  gridColumn?: Layout;
-  gridRow?: Layout;
-  width?: Layout;
-  maxWidth?: Layout;
-  margin?: Layout;
-  marginBlock?: Layout;
-  marginBlockStart?: Layout;
-  marginBlockEnd?: Layout;
-  marginInline?: Layout;
-}>;
+export type ComposerLayoutStyle = LayoutStyle;
 
 /** Where the assistant is: at rest, working, just done, or out of use. */
 export type ComposerActivity = "idle" | "working" | "success" | "disabled";
@@ -140,7 +134,10 @@ export interface ComposerProps {
   start?: ReactNode;
   /** Actions at the end of the footer, before send. */
   end?: ReactNode;
-  /** The quiet controls after the start actions: ComposerModel, then ComposerReasoning. */
+  /**
+   * The quiet controls after the start actions: ComposerModelEffort, the model and its effort as
+   * one. ComposerModel, then ComposerReasoning, where they must stand apart.
+   */
   controls?: ReactNode;
   /**
    * Voice input, at the end beside send: a ComposerAction (Dictate). With nothing written it stands
@@ -148,6 +145,27 @@ export interface ComposerProps {
    * listens, give it `pressed` and the Listening icon, so the press shows even when it stands alone.
    */
   voice?: ReactNode;
+  /**
+   * Dictation by default: the footer's microphone, in `voice`'s place, calls this to start
+   * listening. The host listens and passes what it hears as `dictation`.
+   */
+  onDictate?: () => void;
+  /**
+   * The microphone's name.
+   * @default "Dictate"
+   */
+  dictateLabel?: string;
+  /**
+   * While given, a dictation takes the card over: ComposerVoice, drawn from these props (the
+   * phase, the words, the time, the sound), with what was typed kept before its words. Escape
+   * cancels it unless `onTakeoverDismiss` says otherwise. A `takeover` of the host's comes first.
+   */
+  dictation?: Omit<ComposerVoiceProps, "typed">;
+  /**
+   * After send, behind a short hairline: a control that is not about this message, such as the Ask
+   * bar's Open the chat. In the compact row and in the full footer alike, it stands last.
+   */
+  after?: ReactNode;
   /** Anything else inside the card above the text. Files go in `attachments`. */
   above?: ReactNode;
   /** The files waiting to be sent, shown as cards in a strip above the text. The composer keeps none. */
@@ -192,6 +210,22 @@ export interface ComposerProps {
    */
   mentionsEmptyLabel?: string;
   /**
+   * What is said while the mention menu looks for matches (with `mentionsLoading`).
+   * @default "Looking"
+   */
+  mentionsLoadingLabel?: string;
+  /**
+   * The mention menu's name for a screen reader, when it is not one level into a kind.
+   * @default "Mention"
+   */
+  mentionsLabel?: string;
+  /**
+   * How many the mention menu found, as a screen reader hears it, with the plural the language
+   * takes.
+   * @default (count) => `${count} ${count === 1 ? "result" : "results"}`
+   */
+  mentionsFoundLabel?: (count: number) => string;
+  /**
    * What the commands menu is called.
    * @default "Commands"
    */
@@ -206,6 +240,31 @@ export interface ComposerProps {
    * @default "Sending waits for the files to upload"
    */
   uploadingLabel?: string;
+  /**
+   * The most characters the text takes. Typing stops there, a paste is cut there and that is
+   * said, and a quiet count shows from 90% of it.
+   */
+  maxLength?: number;
+  /**
+   * The count near the limit, from how many are written and the limit.
+   * @default (length, max) => `${length}/${max}`
+   */
+  maxLengthCountLabel?: (length: number, max: number) => string;
+  /**
+   * Said once, politely, as the text comes within 10% of the limit.
+   * @default (max) => `Close to the limit of ${max} characters`
+   */
+  maxLengthNearLabel?: (max: number) => string;
+  /**
+   * Said once, politely, as the text reaches the limit.
+   * @default (max) => `The limit of ${max} characters is reached`
+   */
+  maxLengthReachedLabel?: (max: number) => string;
+  /**
+   * Said when a paste was cut at the limit.
+   * @default (max) => `The pasted text was cut at the limit of ${max} characters`
+   */
+  maxLengthCutLabel?: (max: number) => string;
   /** A band tucked under the top of the card: ComposerSurface, or ComposerQueue for waiting messages. */
   top?: ReactNode;
   /**
@@ -327,6 +386,10 @@ const styles = stylex.create({
     borderColor: "currentColor",
     borderRadius: grasp.corner,
     cornerShape: grasp.cornerShape,
+    // What a control at its corner takes: its corner less the footer's room, 12px (corner.ts, F71).
+    "--grasp-composer-nested": `calc(${grasp.corner} - ${grasp.space3})`,
+    "--grasp-composer-first": grasp.corner,
+    "--grasp-composer-last": grasp.corner,
     backgroundColor: { default: grasp.raised, ":disabled": grasp.soft },
     // Medium lift at rest, as Palermo's; while the text has focus, a soft halo round it says so.
     boxShadow: {
@@ -406,6 +469,8 @@ const styles = stylex.create({
     gap: grasp.space2,
     padding: grasp.space2,
     borderRadius: `min(${grasp.corner}, calc((${grasp.controlSm} + 2 * ${grasp.space2}) / 2))`,
+    // Its corner less its room, 8px (corner.ts, F71).
+    "--grasp-composer-nested": `calc(min(${grasp.corner}, calc((${grasp.controlSm} + 2 * ${grasp.space2}) / 2)) - ${grasp.space2})`,
   },
   above: {
     display: "flex",
@@ -437,8 +502,8 @@ const styles = stylex.create({
     color: { default: grasp.ink, ":disabled": grasp.muted },
     caretColor: grasp.ink,
     fontFamily: grasp.fontSans,
-    // 16px on a touch screen, or iOS zooms the page in when the text takes focus.
-    fontSize: { default: grasp.textMd, [COARSE]: grasp.fieldTextTouch },
+    // 16px on a phone or a touch screen (media.typing), or Safari zooms the page in when the text takes focus.
+    fontSize: { default: grasp.textMd, [media.typing]: grasp.fieldTextTouch },
     lineHeight: grasp.textMdLine,
     letterSpacing: "normal",
     overflowWrap: "anywhere",
@@ -452,6 +517,20 @@ const styles = stylex.create({
     paddingInline: grasp.space1,
     paddingBlockStart: 0,
     alignSelf: "center",
+    // The resting bar is one line at every width: an empty field takes its placeholder's size
+    // (field-sizing), so a placeholder that wrapped made the bar a line taller on a phone (Ask
+    // bar at 320). While it shows, the field holds one line, and the placeholder, drawn in a box of
+    // its own inside the field, keeps to one line and ends in an ellipsis: both are needed (the
+    // field's alone clips the words mid-letter; the placeholder's alone leaves the field two lines
+    // tall). Typed words still grow the field as before.
+    whiteSpace: { default: null, ":placeholder-shown": "nowrap" },
+    overflow: { default: null, ":placeholder-shown": "hidden" },
+    textOverflow: { default: null, ":placeholder-shown": "ellipsis" },
+    "::placeholder": {
+      whiteSpace: "nowrap",
+      overflow: "hidden",
+      textOverflow: "ellipsis",
+    },
   },
   // One line, always: plus and settings, the model and reasoning, then voice and send at the end.
   // It answers to its own width: narrow, the model's name folds to its mark, then reasoning steps
@@ -474,16 +553,46 @@ const styles = stylex.create({
     gap: grasp.space2,
     minWidth: 0,
     flexShrink: 0,
+    // The start side's first control and the end side's last stand at the card's corners: they nest
+    // in them (corner.ts, F71).
+    "--grasp-composer-first": {
+      default: null,
+      ":first-child": "var(--grasp-composer-nested)",
+    },
+    "--grasp-composer-last": {
+      default: null,
+      ":last-child": "var(--grasp-composer-nested)",
+    },
   },
   startSide: {
     flexShrink: 1,
     gap: grasp.space1,
+  },
+  // After send: a short hairline, then a control that is not about this message. A little closer
+  // than the row's own gap on each side of the line, so the line reads as dividing two groups.
+  after: {
+    display: "flex",
+    alignItems: "center",
+    gap: grasp.space1,
+    marginInlineStart: `calc(${grasp.space1} - ${grasp.space2})`,
+  },
+  afterLine: {
+    flexShrink: 0,
+    width: grasp.hairline,
+    height: grasp.iconSm,
+    backgroundColor: { default: grasp.line, [media.forced]: "CanvasText" },
   },
   controls: {
     display: "flex",
     alignItems: "center",
     gap: grasp.space1,
     minWidth: 0,
+    // Its first control is at the card's corner only while these lead the row (corner.ts, F71).
+    "--grasp-composer-first": {
+      default: grasp.corner,
+      ":first-child": "inherit",
+    },
+    "--grasp-composer-last": grasp.corner,
   },
   // Lines under the card, on a band tucked under its foot, as Palermo's disclaimer.
   under: {
@@ -518,14 +627,27 @@ const styles = stylex.create({
     color: grasp.danger,
   },
   // Read by a screen reader, never seen.
-  unseen: {
-    position: "absolute",
-    width: grasp.hairline,
-    height: grasp.hairline,
-    margin: 0,
-    overflow: "hidden",
-    clipPath: "inset(50%)",
+  // The count near the limit: quiet, the small size, its figures of one width.
+  count: {
+    display: "inline-grid",
+    flexShrink: 0,
+    paddingInline: grasp.space1,
+    color: grasp.muted,
+    fontFamily: grasp.fontSans,
+    fontSize: grasp.textXs,
+    lineHeight: grasp.textXsLine,
+    fontVariantNumeric: "tabular-nums",
     whiteSpace: "nowrap",
+    textAlign: "end",
+  },
+  countLayer: {
+    gridArea: "1 / 1",
+  },
+  countUnseen: {
+    visibility: "hidden",
+  },
+  countAt: {
+    color: grasp.ink,
   },
 });
 
@@ -764,19 +886,25 @@ const useTakeoverFocus = (
       focusInside.current ||
       (card.current?.contains(document.activeElement) ?? false);
     if (taken && !hadTakeover.current && here) {
-      card.current
-        ?.querySelector<HTMLElement>(
-          "[data-slot=composer-takeover-room] button, [data-slot=composer-takeover-room] input"
-        )
-        ?.focus({ preventScroll: true });
+      // A choice already made first (a question that comes back answered), else the first control.
+      const room = card.current?.querySelector<HTMLElement>(
+        "[data-slot=composer-takeover-room]"
+      );
+      (
+        room?.querySelector<HTMLElement>("[aria-checked=true]") ??
+        room?.querySelector<HTMLElement>("button, input")
+      )?.focus({ preventScroll: true });
     }
     if (!taken && hadTakeover.current && here) {
       area.current?.focus({ preventScroll: true });
     }
     hadTakeover.current = taken;
   }, [taken, card, area]);
-  const onFocus = () => {
+  // Said on the form too (data-focus-inside), so a part inside, such as a question arriving as a
+  // takeover's next step, knows the person is here and may take the focus.
+  const onFocus = (event: FocusEvent<HTMLFormElement>) => {
     focusInside.current = true;
+    event.currentTarget.dataset.focusInside = "";
   };
   // Focus leaves the composer only when it goes to something outside it. Falling to the page's
   // body from inside (Safari never focuses a pressed button) it is still this composer's.
@@ -786,6 +914,7 @@ const useTakeoverFocus = (
       !event.currentTarget.contains(event.relatedTarget)
     ) {
       focusInside.current = false;
+      delete event.currentTarget.dataset.focusInside;
     }
   };
   return { handleFocus: onFocus, handleBlur: onBlur };
@@ -930,21 +1059,138 @@ const titleOf = (
     : kinds.find((kind) => kind.value === level)?.label;
 };
 
+/** The words a screen reader hears of the mention menu. */
+interface MenuStatusWords {
+  name: string;
+  looking: string;
+  found: (count: number) => string;
+}
+
 /** What a screen reader hears of the menu: its name and how many it found. */
 const menuStatus = (
   menu: Menu | null,
   title: string | undefined,
   loading: boolean,
-  count: number
+  count: number,
+  words: MenuStatusWords
 ) => {
   if (menu === null) {
     return "";
   }
-  const found = loading
-    ? "looking"
-    : `${count} ${count === 1 ? "result" : "results"}`;
-  return `${title ?? "Mention"}: ${found}`;
+  return `${title ?? words.name}: ${loading ? words.looking : words.found(count)}`;
 };
+
+// The limit's words, in English.
+const englishCount = (length: number, max: number) => `${length}/${max}`;
+const englishNear = (max: number) => `Close to the limit of ${max} characters`;
+const englishReached = (max: number) =>
+  `The limit of ${max} characters is reached`;
+const englishCut = (max: number) =>
+  `The pasted text was cut at the limit of ${max} characters`;
+
+/** Where the text stands against its limit: under 90%, near it, or at it. */
+const stageOf = (length: number, max: number | undefined) => {
+  if (max === undefined) {
+    return "under";
+  }
+  if (length >= max) {
+    return "at";
+  }
+  return length >= Math.ceil(max * 0.9) ? "near" : "under";
+};
+
+interface LimitWords {
+  count: (length: number, max: number) => string;
+  near: (max: number) => string;
+  reached: (max: number) => string;
+  cut: (max: number) => string;
+}
+
+/**
+ * The count near the limit, in the footer before send. Its room is kept whenever there is a limit
+ * (the widest it can read, unseen, in the same cell), so the footer never moves when it shows.
+ * What a screen reader hears is apart (limitSaid): said only as the stage changes, never per key.
+ */
+const ComposerCount = ({
+  length,
+  max,
+  words,
+}: {
+  length: number;
+  max: number | undefined;
+  words: LimitWords;
+}) => {
+  if (max === undefined) {
+    return null;
+  }
+  const stage = stageOf(length, max);
+  return (
+    <span
+      aria-hidden="true"
+      data-slot="composer-count"
+      data-limit={stage}
+      {...stylex.props(styles.count)}
+    >
+      <span {...stylex.props(styles.countLayer, styles.countUnseen)}>
+        {words.count(max, max)}
+      </span>
+      <span
+        {...stylex.props(
+          styles.countLayer,
+          stage === "under" && styles.countUnseen,
+          stage === "at" && styles.countAt
+        )}
+      >
+        {words.count(Math.min(length, max), max)}
+      </span>
+    </span>
+  );
+};
+
+/** What a screen reader hears of the limit: once near it, once at it, and a cut paste. */
+const limitSaid = (
+  stage: string,
+  cut: boolean,
+  max: number | undefined,
+  words: LimitWords
+) => {
+  if (max === undefined) {
+    return "";
+  }
+  if (cut) {
+    return words.cut(max);
+  }
+  if (stage === "at") {
+    return words.reached(max);
+  }
+  return stage === "near" ? words.near(max) : "";
+};
+
+/** The limit's live line, apart from the count: it changes only as the stage changes, or on a cut paste. */
+const ComposerLimitSaid = ({
+  length,
+  max,
+  cut,
+  words,
+}: {
+  length: number;
+  max: number | undefined;
+  cut: boolean;
+  words: LimitWords;
+}) =>
+  max === undefined ? null : (
+    <p
+      aria-live="polite"
+      data-slot="composer-limit-said"
+      {...stylex.props(visuallyHidden)}
+    >
+      {limitSaid(stageOf(length, max), cut, max, words)}
+    </p>
+  );
+
+// How many the menu found, in English.
+const englishFound = (count: number) =>
+  `${count} ${count === 1 ? "result" : "results"}`;
 
 interface MentionsInput {
   text: string;
@@ -1197,6 +1443,7 @@ interface FieldProps {
   onChange: TextareaProps["onValueChange"];
   onPaste: (event: ClipboardEvent<HTMLTextAreaElement>) => void;
   onSubmit: () => void;
+  maxLength: number | undefined;
 }
 
 /** The text itself: UI SDK's Textarea, a combobox while mentions are on. */
@@ -1213,6 +1460,7 @@ const ComposerField = ({
   onChange,
   onPaste,
   onSubmit,
+  maxLength,
 }: FieldProps) => {
   const open = mentions.menu !== null;
   return (
@@ -1223,6 +1471,7 @@ const ComposerField = ({
       aria-invalid={invalid ? true : undefined}
       placeholder={placeholder}
       value={text}
+      maxLength={maxLength}
       onValueChange={onChange}
       onPaste={onPaste}
       onKeyDown={mentions.handleKeyDown}
@@ -1267,6 +1516,8 @@ interface EditorProps {
   mentions: Mentions;
   loading: boolean;
   emptyLabel: string;
+  loadingLabel: string;
+  statusWords: MenuStatusWords;
 }
 
 /**
@@ -1281,6 +1532,8 @@ const ComposerEditor = ({
   mentions,
   loading,
   emptyLabel,
+  loadingLabel,
+  statusWords,
 }: EditorProps) => {
   if (!mentions.on) {
     return field;
@@ -1308,19 +1561,20 @@ const ComposerEditor = ({
           highlight={mentions.highlight}
           title={mentions.title}
           loading={loading}
-          loadingLabel="Looking"
+          loadingLabel={loadingLabel}
           emptyLabel={emptyLabel}
           place={mentions.place}
           onPick={mentions.handlePick}
           onHover={mentions.handleHover}
         />
       )}
-      <span aria-live="polite" {...stylex.props(styles.unseen)}>
+      <span aria-live="polite" {...stylex.props(visuallyHidden)}>
         {menuStatus(
           mentions.menu,
           mentions.title,
           loading,
-          mentions.rows.length
+          mentions.rows.length,
+          statusWords
         )}
       </span>
     </div>
@@ -1368,12 +1622,26 @@ const ComposerEnd = ({
   );
 };
 
+/** After send: a short hairline, then the control. Nothing at all without one. */
+const ComposerAfter = ({ after }: { after: ReactNode }) => {
+  if (after === undefined || after === null || after === false) {
+    return null;
+  }
+  return (
+    <div data-slot="composer-after" {...stylex.props(styles.after)}>
+      <span aria-hidden="true" {...stylex.props(styles.afterLine)} />
+      {after}
+    </div>
+  );
+};
+
 interface InsideProps {
   takeover: ReactNode;
   compact: boolean;
   start: ReactNode;
   end: ReactNode;
   last: ReactNode;
+  after: ReactNode;
   editor: ReactNode;
   controls: ReactNode;
   above: ReactNode;
@@ -1394,6 +1662,7 @@ const ComposerInside = ({
   start,
   end,
   last,
+  after,
   editor,
   controls,
   above,
@@ -1418,6 +1687,7 @@ const ComposerInside = ({
         <div {...stylex.props(styles.side)}>
           {end}
           {last}
+          <ComposerAfter after={after} />
         </div>
       </>
     );
@@ -1451,6 +1721,7 @@ const ComposerInside = ({
         <div {...stylex.props(styles.side)}>
           {end}
           {last}
+          <ComposerAfter after={after} />
         </div>
       </div>
     </>
@@ -1547,15 +1818,45 @@ const wordDefaults = (props: ComposerProps) => ({
   stopLabel: props.stopLabel ?? "Stop",
   dropLabel: props.dropLabel ?? "Drop to add",
   mentionsEmptyLabel: props.mentionsEmptyLabel ?? "Nothing found",
+  mentionsLoadingLabel: props.mentionsLoadingLabel ?? "Looking",
+  maxLengthCountLabel: props.maxLengthCountLabel ?? englishCount,
+  maxLengthNearLabel: props.maxLengthNearLabel ?? englishNear,
+  maxLengthReachedLabel: props.maxLengthReachedLabel ?? englishReached,
+  maxLengthCutLabel: props.maxLengthCutLabel ?? englishCut,
+  mentionsLabel: props.mentionsLabel ?? "Mention",
+  mentionsFoundLabel: props.mentionsFoundLabel ?? englishFound,
   commandsLabel: props.commandsLabel ?? "Commands",
   uploadingLabel:
     props.uploadingLabel ?? "Sending waits for the files to upload",
   attachmentsLabel: props.attachmentsLabel ?? "Files to send",
+  dictateLabel: props.dictateLabel ?? "Dictate",
 });
 
 type Resolved = ComposerProps &
   ReturnType<typeof lookDefaults> &
   ReturnType<typeof wordDefaults>;
+
+/**
+ * The footer's microphone and the dictation it hands the card to, from `onDictate` and
+ * `dictation`; the host's own `voice` and `takeover` come first.
+ */
+const dictationParts = (props: Resolved, text: string) => ({
+  voice:
+    props.voice ??
+    (props.onDictate === undefined ? undefined : (
+      <ComposerAction
+        icon={Mic}
+        label={props.dictateLabel}
+        onClick={props.onDictate}
+      />
+    )),
+  takeover:
+    props.takeover ??
+    (props.dictation === undefined ? undefined : (
+      <ComposerVoice typed={text} {...props.dictation} />
+    )),
+  dismiss: props.onTakeoverDismiss ?? props.dictation?.onCancel,
+});
 
 /** The composer, with every default in place. */
 const ComposerForm = (props: Resolved) => {
@@ -1565,13 +1866,24 @@ const ComposerForm = (props: Resolved) => {
     value,
     onValueChange,
     attachments,
-    takeover,
     validation,
     compact,
   } = props;
   const [own, setOwn] = useState(props.defaultValue);
   const text = value ?? own;
+  const { voice, takeover, dismiss } = dictationParts(props, text);
   const area = useRef<HTMLTextAreaElement | null>(null);
+  // The limit: where the text stands against it, and whether the last paste was cut there (set by
+  // the paste, read by the change that follows it).
+  const max = props.maxLength;
+  const [cut, setCut] = useState(false);
+  const cutting = useRef(false);
+  const limitWords: LimitWords = {
+    count: props.maxLengthCountLabel,
+    near: props.maxLengthNearLabel,
+    reached: props.maxLengthReachedLabel,
+    cut: props.maxLengthCutLabel,
+  };
   const card = useRef<HTMLFieldSetElement | null>(null);
   const underId = useId();
   // A file still uploading holds send, and the line under the card says why.
@@ -1581,6 +1893,8 @@ const ComposerForm = (props: Resolved) => {
   const disabled = activity === "disabled";
   const taken = Boolean(takeover);
   const invalid = validation !== undefined && validation !== "";
+  // A dictation in the takeover hands the card its level, so the dithered edge listens with it.
+  const [listener, setListener] = useState<ComposerListener | null>(null);
 
   const files = useFileDrop(props.onAttach, disabled);
   const success = useSuccessCount(activity);
@@ -1615,8 +1929,13 @@ const ComposerForm = (props: Resolved) => {
   // Drawn now, in the same task as the change, not in a render React schedules for later: an
   // agent's plan writes and then presses Send, and between the two it waits only two frames, which
   // Firefox can run back to back before that render (Send was still off in 2 of 10 plans).
-  const change: TextareaProps["onValueChange"] = (next, details) => {
+  const change: TextareaProps["onValueChange"] = (whole, details) => {
+    // A change from outside the keys (a mention picked near the limit) is cut there too.
+    const next =
+      max !== undefined && whole.length > max ? whole.slice(0, max) : whole;
     flushSync(() => {
+      setCut(cutting.current);
+      cutting.current = false;
       if (value === undefined) {
         setOwn(next);
       }
@@ -1661,12 +1980,15 @@ const ComposerForm = (props: Resolved) => {
     if (
       event.key === "Escape" &&
       taken &&
-      props.onTakeoverDismiss !== undefined &&
+      dismiss !== undefined &&
       inTakeover &&
       !event.defaultPrevented
     ) {
+      // One Escape does one thing: it leaves the takeover, and no listener of the host's (on the
+      // document, natively) hears it and closes more (the product's row 52).
       event.preventDefault();
-      props.onTakeoverDismiss();
+      event.stopPropagation();
+      dismiss();
     }
   };
 
@@ -1691,8 +2013,19 @@ const ComposerForm = (props: Resolved) => {
       compact={compact}
       mentions={mentions}
       onChange={change}
-      onPaste={files.handlePaste}
+      onPaste={(event: ClipboardEvent<HTMLTextAreaElement>) => {
+        files.handlePaste(event);
+        if (event.defaultPrevented || max === undefined) {
+          return;
+        }
+        // The field takes what fits and drops the rest; that it was cut is said.
+        const box = event.currentTarget;
+        const room =
+          max - (box.value.length - (box.selectionEnd - box.selectionStart));
+        cutting.current = event.clipboardData.getData("text").length > room;
+      }}
       onSubmit={sendByKey}
+      maxLength={max}
     />
   );
   const editor = (
@@ -1703,19 +2036,28 @@ const ComposerForm = (props: Resolved) => {
       mentions={mentions}
       loading={props.mentionsLoading}
       emptyLabel={props.mentionsEmptyLabel}
+      loadingLabel={props.mentionsLoadingLabel}
+      statusWords={{
+        name: props.mentionsLabel,
+        looking: props.mentionsLoadingLabel,
+        found: props.mentionsFoundLabel,
+      }}
     />
   );
   const last = (
-    <ComposerEnd
-      voice={props.voice}
-      empty={empty}
-      working={working}
-      disabled={disabled}
-      onSend={sendHere}
-      onStop={props.onStop}
-      sendLabel={props.sendLabel}
-      stopLabel={props.stopLabel}
-    />
+    <>
+      <ComposerCount length={text.length} max={max} words={limitWords} />
+      <ComposerEnd
+        voice={voice}
+        empty={empty}
+        working={working}
+        disabled={disabled}
+        onSend={sendHere}
+        onStop={props.onStop}
+        sendLabel={props.sendLabel}
+        stopLabel={props.stopLabel}
+      />
+    </>
   );
 
   return (
@@ -1746,6 +2088,7 @@ const ComposerForm = (props: Resolved) => {
               working={working}
               success={success}
               accent={props.accent}
+              listener={listener}
             />
           )}
           <fieldset
@@ -1766,30 +2109,33 @@ const ComposerForm = (props: Resolved) => {
                 {props.dropLabel}
               </span>
             )}
-            <DisabledContext.Provider value={disabled}>
-              <MentionContext.Provider
-                value={mentions.on ? mentions.openMentions : null}
-              >
-                <ComposerInside
-                  takeover={takeover}
-                  compact={compact}
-                  start={props.start}
-                  end={props.end}
-                  last={last}
-                  editor={editor}
-                  controls={props.controls}
-                  above={props.above}
-                  attachments={attachments}
-                  onAttach={props.onAttach}
-                  onRemoveAttachment={props.onRemoveAttachment}
-                  onRetryAttachment={props.onRetryAttachment}
-                  onOpenAttachment={props.onOpenAttachment}
-                  attachmentWords={props.attachmentWords}
-                  attachmentsLabel={props.attachmentsLabel}
-                  focusText={focusText}
-                />
-              </MentionContext.Provider>
-            </DisabledContext.Provider>
+            <ListenContext.Provider value={setListener}>
+              <DisabledContext.Provider value={disabled}>
+                <MentionContext.Provider
+                  value={mentions.on ? mentions.openMentions : null}
+                >
+                  <ComposerInside
+                    takeover={takeover}
+                    compact={compact}
+                    start={props.start}
+                    end={props.end}
+                    last={last}
+                    after={props.after}
+                    editor={editor}
+                    controls={props.controls}
+                    above={props.above}
+                    attachments={attachments}
+                    onAttach={props.onAttach}
+                    onRemoveAttachment={props.onRemoveAttachment}
+                    onRetryAttachment={props.onRetryAttachment}
+                    onOpenAttachment={props.onOpenAttachment}
+                    attachmentWords={props.attachmentWords}
+                    attachmentsLabel={props.attachmentsLabel}
+                    focusText={focusText}
+                  />
+                </MentionContext.Provider>
+              </DisabledContext.Provider>
+            </ListenContext.Provider>
           </fieldset>
         </div>
       </div>
@@ -1804,9 +2150,15 @@ const ComposerForm = (props: Resolved) => {
         note={props.note}
       />
       {/* oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- not every screen reader treats <output> as a live region; role="status" is */}
-      <p role="status" {...stylex.props(styles.unseen)}>
+      <p role="status" {...stylex.props(visuallyHidden)}>
         {statusWords(activity, props.workingLabel, props.successLabel)}
       </p>
+      <ComposerLimitSaid
+        length={text.length}
+        max={max}
+        cut={cut}
+        words={limitWords}
+      />
     </form>
   );
 };

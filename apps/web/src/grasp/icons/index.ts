@@ -23,6 +23,7 @@ import {
   ArrowLeftRightIcon,
   ArrowRight01Icon,
   ArrowRight02Icon,
+  ArrowShrink01Icon,
   ArrowUp01Icon,
   ArrowUp02Icon,
   ArrowUpDownIcon,
@@ -34,6 +35,7 @@ import {
   Building03Icon,
   CableIcon,
   Calendar03Icon,
+  CalendarOffIcon,
   Cancel01Icon,
   ChartDecreaseIcon,
   ChartIncreaseIcon,
@@ -57,8 +59,10 @@ import {
   File01Icon,
   FileEditIcon,
   FitToScreenIcon,
+  FloorPlanIcon,
   Folder01Icon,
   FolderKanbanIcon,
+  GitCompareIcon,
   Globe02Icon,
   GlobeIcon,
   GoBackward10SecIcon,
@@ -73,6 +77,7 @@ import {
   InformationCircleIcon,
   InputTextIcon,
   Invoice01Icon,
+  Key01Icon,
   KeyboardIcon,
   LaptopIcon,
   LeftToRightListBulletIcon,
@@ -81,9 +86,11 @@ import {
   Loading03Icon,
   Logout03Icon,
   Mail01Icon,
+  MailWarningIcon,
   Menu02Icon,
   Message01Icon,
   Mic01Icon,
+  MicOff01Icon,
   MinusSignCircleIcon,
   MinusSignIcon,
   Moon02Icon,
@@ -98,6 +105,8 @@ import {
   Redo02Icon,
   RefreshIcon,
   RepeatIcon,
+  Rocket01Icon,
+  ScaleIcon,
   Search01Icon,
   SearchAddIcon,
   SearchMinusIcon,
@@ -105,11 +114,14 @@ import {
   ServerStack01Icon,
   Settings01Icon,
   Share08Icon,
+  ShieldAlertIcon,
   SidebarLeftIcon,
   SidebarRightIcon,
   SlidersHorizontalIcon,
   SmartPhone01Icon,
   SourceCodeIcon,
+  SparklesIcon,
+  SplitIcon,
   SquareLock02Icon,
   StarIcon,
   StopIcon,
@@ -315,6 +327,8 @@ export const ArrowUp: IconData = ArrowUp02Icon;
 export const Stop: IconData = StopIcon;
 /** Speak instead of typing. Mic01Icon. */
 export const Mic: IconData = Mic01Icon;
+/** The microphone muted. MicOff01Icon. */
+export const MicOff: IconData = MicOff01Icon;
 /** Listening: dictation is on and hearing you. AudioWave01Icon. */
 export const Listening: IconData = AudioWave01Icon;
 /** Attach a file. Attachment01Icon. */
@@ -322,23 +336,12 @@ export const Attach: IconData = Attachment01Icon;
 /** A file. File01Icon. */
 export const File: IconData = File01Icon;
 
-// Restored on 13 November: a merge into the showcase branch dropped these blocks, which Table,
-// Button group and Item use. Table's sorting (cloud builder 4).
-// Button group and Item (cloud builder 6).
-// Date picker (cloud/data): the button that opens a calendar. Restored as above.
 /** A person: an owner, an assignee. UserCircleIcon. */
 export const Person: IconData = UserCircleIcon;
 /** A number that is measured: views, a score. ChartLineData01Icon. */
 export const Measure: IconData = ChartLineData01Icon;
 /** Words: a title, a name typed in. TextFontIcon. */
 export const Words: IconData = TextFontIcon;
-
-// Restored on 13 November: a merge into the showcase branch dropped these blocks, which Table,
-// Button group and Item use. Table's sorting (cloud builder 4).
-// ArrowUp02Icon is imported once, with the Composer's icons above.
-// Button group and Item (cloud builder 6).
-// Restored (cloud builder 8): the cloud builders' icons, dropped from this file in a showcase merge
-// while their components still use them. Archive is above, with the dropdown menu's icons.
 
 // Agent activity and Sources (cloud/pickers).
 /** A thought: the agent reasoning. Idea01Icon. */
@@ -410,7 +413,6 @@ export const ZoomOut: IconData = SearchMinusIcon;
 export const Comment: IconData = BubbleChatIcon;
 /** Add a comment on what is selected. BubbleChatAddIcon. */
 export const CommentAdd: IconData = BubbleChatAddIcon;
-// The app frame's sidebar and profile menu (Ruben's frame, ported by builder 1).
 /** A conversation: the frame's Chat row (Ruben's pick). Message01Icon. */
 export const Conversation: IconData = Message01Icon;
 /** What the workspace knows: the frame's Brain row (Ruben's pick). AiBrain01Icon. */
@@ -496,3 +498,25 @@ export const Phone: IconData = SmartPhone01Icon;
 export const Tablet: IconData = Tablet01Icon;
 /** A desktop's width: an app shown as on a laptop or a desktop. LaptopIcon. */
 export const Desktop: IconData = LaptopIcon;
+/** A key: an AI provider's key, an API key, a secret. Key01Icon. */
+export const Key: IconData = Key01Icon;
+/** Launch: a first run, a release, a plan put to work. Rocket01Icon. */
+export const Rocket: IconData = Rocket01Icon;
+/** Compare two versions side by side. GitCompareIcon. */
+export const GitCompare: IconData = GitCompareIcon;
+/** Split into two: a view, a task, a payment. SplitIcon. */
+export const Split: IconData = SplitIcon;
+/** Made or suggested by the agent. SparklesIcon. */
+export const Sparkles: IconData = SparklesIcon;
+/** No date, or away: a day that is not available. CalendarOffIcon. */
+export const CalendarOff: IconData = CalendarOffIcon;
+/** A security warning: a risk, a policy broken. ShieldAlertIcon. */
+export const ShieldAlert: IconData = ShieldAlertIcon;
+/** A mail that could not be sent, or one to be wary of. MailWarningIcon. */
+export const MailWarning: IconData = MailWarningIcon;
+/** Weighed: legal, a policy, a fair comparison. ScaleIcon. */
+export const Scale: IconData = ScaleIcon;
+/** Leave full screen: Expand's pair. ArrowShrink01Icon. */
+export const ExitFullScreen: IconData = ArrowShrink01Icon;
+/** A plan of the rooms: a layout, a workspace's map. FloorPlanIcon. */
+export const FloorPlan: IconData = FloorPlanIcon;

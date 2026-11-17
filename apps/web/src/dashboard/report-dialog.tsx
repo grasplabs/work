@@ -1,17 +1,8 @@
 import type { BoardReport } from "@grasp-os/shared/dashboard";
 import type { NextReport } from "@grasp-os/shared/onboarding";
-import { Button } from "@grasp-os/ui/components/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogTitle,
-} from "@grasp-os/ui/components/dialog";
-import { Spinner } from "@grasp-os/ui/components/spinner";
-import { Trans, useLingui } from "@lingui/react/macro";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { Await } from "@tanstack/react-router";
-import { FileTextIcon, PrinterIcon } from "lucide-react";
 import { useState } from "react";
 
 import { ErrorText } from "../error-text.tsx";
@@ -19,6 +10,18 @@ import { exportAs } from "../export/export-file.tsx";
 import type { ExportFile, ExportFormat } from "../export/export-file.tsx";
 import { FigureTiles } from "../export/figure-tiles.tsx";
 import { LoadingLines } from "../frame/page-states.tsx";
+import { Button } from "../grasp/button/index.ts";
+import { Card } from "../grasp/card/index.ts";
+import { Doc, Pdf } from "../grasp/icons/index.ts";
+import {
+  Sheet,
+  SheetBody,
+  SheetDescription,
+  SheetFooter,
+  SheetPanel,
+  SheetTitle,
+} from "../grasp/sheet/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { PlainMarkdown } from "../knowledge/markdown.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import {
@@ -38,6 +41,14 @@ import {
 // printer and sheet of paper aren't here: the report shows as the page it
 // prints from, its key figures in tiles over its text, as the PDF has them.
 // The prototype's hours bars aren't either: core keeps no hours.
+
+const styles = stylex.create({
+  report: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space4,
+  },
+});
 
 /** The report, once its reads came: what it says, and the two ways to take it. */
 const ReportSheet = ({
@@ -81,37 +92,38 @@ const ReportSheet = ({
   };
   return (
     <>
-      <article
-        aria-label={t`Report`}
-        className="bg-card flex flex-col gap-4 rounded-lg border px-5 py-4"
-      >
-        <FigureTiles figures={figures} />
-        <PlainMarkdown text={body} />
-      </article>
-      <ErrorText>
-        {failed ? t`The export didn't work. Try again.` : undefined}
-      </ErrorText>
-      <DialogFooter className="sm:*:flex-1">
+      <SheetBody>
+        <Card element="article" ground="soft">
+          <div aria-label={t`Report`} {...stylex.props(styles.report)}>
+            <FigureTiles figures={figures} />
+            <PlainMarkdown text={body} />
+          </div>
+        </Card>
+        <ErrorText>
+          {failed ? t`The export didn't work. Try again.` : undefined}
+        </ErrorText>
+      </SheetBody>
+      <SheetFooter>
         <Button
           disabled={busy}
+          icon={Doc}
           onClick={() => {
             void take("md");
           }}
-          variant="secondary"
         >
-          <FileTextIcon data-icon="inline-start" />
-          <Trans>Download Markdown</Trans>
+          {t`Download Markdown`}
         </Button>
         <Button
           disabled={busy}
+          icon={Pdf}
           onClick={() => {
             void take("pdf");
           }}
+          variant="ink"
         >
-          {busy ? <Spinner /> : <PrinterIcon data-icon="inline-start" />}
-          <Trans>Save as PDF</Trans>
+          {t`Save as PDF`}
         </Button>
-      </DialogFooter>
+      </SheetFooter>
     </>
   );
 };
@@ -136,21 +148,12 @@ export const ReportDialog = ({
   const { week } = next;
   const title = reportTitle(next, i18n);
   return (
-    <Dialog onOpenChange={onOpenChange} open={open}>
-      <DialogContent
-        className="max-h-svh overflow-y-auto sm:max-w-2xl"
-        closeLabel={t`Close`}
-      >
-        <header className="flex flex-col gap-1 pr-8">
-          <DialogTitle>{title}</DialogTitle>
-          <DialogDescription>
-            <Trans>
-              What ran, the decisions it asked for, every workflow and what
-              could be better. Keep it as Markdown, or save it as a PDF from the
-              print window.
-            </Trans>
-          </DialogDescription>
-        </header>
+    <Sheet onOpenChange={onOpenChange} open={open} size="wide">
+      <SheetPanel closeLabel={t`Close`}>
+        <SheetTitle>{title}</SheetTitle>
+        <SheetDescription>
+          {t`What ran, the decisions it asked for, every workflow and what could be better. Keep it as Markdown, or save it as a PDF from the print window.`}
+        </SheetDescription>
         {/* Only while open, so each opening shows the report as it stands. */}
         {open ? (
           <Await fallback={<LoadingLines lines={6} />} promise={reads}>
@@ -168,7 +171,7 @@ export const ReportDialog = ({
             )}
           </Await>
         ) : null}
-      </DialogContent>
-    </Dialog>
+      </SheetPanel>
+    </Sheet>
   );
 };

@@ -308,9 +308,7 @@ const DecisionInFrame = ({
   return (
     <AppFrame core={core} identity={identity}>
       <SiteHeader crumbs={crumbs} />
-      <div className="pb-chat flex flex-col items-center gap-4 px-6 pt-7 text-sm">
-        {children}
-      </div>
+      <div className="flex flex-col items-center gap-4 text-sm">{children}</div>
     </AppFrame>
   );
 };

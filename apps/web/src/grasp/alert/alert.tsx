@@ -16,24 +16,13 @@ import type { ReactNode } from "react";
 import { Done, Failed, Icon, Info, Alert as Warning } from "../icons";
 import type { IconData } from "../icons";
 import { iconVars } from "../icons/icon.stylex";
+import type { LayoutStyle } from "../layout/layout";
 import { grasp, media } from "../tokens/tokens.stylex";
 
 export type AlertVariant = "neutral" | "success" | "attention" | "danger";
 
-type Layout = string | number | null;
-
 /** What a caller may style: where it sits and how wide it is. */
-export type AlertLayoutStyle = stylex.StyleXStyles<{
-  alignSelf?: Layout;
-  justifySelf?: Layout;
-  gridArea?: Layout;
-  gridColumn?: Layout;
-  width?: Layout;
-  maxWidth?: Layout;
-  margin?: Layout;
-  marginBlock?: Layout;
-  marginInline?: Layout;
-}>;
+export type AlertLayoutStyle = LayoutStyle;
 
 /** Every prop an Alert takes. */
 export interface AlertProps {
@@ -47,6 +36,12 @@ export interface AlertProps {
    * @default "neutral"
    */
   variant?: AlertVariant;
+  /**
+   * The quiet weight: no fill and no inset, the icon in its tone beside the words. For an alert
+   * inside a row or a rail, next to quiet rows, where a filled box is too heavy.
+   * @default false
+   */
+  quiet?: boolean;
   /** Another icon from the icons entry (`@/components/grasp/icons`), or `false` for none. Each variant has its own. */
   icon?: IconData | false;
   /**
@@ -54,10 +49,18 @@ export interface AlertProps {
    * appears, `status` only when its words change, `none` gives it no live role.
    */
   role?: "alert" | "status" | "none";
+  /**
+   * How a screen reader hears it, by the live region's own words, for a host whose lint prefers
+   * them to a role: `polite` is a status (said when the reader is free), `assertive` an alert (said
+   * at once), `off` no live role. It wins over `role` when both are given.
+   */
+  live?: "polite" | "assertive" | "off";
   /** An id, so a field or a section can point at it with `aria-describedby`. */
   id?: string;
   /** Layout only: where it sits and how wide it is. */
   style?: AlertLayoutStyle;
+  /** The same as `style`, by a name a style lint does not take for an inline style attribute. */
+  layout?: AlertLayoutStyle;
 }
 
 const styles = stylex.create({
@@ -88,6 +91,12 @@ const styles = stylex.create({
   },
   noIcon: {
     gridTemplateColumns: "minmax(0, 1fr)",
+  },
+  quiet: {
+    paddingBlock: 0,
+    paddingInline: 0,
+    borderRadius: 0,
+    borderWidth: 0,
   },
   neutral: { backgroundColor: grasp.alertFillNeutral },
   success: { backgroundColor: grasp.successSoft },
@@ -139,29 +148,36 @@ const roles: Record<AlertVariant, "alert" | "status"> = {
   attention: "alert",
   danger: "alert",
 };
+// `live` in a live region's words, as the role it gives.
+const byLive = { polite: "status", assertive: "alert", off: "none" } as const;
 
 export const Alert = ({
   children,
   title,
   variant = "neutral",
+  quiet = false,
   icon,
   role,
+  live,
   id,
-  style,
+  style: styleProp,
+  layout,
 }: AlertProps) => {
   const mark = icon === false ? undefined : (icon ?? icons[variant]);
-  const said = role ?? roles[variant];
+  const said = live === undefined ? (role ?? roles[variant]) : byLive[live];
   return (
     <div
       id={id}
       data-slot="alert"
       data-variant={variant}
+      data-quiet={quiet || undefined}
       role={said === "none" ? undefined : said}
       {...stylex.props(
         styles.alert,
-        styles[variant],
+        !quiet && styles[variant],
+        quiet && styles.quiet,
         !mark && styles.noIcon,
-        style
+        layout ?? styleProp
       )}
     >
       {mark && (

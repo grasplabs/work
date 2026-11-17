@@ -20,6 +20,7 @@ import * as stylex from "@stylexjs/stylex";
 import { useEffect, useRef } from "react";
 import type { RefObject } from "react";
 
+import type { LayoutStyle } from "../layout/layout";
 import { grasp, media } from "../tokens/tokens.stylex";
 import { lightUp, stopNothing } from "./light";
 
@@ -27,31 +28,8 @@ export type SkeletonShape = "line" | "block" | "circle";
 export type SkeletonText = "sm" | "md" | "lg";
 export type SkeletonLook = "grey" | "field";
 
-type Layout = string | number | null;
-
 /** What a caller may style: its size and where it sits. Never its fill or its corner. */
-export type SkeletonLayoutStyle = stylex.StyleXStyles<{
-  width?: Layout;
-  height?: Layout;
-  minWidth?: Layout;
-  maxWidth?: Layout;
-  aspectRatio?: Layout;
-  alignSelf?: Layout;
-  justifySelf?: Layout;
-  flexGrow?: Layout;
-  flexShrink?: Layout;
-  flexBasis?: Layout;
-  gridArea?: Layout;
-  gridColumn?: Layout;
-  gridRow?: Layout;
-  margin?: Layout;
-  marginBlock?: Layout;
-  marginBlockStart?: Layout;
-  marginBlockEnd?: Layout;
-  marginInline?: Layout;
-  marginInlineStart?: Layout;
-  marginInlineEnd?: Layout;
-}>;
+export type SkeletonLayoutStyle = LayoutStyle;
 
 /** Every prop a Skeleton takes. */
 export interface SkeletonProps {

@@ -163,10 +163,10 @@ test("names each member's actions for them, and asks before making someone an ad
   await role.click();
   await page.getByRole("option", { name: "Admin" }).click();
   await expect(
-    page.getByRole("dialog", { name: "Make Person an admin?" })
+    page.getByRole("alertdialog", { name: "Make Person an admin?" })
   ).toBeVisible();
   await page.keyboard.press("Escape");
-  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page.getByRole("alertdialog")).toHaveCount(0);
   await expect(role).toContainText("User");
 });
 
@@ -226,7 +226,7 @@ test("an admin signs someone out everywhere, then removes them, and is told what
 
   await actions.click();
   await page.getByRole("menuitem", { name: "Remove" }).click();
-  const confirm = page.getByRole("dialog", { name: "Remove Person?" });
+  const confirm = page.getByRole("alertdialog", { name: "Remove Person?" });
   await confirm.getByRole("button", { name: "Remove" }).click();
   await expect(notice).toHaveText(
     "Person is removed. 0 personal connections were disconnected."
@@ -287,11 +287,14 @@ test("invites someone with a role, says what each role may do, and withdraws the
   const { admin } = peopleIn("memberInvites");
   await signInTo(context, admin);
   await page.goto("/settings/members");
+  // What each role may do is a tab of its own, beside the members.
+  await page.getByRole("tab", { name: "Roles" }).click();
   const roles = page.getByRole("region", { name: "Roles" });
   await expect(
     roles.getByRole("row", { name: /^Invite people, change roles/u })
   ).toBeVisible();
 
+  await page.getByRole("tab", { name: "Members" }).click();
   await page.getByRole("button", { name: "Invite", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Invite someone" });
   await dialog
@@ -365,7 +368,7 @@ test("an admin makes a team, puts someone in it and takes them off, renames it a
   await teams.getByRole("button", { name: `Actions for ${renamed}` }).click();
   await page.getByRole("menuitem", { name: "Delete" }).click();
   await page
-    .getByRole("dialog", { name: `Delete ${renamed}?` })
+    .getByRole("alertdialog", { name: `Delete ${renamed}?` })
     .getByRole("button", { name: "Delete" })
     .click();
   await expect(teams.getByText(renamed, { exact: true })).toHaveCount(0);

@@ -22,7 +22,9 @@ const HOVER = media.hover;
 const COARSE = media.coarse;
 
 const styles = stylex.create({
-  // A square as tall as the group, in muted, ink under a pointer, as PasswordInput's button.
+  // A square in the group's end square, set in from its edge by space-1 on every side, so its focus
+  // ring stands inside the group and never steps over its edge (third look A3-text-02), as
+  // PasswordInput's button. In muted, ink under a pointer.
   clear: {
     [iconVars.size]: grasp.iconSm,
     [iconVars.stroke]: grasp.iconStroke,
@@ -32,10 +34,12 @@ const styles = stylex.create({
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    margin: 0,
+    marginBlock: grasp.space1,
+    marginInline: grasp.space1,
     padding: 0,
     borderWidth: 0,
-    borderRadius: grasp.corner,
+    // Its corner nests inside the group's, space-1 in.
+    borderRadius: `max(0px, calc(${grasp.corner} - ${grasp.space1}))`,
     cornerShape: grasp.cornerShape,
     backgroundColor: "transparent",
     color: {
@@ -49,12 +53,15 @@ const styles = stylex.create({
     transitionDuration: grasp.durationHover,
     transitionTimingFunction: grasp.ease,
   },
-  md: { width: grasp.controlMd },
-  lg: { width: grasp.controlLg },
-  // A finger needs 44px round it too.
+  md: { width: `calc(${grasp.controlMd} - 2 * ${grasp.space1})` },
+  lg: { width: `calc(${grasp.controlLg} - 2 * ${grasp.space1})` },
+  // A finger needs 44px round it too; at rest the press covers the whole end square.
   target: {
     position: "absolute",
-    inset: { default: 0, [COARSE]: `calc((100% - ${grasp.tap}) / 2)` },
+    inset: {
+      default: `calc(-1 * ${grasp.space1})`,
+      [COARSE]: `calc((100% - ${grasp.tap}) / 2)`,
+    },
   },
 });
 

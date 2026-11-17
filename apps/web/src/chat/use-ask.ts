@@ -7,7 +7,6 @@ import {
 import type { ChatMake, ChatSubject } from "@grasp-os/shared/chat";
 import { failureText } from "@grasp-os/shared/errors";
 import type { ModelEffort, ModelEfforts } from "@grasp-os/shared/models";
-import type { PromptMention } from "@grasp-os/ui/components/prompt-editor";
 import { useRouteContext } from "@tanstack/react-router";
 import { useRef, useState } from "react";
 
@@ -15,6 +14,7 @@ import { useCoreAction } from "../use-core-action.ts";
 import { setActiveChat } from "./active-chat.ts";
 import type { ChatSlot } from "./active-chat.ts";
 import { chatMentionsOf } from "./mentions.tsx";
+import type { Mentionable } from "./mentions.tsx";
 import {
   readChoice,
   resolveChoice,
@@ -117,7 +117,7 @@ export const useAsk = (
   const [text, setText] = useState("");
   // What the person mentioned in the box (`@`), each once: what the
   // question names exactly, beside its words, and the chips the box shows.
-  const [mentions, setMentions] = useState<readonly PromptMention[]>([]);
+  const [mentions, setMentions] = useState<readonly Mentionable[]>([]);
   const [files, setFiles] = useState<readonly BoxFile[]>([]);
   // Why a file the person chose stays out of the box.
   const [fileProblem, setFileProblem] = useState<string>();
@@ -180,7 +180,7 @@ export const useAsk = (
   const ask = async (
     question: string,
     carried: readonly BoxFile[] = [],
-    mentioned: readonly PromptMention[] = []
+    mentioned: readonly Mentionable[] = []
   ): Promise<void> => {
     if (sending.current) {
       return;

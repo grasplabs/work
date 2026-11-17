@@ -21,6 +21,16 @@ const edges = stylex.keyframes({
   "100%": { boxShadow: lineAbove },
 });
 
+// While there is more below, the last of the body fades into the panel's ground just above its
+// bottom hairline, so a line cut at that edge reads as more to come, not as words underlined by the
+// hairline (A3-layers-03, -09). The fade stands on its own layer (::after), not a mask: a mask would
+// take the hairline with it. The hairline's own pixel is left clear. At the end it is gone.
+const FADE = grasp.space6;
+const more = stylex.keyframes({
+  "0%, 99%": { opacity: 1 },
+  "100%": { opacity: 0 },
+});
+
 export const drawerStyles = stylex.create({
   // The shade over the page. UI SDK sets its opacity as the panel moves.
   scrim: {
@@ -86,9 +96,40 @@ export const drawerStyles = stylex.create({
     },
   },
 
-  // A wide sheet.
+  // A wide sheet, and a full one: a chart or a table opened in full. Never closer than the inset
+  // to the window's edges, so on a phone either is the full sheet.
   wide: {
     width: `min(${grasp.sheetWidthWide}, 100% - 2 * ${grasp.sheetInset})`,
+  },
+  full: {
+    width: `min(${grasp.sheetWidthFull}, 100% - 2 * ${grasp.sheetInset})`,
+  },
+
+  // A sheet that keeps to App shell's box (SheetPanel bounds="shell"), which the shell writes on
+  // itself while its menu is open: where it starts, its top, width and height in the window. With
+  // nothing written, the window's. The shade covers the shell, not the window.
+  inShell: {
+    width: `min(${grasp.sheetWidth}, var(--grasp-shell-menu-width, 100%) - 2 * ${grasp.sheetInset})`,
+    height: `calc(var(--grasp-shell-menu-height, 100%) - 2 * ${grasp.sheetInset})`,
+    marginBlockStart: `calc(var(--grasp-shell-menu-top, 0px) + ${grasp.sheetInset})`,
+    marginInlineStart: `calc(var(--grasp-shell-menu-start, 0px) + ${grasp.sheetInset})`,
+  },
+  inShellWide: {
+    width: `min(${grasp.sheetWidthWide}, var(--grasp-shell-menu-width, 100%) - 2 * ${grasp.sheetInset})`,
+  },
+  inShellFull: {
+    width: `min(${grasp.sheetWidthFull}, var(--grasp-shell-menu-width, 100%) - 2 * ${grasp.sheetInset})`,
+  },
+  scrimInShell: {
+    insetBlockStart: "var(--grasp-shell-menu-top, 0px)",
+    insetInlineStart: "var(--grasp-shell-menu-start, 0px)",
+    insetBlockEnd: "auto",
+    insetInlineEnd: "auto",
+    width: "var(--grasp-shell-menu-width, 100%)",
+    height: "var(--grasp-shell-menu-height, 100%)",
+    // The corner of the window the shell fills, so the shade never shows past it (App shell F62).
+    borderRadius: "var(--grasp-shell-menu-corner, 0px)",
+    cornerShape: "var(--grasp-shell-menu-corner-shape, round)",
   },
 
   // A drawer with heights to rest at stands at its tallest; its rests show part of it. Its height
@@ -153,18 +194,6 @@ export const drawerStyles = stylex.create({
   },
   // A sheet's title heads it, as Palermo's: a row of its own, in the interface's small type, with
   // the close button at its end and a hairline under it.
-  // A name with no bar: read by a screen reader, drawn nowhere.
-  titleHidden: {
-    position: "absolute",
-    width: 1,
-    height: 1,
-    margin: -1,
-    padding: 0,
-    overflow: "hidden",
-    clipPath: "inset(50%)",
-    whiteSpace: "nowrap",
-    borderWidth: 0,
-  },
   titleBesideClose: {
     boxSizing: "border-box",
     minHeight: grasp.sheetHeadHeight,
@@ -240,6 +269,41 @@ export const drawerStyles = stylex.create({
     },
     // Square, so the hairlines run straight to its sides; round only for its focus ring.
     borderRadius: { default: 0, ":focus-visible": grasp.cornerMark },
+    "::after": {
+      content: '""',
+      position: "sticky",
+      insetBlockEnd: `calc(-1 * ${grasp.space2})`,
+      display: "block",
+      height: FADE,
+      marginBlockStart: `calc(-1 * ${FADE})`,
+      marginInline: `calc(-1 * ${grasp.space6})`,
+      pointerEvents: "none",
+      backgroundImage: `linear-gradient(to bottom, transparent, ${grasp.raised} calc(100% - ${grasp.hairline}), transparent calc(100% - ${grasp.hairline}))`,
+      opacity: 0,
+      animationName: {
+        default: null,
+        "@supports (animation-timeline: scroll())": {
+          default: more,
+          [stylex.when.ancestor(":not([data-open])", drawerMarker)]: "none",
+        },
+      },
+      animationDuration: {
+        default: null,
+        "@supports (animation-timeline: scroll())": "auto",
+      },
+      animationTimingFunction: {
+        default: null,
+        "@supports (animation-timeline: scroll())": "linear",
+      },
+      animationFillMode: {
+        default: null,
+        "@supports (animation-timeline: scroll())": "both",
+      },
+      animationTimeline: {
+        default: null,
+        "@supports (animation-timeline: scroll())": "scroll(nearest)",
+      },
+    },
   },
   stack: {
     display: "grid",
@@ -262,10 +326,18 @@ export const drawerStyles = stylex.create({
   // In a drawer with heights to rest at, the actions stay in view at a lower rest: lifted by what
   // of the panel is below the window (UI SDK's --drawer-progress is the part that shows), on the
   // panel's own ground over the body, a hairline above them while the body runs on under them.
+  // With no body to grow, the actions go to the panel's foot, where the lift above expects them;
+  // under the description they left an empty band beneath them (A3-layers-05: 328px at the higher rest).
   footerRests: {
     position: "relative",
     zIndex: 1,
-    marginBlockStart: `calc(${grasp.space6} - ${grasp.space4})`,
+    marginBlockStart: {
+      default: `calc(${grasp.space6} - ${grasp.space4})`,
+      [stylex.when.ancestor(
+        ':not(:has([data-slot="drawer-body"]))',
+        drawerMarker
+      )]: "auto",
+    },
     paddingBlockStart: grasp.space4,
     backgroundColor: grasp.raised,
     transform: "translateY(calc((var(--grasp-drawer-shown, 1) - 1) * 100cqh))",
@@ -275,6 +347,24 @@ export const drawerStyles = stylex.create({
         ":is([data-snap-point]):not([data-expanded])",
         drawerMarker
       )]: lineAbove,
+    },
+    // At a lower rest the body does not scroll (the actions are lifted over it), so its own fade
+    // never shows and the row cut at the hairline read as underlined (A3-layers-09). The fade
+    // stands just above the actions instead, on their ground, while they are lifted.
+    "::before": {
+      content: {
+        default: "none",
+        [stylex.when.ancestor(
+          ":is([data-snap-point]):not([data-expanded])",
+          drawerMarker
+        )]: '""',
+      },
+      position: "absolute",
+      insetInline: 0,
+      insetBlockEnd: "100%",
+      height: FADE,
+      pointerEvents: "none",
+      backgroundImage: `linear-gradient(to bottom, transparent, ${grasp.raised})`,
     },
   },
   // In a sheet the actions stand at its foot, however little is above them.

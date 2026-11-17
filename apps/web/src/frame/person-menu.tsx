@@ -1,63 +1,11 @@
-import { isAdmin } from "@grasp-os/shared/roles";
-import type { Identity } from "@grasp-os/shared/rpc";
-import { Avatar, AvatarFallback } from "@grasp-os/ui/components/avatar";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuGroup,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
-  DropdownMenuTrigger,
-} from "@grasp-os/ui/components/dropdown-menu";
-import {
-  SidebarMenu,
-  SidebarMenuButton,
-  SidebarMenuItem,
-  useSidebar,
-} from "@grasp-os/ui/components/sidebar";
-import { toast } from "@grasp-os/ui/components/toast";
-import type { MessageDescriptor } from "@lingui/core";
-import { msg } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
-import { Link, useLocation } from "@tanstack/react-router";
-import {
-  LogOutIcon,
-  MonitorIcon,
-  MoonIcon,
-  RocketIcon,
-  RouteIcon,
-  SunIcon,
-} from "lucide-react";
-import type { LucideIcon } from "lucide-react";
-import { useEffect, useSyncExternalStore } from "react";
-import type { ReactNode } from "react";
 
 import { signOut } from "../core-connection.ts";
 import type { CoreConnection } from "../core-connection.ts";
-import { roleLabel } from "../labels.ts";
-import { LanguageMenu } from "../language-picker.tsx";
-import { tourStops } from "../tour/tour-script.ts";
-import { startTour, tourTaken } from "../tour/tour-state.ts";
-import {
-  applyTheme,
-  chooseTheme,
-  isTheme,
-  onThemeChange,
-  readTheme,
-  themes,
-} from "./theme.ts";
-import type { Theme } from "./theme.ts";
+import { toast } from "../grasp/toast/index.ts";
 
-// The person signed in, at the foot of the sidebar, as in the prototype
-// (`components/nav-user.tsx`): a menu with their onboarding, the language,
-// the theme, Stephen's tour once more and signing out. Settings is in the
-// sidebar itself, above it (app-sidebar.tsx).
+// The person signed in, as the sidebar's foot shows them
+// (grasp/frame/grasp-sidebar.tsx): their initials, and signing out.
 
 const nameParts = /\s+/u;
 
@@ -80,106 +28,6 @@ export const initials = (name: string): string => {
 };
 
 /**
- * The person on the menu's button, as the prototype's: their initials and
- * their name, which is the button's name. Their role is in the menu.
- */
-const Who = ({ identity }: { identity: Identity }) => (
-  <>
-    <Avatar shape="square" size="xs">
-      <AvatarFallback aria-hidden="true">
-        {initials(identity.name)}
-      </AvatarFallback>
-    </Avatar>
-    <span className="flex-1 truncate text-left">{identity.name}</span>
-  </>
-);
-
-/**
- * Who is signed in, atop the menu, as the prototype's: their initials and
- * their name, as on the menu's button; under the name, their role.
- */
-export const SignedIn = ({ identity }: { identity: Identity }) => {
-  const { t } = useLingui();
-  const role = roleLabel(identity.role);
-  return (
-    <DropdownMenuLabel variant="person">
-      <Avatar shape="square">
-        <AvatarFallback aria-hidden="true">
-          {initials(identity.name)}
-        </AvatarFallback>
-      </Avatar>
-      <span className="grid min-w-0 flex-1 leading-tight">
-        <span className="truncate font-medium">{identity.name}</span>
-        <span className="truncate text-xs">
-          {identity.staff ? t`${role}, Grasp staff` : role}
-        </span>
-      </span>
-    </DropdownMenuLabel>
-  );
-};
-
-const themeNames: Record<Theme, MessageDescriptor> = {
-  light: msg`Light`,
-  dark: msg`Dark`,
-  system: msg`System`,
-};
-
-const themeIcons: Record<Theme, LucideIcon> = {
-  light: SunIcon,
-  dark: MoonIcon,
-  system: MonitorIcon,
-};
-
-/**
- * Light, dark or the system's, as a submenu of the person menu: the
- * person's own choice in this browser (theme.ts). The person menu applies
- * it; this mounts only while the menu is open.
- */
-export const ThemeMenu = ({
-  userId,
-  label,
-  icon,
-}: {
-  userId: string;
-  /** Its name, where a menu calls it otherwise ("Appearance"); "Theme" if not. */
-  label?: string;
-  /** Its icon, where a menu gives it one of its own; the theme's own if not. */
-  icon?: ReactNode;
-}) => {
-  const { t, i18n } = useLingui();
-  // Read where it is kept, so a choice made in another tab shows here too.
-  const theme = useSyncExternalStore(onThemeChange, () => readTheme(userId));
-  const ThemeIcon = themeIcons[theme];
-  return (
-    <DropdownMenuSub>
-      <DropdownMenuSubTrigger>
-        {icon ?? <ThemeIcon />}
-        {label ?? t`Theme`}
-        <span className="text-muted-foreground ml-auto">
-          {i18n._(themeNames[theme])}
-        </span>
-      </DropdownMenuSubTrigger>
-      <DropdownMenuSubContent>
-        <DropdownMenuRadioGroup
-          value={theme}
-          onValueChange={(value: unknown) => {
-            if (isTheme(value)) {
-              chooseTheme(userId, value);
-            }
-          }}
-        >
-          {themes.map((each) => (
-            <DropdownMenuRadioItem key={each} value={each}>
-              {i18n._(themeNames[each])}
-            </DropdownMenuRadioItem>
-          ))}
-        </DropdownMenuRadioGroup>
-      </DropdownMenuSubContent>
-    </DropdownMenuSub>
-  );
-};
-
-/**
  * Signs the person out; a sign-out core didn't carry out is said in a
  * toast, and the page stays.
  */
@@ -189,85 +37,10 @@ export const useSignOut = (core: CoreConnection): (() => Promise<void>) => {
     try {
       await signOut(core);
     } catch {
-      toast.add({
-        type: "error",
+      toast.error({
         title: t`Signing out didn't work`,
         description: t`You're still signed in. Try again in a moment.`,
       });
     }
   };
-};
-
-export const PersonMenu = ({
-  core,
-  identity,
-}: {
-  core: CoreConnection;
-  identity: Identity;
-}) => {
-  const { t } = useLingui();
-  // What theme.js painted first was whoever was here last; this is theirs.
-  // Here, not in the theme menu, which mounts only once the menu opens.
-  useEffect(() => {
-    applyTheme(readTheme(identity.userId));
-  }, [identity.userId]);
-  const { isMobile, setOpenMobile } = useSidebar();
-  const { pathname } = useLocation();
-  const toured = tourStops(identity).length > 0;
-  const signOutOrSay = useSignOut(core);
-  return (
-    <SidebarMenu>
-      <SidebarMenuItem>
-        <DropdownMenu>
-          <DropdownMenuTrigger render={<SidebarMenuButton />}>
-            <Who identity={identity} />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent
-            align="end"
-            className="min-w-56"
-            side={isMobile ? "bottom" : "right"}
-            sideOffset={4}
-          >
-            <DropdownMenuGroup>
-              <SignedIn identity={identity} />
-            </DropdownMenuGroup>
-            <DropdownMenuSeparator />
-            <DropdownMenuGroup>
-              {/* The company's own onboarding, which only its admins go through. */}
-              {isAdmin(identity.role) && identity.onboardingOnly !== true ? (
-                <DropdownMenuItem render={<Link to="/setup" />}>
-                  <RocketIcon />
-                  {t`Your onboarding`}
-                </DropdownMenuItem>
-              ) : null}
-              <LanguageMenu />
-              <ThemeMenu userId={identity.userId} />
-              {toured ? (
-                <DropdownMenuItem
-                  onClick={() => {
-                    // On a phone the menu is in a sheet over the page: it goes, so the tour isn't told behind it.
-                    setOpenMobile(false);
-                    startTour(identity.userId, pathname);
-                  }}
-                >
-                  <RouteIcon />
-                  {tourTaken(identity.userId)
-                    ? t`Take the tour again`
-                    : t`Take the tour`}
-                </DropdownMenuItem>
-              ) : null}
-              <DropdownMenuItem
-                onClick={() => {
-                  void signOutOrSay();
-                }}
-              >
-                <LogOutIcon />
-                {t`Sign out`}
-              </DropdownMenuItem>
-            </DropdownMenuGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </SidebarMenuItem>
-    </SidebarMenu>
-  );
 };

@@ -2,19 +2,26 @@ import type {
   BrainMemoryOutcome,
   ChatSavedMemory,
 } from "@grasp-os/shared/brain-memories";
-import { Badge } from "@grasp-os/ui/components/badge";
-import { Button } from "@grasp-os/ui/components/button";
-import {
-  TraceDescription,
-  TraceIcon,
-  TraceLine,
-  TraceTitle,
-} from "@grasp-os/ui/components/trace";
-import { Trans } from "@lingui/react/macro";
-import { BrainIcon } from "lucide-react";
+import { Trans, useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { useState } from "react";
 
+import { Alert } from "../grasp/alert/index.ts";
+import { Badge } from "../grasp/badge/index.ts";
+import { Button } from "../grasp/button/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { useCoreAction } from "../use-core-action.ts";
+
+const styles = stylex.create({
+  line: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    columnGap: grasp.space2,
+    rowGap: grasp.space1,
+  },
+});
 
 /**
  * What Grasp saved, in one whole sentence per case: its statement, who or
@@ -50,14 +57,14 @@ const SavedText = ({
 const SavedKind = ({ type }: Pick<ChatSavedMemory, "type">) => {
   if (type === "instruction") {
     return (
-      <Badge variant="outline">
+      <Badge>
         <Trans>Instruction</Trans>
       </Badge>
     );
   }
   if (type === "preference") {
     return (
-      <Badge variant="outline">
+      <Badge>
         <Trans>Preference</Trans>
       </Badge>
     );
@@ -77,6 +84,7 @@ const SavedKind = ({ type }: Pick<ChatSavedMemory, "type">) => {
  * wouldn't change, so it says that instead.
  */
 export const SavedMemoryLine = ({ saved }: { saved: ChatSavedMemory }) => {
+  const { t } = useLingui();
   const { busy, failure, run } = useCoreAction();
   const [outcome, setOutcome] = useState<BrainMemoryOutcome>();
   const undo = async () => {
@@ -88,36 +96,36 @@ export const SavedMemoryLine = ({ saved }: { saved: ChatSavedMemory }) => {
     }
   };
   return (
-    <TraceLine wrap>
-      <TraceIcon>
-        <BrainIcon />
-      </TraceIcon>
-      <TraceTitle>
-        {outcome === "done" ? (
+    <div {...stylex.props(styles.line)}>
+      {outcome === "done" ? (
+        <Text size="sm" tone="muted">
           <Trans>Grasp no longer remembers this.</Trans>
-        ) : null}
-        {outcome === "nothing" ? (
+        </Text>
+      ) : null}
+      {outcome === "nothing" ? (
+        <Text size="sm" tone="muted">
           <Trans>There was nothing to undo: Grasp no longer uses this.</Trans>
-        ) : null}
-        {outcome === undefined ? (
-          <>
-            <SavedKind type={saved.type} /> <SavedText saved={saved} />{" "}
-            <Button
-              disabled={busy}
-              onClick={() => {
-                void undo();
-              }}
-              size="xs"
-              variant="hint"
-            >
-              <Trans>Undo</Trans>
-            </Button>
-          </>
-        ) : null}
-      </TraceTitle>
-      {failure === undefined ? null : (
-        <TraceDescription>{failure}</TraceDescription>
-      )}
-    </TraceLine>
+        </Text>
+      ) : null}
+      {outcome === undefined ? (
+        <>
+          <SavedKind type={saved.type} />
+          <Text size="sm" tone="muted">
+            <SavedText saved={saved} />
+          </Text>
+          <Button
+            disabled={busy}
+            onClick={() => {
+              void undo();
+            }}
+            size="xs"
+            variant="ghost"
+          >
+            {t`Undo`}
+          </Button>
+        </>
+      ) : null}
+      {failure === undefined ? null : <Alert variant="danger">{failure}</Alert>}
+    </div>
   );
 };

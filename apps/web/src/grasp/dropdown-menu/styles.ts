@@ -132,9 +132,14 @@ export const menuStyles = stylex.create({
     flexShrink: 0,
     color: "inherit",
   },
+  // The words and the end (below) sit on one baseline, the smaller end words too; the icon, the tick
+  // and the spinner stay centred in the row (A3-layers-10: centred, "Ctrl+R" and "Could not copy"
+  // stood 1.5px above the words' baseline). On a touch screen the row is taller than its words, and
+  // a baseline row would lift them to its top: there they centre, as before.
   words: {
     flexGrow: 1,
     minWidth: 0,
+    alignSelf: { default: "baseline", [COARSE]: "auto" },
   },
   // The words of an item with no icon, in a panel where other items have one: they start where
   // the others' words do, past an empty icon slot, so the column of words stays one edge.
@@ -151,6 +156,7 @@ export const menuStyles = stylex.create({
     alignItems: "center",
     flexShrink: 0,
     marginInlineStart: "auto",
+    alignSelf: { default: "baseline", [COARSE]: "auto" },
     color: { default: grasp.muted, [FORCED]: "inherit" },
     fontSize: grasp.textXs,
     lineHeight: grasp.textXsLine,
@@ -162,6 +168,7 @@ export const menuStyles = stylex.create({
     color: { default: grasp.danger, [FORCED]: "inherit" },
   },
   spinner: {
+    alignSelf: "center",
     animationName: { default: spin, [REDUCED]: "none" },
     animationDuration: grasp.durationSpin,
     animationTimingFunction: "linear",
@@ -207,11 +214,15 @@ export const menuStyles = stylex.create({
     color: { default: grasp.muted, [FORCED]: "CanvasText" },
     userSelect: "none",
   },
-  // A hairline between groups, edge to edge of the panel, as Palermo's.
+  // A hairline between groups, edge to edge of the panel, as Palermo's. Where a host sets its own
+  // popup line (App shell's sidebar and bar, FRESH.md F84), that; everywhere else the line.
   separator: {
     height: grasp.hairline,
     marginBlock: grasp.popupPadding,
     marginInline: `calc(-1 * ${grasp.popupPadding})`,
-    backgroundColor: { default: grasp.line, [FORCED]: "CanvasText" },
+    backgroundColor: {
+      default: `var(--grasp-popup-line, ${grasp.line})`,
+      [FORCED]: "CanvasText",
+    },
   },
 });

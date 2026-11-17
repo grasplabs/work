@@ -5,9 +5,11 @@
 // reduced motion the beams stand still as a soft edge, the light comes and goes without a fade,
 // and there is no halo.
 import * as stylex from "@stylexjs/stylex";
+import { useEffect, useRef } from "react";
 
 import { simply } from "../motion/simply.stylex";
 import { grasp, media } from "../tokens/tokens.stylex";
+import type { ComposerListener } from "./context";
 import { useStill } from "./still-context";
 
 /** The colour of the light: Grasp's light by default, or one token colour. */
@@ -75,6 +77,12 @@ const styles = stylex.create({
   },
   ditherOn: {
     opacity: 1,
+  },
+  // Listening (a dictation in the card): the dithered edge follows the voice's level, quietly,
+  // set at each frame as a variable on the layer, so nothing is laid out and nothing re-renders.
+  listening: {
+    opacity: "var(--grasp-composer-listen, 0.2)",
+    transitionDuration: "0s",
   },
   // A beam's room along the top edge. It clips its moving strip, then blurs, so its glow spreads
   // past the room and past the card, softly.
@@ -175,11 +183,57 @@ interface GlowProps {
   /** Changes each time the composer succeeds, so the halo plays again. */
   success: number;
   accent: ComposerAccent;
+  /** A dictation's level, while one is in the card: the dithered edge follows it. */
+  listener: ComposerListener | null;
 }
 
+/** How bright the listening edge is at rest, and how much more at the voice's loudest. */
+const LISTEN_REST = 0.18;
+const LISTEN_SWING = 0.17;
+
+/** What the listening effect returns when there is nothing to follow. */
+const listenNothing = () => {
+  // Nothing was started.
+};
+
+/** The edge follows the level at each frame, while the layer is there. */
+const useListening = (
+  layer: { current: HTMLSpanElement | null },
+  listener: ComposerListener | null
+) => {
+  useEffect(() => {
+    const element = layer.current;
+    if (element === null || listener === null) {
+      return listenNothing;
+    }
+    let frame = 0;
+    const follow = () => {
+      frame = requestAnimationFrame(follow);
+      element.style.setProperty(
+        "--grasp-composer-listen",
+        (LISTEN_REST + LISTEN_SWING * listener.read()).toFixed(3)
+      );
+    };
+    frame = requestAnimationFrame(follow);
+    return () => {
+      cancelAnimationFrame(frame);
+      element.style.removeProperty("--grasp-composer-listen");
+    };
+  }, [layer, listener]);
+};
+
 /** The working light and the success halo, behind the card. */
-export const ComposerGlow = ({ edge, working, success, accent }: GlowProps) => {
+export const ComposerGlow = ({
+  edge,
+  working,
+  success,
+  accent,
+  listener,
+}: GlowProps) => {
   const still = useStill();
+  const layer = useRef<HTMLSpanElement>(null);
+  useListening(layer, listener);
+  const listening = listener !== null && !working;
   const paint = accent === "light" ? styles.light : styles.tint;
   const strip = (size: stylex.StyleXStyles) => (
     <span
@@ -192,19 +246,23 @@ export const ComposerGlow = ({ edge, working, success, accent }: GlowProps) => {
       )}
     />
   );
-  const dither = edge === "dither";
+  // Listening, the edge is always the dithered one: the same material as the voice's field.
+  const dither = edge === "dither" || listening;
   return (
     <>
       <span
+        ref={layer}
         aria-hidden="true"
         data-slot="composer-light"
-        data-edge={edge}
+        data-edge={dither ? "dither" : edge}
+        data-listening={listening}
         {...stylex.props(
           styles.layer,
           colour(accent),
           working && styles.on,
           dither && styles.dither,
-          dither && working && styles.ditherOn
+          dither && working && styles.ditherOn,
+          listening && styles.listening
         )}
       >
         <span {...stylex.props(styles.frame)}>

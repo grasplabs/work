@@ -185,6 +185,8 @@ const BrainLayout = () => {
 };
 
 export const Route = createFileRoute("/_shell/brain")({
+  // It fills the page\'s card, its panes scrolling on their own (frame/page-fill.ts).
+  staticData: { page: "fill" },
   loader: async ({
     abortController,
     context: { core },

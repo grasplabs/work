@@ -1,15 +1,7 @@
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectLabel,
-  SelectTrigger,
-  SelectValue,
-} from "@grasp-os/ui/components/select";
 import { useLingui } from "@lingui/react/macro";
 
 import { BackdropPreview } from "../grasp/field/backdrop-preview.tsx";
+import { Field, FieldDescription, FieldLabel } from "../grasp/field/index.ts";
 import {
   backdrops,
   chooseLook,
@@ -26,11 +18,10 @@ import type {
   DitherPattern,
   DitherTone,
 } from "../grasp/field/look.ts";
-import {
-  SettingsBody,
-  SettingsRow,
-  SettingsSection,
-} from "./settings-parts.tsx";
+import { Radio, RadioGroup } from "../grasp/radio-group/index.ts";
+import { SectionCard } from "../grasp/section-card/index.ts";
+import { Select } from "../grasp/select/index.ts";
+import { SettingsStack } from "./section.tsx";
 
 // Settings → Appearance: what stands behind Chat's own page (the person's
 // look, grasp/field/look.ts). The look is shown live as the page shows it,
@@ -73,69 +64,53 @@ export const BackdropSettings = ({ userId }: { userId: string }) => {
     aurora: t`Aurora`,
   };
   const groups = [
-    { id: "scenes", label: t`Scenes`, kinds: sceneKinds },
-    { id: "dithers", label: t`Dithers`, kinds: ditherKinds },
-    { id: "sand", label: t`Sand`, kinds: sandKinds },
+    { label: t`Scenes`, kinds: sceneKinds },
+    { label: t`Dithers`, kinds: ditherKinds },
+    { label: t`Sand`, kinds: sandKinds },
   ];
   const dithered = isDithered(look.backdrop);
   return (
-    <SettingsSection
-      description={t`What stands behind the page where you start a chat. Yours alone, kept in this browser.`}
+    <SectionCard
+      description={t`What stands behind the page where you start a chat.`}
       title={t`Chat backdrop`}
     >
-      <SettingsBody>
+      <SettingsStack>
         <BackdropPreview
           label={t`Preview of your chat backdrop`}
           look={look}
           title={t`What should we look at today?`}
         />
-      </SettingsBody>
-      <SettingsRow
-        description={t`A scene, a dither, sand, or nothing.`}
-        htmlFor="backdrop-kind"
-        label={t`Backdrop`}
-      >
-        <Select
-          items={backdrops.map((value) => ({ value, label: names[value] }))}
-          onValueChange={(value: unknown) => {
-            const backdrop = backdrops.find((each) => each === value);
-            if (backdrop !== undefined) {
-              chooseLook(userId, { ...look, backdrop });
-            }
-          }}
-          value={look.backdrop}
-        >
-          <SelectTrigger className="w-full" id="backdrop-kind">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {groups.map((group) => (
-              <SelectGroup key={group.id}>
-                <SelectLabel>{group.label}</SelectLabel>
-                {group.kinds.map((kind) => (
-                  <SelectItem key={kind} value={kind}>
-                    {names[kind]}
-                  </SelectItem>
-                ))}
-              </SelectGroup>
-            ))}
-            <SelectItem value="none">{names.none}</SelectItem>
-          </SelectContent>
-        </Select>
-      </SettingsRow>
-      {dithered ? (
-        <>
-          <SettingsRow
-            description={t`How the dither's cells are set.`}
-            htmlFor="backdrop-pattern"
-            label={t`Pattern`}
-          >
-            <Select
-              items={ditherPatterns.map((value) => ({
-                value,
-                label: patternNames[value],
-              }))}
-              onValueChange={(value: unknown) => {
+        <Field>
+          <FieldLabel>{t`Backdrop`}</FieldLabel>
+          <Select
+            items={[
+              ...groups.map((group) => ({
+                type: "group" as const,
+                label: group.label,
+                items: group.kinds.map((kind) => ({
+                  value: kind,
+                  label: names[kind],
+                })),
+              })),
+              { type: "separator" as const },
+              { value: "none", label: names.none },
+            ]}
+            onValueChange={(value) => {
+              const backdrop = backdrops.find((each) => each === value);
+              if (backdrop !== undefined) {
+                chooseLook(userId, { ...look, backdrop });
+              }
+            }}
+            value={look.backdrop}
+          />
+          <FieldDescription>{t`A scene, a dither, sand, or nothing.`}</FieldDescription>
+        </Field>
+        {dithered ? (
+          <>
+            <RadioGroup
+              description={t`How the dither's cells are set.`}
+              label={t`Pattern`}
+              onValueChange={(value) => {
                 const pattern = ditherPatterns.find((each) => each === value);
                 if (pattern !== undefined) {
                   chooseLook(userId, { ...look, pattern });
@@ -143,50 +118,36 @@ export const BackdropSettings = ({ userId }: { userId: string }) => {
               }}
               value={look.pattern}
             >
-              <SelectTrigger className="w-full" id="backdrop-pattern">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {ditherPatterns.map((pattern) => (
-                  <SelectItem key={pattern} value={pattern}>
-                    {patternNames[pattern]}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </SettingsRow>
-          <SettingsRow
-            description={t`One green, or a run of greens from the edge in.`}
-            htmlFor="backdrop-tone"
-            label={t`Colour`}
-          >
-            <Select
-              items={ditherTones.map((value) => ({
-                value,
-                label: toneNames[value],
-              }))}
-              onValueChange={(value: unknown) => {
-                const tone = ditherTones.find((each) => each === value);
-                if (tone !== undefined) {
-                  chooseLook(userId, { ...look, tone });
-                }
-              }}
-              value={look.tone}
-            >
-              <SelectTrigger className="w-full" id="backdrop-tone">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {ditherTones.map((tone) => (
-                  <SelectItem key={tone} value={tone}>
-                    {toneNames[tone]}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </SettingsRow>
-        </>
-      ) : null}
-    </SettingsSection>
+              {ditherPatterns.map((pattern) => (
+                <Radio
+                  key={pattern}
+                  label={patternNames[pattern]}
+                  value={pattern}
+                />
+              ))}
+            </RadioGroup>
+            <Field>
+              <FieldLabel>{t`Colour`}</FieldLabel>
+              <Select
+                items={ditherTones.map((value) => ({
+                  value,
+                  label: toneNames[value],
+                }))}
+                onValueChange={(value) => {
+                  const tone = ditherTones.find((each) => each === value);
+                  if (tone !== undefined) {
+                    chooseLook(userId, { ...look, tone });
+                  }
+                }}
+                value={look.tone}
+              />
+              <FieldDescription>
+                {t`One green, or a run of greens from the edge in.`}
+              </FieldDescription>
+            </Field>
+          </>
+        ) : null}
+      </SettingsStack>
+    </SectionCard>
   );
 };

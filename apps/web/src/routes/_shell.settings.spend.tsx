@@ -1,65 +1,66 @@
 import type {
   ModelMonthSpend,
+  ModelSettings,
   SpendingWorkflow,
 } from "@grasp-os/shared/models";
-import { Stat } from "@grasp-os/ui/components/stat";
 import type { I18n } from "@lingui/core";
 import { msg, ph, plural } from "@lingui/core/macro";
-import { Trans, useLingui } from "@lingui/react/macro";
+import { useLingui } from "@lingui/react/macro";
 import { createFileRoute } from "@tanstack/react-router";
 
-import { NotLoadedState } from "../frame/page-states.tsx";
+import { RouterLink } from "../frame/router-link.tsx";
+import { SectionCard } from "../grasp/section-card/index.ts";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "../grasp/table/index.ts";
+import { Text } from "../grasp/text/index.ts";
 import { loadFromCore } from "../load-from-core.tsx";
+import type { Loaded } from "../load-from-core.tsx";
 import { dollars, monthEnd } from "../settings/money.ts";
 import {
-  SettingsBody,
+  FactRow,
+  FactValue,
+  SectionNotLoaded,
+  SettingsRows,
   SettingsError,
   SettingsLoading,
-  SettingsSection,
-} from "../settings/settings-parts.tsx";
+} from "../settings/section.tsx";
 
-// AI spend, for admins, as in the prototype (`routes/settings/spend.tsx`):
-// what the models cost this month, as core counts it, and which workflows
-// spent most. Read-only: the organization pays its AI providers on its own
-// keys, and nothing in Grasp limits what it spends.
+// AI spend, for admins: what the models cost this month, as core counts
+// it, which workflows spent most, and what each App's model binding spent.
+// Read-only: the organization pays its AI providers on its own keys, and
+// nothing in Grasp limits what it spends. The models themselves are
+// chosen on AI providers (settings/ai-providers.tsx).
 
-/** One number of the top row: what it is, the amount, and a line that puts it in its place. */
-const Figure = ({
-  label,
-  value,
-  sub,
-}: {
-  label: string;
-  value: string;
-  sub: string;
-}) => (
-  <div className="bg-card flex flex-col gap-0.5 px-5 py-4">
-    <span className="text-muted-foreground text-xs">{label}</span>
-    <Stat>{value}</Stat>
-    <span className="text-muted-foreground text-xs">{sub}</span>
-  </div>
-);
-
-/** This month so far, and where it ends. */
-const Month = ({ spent, month }: { spent: number; month: string }) => {
+/** This month so far, and where it ends if the rest goes like the days so far. */
+const Month = ({ spend }: { spend: ModelMonthSpend }) => {
   const { t } = useLingui();
-  const end = monthEnd(spent, month, new Date());
+  const { month } = spend;
+  const end = monthEnd(spend.total, month, new Date());
   const ending = end === null ? null : dollars(end);
   return (
-    <div className="bg-border grid gap-px border-t sm:grid-cols-2">
-      <Figure
-        label={t`This month so far`}
-        sub={t`All model calls together`}
-        value={dollars(spent)}
-      />
-      {ending === null ? null : (
-        <Figure
-          label={t`By the end of the month`}
-          sub={t`If the rest of the month goes like the days so far`}
-          value={t`About ${ending}`}
-        />
-      )}
-    </div>
+    <SectionCard
+      description={t`In US dollars, as the models are priced (${month}, UTC).`}
+      flush
+      title={t`This month`}
+    >
+      <SettingsRows>
+        <FactRow label={t`So far`}>{dollars(spend.total)}</FactRow>
+        {ending === null ? null : (
+          <FactRow
+            help={t`If the rest goes like the days so far.`}
+            label={t`By the end of the month`}
+          >
+            {t`About ${ending}`}
+          </FactRow>
+        )}
+      </SettingsRows>
+    </SectionCard>
   );
 };
 
@@ -77,74 +78,133 @@ const workflowName = (of: SpendingWorkflow, i18n: I18n): string => {
 const WorkflowsThisMonth = ({ spend }: { spend: ModelMonthSpend }) => {
   const { t, i18n } = useLingui();
   const top = spend.workflows.length;
+  const none = top === 0;
   return (
-    <SettingsSection
-      description={t`What each workflow's model calls cost this month, most first, and how often it ran.`}
-      title={t`Workflows this month`}
+    <SectionCard
+      description={t`What their model calls cost this month, most first.`}
+      flush={!none}
+      {...(spend.more
+        ? { footer: t`The ${top} that spent most; more spent less.` }
+        : {})}
+      title={t`Workflows`}
     >
-      {spend.workflows.length === 0 ? (
-        <SettingsBody>
-          <p className="text-muted-foreground">
-            <Trans>No workflow has called a model this month.</Trans>
-          </p>
-        </SettingsBody>
+      {none ? (
+        <Text size="sm" tone="muted">
+          {t`No workflow has called a model this month.`}
+        </Text>
       ) : (
-        <ul>
-          {spend.workflows.map(
-            ({ appId, appName, workflowId, name, amount, runs }) => (
-              <li
-                className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-x-6 border-t px-5 py-3"
-                key={JSON.stringify([appId, workflowId])}
-              >
-                <span className="truncate">
-                  {workflowName({ appId, appName, workflowId, name }, i18n)}
-                </span>
-                <span className="text-muted-foreground text-right tabular-nums">
-                  {t`${plural(runs, { one: "# run", other: "# runs" })}`}
-                </span>
-                <span className="text-right tabular-nums">
-                  {dollars(amount)}
-                </span>
-              </li>
-            )
-          )}
-        </ul>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>{t`Workflow`}</TableHead>
+              <TableHead align="end">{t`Runs`}</TableHead>
+              <TableHead align="end">{t`This month`}</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {spend.workflows.map(
+              ({ appId, appName, workflowId, name, amount, runs }) => (
+                <TableRow key={JSON.stringify([appId, workflowId])}>
+                  <TableCell wrap>
+                    {workflowName({ appId, appName, workflowId, name }, i18n)}
+                  </TableCell>
+                  <TableCell align="end">
+                    {t`${plural(runs, { one: "# run", other: "# runs" })}`}
+                  </TableCell>
+                  <TableCell align="end">{dollars(amount)}</TableCell>
+                </TableRow>
+              )
+            )}
+          </TableBody>
+        </Table>
       )}
-      {spend.more ? (
-        <p className="text-muted-foreground border-t px-5 py-3">
-          <Trans>The {top} that spent most; more spent less.</Trans>
-        </p>
-      ) : null}
-    </SettingsSection>
+    </SectionCard>
+  );
+};
+
+/** Each App's model binding, and what it spent this month. */
+const AppSpend = ({ settings }: { settings: Loaded<ModelSettings> }) => {
+  const { t } = useLingui();
+  const description = t`Through each App's own model; workflows' AI steps count above.`;
+  if (settings.state !== "ready") {
+    return (
+      <SectionCard description={description} title={t`App spend`}>
+        <SectionNotLoaded page={settings} />
+      </SectionCard>
+    );
+  }
+  const { listed: bound, more } = settings.data.bindings;
+  const shown = bound.length;
+  return (
+    <SectionCard
+      description={description}
+      flush={shown > 0}
+      {...(more
+        ? { footer: t`The first ${shown} by App; more Apps have models bound.` }
+        : {})}
+      title={t`App spend`}
+    >
+      {shown === 0 ? (
+        <Text size="sm" tone="muted">
+          {t`No App has a model bound to it.`}
+        </Text>
+      ) : (
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>{t`App`}</TableHead>
+              <TableHead align="end">{t`This month`}</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {bound.map((binding) => {
+              const { alias, model } = binding;
+              return (
+                <TableRow key={`${binding.appId}/${alias}`}>
+                  <TableCell wrap>
+                    <FactValue
+                      note={
+                        model === null
+                          ? t`What it is bound to can't be read, so it serves nothing.`
+                          : t`${alias} · ${model}`
+                      }
+                    >
+                      <RouterLink
+                        params={{ app: binding.appId }}
+                        to="/apps/$app/settings"
+                      >
+                        {binding.appName}
+                      </RouterLink>
+                    </FactValue>
+                  </TableCell>
+                  <TableCell align="end">
+                    {dollars(binding.thisMonth)}
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
+      )}
+    </SectionCard>
   );
 };
 
 const SpendPage = () => {
   const { t } = useLingui();
-  const page = Route.useLoaderData();
-  if (page.state !== "ready") {
+  const { spend, settings } = Route.useLoaderData();
+  if (spend.state !== "ready") {
     return (
-      <SettingsSection title={t`AI spend`}>
-        <NotLoadedState heading="h3" page={page} />
-      </SettingsSection>
+      <SectionCard title={t`This month`}>
+        <SectionNotLoaded page={spend} />
+      </SectionCard>
     );
   }
-  const spend = page.data;
-  const { month } = spend;
   return (
     <>
-      <SettingsSection
-        description={
-          <Trans>
-            What the models cost that work for you in Grasp this month ({month},
-            UTC), in US dollars, as they are priced.
-          </Trans>
-        }
-        title={t`AI spend`}
-      >
-        <Month month={month} spent={spend.total} />
-      </SettingsSection>
-      <WorkflowsThisMonth spend={spend} />
+      <Month spend={spend.data} />
+      <WorkflowsThisMonth spend={spend.data} />
+      <AppSpend settings={settings} />
     </>
   );
 };
@@ -153,6 +213,11 @@ export const Route = createFileRoute("/_shell/settings/spend")({
   pendingComponent: SettingsLoading,
   errorComponent: SettingsError,
   component: SpendPage,
-  loader: async ({ context: { core } }) =>
-    await loadFromCore(core, async (session) => await session.models.spend()),
+  loader: async ({ context: { core } }) => {
+    const [spend, settings] = await Promise.all([
+      loadFromCore(core, async (session) => await session.models.spend()),
+      loadFromCore(core, async (session) => await session.models.settings()),
+    ]);
+    return { spend, settings };
+  },
 });

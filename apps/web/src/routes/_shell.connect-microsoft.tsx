@@ -1,7 +1,9 @@
-import { Trans } from "@lingui/react/macro";
+import { useLingui } from "@lingui/react/macro";
 import { createFileRoute } from "@tanstack/react-router";
 
 import { NotLoadedState } from "../frame/page-states.tsx";
+import { Page, PageHeading } from "../frame/page.tsx";
+import { SiteHeader } from "../frame/site-header.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
 
 // Where Stephen's card in a chat app sends someone to connect their own
@@ -12,21 +14,26 @@ import { loadFromCore } from "../load-from-core.tsx";
 // Once it finishes, core tells them in the chat app and carries on there;
 // the browser lands on Integrations.
 
+// In the frame, under its own bar, as every page: the frame's <main> holds it.
 const ConnectMicrosoft = () => {
+  const { t } = useLingui();
   const page = Route.useLoaderData();
+  const title = t`Connecting your Microsoft 365`;
   return (
-    <main className="mx-auto flex max-w-md flex-col gap-3 p-8 text-sm">
-      <h1 className="text-base font-medium">
-        <Trans>Connecting your Microsoft 365</Trans>
-      </h1>
-      {page.state === "ready" ? (
-        <p className="text-muted-foreground">
-          <Trans>Taking you to the Microsoft sign-in…</Trans>
-        </p>
-      ) : (
-        <NotLoadedState heading="h2" page={page} />
-      )}
-    </main>
+    <>
+      <SiteHeader crumbs={[{ label: title }]} />
+      <Page>
+        <PageHeading
+          title={title}
+          {...(page.state === "ready"
+            ? { description: t`Taking you to the Microsoft sign-in…` }
+            : {})}
+        />
+        {page.state === "ready" ? null : (
+          <NotLoadedState heading="h2" page={page} />
+        )}
+      </Page>
+    </>
   );
 };
 

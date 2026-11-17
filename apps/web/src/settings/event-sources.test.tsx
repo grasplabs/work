@@ -122,10 +122,28 @@ const shown = async (
   return asked;
 };
 
-/** The buttons whose text is `text`. */
+/** An element's words as people get them: not the ones it hides from them. */
+const wordsOf = (element: Element): string => {
+  const copy = element.cloneNode(true);
+  if (!(copy instanceof Element)) {
+    return "";
+  }
+  for (const hidden of copy.querySelectorAll("[aria-hidden='true']")) {
+    hidden.remove();
+  }
+  return copy.textContent.trim();
+};
+
+/** The buttons whose words are `text`. */
 const buttons = (text: string): HTMLButtonElement[] =>
   [...document.querySelectorAll("button")].filter(
-    (each) => each.textContent.trim() === text
+    (each) => wordsOf(each) === text
+  );
+
+/** The button named `name`, by its label. */
+const named = (name: string): HTMLButtonElement | undefined =>
+  [...document.querySelectorAll("button")].find(
+    (each) => each.getAttribute("aria-label") === name
   );
 
 /** Presses the `index`th button whose text is `text`, and lets it settle. */
@@ -136,11 +154,11 @@ const press = async (text: string, index = 0): Promise<void> => {
   });
 };
 
-/** The value of the input named `name`, if there is one. */
-const inputNamed = (name: string): string | undefined =>
-  [...document.querySelectorAll("input")].find(
-    (input) => input.getAttribute("aria-label") === name
-  )?.value;
+/** The value shown beside the copy button named `name`, if there is one. */
+const copyValue = (name: string): string | undefined =>
+  named(name)
+    ?.closest('[data-slot="copy-field"]')
+    ?.querySelector('[data-slot="copy-field-value"]')?.textContent ?? undefined;
 
 /** Types `value` into the new source's name, as React hears a person do it. */
 const typeName = async (value: string): Promise<void> => {
@@ -178,18 +196,19 @@ describe("the Webhooks settings", () => {
 
   it("shows a source's URL with a way to copy it, and how a sender signs an event", async () => {
     await shown();
-    await press("Copy");
-    const [copied] = buttons("Copied");
+    const url = copyValue("Copy the URL of Shop system");
+    await act(async () => {
+      named("Copy the URL of Shop system")?.click();
+      await settled();
+    });
 
     expect({
-      url: inputNamed("URL of Shop system"),
+      url,
       clipboard: await navigator.clipboard.readText(),
-      name: copied?.getAttribute("aria-label"),
       signing: document.body.textContent.includes("Standard Webhooks"),
     }).toStrictEqual({
       url: `${globalThis.location.origin}/api/hooks/token-0b7c`,
       clipboard: `${globalThis.location.origin}/api/hooks/token-0b7c`,
-      name: "Copy the URL of Shop system",
       signing: true,
     });
   });
@@ -198,7 +217,7 @@ describe("the Webhooks settings", () => {
     const asked = await shown([]);
     await typeName("  Stripe ");
     await submit();
-    const shownOnce = inputNamed("Secret");
+    const shownOnce = copyValue("Copy the secret");
     const warned = document.body.textContent.includes("you won't see it again");
     await press("Done");
 
@@ -206,7 +225,7 @@ describe("the Webhooks settings", () => {
       asked,
       shownOnce,
       warned,
-      afterClosing: inputNamed("Secret"),
+      afterClosing: copyValue("Copy the secret"),
     }).toStrictEqual({
       asked: [{ create: { name: "Stripe" } }],
       shownOnce: secret,
@@ -221,7 +240,7 @@ describe("the Webhooks settings", () => {
     await submit();
 
     expect({
-      secret: inputNamed("Secret"),
+      secret: copyValue("Copy the secret"),
       said: document.body.textContent.includes("Core refused the read."),
     }).toStrictEqual({ secret, said: true });
   });
@@ -230,14 +249,13 @@ describe("the Webhooks settings", () => {
     const asked = await shown();
     await press("Rotate the secret");
     const beforeConfirming = asked.length;
-    // The dialog's own button, after the row's.
-    await press("Rotate the secret", 1);
+    await press("Rotate");
 
     expect({
       beforeConfirming,
       asked,
       left: buttons("Rotate the secret").length,
-      shown: inputNamed("Secret"),
+      shown: copyValue("Copy the secret"),
     }).toStrictEqual({
       beforeConfirming: 0,
       asked: [{ rotateSecret: shop.id }],
@@ -249,7 +267,7 @@ describe("the Webhooks settings", () => {
   it("revokes a secret and deletes a source only once confirmed", async () => {
     const asked = await shown();
     await press("Revoke the secret");
-    await press("Revoke the secret", 1);
+    await press("Revoke");
     await press("Delete");
     const beforeDeleting = asked.length;
     await press("Delete the source");
@@ -275,14 +293,14 @@ describe("the Webhooks settings", () => {
   it("closes the confirmation and says why in the row when a change fails, showing no secret", async () => {
     await shown([shop], true);
     await press("Rotate the secret");
-    await press("Rotate the secret", 1);
+    await press("Rotate");
 
     expect({
       left: buttons("Rotate the secret").length,
       said: document.body.textContent.includes(
         "Core couldn't make the change."
       ),
-      secret: inputNamed("Secret"),
+      secret: copyValue("Copy the secret"),
     }).toStrictEqual({ left: 1, said: true, secret: undefined });
   });
 });

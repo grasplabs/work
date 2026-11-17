@@ -1,7 +1,9 @@
 // Light, dark, or the system's colour scheme, through the theme's `dark`
-// class. Loaded as a classic script in <head>, so it runs before first paint
-// and dark mode never flashes light. A file, not inline: the CSP allows no
-// inline script.
+// class, and the theme's colours (Evergreen, Pine, Paper) through Grasp
+// UI's `data-grasp-theme` and `data-grasp-mode` (what its themeScript sets,
+// grasp/theme/script.ts). Loaded as a classic script in <head>, so it runs
+// before first paint and nothing flashes. A file, not inline: the CSP
+// allows no inline script.
 //
 // The choice is the person's, kept in this browser (src/frame/theme.ts):
 // `grasp-theme` holds the one applied last, so the first paint already has
@@ -16,23 +18,38 @@
 // making the bundler run modules in import order.
 globalThis.__zod_globalConfig = { jitless: true };
 
+/**
+ * What this browser keeps under `key`, or null where storage is blocked.
+ * @param {string} key The storage key.
+ * @returns {string | null} What it holds, or null.
+ */
+const readKept = (key) => {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    // Storage blocked: the defaults.
+    return null;
+  }
+};
+
 {
   const dark = matchMedia("(prefers-color-scheme: dark)");
+  const modes = new Set(["light", "dark", "system"]);
+  const ids = new Set(["evergreen", "pine", "paper"]);
   const apply = () => {
-    let theme = null;
-    try {
-      theme = localStorage.getItem("grasp-theme");
-    } catch {
-      // Storage blocked: follow the system.
-    }
+    const root = document.documentElement;
+    const theme = readKept("grasp-theme");
+    const id = readKept("grasp-theme-id");
     const isDark = theme === "dark" || (theme !== "light" && dark.matches);
-    document.documentElement.classList.toggle("dark", isDark);
+    root.classList.toggle("dark", isDark);
+    root.dataset.graspMode = modes.has(theme) ? theme : "system";
+    root.dataset.graspTheme = ids.has(id) ? id : "evergreen";
   };
   apply();
   dark.addEventListener("change", apply);
   document.addEventListener("grasp-theme", apply);
   addEventListener("storage", (event) => {
-    if (event.key === "grasp-theme") {
+    if (event.key === "grasp-theme" || event.key === "grasp-theme-id") {
       apply();
     }
   });

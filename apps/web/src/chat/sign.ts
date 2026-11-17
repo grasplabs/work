@@ -6,22 +6,11 @@ import type {
   ChatToolEvent,
 } from "@grasp-os/shared/chat";
 
-import type { SignFigure } from "./sign-figures.ts";
+// What Grasp is doing on a question it works on now, as the thread's
+// working line says it (grasplabs/prototype `lib/sign.ts`).
 
-// What Grasp's sign in the chat shows, and the figure it takes for it
-// (grasplabs/prototype `lib/sign.ts`). The sign stands under the newest
-// answer only while Grasp works on it; the thread says which work that is.
-
-/** What Grasp is doing, as its sign in the chat shows it. */
-export type SignState =
-  | "reading"
-  | "thinking"
-  | "writing"
-  | "working"
-  | "error";
-
-/** What Grasp does while it works on a question: all but failing. */
-export type WorkState = Exclude<SignState, "error">;
+/** What Grasp does while it works on a question. */
+export type WorkState = "reading" | "thinking" | "writing" | "working";
 
 /**
  * What Grasp is doing on a question it works on now. `partial` is the
@@ -100,36 +89,4 @@ export const readingFileOf = ({
     }
   }
   return undefined;
-};
-
-/**
- * The figure the sign takes for what Grasp is doing. As soon as it sets to
- * work it is the brain: reading the workspace and thinking. It is lines of
- * text while it reads a document, a pen while it writes, a workflow while
- * it runs code, and an exclamation mark when it failed.
- */
-export const figureFor = (
-  state: SignState,
-  { document = false }: { document?: boolean } = {}
-): SignFigure => {
-  switch (state) {
-    case "reading": {
-      return document ? "lines" : "brain";
-    }
-    case "thinking": {
-      return "brain";
-    }
-    case "writing": {
-      return "pen";
-    }
-    case "working": {
-      return "flow";
-    }
-    case "error": {
-      return "alert";
-    }
-    default: {
-      return state satisfies never;
-    }
-  }
 };

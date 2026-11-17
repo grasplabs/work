@@ -187,7 +187,7 @@ const ActivityList = ({ activity }: { activity: InboxActivity }) => {
     })
     .slice(0, 100);
   return (
-    <div className="pb-chat mx-auto flex w-full max-w-4xl flex-col gap-3 px-6 pt-4">
+    <div className="mx-auto flex w-full max-w-4xl flex-col gap-3">
       <div className="flex items-center justify-between gap-3">
         <ToggleGroup
           aria-label={t`Show activity by`}
@@ -264,7 +264,7 @@ const ToDoTab = ({
         className={
           reading
             ? "@container/list hidden min-h-0 flex-col overflow-y-auto border-r @4xl/inbox:flex"
-            : "pb-chat @container/list flex min-h-0 flex-col overflow-y-auto @4xl/inbox:border-r @4xl/inbox:pb-0"
+            : "@container/list flex min-h-0 flex-col overflow-y-auto @4xl/inbox:border-r"
         }
       >
         {list.length === 0 ? (
@@ -299,8 +299,8 @@ const ToDoTab = ({
       <div
         className={
           reading
-            ? "pb-chat @container/item flex min-h-0 flex-col overflow-y-auto"
-            : "pb-chat @container/item hidden min-h-0 flex-col overflow-y-auto @4xl/inbox:flex"
+            ? "@container/item flex min-h-0 flex-col overflow-y-auto"
+            : "@container/item hidden min-h-0 flex-col overflow-y-auto @4xl/inbox:flex"
         }
       >
         {selected === undefined ? (

@@ -1,20 +1,19 @@
 import type { Identity } from "@grasp-os/shared/rpc";
 import type { SignInAgainItem } from "@grasp-os/shared/waiting";
-import { buttonVariants } from "@grasp-os/ui/components/button";
-import { Trans, useLingui } from "@lingui/react/macro";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { Link, useMatch } from "@tanstack/react-router";
-import { KeyRoundIcon } from "lucide-react";
 import { useState } from "react";
 
 import { integrationKey } from "../connections/integrations.ts";
+import { Button } from "../grasp/button/index.ts";
+import { Lock } from "../grasp/icons/index.ts";
+import { Item } from "../grasp/item/index.ts";
+import { SectionCard } from "../grasp/section-card/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { NotLoaded } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
-import {
-  DashboardCard,
-  DashboardCardHeader,
-  DashboardGroup,
-  ItemMark,
-} from "./dashboard-card.tsx";
+import { DashboardGroup } from "./dashboard-card.tsx";
 import { InboxGroup, inInbox } from "./in-inbox.tsx";
 import { TodoPile } from "./todo-pile.tsx";
 import type { PileItem } from "./todo-pile.tsx";
@@ -31,6 +30,22 @@ import type { Viewer, Waiting } from "./waiting.ts";
 // connections they can sign in to again, and what the inbox settles
 // (`in-inbox.tsx`), each a way to its item there.
 
+const styles = stylex.create({
+  // Said once to a screen reader: what was done with the pile's last card.
+  unseen: {
+    position: "absolute",
+    width: grasp.hairline,
+    height: grasp.hairline,
+    overflow: "hidden",
+    clipPath: "inset(50%)",
+    whiteSpace: "nowrap",
+  },
+  notLoaded: {
+    paddingInline: grasp.space5,
+    paddingBlock: grasp.space3,
+  },
+});
+
 /** An account to sign in to again: its next step opens its account on its integration's page. */
 const ReconnectRow = ({ ranOut }: { ranOut: SignInAgainItem }) => {
   const { t } = useLingui();
@@ -41,35 +56,38 @@ const ReconnectRow = ({ ranOut }: { ranOut: SignInAgainItem }) => {
       ? integration.name
       : `${integration.name} (${connection.accountName})`;
   return (
-    <li className="flex min-h-14 items-center gap-3 border-t px-4 py-2">
-      <ItemMark icon={KeyRoundIcon} />
-      <div className="flex min-w-0 flex-1 flex-col">
-        <span className="text-muted-foreground text-xs">
-          <Trans context="kind of thing that waits">Connection</Trans>
-        </span>
-        <span className="truncate">
-          <Trans>{app} needs someone to sign in again</Trans>
-        </span>
-      </div>
-      <Link
-        aria-label={t`Sign in to ${app} again`}
-        className={buttonVariants({ size: "xs" })}
-        params={{
-          integration: integrationKey(integration.source, integration.id),
-        }}
-        search={{ tab: "account" }}
-        to="/integrations/$integration"
-      >
-        <Trans>Sign in again</Trans>
-      </Link>
-    </li>
+    <Item
+      actions={
+        <Button
+          render={
+            <Link
+              aria-label={t`Sign in to ${app} again`}
+              params={{
+                integration: integrationKey(integration.source, integration.id),
+              }}
+              search={{ tab: "account" }}
+              to="/integrations/$integration"
+            />
+          }
+          size="xs"
+        >
+          {t`Sign in again`}
+        </Button>
+      }
+      description={t({
+        message: "Connection",
+        context: "kind of thing that waits",
+      })}
+      icon={Lock}
+      title={t`${app} needs someone to sign in again`}
+    />
   );
 };
 
 /** Why a part of what waits couldn't be read, in its group's place. */
 const PartNotLoaded = ({ part }: { part: Loaded<unknown> }) =>
   part.state === "ready" ? null : (
-    <div className="border-t px-4 py-3">
+    <div {...stylex.props(styles.notLoaded)}>
       <NotLoaded page={part} />
     </div>
   );
@@ -89,11 +107,9 @@ const ReconnectGroup = ({
   }
   return (
     <DashboardGroup title={t`Connections to sign in to again`}>
-      <ul aria-label={t`Connections to sign in to again`}>
-        {ranOut.map((account) => (
-          <ReconnectRow key={account.connection.id} ranOut={account} />
-        ))}
-      </ul>
+      {ranOut.map((account) => (
+        <ReconnectRow key={account.connection.id} ranOut={account} />
+      ))}
     </DashboardGroup>
   );
 };
@@ -169,30 +185,26 @@ export const ToDo = ({
     <>
       <TodoPile items={pileOf(waiting, identity)} onSaid={setSaid} />
       {/* Outside the pile, so what was done with its last card is still said once it is gone. */}
-      <output className="sr-only">{said}</output>
+      <output {...stylex.props(styles.unseen)}>{said}</output>
       {elsewhere ? (
-        <DashboardCard id="dashboard-elsewhere">
-          <DashboardCardHeader
-            id="dashboard-elsewhere"
-            title={t({
-              message: "Waiting elsewhere",
-              context: "dashboard: what waits on you, settled on its own page",
-            })}
-            actions={
-              <Link
-                className={buttonVariants({ size: "xs", variant: "ghost" })}
-                to="/inbox"
-              >
-                <Trans>Open the inbox</Trans>
-              </Link>
-            }
-          />
+        <SectionCard
+          actions={
+            <Button render={<Link to="/inbox" />} size="xs" variant="ghost">
+              {t`Open the inbox`}
+            </Button>
+          }
+          flush
+          title={t({
+            message: "Waiting elsewhere",
+            context: "dashboard: what waits on you, settled on its own page",
+          })}
+        >
           {notLoaded.map(({ key, part }) => (
             <PartNotLoaded key={key} part={part} />
           ))}
           <InboxGroup items={inbox} />
           <ReconnectGroup reconnect={reconnect} />
-        </DashboardCard>
+        </SectionCard>
       ) : null}
     </>
   );

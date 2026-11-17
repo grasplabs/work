@@ -1,23 +1,12 @@
 import type { DecisionView } from "@grasp-os/shared/decisions";
-import {
-  SidebarMenuBadge,
-  SidebarMenuButton,
-  SidebarMenuItem,
-  SidebarMenuSub,
-  SidebarMenuSubButton,
-  SidebarMenuSubItem,
-} from "@grasp-os/ui/components/sidebar";
-import { Plural, Trans, useLingui } from "@lingui/react/macro";
-import { Link, useMatchRoute } from "@tanstack/react-router";
-import { WorkflowIcon } from "lucide-react";
 
 import { readWithin } from "../core-connection.ts";
 import type { CoreConnection } from "../core-connection.ts";
 import { useFrameRead } from "../frame/frame-read.ts";
 
-// The nav's way to Workflows, with how many workflows need the person, as
-// the prototype's badge (`components/app-sidebar.tsx`, `needsYou` in
-// `lib/builder.ts`): each workflow once, however many of its runs ask.
+// How many workflows need the person, beside the sidebar's Workflows
+// (grasp/frame/grasp-sidebar.tsx): each workflow once, however many of its
+// runs ask.
 // What needs them today is a decision of a run waiting for their answer;
 // a change waiting for its test and approval, and a workflow in testing,
 // join it with the workflow lifecycle (GRA-512). Read again as the
@@ -47,61 +36,3 @@ const readCount = async (core: CoreConnection): Promise<number | undefined> => {
 /** How many workflows need the person; `undefined` until core says. */
 export const useWorkflowsWaiting = (): number | undefined =>
   useFrameRead(readCount).value;
-
-/**
- * The sidebar's Workflows entry, with how many workflows need the person;
- * for owners and admins (`requests`), Stephen's requests under it while
- * the person is in Workflows.
- */
-export const WorkflowsItem = ({ requests = false }: { requests?: boolean }) => {
-  const { t } = useLingui();
-  const matchRoute = useMatchRoute();
-  const waiting = useWorkflowsWaiting();
-  const shown = waiting !== undefined && waiting > 0;
-  // As the prototype's: Requests is under Workflows while the person is
-  // in them, and lit on its own there.
-  const inWorkflows = matchRoute({ to: "/workflows", fuzzy: true }) !== false;
-  const onRequests =
-    matchRoute({ to: "/workflows/requests", fuzzy: true }) !== false;
-  return (
-    <SidebarMenuItem>
-      <SidebarMenuButton
-        isActive={inWorkflows && !onRequests}
-        render={<Link to="/workflows" />}
-        tooltip={t`Workflows`}
-      >
-        <WorkflowIcon />
-        <span>
-          <Trans>Workflows</Trans>
-        </span>
-        {/* Inside the link, so its name says how many need the person. */}
-        {shown ? (
-          <SidebarMenuBadge placement="inside">
-            <span aria-hidden="true">{waiting}</span>
-            <span className="sr-only">
-              <Plural
-                one="# workflow needs you"
-                other="# workflows need you"
-                value={waiting}
-              />
-            </span>
-          </SidebarMenuBadge>
-        ) : null}
-      </SidebarMenuButton>
-      {requests && inWorkflows ? (
-        <SidebarMenuSub>
-          <SidebarMenuSubItem>
-            <SidebarMenuSubButton
-              isActive={onRequests}
-              render={<Link to="/workflows/requests" />}
-            >
-              <span>
-                <Trans context="Stephen's requests: the page">Requests</Trans>
-              </span>
-            </SidebarMenuSubButton>
-          </SidebarMenuSubItem>
-        </SidebarMenuSub>
-      ) : null}
-    </SidebarMenuItem>
-  );
-};

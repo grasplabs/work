@@ -1,41 +1,65 @@
 import { isMemberAdmin } from "@grasp-os/shared/roles";
-import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from "@grasp-os/ui/components/tabs";
-import { Trans } from "@lingui/react/macro";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { useRouteContext } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 
+import { Tabs, TabsList, TabsPanel, TabsTab } from "../grasp/tabs/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { TeamsPanel } from "./teams.tsx";
 
-// Settings › Members in two tabs, for the organization's own admins: the
-// members and their roles, then the teams they are in (teams.tsx). Anyone
-// else gets the members alone, as before: core refuses them the teams.
+// Settings › Members in three tabs, for the organization's own admins: the
+// members and their roles, the teams they are in (teams.tsx), and what each
+// role may do: a reference, kept out of the way of the list. Anyone else
+// gets the members and the roles one under the other: core refuses them
+// the teams.
 
-/** The Members page's tabs around `children`, its members. */
-export const MembersTabs = ({ children }: { children: ReactNode }) => {
+const styles = stylex.create({
+  stack: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space5,
+    paddingBlockStart: grasp.space4,
+  },
+  alone: { display: "flex", flexDirection: "column", gap: grasp.space5 },
+});
+
+/** The Members page's tabs: `children`, its members, and `roles`, what each role may do. */
+export const MembersTabs = ({
+  children,
+  roles,
+}: {
+  children: ReactNode;
+  roles: ReactNode;
+}) => {
+  const { t } = useLingui();
   const { identity } = useRouteContext({ from: "/_shell" });
-  const members = <div className="flex flex-col gap-6">{children}</div>;
   if (!isMemberAdmin(identity)) {
-    return members;
+    return (
+      <div {...stylex.props(styles.alone)}>
+        {children}
+        {roles}
+      </div>
+    );
   }
   return (
     <Tabs defaultValue="members">
-      <TabsList>
-        <TabsTrigger value="members">
-          <Trans>Members</Trans>
-        </TabsTrigger>
-        <TabsTrigger value="teams">
-          <Trans>Teams</Trans>
-        </TabsTrigger>
+      <TabsList aria-label={t`Members and roles`}>
+        <TabsTab value="members">{t`Members`}</TabsTab>
+        <TabsTab value="teams">{t`Teams`}</TabsTab>
+        <TabsTab value="roles">{t`Roles`}</TabsTab>
       </TabsList>
-      <TabsContent value="members">{members}</TabsContent>
-      <TabsContent value="teams">
-        <TeamsPanel />
-      </TabsContent>
+      <TabsPanel value="members">
+        <div {...stylex.props(styles.stack)}>{children}</div>
+      </TabsPanel>
+      <TabsPanel value="teams">
+        <div {...stylex.props(styles.stack)}>
+          <TeamsPanel />
+        </div>
+      </TabsPanel>
+      <TabsPanel value="roles">
+        <div {...stylex.props(styles.stack)}>{roles}</div>
+      </TabsPanel>
     </Tabs>
   );
 };

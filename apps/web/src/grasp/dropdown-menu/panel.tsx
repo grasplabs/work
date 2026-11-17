@@ -16,11 +16,6 @@ import { menuStyles as styles } from "./styles";
 
 type ContentPrimitiveProps = ComponentProps<typeof ContentPrimitive>;
 
-// The gap to the trigger and the room kept from the window's edges reach UI SDK as numbers,
-// generated from the menu-gap and popup-gutter tokens (src/tokens/tokens.values.ts).
-// Every prop is documented once, where it is first declared; the props on the docs page are read
-// from the type below, so they cannot drift from what the code accepts.
-
 /** Every prop a DropdownMenuPanel takes: these, and the rest of UI SDK's MenuContent. */
 export interface DropdownMenuPanelProps extends Omit<
   ContentPrimitiveProps,

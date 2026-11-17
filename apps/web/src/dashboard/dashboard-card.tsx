@@ -1,6 +1,22 @@
 import { cn } from "@grasp-os/ui/lib/utils";
+import * as stylex from "@stylexjs/stylex";
 import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
+
+import { ItemGroup } from "../grasp/item/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
+
+const styles = stylex.create({
+  group: {
+    paddingInline: grasp.space3,
+    paddingBlockEnd: grasp.space3,
+  },
+  groupTitle: {
+    paddingInline: grasp.space2,
+    paddingBlock: grasp.space2,
+  },
+});
 
 // The dashboard's blocks, as the prototype draws them
 // (`components/dashboard/dashboard-card.tsx`, `inbox-kind.tsx`): a card
@@ -65,7 +81,7 @@ export const DashboardCardHeader = ({
   </header>
 );
 
-/** A group of rows in a block, under its quiet title. */
+/** A group of rows in a block, under its quiet title (Grasp UI's ItemGroup). */
 export const DashboardGroup = ({
   title,
   children,
@@ -73,11 +89,15 @@ export const DashboardGroup = ({
   title: string;
   children: ReactNode;
 }) => (
-  <section aria-label={title}>
-    <h3 className="bg-muted/50 text-muted-foreground border-t px-4 py-2 text-xs">
-      {title}
-    </h3>
-    {children}
+  <section aria-label={title} {...stylex.props(styles.group)}>
+    <div {...stylex.props(styles.groupTitle)}>
+      <Text element="span" size="xs" tone="muted">
+        {title}
+      </Text>
+    </div>
+    <ItemGroup aria-label={title} separated>
+      {children}
+    </ItemGroup>
   </section>
 );
 

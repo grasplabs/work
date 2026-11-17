@@ -339,6 +339,16 @@
   --grasp-on-fill: oklch(0.99 0.004 160);
   /* Words and icons on action-fill. */
   --grasp-action-text: light-dark(var(--grasp-on-fill), var(--grasp-light-ink));
+  /* action-fill when the action cannot be taken: half its strength on paper; at night a quiet step above the ground, never the brightest thing on it. */
+  --grasp-action-fill-disabled: light-dark(
+    oklch(0.3231 0.0584 168.334 / 0.5),
+    oklch(0.96 0.02 150 / 0.1)
+  );
+  /* Words and icons on action-fill-disabled: half strength on paper, muted at night (still 3:1 on the ground). */
+  --grasp-action-text-disabled: light-dark(
+    oklch(0.99 0.004 160 / 0.5),
+    var(--grasp-muted)
+  );
   /* The second action's fill: white on a light ground, a veil of white on a dark one. */
   --grasp-quiet-fill: light-dark(oklch(1 0 none), oklch(0.96 0.02 150 / 0.08));
   /* quiet-fill under a pointer: one step down to soft. */
@@ -475,9 +485,9 @@
     0 1px 1px var(--grasp-bevel-approve-drop),
     0 0.5px 0.5px var(--grasp-bevel-approve-drop),
     0 0.25px 0.25px var(--grasp-bevel-approve-drop);
-  /* The bevelled edge of an approving action at rest, with its glow. */
+  /* The bevelled edge of an approving action at rest, with its glow: held in close under it, so beside another button it draws no taller (the wider 0 3px 10px -7px reached 3px further down than its neighbour's lift). */
   --grasp-bevel-approve:
-    var(--grasp-bevel-approve-face), 0 3px 10px -7px var(--grasp-approve-glow),
+    var(--grasp-bevel-approve-face), 0 2px 6px -5px var(--grasp-approve-glow),
     var(--grasp-field-lift);
   /* bevel-approve under a pointer: the drop grows and the glow comes up. */
   --grasp-bevel-approve-hover:
@@ -653,7 +663,7 @@
     inset 0 0 0 1px var(--grasp-field-edge-invalid), var(--grasp-field-lift),
     0 0 10px 1px var(--grasp-ring-halo-invalid),
     0 2px 6px var(--grasp-ring-halo-invalid);
-  /* The size of the words in a field on a touch screen: under 16px, iOS zooms the page in on focus. */
+  /* The size of the typed words in a field on a phone or a touch screen (media.typing): under 16px, Safari zooms the page in on focus. */
   --grasp-field-text-touch: 16px;
   /* The breath of lift under a field, beneath its hairline: lift-low's shadow without its edge. */
   --grasp-field-lift:
@@ -677,6 +687,8 @@
   /* Dialog: dialog. */
   /* The width of a dialog: room for a form's fields, and a short title on one line. */
   --grasp-dialog-width: 30rem;
+  /* A full dialog: a chart or a table opened in full, as wide as a page's column. */
+  --grasp-dialog-width-full: 64rem;
   /* The least room between a dialog and the edges of the window; on a phone, above the sheet. */
   --grasp-dialog-gutter: 24px;
   /* The shade over the page behind a dialog: the page stays in view, out of reach. */
@@ -958,6 +970,8 @@
   --grasp-spinner-fade: 0.4;
   /* How faint a spinner's last bar is on a filled control (a working ink, approve or danger button): high enough that the whole ring reads turning on the fill. */
   --grasp-spinner-fade-on-fill: 0.62;
+  /* A spinner's stroke on a filled control, in the icon's 24-unit grid: 1.5px at 16px. At the icon's 1px the ring stood thin and grey alone in a wide ink button, which read as empty. */
+  --grasp-spinner-stroke-on-fill: 2.25;
   /* The curve of a still spinner's breath. */
   --grasp-spinner-ease: var(--grasp-skeleton-ease);
   /* Working mark: working mark. */
@@ -1167,6 +1181,33 @@
   --grasp-slider-track: 4px;
   /* The thumb of a slider: a white circle with the low lift. */
   --grasp-slider-thumb: 16px;
+  /* Level slider: level slider. */
+  /* How tall the track of dots is at the compact size, inside a popup or a menu. */
+  --grasp-level-slider-track: 24px;
+  /* How tall the track is at the regular size, on a page. */
+  --grasp-level-slider-track-regular: 32px;
+  /* How much the thumb grows while a pointer is over the slider, to be taken hold of. */
+  --grasp-level-slider-hover: 1.08;
+  /* The few warm dots just before the thumb, the light's leading edge: a clear orange on paper, amber at night. */
+  --grasp-level-slider-warm: light-dark(
+    oklch(0.74 0.15 58),
+    var(--grasp-attention)
+  );
+  /* How far the thumb's run stops short of the track's round ends, so the thumb's ring stays inside them at either end. */
+  --grasp-level-slider-run-inset: 2px;
+  /* How far the round thumb stands inside the track, top and bottom. */
+  --grasp-level-slider-thumb-inset: 3px;
+  /* The halftone's grid: one dot on every 4px, its size drawn from the dot's own seed. */
+  --grasp-level-slider-pitch: 4px;
+  /* The dots filling to a new level and the thumb settling there: ease-out, no overshoot. At once with reduced motion. */
+  --grasp-level-slider-snap: 160ms;
+  /* The track's ground, under the dots. */
+  --grasp-level-slider-rest: var(--grasp-soft);
+  /* The round thumb: white on paper, and white at night too, so it stands out on the dots. */
+  --grasp-level-slider-thumb: light-dark(
+    var(--grasp-raised),
+    var(--grasp-light-paper)
+  );
   /* Table: table. */
   /* The height of a table's head row. */
   --grasp-table-head-height: 48px;
@@ -1192,6 +1233,8 @@
   --grasp-table-resize-step: 16px;
   /* The narrowest a column can be made. */
   --grasp-table-column-min: 64px;
+  /* How far a table's box fades at an edge with more beyond it: wide enough that a cut column reads as more this way, not as cut. */
+  --grasp-table-fade: var(--grasp-space-12);
   /* The least width of a row's lead cell, so what the row is reads in whole phrases while a narrow table scrolls sideways. */
   --grasp-table-lead-min: 11rem;
   /* A chosen row's band in the mint look: the Data grid's wash over a range, so the two read as one family. */
@@ -1222,6 +1265,8 @@
   --grasp-sheet-width: 26rem;
   /* A wide sheet: room for a layout of its own. */
   --grasp-sheet-width-wide: 37.5rem;
+  /* A full sheet: a chart or a table opened in full beside the page. */
+  --grasp-sheet-width-full: 64rem;
   /* How far a sheet floats off the window's edges. */
   --grasp-sheet-inset: 6px;
   /* The height of a sheet's head: its title and its close button, over a hairline. */
@@ -1399,6 +1444,10 @@
   --grasp-composer-dither: 3px;
   /* The radius of each dot in the dithered edge: fine, so it reads as a texture. */
   --grasp-composer-dot: 0.75px;
+  /* Each dot of the reasoning control's scale, one dot a level: filled up to the level, a ring beyond it. */
+  --grasp-composer-scale-dot: 5px;
+  /* The room between the dots of the reasoning control's scale. */
+  --grasp-composer-scale-gap: 2px;
   /* The model menu's width, rail and list together, as Capy's. */
   --grasp-model-menu-width: 20rem;
   /* The widest a file waiting to be sent grows, in the strip above a composer's text: its width is its name's, up to this or the strip's width, and only a name longer than that is cut. */
@@ -1442,13 +1491,27 @@
   /* Words read first: the current row, the page bar's last crumb. */
   --grasp-shell-text: light-dark(oklch(0.269 0 0), oklch(0.96 0 0));
   /* The rows' words and their icons. */
-  --grasp-shell-text-secondary: light-dark(oklch(0.54 0 0), oklch(0.72 0 0));
+  --grasp-shell-text-secondary: light-dark(oklch(0.52 0 0), oklch(0.72 0 0));
   /* Labels over the rows' groups. */
   --grasp-shell-text-tertiary: light-dark(oklch(0.64 0 0), oklch(0.6 0 0));
   /* The card lifting off the ground by a hair, with a faint ring round it. */
   --grasp-shell-card-shadow:
     0 4px 4px 0 oklch(0 0 0 / 0.02), 0 4px 80px 8px oklch(0 0 0 / 0.02),
     0 0 0 1px light-dark(oklch(0 0 0 / 0.05), oklch(1 0 0 / 0.08));
+  /* The peeking sidebar's ground: the sidebar's in light, a step above the card in dark. */
+  --grasp-shell-peek: light-dark(
+    var(--grasp-shell-ground),
+    color-mix(in oklch, var(--grasp-shell-card) 94%, var(--grasp-shell-text))
+  );
+  /* The peeking sidebar's lift: the card's in light, deeper in dark so it reads over a dark card. */
+  --grasp-shell-peek-shadow:
+    0 4px 4px 0 light-dark(oklch(0 0 0 / 0.02), oklch(0 0 0 / 0.3)),
+    0 4px 80px 8px light-dark(oklch(0 0 0 / 0.02), oklch(0 0 0 / 0.45)),
+    0 0 0 1px light-dark(oklch(0 0 0 / 0.05), oklch(1 0 0 / 0.1));
+  /* The ground of a menu opened from the sidebar or the bar: the card in light, a step above the card in dark. */
+  --grasp-shell-popup: light-dark(var(--grasp-shell-card), oklch(0.26 0 0));
+  /* The hairlines in a menu opened from the sidebar or the bar: the shell's rule. */
+  --grasp-shell-popup-line: var(--grasp-shell-rule);
   /* App frame: app frame sizes. */
   /* The width of the open sidebar. */
   --grasp-shell-sidebar: 240px;
@@ -1462,6 +1525,8 @@
   --grasp-shell-row: 32px;
   /* The room between two rows. */
   --grasp-shell-row-gap: 2px;
+  /* How far the sidebar's Home and Activity switch's track stands round its tabs, on all four sides, and the room between them. */
+  --grasp-shell-switch-inset: 2px;
   /* A row's padding above and below its words. */
   --grasp-shell-row-block: 6px;
   /* A row's padding at its sides. */
@@ -1476,6 +1541,10 @@
   --grasp-shell-corner: 6px;
   /* The page card's corner. */
   --grasp-shell-card-corner: 12px;
+  /* The corner of a window round the shell: the card's corner plus its inset, so the two nest. */
+  --grasp-shell-window-corner: calc(
+    var(--grasp-shell-card-corner) + var(--grasp-shell-inset)
+  );
   /* The rows' letter spacing: a hair tighter than set. */
   --grasp-shell-tracking: -0.01em;
   /* How fast what is pointed at answers. */
@@ -1502,6 +1571,10 @@
   --grasp-shell-page-room-below: 32px;
   /* The room under a page with a chat box floating over its foot, so its last row scrolls clear. */
   --grasp-shell-page-room-chat: 96px;
+  /* The width of a page's centred column inside the shell's card. */
+  --grasp-page-measure: 64rem;
+  /* The width of a wide page's centred column, such as a table or a board. */
+  --grasp-page-measure-wide: 80rem;
   /* Carousel: carousel. */
   /* The room between two slides. */
   --grasp-carousel-gap: var(--grasp-space-4);
@@ -1524,6 +1597,10 @@
   --grasp-form-column: 12rem;
   /* The widest a form's column stands, so a line of fields stays easy to read. */
   --grasp-form-width: 40rem;
+  /* A setting row's control column: one width for every row of a page, so the controls share one end edge. */
+  --grasp-control-column: 20rem;
+  /* A setting row's least height, a 32px control with room above and below; with a line of help it is 56px. */
+  --grasp-setting-row: var(--grasp-space-12);
   /* Approval request: approval request. */
   /* The widest an approval request stands: the Composer's width, as it sits in the same thread. */
   --grasp-approval-width: var(--grasp-composer-width);
@@ -1571,6 +1648,53 @@
   --grasp-chart-dither-ground: var(--grasp-light-pine);
   /* The words and numbers along an axis. */
   --grasp-chart-tick: var(--grasp-muted);
+  /* A comparison drawn as a line: last period's, quieter than the value and dashed, never a second hue. */
+  --grasp-chart-quiet: var(--grasp-muted);
+  /* A comparison drawn as a bar: last year's beside this year's. */
+  --grasp-chart-quiet-fill: color-mix(
+    in oklch,
+    var(--grasp-muted) 32%,
+    transparent
+  );
+  /* A ring's second part: the light turned deep (pine). The first is the value colour. Each tone steps evenly towards the ground and holds 3:1 against it. */
+  --grasp-chart-tone-2: light-dark(oklch(0.43 0.078 175), oklch(0.74 0.09 175));
+  /* A ring's third part, 3:1 or more against the page. */
+  --grasp-chart-tone-3: light-dark(
+    oklch(0.493 0.064 172),
+    oklch(0.683 0.078 172)
+  );
+  /* A ring's fourth part, 3:1 or more against the page. */
+  --grasp-chart-tone-4: light-dark(
+    oklch(0.556 0.05 170),
+    oklch(0.627 0.066 170)
+  );
+  /* A ring's fifth part, 3:1 or more against the page. */
+  --grasp-chart-tone-5: light-dark(
+    oklch(0.62 0.036 168),
+    oklch(0.57 0.054 168)
+  );
+  /* A Sankey's quiet end (disputed, waiting): muted, and in dark no brighter than the value's nodes. */
+  --grasp-chart-node-quiet: light-dark(
+    oklch(0.5 0.03 160),
+    oklch(0.5 0.025 158)
+  );
+  /* A Sankey's flow at rest: the value colour, faint, so where flows cross both still show. */
+  --grasp-chart-ribbon: color-mix(
+    in oklch,
+    var(--grasp-mint-deep) 26%,
+    transparent
+  );
+  /* A Sankey's flow lit, with every flow before and after it. In dark a step fainter, so the ink of a name standing on it keeps 4.5:1. */
+  --grasp-chart-ribbon-lit: light-dark(
+    oklch(0.5 0.12 167 / 0.58),
+    oklch(0.8 0.15 165 / 0.42)
+  );
+  /* A flow into a quiet end (disputed, waiting), and every flow stepped back while another is lit. */
+  --grasp-chart-ribbon-quiet: color-mix(
+    in oklch,
+    var(--grasp-muted) 18%,
+    transparent
+  );
   /* Date range picker: date range picker. */
   /* Room inside a date field before its first date; its calendar opens moved back by it, so the popup's edge meets the field's. */
   --grasp-date-field-inset: var(--grasp-space-3);
@@ -1589,8 +1713,11 @@
   --grasp-tree-row-inset: var(--grasp-space-2);
   /* A tree row's corner: small, as a list item's. */
   --grasp-tree-row-corner: 8px;
-  /* A tree's row under a pointer. */
-  --grasp-tree-fill-hover: var(--grasp-ghost-fill-hover);
+  /* A tree's row under a pointer: a third of the current page's fill, so a row under the pointer is never taken for the current page (A3-nav-06), as the sidebar's hover is to its selected row. */
+  --grasp-tree-fill-hover: light-dark(
+    oklch(0.29 0.05 162 / 0.035),
+    oklch(0.96 0.02 150 / 0.05)
+  );
   /* A chosen row in a tree: the mint wash of a chosen row in a Table, so it is told from a row under a pointer. */
   --grasp-tree-fill-chosen: var(--grasp-grid-range-wash);
   /* The current page in a tree of pages: the pointer's fill, nearly twice as strong, under words a step heavier. */
@@ -1625,34 +1752,41 @@
   --grasp-stepper-tile: 28px;
   /* A stepper's step number in Geist Serif (the serif look): the one large thing in the row. */
   --grasp-stepper-numeral: 28px;
-  /* The light that stands on the current step (the light look): wider than the mark, so it reads as light round it. */
-  --grasp-stepper-glow: 36px;
   /* The height of a stepper's dither band between two steps: two rows of sparse dots, three of dense. */
   --grasp-stepper-band: 6px;
   /* The pitch of the dots in a dither band still to come. */
   --grasp-stepper-dots-sparse: 6px;
   /* The pitch of the dots in a dither band that is done: dense enough to read as filled. */
   --grasp-stepper-dots-dense: 3px;
-  /* One breath of the light on the current step: very slow, so it is alive without asking to be looked at. None with reduced motion. */
-  --grasp-stepper-breathe: 3200ms;
-  /* A stepper's line where it is done, running across: the mint deepened towards pine, Approve's light laid on its side. */
-  --grasp-stepper-fill-across: linear-gradient(
+  /* A step's dot in the light look, done or still to come: small, so the line and the names carry the row. */
+  --grasp-stepper-dot: 8px;
+  /* The current step's dot, and a failed step's square: a little larger than the rest. */
+  --grasp-stepper-dot-current: 10px;
+  /* The stroke of a step still to come, and of the one quiet ring round the current step: an icon's line. */
+  --grasp-stepper-ring: 1.5px;
+  /* The room between the current step's dot and its ring. */
+  --grasp-stepper-ring-gap: 3px;
+  /* The weight of a stepper's line, the whole of it (the light look): the value colour where done, a quiet colour still to come. */
+  --grasp-stepper-line: 2px;
+  /* The working light once along the line to the next step: ambient and slow. Still with reduced motion. */
+  --grasp-stepper-travel: 2400ms;
+  /* The short stretch of the working light that travels the line toward the next step, across: the Composer's sea and mint. */
+  --grasp-stepper-travel-across: linear-gradient(
     90deg,
-    oklch(0.49 0.11 168),
-    oklch(0.4 0.08 173)
+    transparent,
+    var(--grasp-light-sea) 30%,
+    var(--grasp-light-mint) 50%,
+    var(--grasp-light-sea) 70%,
+    transparent
   );
   /* The same, running down. */
-  --grasp-stepper-fill-down: linear-gradient(
+  --grasp-stepper-travel-down: linear-gradient(
     180deg,
-    oklch(0.49 0.11 168),
-    oklch(0.4 0.08 173)
-  );
-  /* The light on the current step: the Composer's mint and sea, gathered into a glow. */
-  --grasp-stepper-light: radial-gradient(
-    circle,
-    var(--grasp-light-mint) 0%,
-    color-mix(in oklch, var(--grasp-light-sea) 55%, transparent) 40%,
-    transparent 70%
+    transparent,
+    var(--grasp-light-sea) 30%,
+    var(--grasp-light-mint) 50%,
+    var(--grasp-light-sea) 70%,
+    transparent
   );
   /* A theme's reveal, a circle growing from the switch a person pressed: the product's longest motion. */
   --grasp-theme-reveal: 300ms;
@@ -1911,12 +2045,6 @@
   --grasp-source-claim-wash: color-mix(
     in oklch,
     var(--grasp-mint) 18%,
-    transparent
-  );
-  /* The fainter mint behind backed words when a mint line runs under them too. */
-  --grasp-source-claim-wash-faint: color-mix(
-    in oklch,
-    var(--grasp-mint) 10%,
     transparent
   );
   /* An agent's or a workflow's tile in its quiet form: a faint wash of mint. */

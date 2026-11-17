@@ -52,14 +52,18 @@ export const tableStyles = stylex.create({
     width: "100%",
     maxWidth: "100%",
     overflowX: "auto",
+    // Never down, but for a table with a height (tall): sideways alone, overflow-y would be auto
+    // too, and a table a pixel taller than its box (220 in 219, a fraction rounded) made the box a
+    // scroller Firefox stops on by Tab with nothing to scroll and no ring.
+    overflowY: "hidden",
     overscrollBehaviorX: "contain",
     borderRadius: tableVars.corner,
     // No scrollbar (the product's rule, which also hides every bar in its own sheet): the edge
     // that has more to scroll fades instead (fade).
     scrollbarWidth: "none",
   },
-  // The edge with more beyond it fades out over space-6, so the table says it scrolls without a
-  // bar: a side with columns beyond it, and the foot of a table with a height while rows lie below
+  // The edge with more beyond it fades out over table-fade (48px), so the table says it scrolls
+  // without a bar, and a cut column reads as more this way, not as cut: a side with columns beyond it, and the foot of a table with a height while rows lie below
   // it (a row there stood cut by the box's foot, with nothing to say more came). Two layers, the
   // sides' and the foot's, kept where both are black. Off at the sides where columns are held:
   // their lift says it instead, and a fade would dim them.
@@ -68,7 +72,7 @@ export const tableStyles = stylex.create({
     "--table-fade-x": "linear-gradient(black, black)",
     "--table-fade-y": {
       default: "linear-gradient(black, black)",
-      ":is([data-under-foot])": `linear-gradient(to bottom, black calc(100% - ${grasp.space6}), transparent)`,
+      ":is([data-under-foot])": `linear-gradient(to bottom, black calc(100% - ${grasp.tableFade}), transparent)`,
     },
     maskImage: {
       default: null,
@@ -81,11 +85,11 @@ export const tableStyles = stylex.create({
   fadeSides: {
     "--table-fade-x": {
       default: "linear-gradient(black, black)",
-      ":is([data-under-end]:not([data-under-start]))": `linear-gradient(to right, black calc(100% - ${grasp.space6}), transparent)`,
-      ":is([data-under-start]:not([data-under-end]))": `linear-gradient(to left, black calc(100% - ${grasp.space6}), transparent)`,
-      ":is([data-under-start][data-under-end])": `linear-gradient(to right, transparent, black ${grasp.space6}, black calc(100% - ${grasp.space6}), transparent)`,
-      ":is([dir=rtl] *):is([data-under-end]:not([data-under-start]))": `linear-gradient(to left, black calc(100% - ${grasp.space6}), transparent)`,
-      ":is([dir=rtl] *):is([data-under-start]:not([data-under-end]))": `linear-gradient(to right, black calc(100% - ${grasp.space6}), transparent)`,
+      ":is([data-under-end]:not([data-under-start]))": `linear-gradient(to right, black calc(100% - ${grasp.tableFade}), transparent)`,
+      ":is([data-under-start]:not([data-under-end]))": `linear-gradient(to left, black calc(100% - ${grasp.tableFade}), transparent)`,
+      ":is([data-under-start][data-under-end])": `linear-gradient(to right, transparent, black ${grasp.tableFade}, black calc(100% - ${grasp.tableFade}), transparent)`,
+      ":is([dir=rtl] *):is([data-under-end]:not([data-under-start]))": `linear-gradient(to left, black calc(100% - ${grasp.tableFade}), transparent)`,
+      ":is([dir=rtl] *):is([data-under-start]:not([data-under-end]))": `linear-gradient(to right, black calc(100% - ${grasp.tableFade}), transparent)`,
     },
   },
   // A table with a height: its rows scroll inside the box, under a head that stays.
@@ -116,18 +120,6 @@ export const tableStyles = stylex.create({
   },
   // The box and its ring stand in this, so the ring lies over the box alone.
   box: { position: "relative", borderRadius: tableVars.corner },
-  // The caption a screen reader meets as the table's name: there, unseen.
-  captionNamed: {
-    position: "absolute",
-    width: 1,
-    height: 1,
-    padding: 0,
-    margin: -1,
-    overflow: "hidden",
-    clipPath: "inset(50%)",
-    whiteSpace: "nowrap",
-    borderWidth: 0,
-  },
   // A TableCaption written into the table: under it, as a table's caption.
   captionUnder: { captionSide: "bottom" },
   // The caption a reader sees: under the box, still and whole while the table scrolls sideways.
@@ -302,7 +294,7 @@ export const tableStyles = stylex.create({
   // A column that can be sorted: its name is a button, with the sort's icon after it.
   sort: {
     // Reached by Tab, it is scrolled clear of the fade at the box's edges, so its ring is whole.
-    scrollMarginInline: grasp.space8,
+    scrollMarginInline: `calc(${grasp.tableFade} + ${grasp.space2})`,
     position: "relative",
     [iconVars.size]: grasp.iconSm,
     [iconVars.stroke]: grasp.iconStroke,
@@ -345,15 +337,6 @@ export const tableStyles = stylex.create({
     fontSize: grasp.textXs,
     color: grasp.muted,
     fontVariantNumeric: "tabular-nums",
-  },
-  // Words for a screen reader only.
-  unseen: {
-    position: "absolute",
-    width: 1,
-    height: 1,
-    overflow: "hidden",
-    clipPath: "inset(50%)",
-    whiteSpace: "nowrap",
   },
   // The icon of a column not sorted yet is quieter than the words.
   unsorted: {

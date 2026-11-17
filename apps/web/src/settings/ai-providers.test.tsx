@@ -221,10 +221,41 @@ const settled = async (): Promise<void> => {
   });
 };
 
+/** An element's words as people get them: not the ones it hides from them. */
+const wordsOf = (element: Element): string => {
+  const copy = element.cloneNode(true);
+  if (!(copy instanceof Element)) {
+    return "";
+  }
+  for (const hidden of copy.querySelectorAll("[aria-hidden='true']")) {
+    hidden.remove();
+  }
+  return copy.textContent.trim();
+};
+
+const press = async (element: HTMLElement): Promise<void> => {
+  await act(async () => {
+    element.click();
+    await Promise.resolve();
+  });
+  await settled();
+};
+
+/** The button named `name`, by its label or its text. */
+const button = (name: string): HTMLButtonElement => {
+  const found = [...document.querySelectorAll("button")].find(
+    (each) => each.getAttribute("aria-label") === name || wordsOf(each) === name
+  );
+  if (found === undefined) {
+    throw new TypeError(`No button ${name}`);
+  }
+  return found;
+};
+
 /** The control labelled `label`, by its `<label>`. */
 const labelled = (label: string): Element => {
   const found = [...document.querySelectorAll("label")].find(
-    (each) => each.textContent?.trim() === label
+    (each) => wordsOf(each) === label
   );
   const control =
     found === undefined
@@ -245,55 +276,84 @@ const textField = (label: string): HTMLInputElement => {
   return found;
 };
 
-/** The choice labelled `label`. */
-const choice = (label: string): HTMLSelectElement => {
+/** The choice labelled `label`: the control that opens its list. */
+const choice = (label: string): HTMLElement => {
   const found = labelled(label);
-  if (!(found instanceof HTMLSelectElement)) {
+  if (!(found instanceof HTMLElement) || found.role !== "combobox") {
     throw new TypeError(`${label} is no choice`);
   }
   return found;
 };
 
-/** Sets `value` on `field`, as React hears a person type or choose it. */
-const enter = async (
-  field: HTMLInputElement | HTMLSelectElement,
-  value: string
-): Promise<void> => {
+/** Sets `value` in `field`, as React hears a person type it. */
+const enter = async (field: HTMLInputElement, value: string): Promise<void> => {
   await act(async () => {
     const prototype = Reflect.getPrototypeOf(field) ?? {};
     Reflect.getOwnPropertyDescriptor(prototype, "value")?.set?.call(
       field,
       value
     );
-    field.dispatchEvent(
-      new Event(field instanceof HTMLSelectElement ? "change" : "input", {
-        bubbles: true,
-      })
-    );
+    field.dispatchEvent(new Event("input", { bubbles: true }));
     await Promise.resolve();
   });
   await settled();
 };
 
-/** The button named `name`, by its label or its text. */
-const button = (name: string): HTMLButtonElement => {
-  const found = [...document.querySelectorAll("button")].find(
-    (each) =>
-      each.getAttribute("aria-label") === name ||
-      each.textContent?.trim() === name
+/** The options `control` offers, once it is opened: in its own list, not one still closing. */
+const optionsOf = async (control: HTMLElement): Promise<HTMLElement[]> => {
+  await press(control);
+  const list = document.querySelector(
+    `[id="${control.getAttribute("aria-controls") ?? ""}"]`
   );
+  return [
+    ...(list ?? document).querySelectorAll<HTMLElement>('[role="option"]'),
+  ];
+};
+
+/** Chooses the option named `name` in the choice labelled `label`, as a person does. */
+const pick = async (label: string, name: string): Promise<void> => {
+  const offered = await optionsOf(choice(label));
+  const option = offered.find((each) => wordsOf(each) === name);
+  if (option === undefined) {
+    throw new TypeError(`${label} offers no ${name}`);
+  }
+  await press(option);
+};
+
+/** Presses the item named `item` in the menu named `menu`. */
+const fromMenu = async (menu: string, item: string): Promise<void> => {
+  await press(button(menu));
+  const found = [
+    ...document.querySelectorAll<HTMLElement>('[role="menuitem"]'),
+  ].find((each) => wordsOf(each) === item);
   if (found === undefined) {
-    throw new TypeError(`No button ${name}`);
+    throw new TypeError(`${menu} has no ${item}`);
+  }
+  await press(found);
+};
+
+/** The confirmation's button named `name`. */
+const confirmButton = (name: string): HTMLButtonElement => {
+  const found = [
+    ...document.querySelectorAll<HTMLButtonElement>(
+      '[role="alertdialog"] button'
+    ),
+  ].find((each) => wordsOf(each) === name);
+  if (found === undefined) {
+    throw new TypeError("No confirmation");
   }
   return found;
 };
 
-const press = async (element: HTMLElement): Promise<void> => {
-  await act(async () => {
-    element.click();
-    await Promise.resolve();
-  });
-  await settled();
+/** The dialog's button named `name`. */
+const dialogButton = (name: string): HTMLButtonElement => {
+  const found = [
+    ...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button'),
+  ].find((each) => wordsOf(each) === name);
+  if (found === undefined) {
+    throw new TypeError(`No ${name} in the dialog`);
+  }
+  return found;
 };
 
 /** The page's text, without its markup. */
@@ -313,12 +373,13 @@ describe("Settings › AI providers", () => {
     await shown(api);
     expect(text()).toContain("No AI provider is connected yet");
 
-    await enter(choice("Provider"), "openai");
+    await press(button("Add a provider"));
+    await pick("Provider", "OpenAI");
     expect(text()).toContain("Runs at: OpenAI, United States");
     const key = textField("Key");
     expect(key.type).toBe("password");
     await enter(key, pastedKey);
-    await press(button("Save key"));
+    await press(dialogButton("Save key"));
 
     const row =
       document.querySelector('ul[aria-label="Connected providers"]')
@@ -326,7 +387,7 @@ describe("Settings › AI providers", () => {
     expect({
       asked,
       listed: row.includes("OpenAI"),
-      masked: row.includes("Key: …a3f2"),
+      masked: row.includes("Key …a3f2"),
     }).toStrictEqual({
       asked: [["add", { provider: "openai", key: pastedKey }]],
       listed: true,
@@ -345,12 +406,16 @@ describe("Settings › AI providers", () => {
     const { api, asked } = fakeAiProviders();
     await shown(api);
 
-    await enter(choice("Provider"), "openai-compatible");
-    expect(button("Save key").disabled).toBeTruthy();
-    await enter(textField("Base URL"), "https://models.example.com/v1");
+    await press(button("Add a provider"));
+    await pick("Provider", "OpenAI-compatible endpoint");
+    // No address yet: nothing is sent, and the field says what it needs.
     await enter(textField("Key"), pastedKey);
-    await press(button("Save key"));
+    await press(dialogButton("Save key"));
+    const sentEarly = [...asked];
+    await enter(textField("Base URL"), "https://models.example.com/v1");
+    await press(dialogButton("Save key"));
 
+    expect(sentEarly).toStrictEqual([]);
     expect(asked).toStrictEqual([
       [
         "add",
@@ -422,10 +487,14 @@ describe("Settings › AI providers", () => {
       ...document.querySelectorAll('ul[aria-label="Connected providers"] > li'),
     ].map((row) => row.textContent ?? "");
 
-    expect(rows[0]).toContain("Working. Last used");
-    expect(rows[1]).toContain("Not working: the last call");
-    expect(rows[1]).toContain("failed because the provider refused the key.");
-    expect(rows[2]).toContain("Not used yet.");
+    expect({
+      working: /Working.*Last used/u.test(rows[0] ?? ""),
+      failing:
+        /Not working.*The last call, .+, failed because the provider refused the key\./u.test(
+          rows[1] ?? ""
+        ),
+      unused: (rows[2] ?? "").includes("Not used yet"),
+    }).toStrictEqual({ working: true, failing: true, unused: true });
   });
 
   it("chooses the default model, then orders its fallbacks", async () => {
@@ -434,9 +503,9 @@ describe("Settings › AI providers", () => {
     });
     await shown(api);
 
-    await enter(choice("Default model"), "openai/gpt-5.4");
-    await enter(choice("Add a fallback"), "openai/gpt-4.1");
-    await enter(choice("Add a fallback"), "openai/gpt-5-mini");
+    await pick("Default model", "GPT-5.4");
+    await pick("Add a fallback", "GPT-4.1");
+    await pick("Add a fallback", "GPT-5 mini");
     await press(button("Move GPT-5 mini up"));
     await press(button("Remove GPT-4.1 from the fallbacks"));
 
@@ -476,21 +545,15 @@ describe("Settings › AI providers", () => {
     });
     await shown(api);
 
-    await press(button("Replace the key for OpenAI"));
+    await fromMenu("Actions for OpenAI", "Replace key");
     await enter(textField("New key for OpenAI"), pastedKey);
-    await press(button("Save key"));
-    expect(text()).toContain("Key: …a3f2");
+    await press(dialogButton("Save key"));
+    expect(text()).toContain("Key …a3f2");
     expect(document.body.innerHTML).not.toContain(pastedKey);
 
-    await press(button("Remove OpenAI"));
+    await fromMenu("Actions for OpenAI", "Remove");
     expect(asked.filter(([what]) => what === "remove")).toStrictEqual([]);
-    const confirm = [
-      ...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button'),
-    ].find((each) => each.textContent?.trim() === "Remove");
-    if (confirm === undefined) {
-      throw new TypeError("No confirmation");
-    }
-    await press(confirm);
+    await press(confirmButton("Remove"));
 
     expect(asked).toStrictEqual([
       ["add", { provider: "openai", key: pastedKey }],
@@ -513,32 +576,24 @@ describe("Settings › AI providers", () => {
     });
     await shown(api);
     const remove = async (label: string) => {
-      await press(button(`Remove ${label}`));
-      const confirm = [
-        ...document.querySelectorAll<HTMLButtonElement>(
-          '[role="dialog"] button'
-        ),
-      ].find((each) => each.textContent?.trim() === "Remove");
-      if (confirm === undefined) {
-        throw new TypeError("No confirmation");
-      }
-      await press(confirm);
+      await fromMenu(`Actions for ${label}`, "Remove");
+      await press(confirmButton("Remove"));
     };
 
     // A fallback's provider removed: a later change sends none of its models.
     await remove("Mistral AI");
-    await enter(choice("Add a fallback"), "openai/gpt-5-mini");
+    await pick("Add a fallback", "GPT-5 mini");
     // The default's provider removed: the fallbacks wait for a new default.
     await remove("Anthropic");
     const waiting = {
-      defaultModel: choice("Default model").value,
+      defaultModel: wordsOf(choice("Default model")),
       canRemoveFallback: !button("Remove GPT-4.1 from the fallbacks").disabled,
       asksForDefault: text().includes("Choose a new default model"),
     };
-    await enter(choice("Default model"), "openai/gpt-5.4");
+    await pick("Default model", "GPT-5.4");
 
     expect(waiting).toStrictEqual({
-      defaultModel: "",
+      defaultModel: "Choose a model",
       canRemoveFallback: false,
       asksForDefault: true,
     });
@@ -575,12 +630,14 @@ describe("Settings › AI providers", () => {
     await press(button("Test OpenAI-compatible endpoint"));
 
     const picked = choice("Default model");
+    const shownNow = wordsOf(picked);
+    const offered = await optionsOf(picked);
     expect({
-      value: picked.value,
-      offered: [...picked.options].map(({ value }) => value),
+      value: shownNow,
+      offered: offered.map(wordsOf),
     }).toStrictEqual({
-      value: "openai-compatible/llama-b",
-      offered: ["openai-compatible/llama-b"],
+      value: "llama-b",
+      offered: ["llama-b"],
     });
   });
 
@@ -590,9 +647,9 @@ describe("Settings › AI providers", () => {
     await press(button("Test OpenAI"));
     const before = document.querySelector("output")?.textContent ?? null;
 
-    await press(button("Replace the key for OpenAI"));
+    await fromMenu("Actions for OpenAI", "Replace key");
     await enter(textField("New key for OpenAI"), pastedKey);
-    await press(button("Save key"));
+    await press(dialogButton("Save key"));
 
     expect({
       before,
@@ -667,7 +724,7 @@ describe("Settings › AI providers", () => {
     });
     await shown(api, false);
 
-    expect(text()).toContain("Key: …0000");
+    expect(text()).toContain("Key …0000");
     expect(text()).toContain("GPT-5.4");
     expect(text()).toContain("GPT-5 mini");
     expect(document.querySelectorAll("input, select")).toHaveLength(0);
@@ -699,17 +756,24 @@ describe("Settings › AI providers", () => {
       (each) =>
         each.querySelector("h2")?.textContent === "Grasp's own AI features"
     );
-    expect(text()).toContain(
-      "Grasp converts uploaded PDFs with OpenAI, European Union, using Grasp's own key."
-    );
-    expect(text()).toContain(
-      "Grasp transcribes interviews with OpenAI, European Union, using Grasp's own key."
-    );
-    expect(text()).toContain(
-      "Grasp reads the interview's questions aloud with ElevenLabs, European Union, using Grasp's own key."
-    );
-    expect(section?.querySelectorAll("input, select, button")).toHaveLength(0);
-    expect(section?.textContent).toContain("Grasp's own provider keys");
+    const said = section?.textContent ?? "";
+    expect({
+      documents: said.includes(
+        "Uploaded documentsFiles in sensitive collections never leave this deployment.OpenAI, European Union"
+      ),
+      transcripts: said.includes("Interview transcriptsOpenAI, European Union"),
+      speech: said.includes(
+        "Interview questions read aloudElevenLabs, European Union"
+      ),
+      keys: said.includes("Always on Grasp's own keys"),
+      controls: section?.querySelectorAll("input, select, button").length,
+    }).toStrictEqual({
+      documents: true,
+      transcripts: true,
+      speech: true,
+      keys: true,
+      controls: 0,
+    });
   });
 
   it("says when documents are converted on the deployment itself", async () => {
@@ -718,8 +782,6 @@ describe("Settings › AI providers", () => {
     });
     await shown(api);
 
-    expect(text()).toContain(
-      "Grasp converts uploaded documents on this deployment: nothing is sent out."
-    );
+    expect(text()).toContain("Uploaded documentsOn this deployment");
   });
 });

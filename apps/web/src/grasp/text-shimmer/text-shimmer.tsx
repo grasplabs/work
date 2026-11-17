@@ -18,6 +18,7 @@
 import * as stylex from "@stylexjs/stylex";
 import { useEffect, useRef, useState } from "react";
 
+import type { LayoutStyle } from "../layout/layout";
 import { grasp, media } from "../tokens/tokens.stylex";
 import { shimmerVars as v } from "./shimmer.stylex";
 
@@ -25,13 +26,7 @@ import { shimmerVars as v } from "./shimmer.stylex";
 export type TextShimmerStrength = "soft" | "clear" | "bright";
 
 /** What a caller may style: where the line sits. Never its look. */
-export type TextShimmerLayoutStyle = stylex.StyleXStyles<{
-  margin?: string | number;
-  marginBlock?: string | number;
-  marginInline?: string | number;
-  justifySelf?: string;
-  alignSelf?: string;
-}>;
+export type TextShimmerLayoutStyle = LayoutStyle;
 
 /** Every prop a TextShimmer takes. */
 export interface TextShimmerProps {

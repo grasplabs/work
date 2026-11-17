@@ -2,11 +2,11 @@ import type {
   ModelMonthSpend,
   WorkflowMonthSpend,
 } from "@grasp-os/shared/models";
-import { Stat } from "@grasp-os/ui/components/stat";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Link } from "@tanstack/react-router";
 import { ChevronRightIcon } from "lucide-react";
 
+import { Highlight } from "../grasp/highlights/index.ts";
 import { dollars } from "../settings/money.ts";
 import { costPerRun, spendShown } from "./spend.ts";
 import { useFull, WidgetBlock } from "./widget-block.tsx";
@@ -75,12 +75,7 @@ const SpendView = ({ spend }: { spend: ModelMonthSpend }) => {
   const shown = full ? spend.workflows : spend.workflows.slice(0, spendShown);
   return (
     <>
-      <p className="flex flex-wrap items-baseline gap-x-2">
-        <Stat>{total}</Stat>
-        <span className="text-muted-foreground text-xs">
-          <Trans>for every model call this month</Trans>
-        </span>
-      </p>
+      <Highlight title={t`For every model call this month`} value={total} />
       {shown.length === 0 ? (
         <p className="text-muted-foreground">
           <Trans>No workflow has called a model this month.</Trans>

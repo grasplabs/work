@@ -24,5 +24,17 @@ export const intent = {
       name: "flush",
       when: "A table or a list, so its rows reach the card's edges.",
     },
+    {
+      name: 'density="compact"',
+      when: "A settings card, or another dense one: the head at text-sm with less room.",
+    },
+    {
+      name: "fill",
+      when: "A widget in a dashboard's fixed grid cell: its body stretches to the foot, clips, and fades while there is more.",
+    },
+    {
+      name: "handle",
+      when: "A widget a person drags on a board: the title row is the handle; the host does the drag and the keys.",
+    },
   ],
 };

@@ -41,5 +41,9 @@ export const intent = {
       when: "Something to look at before it becomes a problem.",
     },
     { name: 'variant="danger"', when: "It went wrong." },
+    {
+      name: 'live="off"',
+      when: "It is part of the page, read where it stands, not news: a note on a page that loads with it.",
+    },
   ],
 };

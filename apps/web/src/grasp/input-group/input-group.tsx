@@ -22,34 +22,13 @@ import { InputGroup as GroupPrimitive } from "@ui-sdk/react/input";
 import type { ReactNode } from "react";
 
 import { focus } from "../focus/focus";
+import type { LayoutStyle } from "../layout/layout";
 import { grasp, media } from "../tokens/tokens.stylex";
 import { SizeContext } from "./context";
 import type { InputGroupSize } from "./context";
 
-type Layout = string | number | null;
-
 /** What a caller may style: where the group sits and how wide it is. Never its look or height. */
-export type InputGroupLayoutStyle = stylex.StyleXStyles<{
-  alignSelf?: Layout;
-  justifySelf?: Layout;
-  flexGrow?: Layout;
-  flexShrink?: Layout;
-  flexBasis?: Layout;
-  gridArea?: Layout;
-  gridColumn?: Layout;
-  gridRow?: Layout;
-  order?: Layout;
-  width?: Layout;
-  minWidth?: Layout;
-  maxWidth?: Layout;
-  margin?: Layout;
-  marginBlock?: Layout;
-  marginBlockStart?: Layout;
-  marginBlockEnd?: Layout;
-  marginInline?: Layout;
-  marginInlineStart?: Layout;
-  marginInlineEnd?: Layout;
-}>;
+export type InputGroupLayoutStyle = LayoutStyle;
 
 /** Every prop an InputGroup takes. */
 export interface InputGroupProps {
@@ -66,6 +45,8 @@ export interface InputGroupProps {
   size?: InputGroupSize;
   /** Layout only: margins, alignment and width. Colours, heights and corners belong to the group. */
   style?: InputGroupLayoutStyle;
+  /** The same as `style`, by a name a style lint does not take for an inline style attribute. */
+  layout?: InputGroupLayoutStyle;
 }
 
 const HOVER = media.hover;
@@ -124,7 +105,7 @@ const styles = stylex.create({
     // Focus, the ring for the keyboard and a real outline in forced colours: focus.fieldWithin.
     color: grasp.ink,
     fontFamily: grasp.fontSans,
-    fontSize: { default: grasp.textSm, [COARSE]: grasp.fieldTextTouch },
+    fontSize: { default: grasp.textSm, [media.typing]: grasp.fieldTextTouch },
     lineHeight: grasp.textSmLine,
     transitionProperty: "box-shadow, background-color",
     transitionDuration: grasp.durationHover,
@@ -157,11 +138,17 @@ const styles = stylex.create({
 export const InputGroup = ({
   children,
   size = "md",
-  style,
+  style: styleProp,
+  layout,
 }: InputGroupProps) => (
   <SizeContext.Provider value={size}>
     <GroupPrimitive
-      {...stylex.props(styles.group, styles[size], focus.fieldWithin, style)}
+      {...stylex.props(
+        styles.group,
+        styles[size],
+        focus.fieldWithin,
+        layout ?? styleProp
+      )}
     >
       <span
         aria-hidden="true"

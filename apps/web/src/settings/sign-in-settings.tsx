@@ -3,20 +3,22 @@ import type {
   SignInSettings,
 } from "@grasp-os/shared/org-settings";
 import { isAdmin } from "@grasp-os/shared/roles";
-import { Badge } from "@grasp-os/ui/components/badge";
-import { Trans, useLingui } from "@lingui/react/macro";
+import { useLingui } from "@lingui/react/macro";
 import { useRouteContext } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 
-import { LoadingLines } from "../frame/page-states.tsx";
-import { loadFromCore, NotLoaded } from "../load-from-core.tsx";
+import { Alert } from "../grasp/alert/index.ts";
+import { Badge } from "../grasp/badge/index.ts";
+import { SectionCard } from "../grasp/section-card/index.ts";
+import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
 import {
-  SettingsBody,
-  SettingsRow,
-  SettingsSection,
-} from "./settings-parts.tsx";
+  FactRow,
+  LoadingLines,
+  SectionNotLoaded,
+  SettingsRows,
+} from "./section.tsx";
 
 // Settings › Workspace › Sign-in, for admins: how the organization's
 // people sign in, as Grasp set it up for the deployment
@@ -43,82 +45,76 @@ const usePinned = ({
   return undefined;
 };
 
-/** One way to sign in: who it is pinned to, and whether it is offered. */
+/** One way to sign in, as a row: who it is pinned to, and whether it is offered. */
 const ProviderRow = ({ provider }: { provider: SignInProvider }) => {
+  const { t } = useLingui();
   const pinned = usePinned(provider);
   return (
-    <SettingsRow
-      description={pinned}
+    <FactRow
+      {...(pinned === undefined ? {} : { help: pinned })}
       label={
         provider.provider === "microsoft" ? "Microsoft 365" : "Google Workspace"
       }
     >
       {provider.offered ? (
-        <Badge variant="secondary">
-          <Trans>On the sign-in page</Trans>
-        </Badge>
+        <Badge tone="success">{t`On the sign-in page`}</Badge>
       ) : (
-        <Badge variant="destructive">
-          <Trans>Not offered: its secret isn’t set</Trans>
-        </Badge>
+        <Badge tone="danger">{t`Not offered: its secret isn’t set`}</Badge>
       )}
-    </SettingsRow>
+    </FactRow>
   );
 };
 
 /** How people sign in, as core answered an admin. */
 export const SignInView = ({
   signIn,
+  onRetry,
 }: {
   /** Undefined while it is read. */
   signIn: Loaded<SignInSettings> | undefined;
+  /** Reads it again, once it didn't load. */
+  onRetry?: () => void;
 }) => {
   const { t } = useLingui();
-  const body = (() => {
-    if (signIn === undefined) {
-      return (
-        <SettingsBody>
-          <LoadingLines lines={2} />
-        </SettingsBody>
-      );
-    }
-    if (signIn.state !== "ready") {
-      return (
-        <SettingsBody>
-          <NotLoaded page={signIn} />
-        </SettingsBody>
-      );
-    }
-    const { configured, providers } = signIn.data;
-    if (!configured || providers.length === 0) {
-      return (
-        <p className="text-muted-foreground border-t px-5 py-4">
-          <Trans>
-            Sign-in isn’t set up for this workspace yet, so nobody can sign in.
-            Grasp sets it up.
-          </Trans>
-        </p>
-      );
-    }
-    return providers.map((provider) => (
-      <ProviderRow key={provider.provider} provider={provider} />
-    ));
-  })();
+  const description = t`Grasp sets this up; ask Grasp to change it.`;
+  const title = t`Sign-in`;
+  if (
+    signIn?.state === "ready" &&
+    signIn.data.configured &&
+    signIn.data.providers.length > 0
+  ) {
+    return (
+      <SectionCard description={description} flush title={title}>
+        <SettingsRows>
+          {signIn.data.providers.map((provider) => (
+            <ProviderRow key={provider.provider} provider={provider} />
+          ))}
+        </SettingsRows>
+      </SectionCard>
+    );
+  }
   return (
-    <SettingsSection
-      description={t`The accounts people sign in to Grasp with. Grasp sets this up for your workspace: ask Grasp to change it.`}
-      title={t`Sign-in`}
-    >
-      {body}
-    </SettingsSection>
+    <SectionCard description={description} title={title}>
+      {signIn === undefined ? <LoadingLines lines={2} /> : null}
+      {signIn !== undefined && signIn.state !== "ready" ? (
+        <SectionNotLoaded
+          page={signIn}
+          {...(onRetry === undefined ? {} : { onRetry })}
+        />
+      ) : null}
+      {signIn?.state === "ready" ? (
+        // Nobody can sign in: someone should look.
+        <Alert variant="attention">
+          {t`Sign-in isn’t set up for this workspace yet, so nobody can sign in. Grasp sets it up.`}
+        </Alert>
+      ) : null}
+    </SectionCard>
   );
 };
 
-/** The sign-in section, for admins only: core is asked only for them. */
-export const SignInSection = () => {
+/** Reads how people sign in once, as it mounts; `onRetry` mounts it anew. */
+const SignInRead = ({ onRetry }: { onRetry: () => void }) => {
   const core = useCore();
-  const { identity } = useRouteContext({ from: "/_shell" });
-  const admin = isAdmin(identity.role);
   const [signIn, setSignIn] = useState<Loaded<SignInSettings>>();
   useEffect(() => {
     const left = new AbortController();
@@ -132,12 +128,25 @@ export const SignInSection = () => {
         setSignIn(loaded);
       }
     };
-    if (admin) {
-      void read();
-    }
+    void read();
     return () => {
       left.abort();
     };
-  }, [admin, core]);
-  return admin ? <SignInView signIn={signIn} /> : null;
+  }, [core]);
+  return <SignInView onRetry={onRetry} signIn={signIn} />;
+};
+
+/** The sign-in section, for admins only: core is asked only for them. */
+export const SignInSection = () => {
+  const { identity } = useRouteContext({ from: "/_shell" });
+  // Each try at reading it: Try again reads it anew.
+  const [attempt, setAttempt] = useState(0);
+  return isAdmin(identity.role) ? (
+    <SignInRead
+      key={attempt}
+      onRetry={() => {
+        setAttempt((now) => now + 1);
+      }}
+    />
+  ) : null;
 };

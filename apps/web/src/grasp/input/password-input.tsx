@@ -60,6 +60,8 @@ export interface PasswordInputProps {
   "aria-label"?: string;
   /** Layout only: margins, alignment and width. */
   style?: InputLayoutStyle;
+  /** The same as `style`, by a name a style lint does not take for an inline style attribute. */
+  layout?: InputLayoutStyle;
 }
 
 const COARSE = media.coarse;
@@ -78,21 +80,24 @@ const styles = stylex.create({
   roomSm: { paddingInlineEnd: `calc(${grasp.controlSm} + ${grasp.space1})` },
   roomMd: { paddingInlineEnd: `calc(${grasp.controlMd} + ${grasp.space1})` },
   roomLg: { paddingInlineEnd: `calc(${grasp.controlLg} + ${grasp.space1})` },
-  // The button: a square at the end, as tall as the field, in muted, ink under a pointer.
+  // The button: a square at the end, set in from the field's edge by space-1 on every side, so its
+  // focus ring stands inside the field and never steps over its edge (third look A3-text-02). Its
+  // icon stays where it was, centred in the field's end square. In muted, ink under a pointer.
   toggle: {
     [iconVars.size]: grasp.iconSm,
     [iconVars.stroke]: grasp.iconStroke,
     position: "absolute",
     zIndex: 1,
-    insetBlock: 0,
-    insetInlineEnd: 0,
+    insetBlock: grasp.space1,
+    insetInlineEnd: grasp.space1,
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
     margin: 0,
     padding: 0,
     borderWidth: 0,
-    borderRadius: grasp.corner,
+    // Its corner nests inside the field's, space-1 in.
+    borderRadius: `max(0px, calc(${grasp.corner} - ${grasp.space1}))`,
     cornerShape: grasp.cornerShape,
     backgroundColor: "transparent",
     color: {
@@ -106,13 +111,16 @@ const styles = stylex.create({
     transitionDuration: grasp.durationHover,
     transitionTimingFunction: grasp.ease,
   },
-  toggleSm: { width: grasp.controlSm },
-  toggleMd: { width: grasp.controlMd },
-  toggleLg: { width: grasp.controlLg },
-  // A finger needs 44px around the button too.
+  toggleSm: { width: `calc(${grasp.controlSm} - 2 * ${grasp.space1})` },
+  toggleMd: { width: `calc(${grasp.controlMd} - 2 * ${grasp.space1})` },
+  toggleLg: { width: `calc(${grasp.controlLg} - 2 * ${grasp.space1})` },
+  // A finger needs 44px around the button too, centred on it as the button is set in.
   toggleTarget: {
     position: "absolute",
-    inset: { default: 0, [COARSE]: `calc((100% - ${grasp.tap}) / 2)` },
+    inset: {
+      default: `calc(-1 * ${grasp.space1})`,
+      [COARSE]: `calc((100% - ${grasp.tap}) / 2)`,
+    },
   },
 });
 
@@ -130,7 +138,8 @@ const square = {
 export const PasswordInput = ({
   size = "md",
   autoComplete = "current-password",
-  style,
+  style: styleProp,
+  layout,
   "aria-label": ariaLabel,
   placeholder,
   showLabel = "Show password",
@@ -140,7 +149,7 @@ export const PasswordInput = ({
   <PasswordInputPrimitive
     {...options}
     autoComplete={autoComplete}
-    {...stylex.props(styles.box, style)}
+    {...stylex.props(styles.box, layout ?? styleProp)}
   >
     <span
       aria-hidden="true"

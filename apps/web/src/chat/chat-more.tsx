@@ -1,46 +1,31 @@
 import type { ChatSummary } from "@grasp-os/shared/chat";
 import { chatTitleMaxLength, chatTitleSchema } from "@grasp-os/shared/chat";
-import {
-  DropdownMenu,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
-} from "@grasp-os/ui/components/dropdown-menu";
-import {
-  EditableTitle,
-  EditableTitleField,
-  EditableTitleMenuContent,
-  EditableTitleRenameItem,
-  EditableTitleTrigger,
-} from "@grasp-os/ui/components/editable-title";
-import { toast } from "@grasp-os/ui/components/toast";
-import { Trans, useLingui } from "@lingui/react/macro";
+import { useLingui } from "@lingui/react/macro";
 import { useRouter } from "@tanstack/react-router";
-import {
-  CheckIcon,
-  CopyIcon,
-  DownloadIcon,
-  FileTextIcon,
-  PencilIcon,
-  PrinterIcon,
-  Trash2Icon,
-} from "lucide-react";
 import { useState } from "react";
 
 import { useCopy } from "../copy.ts";
 import { exportAs } from "../export/export-file.tsx";
 import type { ExportFormat } from "../export/export-file.tsx";
+import {
+  DropdownMenu,
+  DropdownMenuItem,
+  DropdownMenuPanel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "../grasp/dropdown-menu/index.ts";
+import { Copy, Doc, Edit, Pdf, Tick, Trash } from "../grasp/icons/index.ts";
+import { Input } from "../grasp/input/index.ts";
+import { toast } from "../grasp/toast/index.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { chatMarkdown } from "./chat-markdown.ts";
 import { useFollowedChat } from "./chat-watch.ts";
 import { DeleteChatDialog } from "./delete-chat-dialog.tsx";
 import type { SourceName } from "./sources.tsx";
 
-// The open chat's title at the head of the chat, renamed where it stands,
-// joined to its menu (the kit's EditableTitle): copy it as Markdown,
-// download it, rename it, and delete it. Its row in the list of chats does
+// The open chat's title at the head of the chat, which opens its menu:
+// copy it as Markdown, download it as Markdown or PDF, rename it where it
+// stands, and delete it. Its row in the list of chats does
 // the same, but here it is where the chat is read, and nothing lies over
 // the messages.
 
@@ -53,6 +38,46 @@ const fileNameOf = (title: string): string =>
     .replaceAll(unsafeInFileName, "-")
     .replaceAll(/^-+|-+$/gu, "")
     .slice(0, 80) || "grasp-chat";
+
+/**
+ * The chat's name, typed where its title stood: Enter or leaving the field
+ * keeps it, Escape keeps the name as it was.
+ */
+const RenameTitle = ({
+  value,
+  onDone,
+}: {
+  value: string;
+  /** The name typed, or none where it was left as it was. */
+  onDone: (name?: string) => void;
+}) => {
+  const { t } = useLingui();
+  const [name, setName] = useState(value);
+  return (
+    <Input
+      aria-label={t`Chat name`}
+      autoFocus
+      maxLength={chatTitleMaxLength}
+      onBlur={() => {
+        onDone(name);
+      }}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          onDone(name);
+        } else if (event.key === "Escape") {
+          event.preventDefault();
+          onDone();
+        }
+      }}
+      onValueChange={(next) => {
+        setName(next);
+      }}
+      size="sm"
+      value={name}
+    />
+  );
+};
 
 /**
  * The open chat's title and its menu. `sourceNames` name where its answers
@@ -79,6 +104,9 @@ export const ChatTitleMenu = ({
   // on this one.
   const [deletingId, setDeletingId] = useState<string>();
   const deleting = deletingId === chat.id;
+  // Renaming this chat: another chat opened meanwhile is never renamed.
+  const [renamingId, setRenamingId] = useState<string>();
+  const renaming = renamingId === chat.id;
   const onDeleting = (open: boolean): void => {
     setDeletingId(open ? chat.id : undefined);
   };
@@ -107,10 +135,7 @@ export const ChatTitleMenu = ({
       await router.invalidate();
       return;
     }
-    toast.add({
-      type: "error",
-      title: t`The chat couldn't be renamed. Try again.`,
-    });
+    toast.error(t`The chat couldn't be renamed. Try again.`);
   };
   const download = async (format: ExportFormat): Promise<void> => {
     try {
@@ -120,79 +145,84 @@ export const ChatTitleMenu = ({
         i18n.locale
       );
     } catch {
-      toast.add({
-        type: "error",
-        title: t`The export didn't work. Try again.`,
-      });
+      toast.error(t`The export didn't work. Try again.`);
     }
   };
   return (
     <>
-      <EditableTitle
-        className="min-w-0"
-        label={t`Chat name`}
-        onValueChange={(name) => {
-          void rename(name);
-        }}
-        value={chat.title}
-      >
-        <EditableTitleField maxLength={chatTitleMaxLength} />
+      {renaming ? (
+        <RenameTitle
+          key={chat.id}
+          onDone={(name) => {
+            setRenamingId(undefined);
+            if (name !== undefined && name.trim() !== chat.title) {
+              void rename(name);
+            }
+          }}
+          value={chat.title}
+        />
+      ) : (
         <DropdownMenu>
-          <EditableTitleTrigger aria-label={t`More for this chat`} />
-          <EditableTitleMenuContent align="start" className="w-60">
+          <DropdownMenuTrigger
+            aria-label={t`More for this chat`}
+            chevron
+            size="sm"
+            variant="ghost"
+          >
+            {chat.title}
+          </DropdownMenuTrigger>
+          <DropdownMenuPanel align="start">
             {/* It stays open for a moment to say that it is copied. */}
             <DropdownMenuItem
-              closeOnClick={false}
+              closeOnSelect={false}
               disabled={!ready}
-              onClick={() => {
+              icon={copied ? Tick : Copy}
+              onSelect={() => {
                 void copy(markdown());
               }}
             >
-              {copied ? <CheckIcon /> : <CopyIcon />}
-              {copied ? <Trans>Copied</Trans> : <Trans>Copy as Markdown</Trans>}
+              {copied ? t`Copied` : t`Copy as Markdown`}
             </DropdownMenuItem>
-            <DropdownMenuSub>
-              <DropdownMenuSubTrigger disabled={!ready}>
-                <DownloadIcon />
-                <Trans>Download</Trans>
-              </DropdownMenuSubTrigger>
-              <DropdownMenuSubContent className="w-44">
-                <DropdownMenuItem
-                  onClick={() => {
-                    void download("md");
-                  }}
-                >
-                  <FileTextIcon />
-                  <Trans>Markdown (.md)</Trans>
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() => {
-                    void download("pdf");
-                  }}
-                >
-                  <PrinterIcon />
-                  <Trans>PDF</Trans>
-                </DropdownMenuItem>
-              </DropdownMenuSubContent>
-            </DropdownMenuSub>
-            <DropdownMenuSeparator />
-            <EditableTitleRenameItem>
-              <PencilIcon />
-              <Trans>Rename</Trans>
-            </EditableTitleRenameItem>
+            <DropdownMenuItem
+              disabled={!ready}
+              icon={Doc}
+              onSelect={() => {
+                void download("md");
+              }}
+            >
+              {t`Download as Markdown`}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              disabled={!ready}
+              icon={Pdf}
+              onSelect={() => {
+                void download("pdf");
+              }}
+            >
+              {t`Download as PDF`}
+            </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem
-              onClick={() => {
+              icon={Edit}
+              onSelect={() => {
+                setRenamingId(chat.id);
+              }}
+            >
+              {t`Rename`}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              danger
+              icon={Trash}
+              onSelect={() => {
                 onDeleting(true);
               }}
-              variant="destructive"
             >
-              <Trash2Icon />
-              <Trans>Delete</Trans>
+              {t`Delete`}
             </DropdownMenuItem>
-          </EditableTitleMenuContent>
+          </DropdownMenuPanel>
         </DropdownMenu>
-      </EditableTitle>
+      )}
       {/* It mounts when it opens, so it starts from the chat as it is now. */}
       {deleting ? (
         <DeleteChatDialog

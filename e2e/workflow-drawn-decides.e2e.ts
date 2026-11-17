@@ -241,13 +241,19 @@ test("a builder draws an approval with Grasp, an admin names who answers it, the
     .fill(sourceName, pageRead);
   await asAdmin.getByRole("button", { name: "Add the source" }).click();
   const shown = asAdmin.getByRole("dialog");
-  const secret = await shown
-    .getByRole("textbox", { name: "Secret" })
-    .inputValue();
+  // Each value stands in a Copy field, beside the button that copies it.
+  const copied = (within: typeof shown, button: string) =>
+    within
+      .locator('[data-slot="copy-field"]')
+      .filter({ has: asAdmin.getByRole("button", { name: button }) })
+      .locator('[data-slot="copy-field-value"]');
+  const secret = (await copied(shown, "Copy the secret").textContent()) ?? "";
   await shown.getByRole("button", { name: "Done" }).click();
-  const url = await asAdmin
-    .getByRole("textbox", { name: `URL of ${sourceName}` })
-    .inputValue(pageRead);
+  const url =
+    (await copied(
+      asAdmin.locator("main"),
+      `Copy the URL of ${sourceName}`
+    ).textContent(pageRead)) ?? "";
 
   // The builder starts the workflow on its invoices, in its Settings'
   // Triggers.
