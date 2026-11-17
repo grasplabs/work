@@ -11,6 +11,7 @@ import {
   recallAs,
 } from "../src/brain-next.ts";
 import type { SourceReaders, SourceRef } from "../src/brain-next.ts";
+import { setConnectionAudience } from "../src/connection-audiences.ts";
 import { teams } from "../src/db/core/schema.ts";
 import { join, leave, newTeam } from "./brain-next-leaks-harness.ts";
 import { mockIdp } from "./idp.ts";
@@ -130,6 +131,67 @@ const nowhere: Reaches = {
   teams: false,
   namedTeams: false,
   company: false,
+};
+
+/** How core's read of an audience starts (connection-audiences.ts `heldBy`). */
+const audienceRead = 'select "team_id" from "connection_brain_audiences"';
+
+/**
+ * Core's database, but `between` runs right after the first read of a
+ * connection's audience has answered, before its reader gets the answer:
+ * as another admin's change landing between one change's read and its
+ * write. Every other statement is the database's own.
+ */
+const changedAfterFirstRead = (
+  database: D1Database,
+  between: () => Promise<void>
+): D1Database => {
+  let ran = false;
+  const after = async <T>(read: Promise<T>): Promise<T> => {
+    const answered = await read;
+    if (!ran) {
+      ran = true;
+      await between();
+    }
+    return answered;
+  };
+  const reading = (statement: D1PreparedStatement): D1PreparedStatement =>
+    new Proxy(statement, {
+      get: (target, name): unknown => {
+        const member: unknown = Reflect.get(target, name);
+        if (typeof member !== "function") {
+          return member;
+        }
+        if (name === "bind") {
+          return (...values: unknown[]): D1PreparedStatement =>
+            reading(target.bind(...values));
+        }
+        if (name === "all" || name === "raw" || name === "first") {
+          return async (...given: unknown[]): Promise<unknown> =>
+            await after(Promise.resolve(Reflect.apply(member, target, given)));
+        }
+        return (...given: unknown[]): unknown =>
+          Reflect.apply(member, target, given);
+      },
+    });
+  return new Proxy(database, {
+    get: (target, name): unknown => {
+      const member: unknown = Reflect.get(target, name);
+      if (typeof member !== "function") {
+        return member;
+      }
+      if (name === "prepare") {
+        return (query: string): D1PreparedStatement => {
+          const statement = target.prepare(query);
+          return query.startsWith(audienceRead)
+            ? reading(statement)
+            : statement;
+        };
+      }
+      return (...given: unknown[]): unknown =>
+        Reflect.apply(member, target, given);
+    },
+  });
 };
 
 /** Whether `personId` reads `source`'s first version, as the Sources page does. */
@@ -433,6 +495,66 @@ describe("a shared connection's Brain audience", setUpTime, () => {
         detail,
       })),
       audiences: [],
+    });
+  });
+
+  it("records what each of two admins' changes at once replaced: the one that lost its race records nothing, and its retry what it really replaced", async () => {
+    const [first, second] = await Promise.all([
+      signedInApi(idp, "admin"),
+      signedInApi(idp, "admin"),
+    ]);
+    const [sales, support] = await Promise.all([
+      newTeam(first.userId),
+      newTeam(second.userId),
+    ]);
+    const connectionId = await connection();
+    await first.api.connections.setBrainAudience(connectionId, {
+      kind: "team",
+      teamId: sales,
+    });
+    // The first admin reads Sales; before they write, the second admin
+    // opens it to everyone.
+    const racing: Env = {
+      ...env,
+      DB: changedAfterFirstRead(env.DB, async () => {
+        await second.api.connections.setBrainAudience(connectionId, {
+          kind: "everyone",
+        });
+      }),
+    };
+    const identity = await first.api.whoami();
+
+    const events = await auditedDuring(async () => {
+      await setConnectionAudience(racing, identity, connectionId, {
+        kind: "team",
+        teamId: support,
+      });
+    });
+    const audiences = await first.api.connections.brainAudiences();
+
+    expect({
+      events: events.flatMap(({ action, actor, detail }) =>
+        action === "brain.connection_audience.changed"
+          ? [{ actor, detail }]
+          : []
+      ),
+      now: audiences
+        .filter((each) => each.connectionId === connectionId)
+        .map(({ audience }) => audience),
+    }).toStrictEqual({
+      events: [
+        {
+          actor: { type: "person", userId: second.userId },
+          detail: { from: "team", fromTeam: sales, who: "everyone" },
+        },
+        // Not "from Sales", which it read first: everyone is what it
+        // replaced.
+        {
+          actor: { type: "person", userId: first.userId },
+          detail: { from: "everyone", team: support, who: "team" },
+        },
+      ],
+      now: [{ kind: "team", teamId: support }],
     });
   });
 
