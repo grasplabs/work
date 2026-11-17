@@ -106,7 +106,7 @@ const Projects = () => {
   return (
     <>
       <SiteHeader crumbs={[{ label: t`Projects` }]} />
-      <Page wide>
+      <Page>
         <PageHeading
           action={
             make === undefined ? undefined : (

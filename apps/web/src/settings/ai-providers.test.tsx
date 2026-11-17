@@ -26,7 +26,7 @@ import {
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
-import { afterEach, describe, expect, it } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { AiProvidersSettings } from "./ai-providers.tsx";
 
@@ -320,31 +320,6 @@ const pick = async (label: string, name: string): Promise<void> => {
   await press(option);
 };
 
-/** Presses the item named `item` in the menu named `menu`. */
-const fromMenu = async (menu: string, item: string): Promise<void> => {
-  await press(button(menu));
-  const found = [
-    ...document.querySelectorAll<HTMLElement>('[role="menuitem"]'),
-  ].find((each) => wordsOf(each) === item);
-  if (found === undefined) {
-    throw new TypeError(`${menu} has no ${item}`);
-  }
-  await press(found);
-};
-
-/** The confirmation's button named `name`. */
-const confirmButton = (name: string): HTMLButtonElement => {
-  const found = [
-    ...document.querySelectorAll<HTMLButtonElement>(
-      '[role="alertdialog"] button'
-    ),
-  ].find((each) => wordsOf(each) === name);
-  if (found === undefined) {
-    throw new TypeError("No confirmation");
-  }
-  return found;
-};
-
 /** The dialog's button named `name`. */
 const dialogButton = (name: string): HTMLButtonElement => {
   const found = [
@@ -354,6 +329,47 @@ const dialogButton = (name: string): HTMLButtonElement => {
     throw new TypeError(`No ${name} in the dialog`);
   }
   return found;
+};
+
+/** Chooses the provider named `name` in the Add dialog, by its row's label. */
+const chooseProvider = async (name: string): Promise<void> => {
+  const found = [...document.querySelectorAll("label")].find(
+    (each) => wordsOf(each) === name
+  );
+  if (found === undefined) {
+    throw new TypeError(`No provider ${name}`);
+  }
+  await press(found);
+};
+
+/** What a choice shows: a combobox's text, else its words. */
+const shownIn = (control: Element): string =>
+  control instanceof HTMLInputElement ? control.value : wordsOf(control);
+
+/** The hold's confirmation, which a click on it opens: its yes. */
+const confirmation = async (): Promise<HTMLElement> =>
+  await vi.waitFor(() => {
+    const yes = document.querySelector<HTMLElement>(
+      '[data-agent-confirm="Delete key"]'
+    );
+    if (yes === null) {
+      throw new TypeError("No confirmation");
+    }
+    return yes;
+  });
+
+/** Deletes `label`'s key from its key dialog: a click on the hold asks, and its yes deletes. */
+const deleteKey = async (label: string): Promise<void> => {
+  await press(button(`${label} key`));
+  await press(dialogButton("Delete key"));
+  await press(await confirmation());
+};
+
+/** Replaces `label`'s key in its key dialog. */
+const replaceKey = async (label: string, key: string): Promise<void> => {
+  await press(button(`${label} key`));
+  await enter(textField("New key"), key);
+  await press(dialogButton("Replace key"));
 };
 
 /** The page's text, without its markup. */
@@ -371,15 +387,18 @@ describe("Settings › AI providers", () => {
   it("adds a provider in a password field, and shows only the key's mask once it is saved", async () => {
     const { api, asked } = fakeAiProviders();
     await shown(api);
-    expect(text()).toContain("No AI provider is connected yet");
+    expect(text()).toContain("No provider is connected");
 
     await press(button("Add a provider"));
-    await pick("Provider", "OpenAI");
-    expect(text()).toContain("Runs at: OpenAI, United States");
+    await chooseProvider("OpenAI");
+    expect(text()).toContain("OpenAI, United States");
     const key = textField("Key");
-    expect(key.type).toBe("password");
+    expect({ type: key.type, placeholder: key.placeholder }).toStrictEqual({
+      type: "password",
+      placeholder: "sk-proj-…",
+    });
     await enter(key, pastedKey);
-    await press(dialogButton("Save key"));
+    await press(dialogButton("Add provider"));
 
     const row =
       document.querySelector('ul[aria-label="Connected providers"]')
@@ -387,7 +406,7 @@ describe("Settings › AI providers", () => {
     expect({
       asked,
       listed: row.includes("OpenAI"),
-      masked: row.includes("Key …a3f2"),
+      masked: row.includes("Key •••• a3f2"),
     }).toStrictEqual({
       asked: [["add", { provider: "openai", key: pastedKey }]],
       listed: true,
@@ -407,13 +426,13 @@ describe("Settings › AI providers", () => {
     await shown(api);
 
     await press(button("Add a provider"));
-    await pick("Provider", "OpenAI-compatible endpoint");
+    await chooseProvider("OpenAI-compatible endpoint");
     // No address yet: nothing is sent, and the field says what it needs.
     await enter(textField("Key"), pastedKey);
-    await press(dialogButton("Save key"));
+    await press(dialogButton("Add provider"));
     const sentEarly = [...asked];
-    await enter(textField("Base URL"), "https://models.example.com/v1");
-    await press(dialogButton("Save key"));
+    await enter(textField("Address"), "https://models.example.com/v1");
+    await press(dialogButton("Add provider"));
 
     expect(sentEarly).toStrictEqual([]);
     expect(asked).toStrictEqual([
@@ -429,14 +448,14 @@ describe("Settings › AI providers", () => {
     expect(document.body.innerHTML).not.toContain(pastedKey);
   });
 
-  it("tests a provider with one call and says how it went in plain words", async () => {
+  it("tests a provider with one call, says Works on the button, or Failed and why", async () => {
     const working = fakeAiProviders({ connected: [{ provider: "openai" }] });
     await shown(working.api);
     await press(button("Test OpenAI"));
     expect(working.asked).toStrictEqual([["test", "openai", undefined]]);
-    expect(document.querySelector("output")?.textContent).toBe(
-      "It works: GPT-5 mini answered the test."
-    );
+    await vi.waitFor(() => {
+      expect(text()).toContain("Works");
+    });
 
     act(() => {
       root?.unmount();
@@ -448,9 +467,11 @@ describe("Settings › AI providers", () => {
     });
     await shown(failing.api);
     await press(button("Test OpenAI"));
-    expect(document.querySelector("output")?.textContent).toBe(
-      "The test didn't work. GPT-5 mini didn't answer: The model couldn't answer. Try again."
-    );
+    await vi.waitFor(() => {
+      expect(text()).toContain(
+        "Test failed: The model couldn't answer. Try again."
+      );
+    });
   });
 
   it("says how each provider's calls went: working, not working and why, or not used yet", async () => {
@@ -488,11 +509,8 @@ describe("Settings › AI providers", () => {
     ].map((row) => row.textContent ?? "");
 
     expect({
-      working: /Working.*Last used/u.test(rows[0] ?? ""),
-      failing:
-        /Not working.*The last call, .+, failed because the provider refused the key\./u.test(
-          rows[1] ?? ""
-        ),
+      working: (rows[0] ?? "").includes("Working"),
+      failing: /It refused the key\..*Not working/u.test(rows[1] ?? ""),
       unused: (rows[2] ?? "").includes("Not used yet"),
     }).toStrictEqual({ working: true, failing: true, unused: true });
   });
@@ -539,27 +557,26 @@ describe("Settings › AI providers", () => {
     ).toContain("GPT-5 mini");
   });
 
-  it("replaces a key, and removes a provider once the admin confirms", async () => {
+  it("replaces a key, and deletes it once the admin confirms the hold", async () => {
     const { api, asked } = fakeAiProviders({
       connected: [{ provider: "openai" }],
     });
     await shown(api);
 
-    await fromMenu("Actions for OpenAI", "Replace key");
-    await enter(textField("New key for OpenAI"), pastedKey);
-    await press(dialogButton("Save key"));
-    expect(text()).toContain("Key …a3f2");
+    await replaceKey("OpenAI", pastedKey);
+    expect(text()).toContain("Key •••• a3f2");
     expect(document.body.innerHTML).not.toContain(pastedKey);
 
-    await fromMenu("Actions for OpenAI", "Remove");
+    await press(button("OpenAI key"));
+    await press(dialogButton("Delete key"));
     expect(asked.filter(([what]) => what === "remove")).toStrictEqual([]);
-    await press(confirmButton("Remove"));
+    await press(await confirmation());
 
     expect(asked).toStrictEqual([
       ["add", { provider: "openai", key: pastedKey }],
       ["remove", "openai"],
     ]);
-    expect(text()).toContain("No AI provider is connected yet");
+    expect(text()).toContain("No provider is connected");
   });
 
   it("offers none of a removed provider's models, and asks for a new default before the fallbacks change when its was the default", async () => {
@@ -575,10 +592,7 @@ describe("Settings › AI providers", () => {
       },
     });
     await shown(api);
-    const remove = async (label: string) => {
-      await fromMenu(`Actions for ${label}`, "Remove");
-      await press(confirmButton("Remove"));
-    };
+    const remove = deleteKey;
 
     // A fallback's provider removed: a later change sends none of its models.
     await remove("Mistral AI");
@@ -586,14 +600,14 @@ describe("Settings › AI providers", () => {
     // The default's provider removed: the fallbacks wait for a new default.
     await remove("Anthropic");
     const waiting = {
-      defaultModel: wordsOf(choice("Default model")),
+      defaultModel: shownIn(choice("Default model")),
       canRemoveFallback: !button("Remove GPT-4.1 from the fallbacks").disabled,
-      asksForDefault: text().includes("Choose a new default model"),
+      asksForDefault: text().includes("Choose a new default"),
     };
     await pick("Default model", "GPT-5.4");
 
     expect(waiting).toStrictEqual({
-      defaultModel: "Choose a model",
+      defaultModel: "",
       canRemoveFallback: false,
       asksForDefault: true,
     });
@@ -630,7 +644,7 @@ describe("Settings › AI providers", () => {
     await press(button("Test OpenAI-compatible endpoint"));
 
     const picked = choice("Default model");
-    const shownNow = wordsOf(picked);
+    const shownNow = shownIn(picked);
     const offered = await optionsOf(picked);
     expect({
       value: shownNow,
@@ -641,23 +655,20 @@ describe("Settings › AI providers", () => {
     });
   });
 
-  it("shows no earlier test's result for a key that replaced the one tested", async () => {
-    const { api } = fakeAiProviders({ connected: [{ provider: "openai" }] });
+  it("shows no earlier test's failure for a key that replaced the one tested", async () => {
+    const { api } = fakeAiProviders({
+      connected: [{ provider: "openai" }],
+      tested: { ok: false, model: "openai/gpt-5-mini", code: "model.failed" },
+    });
     await shown(api);
     await press(button("Test OpenAI"));
-    const before = document.querySelector("output")?.textContent ?? null;
-
-    await fromMenu("Actions for OpenAI", "Replace key");
-    await enter(textField("New key for OpenAI"), pastedKey);
-    await press(dialogButton("Save key"));
-
-    expect({
-      before,
-      after: document.querySelector("output")?.textContent ?? null,
-    }).toStrictEqual({
-      before: "It works: GPT-5 mini answered the test.",
-      after: null,
+    await vi.waitFor(() => {
+      expect(text()).toContain("Test failed");
     });
+
+    await replaceKey("OpenAI", pastedKey);
+
+    expect(text()).not.toContain("Test failed");
   });
 
   it("switches the organization's AI to Grasp's AI and back, saying what the month came to against its limit", async () => {
@@ -692,12 +703,12 @@ describe("Settings › AI providers", () => {
   it("doesn't say AI can't answer for want of a provider while it runs on Grasp's AI", async () => {
     const { api } = fakeAiProviders({ graspAvailable: true });
     await shown(api);
-    const onOwn = text().includes("so Grasp's AI features can't answer");
+    const onOwn = text().includes("so Grasp's AI can't answer yet");
     await press(button("Switch to Grasp’s AI"));
 
     expect({
       onOwn,
-      onGrasp: text().includes("so Grasp's AI features can't answer"),
+      onGrasp: text().includes("so Grasp's AI can't answer yet"),
       whatSwitchingLeaves: text().includes(
         "No provider of your own is connected"
       ),
@@ -724,64 +735,10 @@ describe("Settings › AI providers", () => {
     });
     await shown(api, false);
 
-    expect(text()).toContain("Key …0000");
+    expect(text()).toContain("Key •••• 0000");
     expect(text()).toContain("GPT-5.4");
     expect(text()).toContain("GPT-5 mini");
     expect(document.querySelectorAll("input, select")).toHaveLength(0);
     expect(document.querySelectorAll("button")).toHaveLength(0);
-  });
-
-  it("says which provider handles Grasp's own AI features, on Grasp's key, with nothing to switch", async () => {
-    const openai = {
-      id: "openai",
-      label: aiProviders.openai.label,
-      whereItRuns: "OpenAI, European Union",
-    } as const;
-    const elevenLabs = {
-      id: "elevenlabs",
-      label: aiProviders.elevenlabs.label,
-      whereItRuns: "ElevenLabs, European Union",
-    } as const;
-    const { api } = fakeAiProviders({
-      connected: [{ provider: "mistral" }],
-      platform: [
-        { feature: "conversion", provider: openai },
-        { feature: "transcription", provider: openai },
-        { feature: "speech", provider: elevenLabs },
-      ],
-    });
-    await shown(api);
-
-    const section = [...document.querySelectorAll("section")].find(
-      (each) =>
-        each.querySelector("h2")?.textContent === "Grasp's own AI features"
-    );
-    const said = section?.textContent ?? "";
-    expect({
-      documents: said.includes(
-        "Uploaded documentsFiles in sensitive collections never leave this deployment.OpenAI, European Union"
-      ),
-      transcripts: said.includes("Interview transcriptsOpenAI, European Union"),
-      speech: said.includes(
-        "Interview questions read aloudElevenLabs, European Union"
-      ),
-      keys: said.includes("Always on Grasp's own keys"),
-      controls: section?.querySelectorAll("input, select, button").length,
-    }).toStrictEqual({
-      documents: true,
-      transcripts: true,
-      speech: true,
-      keys: true,
-      controls: 0,
-    });
-  });
-
-  it("says when documents are converted on the deployment itself", async () => {
-    const { api } = fakeAiProviders({
-      platform: [{ feature: "conversion", provider: null }],
-    });
-    await shown(api);
-
-    expect(text()).toContain("Uploaded documentsOn this deployment");
   });
 });

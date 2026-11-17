@@ -306,7 +306,7 @@ export const ProjectView = ({
           { label: project.name },
         ]}
       />
-      <Page wide>
+      <Page>
         <PageHeading
           action={
             builds ? (

@@ -170,7 +170,7 @@ export const ComposerAdd = ({
         <DropdownMenuTrigger
           icon={Plus}
           aria-label={label}
-          variant="quiet"
+          variant="ghost"
           size="sm"
           disabled={disabled}
         />

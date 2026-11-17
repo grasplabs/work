@@ -98,6 +98,7 @@ const Menu = ({
     </MenuTrigger>
     <DropdownMenuContent align="start" aria-label={words.label}>
       <MenuRadioGroup
+        {...stylex.props(styles.menuAtLeastTrigger)}
         value={value}
         onValueChange={(next) => {
           onChoose(next);
@@ -161,7 +162,8 @@ const Many = ({ onChoose, size, buttonLabel, ...list }: CompactProps) => {
         {...stylex.props(
           menuStyles.panel,
           menuStyles.motion,
-          styles.popupFrame
+          styles.popupFrame,
+          styles.popupAtLeastTrigger
         )}
       >
         <LanguageList

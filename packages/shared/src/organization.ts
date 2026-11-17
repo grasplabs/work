@@ -33,7 +33,31 @@ export interface Organization {
   dataRegion: DataRegion;
   /** The email domains people sign in with, from the deployment's config. */
   signInDomains: string[];
+  /**
+   * Where its logo is shown from (`organizationLogoPath`), for signed-in
+   * members only; null while it has none, and its initials stand in.
+   */
+  logo: string | null;
 }
+
+/** The image types a logo may be: told by its bytes, never its name. No SVG, which can hold script. */
+export const organizationLogoTypes = [
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+] as const;
+
+export type OrganizationLogoType = (typeof organizationLogoTypes)[number];
+
+/** The largest logo core takes, in bytes: a mark in a sidebar, not a photograph. */
+export const organizationLogoMaxBytes = 512 * 1024;
+
+/**
+ * Where the logo whose content hashes to `hash` is served from. A new logo
+ * is a new address, so a browser may keep each for good.
+ */
+export const organizationLogoPath = (hash: string): string =>
+  `/api/organization/logo/${hash}`;
 
 /** What an admin changes; what is left out stays as it is. */
 export interface OrganizationChanges {
@@ -50,6 +74,13 @@ export interface OrganizationApi {
   /** Changes the name, the time zone or both, and returns the result. */
   update: (changes: OrganizationChanges) => Promise<Organization>;
   /**
+   * Sets the organization's logo from an image's bytes: a PNG, JPEG or
+   * WebP of at most {@link organizationLogoMaxBytes}. Its own admins only.
+   */
+  setLogo: (image: Uint8Array) => Promise<Organization>;
+  /** Takes the logo away: the initials stand in again. Its own admins only. */
+  removeLogo: () => Promise<Organization>;
+  /**
    * The organization's teams, by name, for choosing one (a collection's,
    * a person's); for admins and builders, never Grasp staff.
    */
@@ -61,6 +92,8 @@ export const organizationErrors = defineErrorFamily({
   "organization.name_invalid":
     "Give the organization a name of up to 80 characters, on one line.",
   "organization.time_zone_invalid": "That isn't a time zone Grasp knows.",
+  "organization.logo_invalid": "Choose a PNG, JPEG or WebP image.",
+  "organization.logo_too_large": "Choose an image of at most 512 KB.",
   "organization.changes_invalid":
     "Say what to change: the name, the time zone or both.",
 });

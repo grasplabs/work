@@ -26,6 +26,7 @@ import { SignInSection } from "../settings/sign-in-settings.tsx";
 import { StaffAccessSection } from "../settings/staff-access.tsx";
 import {
   controlStyles,
+  LogoField,
   NameField,
   useOrganizationChange,
   useSaveWords,
@@ -211,12 +212,17 @@ const WorkspaceSettings = ({
       <SectionCard density="compact" flush title={t`Organization`}>
         <SettingsRows>
           <NameField canChange={canChange} name={organization.name} />
+          <LogoField
+            canChange={canChange}
+            logo={organization.logo}
+            name={organization.name}
+          />
           <TimeZoneField
             canChange={canChange}
             timeZone={organization.timeZone}
           />
           <FactRow
-            help={t`People sign in with an address in these.`}
+            help={t`People sign in with an address in these. To change them, ask your Grasp contact.`}
             label={t`Sign-in domains`}
           >
             {formatList(organization.signInDomains)}

@@ -75,8 +75,6 @@ const styles = stylex.create({
     flexDirection: "column",
     gap: grasp.space4,
     width: "100%",
-    maxWidth: "80rem",
-    marginInline: "auto",
   },
   split: {
     display: "grid",

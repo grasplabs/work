@@ -21,6 +21,11 @@ import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
 import { activeMember, organizationId } from "./auth/auth.ts";
 import { signInConfig } from "./auth/config.ts";
 import { organizations, teams } from "./db/core/schema.ts";
+import {
+  logoPathOf,
+  removeOrganizationLogo,
+  setOrganizationLogo,
+} from "./organization-logo.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
@@ -34,7 +39,11 @@ import type { SessionCheck } from "./session-check.ts";
 /** The organization as stored, with what the deployment says about it. */
 export const readOrganization = async (env: Env): Promise<Organization> => {
   const [row] = await drizzle(env.DB)
-    .select({ name: organizations.name, timeZone: organizations.timeZone })
+    .select({
+      name: organizations.name,
+      timeZone: organizations.timeZone,
+      logo: organizations.logo,
+    })
     .from(organizations)
     .where(eq(organizations.id, organizationId));
   return {
@@ -42,6 +51,7 @@ export const readOrganization = async (env: Env): Promise<Organization> => {
     timeZone: row?.timeZone ?? defaultTimeZone,
     dataRegion: "eu",
     signInDomains: signInConfig(env)?.domains ?? [],
+    logo: logoPathOf(row?.logo ?? null),
   };
 };
 
@@ -251,6 +261,20 @@ export class OrganizationRpc extends CoreRpcTarget implements OrganizationApi {
       this.#check,
       async (person) => await updateOrganization(this.#env, person, changes)
     );
+  }
+
+  async setLogo(image: Uint8Array): Promise<Organization> {
+    return await withPerson(this.#check, async (person) => {
+      await setOrganizationLogo(this.#env, person, image);
+      return await readOrganization(this.#env);
+    });
+  }
+
+  async removeLogo(): Promise<Organization> {
+    return await withPerson(this.#check, async (person) => {
+      await removeOrganizationLogo(this.#env, person);
+      return await readOrganization(this.#env);
+    });
   }
 
   async teams(): Promise<{ id: string; name: string }[]> {

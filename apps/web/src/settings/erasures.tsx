@@ -16,6 +16,7 @@ import { useEffect, useId, useState } from "react";
 
 import { formatDate } from "../format.ts";
 import { Alert } from "../grasp/alert/index.ts";
+import { Avatar, AvatarFallback } from "../grasp/avatar/index.ts";
 import { Badge } from "../grasp/badge/index.ts";
 import { Button } from "../grasp/button/index.ts";
 import {
@@ -38,19 +39,18 @@ import { Heading } from "../grasp/heading/index.ts";
 import { Input } from "../grasp/input/index.ts";
 import {
   Item,
-  ItemGroup,
-  ItemContent,
-  ItemTitle,
   ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemMedia,
+  ItemTitle,
 } from "../grasp/item/index.ts";
 import { Progress } from "../grasp/progress/index.ts";
-import { SectionCard } from "../grasp/section-card/index.ts";
 import { Spinner } from "../grasp/spinner/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
-import { TitleLine } from "./section.tsx";
 
 // Erasing someone an admin removed (GRA-903, GRA-1195): their email,
 // sign-ins and personal content go; their name and ID stay on the
@@ -126,8 +126,6 @@ const styles = stylex.create({
     margin: 0,
     paddingInlineStart: grasp.space5,
   },
-  more: { display: "flex", justifyContent: "center", padding: grasp.space3 },
-  empty: { padding: grasp.space5 },
 });
 
 /** An area's name, in the page's language; as core names it when it is new to the page. */
@@ -537,8 +535,12 @@ const Standing = ({ person }: { person: RemovedPerson }) => {
   return <Badge tone="success">{t`Erased`}</Badge>;
 };
 
-/** One person an admin removed, and what may be done about them now. */
-const RemovedRow = ({ person }: { person: RemovedPerson }) => {
+/**
+ * One person an admin removed, at the foot of the members list in a quiet
+ * state (their face, their name muted, where they stand), and what may be
+ * done about them now.
+ */
+export const RemovedRow = ({ person }: { person: RemovedPerson }) => {
   const { t } = useLingui();
   const [open, setOpen] = useState<"erase" | "release">();
   const { name, erasure } = person;
@@ -552,19 +554,23 @@ const RemovedRow = ({ person }: { person: RemovedPerson }) => {
   };
   return (
     <>
-      <Item size="sm">
+      <Item size="xs">
+        <ItemMedia>
+          <Avatar decorative name={name} size="xs">
+            <AvatarFallback />
+          </Avatar>
+        </ItemMedia>
         <ItemContent>
           <ItemTitle>
-            <TitleLine
-              detail={
-                email === null
-                  ? t`Removed on ${date} · email erased`
-                  : t`${email} · removed on ${date}`
-              }
-            >
+            <Text element="span" size="sm" tone="muted">
               {name}
-            </TitleLine>
+            </Text>
           </ItemTitle>
+          <ItemDescription>
+            {email === null
+              ? t`Removed on ${date} · email erased`
+              : t`${email} · removed on ${date}`}
+          </ItemDescription>
         </ItemContent>
         <ItemActions>
           <>
@@ -621,11 +627,11 @@ const cursorAfter = (
 };
 
 /**
- * The people admins removed: whom an admin may erase, and whom they did.
- * The latest page first; older ones on request.
+ * The people admins removed, for the foot of the members list: whom an
+ * admin may erase, and whom they did. The latest page first; older ones on
+ * request (`showMore`).
  */
-export const RemovedPeople = ({ page }: { page: RemovedPeoplePage }) => {
-  const { t } = useLingui();
+export const useRemovedPeople = (page: RemovedPeoplePage) => {
   const { busy, failure, run } = useCoreAction();
   // Older pages count only on top of the first page they were read after:
   // fresh loader data (after an erasure, say) starts the list over from its
@@ -650,40 +656,5 @@ export const RemovedPeople = ({ page }: { page: RemovedPeoplePage }) => {
       });
     }
   };
-  return (
-    <SectionCard
-      description={t`They can’t sign in. Erasing takes their personal data for good.`}
-      flush
-      title={t`Removed people`}
-    >
-      {people.length === 0 ? (
-        <div {...stylex.props(styles.empty)}>
-          <Text tone="muted">{t`Nobody was removed.`}</Text>
-        </div>
-      ) : (
-        <ItemGroup aria-label={t`Removed people`} separated>
-          {people.map((person) => (
-            <RemovedRow key={person.userId} person={person} />
-          ))}
-        </ItemGroup>
-      )}
-      {more ? (
-        <div {...stylex.props(styles.more)}>
-          <Button
-            disabled={busy}
-            onClick={() => {
-              void showMore();
-            }}
-            size="sm"
-            variant="ghost"
-          >
-            {t`Show older`}
-          </Button>
-          {failure === undefined ? null : (
-            <Alert tone="danger">{failure}</Alert>
-          )}
-        </div>
-      ) : null}
-    </SectionCard>
-  );
+  return { people, more, showMore, busy, failure };
 };

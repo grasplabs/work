@@ -1,15 +1,17 @@
-import { compatibleModelNamePattern } from "@grasp-os/shared/ai-providers";
+import {
+  compatibleModelNamePattern,
+  featuredModels,
+} from "@grasp-os/shared/ai-providers";
 import type {
   AiModelChoice,
   AiModelChoiceNow,
-  AiPlatformUse,
-  OrganizationProviderId,
   AiProviderListed,
   AiProvidersListing,
   AiProviderStatus,
-  AiProviderTest,
   AiSource,
+  OrganizationProviderId,
 } from "@grasp-os/shared/ai-providers";
+import { failureText } from "@grasp-os/shared/errors";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
@@ -20,34 +22,25 @@ import { useId, useState } from "react";
 import { changeThenRefresh } from "../change-then-refresh.ts";
 import { failureMessage } from "../chat/failure.ts";
 import type { Session } from "../core.ts";
-import { formatDateTime, formatDollars } from "../format.ts";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogContent,
-  AlertDialogTitle,
-} from "../grasp/alert-dialog/index.ts";
+import { formatDollars } from "../format.ts";
+import { Alert } from "../grasp/alert/index.ts";
 import { Badge } from "../grasp/badge/index.ts";
-import { Button } from "../grasp/button/index.ts";
+import { BrandIcon } from "../grasp/brand-icon/index.ts";
+import type { Brand } from "../grasp/brand-icon/index.ts";
+import { Button, useAction } from "../grasp/button/index.ts";
+import { Combobox } from "../grasp/combobox/index.ts";
+import type { ComboboxItems } from "../grasp/combobox/index.ts";
 import {
   Dialog,
   DialogAction,
   DialogBody,
-  DialogFooter,
   DialogContent,
+  DialogFooter,
   DialogTitle,
 } from "../grasp/dialog/index.ts";
 import {
-  DropdownMenu,
-  DropdownMenuItem,
-  DropdownMenuContent,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "../grasp/dropdown-menu/index.ts";
-import {
   Field,
+  FieldContent,
   FieldDescription,
   FieldError,
   FieldLabel,
@@ -57,11 +50,9 @@ import {
   ChevronDown,
   ChevronUp,
   Cross,
-  Edit,
+  Icon,
   Key,
-  More,
   Plus,
-  Trash,
 } from "../grasp/icons/index.ts";
 import { Input } from "../grasp/input/index.ts";
 import {
@@ -73,32 +64,31 @@ import {
   ItemMedia,
   ItemTitle,
 } from "../grasp/item/index.ts";
+import { RadioGroup, RadioGroupItem } from "../grasp/radio-group/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
 import {
-  Select,
-  SelectTrigger,
-  SelectValue,
-  SelectContent,
-} from "../grasp/select/index.ts";
-import type { SelectItems } from "../grasp/select/index.ts";
+  FactRow,
+  RowAlert,
+  SettingRow,
+  SettingsRows,
+} from "../grasp/setting-row/index.ts";
+import type { SettingRowState } from "../grasp/setting-row/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { useCoreAction } from "../use-core-action.ts";
-import { FactRow, RowAlert, SettingRow, SettingsRows } from "./section.tsx";
+import { useCore } from "../use-core.ts";
 
-// Settings › AI providers: the organization's own AI provider keys, which
-// pay for its model calls, and the models its calls use (core's
-// `aiProviders`, @grasp-os/shared/ai-providers). A key is pasted once into a
-// password field in a dialog, goes straight to core and on to connect,
-// which seals it, and is never back on the page: only its mask (`…a3f2`).
-// Each provider is a row: where it runs, its mask, how its calls went
-// lately (from real calls through the gateway), and Test, one tiny call.
-// Then the default model and its fallbacks, tried in order when a
-// provider refuses a call before anything was billed. The organization's
-// own admins change it; Grasp staff only read it. Every change saves at
-// once and reads the page again. Last, which provider handles Grasp's own
-// AI features (document conversion, transcription, speech) on Grasp's
-// keys, whatever was connected, with nothing to switch.
+// Settings › AI providers, as the library's Settings pattern has it: one
+// compact card per topic, rows inside, every control on one edge and as
+// wide as the others. The organization's own AI provider keys (core's
+// `aiProviders`, @grasp-os/shared/ai-providers), which pay for its model
+// calls: each a row with its mark, its name, its key as dots and its last
+// four, how its calls go, and Test, one tiny call that says Works or why
+// not. Its key is replaced or deleted in a small dialog. A key is pasted
+// once into a password field, goes straight to core and on to connect,
+// which seals it, and is never back on the page. Then the default model
+// and its fallbacks, the providers' main models first. The organization's
+// own admins change it; Grasp staff only read it.
 
 /** The most fallbacks a choice may have, as core takes it. */
 const fallbacksMax = 5;
@@ -106,88 +96,50 @@ const fallbacksMax = 5;
 /** The prefix of an OpenAI-compatible endpoint's models, which the organization names. */
 const compatiblePrefix = "openai-compatible/";
 
+/**
+ * How each provider's keys start, shown in the key field so a person can
+ * see they pasted the right kind; none where its keys have no fixed start
+ * (Mistral's, a custom endpoint's). Core takes any key: this is a hint.
+ */
+const keyStarts: Readonly<Record<OrganizationProviderId, string | undefined>> =
+  {
+    anthropic: "sk-ant-…",
+    openai: "sk-proj-…",
+    mistral: undefined,
+    openrouter: "sk-or-v1-…",
+    "openai-compatible": undefined,
+  };
+
+/** Each provider's mark, where the Brand icons have it. */
+const marks: Readonly<Record<OrganizationProviderId, Brand | undefined>> = {
+  anthropic: "claude",
+  openai: "chatgpt",
+  mistral: undefined,
+  openrouter: undefined,
+  "openai-compatible": undefined,
+};
+
 /** How a provider's last call failed, in plain words, by the gateway's kind. */
 const failureKinds: Readonly<Record<string, MessageDescriptor>> = {
-  auth: msg`the provider refused the key`,
-  rate_limited: msg`the provider was too busy and asked to wait`,
-  refused: msg`the provider refused the call`,
-  provider_down: msg`the provider didn't answer`,
+  auth: msg`It refused the key.`,
+  quota: msg`Its account is out of credit.`,
+  rate_limited: msg`It was too busy and asked to wait.`,
+  refused: msg`It refused the call.`,
+  provider_down: msg`It didn't answer.`,
 };
 
-/** How a provider's calls went lately: a word for its badge, and a line with when and why. */
-const useStatus = () => {
-  const { t, i18n } = useLingui();
-  return (
-    status: AiProviderStatus | null
-  ): {
-    word: string;
-    tone: "success" | "danger" | "neutral";
-    detail?: string;
-  } => {
-    const unused = { word: t`Not used yet`, tone: "neutral" as const };
-    if (status === null) {
-      return unused;
-    }
-    const { lastOkAt, lastFailedAt, lastFailure } = status;
-    if (
-      lastOkAt !== null &&
-      (lastFailedAt === null || lastOkAt >= lastFailedAt)
-    ) {
-      const when = formatDateTime(lastOkAt);
-      return {
-        word: t`Working`,
-        tone: "success",
-        detail: t`Last used ${when}`,
-      };
-    }
-    if (lastFailedAt === null) {
-      return unused;
-    }
-    const when = formatDateTime(lastFailedAt);
-    const kind =
-      lastFailure !== null && Object.hasOwn(failureKinds, lastFailure)
-        ? failureKinds[lastFailure]
-        : undefined;
-    const why = kind === undefined ? t`something went wrong` : i18n._(kind);
-    return {
-      word: t`Not working`,
-      tone: "danger",
-      detail: t`The last call, ${when}, failed because ${why}.`,
-    };
-  };
+/** Why a test failed, said to the admin on this page, by core's code; else the chat's own words. */
+const testFailures: Readonly<Record<string, MessageDescriptor>> = {
+  "model.provider_key_failed": msg`It refused the key.`,
+  "model.provider_unavailable": msg`It didn't answer.`,
+  "model.rate_limited": msg`It was too busy and asked to wait.`,
 };
-
-/** A model's name for people: the catalog's, or a custom endpoint's own. */
-/** The models chosen, the default first while there is one. */
-const chosenOf = (choice: AiModelChoiceNow | null): string[] => {
-  if (choice === null) {
-    return [];
-  }
-  return choice.defaultModel === null
-    ? choice.fallbacks
-    : [choice.defaultModel, ...choice.fallbacks];
-};
-
-const nameOf = (
-  model: string,
-  providers: readonly AiProviderListed[]
-): string => {
-  for (const provider of providers) {
-    const found = provider.models.find((each) => each.model === model);
-    if (found !== undefined) {
-      return found.name;
-    }
-  }
-  return model.startsWith(compatiblePrefix)
-    ? model.slice(compatiblePrefix.length)
-    : model;
-};
-
-type Change = (session: Session) => Promise<unknown>;
 
 const styles = stylex.create({
-  lines: { display: "flex", flexDirection: "column" },
-  title: { display: "flex", alignItems: "center", gap: grasp.space2 },
+  // Every control fills the rows' shared control column.
+  control: { width: "100%" },
+  ends: { display: "flex", alignItems: "center", gap: grasp.space2 },
+  named: { display: "inline-flex", alignItems: "center", gap: grasp.space2 },
   inline: {
     display: "flex",
     alignItems: "center",
@@ -206,39 +158,90 @@ const styles = stylex.create({
   fallback: { display: "flex", alignItems: "center", gap: grasp.space1 },
 });
 
-/** How a test went, in a sentence. */
-const TestOutcome = ({
-  outcome,
-  providers,
-}: {
-  outcome: AiProviderTest;
-  providers: readonly AiProviderListed[];
-}) => {
-  const { t, i18n } = useLingui();
-  const model = nameOf(outcome.model, providers);
-  const why = outcome.ok ? "" : failureMessage(outcome.code, i18n);
-  return (
-    <output>
-      <Text element="span" size="sm">
-        {outcome.ok
-          ? t`It works: ${model} answered the test.`
-          : t`The test didn't work. ${model} didn't answer: ${why}`}
-      </Text>
-    </output>
+type Change = (session: Session) => Promise<unknown>;
+
+/** A provider's mark: its brand's, or a key where the Brand icons have none. */
+const Mark = ({ provider }: { provider: OrganizationProviderId }) => {
+  const brand = marks[provider];
+  return brand === undefined ? (
+    <Icon icon={Key} />
+  ) : (
+    <BrandIcon brand={brand} decorative size="xs" />
   );
 };
 
-/** A key field: a password field, so the key is never shown, nor offered by the browser later. */
+/** How a provider's calls went lately: a word for its badge, and why where they fail. */
+const useStatus = () => {
+  const { t, i18n } = useLingui();
+  return (
+    status: AiProviderStatus | null
+  ): { word: string; tone: "success" | "danger" | "neutral"; why?: string } => {
+    const unused = { word: t`Not used yet`, tone: "neutral" as const };
+    if (status === null) {
+      return unused;
+    }
+    const { lastOkAt, lastFailedAt, lastFailure } = status;
+    if (
+      lastOkAt !== null &&
+      (lastFailedAt === null || lastOkAt >= lastFailedAt)
+    ) {
+      return { word: t`Working`, tone: "success" };
+    }
+    if (lastFailedAt === null) {
+      return unused;
+    }
+    const kind =
+      lastFailure !== null && Object.hasOwn(failureKinds, lastFailure)
+        ? failureKinds[lastFailure]
+        : undefined;
+    return {
+      word: t`Not working`,
+      tone: "danger",
+      why: kind === undefined ? undefined : i18n._(kind),
+    };
+  };
+};
+
+/** The models chosen, the default first while there is one. */
+const chosenOf = (choice: AiModelChoiceNow | null): string[] => {
+  if (choice === null) {
+    return [];
+  }
+  return choice.defaultModel === null
+    ? choice.fallbacks
+    : [choice.defaultModel, ...choice.fallbacks];
+};
+
+/** A model's name for people: the catalog's, or a custom endpoint's own. */
+const nameOf = (
+  model: string,
+  providers: readonly AiProviderListed[]
+): string => {
+  for (const provider of providers) {
+    const found = provider.models.find((each) => each.model === model);
+    if (found !== undefined) {
+      return found.name;
+    }
+  }
+  return model.startsWith(compatiblePrefix)
+    ? model.slice(compatiblePrefix.length)
+    : model;
+};
+
+/** A key field: a password field, never shown, nor offered by the browser later; its placeholder how the provider's keys start. */
 const KeyInput = ({
+  provider,
   value,
   onValueChange,
 }: {
+  provider: OrganizationProviderId;
   value: string;
   onValueChange: (value: string) => void;
 }) => (
   <Input
     autoComplete="off"
     onValueChange={onValueChange}
+    placeholder={keyStarts[provider]}
     required
     secret
     spellCheck={false}
@@ -247,22 +250,43 @@ const KeyInput = ({
   />
 );
 
-/** A new key for `provider`, asked for in a dialog; the key goes once it is saved. */
-const ReplaceKeyDialog = ({
+/** Why a change failed, in the person's words. */
+const reasonOf = (error: unknown): string => failureText(error);
+
+/** A provider's key: replace it, or delete it with a hold. */
+const KeyDialog = ({
   provider,
   open,
   onOpenChange,
   onReplace,
+  onDelete,
 }: {
   provider: AiProviderListed;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onReplace: (key: string) => Promise<boolean>;
+  onReplace: (key: string) => Promise<void>;
+  onDelete: () => Promise<void>;
 }) => {
   const { t } = useLingui();
   const formId = useId();
   const [key, setKey] = useState("");
   const { label } = provider;
+  const save = useAction(
+    async () => {
+      await onReplace(key);
+      setKey("");
+      onOpenChange(false);
+    },
+    { working: t`Saving`, done: t`Saved`, failed: t`Could not save` }
+  );
+  const remove = useAction(
+    async () => {
+      await onDelete();
+      onOpenChange(false);
+    },
+    { working: t`Deleting`, done: t`Deleted`, failed: t`Could not delete` }
+  );
+  const failed = save.error ?? remove.error;
   return (
     <Dialog
       onOpenChange={(next) => {
@@ -272,32 +296,47 @@ const ReplaceKeyDialog = ({
       open={open}
     >
       <DialogContent closeLabel={t`Close`}>
-        <DialogTitle>{t`Replace the key for ${label}`}</DialogTitle>
+        <DialogTitle>{t`${label} key`}</DialogTitle>
         <DialogBody>
           <Form
             aria-label={t`Replace the key for ${label}`}
             id={formId}
             onSubmit={(event) => {
               event.preventDefault();
-              void (async () => {
-                if (await onReplace(key)) {
-                  setKey("");
-                  onOpenChange(false);
-                }
-              })();
+              void save.run();
             }}
           >
             <Field>
-              <FieldLabel>{t`New key for ${label}`}</FieldLabel>
-              <KeyInput onValueChange={setKey} value={key} />
+              <FieldLabel>{t`New key`}</FieldLabel>
+              <KeyInput
+                onValueChange={setKey}
+                provider={provider.provider}
+                value={key}
+              />
               <FieldError match="valueMissing">{t`Paste the new key.`}</FieldError>
             </Field>
+            {failed === null || failed === undefined ? null : (
+              <Alert tone="danger">{reasonOf(failed)}</Alert>
+            )}
           </Form>
         </DialogBody>
         <DialogFooter>
+          <Button
+            hold
+            holdLabels={{
+              holdTo: () => t`Hold to delete the key`,
+              ask: () => t`Delete the ${label} key?`,
+              confirm: t`Delete`,
+              cancel: t`Cancel`,
+            }}
+            variant="danger"
+            {...remove.props}
+          >
+            {t`Delete key`}
+          </Button>
           <DialogAction>{t`Cancel`}</DialogAction>
-          <Button form={formId} type="submit" variant="ink">
-            {t`Save key`}
+          <Button form={formId} type="submit" variant="ink" {...save.status}>
+            {t`Replace key`}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -305,114 +344,131 @@ const ReplaceKeyDialog = ({
   );
 };
 
-/** One connected provider, as a row: its status, where it runs and its key's mask, and Test; replacing and removing in its menu. */
+/** Test: one tiny call; working, then Works, or Failed and why under the name. */
+const useTest = (
+  provider: OrganizationProviderId,
+  model: string | undefined
+) => {
+  const { t, i18n } = useLingui();
+  const core = useCore();
+  const router = useRouter();
+  return useAction(
+    async () => {
+      const outcome = await core.withSession(
+        async (session) => await session.aiProviders.test(provider, model)
+      );
+      // How its calls go is read again: the test was one.
+      void router.invalidate();
+      if (!outcome.ok) {
+        const short = Object.hasOwn(testFailures, outcome.code)
+          ? testFailures[outcome.code]
+          : undefined;
+        throw new Error(
+          short === undefined
+            ? failureMessage(outcome.code, i18n)
+            : i18n._(short)
+        );
+      }
+    },
+    { working: t`Testing`, done: t`Works`, failed: t`Failed` }
+  );
+};
+
+/** One connected provider: its mark and name, its key as dots, how its calls go, Test, and its key. */
 const ProviderRow = ({
   provider,
-  providers,
   testModel,
   editable,
-  busy,
-  tested,
-  onTest,
   onReplace,
-  onRemove,
+  onDelete,
 }: {
   provider: AiProviderListed;
-  providers: readonly AiProviderListed[];
-  /** The model a test asks; none when there is none to ask yet (a custom endpoint before a model is named). */
+  /** The model a test asks; null when there is none to ask yet (a custom endpoint before a model is named). */
   testModel: string | undefined | null;
   editable: boolean;
-  busy: boolean;
-  tested: AiProviderTest | undefined;
-  onTest: () => void;
-  onReplace: (key: string) => Promise<boolean>;
-  onRemove: () => void;
+  onReplace: (key: string) => Promise<void>;
+  onDelete: () => Promise<void>;
 }) => {
   const { t } = useLingui();
   const statusOf = useStatus();
-  const [replacing, setReplacing] = useState(false);
-  const { label, whereItRuns, mask } = provider;
+  const [keying, setKeying] = useState(false);
+  const test = useTest(provider.provider, testModel ?? undefined);
+  const { label } = provider;
+  const last = provider.mask.replace("…", "");
   const status = statusOf(provider.status);
+  const testFailure =
+    test.error instanceof Error ? test.error.message : undefined;
+  let line = t`Key •••• ${last}`;
+  if (testFailure !== undefined) {
+    line = t`Test failed: ${testFailure}`;
+  } else if (editable && testModel === null) {
+    line = t`Name a model it serves, below, to test it.`;
+  } else if (status.why !== undefined) {
+    line = status.why;
+  }
   return (
-    <Item>
-      <ItemMedia icon={Key} />
+    <Item size="xs">
+      <ItemMedia>
+        <Mark provider={provider.provider} />
+      </ItemMedia>
       <ItemContent>
-        <ItemTitle>
-          <span {...stylex.props(styles.title)}>
-            {label}
-            <Badge size="sm" tone={status.tone}>
-              {status.word}
-            </Badge>
-          </span>
-        </ItemTitle>
-        <ItemDescription>
-          <span {...stylex.props(styles.lines)}>
-            <span>{t`Key ${mask} · ${whereItRuns}`}</span>
-            {tested === undefined && status.detail !== undefined ? (
-              <span>{status.detail}</span>
-            ) : null}
-            {tested === undefined ? null : (
-              <TestOutcome outcome={tested} providers={providers} />
-            )}
-            {editable && testModel === null ? (
-              <span>{t`Name a model this endpoint serves, then test it.`}</span>
-            ) : null}
-          </span>
-        </ItemDescription>
+        <ItemTitle>{label}</ItemTitle>
+        <ItemDescription>{line}</ItemDescription>
       </ItemContent>
-      {editable ? (
-        <ItemActions>
-          <>
-            <Button
-              aria-label={t`Test ${label}`}
-              disabled={busy || testModel === null}
-              onClick={onTest}
-              size="sm"
-            >
-              {t`Test`}
-            </Button>
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                icon={More}
-                aria-label={t`Actions for ${label}`}
+      <ItemActions>
+        <span {...stylex.props(styles.ends)}>
+          <Badge size="sm" tone={status.tone}>
+            {status.word}
+          </Badge>
+          {editable ? (
+            <>
+              <Button
+                aria-label={t`Test ${label}`}
+                disabled={testModel === null}
+                size="sm"
+                {...test.props}
+              >
+                {t`Test`}
+              </Button>
+              <Button
+                aria-label={t`${label} key`}
+                icon={Key}
+                onClick={() => {
+                  setKeying(true);
+                }}
                 size="sm"
                 variant="ghost"
               />
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem
-                  disabled={busy}
-                  icon={Edit}
-                  onSelect={() => {
-                    setReplacing(true);
-                  }}
-                >
-                  {t`Replace key`}
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  variant="danger"
-                  disabled={busy}
-                  icon={Trash}
-                  onSelect={onRemove}
-                >
-                  {t`Remove`}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-            <ReplaceKeyDialog
-              onOpenChange={setReplacing}
-              onReplace={onReplace}
-              open={replacing}
-              provider={provider}
-            />
-          </>
-        </ItemActions>
-      ) : null}
+              <KeyDialog
+                onDelete={onDelete}
+                onOpenChange={setKeying}
+                onReplace={onReplace}
+                open={keying}
+                provider={provider}
+              />
+            </>
+          ) : null}
+        </span>
+      </ItemActions>
     </Item>
   );
 };
 
-/** Adding a provider, in a dialog from the Providers card: which one, its key, and a custom endpoint's base URL. */
+/** A provider to choose in the dialog: its mark, its name, and where it runs. */
+const ProviderChoice = ({
+  provider,
+  label,
+}: {
+  provider: OrganizationProviderId;
+  label: string;
+}) => (
+  <span {...stylex.props(styles.named)}>
+    <Mark provider={provider} />
+    {label}
+  </span>
+);
+
+/** Adding a provider, in a dialog: which one, by its mark; a custom endpoint's address; its key. */
 const AddProviderDialog = ({
   offered,
   onAdd,
@@ -422,7 +478,7 @@ const AddProviderDialog = ({
     provider: OrganizationProviderId,
     key: string,
     baseUrl: string
-  ) => Promise<boolean>;
+  ) => Promise<void>;
 }) => {
   const { t } = useLingui();
   const formId = useId();
@@ -430,19 +486,27 @@ const AddProviderDialog = ({
   const [chosen, setChosen] = useState<OrganizationProviderId | undefined>();
   const [key, setKey] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
-  const provider =
-    offered.find((each) => each.provider === chosen) ?? offered[0];
-  if (provider === undefined) {
-    return null;
-  }
-  const { whereItRuns } = provider;
-  const custom = provider.provider === "openai-compatible";
   const close = (): void => {
     setOpen(false);
     setKey("");
     setBaseUrl("");
     setChosen(undefined);
   };
+  const provider =
+    offered.find((each) => each.provider === chosen) ?? offered[0];
+  const add = useAction(
+    async () => {
+      if (provider !== undefined) {
+        await onAdd(provider.provider, key, baseUrl);
+        close();
+      }
+    },
+    { working: t`Saving`, done: t`Saved`, failed: t`Could not save` }
+  );
+  if (provider === undefined) {
+    return null;
+  }
+  const custom = provider.provider === "openai-compatible";
   return (
     <>
       <Button
@@ -474,20 +538,12 @@ const AddProviderDialog = ({
               onSubmit={(event) => {
                 // Sent only once every field is right; sent here, not by the browser.
                 event.preventDefault();
-                void (async () => {
-                  if (await onAdd(provider.provider, key, baseUrl)) {
-                    close();
-                  }
-                })();
+                void add.run();
               }}
             >
               <Field>
                 <FieldLabel>{t`Provider`}</FieldLabel>
-                <Select
-                  items={offered.map((each) => ({
-                    value: each.provider,
-                    label: each.label,
-                  }))}
+                <RadioGroup
                   onValueChange={(value) => {
                     setChosen(
                       offered.find((each) => each.provider === value)?.provider
@@ -495,45 +551,58 @@ const AddProviderDialog = ({
                   }}
                   value={provider.provider}
                 >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent />
-                </Select>
-                <FieldDescription>{t`Runs at: ${whereItRuns}`}</FieldDescription>
+                  {offered.map((each) => (
+                    <Field key={each.provider} orientation="horizontal">
+                      <RadioGroupItem value={each.provider} />
+                      <FieldContent>
+                        <FieldLabel>
+                          <ProviderChoice
+                            label={each.label}
+                            provider={each.provider}
+                          />
+                        </FieldLabel>
+                        <FieldDescription>{each.whereItRuns}</FieldDescription>
+                      </FieldContent>
+                    </Field>
+                  ))}
+                </RadioGroup>
               </Field>
               {custom ? (
                 <Field>
-                  <FieldLabel>{t`Base URL`}</FieldLabel>
+                  <FieldLabel>{t`Address`}</FieldLabel>
                   <Input
                     inputMode="url"
                     onValueChange={setBaseUrl}
-                    placeholder="https://"
+                    placeholder="https://models.example.com/v1"
                     required
                     type="url"
                     value={baseUrl}
                   />
-                  <FieldDescription>
-                    {t`Your endpoint's public HTTPS address, such as https://models.example.com/v1.`}
-                  </FieldDescription>
                   <FieldError match="valueMissing">{t`Enter your endpoint's address.`}</FieldError>
                   <FieldError match="typeMismatch">{t`Enter an address that starts with https://.`}</FieldError>
                 </Field>
               ) : null}
               <Field>
                 <FieldLabel>{t`Key`}</FieldLabel>
-                <KeyInput onValueChange={setKey} value={key} />
+                <KeyInput
+                  onValueChange={setKey}
+                  provider={provider.provider}
+                  value={key}
+                />
                 <FieldDescription>
-                  {t`From your provider's console. Stored sealed: only its last four characters show.`}
+                  {t`Only its last four characters are shown again.`}
                 </FieldDescription>
                 <FieldError match="valueMissing">{t`Paste the key.`}</FieldError>
               </Field>
+              {add.error === null || add.error === undefined ? null : (
+                <Alert tone="danger">{reasonOf(add.error)}</Alert>
+              )}
             </Form>
           </DialogBody>
           <DialogFooter>
             <DialogAction>{t`Cancel`}</DialogAction>
-            <Button form={formId} type="submit" variant="ink">
-              {t`Save key`}
+            <Button form={formId} type="submit" variant="ink" {...add.status}>
+              {t`Add provider`}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -542,21 +611,44 @@ const AddProviderDialog = ({
   );
 };
 
-/** The models to choose from, by provider: each provider's catalog, and a custom endpoint's named ones. */
+/** A custom endpoint's models: those chosen, and those named here. */
+const namedOf = (chosen: readonly string[], namedHere: readonly string[]) => [
+  ...new Set(
+    [...chosen, ...namedHere].filter((model) =>
+      model.startsWith(compatiblePrefix)
+    )
+  ),
+];
+
+/**
+ * The models to choose from: the connected providers' main ones first
+ * (`featuredModels`, core's own list of what most organizations choose),
+ * then every other, by provider. `except` are left out.
+ */
 const modelItems = (
   providers: readonly AiProviderListed[],
   named: readonly string[],
-  except: readonly string[]
-): SelectItems =>
-  providers.flatMap((provider) => {
-    const models =
-      provider.provider === "openai-compatible"
-        ? named.map((model) => ({
-            model,
-            name: model.slice(compatiblePrefix.length),
-          }))
-        : provider.models;
-    const left = models.filter(({ model }) => !except.includes(model));
+  except: readonly string[],
+  recommendedLabel: string
+): ComboboxItems => {
+  const modelsOf = (provider: AiProviderListed) =>
+    provider.provider === "openai-compatible"
+      ? named.map((model) => ({
+          model,
+          name: model.slice(compatiblePrefix.length),
+        }))
+      : provider.models;
+  const recommended = providers.flatMap((provider) =>
+    featuredModels[provider.provider].flatMap((model) => {
+      const found = provider.models.find((each) => each.model === model);
+      return found === undefined || except.includes(model) ? [] : [found];
+    })
+  );
+  const shown = new Set(recommended.map(({ model }) => model));
+  const groups = providers.flatMap((provider) => {
+    const left = modelsOf(provider).filter(
+      ({ model }) => !except.includes(model) && !shown.has(model)
+    );
     return left.length === 0
       ? []
       : [
@@ -570,15 +662,23 @@ const modelItems = (
           },
         ];
   });
+  return recommended.length === 0
+    ? groups
+    : [
+        {
+          type: "group" as const,
+          label: recommendedLabel,
+          items: recommended.map(({ model, name }) => ({
+            value: model,
+            label: name,
+          })),
+        },
+        ...groups,
+      ];
+};
 
-/** Naming a model a custom endpoint serves, so it can be chosen, as a row. */
-const NameModel = ({
-  busy,
-  onName,
-}: {
-  busy: boolean;
-  onName: (model: string) => void;
-}) => {
+/** Naming a model a custom endpoint serves, so it can be chosen. */
+const NameModel = ({ onName }: { onName: (model: string) => void }) => {
   const { t } = useLingui();
   const [name, setName] = useState("");
   const valid = compatibleModelNamePattern.test(name.trim());
@@ -591,7 +691,7 @@ const NameModel = ({
   return (
     <SettingRow
       help={t`As your endpoint names it, such as llama-3.3-70b.`}
-      label={t`A model your endpoint serves`}
+      label={t`Your endpoint's model`}
     >
       {(field) => (
         <div {...stylex.props(styles.inline)}>
@@ -604,9 +704,10 @@ const NameModel = ({
               }
             }}
             onValueChange={setName}
+            size="sm"
             value={name}
           />
-          <Button disabled={busy || !valid} onClick={add}>
+          <Button disabled={!valid} onClick={add} size="sm">
             {t`Add`}
           </Button>
         </div>
@@ -615,7 +716,7 @@ const NameModel = ({
   );
 };
 
-/** The fallbacks, in order, each with moving and removing where they may change. */
+/** The fallbacks, in order, each moved or removed where they may change. */
 const Fallbacks = ({
   fallbacks,
   providers,
@@ -640,161 +741,124 @@ const Fallbacks = ({
   };
   return (
     <FactRow
-      help={t`Tried in order when the default's provider refuses a call.`}
+      help={t`Used in this order when the default's provider is down.`}
       label={t`Fallbacks`}
     >
-      {fallbacks.length === 0 ? (
-        t({ message: "None", context: "nothing set" })
-      ) : (
-        <ol aria-label={t`Fallbacks`} {...stylex.props(styles.list)}>
-          {fallbacks.map((model, at) => {
-            const name = nameOf(model, providers);
-            return (
-              <li key={model} {...stylex.props(styles.fallback)}>
-                <div {...stylex.props(styles.grow)}>
-                  <Text element="span" size="sm">
-                    {name}
-                  </Text>
-                </div>
-                {editable ? (
-                  <>
-                    <Button
-                      disabled={frozen || at === 0}
-                      icon={ChevronUp}
-                      aria-label={t`Move ${name} up`}
-                      onClick={() => {
-                        onChange(move(at, at - 1));
-                      }}
-                      size="sm"
-                      variant="ghost"
-                    />
-                    <Button
-                      disabled={frozen || at === fallbacks.length - 1}
-                      icon={ChevronDown}
-                      aria-label={t`Move ${name} down`}
-                      onClick={() => {
-                        onChange(move(at, at + 1));
-                      }}
-                      size="sm"
-                      variant="ghost"
-                    />
-                    <Button
-                      disabled={frozen}
-                      icon={Cross}
-                      aria-label={t`Remove ${name} from the fallbacks`}
-                      onClick={() => {
-                        onChange(fallbacks.filter((each) => each !== model));
-                      }}
-                      size="sm"
-                      variant="ghost"
-                    />
-                  </>
-                ) : null}
-              </li>
-            );
-          })}
-        </ol>
-      )}
+      <ol aria-label={t`Fallbacks`} {...stylex.props(styles.list)}>
+        {fallbacks.map((model, at) => {
+          const name = nameOf(model, providers);
+          return (
+            <li key={model} {...stylex.props(styles.fallback)}>
+              <div {...stylex.props(styles.grow)}>
+                <Text element="span" size="sm">
+                  {name}
+                </Text>
+              </div>
+              {editable ? (
+                <>
+                  <Button
+                    aria-label={t`Move ${name} up`}
+                    disabled={frozen || at === 0}
+                    icon={ChevronUp}
+                    onClick={() => {
+                      onChange(move(at, at - 1));
+                    }}
+                    size="xs"
+                    variant="ghost"
+                  />
+                  <Button
+                    aria-label={t`Move ${name} down`}
+                    disabled={frozen || at === fallbacks.length - 1}
+                    icon={ChevronDown}
+                    onClick={() => {
+                      onChange(move(at, at + 1));
+                    }}
+                    size="xs"
+                    variant="ghost"
+                  />
+                  <Button
+                    aria-label={t`Remove ${name} from the fallbacks`}
+                    disabled={frozen}
+                    icon={Cross}
+                    onClick={() => {
+                      onChange(fallbacks.filter((each) => each !== model));
+                    }}
+                    size="xs"
+                    variant="ghost"
+                  />
+                </>
+              ) : null}
+            </li>
+          );
+        })}
+      </ol>
     </FactRow>
   );
 };
 
-/** Adds a fallback; with none yet, this row alone stands for the fallbacks, so it says what they are. */
-const AddFallback = ({
-  items,
-  frozen,
-  only,
-  onAdd,
-}: {
-  items: ReturnType<typeof modelItems>;
-  frozen: boolean;
-  only: boolean;
-  onAdd: (model: string) => void;
-}) => {
+/** The words a row says of its save, translated. */
+const useSaveWords = () => {
   const { t } = useLingui();
-  return (
-    <SettingRow
-      help={
-        only
-          ? t`Tried in order when the default's provider refuses a call.`
-          : undefined
-      }
-      label={t`Add a fallback`}
-    >
-      {(field) => (
-        <Select
-          disabled={frozen}
-          items={items}
-          onValueChange={(model) => {
-            if (model !== null && model !== "") {
-              onAdd(model);
-            }
-          }}
-          value={null}
-        >
-          <SelectTrigger {...field}>
-            <SelectValue placeholder={t`Choose a model`} />
-          </SelectTrigger>
-          <SelectContent />
-        </Select>
-      )}
-    </SettingRow>
-  );
+  return {
+    failedLabel: t`Could not save. Your change is kept.`,
+    retryLabel: t`Try again`,
+    savedLabel: t`Saved`,
+    savingLabel: t`Saving`,
+  };
 };
 
-/** The default model and its fallbacks, in order. */
+/** The default model and its fallbacks, in order, saved as they are chosen. */
 const Models = ({
   providers,
   choice,
   editable,
-  busy,
   onChoose,
 }: {
   providers: readonly AiProviderListed[];
   /** As core read it: never a model of a provider no longer connected. */
   choice: AiModelChoiceNow | null;
   editable: boolean;
-  busy: boolean;
-  onChoose: (choice: AiModelChoice) => void;
+  onChoose: (choice: AiModelChoice) => Promise<boolean>;
 }) => {
   const { t } = useLingui();
+  const words = useSaveWords();
+  const [status, setStatus] = useState<SettingRowState>("idle");
+  const [last, setLast] = useState<AiModelChoice>();
   // None once the provider it was of is removed: the fallbacks wait for
   // a new one, as a choice is saved with its default.
   const defaultModel = choice?.defaultModel ?? null;
   const chosen = chosenOf(choice);
-  // A custom endpoint's models: those chosen now, as core read them (so a
-  // choice another admin saved meanwhile is among them), and those named
-  // here since.
   const [namedHere, setNamedHere] = useState<string[]>([]);
-  const named = [
-    ...new Set(
-      [...chosen, ...namedHere].filter((model) =>
-        model.startsWith(compatiblePrefix)
-      )
-    ),
-  ];
+  const named = namedOf(chosen, namedHere);
   const custom = providers.some(
     ({ provider }) => provider === "openai-compatible"
   );
   const fallbacks = choice?.fallbacks ?? [];
+  const save = (next: AiModelChoice): void => {
+    setLast(next);
+    setStatus("saving");
+    void (async () => {
+      setStatus((await onChoose(next)) ? "saved" : "failed");
+    })();
+  };
   const chooseFallbacks = (next: string[]): void => {
     if (defaultModel !== null) {
-      onChoose({ defaultModel, fallbacks: next });
+      save({ defaultModel, fallbacks: next });
     }
   };
-  const frozen = busy || defaultModel === null;
+  const frozen = status === "saving" || defaultModel === null;
+  const recommended = t`Recommended`;
   let defaultName = t`None: its provider was removed.`;
   if (choice === null) {
-    defaultName = t`No model is chosen yet.`;
+    defaultName = t`None yet`;
   } else if (defaultModel !== null) {
     defaultName = nameOf(defaultModel, providers);
   }
   return (
-    <SectionCard flush title={t`Default and fallbacks`}>
+    <SectionCard density="compact" flush title={t`Models`}>
       <SettingsRows>
         {editable && custom ? (
           <NameModel
-            busy={busy}
             onName={(model) => {
               setNamedHere((now) =>
                 now.includes(model) ? now : [...now, model]
@@ -804,28 +868,34 @@ const Models = ({
         ) : null}
         {editable ? (
           <SettingRow
-            help={t`What Grasp's AI uses for every call.`}
             label={t`Default model`}
+            onRetry={() => {
+              if (last !== undefined) {
+                save(last);
+              }
+            }}
+            status={status}
+            {...words}
           >
             {(field) => (
-              <Select
-                disabled={busy}
-                items={modelItems(providers, named, [])}
+              <Combobox
+                {...field}
+                disabled={status === "saving"}
+                empty={t`No model has that name`}
+                items={modelItems(providers, named, [], recommended)}
+                layout={styles.control}
                 onValueChange={(model) => {
                   if (model !== null && model !== "") {
-                    onChoose({
+                    save({
                       defaultModel: model,
                       fallbacks: fallbacks.filter((each) => each !== model),
                     });
                   }
                 }}
+                placeholder={t`Search models`}
+                size="sm"
                 value={defaultModel}
-              >
-                <SelectTrigger {...field}>
-                  <SelectValue placeholder={t`Choose a model`} />
-                </SelectTrigger>
-                <SelectContent />
-              </Select>
+              />
             )}
           </SettingRow>
         ) : (
@@ -833,10 +903,10 @@ const Models = ({
         )}
         {choice !== null && defaultModel === null && editable ? (
           <RowAlert variant="attention">
-            {t`The default model's provider was removed. Choose a new default model to change the fallbacks.`}
+            {t`The default model's provider was removed. Choose a new default.`}
           </RowAlert>
         ) : null}
-        {choice === null || (editable && fallbacks.length === 0) ? null : (
+        {fallbacks.length === 0 ? null : (
           <Fallbacks
             editable={editable}
             fallbacks={fallbacks}
@@ -846,62 +916,28 @@ const Models = ({
           />
         )}
         {editable && choice !== null && fallbacks.length < fallbacksMax ? (
-          <AddFallback
-            frozen={frozen}
-            items={modelItems(providers, named, chosen)}
-            onAdd={(model) => {
-              chooseFallbacks([...fallbacks, model]);
-            }}
-            only={fallbacks.length === 0}
-          />
+          <SettingRow label={t`Add a fallback`}>
+            {(field) => (
+              <Combobox
+                {...field}
+                disabled={frozen}
+                empty={t`No model has that name`}
+                items={modelItems(providers, named, chosen, recommended)}
+                layout={styles.control}
+                onValueChange={(model) => {
+                  if (model !== null && model !== "") {
+                    chooseFallbacks([...fallbacks, model]);
+                  }
+                }}
+                placeholder={t`Search models`}
+                size="sm"
+                value={null}
+              />
+            )}
+          </SettingRow>
         ) : null}
       </SettingsRows>
     </SectionCard>
-  );
-};
-
-/** Removing a provider, once the admin confirms. */
-const RemoveDialog = ({
-  provider,
-  onRemove,
-  onClose,
-}: {
-  provider: AiProviderListed | null;
-  onRemove: (provider: OrganizationProviderId) => Promise<void>;
-  onClose: () => void;
-}) => {
-  const { t } = useLingui();
-  const label = provider?.label ?? "";
-  return (
-    <AlertDialog
-      onOpenChange={(open) => {
-        if (!open) {
-          onClose();
-        }
-      }}
-      open={provider !== null}
-    >
-      <AlertDialogContent>
-        <AlertDialogTitle>{t`Remove ${label}?`}</AlertDialogTitle>
-        <AlertDialogDescription>
-          {t`Its key is deleted, and calls stop using it at once. Models of this provider are no longer used, even as a fallback.`}
-        </AlertDialogDescription>
-        <AlertDialogFooter>
-          <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
-          <AlertDialogAction
-            action={async () => {
-              if (provider !== null) {
-                await onRemove(provider.provider);
-              }
-            }}
-            failedLabel={t`Could not remove`}
-            variant="danger"
-          >
-            {t`Remove`}
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
   );
 };
 
@@ -915,39 +951,6 @@ const testModelOf = (
   }
   return (
     chosenOf(choice).find((model) => model.startsWith(compatiblePrefix)) ?? null
-  );
-};
-
-/** Who handles Grasp's own AI features, which no setting here changes: one fact a feature. */
-const PlatformUses = ({ uses }: { uses: readonly AiPlatformUse[] }) => {
-  const { t } = useLingui();
-  const names: Record<AiPlatformUse["feature"], string> = {
-    conversion: t`Uploaded documents`,
-    transcription: t`Interview transcripts`,
-    speech: t`Interview questions read aloud`,
-  };
-  return (
-    <SectionCard
-      description={t`Always on Grasp's own keys, whatever you connect above.`}
-      flush
-      title={t`Grasp's own AI features`}
-    >
-      <SettingsRows>
-        {uses.map(({ feature, provider }) => (
-          <FactRow
-            key={feature}
-            {...(feature === "conversion" && provider !== null
-              ? {
-                  help: t`Files in sensitive collections never leave this deployment.`,
-                }
-              : {})}
-            label={names[feature]}
-          >
-            {provider === null ? t`On this deployment` : provider.whereItRuns}
-          </FactRow>
-        ))}
-      </SettingsRows>
-    </SectionCard>
   );
 };
 
@@ -974,7 +977,6 @@ const Source = ({
     return null;
   }
   const model = graspAi.model.name;
-  const { whereItRuns } = graspAi;
   const spent = formatDollars(graspAi.month.spentUsd);
   const limit = formatDollars(graspAi.month.limitUsd);
   const onGrasp = source === "grasp";
@@ -995,16 +997,13 @@ const Source = ({
             ),
           }
         : {})}
+      density="compact"
       flush
       title={t`Grasp’s AI or your own keys`}
     >
       <SettingsRows>
         <FactRow
-          help={
-            onGrasp
-              ? t`${model}. Runs at: ${whereItRuns}`
-              : t`The providers and models below.`
-          }
+          help={onGrasp ? model : undefined}
           label={
             onGrasp
               ? t`Your AI runs on Grasp’s AI`
@@ -1045,12 +1044,10 @@ export const AiProvidersSettings = ({
 }) => {
   const { t } = useLingui();
   const router = useRouter();
+  const core = useCore();
   const { busy, failure, run } = useCoreAction();
-  const [tests, setTests] = useState<
-    Partial<Record<OrganizationProviderId, AiProviderTest>>
-  >({});
-  const [removing, setRemoving] = useState<AiProviderListed | null>(null);
-  const { providers, offered, choice, platform } = listing;
+  const { providers, offered, choice } = listing;
+  /** A change, then the page read again; false where it failed, which the page says. */
   const change = async (action: Change): Promise<boolean> => {
     const done = await run(async (session) => {
       await changeThenRefresh(
@@ -1064,6 +1061,30 @@ export const AiProvidersSettings = ({
       return true;
     });
     return done === true;
+  };
+  /** A change from a dialog: it throws where it failed, so the dialog says why. */
+  const changeOrThrow = async (action: Change): Promise<void> => {
+    await core.withSession(async (session) => {
+      await changeThenRefresh(
+        async () => {
+          await action(session);
+        },
+        async () => {
+          await router.invalidate({ sync: true });
+        }
+      );
+    });
+  };
+  const addKey = async (
+    provider: OrganizationProviderId,
+    key: string,
+    baseUrl: string
+  ): Promise<void> => {
+    await changeOrThrow(async (session) =>
+      provider === "openai-compatible"
+        ? await session.aiProviders.add({ provider, key, baseUrl })
+        : await session.aiProviders.add({ provider, key })
+    );
   };
   const addable = offered.filter(
     ({ provider }) => !providers.some((each) => each.provider === provider)
@@ -1085,91 +1106,41 @@ export const AiProvidersSettings = ({
       <SectionCard
         {...(editable && addable.length > 0
           ? {
-              actions: (
-                <AddProviderDialog
-                  offered={addable}
-                  onAdd={async (provider, key, baseUrl) =>
-                    await change(async (session) =>
-                      provider === "openai-compatible"
-                        ? await session.aiProviders.add({
-                            provider,
-                            key,
-                            baseUrl,
-                          })
-                        : await session.aiProviders.add({ provider, key })
-                    )
-                  }
-                />
-              ),
+              actions: <AddProviderDialog offered={addable} onAdd={addKey} />,
             }
           : {})}
-        description={
-          listing.source === "grasp"
-            ? t`Your own keys, for when your AI runs on them. Stored sealed.`
-            : t`Your organization's own keys pay for its model calls. Stored sealed.`
-        }
+        density="compact"
         flush
         title={t`Providers`}
       >
-        <SettingsRows>
-          {failure === undefined ? null : (
-            <RowAlert variant="danger">{failure}</RowAlert>
-          )}
-          {unanswered ? (
-            <RowAlert variant="attention">
-              {editable
-                ? t`No AI provider is connected yet, so Grasp's AI features can't answer. Add one above.`
-                : t`No AI provider is connected yet, so Grasp's AI features can't answer.`}
-            </RowAlert>
-          ) : null}
-        </SettingsRows>
+        {failure === undefined && !unanswered ? null : (
+          <SettingsRows>
+            {failure === undefined ? null : (
+              <RowAlert variant="danger">{failure}</RowAlert>
+            )}
+            {unanswered ? (
+              <RowAlert variant="attention">
+                {t`No provider is connected, so Grasp's AI can't answer yet.`}
+              </RowAlert>
+            ) : null}
+          </SettingsRows>
+        )}
         {providers.length > 0 ? (
           <ItemGroup aria-label={t`Connected providers`} separated>
             {providers.map((provider) => (
               <ProviderRow
-                busy={busy}
                 editable={editable}
-                key={provider.provider}
-                onRemove={() => {
-                  setRemoving(provider);
-                }}
-                onReplace={async (key) => {
-                  const replaced = await change(async (session) =>
-                    provider.provider === "openai-compatible"
-                      ? await session.aiProviders.add({
-                          provider: "openai-compatible",
-                          key,
-                          baseUrl: provider.baseUrl ?? "",
-                        })
-                      : await session.aiProviders.add({
-                          provider: provider.provider,
-                          key,
-                        })
-                  );
-                  // A test of the key it replaced says nothing of this one.
-                  if (replaced) {
-                    setTests((now) => ({
-                      ...now,
-                      [provider.provider]: undefined,
-                    }));
-                  }
-                  return replaced;
-                }}
-                onTest={() => {
-                  void change(async (session) => {
-                    const outcome = await session.aiProviders.test(
-                      provider.provider,
-                      testModelOf(provider.provider, choice) ?? undefined
-                    );
-                    setTests((now) => ({
-                      ...now,
-                      [provider.provider]: outcome,
-                    }));
+                // A new key is a new row: no test of the key it replaced stays.
+                key={`${provider.provider}:${provider.mask}:${String(provider.updatedAt)}`}
+                onDelete={async () => {
+                  await changeOrThrow(async (session) => {
+                    await session.aiProviders.remove(provider.provider);
                   });
                 }}
+                onReplace={async (key) => {
+                  await addKey(provider.provider, key, provider.baseUrl ?? "");
+                }}
                 provider={provider}
-                providers={providers}
-                tested={tests[provider.provider]}
                 testModel={testModelOf(provider.provider, choice)}
               />
             ))}
@@ -1178,35 +1149,16 @@ export const AiProvidersSettings = ({
       </SectionCard>
       {providers.length === 0 ? null : (
         <Models
-          busy={busy}
           choice={choice}
           editable={editable}
-          onChoose={(next) => {
-            void change(async (session) => {
+          onChoose={async (next) =>
+            await change(async (session) => {
               await session.aiProviders.setModels(next);
-            });
-          }}
+            })
+          }
           providers={providers}
         />
       )}
-      <RemoveDialog
-        onClose={() => {
-          setRemoving(null);
-        }}
-        onRemove={async (provider) => {
-          if (
-            await change(async (session) => {
-              await session.aiProviders.remove(provider);
-            })
-          ) {
-            setTests((now) => ({ ...now, [provider]: undefined }));
-            return;
-          }
-          throw new Error("not removed");
-        }}
-        provider={removing}
-      />
-      {platform.length === 0 ? null : <PlatformUses uses={platform} />}
     </>
   );
 };

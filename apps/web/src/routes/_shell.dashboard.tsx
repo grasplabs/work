@@ -49,7 +49,7 @@ const DashboardPage = () => {
   return (
     <>
       <SiteHeader crumbs={[{ label: t`Dashboard` }]} />
-      <Page wide>
+      <Page>
         <PageHeading
           description={
             line ?? (

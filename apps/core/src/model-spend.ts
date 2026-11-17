@@ -269,9 +269,23 @@ const monthRunsOf = async (
   );
 };
 
+/** What a chat's turns are called for: a person's, and a guest's. */
+const chatPurposes = ["chat.turn", "guest.turn"];
+
+/**
+ * How many days of UTC month `month` have begun by `now`: up to today in
+ * the month it is, all of a month that is over, and all of one to come
+ * (tests count in months from 2200).
+ */
+const daysSoFar = (month: string, now: Date): number => {
+  const { from, until } = monthBounds(month);
+  const length = Math.round((until.getTime() - from.getTime()) / 86_400_000);
+  return now >= from && now < until ? now.getUTCDate() : length;
+};
+
 /**
  * What the models cost in `month` on the organization's keys: the
- * deployment's total, and the workflows that spent most (at most
+ * deployment's total, each day's, chat's, and the workflows that spent most (at most
  * `modelSpendListed`), an App's and an independent one's alike, each with
  * its name and its App's where core still has them, and its runs started
  * in the month: for admins to read (models-rpc.ts).
@@ -282,8 +296,21 @@ export const monthSpend = async (
 ): Promise<ModelMonthSpend> => {
   const db = drizzle(env.DB);
   const spent = sql<number>`sum(${modelUsage.cost})`;
-  const [totals, rows] = await Promise.all([
+  // The UTC day of the month each call was answered on, `01` to `31`.
+  const day = sql<string>`strftime('%d', ${modelUsage.createdAt} / 1000, 'unixepoch')`;
+  const [totals, byDay, chats, rows] = await Promise.all([
     db.select({ total: spent }).from(modelUsage).where(organizationIn(month)),
+    db
+      .select({ day, amount: spent })
+      .from(modelUsage)
+      .where(organizationIn(month))
+      .groupBy(day),
+    db
+      .select({ total: spent })
+      .from(modelUsage)
+      .where(
+        and(organizationIn(month), inArray(modelUsage.purpose, chatPurposes))
+      ),
     // One more than are listed, to tell whether any are left out.
     db
       .select({
@@ -308,9 +335,21 @@ export const monthSpend = async (
     workflowNamesOf(db, workflows),
     monthRunsOf(db, workflows, month),
   ]);
+  const days: number[] = Array.from(
+    { length: daysSoFar(month, new Date()) },
+    () => 0
+  );
+  for (const { day: of, amount } of byDay) {
+    const at = Number(of) - 1;
+    if (at >= 0 && at < days.length) {
+      days[at] = amount;
+    }
+  }
   return {
     month,
     total: totals[0]?.total ?? 0,
+    days,
+    chat: chats[0]?.total ?? 0,
     workflows: listed.map(({ workflow, amount }) => ({
       ...workflow,
       name: workflowNameOf(workflow, names),

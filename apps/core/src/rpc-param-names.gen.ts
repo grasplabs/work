@@ -366,6 +366,8 @@ export const rpcParamNames: ParamNames = {
   },
   "OrganizationRpc": {
     "get": [],
+    "removeLogo": [],
+    "setLogo": ["image"],
     "teams": [],
     "update": ["changes"],
   },
