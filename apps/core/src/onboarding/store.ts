@@ -6328,19 +6328,18 @@ export class Onboarding extends DurableObject<Env> {
         // and drawings were made from, read in this transaction against
         // when the intake began (`#goneSince`). Anyone whose approval
         // changed since is noted as gone (`gonePrefix`), and the team stays
-        // due for another intake. A gone mark is never cleared here.
+        // due for another intake.
         const since = new Set(this.#goneSince(began));
-        // A claim rests on exactly the people behind it now: whoever it
-        // rested on before and doesn't now no longer counts towards the
-        // five it needs. Who is gone stays gone.
+        // A claim rests on exactly the people behind it now, and on nobody
+        // else: whoever it rested on before, gone marks included, is
+        // replaced. Someone who took back their part while this intake ran
+        // was marked gone on it as their take-back committed; kept here, the
+        // mark would stand beside five who back it now, a claim that still
+        // stands, and never be forgotten (`#forgetFallen` forgets only
+        // what falls). Who went while it ran is marked again below.
         this.#db
           .delete(brainSent)
-          .where(
-            and(
-              inList(brainSent.record, claimed),
-              not(like(brainSent.person, `${gonePrefix}%`))
-            )
-          )
+          .where(inList(brainSent.record, claimed))
           .run();
         // One row a record: within SQLite's bound parameters.
         for (const rest of rests) {
@@ -7435,6 +7434,9 @@ export class Onboarding extends DurableObject<Env> {
    * approved backs nothing that still stands, as a claim rests on exactly
    * the five whose facts were checked first (team-claims.ts `supported`)
    * and a drawing on everyone it was drawn from, so each fell as they went.
+   * An intake that rebuilds such a claim while they go rests it on who
+   * backs it now alone, their gone mark dropped (`#intakeTeam`), so no
+   * standing claim keeps one.
    */
   #toForget(): string[] {
     const rows = this.#db
