@@ -20,13 +20,13 @@ import { copyOfStore, restoreStore } from "./brain-next-store-copy.ts";
 import { mockIdp } from "./idp.ts";
 import { answering, onLink } from "./interview-link.ts";
 import { agree, fact, openLink, team } from "./onboarding-team.ts";
-import { auditedDuring, signedInApi, unique } from "./sign-in.ts";
+import { auditedDuring, outcome, signedInApi, unique } from "./sign-in.ts";
 
 // The company's teams in the new Brain (GRA-1748): each team taking part on
 // the staff list the admin confirmed, as the admin described it, with its
 // head count on the roster, as one source everyone in the company reads
-// (the owner, 17 November), a new version at each confirmed change; the
-// admin may erase it. The ways it can fail, from the threat model on the
+// (the owner, 17 November), a new version at each hand-over after a
+// confirmed change; the admin may erase it, and what members read with it. The ways it can fail, from the threat model on the
 // issue and review round 1 of #2344:
 //
 // - What a lead's map says a team does reaching anyone: a model's answer
@@ -167,7 +167,7 @@ const markers = () => ({
 });
 
 describe("the company's teams in the new Brain", { timeout: 180_000 }, () => {
-  it("never gives anyone what a lead's map says a team does, nor times a drawing in the audit log, before or after the lead deletes their interview", async () => {
+  it("never gives anyone what a lead's map says a team does, nor times a drawing in the audit log, and takes it from staff too when the lead deletes their interview", async () => {
     const [admin, member] = await Promise.all([
       signedInApi(idp, "admin"),
       signedInApi(idp, "user"),
@@ -223,6 +223,8 @@ describe("the company's teams in the new Brain", { timeout: 180_000 }, () => {
     await store.releaseDue();
     await handOverNow();
     const after = await readNow();
+    // Nor do staff any more: the map's words were drawn from her interview.
+    const asMappedAfter = JSON.stringify(await store.rosterAsMapped());
     const held = (read: Record<string, string>) =>
       Object.entries(read).flatMap(([where, text]) =>
         text.includes(marker) || text.includes("lea lind") ? [where] : []
@@ -230,6 +232,7 @@ describe("the company's teams in the new Brain", { timeout: 180_000 }, () => {
 
     expect({
       staff: asMapped.includes(marker),
+      staffAfter: asMappedAfter.includes(marker),
       adminRoster: adminView.includes(marker),
       before: held(before),
       after: held(after),
@@ -238,10 +241,47 @@ describe("the company's teams in the new Brain", { timeout: 180_000 }, () => {
       ).length,
     }).toStrictEqual({
       staff: true,
+      staffAfter: false,
       adminRoster: false,
       before: [],
       after: [],
       drawingHandedOver: 0,
+    });
+  });
+
+  it("takes what a lead's map says a team does from staff when the lead withdraws, and keeps the rest of the map", async () => {
+    const ids = await team();
+    const store = onboardingStore(env);
+    await store.releaseDue();
+    const marker = markerOf("lead");
+    await agree(ids.lea, [
+      fact("l1", "work", "Max, Mia and Mo handle new tickets every morning."),
+    ]);
+    await answering(
+      [
+        {
+          text: JSON.stringify({
+            does: `Handles the ${marker} tickets`,
+            works: [],
+          }),
+          inputTokens: 1,
+          outputTokens: 1,
+        },
+      ],
+      async () => await store.drawNext()
+    );
+    const mapped = async () => {
+      const roster = await store.rosterAsMapped();
+      return roster?.teams.find(({ id }) => id === ids.team)?.does;
+    };
+    const before = await mapped();
+
+    await onLink({ action: "withdraw", ...(await openLink(ids.lea)) });
+
+    expect({ before, after: await mapped() }).toStrictEqual({
+      before: `Handles the ${marker} tickets`,
+      // What the admin wrote, which is nothing here.
+      after: "",
     });
   });
 
@@ -344,6 +384,91 @@ describe("the company's teams in the new Brain", { timeout: 180_000 }, () => {
     });
   });
 
+  it("keeps the confirmed teams when the admin saves an edit without confirming it", async () => {
+    const [admin, member] = await Promise.all([
+      signedInApi(idp, "admin"),
+      signedInApi(idp, "user"),
+    ]);
+    const words = markers();
+    await admin.api.onboarding.confirmRoster(rosterWith(words));
+    await handOverNow();
+    const confirmed = await versionsOf(member.userId);
+
+    // The same team renamed and described anew, saved but not confirmed.
+    const renamed = markerOf("renamed");
+    const described = markerOf("does");
+    const edited = rosterWith({ ...words, team: renamed });
+    await admin.api.onboarding.saveRoster({
+      ...edited,
+      teams: edited.teams.map((each) =>
+        each.id === "bakery" ? { ...each, does: `Bakes ${described}` } : each
+      ),
+    });
+    await handOverNow();
+    const read = await readOf(member.userId, words.team);
+    const page = JSON.stringify(await member.api.brain.read()).toLowerCase();
+    const after = await versionsOf(member.userId);
+
+    expect({
+      added: after.length - confirmed.length,
+      current: read.includes(`${words.team}: 2 people. bakes bread`),
+      edited: [read, page].some(
+        (text) => text.includes(renamed) || text.includes(described)
+      ),
+      page: page.includes(words.team),
+    }).toStrictEqual({ added: 0, current: true, edited: false, page: true });
+  });
+
+  it("gives the Brain a version saying no team takes part once the admin switches every team off", async () => {
+    const [admin, member] = await Promise.all([
+      signedInApi(idp, "admin"),
+      signedInApi(idp, "user"),
+    ]);
+    const words = markers();
+    await admin.api.onboarding.confirmRoster(rosterWith(words));
+    await handOverNow();
+    const source = await rosterNow();
+    const list = rosterWith(words);
+    await admin.api.onboarding.confirmRoster({
+      ...list,
+      teams: list.teams.map((each) => ({ ...each, off: true })),
+    });
+    await handOverNow();
+    const { versions } = await listVersionsAs(env, member.userId, { source });
+    const newest = Math.max(...versions.map(({ version }) => version));
+    const current = await readSourceVersionAs(env, member.userId, {
+      source,
+      version: newest,
+    });
+    const page = await member.api.brain.read();
+
+    expect({
+      current: current?.text.toLowerCase().includes(words.team),
+      none: current?.text.includes("No team takes part"),
+      page: page.teams.some(({ name }) => name === words.team),
+    }).toStrictEqual({ current: false, none: true, page: false });
+  });
+
+  it("refuses a member's erase, and keeps the teams in the Brain", async () => {
+    const [admin, member] = await Promise.all([
+      signedInApi(idp, "admin"),
+      signedInApi(idp, "user"),
+    ]);
+    const words = markers();
+    await admin.api.onboarding.confirmRoster(rosterWith(words));
+    await handOverNow();
+
+    const refused = await outcome(member.api.onboarding.eraseTeamsFromBrain());
+    const read = await readOf(member.userId, words.team);
+    const { teamsInBrain } = await admin.api.onboarding.view();
+
+    expect({
+      refused,
+      kept: read.includes(words.team),
+      inBrain: teamsInBrain,
+    }).toStrictEqual({ refused: "role.forbidden", kept: true, inBrain: "in" });
+  });
+
   it("erases every version when the admin erases the teams, also after a restore, keeps the roster, and gives them afresh at the next confirmed save", async () => {
     const [admin, member] = await Promise.all([
       signedInApi(idp, "admin"),
@@ -374,7 +499,8 @@ describe("the company's teams in the new Brain", { timeout: 180_000 }, () => {
       read: await holds(words.team),
       renamed: await holds(renamed),
       versions: await versionsIn(member.userId, erased),
-      // The roster itself stays, and what members read on the page.
+      // The roster itself stays; members' page shows no team until the
+      // next confirmed save.
       roster: view.roster?.teams.map(({ name }) => name),
       page: page.teams.some(({ name }) => name === renamed),
       inBrain: view.teamsInBrain,
@@ -391,6 +517,7 @@ describe("the company's teams in the new Brain", { timeout: 180_000 }, () => {
     await handOverNow();
     const fresh = await rosterNow();
     const freshVersions = await versionsIn(member.userId, fresh);
+    const freshPage = await member.api.brain.read();
     const logged = JSON.stringify(events).toLowerCase();
 
     expect({
@@ -401,6 +528,7 @@ describe("the company's teams in the new Brain", { timeout: 180_000 }, () => {
         own: fresh.id !== erased.id,
         versions: freshVersions.length,
         read: await holds(renamed),
+        page: freshPage.teams.some(({ name }) => name === renamed),
       },
       audited: events
         .filter(({ action }) => action === "onboarding.roster.brain_erased")
@@ -413,11 +541,11 @@ describe("the company's teams in the new Brain", { timeout: 180_000 }, () => {
         renamed: false,
         versions: [],
         roster: [renamed, words.other],
-        page: true,
+        page: false,
         inBrain: null,
       },
       afterRestore: { read: false, versions: [] },
-      fresh: { own: true, versions: 1, read: true },
+      fresh: { own: true, versions: 1, read: true, page: true },
       audited: ["person"],
       logged: false,
     });

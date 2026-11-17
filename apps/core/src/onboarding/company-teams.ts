@@ -22,15 +22,20 @@ export interface CompanyTeam {
 
 /**
  * `teams` as the new Brain's source text, for recall: written for a model
- * to read, in English like the rest of Grasp's own words to it. Never
- * empty: the store gives none before the admin confirmed a team.
+ * to read, in English like the rest of Grasp's own words to it. With no
+ * team taking part (the admin switched every one off), one fixed
+ * sentence says so, so the Brain never keeps listing them.
  */
 export const companyTeamsText = (teams: readonly CompanyTeam[]): string =>
-  `The company's teams, from its staff list\n\n${teams
-    .map(({ name, does, people }) => {
-      const size = `${people === 1 ? "1 person" : `${people} people`}.`;
-      return does.trim() === ""
-        ? `- ${name}: ${size}`
-        : `- ${name}: ${size} ${does.trim()}`;
-    })
-    .join("\n")}`;
+  `The company's teams, from its staff list\n\n${
+    teams.length === 0
+      ? "No team takes part."
+      : teams
+          .map(({ name, does, people }) => {
+            const size = `${people === 1 ? "1 person" : `${people} people`}.`;
+            return does.trim() === ""
+              ? `- ${name}: ${size}`
+              : `- ${name}: ${size} ${does.trim()}`;
+          })
+          .join("\n")
+  }`;

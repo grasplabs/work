@@ -99,7 +99,10 @@ export const rosterTeamSchema = z.strictObject({
   name: nameSchema,
   /** Its lead, by person: someone in the team. */
   lead: idSchema.nullable(),
-  /** What it does, once its lead said so. */
+  /**
+   * What it does, in the admin's own words: every member reads it once the
+   * admin confirms the list. Never what a lead's map says (GRA-1748).
+   */
   does: z.string().trim().max(200).default(""),
   /** Not taking part: nobody in it gets a link. */
   off: z.boolean().default(false),

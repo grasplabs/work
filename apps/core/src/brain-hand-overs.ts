@@ -78,7 +78,8 @@ export const handOverProducers = {
     target: "onboarding_kickoff",
   },
   // The company's teams (onboarding/company-teams.ts), as the onboarding's
-  // store notes each change of them (`#rosterChanged`): never who is in one.
+  // store notes each confirmed change of them (`#rosterConfirmed`): never
+  // who is in one.
   roster: {
     actions: ["onboarding.roster.brain_source"],
     target: "onboarding_roster",
