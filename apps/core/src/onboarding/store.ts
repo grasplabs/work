@@ -2089,7 +2089,6 @@ export class Onboarding extends DurableObject<Env> {
         .set({ withdrawnAt: now })
         .where(eq(participations.person, person.id))
         .run();
-      this.#forgetMapOf(person.id);
       this.#admissionChanged(person, false, true, now);
       this.#noted(person.id, "interview.withdrawn", now);
     });
@@ -7458,8 +7457,9 @@ export class Onboarding extends DurableObject<Env> {
         .update(teams)
         .set({
           // The lead's map is theirs, from their interview: kept apart from
-          // what the admin wrote, never shown as theirs (GRA-1748).
-          ...(map.does === "" ? {} : { mappedDoes: map.does }),
+          // what the admin wrote, never shown as theirs (GRA-1748). A map
+          // saying nothing of it leaves nothing of an earlier one.
+          mappedDoes: map.does === "" ? null : map.does,
           ...(generation === input.generation && admission === input.admission
             ? {
                 mappedAt: sql`coalesce(${teams.mappedAt}, ${at})`,
@@ -7828,7 +7828,8 @@ export class Onboarding extends DurableObject<Env> {
     if (lost) {
       // Every drawing it was in goes, whatever still counts: one drawn
       // from what no longer does never comes back, even when drawing it
-      // again fails.
+      // again fails. So does what their map says a team does.
+      this.#forgetMapOf(person.id);
       this.#forgetDrawings(person.id);
       this.#db
         .update(interviewStates)
@@ -8229,7 +8230,8 @@ export class Onboarding extends DurableObject<Env> {
   /**
    * Takes what `person`'s map says a team they lead does (`mappedDoes`), a
    * model's answer from their interview, from staff too, in the
-   * transaction of their withdrawal, delete or erasure (GRA-1748). The
+   * transaction of their withdrawal, delete or erasure, or of an approval
+   * they took back (GRA-1748); a map drawn again gives it anew. The
    * team's pieces of work stay: the rest of the team was asked about them,
    * and they are drawn again from what those people agreed (GRA-329).
    */

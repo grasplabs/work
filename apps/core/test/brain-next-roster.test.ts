@@ -249,7 +249,7 @@ describe("the company's teams in the new Brain", { timeout: 180_000 }, () => {
     });
   });
 
-  it("takes what a lead's map says a team does from staff when the lead withdraws, and keeps the rest of the map", async () => {
+  it("takes what a lead's map says a team does from staff when the lead withdraws", async () => {
     const ids = await team();
     const store = onboardingStore(env);
     await store.releaseDue();
@@ -282,6 +282,59 @@ describe("the company's teams in the new Brain", { timeout: 180_000 }, () => {
       before: `Handles the ${marker} tickets`,
       // What the admin wrote, which is nothing here.
       after: "",
+    });
+  });
+
+  it("takes what a lead's map says a team does from staff when the lead takes back an approval, and when a redraw says nothing", async () => {
+    const ids = await team();
+    const store = onboardingStore(env);
+    await store.releaseDue();
+    const tickets = fact("l1", "work", "Max, Mia and Mo handle new tickets.");
+    const rota = fact("l2", "work", "Lea plans the rota every Friday.");
+    /** Draws the team's map, the model saying the team does `does`. */
+    const draw = async (does: string): Promise<void> => {
+      await answering(
+        [
+          {
+            text: JSON.stringify({ does, works: [] }),
+            inputTokens: 1,
+            outputTokens: 1,
+          },
+        ],
+        async () => await store.drawNext()
+      );
+    };
+    const mapped = async () => {
+      const roster = await store.rosterAsMapped();
+      return roster?.teams.find(({ id }) => id === ids.team)?.does;
+    };
+    const first = markerOf("lead");
+    let version = await agree(ids.lea, [tickets]);
+    await draw(`Handles the ${first} tickets`);
+    const drawn = await mapped();
+
+    // She agrees to more: drawn again, the model saying nothing of it.
+    version = await agree(ids.lea, [tickets, rota], version);
+    await draw("");
+    const redrawnEmpty = await mapped();
+
+    // Drawn once more, then she takes the rota's approval back.
+    const second = markerOf("lead");
+    version = await agree(
+      ids.lea,
+      [tickets, rota, fact("l3", "work", "Mo orders the paper.")],
+      version
+    );
+    await draw(`Handles the ${second} tickets`);
+    const drawnAgain = await mapped();
+    await agree(ids.lea, [tickets], version);
+    const takenBack = await mapped();
+
+    expect({ drawn, redrawnEmpty, drawnAgain, takenBack }).toStrictEqual({
+      drawn: `Handles the ${first} tickets`,
+      redrawnEmpty: "",
+      drawnAgain: `Handles the ${second} tickets`,
+      takenBack: "",
     });
   });
 
