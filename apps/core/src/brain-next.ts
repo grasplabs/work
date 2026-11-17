@@ -72,6 +72,7 @@ import type {
   MemoryChangeOutcome,
   MemoryId,
   MemoryType,
+  NewEntity,
   ExportStatus,
   Finding,
   KeyState,
@@ -124,6 +125,7 @@ import type {
 import { brainSourceErrors, firstLineOf } from "@grasp-os/shared/brain-sources";
 import { brainConnectionIdSchema } from "@grasp-os/shared/connect";
 import { withinTime } from "@grasp-os/shared/deadline";
+import { sha256Hex } from "@grasp-os/shared/encoding";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
@@ -3835,7 +3837,76 @@ export type Handed =
       readers: SourceReaders;
       /** The group it is added in (`addSource`): none for most. */
       group?: SourceRef;
+      /**
+       * What its producer's own code files on the version as it is added
+       * (`fileOnVersion`), quoting `text`: only for a text always within a
+       * source's bound, as `whenTooLarge` says none of it. None for most.
+       */
+      filed?: Filed;
     };
+
+/**
+ * Memories a producer's own code draws from a source's text, never a
+ * model's: the entities they name, and each memory with the words of the
+ * text it quotes. The system's word, as the producer wrote them.
+ */
+export interface Filed {
+  entities: NewEntity[];
+  memories: {
+    about: string;
+    attribute?: string;
+    object?: string;
+    value?: string;
+    type: MemoryType;
+    statement: string;
+    quote: string;
+  }[];
+}
+
+/**
+ * Files `filed` on version `version` of `source`, which `readers` may
+ * read: memories of the shared store resting on that version, readable by
+ * no more than its readers (the store holds them to the version's), under
+ * one change of that version, so filing it again adds nothing twice. It
+ * marks the version as drawn from, so what was filed on an earlier version
+ * of the source ends, and stays as history. Refused by the Brain for a
+ * version erased or removed meanwhile, or a quote the version doesn't say.
+ * Never for what one person alone may read: that is drawn in their own
+ * store.
+ */
+const fileOnVersion = async (
+  env: BrainEnv,
+  {
+    source,
+    version,
+    readers,
+    filed,
+  }: {
+    source: SourceRef;
+    version: number;
+    readers: SourceReaders;
+    filed: Filed;
+  }
+): Promise<void> => {
+  if (readers.kind === "owner") {
+    throw new Error(
+      "Refused: what one person alone may read is filed in their own store"
+    );
+  }
+  const key = sourceKeyOf(source);
+  await brain(env).addMemories({
+    // A source's key may take the whole length a change may: its hash.
+    change: `filed:${version}:${await sha256Hex(key)}`,
+    access: accessOf(readers),
+    entities: filed.entities,
+    memories: filed.memories.map(({ quote, ...memory }) => ({
+      ...memory,
+      speaker: { kind: "system" },
+      basis: { kind: "source", source: key, version, quote },
+    })),
+    extracted: { source: key, version },
+  });
+};
 
 /**
  * Why a noted source is not handed over after all, one of a fixed set:
@@ -4026,6 +4097,14 @@ const handOver = async (
     (await erasureBegun(env, readers.data.personId))
   ) {
     return await refused("erased", readers.data);
+  }
+  if (handed.filed !== undefined) {
+    await fileOnVersion(env, {
+      source,
+      version,
+      readers: readers.data,
+      filed: handed.filed,
+    });
   }
   const added: HandOverResult = { kind: "added", version };
   await attempt.ended(added);

@@ -785,6 +785,11 @@ export interface StandingDrawing {
   drawing: WorkflowVersionRecord;
 }
 
+/** A drawing as the hand-over reads it (`drawingToHand`): with its team's name on the staff list. */
+export interface HeldDrawing extends StandingDrawing {
+  teamName: string;
+}
+
 /** A drawing as the store keeps it (`brain_drawings.drawing`), or none when it no longer reads as one. */
 const brainDrawingOf = (stored: string): WorkflowVersionRecord | null => {
   const parsed = brainRecordSchema.safeParse(JSON.parse(stored));
@@ -6931,12 +6936,15 @@ export class Onboarding extends DurableObject<Env> {
 
   /**
    * The drawing `source` as the hand-over adds it now: what it holds, for
-   * its team, only while it stands (`standingDrawing`). Null otherwise.
+   * its team, by the name the staff list gives it now, only while it
+   * stands (`standingDrawing`). Null otherwise.
    */
-  drawingToHand(source: string): StandingDrawing | null {
-    return (
-      this.standingDrawings().find((each) => each.source === source) ?? null
-    );
+  drawingToHand(source: string): HeldDrawing | null {
+    const held = this.standingDrawings().find((each) => each.source === source);
+    const team = this.#roster()?.teams.find(({ id }) => id === held?.team);
+    return held === undefined || team === undefined
+      ? null
+      : { ...held, teamName: team.name };
   }
 
   /**
