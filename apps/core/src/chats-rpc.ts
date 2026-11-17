@@ -36,7 +36,7 @@ import type { DependencyRequest } from "@grasp-os/shared/dependencies";
 import { chatIdSchema } from "@grasp-os/shared/ids";
 import type { ChatId } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
-import type { ModelEfforts } from "@grasp-os/shared/models";
+import type { ModelEffort, ModelEfforts } from "@grasp-os/shared/models";
 import { requireBuilder } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { subjectSchema } from "@grasp-os/shared/subject";
@@ -58,6 +58,7 @@ import {
   setAgentToolClass,
 } from "./agent-builder.ts";
 import { makeAgentWake, wakeScheduleOf } from "./agent-wakes.ts";
+import type { QuestionBuilt } from "./agent.ts";
 import { firstAgentId, turnAgent } from "./agents.ts";
 import { createFromBlueprint } from "./app-blueprints.ts";
 import { appKind, createApp, editableApp } from "./apps.ts";
@@ -130,6 +131,31 @@ const settingsIn = ({
   audience !== undefined ||
   turnOn.length > 0 ||
   schedule !== undefined;
+
+/**
+ * After a card's press made something: the chat goes on in the person's
+ * words, its agent told what was made (`built`), as after Build it. A
+ * turn that can't start keeps their words with what was made and why it
+ * stopped (`keepBuilt`), so the card waits no more and nothing is made
+ * twice.
+ */
+const carryOn = async (
+  chats: ReturnType<typeof workspace>,
+  chatId: ChatId,
+  personId: string,
+  asked: { text: string; model: string; effort?: ModelEffort | undefined },
+  built: QuestionBuilt
+): Promise<void> => {
+  try {
+    await chats.send(chatId, personId, { ...asked, built });
+  } catch (error) {
+    await chats.keepBuilt(chatId, personId, {
+      text: asked.text,
+      built,
+      stopped: stopReason(chatId, error),
+    });
+  }
+};
 
 const draftMakeSchema = questionSchema
   .pick({ text: true, model: true, effort: true })
@@ -657,6 +683,9 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
       let agentId = made;
       if (agentId === null) {
         try {
+          // None made for a chat whose paused agent couldn't go on with it,
+          // as Build it makes none.
+          await this.#requireChatAgentOn(chats, id, person.userId);
           const madeNow = await this.#makeDrafted(person, draft);
           agentId = madeNow.id;
         } catch (error) {
@@ -683,6 +712,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
       const agent = { id: agentId, name: draft.name };
       // Told: it stays made and the draft taken, whatever fails next, and
       // the person lands on its page to finish it there.
+      let unfinished = false;
       try {
         await this.#setDrafted(person, agent.id, draft);
       } catch (error) {
@@ -691,14 +721,15 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
         // app saved it would use any app. Paused, it answers nothing until
         // its page is finished.
         await this.#pauseQuietly(person, agent.id);
-        return { id: agent.id, name: agent.name, unfinished: true };
+        unfinished = true;
       }
-      try {
-        await chats.send(id, person.userId, asked);
-      } catch (error) {
-        log.warn("agent.drafted_unanswered", errorFields(error));
-      }
-      return { id: agent.id, name: agent.name };
+      await carryOn(chats, id, person.userId, asked, {
+        plan: callId,
+        agent,
+        agentAction: "made",
+        ...(unfinished ? { unfinished: true } : {}),
+      });
+      return { ...agent, ...(unfinished ? { unfinished: true } : {}) };
     });
   }
 
@@ -719,6 +750,16 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
       return await makeOwnAgent(this.#env, person, said, { from: "chat" });
     }
     return await makeAgent(this.#env, person, said, { from: "chat" });
+  }
+
+  /** Refuses while the chat's own agent is paused: it couldn't go on with what a card made. */
+  async #requireChatAgentOn(
+    chats: ReturnType<typeof workspace>,
+    chatId: ChatId,
+    personId: string
+  ): Promise<void> {
+    const { agentId } = await chats.chatSummary(chatId, personId);
+    await turnAgent(this.#env, agentId);
   }
 
   /** Pauses an agent whose card couldn't all be set; a failure is only logged. */
@@ -760,6 +801,9 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
       );
       let agent: Agent;
       try {
+        // Nothing changed for a chat whose paused agent couldn't go on with
+        // it, as Build it makes nothing.
+        await this.#requireChatAgentOn(chats, id, person.userId);
         agent = await this.#changedAgent(person, change, at);
         await this.#checkDrafted({
           ...(change.addApps === undefined ? {} : { apps: change.addApps }),
@@ -774,6 +818,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
         await chats.releaseAgentChange(id, callId);
         throw error;
       }
+      let unfinished = false;
       try {
         await this.#setChanged(person, agent, change, callId);
       } catch (error) {
@@ -781,14 +826,16 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
         // An app the card took off may still be on: paused, it answers
         // nothing until its page is finished.
         await this.#pauseQuietly(person, agent.id);
-        return { id: agent.id, name: agent.name, unfinished: true };
+        unfinished = true;
       }
-      try {
-        await chats.send(id, person.userId, asked);
-      } catch (error) {
-        log.warn("agent.change_unanswered", errorFields(error));
-      }
-      return { id: agent.id, name: agent.name };
+      const changed = { id: agent.id, name: agent.name };
+      await carryOn(chats, id, person.userId, asked, {
+        plan: callId,
+        agent: changed,
+        agentAction: "changed",
+        ...(unfinished ? { unfinished: true } : {}),
+      });
+      return { ...changed, ...(unfinished ? { unfinished: true } : {}) };
     });
   }
 
@@ -846,13 +893,19 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
     callId: string
   ): Promise<void> {
     if (job !== undefined) {
-      await changeAgent(this.#env, person, agent.id, {
-        name: agent.name,
-        face: agent.face,
-        job,
-        modelRole: agent.modelRole,
-        model: agent.model,
-      });
+      await changeAgent(
+        this.#env,
+        person,
+        agent.id,
+        {
+          name: agent.name,
+          face: agent.face,
+          job,
+          modelRole: agent.modelRole,
+          model: agent.model,
+        },
+        { from: "chat" }
+      );
     }
     if (addInstructions !== undefined) {
       // Added after what its instruction file says now, saved as on its
@@ -878,7 +931,8 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
           person,
           agent.id,
           agentAppOf(source, provider),
-          on
+          on,
+          { from: "chat" }
         );
       }
     }
@@ -886,7 +940,9 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
       // Whom it reaches, and nothing else: whether it answers at all stays
       // as it is, which the card never showed.
       const { on } = await readAgentSettings(this.#env, agent.id);
-      await setAgentReach(this.#env, person, agent.id, on, audience);
+      await setAgentReach(this.#env, person, agent.id, on, audience, {
+        from: "chat",
+      });
     }
     await this.#setDrafted(person, agent.id, {
       classes: turnOn,
@@ -941,23 +997,40 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
         person,
         agentId,
         agentAppOf(source, provider),
-        true
+        true,
+        { from: "chat" }
       );
     }
     if (audience !== undefined) {
-      await setAgentReach(this.#env, person, agentId, true, audience);
+      await setAgentReach(this.#env, person, agentId, true, audience, {
+        from: "chat",
+      });
     }
     for (const toolClass of classes) {
       // oxlint-disable-next-line no-await-in-loop -- one at a time, each audited
-      await setAgentToolClass(this.#env, person, agentId, toolClass, {
-        who: "asClass",
-      });
+      await setAgentToolClass(
+        this.#env,
+        person,
+        agentId,
+        toolClass,
+        {
+          who: "asClass",
+        },
+        { from: "chat" }
+      );
     }
     if (schedule !== undefined) {
-      await makeAgentWake(this.#env, person, agentId, {
-        ...schedule,
-        personId: person.userId,
-      });
+      await makeAgentWake(
+        this.#env,
+        person,
+        agentId,
+        {
+          ...schedule,
+          personId: person.userId,
+        },
+        new Date(),
+        { from: "chat" }
+      );
     }
   }
 

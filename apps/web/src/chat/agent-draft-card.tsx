@@ -1,8 +1,7 @@
 import type { AgentDraftMade, AgentDrafted } from "@grasp-os/shared/agents";
 import type { ToolClassAudience } from "@grasp-os/shared/connect";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { Link, useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
+import { useNavigate } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 
 import { useCoreRead } from "../apps/use-core-read.ts";
@@ -195,32 +194,15 @@ export const DraftActions = ({
 }) => {
   const { t } = useLingui();
   const navigate = useNavigate();
-  // Made or changed, but not all of the card could be set: it is paused,
-  // and its page says what it has.
-  const [unfinished, setUnfinished] = useState<string>();
   return (
     <MakeActions
       build={build}
       changeLabel={t`Change something`}
       label={press === "make" ? t`Make it` : t`Change it`}
-      notice={
-        unfinished === undefined ? null : (
-          <p className="text-sm">
-            <Trans>
-              Not all of it could be set, so the agent is paused.{" "}
-              <Link params={{ agent: unfinished }} to="/agents/$agent">
-                Finish it on its page
-              </Link>
-              .
-            </Trans>
-          </p>
-        )
-      }
+      // Lands on the agent made or changed, as Build it lands on what it
+      // built, the chat going on beside it: one only partly set is paused,
+      // which its page says, and the chat's answer too.
       onDone={(agent: AgentDraftMade) => {
-        if (agent.unfinished === true) {
-          setUnfinished(agent.id);
-          return;
-        }
         void navigate({ to: "/agents/$agent", params: { agent: agent.id } });
       }}
       press={async (session, asked) => {
