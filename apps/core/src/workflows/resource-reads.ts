@@ -6,12 +6,14 @@ import {
   workspaceIdSchema,
 } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
+import type { CodeSubject, WorkContext } from "@grasp-os/shared/permissions";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
+import { runOfStepKey } from "@grasp-os/shared/workflows";
 import { drizzle } from "drizzle-orm/d1";
 
 import { readableMemoriesAs, readableVersionsAs } from "../brain-next.ts";
 import type { PinnedVersionRef } from "../brain-next.ts";
-import { runChatSources } from "../db/core/schema.ts";
+import { runChatSources, workflowResourceRuns } from "../db/core/schema.ts";
 import { inList } from "../db/d1.ts";
 import { readableSources } from "../history-access.ts";
 import { authorize } from "../permissions.ts";
@@ -500,3 +502,101 @@ export const copiesEvidence = async (
     })),
     { grants: false, read }
   );
+
+/** The run a call was made in, by its workflow and ID. */
+interface CallRun {
+  readonly workflowId: string;
+  readonly runId: string;
+}
+
+/**
+ * The run that made a call, if a run made it: the run its context names
+ * (`workflowRun`), or, for an independent workflow's call whose context
+ * names none, the run its key names (`runOfStepKey`), none if it names
+ * none, which no run's row matches.
+ */
+export const callRunOf = (call: {
+  readonly subject: CodeSubject;
+  readonly context: WorkContext | undefined;
+  readonly idempotencyKey: string;
+}): CallRun | undefined => {
+  const { subject, context, idempotencyKey } = call;
+  if (context?.type === "workflowRun") {
+    return { workflowId: context.workflowId, runId: context.runId };
+  }
+  return subject.type === "workflow"
+    ? {
+        workflowId: subject.workflowId,
+        runId: runOfStepKey(idempotencyKey) ?? "",
+      }
+    : undefined;
+};
+
+/**
+ * The runs `calls` name, each with its person, as their rows have them:
+ * one read however many there are. A run with no row of its workflow's is
+ * left out.
+ */
+const evidenceRunsOf = async (
+  env: Env,
+  calls: readonly CallRun[]
+): Promise<EvidenceRun[]> => {
+  const named = new Map(
+    calls.map(({ runId, workflowId }) => [runId, workflowId])
+  );
+  if (named.size === 0) {
+    return [];
+  }
+  const rows = await drizzle(env.DB)
+    .select({
+      runId: workflowResourceRuns.id,
+      workflowId: workflowResourceRuns.workflowResourceId,
+      principal: workflowResourceRuns.principalId,
+    })
+    .from(workflowResourceRuns)
+    .where(inList(workflowResourceRuns.id, [...named.keys()]));
+  return rows.filter(
+    ({ runId, workflowId }) => named.get(runId) === workflowId
+  );
+};
+
+/**
+ * How the evidence of the runs that made `calls` stands (`runsEvidence`),
+ * by run ID, for a reader that shows what a run's call would send, or
+ * sent, only while the run may still read what it read (a held action's
+ * input, an unknown outcome's: pending-actions.ts, unknown-outcomes.ts,
+ * GRA-1999). Checked together: a list of them costs one read of the runs
+ * and one check, however many it holds. A run with no row is refused, so
+ * nothing of what it made shows.
+ */
+export const callRunsEvidence = async (
+  env: Env,
+  calls: readonly CallRun[]
+): Promise<Map<string, EvidenceState>> => {
+  let runs: EvidenceRun[];
+  try {
+    runs = await evidenceRunsOf(env, calls);
+  } catch (error) {
+    return new Map(calls.map(({ runId }) => [runId, unchecked(runId, error)]));
+  }
+  const states = await runsEvidence(env, runs);
+  return new Map(
+    calls.map(({ runId }) => [runId, states.get(runId) ?? "refused"])
+  );
+};
+
+/**
+ * `requireEndedRunEvidenceReadable` for the run that made a call
+ * (`callRunOf`), before what it sent may go out again (an unknown outcome
+ * said not to have happened): a run with no row is refused.
+ */
+export const requireCallRunEvidenceReadable = async (
+  env: Env,
+  call: CallRun
+): Promise<void> => {
+  const [run] = await evidenceRunsOf(env, [call]);
+  if (run === undefined) {
+    throw workflowResourceErrors.create("brain.revoked");
+  }
+  await requireOwnEvidenceReadable(env, run);
+};

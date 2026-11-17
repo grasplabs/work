@@ -6438,10 +6438,6 @@ msgctxt "“Requested” is the name of a section on the Integrations page."
 msgid "Grasp checks what it takes to connect it. You find it under Requested."
 msgstr "Grasp comprueba qué hace falta para conectarla. La encuentras en Solicitadas."
 
-#: src/settings/ai-providers.tsx
-msgid "Grasp converts uploaded documents on this deployment: nothing is sent out."
-msgstr "Grasp convierte los documentos subidos en este despliegue: no se envía nada fuera."
-
 #: src/chat/failure.ts
 msgid "Grasp could not be reached. Try again."
 msgstr "No se pudo contactar con Grasp. Vuelve a intentarlo."
@@ -6762,10 +6758,6 @@ msgstr "Nombre de la cabecera"
 msgid "Hear both again"
 msgstr "Escuchar a los dos otra vez"
 
-#: src/brain/work-knowledge.tsx
-msgid "Heard from enough people"
-msgstr "Escuchado de suficientes personas"
-
 #: src/interview/words.ts
 msgid "Hello"
 msgstr "Hola"
@@ -6904,6 +6896,13 @@ msgstr "Con qué frecuencia"
 #: src/brain/work-knowledge.tsx
 msgid "How sure"
 msgstr "Qué tan seguro"
+
+#. Under a statement put together from the interviews
+#. Under a statement put together from the interviews
+#: src/brain/aggregate.tsx
+#: src/brain/brain.ts
+msgid "How the team works, as its people told it"
+msgstr "Cómo trabaja el equipo, tal como lo contó su gente"
 
 #: src/brain/work-knowledge.tsx
 msgid "How the work goes today"
@@ -12076,13 +12075,6 @@ msgctxt "what something known rests on: people said it"
 msgid "Said"
 msgstr "Dicho"
 
-#. Under a statement put together from the interviews
-#. Under a statement put together from the interviews
-#: src/brain/aggregate.tsx
-#: src/brain/brain.ts
-msgid "Said by five or more people"
-msgstr "Dicho por cinco o más personas"
-
 #: src/brain/work-knowledge.tsx
 msgid "Said in an interview"
 msgstr "Dicho en una entrevista"
@@ -15214,6 +15206,10 @@ msgstr "Hoy"
 msgid "Token"
 msgstr "Token"
 
+#: src/brain/work-knowledge.tsx
+msgid "Told by the team that does it"
+msgstr "Contado por el equipo que lo hace"
+
 #: src/onboarding/send-plan-form.tsx
 msgid "Tomorrow"
 msgstr "Mañana"
@@ -16437,6 +16433,14 @@ msgstr "Lo que pregunta esta decisión no se puede mostrar ahora."
 msgid "What this decision asks is withheld, so you can only reject it."
 msgstr "Lo que pregunta esta decisión está retenido, así que solo puedes rechazarla."
 
+#: src/chat/held-writes.tsx
+msgid "What this would send can't be shown right now, so you can only reject it for now. Try again in a moment."
+msgstr "Lo que esto enviaría no se puede mostrar ahora, así que por ahora solo puedes rechazarlo. Vuelve a intentarlo en un momento."
+
+#: src/chat/held-writes.tsx
+msgid "What this would send is withheld: the run that asked for it may no longer read what it read, so you can only reject it."
+msgstr "Lo que esto enviaría está retenido: la ejecución que lo pidió ya no puede leer lo que leyó, así que solo puedes rechazarlo."
+
 #: src/agents/agent-wakes.tsx
 msgid "What to ask it each time"
 msgstr "Qué preguntarle cada vez"
@@ -16479,8 +16483,16 @@ msgid "What was said is on the work it was about"
 msgstr "Lo que se dijo está en el trabajo del que trataba"
 
 #: src/dashboard/outcome-card.tsx
+msgid "What was sent can't be shown right now. Try again in a moment."
+msgstr "Lo que se envió no se puede mostrar ahora. Vuelve a intentarlo en un momento."
+
+#: src/dashboard/outcome-card.tsx
 msgid "What was sent is no longer kept."
 msgstr "Lo que se envió ya no se conserva."
+
+#: src/dashboard/outcome-card.tsx
+msgid "What was sent is withheld: the run that sent it may no longer read what it read."
+msgstr "Lo que se envió está retenido: la ejecución que lo envió ya no puede leer lo que leyó."
 
 #: src/interview/before.tsx
 msgid "What we do"
