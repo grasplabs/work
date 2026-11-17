@@ -193,8 +193,13 @@ const openMarks = (block: string): { open: Open[]; code: number } => {
   return { open, code };
 };
 
-/** A link being written at the end of the block: `[words`, `[words](` or `[words](addr`. */
-const openLink = (block: string): "words" | "address" | null => {
+/**
+ * A link being written at the end of the block: `[words`, `[words]`, `[words](` or `[words](addr`, or its
+ * title still coming, `[words](addr "title` (then what closes it: the title's mark and the bracket).
+ */
+const openLink = (
+  block: string
+): "words" | "bracket" | "address" | '"' | "'" | null => {
   const start = block.lastIndexOf("[");
   if (start === -1 || block[start - 1] === "\\" || block[start + 1] === "^") {
     return null;
@@ -210,7 +215,17 @@ const openLink = (block: string): "words" | "address" | null => {
   if (!rest.includes("]")) {
     return rest.includes("\n\n") ? null : "words";
   }
-  return /^\[[^\]]*\]\([^)\s]*$/u.test(rest) ? "address" : null;
+  // Its words whole, its address not begun: `[words]`.
+  if (/^\[[^\]]*\]$/u.test(rest)) {
+    return "bracket";
+  }
+  if (/^\[[^\]]*\]\([^)\s]*\s*$/u.test(rest)) {
+    return "address";
+  }
+  const title = /^\[[^\]]*\]\([^)\s]*\s+(?<mark>["'])(?:(?!\k<mark>).)*$/u.exec(
+    rest
+  )?.groups?.mark;
+  return title === '"' || title === "'" ? title : null;
 };
 
 /**
@@ -238,8 +253,13 @@ export const repair = (source: string): Repaired => {
   if (link === "words") {
     // No address yet: its words, as words. (`#` leads nowhere, so no link is drawn.)
     close += "](#)";
+  } else if (link === "bracket") {
+    close += "(#)";
   } else if (link === "address") {
     close += ")";
+  } else if (link !== null) {
+    // A title still coming: its own mark closes it, then the bracket.
+    close += `${link})`;
   }
   close += open
     .toReversed()

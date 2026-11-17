@@ -5,3 +5,5 @@ export type {
   MarkdownProps,
   MarkdownSoftBreaks,
 } from "./markdown";
+export { MarkdownLinks } from "./links";
+export type { MarkdownLinkDrawer } from "./links";

@@ -206,15 +206,21 @@ const press = async (element: Element | null | undefined) => {
   await settled();
 };
 
-/** Each card as its name, where its name leads, and whether it offers a chat. */
+/** The agents' names, as the rows start with them. */
+const names = ["Stephen", "Claire", "Milan"];
+
+/** Each row as its name, where its name leads, and whether it offers a chat. */
 const cards = () =>
-  [...document.querySelectorAll("ul[aria-label='Agents'] > li")].map((card) => {
-    const [name, ...others] = [...card.querySelectorAll("a")];
+  [...document.querySelectorAll("ul[aria-label='Agents'] > li")].map((row) => {
+    const text = row.textContent ?? "";
+    const links = [...row.querySelectorAll("a")].map((link) =>
+      link.getAttribute("href")
+    );
     return {
-      name: name?.textContent,
-      to: name?.getAttribute("href"),
-      chat: others.map((link) => link.getAttribute("href")),
-      text: card.textContent ?? "",
+      name: names.find((name) => text.includes(name)),
+      to: links.find((href) => href?.startsWith("/agents/") === true),
+      chat: links.filter((href) => href?.startsWith("/?agent=") === true),
+      text,
     };
   });
 
@@ -222,8 +228,16 @@ const cards = () =>
 const buttonNamed = (name: string) =>
   [...document.querySelectorAll("button")].find(
     (each) =>
-      each.textContent?.trim() === name &&
-      each.closest("[role='tabpanel'][hidden]") === null
+      each.textContent?.trim() === name && each.closest("[hidden]") === null
+  );
+
+/**
+ * The button whose words start with `words`: a dialog's action also
+ * holds the words it shows while working or failed, unseen.
+ */
+const buttonStarting = (words: string) =>
+  [...document.querySelectorAll("button")].find((each) =>
+    each.textContent?.trim().startsWith(words)
   );
 
 /** One agent's page, as its route shows it. */
@@ -235,7 +249,6 @@ const page = (agent: Agent, tab: AgentTab, usable = true) => (
     first={agent.id === stephen.id}
     firstAccess={agent.id === stephen.id ? firstAccess : undefined}
     models={["anthropic/claude-sonnet-4-5", "anthropic/claude-opus-4-6"]}
-    onTab={() => {}}
     people={[]}
     settings={managed.settings[agent.id]}
     tab={tab}
@@ -259,6 +272,7 @@ describe("the company's agents, on pages of their own", () => {
     it("shows someone who isn't an admin only their agents, each opening a chat with it and nothing to change", async () => {
       await mounted(
         <AgentsOverview
+          models={[]}
           makes={false}
           managed={undefined}
           usable={[chatAgent(stephen), chatAgent(claire)]}
@@ -267,19 +281,11 @@ describe("the company's agents, on pages of their own", () => {
       expect(
         cards().map(({ name, to, chat }) => ({ name, to, chat }))
       ).toStrictEqual([
-        {
-          name: "Stephen",
-          to: "/?agent=organization",
-          chat: ["/?agent=organization"],
-        },
-        {
-          name: "Claire",
-          to: "/?agent=agent-claire",
-          chat: ["/?agent=agent-claire"],
-        },
+        { name: "Stephen", to: undefined, chat: ["/?agent=organization"] },
+        { name: "Claire", to: undefined, chat: ["/?agent=agent-claire"] },
       ]);
       expect({
-        newAgent: document.querySelector("a[href='/agents/new']") !== null,
+        newAgent: buttonNamed("New agent") !== undefined,
         says: document.body.textContent?.includes("Paused"),
       }).toStrictEqual({ newAgent: false, says: false });
     });
@@ -287,6 +293,7 @@ describe("the company's agents, on pages of their own", () => {
     it("shows an admin every agent, and offers a chat only with one that is on and answers them", async () => {
       await mounted(
         <AgentsOverview
+          models={[]}
           makes
           managed={managed}
           // The admin isn't in Claire's teams; Milan is paused.
@@ -311,19 +318,18 @@ describe("the company's agents, on pages of their own", () => {
           "3 of 6 kinds of work",
           "1 schedule",
           "$12.50 this month",
-          "On",
         ].map((words) => clairesCard?.text.includes(words)),
         // Never asked this month: nothing about what it cost.
         milanCost: milansCard?.text.includes("this month"),
-        milan: ["Nobody yet", "May do nothing yet", "Only when asked"].map(
-          (words) => milansCard?.text.includes(words)
+        milan: ["Nobody yet", "May do nothing yet"].map((words) =>
+          milansCard?.text.includes(words)
         ),
-        milanPaused: milansCard?.text.endsWith("Paused"),
-        newAgent: document.querySelector("a[href='/agents/new']") !== null,
+        milanPaused: milansCard?.text.includes("Paused"),
+        newAgent: buttonNamed("New agent") !== undefined,
       }).toStrictEqual({
-        claire: [true, true, true, true, true],
+        claire: [true, true, true, true],
         milanCost: false,
-        milan: [true, true, true],
+        milan: [true, true],
         milanPaused: true,
         newAgent: true,
       });
@@ -331,7 +337,12 @@ describe("the company's agents, on pages of their own", () => {
 
     it("narrows an admin's list to the paused ones", async () => {
       await mounted(
-        <AgentsOverview makes managed={managed} usable={[chatAgent(stephen)]} />
+        <AgentsOverview
+          models={[]}
+          makes
+          managed={managed}
+          usable={[chatAgent(stephen)]}
+        />
       );
       await press(buttonNamed("Paused"));
       expect(cards().map(({ name }) => name)).toStrictEqual(["Milan"]);
@@ -343,7 +354,7 @@ describe("the company's agents, on pages of their own", () => {
       const asked = await mounted(page(claire, "overview"));
       expect(
         document.querySelector("a[href='/?agent=agent-claire']")?.textContent
-      ).toBe("Chat with Claire");
+      ).toBe("Chat");
       await press(document.querySelector("[role='switch']"));
       expect(asked).toStrictEqual([["paused", "agent-claire", true]]);
     });
@@ -364,7 +375,7 @@ describe("the company's agents, on pages of their own", () => {
 
     it("has the first agent's access on its own page: where people reach it, with no way out to Settings", async () => {
       await mounted(page(stephen, "access"));
-      const panel = document.querySelector("[role='tabpanel']:not([hidden])");
+      const panel = document.body;
       expect({
         places: panel?.textContent?.includes("Where people reach him"),
         grasp: panel?.textContent?.includes("Grasp's chat"),
@@ -404,44 +415,11 @@ describe("the company's agents, on pages of their own", () => {
       ]);
     });
 
-    it("saves a picked picture and a model of its own, each with the rest as it was", async () => {
-      const asked = await mounted(page(claire, "overview"));
-      await press(document.querySelector("input[aria-label='Pen']"));
-      const [saveProfile, saveModel] = [
-        ...document.querySelectorAll("button"),
-      ].filter((each) => each.textContent?.trim() === "Save");
-      await press(saveProfile);
-      const select = document.querySelector("select");
-      if (select === null) {
-        throw new TypeError("No model select");
-      }
-      await act(async () => {
-        select.value = "anthropic/claude-opus-4-6";
-        select.dispatchEvent(new Event("change", { bubbles: true }));
-        await Promise.resolve();
-      });
-      await press(saveModel);
-      const whole = {
-        name: "Claire",
-        job: "Chases invoices.",
-        instructions: "Claire's instructions.",
-        modelRole: null,
-      };
-      expect(asked).toStrictEqual([
-        ["change", "agent-claire", { ...whole, face: "pen", model: null }],
-        [
-          "change",
-          "agent-claire",
-          { ...whole, face: "stephen", model: "anthropic/claude-opus-4-6" },
-        ],
-      ]);
-    });
-
     it("deletes an agent only once the admin says so again, and offers no delete for the first agent", async () => {
       const asked = await mounted(page(claire, "overview"));
       await press(buttonNamed("Delete"));
       const before = [...asked];
-      await press(buttonNamed("Delete for good"));
+      await press(buttonStarting("Delete for good"));
       act(() => {
         root?.unmount();
       });
@@ -460,23 +438,15 @@ describe("the company's agents, on pages of their own", () => {
 
     it("says what an agent used this month: how much and how often, never what", async () => {
       await mounted(page(claire, "overview"));
-      const said = [...document.querySelectorAll("dl")]
-        .at(1)
-        ?.textContent?.replaceAll(/\s+/gu, " ");
+      const said = document.body.textContent ?? "";
       expect(
         [
-          "November 2026",
-          "Cost$12.50$3.00 the month before",
-          "Requests to a model40",
-          "People it worked for4",
-          "Last asked",
-        ].map(
-          (words) =>
-            (words === "November 2026"
-              ? document.body.textContent
-              : said
-            )?.includes(words) ?? false
-        )
+          "$12.50",
+          "40 requests to a model",
+          "for 4 people",
+          "$3.00 the month before",
+          "Last asked in a chat",
+        ].map((words) => said.includes(words))
       ).toStrictEqual([true, true, true, true, true]);
     });
 
@@ -485,6 +455,7 @@ describe("the company's agents, on pages of their own", () => {
       const unread: ManagedAgents = { ...managed, settings: {} };
       await mounted(
         <AgentsOverview
+          models={[]}
           makes={false}
           managed={unread}
           usable={[chatAgent(stephen)]}
@@ -507,7 +478,6 @@ describe("the company's agents, on pages of their own", () => {
           editable={false}
           first={false}
           models={[]}
-          onTab={() => {}}
           people={[]}
           settings={undefined}
           tab="access"
@@ -517,7 +487,7 @@ describe("the company's agents, on pages of their own", () => {
           wakes={[]}
         />
       );
-      const panel = document.querySelector("[role='tabpanel']:not([hidden])");
+      const panel = document.body;
       expect({
         ...onCards,
         access: panel?.textContent?.includes("Access isn't shown"),

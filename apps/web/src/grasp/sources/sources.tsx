@@ -3,7 +3,10 @@
 import { useId, useState } from "react";
 import type { ReactNode } from "react";
 
+import { MarkdownLinks } from "../markdown/links";
+import type { MarkdownLinkDrawer } from "../markdown/links";
 import { useWords, withGiven } from "../words/words";
+import { Citation } from "./citation";
 import { placeOf, SourcesContext, startList } from "./context";
 import type { Marks, SourcesValue } from "./context";
 import type { Source, SourcesLabels } from "./types";
@@ -26,6 +29,20 @@ export interface SourcesProps {
 }
 
 const noMarks: Marks = new Map();
+
+/**
+ * Markdown inside Sources draws `[n](cite:n)` as Citation n, and a citation's title as that
+ * mention's quote (`[n](cite:n "the span")`), so no page writes a renderLink for it.
+ */
+const citationOf: MarkdownLinkDrawer = (link) => {
+  const n =
+    link.scheme === "cite" && link.kind !== "image"
+      ? Number(link.href.slice("cite:".length))
+      : Number.NaN;
+  return Number.isInteger(n) && n > 0 ? (
+    <Citation n={n} quote={link.title} />
+  ) : undefined;
+};
 
 /** Holds one answer's sources for its markers and its list. Renders nothing of its own. */
 export const Sources = ({ items, children, labels, onOpen }: SourcesProps) => {
@@ -58,5 +75,9 @@ export const Sources = ({ items, children, labels, onOpen }: SourcesProps) => {
     labels: catalogue,
     onOpen,
   };
-  return <SourcesContext value={value}>{children}</SourcesContext>;
+  return (
+    <SourcesContext value={value}>
+      <MarkdownLinks value={citationOf}>{children}</MarkdownLinks>
+    </SourcesContext>
+  );
 };

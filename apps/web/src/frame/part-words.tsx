@@ -24,18 +24,22 @@ import {
 import { datePickerWords } from "../grasp/date-picker/words.ts";
 import { dateRangePickerWords } from "../grasp/date-range-picker/words.ts";
 import { dialogWords } from "../grasp/dialog/words.ts";
+import { dropdownMenuWords } from "../grasp/dropdown-menu/words.ts";
 import { emptyWords } from "../grasp/empty/words.ts";
 import { fileUploadWords, imageWellWords } from "../grasp/file-upload/words.ts";
 import { inputWords } from "../grasp/input/words.ts";
 import { languageSwitchWords } from "../grasp/language-switch/words.ts";
+import { linkWords } from "../grasp/link/words.ts";
 import { markdownWords } from "../grasp/markdown/words.ts";
 import { paginationWords } from "../grasp/pagination/words.ts";
+import { sectionCardWords } from "../grasp/section-card/words.ts";
 import { settingRowWords } from "../grasp/setting-row/words.ts";
 import { sheetWords } from "../grasp/sheet/words.ts";
 import { sidebarWords } from "../grasp/sidebar/words.ts";
 import { sourcesWords } from "../grasp/sources/words.ts";
 import { tagInputWords } from "../grasp/tag-input/words.ts";
 import { tagWords } from "../grasp/tag/words.ts";
+import { themeSwitchWords } from "../grasp/theme-switch/words.ts";
 import { dayWritten } from "../grasp/thread/rows.ts";
 import { threadWords } from "../grasp/thread/words.ts";
 import { toasterWords } from "../grasp/toast/words.ts";
@@ -74,18 +78,22 @@ export const englishPartWords: GraspWordsCatalog = {
   dataTable: dataTableWords,
   dataTableFilters: englishFilterWords,
   dialog: dialogWords,
+  dropdownMenu: dropdownMenuWords,
   empty: emptyWords,
   fileUpload: fileUploadWords,
   imageWell: imageWellWords,
   input: inputWords,
+  link: linkWords,
   markdown: markdownWords,
   pagination: paginationWords,
   rename: renameWords,
+  sectionCard: sectionCardWords,
   settingRow: settingRowWords,
   sheet: sheetWords,
   sidebar: sidebarWords,
   sources: sourcesWords,
   tag: tagWords,
+  themeSwitch: themeSwitchWords,
   thread: threadWords,
   toaster: toasterWords,
 };
@@ -412,6 +420,30 @@ export const usePartWords = (): GraspWordsCatalog => {
       invalid: t({ message: "not valid", context: "a tag typed" }),
     },
     dialog: { close: t`Close` },
+    dropdownMenu: {
+      working: t({ message: "Working", context: "a menu item's action" }),
+    },
+    link: { external: t`opens in a new tab` },
+    sectionCard: { info: t`More about this section` },
+    themeSwitch: {
+      label: t({ message: "Theme", context: "light, dark or as the device" }),
+      themes: t({ message: "Colours", context: "a choice of colour themes" }),
+      light: {
+        name: t({ message: "Light", context: "a theme's mode" }),
+        line: t`Always light`,
+      },
+      dark: {
+        name: t({ message: "Dark", context: "a theme's mode" }),
+        line: t`Always dark`,
+      },
+      system: {
+        name: t({ message: "System", context: "a theme's mode" }),
+        line: t`As your device`,
+      },
+      icon: (label, current, next) =>
+        t`${label}, ${current}. Switch to ${next}`,
+    },
+
     sheet: { close: t`Close` },
     pagination: {
       name: t`Pagination`,

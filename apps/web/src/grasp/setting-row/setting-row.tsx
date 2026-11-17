@@ -2,7 +2,7 @@
 
 /* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
-import { useId } from "react";
+import { useId, useState } from "react";
 import type { ReactNode } from "react";
 
 import { Alert } from "../alert";
@@ -15,6 +15,7 @@ import { Spinner } from "../spinner";
 import { grasp } from "../tokens/tokens.stylex";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../tooltip";
 import { useWords, withGiven } from "../words/words";
+import { RowProblem } from "./line-context";
 import { settingRowWords } from "./words";
 
 /** What a caller may style: where the rows sit and how wide they are. Never their look. */
@@ -248,6 +249,8 @@ interface LineProps {
   savedLabel: string;
   failedLabel: string;
   retryLabel: string;
+  /** A problem the control put here (a file it refused): in the danger tone, in the help's place. */
+  problem: string;
 }
 
 const Line = ({
@@ -259,6 +262,7 @@ const Line = ({
   savedLabel,
   failedLabel,
   retryLabel,
+  problem,
 }: LineProps) => {
   // Saving and saved are drawn beside the control (the row's mark); here they are only said, and
   // the help keeps its place, so nothing under the name changes.
@@ -284,6 +288,17 @@ const Line = ({
           </Button>
         </span>
       </>
+    );
+  }
+  if (problem !== "") {
+    return (
+      <span
+        id={id}
+        data-slot="setting-row-problem"
+        {...stylex.props(styles.failed)}
+      >
+        {problem}
+      </span>
     );
   }
   return help === undefined ? null : <span id={id}>{help}</span>;
@@ -320,8 +335,12 @@ export const SettingRow = ({
   });
   const id = useId();
   const helpId = useId();
+  // A problem the control reports (a file it refused), shown in the row's own line.
+  const [problem, setProblem] = useState("");
   const field: SettingField =
-    help === undefined ? { id } : { id, "aria-describedby": helpId };
+    help === undefined && problem === ""
+      ? { id }
+      : { id, "aria-describedby": helpId };
   return (
     <div
       data-slot="setting-row"
@@ -357,6 +376,7 @@ export const SettingRow = ({
               savedLabel={savedLabel}
               failedLabel={failedLabel}
               retryLabel={retryLabel}
+              problem={problem}
             />
           </p>
         </div>
@@ -379,7 +399,9 @@ export const SettingRow = ({
               <Icon icon={Tick} />
             </span>
           )}
-          {typeof children === "function" ? children(field) : children}
+          <RowProblem value={setProblem}>
+            {typeof children === "function" ? children(field) : children}
+          </RowProblem>
         </div>
         {error !== undefined && (
           <div {...stylex.props(styles.across)}>

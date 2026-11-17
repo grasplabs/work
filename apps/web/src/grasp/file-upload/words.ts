@@ -40,6 +40,12 @@ export const imageWellWords: ImageWellWords = {
       "file-too-large": `${name} is too large.`,
       "file-too-small": `${name} is empty.`,
     })[reason] ?? `${name}: ${reason}`,
+  refusedInRow: (reason) =>
+    ({
+      "file-type": "Not a kind of picture this takes.",
+      "file-too-large": "Too large.",
+      "file-too-small": "That file is empty.",
+    })[reason] ?? reason,
 };
 
 declare module "../words/words" {

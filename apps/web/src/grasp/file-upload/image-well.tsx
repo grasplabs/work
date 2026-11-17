@@ -34,6 +34,7 @@ import { Cross, Icon, Image as ImageMark, Retry, Upload } from "../icons";
 import { iconVars } from "../icons/icon.stylex";
 import type { LayoutStyle } from "../layout/layout";
 import { simply } from "../motion/simply.stylex";
+import { useRowProblem } from "../setting-row/line-context";
 import { Spinner } from "../spinner/spinner";
 import { grasp, media } from "../tokens/tokens.stylex";
 import { Tooltip, TooltipContent } from "../tooltip";
@@ -64,6 +65,11 @@ export interface ImageWellWords {
   how: string;
   /** Why a file was refused, from UI SDK's reason. */
   refused: (name: string, reason: string) => string;
+  /**
+   * Why, in a Setting row's line under its name: one short line, without the file's name (the
+   * person has just picked it), so the row keeps its height. Without it, `refused`.
+   */
+  refusedInRow?: (reason: string) => string;
 }
 
 /** Every prop an ImageWell takes. */
@@ -353,7 +359,9 @@ const styles = stylex.create({
     maxWidth: "20rem",
     fontSize: grasp.textXs,
     lineHeight: grasp.textXsLine,
-    color: grasp.dangerText,
+    // The danger colour for words on the page's own ground (as a field's error); `dangerText` is
+    // the white for words on a red fill, and was invisible here.
+    color: grasp.danger,
   },
 });
 
@@ -667,7 +675,17 @@ export const ImageWell = ({
     picture,
     words
   );
-  const [refusal, setRefusal] = useState("");
+  const [refusalHere, setRefusalHere] = useState("");
+  // In a Setting row the refusal goes in the row's line under its name, where a failed save's
+  // sentence goes, so the row keeps its height; standing alone it is drawn under the well.
+  const toRow = useRowProblem();
+  const setRefusal = (line: string) => {
+    if (toRow === null) {
+      setRefusalHere(line);
+    } else {
+      toRow(line);
+    }
+  };
   // Until the page runs its script, the browser's own file input does the work.
   const [mounted, setMounted] = useState(false);
   // oxlint-disable-next-line react/hook-use-state -- a controller made once, never replaced
@@ -697,13 +715,24 @@ export const ImageWell = ({
     if (first === undefined) {
       return;
     }
-    const line = words.refused(first.file.name, first.reasons[0] ?? "");
-    setRefusal(line);
-    setSaid(line);
+    const reason = first.reasons[0] ?? "";
+    // The row's line is a live region of its own and says it there; once is enough.
+    if (toRow === null) {
+      const line = words.refused(first.file.name, reason);
+      setRefusal(line);
+      setSaid(line);
+    } else {
+      setRefusal(
+        words.refusedInRow?.(reason) ?? words.refused(first.file.name, reason)
+      );
+    }
   };
   const label = ariaLabel ?? (shown === null ? words.add : words.change);
   const tipWords = tipFor(status, words, hint);
-  const describedByAll = joined([describedBy, refusal ? refusalId : undefined]);
+  const describedByAll = joined([
+    describedBy,
+    refusalHere ? refusalId : undefined,
+  ]);
 
   return (
     <div
@@ -764,13 +793,13 @@ export const ImageWell = ({
           ) : null}
         </FileInputDropzone>
       </FileInput>
-      {refusal ? (
+      {refusalHere ? (
         <p
           id={refusalId}
           data-slot="image-well-refusal"
           {...stylex.props(styles.refusal)}
         >
-          {refusal}
+          {refusalHere}
         </p>
       ) : null}
       <span

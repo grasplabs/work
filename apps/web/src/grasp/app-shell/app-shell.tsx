@@ -31,6 +31,7 @@ import { cardLine } from "./card-line.stylex";
 import type { PanelPlacement } from "./float-window";
 import type { PanelPosition } from "./floating";
 import { FOCUSABLE, placeOf } from "./focus-place";
+import { escapeSetsAside } from "./focus-return";
 import { Panels, ShellCoverContext } from "./panels";
 import type { Cover } from "./panels";
 import { appShellWords } from "./words";
@@ -1766,6 +1767,15 @@ export const AppShell = ({
   const paneled = hasPanels(panels, panelsOpen);
   const place = usePanelsPlace({ paneled, covered, crowded, narrow });
   const { aside, setAside, over, guessing, phone, inertCard, under } = place;
+  // On a phone the panels are a sheet over the page: Escape sets them aside, focus on their button.
+  useEffect(() => {
+    const element = shell.current;
+    return phone && !aside && element !== null
+      ? escapeSetsAside(element, () => {
+          setAside(true);
+        })
+      : undefined;
+  }, [phone, aside, setAside]);
 
   const card = (
     <ShellCard

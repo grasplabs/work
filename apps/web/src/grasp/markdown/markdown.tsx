@@ -44,6 +44,8 @@ import {
 import { useWords, withGiven } from "../words/words";
 import { NOTHING, readBlocks } from "./blocks";
 import type { Placed } from "./blocks";
+import { MarkdownLinks } from "./links";
+import type { MarkdownLinkDrawer } from "./links";
 import { parse, safeHref, schemeOf } from "./parse";
 import { openFence, repair, tidy } from "./repair";
 import { markdownStyles as styles } from "./styles";
@@ -165,6 +167,12 @@ interface Context {
   definitions: Map<string, { url: string; title: string | undefined }>;
   /** The host's own drawing of a link, when it has one. */
   renderLink: MarkdownProps["renderLink"];
+  /** The links the part around Markdown draws (MarkdownLinks: Sources' citations). */
+  around: MarkdownLinkDrawer | null;
+  /** While written: how much of the source is the stream's own (repair.ts closed the rest). */
+  kept: number;
+  /** Where the block being drawn starts in the source: its nodes' places count from there. */
+  base: number;
   footnotes: Map<string, number>;
   prefix: string;
   /** Still being written, or its last words still arriving. */
@@ -380,18 +388,29 @@ const hosted = (
   context: Context,
   link: Omit<MarkdownLink, "scheme" | "title"> & { title: string | undefined }
 ): MarkdownDrawn | undefined => {
+  if (context.inLink) {
+    return undefined;
+  }
   const { title, ...rest } = link;
   const asked = {
     ...rest,
     scheme: schemeOf(link.href),
     ...(title === undefined ? {} : { title }),
   };
-  return context.renderLink === undefined || context.inLink
-    ? undefined
-    : context.renderLink(asked);
+  // The page's own first, then the part around Markdown (Sources' citations).
+  const drawn = context.renderLink?.(asked);
+  return drawn === undefined ? (context.around?.(asked) ?? undefined) : drawn;
 };
 
 const LinkInline = ({ node, context }: { node: Linked; context: Context }) => {
+  // A link still being written (its end closed by repair.ts) is held back, words and all, until its
+  // address has arrived: a citation's number never shows as words first, then turns into its mark.
+  if (
+    context.streaming &&
+    context.base + (node.position?.end.offset ?? 0) > context.kept
+  ) {
+    return null;
+  }
   const { url, title } = targetOf(node, context);
   const words = (
     <Phrasing nodes={node.children} context={{ ...context, inLink: true }} />
@@ -857,9 +876,15 @@ const useAnswer = (
   }
   // Still being written until the last word is out, a moment after the stream has ended.
   if (!streaming && paced.done) {
-    return { shown: cut || streamed ? tidy(source) : source, live: false };
+    return {
+      shown: cut || streamed ? tidy(source) : source,
+      live: false,
+      kept: Number.POSITIVE_INFINITY,
+    };
   }
-  return { shown: repair(paced.text).text, live: true };
+  // `kept`: how much of it is the stream's own; past it, repair.ts closed what was still open.
+  const { text, kept } = repair(paced.text);
+  return { shown: text, live: true, kept };
 };
 
 /**
@@ -976,7 +1001,8 @@ export const Markdown = ({
     table: tableLabel,
   });
   const prefix = useId().replaceAll(":", "");
-  const { shown, live } = useAnswer(source, streaming, cut, { pace });
+  const { shown, live, kept } = useAnswer(source, streaming, cut, { pace });
+  const around = useContext(MarkdownLinks);
   const { setRoot, written } = useWrittenHere(live);
   const all = useBlocks(shown, live);
   const { definitions, notes } = gather(all.map(({ node }) => node));
@@ -994,6 +1020,9 @@ export const Markdown = ({
   const context: Context = {
     definitions,
     renderLink,
+    around,
+    kept,
+    base: 0,
     footnotes,
     prefix,
     streaming: live,
@@ -1030,13 +1059,16 @@ export const Markdown = ({
         size === "xs" && styles.xsmall
       )}
     >
-      {placed.map(({ node }, index) => (
+      {placed.map(({ node, base }, index) => (
         // A block keeps its place by its order, so one that is already shown never fades in again.
         <Fragment key={index}>
           <div
             {...stylex.props(live && framed.has(node.type) && styles.arrives)}
           >
-            <Block node={node} context={context} />
+            <Block
+              node={node}
+              context={base === 0 ? context : { ...context, base }}
+            />
           </div>
         </Fragment>
       ))}

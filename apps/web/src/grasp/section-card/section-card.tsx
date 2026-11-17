@@ -24,10 +24,14 @@ import type { ButtonHTMLAttributes, ReactNode, Ref } from "react";
 import { Card } from "../card";
 import type { CardLayoutStyle } from "../card";
 import { focus } from "../focus/focus";
+import { Info } from "../icons";
 import { SectionHeader } from "../section-header";
 import { Separator } from "../separator";
 import { tableVars } from "../table/table.stylex";
 import { grasp } from "../tokens/tokens.stylex";
+import { Tooltip, TooltipContent, TooltipTrigger } from "../tooltip";
+import { useWords, withGiven } from "../words/words";
+import { sectionCardWords } from "./words";
 
 /**
  * The title row as a drag handle on a board of widgets. The library draws and names it; the drag
@@ -70,6 +74,13 @@ interface SectionCardOwn {
   description?: ReactNode;
   /** Beside the title: a badge that says it is new, a count. */
   aside?: ReactNode;
+  /**
+   * More about the part behind an info mark beside its title, as a Setting row's `info`: what it
+   * shows, who can see it, why. Said on hover and focus; it never makes the header taller.
+   */
+  info?: string;
+  /** The info mark's name for a screen reader. @default "More about this section" */
+  infoLabel?: string;
   /** At the end of the header's row: the part's own buttons. */
   actions?: ReactNode;
   /** What the part holds. */
@@ -130,6 +141,15 @@ const styles = stylex.create({
     padding: grasp.space5,
     containerType: "inline-size",
     containerName: "section-card-head",
+  },
+  // The info mark beside the title, in a box no taller than the title's line: its button may be
+  // taller, the header never is. Over a board's drag handle, as the actions are.
+  info: {
+    position: "relative",
+    zIndex: 1,
+    display: "inline-flex",
+    alignItems: "center",
+    height: grasp.textSmLine,
   },
   headFill: { flexShrink: 0 },
   headCompact: { paddingBlock: grasp.space3, paddingInline: grasp.space4 },
@@ -313,11 +333,44 @@ const Head = ({
   </div>
 );
 
+/** The info mark beside the title, and whatever else stands beside it. */
+const Beside = ({
+  info,
+  infoLabel,
+  aside,
+}: {
+  info: string;
+  infoLabel: string | undefined;
+  aside: ReactNode;
+}) => {
+  const { info: label } = withGiven(useWords("sectionCard", sectionCardWords), {
+    info: infoLabel,
+  });
+  return (
+    <>
+      <span {...stylex.props(styles.info)}>
+        <Tooltip>
+          <TooltipTrigger
+            icon={Info}
+            aria-label={label}
+            variant="ghost"
+            size="xs"
+          />
+          <TooltipContent>{info}</TooltipContent>
+        </Tooltip>
+      </span>
+      {aside}
+    </>
+  );
+};
+
 export const SectionCard = ({
   title,
   "aria-label": ariaLabel,
   description,
   aside,
+  info,
+  infoLabel,
   actions,
   children,
   footer,
@@ -362,7 +415,13 @@ export const SectionCard = ({
             id={id}
             title={title}
             description={description}
-            aside={aside}
+            aside={
+              info === undefined ? (
+                aside
+              ) : (
+                <Beside info={info} infoLabel={infoLabel} aside={aside} />
+              )
+            }
             actions={actions}
             level={level}
             loading={loading}

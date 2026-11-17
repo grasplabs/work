@@ -76,6 +76,7 @@ const AgentsPage = () => {
       <AgentsOverview
         makes={isMemberAdmin(identity)}
         managed={page.data.managed}
+        models={page.data.models}
         usable={page.data.usable}
       />
     </>
@@ -87,11 +88,16 @@ export const Route = createFileRoute("/_shell/agents/")({
   component: AgentsPage,
   loader: async ({ context: { core, identity } }) =>
     await loadFromCore(core, async (session) => {
-      const [usable, managed] = await Promise.all([
+      const [usable, managed, models] = await Promise.all([
         session.chats.agents(),
         // Admins, Grasp's staff among them, who read and change nothing.
         isAdmin(identity.role) ? readManaged(session) : undefined,
+        // The models a new agent can be given, for those who make one:
+        // none when core won't say, and it then asks for none.
+        isMemberAdmin(identity)
+          ? session.chats.models().catch((): string[] => [])
+          : [],
       ]);
-      return { usable, managed };
+      return { usable, managed, models };
     }),
 });

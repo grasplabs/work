@@ -7,6 +7,7 @@ import { useLingui } from "@lingui/react/macro";
 import { Link, useLocation, useMatchRoute } from "@tanstack/react-router";
 import { useState } from "react";
 
+import { useAgentSection } from "../../agents/agent-section.tsx";
 import { chatsKey, useChatsWindow } from "../../chat/chat-switcher.tsx";
 import { useRecentChats } from "../../chat/sidebar-chats.tsx";
 import type { CoreConnection } from "../../core-connection.ts";
@@ -384,7 +385,9 @@ export const useGraspSidebar = ({
   const waiting = waitingItems?.length;
   const groups = useGroups(core, identity, tab, waitingItems);
   const profile = useProfile(core, identity);
-  const section = useSettingsSection(identity);
+  const settingsSection = useSettingsSection(identity);
+  const agentSection = useAgentSection();
+  const section = settingsSection ?? agentSection;
   const searching = identity.onboardingOnly !== true;
   return {
     foldLabel: t`Show or hide the sidebar`,
