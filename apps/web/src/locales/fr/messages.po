@@ -90,6 +90,10 @@ msgstr "{about} a {open, plural, one {# décision en attente} other {# décision
 msgid "{account} on {provider}"
 msgstr "{account} sur {provider}"
 
+#: src/brain/learned-section.tsx
+msgid "{addedCount, plural, one {This version added # memory.} other {This version added # memories.}}"
+msgstr "{addedCount, plural, one {Cette version a ajouté # souvenir.} other {Cette version a ajouté # souvenirs.}}"
+
 #: src/brain/brain.ts
 msgid "{ai, select, tool {An AI tool, as the team said it} builtIn {AI built in, as the team said it} other {No AI, as the team said it}}"
 msgstr "{ai, select, tool {Un outil d’IA, selon l’équipe} builtIn {IA intégrée, selon l’équipe} other {Pas d’IA, selon l’équipe}}"
@@ -241,6 +245,10 @@ msgstr "{connection}, {resource} ({tool})"
 #: src/projects/project-counts.tsx
 msgid "{connections, plural, one {# connection} other {# connections}}"
 msgstr "{connections, plural, one {# connexion} other {# connexions}}"
+
+#: src/brain/learned-section.tsx
+msgid "{contestedCount, plural, one {Sources disagree on # memory this version added.} other {Sources disagree on # memories this version added.}}"
+msgstr "{contestedCount, plural, one {Les sources divergent sur # souvenir que cette version a ajouté.} other {Les sources divergent sur # souvenirs que cette version a ajoutés.}}"
 
 #: src/brain/brain-atlas.ts
 msgid "{conversations, plural, one {# conversation} other {# conversations}}"
@@ -507,6 +515,10 @@ msgstr "{each, plural, one {# heure par semaine} other {# heures par semaine}}"
 #: src/dashboard/spend-widget.tsx
 msgid "{each} a run"
 msgstr "{each} par exécution"
+
+#: src/brain/learned-section.tsx
+msgid "{endedCount, plural, one {This version replaced # memory from an earlier version.} other {This version replaced # memories from earlier versions.}}"
+msgstr "{endedCount, plural, one {Cette version a remplacé # souvenir d’une version précédente.} other {Cette version a remplacé # souvenirs de versions précédentes.}}"
 
 #: src/workflows/trigger-description.ts
 msgid "{event}, at {account}"
@@ -2477,6 +2489,10 @@ msgstr "Autre plateforme"
 msgctxt "how search found a memory"
 msgid "Another side of a disputed fact"
 msgstr "Une autre version d’un fait contesté"
+
+#: src/brain/learned-section.tsx
+msgid "Another source says: {said}"
+msgstr "Une autre source dit : {said}"
 
 #: src/activity/pending.tsx
 msgid "Another version of this App was published since this list was read. The list now shows it: review that version, then approve again."
@@ -8412,6 +8428,10 @@ msgstr "Davantage de personnes seront interrogées à ce sujet lors des prochain
 msgid "More sources say other things: open it to see them all."
 msgstr "D’autres sources disent autre chose : ouvrez-le pour toutes les voir."
 
+#: src/brain/learned-section.tsx
+msgid "More sources say something else."
+msgstr "D’autres sources disent autre chose."
+
 #: src/brain/brain-atlas.ts
 msgid "More teams"
 msgstr "Autres équipes"
@@ -8597,6 +8617,11 @@ msgstr "Jamais"
 #: src/workflows/item-test.tsx
 msgid "Never started: {refusal}"
 msgstr "Jamais démarré : {refusal}"
+
+#: src/brain/learned-section.tsx
+msgctxt "an entity the Brain first saw in this version"
+msgid "New"
+msgstr "Nouveau"
 
 #: src/workflows/requests/request-parts.tsx
 msgctxt "asked for the first time this span"
@@ -12574,6 +12599,7 @@ msgstr "Afficher sa définition"
 msgid "Show less"
 msgstr "Afficher moins"
 
+#: src/brain/learned-section.tsx
 #: src/brain/memories-page.tsx
 #: src/brain/sources-page.tsx
 #: src/onboarding/connect-steps.tsx
@@ -13887,6 +13913,10 @@ msgstr "Brain"
 #: src/routes/_shell.settings.brain.tsx
 msgid "The brain has no teams to group yet."
 msgstr "Le Brain n’a pas encore d’équipes à regrouper."
+
+#: src/brain/learned-section.tsx
+msgid "The Brain hasn't learned anything from this version."
+msgstr "Le Brain n’a encore rien appris de cette version."
 
 #: src/brain/own-export.tsx
 msgid "The Brain keeps nothing that only you may read yet, so your export holds nothing."
@@ -16118,6 +16148,10 @@ msgstr "Ce que le cerveau en a gardé"
 #: src/settings/erasures.tsx
 msgid "What the Brain learned about them under the address they signed in with, and what they said, where others may read it"
 msgstr "Ce que le Brain a appris sur cette personne sous l’adresse avec laquelle elle se connectait et ce qu’elle a dit, là où d’autres peuvent le lire"
+
+#: src/brain/learned-section.tsx
+msgid "What the Brain learned from this version"
+msgstr "Ce que le Brain a appris de cette version"
 
 #: src/brain/memories-page.tsx
 msgid "What the Brain learns from sources and from what you tell it shows here."

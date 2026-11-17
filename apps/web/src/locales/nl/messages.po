@@ -90,6 +90,10 @@ msgstr "{about} heeft {open, plural, one {# open beslissing} other {# open besli
 msgid "{account} on {provider}"
 msgstr "{account} bij {provider}"
 
+#: src/brain/learned-section.tsx
+msgid "{addedCount, plural, one {This version added # memory.} other {This version added # memories.}}"
+msgstr "{addedCount, plural, one {Deze versie voegde # herinnering toe.} other {Deze versie voegde # herinneringen toe.}}"
+
 #: src/brain/brain.ts
 msgid "{ai, select, tool {An AI tool, as the team said it} builtIn {AI built in, as the team said it} other {No AI, as the team said it}}"
 msgstr "{ai, select, tool {Een AI-tool, volgens het team} builtIn {AI ingebouwd, volgens het team} other {Geen AI, volgens het team}}"
@@ -241,6 +245,10 @@ msgstr "{connection}, {resource} ({tool})"
 #: src/projects/project-counts.tsx
 msgid "{connections, plural, one {# connection} other {# connections}}"
 msgstr "{connections, plural, one {# verbinding} other {# verbindingen}}"
+
+#: src/brain/learned-section.tsx
+msgid "{contestedCount, plural, one {Sources disagree on # memory this version added.} other {Sources disagree on # memories this version added.}}"
+msgstr "{contestedCount, plural, one {Bronnen spreken # herinnering tegen die deze versie toevoegde.} other {Bronnen spreken # herinneringen tegen die deze versie toevoegde.}}"
 
 #: src/brain/brain-atlas.ts
 msgid "{conversations, plural, one {# conversation} other {# conversations}}"
@@ -507,6 +515,10 @@ msgstr "{each, plural, one {# uur per week} other {# uur per week}}"
 #: src/dashboard/spend-widget.tsx
 msgid "{each} a run"
 msgstr "{each} per run"
+
+#: src/brain/learned-section.tsx
+msgid "{endedCount, plural, one {This version replaced # memory from an earlier version.} other {This version replaced # memories from earlier versions.}}"
+msgstr "{endedCount, plural, one {Deze versie verving # herinnering uit een eerdere versie.} other {Deze versie verving # herinneringen uit eerdere versies.}}"
 
 #: src/workflows/trigger-description.ts
 msgid "{event}, at {account}"
@@ -2477,6 +2489,10 @@ msgstr "Ander platform"
 msgctxt "how search found a memory"
 msgid "Another side of a disputed fact"
 msgstr "Een andere kant van een betwist feit"
+
+#: src/brain/learned-section.tsx
+msgid "Another source says: {said}"
+msgstr "Een andere bron zegt: {said}"
 
 #: src/activity/pending.tsx
 msgid "Another version of this App was published since this list was read. The list now shows it: review that version, then approve again."
@@ -8412,6 +8428,10 @@ msgstr "In de volgende interviews worden meer mensen erover gevraagd."
 msgid "More sources say other things: open it to see them all."
 msgstr "Meer bronnen zeggen iets anders: open het om ze allemaal te zien."
 
+#: src/brain/learned-section.tsx
+msgid "More sources say something else."
+msgstr "Meer bronnen zeggen iets anders."
+
 #: src/brain/brain-atlas.ts
 msgid "More teams"
 msgstr "Meer teams"
@@ -8597,6 +8617,11 @@ msgstr "Nooit"
 #: src/workflows/item-test.tsx
 msgid "Never started: {refusal}"
 msgstr "Nooit gestart: {refusal}"
+
+#: src/brain/learned-section.tsx
+msgctxt "an entity the Brain first saw in this version"
+msgid "New"
+msgstr "Nieuw"
 
 #: src/workflows/requests/request-parts.tsx
 msgctxt "asked for the first time this span"
@@ -12574,6 +12599,7 @@ msgstr "Zijn definitie tonen"
 msgid "Show less"
 msgstr "Minder tonen"
 
+#: src/brain/learned-section.tsx
 #: src/brain/memories-page.tsx
 #: src/brain/sources-page.tsx
 #: src/onboarding/connect-steps.tsx
@@ -13887,6 +13913,10 @@ msgstr "Brain"
 #: src/routes/_shell.settings.brain.tsx
 msgid "The brain has no teams to group yet."
 msgstr "Het Brain heeft nog geen teams om te groeperen."
+
+#: src/brain/learned-section.tsx
+msgid "The Brain hasn't learned anything from this version."
+msgstr "Het Brain heeft nog niets uit deze versie geleerd."
 
 #: src/brain/own-export.tsx
 msgid "The Brain keeps nothing that only you may read yet, so your export holds nothing."
@@ -16118,6 +16148,10 @@ msgstr "Wat het brein ervan bewaarde"
 #: src/settings/erasures.tsx
 msgid "What the Brain learned about them under the address they signed in with, and what they said, where others may read it"
 msgstr "Wat het Brain onder het adres waarmee zij zich aanmeldden over hen leerde en wat zij zeiden, waar anderen het mogen lezen"
+
+#: src/brain/learned-section.tsx
+msgid "What the Brain learned from this version"
+msgstr "Wat het Brain uit deze versie leerde"
 
 #: src/brain/memories-page.tsx
 msgid "What the Brain learns from sources and from what you tell it shows here."

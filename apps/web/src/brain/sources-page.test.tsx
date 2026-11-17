@@ -1,6 +1,11 @@
 // @vitest-environment happy-dom
 import type { Connection } from "@grasp-os/shared/brain";
 import type {
+  BrainMemoryShown,
+  BrainStoreCursor,
+} from "@grasp-os/shared/brain-memories";
+import type {
+  BrainLearned,
   BrainSearchPack,
   BrainSourceListed,
   BrainSourceRef,
@@ -17,6 +22,7 @@ import {
   createRouter,
   Outlet,
   RouterProvider,
+  useLocation,
 } from "@tanstack/react-router";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
@@ -185,10 +191,22 @@ interface Faked {
   deleteAnswerLost?: boolean;
   /** Refuses the first new version with this, as a lost answer would. */
   firstVersionRefused?: string;
+  /**
+   * What the Brain learned from each version (`<id>@<version>`, and
+   * `#<cursor's memory>` for a page after the first), as core answers:
+   * none (null) for any other; a string is a refusal.
+   */
+  learned?: Record<string, BrainLearned | null | string>;
 }
 
 /** A question nothing the person may read holds: its pack is empty. */
 const unmatched = "zeppelin";
+
+/** The Memories page, as far as a link to it goes: where it was asked to open. */
+const MemoriesStandIn = () => {
+  const { searchStr } = useLocation();
+  return <p>Memories page {searchStr}</p>;
+};
 
 /** Shows the page on a faked core, answering as `faked` says. */
 const shown = async (
@@ -207,6 +225,7 @@ const shown = async (
     handbookDeletes = "erase",
     deleteAnswerLost = false,
     firstVersionRefused,
+    learned = {},
   }: Faked = {}
 ) => {
   const calls: string[] = [];
@@ -260,6 +279,20 @@ const shown = async (
       return text === undefined
         ? null
         : { source, version, addedAt: "2026-11-10T09:00:00.000Z", text };
+    },
+    learned: async (
+      source: BrainSourceRef,
+      version: number,
+      next?: BrainStoreCursor | null
+    ) => {
+      await Promise.resolve();
+      const after =
+        next === undefined || next === null ? "" : `#${String(next.memory)}`;
+      const answer = learned[`${source.id}@${version}${after}`] ?? null;
+      if (typeof answer === "string") {
+        throw new TypeError(answer);
+      }
+      return answer;
     },
     search: async (question: string) => {
       calls.push(`search ${question}`);
@@ -381,8 +414,13 @@ const shown = async (
       <SourcesPage admin={admin} connections={connections} teams={teams} />
     ),
   });
+  const memoriesPage = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/brain/memories",
+    component: MemoriesStandIn,
+  });
   const router = createRouter({
-    routeTree: rootRoute.addChildren([page]),
+    routeTree: rootRoute.addChildren([page, memoriesPage]),
     history: createMemoryHistory(),
     context: { core },
   });
@@ -493,6 +531,81 @@ const section = (heading: string): string =>
       document.querySelector(`[id="${each.getAttribute("aria-labelledby")}"]`)
         ?.textContent === heading
   )?.textContent ?? "";
+
+/** A memory as core shows one, about entity `about`. */
+const memoryShown = (
+  id: string,
+  statement: string,
+  about: string,
+  contested = false
+): BrainMemoryShown => ({
+  store: "shared",
+  id,
+  about,
+  attribute: null,
+  object: null,
+  value: null,
+  type: "fact",
+  statement,
+  quote: null,
+  source: { source: handbook, version: 2 },
+  yours: false,
+  learnedAt: "2026-11-10T09:00:00.000Z",
+  endedAt: null,
+  confirmed: null,
+  validFrom: null,
+  validUntil: null,
+  contested,
+});
+
+/**
+ * What the handbook's second version taught the Brain: a rule it added,
+ * which another source disagrees with, about an entity first seen there;
+ * and the first version's rule it replaced, about one seen before.
+ */
+const handbookLearned: BrainLearned = {
+  memories: [
+    {
+      part: "added",
+      memory: memoryShown("m-a", "Invoices are paid on Fridays", "e-1", true),
+      rivals: [memoryShown("m-r", "Invoices are paid on Mondays", "e-1")],
+      moreRivals: true,
+    },
+    {
+      part: "ended",
+      memory: memoryShown("m-b", "Invoices are paid monthly", "e-2"),
+      rivals: [],
+      moreRivals: false,
+    },
+  ],
+  entities: [
+    {
+      entity: { store: "shared", id: "e-1" },
+      kind: "routine",
+      name: "Paying invoices",
+      unreadable: false,
+      borrowed: false,
+      firstSeen: true,
+    },
+    {
+      entity: { store: "shared", id: "e-2" },
+      kind: "term",
+      name: "Invoice",
+      unreadable: false,
+      borrowed: false,
+      firstSeen: false,
+    },
+  ],
+  next: null,
+};
+
+/** The text of the section of what the Brain learned, or none. */
+const learnedSection = (): string | undefined =>
+  [...document.querySelectorAll("section[aria-labelledby]")].find(
+    (each) =>
+      document.querySelector(`[id="${each.getAttribute("aria-labelledby")}"]`)
+        ?.textContent === "What the Brain learned from this version"
+  )?.textContent;
 
 describe(SourcesPage, () => {
   beforeEach(() => {
@@ -1253,5 +1366,114 @@ describe(SourcesPage, () => {
     expect(
       calls.slice(before).filter((call) => call.startsWith("sharedUploads"))
     ).toStrictEqual(["sharedUploads"]);
+  });
+
+  it("shows what the Brain learned from the version shown: what it added, replaced and what sources disagree on", async () => {
+    await shown([], { learned: { "u-1@2": handbookLearned } });
+    await press("Handbook");
+    const learned = learnedSection() ?? "";
+
+    expect(
+      [
+        "This version added 1 memory.",
+        "Invoices are paid on Fridays",
+        "Paying invoices",
+        "New",
+        "This version replaced 1 memory from an earlier version.",
+        "Invoices are paid monthly",
+        "Invoice",
+        "Sources disagree on 1 memory this version added.",
+        "Another source says: Invoices are paid on Mondays",
+        "More sources say something else.",
+      ].filter((text) => !learned.includes(text))
+    ).toStrictEqual([]);
+  });
+
+  it("opens the entity a memory of the version is about on the Memories page", async () => {
+    await shown([], { learned: { "u-1@2": handbookLearned } });
+    await press("Handbook");
+    const link = [...document.querySelectorAll("a")].find(
+      (each) => each.textContent === "Invoice"
+    );
+    await act(async () => {
+      link?.click();
+      await Promise.resolve();
+    });
+    await settle();
+
+    expect(document.body.textContent).toContain(
+      "Memories page ?store=shared&entity=e-2&kind=term"
+    );
+  });
+
+  it("says when the Brain learned nothing from a version, shows nothing for one core answers none of, and says why core refused", async () => {
+    await shown([], {
+      learned: {
+        "u-1@2": { memories: [], entities: [], next: null },
+        "c-1@1": "The Brain is busy.",
+      },
+    });
+    await press("Handbook");
+    const nothing = learnedSection();
+    await press("Version 1");
+    const none = learnedSection();
+    await press("Board minutes");
+    const refused = learnedSection();
+
+    expect({ nothing, none, refused }).toStrictEqual({
+      nothing:
+        "What the Brain learned from this versionThe Brain hasn't learned anything from this version.",
+      none: undefined,
+      refused: "What the Brain learned from this versionThe Brain is busy.",
+    });
+  });
+
+  it("reads what the Brain learned a page at a time, counting each page in", async () => {
+    const [added] = handbookLearned.memories;
+    await shown([], {
+      learned: {
+        "u-1@2": {
+          ...handbookLearned,
+          memories: added === undefined ? [] : [added],
+          next: { at: "2026-11-10T09:00:00.000Z", memory: "m-a" },
+        },
+        "u-1@2#m-a": {
+          ...handbookLearned,
+          memories: [
+            {
+              part: "added",
+              memory: memoryShown("m-c", "Receipts go to Finance", "e-2"),
+              rivals: [],
+              moreRivals: false,
+            },
+          ],
+        },
+      },
+    });
+    await press("Handbook");
+    const first = learnedSection() ?? "";
+    const more = [
+      ...document.querySelectorAll<HTMLButtonElement>("section button"),
+    ].find(
+      (each) =>
+        each.textContent === "Show more" &&
+        each.closest("[data-slot=card]") !== null
+    );
+    await act(async () => {
+      more?.click();
+      await Promise.resolve();
+    });
+    await settle();
+    const both = learnedSection() ?? "";
+
+    expect({
+      first: first.includes("This version added 1 memory."),
+      both: [
+        "This version added 2 memories.",
+        "Invoices are paid on Fridays",
+        "Receipts go to Finance",
+      ].every((text) => both.includes(text)),
+      more: both.includes("Show more"),
+    }).toStrictEqual({ first: true, both: true, more: false });
   });
 });
