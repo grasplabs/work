@@ -1,32 +1,27 @@
 import type { ViewedApp } from "@grasp-os/shared/apps";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { Button } from "@grasp-os/ui/components/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@grasp-os/ui/components/dropdown-menu";
-import {
-  Empty,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle,
-} from "@grasp-os/ui/components/empty";
-import { Trans, useLingui } from "@lingui/react/macro";
-import { Link, useRouter } from "@tanstack/react-router";
-import {
-  ArchiveIcon,
-  LayoutGridIcon,
-  Maximize2Icon,
-  MoreHorizontalIcon,
-  SettingsIcon,
-} from "lucide-react";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
+import { useNavigate, useRouter } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 
 import { ItemBar, ItemShell } from "../frame/item-shell.tsx";
 import type { Crumb } from "../frame/site-header.tsx";
+import {
+  DropdownMenu,
+  DropdownMenuItem,
+  DropdownMenuPanel,
+  DropdownMenuTrigger,
+} from "../grasp/dropdown-menu/index.ts";
+import { Empty } from "../grasp/empty/index.ts";
+import {
+  AppWindow,
+  Archive,
+  Expand,
+  More,
+  Settings,
+} from "../grasp/icons/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { pageHref, useAppAddress } from "../pages/app-address.ts";
 import { PageFrame } from "../pages/page-frame.tsx";
 import { buildsApp } from "./app-role.ts";
@@ -46,79 +41,84 @@ import type {
 // nobody uses one until it is restored. Its settings, under "…", are for
 // everyone who opens it, each section as they may see it (app-settings.tsx).
 
-/** "…": the open page at full size, and the App's settings. */
+const styles = stylex.create({
+  place: {
+    display: "flex",
+    flexGrow: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: grasp.space6,
+  },
+});
+
+/** "…": the open page at full size (`full`, its address), and the App's settings. */
 const MoreMenu = ({
   app,
   name,
-  fullPage,
+  full,
 }: {
   app: string;
   name: string;
-  fullPage: ReactNode;
+  full: string | undefined;
 }) => {
   const { t } = useLingui();
+  const navigate = useNavigate();
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
-        render={
-          <Button
-            aria-label={t`More for ${name}`}
-            size="icon-sm"
-            variant="ghost"
-          />
-        }
-      >
-        <MoreHorizontalIcon />
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
-        {fullPage}
+        icon={More}
+        label={t`More for ${name}`}
+        variant="ghost"
+      />
+      <DropdownMenuPanel align="end">
+        {full === undefined ? null : (
+          <DropdownMenuItem
+            icon={Expand}
+            onSelect={() => {
+              // Outside the shell: a document of its own.
+              window.location.assign(full);
+            }}
+          >
+            {t`Open full page`}
+          </DropdownMenuItem>
+        )}
         <DropdownMenuItem
-          render={<Link params={{ app }} to="/apps/$app/settings" />}
+          icon={Settings}
+          onSelect={() => {
+            void navigate({ to: "/apps/$app/settings", params: { app } });
+          }}
         >
-          <SettingsIcon />
-          <Trans>Settings</Trans>
+          {t`Settings`}
         </DropdownMenuItem>
-      </DropdownMenuContent>
+      </DropdownMenuPanel>
     </DropdownMenu>
   );
 };
 
 /** No page to show: archived, or nothing built yet. */
-const NoPage = ({ archived }: { archived: boolean }) => (
-  <div className="flex flex-1 items-center justify-center p-6">
-    <Empty>
-      <EmptyHeader>
-        <EmptyMedia variant="icon">
-          {archived ? <ArchiveIcon /> : <LayoutGridIcon />}
-        </EmptyMedia>
-        <EmptyTitle>
-          {archived ? (
-            <Trans>This App is archived</Trans>
-          ) : (
-            <Trans>No page yet</Trans>
-          )}
-        </EmptyTitle>
-        <EmptyDescription>
-          {archived ? (
-            <Trans>
-              It is kept as it was, and nobody works on it, until a builder
-              restores it.
-            </Trans>
-          ) : (
-            <Trans>This App has nothing to open yet.</Trans>
-          )}
-        </EmptyDescription>
-      </EmptyHeader>
-    </Empty>
-  </div>
-);
+const NoPage = ({ archived }: { archived: boolean }) => {
+  const { t } = useLingui();
+  return (
+    <div {...stylex.props(styles.place)}>
+      {archived ? (
+        <Empty icon={Archive} title={t`This App is archived`}>
+          {t`It is kept as it was, and nobody works on it, until a builder restores it.`}
+        </Empty>
+      ) : (
+        <Empty icon={AppWindow} title={t`No page yet`}>
+          {t`This App has nothing to open yet.`}
+        </Empty>
+      )}
+    </div>
+  );
+};
 
 /** The live App: its bar, then its open page (`children`), or that it has none. */
 const AppPage = ({
   app,
   back,
   opens,
-  fullPage,
+  full,
   children,
 }: {
   app: ViewedApp;
@@ -126,8 +126,8 @@ const AppPage = ({
   back: Crumb;
   /** Whether its pages open: it has some, and isn't archived. */
   opens: boolean;
-  /** "Open full page", as a menu item, while a page is open. */
-  fullPage: ReactNode;
+  /** Where "Open full page" goes, while a page is open. */
+  full: string | undefined;
   children: ReactNode;
 }) => {
   const { name } = app;
@@ -135,7 +135,7 @@ const AppPage = ({
     <ItemShell
       bar={
         <ItemBar
-          actions={<MoreMenu app={app.id} fullPage={fullPage} name={name} />}
+          actions={<MoreMenu app={app.id} full={full} name={name} />}
           back={back}
           name={name}
           // Who uses it sees it only live; anything else says so.
@@ -167,7 +167,6 @@ const LiveApp = ({
 }) => {
   const { id } = app;
   const router = useRouter();
-  const { t } = useLingui();
   const address = useAppAddress({
     root: `/apps/${id}`,
     sub: `/apps/${id}/pages`,
@@ -177,26 +176,15 @@ const LiveApp = ({
     <AppPage
       app={app}
       back={back}
-      fullPage={
-        opens ? (
-          <DropdownMenuItem
-            render={
-              // Where the App is, its search and hash as the App wrote
-              // them, full page: outside the shell, so a document of
-              // its own.
-              <a
-                aria-label={t`Open full page`}
-                href={pageHref(
-                  { root: `/apps/${id}/full`, sub: `/apps/${id}/full` },
-                  address.at ?? "/"
-                )}
-              />
-            }
-          >
-            <Maximize2Icon />
-            <Trans>Open full page</Trans>
-          </DropdownMenuItem>
-        ) : null
+      full={
+        // Where the App is, its search and hash as the App wrote them,
+        // full page.
+        opens
+          ? pageHref(
+              { root: `/apps/${id}/full`, sub: `/apps/${id}/full` },
+              address.at ?? "/"
+            )
+          : undefined
       }
       opens={opens}
     >
