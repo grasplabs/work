@@ -35,7 +35,11 @@ const readyMs = 10_000;
 /** What a live line is opened with. */
 export interface LiveLineOptions {
   locale: Locale;
-  link: { secret: string; key: string };
+  /**
+   * Someone's interview link, which the line listens for; without one, the
+   * admin signed in (a chat's dictation, chat/dictation.ts), as core takes it.
+   */
+  link?: { secret: string; key: string };
   /** What is heard so far of the stretch being sent, all of it, every time there is more. */
   onPartial: (text: string) => void;
   /** The line is listening, or not any more. */

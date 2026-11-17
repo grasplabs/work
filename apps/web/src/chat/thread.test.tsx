@@ -440,6 +440,10 @@ describe(ChatThread, () => {
     });
     const closed = thoughtLine();
     await press(thoughtButton());
+    // The thoughts come in at the pace an answer's words do.
+    await vi.waitFor(() => {
+      expect(thoughtLine().shows).toBe("Add two to two.");
+    });
 
     expect([closed, thoughtLine()]).toStrictEqual([
       { line: "Thinking", open: false, shows: undefined },
@@ -614,6 +618,31 @@ describe(ChatThread, () => {
     });
   });
 
+  it("says in its steps' line that an answer was stopped while it wrote, and cuts back a link it was still writing", async () => {
+    await thread([
+      asked,
+      {
+        id: 2,
+        role: "assistant",
+        text: "Four, as the [policy](https://exam",
+        citations: [],
+        code: [],
+        tools: [],
+        end: "cancelled",
+        at: "2026-10-27T09:00:05.000Z",
+      },
+    ]);
+    const steps = document.querySelector(
+      'section[aria-label="What Grasp did"]'
+    )?.textContent;
+    const words = document.querySelector("[data-slot=markdown]")?.textContent;
+
+    expect({
+      stopped: steps?.includes("Stopped while writing"),
+      words,
+    }).toStrictEqual({ stopped: true, words: "Four, as the" });
+  });
+
   it("shows a response's tool calls and code steps in the order it made them", async () => {
     const at = "2026-10-27T09:00:05.000Z";
     const done = (id: number, callId: string): ChatMessage => ({
@@ -671,16 +700,15 @@ describe(ChatThread, () => {
     ]);
   });
 
-  it("fades each word of an answer in as it is written, where words come, and a kept answer stands still", async () => {
+  it("lets an answer's words out at a pace while it is written, and shows a kept answer whole", async () => {
+    const text = "It adds up. Four, as two and two, which is what you asked.";
     await thread([asked], {
-      text: "It adds up.\n\nFour, as **two** and two.",
+      text,
       code: [],
       tools: [],
       reasoning: "",
     });
-    const landing = [...document.querySelectorAll("span.animate-in")].map(
-      (word) => word.textContent
-    );
+    const writing = document.querySelector("[data-slot=markdown]")?.textContent;
     act(() => {
       root?.unmount();
     });
@@ -690,7 +718,7 @@ describe(ChatThread, () => {
       {
         id: 2,
         role: "assistant",
-        text: "Four, as **two** and two.",
+        text,
         citations: [],
         code: [],
         tools: [],
@@ -700,12 +728,9 @@ describe(ChatThread, () => {
     ]);
 
     expect({
-      landing,
-      kept: document.querySelectorAll("span.animate-in").length,
-    }).toStrictEqual({
-      landing: ["Four,", "as", "two", "and", "two."],
-      kept: 0,
-    });
+      paced: writing !== undefined && writing.length < text.length,
+      kept: document.querySelector("[data-slot=markdown]")?.textContent,
+    }).toStrictEqual({ paced: true, kept: text });
   });
 
   it("carries an answer's thinking as a picture that opens the brain, and the way there where it can't be drawn", async () => {

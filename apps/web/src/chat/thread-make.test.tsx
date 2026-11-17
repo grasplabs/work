@@ -229,8 +229,10 @@ describe("making something in a chat's thread", () => {
       { connected }
     );
     await settle();
-    const card = document.querySelector(
-      'section[aria-label="Here\'s what Grasp will make"]'
+    // The card by its heading.
+    const card = [...document.querySelectorAll("section")].find(
+      (each) =>
+        each.querySelector("h2")?.textContent === "Here's what Grasp will make"
     );
     const shown = {
       parts: [...(card?.querySelectorAll("li") ?? [])].map(

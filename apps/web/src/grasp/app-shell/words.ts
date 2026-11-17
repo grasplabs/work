@@ -13,6 +13,10 @@ export const appShellPanelWords = {
   dock: "Dock beside the page",
   /** The link to the panel's own page. */
   page: "Open as a page",
+  /** The control that takes the panel full screen over the page. */
+  expand: "Full screen",
+  /** The same control while it is full screen: back to where it was. */
+  collapse: "Leave full screen",
   /** The name of the floating window's start edge, which resizes its width. */
   width: "Resize the panel's width",
   /** The name of the floating window's top edge, which resizes its height. */

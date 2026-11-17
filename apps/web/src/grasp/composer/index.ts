@@ -52,3 +52,10 @@ export type {
   ComposerMicrophone,
   ComposerMicrophoneStatus,
 } from "./microphone";
+export { ComposerAgent } from "./agent";
+export type {
+  ComposerAgentAll,
+  ComposerAgentOption,
+  ComposerAgentProps,
+} from "./agent";
+export type { ComposerEffortLook } from "./effort";

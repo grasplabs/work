@@ -270,7 +270,9 @@ export const useAsk = (
       onEffort: (chosen: ModelEffort) => {
         choose({ model, effort: chosen });
       },
-      busy,
+      // Not before core has said which models there are: a question
+      // would name none, and core refuses it.
+      busy: busy || models === undefined,
       failure,
       fileProblem,
       files: files.map(({ id, file }) => ({

@@ -102,7 +102,7 @@ const styles = stylex.create({
   },
   overAway: {
     opacity: 0,
-    translate: `0 ${grasp.space3}`,
+    translate: { default: `0 ${grasp.space3}`, [NARROW]: `0 ${grasp.space5}` },
     transitionDuration: simply.leave,
   },
   // On a phone the panels are always over the page: the same coming and going there.
@@ -837,8 +837,11 @@ const PanelsCard = ({
             ...placeLook({ measured, covered, crowded, moving, cover, shown }),
             styles.panelsUnderRow,
             aside && styles.panelsAside,
-            !out && over && styles.overAway,
+            // The phone's leaving first, then the wide one: the phone's sets no opacity on a wide
+            // shell (null), and after the wide one it took its fade away, so panels over the page
+            // (crowded, covered, floating) vanished at the end of their time instead of fading out.
             !out && styles.overAwayNarrow,
+            !out && over && styles.overAway,
             phase === "closed" && styles.closedAway,
             ...float.look
           )}

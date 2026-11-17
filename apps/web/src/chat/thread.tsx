@@ -30,18 +30,18 @@ import {
   ChatMessageAction,
 } from "../grasp/chat-message/index.ts";
 import { Retry } from "../grasp/icons/index.ts";
-import { Spinner } from "../grasp/spinner/index.ts";
+import { Markdown } from "../grasp/markdown/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { Thread } from "../grasp/thread/index.ts";
 import type { ThreadWords } from "../grasp/thread/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { useMemberAdmin } from "../use-member-admin.ts";
-import { AnswerMarkdown } from "./answer-markdown.tsx";
 import {
   SeeInBrain,
   useAnswerThinking,
   useThinkingStep,
 } from "./answer-thinking.tsx";
+import { AnswerWords, useMarkdownWords } from "./answer-words.tsx";
 import { answeredOf } from "./answered.ts";
 import { AskedLine } from "./asked-questions.tsx";
 import { pendingPlan, ThreadPlan } from "./build-progress.tsx";
@@ -53,7 +53,8 @@ import { recoveredSteps } from "./recovered.ts";
 import { SavedMemoryLine } from "./saved-memory.tsx";
 import { readingFileOf, signOf } from "./sign.ts";
 import type { WorkState } from "./sign.ts";
-import { AnswerCited, AnswerSources, useCitedDocuments } from "./sources.tsx";
+import { AnswerCited, useCitedDocuments } from "./sources.tsx";
+import { ThreadLoading } from "./thread-loading.tsx";
 import { turnsOf, workedFor } from "./turns.ts";
 import { widgetLinesOf } from "./widget-lines.ts";
 
@@ -117,11 +118,6 @@ const styles = stylex.create({
   },
   start: {
     justifySelf: "start",
-  },
-  centre: {
-    display: "grid",
-    placeItems: "center",
-    paddingBlock: grasp.space8,
   },
 });
 
@@ -492,30 +488,16 @@ const KeyFailed = () => (
 );
 
 /**
- * A stored reply's words that cite documents: until sources move onto
- * Grasp UI's Sources, its own Markdown with each cited span marked, and
- * "Based on N sources" under it.
+ * A stored reply's words that cite documents: each cited span marked, and
+ * the documents (read by AnswerCited around it) listed under them.
  */
-const CitedWords = ({
-  text,
-  cited,
-}: {
-  text: string;
-  cited: readonly string[];
-}) => {
+const CitedWords = ({ text }: { text: string }) => {
   const sources = useCitedDocuments();
-  return (
-    <>
-      <AnswerMarkdown
-        cited={cited}
-        sources={sources}
-        text={text}
-        written={false}
-      />
-      <AnswerSources cited={sources} />
-    </>
-  );
+  return <AnswerWords cited={sources} text={text} writing={false} />;
 };
+
+/** A link still being written at the end of an answer: `[words` or `[words](address`. */
+const halfLink = /\s*\[[^\]]*(?:\]\([^)]*)?$/u;
 
 /** One reply's words, its citations inline where it cites documents. */
 const ReplyWords = ({
@@ -523,11 +505,20 @@ const ReplyWords = ({
   chatId,
   writing,
 }: {
-  reply: { id?: number; text: string; citations?: Answer["citations"] };
+  reply: {
+    id?: number;
+    text: string;
+    citations?: Answer["citations"];
+    end?: Answer["end"];
+  };
   chatId: string;
   writing: boolean;
 }) => {
-  if (reply.text.trim() === "") {
+  // Stopped mid-way: cut back to before a half-written link, which
+  // Markdown hides only while it streams.
+  const text =
+    reply.end === "cancelled" ? reply.text.replace(halfLink, "") : reply.text;
+  if (text.trim() === "") {
     return null;
   }
   if (
@@ -535,17 +526,11 @@ const ReplyWords = ({
     reply.citations === undefined ||
     reply.citations.length === 0
   ) {
-    // Model output, so work's own renderer: a link out of Grasp asks first
-    // and carries no address, until the library's Markdown takes a link
-    // renderer (`renderLink`).
-    return <AnswerMarkdown text={reply.text} written={writing} />;
+    return <AnswerWords text={text} writing={writing} />;
   }
   return (
     <AnswerCited cited={{ chatId, messageId: reply.id }}>
-      <CitedWords
-        cited={reply.citations.map(({ documentId }) => documentId)}
-        text={reply.text}
-      />
+      <CitedWords text={text} />
     </AnswerCited>
   );
 };
@@ -854,11 +839,6 @@ const AnswerEnding = ({
   const { t } = useLingui();
   return (
     <>
-      {ending.end === "cancelled" ? (
-        <Text element="p" size="sm" tone="muted">
-          <Trans>Stopped.</Trans>
-        </Text>
-      ) : null}
       {ending.end === "cut_off" ? (
         <Text element="p" size="sm" tone="muted">
           <Trans>The answer was cut off at the model&apos;s limit.</Trans>
@@ -883,6 +863,17 @@ const AnswerEnding = ({
   );
 };
 
+/** The steps' line for an answer stopped mid-way: while it worked, or while it wrote. */
+const useStoppedSummary = () => {
+  const { t } = useLingui();
+  return (stopped: boolean, wrote: boolean): string | undefined => {
+    if (!stopped) {
+      return undefined;
+    }
+    return wrote ? t`Stopped while writing` : t`Stopped while working`;
+  };
+};
+
 /** What an answer holds: its steps, what they did, its words, and how it ended. */
 const AnswerBody = ({
   turn,
@@ -897,6 +888,7 @@ const AnswerBody = ({
 }) => {
   const { t } = useLingui();
   const activityWords = useActivityWords();
+  const stoppedSummary = useStoppedSummary();
   const { replies, partial, live } = turn;
   const stepped: Stepped[] = partial === null ? replies : [...replies, partial];
   const firstId = replies[0]?.id;
@@ -904,8 +896,12 @@ const AnswerBody = ({
     firstId === undefined ? undefined : context.worked.get(firstId);
   // The activity's line says what Grasp does once steps show, or between two
   // replies; while words arrive, they say it themselves.
+  const stopped = ending.end === "cancelled";
   const activity =
-    steps.length > 0 || (live && (context.checking || partial === null));
+    stopped ||
+    steps.length > 0 ||
+    (live && (context.checking || partial === null));
+  const wrote = replies.some(({ text }) => text.trim() !== "");
   return (
     <div {...stylex.props(styles.stack)}>
       {activity ? (
@@ -913,6 +909,7 @@ const AnswerBody = ({
           aria-label={t`What Grasp did`}
           duration={live || seconds === undefined ? undefined : seconds * 1000}
           steps={steps}
+          summary={stoppedSummary(stopped, wrote)}
           words={activityWords}
           loading={live}
           workingLabel={context.workingLabel}
@@ -1003,6 +1000,7 @@ const AnswerRow = ({
   );
   const steps = activitySteps(stepped, writing, context);
   const thought = thoughtOf(replies, partial);
+  const markdownWords = useMarkdownWords();
   const { words, last, failed, ending, status } = answerStateOf(
     turn,
     steps,
@@ -1039,6 +1037,7 @@ const AnswerRow = ({
       }
       from="agent"
       name="Grasp"
+      nameHidden
       onRetry={ending.providerMissing ? undefined : retry}
       retryLabel={t`Try again`}
       status={ending.providerMissing ? "done" : status}
@@ -1047,7 +1046,16 @@ const AnswerRow = ({
       thoughtLabel={(time) =>
         t`${plural(time, { one: "Thought for # second", other: "Thought for # seconds" })}`
       }
-      thoughts={thought.thoughts}
+      thoughts={
+        thought.thoughts === undefined ? undefined : (
+          <Markdown
+            {...markdownWords}
+            size="sm"
+            source={thought.thoughts}
+            streaming={status === "thinking"}
+          />
+        )
+      }
       thoughtSeconds={thought.seconds}
     >
       {status === "thinking" ? undefined : (
@@ -1207,8 +1215,8 @@ export const ChatThread = ({
     : undefined;
   if (!loaded) {
     return (
-      <div {...stylex.props(styles.centre)}>
-        <Spinner aria-label={t`Loading…`} />
+      <div {...stylex.props(!compact && styles.column)}>
+        <ThreadLoading />
       </div>
     );
   }

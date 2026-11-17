@@ -7,8 +7,7 @@ import type {
 } from "@grasp-os/shared/members";
 import { isMemberAdmin, roleSchema } from "@grasp-os/shared/roles";
 import type { Role } from "@grasp-os/shared/roles";
-import type { MessageDescriptor } from "@lingui/core";
-import { msg, plural } from "@lingui/core/macro";
+import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { createFileRoute, useRouter } from "@tanstack/react-router";
@@ -34,7 +33,14 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "../grasp/dropdown-menu/index.ts";
-import { Info, More, Search, SignOut, Trash } from "../grasp/icons/index.ts";
+import {
+  Copy,
+  Info,
+  More,
+  Search,
+  SignOut,
+  Trash,
+} from "../grasp/icons/index.ts";
 import {
   InputGroup,
   InputGroupInput,
@@ -48,8 +54,15 @@ import {
   ItemDetail,
   ItemGroup,
   ItemMedia,
+  ItemRevealButton,
   ItemTitle,
 } from "../grasp/item/index.ts";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTitle,
+  PopoverTrigger,
+} from "../grasp/popover/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
 import {
   Select,
@@ -57,18 +70,17 @@ import {
   SelectValue,
   SelectContent,
 } from "../grasp/select/index.ts";
-import { Separator } from "../grasp/separator/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "../grasp/tooltip/index.ts";
 import { roleLabel } from "../labels.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import { RemovedRow, useRemovedPeople } from "../settings/erasures.tsx";
-import { InvitationRow, InviteButton } from "../settings/invitations.tsx";
+import {
+  copyEmail,
+  InvitationRow,
+  InviteButton,
+} from "../settings/invitations.tsx";
+import { roleItems, roleLines } from "../settings/roles.ts";
 import {
   SectionNotLoaded,
   SettingsError,
@@ -90,32 +102,38 @@ import { useCore } from "../use-core.ts";
 // (which core allows while another admin exists) is left out so nobody
 // loses this page by accident.
 
-// Wide enough for the longest role in every language.
-const roleWidth = "8rem";
-
 const styles = stylex.create({
   page: { display: "flex", flexDirection: "column", gap: grasp.space5 },
   // Narrower on a phone: Section card's actions never shrink, so Invite would run past its edge.
   search: { width: { default: "14rem", [media.belowPhone]: "8rem" } },
   notice: { padding: grasp.space4 },
   rowEnd: { display: "flex", alignItems: "center", gap: grasp.space1 },
-  role: { width: roleWidth },
   // Your own row has no menu: its room is kept, so every role stands on one edge.
-  menuRoom: { width: grasp.controlSm, flexShrink: 0 },
-  // The quiet row over the members, in the rows' own inset.
-  rolesRow: {
-    display: "flex",
-    alignItems: "center",
-    gap: grasp.space1,
+  menuRoom: { width: grasp.controlXs, flexShrink: 0 },
+  // The roles compared: each name over what it may do.
+  roles: {
+    display: "grid",
+    gap: grasp.space3,
+    margin: 0,
+    padding: 0,
+    maxWidth: "20rem",
+  },
+  roleName: { margin: 0, fontWeight: grasp.weightMedium, color: grasp.ink },
+  roleText: { margin: 0, color: grasp.muted },
+  // Removed people: the list's foot, under a quiet name.
+  removedLabel: {
+    margin: 0,
     paddingBlock: grasp.space2,
     paddingInline: grasp.tableCellInline,
+    borderTopStyle: "solid",
+    borderTopWidth: grasp.hairline,
+    borderTopColor: grasp.line,
+    fontSize: grasp.textXs,
+    lineHeight: grasp.textXsLine,
+    fontWeight: grasp.weightMedium,
+    color: grasp.muted,
   },
-  roleLine: { display: "block" },
 });
-
-/** The roles to pick from, in the page's language. */
-const roleItems = (): { label: string; value: Role }[] =>
-  roleSchema.options.map((role) => ({ label: roleLabel(role), value: role }));
 
 /** What a change did, or why it failed. */
 interface Notice {
@@ -175,6 +193,12 @@ const MemberActions = ({
     }
     onNotice({ done: t`${name} is signed out everywhere.` });
   };
+  // With none to disconnect, the removal alone is said. Outside the `try`
+  // below, as the React Compiler can't compile a conditional within one.
+  const removedSaid = (count: number): string =>
+    count === 0
+      ? t`${name} is removed.`
+      : t`${name} is removed. ${plural(count, { one: "# personal connection was disconnected.", other: "# personal connections were disconnected." })}`;
   const remove = async (): Promise<void> => {
     onNotice({});
     try {
@@ -182,7 +206,7 @@ const MemberActions = ({
         async ({ members }) => await members.remove(member.userId)
       );
       onNotice({
-        done: t`${name} is removed. ${plural(count, { one: "# personal connection was disconnected.", other: "# personal connections were disconnected." })}`,
+        done: removedSaid(count),
       });
     } catch (error) {
       // Removed, with some connections still to disconnect: the row goes
@@ -212,11 +236,7 @@ const MemberActions = ({
         }}
         value={member.role}
       >
-        <SelectTrigger
-          aria-label={t`Role of ${who}`}
-          layout={styles.role}
-          size="sm"
-        >
+        <SelectTrigger aria-label={t`Role of ${who}`} size="sm" variant="text">
           <SelectValue />
         </SelectTrigger>
         <SelectContent />
@@ -225,10 +245,21 @@ const MemberActions = ({
         <DropdownMenuTrigger
           icon={More}
           aria-label={t`Actions for ${who}`}
-          size="sm"
+          size="xs"
           variant="ghost"
         />
         <DropdownMenuContent align="end">
+          <DropdownMenuItem
+            icon={Copy}
+            onSelect={() => {
+              void copyEmail(member.email, {
+                copied: t`Copied`,
+                failed: t`Copying didn't work`,
+              });
+            }}
+          >
+            {t`Copy email`}
+          </DropdownMenuItem>
           <DropdownMenuItem
             action={signOutEverywhere}
             failedLabel={t`Could not sign out`}
@@ -306,45 +337,29 @@ const MemberActions = ({
   );
 };
 
-/** What each role may do, in one line each: the three roles, most first. */
-const roleLines: Record<Role, MessageDescriptor> = {
-  admin: msg`Manages people, teams and permissions, and can do everything a Builder can.`,
-  builder: msg`Builds Apps and workflows, and asks for the permissions they need.`,
-  user: msg`Uses the Apps and workflows shared with them, and chats with Grasp.`,
-};
-
-/**
- * One quiet row over the members: "Roles", and behind its info mark what
- * each role may do, one line each, on hover or focus. Until the library's
- * Roles button and role lines in the Select land (/patterns/members).
- */
-const RolesRow = () => {
-  const { t, i18n } = useLingui();
+/** The three roles compared, each name over what it may do: in a popover from the card's head. */
+const RolesButton = () => {
+  const { t, i18n: lingui } = useLingui();
   return (
-    <div {...stylex.props(styles.rolesRow)}>
-      <Text element="span" size="sm" tone="muted">
+    <Popover>
+      <PopoverTrigger icon={Info} size="sm" variant="ghost">
         {t`Roles`}
-      </Text>
-      <Tooltip>
-        <TooltipTrigger
-          aria-label={t`What each role may do`}
-          icon={Info}
-          size="xs"
-          variant="ghost"
-        />
-        <TooltipContent>
-          {roleSchema.options.map((role) => {
-            const name = roleLabel(role);
-            const does = i18n._(roleLines[role]);
-            return (
-              <span key={role} {...stylex.props(styles.roleLine)}>
-                {t`${name}: ${does}`}
-              </span>
-            );
-          })}
-        </TooltipContent>
-      </Tooltip>
-    </div>
+      </PopoverTrigger>
+      {/* It only explains: focus stays on the button, so no ring frames the panel. */}
+      <PopoverContent initialFocus="none">
+        <PopoverTitle>{t`Roles`}</PopoverTitle>
+        <dl {...stylex.props(styles.roles)}>
+          {roleSchema.options.map((role) => (
+            <div key={role}>
+              <dt {...stylex.props(styles.roleName)}>{roleLabel(role)}</dt>
+              <dd {...stylex.props(styles.roleText)}>
+                {lingui._(roleLines[role])}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      </PopoverContent>
+    </Popover>
   );
 };
 
@@ -371,7 +386,7 @@ const OwnRole = ({ role }: { role: Role }) => {
   return (
     <div {...stylex.props(styles.rowEnd)}>
       <Select disabled items={roleItems()} value={role}>
-        <SelectTrigger aria-label={t`Your role`} layout={styles.role} size="sm">
+        <SelectTrigger aria-label={t`Your role`} size="sm" variant="text">
           <SelectValue />
         </SelectTrigger>
         <SelectContent />
@@ -394,9 +409,10 @@ const MemberRow = ({
   onRemoved: () => void;
 }) => {
   const { t } = useLingui();
+  const { name } = member;
   return (
     <Item size="xs">
-      <ItemMedia>
+      <ItemMedia align="center">
         <Avatar decorative name={member.name} size="xs">
           <AvatarFallback />
         </Avatar>
@@ -406,7 +422,19 @@ const MemberRow = ({
           {member.name}
           {me ? <ItemDetail>{t`You`}</ItemDetail> : null}
         </ItemTitle>
-        <ItemDescription>{member.email}</ItemDescription>
+        <ItemDescription>
+          {member.email}
+          <ItemRevealButton
+            aria-label={t`Copy email of ${name}`}
+            icon={Copy}
+            onClick={() => {
+              void copyEmail(member.email, {
+                copied: t`Copied`,
+                failed: t`Copying didn't work`,
+              });
+            }}
+          />
+        </ItemDescription>
       </ItemContent>
       <ItemActions>
         {me ? (
@@ -457,6 +485,7 @@ const MembersList = ({
     <SectionCard
       actions={
         <>
+          <RolesButton />
           <InputGroup layout={styles.search}>
             <InputGroupText icon={Search} />
             <InputGroupInput
@@ -495,8 +524,6 @@ const MembersList = ({
       }
       title={t`Members`}
     >
-      <RolesRow />
-      <Separator decorative />
       {notice.failure === undefined && notice.done === undefined ? null : (
         <div {...stylex.props(styles.notice)}>
           {notice.failure === undefined ? (
@@ -526,10 +553,18 @@ const MembersList = ({
           {invited.map((invitation) => (
             <InvitationRow invitation={invitation} key={invitation.id} />
           ))}
-          {left.map((person) => (
-            <RemovedRow key={person.userId} person={person} />
-          ))}
         </ItemGroup>
+      )}
+      {/* Removed people: the list's foot, under a quiet name, a step back. */}
+      {left.length === 0 ? null : (
+        <>
+          <p {...stylex.props(styles.removedLabel)}>{t`Removed`}</p>
+          <ItemGroup aria-label={t`Removed`} separated>
+            {left.map((person) => (
+              <RemovedRow key={person.userId} person={person} />
+            ))}
+          </ItemGroup>
+        </>
       )}
     </SectionCard>
   );
@@ -559,7 +594,16 @@ const MembersPage = () => {
         </SectionCard>
       )}
       {/* Core refuses the teams to anyone else. */}
-      {isMemberAdmin(identity) ? <TeamsPanel /> : null}
+      {/* Read again whenever the people change, so a removed person leaves the teams' faces too. */}
+      {isMemberAdmin(identity) ? (
+        <TeamsPanel
+          key={
+            page.state === "ready"
+              ? page.data.members.map(({ userId }) => userId).join(" ")
+              : "unread"
+          }
+        />
+      ) : null}
     </div>
   );
 };

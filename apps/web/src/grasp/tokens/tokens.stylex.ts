@@ -349,6 +349,7 @@ export const grasp = stylex.defineConsts({
   avatarLg: "var(--grasp-avatar-lg)",
   avatarXl: "var(--grasp-avatar-xl)",
   avatarEdge: "var(--grasp-avatar-edge)",
+  avatar2xs: "var(--grasp-avatar-2xs)",
   // Alert: alert.
   alertFillNeutral: "var(--grasp-alert-fill-neutral)",
   // Pagination: pagination.

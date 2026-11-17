@@ -11,6 +11,7 @@ import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
 import { chatLink, useGoToChat } from "./chat-link.ts";
 import { useAskDeleteChat } from "./chat-switcher.tsx";
+import { onChatsChanged } from "./chats-changed.ts";
 
 // The person's recent chats in the sidebar: the most recently used first,
 // a few of them, each a link to its page, with its menu (open, rename,
@@ -54,7 +55,13 @@ const useChats = (enabled: boolean): ChatSummary[] => {
       }
     };
     readIf();
-    return router.subscribe("onResolved", readIf);
+    const unsubscribe = router.subscribe("onResolved", readIf);
+    // An answer ended: its chat no longer works.
+    const unheard = onChatsChanged(readIf);
+    return () => {
+      unsubscribe();
+      unheard();
+    };
   }, [enabled, router]);
   return enabled ? chats : [];
 };
@@ -125,6 +132,9 @@ export const useRecentChats = ({
       label: title,
       render: <Link {...chatLink(chat.id)} />,
       current: matchRoute(chatLink(chat.id)) !== false,
+      // Its agent is still answering: the Working mark at the row's end.
+      working: chat.running,
+      workingLabel: t`Answering`,
       actions,
       actionsLabel: t`More for ${title}`,
       renameLabel: t`Rename ${title}`,

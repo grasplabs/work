@@ -1192,62 +1192,6 @@
 }
 
 /*
- * Code in the agent's answers (chat/answer-markdown.tsx), highlighted by
- * class (rehype-highlight): coloured from the theme's tokens, so it follows
- * light and dark, and set without any inline style (the `no-inline-styles`
- * lint rule).
- */
-@layer components {
-  .hljs-comment,
-  .hljs-quote {
-    color: var(--muted-foreground);
-    font-style: italic;
-  }
-
-  .hljs-keyword,
-  .hljs-selector-tag,
-  .hljs-built_in,
-  .hljs-doctag {
-    color: var(--syntax-keyword);
-  }
-
-  .hljs-string,
-  .hljs-regexp,
-  .hljs-symbol {
-    color: var(--syntax-string);
-  }
-
-  .hljs-number,
-  .hljs-literal,
-  .hljs-variable.constant_ {
-    color: var(--syntax-constant);
-  }
-
-  .hljs-title,
-  .hljs-type,
-  .hljs-section,
-  .hljs-attr,
-  .hljs-attribute,
-  .hljs-name,
-  .hljs-property {
-    color: var(--syntax-function);
-  }
-
-  .hljs-addition {
-    color: var(--status-agreed);
-  }
-
-  .hljs-deletion {
-    color: var(--destructive);
-  }
-
-  .hljs-meta,
-  .hljs-punctuation {
-    color: var(--muted-foreground);
-  }
-}
-
-/*
  * An App's Code view (apps/code-view.tsx): @pierre/diffs draws each
  * file and diff in a shadow root, coloured by its custom properties, which
  * reach in from here. Its theme ("grasp", a theme of CSS variables) names

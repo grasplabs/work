@@ -37,16 +37,17 @@ import { LoadingLines, SectionNotLoaded } from "./section.tsx";
 // core itself, so the page's own read stays as it is.
 
 /** Whose accounts a way to sign in takes, in words; nothing when core doesn't say. */
-const usePinned = (
-  { provider, tenantId, hostedDomain }: SignInProvider,
-  organization: string
-): string | undefined => {
+const usePinned = ({
+  provider,
+  tenantId,
+  hostedDomain,
+}: SignInProvider): string | undefined => {
   const { t } = useLingui();
   if (provider === "microsoft" && tenantId !== undefined) {
-    return t`Only work accounts from ${organization}’s Microsoft 365.`;
+    return t`Only your organization’s work accounts.`;
   }
   if (provider === "google" && hostedDomain !== undefined) {
-    return t`Only work accounts from ${organization}’s Google Workspace (${hostedDomain}).`;
+    return t`Only work accounts at ${hostedDomain}.`;
   }
   return undefined;
 };
@@ -55,15 +56,9 @@ const usePinned = (
  * One way to sign in, as a row: its logo and name, whose accounts it
  * takes, and, only when something is wrong, that it isn't offered yet.
  */
-const ProviderRow = ({
-  provider,
-  organization,
-}: {
-  provider: SignInProvider;
-  organization: string;
-}) => {
+const ProviderRow = ({ provider }: { provider: SignInProvider }) => {
   const { t } = useLingui();
-  const pinned = usePinned(provider, organization);
+  const pinned = usePinned(provider);
   const microsoft = provider.provider === "microsoft";
   return (
     <Item size="xs">
@@ -97,18 +92,14 @@ const ProviderRow = ({
 /** How people sign in, as core answered an admin. */
 export const SignInView = ({
   signIn,
-  organization,
   onRetry,
 }: {
   /** Undefined while it is read. */
   signIn: Loaded<SignInSettings> | undefined;
-  /** The organization's name, to say whose accounts sign in. */
-  organization: string;
   /** Reads it again, once it didn't load. */
   onRetry?: () => void;
 }) => {
   const { t } = useLingui();
-  const description = t`Your people sign in with their work accounts.`;
   const title = t`Sign-in`;
   if (
     signIn?.state === "ready" &&
@@ -116,26 +107,17 @@ export const SignInView = ({
     signIn.data.providers.length > 0
   ) {
     return (
-      <SectionCard
-        density="compact"
-        description={description}
-        flush
-        title={title}
-      >
+      <SectionCard density="compact" flush title={title}>
         <ItemGroup aria-label={title} separated>
           {signIn.data.providers.map((provider) => (
-            <ProviderRow
-              key={provider.provider}
-              organization={organization}
-              provider={provider}
-            />
+            <ProviderRow key={provider.provider} provider={provider} />
           ))}
         </ItemGroup>
       </SectionCard>
     );
   }
   return (
-    <SectionCard density="compact" description={description} title={title}>
+    <SectionCard density="compact" title={title}>
       {signIn === undefined ? <LoadingLines lines={2} /> : null}
       {signIn !== undefined && signIn.state !== "ready" ? (
         <SectionNotLoaded
@@ -154,13 +136,7 @@ export const SignInView = ({
 };
 
 /** Reads how people sign in once, as it mounts; `onRetry` mounts it anew. */
-const SignInRead = ({
-  organization,
-  onRetry,
-}: {
-  organization: string;
-  onRetry: () => void;
-}) => {
+const SignInRead = ({ onRetry }: { onRetry: () => void }) => {
   const core = useCore();
   const [signIn, setSignIn] = useState<Loaded<SignInSettings>>();
   useEffect(() => {
@@ -180,20 +156,17 @@ const SignInRead = ({
       left.abort();
     };
   }, [core]);
-  return (
-    <SignInView organization={organization} onRetry={onRetry} signIn={signIn} />
-  );
+  return <SignInView onRetry={onRetry} signIn={signIn} />;
 };
 
 /** The sign-in section, for admins only: core is asked only for them. */
-export const SignInSection = ({ organization }: { organization: string }) => {
+export const SignInSection = () => {
   const { identity } = useRouteContext({ from: "/_shell" });
   // Each try at reading it: Try again reads it anew.
   const [attempt, setAttempt] = useState(0);
   return isAdmin(identity.role) ? (
     <SignInRead
       key={attempt}
-      organization={organization}
       onRetry={() => {
         setAttempt((now) => now + 1);
       }}
