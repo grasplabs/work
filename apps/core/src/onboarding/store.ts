@@ -4035,18 +4035,23 @@ export class Onboarding extends DurableObject<Env> {
       const now = new Date().toISOString();
       await this.#fallenFirst(() => {
         this.ctx.storage.transactionSync(() => {
-          const standing = this.#db
-            .select({ source: brainDrawings.source })
+          // Each standing, and each marked that this object hasn't seen
+          // taken out (a removal that failed, a restart): it may be in use
+          // still, so it is taken out before the reading goes.
+          const inUse = this.#db
+            .select({
+              source: brainDrawings.source,
+              erase: brainDrawings.erase,
+            })
             .from(brainDrawings)
-            .where(and(gte(brainDrawings.at, first), standingDrawing))
-            .all();
-          if (standing.length > 0) {
-            throw new SourcesFallError(
-              standing.map(({ source }) => ({
-                producer: "drawing",
-                id: source,
-              }))
-            );
+            .where(gte(brainDrawings.at, first))
+            .all()
+            .flatMap(({ source, erase }) => {
+              const fallen = { producer: "drawing" as const, id: source };
+              return this.#mayBeInUse(fallen, erase) ? [fallen] : [];
+            });
+          if (inUse.length > 0) {
+            throw new SourcesFallError(inUse);
           }
           this.#db
             .delete(documents)
@@ -7143,7 +7148,7 @@ export class Onboarding extends DurableObject<Env> {
     // still be in use: it is taken out again first.
     const owed = held.filter(
       ({ producer, source, erase }) =>
-        erase && !this.#takenOut.has(fallenKey({ producer, id: source }))
+        erase && this.#mayBeInUse({ producer, id: source }, erase)
     );
     const standing = held.filter(({ erase }) => !erase);
     if (owed.length === 0 && standing.length === 0) {
@@ -7175,7 +7180,8 @@ export class Onboarding extends DurableObject<Env> {
    * The one rule for whether a drawing of `team` resting on `resting`
    * stands now (GRA-1084, GRA-1748): its team may have its results shown
    * (`#teamShowsResults`, as for a claim), everyone it rests on still
-   * counts (none gone, none who took back what they approved), and its
+   * counts (none gone, none who took back what they approved, none moved
+   * to another team), and its
    * team's map stands on what its lead's facts are now (`#mapBacked`,
    * GRA-329). The
    * recount (`#recountStanding`), noting a drawing (`#noteDrawings`) and
@@ -7198,7 +7204,9 @@ export class Onboarding extends DurableObject<Env> {
     return (
       this.#teamShowsResults(team, { roster, mayClaim }) &&
       resting.length > 0 &&
-      resting.every((person) => agreed.has(person)) &&
+      // Each still agrees, and is in the team now: one who moved away takes
+      // their part with them, as for a claim (`#currentBackers`).
+      this.#currentBackers(team, resting, agreed).length === resting.length &&
       this.#mapBacked(team)
     );
   }
@@ -7258,6 +7266,17 @@ export class Onboarding extends DurableObject<Env> {
       this.#teamShowsResults(team, { roster, mayClaim }) &&
       this.#currentBackers(team, backers, agreed).length >= minTeamShown
     );
+  }
+
+  /**
+   * Whether `source`, marked to be erased or not (`erase`), may still be in
+   * use in the Brain: standing, or marked but not seen taken out by this
+   * object (`#takenOut`: a removal that failed after the mark, or a restart
+   * since). The one rule for what a change takes out again before what
+   * rests on it goes (`#recountStanding`, a document's removal).
+   */
+  #mayBeInUse(source: FallingSource, erase: boolean): boolean {
+    return !erase || !this.#takenOut.has(fallenKey(source));
   }
 
   /**
@@ -8345,8 +8364,25 @@ export class Onboarding extends DurableObject<Env> {
     // never lowers backing, so it pays no recount, and going from counting
     // to not counting always loses something.
     if (lost) {
-      this.#recountStanding([this.#teamOfPerson(person.id)]);
+      this.#recountStanding(this.#teamsRestingOn(person.id));
     }
+  }
+
+  /**
+   * The teams whose results a change of `person`'s may take down: their
+   * team now, and every team whose claims or drawings rest on them, from
+   * the rows that say whom each rests on (`brain_sent`, under their id or
+   * as someone gone), whichever team they are in now (GRA-1748).
+   */
+  #teamsRestingOn(person: string): string[] {
+    const rested = this.#db
+      .selectDistinct({ team: brainSent.team })
+      .from(brainSent)
+      .where(inList(brainSent.person, [person, `${gonePrefix}${person}`]))
+      .all()
+      .map(({ team }) => team);
+    const now = this.#teamOfPerson(person);
+    return [...new Set([...(now === null ? [] : [now]), ...rested])];
   }
 
   #onRoster(person: string): boolean {
@@ -8369,7 +8405,7 @@ export class Onboarding extends DurableObject<Env> {
     // commits (`#recountStanding`). A roster save, which erases everyone it
     // takes off the list, recounts once for them all at the end of its
     // own transaction (`#writeRoster`).
-    this.#recountStanding([this.#teamOfPerson(person)]);
+    this.#recountStanding(this.#teamsRestingOn(person));
     this.#noted(person, what, now, by);
   }
 

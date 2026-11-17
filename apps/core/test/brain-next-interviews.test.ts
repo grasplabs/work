@@ -2394,6 +2394,50 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
     });
   });
 
+  it("take a team's drawing and claim out as someone they rest on moves to another team, though seven still tell, and leave nothing of it to their later withdrawal", async () => {
+    const { ids, max } = await drawnTeam({ eight: true });
+    await intakeOf(ids, [zendeskClaim]);
+    await handOverNow();
+    const readNow = async () => {
+      const drawings = await recalled(max, "ticket", "drawing");
+      return {
+        claims: await recalled(max, "Zendesk", "claim"),
+        drawings: drawings.length,
+        page: await workOnPage(ids),
+      };
+    };
+    const before = await readNow();
+    // Max, whom the drawing was drawn from and who backs the claim, moves
+    // to Billing: Ops still has seven who tell. What rests on him in Ops
+    // rests on him no more (GRA-1748).
+    await savedRoster(ids, [...everyone, "sam", "ada"], (roster) => ({
+      teams: [
+        ...roster.teams,
+        {
+          id: `${ids.team}-b`,
+          name: "Billing",
+          lead: null,
+          does: "",
+          off: false,
+        },
+      ],
+      people: roster.people.map((person) =>
+        person.id === ids.max ? { ...person, team: `${ids.team}-b` } : person
+      ),
+    }));
+    const moved = await readNow();
+    await onLink({ action: "withdraw", ...(await openLink(ids.max)) });
+    expect({ before, moved, withdrawn: await readNow() }).toStrictEqual({
+      before: {
+        claims: [zendeskClaim.text],
+        drawings: 1,
+        page: [["handling new tickets", 1]],
+      },
+      moved: { claims: [], drawings: 0, page: [] },
+      withdrawn: { claims: [], drawings: 0, page: [] },
+    });
+  });
+
   it("take a drawing out as its team's lead is replaced on the list: its map was the old lead's", async () => {
     const { ids, max } = await drawnTeam({ eight: true });
     await intakeOf(ids, [zendeskClaim]);

@@ -10,8 +10,12 @@ import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
+import { recallAs, workBrain } from "../src/brain-next.ts";
+import { producersOf, relayHandOvers } from "../src/brain-sources.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
+import { setObjectEnv } from "./agent-chat.ts";
 import { allEvents } from "./audit-events.ts";
+import { removalsFailingOnce } from "./brain-erasures-failing.ts";
 import { mockIdp } from "./idp.ts";
 import {
   answering,
@@ -25,7 +29,7 @@ import {
 import { d1ColumnsWith, onboardingTablesWith } from "./kept-where.ts";
 import type { Answer, ProviderReply } from "./model-provider.ts";
 import { alikeReply, intakeAlike } from "./onboarding-team.ts";
-import { signedInApi, unique } from "./sign-in.ts";
+import { outcome, signedInApi, unique } from "./sign-in.ts";
 import { wordFile } from "./word-file.ts";
 
 // A document shared in the onboarding, whose reading goes when an admin
@@ -359,6 +363,17 @@ const drawAll = async (ids: Ids, tool: string, word: string) => {
     .includes(word);
 };
 
+/** Gives the brain team `ids`, as the alarm would once others due before it are given. */
+const intakeOf = async (ids: Ids): Promise<void> => {
+  for (let round = 0; round < 5; round += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- one team at a time, as the alarm gives them
+    const given = await intakeAlike();
+    if (given === `brain:${ids.team}` || given === null) {
+      return;
+    }
+  }
+};
+
 /** Where `word` is left: the store's tables, core's database, the audit log, interview turns, and what the admin and the brain show. */
 const leftOf = async (admin: SessionApi, ids: Ids, word: string) => {
   const store = onboardingStore(env);
@@ -543,7 +558,7 @@ describe(
       const ids = await team({ seven: true });
       await sevenTold(ids);
       await drawAll(ids, word, word);
-      await intakeAlike();
+      await intakeOf(ids);
       const standing = async (): Promise<number> => {
         const drawings = await onboardingStore(env).standingDrawings();
         return drawings.filter(({ team: of }) => of === ids.team).length;
@@ -562,6 +577,55 @@ describe(
       }).toStrictEqual({
         before: { standing: 1, page: ["handling new tickets"] },
         after: { standing: 0, page: [] },
+      });
+    });
+
+    it("takes a drawing out of the new Brain on the removal's retry when taking it out failed the first time, before the reading goes", async () => {
+      const { api: admin } = await signedInApi(idp, "admin");
+      const member = await signedInApi(idp, "user");
+      const word = sentinelOf();
+      const id = await share(admin, `removed-${unique()}.docx`, word);
+      const ids = await team({ seven: true });
+      await sevenTold(ids);
+      await drawAll(ids, word, word);
+      await intakeOf(ids);
+      // Handed to the new Brain, as core's clock does.
+      await allEvents();
+      await relayHandOvers(env);
+      await workBrain(env, new Date(), producersOf(env));
+      const drawingsFound = async (): Promise<number> => {
+        const { items } = await recallAs(env, member.userId, {
+          question: "ticket",
+          budget: { tokens: 2000 },
+          personal: true,
+        });
+        return items.filter(({ source }) => source.producer === "drawing")
+          .length;
+      };
+      const before = await drawingsFound();
+      // The Brain can't take it out of use the first time: the removal
+      // fails, with the reading still there; the retry finds it again.
+      const restore = await setObjectEnv(onboardingStore(env), {
+        BRAIN_STORE: removalsFailingOnce().BRAIN_STORE,
+      });
+      let first: string;
+      try {
+        first = await outcome(admin.onboarding.removeDocument(id));
+        await admin.onboarding.removeDocument(id);
+      } finally {
+        await restore();
+      }
+      const documents = await admin.onboarding.documents();
+      expect({
+        before: before > 0,
+        first: first === "removed" ? "removed" : "refused",
+        reading: documents.some((document) => document.id === id),
+        after: await drawingsFound(),
+      }).toStrictEqual({
+        before: true,
+        first: "refused",
+        reading: false,
+        after: 0,
       });
     });
 
