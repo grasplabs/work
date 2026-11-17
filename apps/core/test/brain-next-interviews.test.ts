@@ -77,7 +77,8 @@ import {
 } from "./sign-in.ts";
 
 // Each interview in the new Brain, readable by the person interviewed
-// alone (GRA-1790), and the team claims five or more of them back,
+// alone (GRA-1790), and the team claims of how they work, from the first
+// who told it (GRA-1987),
 // readable by their team (GRA-1741): from the threat model on GRA-1790.
 // The ways it can fail, tried here:
 //
@@ -1208,7 +1209,7 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
   /**
    * A team through the onboarding, its tickets drawn, Max signed in to his
    * account: seven who told their own work (Sam too, a step of his own)
-   * unless `small`, and then six.
+   * unless `small`, and then six; eight with `eight`.
    */
   const drawnTeam = async ({
     small = false,
@@ -1248,18 +1249,9 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
     return { ids, max };
   };
 
-  it("stand only at five backers, for every current member of the company and nobody else, and are erased for good when a withdrawal leaves four", async () => {
+  it("stand for every current member of the company and nobody else, and are erased for good when one they rest on withdraws", async () => {
     const { ids, max } = await drawnTeam();
-    const [, ...fourOfThem] = zendeskSaid;
-    const fourCite = "Zendesk sends the tickets on.";
-    await intakeOf(ids, [
-      zendeskClaim,
-      {
-        kind: "tool",
-        text: fourCite,
-        cites: ["Tickets arrive in Zendesk.", ...fourOfThem.slice(0, 1)],
-      },
-    ]);
+    await intakeOf(ids, [zendeskClaim]);
     await handOverNow();
     // A member of no team on the list reads it as the team does (GRA-1748);
     // someone an admin removed, and someone who never was a member (a
@@ -1273,7 +1265,6 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
     expect({
       max: await recalled(max, "Zendesk", "claim"),
       listed: listed.map(({ versions }) => versions),
-      fourCite: await recalled(max, "sends", "claim"),
       outsider: await recalled(outsider, "Zendesk", "claim"),
       outsiderListed: outsiderClaims.map(({ versions }) => versions),
       former: await readByNonMember(former),
@@ -1281,13 +1272,12 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
     }).toStrictEqual({
       max: [zendeskClaim.text],
       listed: [[1]],
-      fourCite: [],
       outsider: [zendeskClaim.text],
       outsiderListed: [[1]],
       former: "refused",
       stranger: "refused",
     });
-    // Pim withdraws: the claim rests on four now. Core's clock erases it:
+    // Pim, whom it rests on, withdraws. Core's clock erases it:
     // no recall, no listing, no version of it, as history or otherwise.
     await onLink({ action: "withdraw", ...(await openLink(ids.pim)) });
     await eraseOwedOnboardingSources(env);
@@ -1310,16 +1300,6 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
       versions: [],
       owed: [],
     });
-  });
-
-  it("are none in a team of fewer than two more interviewed than the floor, whatever backs them", async () => {
-    const { ids, max } = await drawnTeam({ small: true });
-    await intakeOf(ids, [zendeskClaim]);
-    await handOverNow();
-    expect({
-      max: await recalled(max, "Zendesk", "claim"),
-      listed: await claimsOf(max),
-    }).toStrictEqual({ max: [], listed: [] });
   });
 
   it("are not noted from an intake whose backers changed while it ran", async () => {
@@ -1429,23 +1409,23 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
   const eightBut = (left?: Key): Key[] =>
     [...everyone, "sam" as const, "ada" as const].filter((key) => key !== left);
 
-  it("are erased when someone moving to another team leaves six interviewed, and form anew under a new key when seven are back", async () => {
+  it("are erased when one they rest on moves to another team, and form anew under a new key once they are back", async () => {
     const { ids, max } = await drawnTeam();
     await intakeOf(ids, [zendeskClaim]);
     await handOverNow();
     const [first] = await claimsOf(max);
     const store = onboardingStore(env);
-    // Rik, who backs no claim, moves to Billing: Ops has six who told.
-    await store.saveRoster(rosterWith(ids, { moved: ["rik"] }), {
+    // Pim, whom the claim rests on, moves to Billing.
+    await store.saveRoster(rosterWith(ids, { moved: ["pim"] }), {
       type: "system",
     });
     await eraseOwedOnboardingSources(env);
-    const whileSix = {
+    const whileAway = {
       recalled: await recalled(max, "Zendesk", "claim"),
       listed: await claimsOf(max),
     };
-    // Back in Ops: seven again. The next intake (Sam agreeing to more,
-    // the work drawn again) puts the claim together anew.
+    // Back in Ops, where he told it (GRA-1984). The next intake (Sam
+    // agreeing to more, the work drawn again) puts the claim together anew.
     await store.saveRoster(rosterWith(ids), { type: "system" });
     await agree(
       ids.sam,
@@ -1464,24 +1444,24 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
     const [again] = await claimsOf(max);
     expect({
       first: first === undefined,
-      whileSix,
+      whileAway,
       again: await recalled(max, "Zendesk", "claim"),
       newKey: again !== undefined && again.source.id !== first?.source.id,
     }).toStrictEqual({
       first: false,
-      whileSix: { recalled: [], listed: [] },
+      whileAway: { recalled: [], listed: [] },
       again: [zendeskClaim.text],
       newKey: true,
     });
   });
 
-  it("are erased when one who told becomes the team's lead and leaves six", async () => {
+  it("are erased when one they rest on becomes the team's lead", async () => {
     const { ids, max } = await drawnTeam();
     await intakeOf(ids, [zendeskClaim]);
     await handOverNow();
     const before = await recalled(max, "Zendesk", "claim");
-    // Rik leads Ops now: a lead's own work isn't told, so six told.
-    await onboardingStore(env).saveRoster(rosterWith(ids, { lead: "rik" }), {
+    // Pim leads Ops now: a lead's own work isn't told.
+    await onboardingStore(env).saveRoster(rosterWith(ids, { lead: "pim" }), {
       type: "system",
     });
     await eraseOwedOnboardingSources(env);
@@ -1508,7 +1488,7 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
     return { recalled: read, listed };
   };
 
-  it("are unreadable the moment an edit leaves four behind one, while an intake holds the Brain's work", async () => {
+  it("are unreadable the moment an edit takes back what one rests on, while an intake holds the Brain's work", async () => {
     const { ids, max } = await drawnTeam({ eight: true });
     await intakeOf(ids, [zendeskClaim]);
     await handOverNow();
@@ -1607,7 +1587,7 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
     ["is given a new start by staff", "new_start"],
     ["is erased by core", "erased"],
   ] as const)(
-    "are unreadable the moment a backer %s and leaves four behind one, while an intake holds the Brain's work",
+    "are unreadable the moment a backer %s, while an intake holds the Brain's work",
     async (_, change) => {
       const { ids, max } = await drawnTeam({ eight: true });
       await intakeOf(ids, [zendeskClaim]);
@@ -1656,8 +1636,7 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
   );
 
   it.each([
-    // Seven still interviewed, four behind the claim: only the recount
-    // hides it.
+    // The team still shows its work: only the recount hides it.
     ["a backer", ["pim"]],
     // Two in one save: everyone it takes off the list erased without a
     // recount each, then one recount for them all.
@@ -1699,11 +1678,11 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
     }
   );
 
-  it("are unreadable the moment a move leaves six interviewed, before core's clock erases them", async () => {
+  it("are unreadable the moment a move takes one they rest on to another team, before core's clock erases them", async () => {
     const { ids, max } = await drawnTeam();
     await intakeOf(ids, [zendeskClaim]);
     await handOverNow();
-    await onboardingStore(env).saveRoster(rosterWith(ids, { moved: ["rik"] }), {
+    await onboardingStore(env).saveRoster(rosterWith(ids, { moved: ["pim"] }), {
       type: "system",
     });
     await expect(readableBy(max)).resolves.toStrictEqual({
@@ -1712,18 +1691,17 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
     });
   });
 
-  it("are unreadable the moment one who backs none of them withdraws and leaves six, before core's clock", async () => {
+  it("stay readable when one who backs none of them withdraws", async () => {
     const { ids, max } = await drawnTeam();
     await intakeOf(ids, [zendeskClaim]);
     await handOverNow();
     await onLink({ action: "withdraw", ...(await openLink(ids.rik)) });
-    await expect(readableBy(max)).resolves.toStrictEqual({
-      recalled: [],
-      listed: [],
-    });
+    await expect(recalled(max, "Zendesk", "claim")).resolves.toStrictEqual([
+      zendeskClaim.text,
+    ]);
   });
 
-  it("are unreadable the moment a backer withdraws and leaves four behind one, in a team still of seven, before core's clock", async () => {
+  it("are unreadable the moment a backer withdraws, in a team that still shows its work, before core's clock", async () => {
     const { ids, max } = await drawnTeam({ eight: true });
     await intakeOf(ids, [zendeskClaim]);
     await handOverNow();
@@ -1736,7 +1714,7 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
     });
   });
 
-  it("are unreadable to a read already under way when a backer's withdrawal leaves four behind one: its reader decided before, its statement run after, the request's own erasures failing", async () => {
+  it("are unreadable to a read already under way when a backer withdraws: its reader decided before, its statement run after, the request's own erasures failing", async () => {
     const { ids, max } = await drawnTeam({ eight: true });
     await intakeOf(ids, [zendeskClaim]);
     await handOverNow();
@@ -1771,47 +1749,53 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
     });
   });
 
-  it.each([
-    [
-      "backs one by four",
-      () => {
-        const [, ...rest] = zendeskSaid;
-        return [
-          {
-            ...zendeskClaim,
-            cites: ["Tickets arrive in Zendesk.", ...rest.slice(0, 1)],
-          },
-        ];
-      },
-    ],
-    ["no longer makes one", () => []],
-  ] as const)(
-    "are unreadable the moment a later intake %s, before core's clock",
-    async (_, claims) => {
-      const { ids, max } = await drawnTeam();
-      await intakeOf(ids, [zendeskClaim]);
-      await handOverNow();
-      const before = await recalled(max, "Zendesk", "claim");
-      await dueAgain(ids);
-      await intakeOf(ids, claims());
-      expect({
-        before,
-        afterIntake: await recalled(max, "Zendesk", "claim"),
-        listed: await claimsOf(max),
-      }).toStrictEqual({
-        before: [zendeskClaim.text],
-        afterIntake: [],
-        listed: [],
-      });
-    }
-  );
+  it("are unreadable the moment a later intake no longer makes one, before core's clock", async () => {
+    const { ids, max } = await drawnTeam();
+    await intakeOf(ids, [zendeskClaim]);
+    await handOverNow();
+    const before = await recalled(max, "Zendesk", "claim");
+    await dueAgain(ids);
+    await intakeOf(ids, []);
+    expect({
+      before,
+      afterIntake: await recalled(max, "Zendesk", "claim"),
+      listed: await claimsOf(max),
+    }).toStrictEqual({
+      before: [zendeskClaim.text],
+      afterIntake: [],
+      listed: [],
+    });
+  });
 
-  it("are unreadable the moment an intake returns that backs one by four while someone's interview moved under it, before core's clock", async () => {
+  it("stay readable, under the same key, when a later intake makes one again from fewer people", async () => {
+    const { ids, max } = await drawnTeam();
+    await intakeOf(ids, [zendeskClaim]);
+    await handOverNow();
+    const [first] = await claimsOf(max);
+    await dueAgain(ids);
+    const [, ...rest] = zendeskSaid;
+    await intakeOf(ids, [
+      {
+        ...zendeskClaim,
+        cites: ["Tickets arrive in Zendesk.", ...rest.slice(0, 1)],
+      },
+    ]);
+    const listed = await claimsOf(max);
+    expect({
+      afterIntake: await recalled(max, "Zendesk", "claim"),
+      sameKey: listed.map(({ source }) => source.id === first?.source.id),
+    }).toStrictEqual({
+      afterIntake: [zendeskClaim.text],
+      sameKey: [true],
+    });
+  });
+
+  it("are unreadable the moment one they rest on takes it back while an intake runs, and the intake returning brings nothing of it back, before core's clock", async () => {
     const { ids, max } = await drawnTeam({ eight: true });
     await intakeOf(ids, [zendeskClaim]);
     await handOverNow();
     const before = await recalled(max, "Zendesk", "claim");
-    // The intake puts the claim together from four of its five backers.
+    // The intake puts the claim together from fewer of its backers.
     const [, ...rest] = zendeskSaid;
     const held = await heldIntake(ids, [
       {
@@ -1819,11 +1803,14 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
         cites: ["Tickets arrive in Zendesk.", ...rest.slice(0, 1)],
       },
     ]);
-    // Rik, who backs none of it, takes back what he approved while it runs:
-    // his interview moved under the intake, so it notes no claims.
+    // Pim, whom it rests on, takes back what backed it while it runs: his
+    // interview moved under the intake, so it notes no claims.
     await agree(
-      ids.rik,
-      [{ ...fact("r1", "step", "Checks the queue at noon."), out: true }],
+      ids.pim,
+      [
+        fact("p1", "step", "Tags the ticket."),
+        { ...fact("p2", "system", "Tickets arrive in Zendesk."), out: true },
+      ],
       1
     );
     const during = await recalled(max, "Zendesk", "claim");
@@ -1834,7 +1821,8 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
       afterIntake: await recalled(max, "Zendesk", "claim"),
     }).toStrictEqual({
       before: [zendeskClaim.text],
-      during: [zendeskClaim.text],
+      // Gone as his take-back committed.
+      during: [],
       afterIntake: [],
     });
   });
@@ -2261,15 +2249,15 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
     });
   });
 
-  it("are never shown again under their old key when the team goes under seven and back before core's clock", async () => {
+  it("are never shown again under their old key when one they rest on moves away and back before core's clock", async () => {
     const { ids, max } = await drawnTeam();
     await intakeOf(ids, [zendeskClaim]);
     await handOverNow();
     const [first] = await claimsOf(max);
-    // The company's admin moves Rik out and back, as two saves.
+    // The company's admin moves Pim out and back, as two saves.
     const admin = await signedInApi(idp, "admin");
     await admin.api.onboarding.confirmRoster(
-      rosterWith(ids, { moved: ["rik"] })
+      rosterWith(ids, { moved: ["pim"] })
     );
     await admin.api.onboarding.confirmRoster(rosterWith(ids));
     await handOverNow();
@@ -2318,13 +2306,13 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
     });
   });
 
-  it("are never readable again under their old key when the team goes under seven and back while their erasure fails", async () => {
+  it("are never readable again under their old key when one they rest on moves away and back while their erasure fails", async () => {
     const { ids, max } = await drawnTeam();
     await intakeOf(ids, [zendeskClaim]);
     await handOverNow();
     const [first] = await claimsOf(max);
     const store = onboardingStore(env);
-    await store.saveRoster(rosterWith(ids, { moved: ["rik"] }), {
+    await store.saveRoster(rosterWith(ids, { moved: ["pim"] }), {
       type: "system",
     });
     await eraseOwedOnboardingSources(erasuresFailing());
@@ -2415,8 +2403,8 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
         async (file) => (await brainExportFile(env, { id, file })) ?? ""
       )
     );
-    // The team goes under seven: the claim is erased.
-    await onboardingStore(env).saveRoster(rosterWith(ids, { moved: ["rik"] }), {
+    // Pim, whom the claim rests on, moves away: it is erased.
+    await onboardingStore(env).saveRoster(rosterWith(ids, { moved: ["pim"] }), {
       type: "system",
     });
     await eraseOwedOnboardingSources(env);
@@ -2562,17 +2550,6 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
     }).toStrictEqual({ member: true, appOrWorkflow: 0, chatCode: 0 });
   });
 
-  it("give no drawing of a team with fewer than seven who tell their own work, as for its claims", async () => {
-    const { ids, max } = await drawnTeam({ small: true });
-    await intakeOf(ids, [zendeskClaim]);
-    await handOverNow();
-    expect({
-      claims: await recalled(max, "Zendesk", "claim"),
-      drawings: await recalled(max, "ticket", "drawing"),
-      page: await workOnPage(ids),
-    }).toStrictEqual({ claims: [], drawings: [], page: [] });
-  });
-
   it("take a drawing out as a move leaves its team six who tell, though everyone it rests on still agrees", async () => {
     const { ids, max } = await drawnTeam();
     await intakeOf(ids, [zendeskClaim]);
@@ -2619,7 +2596,7 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
     };
     const before = await readNow();
     // Max, whom the drawing was drawn from and who backs the claim, moves
-    // to Billing: Ops still has seven who tell. What rests on him in Ops
+    // to Billing: Ops still has others who tell. What rests on him in Ops
     // rests on him no more (GRA-1748).
     await savedRoster(ids, [...everyone, "sam", "ada"], (roster) => ({
       teams: [
@@ -2654,7 +2631,7 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
     await intakeOf(ids, [zendeskClaim]);
     await handOverNow();
     const keys: Key[] = [...everyone, "sam", "ada"];
-    // Max moves to Billing, and stays: Ops still has seven who tell.
+    // Max moves to Billing, and stays: Ops still has others who tell.
     await savedRoster(ids, keys, movedToBilling(ids, [ids.max]));
     const moved = await workOnPage(ids);
     // The work is due to be drawn again, without him; then the team's

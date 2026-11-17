@@ -647,8 +647,8 @@ describe("what a team said, put together", { timeout: 120_000 }, () => {
   });
 
   it("shows no claim owed its erasure on the page or in a chat's thinking, before core's clock finishes it", async () => {
-    // Eight tell: Pim leaving takes the claim under five of its backers,
-    // and leaves the team seven.
+    // Eight tell: Pim leaving takes down the claim resting on him, and
+    // leaves the team seven.
     const ids = await eightTeam();
     await mapped(ids);
     await eightTold(ids);
@@ -1066,8 +1066,8 @@ describe("what a team said, put together", { timeout: 120_000 }, () => {
     await intake(ids, [zendeskClaim]);
     const member = await signedInApi(idp, "user");
     const before = await statementsFor(member.api, ids);
-    // Pim moves to Billing: Ops still has seven who told, but four of its
-    // people now make the claim.
+    // Pim moves to Billing: Ops still has seven who told, but the claim
+    // rested on him.
     const roster = rosterOf(ids, keys);
     const billing = `${ids.team}-billing`;
     await onboardingStore(env).saveRoster(

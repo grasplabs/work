@@ -62,7 +62,6 @@ import { sayOnLink, stillKept } from "./spoken.ts";
 // - D3: a copy left open saving it back (also interview-links.test.ts).
 // - D4: Stephen's lines from it, kept for their sound.
 // - L7: someone taken off the list leaving what they said behind.
-// - W5: a team falling under five people in the brain by a delete.
 // - W7: the deletion in the audit log with who, or with their words, or
 //   a delete from the link there at all: its moment would tell the admin
 //   which lead it was.

@@ -41,10 +41,9 @@ import {
 // can fail, tried here:
 //
 // - The admin told who said which way, or anyone's name.
-// - A way fewer than five people told shown at all (GRA-1084): it would be
-//   one person's way of doing it. Each way must rest on five or more the
-//   brain's intake checked, in the drawing as it stands, the model's word
-//   never enough.
+// - A way nobody is checked to have told shown at all (GRA-1084,
+//   GRA-1987). Each way must rest on someone the brain's intake checked,
+//   in the drawing as it stands, the model's word never enough.
 // - Something settled that needs no settling, or by anyone but an admin
 //   (Grasp's staff are admins, and read and settle as one).
 // - A settlement made without a trace in the audit log.
@@ -270,7 +269,7 @@ const onLinkOf = async (person: string, action: string) => {
 describe("what needs the admin", { timeout: 120_000 }, () => {
   beforeEach(holdAlarm);
 
-  it("is a step told two ways that nobody could explain, by five or more each, never who told which or anyone's name, and keeps how the admin settled it", async () => {
+  it("is a step told two ways that nobody could explain, each checked to be told, never who told which or anyone's name, and keeps how the admin settled it", async () => {
     const ids = await team();
     const { tickets } = await drawn(ids);
     const { api } = await signedInApi(idp, "admin");
@@ -398,27 +397,15 @@ describe("what needs the admin", { timeout: 120_000 }, () => {
     }).toStrictEqual({ withdrawn: [], deleted: [] });
   });
 
-  it("shows no difference whose other way fewer than five are checked to tell, the drawing's word for five notwithstanding", async () => {
+  it("shows no difference whose other way nobody is checked to tell, the drawing's word notwithstanding", async () => {
     const ids = await team();
-    // One of the five says something else, as the check finds.
+    // Nobody's facts say the other way, as the check finds.
     const { tickets } = await drawn(
       ids,
-      (part, facts) =>
-        !part.includes("Salesforce") || facts.includes(salesforceWay),
+      (part) => !part.includes("Salesforce"),
       [salesforceWay]
     );
-    const last = ids.doers.at(-1) ?? "";
-    await agree(last, "step", ["I phone the customer first."], 1);
-    await answering(
-      [ticketsReply(ids)],
-      async () => await onboardingStore(env).drawNext()
-    );
-    await intake(
-      ids,
-      [],
-      (part, facts) =>
-        !part.includes("Salesforce") || facts.includes(salesforceWay)
-    );
+    await intake(ids, [], (part) => !part.includes("Salesforce"));
     const { api } = await signedInApi(idp, "admin");
     const review = await api.onboarding.review();
     expect({

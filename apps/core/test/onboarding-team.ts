@@ -400,9 +400,7 @@ export const mapped = async (
 /**
  * Noor, Pim and Rik agree to a step each, and Noor and Pim that tickets
  * arrive in Zendesk and wait for the customer: with Max, Mia and Mo they
- * make six who tell their own work, one more than the five a team needs
- * before any of it reaches the brain (`minTeamShown`; the lead isn't
- * counted), so one interview going leaves the rest there.
+ * make six who tell their own work (the lead isn't counted).
  */
 export const othersTold = async (ids: Ids) => {
   await agree(ids.noor, [
@@ -451,8 +449,7 @@ export const told = async (ids: Ids) => {
 
 /**
  * The team with Sam in it too: with him seven tell their own work (the
- * lead isn't counted), as a team needs before it has any claims at all
- * (`teamMayClaim`), so the Brain and its page hold the team's claims.
+ * lead isn't counted), so the Brain and its page hold the team's claims.
  */
 export const sevenTeam = async () =>
   await team(["lea", "max", "mia", "mo", "noor", "pim", "rik", "sam"]);

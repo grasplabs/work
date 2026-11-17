@@ -348,7 +348,7 @@ describe(
     it("counts a week's interviews only of people still taking part, and never moves a week a withdrawal took below five into another", async () => {
       const store = onboardingStore(env);
       // Eight tell their own work, and Lea leads: one of them and Lea
-      // going still leaves seven who tell, so the team's interviews show.
+      // going still leaves others who tell, so the team's interviews show.
       const ids = await eightTeam();
       await mapped(ids);
       await sevenTold(ids);

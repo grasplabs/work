@@ -7320,7 +7320,9 @@ export class Onboarding extends DurableObject<Env> {
    * The one rule for whether a claim of `team` resting on `backers` stands
    * now (GRA-1741): its team may have its results shown
    * (`#teamShowsResults`), and every one of `backers` backs it now
-   * (`#restsWhole`, as for a drawing, GRA-1987). Both noting
+   * (`#restsWhole`, as for a drawing, GRA-1987), none of them its lead: a
+   * lead's facts make no claim (`#tellers`), so one who becomes the lead
+   * takes down what rests on them. Both noting
    * a claim (`#noteClaims`) and the recount (`#recountStanding`) ask it, so
    * neither keeps what the other drops. A recount over many claims passes
    * the list and the agreed people read once, and a map of what each team
@@ -7339,8 +7341,10 @@ export class Onboarding extends DurableObject<Env> {
       mayClaim?: Map<string, boolean>;
     } = {}
   ): boolean {
+    const lead = roster?.teams.find(({ id }) => id === team)?.lead ?? null;
     return (
       this.#teamShowsResults(team, { roster, mayClaim }) &&
+      (lead === null || !backers.includes(lead)) &&
       this.#restsWhole(team, backers, { roster, agreed })
     );
   }
