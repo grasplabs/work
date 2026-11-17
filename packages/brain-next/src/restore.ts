@@ -59,6 +59,7 @@ import type {
   MemoryLine,
   RemovalLine,
 } from "./exports.ts";
+import { extractorRowOf } from "./extractors.ts";
 import {
   fileKeyOf,
   hashOf,
@@ -393,13 +394,15 @@ const addOf = (line: MemoryLine): unknown => ({
 /**
  * Whether `line` is a memory an add would take as one group's (the add's
  * own rules: contract.ts `newMemoriesSchema` and its plan), resting on a
- * version or a writer, never both.
+ * version or a writer, never both; drawn by extraction from a version
+ * alone.
  */
 const isMemoryToRestore = (line: MemoryLine): boolean => {
   if (
     line.access.kind !== "audience" ||
     (line.writer === null) === (line.source === null) ||
-    (line.source === null) !== (line.version === null)
+    (line.source === null) !== (line.version === null) ||
+    (line.source === null && (line.extractor ?? null) !== null)
   ) {
     return false;
   }
@@ -793,8 +796,9 @@ const restoreMemory = async (
         `INSERT INTO memories (id, entity, attribute, object, value, value_key,
           one_value, type, statement, quote, source, version, subject, writer,
           writer_subject, lineage, lineage_order, speaker, valid_from,
-          valid_until, learned_at, retired_at, retired_change, readers)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          valid_until, learned_at, retired_at, retired_change, readers,
+          extractor)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         RETURNING row`,
         line.id,
         about,
@@ -819,7 +823,10 @@ const restoreMemory = async (
         line.learnedAt,
         line.retiredAt,
         line.retiredChange ?? null,
-        readerSetKeyOf(line.access)
+        readerSetKeyOf(line.access),
+        line.extractor === undefined || line.extractor === null
+          ? null
+          : extractorRowOf(sql, line.extractor)
       )
       .one();
     indexMemoryWords(sql, row, line.statement, new Map());

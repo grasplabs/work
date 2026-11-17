@@ -22,6 +22,7 @@ import type {
   ExportStatus,
 } from "./contract.ts";
 import { subjectOf } from "./erasure.ts";
+import { extractorOfColumns, extractorSchema } from "./extractors.ts";
 import { fileKeyOf, hashOf } from "./files.ts";
 import { unerasedSql, writerErasedAfterSql } from "./memories.ts";
 import { accessOfKey, readerSetKeyOf } from "./reader-sets.ts";
@@ -318,6 +319,13 @@ export const memoryLineSchema = z.strictObject({
    */
   retiredChange: z.string().nullable().optional(),
   access: accessSchema,
+  /**
+   * The calls that drew it from its source (extractors.ts): null for a
+   * memory extraction didn't draw. In the company's export alone, never in
+   * a person's own (nothing of it is shown to a member); absent from an
+   * export an older release wrote, which kept none.
+   */
+  extractor: extractorSchema.nullable().optional(),
 });
 export type MemoryLine = z.infer<typeof memoryLineSchema>;
 
@@ -727,6 +735,8 @@ const memoryPhaseSqlOf = (
   CASE WHEN m.retired_at <= ?4 THEN m.retired_at END AS retired_at,
   CASE WHEN m.retired_at <= ?4 THEN m.retired_change END AS retired_change,
   m.readers AS readers,
+  drawn.read_prompt AS read_prompt, drawn.read_model AS read_model,
+  drawn.check_prompt AS check_prompt, drawn.check_model AS check_model,
   (SELECT json_group_array(json_array(named.id, named.kind))
     FROM entities AS named WHERE named.row IN (m.entity, m.object)) AS entities,
   (SELECT json_group_array(json_array(named.id, entity_names.type, entity_names.value))
@@ -735,6 +745,7 @@ const memoryPhaseSqlOf = (
 FROM memories AS m
 JOIN entities AS about ON about.row = m.entity
 LEFT JOIN entities AS object ON object.row = m.object
+LEFT JOIN extractors AS drawn ON drawn.row = m.extractor
 WHERE m.row > ?1 AND ${exportedMemorySql(scope, "m")}
 ORDER BY m.row
 LIMIT ?3`,
@@ -880,6 +891,16 @@ const memoriesLineOf = (
       retiredAt: row.retired_at,
       retiredChange: row.retired_change,
       access: exportedAccessOf(scope, row.readers),
+      ...(scope.kind === "company"
+        ? {
+            extractor: extractorOfColumns({
+              read_prompt: row.read_prompt ?? null,
+              read_model: row.read_model ?? null,
+              check_prompt: row.check_prompt ?? null,
+              check_model: row.check_model ?? null,
+            }),
+          }
+        : {}),
     });
     const subject = textOrNull(row.subject);
     const writerSubject = textOrNull(row.writer_subject);

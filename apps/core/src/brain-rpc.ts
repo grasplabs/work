@@ -86,14 +86,15 @@ import { listWorkflowResources } from "./workflow-resources.ts";
 // |                    | for everyone signed in; the roster's teams taking part,  |
 // |                    | for admins                                               |
 // | teams              | the roster (admins), the teams the kickoff named (with   |
-// |                    | their sizes, for everyone signed in), then the brain's   |
-// |                    | team records; a team the kickoff named joins the team of |
-// |                    | its name                                                 |
+// |                    | their sizes, for everyone signed in), the confirmed      |
+// |                    | roster's teams taking part (everyone else), then the     |
+// |                    | brain's team records; a team the kickoff named joins the |
+// |                    | team of its name                                         |
 // | sources            | the kickoff, the roster, each team lead's finished       |
 // |                    | interview and the documents shared in the onboarding     |
-// |                    | (admins); each team's interviews, once the brain holds   |
-// |                    | what they learned, for whoever reads records naming them |
-// |                    | (never with a transcript)                                |
+// |                    | (admins); each team's interviews, while its results may  |
+// |                    | show, for whoever reads what names them (never with a    |
+// |                    | transcript)                                              |
 // | tools              | the tools those documents name (admins)                  |
 // | connections        | the catalog's offered entries and the person's           |
 // |                    | connections                                              |
@@ -191,7 +192,7 @@ interface OnboardingFacts {
   leadsTalked: { team: string; person: string; day: string }[];
   /** The documents shared in the onboarding, newest first. */
   documents: OnboardingDocument[];
-  /** Each team's interviews the brain holds what they learned of. */
+  /** Each team's interviews, while its results may show. */
   interviews: CameIn[];
 }
 
@@ -202,9 +203,9 @@ interface CameIn {
 }
 
 /**
- * Each team's interviews the brain holds what they learned of, as the one
- * source its statements and drawings name (onboarding/brain-intake.ts):
- * how many of its people agreed, and the week the first did, never who.
+ * Each team's interviews while its results may show, as the one source
+ * its claims and drawings name (onboarding/brain-intake.ts): how many of
+ * its people agreed, and the week the first did, never who.
  */
 const teamInterviews = async (env: Env): Promise<CameIn[]> => {
   const teams = await onboardingStore(env).interviewSources();
@@ -800,37 +801,27 @@ const withKickoffTeams = (
 };
 
 /**
- * The onboarding's teams (the roster's for an admin, and the kickoff's),
- * with what the records added for each, then the records' own. A value
- * for a team the person can't see is left out. A roster team's record
- * (onboarding/brain-intake.ts) is that team, for whoever can't read the
- * roster: for an admin, the roster's team, which is newer, with what was
- * added for it.
+ * The onboarding's teams (the roster's, and the kickoff's), with what the
+ * records added for each, then the records' own. A value for a team the
+ * person can't see is left out.
  */
 const teamsOf = (
   roster: Team[],
   kickoff: Team[],
   records: HeldRecords
 ): Team[] => {
-  const byId = new Map([...roster, ...kickoff].map((team) => [team.id, team]));
-  const own = records.teams.filter((team) => {
-    const onboarding = byId.get(team.id);
-    onboarding?.counts.push(...team.counts);
-    onboarding?.stakeholders.push(...team.stakeholders);
-    return onboarding === undefined;
-  });
-  // Values for a team record were joined to it already; these are for the
-  // onboarding's teams.
-  for (const team of own) {
-    byId.set(team.id, team);
-  }
+  // A team record never takes an onboarding team's id (`team-<id>`, an
+  // `onb-` one): `brain.addRecords` refuses both.
+  const byId = new Map(
+    [...roster, ...kickoff, ...records.teams].map((team) => [team.id, team])
+  );
   for (const { teamId, value } of records.teamCounts) {
     byId.get(teamId)?.counts.push(value);
   }
   for (const { teamId, value } of records.stakeholders) {
     byId.get(teamId)?.stakeholders.push(value);
   }
-  return withKickoffTeams(roster, kickoff, own);
+  return withKickoffTeams(roster, kickoff, records.teams);
 };
 
 /**

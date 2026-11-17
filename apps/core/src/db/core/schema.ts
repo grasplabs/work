@@ -2634,6 +2634,34 @@ export const runBrainVersions = sqliteTable(
 );
 
 /**
+ * Every memory of the Brain's shared store a run's entity reads rested on
+ * (workflows/run-evidence.ts, GRA-1985): the memories of a card or a page
+ * of entities, the ones that named them and made them seen, by id, with
+ * the permission to read the Brain it came through: identifiers only, no
+ * person's. An id is never used again, so a row means the same memory for
+ * as long as it is kept. It only grows while the run lives, and before
+ * the run's next model, connection or App call, decision or output, the
+ * host checks the company may still read them all and their writers
+ * haven't retired them: one a person's erasure took, retired or taken
+ * back, or whose source was erased or narrowed, refuses the run from then
+ * on. Goes with the run's details.
+ */
+export const runBrainMemories = sqliteTable(
+  "run_brain_memories",
+  {
+    runId: text("run_id").notNull(),
+    memoryId: text("memory_id").notNull(),
+    permissionId: text("permission_id").notNull(),
+    recordedAt: timestamp("recorded_at").notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.runId, table.memoryId, table.permissionId],
+    }),
+  ]
+);
+
+/**
  * Nothing writes or reads it. Kept until GRA-1589 drops it, so a core
  * still serving during a rollout keeps working (expand, then contract).
  */
@@ -3372,6 +3400,22 @@ export const sharedMailboxPointers = sqliteTable("shared_mailbox_pointers", {
   changedBy: text("changed_by").notNull(),
   changedAt: timestamp("changed_at").notNull(),
 });
+
+/**
+ * Who may read in the Brain what agents read through a shared connection
+ * (connection-audiences.ts, GRA-1831): one row per shared connection an
+ * admin chose an audience for, by connect's connection ID. `team_id` is
+ * the one team; null is everyone in the company. No row is nobody.
+ */
+export const connectionBrainAudiences = sqliteTable(
+  "connection_brain_audiences",
+  {
+    connectionId: text("connection_id").primaryKey(),
+    teamId: text("team_id"),
+    changedBy: text("changed_by").notNull(),
+    changedAt: timestamp("changed_at").notNull(),
+  }
+);
 
 /**
  * The company's agents an admin made or changed (agents.ts): one row per

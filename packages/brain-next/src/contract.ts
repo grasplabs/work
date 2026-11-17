@@ -889,14 +889,19 @@ export const modelTroubles = [
 export type ModelTrouble = (typeof modelTroubles)[number];
 
 /**
- * What the host's model answered: its text; that it refused the call as it
- * is (`refused`: the request itself) or that the call ran out of its time
+ * What the host's model answered: its text, and the model that answered
+ * (the host's name for it, as its gateway reports it, which an extracted
+ * memory records); that it refused the call as it is (`refused`: the request itself) or that the call ran out of its time
  * (`timed_out`), which fail the item; or that the queue must pause, why,
  * and for how many seconds where the provider said, with no item's attempt
  * spent. A call that throws instead is taken for the host out of reach.
  */
 export const modelReplySchema = z.discriminatedUnion("kind", [
-  z.strictObject({ kind: z.literal("answer"), text: z.string() }),
+  z.strictObject({
+    kind: z.literal("answer"),
+    text: z.string(),
+    model: z.string().min(1),
+  }),
   z.strictObject({ kind: z.literal("refused") }),
   z.strictObject({ kind: z.literal("timed_out") }),
   z.strictObject({
@@ -2502,6 +2507,18 @@ export interface EntityPage {
    * it has no version for. For the host to keep as `restsOn`.
    */
   restsOnWords: MemoryId[];
+  /**
+   * Every memory what it says rests on, the same as `restsOn` and
+   * `restsOnWords` name, each once, with its record as `erasedOf` is
+   * asked by it (`ErasedMemory`): its id, its source's key or writer, when
+   * the store learned it, whose word it is, and its entities' ids. Each is
+   * a memory the reader may read through this answer, so it tells no
+   * reader anything they may not know; for the host to keep with what it
+   * hands on (a run's pins), so what an erasure took of it is told by the
+   * ledger alone (a person's erasure takes a memory by its speaker and
+   * entities); never shown to anyone.
+   */
+  restsOnMemories: ErasedMemory[];
 }
 
 /** An entity to read, for a reader. */
@@ -2719,6 +2736,18 @@ export interface Card {
    * it has no version for. For the host to keep as `restsOn`.
    */
   restsOnWords: MemoryId[];
+  /**
+   * Every memory what it says rests on, the same as `restsOn` and
+   * `restsOnWords` name, each once, with its record as `erasedOf` is
+   * asked by it (`ErasedMemory`): its id, its source's key or writer, when
+   * the store learned it, whose word it is, and its entities' ids. Each is
+   * a memory the reader may read through this answer, so it tells no
+   * reader anything they may not know; for the host to keep with what it
+   * hands on (a run's pins), so what an erasure took of it is told by the
+   * ledger alone (a person's erasure takes a memory by its speaker and
+   * entities); never shown to anyone.
+   */
+  restsOnMemories: ErasedMemory[];
 }
 
 // Memories in a recall's pack (recall-memories.ts, pack.ts).

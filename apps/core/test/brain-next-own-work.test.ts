@@ -138,7 +138,8 @@ describe("a person's own store at work on its own alarm", () => {
     const key = `asks-${crypto.randomUUID()}`;
     const answers: string[] = [];
     behaviours.set(key, async ({ ask }) => {
-      answers.push(await ask({ system: "Say something.", input: key }));
+      const { text } = await ask({ system: "Say something.", input: key });
+      answers.push(text);
     });
     await enqueueOwn(person, key);
     const armed = (await alarmOf(person)) !== null;

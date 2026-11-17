@@ -143,7 +143,7 @@ const land = async (held: Held): Promise<void> => {
 
 const quietAsk = async () => {
   await Promise.resolve();
-  return { kind: "answer" as const, text: "" };
+  return { kind: "answer" as const, text: "", model: "test/model" };
 };
 
 const model: EmbedModel = { name: "erase-test", build: "1" };

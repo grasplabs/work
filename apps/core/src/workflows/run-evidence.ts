@@ -3,7 +3,7 @@ import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import { and, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
-import { runBrainVersions } from "../db/core/schema.ts";
+import { runBrainMemories, runBrainVersions } from "../db/core/schema.ts";
 
 // What a workflow run recalled stays pinned to the run (GRA-299, kept on
 // the new Brain by GRA-1731): every version its recalls handed it, and
@@ -23,6 +23,15 @@ import { runBrainVersions } from "../db/core/schema.ts";
 // again, so a pin means the same text for as long as it is kept; an
 // erased one is no longer readable, and refuses the run as a revoked one
 // does.
+//
+// What its entity reads handed it rests on memories too, and a person's
+// erasure takes memories (their card, their word: GRA-1985), while the
+// documents they were drawn from stay. So every memory an entity read
+// rests on (the Brain's `restsOnMemories`) is kept with the run as well,
+// by id (`runBrainMemories`), and checked the same way: still one the
+// company may read and its writer hasn't retired, as a chat's history
+// checks it. No bound of its own: the check pages through them, 500 a
+// Brain call.
 
 /**
  * Most versions one run keeps (one per version and permission). A recall's
@@ -97,3 +106,37 @@ export const evidenceOf = async (env: Env, runId: string) =>
     })
     .from(runBrainVersions)
     .where(eq(runBrainVersions.runId, runId));
+
+/**
+ * Adds `memories` (of the shared store), what an entity read handed run
+ * `runId` through the permission `permissionId` rests on, to the run's
+ * evidence: never replacing, never narrowing. One statement however many,
+ * the list bound as one JSON value. No memories add nothing.
+ */
+export const recordRunMemories = async (
+  env: Env,
+  runId: string,
+  permissionId: PermissionId,
+  memories: readonly string[]
+): Promise<void> => {
+  const unique = [...new Set(memories)];
+  if (unique.length === 0) {
+    return;
+  }
+  await drizzle(env.DB)
+    .insert(runBrainMemories)
+    .select(
+      sql`SELECT ${runId}, handed.value, ${permissionId}, ${Date.now()} FROM json_each(${JSON.stringify(unique)}) AS handed WHERE true`
+    )
+    .onConflictDoNothing();
+};
+
+/** What run `runId`'s entity reads rested on, as its evidence keeps it. */
+export const memoryEvidenceOf = async (env: Env, runId: string) =>
+  await drizzle(env.DB)
+    .select({
+      memoryId: runBrainMemories.memoryId,
+      permissionId: runBrainMemories.permissionId,
+    })
+    .from(runBrainMemories)
+    .where(eq(runBrainMemories.runId, runId));
