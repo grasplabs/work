@@ -24,17 +24,17 @@ import { claimSource } from "./team-claims.ts";
 //   quotes), readable by every member of the company reading as themselves
 //   (GRA-1748, decided on 16 November; `members`: never code, an App or a
 //   workflow, which could keep a copy past its fall, until the owner says
-//   whether code may copy claims), only while five or more back it and
-//   seven or more of the team were interviewed
-//   (counted by the store, never in the Brain). Noted by an audit event
+//   whether code may copy claims), only while everyone it rests on still
+//   counts and its team's work may show: from the first person who told
+//   it (GRA-1987; counted by the store, never in the Brain). Noted by an audit event
 //   for the hand-over (brain-hand-overs.ts), which reads it here
 //   (`claimOf`) when it runs: a team's, never a person's.
 // - A drawing of a team's piece of work (`drawing:<id>`, GRA-1748): only
-//   the parts five or more of its people told, checked, never who told
-//   what, readable by every member reading as themselves (`members`, as a
-//   claim), only while everyone it rests on still counts, its team has
-//   five or more who tell their own work, and its map stands on its lead's
-//   facts (counted by the store). Noted and read like a claim
+//   the parts its people are checked to have told, never who told what
+//   or how many, readable by every member reading as themselves
+//   (`members`, as a claim), only while everyone it rests on still counts,
+//   its team's work may show, and its map stands on its lead's facts
+//   (counted by the store). Noted and read like a claim
 //   (`drawingOf`); one drawn anew is a new source.
 // - The kickoff (`kickoff:<id>`, GRA-1748): what every member reads of it
 //   (kickoff-company.ts), readable by everyone, under an id minted for
@@ -139,7 +139,8 @@ export const drawingSource = (id: string): SourceRef => ({
  * Drawing `drawing` of `name` (`local` in its people's words) as the new
  * Brain's source text, for recall: written for a model to read, in
  * English like the rest of Grasp's own words to it. Its parts are only
- * what five or more told, with no one's name in them (brain-intake.ts).
+ * what its people are checked to have told, with no one's name in them,
+ * and it says nothing of how many told it (GRA-1987, brain-intake.ts).
  */
 export const drawingText = ({
   name,
@@ -155,7 +156,7 @@ export const drawingText = ({
     return `${at + 1}. ${text}${about.length === 0 ? "" : ` (${about.join(", ")})`}`;
   });
   return [
-    `How a team does ${name}${local === undefined ? "" : ` (${local})`}, as ${drawing.people} of its people told it`,
+    `How a team does ${name}${local === undefined ? "" : ` (${local})`}, as its people told it`,
     drawing.starts === "" ? "" : `What starts one: ${drawing.starts}`,
     steps.length === 0 ? "" : `Its steps:\n${steps.join("\n")}`,
     drawing.waits.length === 0
@@ -166,7 +167,7 @@ export const drawingText = ({
     .join("\n\n");
 };
 
-/** Drawing `id` as the onboarding holds it now: what five or more told of the piece of work; nothing once it no longer stands. */
+/** Drawing `id` as the onboarding holds it now: what its people told of the piece of work; nothing once it no longer stands. */
 export const drawingOf = async (env: Env, id: string): Promise<Handed> => {
   const held = await onboardingStore(env).drawingToHand(id);
   return held === null

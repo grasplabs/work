@@ -419,26 +419,31 @@ const HeldItem = ({
   const shown = useShown(action);
   const { busy, failure, decide } = useDecide(frame.onSaid);
   const who = frame.item.context;
+  const reject: Act = {
+    label: t`Reject`,
+    name: t`Reject ${who}`,
+    onPress: async () => {
+      await decide(declineHeld(action), t`Rejected: ${who}.`);
+    },
+  };
+  // Nobody approves what they can't read: withheld, it is only rejected.
+  const approve: Act[] =
+    action.withheld === undefined
+      ? [
+          {
+            label: t`Approve`,
+            name: t`Approve ${who}`,
+            disabled: shown.unseen,
+            describedBy: shown.unseen ? shown.unseenId : undefined,
+            onPress: async () => {
+              await decide(confirmHeld(action), t`Approved: ${who}.`);
+            },
+          },
+        ]
+      : [];
   return (
     <ItemFrame
-      acts={[
-        {
-          label: t`Approve`,
-          name: t`Approve ${who}`,
-          disabled: shown.unseen,
-          describedBy: shown.unseen ? shown.unseenId : undefined,
-          onPress: async () => {
-            await decide(confirmHeld(action), t`Approved: ${who}.`);
-          },
-        },
-        {
-          label: t`Reject`,
-          name: t`Reject ${who}`,
-          onPress: async () => {
-            await decide(declineHeld(action), t`Rejected: ${who}.`);
-          },
-        },
-      ]}
+      acts={[...approve, reject]}
       busy={busy}
       extra={<HeldWriteDetails action={action} shown={shown} />}
       failure={failure}

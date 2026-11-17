@@ -20,8 +20,9 @@ import { StatementsByKind } from "./brain-article/statements-by-kind.tsx";
 import { statementWords } from "./brain.ts";
 
 // What the Brain page says of what the interviews gave it (GRA-1084): a
-// statement the onboarding gave is a team's claim five or more of its
-// people made, and reads so, never as one person's words; one an admin
+// statement the onboarding gave is a team's claim of how it works
+// (GRA-1987), and reads so, never as one person's words nor with how many
+// told it; one an admin
 // added reads as it always did.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
@@ -80,7 +81,10 @@ const lines = () =>
   [...document.querySelectorAll<HTMLElement>("[data-statement]")].map(
     (line) => ({
       id: line.dataset.statement,
-      basis: line.textContent?.includes("Said by five or more people") ?? false,
+      basis:
+        line.textContent?.includes(
+          "How the team works, as its people told it"
+        ) ?? false,
     })
   );
 
@@ -93,7 +97,7 @@ describe("what the Brain page says of the interviews", () => {
     document.body.replaceChildren();
   });
 
-  it("reads a team's claim as said by five or more people, and an admin's statement as it is", async () => {
+  it("reads a team's claim as how the team works, and an admin's statement as it is", async () => {
     const claim = statement(
       "onb-st-0123456789abcdef0123456789abcdef",
       "Tickets come in through Zendesk."
