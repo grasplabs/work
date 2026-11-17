@@ -2143,6 +2143,10 @@ msgstr "Agent not found"
 msgid "Agents"
 msgstr "Agents"
 
+#: src/agents/agent-share.tsx
+msgid "Agents people made for themselves and offered to the company. Taking one on makes it the company's: it starts reaching nobody, with nothing it may do, until you say so."
+msgstr "Agents people made for themselves and offered to the company. Taking one on makes it the company's: it starts reaching nobody, with nothing it may do, until you say so."
+
 #: src/agents/own-agents-admin.tsx
 msgid "Agents people make for themselves. Only their owner sees and asks them, and they do at most what Grasp may do for that person. You see how many each person has and what they cost, never what they are told."
 msgstr "Agents people make for themselves. Only their owner sees and asks them, and they do at most what Grasp may do for that person. You see how many each person has and what they cost, never what they are told."
@@ -4555,6 +4559,7 @@ msgstr "Decision not found"
 msgid "Decisions"
 msgstr "Decisions"
 
+#: src/agents/agent-share.tsx
 #: src/brain/skills-page.tsx
 #: src/inbox/item-detail.tsx
 msgid "Decline"
@@ -6004,6 +6009,14 @@ msgstr "From"
 msgctxt "where a decision comes from"
 msgid "From"
 msgstr "From"
+
+#: src/agents/agent-share.tsx
+msgid "From {from}"
+msgstr "From {from}"
+
+#: src/agents/agent-share.tsx
+msgid "From {from} · {job}"
+msgstr "From {from} · {job}"
 
 #: src/brain/memories-page.tsx
 msgid "From a chat, version {version}"
@@ -9312,6 +9325,10 @@ msgstr "Noted: {name}. We’ll connect it with you. Meanwhile, check who leads w
 msgid "Noted. We’ll get in touch to put it on the laptops with you."
 msgstr "Noted. We’ll get in touch to put it on the laptops with you."
 
+#: src/agents/agent-share.tsx
+msgid "Nothing beyond Grasp's own rules."
+msgstr "Nothing beyond Grasp's own rules."
+
 #: src/routes/_shell.integrations.index.tsx
 msgid "Nothing connected yet."
 msgstr "Nothing connected yet."
@@ -9546,6 +9563,22 @@ msgstr "Off, nobody can connect it, admins included. Connections already made go
 #: src/connections/offer-switch.tsx
 msgid "Offer {name}"
 msgstr "Offer {name}"
+
+#: src/agents/agent-share.tsx
+msgid "Offer {name} to your company's admins. If they take it on, it becomes one of the company's agents: they choose who may ask it and what it may do, and you no longer change it."
+msgstr "Offer {name} to your company's admins. If they take it on, it becomes one of the company's agents: they choose who may ask it and what it may do, and you no longer change it."
+
+#: src/agents/agent-share.tsx
+msgid "Offer to the company"
+msgstr "Offer to the company"
+
+#: src/agents/agent-share.tsx
+msgid "Offered on {since}. Your company's admins can now read what {name} is told, and may take it on."
+msgstr "Offered on {since}. Your company's admins can now read what {name} is told, and may take it on."
+
+#: src/agents/agent-share.tsx
+msgid "Offered to the company"
+msgstr "Offered to the company"
 
 #: src/connections/offer-switch.tsx
 msgid "Offered to your organization"
@@ -12369,6 +12402,7 @@ msgstr "Share this version instead"
 msgid "Share with a team"
 msgstr "Share with a team"
 
+#: src/agents/agent-share.tsx
 #: src/brain/skills-page.tsx
 msgid "Share with the company"
 msgstr "Share with the company"
@@ -12754,6 +12788,7 @@ msgstr "Someone it is no longer shared with"
 msgid "Someone no longer here"
 msgstr "Someone no longer here"
 
+#: src/agents/agent-share.tsx
 #: src/agents/agent-wakes.tsx
 #: src/agents/own-agents-admin.tsx
 msgid "Someone no longer in the company"
@@ -13235,6 +13270,10 @@ msgstr "Take {itemName} out of {projectName}?"
 msgid "Take {itemName} out of the project"
 msgstr "Take {itemName} out of the project"
 
+#: src/agents/agent-share.tsx
+msgid "Take {name} on for the company"
+msgstr "Take {name} on for the company"
+
 #: src/projects/project-people.tsx
 msgid "Take {name} out of {projectName}?"
 msgstr "Take {name} out of {projectName}?"
@@ -13255,6 +13294,10 @@ msgstr "Take off"
 msgid "Take off the dashboard"
 msgstr "Take off the dashboard"
 
+#: src/agents/agent-share.tsx
+msgid "Take on"
+msgstr "Take on"
+
 #: src/projects/project-people.tsx
 #: src/projects/project-view.tsx
 msgid "Take out"
@@ -13267,6 +13310,10 @@ msgstr "Take out: {text}"
 #: src/onboarding/hr-leads.tsx
 msgid "Take the leads from {name}"
 msgstr "Take the leads from {name}"
+
+#: src/agents/agent-share.tsx
+msgid "Take the offer back"
+msgstr "Take the offer back"
 
 #: src/frame/person-menu.tsx
 msgid "Take the tour"
@@ -13754,12 +13801,12 @@ msgid "The Brain keeps nothing that only you may read yet, so your export holds 
 msgstr "The Brain keeps nothing that only you may read yet, so your export holds nothing."
 
 #: src/brain/sources-page.tsx
-msgid "The Brain keeps one Gmail message or attachment, or one OneNote page, when an agent reads it for you through an account you connected yourself, and keeps it for you alone. Everything else agents search live when you ask, and the Brain keeps nothing of it."
-msgstr "The Brain keeps one Gmail message or attachment, or one OneNote page, when an agent reads it for you through an account you connected yourself, and keeps it for you alone. Everything else agents search live when you ask, and the Brain keeps nothing of it."
+msgid "The Brain keeps one Gmail message or attachment, one OneNote page, or the answer of a read in an app that holds your own things, when an agent reads it for you through an account you connected yourself, and keeps it for you alone. Everything else agents search live when you ask, and the Brain keeps nothing of it."
+msgstr "The Brain keeps one Gmail message or attachment, one OneNote page, or the answer of a read in an app that holds your own things, when an agent reads it for you through an account you connected yourself, and keeps it for you alone. Everything else agents search live when you ask, and the Brain keeps nothing of it."
 
 #: src/brain/sources-page.tsx
-msgid "The Brain keeps the messages and pages an agent reads for you from this."
-msgstr "The Brain keeps the messages and pages an agent reads for you from this."
+msgid "The Brain may keep some of what an agent reads for you from this."
+msgstr "The Brain may keep some of what an agent reads for you from this."
 
 #: src/workflows/binding-approvals.tsx
 msgid "The Brain, as each run's person may read it"
@@ -15826,6 +15873,10 @@ msgstr "What it is for"
 msgctxt "what an app is for, in a sentence"
 msgid "What it is for"
 msgstr "What it is for"
+
+#: src/agents/agent-share.tsx
+msgid "What it is told"
+msgstr "What it is told"
 
 #: src/agents/agent-page.tsx
 #: src/chat/agent-draft-card.tsx

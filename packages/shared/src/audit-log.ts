@@ -85,6 +85,11 @@ const typeRules: readonly {
   { action: "agent.changed", type: "config" },
   { action: "agent.paused", type: "config" },
   { action: "agent.deleted", type: "config" },
+  // A person offering one of their own agents to the company, and its
+  // admins taking it on or declining it (core's src/agent-builder.ts).
+  { action: "agent.offered", type: "config" },
+  { action: "agent.adopted", type: "config" },
+  { action: "agent.declined", type: "config" },
   // An agent's apps: one added or taken off by hand, and those worked out
   // from its instructions (core's src/agent-apps.ts).
   { action: "agent.app.changed", type: "config" },
