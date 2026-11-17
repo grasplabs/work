@@ -22,6 +22,7 @@ import { fileUploadWords, imageWellWords } from "../grasp/file-upload/words.ts";
 import { markdownWords } from "../grasp/markdown/words.ts";
 import { paginationWords } from "../grasp/pagination/words.ts";
 import { settingRowWords } from "../grasp/setting-row/words.ts";
+import { sheetWords } from "../grasp/sheet/words.ts";
 import { sidebarWords } from "../grasp/sidebar/words.ts";
 import { sourcesWords } from "../grasp/sources/words.ts";
 import { tagWords } from "../grasp/tag/words.ts";
@@ -62,6 +63,7 @@ export const englishPartWords: GraspWordsCatalog = {
   pagination: paginationWords,
   rename: renameWords,
   settingRow: settingRowWords,
+  sheet: sheetWords,
   sidebar: sidebarWords,
   sources: sourcesWords,
   tag: tagWords,
@@ -327,6 +329,7 @@ export const usePartWords = (): GraspWordsCatalog => {
     },
     copyField: { copied: t`Copied`, failed: t`Could not copy` },
     dialog: { close: t`Close` },
+    sheet: { close: t`Close` },
     pagination: {
       name: t`Pagination`,
       previous: t`Previous page`,

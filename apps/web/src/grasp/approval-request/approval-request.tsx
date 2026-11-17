@@ -738,10 +738,13 @@ const Compact = ({
       >
         <Icon icon={marks[status]} />
       </span>
-      <span {...stylex.props(styles.compactAsk)}>
-        {title}
-        {note}
-      </span>
+      {/* With no ask, the decision stands by its mark, not alone at the far end. */}
+      {title === "" && note === "" ? null : (
+        <span {...stylex.props(styles.compactAsk)}>
+          {title}
+          {note}
+        </span>
+      )}
       <span {...stylex.props(styles.compactEnd)}>
         <span>
           <span {...stylex.props(styles.lineDecided)}>

@@ -117,6 +117,37 @@ const checkedQuote = (
   );
 };
 
+/**
+ * The answer's text with each citation's checked quote back as its link's
+ * title. Core keeps an answer's citations as `[words](grasp:note/<id>)`,
+ * their titles taken out, and gives each quote it checked with where its
+ * link starts (`ChatCitedSpan.at`); a link not found there as core wrote
+ * it is left as it is.
+ */
+const withQuotes = (
+  text: string,
+  cited: readonly ChatCitedDocument[] | undefined
+): string => {
+  const quoted = (cited ?? [])
+    .flatMap(({ documentId, spans }) =>
+      spans.flatMap(({ at, text: words, quote }) =>
+        quote === null
+          ? []
+          : [{ at, link: `[${words}](grasp:note/${documentId})`, quote }]
+      )
+    )
+    // From the end, so each place still stands where core counted it.
+    .toSorted((one, other) => other.at - one.at);
+  let shown = text;
+  for (const { at, link, quote } of quoted) {
+    if (shown.startsWith(link, at)) {
+      const title = quote.replaceAll(/["\\]/gu, "\\$&");
+      shown = `${shown.slice(0, at + link.length - 1)} "${title}")${shown.slice(at + link.length)}`;
+    }
+  }
+  return shown;
+};
+
 /** One of the answer's links, drawn by what `cited` holds. */
 const AnswerLink = ({
   link,
@@ -181,7 +212,7 @@ export const AnswerWords = ({
     <Markdown
       renderLink={(link) => <AnswerLink cited={cited} link={link} />}
       cut={cut}
-      source={text}
+      source={withQuotes(text, cited)}
       streaming={writing}
     />
   );

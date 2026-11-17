@@ -146,8 +146,11 @@ const styles = stylex.create({
     fontWeight: grasp.weightRegular,
   },
   // The words stop before the chevron.
+  // A field is one line already; a value too long for it ends in an ellipsis at rest (a browser
+  // shows the ellipsis only while the field is not being typed in), not clipped mid-letter.
   inputEnd: {
     paddingInlineEnd: `calc(${grasp.space2} + ${grasp.iconSm} + ${grasp.space2})`,
+    textOverflow: "ellipsis",
   },
   // The chevron at the end opens the list for a pointer. The keyboard opens it from the input, so
   // the chevron stays out of the Tab order.

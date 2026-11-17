@@ -184,6 +184,12 @@ export interface SelectTriggerProps {
   "aria-describedby"?: string;
   /** Layout only: margins, alignment and width. Colours, heights and corners belong to the select. */
   layout?: SelectLayoutStyle;
+  /**
+   * Squeezed, the chosen value stays on one line and ends in an ellipsis, as Button's and Dropdown
+   * menu's `truncate`; the list shows it whole. Without it, a long value wraps.
+   * @default false
+   */
+  truncate?: boolean;
 }
 
 /** Every prop a SelectValue takes: the chosen value's words, or the placeholder. */
@@ -382,6 +388,14 @@ const styles = stylex.create({
     minWidth: 0,
     overflowWrap: "anywhere",
     hyphens: "auto",
+  },
+  // truncate: one line, ending in an ellipsis; never hyphenated or broken inside a word.
+  valueCut: {
+    overflow: "hidden",
+    whiteSpace: "nowrap",
+    textOverflow: "ellipsis",
+    overflowWrap: "normal",
+    hyphens: "manual",
   },
   placeholder: {
     color: grasp.muted,
@@ -675,6 +689,8 @@ const asItem = (entry: ListItem | string): ListItem =>
 const ItemsContext = createContext<SelectItems | undefined>(undefined);
 // The root's `layout`, for the trigger: it lands there in the parts form as in the older one.
 const RootLayout = createContext<SelectLayoutStyle | undefined>(undefined);
+// Whether the trigger keeps its value on one line, for the SelectValue inside it.
+const Truncated = createContext(false);
 
 // In development, say so when nothing names the control: no Field label, no aria-label.
 const warnUnnamed = (control: HTMLButtonElement | null) => {
@@ -701,6 +717,7 @@ export const SelectTrigger = ({
   "aria-describedby": describedBy,
   id,
   layout,
+  truncate = false,
 }: SelectTriggerProps) => {
   const trigger = useRef<HTMLButtonElement | null>(null);
   useEffect(() => {
@@ -740,7 +757,7 @@ export const SelectTrigger = ({
             aria-hidden="true"
             {...stylex.props(styles.target, targetStyles[size])}
           />
-          {children}
+          <Truncated value={truncate}>{children}</Truncated>
           <span
             aria-hidden="true"
             {...stylex.props(styles.chevron, state.open && styles.chevronOpen)}
@@ -754,14 +771,21 @@ export const SelectTrigger = ({
 };
 
 /** The chosen value's words, or the placeholder while nothing is chosen. */
-export const SelectValue = ({ placeholder }: SelectValueProps) => (
-  <ValuePrimitive
-    placeholder={placeholder}
-    className={(value: SelectValueState) =>
-      className(styles.value, value.placeholder && styles.placeholder)
-    }
-  />
-);
+export const SelectValue = ({ placeholder }: SelectValueProps) => {
+  const truncate = useContext(Truncated);
+  return (
+    <ValuePrimitive
+      placeholder={placeholder}
+      className={(value: SelectValueState) =>
+        className(
+          styles.value,
+          truncate && styles.valueCut,
+          value.placeholder && styles.placeholder
+        )
+      }
+    />
+  );
+};
 
 /** One choice: its words, and the tick at the end when it is the chosen one. */
 export const SelectItem = ({

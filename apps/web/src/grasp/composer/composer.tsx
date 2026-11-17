@@ -569,6 +569,8 @@ const styles = stylex.create({
   footer: {
     containerType: "inline-size",
     containerName: "composer-footer",
+    // The count stands over its end edge on a narrow footer (count, below).
+    position: "relative",
     display: "flex",
     flexWrap: "nowrap",
     alignItems: "center",
@@ -650,10 +652,24 @@ const styles = stylex.create({
     color: grasp.danger,
   },
   // Read by a screen reader, never seen.
-  // The count near the limit: quiet, the small size, its figures of one width.
+  // The count near the limit: quiet, the small size, its figures of one width. On a footer with
+  // room it keeps its room in the row, so nothing moves when it shows. On a narrow footer it takes
+  // none from the controls: it stands over the row's end, on the field's bottom edge, above Send.
   count: {
     display: "inline-grid",
     flexShrink: 0,
+    position: {
+      default: "static",
+      "@container composer-footer (width < 30rem)": "absolute",
+    },
+    insetInlineEnd: {
+      default: null,
+      "@container composer-footer (width < 30rem)": grasp.space2,
+    },
+    bottom: {
+      default: null,
+      "@container composer-footer (width < 30rem)": "100%",
+    },
     paddingInline: grasp.space1,
     color: grasp.muted,
     fontFamily: grasp.fontSans,
@@ -1754,7 +1770,11 @@ const ComposerInside = ({
       ) : null}
       {Boolean(above) && <div {...stylex.props(styles.above)}>{above}</div>}
       {editor}
-      <div onPointerDown={focusText} {...stylex.props(styles.footer)}>
+      <div
+        data-slot="composer-footer"
+        onPointerDown={focusText}
+        {...stylex.props(styles.footer)}
+      >
         <div {...stylex.props(styles.side, styles.startSide)}>
           {start}
           {Boolean(controls) && (

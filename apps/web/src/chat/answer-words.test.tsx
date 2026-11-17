@@ -296,30 +296,31 @@ describe(AnswerWords, () => {
     }).toStrictEqual({ drawn: null, words: ["Before", "A chart"] });
   });
 
-  it("shows in a citation's card the passage it rests on, as core checked it, and nothing for a quote core didn't keep", async () => {
+  it("shows in a citation's card the passage it rests on, as core checked it, and nothing where core kept no quote", async () => {
+    // As core keeps an answer: its citations without their titles, each
+    // quote it checked given apart, with where its link starts.
+    const text =
+      "Leave lasts [sixteen weeks](grasp:note/leave), and is [unpaid](grasp:note/leave).";
     const quoted: ChatCitedDocument = {
       ...leave,
       spans: [
         {
-          at: 12,
+          at: text.indexOf("[sixteen"),
           text: "sixteen weeks",
-          quote: "Leave lasts sixteen weeks, paid.",
+          quote: 'Leave lasts sixteen "paid" weeks.',
         },
-        { at: 80, text: "unpaid", quote: null },
+        { at: text.indexOf("[unpaid"), text: "unpaid", quote: null },
       ],
     };
-    await shown(
-      'Leave lasts [sixteen weeks](grasp:note/leave "Leave lasts sixteen   weeks, paid."), and is [unpaid](grasp:note/leave "Unpaid, always.").',
-      [quoted]
-    );
+    await shown(text, [quoted]);
 
     const first = await cardOf("Source 1, first mention: Parental leave");
     const second = await cardOf("Source 1, second mention: Parental leave");
 
     expect({
-      first: first.includes("Leave lasts sixteen weeks, paid."),
-      second: [second.includes("Unpaid, always."), second.includes("paid.")],
+      first: first.includes('Leave lasts sixteen "paid" weeks.'),
+      second: second.includes("Leave lasts sixteen"),
       start: first.includes("Parental leave lasts sixteen weeks."),
-    }).toStrictEqual({ first: true, second: [false, false], start: false });
+    }).toStrictEqual({ first: true, second: false, start: false });
   });
 });

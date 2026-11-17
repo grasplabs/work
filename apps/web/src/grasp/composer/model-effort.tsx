@@ -4,7 +4,7 @@
 import * as stylex from "@stylexjs/stylex";
 import { Popover, PopoverContent, PopoverTrigger } from "@ui-sdk/react/popover";
 import { mergeProps } from "@ui-sdk/react/primitive";
-import { useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 
 import { focus } from "../focus/focus";
@@ -220,17 +220,27 @@ const styles = stylex.create({
     columnGap: grasp.space1,
     rowGap: 0,
     flexShrink: 1,
-    minWidth: "4ch",
     height: grasp.textXsLine,
     overflow: "hidden",
   },
-  // The model's name, in ink. Short of room it is cut first, but only to about eight characters
-  // (its basis, 9ch with the ellipsis, or the whole name when shorter): the line breaks on that
-  // basis, so below it the level wraps out of sight before the name is cut further.
+  // The words' floor: eight characters and the ellipsis (the whole name when shorter), so names
+  // alike in their start ("gpt-6-luna", "gpt-6-mini") stay apart. Below it only when the footer has
+  // nothing else to give (useChipRoom), and then never under three letters.
+  chipFloor: (floor: string) => ({ minWidth: floor }),
+  chipFloorLast: {
+    minWidth: "4ch",
+  },
+  // At the last floor the chip takes the room its own inset wastes, beside the mark and the chevron.
+  chipTight: {
+    paddingInline: grasp.space1,
+  },
+  // The model's name, in ink. Short of room, the level leaves first: the line breaks on the whole
+  // name (its basis), so the level wraps out of sight as soon as both do not fit. Then the name is
+  // cut, down to the words' floor.
   chipName: {
     flexGrow: 1,
     flexShrink: 1,
-    flexBasis: "9ch",
+    flexBasis: "auto",
     maxWidth: "max-content",
     minWidth: 0,
     overflow: "hidden",
@@ -243,6 +253,10 @@ const styles = stylex.create({
     flexShrink: 0,
     whiteSpace: "nowrap",
     color: grasp.muted,
+  },
+  // Gone for want of room: the chip closes up on the name (useChipRoom).
+  chipLevelGone: {
+    display: "none",
   },
   chipShrinks: {
     flexShrink: 1,
@@ -332,6 +346,103 @@ const ModelList = ({
 );
 
 /** The chip: the maker's mark, the model's name, its level in a word, and the chevron. */
+/** A computed length in pixels ("8px"), or 0 for one that is not ("normal"). */
+const pixels = (value: string) => Number(value.replace("px", "")) || 0;
+
+/** The room the footer has left over: its width less its parts' and the gaps between them. */
+const footerSpare = (footer: HTMLElement) => {
+  const style = getComputedStyle(footer);
+  const parts = [...footer.children].filter(
+    (part) =>
+      part.getClientRects().length > 0 &&
+      getComputedStyle(part).position !== "absolute"
+  );
+  const used = parts.reduce(
+    (sum, part) => sum + part.getBoundingClientRect().width,
+    0
+  );
+  const gaps = (parts.length - 1) * pixels(style.columnGap);
+  const inset =
+    pixels(style.paddingInlineStart) + pixels(style.paddingInlineEnd);
+  return footer.clientWidth - inset - used - gaps;
+};
+
+/**
+ * What the chip's words may show, from the room they have (their width, less what runs past the
+ * chip's own box, plus the footer's spare room): the level only beside the whole name (else it
+ * leaves, and the chip closes up on the name); under the floor only when the footer has nothing
+ * else to give. Read again as the chip or the footer changes size. The level's width and the floor
+ * are read while they show, so leaving and coming back happen at the same width: nothing flickers.
+ * Before this has read (the server's HTML), the level wraps out of sight by itself (chipWords).
+ */
+const useChipRoom = (chip: HTMLElement | null) => {
+  const [room, setRoom] = useState<{
+    last: boolean;
+    levelGone: boolean;
+    floor: number | null;
+  }>({ last: false, levelGone: false, floor: null });
+  const levelWidth = useRef(0);
+  useEffect(() => {
+    const footer = chip?.closest<HTMLElement>('[data-slot="composer-footer"]');
+    const read = () => {
+      // Found anew each time: a new choice draws the words anew (the value's key).
+      const words = chip?.querySelector<HTMLElement>("[data-chip-words]");
+      if (
+        chip === null ||
+        words === null ||
+        words === undefined ||
+        footer === null ||
+        footer === undefined
+      ) {
+        return;
+      }
+      const name = words.querySelector<HTMLElement>(
+        '[data-slot="composer-model-effort-name"]'
+      );
+      // The floor: eight characters and the ellipsis (nine of the font's figure width), never more
+      // than the whole name, whose letters may be narrower than that.
+      const whole = name?.scrollWidth ?? 0;
+      const context = document.createElement("canvas").getContext("2d");
+      if (context !== null && name !== null) {
+        context.font = getComputedStyle(name).font;
+      }
+      const floor = Math.min(whole, (context?.measureText("0").width ?? 0) * 9);
+      const level = words.querySelector<HTMLElement>(
+        '[data-slot="composer-model-effort-level"]'
+      );
+      if (level !== null && level.getClientRects().length > 0) {
+        levelWidth.current = level.getBoundingClientRect().width;
+      }
+      // What the words could have: their width, less what already runs past the chip's own box,
+      // plus the footer's spare room.
+      const value = words.parentElement ?? words;
+      const past = Math.max(
+        0,
+        value.scrollWidth - value.clientWidth,
+        chip.scrollWidth - chip.clientWidth
+      );
+      const have =
+        words.getBoundingClientRect().width - past + footerSpare(footer) + 0.5;
+      const gap = pixels(getComputedStyle(words).columnGap);
+      setRoom({
+        last: have < floor,
+        levelGone: level !== null && have < whole + gap + levelWidth.current,
+        floor,
+      });
+    };
+    // Watched once the chip is on the page in its footer; before that, nothing to read.
+    const observer = new ResizeObserver(read);
+    if (chip !== null && footer !== null && footer !== undefined) {
+      observer.observe(chip);
+      observer.observe(footer);
+    }
+    return () => {
+      observer.disconnect();
+    };
+  }, [chip]);
+  return room;
+};
+
 const Chip = ({
   props,
   mark,
@@ -346,43 +457,64 @@ const Chip = ({
   level: string | undefined;
   lit: boolean;
   value: string;
-}) => (
-  <button
-    {...props}
-    type="button"
-    data-slot="composer-model-effort"
-    data-top={lit || undefined}
-    {...stylex.props(
-      controlStyles.control,
-      styles.chipShrinks,
-      focus.ring,
-      lit && styles.lit
-    )}
-  >
-    <span aria-hidden="true" {...stylex.props(controlStyles.reach)} />
-    {lit ? <LitEdge /> : null}
-    <span key={value} {...stylex.props(controlStyles.value, styles.chipValue)}>
-      {mark === undefined ? null : <Icon icon={mark} />}
-      <span {...stylex.props(styles.chipWords)}>
+}) => {
+  const [node, setNode] = useState<HTMLElement | null>(null);
+  const { last, levelGone, floor } = useChipRoom(node);
+  return (
+    <button
+      {...mergeProps(props, { ref: setNode })}
+      type="button"
+      data-slot="composer-model-effort"
+      data-top={lit || undefined}
+      {...stylex.props(
+        controlStyles.control,
+        styles.chipShrinks,
+        focus.ring,
+        lit && styles.lit,
+        last && styles.chipTight
+      )}
+    >
+      <span aria-hidden="true" {...stylex.props(controlStyles.reach)} />
+      {lit ? <LitEdge /> : null}
+      <span
+        key={value}
+        {...stylex.props(controlStyles.value, styles.chipValue)}
+      >
+        {mark === undefined ? null : <Icon icon={mark} />}
         <span
-          data-slot="composer-model-effort-name"
-          {...stylex.props(styles.chipName)}
+          data-chip-words={last ? "last" : ""}
+          {...stylex.props(
+            styles.chipWords,
+            styles.chipFloor(
+              floor === null ? `${Math.min(9, name.length)}ch` : `${floor}px`
+            ),
+            last && styles.chipFloorLast
+          )}
         >
-          {name}
-        </span>
-        {level === undefined ? null : (
           <span
-            data-slot="composer-model-effort-level"
-            {...stylex.props(styles.chipLevel)}
+            data-slot="composer-model-effort-name"
+            {...stylex.props(styles.chipName)}
           >
-            {level}
+            {name}
           </span>
-        )}
+          {level === undefined ? null : (
+            <span
+              data-slot="composer-model-effort-level"
+              data-gone={levelGone || undefined}
+              {...stylex.props(
+                styles.chipLevel,
+                levelGone && styles.chipLevelGone
+              )}
+            >
+              {level}
+            </span>
+          )}
+        </span>
       </span>
-    </span>
-    <Icon icon={ChevronDown} />
-  </button>
-);
+      <Icon icon={ChevronDown} />
+    </button>
+  );
+};
 
 /** What the chip and the surface show for the chosen model and level. */
 const readChoice = (

@@ -1,5 +1,5 @@
 // The model and effort chip's whole words in a Tooltip ("Claude Opus 5.5, Medium"), only while the
-// chip is too narrow for them: its name is cut, or its level has left the line. The words are
+// chip is too narrow for them: its name is cut, or its level has left it. The words are
 // already the chip's own name, so the tooltip is for the eye and adds nothing a screen reader
 // hears. It never opens over the chip's own surface.
 "use client";
@@ -27,12 +27,13 @@ export const isShort = (chip: HTMLElement | null) => {
     '[data-slot="composer-model-effort-level"]'
   );
   const line = name.getBoundingClientRect();
-  return (
-    name.scrollWidth > name.clientWidth + 0.5 ||
-    (level !== null &&
-      level !== undefined &&
-      level.getBoundingClientRect().top >= line.bottom - 0.5)
-  );
+  // The level has left: gone for want of room (no box), or wrapped off the seen line.
+  const levelLeft =
+    level !== null &&
+    level !== undefined &&
+    (level.getClientRects().length === 0 ||
+      level.getBoundingClientRect().top >= line.bottom - 0.5);
+  return name.scrollWidth > name.clientWidth + 0.5 || levelLeft;
 };
 
 /** The trigger's props without the description: the tooltip repeats the chip's own name. */

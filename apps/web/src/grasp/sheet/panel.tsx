@@ -16,7 +16,9 @@ import { KindContext } from "../drawer/kind-context";
 import { useStill } from "../drawer/still-context";
 import { drawerStyles as styles } from "../drawer/styles";
 import { Cross } from "../icons";
+import { useWords, withGiven } from "../words/words";
 import { useSize } from "./size-context";
+import { sheetWords } from "./words";
 
 type ContentPrimitiveProps = ComponentProps<typeof ContentPrimitive>;
 
@@ -55,34 +57,40 @@ export interface SheetContentProps extends Omit<
 
 /** The sheet's close button, for content that places its own (`SheetPanel close="none"`). */
 export const SheetClose = ({
-  label = "Close",
+  label,
   size = "sm",
 }: {
   label?: string;
   size?: "xs" | "sm";
-}) => (
-  <ClosePrimitive
-    render={(props: Record<string, unknown>) => (
-      <Button
-        {...props}
-        variant="ghost"
-        size={size}
-        icon={Cross}
-        aria-label={label}
-      />
-    )}
-  />
-);
+}) => {
+  const words = withGiven(useWords("sheet", sheetWords), { close: label });
+  return (
+    <ClosePrimitive
+      render={(props: Record<string, unknown>) => (
+        <Button
+          {...props}
+          variant="ghost"
+          size={size}
+          icon={Cross}
+          aria-label={words.close}
+        />
+      )}
+    />
+  );
+};
 
 /** The panel, with the shade behind it and the close button in its corner. The window's height. */
 export const SheetContent = ({
   children,
-  closeLabel = "Close",
+  closeLabel: closeGiven,
   close = "corner",
   corner = "sheet",
   bounds = "window",
   ...rest
 }: SheetContentProps) => {
+  const closeLabel = withGiven(useWords("sheet", sheetWords), {
+    close: closeGiven,
+  }).close;
   const size = useSize();
   const still = useStill();
   if (still) {
