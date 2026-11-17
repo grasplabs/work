@@ -531,6 +531,11 @@ export interface QuestionBuilt {
   workflow?: { id: string; name: string } | undefined;
   /** The project they were made in, if any. */
   project?: string | undefined;
+  /** Make it or Change it, said to an agent card: the agent made or changed. */
+  agent?: { id: string; name: string } | undefined;
+  agentAction?: "made" | "changed" | undefined;
+  /** Not all of the card could be set: the agent is paused. */
+  unfinished?: true | undefined;
 }
 
 /** What a question is about, as core found each by name (`ChatsApi.send`). */
@@ -551,12 +556,31 @@ export interface QuestionAbout {
 const makeNoteText = ({ kind }: ChatMake): string =>
   `The person started this chat from "Make something", to make ${kind === "app" ? "an App: a page their team opens" : "a workflow: something that runs on its own"}. Make it as Grasp makes anything new: a plan first, with proposePlan.`;
 
+/** What the model reads beside Make it or Change it: the agent, and what to say. */
+const agentNoteText = (
+  { id, name }: { id: string; name: string },
+  action: "made" | "changed",
+  unfinished: boolean
+): string =>
+  [
+    `The person pressed ${action === "made" ? "Make it" : "Change it"} on your card. Grasp ${action} the agent ${JSON.stringify(name)} (${id}) as the card showed it, owned as the card said.`,
+    unfinished
+      ? "Not all of the card could be set, so the agent is paused: tell them in one or two plain sentences, and that they finish it on its page."
+      : "Tell them in one or two plain sentences that it is done, and that its page shows it.",
+  ].join(" ");
+
 /** What the model reads beside Build it: what was made, and building it. */
 export const builtNoteText = ({
   app,
   workflow,
   project,
+  agent,
+  agentAction,
+  unfinished,
 }: QuestionBuilt): string => {
+  if (agent !== undefined) {
+    return agentNoteText(agent, agentAction ?? "made", unfinished === true);
+  }
   const made = [
     ...(app === undefined
       ? []

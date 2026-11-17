@@ -430,6 +430,69 @@ describe("an agent made from the chat", { timeout: 120_000 }, () => {
     });
   });
 
+  it("tells the chat's agent what Make it made, as Build it tells it what it built", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const name = `Told ${unique()}`;
+    const { chat, callId, provider } = await draftedChat(admin, {
+      ...hr(name),
+      whose: "own",
+    });
+
+    const made = await admin.api.chats.makeDraftedAgent(chat.id, {
+      draft: callId ?? "",
+      text: "Make it",
+      model,
+    });
+    await idle(admin, chat.id);
+    const told = JSON.stringify(provider.requests.at(-1)?.body);
+
+    expect({
+      pressed: told.includes("pressed Make it"),
+      named: told.includes(made.id),
+    }).toStrictEqual({ pressed: true, named: true });
+  });
+
+  it("makes nothing while the chat's own agent is paused, as Build it builds nothing, leaving the card to press again", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const name = `Paused ${unique()}`;
+    const { chat, callId } = await draftedChat(admin, {
+      ...hr(name),
+      whose: "own",
+    });
+    const { agentId } = await admin.api.chats.summary(chat.id);
+    await admin.api.connections.setAgentPaused(agentId, true);
+    let tried: string;
+    let listed: Awaited<ReturnType<typeof admin.api.connections.ownAgents>>;
+    try {
+      tried = await outcome(
+        admin.api.chats.makeDraftedAgent(chat.id, {
+          draft: callId ?? "",
+          text: "Make it",
+          model,
+        })
+      );
+      listed = await admin.api.connections.ownAgents();
+    } finally {
+      await admin.api.connections.setAgentPaused(agentId, false);
+    }
+    const again = await admin.api.chats.makeDraftedAgent(chat.id, {
+      draft: callId ?? "",
+      text: "Make it",
+      model,
+    });
+    await idle(admin, chat.id);
+
+    expect({
+      tried,
+      madeWhilePaused: listed.some((agent) => agent.name === name),
+      again: again.name,
+    }).toStrictEqual({
+      tried: "agent.paused",
+      madeWhilePaused: false,
+      again: name,
+    });
+  });
+
   it("is never drafted in a turn nobody asked for", async () => {
     const admin = await signedInApi(idp, "admin");
     const { stub, provider, newChat } = await personalChatsOf(
@@ -566,8 +629,17 @@ describe("an agent made from the chat", { timeout: 120_000 }, () => {
       const told = await toldTo(admin, made.id);
       const apps = await admin.api.connections.agentApps(made.id);
       const settings = await admin.api.connections.agentSettings(made.id);
+      const events = await allEvents();
+      const fromChat = events
+        .filter(
+          ({ action, target, detail }) =>
+            (target?.id === made.id || detail?.agent === made.id) &&
+            ["agent.app.changed", "agent.class.changed"].includes(action)
+        )
+        .map(({ action, detail }) => [action, detail?.from]);
 
       expect({
+        fromChat,
         before,
         after: [told, after?.job],
         apps: apps.map(({ app, state }) => [app, state]),
@@ -587,6 +659,11 @@ describe("an agent made from the chat", { timeout: 120_000 }, () => {
         on: ["read-own"],
         audience: { who: "nobody" },
         again: "agent.draft_not_found",
+        // Recorded as made from the chat, not on the agent's page.
+        fromChat: [
+          ["agent.app.changed", "chat"],
+          ["agent.class.changed", "chat"],
+        ],
       });
     });
 

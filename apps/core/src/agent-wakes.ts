@@ -10,6 +10,7 @@ import { nextScheduledRun } from "@grasp-os/shared/workflows";
 import { and, asc, eq, isNull, lte, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
+import type { MadeFrom } from "./agent-builder.ts";
 import { requireAgentReaches } from "./agent-reach.ts";
 import { companyAgent, turnAgent } from "./agents.ts";
 import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
@@ -181,7 +182,8 @@ export const makeAgentWake = async (
   identity: Identity,
   agentId: unknown,
   input: unknown,
-  now = new Date()
+  now = new Date(),
+  { from }: MadeFrom = {}
 ): Promise<AgentWake> => {
   requireCompanyAdmin(identity);
   // Never a person's own agent: it works only when its owner asks.
@@ -254,6 +256,7 @@ export const makeAgentWake = async (
         timeZone: row.timeZone,
         person: row.personId,
         openingLength: String(row.opening.length),
+        ...(from === undefined ? {} : { from }),
       },
     }),
   ]);
