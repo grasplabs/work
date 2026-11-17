@@ -121,6 +121,10 @@ const shownOf = (brain: Workspace, teamId: string) => {
   };
 };
 
+/** The types of `records`, each once, in order. */
+const typesOf = (records: readonly { type: string }[]): string[] =>
+  [...new Set(records.map(({ type }) => type))].toSorted();
+
 describe(
   "what the onboarding learned, in the brain",
   { timeout: 120_000 },
@@ -216,9 +220,10 @@ describe(
 
     it("keeps only a drawing's newest checked version once it is drawn again, and knows whose interview each record rests on", async () => {
       const store = onboardingStore(env);
-      const ids = await team();
+      // Seven tell their own work, as a team's drawings need.
+      const ids = await sevenTeam();
       await mapped(ids);
-      await told(ids);
+      await sevenTold(ids);
       await answering([fiveToldReply(ids)], async () => await store.drawNext());
       await intake(ids);
       const before = await kept(ids);
@@ -289,21 +294,21 @@ describe(
         rests: {
           // The claim rests on the five who made it, the drawing on whom it
           // was drawn from.
-          max: ["statement", "workflow", "workflowVersion"],
-          mia: ["statement", "workflow", "workflowVersion"],
-          // The lead named the work, and was the drawing's context; the
-          // work rests on whom it was drawn from too.
-          lea: ["workflow", "workflowVersion"],
-          noor: ["statement", "workflow", "workflowVersion"],
+          max: ["statement", "workflowVersion"],
+          mia: ["statement", "workflowVersion"],
+          // The lead was the drawing's context.
+          lea: ["workflowVersion"],
+          noor: ["statement", "workflowVersion"],
         },
       });
     });
 
     it("takes out a drawing the brain holds from before, with no note of whom it rests on, once the work is drawn and checked anew", async () => {
       const store = onboardingStore(env);
-      const ids = await team();
+      // Seven tell their own work, as a team's drawings need.
+      const ids = await sevenTeam();
       await mapped(ids);
-      await told(ids);
+      await sevenTold(ids);
       await answering([fiveToldReply(ids)], async () => await store.drawNext());
       await intake(ids);
       const first = await kept(ids);
@@ -378,9 +383,9 @@ describe(
       });
     });
 
-    it("holds back a team until five who tell their own work agreed: its lead isn't counted", async () => {
+    it("holds back a team until five who tell their own work agreed, and its drawings until seven: its lead isn't counted", async () => {
       const store = onboardingStore(env);
-      const ids = await team(["lea", "max", "mia", "mo", "noor", "pim"]);
+      const ids = await sevenTeam();
       await mapped(ids);
       await agree(ids.max, [
         fact("m2", "system", "Tickets arrive in Zendesk."),
@@ -404,17 +409,28 @@ describe(
       await answering([ticketsReply(ids)], async () => await store.drawNext());
       const late = await store.intakeNext();
       const given = await kept(ids);
+      // Rik and Sam too: seven who tell, as a team's results need.
+      await agree(ids.rik, [fact("r1", "step", "Checks the queue at noon.")]);
+      await agree(ids.sam, [fact("s1", "step", "Answers the phone.")]);
+      await answering([ticketsReply(ids)], async () => await store.drawNext());
+      const atSeven = await store.intakeNext();
+      const drawn = await kept(ids);
       expect({
         early,
         waiting: waiting.length,
         late,
-        types: [...new Set(given.map(({ type }) => type))].toSorted(),
+        types: typesOf(given),
+        atSeven,
+        drawn: typesOf(drawn),
       }).toStrictEqual({
         early: `brain:${ids.team}`,
         waiting: 0,
         late: `brain:${ids.team}`,
+        // Five tell: the team, but no drawing yet.
+        types: ["team"],
+        atSeven: `brain:${ids.team}`,
         // Nothing five of them said alike: no statement.
-        types: ["team", "workflow", "workflowVersion"],
+        drawn: ["team", "workflow", "workflowVersion"],
       });
     });
 

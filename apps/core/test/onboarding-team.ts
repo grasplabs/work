@@ -427,6 +427,13 @@ export const told = async (ids: Ids) => {
 export const sevenTeam = async () =>
   await team(["lea", "max", "mia", "mo", "noor", "pim", "rik", "sam"]);
 
+/**
+ * As `sevenTeam`, Ada in it too: eight who tell their own work, so one of
+ * them leaving still leaves seven, and what the rest told still shows.
+ */
+export const eightTeam = async () =>
+  await team(["lea", "max", "mia", "mo", "noor", "pim", "rik", "sam", "ada"]);
+
 /** What the six tell (`told`), and Sam a step of his own. */
 export const sevenTold = async (ids: Ids) => {
   await told(ids);
@@ -688,12 +695,16 @@ const records = async (ids: Ids) => {
 
 /**
  * Every record the brain keeps whose id is the onboarding's, for a team,
- * as stored, and the team's claims standing now, which the onboarding
- * keeps itself (GRA-1748): each as a statement of the team, by its id on
- * the Brain page.
+ * as stored, and the team's claims and drawings standing now, which the
+ * onboarding keeps itself (GRA-1748): each as the record it was, by its id
+ * on the Brain page.
  */
 export const kept = async (ids: Ids) => {
-  const claims = await onboardingStore(env).standingClaims();
+  const store = onboardingStore(env);
+  const [claims, drawings] = await Promise.all([
+    store.standingClaims(),
+    store.standingDrawings(),
+  ]);
   return [
     ...(await records(ids)),
     ...claims
@@ -703,5 +714,20 @@ export const kept = async (ids: Ids) => {
         id: `onb-claim-${source}`,
         body: JSON.stringify({ kind, text, teamIds: [`team-${ids.team}`] }),
       })),
+    // Each piece of work with its one drawing, as the Brain page shows them.
+    ...drawings
+      .filter(({ team: of }) => of === ids.team)
+      .flatMap(({ workflow, name, local, drawing }) => [
+        {
+          type: "workflow",
+          id: workflow,
+          body: JSON.stringify({ name, local, teamId: `team-${ids.team}` }),
+        },
+        {
+          type: "workflowVersion",
+          id: drawing.id,
+          body: JSON.stringify(drawing),
+        },
+      ]),
   ];
 };

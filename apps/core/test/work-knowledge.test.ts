@@ -1,9 +1,9 @@
 import type { BrainRecordInput } from "@grasp-os/shared/brain-records";
 import type { WorkKnowledge } from "@grasp-os/shared/work-knowledge";
-import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { mockIdp } from "./idp.ts";
+import { drawingHeld } from "./onboarding-drawings.ts";
 import { outcome, signedInApi, unique } from "./sign-in.ts";
 
 // A piece of work's Knowledge tab (brain-work.ts), from its threat model
@@ -88,13 +88,6 @@ const daysIn = (value: unknown): string[] =>
   JSON.stringify(value).match(/\d{4}-\d{2}-\d{2}/gu) ?? [];
 
 /** Writes a record as the onboarding gives the brain one. */
-const insert = async (body: Record<string, unknown>) => {
-  await env.DB.prepare(
-    "INSERT INTO brain_records (type, id, body, added_at) VALUES (?, ?, ?, ?)"
-  )
-    .bind(body.type, body.id, JSON.stringify(body), Date.now())
-    .run();
-};
 
 describe("a piece of work's knowledge", () => {
   it("tells only the brain's own sentences and their week, and names who only once five or more told it, by a role five or more hold", async () => {
@@ -231,15 +224,12 @@ describe("a piece of work's knowledge", () => {
       wrong: null,
       open: [],
     });
-    await insert({
-      type: "workflow",
-      id: workflow,
-      name: "Paying invoices",
-      teamId: "team-unknown",
-      sourceId: "onb-src-0123456789abcdef0123456789abcdef",
-      status: "drawn",
+    // The onboarding holds it, as its intake noted it (GRA-1748).
+    const held = { workflow, team: "unknown", name: "Paying invoices" };
+    await drawingHeld({
+      ...held,
+      drawing: drawing(6, "The controller decides above the limit.", day),
     });
-    await insert(drawing(6, "The controller decides above the limit.", day));
     const first = await member.api.brain.work(workflow);
     expect({
       sentences: first.sentences.map(({ about, text, restsOn, week: at }) => ({
@@ -273,7 +263,7 @@ describe("a piece of work's knowledge", () => {
       confidence: "heard",
     });
     // Drawn again once someone was erased: four people, nobody decides.
-    await insert(drawing(4, "", "2026-10-21"));
+    await drawingHeld({ ...held, drawing: drawing(4, "", "2026-10-21") });
     const again = await member.api.brain.work(workflow);
     expect({
       decides: again.sentences.some(({ about }) => about === "rule"),

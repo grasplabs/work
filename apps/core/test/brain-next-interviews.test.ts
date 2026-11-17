@@ -28,10 +28,11 @@ import {
   eraseOwedOnboardingSources,
   settleOnboardingBrain,
 } from "../src/onboarding/new-brain.ts";
-import { onboardingStore } from "../src/onboarding/store.ts";
+import { Onboarding, onboardingStore } from "../src/onboarding/store.ts";
 import { teamMayClaim } from "../src/onboarding/team-claims.ts";
 import { retryErasures } from "../src/person-erasure.ts";
 import { adminCommands } from "./admin-command.ts";
+import { setObjectEnv } from "./agent-chat.ts";
 import { ageOwnErasure } from "./brain-next-own-store.ts";
 import { copyOfStore, restoreStore } from "./brain-next-store-copy.ts";
 import { mockIdp } from "./idp.ts";
@@ -64,6 +65,7 @@ import { acmeTenant } from "./sign-in-config.ts";
 import {
   entraPerson,
   openRpc,
+  outcome,
   signedInApi,
   signedIn,
   unique,
@@ -341,6 +343,52 @@ const intakeOf = async (
   throw new Error(`The team wasn't given within ${teamsDueMax} teams due.`);
 };
 
+/** Whether the onboarding's alarm is set. */
+const alarmSet = async (): Promise<boolean> => {
+  const at = await runInDurableObject(
+    onboardingStore(env),
+    async (_instance, state) => await state.storage.getAlarm()
+  );
+  return at !== null;
+};
+
+/** The onboarding closed (its plan ended a fortnight ago), every link out, and no alarm set: nothing would set one again by itself. */
+const noAlarm = async (): Promise<void> => {
+  const ended = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
+    .toISOString()
+    .slice(0, 10);
+  await onboardingStore(env).savePlan(
+    { start: ended, days: 14 },
+    { type: "system" }
+  );
+  await runInDurableObject(onboardingStore(env), async (_instance, state) => {
+    await state.storage.deleteAlarm();
+  });
+};
+
+/**
+ * Runs the onboarding's alarm as its timer would, each run a model
+ * answering any team's claims, and hands over what it noted, until `done`
+ * says so: never an intake asked for directly. Earlier tests of this file
+ * leave their teams due too.
+ */
+const byTheAlarm = async (done: () => Promise<boolean>): Promise<void> => {
+  for (let run = 0; run < teamsDueMax; run += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- one run at a time, as the timer runs it
+    await answeringWith(claimsReply([zendeskClaim]), async () => {
+      await runInDurableObject(onboardingStore(env), async (instance) => {
+        await Onboarding.prototype.alarm.call(instance);
+      });
+    });
+    // oxlint-disable-next-line no-await-in-loop -- one run at a time
+    await handOverNow();
+    // oxlint-disable-next-line no-await-in-loop -- one run at a time
+    if (await done()) {
+      return;
+    }
+  }
+};
+
 /** What `userId` recalls of `word`, of sources of `producer` or any: the texts found. */
 const recalled = async (
   userId: string,
@@ -412,6 +460,25 @@ const interviewAddedFor = async (
     text: `Approved facts ${unique()}`,
     readers,
   }).then(() => "added", String);
+
+/** The staff list of `ids` with the people `movers` in Billing, a team of their own. */
+const movedToBilling =
+  (ids: Ids, movers: readonly string[]) =>
+  (roster: ReturnType<typeof rosterOf>): ReturnType<typeof rosterOf> => ({
+    teams: [
+      ...roster.teams,
+      {
+        id: `${ids.team}-b`,
+        name: "Billing",
+        lead: null,
+        does: "",
+        off: false,
+      },
+    ],
+    people: roster.people.map((person) =>
+      movers.includes(person.id) ? { ...person, team: `${ids.team}-b` } : person
+    ),
+  });
 
 describe("interviews in the new Brain", { timeout: 120_000 }, () => {
   beforeEach(holdAlarm);
@@ -2257,5 +2324,455 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
       moved: true,
       now: { recalled: [], listed: [] },
     });
+  });
+
+  /** Each of the team's pieces of work on the Brain page, as an admin reads it: its name and how many drawings it shows. */
+  const workOnPage = async (ids: { team: string }) => {
+    const admin = await signedInApi(idp, "admin");
+    const { workflows } = await admin.api.brain.read();
+    return workflows
+      .filter(({ teamId }) => teamId === `team-${ids.team}`)
+      .map(({ name, drawings }) => [name, drawings?.length ?? 0]);
+  };
+
+  it("give every member each piece of work's drawing, and take it out as a lead's withdrawal commits, every erasure failing, before core's clock", async () => {
+    const { ids, max } = await drawnTeam({ eight: true });
+    await intakeOf(ids, [zendeskClaim]);
+    await handOverNow();
+    const before = {
+      recalled: await recalled(max, "ticket", "drawing"),
+      page: await workOnPage(ids),
+    };
+    // Lea, whose map the work was drawn on, withdraws, and every erasure
+    // fails, the onboarding's own too: the drawing is out of use in the
+    // Brain, and off the page, before her withdrawal commits (GRA-1748).
+    const restore = await setObjectEnv(onboardingStore(env), {
+      BRAIN_STORE: erasuresFailing().BRAIN_STORE,
+    });
+    let withdrew: boolean;
+    try {
+      const answer = await onLink(
+        { action: "withdraw", ...(await openLink(ids.lea)) },
+        erasuresFailing()
+      );
+      withdrew = answer.ok;
+    } finally {
+      await restore();
+    }
+    const owed = await onboardingStore(env).owedErasures({ claims: true });
+    expect({
+      before: { found: before.recalled.length > 0, page: before.page },
+      withdrew,
+      owed: owed.filter(({ kind }) => kind === "drawing").length,
+      after: {
+        recalled: await recalled(max, "ticket", "drawing"),
+        page: await workOnPage(ids),
+      },
+    }).toStrictEqual({
+      before: { found: true, page: [["handling new tickets", 1]] },
+      withdrew: true,
+      owed: 1,
+      after: { recalled: [], page: [] },
+    });
+  });
+
+  /** The staff list of `ids` with `keys` on it, at their own addresses, as `change` makes it. */
+  const savedRoster = async (
+    ids: Ids,
+    keys: readonly Key[],
+    change: (roster: ReturnType<typeof rosterOf>) => ReturnType<typeof rosterOf>
+  ): Promise<void> => {
+    const roster = rosterOf(
+      ids,
+      keys,
+      Object.fromEntries(keys.map((key) => [key, addressOf(ids[key])]))
+    );
+    await onboardingStore(env).saveRoster(change(roster), { type: "system" });
+  };
+
+  it("give code's recall, as an App or a workflow and as a chat's code, no drawing a member finds", async () => {
+    const { ids, max } = await drawnTeam({ eight: true });
+    await intakeOf(ids, [zendeskClaim]);
+    await handOverNow();
+    // As brain-recall.ts asks it (`recallFor`), before its own narrowing,
+    // so the drawing's readers alone keep it out.
+    const codeReads = async (company: boolean) => {
+      const { items } = await recallPassagesAs(env, max, {
+        question: "ticket",
+        budget: { tokens: 2000 },
+        personal: false,
+        company,
+        teams: [],
+      });
+      const drawings = items.filter(
+        ({ source }) => source.producer === "drawing"
+      );
+      return drawings.length;
+    };
+    const found = await recalled(max, "ticket", "drawing");
+    expect({
+      member: found.length > 0,
+      appOrWorkflow: await codeReads(true),
+      chatCode: await codeReads(false),
+    }).toStrictEqual({ member: true, appOrWorkflow: 0, chatCode: 0 });
+  });
+
+  it("give no drawing of a team with fewer than seven who tell their own work, as for its claims", async () => {
+    const { ids, max } = await drawnTeam({ small: true });
+    await intakeOf(ids, [zendeskClaim]);
+    await handOverNow();
+    expect({
+      claims: await recalled(max, "Zendesk", "claim"),
+      drawings: await recalled(max, "ticket", "drawing"),
+      page: await workOnPage(ids),
+    }).toStrictEqual({ claims: [], drawings: [], page: [] });
+  });
+
+  it("take a drawing out as a move leaves its team six who tell, though everyone it rests on still agrees", async () => {
+    const { ids, max } = await drawnTeam();
+    await intakeOf(ids, [zendeskClaim]);
+    await handOverNow();
+    const before = await workOnPage(ids);
+    // Rik moves to another team: he still agrees to what he told.
+    await savedRoster(ids, [...everyone, "sam"], (roster) => ({
+      teams: [
+        ...roster.teams,
+        {
+          id: `${ids.team}-b`,
+          name: "Billing",
+          lead: null,
+          does: "",
+          off: false,
+        },
+      ],
+      people: roster.people.map((person) =>
+        person.id === ids.rik ? { ...person, team: `${ids.team}-b` } : person
+      ),
+    }));
+    expect({
+      before,
+      drawings: await recalled(max, "ticket", "drawing"),
+      page: await workOnPage(ids),
+    }).toStrictEqual({
+      before: [["handling new tickets", 1]],
+      drawings: [],
+      page: [],
+    });
+  });
+
+  it("take a team's drawing and claim out as someone they rest on moves to another team, though seven still tell, and leave nothing of it to their later withdrawal", async () => {
+    const { ids, max } = await drawnTeam({ eight: true });
+    await intakeOf(ids, [zendeskClaim]);
+    await handOverNow();
+    const readNow = async () => {
+      const drawings = await recalled(max, "ticket", "drawing");
+      return {
+        claims: await recalled(max, "Zendesk", "claim"),
+        drawings: drawings.length,
+        page: await workOnPage(ids),
+      };
+    };
+    const before = await readNow();
+    // Max, whom the drawing was drawn from and who backs the claim, moves
+    // to Billing: Ops still has seven who tell. What rests on him in Ops
+    // rests on him no more (GRA-1748).
+    await savedRoster(ids, [...everyone, "sam", "ada"], (roster) => ({
+      teams: [
+        ...roster.teams,
+        {
+          id: `${ids.team}-b`,
+          name: "Billing",
+          lead: null,
+          does: "",
+          off: false,
+        },
+      ],
+      people: roster.people.map((person) =>
+        person.id === ids.max ? { ...person, team: `${ids.team}-b` } : person
+      ),
+    }));
+    const moved = await readNow();
+    await onLink({ action: "withdraw", ...(await openLink(ids.max)) });
+    expect({ before, moved, withdrawn: await readNow() }).toStrictEqual({
+      before: {
+        claims: [zendeskClaim.text],
+        drawings: 1,
+        page: [["handling new tickets", 1]],
+      },
+      moved: { claims: [], drawings: 0, page: [] },
+      withdrawn: { claims: [], drawings: 0, page: [] },
+    });
+  });
+
+  it("draw a team's work again without someone who moved away, and give its drawing back once it stands without them, nobody agreeing anew", async () => {
+    const { ids, max } = await drawnTeam({ eight: true });
+    await intakeOf(ids, [zendeskClaim]);
+    await handOverNow();
+    const keys: Key[] = [...everyone, "sam", "ada"];
+    // Max moves to Billing, and stays: Ops still has seven who tell.
+    await savedRoster(ids, keys, movedToBilling(ids, [ids.max]));
+    const moved = await workOnPage(ids);
+    // The work is due to be drawn again, without him; then the team's
+    // next intake.
+    for (let round = 0; round < 4; round += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one drawing at a time, as the alarm draws
+      const { result } = await answering(
+        [ticketsReply(ids)],
+        async () => await onboardingStore(env).drawNext()
+      );
+      if (result === null) {
+        break;
+      }
+    }
+    await intakeOf(ids, [zendeskClaim]);
+    await handOverNow();
+    const drawings = await recalled(max, "ticket", "drawing");
+    const [drawn] = await onboardingStore(env).standingDrawings();
+    const restingOnMax = await onboardingStore(env).sentFor(ids.max);
+    expect({
+      moved,
+      drawings: drawings.length,
+      page: await workOnPage(ids),
+      // Drawn from those in Ops now: never Max.
+      fromMax: JSON.stringify(drawn?.drawing ?? {}).includes(ids.max),
+      restsOnMax: restingOnMax.length,
+    }).toStrictEqual({
+      moved: [],
+      drawings: 1,
+      page: [["handling new tickets", 1]],
+      fromMax: false,
+      restsOnMax: 0,
+    });
+  });
+
+  it("give a team's claims and drawing back at its next intake when someone they rest on moves back, nobody agreeing anew", async () => {
+    const { ids, max } = await drawnTeam({ eight: true });
+    await intakeOf(ids, [zendeskClaim]);
+    await handOverNow();
+    const keys: Key[] = [...everyone, "sam", "ada"];
+    await savedRoster(ids, keys, movedToBilling(ids, [ids.max]));
+    await noAlarm();
+    await savedRoster(ids, keys, movedToBilling(ids, []));
+    const armed = await alarmSet();
+    await byTheAlarm(async () => {
+      const drawn = await recalled(max, "ticket", "drawing");
+      return drawn.length > 0;
+    });
+    const drawings = await recalled(max, "ticket", "drawing");
+    expect({
+      armed,
+      claims: await recalled(max, "Zendesk", "claim"),
+      drawings: drawings.length,
+      page: await workOnPage(ids),
+    }).toStrictEqual({
+      armed: true,
+      claims: [zendeskClaim.text],
+      drawings: 1,
+      page: [["handling new tickets", 1]],
+    });
+  });
+
+  it("take a drawing out as its team's lead is replaced on the list: its map was the old lead's", async () => {
+    const { ids, max } = await drawnTeam({ eight: true });
+    await intakeOf(ids, [zendeskClaim]);
+    await handOverNow();
+    const before = await workOnPage(ids);
+    await savedRoster(ids, [...everyone, "sam", "ada"], (roster) => ({
+      ...roster,
+      teams: roster.teams.map((each) => ({ ...each, lead: ids.max })),
+    }));
+    expect({
+      before,
+      drawings: await recalled(max, "ticket", "drawing"),
+      page: await workOnPage(ids),
+    }).toStrictEqual({
+      before: [["handling new tickets", 1]],
+      drawings: [],
+      page: [],
+    });
+  });
+
+  it("take a switched-off team's claims and drawings out as the save commits, and note them again at its next intake once it takes part again, nobody agreeing anew", async () => {
+    const { ids, max } = await drawnTeam({ eight: true });
+    await intakeOf(ids, [zendeskClaim]);
+    await handOverNow();
+    const keys: Key[] = [...everyone, "sam", "ada"];
+    const readNow = async () => {
+      const drawings = await recalled(max, "ticket", "drawing");
+      return {
+        claims: await recalled(max, "Zendesk", "claim"),
+        drawings: drawings.length,
+        page: await workOnPage(ids),
+      };
+    };
+    const before = await readNow();
+    await savedRoster(ids, keys, (roster) => ({
+      ...roster,
+      teams: roster.teams.map((each) => ({ ...each, off: true })),
+    }));
+    const off = await readNow();
+    // Taking part again, confirmed, and nobody agreeing anew: the next
+    // intake.
+    await noAlarm();
+    await savedRoster(ids, keys, (roster) => roster);
+    const armed = await alarmSet();
+    await byTheAlarm(async () => {
+      const drawn = await recalled(max, "ticket", "drawing");
+      return drawn.length > 0;
+    });
+    const again = await readNow();
+    expect({ before, off, armed, again }).toStrictEqual({
+      before: {
+        claims: [zendeskClaim.text],
+        drawings: 1,
+        page: [["handling new tickets", 1]],
+      },
+      off: { claims: [], drawings: 0, page: [] },
+      armed: true,
+      again: {
+        claims: [zendeskClaim.text],
+        drawings: 1,
+        page: [["handling new tickets", 1]],
+      },
+    });
+  });
+
+  it("bring nothing of a switched-off team back while switching it on again waits for the admin's confirmation, and show it at the next intake once confirmed, with nothing else changed", async () => {
+    const { ids, max } = await drawnTeam({ eight: true });
+    await intakeOf(ids, [zendeskClaim]);
+    await handOverNow();
+    const keys: Key[] = [...everyone, "sam", "ada"];
+    const listOf = () =>
+      rosterOf(
+        ids,
+        keys,
+        Object.fromEntries(keys.map((key) => [key, addressOf(ids[key])]))
+      );
+    const readNow = async () => {
+      const drawings = await recalled(max, "ticket", "drawing");
+      return {
+        claims: await recalled(max, "Zendesk", "claim"),
+        drawings: drawings.length,
+        page: await workOnPage(ids),
+      };
+    };
+    /** Sam agrees to more, the work is drawn again, and the team's next intake runs. */
+    const nextIntake = async (version: number) => {
+      await agree(
+        ids.sam,
+        [
+          fact("s1", "step", "Answers the phone."),
+          fact("s2", "step", "Logs the call."),
+        ],
+        version
+      );
+      await answering(
+        [ticketsReply(ids)],
+        async () => await onboardingStore(env).drawNext()
+      );
+      await intakeOf(ids, [zendeskClaim]);
+      await handOverNow();
+    };
+    // Confirmed off; then switched on again in a save not confirmed.
+    await savedRoster(ids, keys, (roster) => ({
+      ...roster,
+      teams: roster.teams.map((each) => ({ ...each, off: true })),
+    }));
+    await onboardingStore(env).saveRoster(
+      listOf(),
+      { type: "system" },
+      { confirmed: false }
+    );
+    await nextIntake(1);
+    const unconfirmed = await readNow();
+    // The admin confirms it, and nothing else changes: the clock's next
+    // intake notes the team's results.
+    await noAlarm();
+    await onboardingStore(env).saveRoster(listOf(), { type: "system" });
+    const armed = await alarmSet();
+    await byTheAlarm(async () => {
+      const drawn = await recalled(max, "ticket", "drawing");
+      return drawn.length > 0;
+    });
+    expect({ unconfirmed, armed, confirmed: await readNow() }).toStrictEqual({
+      unconfirmed: { claims: [], drawings: 0, page: [] },
+      armed: true,
+      confirmed: {
+        claims: [zendeskClaim.text],
+        drawings: 1,
+        page: [["handling new tickets", 1]],
+      },
+    });
+  });
+
+  it("give a team's results back at the clock's next intake when the Brain refused its switch-off, with nothing else changed", async () => {
+    const { ids, max } = await drawnTeam({ eight: true });
+    await intakeOf(ids, [zendeskClaim]);
+    await handOverNow();
+    const keys: Key[] = [...everyone, "sam", "ada"];
+    const readNow = async () => {
+      const drawings = await recalled(max, "ticket", "drawing");
+      return {
+        claims: await recalled(max, "Zendesk", "claim"),
+        drawings: drawings.length,
+        page: await workOnPage(ids),
+      };
+    };
+    // The Brain's store restores, so it takes nothing out of use: the
+    // switch-off is refused whole, its team's results already marked.
+    const shared = inJurisdiction(env, env.BRAIN_STORE).getByName("brain");
+    const restore = `restore-${unique()}`;
+    await runInDurableObject(shared, (_, state) => {
+      state.storage.sql.exec(
+        "INSERT INTO restores (export, checked, part, restored, state, started_at) VALUES (?, 0, 0, 0, 'running', ?)",
+        restore,
+        Date.now()
+      );
+    });
+    await noAlarm();
+    const refused = await outcome(
+      savedRoster(ids, keys, (roster) => ({
+        ...roster,
+        teams: roster.teams.map((each) => ({ ...each, off: true })),
+      }))
+    );
+    const armed = await alarmSet();
+    const { roster } = await onboardingStore(env).view();
+    const off = roster?.teams.find(({ id }) => id === ids.team)?.off;
+    await runInDurableObject(shared, (_, state) => {
+      state.storage.sql.exec("DELETE FROM restores WHERE export = ?", restore);
+    });
+    await byTheAlarm(async () => {
+      const drawn = await recalled(max, "ticket", "drawing");
+      return drawn.length > 0;
+    });
+    expect({
+      refused: refused === "ok" ? "saved" : "refused",
+      armed,
+      off,
+      again: await readNow(),
+    }).toStrictEqual({
+      refused: "refused",
+      armed: true,
+      off: false,
+      again: {
+        claims: [zendeskClaim.text],
+        drawings: 1,
+        page: [["handling new tickets", 1]],
+      },
+    });
+  });
+
+  it("take a drawing out as a backer's withdrawal commits, for the Brain and the page alike", async () => {
+    const { ids, max } = await drawnTeam({ eight: true });
+    await intakeOf(ids, [zendeskClaim]);
+    await handOverNow();
+    const before = await recalled(max, "ticket", "drawing");
+    await onLink({ action: "withdraw", ...(await openLink(ids.pim)) });
+    expect({
+      before: before.length > 0,
+      recalled: await recalled(max, "ticket", "drawing"),
+      page: await workOnPage(ids),
+    }).toStrictEqual({ before: true, recalled: [], page: [] });
   });
 });

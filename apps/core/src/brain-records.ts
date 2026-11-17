@@ -34,7 +34,7 @@ import { canonicalJson } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { requireAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { and, asc, count, eq, gte, isNull, like, sql } from "drizzle-orm";
+import { and, asc, count, isNull, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -602,79 +602,6 @@ export const purgeOnboardingRecords = async (
   return held.size;
 };
 
-/**
- * The onboarding's drawings the brain holds now of the workflows
- * `workflowIds`, by id, each with its workflow: what a piece of work drawn
- * and checked anew replaces (GRA-1084).
- */
-export const onboardingDrawingsOf = async (
-  env: Env,
-  workflowIds: readonly string[]
-): Promise<{ id: string; workflowId: string }[]> => {
-  if (workflowIds.length === 0) {
-    return [];
-  }
-  const rows = await drizzle(env.DB)
-    .select({
-      id: brainRecords.id,
-      workflowId: sql<string>`json_extract(${brainRecords.body}, '$.workflowId')`,
-    })
-    .from(brainRecords)
-    .where(
-      and(
-        eq(brainRecords.type, "workflowVersion"),
-        like(brainRecords.id, `${onboardingIdPrefix}%`),
-        inList(
-          sql`json_extract(${brainRecords.body}, '$.workflowId')`,
-          workflowIds
-        )
-      )
-    )
-    .all();
-  return rows;
-};
-
-/**
- * Takes out of the brain, for good, every drawing the onboarding gave it
- * from `since` on: what may have been drawn with a document's reading
- * that a Knowledge purge reached (onboarding/documents.ts). A drawing is
- * a version of its workflow; the workflow stays, and is drawn again.
- * Nothing else is taken out, and nothing written over. One batch with its
- * audit event, which names the records by id and counts them, never what
- * they said. Returns the ids taken out.
- */
-export const purgeOnboardingDrawings = async (
-  env: Env,
-  since: Date
-): Promise<string[]> => {
-  const db = drizzle(env.DB);
-  const held = await db
-    .select({ id: brainRecords.id, type: brainRecords.type })
-    .from(brainRecords)
-    .where(
-      and(
-        eq(brainRecords.type, "workflowVersion"),
-        like(brainRecords.id, `${onboardingIdPrefix}%`),
-        gte(brainRecords.addedAt, since)
-      )
-    );
-  if (held.length === 0) {
-    return [];
-  }
-  const gone = held.map(({ id }) => id);
-  await auditedBatch(env, db, [
-    db.delete(brainRecords).where(inList(brainRecords.id, gone)),
-    outboxed(db, {
-      actor: { type: "system" },
-      action: "brain.records.purged",
-      target: { type: "brain", id: "records" },
-      provenance: held.slice(0, auditProvenanceMaxItems).map(keyOf),
-      detail: { purged: held.length },
-    }),
-  ]);
-  return gone;
-};
-
 /** A stored body as JSON; `undefined` when it isn't. */
 const parsedBody = (body: string): unknown => {
   try {
@@ -836,7 +763,7 @@ export const datedInOrder = (team: Team): void => {
 };
 
 /** The steps of a drawing, as a workflow's baseline. */
-const stepsOf = ({ steps }: WorkflowDrawing): Step[] =>
+export const stepsOf = ({ steps }: WorkflowDrawing): Step[] =>
   steps.map(({ text, who, tool, minutes }) => ({
     text,
     ...(who === "" ? {} : { who }),
