@@ -267,9 +267,8 @@ const connectedSystemsOf = async (
 /**
  * Every opportunity the admin `admin` may read, the largest first (by
  * hours a week; those with none last), dismissed ones left out. Each
- * routine they may read in the Brain, with its proposal: asked of the
- * model the first time at its evidence, then kept. Refused for anyone
- * but an admin.
+ * routine standing now, with its proposal: asked of the model the first
+ * time at its evidence, then kept. Refused for anyone but an admin.
  */
 export const listOpportunities = async (
   env: Env,
@@ -323,6 +322,15 @@ export const listOpportunities = async (
           target: [opportunityProposals.routine, opportunityProposals.evidence],
           set: { proposal: JSON.stringify(proposal), createdAt: new Date() },
         });
+      // The drawing may have fallen while the model answered, and its
+      // erasure run before this write: checked after it, so what it rested
+      // on never outlives it. One that falls later is erased with it.
+      // oxlint-disable-next-line no-await-in-loop -- checked as it is kept
+      if ((await onboardingStore(env).drawingToHand(evidence)) === null) {
+        // oxlint-disable-next-line no-await-in-loop -- erased as it is found
+        await eraseOpportunitiesOn(env, evidence);
+        continue;
+      }
     }
     const cases = casesPerWeekOf(drawing.drawing);
     const minutes = minutesOf(drawing.drawing);

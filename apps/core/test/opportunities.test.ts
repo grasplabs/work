@@ -5,7 +5,12 @@ import { z } from "zod";
 import { eraseOwedOnboardingSources } from "../src/onboarding/new-brain.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { mockIdp } from "./idp.ts";
-import { aloneInTheStore, answering, onLink } from "./interview-link.ts";
+import {
+  aloneInTheStore,
+  answering,
+  answeringWith,
+  onLink,
+} from "./interview-link.ts";
 import {
   agree,
   fact,
@@ -233,6 +238,37 @@ describe("opportunities", { timeout: 120_000 }, () => {
       withdrawn: undefined,
       kept: 0,
     });
+  });
+
+  it("keep no proposal for a drawing a withdrawal took down while the model answered", async () => {
+    const { ids } = await drawnTeam();
+    const { api } = await signedInApi(idp, "admin");
+    const before = await onboardingStore(env).standingDrawings();
+    const drawing = before.find(({ team: of }) => of === ids.team);
+    let withdrew = false;
+    const { result } = await answeringWith(
+      async () => {
+        // Pim withdraws while the model answers, and the drawing's erasure
+        // runs before the answer is kept.
+        if (!withdrew) {
+          withdrew = true;
+          await onLink({ action: "withdraw", ...(await openLink(ids.pim)) });
+          await eraseOwedOnboardingSources(env);
+        }
+        return proposing({ form: "workflow", systems: ["Zendesk"] });
+      },
+      async () => await api.opportunities.list()
+    );
+    const kept = await env.DB.prepare(
+      "SELECT COUNT(*) AS kept FROM opportunity_proposals WHERE evidence = ?"
+    )
+      .bind(drawing?.source ?? "")
+      .first<{ kept: number }>();
+    expect({
+      withdrew,
+      listed: result.some(({ evidence }) => evidence === drawing?.source),
+      kept: kept?.kept,
+    }).toStrictEqual({ withdrew: true, listed: false, kept: 0 });
   });
 
   it("refuse anyone but an admin, listing or dismissing", async () => {
