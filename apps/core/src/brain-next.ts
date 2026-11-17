@@ -301,11 +301,12 @@ const kindsWithoutColon = <const K extends string>(
 // `capture`: what a chat's agent read through its person's own connection
 // (connection-capture.ts, GRA-1730), in their own store alone.
 // `interview`: a person's interview, theirs alone, in their own store;
-// `claim`: what five or more people of a staff-list team said in theirs,
-// readable by that team (onboarding/new-brain.ts, GRA-1790, GRA-1741).
+// `claim`: how a staff-list team works, as its people shared it in theirs,
+// readable by every member as themselves (onboarding/new-brain.ts,
+// GRA-1790, GRA-1741, GRA-1987).
 // `drawing`: a drawing of a staff-list team's piece of work, only what
-// five or more of its people told, readable by every member as themselves
-// (onboarding/new-brain.ts, GRA-1748).
+// its people are checked to have told, readable by every member as
+// themselves (onboarding/new-brain.ts, GRA-1748).
 // `kickoff`: what every member reads of the onboarding's kickoff, readable
 // by everyone (onboarding/new-brain.ts, GRA-1748).
 // `roster`: the company's confirmed teams, as the admin described them,
