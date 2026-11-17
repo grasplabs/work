@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "7ae5456c-8d61-4ee8-8be8-18dd07d0f14f",
+  "id": "7b542b0c-f2ac-452f-b87f-e9489e9ed02e",
   "prevId": "294a4b9a-6999-43c1-92b5-14d688e029f4",
   "tables": {
     "chunk_blocks": {
@@ -2200,7 +2200,15 @@
           "autoincrement": false
         }
       },
-      "indexes": {},
+      "indexes": {
+        "restore_cards_entity_idx": {
+          "name": "restore_cards_entity_idx",
+          "columns": [
+            "entity"
+          ],
+          "isUnique": false
+        }
+      },
       "foreignKeys": {},
       "compositePrimaryKeys": {
         "restore_cards_subject_entity_pk": {

@@ -16,5 +16,6 @@ CREATE TABLE `restore_cards` (
 	PRIMARY KEY(`subject`, `entity`)
 );
 --> statement-breakpoint
+CREATE INDEX `restore_cards_entity_idx` ON `restore_cards` (`entity`);--> statement-breakpoint
 CREATE INDEX `memories_speaker_idx` ON `memories` ((speaker ->> 'person')) WHERE speaker ->> 'kind' = 'internal';--> statement-breakpoint
 CREATE INDEX `memory_confirmations_person_idx` ON `memory_confirmations` (`person`);

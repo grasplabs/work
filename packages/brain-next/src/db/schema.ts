@@ -1332,7 +1332,12 @@ export const restoreCards = sqliteTable(
     subject: text().notNull(),
     entity: text().notNull(),
   },
-  (table) => [primaryKey({ columns: [table.subject, table.entity] })]
+  (table) => [
+    primaryKey({ columns: [table.subject, table.entity] }),
+    // By the card: when it goes (forget.ts), when an erasure takes it, and
+    // when a restore is given up.
+    index("restore_cards_entity_idx").on(table.entity),
+  ]
 );
 
 /**

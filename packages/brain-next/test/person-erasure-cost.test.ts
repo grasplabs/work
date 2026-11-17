@@ -6,7 +6,7 @@
 // is and by confirmer, each a seek: rows linear in what is theirs, never
 // in what others said or confirmed. Every name and statement is fixed,
 // and each case has a store of its own from empty storage.
-import { reset } from "cloudflare:test";
+import { reset, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -104,6 +104,91 @@ describe("a person's erasure in the shared store", () => {
   it("reads rows linear in what is theirs, never in what others said or confirmed", async () => {
     const fewer = await rowsOfErasure(1000);
     const more = await rowsOfErasure(3000);
+    expect({ grew: more - fewer }).toStrictEqual({ grew: 0 });
+  }, 120_000);
+});
+
+/**
+ * `count` links a restore given up keeps (`restore_cards`), each of a card
+ * the store holds nothing else of here: their shape, planted.
+ */
+const keptLinks = async (stub: Store, count: number): Promise<void> => {
+  await runInDurableObject(stub, (_instance, state) => {
+    for (let at = 0; at < count; at += 1) {
+      state.storage.sql.exec(
+        "INSERT INTO restore_cards (subject, entity) VALUES (?, ?)",
+        `subject-${at}`,
+        `card-${at}`
+      );
+    }
+  });
+};
+
+/** The rows a writer's erasure reads, its delete batch removing a memory but no card, with `links` links kept. */
+const rowsOfDeletion = async (links: number): Promise<number> => {
+  const { stub, rowsReadBy } = await countedStore();
+  await stub.addMemories({
+    change: "kept",
+    access: { kind: "audience", group },
+    entities: [{ key: "c", kind: "customer", names: ["Acme"] }],
+    memories: [
+      {
+        about: "c",
+        type: "fact",
+        statement: "Acme renews in May",
+        speaker: { kind: "system" },
+        basis: { kind: "writer", writer: "app:kept" },
+      },
+    ],
+  });
+  await stub.addMemories({
+    change: "erased",
+    access: { kind: "audience", group },
+    entities: [{ key: "c", kind: "customer", names: ["Acme"] }],
+    memories: [
+      {
+        about: "c",
+        type: "fact",
+        statement: "Acme pays late",
+        speaker: { kind: "system" },
+        basis: { kind: "writer", writer: "app:gone" },
+      },
+    ],
+  });
+  await keptLinks(stub, links);
+  return await rowsReadBy(async () => {
+    await stub.eraseWriter({
+      writer: "app:gone",
+      reason: "deleted",
+      change: "reset",
+    });
+  });
+};
+
+/** The rows erasing a person with no card a restore recorded reads, with `links` links kept. */
+const rowsOfErasureBesideLinks = async (links: number): Promise<number> => {
+  const { stub, rowsReadBy } = await countedStore();
+  await saidBy(stub, "anna", 100);
+  await keptLinks(stub, links);
+  return await rowsReadBy(async () => {
+    await stub.erasePersonShared({
+      person: "anna",
+      identifiers: [{ type: "email", value: "anna@cost.test" }],
+      reason: "person_erased",
+    });
+  });
+};
+
+describe("the links a restore given up keeps", () => {
+  it("cost a delete batch that removes no card nothing, however many are kept", async () => {
+    const fewer = await rowsOfDeletion(10);
+    const more = await rowsOfDeletion(10_000);
+    expect({ grew: more - fewer }).toStrictEqual({ grew: 0 });
+  }, 120_000);
+
+  it("cost a person's erasure that takes none of their cards nothing, however many are kept", async () => {
+    const fewer = await rowsOfErasureBesideLinks(10);
+    const more = await rowsOfErasureBesideLinks(10_000);
     expect({ grew: more - fewer }).toStrictEqual({ grew: 0 });
   }, 120_000);
 });
