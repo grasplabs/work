@@ -563,6 +563,7 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "brainStore.chunk_days": {
     company: "the days passages of those documents mention",
   },
+  "brainStore.chunk_blocks": noPerson,
   "brainStore.vector_models": noPerson,
   "brainStore.vector_blocks": { company: "vector codes of those passages" },
   "brainStore.vector_codes": { company: "vector codes of those passages" },
