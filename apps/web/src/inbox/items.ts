@@ -407,9 +407,7 @@ const askedItems = (
         kind: "openQuestion",
         title: question,
         context: owner,
-        body: [
-          t`You were asked this as the ${owner}. Answer it in the brain: everyone in the company reads the answer, with your name.`,
-        ],
+        body: [t`Everyone in the company reads your answer, with your name.`],
         facts: [{ label: t`Asked`, value: formatDateTime(at) }],
         about: { kind: "brain" },
         forWhom: { person: me },

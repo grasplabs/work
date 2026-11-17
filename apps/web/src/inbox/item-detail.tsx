@@ -1,18 +1,8 @@
 import type { WorkflowBindingTarget } from "@grasp-os/shared/workflow-resources";
-import { Button } from "@grasp-os/ui/components/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@grasp-os/ui/components/dialog";
 import { Trans, useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { useRouter } from "@tanstack/react-router";
-import { ArrowLeftIcon, ArrowUpRightIcon } from "lucide-react";
-import { useId, useLayoutEffect, useRef, useState } from "react";
+import { useId } from "react";
 import type { ReactNode } from "react";
 
 import { grantReviewed, reviewedVersion } from "../activity/pending.tsx";
@@ -26,21 +16,76 @@ import {
 import type { Session } from "../core.ts";
 import { isUnresolvable, OutcomeDetails } from "../dashboard/outcome-card.tsx";
 import { RequestDetails } from "../dashboard/pile-cards.tsx";
-import { ErrorText } from "../error-text.tsx";
 import { formatDate } from "../format.ts";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogPanel,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "../grasp/alert-dialog/index.ts";
+import { Alert } from "../grasp/alert/index.ts";
+import { Badge } from "../grasp/badge/index.ts";
+import { Button } from "../grasp/button/index.ts";
+import { CodeBlock } from "../grasp/code-block/index.ts";
+import { Heading } from "../grasp/heading/index.ts";
+import { ArrowLeft, External } from "../grasp/icons/index.ts";
+import { KeyValueList } from "../grasp/key-value/index.ts";
+import { QuestionTool } from "../grasp/question-tool/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { useCoreAction } from "../use-core-action.ts";
+import { useCore } from "../use-core.ts";
 import { PendingBindingList } from "../workflows/binding-approvals.tsx";
-import { ItemMark, KindPill } from "./inbox-kind.tsx";
+import { kindLabel, kindMark } from "./inbox-kind.tsx";
 import type { InboxItem, InboxSource, Target } from "./items.ts";
 import { TargetLink } from "./target-link.tsx";
 
-// An item of the inbox, as the prototype's (`routes/inbox.tsx`): what
-// happened and what to do, its context, and a bar with its actions at the
-// bottom. Each action goes to core with the same calls the dashboard's
-// pile makes, and the inbox is read again once it is through, so a
-// settled item leaves the list. What the prototype's bar adds besides
-// (dismiss with why, put away until a date, give to someone) core keeps
-// nothing of, so the bar has the item's own actions only.
+// An item of the inbox, on Grasp UI: what it is and what happened, what
+// has to be read before deciding, its facts, and its actions in one row
+// under them, the one that settles it first. Each action goes to core with
+// the same calls the dashboard's pile makes, and the inbox is read again
+// once it is through, so a settled item leaves the list. A question the
+// brain asked the person is answered here, in their own words, on the
+// Question tool (`brain.answerGap`); core then lists it no more.
+
+const styles = stylex.create({
+  item: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space5,
+    width: "100%",
+    maxWidth: "44rem",
+    marginInline: "auto",
+    paddingBlock: grasp.space6,
+    paddingInline: grasp.space6,
+    boxSizing: "border-box",
+  },
+  head: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space2,
+  },
+  meta: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: grasp.space2,
+  },
+  words: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space2,
+  },
+  actions: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: grasp.space2,
+  },
+});
 
 /** One of an item's actions: a press that goes to core, or the way to where it is done. */
 interface Act {
@@ -53,138 +98,54 @@ interface Act {
   disabled?: boolean;
   /** The id of a line that says why it waits. */
   describedBy?: string;
-  /** Asked once more before it is done, in a dialog: for a no that can't be taken back. */
+  /** Asked once more before it is done: for a no that can't be taken back. */
   confirm?: {
     title: string;
     description: string;
-    /** How the dialog's button reads: destructive unless saying so is not. */
-    variant?: "default" | "destructive";
+    /** How the dialog's button reads: danger unless saying so is not. */
+    variant?: "ink" | "danger";
   };
 }
-
-/** The height of one line in the list. Every line in the item falls on this rhythm too, in pixels. */
-const row = 56;
-
-/**
- * A block whose height is a whole number of list lines, so its bottom line
- * meets a line of the list beside it. It grows by a whole line when its
- * content needs more room.
- */
-const pxSuffix = /px$/u;
-
-/** Makes `block` as high as the whole list lines its content takes. */
-const fitRows = (block: HTMLElement, content: HTMLElement): void => {
-  const style = getComputedStyle(block);
-  const chrome = [
-    style.paddingTop,
-    style.paddingBottom,
-    style.borderTopWidth,
-    style.borderBottomWidth,
-  ].reduce((sum, value) => sum + (Number(value.replace(pxSuffix, "")) || 0), 0);
-  // A hair under a whole line still fits in it; rounding would otherwise add a line.
-  const rows = Math.max(
-    1,
-    Math.ceil((content.offsetHeight + chrome - 0.5) / row)
-  );
-  // A custom property, not a style: the class reads it (`min-h-(--rows-height)`).
-  block.style.setProperty("--rows-height", `${rows * row}px`);
-};
-
-const Rows = ({
-  className,
-  children,
-}: {
-  className: string;
-  children: ReactNode;
-}) => {
-  const outer = useRef<HTMLDivElement>(null);
-  const inner = useRef<HTMLDivElement>(null);
-  useLayoutEffect(() => {
-    const block = outer.current;
-    const content = inner.current;
-    const observer = new ResizeObserver(() => {
-      if (block !== null && content !== null) {
-        fitRows(block, content);
-      }
-    });
-    if (block !== null && content !== null) {
-      fitRows(block, content);
-      observer.observe(content);
-    }
-    return () => {
-      observer.disconnect();
-    };
-  }, []);
-  return (
-    <div className={className} ref={outer}>
-      <div ref={inner}>{children}</div>
-    </div>
-  );
-};
-
-/** A section of the item, with a grey band for its name, one line high. */
-const Section = ({
-  title,
-  children,
-}: {
-  title: string;
-  children: ReactNode;
-}) => (
-  <section aria-label={title}>
-    <h2 className="bg-row-group text-row-group-foreground flex h-14 items-center border-b px-5 font-medium">
-      {title}
-    </h2>
-    {children}
-  </section>
-);
-
-/** One fact of the context: a cell one line high, or two when its value needs the room. */
-const Fact = ({ label, value }: { label: string; value: string }) => (
-  <Rows className="flex min-h-(--rows-height) flex-col justify-center border-r border-b px-5 py-2">
-    <dl>
-      <dt className="text-muted-foreground text-xs leading-4">{label}</dt>
-      <dd className="mt-0.5 leading-5">{value}</dd>
-    </dl>
-  </Rows>
-);
 
 /** An action's button: a press, asked once more where it can't be taken back, or the way to its page. */
 const ActButton = ({
   act,
   busy,
-  variant,
+  first,
 }: {
   act: Act;
   busy: boolean;
-  variant: "default" | "outline";
+  /** The item's own next step: ink; the rest quiet. */
+  first: boolean;
 }) => {
-  const [confirming, setConfirming] = useState(false);
+  const { t } = useLingui();
+  const variant = first ? "ink" : "quiet";
   if (act.to !== undefined) {
     return (
       <Button
-        aria-label={act.name}
-        nativeButton={false}
-        render={<TargetLink destination={act.to} />}
+        iconEnd={External}
+        render={<TargetLink aria-label={act.name} destination={act.to} />}
         size="sm"
         variant={variant}
       >
         {act.label}
-        <ArrowUpRightIcon data-icon="inline-end" />
       </Button>
     );
   }
-  const press = () => {
-    void act.onPress?.();
+  const press = async () => {
+    await act.onPress?.();
   };
-  const { confirm } = act;
   const disabled = busy || act.disabled === true;
+  const { confirm } = act;
   if (confirm === undefined) {
     return (
       <Button
         aria-describedby={act.describedBy}
         aria-label={act.name}
         disabled={disabled}
-        onClick={press}
+        onClick={() => {
+          void press();
+        }}
         size="sm"
         variant={variant}
       >
@@ -192,49 +153,36 @@ const ActButton = ({
       </Button>
     );
   }
-  const button = (
-    <Button
-      aria-describedby={act.describedBy}
-      aria-label={act.name}
-      disabled={disabled}
-      size="sm"
-      variant={variant}
-    />
-  );
   return (
-    <Dialog onOpenChange={setConfirming} open={confirming}>
-      <DialogTrigger render={button}>{act.label}</DialogTrigger>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>{confirm.title}</DialogTitle>
-          <DialogDescription>{confirm.description}</DialogDescription>
-        </DialogHeader>
-        <DialogFooter>
-          <Button
-            onClick={() => {
-              setConfirming(false);
-            }}
-            variant="outline"
-          >
-            <Trans>Cancel</Trans>
-          </Button>
-          <Button
-            disabled={busy}
-            onClick={() => {
-              setConfirming(false);
-              press();
-            }}
-            variant={confirm.variant ?? "destructive"}
+    <AlertDialog>
+      <AlertDialogTrigger
+        aria-describedby={act.describedBy}
+        aria-label={act.name}
+        disabled={disabled}
+        size="sm"
+        variant={variant}
+      >
+        {act.label}
+      </AlertDialogTrigger>
+      <AlertDialogPanel>
+        <AlertDialogTitle>{confirm.title}</AlertDialogTitle>
+        <AlertDialogDescription>{confirm.description}</AlertDialogDescription>
+        <AlertDialogFooter>
+          <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
+          <AlertDialogAction
+            action={press}
+            failedLabel={t`It didn't go through`}
+            variant={confirm.variant ?? "danger"}
           >
             {act.label}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogPanel>
+    </AlertDialog>
   );
 };
 
-/** The item as it is shown: what happened, its context, and its actions, the first its next step. */
+/** The item as it is shown: what happened, what to read, its facts, and its actions. */
 const ItemFrame = ({
   frame,
   extra,
@@ -249,127 +197,82 @@ const ItemFrame = ({
   busy: boolean;
   failure: string | undefined;
 }) => {
-  const { t } = useLingui();
+  const { t, i18n } = useLingui();
   const { item, onBack } = frame;
-  const [first, ...others] = acts;
-  let forWhom = t`For an admin`;
+  let forWhom = t`An admin`;
   if (item.forWhom !== undefined && "role" in item.forWhom) {
     const { role } = item.forWhom;
-    forWhom = t`For the ${role}`;
+    forWhom = t`The ${role}`;
   } else if (item.forWhom !== undefined) {
-    const { person } = item.forWhom;
-    forWhom = t`For ${person}`;
+    forWhom = item.forWhom.person;
   }
   // With no action of its own, the item is dealt with where it lives.
-  const openLink =
-    item.about === undefined ? null : (
-      <Button
-        nativeButton={false}
-        render={<TargetLink destination={item.about} />}
-        size="sm"
-      >
-        <Trans>Open</Trans>
-        <ArrowUpRightIcon data-icon="inline-end" />
-      </Button>
-    );
+  const shown: Act[] =
+    acts.length === 0 && item.about !== undefined
+      ? [{ label: t`Open`, to: item.about }]
+      : acts;
   return (
-    <article aria-label={item.title} className="flex min-h-full flex-col">
-      <header className="flex h-14 flex-none items-center gap-3 border-b px-5">
-        <Button
-          aria-label={t`Back to the list`}
-          className="-ml-2 @4xl/inbox:hidden"
-          onClick={onBack}
-          size="icon-sm"
-          variant="ghost"
-        >
-          <ArrowLeftIcon />
+    <article aria-label={item.title} {...stylex.props(styles.item)}>
+      {onBack === undefined ? null : (
+        <Button icon={ArrowLeft} onClick={onBack} size="sm" variant="ghost">
+          {t`All items`}
         </Button>
-        <ItemMark item={item} />
-        <span className="min-w-0 flex-1 truncate font-medium">
-          {item.context}
-        </span>
-        <span className="hidden @md/item:inline-flex">
-          <KindPill kind={item.kind} />
-        </span>
-        <span className="text-muted-foreground text-xs tabular-nums">
-          {formatDate(item.date)}
-        </span>
-      </header>
-
-      <Section
-        title={t({ message: "What happened", context: "inbox item section" })}
-      >
-        <Rows className="min-h-(--rows-height) border-b px-5 py-4">
-          <div className="flex flex-col gap-3 leading-6">
-            <p className="font-medium">{item.title}</p>
-            {item.body.map((paragraph) => (
-              <p className="text-muted-foreground" key={paragraph}>
-                {paragraph}
-              </p>
-            ))}
-            {extra}
-            {first === undefined ? null : (
-              <div className="bg-card flex items-center justify-between gap-4 rounded-lg border px-4 py-3">
-                <span className="text-muted-foreground">
-                  <Trans context="inbox: the action that settles an item">
-                    Next step
-                  </Trans>
-                </span>
-                <ActButton act={first} busy={busy} variant="default" />
-              </div>
-            )}
-            <ErrorText>{failure}</ErrorText>
-          </div>
-        </Rows>
-      </Section>
-
-      <Section title={t({ message: "Context", context: "inbox item section" })}>
-        {/* Each cell draws its own right and bottom line; the column at the edge hides its right one. */}
-        <div className="overflow-hidden">
-          <div className="-mr-px grid grid-cols-1 @md/item:grid-cols-2 @2xl/item:grid-cols-3">
-            <Fact label={t`Who`} value={forWhom} />
-            {item.facts.map((fact) => (
-              <Fact
-                key={`${fact.label}-${fact.value}`}
-                label={fact.label}
-                value={fact.value}
-              />
-            ))}
-          </div>
+      )}
+      <header {...stylex.props(styles.head)}>
+        <div {...stylex.props(styles.meta)}>
+          <Badge icon={kindMark[item.kind]}>
+            {i18n._(kindLabel[item.kind])}
+          </Badge>
+          {item.urgent ? (
+            <Badge tone="attention">
+              <Trans context="inbox: something waits on this item">
+                Blocks work
+              </Trans>
+            </Badge>
+          ) : null}
+          <Text element="span" size="xs" tone="muted">
+            {formatDate(item.date)}
+          </Text>
         </div>
-        {item.about === undefined ? null : (
-          <div className="flex h-14 items-center border-b px-5">
-            <TargetLink
-              className="inline-flex items-center gap-1 hover:underline"
-              destination={item.about}
-            >
-              <Trans>Open where it lives</Trans>
-              <ArrowUpRightIcon className="text-muted-foreground size-3.5" />
-            </TargetLink>
-          </div>
+        <Heading level={2} size="md">
+          {item.title}
+        </Heading>
+        {item.context === item.title ? null : (
+          <Text size="sm" tone="muted">
+            {item.context}
+          </Text>
         )}
-      </Section>
-
-      {/* The actions float at the foot of the item: the quiet ones first, the item's own last. */}
-      {first === undefined && item.about === undefined ? null : (
-        <div className="sticky bottom-4 mt-auto flex justify-center px-5 pt-6">
-          <div className="bg-background flex max-w-full flex-wrap items-center justify-center gap-1 rounded-xl border p-1.5">
-            {others.map((act) => (
-              <ActButton
-                act={act}
-                busy={busy}
-                key={act.label}
-                variant="outline"
-              />
-            ))}
-            {first === undefined ? (
-              openLink
-            ) : (
-              <ActButton act={first} busy={busy} variant="default" />
-            )}
-          </div>
+      </header>
+      {item.body.length === 0 ? null : (
+        <div {...stylex.props(styles.words)}>
+          {item.body.map((paragraph) => (
+            <Text key={paragraph} size="sm" tone="text">
+              {paragraph}
+            </Text>
+          ))}
         </div>
       )}
+      {extra}
+      {shown.length === 0 ? null : (
+        <div {...stylex.props(styles.actions)}>
+          {shown.map((act, index) => (
+            <ActButton
+              act={act}
+              busy={busy}
+              first={index === 0}
+              key={act.label}
+            />
+          ))}
+        </div>
+      )}
+      {failure === undefined ? null : <Alert variant="danger">{failure}</Alert>}
+      <KeyValueList
+        items={[
+          { key: t`For`, value: forWhom },
+          ...item.facts.map(({ label, value }) => ({ key: label, value })),
+        ]}
+        layout="inline"
+      />
     </article>
   );
 };
@@ -377,7 +280,8 @@ const ItemFrame = ({
 /** What the inbox gives an item: the way back to the list, and where to say what was done. */
 interface Frame {
   item: InboxItem;
-  onBack: () => void;
+  /** Back to the list, where the item takes the list's place (a narrow page). */
+  onBack?: () => void;
   /** Says what was done, for a screen reader: the list only loses the item. */
   onSaid: (said: string) => void;
 }
@@ -493,16 +397,11 @@ const HeldStartItem = ({
       ]}
       busy={busy}
       extra={
-        <div className="flex flex-col gap-2">
-          <h3 className="font-medium">
-            <Trans>What it starts with</Trans>
-          </h3>
-          <pre className="bg-muted w-full overflow-x-auto rounded-md p-3 text-sm">
-            <code className="font-mono">
-              {JSON.stringify(start.args, null, 2)}
-            </code>
-          </pre>
-        </div>
+        <CodeBlock
+          code={JSON.stringify(start.args, null, 2)}
+          fileName={t`What it starts with`}
+          language="json"
+        />
       }
       failure={failure}
       frame={frame}
@@ -554,7 +453,7 @@ const OutcomeItem = ({
           confirm: {
             title: t`Say it happened?`,
             description: t`Grasp records your word that it took effect and never sends it again; a run waiting on it goes on without the answer that was lost. Nothing is changed or undone on ${connection}.`,
-            variant: "default",
+            variant: "ink",
           },
           onPress: async () => {
             await decide(
@@ -767,13 +666,64 @@ const BindingsDetail = ({
   );
 };
 
+/**
+ * A question the brain asked the person: answered here, in their own
+ * words, for everyone in the company to read with their name. Once it is
+ * answered core lists it no more, so it leaves the inbox.
+ */
+const AskedItem = ({
+  frame,
+  source,
+}: {
+  frame: Frame;
+  source: Extract<InboxSource, { type: "asked" }>;
+}) => {
+  const { t } = useLingui();
+  const router = useRouter();
+  const core = useCore();
+  const { notification } = source;
+  const { owner } = notification;
+  const asked = t`Asked of you as the ${owner}`;
+  const answer = async (words: string[]): Promise<void> => {
+    const [text = ""] = words;
+    await core.withSession(
+      async (session) =>
+        await session.brain.answerGap(notification.gap, text.trim())
+    );
+    const { question } = notification;
+    frame.onSaid(t`Answered: ${question}`);
+    await router.invalidate({ sync: true });
+  };
+  return (
+    <ItemFrame
+      acts={[]}
+      busy={false}
+      extra={
+        <QuestionTool
+          embedded
+          failedLabel={t`Your answer wasn't saved. Try again.`}
+          kind="text"
+          label={t`Your answer`}
+          onSubmit={answer}
+          question={notification.question}
+          submitLabel={t`Answer`}
+        />
+      }
+      failure={undefined}
+      frame={{
+        ...frame,
+        item: { ...frame.item, title: asked, context: asked },
+      }}
+    />
+  );
+};
+
 /** What is done on its own page: its next step leads there. */
 const ElsewhereItem = ({ frame }: { frame: Frame }) => {
   const { t } = useLingui();
   const { item } = frame;
   const labels: Partial<Record<InboxSource["type"], string>> = {
     reconnect: t`Sign in again`,
-    asked: t`Answer in the brain`,
     decision: t`Review and answer`,
     stoppedEvents: t`Open the connection`,
     appMessage: t`Open the App`,
@@ -809,6 +759,9 @@ export const ItemDetail = (frame: Frame) => {
   }
   if (source.type === "bindings") {
     return <BindingsDetail frame={frame} source={source} />;
+  }
+  if (source.type === "asked") {
+    return <AskedItem frame={frame} source={source} />;
   }
   return <ElsewhereItem frame={frame} />;
 };

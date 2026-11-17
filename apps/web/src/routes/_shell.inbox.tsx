@@ -38,8 +38,6 @@ const Inbox = () => {
 };
 
 export const Route = createFileRoute("/_shell/inbox")({
-  // It fills the page\'s card, its panes scrolling on their own (frame/page-fill.ts).
-  staticData: { page: "fill" },
   validateSearch: z.object({ item: z.string().optional() }),
   pendingComponent: PageLoading,
   loader: async ({ context: { core, identity } }) => {
