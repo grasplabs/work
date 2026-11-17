@@ -59,12 +59,12 @@ const remember = async (person: string, ...memories: NewMemory[]) =>
 const statementsOf = async (
   person: string,
   budget = whole
-): Promise<{ statements: string[]; truncated: boolean }> => {
-  const { memories, truncated }: Profile = await own(person).readProfile({
+): Promise<string[]> => {
+  const { memories }: Profile = await own(person).readProfile({
     reader: readerOf(person),
     budget,
   });
-  return { statements: memories.map(({ statement }) => statement), truncated };
+  return memories.map(({ statement }) => statement);
 };
 
 describe("a person's profile", () => {
@@ -88,10 +88,9 @@ describe("a person's profile", () => {
       })
     );
 
-    await expect(statementsOf(person)).resolves.toStrictEqual({
-      statements: ["Prefers short answers"],
-      truncated: false,
-    });
+    await expect(statementsOf(person)).resolves.toStrictEqual([
+      "Prefers short answers",
+    ]);
   });
 
   // AC 3: within its budget, whole memories, newest first, cut at the
@@ -144,12 +143,12 @@ describe("a person's profile", () => {
 
     expect({
       all: all.memories.map(({ statement }) => statement),
-      again: again.statements,
+      again,
       cut,
     }).toStrictEqual({
       all: said.toReversed(),
       again: said.toReversed(),
-      cut: { statements: said.toReversed().slice(0, 2), truncated: true },
+      cut: said.toReversed().slice(0, 2),
     });
   });
 
@@ -179,7 +178,7 @@ describe("a person's profile", () => {
       change: `forget:${memories[0]}`,
     });
 
-    const { statements } = await statementsOf(person);
+    const statements = await statementsOf(person);
     expect(statements.toSorted()).toStrictEqual(["Leads finance"]);
   });
 
@@ -206,8 +205,8 @@ describe("a person's profile", () => {
     ]);
 
     expect({ never, erased: await statementsOf(person) }).toStrictEqual({
-      never: { statements: [], truncated: false },
-      erased: { statements: [], truncated: false },
+      never: [],
+      erased: [],
     });
   });
 });

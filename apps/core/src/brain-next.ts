@@ -4446,8 +4446,8 @@ export const ownEntityIdAs = async (
  * The member `personId`'s profile (the Brain's `readProfile`, GRA-1745):
  * the current memories about their own entity in their own word, from
  * their own store, as their recall hands memories over (each with its
- * store, source and whose word), as many as fit `budget.tokens`, cut
- * short (`truncated`) at the first that doesn't. Built now from what they
+ * store, source and whose word), newest first, as many as fit
+ * `budget.tokens`, stopping at the first that doesn't. Built now from what they
  * may read, never kept. Each is `found` along their own entity
  * (`entities`). Refused once they are no longer a member.
  */
@@ -4455,12 +4455,12 @@ export const profileAs = async (
   env: BrainEnv & ReaderEnv,
   personId: string,
   budget: { tokens: number }
-): Promise<{ memories: RecalledMemory[]; truncated: boolean }> => {
+): Promise<{ memories: RecalledMemory[] }> => {
   const reader = await personReaderOf(env, personId, { interviews: false });
-  const { memories, truncated } = await ownBrain(
-    env,
-    reader.person
-  ).readProfile({ reader, budget });
+  const { memories } = await ownBrain(env, reader.person).readProfile({
+    reader,
+    budget,
+  });
   return {
     memories: memories.map((memory) => {
       const { id, value: _value, endedAt: _endedAt, ...held } = memory;
@@ -4478,7 +4478,6 @@ export const profileAs = async (
         said: saidOf(packed, personId),
       };
     }),
-    truncated,
   };
 };
 

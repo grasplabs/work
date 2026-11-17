@@ -2406,7 +2406,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
           tokens: budget.tokens,
           ...this.#pageMoments(),
         })
-      : { memories: [], truncated: false };
+      : { memories: [] };
   }
 
   /** An entity's card as the reader sees it, built now (cards.ts). */

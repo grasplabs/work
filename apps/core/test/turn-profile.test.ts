@@ -17,7 +17,7 @@ import {
 import { addSource, forgetAs, rememberAs } from "../src/brain-next.ts";
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import { inJurisdiction, workspace } from "../src/durable-objects.ts";
-import { chatOf, personalChatsOf, says } from "./agent-chat.ts";
+import { chatOf, personalChatsOf, says, setObjectEnv } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { fakeProvider } from "./model-provider.ts";
@@ -352,5 +352,60 @@ describe("the profile a chat starts with", setUpTime, () => {
       afterProfile: false,
       afterSearch: true,
     });
+  });
+
+  // Review of #2343, round 2: a slow profile read never holds the
+  // search's recall up: it goes over without it, and marks nothing.
+  it("hands the search's evidence over at once when the profile read is slow, without the profile, and marks nothing for it", async () => {
+    const { admin, personId } = await memberAndAdmin();
+    const topic = word();
+    await addSource(env, {
+      source: { producer: "upload", id: crypto.randomUUID() },
+      change: crypto.randomUUID(),
+      text: `The ${topic} warehouse opens at seven in the morning.`,
+      readers: { kind: "everyone" },
+    });
+    const theirs = `Leads the ${word()} team`;
+    await aboutThemselves(personId, theirs);
+    const chats = await personalChatsOf(personId, says("Seven."));
+    await requestGranted(idp, admin, {
+      subject: chats.agent,
+      object: { type: "platform" },
+      actions: ["brain"],
+      binding: "BRAIN",
+    });
+    // The person's own store answers their profile only past the recall's
+    // deadline; everything else at once.
+    const slowProfile = new Proxy(env.BRAIN_STORE, {
+      get: (namespace, name): unknown =>
+        name === "getByName"
+          ? (...given: Parameters<typeof namespace.getByName>) =>
+              new Proxy(namespace.getByName(...given), {
+                get: (stub, method): unknown =>
+                  method === "readProfile"
+                    ? async (...args: Parameters<typeof stub.readProfile>) => {
+                        await scheduler.wait(3500);
+                        return await stub.readProfile(...args);
+                      }
+                    : Reflect.get(stub, method),
+              })
+          : Reflect.get(namespace, name),
+    });
+    const { chat, ask } = await chats.newChat();
+    const restore = await setObjectEnv(chats.stub, {
+      BRAIN_STORE: slowProfile,
+    });
+    try {
+      await ask(`When does the ${topic} warehouse open?`);
+    } finally {
+      await restore();
+    }
+    const recall = latestRecallIn(chats.provider.requests.at(-1)?.body);
+
+    expect({
+      evidence: recall.includes(`The ${topic} warehouse opens`),
+      profile: recall.includes(theirs),
+      marked: await chats.stub.isChatPrivateRead(chat.id),
+    }).toStrictEqual({ evidence: true, profile: false, marked: false });
   });
 });

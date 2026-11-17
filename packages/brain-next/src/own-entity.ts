@@ -72,7 +72,7 @@ const newestFirst = (a: Memory, b: Memory): number =>
  * The profile of `reader` (contract.ts `readProfile`): the current memories
  * about their own entity in their own word, read at one moment, newest
  * first (`newestFirst`), each whole, as many as fit `tokens` in that
- * order (`packMemoryTokens`); cut short at the first that doesn't fit.
+ * order (`packMemoryTokens`), stopping at the first that doesn't fit.
  * Nothing while the store has no own entity. One synchronous read: a
  * snapshot.
  */
@@ -93,7 +93,7 @@ export const readProfile = (
   const entity = ownEntityId(sql);
   const theirs: Memory[] = [];
   if (entity === null) {
-    return { memories: theirs, truncated: false };
+    return { memories: theirs };
   }
   let after: MemoriesCursor | undefined;
   for (;;) {
@@ -123,10 +123,10 @@ export const readProfile = (
   for (const memory of theirs.toSorted(newestFirst)) {
     const cost = tokensOfMemory(memory);
     if (cost > left) {
-      return { memories, truncated: true };
+      break;
     }
     left -= cost;
     memories.push(memory);
   }
-  return { memories, truncated: false };
+  return { memories };
 };

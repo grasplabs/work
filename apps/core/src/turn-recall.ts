@@ -292,29 +292,46 @@ const leftOf = (started: number, ms: number): number =>
  * The profile the turn starts with (GRA-1745, brain-next.ts `profileAs`):
  * for a recall as the person alone, what the Brain holds about them in
  * their own word, from their own store, newest first. Read alongside the
- * question's search, from the same moment and within the same deadline,
- * and handed over only as far as the search left room (`fitted`). A store
- * that can't answer in time leaves the turn without it, logged by name:
- * missing guidance is no question of access, as for the instruction
- * files. Never rejects.
+ * question's search, from the same moment, and never waited for: `take`
+ * answers it if it has arrived when the search has ended, and otherwise
+ * nothing, logging why (it failed, or hasn't answered yet), as `lookElsewhere`
+ * does; so a slow store never holds the search's recall up, and what
+ * arrives later is dropped. Missing guidance is no question of access, as
+ * for the instruction files. Handed over only as far as the search left
+ * room (`fitted`).
  */
-const profileOf = async (
+const profileOf = (
   { env, turn }: Recalling,
   reads: Reads
-): Promise<RecalledMemory[]> => {
+): { take: () => RecalledMemory[] } => {
   if (!reads.personal) {
-    return [];
+    return { take: () => [] };
   }
-  try {
-    const { memories } = await withinTime(
-      async () => await profileAs(env, turn.scope.personId, turnRecallBudget),
-      turnRecallDeadlineMs
-    );
-    return memories;
-  } catch {
-    log.warn("chat.profile_unavailable", {});
-    return [];
-  }
+  let found: RecalledMemory[] | "failed" | undefined;
+  const read = async () => {
+    try {
+      ({ memories: found } = await profileAs(
+        env,
+        turn.scope.personId,
+        turnRecallBudget
+      ));
+    } catch {
+      found = "failed";
+    }
+  };
+  // Not awaited, and it never rejects: the search never waits on it.
+  void read();
+  return {
+    take: () => {
+      if (Array.isArray(found)) {
+        return found;
+      }
+      log.warn("chat.profile_unavailable", {
+        reason: found === "failed" ? "failed" : "late",
+      });
+      return [];
+    },
+  };
 };
 
 /**
@@ -601,10 +618,11 @@ export const recallForTurn = async (
   let failure = "The recall failed.";
   try {
     // The search as without a profile, with the profile read alongside,
-    // from the same moment; the profile only in the room it left.
+    // from the same moment, taken if it arrived by the search's end; the
+    // profile only in the room the search left.
     const profiling = profileOf(recalling, reads);
     const searched = await recalled(recalling, reads, query, analysed);
-    const profile = fitted(await profiling, searched.pack);
+    const profile = fitted(profiling.take(), searched.pack);
     const pack = {
       ...searched.pack,
       memories: [...searched.pack.memories, ...profile],
