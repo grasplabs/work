@@ -51,6 +51,7 @@ import {
   DisabledContext,
   ListenContext,
   MentionContext,
+  VoiceBesideContext,
   VoiceContext,
 } from "./context";
 import type { ComposerListener } from "./context";
@@ -1612,7 +1613,7 @@ const ComposerEnd = ({
   }
   return (
     <>
-      {voice}
+      <VoiceBesideContext.Provider value>{voice}</VoiceBesideContext.Provider>
       <ComposerSend
         working={working}
         empty={empty}

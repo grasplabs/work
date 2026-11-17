@@ -44,10 +44,28 @@ export interface SectionCardHandle extends Omit<
   ref?: Ref<HTMLButtonElement>;
 }
 
+/**
+ * A Section card's name: a title in its header, or, with no header (one card on a page whose title
+ * already says it), a name for a screen reader.
+ */
+type SectionCardName =
+  | {
+      /** The part's name, in sentence case ("Usage"). Leave it out for a card the page's own title names. */
+      title: ReactNode;
+      /** Its name for a screen reader, when it has a title: the title names it already. */
+      "aria-label"?: string;
+    }
+  | {
+      title?: undefined;
+      /** With no title: the card draws no header, and this names it for a screen reader ("Profile"). */
+      "aria-label": string;
+    };
+
 /** Every prop a SectionCard takes. */
-export interface SectionCardProps {
-  /** The part's name, in sentence case ("Usage"). */
-  title: ReactNode;
+export type SectionCardProps = SectionCardName & SectionCardOwn;
+
+/** What a SectionCard takes besides its name. */
+interface SectionCardOwn {
   /** One sentence under the title: what the part holds. */
   description?: ReactNode;
   /** Beside the title: a badge that says it is new, a count. */
@@ -116,6 +134,9 @@ const styles = stylex.create({
   headFill: { flexShrink: 0 },
   headCompact: { paddingBlock: grasp.space3, paddingInline: grasp.space4 },
   bodyCompact: { paddingInline: grasp.space4, paddingBlockEnd: grasp.space4 },
+  // With no header, the room over what it holds is the room at its sides.
+  bodyTop: { paddingBlockStart: grasp.space5 },
+  bodyTopCompact: { paddingBlockStart: grasp.space4 },
   footCompact: { paddingInline: grasp.space4 },
   // Over the header, under its actions (SectionHeader lifts them): the whole row but the buttons
   // takes the press. Its top corners are the card's, so the ring inside it follows them.
@@ -241,8 +262,60 @@ const Foot = ({
     </div>
   );
 
+interface HeadProps {
+  id: string;
+  title: ReactNode;
+  description: ReactNode;
+  aside: ReactNode;
+  actions: ReactNode;
+  level: 2 | 3 | 4;
+  loading: boolean;
+  compact: boolean;
+  flush: boolean;
+  fill: boolean;
+  handle: SectionCardHandle | undefined;
+}
+
+/** The card's header row: its title, sentence, aside and actions, and the drag handle on a board. */
+const Head = ({
+  id,
+  title,
+  description,
+  aside,
+  actions,
+  level,
+  loading,
+  compact,
+  flush,
+  fill,
+  handle,
+}: HeadProps) => (
+  <div
+    {...stylex.props(
+      styles.head,
+      compact && styles.headCompact,
+      flush && styles.edgeFlush,
+      fill && styles.headFill,
+      handle && styles.handled
+    )}
+  >
+    {handle && <Handle handle={handle} />}
+    <SectionHeader
+      id={id}
+      title={title}
+      description={description}
+      aside={aside}
+      actions={actions}
+      headingLevel={level}
+      size={compact ? "sm" : "md"}
+      loading={loading}
+    />
+  </div>
+);
+
 export const SectionCard = ({
   title,
+  "aria-label": ariaLabel,
   description,
   aside,
   actions,
@@ -266,39 +339,39 @@ export const SectionCard = ({
     const element = body.current;
     return fill && element !== null ? watchEdges(element) : undefined;
   }, [fill]);
+  const titled = title !== undefined;
   const bodyLook = flush
     ? styles.flush
-    : [styles.body, compact && styles.bodyCompact];
+    : [
+        styles.body,
+        compact && styles.bodyCompact,
+        !titled && (compact ? styles.bodyTopCompact : styles.bodyTop),
+      ];
   return (
     <Card
       element="section"
       padding="none"
       fill={fill}
+      aria-label={ariaLabel}
       layout={layout ?? styleProp}
     >
       <div {...stylex.props(styles.card, fill && styles.cardFill)}>
-        <div
-          {...stylex.props(
-            styles.head,
-            compact && styles.headCompact,
-            flush && styles.edgeFlush,
-            fill && styles.headFill,
-            handle && styles.handled
-          )}
-        >
-          {handle && <Handle handle={handle} />}
-          <SectionHeader
+        {titled && (
+          <Head
             id={id}
             title={title}
             description={description}
             aside={aside}
             actions={actions}
-            headingLevel={level}
-            size={compact ? "sm" : "md"}
+            level={level}
             loading={loading}
+            compact={compact}
+            flush={flush}
+            fill={fill}
+            handle={handle}
           />
-        </div>
-        {flush && <Separator decorative />}
+        )}
+        {titled && flush && <Separator decorative />}
         <div
           ref={body}
           data-slot="section-card-body"

@@ -10,35 +10,23 @@ import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 
 // A page's body and heading. App shell gives the page its side room, the
 // room under its bar and the room over the chat's bar at its foot; the
-// page keeps its column to a readable width in the middle of the card.
-
-// How wide a page's column grows: most pages, and those that lay out a
-// grid (`wide`). Grasp UI has no token for a page's measure yet.
-const PAGE_MEASURE = "64rem";
-const WIDE_MEASURE = "80rem";
+// page fills the card between those.
 
 const styles = stylex.create({
+  // As wide as the card lets it be, so every page's edges stand under the
+  // bar's and a banner's (Ruben, 17 Nov 2026: one width through the product).
   page: {
     display: "flex",
     flexDirection: "column",
     gap: grasp.space6,
     width: "100%",
-    maxWidth: PAGE_MEASURE,
-    marginInline: "auto",
-  },
-  wide: {
-    maxWidth: WIDE_MEASURE,
   },
 });
 
-/** The page body: a column in the middle of the card. */
-export const Page = ({
-  children,
-  wide = false,
-}: {
-  children: ReactNode;
-  wide?: boolean;
-}) => <div {...stylex.props(styles.page, wide && styles.wide)}>{children}</div>;
+/** The page body: a column as wide as the card. */
+export const Page = ({ children }: { children: ReactNode }) => (
+  <div {...stylex.props(styles.page)}>{children}</div>
+);
 
 /**
  * Every page's heading, the one way to head a page: Grasp UI's PageHeader,

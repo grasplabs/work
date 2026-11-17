@@ -16,7 +16,8 @@
 //     <FileRow />
 //   </ContextMenu>
 //
-// The area takes a tab stop, so Shift+F10 or the menu key opens it from the keyboard. Everything
+// The area takes a tab stop, so Shift+F10 or the menu key opens it from the keyboard (with
+// `tabStop={false}` the thing inside it that takes the keys does, a row's link). Everything
 // in it must also be reachable another way: a context menu is a shortcut, never the only door.
 // Every value is a token (src/tokens).
 "use client";
@@ -29,7 +30,7 @@ import type {
   MenuValueChangeDetails,
 } from "@ui-sdk/react/menu";
 import { useState } from "react";
-import type { KeyboardEvent, ReactNode } from "react";
+import type { ComponentProps, KeyboardEvent, ReactNode } from "react";
 
 import { listStyles } from "../combobox/list.styles";
 import { focus } from "../focus/focus";
@@ -68,6 +69,19 @@ export interface ContextMenuProps {
   disabled?: boolean;
   /** What a failed action says when it has no `failedLabel` of its own. @default "Failed" */
   failedLabel?: string;
+  /**
+   * Whether the area takes a tab stop of its own. `false` when the area holds the thing the keys
+   * reach (a row's link): the menu key and Shift+F10 on it still open the menu, as they bubble.
+   * @default true
+   */
+  tabStop?: boolean;
+  /**
+   * Where focus goes as the menu closes: back to the area by default; an element, a function that
+   * finds one (the row's link, when the area takes no tab stop), or `"none"` when the chosen action
+   * moves focus itself (a rename field).
+   * @default "trigger"
+   */
+  finalFocus?: ComponentProps<typeof MenuContent>["finalFocus"];
 }
 
 const styles = stylex.create({
@@ -109,6 +123,8 @@ export const ContextMenu = ({
   onValueChange,
   disabled = false,
   failedLabel = "Failed",
+  tabStop = true,
+  finalFocus,
 }: ContextMenuProps) => {
   // A failure is said aloud by a status line beside the menu, as well as shown on the action.
   const [said, setSaid] = useState("");
@@ -128,7 +144,7 @@ export const ContextMenu = ({
     >
       <MenuContextTrigger
         disabled={disabled}
-        tabIndex={disabled ? undefined : 0}
+        tabIndex={disabled || !tabStop ? undefined : 0}
         // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- the area is any content the caller gives; a <fieldset> would bring its own border and padding
         role="group"
         aria-label={ariaLabel}
@@ -138,6 +154,7 @@ export const ContextMenu = ({
         {children}
       </MenuContextTrigger>
       <MenuContent
+        finalFocus={finalFocus}
         sideOffset={popup.gap}
         collisionPadding={popup.gutter}
         {...stylex.props(listStyles.popup, listStyles.menuPopup, scroll.bar)}

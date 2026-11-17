@@ -88,7 +88,7 @@ export const AppsOverview = ({
     ({ app }) => needle === "" || app.name.toLocaleLowerCase().includes(needle)
   );
   return (
-    <Page wide>
+    <Page>
       <PageHeading
         // One Make something a page: with no Apps yet, the empty state's.
         action={

@@ -2,7 +2,7 @@
 //
 // It lies in a band directly under the words and stays where it is: one body of light centred on
 // the band, symmetric left and right, that breathes with the voice in place. Nothing travels
-// sideways. Its width and height follow the level (ordinary speech about half its height, only a
+// sideways. It spans the band end to end; its height follows the level (ordinary speech about half its height, only a
 // raised voice the top, about 28px; at rest about 6px, barely moving); the release of the level is
 // its afterglow, fading in place in about 300ms. The body has volume: a gradient inside it, the
 // brightest stop only along its centre line, then Bayer's threshold thins it through the grade's
@@ -52,9 +52,14 @@ const DOT_MIN = 1.5;
 /** Half the body's height at rest and at its loudest, in pixels: about 6px and 28px tall. */
 const REST_HALF = 3;
 const LOUD_HALF = 14;
-/** Half the body's width, as a share of the band's: at rest, and how much more at its loudest. */
-const REST_WIDTH = 0.2;
-const LOUD_WIDTH = 0.15;
+/**
+ * Half the body's width, as a share of the band's: at rest, and how much more at its loudest. The
+ * body spans the whole band, end to end, at every level (Ruben, 17 November: the band fills the
+ * footer's room between the time and the controls); the voice moves its height and brightness. A
+ * little past half, so its tapering tail meets the band's ends rather than stopping short of them.
+ */
+const REST_WIDTH = 0.58;
+const LOUD_WIDTH = 0;
 /** The rest's breath: one slow swell every few seconds, so at silence it barely moves. */
 const BREATH = 7;
 /** The centre line's half width, in pixels: where the brightest stop lives. */

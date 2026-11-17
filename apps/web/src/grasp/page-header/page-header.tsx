@@ -39,12 +39,13 @@ export interface PageHeaderProps {
   /** At the end of the title row: the page's own buttons, the main one last. */
   actions?: ReactNode;
   /**
-   * `lg` for a page of its own: the serif title-lg with a lead. `sm` for a sub-page whose crumbs
-   * already say where you are (a settings page): the title at title-sm in the sans, and a sentence,
-   * if any, at text-sm. Leave the lead out on a sub-page.
+   * `lg` for a page of its own: the serif title-lg with a lead. `md` for a settings page: the serif
+   * at title-md, a sentence (if any) at text-sm, as dense as `sm`. `sm` for a sub-page whose crumbs
+   * already say where you are: the title at title-sm in the sans, and a sentence, if any, at text-sm.
+   * Leave the lead out on `md` and `sm`.
    * @default "lg"
    */
-  size?: "lg" | "sm";
+  size?: "lg" | "md" | "sm";
   /** Under the title: the page's Tabs, when it has views. */
   tabs?: ReactNode;
   /**
@@ -141,6 +142,13 @@ const styles = stylex.create({
     letterSpacing: grasp.trackingUiTitle,
   },
   descriptionSm: { fontSize: grasp.textSm, lineHeight: grasp.textSmLine },
+  // A settings page's title: the page's serif at the middle size, as dense as a sub-page's.
+  titleMd: { fontSize: grasp.titleMd, lineHeight: grasp.titleMdLine },
+  actionsMd: { minHeight: grasp.titleMdLine },
+  titleWaitMd: {
+    height: grasp.titleMd,
+    marginBlock: `calc((${grasp.titleMdLine} - ${grasp.titleMd}) / 2)`,
+  },
   actionsSm: { minHeight: grasp.titleSmLine },
   titleWaitSm: {
     height: grasp.titleSm,
@@ -163,6 +171,12 @@ const styles = stylex.create({
 /** Each size's own look, over the large one's (none for `lg`). */
 const sizeLooks = {
   lg: { title: null, description: null, actions: null, titleWait: null },
+  md: {
+    title: styles.titleMd,
+    description: styles.descriptionSm,
+    actions: styles.actionsMd,
+    titleWait: styles.titleWaitMd,
+  },
   sm: {
     title: styles.titleSm,
     description: styles.descriptionSm,

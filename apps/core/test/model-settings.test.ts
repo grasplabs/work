@@ -52,6 +52,9 @@ const newMonth = (): string => {
   return `${2200 + Math.floor(monthsUsed / 12)}-${String((monthsUsed % 12) + 1).padStart(2, "0")}`;
 };
 
+/** US dollars as whole micros, so sums compare exactly. */
+const micros = (dollars: number): number => Math.round(dollars * 1_000_000);
+
 /** The model each role gets. */
 const roleIn = (settings: ModelsNow) => ({
   quick: modelForRole(settings, "quick"),
@@ -162,7 +165,7 @@ describe("model settings", { timeout: 60_000 }, () => {
     });
   });
 
-  it("show admins this month's spend: the total, and the workflows that spent most with their runs, and nobody else", async () => {
+  it("show admins this month's spend: the total, each day's, chat's, and the workflows that spent most with their runs, and nobody else", async () => {
     // The month it is: workflow runs are counted in it.
     const coreEnv: Env = { ...env, SPEND_MONTH: undefined };
     const { signedIn: signedInPerson } = jsonWorkflowAppsOf(idp);
@@ -250,9 +253,19 @@ describe("model settings", { timeout: 60_000 }, () => {
     const { core } = await openRpc(session, { coreEnv });
     const spend = await core.authenticate().models.spend();
     expect(spend.workflows).toHaveLength(modelSpendListed);
-    // The three calls, and the gone App's workflows'.
+    // Each day of the month so far, today's all of it, and nothing missing:
+    // the days add up to the total, and chat is the person's one turn.
+    const today = new Date().getUTCDate();
+    const { days, chat, ...rest } = spend;
     expect({
-      ...spend,
+      ...rest,
+      days: {
+        length: days.length,
+        sum: micros(days.reduce((sum, each) => sum + each, 0)),
+        today: micros(days[today - 1] ?? 0),
+        others: days.filter((_, at) => at !== today - 1),
+      },
+      chat: micros(chat),
       total: Math.round(spend.total * 1_000_000),
       workflows: spend.workflows.slice(0, 2).map(({ amount, ...listed }) => ({
         ...listed,
@@ -280,6 +293,13 @@ describe("model settings", { timeout: 60_000 }, () => {
         },
       ],
       more: true,
+      days: {
+        length: today,
+        sum: micros(spend.total),
+        today: micros(spend.total),
+        others: Array.from({ length: today - 1 }, () => 0),
+      },
+      chat: 4500,
     });
 
     const { session: builderSession } = await signedInWithRole(idp, "builder");

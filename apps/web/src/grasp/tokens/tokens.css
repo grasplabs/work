@@ -1526,7 +1526,6 @@
   /* The room above the sidebar's first row. */
   --grasp-shell-head: 16px;
   /* The height of a sidebar row. */
-  --grasp-picker-tile: 8rem;
   --grasp-shell-row: 32px;
   /* The room between two rows. */
   --grasp-shell-row-gap: 2px;
@@ -1578,6 +1577,8 @@
   --grasp-shell-page-room-chat: 96px;
   /* The width of a page's centred column inside the shell's card. */
   --grasp-page-measure: 64rem;
+  /* The widest a picker's tile grows with tileSize="md": a theme's miniature, a backdrop's preview. */
+  --grasp-picker-tile: 8rem;
   /* The width of a page column at the page's start: a settings page's groups of rows (Page column). */
   --grasp-page-column-measure: 45rem;
   /* The width of a wide page's centred column, such as a table or a board. */

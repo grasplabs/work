@@ -58,6 +58,7 @@ export const ProfileName = ({ name }: { name: string }) => {
     <SettingRow
       {...(failure === undefined ? {} : { error: failure })}
       failedLabel={t`Could not save. Your name is kept.`}
+      help={t`As your team sees it.`}
       label={t`Name`}
       onRetry={() => {
         if (tried !== undefined) {
@@ -89,6 +90,7 @@ export const ProfileName = ({ name }: { name: string }) => {
           }}
           // Read-only while its save runs, not disabled: a disabled field drops the keyboard's focus.
           readOnly={busy}
+          size="sm"
           value={draft ?? saved}
         />
       )}

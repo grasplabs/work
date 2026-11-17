@@ -100,6 +100,7 @@ export interface ThemeSwitchPickerProps {
   modeLabel: string;
   themeLabel: string;
   showThemes: boolean;
+  tileSize: "fill" | "md";
   modeWords: (mode: ThemeMode) => ModeWords;
   themeWords: (theme: ThemeId) => ThemeWords;
   onChooseMode: (mode: ThemeMode, origin?: { x: number; y: number }) => void;
@@ -113,6 +114,7 @@ export const ThemeSwitchPicker = ({
   modeLabel,
   themeLabel,
   showThemes,
+  tileSize,
   modeWords,
   themeWords,
   onChooseMode,
@@ -129,7 +131,7 @@ export const ThemeSwitchPicker = ({
         <div
           role="radiogroup"
           aria-label={modeLabel}
-          {...stylex.props(styles.tiles)}
+          {...stylex.props(styles.tiles, tileSize === "md" && styles.tilesMd)}
         >
           {themeModes.map((each) => (
             <Tile
@@ -176,7 +178,7 @@ export const ThemeSwitchPicker = ({
           <div
             role="radiogroup"
             aria-label={themeLabel}
-            {...stylex.props(styles.tiles)}
+            {...stylex.props(styles.tiles, tileSize === "md" && styles.tilesMd)}
           >
             {themeIds.map((each) => (
               <Tile

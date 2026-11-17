@@ -17,3 +17,5 @@ export type {
 } from "./item";
 export { ItemGroup } from "./group";
 export type { ItemGroupProps } from "./group";
+export { ItemReveal, ItemRevealButton } from "./reveal";
+export type { ItemRevealButtonProps, ItemRevealProps } from "./reveal";
