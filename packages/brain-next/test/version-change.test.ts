@@ -433,6 +433,49 @@ describe("what a version changed", () => {
     });
   });
 
+  // A mark is a cutoff only for what it ended before this version did: an
+  // earlier version marked fully extracted after this version's own memory
+  // replaced something takes none of that from this version.
+  it("keeps what this version replaced when an earlier version is marked fully extracted after it", async () => {
+    const group = unique("group");
+    const source = unique("doc");
+    const reader = readerOf(unique("reader"), group);
+    const text = "Acme is Active. Acme is Churning.";
+    const first = await addVersion(source, text, audience(group));
+    const { entities } = await remember(
+      audience(group),
+      [customer("c", "Acme")],
+      [
+        drawn("c", first, "Acme is Active", "Acme is active", {
+          attribute: "status",
+          value: "Active",
+        }),
+      ]
+    );
+    const second = await addVersion(source, `${text} Second.`, audience(group));
+    const third = await addVersion(source, `${text} Third.`, audience(group));
+    await remember(
+      audience(group),
+      [customer("c", "Acme", { id: entities.c ?? "" })],
+      [
+        drawn("c", third, "Acme is Churning", "Acme is churning", {
+          attribute: "status",
+          value: "Churning",
+        }),
+      ]
+    );
+    await markExtracted(second, group);
+
+    const [replacedBySecond, replacedByThird] = await Promise.all([
+      changeOf(second, reader),
+      changeOf(third, reader),
+    ]);
+    expect({
+      second: replacedBySecond?.ended,
+      third: replacedByThird?.ended,
+    }).toStrictEqual({ second: [], third: ["Acme is active"] });
+  });
+
   // Threat 10: paged by the store's paging, nothing repeated or skipped.
   it("pages through what a version changed, one memory at a time", async () => {
     const group = unique("group");
