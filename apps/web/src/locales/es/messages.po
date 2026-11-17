@@ -2367,7 +2367,6 @@ msgid "Amsterdam"
 msgstr "Ámsterdam"
 
 #: src/connections/connection-list.tsx
-#: src/inbox/item-detail.tsx
 msgid "An admin"
 msgstr "Un administrador"
 

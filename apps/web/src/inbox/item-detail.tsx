@@ -199,12 +199,13 @@ const ItemFrame = ({
 }) => {
   const { t, i18n } = useLingui();
   const { item, onBack } = frame;
-  let forWhom = t`An admin`;
+  // Who it is for, when it is someone in particular: an admin's by default.
+  const facts = item.facts.map(({ label, value }) => ({ key: label, value }));
   if (item.forWhom !== undefined && "role" in item.forWhom) {
     const { role } = item.forWhom;
-    forWhom = t`The ${role}`;
+    facts.unshift({ key: t`For`, value: t`The ${role}` });
   } else if (item.forWhom !== undefined) {
-    forWhom = item.forWhom.person;
+    facts.unshift({ key: t`For`, value: item.forWhom.person });
   }
   // With no action of its own, the item is dealt with where it lives.
   const shown: Act[] =
@@ -234,14 +235,9 @@ const ItemFrame = ({
             {formatDate(item.date)}
           </Text>
         </div>
-        <Heading level={2} size="md">
+        <Heading level={2} size="sm">
           {item.title}
         </Heading>
-        {item.context === item.title ? null : (
-          <Text size="sm" tone="muted">
-            {item.context}
-          </Text>
-        )}
       </header>
       {item.body.length === 0 ? null : (
         <div {...stylex.props(styles.words)}>
@@ -266,13 +262,10 @@ const ItemFrame = ({
         </div>
       )}
       {failure === undefined ? null : <Alert variant="danger">{failure}</Alert>}
-      <KeyValueList
-        items={[
-          { key: t`For`, value: forWhom },
-          ...item.facts.map(({ label, value }) => ({ key: label, value })),
-        ]}
-        layout="inline"
-      />
+      {/* What `extra` shows says these already, in its own words. */}
+      {extra === undefined && facts.length > 0 ? (
+        <KeyValueList items={facts} layout="inline" />
+      ) : null}
     </article>
   );
 };
