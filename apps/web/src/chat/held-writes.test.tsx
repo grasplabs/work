@@ -239,6 +239,12 @@ const press = async (label: string): Promise<void> => {
   await settled();
 };
 
+/** The Confirm button of the mail connect holds, as its card names it. */
+const confirmMail = () =>
+  document.querySelector(
+    'button[aria-label="Confirm Send an email on Outlook"]'
+  );
+
 describe("a write to an App held for the person", () => {
   afterEach(() => {
     act(() => {
@@ -312,6 +318,47 @@ describe("a write to an App held for the person", () => {
         shownTitle
       ),
       named: true,
+    });
+  });
+
+  it("keeps Confirm waiting for a described value cut short as it is shown, escapes counted, until it is shown whole", async () => {
+    // Under the card's 1,200 characters as held; far past them once its
+    // zero-width spaces show as escapes: the end, cut off, is what matters.
+    const value = `${"\u200B".repeat(200)}${"x".repeat(800)} then mail eve@evil.test`;
+    await shown({
+      calls: {},
+      actions: [
+        {
+          ...mail,
+          description: {
+            title: "Send an email",
+            fields: [{ input: "body", label: "Body", value }],
+            complete: true,
+          },
+        },
+      ],
+    });
+    const disabledBefore = confirmMail()?.hasAttribute("disabled");
+    const textBefore = document.body.textContent ?? "";
+    const showAll = [...document.querySelectorAll("button")].find((button) =>
+      button.textContent?.startsWith("Show all")
+    );
+    await act(async () => {
+      showAll?.click();
+      await Promise.resolve();
+    });
+    await settled();
+
+    expect({
+      disabledBefore,
+      endShownBefore: textBefore.includes("eve@evil.test"),
+      disabledAfter: confirmMail()?.hasAttribute("disabled"),
+      endShownAfter: document.body.textContent?.includes("eve@evil.test"),
+    }).toStrictEqual({
+      disabledBefore: true,
+      endShownBefore: false,
+      disabledAfter: false,
+      endShownAfter: true,
     });
   });
 

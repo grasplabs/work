@@ -993,7 +993,7 @@ const bindingOf = (name: string): string =>
  * writes a note titled `title`, which the model wrote (GRA-1929): the card
  * of held writes Slack was sent.
  */
-const heldAppWriteInSlack = async (title: string) => {
+const heldAppWriteInSlack = async (title: string, body?: string) => {
   const builder = await signedInApi(idp, "builder");
   const admin = await signedInApi(idp, "admin");
   const { app, release } = await liveNotes(builder);
@@ -1018,7 +1018,13 @@ const heldAppWriteInSlack = async (title: string) => {
   const depot = marker();
   await ownSource(userId, `Depot ${depot} opens at seven.`);
   await fakeProvider(
-    writesNote(app, release, title),
+    body === undefined
+      ? writesNote(app, release, title)
+      : codeStep(
+          `export default async (self, env) => await env.apps.call(${JSON.stringify(app)}, new Blob([${JSON.stringify(
+            callOf(release, "notes.createWith", { title, body })
+          )}]).stream());`
+        ),
     says("It waits for you to confirm it.")
   );
   const message = messageFrom(slackUser);
@@ -1034,7 +1040,10 @@ const heldAppWriteInSlack = async (title: string) => {
   return {
     slackUser,
     channel: message.event.channel,
-    request: callOf(release, "notes.create", { title }),
+    request:
+      body === undefined
+        ? callOf(release, "notes.create", { title })
+        : callOf(release, "notes.createWith", { title, body }),
     card: slackCardOf(card.fields),
     titles: async () => await noteTitles(builder.userId, app, release),
   };
@@ -1083,6 +1092,21 @@ describe("a linked person's held write to an App in Slack", () => {
       request: `*${say("heldAppRequest", "en")}*\n${held.request.replace(hiddenTitle, hiddenTitleShown)}`,
       confirm: true,
     });
+  });
+
+  it("counts a request's length as shown, its escapes in: short as held, past a Slack field once shown, it has no Confirm", async () => {
+    // About 400 characters as held; past 1,997 once its zero-width spaces
+    // show as escapes.
+    const held = await heldAppWriteInSlack(
+      `body-${unique()}`,
+      "\u200B".repeat(300)
+    );
+
+    expect({
+      short: held.request.length < 1997,
+      confirm: held.card.confirm,
+      said: held.card.texts.includes(say("cardTooLong", "en")),
+    }).toStrictEqual({ short: true, confirm: undefined, said: true });
   });
 
   it("is on a card without Confirm where its request fits the card but not one of Slack's fields", async () => {
