@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { chatAgentId } from "../src/chats-rpc.ts";
 import { model, says } from "./agent-chat.ts";
 import { mockIdp } from "./idp.ts";
+import { saveInstructions } from "./instruction-saves.ts";
 import { fakeProvider } from "./model-provider.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
 
@@ -27,10 +28,21 @@ const said = (over: Record<string, unknown> = {}) => ({
   name: "Claire",
   face: "claire",
   job: "Chases unpaid invoices.",
-  instructions: "Answer only about invoices. SECRET-RULE-17.",
   modelRole: null,
   ...over,
 });
+
+/** Tells the agent `agentId` its rule, in its instruction file, as `admin` saves it on its page. */
+const tell = async (
+  admin: Awaited<ReturnType<typeof signedInApi>>,
+  agentId: string
+): Promise<void> => {
+  await saveInstructions(
+    admin.api,
+    { scope: "agent", agentId },
+    "Answer only about invoices. SECRET-RULE-17."
+  );
+};
 
 /** A team of the company's, with `userIds` in it. */
 const teamOf = async (...userIds: string[]): Promise<string> => {
@@ -66,6 +78,7 @@ describe("picking an agent for a chat", setUpTime, () => {
     const team = await teamOf(inTeam.userId);
     const { connections } = admin.api;
     const claire = await connections.makeAgent(said());
+    await tell(admin, claire.id);
     const nobodys = await connections.makeAgent(said({ name: "Nobody's" }));
     const paused = await connections.makeAgent(said({ name: "Pat" }));
     await connections.setAgentReach(claire.id, true, {
@@ -164,6 +177,7 @@ describe("picking an agent for a chat", setUpTime, () => {
     const person = await signedInApi(idp, "user");
     const { connections } = admin.api;
     const claire = await connections.makeAgent(said());
+    await tell(admin, claire.id);
     await connections.setAgentReach(claire.id, true, everyone);
     const gateway = await fakeProvider(says("About invoices."));
     const chat = await person.api.chats.create("Invoices", claire.id);
@@ -171,7 +185,7 @@ describe("picking an agent for a chat", setUpTime, () => {
     await expect(
       outcome(person.api.chats.send(chat.id, { text: "Hi.", model }))
     ).resolves.toBe("ok");
-    // Its own instructions, so its own agent, went to the model.
+    // Its own instruction file, so its own agent, went to the model.
     await vi.waitFor(() => {
       expect(JSON.stringify(gateway.requests)).toContain("SECRET-RULE-17");
     });

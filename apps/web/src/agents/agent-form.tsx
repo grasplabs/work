@@ -1,10 +1,6 @@
-import {
-  agentFaces,
-  agentInstructionsMax,
-  agentJobMax,
-  agentNameMax,
-} from "@grasp-os/shared/agents";
+import { agentFaces, agentJobMax, agentNameMax } from "@grasp-os/shared/agents";
 import type { AgentFace } from "@grasp-os/shared/agents";
+import { instructionsMaxLength } from "@grasp-os/shared/instruction-files";
 import { Button } from "@grasp-os/ui/components/button";
 import { Field, FieldLabel } from "@grasp-os/ui/components/field";
 import { Input } from "@grasp-os/ui/components/input";
@@ -21,16 +17,18 @@ import { modelName } from "../chat/composer.tsx";
 import { AgentAvatar, faceOf } from "./agent-avatar.tsx";
 
 // What an admin says of an agent: its name, what it is for, the picture
-// it is drawn with, the model its turns use and its instructions. The
-// new agent's page asks for all at once (new-agent.tsx); an agent's own
-// page has them on cards of their own (agent-page.tsx), each saved by
-// itself.
+// it is drawn with, the model its turns use and, on the new agent's page,
+// its first instructions. The new agent's page asks for all at once
+// (new-agent.tsx); an agent's own page has them on cards of their own
+// (agent-page.tsx), each saved by itself, its instructions as its
+// instruction file (settings/instruction-file.tsx).
 
 /** What an admin says of an agent. */
 export interface Typed {
   name: string;
   job: string;
-  instructions: string;
+  /** Its first instructions, on the new agent's page alone. */
+  instructions?: string;
   /** The figure it is drawn with, by name. */
   face: string;
   /** The model its turns use; null for the one its asker picks. */
@@ -211,13 +209,13 @@ export const AgentForm = ({
           <Textarea
             disabled={!can}
             id={instructionsId}
-            maxLength={agentInstructionsMax}
+            maxLength={instructionsMaxLength}
             onChange={(event) => {
               setTyped({ ...typed, instructions: event.target.value });
             }}
             placeholder={t`What it should know and how it should work. Grasp's own rules always hold over these.`}
             rows={parts.length === 1 ? 14 : 8}
-            value={typed.instructions}
+            value={typed.instructions ?? ""}
           />
         </Field>
       ) : null}

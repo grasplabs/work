@@ -20,9 +20,7 @@ import {
   exportIdSchema,
   handOversMax,
   identifierSchema,
-  instructionsMaxLength,
   instructionsTextSchema,
-  isOverInstructionsLimit,
   memoriesCursorSchema,
   memoryIdSchema,
   memoryTypes,
@@ -121,7 +119,11 @@ import { withinTime } from "@grasp-os/shared/deadline";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
-import { instructionFileErrors } from "@grasp-os/shared/instruction-files";
+import {
+  instructionFileErrors,
+  instructionsMaxLength,
+  instructionsTooLong,
+} from "@grasp-os/shared/instruction-files";
 import type { InstructionFileRef } from "@grasp-os/shared/instruction-files";
 import { log } from "@grasp-os/shared/log";
 import { modelErrors } from "@grasp-os/shared/models";
@@ -145,7 +147,6 @@ import {
   questionVectorMs,
   questionVectorOf,
 } from "./embedder.ts";
-import { promptTextOf } from "./instructions-text.ts";
 import { parseModelRef } from "./model-catalog.ts";
 import { brainSpendByPurpose, spendMonth } from "./model-spend.ts";
 import { modelForRole, modelSettings, models } from "./models.ts";
@@ -296,6 +297,8 @@ const kindsWithoutColon = <const K extends string>(
 // `interview`: a person's interview, theirs alone, in their own store;
 // `claim`: what five or more people of a staff-list team said in theirs,
 // readable by that team (onboarding/new-brain.ts, GRA-1790, GRA-1741).
+// `kickoff`: what every member reads of the onboarding's kickoff, readable
+// by everyone (onboarding/new-brain.ts, GRA-1748).
 const producerKinds = kindsWithoutColon([
   "upload",
   "chat",
@@ -303,6 +306,7 @@ const producerKinds = kindsWithoutColon([
   "capture",
   "interview",
   "claim",
+  "kickoff",
 ]);
 
 /**
@@ -2124,10 +2128,11 @@ export const brainRestoreStatus = async (
 // company's instructions and lasting facts, a person's own file, an App's
 // and an agent's), each a source of its own under `instructions:`, kept
 // whole and versioned, never indexed, so recall never returns one. Who
-// may read each in the Brain: a person's file, that person, in their own
-// store alone (`keptIn`; the shared store refuses it); an App's, the
-// App's group, which core puts in a reader only once they passed the
-// builder check; the company's and agents', the company. Which of them
+// may read each in the Brain: a person's file, and the file of an agent
+// of their own (agents.ts), that person, in their own store alone
+// (`keptIn`; the shared store refuses it); an App's, the App's group,
+// which core puts in a reader only once they passed the builder check;
+// the company's and the company's agents', the company. Which of them
 // reaches which chat or run, and who may write each, is
 // instruction-files.ts's rule; the functions here only name them for the
 // Brain.
@@ -2165,15 +2170,33 @@ const instructionFileSchema = z.discriminatedUnion("scope", [
   z.strictObject({ scope: z.literal("agent"), agentId: instructionIdSchema }),
 ]) satisfies z.ZodType<InstructionFileRef>;
 
-/** An instruction file, by its scope. */
-export type InstructionFile = z.infer<typeof instructionFileSchema>;
+/**
+ * An instruction file as core places it: as named on the wire, or the
+ * file of an agent of a person's own with that person (`ownerId`), which
+ * is kept in their own store, readable by them alone. Only core names an
+ * owner, from its own records: the wire never does (`instructionFileOf`).
+ */
+const placedFileSchema = z.union([
+  instructionFileSchema,
+  z.strictObject({
+    scope: z.literal("agent"),
+    agentId: instructionIdSchema,
+    ownerId: idSchema.pipe(instructionIdSchema),
+  }),
+]);
+
+/** An instruction file, by its scope, placed (above). */
+export type InstructionFile = z.infer<typeof placedFileSchema>;
 
 /**
- * `input` as an instruction file, checked whole: refused with
- * `permission.invalid` when it isn't one. For instruction-files.ts, which
- * checks who may write a file before it is added.
+ * `input` as an instruction file named on the wire, checked whole:
+ * refused with `permission.invalid` when it isn't one, an owner among
+ * what it names. For instruction-files.ts, which checks who may write a
+ * file, and places an agent's, before it is added.
  */
-export const instructionFileOf = (input: unknown): InstructionFile =>
+export const instructionFileOf = (
+  input: unknown
+): z.infer<typeof instructionFileSchema> =>
   permissionErrors.parse("permission.invalid", instructionFileSchema, input);
 
 /** The Brain's key for `file`: its scope is part of it. */
@@ -2206,8 +2229,12 @@ const instructionAccessOf = (file: InstructionFile): Access => {
     case "app": {
       return { kind: "audience", group: appGroup(file.appId) };
     }
-    case "company":
     case "agent": {
+      return "ownerId" in file
+        ? { kind: "owner", person: file.ownerId }
+        : { kind: "audience", group: companyGroup };
+    }
+    case "company": {
       return { kind: "audience", group: companyGroup };
     }
     default: {
@@ -2217,7 +2244,7 @@ const instructionAccessOf = (file: InstructionFile): Access => {
 };
 
 const newInstructionsSchema = z.strictObject({
-  file: instructionFileSchema,
+  file: placedFileSchema,
   change: changeSchema,
   text: instructionsTextSchema,
   after: z.int().min(0),
@@ -2236,7 +2263,7 @@ export interface InstructionFileVersion {
  * its version `after` (0 for none), which every add names, so none
  * overwrites a version it never saw; the one before stays as history.
  * Refused over `instructionsMaxLength` UTF-16 units as a chat's prompt
- * holds it (`promptTextOf`, never shorter than the text), with
+ * holds it (`instructionsTooLong`, never shorter than the text), with
  * `instructions.too_large`, and with `instructions.changed` when `after`
  * is no longer the current version, and `brain.request_invalid` for an
  * add that isn't one, one without `after` among them. Every add that
@@ -2256,10 +2283,7 @@ export const addInstructionFile = async (
 ): Promise<{ file: InstructionFile; version: number; addedAt: Date }> => {
   // Counted as a chat's prompt holds it, escaped, which is never shorter
   // than the text: the limit bounds what reaches a model.
-  if (
-    typeof added.text === "string" &&
-    isOverInstructionsLimit(promptTextOf(added.text))
-  ) {
+  if (typeof added.text === "string" && instructionsTooLong(added.text)) {
     throw instructionFileErrors.create("instructions.too_large", {
       maxLength: instructionsMaxLength,
     });
@@ -2295,20 +2319,21 @@ export const addInstructionFile = async (
   return { file, version, addedAt };
 };
 
-const instructionFilesSchema = z
-  .array(instructionFileSchema)
-  .max(currentReadMax);
+const instructionFilesSchema = z.array(placedFileSchema).max(currentReadMax);
 
 /**
  * The current version of each of `wanted` that the member `personId` may
  * read, as core counts them now, whole, in the order given: their own
- * file, the company's and agents', and the App `builtApp`'s, never
- * another person's or another App's. A file never written is left out.
+ * file and their own agents', the company's and its agents', and the App
+ * `builtApp`'s, never another person's, another person's agent's or
+ * another App's. A file never written is left out.
  * Refused once they are no longer a member.
  *
- * For instruction-files.ts only, which picks the files a context gets and
+ * For instruction-files.ts, which picks the files a context gets and
  * passes `builtApp` only once they passed its builder check: that is
- * taken here on the caller's word, so no other code may call it.
+ * taken here on the caller's word, so no other code may pass it. And for
+ * agent-app-access.ts, which reads an agent's file, never an App's, for
+ * someone who may change the agent, as instruction-files.ts lets them.
  * (Exported only because core's Brain contract is reachable from this
  * file alone.)
  */
@@ -2328,14 +2353,18 @@ export const readInstructionFilesAs = async (
   const groups =
     app === undefined ? [companyGroup] : [companyGroup, appGroup(app)];
   const reader = { person, groups };
-  // A person's file is in their own store (`keptIn`): only the reader's
-  // own is asked of, there, and their store only when it is wanted.
-  // Another person's is left out as a file never written is, and their
-  // store is never addressed.
-  const ownFile = files.filter(
-    (file) => file.scope === "person" && file.personId === reader.person
+  // A file only one person reads (theirs, or their own agent's) is in
+  // their own store (`keptIn`): only the reader's own are asked of,
+  // there, and their store only when one is wanted. Another person's is
+  // left out as a file never written is, and their store is never
+  // addressed.
+  const ownFile = files.filter((file) => {
+    const access = instructionAccessOf(file);
+    return access.kind === "owner" && access.person === reader.person;
+  });
+  const sharedFiles = files.filter(
+    (file) => instructionAccessOf(file).kind !== "owner"
   );
-  const sharedFiles = files.filter((file) => file.scope !== "person");
   const [fromShared, fromOwn] = await Promise.all([
     brain(env).readCurrent({
       sources: sharedFiles.map((file) => instructionKeyOf(file)),

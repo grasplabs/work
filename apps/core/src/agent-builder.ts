@@ -53,7 +53,7 @@ import {
 import { audienceOf, off, storedOf } from "./tool-classes.ts";
 
 // The agent builder, as core keeps it: the company's admins making an
-// agent, changing what it is called and told, pausing it, and saying whom
+// agent, changing what it is called, pausing it, and saying whom
 // it reaches and for whom it has each class of tools (agent-reach.ts).
 //
 // An agent starts with nothing. Making one writes, in the same batch as
@@ -64,8 +64,9 @@ import { audienceOf, off, storedOf } from "./tool-classes.ts";
 // whatever an agent's row says: the class gate asks the company first.
 //
 // The company's own admins change agents, never Grasp staff, and every
-// change is audited; one that changes nothing records nothing. An agent's
-// instructions are not kept in the audit log, only how long they are.
+// change is audited; one that changes nothing records nothing. What an
+// agent is told is its instruction file in the Brain, saved and audited
+// as instruction files are (instruction-files.ts), never here.
 //
 // The ways it can fail, which the tests start from: an agent that
 // answers or acts before an admin gave it anyone; someone who isn't the
@@ -153,7 +154,6 @@ const unchanged = (agent: Agent, said: AgentSaid): boolean =>
   agent.name === said.name &&
   agent.face === said.face &&
   agent.job === said.job &&
-  agent.instructions === said.instructions &&
   agent.modelRole === said.modelRole &&
   agent.model === said.model;
 
@@ -177,33 +177,28 @@ const requireModelChosen = async (
 };
 
 /**
- * What an audit event says of a person's own agent: that it is one, and
- * how much it was told. Never its name or job, which are its owner's and
- * the company's admins read the log.
+ * What an audit event says of a person's own agent: that it is one.
+ * Never its name or job, which are its owner's and the company's admins
+ * read the log.
  */
-const ownDetailOf = ({ instructions }: AgentSaid): Record<string, string> => ({
-  own: "true",
-  instructionsLength: String(instructions.length),
-});
+const ownDetail: Record<string, string> = { own: "true" };
 
 /** Where an agent was made, when not on the Agents page: a chat's draft. */
 interface MadeFrom {
   from?: "chat";
 }
 
-/** What an audit event says of an agent: never its instructions. */
+/** What an audit event says of an agent. */
 const detailOf = ({
   name,
   face,
   job,
-  instructions,
   modelRole,
   model,
 }: AgentSaid): Record<string, string> => ({
   name,
   face,
   job,
-  instructionsLength: String(instructions.length),
   modelRole: modelRole ?? "none",
   model: model ?? "none",
 });
@@ -227,8 +222,8 @@ export const listAgents = async (env: Env): Promise<Agent[]> => {
 
 /**
  * Makes an agent, on, reaching nobody and with every class for nobody.
- * Throws `agent.record_invalid` for what isn't an agent's name, job or
- * instructions, and `agent.name_taken` for a name another agent has.
+ * Throws `agent.record_invalid` for what isn't an agent's name, job,
+ * picture or model, and `agent.name_taken` for a name another agent has.
  */
 export const makeAgent = async (
   env: Env,
@@ -265,6 +260,8 @@ export const makeAgent = async (
         db.insert(agents).values({
           id,
           ...made,
+          // No longer read: what it is told is its instruction file.
+          instructions: "",
           nameKey: agentNameKey(made.name),
           state: "on",
           madeBy: identity.userId,
@@ -371,7 +368,7 @@ export const makeOwnAgent = async (
   await auditedBatch(env, db, [
     db.insert(agents).select(
       sql`SELECT ${id}, ${made.name}, NULL, ${made.face}, ${made.job},
-          ${made.instructions}, ${made.modelRole}, ${made.model}, 'on',
+          '', ${made.modelRole}, ${made.model}, 'on',
           ${ownerId}, NULL, ${ownerId}, ${now.getTime()}, ${ownerId},
           ${now.getTime()} WHERE ${room} AND ${member} AND ${ownAgentsOnSql}`
     ),
@@ -379,7 +376,7 @@ export const makeOwnAgent = async (
       actor: actorOf(identity),
       action: "agent.made",
       target: { type: "agent", id },
-      detail: { ...ownDetailOf(made), ...(from === undefined ? {} : { from }) },
+      detail: { ...ownDetail, ...(from === undefined ? {} : { from }) },
     }),
   ]);
   const kept = await readAgent(env, id);
@@ -401,7 +398,7 @@ export const makeOwnAgent = async (
 };
 
 /**
- * Changes what the agent `agentId` is called and told. Throws
+ * Changes what the agent `agentId` is called, its picture and its model. Throws
  * `agent.unknown` for an agent the company doesn't have,
  * `agent.record_invalid` for what isn't an agent's, and `agent.name_taken`.
  */
@@ -437,7 +434,6 @@ export const changeAgent = async (
     sql`${agents.name} IS NOT ${changed.name}`,
     sql`${agents.face} IS NOT ${changed.face}`,
     sql`${agents.job} IS NOT ${changed.job}`,
-    sql`${agents.instructions} IS NOT ${changed.instructions}`,
     sql`${agents.modelRole} IS NOT ${changed.modelRole}`,
     sql`${agents.model} IS NOT ${changed.model}`
   );
@@ -455,6 +451,7 @@ export const changeAgent = async (
               .values({
                 id: agent.id,
                 ...named,
+                instructions: "",
                 state: agent.state,
                 madeBy: identity.userId,
                 madeAt: now,
@@ -480,7 +477,7 @@ export const changeAgent = async (
           actor: actorOf(identity),
           action: "agent.changed",
           target: { type: "agent", id: agent.id },
-          detail: ownerId === null ? detailOf(changed) : ownDetailOf(changed),
+          detail: ownerId === null ? detailOf(changed) : ownDetail,
         }),
       ])
   );
@@ -522,7 +519,7 @@ export const setAgentPaused = async (
             nameKey: agentNameKey(agent.name),
             face: agent.face,
             job: agent.job,
-            instructions: agent.instructions,
+            instructions: "",
             modelRole: agent.modelRole,
             model: agent.model,
             state,
@@ -560,7 +557,7 @@ export const setAgentPaused = async (
  * so a chat that still names it is refused its turn (agents.ts); its
  * name is free again; it reaches nobody and has every class for nobody,
  * whatever else reads its rows; its places, wake-ups and documents are gone. The
- * chats people had with it, its audit events and its memory file stay.
+ * chats people had with it, its audit events and its instruction file stay.
  * Throws `agent.first_stays` for the company's first agent, which every
  * chat falls back to, and `agent.unknown`.
  */
@@ -877,8 +874,10 @@ const requireOffered = async (env: Env, agentId: unknown): Promise<Agent> => {
  * Takes on the agent `agentId` its owner offered the company: it becomes
  * one of the company's, under its name, which must be free among the
  * company's (`agent.name_taken`), on, reaching nobody and with every class
- * for nobody, as one an admin makes, with its instructions and documents
- * as its owner left them. Throws `agent.not_offered` for one that isn't
+ * for nobody, as one an admin makes, with its documents as its owner
+ * left them. What its owner told it (their instruction file, in their own
+ * store) doesn't go with it: it starts told nothing until an admin writes
+ * its file (GRA-1833). Throws `agent.not_offered` for one that isn't
  * offered now. The company's own admins only, never Grasp's staff.
  *
  * The batch holds what was read: the agent is taken on only while it is

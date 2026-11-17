@@ -785,6 +785,15 @@ const draftsOf = ({
 /** Where a chat keeps the agents it drafted that Make it took, by call. */
 const draftedKeyPrefix = "drafted:";
 
+/**
+ * Where a chat keeps, by call, the agent Make it made of a draft whose
+ * instructions it couldn't save: its next Make it saves them to that
+ * agent, never making a second (chats-rpc.ts).
+ */
+const draftMadeKeyPrefix = "draft-made:";
+
+const draftMadeSchema = z.record(z.string(), z.string());
+
 const builtSchema = z.array(z.string());
 
 /**
@@ -2956,7 +2965,6 @@ export class Workspace extends DurableObject<Env> {
         : {
             agent: {
               name: agent.name,
-              instructions: agent.instructions,
               ...(documents.length === 0 ? {} : { documents }),
             },
           }),
@@ -4264,18 +4272,44 @@ export class Workspace extends DurableObject<Env> {
     chatId: unknown,
     personId: string,
     callId: unknown
-  ): AgentDraft {
-    const { args } = this.#takeCall(chatId, personId, callId, {
+  ): { draft: AgentDraft; made: string | null } {
+    const { chat, args } = this.#takeCall(chatId, personId, callId, {
       tool: "draftAgent",
       keyPrefix: draftedKeyPrefix,
       notFound: "agent.draft_not_found",
     });
-    return agentDraftSchema.parse(args);
+    const kept = draftMadeSchema.safeParse(
+      this.ctx.storage.kv.get(`${draftMadeKeyPrefix}${chat.id}`)
+    );
+    // `#takeCall` took a string call alone.
+    const made =
+      kept.success && typeof callId === "string"
+        ? kept.data[callId]
+        : undefined;
+    return { draft: agentDraftSchema.parse(args), made: made ?? null };
   }
 
   /** Gives back a draft `takeAgentDraft` took, of which Make it made nothing. */
   releaseAgentDraft(chatId: ChatId, callId: string): void {
     this.#releaseCall(`${draftedKeyPrefix}${chatId}`, callId);
+  }
+
+  /**
+   * Gives back a draft `takeAgentDraft` took, of which Make it made the
+   * agent `agentId` but couldn't save its instructions: taken again, it
+   * names that agent (`made`), so Make it saves them to it and makes no
+   * second. In one step, so it is never given back without it.
+   */
+  keepAgentDraftMade(chatId: ChatId, callId: string, agentId: string): void {
+    this.ctx.storage.transactionSync(() => {
+      const key = `${draftMadeKeyPrefix}${chatId}`;
+      const kept = draftMadeSchema.safeParse(this.ctx.storage.kv.get(key));
+      this.ctx.storage.kv.put(key, {
+        ...(kept.success ? kept.data : {}),
+        [callId]: agentId,
+      });
+      this.#releaseCall(`${draftedKeyPrefix}${chatId}`, callId);
+    });
   }
 
   /**
@@ -4852,6 +4886,7 @@ export class Workspace extends DurableObject<Env> {
         this.ctx.storage.kv.delete(`${builtKeyPrefix}${id}`);
         this.ctx.storage.kv.delete(`${runningKeyPrefix}${id}`);
         this.ctx.storage.kv.delete(`${copiedKeyPrefix}${id}`);
+        this.ctx.storage.kv.delete(`${draftMadeKeyPrefix}${id}`);
         if (audited) {
           this.#outboxed(by, "chat.deleted", id, { declined });
         }

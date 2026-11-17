@@ -453,6 +453,7 @@ describe(
         "another agent's instruction file": markerWord(),
         "an App's instruction file the outsider doesn't build": markerWord(),
         "an App's instruction file the outsider uses": markerWord(),
+        "the holder's own agent's instruction file": markerWord(),
         "the holder's upload for only them": markerWord(),
         "an upload for a team the outsider isn't in": markerWord(),
         "what the holder's agent fetched through a connection": markerWord(),
@@ -464,8 +465,14 @@ describe(
         "an answer in the holder's chat": markerWord(),
       };
       // What every member may read, and nobody outside the company.
-      const companyMarkers = { "an upload for everyone": markerWord() };
-      const { "an upload for everyone": everyoneUploadMarker } = companyMarkers;
+      const companyMarkers = {
+        "an upload for everyone": markerWord(),
+        "the company's vision from the kickoff": markerWord(),
+      };
+      const {
+        "an upload for everyone": everyoneUploadMarker,
+        "the company's vision from the kickoff": kickoffMarker,
+      } = companyMarkers;
       const {
         "the holder's own source": ownerMarker,
         "a team's source the outsider isn't in": teamMarker,
@@ -478,6 +485,7 @@ describe(
         "another agent's instruction file": agentFileMarker,
         "an App's instruction file the outsider doesn't build": appFileMarker,
         "an App's instruction file the outsider uses": usedAppFileMarker,
+        "the holder's own agent's instruction file": ownAgentFileMarker,
         "the holder's upload for only them": ownUploadMarker,
         "an upload for a team the outsider isn't in": teamUploadMarker,
         "what the holder's agent fetched through a connection": captureMarker,
@@ -538,11 +546,28 @@ describe(
           after: 0,
         });
       }
+      // An agent of the holder's own, told something only they wrote:
+      // saved on their session, so core keeps it in their own store.
+      const holdersOwnAgent = await holderApi.api.connections.makeOwnAgent({
+        name: `Own ${unique()}`,
+        face: "pen",
+        job: "",
+        modelRole: null,
+      });
+      await saveInstructions(
+        holderApi.api,
+        { scope: "agent", agentId: holdersOwnAgent.id },
+        `Instructions ${sharedWord} ${ownAgentFileMarker}`
+      );
+      const hiddenOwnAgents = [
+        { agentId: holdersOwnAgent.id, ownerId: holder },
+      ];
       const instructionMarkers = [
         holderFileMarker,
         agentFileMarker,
         appFileMarker,
         usedAppFileMarker,
+        ownAgentFileMarker,
       ];
       // The holder's own skill, named by its marker, written and asked to
       // be shared on the holder's own session: theirs alone, and the share
@@ -597,6 +622,7 @@ describe(
         "another agent's instruction file": agentFileMarker,
         "an App's instruction file the outsider doesn't build": appFileMarker,
         "an App's instruction file the outsider uses": usedAppFileMarker,
+        "the holder's own agent's instruction file": ownAgentFileMarker,
       };
       const instructionGroups = [
         "company",
@@ -860,6 +886,13 @@ describe(
         { kind: "everyone" },
         "for everyone"
       );
+      // The company's vision, as the onboarding hands its kickoff over
+      // (GRA-1748): every member's, without the shared word.
+      const kickoffSource = await add(
+        `The company's vision ${kickoffMarker}`,
+        { kind: "everyone" },
+        { producer: "kickoff", id: crypto.randomUUID() }
+      );
 
       // Through each producer core hands over (brain-hand-overs.ts), as it
       // does: a workflow run of the holder's that ended, and a turn of the
@@ -995,6 +1028,7 @@ describe(
         ),
         hiddenUploads: [ownUpload.id, teamUpload.id],
         hiddenInstructionFiles: [holderFile, agentFile, appFile, usedAppFile],
+        hiddenOwnAgents,
         hiddenSkills: [holderSkillMarker],
         hiddenTeamSkills: [{ team: secretTeam, name: teamSkillMarker }],
         usedApps,
@@ -1055,6 +1089,11 @@ describe(
           marker: "a staff-list team's claim",
           source: claimId,
           reader: holder,
+        },
+        kickoff: {
+          marker: "the company's vision from the kickoff",
+          source: kickoffSource,
+          reader: outsider,
         },
       };
       // The model prompts that carried each marker while the world was

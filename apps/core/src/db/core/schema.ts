@@ -3377,7 +3377,9 @@ export const sharedMailboxPointers = sqliteTable("shared_mailbox_pointers", {
  * The company's agents an admin made or changed (agents.ts): one row per
  * agent, by the ID its permissions, audit events and instruction file name.
  * `face` is the figure it is drawn with; `job` one line on what it is
- * for; `instructions` what it is told on top of Grasp's own rules;
+ * for; `instructions` no longer read, and written empty: what an agent
+ * is told is its instruction file in the Brain (instruction-files.ts),
+ * and the column goes in a later release (expand, then contract);
  * `modelRole` the role it asks the gateway for, or null for the model a
  * chat would use anyway; `state` whether it answers. No row for the
  * first agent, the organization's: as Grasp ships it.
@@ -5876,9 +5878,10 @@ export const brainRecords = sqliteTable(
      */
     purgedAt: timestamp("purged_at"),
     /**
-     * When the record stopped counting (brain-records.ts
-     * `retireOnboardingRecords`): what a replaced kickoff transcript gave
-     * the brain. Kept, never deleted, and left out of `brain.read`.
+     * When the record stopped counting: what a replaced kickoff transcript
+     * gave the brain, left out of `brain.read`. Nothing sets it any more
+     * (GRA-1748: the kickoff is a source of the new Brain, and its rows
+     * here were removed by migration 0259); dropped in a later release.
      */
     retiredAt: timestamp("retired_at"),
     /**
