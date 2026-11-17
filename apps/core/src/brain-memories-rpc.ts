@@ -16,6 +16,7 @@ import type {
   BrainMemoryShown,
   BrainShare,
   BrainShared,
+  BrainSharedPage,
   BrainStoreCursor,
 } from "@grasp-os/shared/brain-memories";
 
@@ -27,7 +28,7 @@ import {
   unpublishFor,
 } from "./brain-memories.ts";
 import type { MemoryCaller } from "./brain-memories.ts";
-import { contestedAs, entitiesAs, memoriesAs } from "./brain-next.ts";
+import { contestedAs, entitiesAs, memoriesAs, sharedAs } from "./brain-next.ts";
 import type { StoredEntity, StoredMemory, StorePlace } from "./brain-next.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
@@ -38,9 +39,9 @@ import type { SessionCheck } from "./session-check.ts";
 // Memories page (GRA-1746) lists the entities they may see, what the
 // Brain remembers about one, history included, and the facts sources
 // disagree on, and takes their confirmation or correction, and their
-// share of a memory of their own with a team or the company, or its
-// take-back (GRA-1815): the one way a memory widens, the person's own
-// act on what they were shown. Each call acts
+// share of a memory of their own with a team or the company, the list of
+// what they shared, and its take-back (GRA-1815): the one way a memory
+// widens, the person's own act on what they were shown. Each call acts
 // as the signed-in person, from what they may read alone (brain-next.ts,
 // brain-memories.ts): what they may not read answers as what doesn't
 // exist. Reads aren't audited per read, as the Sources page's aren't;
@@ -153,6 +154,8 @@ const memoryOut = (person: string, memory: StoredMemory): BrainMemoryShown => ({
           byYou: memory.confirmed.by === person,
         },
   contested: memory.contested,
+  validFrom: memory.validFrom?.toISOString() ?? null,
+  validUntil: memory.validUntil?.toISOString() ?? null,
 });
 
 export class BrainMemoriesRpc
@@ -260,5 +263,24 @@ export class BrainMemoriesRpc
     return await this.#asCaller(
       async (caller) => await unpublishFor(this.#env, caller, memory)
     );
+  }
+
+  async shared(next?: BrainStoreCursor | null): Promise<BrainSharedPage> {
+    return await withPerson(this.#check, async (person) => {
+      const page = await sharedAs(
+        this.#env,
+        person.userId,
+        next === undefined || next === null ? null : cursorIn(next)
+      );
+      return {
+        memories: page.memories.map(({ id, audience, sharedAt, memory }) => ({
+          id,
+          audience,
+          sharedAt: sharedAt.toISOString(),
+          memory: memory === null ? null : memoryOut(person.userId, memory),
+        })),
+        next: page.next === null ? null : cursorOut(page.next),
+      };
+    });
   }
 }

@@ -181,6 +181,9 @@ export interface BrainMemoryShown {
   endedAt: string | null;
   /** A confirmation they may see: when, and whether it was theirs. */
   confirmed: { at: string; byYou: boolean } | null;
+  /** When it starts and stops being true, when it says (ISO 8601); null for no such bound. */
+  validFrom: string | null;
+  validUntil: string | null;
   /** Another source they may read says something else. */
   contested: boolean;
 }
@@ -262,25 +265,52 @@ export type BrainShareAudience = { team: string } | "company";
 
 /**
  * A memory of the person's own store to share (GRA-1815): which one, the
- * texts they were shown of it (what it is about, the value it holds, and
- * its statement), whom with, and the id of this one share, minted once
- * when they open it, so a retry shares it once. Core shares it only while
- * the memory still says exactly what was shown.
+ * texts they were shown of it (the name of what it is about, the value it
+ * holds, its statement, and when it starts and stops being true, as the
+ * page received them), whom with, and the id of this one share, minted
+ * once when they open it, so a retry shares it once. Core shares it only
+ * while the memory still says exactly what was shown.
  */
 export interface BrainShare {
   memory: { entity: string; memory: string };
-  shown: { about: string | null; value: string | null; statement: string };
+  shown: {
+    about: string;
+    value: string | null;
+    statement: string;
+    validFrom: string | null;
+    validUntil: string | null;
+  };
   audience: BrainShareAudience;
   change: string;
 }
 
 /**
  * What a share made: a new memory in the shared store, the person's own
- * word, which the audience reads, and the entity it is about there; the
- * same again for a retry of it. Null alike when the memory isn't one of
- * theirs they may share, and when it no longer says what they were shown.
+ * word, which the audience reads as someone's own word (no name), and the
+ * entity it is about there; the same again for a retry of it. Null alike
+ * when the memory isn't one of theirs they may share, and when it no
+ * longer says what they were shown.
  */
 export type BrainShared = { memory: string; entity: string } | null;
+
+/**
+ * A memory the person shared and hasn't taken back: its id, whom it is
+ * shared with (null for readers the page can't name), when (ISO 8601),
+ * and the memory as they read it now, or null when they may no longer
+ * read it (out of the team): then nothing of what it says.
+ */
+export interface BrainSharedListed {
+  id: string;
+  audience: BrainShareAudience | null;
+  sharedAt: string;
+  memory: BrainMemoryShown | null;
+}
+
+/** A page of what the person shared, and where the next goes on: null at the last. */
+export interface BrainSharedPage {
+  memories: BrainSharedListed[];
+  next: BrainStoreCursor | null;
+}
 
 /** The person's memories, over `/rpc` as `session.brainMemories`. */
 export interface BrainMemoriesApi {
@@ -309,10 +339,13 @@ export interface BrainMemoriesApi {
    */
   publish: (share: BrainShare) => Promise<BrainShared>;
   /**
-   * Takes back a memory they shared: it stops being current for everyone,
-   * and stays as history for those who may read it.
+   * Takes back a memory they shared, also once they may no longer read
+   * it: it stops being current for everyone, and stays as history for
+   * those who may read it.
    */
   unpublish: (memory: string) => Promise<BrainMemoryOutcome>;
+  /** A page of what they shared and haven't taken back, the oldest first. */
+  shared: (next?: BrainStoreCursor | null) => Promise<BrainSharedPage>;
 }
 
 /** What core answers a correction it can't take as it is. */
@@ -323,4 +356,6 @@ export const brainMemoryErrors = defineErrorFamily({
     "You can share only with a team you're in, or with everyone.",
   "brain.share_reused":
     "This was shared before with other readers. Start it again.",
+  "brain.share_taken_back":
+    "This share was taken back or replaced since. Start it again to share it.",
 });

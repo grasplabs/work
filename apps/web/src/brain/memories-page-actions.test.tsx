@@ -72,6 +72,8 @@ const memory = (
   endedAt: null,
   confirmed: null,
   contested: false,
+  validFrom: null,
+  validUntil: null,
   ...more,
 });
 
@@ -122,10 +124,15 @@ const shown = async (
   api: Readonly<Record<string, unknown>>,
   teams: { id: string; name: string }[] = []
 ) => {
+  // Nothing shared, unless the test says otherwise.
+  const memories = {
+    shared: async () => await Promise.resolve({ memories: [], next: null }),
+    ...api,
+  };
   const core = {
     withSession: async <T,>(
-      action: (session: { brainMemories: typeof api }) => Promise<T>
-    ): Promise<T> => await action({ brainMemories: api }),
+      action: (session: { brainMemories: typeof memories }) => Promise<T>
+    ): Promise<T> => await action({ brainMemories: memories }),
   };
   const rootRoute = createRootRoute({ component: Outlet });
   const page = createRoute({
@@ -1117,6 +1124,8 @@ describe("the Memories page's paged lists, read again", () => {
           about: "Initech",
           value: "Renewing",
           statement: "Initech renews in March",
+          validFrom: null,
+          validUntil: null,
         },
         audience: "company",
         change: "string",
@@ -1188,5 +1197,117 @@ describe("the Memories page's paged lists, read again", () => {
       takeBacks: buttons("Take back").length,
       takenBack,
     }).toStrictEqual({ offered: 0, takeBacks: 1, takenBack: ["m-copy"] });
+  });
+
+  it("shows the dates a time-bound fact is true as part of what is shared, and sends them back as shown", async () => {
+    const sent: Readonly<Record<string, unknown>>[] = [];
+    const until = "2026-11-21T17:00:00.000Z";
+    await initechOpen([ownFact("m-leave", { validUntil: until })], {
+      publish: async (share: Readonly<Record<string, unknown>>) => {
+        sent.push(share);
+        return await Promise.resolve({ memory: "m-copy", entity: "e-copy" });
+      },
+    });
+    await press(buttons("Share…")[0]);
+    const dialogText =
+      document.querySelector("option[value=everyone]")?.closest("form")
+        ?.textContent ?? "";
+    await shareWith("everyone");
+    expect({
+      showsUntil: dialogText.includes("True until"),
+      shown: sent[0]?.shown,
+    }).toStrictEqual({
+      showsUntil: true,
+      shown: {
+        about: "Initech",
+        value: "Renewing",
+        statement: "Initech renews in March",
+        validFrom: null,
+        validUntil: until,
+      },
+    });
+  });
+
+  it("offers no share of a memory about a person or about something without a name", async () => {
+    const shareOffers = async (open: BrainEntityListed) => {
+      await shown({
+        contested: async () => await Promise.resolve({ facts: [], next: null }),
+        entities: async () =>
+          await Promise.resolve({ entities: [open], next: null }),
+        memories: async () =>
+          await Promise.resolve({
+            entity: open,
+            memories: [ownFact("m-own", { about: open.entity.id })],
+            next: null,
+          }),
+      });
+      await press(
+        [...document.querySelectorAll("section ul button")].find(
+          (each): each is HTMLButtonElement => each instanceof HTMLButtonElement
+        )
+      );
+      const offered = buttons("Share…").length;
+      act(() => {
+        root?.unmount();
+      });
+      document.body.replaceChildren();
+      return offered;
+    };
+    expect([
+      await shareOffers({ ...initech, kind: "person", name: "Ben Jansen" }),
+      await shareOffers({ ...initech, name: null }),
+      await shareOffers(initech),
+    ]).toStrictEqual([0, 0, 1]);
+  });
+
+  it("lists what the person shared, saying nothing of one they can no longer read, and takes it back", async () => {
+    const takenBack: string[] = [];
+    await shown(
+      {
+        contested: async () => await Promise.resolve({ facts: [], next: null }),
+        entities: async () =>
+          await Promise.resolve({ entities: [], next: null }),
+        shared: async () =>
+          await Promise.resolve({
+            memories: [
+              {
+                id: "m-left",
+                audience: { team: "t-gone" },
+                sharedAt: "2026-11-15T09:00:00.000Z",
+                memory: null,
+              },
+              {
+                id: "m-sales",
+                audience: { team: "t-sales" },
+                sharedAt: "2026-11-16T09:00:00.000Z",
+                memory: memory("m-sales", "e-copy", "Renewing", {
+                  source: null,
+                  yours: true,
+                }),
+              },
+            ],
+            next: null,
+          }),
+        unpublish: async (id: string) => {
+          takenBack.push(id);
+          return await Promise.resolve("done");
+        },
+      },
+      [{ id: "t-sales", name: "Sales" }]
+    );
+    const text = document.body.textContent;
+    await press(buttons("Take back")[0]);
+    expect({
+      lines: [
+        "You can no longer read this memory.",
+        "Shared with a team you are no longer in.",
+        "e-copy is Renewing",
+        "Shared with team Sales.",
+      ].map((line) => text.includes(line)),
+      takenBack,
+    }).toStrictEqual({
+      lines: [true, true, true, true],
+      takenBack: ["m-left"],
+    });
   });
 });

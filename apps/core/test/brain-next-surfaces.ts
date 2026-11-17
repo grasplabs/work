@@ -1151,7 +1151,8 @@ type CorePersonMember =
   | "confirmAs"
   | "correctAs"
   | "publishAs"
-  | "unpublishAs";
+  | "unpublishAs"
+  | "sharedAs";
 
 /** The exports of core's brain-next.ts for code's entities, probed after them (`coreCodeEntities`). */
 type CoreCodeMember = "codeCardAs" | "codeEntitiesAs" | "isCodeEntitiesRequest";
@@ -5342,6 +5343,33 @@ export const recallProbes = {
   },
 } satisfies Record<RecallMember, Probe>;
 
+/**
+ * A marked memory in `person`'s own word in the shared store, readable by
+ * a group they aren't in: as one they shared with a team they left. Their
+ * listing of what they wrote names it, and must say nothing of it.
+ */
+const writtenOutOfReach = async (
+  person: string,
+  markers: readonly string[]
+): Promise<string> => {
+  const text = markedText(markers);
+  const { memories } = await store().addMemories({
+    change: crypto.randomUUID(),
+    access: strangers(),
+    entities: [{ key: "c", kind: "customer", names: [text] }],
+    memories: [
+      {
+        about: "c",
+        type: "fact",
+        statement: text,
+        speaker: { kind: "internal", person },
+        basis: { kind: "writer", writer: person },
+      },
+    ],
+  });
+  return memories[0] ?? "";
+};
+
 /** The probes of the store's memories and entities. */
 const memoryProbes = {
   addMemories: async ({ markers }) => {
@@ -5554,6 +5582,69 @@ const memoryProbes = {
         probing.markers.join(""),
         probing.personId
       ),
+    ];
+  },
+  listWritten: async (probing) => {
+    const { reader, markers } = probing;
+    // The reader's own word they may no longer read: listed by id and
+    // readers alone.
+    await writtenOutOfReach(reader.person, markers);
+    const list = async (
+      name: string,
+      writer: string,
+      after?: Readonly<Record<string, unknown>>
+    ) =>
+      await answer(
+        name,
+        async () =>
+          await store().listWritten({
+            writer,
+            reader,
+            ...(after === undefined ? {} : { after: unchecked(after) }),
+          })
+      );
+    return [
+      await list("what the reader wrote", reader.person),
+      await list("what a writer named by the markers wrote", markers.join("")),
+      await list("after a place named by the markers", reader.person, {
+        learnedAt: new Date(),
+        memory: markers.join(""),
+      }),
+    ];
+  },
+  retireWritten: async (probing) => {
+    const { reader, markers } = probing;
+    const fixture = await memoryFixture(probing);
+    const outOfReach = await writtenOutOfReach(reader.person, markers);
+    const retire = async (
+      name: string,
+      memory: string,
+      about?: Answer["about"]
+    ) =>
+      await answer(
+        name,
+        async () =>
+          await store().retireWritten({
+            memory,
+            writer: reader.person,
+            change: "take-back",
+          }),
+        about
+      );
+    return [
+      await retire("a memory no one added", crypto.randomUUID(), "nothing"),
+      await retire(
+        "another writer's hidden memory",
+        fixture.hiddenMemory,
+        "hidden"
+      ),
+      await retire(
+        "another writer's memory the reader may read",
+        fixture.seenMemory,
+        "hidden"
+      ),
+      await retire("the reader's own word out of their reach", outOfReach),
+      await retire("a memory named by the markers", markers.join("")),
     ];
   },
   confirmMemory: async (probing) => {
@@ -6255,6 +6346,7 @@ const corePersonProbes = personMemoryProbes({
 interface ShareCalls {
   publish: (personId: string, share: unknown) => Promise<unknown>;
   unpublish: (personId: string, memory: unknown) => Promise<unknown>;
+  shared: (personId: string, after?: unknown) => Promise<unknown>;
 }
 
 /**
@@ -6273,7 +6365,13 @@ const plainOwnMemory = async (personId: string) => {
   });
   return {
     memory: { entity, memory },
-    shown: { about: name, value: null, statement },
+    shown: {
+      about: name,
+      value: null,
+      statement,
+      validFrom: null,
+      validUntil: null,
+    },
   };
 };
 
@@ -6285,6 +6383,16 @@ const ownIfMember = async (personId: string) => {
     return null;
   }
 };
+
+/** A share of the reader's own memory `own` (`plainOwnMemory`) with team `team`. */
+const toTeam = (
+  own: Awaited<ReturnType<typeof plainOwnMemory>>,
+  team: string
+) => ({
+  ...own,
+  audience: { team },
+  change: crypto.randomUUID(),
+});
 
 /**
  * The probes of sharing a memory over `calls`: what isn't the reader's own
@@ -6308,7 +6416,13 @@ const memorySharingProbes = (calls: ShareCalls) => {
     const text = markedText(markers);
     return {
       memory,
-      shown: { about: text, value: text, statement: text },
+      shown: {
+        about: text,
+        value: text,
+        statement: text,
+        validFrom: null,
+        validUntil: null,
+      },
       audience: "company",
       change: crypto.randomUUID(),
       ...extra,
@@ -6385,19 +6499,52 @@ const memorySharingProbes = (calls: ShareCalls) => {
           })
         ),
       ];
-      // Their own, as they were shown it: shared with the company. Only a
-      // member has one.
-      const own = await ownIfMember(personId);
-      return own === null
-        ? asked
-        : [
-            ...asked,
-            await publish("the reader's own, as they were shown it", {
-              ...own,
-              audience: "company",
-              change: crypto.randomUUID(),
-            }),
-          ];
+      // Their own, as they were shown it: shared with the company; and
+      // with a team they aren't in, refused alike whether the team exists
+      // (compared: a share made would answer a new memory each time).
+      // Only a member has one.
+      const [own, forTeam, forNone] = await Promise.all([
+        ownIfMember(personId),
+        ownIfMember(personId),
+        ownIfMember(personId),
+      ]);
+      if (own === null || forTeam === null || forNone === null) {
+        return asked;
+      }
+
+      asked.push(
+        await publish("the reader's own, as they were shown it", {
+          ...own,
+          audience: "company",
+          change: crypto.randomUUID(),
+        })
+      );
+      // From one call site, so the two refusals' stacks are alike.
+      for (const [name, shared, team, about] of [
+        [
+          "the reader's own, with a team they aren't in",
+          forTeam,
+          stranger(),
+          "hidden",
+        ],
+        [
+          "the reader's own, with a team no one has",
+          forNone,
+          crypto.randomUUID(),
+          "nothing",
+        ],
+      ] as const) {
+        asked.push(
+          // oxlint-disable-next-line no-await-in-loop -- one share at a time
+          await answer(
+            name,
+            async () => await calls.publish(personId, toTeam(shared, team)),
+            about,
+            "team"
+          )
+        );
+      }
+      return asked;
     },
     unpublish: async (probing: Probing): Promise<Answer[]> => {
       const { personId, markers } = probing;
@@ -6443,7 +6590,12 @@ const memorySharingProbes = (calls: ShareCalls) => {
         ),
         await unpublish("an id of the markers", markers.join("")),
       ];
-      // One they shared, taken back.
+      // One they wrote that they may no longer read, taken back whoever
+      // may read it (as after leaving its team), and one they shared.
+      const outOfReach = await writtenOutOfReach(personId, markers);
+      asked.push(
+        await unpublish("one the reader wrote, out of their reach", outOfReach)
+      );
       const own = await ownIfMember(personId);
       const shared =
         own === null
@@ -6457,6 +6609,30 @@ const memorySharingProbes = (calls: ShareCalls) => {
         ? asked
         : [...asked, await unpublish("one the reader shared", shared.memory)];
     },
+    shared: async (probing: Probing): Promise<Answer[]> => {
+      const { personId, markers } = probing;
+      // Their own word they may no longer read: listed by id and
+      // audience alone.
+      await writtenOutOfReach(personId, markers);
+      return [
+        await answer(
+          "what the reader shared",
+          async () => await calls.shared(personId)
+        ),
+        await answer(
+          "as someone who isn't a member",
+          async () => await calls.shared(stranger())
+        ),
+        await answer(
+          "after a place named by the markers",
+          async () =>
+            await calls.shared(personId, {
+              learnedAt: markers.join(" "),
+              memory: markers.join(""),
+            })
+        ),
+      ];
+    },
   } satisfies Record<keyof ShareCalls, Probe>;
 };
 
@@ -6466,6 +6642,8 @@ const coreShareProbes = memorySharingProbes({
     await coreBrain.publishAs(env, personId, unchecked(share)),
   unpublish: async (personId, memory) =>
     await coreBrain.unpublishAs(env, personId, unchecked(memory)),
+  shared: async (personId, after) =>
+    await coreBrain.sharedAs(env, personId, after),
 });
 
 /** One probe per export of core's brain-next.ts for a person's memories. */
@@ -6489,6 +6667,7 @@ const corePersonMemories = {
   correctAs: corePageProbes.correct,
   publishAs: coreShareProbes.publish,
   unpublishAs: coreShareProbes.unpublish,
+  sharedAs: coreShareProbes.shared,
   // An entity of the reader's own store: one in the shared store, one in
   // someone else's own store and one no one added answer alike.
   ownEntityAs: async (probing) => {
@@ -7252,6 +7431,9 @@ export const memoriesProbes = (() => {
         personCaller(personId),
         unchecked(memory)
       ),
+    // Not one of the callers': a read, through core's own function.
+    shared: async (personId, after) =>
+      await coreBrain.sharedAs(env, personId, after),
   });
   return {
     rememberFor: probes.remember,
@@ -10194,6 +10376,8 @@ export const memoriesRpcProbes = {
       await memoriesAs(personId).publish(unchecked(share)),
     unpublish: async (personId, memory) =>
       await memoriesAs(personId).unpublish(unchecked(memory)),
+    shared: async (personId, after) =>
+      await memoriesAs(personId).shared(unchecked(after)),
   }),
 } satisfies Record<
   | "forget"
@@ -10203,7 +10387,8 @@ export const memoriesRpcProbes = {
   | "confirm"
   | "correct"
   | "publish"
-  | "unpublish",
+  | "unpublish"
+  | "shared",
   Probe
 >;
 

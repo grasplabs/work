@@ -84,6 +84,8 @@ const memory = (
   endedAt: null,
   confirmed: null,
   contested: false,
+  validFrom: null,
+  validUntil: null,
   ...more,
 });
 
@@ -200,6 +202,8 @@ const shown = async (refusal?: string, failedSaves = 0) => {
         }
         return { memory: "m-new", entity: "e-mine" };
       }),
+    // Nothing shared: the page's list of what they shared is empty.
+    shared: async () => await Promise.resolve({ memories: [], next: null }),
   };
   const core = {
     withSession: async <T,>(

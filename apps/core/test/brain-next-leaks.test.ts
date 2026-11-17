@@ -1272,7 +1272,13 @@ describe(
       });
       const sharedMemory = await publishAs(env, holder, {
         memory: { entity: kept.entity, memory: kept.memory },
-        shown: { about: sharedName, value: null, statement: sharedStatement },
+        shown: {
+          about: sharedName,
+          value: null,
+          statement: sharedStatement,
+          validFrom: null,
+          validUntil: null,
+        },
         audience: { team: secretTeam },
         change: crypto.randomUUID(),
       });

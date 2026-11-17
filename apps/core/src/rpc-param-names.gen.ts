@@ -103,6 +103,7 @@ export const rpcParamNames: ParamNames = {
     "forget": ["memory"],
     "memories": ["entity","next"],
     "publish": ["share"],
+    "shared": ["next"],
     "unpublish": ["memory"],
   },
   "BrainRpc": {

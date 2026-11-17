@@ -12400,6 +12400,10 @@ msgstr "Partager votre liste du personnel"
 msgid "Share…"
 msgstr "Partager…"
 
+#: src/brain/memories-page.tsx
+msgid "Shared {when}"
+msgstr "Partagé le {when}"
+
 #: src/settings/stephen-settings.tsx
 msgid "Shared mailboxes, colleagues' calendars and the company's files."
 msgstr "Boîtes partagées, agendas des collègues et fichiers de l'entreprise."
@@ -12419,6 +12423,18 @@ msgstr "Partagée avec"
 #: src/drafts/share-with-team.tsx
 msgid "Shared with {who}"
 msgstr "Partagé avec {who}"
+
+#: src/brain/memories-page.tsx
+msgid "Shared with a team you are no longer in."
+msgstr "Partagé avec une équipe dont vous ne faites plus partie."
+
+#: src/brain/memories-page.tsx
+msgid "Shared with everyone."
+msgstr "Partagé avec tout le monde."
+
+#: src/brain/memories-page.tsx
+msgid "Shared with team {team}."
+msgstr "Partagé avec l’équipe {team}."
 
 #: src/brain/memories-page.tsx
 msgid "Shared. It shows under the same name for those you shared it with."
@@ -13272,6 +13288,10 @@ msgstr "Retirer {who} de {name}"
 #: src/brain/memories-page.tsx
 msgid "Take back"
 msgstr "Retirer"
+
+#: src/brain/memories-page.tsx
+msgid "Take back what you shared"
+msgstr "Retirer ce que vous avez partagé"
 
 #: src/brain/memories-page.tsx
 msgid "Take back what you shared: {statement}"
@@ -14409,8 +14429,8 @@ msgid "They use"
 msgstr "Outils utilisés"
 
 #: src/brain/memories-page.tsx
-msgid "They will read exactly what is below, as your own word. Your own memory stays yours alone, and you can take the copy back."
-msgstr "Ils liront exactement ce qui figure ci-dessous, comme votre propre parole. Votre souvenir reste à vous seul, et vous pouvez retirer la copie."
+msgid "They will read exactly what is below, as someone's own word, without your name. Your own memory stays yours alone, and you can take the copy back."
+msgstr "Ils liront exactement ce qui figure ci-dessous, comme la parole de quelqu’un, sans votre nom. Votre souvenir reste à vous seul, et vous pouvez retirer la copie."
 
 #: src/drafts/share-with-team.tsx
 msgid "They'll find it under Apps, and see it as it is now."
@@ -14949,6 +14969,14 @@ msgstr "Déclencheur {trigger}"
 msgctxt "a workflow's settings section"
 msgid "Triggers"
 msgstr "Déclencheurs"
+
+#: src/brain/memories-page.tsx
+msgid "True from {from}"
+msgstr "Valable à partir du {from}"
+
+#: src/brain/memories-page.tsx
+msgid "True until {until}"
+msgstr "Valable jusqu’au {until}"
 
 #: src/workflows/workflow-diagram.tsx
 msgid "Try"
@@ -16097,6 +16125,10 @@ msgstr "Ce que vous avez demandé à partager"
 msgid "What you chose"
 msgstr "Ce que vous avez choisi"
 
+#: src/brain/memories-page.tsx
+msgid "What you shared"
+msgstr "Ce que vous avez partagé"
+
 #: src/routes/_shell.settings.instructions.tsx
 msgid "What your chats with Grasp start with, and only yours: how you like to work, what you are responsible for."
 msgstr "Ce par quoi commencent vos conversations avec Grasp, et seulement les vôtres : votre façon de travailler, ce dont vous êtes responsable."
@@ -16784,6 +16816,10 @@ msgstr "Vous êtes connecté en tant que membre de l’équipe Grasp, pour une d
 msgid "You can close this page now. Come back here to see how far I am."
 msgstr "Vous pouvez fermer cette page. Revenez ici pour voir où j’en suis."
 
+#: src/brain/memories-page.tsx
+msgid "You can no longer read this memory."
+msgstr "Vous ne pouvez plus lire ce souvenir."
+
 #: src/pages/frame-failure.tsx
 msgid "You can't open this App"
 msgstr "Vous ne pouvez pas ouvrir cette App"
@@ -16835,6 +16871,10 @@ msgstr "Vous n’avez aucune exécution récente dont l’entrée est encore con
 #: src/brain/skills-page.tsx
 msgid "You have no skills of your own yet."
 msgstr "Vous n'avez pas encore de skills à vous."
+
+#: src/brain/memories-page.tsx
+msgid "You haven't shared any of your memories."
+msgstr "Vous n’avez encore partagé aucun de vos souvenirs."
 
 #: src/onboarding/about-story.tsx
 msgid "You show me who’s who, where the documents are, and which tools people use."

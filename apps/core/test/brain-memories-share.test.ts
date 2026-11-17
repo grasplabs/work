@@ -1,3 +1,4 @@
+import { brainOf, personalBrainOf } from "@grasp-os/brain-next/contract";
 import type {
   BrainEntityListed,
   BrainMemoryPageNext,
@@ -7,13 +8,15 @@ import type {
 } from "@grasp-os/shared/brain-memories";
 import { brainMemoryErrors } from "@grasp-os/shared/brain-memories";
 import { env } from "cloudflare:workers";
+import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
 
 import { organizationId } from "../src/auth/auth.ts";
-import { rememberAs } from "../src/brain-next.ts";
+import { recallAs, rememberAs } from "../src/brain-next.ts";
 import type { Remembered } from "../src/brain-next.ts";
 import { teamMembers, teams } from "../src/db/core/schema.ts";
+import { inJurisdiction } from "../src/durable-objects.ts";
 import { mockIdp } from "./idp.ts";
 import { eventsOf } from "./model-rules.ts";
 import { signedInApi } from "./sign-in.ts";
@@ -25,8 +28,11 @@ type Api = Awaited<ReturnType<typeof signedInApi>>["api"];
 // a team they are in or the company, as a new memory in their own word in
 // the shared store. Its group reads it, nobody else does, and their own
 // memory stays theirs alone. What isn't theirs to share, or no longer says
-// what they were shown, answers alike; a share is audited with ids alone,
-// and taking it back keeps it as history. The permission harness
+// what they were shown, answers alike; nothing about a person, or about
+// what has no name, is shared; a time-bound fact ends for its readers when
+// it ends for them; a share is audited with ids alone, and its writer can
+// list it and take it back, also once out of its team, which keeps it as
+// history for those who may read it. The permission harness
 // (brain-next-surfaces.ts, brain-next-leaks.test.ts) probes every method
 // with markers.
 
@@ -130,14 +136,41 @@ const ownMemory = async (
 /** A share of `shown`, about `about`, with `audience`, as the page sends it. */
 const shareOf = (
   shown: BrainMemoryShown,
-  about: string | null,
+  about: string,
   audience: BrainShare["audience"]
 ): BrainShare => ({
   memory: { entity: shown.about, memory: shown.id },
-  shown: { about, value: shown.value, statement: shown.statement },
+  shown: {
+    about,
+    value: shown.value,
+    statement: shown.statement,
+    validFrom: shown.validFrom,
+    validUntil: shown.validUntil,
+  },
   audience,
   change: crypto.randomUUID(),
 });
+
+/** Takes `userId` out of team `teamId`. */
+const leave = async (teamId: string, userId: string): Promise<void> => {
+  await drizzle(env.DB)
+    .delete(teamMembers)
+    .where(and(eq(teamMembers.teamId, teamId), eq(teamMembers.userId, userId)));
+};
+
+/** Whether `userId`'s recall as their teams hands over memory `memory` for `question`. */
+const recalls = async (
+  userId: string,
+  question: string,
+  memory: string
+): Promise<boolean> => {
+  const { memories } = await recallAs(env, userId, {
+    personal: false,
+    question,
+    budget: { tokens: 4000 },
+  });
+  return memories.some((each) => each.memory === memory);
+};
 
 /** A customer's renewal the person says, with the words they said it in. */
 const renewal = (name: string, quote: string) => ({
@@ -321,6 +354,19 @@ describe("sharing a memory of a person's own", () => {
       quote: "We drop the Initech discount",
     });
     await anna.api.brainMemories.forget(forgotten.shown.id);
+    // About a person (a colleague), and about something with no name.
+    const colleague = await ownMemory(anna.api, anna.userId, {
+      about: { kind: "person", names: ["Ben Jansen"] },
+      type: "fact",
+      statement: "Ben Jansen is leaving in May",
+      quote: "Ben Jansen is leaving in May",
+    });
+    const nameless = await ownMemory(anna.api, anna.userId, {
+      about: { kind: "customer" },
+      type: "fact",
+      statement: "The new customer pays late",
+      quote: "The new customer pays late",
+    });
     const team = { team: sales };
     const share = shareOf(shown, name, team);
     const answers = await Promise.all([
@@ -341,6 +387,10 @@ describe("sharing a memory of a person's own", () => {
       anna.api.brainMemories.publish(shareOf(preference.shown, name, team)),
       anna.api.brainMemories.publish(shareOf(instruction.shown, name, team)),
       anna.api.brainMemories.publish(shareOf(forgotten.shown, name, team)),
+      anna.api.brainMemories.publish(
+        shareOf(colleague.shown, "Ben Jansen", team)
+      ),
+      anna.api.brainMemories.publish(shareOf(nameless.shown, "", team)),
       // Hers, asked by Ben, and one nobody saved.
       ben.api.brainMemories.publish(share),
       anna.api.brainMemories.publish({
@@ -353,6 +403,150 @@ describe("sharing a memory of a person's own", () => {
       // Nothing reached the team.
       bens: await named(ben.api, name),
     }).toStrictEqual({ answers: answers.map(() => null), bens: [] });
+  });
+
+  it("ends the copy when the original ends, and shares a time-bound fact only as shown with its dates", async () => {
+    const [anna, ben] = await Promise.all([
+      signedInApi(idp, "user"),
+      signedInApi(idp, "user"),
+    ]);
+    const sales = await teamOf(anna.userId, ben.userId);
+    const name = nameOf("Stark");
+    const until = new Date(Date.now() + 86_400_000);
+    // Drawn as a chat's extraction draws it: true until a day from now.
+    const own = await personalBrainOf(
+      inJurisdiction(env, env.BRAIN_STORE),
+      anna.userId
+    ).addMemories({
+      change: crypto.randomUUID(),
+      access: { kind: "owner", person: anna.userId },
+      entities: [{ key: "c", kind: "customer", names: [name] }],
+      memories: [
+        {
+          about: "c",
+          attribute: "status",
+          value: "Paused",
+          type: "fact",
+          statement: `${name} is paused until tomorrow`,
+          validUntil: until,
+          speaker: { kind: "internal", person: anna.userId },
+          basis: { kind: "writer", writer: anna.userId },
+        },
+      ],
+    });
+    const entity = { store: "own" as const, id: own.entities.c ?? "" };
+    const [shown] = await memoriesAbout(anna.api, entity);
+    if (shown === undefined) {
+      throw new Error("The page shows no memory");
+    }
+    const share = shareOf(shown, name, { team: sales });
+    const withoutEnd = await anna.api.brainMemories.publish({
+      ...share,
+      shown: { ...share.shown, validUntil: null },
+    });
+    const shared = await anna.api.brainMemories.publish(share);
+    if (shared === null) {
+      throw new Error("Shared nothing");
+    }
+    const bensReader = {
+      person: ben.userId,
+      groups: [`team:${sales}`, "company"],
+    };
+    const store = brainOf(inJurisdiction(env, env.BRAIN_STORE));
+    const currentAt = async (asOf?: Date) => {
+      const { memories } = await store.readMemories({
+        entity: shared.entity,
+        reader: bensReader,
+        ...(asOf === undefined ? {} : { asOf }),
+      });
+      return memories.map(({ id }) => id);
+    };
+    expect({
+      shownUntil: shown.validUntil,
+      withoutEnd,
+      now: await currentAt(),
+      afterTheEnd: await currentAt(new Date(until.getTime() + 1)),
+    }).toStrictEqual({
+      shownUntil: until.toISOString(),
+      withoutEnd: null,
+      now: [shared.memory],
+      afterTheEnd: [],
+    });
+  });
+
+  it("lets the person list and take back what they shared once out of its team, showing them nothing of what it says; nobody else can take it back", async () => {
+    const [anna, ben, carl] = await Promise.all([
+      signedInApi(idp, "user"),
+      signedInApi(idp, "user"),
+      signedInApi(idp, "user"),
+    ]);
+    const sales = await teamOf(anna.userId, ben.userId);
+    const name = nameOf("Wayne");
+    const { shown } = await ownMemory(
+      anna.api,
+      anna.userId,
+      renewal(name, "Wayne renews")
+    );
+    const shared = await anna.api.brainMemories.publish(
+      shareOf(shown, name, { team: sales })
+    );
+    if (shared === null) {
+      throw new Error("Shared nothing");
+    }
+    const listedIn = await anna.api.brainMemories.shared();
+    const benRecalledIn = await recalls(ben.userId, name, shared.memory);
+    await leave(sales, anna.userId);
+    const listedOut = await anna.api.brainMemories.shared();
+    const others = await Promise.all([
+      ben.api.brainMemories.unpublish(shared.memory),
+      carl.api.brainMemories.unpublish(shared.memory),
+    ]);
+    const taken = await anna.api.brainMemories.unpublish(shared.memory);
+    const listedAfter = await anna.api.brainMemories.shared();
+    const theirs = (page: typeof listedIn) =>
+      page.memories.filter(({ id }) => id === shared.memory);
+    expect({
+      listedIn: theirs(listedIn).map(({ audience, memory }) => ({
+        audience,
+        statement: memory?.statement,
+      })),
+      benRecalledIn,
+      // Out of the team: its id, audience and time, nothing it says.
+      listedOut: theirs(listedOut).map(({ audience, memory }) => ({
+        audience,
+        memory,
+      })),
+      saysNothing: JSON.stringify(listedOut).includes(name),
+      others,
+      taken,
+      listedAfter: theirs(listedAfter),
+      benRecalledAfter: await recalls(ben.userId, name, shared.memory),
+    }).toStrictEqual({
+      listedIn: [{ audience: { team: sales }, statement: shown.statement }],
+      benRecalledIn: true,
+      listedOut: [{ audience: { team: sales }, memory: null }],
+      saysNothing: false,
+      others: ["nothing", "nothing"],
+      taken: "done",
+      listedAfter: [],
+      benRecalledAfter: false,
+    });
+  });
+
+  it("answers a replay of a share taken back since as taken back, never as shared", async () => {
+    const anna = await signedInApi(idp, "user");
+    const name = nameOf("Tyrell");
+    const { shown } = await ownMemory(
+      anna.api,
+      anna.userId,
+      renewal(name, "Tyrell renews")
+    );
+    const share = shareOf(shown, name, "company");
+    const shared = await anna.api.brainMemories.publish(share);
+    await anna.api.brainMemories.unpublish(shared?.memory ?? "");
+    await expect(anna.api.brainMemories.publish(share)).rejects.toThrow(
+      brainMemoryErrors.create("brain.share_taken_back").message
+    );
   });
 
   it("refuses a team the person isn't in, alike whether it exists", async () => {

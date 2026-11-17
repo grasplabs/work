@@ -2358,6 +2358,58 @@ export interface RetiredMemory {
   change: string | null;
 }
 
+/**
+ * Where a page of `listWritten` ended: its last memory's learning time
+ * and id. The next page starts after it.
+ */
+export const writtenCursorSchema = z.strictObject({
+  learnedAt: z.date(),
+  memory: memoryIdSchema,
+});
+export type WrittenCursor = z.infer<typeof writtenCursorSchema>;
+
+/**
+ * What `writer` wrote to list (`Brain.listWritten`), for `reader`, the
+ * person the host resolved as that writer: a page of at most `limit`,
+ * after `after`.
+ */
+export const writtenRequestSchema = z.strictObject({
+  writer: principalSchema,
+  reader: readerSchema,
+  after: writtenCursorSchema.optional(),
+  limit: z.int().min(1).max(memoriesReadMax).default(memoriesReadMax),
+});
+export type WrittenRequest = z.input<typeof writtenRequestSchema>;
+
+/**
+ * A memory its writer wrote and hasn't retired: its id, who may read it
+ * (`Access`, null for readers the contract can't name), when it was
+ * learned, and the memory as the reader reads it (`Memory`, ended ones
+ * too), or null when they may not read it now: then nothing of what it
+ * says.
+ */
+export interface WrittenMemory {
+  id: MemoryId;
+  access: Access | null;
+  learnedAt: Date;
+  memory: Memory | null;
+}
+
+/** A page of `listWritten`, by learning time then id; whether more follow, and where to go on from. */
+export interface WrittenPage {
+  memories: WrittenMemory[];
+  more: boolean;
+  next?: WrittenCursor;
+}
+
+/** A memory of `writer`'s own lineage to retire whoever may read it (`Brain.retireWritten`), under the caller's change. */
+export const retireWrittenRequestSchema = z.strictObject({
+  memory: memoryIdSchema,
+  writer: principalSchema,
+  change: changeKeySchema,
+});
+export type RetireWrittenRequest = z.infer<typeof retireWrittenRequestSchema>;
+
 /** A memory the reader confirms, as their own word. */
 export const confirmRequestSchema = z.strictObject({
   memory: memoryIdSchema,
@@ -3126,6 +3178,28 @@ export interface Brain {
    * still answers its time on a repeat.
    */
   retireMemory: (request: RetireRequest) => Promise<RetiredMemory | null>;
+  /**
+   * A page of what `writer` wrote (its lineage is the writer's) and hasn't
+   * retired, by when it was learned: each with who may read it and when
+   * it was learned, and the memory itself only where the reader may read
+   * it now; of any other, nothing of what it says. Never one an erasure
+   * hides. For the host only, for a person listing their own word
+   * (core's shares of a memory), the writer and the reader both that
+   * person, as the host verified them: the store can't tell.
+   */
+  listWritten: (request: WrittenRequest) => Promise<WrittenPage>;
+  /**
+   * Retires one of `writer`'s own memories whoever may read it, as
+   * `retireMemory` retires one, expired or not: its writer taking back
+   * their own word, which removes and reads nothing. Answers when and by
+   * which change (`RetiredMemory`), the same again for one this writer
+   * retired before. Null alike for no such memory, another writer's, and
+   * one an erasure hides. For the host only, the writer as the host
+   * verified them.
+   */
+  retireWritten: (
+    request: RetireWrittenRequest
+  ) => Promise<RetiredMemory | null>;
   /**
    * The reader confirms a current memory they may read, over the current
    * memories of other lineages they may read that say something else of
