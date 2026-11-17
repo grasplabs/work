@@ -97,6 +97,7 @@ import {
   retryable,
 } from "./resource-errors.ts";
 import type { CaughtError, Failure } from "./resource-errors.ts";
+import { requireResourceRunEvidenceReadable } from "./resource-reads.ts";
 import { inboxOf } from "./run-inboxes.ts";
 import { sealedMainModules } from "./sealed-isolate.ts";
 import type { Settled, StepError } from "./sealed-isolate.ts";
@@ -2065,6 +2066,25 @@ class SealedRun implements SealedRunKind {
         }),
       ]);
       return undefined;
+    }
+    // What it keeps, the workflow's builders and admins read, and every
+    // later run of it: never once the run may no longer read what it read
+    // (resource-reads.ts: a version erased or narrowed, a memory a
+    // person's erasure took or its writer retired), checked as it writes,
+    // as anything leaving the run is (GRA-1985). A step on the Brain or
+    // the run's files is checked here alone; a model's or a connector's
+    // was checked before its call, and is again, as the run may have lost
+    // read since. A refusal fails the step, after its call's effect as
+    // `workflow.failed_after_effect`, and writes nothing.
+    try {
+      await requireResourceRunEvidenceReadable(this.#env, calling);
+    } catch (error) {
+      if (workflowResourceErrors.codeOf(error) !== "brain.revoked") {
+        throw error;
+      }
+      return this.#effected.has(attempt)
+        ? failedAfterEffect
+        : forIsolate(error);
     }
     try {
       await writeWorkflowState(

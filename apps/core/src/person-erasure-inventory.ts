@@ -204,6 +204,10 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
     company:
       "which Brain versions a run recalled, identifiers only, as runs are (D3)",
   },
+  "core.run_brain_memories": {
+    company:
+      "which Brain memories a run's entity reads rested on, identifiers only, no person's, as runs are (D3)",
+  },
   "core.guest_chats": { company: "guest chats they opened for an App" },
   // An App's visitor list (app-visitors.ts): the company's, as its builders
   // keep it, with the builder who listed each entry (`added_by`). An entry
