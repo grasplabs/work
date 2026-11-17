@@ -152,6 +152,11 @@ const typeRules: readonly {
   // passages and whether the budget cut it short, or why it was refused;
   // never the question or what was found.
   { action: "brain.recall", type: "read" },
+  // A chat's code asking the Brain who knows about a topic for a person
+  // (core's src/brain-recall.ts `whoKnowsFor`): for whom, how many people it named
+  // and whether the budget cut it short, or why it was refused; never the
+  // question, a name or who was named.
+  { action: "brain.who_knows", type: "read" },
   // An App or a workflow's run selecting or reading the Brain's skills for
   // a person (core's src/brain-recall.ts): for whom, how many skills or
   // which version, or why it was refused; never the task, a name or a

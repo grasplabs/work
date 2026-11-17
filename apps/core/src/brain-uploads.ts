@@ -40,6 +40,7 @@ import {
 } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
+import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
 import { z } from "zod";
 
 import {
@@ -53,6 +54,7 @@ import {
 import { currentMembership } from "./auth/auth.ts";
 import { memberOf } from "./auth/identity.ts";
 import type { Member } from "./auth/identity.ts";
+import { activeMember, organizationId } from "./auth/membership-sql.ts";
 import { uploadSource } from "./brain-next-origins.ts";
 import {
   addSource,
@@ -63,7 +65,14 @@ import {
   sourceTextProblem,
 } from "./brain-next.ts";
 import type { SourceReaders, SourceVersionRef } from "./brain-next.ts";
-import { brainUploads, members, teams, users } from "./db/core/schema.ts";
+import {
+  brainUploads,
+  members,
+  teamMembers,
+  teams,
+  users,
+} from "./db/core/schema.ts";
+import { inList } from "./db/d1.ts";
 import { ExtractorUnavailableError, localExtractor } from "./files/extract.ts";
 import { hasText, signatures } from "./files/upload-checks.ts";
 import { onboardingStore } from "./onboarding/store.ts";
@@ -1159,4 +1168,81 @@ export const sharedUploadsFor = async (
         ? { uploadedAt: last.createdAt.toISOString(), id: last.id }
         : null,
   };
+};
+
+/** Who uploaded an upload, as `uploadersOf` names them. */
+export interface Uploader {
+  uploadId: string;
+  userId: string;
+  name: string;
+}
+
+/**
+ * Of the uploads `uploadIds`, those whose uploader `reader` may be told
+ * (brain-recall.ts `whoKnowsFor`), with who uploaded each: read in the
+ * one statement that checks each again, so none is told on the strength
+ * of what the reader may not read or of a person no longer here. Only an
+ * upload in use (not removed, its removal in the Brain owed or not);
+ * shared with everyone, or with a team both the reader (`reader.person`,
+ * as their teams read; none when they read as the company alone) and its
+ * uploader are in now (one who left it is no longer named for what they
+ * may not read); never one its uploader alone reads; and only while its
+ * uploader is an active member now: an erased or removed person is never
+ * named.
+ */
+export const uploadersOf = async (
+  env: Env,
+  uploadIds: readonly string[],
+  reader: { person: string | null }
+): Promise<Uploader[]> => {
+  if (uploadIds.length === 0) {
+    return [];
+  }
+  const db = drizzle(env.DB);
+  /** That `userId` is in the upload's team now. */
+  const inUploadsTeam = (userId: string | SQLiteColumn) =>
+    exists(
+      db
+        .select({ one: sql`1` })
+        .from(teamMembers)
+        .innerJoin(teams, eq(teams.id, teamMembers.teamId))
+        .where(
+          and(
+            eq(teamMembers.teamId, brainUploads.teamId),
+            eq(teamMembers.userId, userId),
+            eq(teams.organizationId, organizationId)
+          )
+        )
+    );
+  return await db
+    .select({
+      uploadId: brainUploads.id,
+      userId: brainUploads.uploadedBy,
+      name: users.name,
+    })
+    .from(brainUploads)
+    .innerJoin(users, eq(users.id, brainUploads.uploadedBy))
+    .where(
+      and(
+        inList(brainUploads.id, uploadIds),
+        isNull(brainUploads.removedAt),
+        // The reader's access, again: the Brain found these as this reader
+        // already, and filters inside its own search, so this second layer
+        // only holds the answer to the same reader should the Brain's
+        // answer and these rows ever disagree. `readers = 'me'` is
+        // neither: what only one person may read is never evidence for
+        // anyone else.
+        or(
+          eq(brainUploads.readers, "everyone"),
+          reader.person === null
+            ? undefined
+            : and(
+                eq(brainUploads.readers, "team"),
+                inUploadsTeam(reader.person),
+                inUploadsTeam(brainUploads.uploadedBy)
+              )
+        ),
+        activeMember(brainUploads.uploadedBy)
+      )
+    );
 };
