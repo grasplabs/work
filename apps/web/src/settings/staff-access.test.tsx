@@ -156,10 +156,11 @@ describe("Settings › Workspace › Grasp staff access", () => {
       afterCancel: [],
       asked: ["end"],
     });
-    expect(text()).toContain(
-      "Nobody from Grasp can sign in to this workspace now."
-    );
-    expect(button("End staff access now")).toBeUndefined();
+    // Ended, the card goes: nobody from Grasp can sign in.
+    expect({
+      card: text().includes("Grasp staff access"),
+      end: button("End staff access now"),
+    }).toStrictEqual({ card: false, end: undefined });
   });
 
   it("says why when core doesn't end staff access, and still shows it open", async () => {
@@ -181,16 +182,14 @@ describe("Settings › Workspace › Grasp staff access", () => {
     }).toStrictEqual({ asked: ["end"], reason: true, stillOpen: true });
   });
 
-  it("says nobody from Grasp can sign in when no window is open", async () => {
+  it("shows nothing of staff access while no window is open", async () => {
     const { session } = fakeGate(null);
     await shown(session);
 
     expect({
-      none: text().includes(
-        "Nobody from Grasp can sign in to this workspace now."
-      ),
+      card: text().includes("Grasp staff access"),
       end: button("End staff access now"),
-    }).toStrictEqual({ none: true, end: undefined });
+    }).toStrictEqual({ card: false, end: undefined });
   });
 
   it("shows Grasp staff their own access, with no way to end it", async () => {

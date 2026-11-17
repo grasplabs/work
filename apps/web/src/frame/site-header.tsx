@@ -4,7 +4,6 @@ import type { ReactNode } from "react";
 
 import type { RegionId } from "../brain/brain-atlas.ts";
 import { AppShellBar } from "../grasp/app-shell/index.ts";
-import { useFrameBanner } from "./frame-banner.ts";
 
 /** A step on the way to the page; the last one is the page itself. */
 export type Crumb =
@@ -96,21 +95,17 @@ export const SiteHeader = ({
   phoneCrumbs?: "last-two" | "first";
 }) => {
   const { t } = useLingui();
-  const banner = useFrameBanner();
   return (
-    <>
-      <AppShellBar
-        actions={actions}
-        breadcrumbLabel={t`Breadcrumb`}
-        crumbs={crumbs.map((crumb) =>
-          "to" in crumb
-            ? { label: crumb.label, render: crumbLink(crumb) }
-            : { label: crumb.label }
-        )}
-        phoneCrumbs={phoneCrumbs}
-        end={trailing}
-      />
-      {banner}
-    </>
+    <AppShellBar
+      actions={actions}
+      breadcrumbLabel={t`Breadcrumb`}
+      crumbs={crumbs.map((crumb) =>
+        "to" in crumb
+          ? { label: crumb.label, render: crumbLink(crumb) }
+          : { label: crumb.label }
+      )}
+      phoneCrumbs={phoneCrumbs}
+      end={trailing}
+    />
   );
 };
