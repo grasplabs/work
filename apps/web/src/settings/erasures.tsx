@@ -161,9 +161,10 @@ const WhatErasingDoes = ({ areas }: { areas: readonly string[] }) => {
           </li>
           <li>
             <Trans>
-              Cards built only from documents that name them without their work
-              address can remain. An admin removes them by deleting those
-              documents.
+              Cards about them that hold no work address of theirs can remain.
+              Those built from documents go when an admin deletes those
+              documents, and those an App wrote go when that App’s data is
+              reset.
             </Trans>
           </li>
         </ul>

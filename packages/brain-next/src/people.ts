@@ -13,30 +13,35 @@ import { hashOf } from "./files.ts";
 //
 // Which entity is theirs is decided on exact evidence alone: an
 // identifier the host verified as theirs, which a memory gave the entity
-// (entities.ts), never a name. Only an entity of kind `person`, every
-// identifier of which is theirs, is theirs alone: every memory about it
-// or relating to it is covered, so the entity goes with its names. Any
-// other entity holding one of theirs (a team, a project or a customer
-// whose contact address was theirs, a shared mailbox, a card two people
-// were joined on) loses only that identifier: nothing else of it goes,
-// so no one can take a team's or a project's knowledge with them by
-// giving it their address. Every memory in their own word (its speaker is
-// them) is covered too, whatever it is about. Covered memories are hidden
-// at once (memories.ts `unerasedSql`, by `person_erasure_memories`) and
-// deleted by the tick. A confirmation of theirs stands, its confirmer
-// replaced by `erasedConfirmer`. Every export started before it is stale,
-// if it changed anything (it holds what changed).
+// (entities.ts), never a name. An entity of kind `person` holding one is
+// their card, whole, whatever else it holds (another address of theirs, a
+// reference, or, on a card two people were wrongly joined on, the other
+// one's address: the sources stay and are read again): every memory about
+// it or relating to it is covered, so it goes with its names. Any other
+// entity holding one (a team, a project or a customer whose contact
+// address was theirs, a shared desk) loses only that identifier: nothing
+// else of it goes, so no one can take a team's or a project's knowledge
+// with them by giving it their address. Every memory in their own word
+// (its speaker is them) is covered too, whatever it is about. Covered
+// memories are hidden at once (memories.ts `unerasedSql`, by
+// `person_erasure_memories`) and deleted by the tick. A confirmation of
+// theirs stands, its confirmer replaced by `erasedConfirmer`. Every export
+// started before it is stale, if it changed anything (it holds what
+// changed).
 //
 // What it closed stays closed (`person_erasure_subjects`, and the
-// erasure's own record for the person), until the host says the address
-// is verified again for a member (`reopenIdentifiers`): any add strips a
-// closed identifier and writes the rest, answering as it would for an
-// identifier it holds nowhere; extraction also leaves out an entity of
-// kind `person` all of whose identifiers are closed, with what is about it
-// or relates to it, and what is in their word, so nothing drawn again from
-// a source that stays makes their card again; a restore of an export
-// passes over what rests on their entities or is in their word, and
-// keeps none of their identifiers.
+// erasure's own record for the person). A write leaves a closed
+// identifier out and writes the rest, answering as it would for an
+// identifier it holds nowhere. What is drawn from a source (extraction, a
+// write resting on a version, a restore of one) also leaves out an entity
+// of kind `person` holding a closed identifier, with what is about it or
+// relates to it, and what is in their word, so nothing drawn again from a
+// source that stays makes their card again. Once an admin gives the
+// address to someone else, it is released (`reopenIdentifiers`): the
+// host's and Apps' own writes keep it again, so its next holder has a
+// card; what is drawn from a source keeps leaving it out, for good, so no
+// document builds or feeds a person's card by it again (by a name it
+// may).
 //
 // The store and the ledger keep a person and an identifier as SHA-256
 // hashes, never plain: the person by their id (as the erasure's subject),
@@ -100,10 +105,18 @@ export const namingOf = async (
   ),
 });
 
-/** Of `subjects`, those a person's erasure closed: one seek each. */
+/**
+ * How a write meets what a person's erasure closed: the host's or an App's
+ * own word (`written`), which keeps a released identifier; or drawn from a
+ * source (`drawn`), which leaves it out for good (above).
+ */
+export type WriteKind = "written" | "drawn";
+
+/** Of `subjects`, those a person's erasure closed to a write of `kind`: one seek each. */
 export const closedOf = (
   sql: SqlStorage,
-  subjects: readonly string[]
+  subjects: readonly string[],
+  kind: WriteKind = "drawn"
 ): Set<string> =>
   subjects.length === 0
     ? new Set()
@@ -111,8 +124,10 @@ export const closedOf = (
         sql
           .exec<{ subject: string }>(
             `SELECT subject FROM person_erasure_subjects
-            WHERE subject IN (SELECT value FROM json_each(?))`,
-            JSON.stringify(subjects)
+            WHERE subject IN (SELECT value FROM json_each(?1))
+              AND (?2 = 'drawn' OR released = 0)`,
+            JSON.stringify(subjects),
+            kind
           )
           .toArray()
           .map(({ subject }) => subject)
@@ -133,10 +148,11 @@ export const isErasedPerson = (
     .toArray().length > 0;
 
 /**
- * `entities` (`naming.identifiers` theirs, in order) as an add writes
- * them: every identifier a person's erasure closed stripped; and the keys
- * of those of kind `person` that held identifiers and only closed ones:
- * the erased person themselves, by exact evidence.
+ * `entities` (`naming.identifiers` theirs, in order) as a write of `kind`
+ * keeps them: every identifier a person's erasure closed to it stripped;
+ * and the keys of those of kind `person` that held one: the erased
+ * person's card, by exact evidence, which what is drawn from a source
+ * leaves out whole.
  */
 export const strippedOf = <
   Entity extends {
@@ -147,9 +163,10 @@ export const strippedOf = <
 >(
   sql: SqlStorage,
   entities: readonly Entity[],
-  identifiers: readonly string[][]
+  identifiers: readonly string[][],
+  kind: WriteKind
 ): { entities: Entity[]; erased: Set<string> } => {
-  const closed = closedOf(sql, identifiers.flat());
+  const closed = closedOf(sql, identifiers.flat(), kind);
   const erased = new Set<string>();
   const stripped = entities.map((entity, index) => {
     const given = entity.identifiers ?? [];
@@ -157,7 +174,7 @@ export const strippedOf = <
     const kept = given.filter(
       (_identifier, at) => !closed.has(subjects[at] ?? "")
     );
-    if (entity.kind === "person" && given.length > 0 && kept.length === 0) {
+    if (entity.kind === "person" && kept.length < given.length) {
       erased.add(entity.key);
     }
     return kept.length === given.length
@@ -171,8 +188,8 @@ export const strippedOf = <
 export type HeldIdentifier = readonly [type: string, folded: string];
 
 /**
- * An entity holding one of a person's identifiers: theirs alone (kind
- * `person`, and no identifier but theirs), or one that only loses theirs.
+ * An entity holding one of a person's identifiers: their card (kind
+ * `person`), taken whole, or anyone else's, which only loses theirs.
  */
 export interface HeldEntity {
   row: number;
@@ -190,15 +207,7 @@ export const entitiesHolding = (
     : sql
         .exec<{ row: number; id: string; alone: number }>(
           `SELECT DISTINCT entities.row AS row, entities.id AS id,
-            entities.kind = 'person' AND NOT EXISTS (
-              SELECT 1 FROM entity_names AS other
-              WHERE other.entity = entities.row AND other.type <> 'name'
-                AND NOT EXISTS (
-                  SELECT 1 FROM json_each(?1) AS given
-                  WHERE given.value ->> 0 = other.type
-                    AND given.value ->> 1 = other.folded
-                )
-            ) AS alone
+            entities.kind = 'person' AS alone
           FROM json_each(?1) AS given
           CROSS JOIN entity_names
             ON entity_names.type = given.value ->> 0
@@ -246,8 +255,12 @@ export const applyPerson = (
       alone ? [entityClosureOf(id)] : []
     ),
   ]) {
+    // Closed anew, also one an earlier erasure closed and an admin
+    // released since (its next holder erased in turn).
     sql.exec(
-      "INSERT OR IGNORE INTO person_erasure_subjects (subject, erasure) VALUES (?, ?)",
+      `INSERT INTO person_erasure_subjects (subject, erasure, released)
+      VALUES (?1, ?2, 0)
+      ON CONFLICT (subject) DO UPDATE SET erasure = ?2, released = 0`,
       closed,
       key
     );

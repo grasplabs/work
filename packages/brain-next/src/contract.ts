@@ -1947,9 +1947,8 @@ export const sharedPersonErasureSchema = z.strictObject({
 export type SharedPersonErasure = z.infer<typeof sharedPersonErasureSchema>;
 
 /**
- * Identifiers a person's erasure closed, to open again
- * (`Brain.reopenIdentifiers`): the host verified each again for a member
- * (their sign-in address, at a sign-in after the erasure).
+ * Identifiers a person's erasure closed, to release
+ * (`Brain.reopenIdentifiers`): an admin gave each to someone else.
  */
 export const identifiersReopenSchema = z.strictObject({
   identifiers: z.array(identifierSchema).min(1).max(namesPerEntityMax),
@@ -3012,30 +3011,34 @@ export interface Brain {
    * Erases from the shared store what it derived about `person`, and what
    * is in their own word, for an erasure of the person (erasure.ts
    * `erasePersonShared`, people.ts): every memory whose speaker is them;
-   * on an entity of kind `person` every identifier of which is one of
-   * `identifiers`, every memory about it or relating to it, so the entity
-   * goes with its names; on any other entity holding one of them, that
-   * identifier alone. Hidden from every read at once, recorded in the
-   * ledger, deleted by the tick if not by the call. Their confirmations
-   * stand, the confirmer replaced by `erasedConfirmer`; every export
-   * started before it is stale, when it changed anything. Their
-   * identifiers stay closed until `reopenIdentifiers`: an add leaves one
-   * out and writes the rest, answering as for an identifier held nowhere;
-   * extraction and a restore leave out their entity and their word. The
-   * sources stay. Safe to repeat: the same person is the same erasure, its
+   * on an entity of kind `person` holding one of `identifiers`, their card,
+   * every memory about it or relating to it, so it goes whole with its
+   * names; on any other entity holding one of them, that identifier alone.
+   * Hidden from every read at once, recorded in the ledger, deleted by the
+   * tick if not by the call. Their confirmations stand, the confirmer
+   * replaced by `erasedConfirmer`; every export started before it is
+   * stale, when it changed anything. Their identifiers stay closed: a
+   * write leaves one out and writes the rest, answering as for an
+   * identifier held nowhere; what is drawn from a source (extraction, a
+   * write resting on a version, a restore of one) also leaves out a
+   * person's card holding one, and their word. `reopenIdentifiers`
+   * releases one to the host's and Apps' own writes alone. The sources
+   * stay. Safe to repeat: the same person is the same erasure, its
    * identifiers those of its first call. Returns only once its entry is in
    * the ledger: one that throws must be repeated. The shared store's
    * alone: a person's own store refuses.
    */
   erasePersonShared: (request: SharedPersonErasure) => Promise<void>;
   /**
-   * Opens again each of `identifiers` a person's erasure closed (erasure.ts
-   * `reopenIdentifiers`): from then on it is kept and drawn as any other.
-   * Recorded in the ledger before it applies, so a restore keeps it open
-   * after the erasure that closed it. What the erasure took stays erased.
-   * Answers how many it opened: none for one nothing closed, which writes
-   * nothing. One that throws opened nothing, and is asked again. The
-   * shared store's alone.
+   * Releases each of `identifiers` a person's erasure closed (erasure.ts
+   * `reopenIdentifiers`), once an admin gave it to someone else: from then
+   * on the host's and Apps' own writes keep it, so its next holder has a
+   * card; what is drawn from a source keeps leaving it out, for good.
+   * Recorded in the ledger before it applies, so a restore keeps it
+   * released after the erasure that closed it. What the erasure took stays
+   * erased. Answers how many it released: none for one nothing closed or
+   * released already, which writes nothing. One that throws released
+   * nothing, and is asked again. The shared store's alone.
    */
   reopenIdentifiers: (
     request: IdentifiersReopen

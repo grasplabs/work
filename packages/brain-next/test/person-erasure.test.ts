@@ -759,6 +759,171 @@ describe("a person's erasure in the shared store", () => {
     ).rejects.toThrow("only the shared store takes this");
   });
 
+  it("takes their person card whole, whatever other addresses it holds, also one joined with someone else's", async () => {
+    const group = unique("g");
+    const bob = unique("bob-");
+    const anna = unique("anna-");
+    const reader: Reader = { person: bob, groups: [group] };
+    const local = word();
+    const own = word();
+    const bobs = word();
+    const name = `Anna ${word()}`;
+    const joined = `Anna ${word()}`;
+    const fromCrm = (about: string, statement: string): NewMemory => ({
+      about,
+      type: "fact",
+      statement,
+      speaker: { kind: "internal", person: bob },
+      basis: { kind: "writer", writer: "app:crm" },
+    });
+    const privateAddress: Identifier = {
+      type: "email",
+      value: `${own}@private.test`,
+    };
+    const { entities } = await remember(
+      group,
+      [
+        {
+          key: "a",
+          kind: "person",
+          names: [name],
+          identifiers: [
+            email(local),
+            privateAddress,
+            { type: "ref", value: `crm:${own}` },
+          ],
+        },
+      ],
+      [
+        fromCrm("a", `${name} leads finance`),
+        fromCrm("a", `${name} is on sick leave until May`),
+      ]
+    );
+    // A card two people were joined on, by her address and Bob's.
+    const other = await remember(
+      unique("g"),
+      [
+        {
+          key: "j",
+          kind: "person",
+          names: [joined],
+          identifiers: [email(local), email(bobs)],
+        },
+      ],
+      [fromCrm("j", `${joined} runs payroll`)]
+    );
+
+    await erase(anna, [email(local)]);
+    await tick(shared());
+    const seen = await everything(
+      reader,
+      [entities.a ?? "", other.entities.j ?? ""],
+      [name, joined],
+      [email(local), privateAddress, email(bobs)]
+    );
+
+    expect(
+      [
+        name,
+        joined,
+        `${local}@acme.test`,
+        `${own}@private.test`,
+        `crm:${own}`,
+        "leads finance",
+        "sick leave",
+        "runs payroll",
+      ].filter((needle) => seen.includes(needle))
+    ).toStrictEqual([]);
+  });
+
+  it("lets Apps write a released address for its next holder, and no document builds or feeds a person's card by it again", async () => {
+    /**
+     * Her card drawn from Bob's note, then her erasure and the address
+     * released; then an App writes the card of `holder` (its next holder,
+     * or she herself taken on again) with it, and the note is drawn on
+     * again: that card, as a teammate reads it.
+     */
+    const cardAfterRelease = async (holder: string, name: string) => {
+      const group = unique("g");
+      const bob = unique("bob-");
+      const reader: Reader = { person: bob, groups: [group] };
+      const local = word();
+      const note = await document(
+        group,
+        `${name} (${local}@acme.test) is on sick leave until May.`
+      );
+      const drawnFromNote = async () =>
+        await remember(
+          group,
+          [
+            {
+              key: "a",
+              kind: "person",
+              names: [name],
+              identifiers: [email(local)],
+            },
+          ],
+          [
+            said(
+              "a",
+              `${name} is on sick leave until May`,
+              bob,
+              on(note, "is on sick leave until May")
+            ),
+          ]
+        );
+      await drawnFromNote();
+      await erase(unique("anna-"), [email(local)]);
+      await tick(shared());
+      await shared().reopenIdentifiers({ identifiers: [email(local)] });
+      const written = await remember(
+        group,
+        [
+          {
+            key: "n",
+            kind: "person",
+            names: [holder],
+            identifiers: [email(local)],
+          },
+        ],
+        [
+          {
+            about: "n",
+            type: "fact",
+            statement: `${holder} joins finance`,
+            speaker: { kind: "agent", agent: "app:hr" },
+            basis: { kind: "writer", writer: "app:hr" },
+          },
+        ]
+      );
+      await drawnFromNote();
+      const entity = written.entities.n ?? "";
+      return {
+        statements: await statementsOf(entity, reader),
+        names: await shared()
+          .readEntityNames({ entity, reader })
+          .then(({ names }) => names.map(({ value }) => value).toSorted()),
+        address: local,
+      };
+    };
+    const name = `Anna ${word()}`;
+    const noor = await cardAfterRelease("Noor Bakker", name);
+    const back = await cardAfterRelease(name, name);
+
+    expect({ noor, back }).toStrictEqual({
+      noor: {
+        statements: ["Noor Bakker joins finance"],
+        names: [`${noor.address}@acme.test`, "Noor Bakker"].toSorted(),
+        address: noor.address,
+      },
+      back: {
+        statements: [`${name} joins finance`],
+        names: [`${back.address}@acme.test`, name].toSorted(),
+        address: back.address,
+      },
+    });
+  });
+
   it("leaves every earlier export when it changed nothing, and makes it stale when it did", async () => {
     const at = await annaAndBob();
     const { id } = await shared().startExport("test");
@@ -824,6 +989,39 @@ describe("a person's erasure in the shared store", () => {
     const state = await restoredAfterLoss(shared, older, empty);
     const seen = await everything(at.reader, [], [at.name], []);
     const restoredOpen = await hireFound();
+    // Released, not opened: a document still feeds no card by it.
+    const note = await document(
+      at.group,
+      `${at.name} (${at.local}@acme.test) leads finance again ${at.marker}.`
+    );
+    await remember(
+      at.group,
+      [
+        {
+          key: "a",
+          kind: "person",
+          names: [at.name],
+          identifiers: [email(at.local)],
+        },
+      ],
+      [
+        said(
+          "a",
+          `${at.name} leads finance again ${at.marker}`,
+          at.bob,
+          on(note, "leads finance again")
+        ),
+      ]
+    );
+    const byAddress = await shared().findEntities({
+      reader: at.reader,
+      identifier: email(at.local),
+    });
+    const fed = await Promise.all(
+      byAddress.entities.map(
+        async ({ id }) => await statementsOf(id, at.reader)
+      )
+    );
 
     expect({
       closed,
@@ -835,6 +1033,7 @@ describe("a person's erasure in the shared store", () => {
         seen.includes(needle)
       ),
       restoredOpen,
+      fed: fed.flat().filter((statement) => statement.includes("again")),
     }).toStrictEqual({
       closed: 0,
       opened: { opened: 1 },
@@ -843,6 +1042,7 @@ describe("a person's erasure in the shared store", () => {
       state: "done",
       seen: [],
       restoredOpen: 1,
+      fed: [],
     });
   });
 

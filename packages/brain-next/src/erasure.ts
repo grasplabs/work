@@ -153,14 +153,14 @@ export interface ErasureStore {
 /**
  * What is erased: a source, what a writer wrote, or what the shared store
  * derived about a person; or, not an erasure, an identifier a person's
- * erasure closed opened again (`reopen`: `reopenIdentifiers`).
+ * erasure closed released (`reopen`: `reopenIdentifiers`).
  */
 type ErasureKind = "source" | "writer" | "person" | "reopen";
 
 /** An erasure, as the ledger holds it. */
 interface LedgerEntry {
   kind: ErasureKind;
-  /** The SHA-256 of the source's key, of the writer's lineage, of the person's id, or of the identifier opened again, in hex. */
+  /** The SHA-256 of the source's key, of the writer's lineage, of the person's id, or of the identifier released, in hex. */
   subject: string;
   reason: ErasureReason;
   /**
@@ -632,9 +632,10 @@ const applyPersonEntry = (
 };
 
 /**
- * Applies the opening again `key` of the identifier whose SHA-256 is
- * `subject` (`reopenIdentifiers`): its record, and the identifier no
- * longer closed. In the caller's transaction; safe to repeat.
+ * Applies the release `key` of the identifier whose SHA-256 is `subject`
+ * (`reopenIdentifiers`): its record, and the identifier released (people.ts:
+ * kept by the host's and Apps' own writes, still left out of what is drawn
+ * from a source). In the caller's transaction; safe to repeat.
  */
 const applyReopen = (
   sql: SqlStorage,
@@ -646,7 +647,10 @@ const applyReopen = (
     key,
     at
   );
-  sql.exec("DELETE FROM person_erasure_subjects WHERE subject = ?", subject);
+  sql.exec(
+    "UPDATE person_erasure_subjects SET released = 1 WHERE subject = ?",
+    subject
+  );
 };
 
 /**
@@ -1566,16 +1570,16 @@ export const erasePersonShared = async (
 };
 
 /**
- * Opens again each of `identifiers` a person's erasure closed, as the host
- * asks once the identifier is verified again for a member (their sign-in
- * address, at a new sign-in): from then on an add keeps it, extraction
- * draws what names it, a restore keeps it. Its ledger entry is written
- * first, one an identifier (`reopen`, the identifier's SHA-256), so a
- * restore of an older copy, or of an export into an empty store, applies
- * it after the erasure that closed it; then it is applied. Answers how
- * many it opened: none for an identifier nothing closed, which writes
- * nothing. Throws when the entry can't be written, opening nothing; the
- * host asks again. What an erasure took stays erased; it can be made anew.
+ * Releases each of `identifiers` a person's erasure closed, as the host
+ * asks once an admin gave it to someone else (people.ts): from then on
+ * the host's and Apps' own writes keep it; what is drawn from a source
+ * keeps leaving it out, for good. Its ledger entry is written first, one
+ * an identifier (`reopen`, the identifier's SHA-256), so a restore of an
+ * older copy, or of an export into an empty store, applies it after the
+ * erasure that closed it; then it is applied. Answers how many it
+ * released: none for one nothing closed or released already, which writes
+ * nothing. Throws when the entry can't be written, releasing nothing; the
+ * host asks again. What an erasure took stays erased.
  */
 export const reopenIdentifiers = async (
   store: ErasureStore,
@@ -1588,7 +1592,7 @@ export const reopenIdentifiers = async (
   );
   let opened = 0;
   for (const subject of new Set(subjects)) {
-    if (!closedOf(sql, [subject]).has(subject)) {
+    if (!closedOf(sql, [subject], "written").has(subject)) {
       continue;
     }
     const entry: LedgerEntry = {

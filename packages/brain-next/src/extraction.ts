@@ -962,11 +962,12 @@ const pieceNamingOf = async (adding: Candidates): Promise<Naming> =>
 
 /**
  * `adding` as a person's erasure leaves it (people.ts): an entity of kind
- * `person` all of whose identifiers are closed is that person, left out
- * with the memories about it or relating to it; so are the memories in
- * their word; every other entity only loses a closed identifier. Their
- * sources stay, so nothing drawn from them again makes their card or
- * their word again, and nothing else of them is lost.
+ * `person` holding a closed identifier, a released one too, is their card,
+ * left out with the memories about it or relating to it; so are the
+ * memories in their word; every other entity only loses a closed
+ * identifier. Their sources stay, so nothing drawn from them again makes
+ * or feeds their card, or the card of the address's next holder, and
+ * nothing else of them is lost.
  */
 const leavingOutClosed = (
   sql: SqlStorage,
@@ -976,7 +977,8 @@ const leavingOutClosed = (
   const { entities, erased } = strippedOf(
     sql,
     adding.entities,
-    naming.identifiers
+    naming.identifiers,
+    "drawn"
   );
   return keeping(
     entities,

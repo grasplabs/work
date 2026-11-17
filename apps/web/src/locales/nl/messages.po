@@ -3429,8 +3429,8 @@ msgid "Card"
 msgstr "Kaart"
 
 #: src/settings/erasures.tsx
-msgid "Cards built only from documents that name them without their work address can remain. An admin removes them by deleting those documents."
-msgstr "Kaarten die alleen zijn opgebouwd uit documenten die hen noemen zonder hun werkadres, kunnen blijven. Een admin verwijdert ze door die documenten te verwijderen."
+msgid "Cards about them that hold no work address of theirs can remain. Those built from documents go when an admin deletes those documents, and those an App wrote go when that App’s data is reset."
+msgstr "Kaarten over hen zonder een werkadres van hen kunnen blijven. Kaarten uit documenten verdwijnen als een admin die documenten verwijdert, en kaarten die een App schreef als de gegevens van die App worden teruggezet."
 
 #: src/activity/audit-words.ts
 msgid "Carried out a confirmed write to an App, or failed to"

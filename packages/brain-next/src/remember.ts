@@ -664,9 +664,19 @@ export const writeAdd = (
     if (naming.speakers.some((person) => isErasedPerson(sql, person))) {
       throw refused("it is in the word of a person an erasure took");
     }
+    // Drawn from a source when a memory rests on a version, or it marks
+    // one extracted: a released identifier stays out of that for good.
+    const drawn =
+      asked.extracted !== undefined ||
+      asked.memories.some(({ basis }) => basis.kind === "source");
     const adding: Adding = {
       ...asked,
-      entities: strippedOf(sql, asked.entities, naming.identifiers).entities,
+      entities: strippedOf(
+        sql,
+        asked.entities,
+        naming.identifiers,
+        drawn ? "drawn" : "written"
+      ).entities,
     };
     // The set is stored (read sets match readers by it); memories name it
     // by its key alone, never its row id.

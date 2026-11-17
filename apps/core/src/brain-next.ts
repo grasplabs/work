@@ -1946,11 +1946,13 @@ export const erasePersonShared = async (
 };
 
 /**
- * Opens `email` again in the shared store, if a member's erasure closed it
- * (`erasePersonShared`): it is verified again for a member, who signed in
- * with it (brain-addresses.ts). From then on it is kept and drawn as any
- * other; what the erasure took stays erased. Answers whether it was
- * closed. One that throws opened nothing.
+ * Releases `email` in the shared store, if a member's erasure closed it
+ * (`erasePersonShared`), once an admin gave the address to someone else
+ * (person-erasure.ts `releaseAddress`): from then on the host's and Apps'
+ * own writes keep it, so its next holder has a card; documents still
+ * build or feed no person's card by it. What the erasure took stays
+ * erased. Answers whether it released it now. One that throws released
+ * nothing.
  */
 export const reopenAddress = async (
   env: BrainEnv,

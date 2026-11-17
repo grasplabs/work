@@ -1099,9 +1099,15 @@ export const erasePerson = async (
  * Lets the address `email` in again, as one of the client's admins asked:
  * the company gave the address that was an erased person's to someone
  * else. Only the hash goes, while the admin still is one, recorded with
- * the erased person's ID only, never the address; and the Brain keeps the
- * address again (`reopenAddress`), so the person it now belongs to has a
- * card. Answers whether an erased person's address it was.
+ * the erased person's ID only, never the address. Then the Brain releases
+ * it (`reopenAddress`), only once that landed: its erasure closed the
+ * address there, so nothing drawn again from documents that stay made the
+ * erased person's card again; released, the host's and Apps' writes keep
+ * it for the person it now belongs to, and documents still feed no card
+ * by it. Asked again for an address released already, by an admin still,
+ * only the Brain is asked again: so one whose Brain step failed is
+ * finished by the admin asking again. Answers whether it released an
+ * erased person's address now.
  */
 export const releaseAddress = async (
   env: Env,
@@ -1119,16 +1125,17 @@ export const releaseAddress = async (
     .from(personErasures)
     .where(erasedAddress(hash));
   if (erased === undefined) {
+    // Nothing to release here: the Brain is asked again, by an admin who
+    // still is one now, in case an earlier release's Brain step failed.
+    const still = await db.get<{ admin: number }>(
+      sql`SELECT ${activeMember(by.userId, ["admin"])} AS admin`
+    );
+    if (still.admin !== 1) {
+      throw roleErrors.create("role.forbidden");
+    }
+    await reopenAddress(env, email);
     return { released: false };
   }
-  // The Brain opens it first (brain-next.ts `reopenAddress`): the erasure
-  // closed it there, so nothing drawn again from documents that stay made
-  // the erased person's card again, and the company now gives it to
-  // someone, who can only sign in with it once it is released here. One
-  // that fails releases nothing: the admin asks again. Opened in the Brain
-  // with the release still to land (the admin stopped being one) is the
-  // address kept out at sign-in all the same.
-  await reopenAddress(env, email);
   const [released] = await auditedBatch(env, db, [
     db
       .update(personErasures)
@@ -1151,6 +1158,7 @@ export const releaseAddress = async (
   if (released.length === 0) {
     throw roleErrors.create("role.forbidden");
   }
+  await reopenAddress(env, email);
   return { released: true };
 };
 
