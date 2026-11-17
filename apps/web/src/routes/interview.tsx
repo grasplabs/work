@@ -87,6 +87,7 @@ const opened = async (secret: string, core: CoreConnection): Promise<Page> => {
   // Back on the link after stopping, it carries on where it was.
   holdInterview({
     secret,
+    kind: answer.kind,
     version: answer.version,
     progress: answer.progress === null ? null : resumed(answer.progress),
   });

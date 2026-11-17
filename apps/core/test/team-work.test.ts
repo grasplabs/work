@@ -51,7 +51,7 @@ import {
 // How a team's work runs shows from the first person who told it
 // (GRA-1987, the owner's decision of 17 November), as claims of the kinds
 // that describe the work and as drawings, only from the lines each person
-// chose to share with their team, and only for the team they told it in
+// chose to share as how their team works, and only for the team they told it in
 // (GRA-1984). One person's description is that person's account,
 // restated: the ways it could read as what they said, tried here:
 //

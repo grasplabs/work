@@ -135,7 +135,7 @@ test("someone has their interview by typing, carries on after stopping, and agre
   ]);
   // How the work runs starts out shared with the team, each line its own to move.
   await expect(
-    lines.getByRole("button", { name: "Shared with your team as how you work" })
+    lines.getByRole("button", { name: "Shared as how your team works" })
   ).toHaveCount(2);
   await page
     .getByRole("button", { name: "Change: You send it to Sam." })

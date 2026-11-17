@@ -3,7 +3,7 @@ import { UsersIcon } from "lucide-react";
 
 // What the brain shows of the interviews (GRA-1084, GRA-1987): a statement
 // the onboarding gave it is a claim of how a team works, made from what its
-// people shared with their team (core's onboarding/team-claims.ts), never
+// people shared as how their team works (core's onboarding/team-claims.ts), never
 // one person's words, and the page says so: never quoted (brain.ts
 // `statementWords`), and with what it rests on where it stands on its own.
 // Never how many told it: it shows from the first person who did.

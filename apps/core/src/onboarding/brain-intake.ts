@@ -22,7 +22,7 @@ import type { TeamClaim } from "./team-claims.ts";
 import { inUnitOf } from "./work-drawing.ts";
 
 // What the onboarding learned of a team (GRA-367, GRA-1748): how its work
-// runs, as its people told it in the lines they shared with their team
+// runs, as its people told it in the lines they shared as how their team works
 // (GRA-1987), put together as its claims (GRA-1084, team-claims.ts), and a
 // drawing of each piece of its work. The onboarding keeps both itself and
 // hands each to the new Brain as a source of its own; none is a record of

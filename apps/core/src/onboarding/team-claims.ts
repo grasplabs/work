@@ -10,7 +10,7 @@ import type { Took } from "./store.ts";
 
 // What a team says of how its work runs, put together (GRA-1084,
 // GRA-1987): the brain's statements of a team are claims made from the
-// lines its people chose to share with their team as how they work, from
+// lines its people chose to share as how their team works, from
 // the first person who told one: never one person's fact as it was said,
 // never their name, never what anyone thinks of the work. Members and
 // admins read only these; staff read none (brain-rpc.ts).
@@ -405,7 +405,7 @@ const supported = async (
 
 /**
  * A team's claims, put together by the careful model through the gateway
- * from what its people agreed to and shared with their team: each checked
+ * from what its people agreed to and shared as how their team works: each checked
  * to be said by one of them or more, and to say only how the work runs.
  * None, and no call, when nobody shared a fact of a kind that describes
  * the work. Throws

@@ -20,6 +20,8 @@ import {
   mayName,
 } from "./entities.ts";
 import { subjectOf, writerSubjectOf } from "./erasure.ts";
+import { extractorRowOf } from "./extractors.ts";
+import type { Extractor } from "./extractors.ts";
 import { fileKeyOf, hashOf } from "./files.ts";
 import { linkedByName } from "./linking.ts";
 import {
@@ -55,6 +57,13 @@ import type { WordMemo } from "./words.ts";
 
 /** An add as its schema reads it. */
 export type Adding = z.output<typeof newMemoriesSchema>;
+
+/**
+ * An add extraction makes (extraction.ts): each memory with the calls that
+ * drew it, by its place in `memories` (extractors.ts). Never from a
+ * caller: the contract's add takes none.
+ */
+export type DrawnAdding = Adding & { extractors?: readonly Extractor[] };
 
 /** A memory of an add, with where its entities are in the add and its attribute's rule. */
 interface Planned {
@@ -323,6 +332,8 @@ interface Into {
   writers: ReadonlyMap<string, string>;
   /** Each memory's restatement key, by its place in the add as asked (`restatementOf`). */
   restatements: readonly string[];
+  /** The calls that drew each memory, by its place in the add as asked; none for an add extraction didn't make. */
+  extractors: readonly Extractor[] | undefined;
   learnedAt: number;
   memo: WordMemo;
 }
@@ -515,14 +526,18 @@ const writeMemory = (
     throw refused(`memory ${index} names an entity the add doesn't give`);
   }
   const based = basisOf(into, memory.basis);
+  const extractor = into.extractors?.[index];
+  if (into.extractors !== undefined && extractor === undefined) {
+    throw new Error("A memory drawn without its extractor");
+  }
   const id = crypto.randomUUID();
   const { row } = sql
     .exec<{ row: number }>(
       `INSERT INTO memories (id, entity, attribute, object, value, value_key,
         one_value, type, statement, quote, source, version, subject, writer,
         writer_subject, lineage, lineage_order, speaker, valid_from,
-        valid_until, learned_at, readers)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        valid_until, learned_at, readers, extractor)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       RETURNING row`,
       id,
       aboutRow,
@@ -545,7 +560,8 @@ const writeMemory = (
       memory.validFrom?.getTime() ?? null,
       memory.validUntil?.getTime() ?? null,
       into.learnedAt,
-      into.readers
+      into.readers,
+      extractor === undefined ? null : extractorRowOf(sql, extractor)
     )
     .one();
   indexMemoryWords(sql, row, memory.statement, into.memo);
@@ -660,7 +676,7 @@ export const hashesOf = async (adding: Adding): Promise<AddHashes> => {
  */
 export const writeAdd = (
   { storage, db, shared }: Omit<RememberStore, "bucket">,
-  asked: Adding,
+  asked: DrawnAdding,
   { key, hash, subjects, writers, restatements, naming }: AddHashes,
   texts: CurrentTexts = new Map()
 ): AddedMemories => {
@@ -745,6 +761,7 @@ export const writeAdd = (
       subjects,
       writers,
       restatements,
+      extractors: asked.extractors,
       learnedAt: stampWrite(sql),
       memo: new Map(),
     };

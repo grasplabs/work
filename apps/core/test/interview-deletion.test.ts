@@ -487,7 +487,7 @@ describe("deleting an interview", { timeout: 180_000 }, () => {
     });
   });
 
-  it("of a team's lead draws all of its work again without their facts, and keeps none of their drawings", async () => {
+  it("of a team's lead keeps none of their drawings, and draws none of their map's work again until a map of theirs stands (GRA-1987)", async () => {
     const store = onboardingStore(env);
     const ids = await sevenTeam();
     const said = sentinels();
@@ -502,7 +502,8 @@ describe("deleting an interview", { timeout: 180_000 }, () => {
       redrawnWith: JSON.stringify(redrawn.map(({ body }) => body)).includes(
         said.lea
       ),
-      // The map they drew stays: everyone else was asked about its work.
+      // The map they drew stays for staff, but no longer stands on lines
+      // of theirs: no drawing is drawn from its words (GRA-1987).
       works: works.map(({ name, drawn }) => [
         name,
         drawn?.from.toSorted() ?? null,
@@ -513,18 +514,7 @@ describe("deleting an interview", { timeout: 180_000 }, () => {
       left: { words: [], person: [] },
       redrawnWith: false,
       works: [
-        [
-          "handling new tickets",
-          [
-            ids.max,
-            ids.mia,
-            ids.mo,
-            ids.noor,
-            ids.pim,
-            ids.rik,
-            ids.sam,
-          ].toSorted(),
-        ],
+        ["handling new tickets", null],
         ["planning the rota", null],
       ],
       after: {
@@ -855,7 +845,7 @@ describe(
       }).toStrictEqual({ voiced: [200, 200, true], max: false, mia: true });
     });
 
-    it("withdrawing from a lead's interview draws all of the team's work again without their facts, and nothing in the brain rests on them (T5)", async () => {
+    it("withdrawing from a lead's interview draws none of their map's work again, and nothing in the brain rests on them (T5, GRA-1987)", async () => {
       const store = onboardingStore(env);
       const ids = await sevenTeam();
       const said = sentinels();
@@ -874,7 +864,8 @@ describe(
         statements: brain.statements.length,
       }).toStrictEqual({
         redrawnWith: false,
-        redrawn: true,
+        // Their map no longer stands: nothing is drawn from its words.
+        redrawn: false,
         drawInput: null,
         restsOn: [],
         statements: 1,

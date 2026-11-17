@@ -15,6 +15,7 @@ import { useLingui } from "@lingui/react/macro";
 import { PlusIcon, Trash2Icon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
+import { SaveTrouble } from "./composer.tsx";
 import { WhereLinesGo } from "./destination.tsx";
 import { Head, headSizes, useHead } from "./head.tsx";
 import { useInterviewer, useProgress } from "./kept.ts";
@@ -161,6 +162,8 @@ export const Closed = ({
           {t`Add something`}
         </Button>
         {told ? <WhereLinesGo /> : null}
+        {/* A change of where a line goes not kept yet, or refused, shows here too once the sheet is closed. */}
+        <SaveTrouble />
         <Rating onRate={onRate} value={rating} />
         <p className="text-muted-foreground text-xs text-balance">{promise}</p>
       </div>

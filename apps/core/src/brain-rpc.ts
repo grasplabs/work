@@ -1095,7 +1095,7 @@ const readBrainCore = async (
  * The brain's teams, what they said and its workflows, as `person` may
  * read them, as `readBrain` reads them: what a step of a chat's thinking
  * may name (agent-thinking.ts). What a team said is a claim of how it
- * works, from what its people shared with it (GRA-1987), or none.
+ * works, from what its people shared as how it works (GRA-1987), or none.
  */
 export const readThinkingBrain = async (
   env: Env,
