@@ -30,6 +30,7 @@ import {
   Brain,
   Cable,
   Conversation,
+  Home,
   Cycle,
   Inbox,
   Projects,
@@ -62,18 +63,22 @@ const workflowsWaitingLabel = (waiting: number): string =>
     other: "# workflows need you",
   });
 
+/** The sidebar's two views, chosen with the switch under its head. */
+type SidebarView = "home" | "chats";
+
 /** The product's sections, and the Apps' own entries after them. */
 const useGroups = (
   core: CoreConnection,
   identity: Identity,
-  closeMenu: () => void
+  closeMenu: () => void,
+  tab: SidebarView
 ): SidebarGroup[] => {
   const { t } = useLingui();
   const matchRoute = useMatchRoute();
   const waiting = useWaitingCount();
   const workflowsWaiting = useWorkflowsWaiting();
   const apps = useSidebarApps(core);
-  // The person's recent chats under Chat, which itself starts a new one.
+  // The person's recent chats: the Chats tab's list.
   const recent = useRecentChats({
     enabled: identity.onboardingOnly !== true,
     onOpened: closeMenu,
@@ -91,7 +96,6 @@ const useGroups = (
         icon: Conversation,
         render: <Link to="/" />,
         current: at("/", false) && !recent.anyCurrent,
-        ...(recent.rows.length === 0 ? {} : { rows: recent.rows }),
       },
       {
         label: t`Dashboard`,
@@ -191,7 +195,9 @@ const useGroups = (
             })),
           },
         ];
-  return [sections, ...fromApps];
+  // The Chats tab: the recent chats alone, so they never push the
+  // product's sections down the Home tab.
+  return tab === "chats" ? [{ rows: recent.rows }] : [sections, ...fromApps];
 };
 
 /** A page outside Settings, to go back to: its path and its search. */
@@ -332,7 +338,8 @@ export const useGraspSidebar = ({
 }): SidebarProps => {
   const { t } = useLingui();
   const openChats = useChatsWindow();
-  const groups = useGroups(core, identity, closeMenu);
+  const [tab, setTab] = useState<SidebarView>("home");
+  const groups = useGroups(core, identity, closeMenu, tab);
   const profile = useProfile(core, identity);
   const section = useSettingsSection(identity);
   const searching = identity.onboardingOnly !== true;
@@ -346,6 +353,19 @@ export const useGraspSidebar = ({
     open,
     profile,
     searchLabel: t`Search chats`,
+    ...(searching
+      ? {
+          tabs: [
+            { value: "home", label: t`Home`, icon: Home },
+            { value: "chats", label: t`Chats`, icon: Conversation },
+          ],
+          tab,
+          onTabChange: (next: string) => {
+            setTab(next === "chats" ? "chats" : "home");
+          },
+          tabsLabel: t`Views`,
+        }
+      : {}),
     searchShortcut: shortcutLabel(chatsKey),
     ...(section === undefined ? {} : { section }),
     ...(searching

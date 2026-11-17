@@ -5,8 +5,8 @@ import { test } from "./csp.ts";
 import { apiOf, peopleIn, signInAs } from "./people.ts";
 
 // Settings, as in the prototype: the workspace's sections for admins, the
-// account's for everyone, listed beside the section where the page has the
-// room and as one control above it where it hasn't. Billing's details and
+// account's for everyone, listed in the sidebar while the person is in
+// Settings, and on a phone in the menu's sheet. Billing's details and
 // emails are kept by core and changed here by the admin; what core has
 // nothing for yet (a plan, a card, invoices) shows the prototype's empty
 // state, and can't be changed. The devices a person is signed in on can be
@@ -17,7 +17,7 @@ import { apiOf, peopleIn, signInAs } from "./people.ts";
 const sectionOf = (page: Page, name: string) =>
   page.getByRole("region", { name, exact: true });
 
-test("an admin opens Settings on the workspace, and each section from the list beside it", async ({
+test("an admin opens Settings on the workspace, and each section from the sidebar", async ({
   pageOf,
 }) => {
   const { admin } = peopleIn("settings");
@@ -86,18 +86,22 @@ test("someone who isn't an admin opens Settings on their profile, with only thei
   ).toHaveText(["Profile", "Appearance", "Security"]);
 });
 
-test("on a phone the sections are one control above the section", async ({
+test("on a phone the sections are in the menu's sheet, and choosing one closes it", async ({
   pageOf,
 }) => {
   const { admin } = peopleIn("settings");
   const page = await pageOf(admin);
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/settings/profile");
-  await expect(page.getByRole("navigation", { name: "Settings" })).toBeHidden();
-  const sections = page.getByRole("combobox", { name: "Settings" });
-  await expect(sections).toContainText("Profile");
-  await sections.click();
-  await page.getByRole("option", { name: "Members and roles" }).click();
+  await page.getByRole("button", { name: "Menu" }).click();
+  const sheet = page.getByRole("dialog", { name: "Menu" });
+  const sections = sheet.getByRole("navigation", { name: "Settings" });
+  await expect(sections.getByRole("link", { name: "Profile" })).toHaveAttribute(
+    "aria-current",
+    "page"
+  );
+  await sections.getByRole("link", { name: "Members and roles" }).click();
+  await expect(sheet).toBeHidden();
   await expect(page).toHaveURL(/\/settings\/members$/u);
   await expect(sectionOf(page, "Members")).toBeVisible();
 });

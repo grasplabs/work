@@ -2905,6 +2905,7 @@ msgstr "Pedir a un administrador"
 
 #: src/chat/chat-composer.tsx
 #: src/chat/global-chat.tsx
+#: src/routes/_shell.lab.chat-start.tsx
 msgid "Ask anything, or describe a process"
 msgstr "Pregunta lo que quieras o describe un proceso"
 
@@ -3121,6 +3122,7 @@ msgstr "Disponible, a través de Composio"
 #: src/brain/atlas-overlays.tsx
 #: src/brain/back-button.tsx
 #: src/chat/asked-questions.tsx
+#: src/grasp/frame/grasp-sidebar.tsx
 #: src/onboarding/setup-frame.tsx
 #: src/tour/tour-layer.tsx
 #: src/workflows/requests/request-detail.tsx
@@ -3562,7 +3564,7 @@ msgstr "Cambiar {title}"
 msgid "Change project"
 msgstr "Cambiar proyecto"
 
-#: src/chat/chat-panel.tsx
+#: src/chat/chat-body.tsx
 msgid "Change something about the plan"
 msgstr "Cambiar algo del plan"
 
@@ -3769,6 +3771,7 @@ msgstr "Chatear con {name}"
 
 #: src/chat/chat-switcher.tsx
 #: src/chat/chat-window.tsx
+#: src/grasp/frame/grasp-sidebar.tsx
 msgid "Chats"
 msgstr "Chats"
 
@@ -4551,6 +4554,7 @@ msgstr "No se pudo eliminar"
 #: src/chat/asked-questions.tsx
 #: src/chat/chat-bar.tsx
 #: src/chat/chat-composer.tsx
+#: src/routes/_shell.lab.chat-start.tsx
 msgid "Could not send"
 msgstr "No se pudo enviar"
 
@@ -6789,6 +6793,10 @@ msgstr "Historial"
 msgid "Hold for 4 seconds"
 msgstr "Mantén pulsado 4 segundos"
 
+#: src/grasp/frame/grasp-sidebar.tsx
+msgid "Home"
+msgstr "Inicio"
+
 #: src/brain/thinking/work-hours.tsx
 msgid "Hours not known yet"
 msgstr "Horas aún desconocidas"
@@ -8083,7 +8091,7 @@ msgstr "Cargando mensajes anteriores"
 #: src/activity/audit-log.tsx
 #: src/apps/app-workspace.tsx
 #: src/apps/publish.tsx
-#: src/chat/chat-panel.tsx
+#: src/chat/chat-body.tsx
 #: src/chat/thread.tsx
 #: src/frame/page-states.tsx
 #: src/knowledge/nav.tsx
@@ -14181,7 +14189,7 @@ msgstr "La organización aún no tiene equipos."
 msgid "The origin is https:// and a public host name, with nothing after it: https://api.example.com."
 msgstr "El origen es https:// y un nombre de host público, sin nada detrás: https://api.example.com."
 
-#: src/chat/chat-panel.tsx
+#: src/chat/chat-body.tsx
 msgid "The packages are approved. Carry on."
 msgstr "Los paquetes están aprobados. Continúa."
 
@@ -15071,8 +15079,8 @@ msgstr "Intentar"
 #: src/apps/app-owner.tsx
 #: src/apps/app-settings.tsx
 #: src/chat/builds.tsx
+#: src/chat/chat-body.tsx
 #: src/chat/chat-files.tsx
-#: src/chat/chat-panel.tsx
 #: src/chat/thread.tsx
 #: src/frame/page-states.tsx
 #: src/frame/setting-up.tsx
@@ -15566,6 +15574,10 @@ msgstr "Viena"
 #: src/apps/app-history.tsx
 msgid "View changes"
 msgstr "Ver cambios"
+
+#: src/grasp/frame/grasp-sidebar.tsx
+msgid "Views"
+msgstr "Vistas"
 
 #: src/brain/brain.ts
 msgid "Vision"
@@ -16090,6 +16102,7 @@ msgid "What should this App do?"
 msgstr "¿Qué debe hacer esta app?"
 
 #: src/chat/chat-start.tsx
+#: src/routes/_shell.lab.chat-start.tsx
 #: src/settings/backdrop-settings.tsx
 msgid "What should we look at today?"
 msgstr "¿Qué miramos hoy?"
