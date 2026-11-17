@@ -38,7 +38,7 @@ import { afterEach, describe, expect, it } from "vite-plus/test";
 import { AgentPage } from "./agent-page.tsx";
 import type { AgentTab, FirstAgentAccess } from "./agent-page.tsx";
 import { NewAgent } from "./new-agent.tsx";
-import { takeUnsaved } from "./unsaved-instructions.ts";
+import { agentInstructionsFor } from "./unsaved-instructions.ts";
 import type { UnsavedInstructions } from "./unsaved-instructions.ts";
 
 // One agent's page and the new agent's page against core's connections
@@ -98,6 +98,10 @@ const firstAccess: FirstAgentAccess = {
 /** The models the organization chose. */
 const models = ["anthropic/claude-sonnet-4-5"];
 
+/** Whether the page says the Brain couldn't be reached, as the fake refuses. */
+const saysOutOfReach = (): boolean =>
+  document.body.textContent.includes("The Brain can't be reached. Try again.");
+
 /** The agent whose instruction file `file` is. */
 const agentOf = (file: InstructionFileRef): string =>
   file.scope === "agent" ? file.agentId : "not an agent's";
@@ -114,10 +118,14 @@ const fakeConnections = () => {
   // `session.instructions` keeps it.
   const files = new Map<string, InstructionFileText>();
   // Saves to refuse, as a Brain out of reach would, before any is kept.
-  const outOfReach = { saves: 0 };
+  const outOfReach = { saves: 0, reads: 0 };
   const instructions: InstructionsApi = {
     read: async (file) => {
       await Promise.resolve();
+      if (outOfReach.reads > 0) {
+        outOfReach.reads -= 1;
+        throw new Error("The Brain can't be reached. Try again.");
+      }
       return files.get(agentOf(file)) ?? null;
     },
     save: async ({ file, text, after }) => {
@@ -374,7 +382,7 @@ let root: Root | undefined;
 /** What the page's route read. */
 interface Shown {
   agents: Agent[];
-  instructions: Record<string, InstructionFileText | null>;
+  instructions: Record<string, InstructionFileText | null | undefined>;
   unsaved: Record<string, UnsavedInstructions | undefined>;
   settings: Record<string, AgentSettings>;
   wakes: Record<string, AgentWake[]>;
@@ -418,7 +426,7 @@ const Page = ({
       documents={data.documents[agent.id]}
       editable={editable}
       // Read only for whoever may change it, as its route reads it.
-      instructions={editable ? data.instructions[agent.id] : undefined}
+      instructions={data.instructions[agent.id]}
       unsaved={data.unsaved[agent.id]}
       first={agent.id === data.agents.at(0)?.id}
       firstAccess={agent.id === data.agents.at(0)?.id ? firstAccess : undefined}
@@ -475,20 +483,24 @@ const shown = async (
         await connections.agentDocuments(id),
       ])
     );
+    // Each agent's file and what its New agent page couldn't save, read
+    // as the route reads them.
     const told = await Promise.all(
       agents.map(
-        async ({ id }): Promise<[string, InstructionFileText | null]> => [
-          id,
-          await instructions.read({ scope: "agent", agentId: id }),
-        ]
+        async ({ id }) =>
+          [
+            id,
+            await agentInstructionsFor({ instructions }, id, editable),
+          ] as const
       )
     );
     return {
       agents,
-      instructions: Object.fromEntries(told),
-      // What a New agent page couldn't save, once, as the route takes it.
+      instructions: Object.fromEntries(
+        told.map(([id, { instructions: file }]) => [id, file])
+      ),
       unsaved: Object.fromEntries(
-        agents.map(({ id }) => [id, takeUnsaved(id)])
+        told.map(([id, { unsaved }]) => [id, unsaved])
       ),
       settings: Object.fromEntries(read),
       wakes: Object.fromEntries(woken),
@@ -730,6 +742,49 @@ describe("an agent's page", () => {
       at: "/",
       said: true,
       kept: true,
+    });
+  });
+
+  it("keeps instructions it couldn't save while their file can't be read either, shows them once it can, and drops them once saved", async () => {
+    const fake = fakeConnections();
+    fake.outOfReach.saves = 1;
+    await shown(fake, "new");
+    await set(field("Name"), "Claire", "input");
+    await set(field("Instructions"), claireTold, "input");
+    await press(button("Make agent"));
+    /** The agent's page, opened again, as the address it was sent to. */
+    const reopened = async (): Promise<void> => {
+      act(() => {
+        root?.unmount();
+      });
+      document.body.replaceChildren();
+      await shown(fake, { agent: "Claire", tab: "instructions" });
+    };
+    // The Brain still out of reach: no file read, for either agent.
+    fake.outOfReach.reads = 2;
+    await reopened();
+    const unreadable = document.body.textContent.includes("Not shown");
+    await reopened();
+    const readable = {
+      text: field("Instructions").value,
+      said: saysOutOfReach(),
+    };
+    await press(button("Save"));
+    await reopened();
+    expect({
+      unreadable,
+      readable,
+      afterSave: { text: field("Instructions").value, said: saysOutOfReach() },
+      saved: await fake.instructions.read({
+        scope: "agent",
+        agentId: "agent-1",
+      }),
+    }).toStrictEqual({
+      unreadable: true,
+      readable: { text: claireTold, said: true },
+      // Saved, nothing is handed over again: the editor shows the file.
+      afterSave: { text: claireTold, said: false },
+      saved: { version: 1, text: claireTold },
     });
   });
 

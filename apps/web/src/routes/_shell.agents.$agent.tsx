@@ -5,7 +5,7 @@ import { BotIcon } from "lucide-react";
 
 import { AgentPage, agentTabOf } from "../agents/agent-page.tsx";
 import type { AgentTab, FirstAgentAccess } from "../agents/agent-page.tsx";
-import { takeUnsaved } from "../agents/unsaved-instructions.ts";
+import { agentInstructionsFor } from "../agents/unsaved-instructions.ts";
 import type { Session } from "../core.ts";
 import { PageLoading, PageNotLoaded } from "../frame/page-states.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
@@ -149,9 +149,13 @@ export const Route = createFileRoute("/_shell/agents/$agent")({
         session.connections.catalog(),
         // Its instruction file, for whoever may change the agent (core's
         // instruction-files.ts): never Grasp's staff, who change nothing.
-        mine || isMemberAdmin(identity)
-          ? session.instructions.read({ scope: "agent", agentId: params.agent })
-          : undefined,
+        // With it, what its New agent page couldn't save, once the
+        // editor can show it.
+        agentInstructionsFor(
+          session,
+          params.agent,
+          mine || isMemberAdmin(identity)
+        ),
       ]);
       return {
         managed,
@@ -159,9 +163,9 @@ export const Route = createFileRoute("/_shell/agents/$agent")({
         usable,
         people: listed.status === "fulfilled" ? listed.value : [],
         models: chosen.status === "fulfilled" ? chosen.value : [],
-        instructions: told.status === "fulfilled" ? told.value : undefined,
-        // What its New agent page couldn't save, once: its editor keeps it.
-        unsaved: takeUnsaved(params.agent),
+        instructions:
+          told.status === "fulfilled" ? told.value.instructions : undefined,
+        unsaved: told.status === "fulfilled" ? told.value.unsaved : undefined,
         documents: kept.status === "fulfilled" ? kept.value : undefined,
         apps: {
           apps: apps.status === "fulfilled" ? apps.value : undefined,
