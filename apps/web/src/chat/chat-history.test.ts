@@ -24,6 +24,7 @@ const chat = (title: string, lastAt: string): ChatSummary => ({
   appId: null,
   via: "web",
   make: null,
+  archived: false,
 });
 
 describe("chat history", () => {

@@ -62,8 +62,12 @@ export interface ChatComposerProps {
   running: boolean;
   /** Whether a question or a stop is on its way to core. */
   busy: boolean;
+  /** Why the last question didn't go, said under the box; Send tries again. */
   failure?: string;
-  onSend: () => void;
+  /** Why a file the person chose stays out of the box. */
+  fileProblem?: string;
+  /** Sends the question; rejects when it didn't go, which the box says (`failure`). */
+  onSend: () => Promise<void> | void;
   onStop?: () => void;
   /** What the box is called, for a screen reader. */
   label?: string;
@@ -102,6 +106,15 @@ const attachmentsOf = (files: readonly CardFile[]): ComposerFile[] =>
     size: bytes,
     status: "done",
   }));
+
+/**
+ * The line under the box: how to connect an AI provider while there is
+ * none, else why a file stayed out or why the last question didn't go
+ * (from the box, or from Try again in the thread). Said, never a reason to
+ * hold the next question back, as `validation` would.
+ */
+const noteOf = (noProvider: boolean, problem: string | undefined) =>
+  noProvider ? <ConnectAiProvider size="xs" /> : problem;
 
 /** What the box says as the text nears and reaches its longest, in the page's language. */
 const useLengthWords = () => {
@@ -150,6 +163,7 @@ export const ChatComposer = ({
   running,
   busy,
   failure,
+  fileProblem,
   onSend,
   onStop,
   label,
@@ -209,7 +223,7 @@ export const ChatComposer = ({
       failedLabel={t`Could not send`}
       label={label ?? t`Your question`}
       layout={styles.fill}
-      note={noProvider ? <ConnectAiProvider size="xs" /> : undefined}
+      note={noteOf(noProvider, fileProblem ?? failure)}
       onAttach={
         onAttach === undefined
           ? undefined
@@ -219,9 +233,9 @@ export const ChatComposer = ({
       }
       // Not removable while the question is on its way with them.
       onRemoveAttachment={busy ? undefined : onRemoveFile}
-      onSend={() => {
+      onSend={async () => {
         if (!busy) {
-          onSend();
+          await onSend();
         }
       }}
       onStop={onStop}
@@ -249,7 +263,6 @@ export const ChatComposer = ({
           <ComposerSurface>{subject}</ComposerSurface>
         )
       }
-      validation={failure}
       value={text}
       workingLabel={t`Grasp is answering`}
     />

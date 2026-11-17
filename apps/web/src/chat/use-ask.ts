@@ -181,9 +181,10 @@ export const useAsk = (
     question: string,
     carried: readonly BoxFile[] = [],
     mentioned: readonly Mentionable[] = []
-  ): Promise<void> => {
+  ): Promise<boolean> => {
+    // Already on its way: this press is the same question, not a failure.
     if (sending.current) {
-      return;
+      return true;
     }
     sending.current = true;
     const named = chatMentionsOf(mentioned);
@@ -229,7 +230,7 @@ export const useAsk = (
       if (created !== undefined) {
         unsent.current = { id: created, question, agentId };
       }
-      return;
+      return false;
     }
     unsent.current = null;
     // Clears the box only of what was sent from it: asking again sends an
@@ -246,6 +247,7 @@ export const useAsk = (
       setActiveChat(sent, slot);
     }
     onAsked?.(sent);
+    return true;
   };
   const stop = async (): Promise<void> => {
     if (chatId !== undefined) {
@@ -269,7 +271,8 @@ export const useAsk = (
         choose({ model, effort: chosen });
       },
       busy,
-      failure: fileProblem ?? failure,
+      failure,
+      fileProblem,
       files: files.map(({ id, file }) => ({
         id,
         name: file.name,
@@ -277,9 +280,13 @@ export const useAsk = (
       })),
       onAttach: attach,
       onRemoveFile: removeFile,
-      onSend: () => {
+      // Rejects when the question didn't go: the box says so under it
+      // (`failure`, why), keeps the text, and Send tries again.
+      onSend: async (): Promise<void> => {
         setFileProblem(undefined);
-        void ask(text, files, mentions);
+        if (!(await ask(text, files, mentions))) {
+          throw new Error("The question was not sent");
+        }
       },
       onStop: () => {
         void stop();

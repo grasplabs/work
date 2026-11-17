@@ -108,7 +108,7 @@ export const useRenameFocus = <Element extends HTMLElement>(
   };
 };
 
-/** Renaming one of the person's chats, then reading the page again. */
+/** Renaming or archiving one of the person's chats, then reading the page again. */
 export const useChatChanges = (chat: ChatSummary) => {
   const router = useRouter();
   const { failure, run } = useCoreAction();
@@ -129,7 +129,31 @@ export const useChatChanges = (chat: ChatSummary) => {
       await router.invalidate();
     }
   };
-  return { failure, rename };
+  // Out of the person's list, or back into it (`chats.list`); the chat
+  // itself opens and takes questions either way.
+  const archive = async (archived: boolean): Promise<void> => {
+    const changed = await run(async (session) => {
+      await (archived
+        ? session.chats.archive(chat.id)
+        : session.chats.unarchive(chat.id));
+      return true;
+    });
+    if (changed === true) {
+      await router.invalidate();
+    }
+  };
+  return {
+    failure,
+    rename,
+    /** Archives the chat: out of the person's list. */
+    archive: async () => {
+      await archive(true);
+    },
+    /** Brings the archived chat back into the person's list. */
+    unarchive: async () => {
+      await archive(false);
+    },
+  };
 };
 
 /**

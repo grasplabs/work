@@ -4,6 +4,7 @@ import {
   chatMakeSchema,
   chatMentionsSchema,
   chatSubjectSchema,
+  chatListOptionsSchema,
   chatTitleSchema,
   unmetNeeds,
 } from "@grasp-os/shared/chat";
@@ -16,6 +17,7 @@ import type {
   ChatCitedDocument,
   ChatFile,
   ChatFileInput,
+  ChatListOptions,
   ChatQuestion,
   ChatSearchHit,
   ChatsApi,
@@ -171,6 +173,7 @@ const summaryOfMade = (chat: Chat): ChatSummary => ({
   appId: chat.appId,
   via: chat.via,
   make: makeOf(chat),
+  archived: false,
 });
 
 export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
@@ -220,11 +223,17 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
     });
   }
 
-  async list(): Promise<ChatSummary[]> {
-    return await withPerson(
-      this.#check,
-      async ({ userId }) => await this.#chatsOf(userId).chats(userId)
-    );
+  async list(options?: ChatListOptions): Promise<ChatSummary[]> {
+    return await withPerson(this.#check, async ({ userId }) => {
+      const parsed = chatListOptionsSchema.safeParse(options ?? {});
+      if (!parsed.success) {
+        throw agentErrors.create("agent.invalid_request");
+      }
+      return await this.#chatsOf(userId).chats(
+        userId,
+        parsed.data.archived ?? false
+      );
+    });
   }
 
   async search(query: string): Promise<ChatSearchHit[]> {
@@ -358,6 +367,26 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
         id,
         person.userId,
         parsed.data,
+        actorOf(person)
+      );
+    });
+  }
+
+  async archive(chatId: string): Promise<void> {
+    await this.#archive(chatId, true);
+  }
+
+  async unarchive(chatId: string): Promise<void> {
+    await this.#archive(chatId, false);
+  }
+
+  /** Archives the person's own chat, or brings it back (`archived` false). */
+  async #archive(chatId: string, archived: boolean): Promise<void> {
+    await withPerson(this.#check, async (person) => {
+      await this.#chatsOf(person.userId).archiveChat(
+        chatIdOf(chatId),
+        person.userId,
+        archived,
         actorOf(person)
       );
     });

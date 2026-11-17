@@ -77,11 +77,14 @@ const partOf = <T>(
 /**
  * What waits on the person: core's feed of it, in one read, and the names
  * permission requests are shown with. Reading it marks the
- * notifications it lists as read.
+ * notifications it lists as read, as a page that shows them (the
+ * dashboard, the inbox) does; the sidebar's list, which only says what
+ * waits, reads them with `markShownRead: false`.
  */
 export const readWaiting = async (
   core: CoreConnection,
-  identity: Identity
+  identity: Identity,
+  { markShownRead: marking = true }: { markShownRead?: boolean } = {}
 ): Promise<Waiting> => {
   const feed = await loadFromCore(
     core,
@@ -114,7 +117,7 @@ export const readWaiting = async (
     };
   });
   // Marked read as shown; one that couldn't be stays unread, and shows all the same.
-  if (notifications.state === "ready") {
+  if (marking && notifications.state === "ready") {
     await loadFromCore(core, async (session) => {
       await markShownRead(session, notifications.data.page.notifications);
     });

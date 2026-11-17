@@ -83,6 +83,12 @@ export const chats = sqliteTable(
      * for a chat "Make something" started in one; null otherwise.
      */
     makeProject: text("make_project"),
+    /**
+     * When its person archived it: out of their list (`ChatsApi.list`),
+     * kept whole, and opened, asked in and brought back as ever; null for
+     * a chat in the list.
+     */
+    archivedAt: integer("archived_at", { mode: "timestamp_ms" }),
   },
   // A person's list, most recently active first.
   (table) => [

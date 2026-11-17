@@ -80,6 +80,7 @@ import {
   eq,
   gt,
   inArray,
+  isNotNull,
   isNull,
   or,
   max,
@@ -1058,6 +1059,7 @@ export class Workspace extends DurableObject<Env> {
         via: chats.via,
         makeKind: chats.makeKind,
         makeProject: chats.makeProject,
+        archivedAt: chats.archivedAt,
         agentId: chats.agentId,
         said: sql<string>`'' || ${saidWords}`,
       })
@@ -1429,6 +1431,8 @@ export class Workspace extends DurableObject<Env> {
     action:
       | "chat.created"
       | "chat.renamed"
+      | "chat.archived"
+      | "chat.unarchived"
       | "chat.deleted"
       | "chat.moved"
       | "chat.draft_restored"
@@ -3312,9 +3316,10 @@ export class Workspace extends DurableObject<Env> {
 
   /**
    * `personId`'s chats, the most recently active first: at most
-   * {@link listedChats}.
+   * {@link listedChats}. Those they archived only with `archived`, and then
+   * only those.
    */
-  chats(personId: string): ChatSummary[] {
+  chats(personId: string, archived = false): ChatSummary[] {
     return this.#db
       .select({
         id: chats.id,
@@ -3326,9 +3331,15 @@ export class Workspace extends DurableObject<Env> {
         via: chats.via,
         makeKind: chats.makeKind,
         makeProject: chats.makeProject,
+        archivedAt: chats.archivedAt,
       })
       .from(chats)
-      .where(eq(chats.personId, personId))
+      .where(
+        and(
+          eq(chats.personId, personId),
+          archived ? isNotNull(chats.archivedAt) : isNull(chats.archivedAt)
+        )
+      )
       .orderBy(desc(chats.lastAt))
       .limit(listedChats)
       .all()
@@ -3348,6 +3359,7 @@ export class Workspace extends DurableObject<Env> {
       | "via"
       | "makeKind"
       | "makeProject"
+      | "archivedAt"
     >
   ): ChatSummary {
     return {
@@ -3360,6 +3372,7 @@ export class Workspace extends DurableObject<Env> {
       appId: chat.appId,
       via: chat.via,
       make: makeOf(chat),
+      archived: chat.archivedAt !== null,
     };
   }
 
@@ -3799,6 +3812,37 @@ export class Workspace extends DurableObject<Env> {
     this.ctx.storage.transactionSync(() => {
       this.#db.update(chats).set({ title }).where(eq(chats.id, id)).run();
       this.#outboxed(by, "chat.renamed", id);
+    });
+    this.#deliverAudit();
+  }
+
+  /**
+   * Archives `personId`'s own chat, out of their list, or brings it back
+   * (`archived` false), audited as `by`'s; nothing, and no event, where it
+   * is so already. Nothing else about the chat changes: it opens and takes
+   * questions as ever.
+   */
+  archiveChat(
+    chatId: unknown,
+    personId: string,
+    archived: boolean,
+    by: AuditActor
+  ): void {
+    const chat = this.#ownChat(chatId, personId);
+    if ((chat.archivedAt !== null) === archived) {
+      return;
+    }
+    this.ctx.storage.transactionSync(() => {
+      this.#db
+        .update(chats)
+        .set({ archivedAt: archived ? new Date() : null })
+        .where(eq(chats.id, chat.id))
+        .run();
+      this.#outboxed(
+        by,
+        archived ? "chat.archived" : "chat.unarchived",
+        chat.id
+      );
     });
     this.#deliverAudit();
   }

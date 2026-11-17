@@ -44,6 +44,7 @@ const chat = (
   appId: null,
   via: "web",
   make: null,
+  archived: false,
 });
 
 /** Ten chats, as core lists them: the most recently used first. */

@@ -40,6 +40,7 @@ const leave: ChatSummary = {
   appId: null,
   via: "web",
   make: null,
+  archived: false,
 };
 
 /** The chat as core's watch first answers it: a question and its answer. */

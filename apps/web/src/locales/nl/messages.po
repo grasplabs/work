@@ -2778,6 +2778,7 @@ msgid "Apps and agents with a permission"
 msgstr "Apps en agents met een toestemming"
 
 #: src/inbox/inbox-page.tsx
+#: src/inbox/sidebar-inbox.tsx
 msgctxt "inbox filter"
 msgid "Apps and connections"
 msgstr "Apps en koppelingen"
@@ -3290,6 +3291,7 @@ msgid "Brain"
 msgstr "Brein"
 
 #: src/inbox/inbox-page.tsx
+#: src/inbox/sidebar-inbox.tsx
 msgctxt "inbox filter"
 msgid "Brain"
 msgstr "Brein"
@@ -9559,6 +9561,10 @@ msgstr "Nog niets te tonen."
 msgid "Nothing uses them until you approve. Known malware is always refused."
 msgstr "Niets gebruikt ze tot je ze goedkeurt. Bekende malware wordt altijd geweigerd."
 
+#: src/grasp/frame/grasp-sidebar.tsx
+msgid "Nothing waits for you."
+msgstr "Er wacht niets op je."
+
 #: src/inbox/inbox-page.tsx
 msgid "Nothing waits on you"
 msgstr "Er wacht niets op je"
@@ -14394,6 +14400,10 @@ msgstr "Het hele bedrijf"
 msgid "the whole connection"
 msgstr "de hele koppeling"
 
+#: src/inbox/sidebar-inbox.tsx
+msgid "The whole inbox"
+msgstr "De hele inbox"
+
 #: src/workflows/delete-workflow.tsx
 msgid "The workflow is deleted, but its name wasn't released: {reason}"
 msgstr "De workflow is verwijderd, maar de naam is niet vrijgegeven: {reason}"
@@ -16723,6 +16733,7 @@ msgid "Workflows"
 msgstr "Workflows"
 
 #: src/inbox/inbox-page.tsx
+#: src/inbox/sidebar-inbox.tsx
 msgctxt "inbox filter"
 msgid "Workflows"
 msgstr "Workflows"

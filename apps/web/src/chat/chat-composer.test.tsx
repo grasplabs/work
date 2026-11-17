@@ -192,6 +192,43 @@ describe(ChatComposer, () => {
     expect(heard).toStrictEqual(["send What is 2 + 2?", "stop"]);
   });
 
+  it("says a question didn't go and why, keeps it in the box, and Send sends it again", async () => {
+    let tries = 0;
+    await shown({
+      failure: "Grasp can't be reached right now.",
+      onSend: async () => {
+        tries += 1;
+        await Promise.resolve();
+        if (tries === 1) {
+          throw new Error("not sent");
+        }
+      },
+    });
+    type("What is 2 + 2?");
+    await press(button("Send"));
+    const said = await vi.waitFor(() => {
+      const alert = document.querySelector('[role="alert"]')?.textContent;
+      if (alert === undefined) {
+        throw new Error("Nothing said");
+      }
+      return `${alert} ${document.body.textContent}`;
+    });
+    const kept = field().value;
+    await press(button("Send"));
+
+    expect({
+      failed: said.includes("Could not send"),
+      why: said.includes("Grasp can't be reached right now."),
+      kept,
+      tries,
+    }).toStrictEqual({
+      failed: true,
+      why: true,
+      kept: "What is 2 + 2?",
+      tries: 2,
+    });
+  });
+
   it("shows the files a question carries by name and size, none said uploaded before it is sent, each to take off", async () => {
     const removed: string[] = [];
     await shown({

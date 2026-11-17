@@ -1,0 +1,1 @@
+ALTER TABLE `chats` ADD `archived_at` integer;

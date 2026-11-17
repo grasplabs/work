@@ -10,7 +10,6 @@ import { useState } from "react";
 import { chatsKey, useChatsWindow } from "../../chat/chat-switcher.tsx";
 import { useRecentChats } from "../../chat/sidebar-chats.tsx";
 import type { CoreConnection } from "../../core-connection.ts";
-import { useWaitingCount } from "../../dashboard/nav-item.tsx";
 import {
   organizationOf,
   useShownName,
@@ -19,6 +18,8 @@ import { useSignOut } from "../../frame/person-menu.tsx";
 import { usePersonTheme } from "../../frame/person-theme.tsx";
 import { useSidebarApps } from "../../frame/surface-nav.tsx";
 import { chooseTheme, isTheme } from "../../frame/theme.ts";
+import type { InboxItem } from "../../inbox/items.ts";
+import { useInboxGroups, useWaitingItems } from "../../inbox/sidebar-inbox.tsx";
 import { appSplat } from "../../pages/app-address.ts";
 import { groupedSectionsFor } from "../../settings/sections.ts";
 import { shortcutLabel } from "../../shortcuts.ts";
@@ -37,7 +38,10 @@ import {
   Projects,
   Question,
   Settings,
+  Computer,
+  Moon,
   SignOut,
+  Sun,
   Swap,
 } from "../icons/index.ts";
 import type {
@@ -71,11 +75,13 @@ type SidebarView = "home" | "inbox";
 const useGroups = (
   core: CoreConnection,
   identity: Identity,
-  tab: SidebarView
+  tab: SidebarView,
+  waitingItems: readonly InboxItem[] | undefined
 ): SidebarGroup[] => {
   const { t } = useLingui();
   const matchRoute = useMatchRoute();
-  const waiting = useWaitingCount();
+  const waiting = waitingItems?.length;
+  const inbox = useInboxGroups(waitingItems);
   const workflowsWaiting = useWorkflowsWaiting();
   const apps = useSidebarApps(core);
   // The person's recent chats: the Chats tab's list.
@@ -209,23 +215,8 @@ const useGroups = (
             rows: recent,
           },
         ];
-  // The Inbox tab: what waits for the person, on its own page for now.
-  return tab === "inbox"
-    ? [
-        {
-          rows: [
-            {
-              label: t`Inbox`,
-              icon: Bell,
-              render: <Link to="/inbox" />,
-              current: at("/inbox"),
-              count: waiting,
-              countLabel: thingsWaiting(waiting ?? 0),
-            },
-          ],
-        },
-      ]
-    : [sections, ...chats, ...fromApps];
+  // The Inbox tab: what waits for the person, each to its place in the inbox.
+  return tab === "inbox" ? inbox : [sections, ...chats, ...fromApps];
 };
 
 /** A page outside Settings, to go back to: its path and its search. */
@@ -337,9 +328,9 @@ const useProfile = (
       }
     },
     themes: [
-      { label: t`Light`, value: "light" },
-      { label: t`Dark`, value: "dark" },
-      { label: t`System`, value: "system" },
+      { label: t`Light`, value: "light", icon: Sun },
+      { label: t`Dark`, value: "dark", icon: Moon },
+      { label: t`System`, value: "system", icon: Computer },
     ],
     themeLabel: t`Appearance`,
   };
@@ -367,8 +358,14 @@ export const useGraspSidebar = ({
   const { t } = useLingui();
   const openChats = useChatsWindow();
   const [tab, setTab] = useState<SidebarView>("home");
-  const waiting = useWaitingCount();
-  const groups = useGroups(core, identity, tab);
+  // What waits on the person: the Inbox view's list, and so the bell's
+  // dot and the Dashboard's count.
+  const waitingItems = useWaitingItems(
+    identity,
+    identity.onboardingOnly !== true
+  );
+  const waiting = waitingItems?.length;
+  const groups = useGroups(core, identity, tab, waitingItems);
   const profile = useProfile(core, identity);
   const section = useSettingsSection(identity);
   const searching = identity.onboardingOnly !== true;
@@ -382,6 +379,11 @@ export const useGraspSidebar = ({
     open,
     profile,
     searchLabel: t`Search chats`,
+    // Said only once core has said so: while it can't be read, the
+    // view stays blank rather than claim nothing waits.
+    ...(tab === "inbox" && waitingItems !== undefined
+      ? { empty: t`Nothing waits for you.` }
+      : {}),
     // Where the sidebar keeps which of its groups are folded, in this browser.
     storageKey: "grasp.sidebar",
     ...(searching

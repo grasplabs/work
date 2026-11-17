@@ -242,6 +242,68 @@ describe("chats", () => {
     );
   });
 
+  it("are archived by their person alone: out of the list, listed when asked, opened as ever, and back once unarchived, each recorded once", async () => {
+    const ann = await person();
+    const ben = await person();
+    const kept = await ann.chats.create("Kept");
+    const old = await ann.chats.create("Old trip");
+
+    await ann.chats.archive(old.id);
+    // Archiving it again changes nothing, and records nothing more.
+    await ann.chats.archive(old.id);
+    await expect(
+      Promise.all([
+        outcome(ben.chats.archive(old.id)),
+        outcome(ben.chats.unarchive(old.id)),
+      ])
+    ).resolves.toStrictEqual(["agent.chat_not_found", "agent.chat_not_found"]);
+    const listed = {
+      list: await ann.chats.list(),
+      archived: await ann.chats.list({ archived: true }),
+      opened: await ann.chats.summary(old.id),
+    };
+    await ann.chats.unarchive(old.id);
+
+    expect({
+      list: listed.list.map(({ id }) => id),
+      archived: listed.archived.map(({ id, archived }) => ({ id, archived })),
+      opened: listed.opened.archived,
+    }).toStrictEqual({
+      list: [kept.id],
+      archived: [{ id: old.id, archived: true }],
+      opened: true,
+    });
+    await expect(ann.chats.list()).resolves.toMatchObject([
+      { id: old.id, archived: false },
+      { id: kept.id, archived: false },
+    ]);
+    await expect(ann.chats.list({ archived: true })).resolves.toStrictEqual([]);
+    await vi.waitFor(
+      async () => {
+        const events = await allEvents();
+        expect(
+          events
+            .filter(({ target }) => target?.id === old.id)
+            .map(({ action, actor }) => ({ action, actor }))
+        ).toStrictEqual([
+          {
+            action: "chat.created",
+            actor: { type: "person", userId: ann.userId },
+          },
+          {
+            action: "chat.archived",
+            actor: { type: "person", userId: ann.userId },
+          },
+          {
+            action: "chat.unarchived",
+            actor: { type: "person", userId: ann.userId },
+          },
+        ]);
+      },
+      { timeout: 10_000 }
+    );
+  });
+
   it("are listed by their latest message: a chat just continued comes first", async () => {
     const ann = await person();
     const older = await ann.chats.create("Invoices");

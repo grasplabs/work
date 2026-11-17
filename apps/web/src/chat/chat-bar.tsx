@@ -89,9 +89,11 @@ export const ChatBar = () => {
         onMention={(item) => {
           mentioning?.onMention(item);
         }}
-        onSend={() => {
+        // Opens the chat once the question went: one that didn't stays
+        // here, said under the bar, to send again.
+        onSend={async () => {
           if (canSend) {
-            composer.onSend();
+            await composer.onSend();
           }
           openHere();
         }}
