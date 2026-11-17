@@ -18,6 +18,7 @@ import { appUsersReadBy, appWriteFor } from "../src/brain-app-writes.ts";
 import {
   codeCardAs,
   codeEntitiesAs,
+  isCodeWriteRequest,
   memoriesAs,
   recallAs,
 } from "../src/brain-next.ts";
@@ -267,6 +268,21 @@ describe("an App's code remembers and forgets for its users", setUpTime, () => {
       said: false,
       conflicts: 0,
     });
+  });
+
+  it("is refused at its request check when it names a person's own entity", () => {
+    const remembered = {
+      about: { kind: "person", names: ["Ann Smit"] },
+      statement: "Ann leads the Rotterdam depot",
+    };
+
+    expect({
+      named: isCodeWriteRequest("remember", remembered),
+      own: isCodeWriteRequest("remember", {
+        ...remembered,
+        about: { kind: "person", own: true },
+      }),
+    }).toStrictEqual({ named: true, own: false });
   });
 
   it("is refused, writing nothing, when an agent or Code Mode calls the App", async () => {

@@ -31,9 +31,9 @@ import { signedInApi, unique } from "./sign-in.ts";
 //   the proposed memory, must confirm it.
 // - The check given what the chat's tools read.
 // - A saved memory the person can't undo, or one that someone else can.
-// - A save where nobody sees a notice: a shared thread, a direct message
-//   on a chat platform (the person's own chat, GRA-1821, but it shows
-//   neither the notice nor its Undo), a turn nobody started.
+// - A save where nobody sees a notice: a shared thread, a turn nobody
+//   started. (A direct message on a chat platform is their own chat, with
+//   the notice and Undo there: channels-remember.test.ts.)
 
 const idp = mockIdp();
 
@@ -56,16 +56,16 @@ const checksSent = (provider: FakeProvider): string[] =>
 const keptFor = async (personId: string, name?: string) => {
   const store = personalBrainOf(inJurisdiction(env, env.BRAIN_STORE), personId);
   const reader = { person: personId, groups: [] };
-  const found = await store.findEntities(
+  const named = async () => {
+    const { entities } = await store.findEntities({ reader, name });
+    return entities.map(({ id }) => id);
+  };
+  const found =
     name === undefined
-      ? {
-          reader,
-          identifier: { type: "ref", value: `grasp:person:${personId}` },
-        }
-      : { reader, name }
-  );
+      ? [await store.ownEntity({ reader })].filter((id) => id !== null)
+      : await named();
   return await Promise.all(
-    found.entities.map(async ({ id }) => {
+    found.map(async (id) => {
       const { memories } = await store.readMemories({ entity: id, reader });
       return memories.map(({ statement }) => statement);
     })
@@ -449,7 +449,7 @@ describe("the agent remembering in a person's own chat", () => {
   });
 
   it(
-    "keeps nothing where nobody sees a notice: a shared thread, a direct message on a chat platform, a turn nobody started",
+    "keeps nothing where nobody sees a notice: a shared thread, a turn nobody started",
     slow,
     async () => {
       const [member, colleague] = await Promise.all([
@@ -462,8 +462,6 @@ describe("the agent remembering in a person's own chat", () => {
       const provider = await fakeProvider(
         savesPreference(),
         says("Shared."),
-        savesPreference(),
-        says("Direct."),
         savesPreference(),
         says("Woken.")
       );
@@ -482,14 +480,6 @@ describe("the agent remembering in a person's own chat", () => {
           },
         }
       );
-      const direct = await stub.askThrough(
-        member.userId,
-        agentId,
-        "teams",
-        said,
-        undefined,
-        { kind: "direct" }
-      );
       const own = await stub.createChat("Questions", member.userId, agentId);
       await stub.sendUnattended(own.id, { text: said, model });
       await vi.waitFor(
@@ -499,7 +489,7 @@ describe("the agent remembering in a person's own chat", () => {
         { timeout: 10_000 }
       );
       const outcomes = await Promise.all(
-        [shared.chatId, direct.chatId, own.id].map(async (chatId) => {
+        [shared.chatId, own.id].map(async (chatId) => {
           const results = await toolResults(stub, chatId);
           return results.map(({ tool, isError }) => ({ tool, isError }));
         })
@@ -511,7 +501,6 @@ describe("the agent remembering in a person's own chat", () => {
         checks: checksSent(provider).length,
       }).toStrictEqual({
         outcomes: [
-          [{ tool: "remember", isError: true }],
           [{ tool: "remember", isError: true }],
           [{ tool: "remember", isError: true }],
         ],
