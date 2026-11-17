@@ -306,17 +306,17 @@ export const listProposals = (
     }));
 
 /**
- * Settles the open proposal `key` as `outcome`, keeping its key alone, so
+ * Settles the open proposal `key`, accepted or dismissed alike (nothing
+ * reads which), keeping its key alone, so
  * nothing is drafted under it again; one settled before stays as it was.
  */
 export const settleProposal = (
   sql: SqlStorage,
-  { key, outcome }: Omit<ProposalSettle, "person">
+  { key }: Omit<ProposalSettle, "person">
 ): void => {
   sql.exec(
-    `UPDATE skill_proposals SET state = ?, text = NULL, rests_on = NULL
+    `UPDATE skill_proposals SET state = 'settled', text = NULL, rests_on = NULL
     WHERE key = ? AND state = 'open'`,
-    outcome,
     proposalKeySchema.parse(key)
   );
 };

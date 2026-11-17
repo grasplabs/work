@@ -1520,6 +1520,15 @@ const leavingWork: Record<string, (who: string) => Promise<void>> = {
   addSource: async (who) => {
     await add(own(who), "A source to embed", theirs(who));
   },
+  // A draft of a skill for them (skill-proposals.ts): written by the queue.
+  proposeSkill: async (who) => {
+    await own(who).proposeSkill({
+      person: who,
+      key: await sha256(crypto.randomUUID()),
+      about: "A routine.",
+      sources: [`run:${crypto.randomUUID()}`],
+    });
+  },
   // Their own export: written by the queue, a part a run.
   startOwnExport: async (who) => {
     await own(who).startOwnExport({ person: who, deployment: "test" });
@@ -1666,6 +1675,10 @@ const leavingNone = [
   "listWritten",
   "retireWritten",
   "searchVectors",
+  // A person's skill proposals, listed and settled in one statement each
+  // (skill-proposals.ts).
+  "settleSkillProposal",
+  "skillProposals",
   "startExport",
   // A person's own store refuses the company's export and every restore.
   "checkRestore",

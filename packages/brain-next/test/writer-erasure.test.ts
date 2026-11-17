@@ -902,8 +902,9 @@ describe("a writer's erasure", () => {
         // and so are the quotes' (migration 0022, quotes.ts), the days
         // chunks mention (migration 0024, dates.ts), where each set of
         // readers' chunks are (migration 0026, chunk-blocks.ts), a
-        // person's erasure's (migration 0027, people.ts) and the calls
-        // that drew memories (migration 0028, extractors.ts).
+        // person's erasure's (migration 0027, people.ts), the calls that
+        // drew memories (migration 0028, extractors.ts) and a person's
+        // skill proposals (migration 0029, skill-proposals.ts).
         tables: now.tables
           .filter(
             ({ name }) =>
@@ -922,6 +923,7 @@ describe("a writer's erasure", () => {
                 "person_erasure_memories",
                 "restore_cards",
                 "extractors",
+                "skill_proposals",
               ].includes(name)
           )
           .map((table) => {

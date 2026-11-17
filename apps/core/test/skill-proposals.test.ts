@@ -418,6 +418,48 @@ describe("skill proposals", setUpTime, () => {
     });
   });
 
+  it("never shows or adds a proposal named as a skill of the person's own, which keeps its text", async () => {
+    const name = `weekly-report-${unique()}`;
+    const { drafted } = await draftingProvider(name);
+    const [builder, ada] = await Promise.all([
+      person("builder"),
+      person("user"),
+    ]);
+    const mine = `---\nname: ${name}\ndescription: My own way.\n---\nMine.\n`;
+    await ada.api.skills.save(mine);
+    const workflow = await workflowOf(builder.by, [ada.userId]);
+    await runs(ada.by, workflow.id, 5);
+    // The proposal's key, as core makes it: the workflow and its version.
+    const key = [
+      ...new Uint8Array(
+        await crypto.subtle.digest(
+          "SHA-256",
+          new TextEncoder().encode(`${workflow.id}:1`)
+        )
+      ),
+    ]
+      .map((byte) => byte.toString(16).padStart(2, "0"))
+      .join("");
+    const adds = await outcome(ada.api.skills.acceptProposal(key));
+    const { own } = await ada.api.skills.overview();
+    const { text } = await ada.api.skills.read("own", name);
+    expect({
+      draftsAsked: drafted().length,
+      proposed: await proposedFrom(ada.api, workflow.id),
+      adds,
+      own: own
+        .filter((skill) => skill.name === name)
+        .map(({ version }) => version),
+      text,
+    }).toStrictEqual({
+      draftsAsked: 1,
+      proposed: [],
+      adds: "skills.not_found",
+      own: [1],
+      text: mine,
+    });
+  });
+
   it("keeps a dismissed proposal away for its version, and proposes again for a new one", async () => {
     const { drafted } = await draftingProvider(`weekly-report-${unique()}`);
     const [builder, ada] = await Promise.all([

@@ -310,7 +310,7 @@ export const acceptProposal = async (
           change: `proposal-${await sha256Of(proposal.text)}`,
           text: proposal.text,
         });
-  await settleOwnSkillProposal(env, by.userId, wanted, "accepted");
+  await settleOwnSkillProposal(env, by.userId, wanted);
   const current =
     added ??
     (await readCurrentSkillAs(env, by.userId, {
@@ -341,5 +341,5 @@ export const dismissProposal = async (
   if (!shown.some((each) => each.key === wanted)) {
     throw skillErrors.create("skills.not_found");
   }
-  await settleOwnSkillProposal(env, by.userId, wanted, "dismissed");
+  await settleOwnSkillProposal(env, by.userId, wanted);
 };

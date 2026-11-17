@@ -4205,8 +4205,7 @@ export const coreProbes = {
           await coreBrain.settleOwnSkillProposal(
             env,
             probing.personId,
-            others.key,
-            "accepted"
+            others.key
           );
           const left = await personalStore(others.person).skillProposals({
             reader: { person: others.person, groups: [] },
@@ -4221,20 +4220,14 @@ export const coreProbes = {
           await coreBrain.settleOwnSkillProposal(
             env,
             probing.personId,
-            await proposalKey(),
-            "accepted"
+            await proposalKey()
           );
           return 1;
         },
         "nothing"
       ),
       await answer("as someone who isn't a member", async () => {
-        await coreBrain.settleOwnSkillProposal(
-          env,
-          stranger(),
-          others.key,
-          "dismissed"
-        );
+        await coreBrain.settleOwnSkillProposal(env, stranger(), others.key);
       }),
     ];
   },
@@ -10600,7 +10593,6 @@ export const storeProbes = {
           await personalStore(person).settleSkillProposal({
             person,
             key: others.key,
-            outcome: "accepted",
           });
         },
         "hidden"
@@ -10611,7 +10603,6 @@ export const storeProbes = {
           await personalStore(person).settleSkillProposal({
             person,
             key: await proposalKey(),
-            outcome: "accepted",
           });
         },
         "nothing"
@@ -10620,14 +10611,12 @@ export const storeProbes = {
         await personalStore(others.person).settleSkillProposal({
           person,
           key: others.key,
-          outcome: "dismissed",
         });
       }),
       await answer("the shared store", async () => {
         await store().settleSkillProposal({
           person,
           key: others.key,
-          outcome: "dismissed",
         });
       }),
     ];

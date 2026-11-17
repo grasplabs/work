@@ -1392,13 +1392,14 @@ export const personErasureMemories = sqliteTable("person_erasure_memories", {
  * host's key for what they have in common. Open, it holds the draft and
  * the versions it rests on, and is listed only while every one of them is
  * still current and readable by its person; an erasure of one of them
- * deletes it. Once accepted or dismissed it keeps its key alone, so the
+ * deletes it. Once settled (accepted or dismissed: nothing tells them
+ * apart) it keeps its key alone, so the
  * same key is never drafted again, and nothing in it says what it was
  * drawn from or what became of it. Only in a person's own store.
  */
 export const skillProposals = sqliteTable("skill_proposals", {
   key: text().primaryKey(),
-  state: text({ enum: ["open", "accepted", "dismissed"] }).notNull(),
+  state: text({ enum: ["open", "settled"] }).notNull(),
   /** The `SKILL.md` drafted; null once settled. */
   text: text(),
   /** The versions it rests on, as JSON `[{ source, version }]`; null once settled. */

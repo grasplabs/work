@@ -190,12 +190,10 @@ describe("skill proposals", () => {
     await own().settleSkillProposal({
       person,
       key: accepted,
-      outcome: "accepted",
     });
     await own().settleSkillProposal({
       person,
       key: dismissed,
-      outcome: "dismissed",
     });
     // Settled keys are never drafted again.
     await propose(accepted, second, model.ask);

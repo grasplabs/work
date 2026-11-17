@@ -3729,17 +3729,17 @@ export const ownSkillProposalsAs = async (
 };
 
 /**
- * Settles the member `personId`'s proposal `key` as `outcome`: nothing is
+ * Settles the member `personId`'s proposal `key`, accepted or dismissed
+ * alike: nothing is
  * drafted under it again. Refused once they are no longer a member.
  */
 export const settleOwnSkillProposal = async (
   env: BrainEnv & ReaderEnv,
   personId: string,
-  key: string,
-  outcome: "accepted" | "dismissed"
+  key: string
 ): Promise<void> => {
   const { person } = await skillReaderOf(env, personId, "person");
-  await ownBrain(env, person).settleSkillProposal({ person, key, outcome });
+  await ownBrain(env, person).settleSkillProposal({ person, key });
 };
 
 /**

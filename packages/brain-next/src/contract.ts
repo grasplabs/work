@@ -1607,14 +1607,13 @@ export interface SkillProposal {
   draftedAt: Date;
 }
 
-/** How a person settles one of their proposals. */
-export const proposalOutcomes = ["accepted", "dismissed"] as const;
-
-/** A person settling one of their own proposals. */
+/**
+ * A person settling one of their own proposals, accepted or dismissed
+ * alike: nothing is drafted under its key again.
+ */
 export const proposalSettleSchema = z.strictObject({
   person: principalSchema,
   key: proposalKeySchema,
-  outcome: z.enum(proposalOutcomes),
 });
 export type ProposalSettle = z.infer<typeof proposalSettleSchema>;
 
@@ -3345,7 +3344,7 @@ export interface Brain {
    */
   skillProposals: (request: ProposalsRequest) => Promise<SkillProposal[]>;
   /**
-   * Settles one of `person`'s open proposals as accepted or dismissed,
+   * Settles one of `person`'s open proposals, accepted or dismissed alike,
    * keeping its key alone. Only their own store takes it, and only for
    * them.
    */
