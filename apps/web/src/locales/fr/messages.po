@@ -98,6 +98,10 @@ msgstr "{about} a {open, plural, one {# décision en attente} other {# décision
 msgid "{account} on {provider}"
 msgstr "{account} sur {provider}"
 
+#: src/connections/connection-list.tsx
+msgid "{actions} on {resource}"
+msgstr "{actions} sur {resource}"
+
 #: src/brain/brain.ts
 msgid "{ai, select, tool {An AI tool, as the team said it} builtIn {AI built in, as the team said it} other {No AI, as the team said it}}"
 msgstr "{ai, select, tool {Un outil d’IA, selon l’équipe} builtIn {IA intégrée, selon l’équipe} other {Pas d’IA, selon l’équipe}}"
@@ -634,10 +638,6 @@ msgstr "{going} sur {count}"
 #: src/brain/brain-source-contents.tsx
 msgid "{hidden, plural, one {Show # more} other {Show # more}}"
 msgstr "{hidden, plural, one {Afficher # de plus} other {Afficher # de plus}}"
-
-#: src/connections/connection-list.tsx
-msgid "{holder}: {actions} on {resource}"
-msgstr "{holder} : {actions} sur {resource}"
 
 #: src/brain/thinking/use-thinking.ts
 msgid "{hours, plural, one {# hour a week in all that Grasp can count} other {# hours a week in all that Grasp can count}}"
@@ -1405,8 +1405,8 @@ msgid "{who} can't be granted later: it has to ask again."
 msgstr "{who} ne pourra pas être accordé plus tard : il faudra le redemander."
 
 #: src/connections/connection-list.tsx
-msgid "{who} consented to this before connecting it:"
-msgstr "{who} a donné son consentement avant de le connecter :"
+msgid "{who} consented to this before connecting it"
+msgstr "{who} y a consenti avant de le connecter"
 
 #: src/settings/team-members-dialog.tsx
 msgid "{who} couldn't be taken off {name}. Try again."
@@ -4370,7 +4370,6 @@ msgstr "Déclencheur de connexion"
 
 #: src/brain/brain-log.tsx
 #: src/brain/brain.ts
-#: src/routes/_shell.integrations.$integration.tsx
 msgid "Connections"
 msgstr "Connexions"
 
@@ -4596,6 +4595,10 @@ msgstr "Impossible d'importer"
 #: src/agents/agent-page.tsx
 msgid "Couldn't delete"
 msgstr "Suppression impossible"
+
+#: src/connections/connection-list.tsx
+msgid "Couldn't disconnect"
+msgstr "Déconnexion impossible"
 
 #: src/apps/app-owner.tsx
 msgid "Couldn't load who may answer for it."
@@ -13158,7 +13161,6 @@ msgid "Statements"
 msgstr "Affirmations"
 
 #: src/apps/app-settings.tsx
-#: src/connections/connection-list.tsx
 #: src/routes/_shell.integrations.$integration.tsx
 #: src/routes/_shell.workflows.index.tsx
 #: src/workflows/resource-runs.tsx

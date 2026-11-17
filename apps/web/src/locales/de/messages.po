@@ -98,6 +98,10 @@ msgstr "{about} hat {open, plural, one {# offene Entscheidung} other {# offene E
 msgid "{account} on {provider}"
 msgstr "{account} bei {provider}"
 
+#: src/connections/connection-list.tsx
+msgid "{actions} on {resource}"
+msgstr "{actions} auf {resource}"
+
 #: src/brain/brain.ts
 msgid "{ai, select, tool {An AI tool, as the team said it} builtIn {AI built in, as the team said it} other {No AI, as the team said it}}"
 msgstr "{ai, select, tool {Ein KI-Tool, laut Team} builtIn {Mit integrierter KI, laut Team} other {Keine KI, laut Team}}"
@@ -634,10 +638,6 @@ msgstr "{going} von {count}"
 #: src/brain/brain-source-contents.tsx
 msgid "{hidden, plural, one {Show # more} other {Show # more}}"
 msgstr "{hidden, plural, one {# weitere anzeigen} other {# weitere anzeigen}}"
-
-#: src/connections/connection-list.tsx
-msgid "{holder}: {actions} on {resource}"
-msgstr "{holder}: {actions} auf {resource}"
 
 #: src/brain/thinking/use-thinking.ts
 msgid "{hours, plural, one {# hour a week in all that Grasp can count} other {# hours a week in all that Grasp can count}}"
@@ -1405,8 +1405,8 @@ msgid "{who} can't be granted later: it has to ask again."
 msgstr "{who} kann später nicht mehr erteilt werden: es muss erneut angefragt werden."
 
 #: src/connections/connection-list.tsx
-msgid "{who} consented to this before connecting it:"
-msgstr "{who} hat vor dem Verbinden hier zugestimmt:"
+msgid "{who} consented to this before connecting it"
+msgstr "{who} hat dem vor dem Verbinden zugestimmt"
 
 #: src/settings/team-members-dialog.tsx
 msgid "{who} couldn't be taken off {name}. Try again."
@@ -4370,7 +4370,6 @@ msgstr "Verbindungsauslöser"
 
 #: src/brain/brain-log.tsx
 #: src/brain/brain.ts
-#: src/routes/_shell.integrations.$integration.tsx
 msgid "Connections"
 msgstr "Verbindungen"
 
@@ -4596,6 +4595,10 @@ msgstr "Konnte nicht hochgeladen werden"
 #: src/agents/agent-page.tsx
 msgid "Couldn't delete"
 msgstr "Löschen fehlgeschlagen"
+
+#: src/connections/connection-list.tsx
+msgid "Couldn't disconnect"
+msgstr "Trennen fehlgeschlagen"
 
 #: src/apps/app-owner.tsx
 msgid "Couldn't load who may answer for it."
@@ -13158,7 +13161,6 @@ msgid "Statements"
 msgstr "Aussagen"
 
 #: src/apps/app-settings.tsx
-#: src/connections/connection-list.tsx
 #: src/routes/_shell.integrations.$integration.tsx
 #: src/routes/_shell.workflows.index.tsx
 #: src/workflows/resource-runs.tsx

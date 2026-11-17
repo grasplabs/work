@@ -98,6 +98,10 @@ msgstr "{about} tiene {open, plural, one {# decisión abierta} other {# decision
 msgid "{account} on {provider}"
 msgstr "{account} en {provider}"
 
+#: src/connections/connection-list.tsx
+msgid "{actions} on {resource}"
+msgstr "{actions} en {resource}"
+
 #: src/brain/brain.ts
 msgid "{ai, select, tool {An AI tool, as the team said it} builtIn {AI built in, as the team said it} other {No AI, as the team said it}}"
 msgstr "{ai, select, tool {Una herramienta de IA, según el equipo} builtIn {Con IA integrada, según el equipo} other {Sin IA, según el equipo}}"
@@ -634,10 +638,6 @@ msgstr "{going} de {count}"
 #: src/brain/brain-source-contents.tsx
 msgid "{hidden, plural, one {Show # more} other {Show # more}}"
 msgstr "{hidden, plural, one {Mostrar # más} other {Mostrar # más}}"
-
-#: src/connections/connection-list.tsx
-msgid "{holder}: {actions} on {resource}"
-msgstr "{holder}: {actions} sobre {resource}"
 
 #: src/brain/thinking/use-thinking.ts
 msgid "{hours, plural, one {# hour a week in all that Grasp can count} other {# hours a week in all that Grasp can count}}"
@@ -1405,8 +1405,8 @@ msgid "{who} can't be granted later: it has to ask again."
 msgstr "{who} no se podrá conceder más tarde: tendrá que volver a pedirse."
 
 #: src/connections/connection-list.tsx
-msgid "{who} consented to this before connecting it:"
-msgstr "{who} dio su consentimiento antes de conectarlo:"
+msgid "{who} consented to this before connecting it"
+msgstr "{who} lo consintió antes de conectarlo"
 
 #: src/settings/team-members-dialog.tsx
 msgid "{who} couldn't be taken off {name}. Try again."
@@ -4370,7 +4370,6 @@ msgstr "Disparador de conexión"
 
 #: src/brain/brain-log.tsx
 #: src/brain/brain.ts
-#: src/routes/_shell.integrations.$integration.tsx
 msgid "Connections"
 msgstr "Conexiones"
 
@@ -4596,6 +4595,10 @@ msgstr "No se pudo subir"
 #: src/agents/agent-page.tsx
 msgid "Couldn't delete"
 msgstr "No se pudo eliminar"
+
+#: src/connections/connection-list.tsx
+msgid "Couldn't disconnect"
+msgstr "No se pudo desconectar"
 
 #: src/apps/app-owner.tsx
 msgid "Couldn't load who may answer for it."
@@ -13158,7 +13161,6 @@ msgid "Statements"
 msgstr "Afirmaciones"
 
 #: src/apps/app-settings.tsx
-#: src/connections/connection-list.tsx
 #: src/routes/_shell.integrations.$integration.tsx
 #: src/routes/_shell.workflows.index.tsx
 #: src/workflows/resource-runs.tsx

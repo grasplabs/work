@@ -32,7 +32,7 @@ import {
   ToolPermissions,
 } from "../connections/tool-permissions.tsx";
 import { WorkflowsUsing } from "../connections/workflows-using.tsx";
-import { formatDate, formatDayMonth, formatNumber } from "../format.ts";
+import { formatDate, formatDayMonth } from "../format.ts";
 import { IntegrationsIcon } from "../frame/integrations-icon.tsx";
 import {
   LoadingLines,
@@ -57,7 +57,6 @@ import {
 import { PageHeader } from "../grasp/page-header/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
 import { SectionHeader } from "../grasp/section-header/index.ts";
-import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { loadFromCore, notLoadedText } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
@@ -378,37 +377,6 @@ const changeableOf = (
     : { connection, staff: identity.staff };
 };
 
-/** Its connections, each to disconnect, and the Apps and agents holding a permission. */
-const Connections = ({
-  integration,
-  held,
-  identity,
-}: {
-  integration: Integration;
-  held: Loaded<HeldPermissions> | undefined;
-  identity: Identity;
-}) => {
-  const { t } = useLingui();
-  return (
-    <SectionCard
-      aside={
-        <Text element="span" size="sm" tone="muted">
-          {formatNumber(integration.connections.length)}
-        </Text>
-      }
-      density="compact"
-      title={t`Connections`}
-    >
-      <HeldNotLoaded held={held} />
-      <ConnectionList
-        held={held}
-        identity={identity}
-        integration={integration}
-      />
-    </SectionCard>
-  );
-};
-
 /** What the app is for, under its name: in a sentence where the catalog says, else its kind. */
 const aboutOf = (integration: Integration): string | undefined =>
   integration.description ?? integration.categories[0];
@@ -578,13 +546,13 @@ const IntegrationPage = ({ integration }: { integration: Integration }) => {
         <SectionCard density="compact" title={t`Workflows`}>
           <WorkflowsUsing integration={integration} uses={uses} />
         </SectionCard>
-        {count === 0 ? null : (
-          <Connections
-            held={held}
-            identity={identity}
-            integration={integration}
-          />
-        )}
+        {/* Its connections, each a card of its own. */}
+        <HeldNotLoaded held={held} />
+        <ConnectionList
+          held={held}
+          identity={identity}
+          integration={integration}
+        />
       </Page>
       {connectable ? (
         <ConnectDialog
