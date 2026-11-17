@@ -501,21 +501,26 @@ export const countedWorks = sqliteTable("counted_works", {
 });
 
 /**
- * Each team on its way into the brain (onboarding/brain-intake.ts): when
- * something new of it waits to be given to the brain (`dueAt`), and when
- * the brain first had any of it (`sentAt`), both ISO 8601.
+ * Each team whose intake may be due (onboarding/brain-intake.ts): when
+ * something new of it waits to be taken in (`dueAt`), ISO 8601.
  */
 export const brainTeams = sqliteTable("brain_teams", {
   team: text().primaryKey(),
   dueAt: text("due_at"),
+  /**
+   * When the old brain's records first had any of the team (GRA-1748):
+   * written and read by nothing since the onboarding keeps what it learned
+   * itself. Dropped in a later release (expand, then contract).
+   */
   sentAt: text("sent_at"),
 });
 
 /**
- * Who each record the onboarding gave the brain rests on: a statement on
- * whoever agreed to its fact, a drawing on whom it was drawn from. The
- * brain's records never name a person; this is how deleting an interview
- * finds what it is in (GRA-368). Goes with nothing else.
+ * Who each of a team's claims and drawings rests on: a claim
+ * (`statement`) on whoever agreed to its fact, a drawing
+ * (`workflowVersion`) on whom it was drawn from. The Brain never names a
+ * person; this is how deleting an interview finds what it is in
+ * (GRA-368). Goes with nothing else.
  */
 export const brainSent = sqliteTable(
   "brain_sent",
@@ -525,8 +530,9 @@ export const brainSent = sqliteTable(
     team: text().notNull(),
     person: text().notNull(),
     /**
-     * The record it belongs to: a drawing's workflow, which goes once none
-     * of its drawings is left. None for anything else.
+     * The old brain's workflow a drawing belonged to (GRA-1748): written
+     * and read by nothing since the onboarding keeps its drawings itself.
+     * Dropped in a later release (expand, then contract).
      */
     parent: text(),
   },

@@ -504,8 +504,9 @@ describe(
         { kind: "me" },
         upload
       );
-      const ids = await team();
-      await toldAll(ids);
+      // Seven tell: only then does a team's intake ask a model.
+      const ids = await team({ seven: true });
+      await sevenTold(ids);
       await drawAll(ids, "Zendesk", sentinelOf());
       // An intake that holds the brain until the test lets its model answer.
       const intakeAsked = Promise.withResolvers<boolean>();

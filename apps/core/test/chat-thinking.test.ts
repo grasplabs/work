@@ -422,7 +422,6 @@ describe("show_thinking in a chat", slow, () => {
     const ids = await teamInTheBrain();
     const before = await askedWithBrain(ids);
     await onLink({ action: "withdraw", ...(await openLink(ids.pim)) });
-    await onboardingStore(env).purgeBrain();
     const { chats } = await askedWithBrain(
       ids,
       thinks({
