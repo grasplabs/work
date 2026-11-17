@@ -9,7 +9,7 @@ import type { MouseEvent } from "react";
 
 import { Button } from "../button";
 import type { IconData } from "../icons";
-import { useComposerDisabled, useVoiceAlone } from "./context";
+import { useComposerDisabled, useVoiceAlone, useVoiceBeside } from "./context";
 import { cornerStyles } from "./corner";
 
 /** Every prop a ComposerAction takes. */
@@ -34,6 +34,14 @@ export interface ComposerActionProps {
   pressed?: boolean;
 }
 
+/** Filled alone or pressed on; bare in voice's place beside Send; else quiet with its edge (Add). */
+const variantOf = (alone: boolean, pressed: boolean, beside: boolean) => {
+  if (alone || pressed) {
+    return "ink";
+  }
+  return beside ? "ghost" : "quiet";
+};
+
 /** A round icon button for a composer's `start` or `end`. */
 export const ComposerAction = ({
   icon,
@@ -46,6 +54,8 @@ export const ComposerAction = ({
   const disabled = useComposerDisabled() || own;
   // Voice input standing alone in send's place is filled, as send is; so is an action pressed on.
   const alone = useVoiceAlone();
+  // In voice's place beside Send, once there is text, it goes quiet: bare, as the listening row's.
+  const beside = useVoiceBeside();
   // First or last in its side of the footer, it nests in the card's corner (corner.ts).
   return (
     <span {...stylex.props(cornerStyles.nest)}>
@@ -57,7 +67,7 @@ export const ComposerAction = ({
         render={(props: Record<string, unknown>) => (
           <Button
             {...props}
-            variant={alone || pressed === true ? "ink" : "quiet"}
+            variant={variantOf(alone, pressed === true, beside)}
             size="sm"
             icon={icon}
             aria-label={label}

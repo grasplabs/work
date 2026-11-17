@@ -1,123 +1,92 @@
-import { failureText } from "@grasp-os/shared/errors";
+import type { ModelMonthSpend } from "@grasp-os/shared/models";
 import { noBilling } from "@grasp-os/shared/org-settings";
-import { roleErrors } from "@grasp-os/shared/roles";
-import type { MonthBilled } from "@grasp-os/shared/stephen-requests";
 import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { createFileRoute, Link } from "@tanstack/react-router";
 
-import type { Session } from "../core.ts";
-import { formatNumber } from "../format.ts";
 import { Button } from "../grasp/button/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
+import {
+  RowAlert,
+  SettingRow,
+  SettingsRows,
+} from "../grasp/setting-row/index.ts";
 import { Switch } from "../grasp/switch/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { loadFromCore } from "../load-from-core.tsx";
+import type { Loaded } from "../load-from-core.tsx";
+import { SpendSummary } from "../settings/ai-spend.tsx";
 import { useQueuedSave } from "../settings/queued-save.ts";
 import { SavedField } from "../settings/saved-field.tsx";
 import {
-  FactRow,
-  RowAlert,
   SectionNotLoaded,
-  SettingRow,
   SettingsError,
   SettingsLoading,
-  SettingsRows,
-  SwitchRow,
 } from "../settings/section.tsx";
 
-// Settings → Billing, for admins: the plan, Stephen's requests outside
-// Grasp this month (which the plan bills, with the way to how they are
-// used), and the billing details. Core keeps the billing details
-// (`orgSettings.billing()`), which the organization's own admins change
-// here, each field saved as it is left; Grasp staff read them. No payment
-// provider is linked yet, so there is no plan, card or invoice: what
-// would only lead into Stripe (change plan, the card, invoices) is left
-// out until it is. Which emails Stripe sends is kept with the details.
+// Settings → Billing, for admins: the plan, this month's AI spend
+// (settings/ai-spend.tsx, the same as on AI and spend, with the way
+// there for where it went), and the billing details. Core keeps the
+// billing details (`orgSettings.billing()`), which the organization's own
+// admins change here, each field saved as it is left; Grasp staff read
+// them, and are refused the spend, so it isn't asked for them. No payment
+// provider is linked yet, so there is no plan, card or invoice, and no
+// way into Stripe: what would only lead there is left out until it is.
+// Which emails Stripe sends is kept with the details.
 
-/** Stephen's requests this month as the page read them: the count, refused to the viewer, or why not read. */
-type RequestsRead =
-  | { state: "ready"; billed: MonthBilled }
-  | { state: "refused" }
-  | { state: "failed"; reason: string };
+const styles = stylex.create({
+  body: { display: "grid", gap: grasp.space4 },
+});
 
-/**
- * Reads Stephen's requests this month on its own, so the page stands
- * without them: core refuses them to whoever may not see them.
- */
-const readRequests = async (session: Session): Promise<RequestsRead> => {
-  try {
-    return { state: "ready", billed: await session.stephenRequests.billed() };
-  } catch (error) {
-    if (roleErrors.codeOf(error) === "role.forbidden") {
-      return { state: "refused" };
-    }
-    return { state: "failed", reason: failureText(error) };
-  }
-};
-
-/** Stephen's requests outside Grasp this month, against what the plan includes when it says; or why they can't be read. */
-const RequestsRow = ({
-  requests,
-}: {
-  requests: Exclude<RequestsRead, { state: "refused" }>;
-}) => {
+/** The plan: none until Grasp links Stripe and sets one up. */
+const Plan = () => {
   const { t } = useLingui();
-  if (requests.state === "failed") {
-    return <RowAlert variant="danger">{requests.reason}</RowAlert>;
-  }
-  const used = formatNumber(requests.billed.billed);
-  const { included } = requests.billed;
-  const of = included === null ? "" : formatNumber(included);
   return (
-    <FactRow
-      help={
-        included === null
-          ? t`Outside Grasp this month.`
-          : t`Outside Grasp this month, against what the plan includes.`
-      }
-      label={t`Stephen’s requests`}
-    >
-      {included === null ? used : t`${used} of ${of}`}
-    </FactRow>
+    <SectionCard density="compact" flush title={t`Plan`}>
+      <SettingsRows>
+        <SettingRow
+          info={t`Grasp links Stripe and sets up your plan with you.`}
+          label={t`Current plan`}
+        >
+          <Text size="sm">{t`None yet`}</Text>
+        </SettingRow>
+      </SettingsRows>
+    </SectionCard>
   );
 };
 
-/** The plan, that Stripe isn't linked yet, and Stephen's requests where the viewer may see them. */
-const Plan = ({ requests }: { requests: RequestsRead }) => {
+/** This month's AI spend, as AI and spend shows it, with the way there. */
+const Spend = ({ spend }: { spend: Loaded<ModelMonthSpend> }) => {
   const { t } = useLingui();
-  const shown = requests.state !== "refused";
   return (
     <SectionCard
-      {...(shown
-        ? {
-            actions: (
-              <Button render={<Link to="/workflows/requests" />} size="sm">
-                {t`See usage`}
-              </Button>
-            ),
-          }
-        : {})}
-      description={t`What the workspace pays for Grasp.`}
-      flush
-      title={t`Plan`}
+      actions={
+        <Button
+          render={<Link to="/settings/ai-providers" />}
+          size="sm"
+          variant="ghost"
+        >
+          {t`AI and spend`}
+        </Button>
+      }
+      density="compact"
+      title={t`AI spend`}
     >
-      <SettingsRows>
-        <RowAlert variant="neutral">
-          {t`Stripe isn’t linked yet: no plan, card or invoice until it is.`}
-        </RowAlert>
-        <FactRow label={t`Current plan`}>
-          {t({ message: "None", context: "nothing set" })}
-        </FactRow>
-        {requests.state === "refused" ? null : (
-          <RequestsRow requests={requests} />
-        )}
-      </SettingsRows>
+      {spend.state === "ready" ? (
+        <div {...stylex.props(styles.body)}>
+          <SpendSummary spend={spend.data} />
+        </div>
+      ) : (
+        <SectionNotLoaded page={spend} />
+      )}
     </SectionCard>
   );
 };
 
 const BillingPage = () => {
   const { t } = useLingui();
-  const page = Route.useLoaderData();
+  const { page, spend } = Route.useLoaderData();
   const { identity } = Route.useRouteContext();
   const billing = page.state === "ready" ? page.data.billing : noBilling;
   const { failure, save } = useQueuedSave(
@@ -135,12 +104,9 @@ const BillingPage = () => {
   const readOnly = identity.staff;
   return (
     <>
-      <Plan requests={page.data.requests} />
-      <SectionCard
-        description={t`What appears on every invoice.`}
-        flush
-        title={t`Billing details`}
-      >
+      <Plan />
+      {spend === undefined ? null : <Spend spend={spend} />}
+      <SectionCard density="compact" flush title={t`Billing details`}>
         <SettingsRows>
           {failure === undefined ? null : (
             <RowAlert variant="danger">{failure}</RowAlert>
@@ -202,28 +168,34 @@ const BillingPage = () => {
               />
             )}
           </SettingRow>
-          <SwitchRow>
+          <SettingRow
+            help={t`Each invoice as a PDF.`}
+            label={t`Email invoices`}
+          >
             <Switch
               checked={billing.emailInvoices}
-              description={t`Each invoice as a PDF, as soon as it is issued.`}
               label={t`Email invoices`}
+              labelHidden
               onCheckedChange={(emailInvoices) => {
                 save({ emailInvoices });
               }}
               readOnly={readOnly}
             />
-          </SwitchRow>
-          <SwitchRow>
+          </SettingRow>
+          <SettingRow
+            help={t`A receipt for each payment.`}
+            label={t`Email payment receipts`}
+          >
             <Switch
               checked={billing.emailReceipts}
-              description={t`A receipt each time a payment goes through.`}
               label={t`Email payment receipts`}
+              labelHidden
               onCheckedChange={(emailReceipts) => {
                 save({ emailReceipts });
               }}
               readOnly={readOnly}
             />
-          </SwitchRow>
+          </SettingRow>
         </SettingsRows>
       </SectionCard>
     </>
@@ -234,12 +206,16 @@ export const Route = createFileRoute("/_shell/settings/billing")({
   pendingComponent: SettingsLoading,
   errorComponent: SettingsError,
   component: BillingPage,
-  loader: async ({ context: { core } }) =>
-    await loadFromCore(core, async (session) => {
-      const [billing, requests] = await Promise.all([
-        session.orgSettings.billing(),
-        readRequests(session),
-      ]);
-      return { billing, requests };
-    }),
+  loader: async ({ context: { core, identity } }) => {
+    // Core refuses the spend to Grasp staff: they aren't asked.
+    const [page, spend] = await Promise.all([
+      loadFromCore(core, async (session) => ({
+        billing: await session.orgSettings.billing(),
+      })),
+      identity.staff
+        ? undefined
+        : loadFromCore(core, async (session) => await session.models.spend()),
+    ]);
+    return { page, spend };
+  },
 });

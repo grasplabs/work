@@ -287,14 +287,12 @@ test("invites someone with a role, says what each role may do, and withdraws the
   const { admin } = peopleIn("memberInvites");
   await signInTo(context, admin);
   await page.goto("/settings/members");
-  // What each role may do is a tab of its own, beside the members.
-  await page.getByRole("tab", { name: "Roles" }).click();
-  const roles = page.getByRole("region", { name: "Roles" });
+  // What each role may do sits behind the Roles row over the members.
+  await page.getByRole("button", { name: "What each role may do" }).focus();
   await expect(
-    roles.getByRole("row", { name: /^Invite people, change roles/u })
+    page.getByRole("tooltip").getByText(/^Admin: Manages people/u)
   ).toBeVisible();
 
-  await page.getByRole("tab", { name: "Members" }).click();
   await page.getByRole("button", { name: "Invite", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Invite someone" });
   await dialog
@@ -332,7 +330,6 @@ test("an admin makes a team, puts someone in it and takes them off, renames it a
   const { admin, member } = peopleIn("teams");
   await signInTo(context, admin);
   await page.goto("/settings/members");
-  await page.getByRole("tab", { name: "Teams" }).click();
   const teams = page.getByRole("region", { name: "Teams" });
   const name = `Finance ${crypto.randomUUID().slice(0, 6)}`;
 

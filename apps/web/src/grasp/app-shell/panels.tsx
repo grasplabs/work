@@ -33,6 +33,9 @@ import { Resizable } from "../resizable";
 import { grasp, media } from "../tokens/tokens.stylex";
 import { CardLine } from "./card-line";
 import { cardLine } from "./card-line.stylex";
+import { PanelPlaceContext, useFloat } from "./float-window";
+import type { PanelPlacement } from "./float-window";
+import type { PanelPosition } from "./floating";
 import { FOCUSABLE, firstStop, placeOf } from "./focus-place";
 
 const NARROW = "@container app-shell (width < 40rem)";
@@ -339,10 +342,22 @@ interface PanelsProps {
   onShown?: () => void;
   /** Runs when the panels are gone. */
   onGone?: () => void;
-  width: number;
+  /** Their width, docked or floating; unset, each placement's first width. */
+  width?: number;
   min: number;
   max: number;
   covered: boolean;
+  /** Whether the shell is narrow, as AppShell has read it: no floating window on a phone. */
+  narrow: boolean;
+  /** Beside the page, or over it as a window (AppShell's `panelPlacement`). */
+  placement?: PanelPlacement;
+  onPlacementChange?: (placement: PanelPlacement) => void;
+  /** The floating window's place, from the shell's end and foot; unset, its first place. */
+  position?: PanelPosition;
+  onPositionChange?: (position: PanelPosition) => void;
+  /** The floating window's height; unset, its first height. */
+  height?: number;
+  onHeightChange?: (height: number) => void;
   /** On a phone, set aside for the page. */
   aside: boolean;
   /** The handle's name (AppShell's `panelResizeLabel`). @default "Resize the panel" */
@@ -362,6 +377,9 @@ interface PanelsProps {
   /** A line at the foot of the panels' head row (AppShell's `panelsHeadLine`). */
   headLine?: boolean;
 }
+
+/** The panels' first width beside the page, in pixels, before anyone resizes them. */
+export const DOCKED_WIDTH = 416;
 
 /** A width kept between its least and most, in whole pixels. */
 const clamp = (wanted: number, least: number, most: number): number =>
@@ -703,30 +721,40 @@ const handleLook = ({
 const shareOf = ({
   measured,
   full,
+  floating,
   phase,
   shown,
   space,
 }: {
   measured: boolean;
   full: boolean;
+  floating: boolean;
   phase: Phase;
   shown: number;
   space: number;
 }) =>
-  measured && !full && (phase === "coming" || phase === "open")
+  measured && !full && !floating && (phase === "coming" || phase === "open")
     ? (shown / space) * 100
     : 0;
+
+/** Whether the panels cover the page for want of room: never while they float over it. */
+const crowdedOf = (phase: Phase, tight: boolean, floating: boolean) =>
+  phase !== "closed" && tight && !floating;
+
+/** Whether the panels stand at rest beside the page, where the gutter resizes them. */
+const stillOf = (resting: boolean, cover: Cover, floating: boolean) =>
+  resting && cover === "docked" && !floating;
 
 /** The room the two cards share, and what the panels get of it. */
 const useRoom = ({
   column,
-  width,
+  width = DOCKED_WIDTH,
   min,
   max,
   onNarrowChange,
 }: {
   column: RefObject<HTMLDivElement | null>;
-  width: number;
+  width?: number;
   min: number;
   max: number;
   onNarrowChange: (narrow: boolean) => void;
@@ -771,6 +799,7 @@ interface SideProps {
   onClose?: () => void;
   closeLabel: string;
   headLine: boolean;
+  float: ReturnType<typeof useFloat>;
 }
 
 /** What stands in the panels' side: their card, held at its final width while the side moves. */
@@ -787,9 +816,11 @@ const PanelsCard = ({
   onClose,
   closeLabel,
   headLine,
+  float,
 }: SideProps) => {
   const out = phase === "coming" || phase === "open";
-  const over = covered || crowded;
+  // A floating window comes and goes as panels over the page do: it fades in and rises a little.
+  const over = covered || crowded || float.on;
   // Full screen by the host's word (not for want of room): their place moves as one movement.
   const moving = !crowded && cover !== "docked";
   return (
@@ -798,6 +829,7 @@ const PanelsCard = ({
         <div
           data-slot="app-shell-panels"
           data-closed={phase === "closed" ? "" : undefined}
+          data-floating={float.on ? "" : undefined}
           inert={phase === "closed" || phase === "going"}
           {...stylex.props(
             styles.panels,
@@ -807,10 +839,11 @@ const PanelsCard = ({
             aside && styles.panelsAside,
             !out && over && styles.overAway,
             !out && styles.overAwayNarrow,
-            phase === "closed" && styles.closedAway
+            phase === "closed" && styles.closedAway,
+            ...float.look
           )}
         >
-          {panels}
+          <PanelPlaceContext value={float.value}>{panels}</PanelPlaceContext>
           <CardLine />
           {headLine && (
             <span
@@ -819,6 +852,7 @@ const PanelsCard = ({
               {...stylex.props(styles.headLine)}
             />
           )}
+          {float.edges}
           {crowded && onClose !== undefined && (
             <span
               data-slot="app-shell-panels-close"
@@ -847,6 +881,9 @@ const travelOf = (phase: Phase) => {
   return phase === "going" ? styles.sideGoing : styles.sideComing;
 };
 
+/** How the two sides travel while the panels float off or dock again: as when they come. */
+const floatTravelOf = (moving: boolean) => (moving ? styles.sideComing : null);
+
 /** How the two sides travel while the panels go full screen or come back: nothing at rest. */
 const coverTravelOf = (cover: Cover) =>
   cover === "covering" || cover === "docking" ? styles.sideComing : null;
@@ -870,11 +907,15 @@ export const Panels = ({
   closeLabel,
   keep,
   headLine = true,
+  narrow,
+  ...place
 }: PanelsProps) => {
   const column = useRef<HTMLDivElement>(null);
   const side = useRef<HTMLDivElement>(null);
   const given = panels !== undefined && panels !== null;
   const phase = usePhase(given, open, side, onShown, onGone);
+  // Floating, the panels lie over the page as a window and their side of the group has no width: the
+  // page has the column, as with no panels. Never on a phone or full screen.
   const { space, most, measured, shown, tight } = useRoom({
     column,
     width,
@@ -882,14 +923,25 @@ export const Panels = ({
     max,
     onNarrowChange,
   });
-  const crowded = phase !== "closed" && tight;
+  const float = useFloat({
+    ...place,
+    column,
+    narrow,
+    covered,
+    width,
+    min,
+    max,
+    onWidthChange,
+    docked: shown,
+  });
+  const crowded = crowdedOf(phase, tight, float.on);
   // Full screen by the host's word: the page's side takes the whole column (its card the panels'
   // ground), and the two move there and back as the panels' coming and going do.
   const cover = useCover(covered && !crowded, side);
   const full = cover === "covering" || cover === "covered";
   const resting = phase === "open";
   // At rest beside the page: only then can the gutter resize them.
-  const still = resting && cover === "docked";
+  const still = stillOf(resting, cover, float.on || float.moving);
 
   useEffect(() => {
     onCrowdedChange(measured ? crowded : undefined);
@@ -903,7 +955,14 @@ export const Panels = ({
       ? holdFocus(element, onClose, keep)
       : undefined;
   }, [crowded, onClose, keep]);
-  const percent = shareOf({ measured, full, phase, shown, space });
+  const percent = shareOf({
+    measured,
+    full,
+    floating: float.on,
+    phase,
+    shown,
+    space,
+  });
 
   const changed = (layout: number[], details: ResizableLayoutChangeDetails) => {
     // The group laying itself out again as the window resizes is not a person resizing.
@@ -922,7 +981,8 @@ export const Panels = ({
       onWidthChange(next);
     }
   };
-  const travel = travelOf(phase) ?? coverTravelOf(cover);
+  const travel =
+    travelOf(phase) ?? coverTravelOf(cover) ?? floatTravelOf(float.moving);
   // What the page's card is told of the move: only while the panels are out.
   const told: Cover = resting ? cover : "docked";
   const held = told === "lifting" || told === "covering" || told === "docking";
@@ -972,7 +1032,7 @@ export const Panels = ({
         </ResizableHandlePrimitive>
         <ResizablePanelPrimitive
           ref={side}
-          defaultSize={given && open ? `${width}px` : "0px"}
+          defaultSize={given && open ? `${shown}px` : "0px"}
           minSize={still ? `${min}px` : "0px"}
           maxSize={`${most}px`}
           {...stylex.props(styles.side, travel)}
@@ -991,10 +1051,12 @@ export const Panels = ({
               onClose={onClose}
               closeLabel={closeLabel}
               headLine={headLine}
+              float={float}
             />
           </div>
         </ResizablePanelPrimitive>
       </Resizable>
+      {float.ghost}
     </div>
   );
 };

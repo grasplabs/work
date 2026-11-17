@@ -2,15 +2,16 @@ import type {
   ChannelAccount,
   ChannelLinkPreview,
   ChannelLinkRefusal,
-  ChannelReach,
 } from "@grasp-os/shared/channel-accounts";
 import { chatPlatformName } from "@grasp-os/shared/chat";
+// The frame mounts this Toaster (frame/app-frame.tsx), not the library's own yet.
+import { toast } from "@grasp-os/ui/components/toast";
 import { useLingui } from "@lingui/react/macro";
-import * as stylex from "@stylexjs/stylex";
 import { useRouter } from "@tanstack/react-router";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
-import { formatDateTime } from "../format.ts";
+import { BrandIcon, brands } from "../grasp/brand-icon/index.ts";
+import type { Brand } from "../grasp/brand-icon/index.ts";
 import { Button } from "../grasp/button/index.ts";
 import { Chat } from "../grasp/icons/index.ts";
 import {
@@ -23,33 +24,22 @@ import {
   ItemMedia,
 } from "../grasp/item/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
-import { Separator } from "../grasp/separator/index.ts";
-import { Text } from "../grasp/text/index.ts";
-import { grasp } from "../grasp/tokens/tokens.stylex.ts";
+import { SettingsRows } from "../grasp/setting-row/index.ts";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { forgetChatLink } from "./chat-link.ts";
-import { RowNote, SectionNotLoaded, TitleLine } from "./section.tsx";
-import { WhereStephen } from "./where-stephen.tsx";
+import { RowNote, SectionNotLoaded } from "./section.tsx";
 
-// Settings › Security › Chat apps: the person's accounts on chat platforms
-// that are linked to them, so Grasp knows it is them writing there, and a
-// link a chat sent them, waiting for them to confirm it. Confirming is a
+// Settings › Security: the person's accounts on chat platforms that are
+// linked to them, so Grasp knows it is them writing there, as quiet rows in
+// the Sign-in card (none when none are); and a link a chat sent them,
+// waiting for them to confirm it, in a card of its own. Confirming is a
 // press here, never opening the link (chat apps open links to preview
 // them), and the card says whose account it is, by the platform's own
 // name for it, so a link someone forwarded doesn't pass for theirs.
 
-const styles = stylex.create({
-  // In the rows' inline padding, so the card's parts share a left edge.
-  pad: { paddingBlock: grasp.space3, paddingInline: grasp.tableCellInline },
-});
-
-/**
- * What the section shows: where to reach Stephen, the linked accounts,
- * and the link waiting, if any.
- */
+/** The linked accounts, and the link waiting in this tab, if any. */
 export interface ChatAccounts {
-  reach: ChannelReach[];
   accounts: ChannelAccount[];
   pending?: { secret: string; preview: ChannelLinkPreview };
 }
@@ -124,13 +114,15 @@ const OpenLink = ({
   const app = chatPlatformName(platform);
   const account = name ?? platformUserId;
   const link = async (): Promise<void> => {
+    const outcome = { linked: false };
     await run(async ({ channelAccounts }) => {
       await changeThenRefresh(
         async () => {
-          const outcome = await channelAccounts.link(secret);
+          const answer = await channelAccounts.link(secret);
           // A refusal keeps the link: the refreshed preview says why.
-          if (outcome.state === "linked") {
+          if (answer.state === "linked") {
             forgetChatLink();
+            outcome.linked = true;
           }
         },
         async () => {
@@ -138,6 +130,10 @@ const OpenLink = ({
         }
       );
     });
+    // The card goes and the account stands among the linked ones: say so.
+    if (outcome.linked) {
+      toast.add({ type: "success", title: t`Linked` });
+    }
   };
   return (
     <Item variant="outline">
@@ -179,14 +175,24 @@ const OpenLink = ({
   );
 };
 
-/** One linked account, and unlinking it. */
+/** Whether a Brand icon has this mark. */
+const isBrand = (id: string): id is Brand => Object.hasOwn(brands, id);
+
+/** A chat app's mark, where the Brand icons have it; core's platform ids are mostly the brands'. */
+const brandOf = (platform: string): Brand | undefined => {
+  const id =
+    platform === "gchat" || platform === "google-chat" ? "google" : platform;
+  return isBrand(id) ? id : undefined;
+};
+
+/** One linked account, its chat app's mark, and unlinking it. */
 const AccountRow = ({ account }: { account: ChannelAccount }) => {
   const { t } = useLingui();
   const router = useRouter();
   const { busy, failure, run } = useCoreAction();
   const app = chatPlatformName(account.platform);
-  const time = formatDateTime(account.linkedAt);
   const shown = account.name ?? account.platformUserId;
+  const brand = brandOf(account.platform);
   const unlink = async (): Promise<void> => {
     await run(async ({ channelAccounts }) => {
       await changeThenRefresh(
@@ -198,15 +204,19 @@ const AccountRow = ({ account }: { account: ChannelAccount }) => {
     });
   };
   return (
-    <Item size="sm">
+    <Item size="xs">
+      {brand === undefined ? (
+        <ItemMedia icon={Chat} iconLook="inline" />
+      ) : (
+        <ItemMedia>
+          <BrandIcon brand={brand} decorative size="md" tile={false} />
+        </ItemMedia>
+      )}
       <ItemContent>
-        <ItemTitle>
-          <TitleLine
-            detail={<RowNote failure={failure}>{t`Linked ${time}`}</RowNote>}
-          >
-            {t`${app} · ${shown}`}
-          </TitleLine>
-        </ItemTitle>
+        <ItemTitle>{shown}</ItemTitle>
+        <ItemDescription>
+          <RowNote failure={failure}>{app}</RowNote>
+        </ItemDescription>
       </ItemContent>
       <ItemActions>
         <Button
@@ -225,63 +235,59 @@ const AccountRow = ({ account }: { account: ChannelAccount }) => {
   );
 };
 
-/** The link waiting for the person, as core read it. */
-const PendingLink = ({
-  pending,
+/**
+ * The chat accounts linked to the person, one quiet row each, in the
+ * Sign-in card under how they sign in; nothing when none are.
+ */
+export const LinkedChatAccounts = ({
+  accounts,
 }: {
-  pending: NonNullable<ChatAccounts["pending"]>;
+  accounts: ChannelAccount[];
 }) => {
-  const { preview, secret } = pending;
-  if (preview.state === "refused") {
-    return <RefusedLink reason={preview.reason} />;
+  const { t } = useLingui();
+  if (accounts.length === 0) {
+    return null;
   }
   return (
-    <OpenLink
-      name={preview.offer.name}
-      platform={preview.offer.platform}
-      platformUserId={preview.offer.platformUserId}
-      secret={secret}
-    />
+    <SettingsRows label={t`Linked chat accounts`}>
+      <ItemGroup aria-label={t`Linked chat accounts`} separated>
+        {accounts.map((account) => (
+          <AccountRow account={account} key={account.id} />
+        ))}
+      </ItemGroup>
+    </SettingsRows>
   );
 };
 
-/** Settings › Security › Chat apps. */
-export const ChatAccountsSection = ({
-  chat,
-}: {
-  chat: Loaded<ChatAccounts>;
-}) => {
+/**
+ * A link a chat app sent, waiting in this tab for the person to confirm or
+ * turn down; or why the accounts could not be read to show it.
+ */
+export const PendingChatLink = ({ chat }: { chat: Loaded<ChatAccounts> }) => {
   const { t } = useLingui();
-  const description = t`Where Grasp knows it’s you. Write to Grasp in one to link it here.`;
   if (chat.state !== "ready") {
     return (
-      <SectionCard description={description} title={t`Chat apps`}>
+      <SectionCard density="compact" title={t`Chat apps`}>
         <SectionNotLoaded page={chat} />
       </SectionCard>
     );
   }
-  const { reach, accounts, pending } = chat.data;
+  const { pending } = chat.data;
+  if (pending === undefined) {
+    return null;
+  }
+  const { preview, secret } = pending;
   return (
-    <SectionCard description={description} flush title={t`Chat apps`}>
-      {pending === undefined ? null : (
-        <div {...stylex.props(styles.pad)}>
-          <PendingLink pending={pending} />
-        </div>
-      )}
-      <WhereStephen reach={reach} />
-      {reach.length === 0 ? null : <Separator decorative />}
-      {accounts.length === 0 ? (
-        <div {...stylex.props(styles.pad)}>
-          <Text size="sm" tone="muted">
-            {t`No chat app accounts are linked.`}
-          </Text>
-        </div>
+    <SectionCard density="compact" title={t`Chat apps`}>
+      {preview.state === "refused" ? (
+        <RefusedLink reason={preview.reason} />
       ) : (
-        <ItemGroup aria-label={t`Linked accounts`} separated>
-          {accounts.map((account) => (
-            <AccountRow account={account} key={account.id} />
-          ))}
-        </ItemGroup>
+        <OpenLink
+          name={preview.offer.name}
+          platform={preview.offer.platform}
+          platformUserId={preview.offer.platformUserId}
+          secret={secret}
+        />
       )}
     </SectionCard>
   );

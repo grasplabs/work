@@ -13,6 +13,9 @@ import type { CoreConnection } from "../core-connection.ts";
 /** The organization's name as the sidebar shows it. */
 let shownName: string | undefined;
 
+/** Where the organization's logo is shown from, as the sidebar shows it; none while it has none. */
+let shownLogo: string | undefined;
+
 /** How often that name was set: a sidebar shows only one set since it mounted. */
 let shownVersion = 0;
 
@@ -21,9 +24,12 @@ let renames = 0;
 
 const listeners = new Set<() => void>();
 
-/** Shows `name` as the organization's: core's answer, or a rename just saved. */
-const showName = (name?: string): void => {
+/** Shows `name` (and `logo`, where given) as the organization's: core's answer, or a change just saved. */
+const showName = (name?: string, logo?: string | null): void => {
   shownName = name;
+  if (logo !== undefined) {
+    shownLogo = logo ?? undefined;
+  }
   shownVersion += 1;
   for (const listener of listeners) {
     listener();
@@ -39,6 +45,15 @@ export const organizationRenamed = (name: string): void => {
   showName(name.trim() === "" ? undefined : name);
 };
 
+/**
+ * Tells the sidebar the organization's logo changed on this page: the
+ * Workspace settings call it once core saved a new one or took it away.
+ */
+export const organizationLogoChanged = (logo: string | null): void => {
+  renames += 1;
+  showName(shownName, logo);
+};
+
 const subscribe = (listener: () => void): (() => void) => {
   listeners.add(listener);
   return () => {
@@ -46,15 +61,15 @@ const subscribe = (listener: () => void): (() => void) => {
   };
 };
 
-/** The organization's name, or none when it has none or core couldn't say. Outside the component, as the React Compiler can't compile `try`. */
+/** The organization's name and logo, or none when core couldn't say. Outside the component, as the React Compiler can't compile `try`. */
 const nameOf = async (
   organization: () => Promise<Organization>
-): Promise<string | undefined> => {
+): Promise<{ name: string | undefined; logo: string | null }> => {
   try {
-    const { name } = await organization();
-    return name.trim() === "" ? undefined : name;
+    const { name, logo } = await organization();
+    return { name: name.trim() === "" ? undefined : name, logo };
   } catch {
-    return undefined;
+    return { name: undefined, logo: null };
   }
 };
 
@@ -68,9 +83,9 @@ const readName = async (
   read: { current: boolean }
 ): Promise<void> => {
   const begun = renames;
-  const named = await nameOf(organization);
+  const { name, logo } = await nameOf(organization);
   if (read.current && renames === begun) {
-    showName(named);
+    showName(name, logo);
   }
 };
 
@@ -79,9 +94,9 @@ const readName = async (
  * rename since (`organizationRenamed`); none until then, or when it has
  * none.
  */
-export const useShownName = (
+export const useShownOrganization = (
   organization: () => Promise<Organization>
-): string | undefined => {
+): { name: string | undefined; logo: string | undefined } => {
   // A sidebar mounted anew (another session, say) shows no name set before
   // it mounted, not even for its first paint: only one core says, or a
   // rename, since.
@@ -89,6 +104,7 @@ export const useShownName = (
   const [mountedAt] = useState(() => shownVersion);
   const version = useSyncExternalStore(subscribe, () => shownVersion);
   const name = version > mountedAt ? shownName : undefined;
+  const logo = version > mountedAt ? shownLogo : undefined;
   useEffect(() => {
     const read = { current: true };
     void readName(organization, read);
@@ -96,8 +112,13 @@ export const useShownName = (
       read.current = false;
     };
   }, [organization]);
-  return name;
+  return { name, logo };
 };
+
+/** The organization's name alone, as `useShownOrganization` has it. */
+export const useShownName = (
+  organization: () => Promise<Organization>
+): string | undefined => useShownOrganization(organization).name;
 
 /** Reads the organization from core. */
 export const organizationOf =

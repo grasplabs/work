@@ -114,10 +114,13 @@ const stemName = msg({
   context: "the brainstem: every conversation, document and connection",
 });
 
+/** The id of the region the teams in no group share, and the groups beyond the lobes. */
+export const OTHER_TEAMS = "group-other";
+
 /**
- * The company's groups of teams, one for each lobe. The groups it keeps (confirmed, or proposed by
- * Grasp), then one of its own for every team in none, named after it, as Grasp would propose it.
- * More groups than lobes: the last lobe holds the rest together.
+ * The company's groups of teams, one for each lobe, in its order, as an admin arranged them on
+ * the map (region-edit.tsx). The teams in none share the last lobe as "Other teams", until an admin
+ * moves them, and so do the groups the four lobes have no room for.
  */
 export const groupsOf = (ws: Workspace): TeamGroup[] => {
   const known = new Set(ws.teams.map((team) => team.id));
@@ -128,30 +131,28 @@ export const groupsOf = (ws: Workspace): TeamGroup[] => {
     }))
     .filter((group) => group.teamIds.length > 0);
   const placed = new Set(kept.flatMap((group) => group.teamIds));
-  const all = [
-    ...kept,
-    ...ws.teams
-      .filter((team) => !placed.has(team.id))
-      .map((team): TeamGroup => ({
-        id: `group-${team.id}`,
-        name: team.name,
-        teamIds: [team.id],
-        confirmed: false,
-      })),
+  const waiting = ws.teams
+    .filter((team) => !placed.has(team.id))
+    .map((team) => team.id);
+  const room =
+    waiting.length === 0 && kept.length <= LOBES.length
+      ? LOBES.length
+      : LOBES.length - 1;
+  const rest = [
+    ...kept.slice(room).flatMap((group) => group.teamIds),
+    ...waiting,
   ];
-  if (all.length <= LOBES.length) {
-    return all;
-  }
-  const rest = all.slice(LOBES.length - 1);
-  return [
-    ...all.slice(0, LOBES.length - 1),
-    {
-      id: "group-more",
-      name: t`More teams`,
-      teamIds: rest.flatMap((group) => group.teamIds),
-      confirmed: rest.every((group) => group.confirmed),
-    },
-  ];
+  return rest.length === 0
+    ? kept.slice(0, room)
+    : [
+        ...kept.slice(0, room),
+        {
+          id: OTHER_TEAMS,
+          name: t`Other teams`,
+          teamIds: rest,
+          confirmed: true,
+        },
+      ];
 };
 
 /** The team a piece of work belongs to: its workflow's main team, else the first team that told of it. */

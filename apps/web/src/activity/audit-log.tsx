@@ -26,6 +26,8 @@ import { Badge } from "../grasp/badge/index.ts";
 import { Button } from "../grasp/button/index.ts";
 import { CodeBlock } from "../grasp/code-block/index.ts";
 import { CopyField } from "../grasp/copy-field/index.ts";
+import { DataTable } from "../grasp/data-table/index.ts";
+import type { DataTableColumn } from "../grasp/data-table/index.ts";
 import { DateRangePicker } from "../grasp/date-range-picker/index.ts";
 import {
   Dialog,
@@ -56,14 +58,6 @@ import {
   SelectValue,
   SelectContent,
 } from "../grasp/select/index.ts";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "../grasp/table/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { RowAlert } from "../settings/section.tsx";
@@ -597,6 +591,74 @@ const RecordDetails = ({
 /** How many events a page shows. */
 const pageSize = 25;
 
+/** The words the columns say, translated where they are made. */
+interface EventColumnWords {
+  when: string;
+  event: string;
+  by: string;
+  actions: string;
+  notVerified: string;
+  details: string;
+  detailsOf: (seq: number) => string;
+}
+
+/** The events table's columns, as Data table takes them: when, what, by whom, and its marks and details. */
+const columns = ({
+  directory,
+  onDetails,
+  words,
+}: {
+  directory: Directory;
+  onDetails: (record: AuditRecord) => void;
+  words: EventColumnWords;
+}): DataTableColumn<AuditRecord>[] => [
+  {
+    key: "when",
+    header: words.when,
+    value: (record) => record.receivedAt,
+    cell: (record) => entryTime(record.receivedAt),
+  },
+  {
+    key: "event",
+    header: words.event,
+    value: (record) => record.event?.action ?? "",
+    cell: (record) => entryWords(record.event?.action),
+  },
+  {
+    key: "by",
+    header: words.by,
+    value: (record) => record.event?.actor.type ?? "",
+    cell: (record) => <EntryWho directory={directory} record={record} />,
+  },
+  {
+    key: "actions",
+    header: words.actions,
+    align: "end",
+    control: true,
+    value: () => "",
+    cell: (record) => (
+      <span {...stylex.props(styles.marks)}>
+        {record.verified ? null : (
+          <Badge tone="attention">{words.notVerified}</Badge>
+        )}
+        {record.type === null ? null : (
+          <Badge>{i18n._(typeLabels[record.type])}</Badge>
+        )}
+        <Button
+          aria-label={words.detailsOf(record.seq)}
+          onClick={() => {
+            onDetails(record);
+          }}
+          size="sm"
+          variant="ghost"
+        >
+          {words.details}
+        </Button>
+      </span>
+    ),
+  },
+];
+
 /**
  * The events that match, newest first, 25 a page with Newer and Older:
  * the first of core's pages as the page read it, then each older one asked
@@ -665,56 +727,31 @@ export const LogRecords = ({
       </div>
     );
   }
+  const eventColumns = columns({
+    directory,
+    onDetails: setOpen,
+    words: {
+      when: t`When`,
+      event: t`Event`,
+      by: t`By`,
+      actions: t`Actions`,
+      notVerified: t`Not verified`,
+      details: t`Details`,
+      detailsOf: (seq) => t`Details of event ${seq}`,
+    },
+  });
   const firstShown = at * pageSize + 1;
   const lastShown = at * pageSize + shown.length;
   return (
     <>
-      <Table density="compact" aria-label={t`Events`}>
-        <TableHeader>
-          <TableRow>
-            <TableHead>{t`When`}</TableHead>
-            <TableHead>{t`Event`}</TableHead>
-            <TableHead>{t`By`}</TableHead>
-            <TableHead align="end">
-              <span {...stylex.props(styles.hidden)}>{t`Actions`}</span>
-            </TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {shown.map((record) => {
-            const { seq } = record;
-            return (
-              <TableRow key={record.seq}>
-                <TableCell>{entryTime(record.receivedAt)}</TableCell>
-                <TableCell lead>{entryWords(record.event?.action)}</TableCell>
-                <TableCell>
-                  <EntryWho directory={directory} record={record} />
-                </TableCell>
-                <TableCell align="end">
-                  <span {...stylex.props(styles.marks)}>
-                    {record.verified ? null : (
-                      <Badge tone="attention">{t`Not verified`}</Badge>
-                    )}
-                    {record.type === null ? null : (
-                      <Badge>{i18n._(typeLabels[record.type])}</Badge>
-                    )}
-                    <Button
-                      aria-label={t`Details of event ${seq}`}
-                      onClick={() => {
-                        setOpen(record);
-                      }}
-                      size="sm"
-                      variant="ghost"
-                    >
-                      {t`Details`}
-                    </Button>
-                  </span>
-                </TableCell>
-              </TableRow>
-            );
-          })}
-        </TableBody>
-      </Table>
+      {/* One page of the log at a time: Newer and Older below page through core's. */}
+      <DataTable
+        columns={eventColumns}
+        density="compact"
+        label={t`Events`}
+        rowKey={(record) => String(record.seq)}
+        rows={shown}
+      />
       <nav aria-label={t`Pages of events`} {...stylex.props(styles.pager)}>
         <Text size="sm" tone="muted">
           {t`${firstShown}–${lastShown}`}

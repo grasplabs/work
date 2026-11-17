@@ -25,7 +25,6 @@ import {
   useFailingProviders,
 } from "./ai-key-banner.tsx";
 import type { FailingProvider } from "./ai-key-banner.tsx";
-import { FrameBanner } from "./frame-banner.ts";
 import { InFrame } from "./in-frame.ts";
 import { usePageFills } from "./page-fill.ts";
 import { PersonTheme } from "./person-theme.tsx";
@@ -149,16 +148,13 @@ export const AppFrame = ({
       setMenuOpen(false);
     },
   });
-  // Read here, where it stays as pages come and go; drawn under each page's bar.
-  const banner = (
-    <FailingBanner
-      failing={useFailingProviders({
-        identity,
-        providers: providersOf(core),
-        ...(failing === undefined ? {} : { failing }),
-      })}
-    />
-  );
+  // Read here, where it stays as pages come and go; drawn above the page's
+  // bar, in App shell's own place for a banner.
+  const failingNow = useFailingProviders({
+    identity,
+    providers: providersOf(core),
+    ...(failing === undefined ? {} : { failing }),
+  });
   const { phase } = useTour();
   const touring = phase === "opening" || phase === "running";
   return (
@@ -170,6 +166,11 @@ export const AppFrame = ({
           {/* The floating chat inside it too, so the tour holds it as well. */}
           <div inert={touring} {...stylex.props(styles.shell)}>
             <AppShell
+              banner={
+                failingNow.length === 0 ? undefined : (
+                  <FailingBanner failing={failingNow} />
+                )
+              }
               bar={bar}
               dock={chatPage ? undefined : dock}
               maxPanelWidth={panels?.maxWidth}
@@ -189,11 +190,7 @@ export const AppFrame = ({
               sidebar={<Sidebar {...sidebar} />}
             >
               <div {...stylex.props(styles.page, fills && styles.fill)}>
-                {/* With no bar (Chat's start) at the page's top; else under the page's bar (SiteHeader). */}
-                {bar === "none" ? banner : null}
-                <FrameBanner value={bar === "none" ? null : banner}>
-                  <InFrame value>{children}</InFrame>
-                </FrameBanner>
+                <InFrame value>{children}</InFrame>
               </div>
             </AppShell>
             {floating}
