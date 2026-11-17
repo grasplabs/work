@@ -10,17 +10,15 @@ import { platformUpdateSignatureHeader } from "@grasp-os/shared/platform-change"
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
+import { recordResponse } from "../src/model-usage.ts";
 import { models } from "../src/models.ts";
 import { platformSpeech } from "../src/speech.ts";
-import { platformOpenAiKey } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import {
   answeringProvider,
   connectModels,
   keyChanger,
 } from "./model-provider.ts";
-import { plan } from "./platform-providers.ts";
-import { streamText } from "./provider-streams.ts";
 import { routed, signedInApi } from "./sign-in.ts";
 
 // The organization's AI, for the admin: which providers it connected and
@@ -117,29 +115,40 @@ const heard = async (month: string, seconds: number): Promise<void> => {
   await listening.heard(seconds, "answered");
 };
 
-/** A PDF converted in `month`, on Grasp's key. */
-const converted = async (month: string): Promise<void> => {
-  await plan(platformOpenAiKey, [
+/**
+ * A PDF converted in `month` on Grasp's key, as a release that still
+ * converted documents recorded it: its usage row stays, named
+ * `conversion`. What it cost, in micros.
+ */
+const convertedBefore = async (month: string): Promise<number> => {
+  const cost = 0.0125;
+  await recordResponse(
+    inMonth(month),
     {
-      sse: streamText("openai-responses", {
-        text: "# Expense policy",
+      at: Date.now(),
+      entry: {
+        actor: newPerson(),
+        action: "model.call",
+        detail: { purpose: "upload.conversion" },
+      },
+      spend: { trigger: newPerson() },
+      usage: {
+        id: `request-${crypto.randomUUID()}`,
+        model: "openai/gpt-5.4-mini",
+        purpose: "upload.conversion",
+        credential: "platform",
+        feature: "conversion",
         inputTokens: 2000,
         outputTokens: 100,
-      }),
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        cost,
+        estimated: false,
+      },
     },
-  ]);
-  await models(inMonth(month)).platformCall({
-    model: "openai/gpt-5.4-mini",
-    purpose: "upload.conversion",
-    trigger: newPerson(),
-    work: { platform: "document_conversion" },
-    input: "Write out this document as Markdown.",
-    document: {
-      name: "policy.pdf",
-      mediaType: "application/pdf",
-      bytes: new TextEncoder().encode("%PDF-1.4\n%%EOF\n"),
-    },
-  });
+    { awaited: true }
+  );
+  return Math.round(cost * 1_000_000);
 };
 
 const bodyAt = (sentAt = new Date().toISOString()) =>
@@ -234,7 +243,7 @@ describe("the organization's AI, for the admin", () => {
     });
   });
 
-  it("sums what Grasp's own features cost on its keys this month and last, by feature and model, never a call on the organization's key", async () => {
+  it("sums what Grasp's own features cost on its keys this month and last, by feature and model, old conversion rows included, never a call on the organization's key", async () => {
     const thisMonth = monthBack(0);
     const lastMonth = monthBack(1);
     // On the organization's own key: never Grasp's cost.
@@ -248,7 +257,7 @@ describe("the organization's AI, for the admin", () => {
     const { api } = await signedInApi(idp, "admin");
     await api.aiProviders.test("mistral");
 
-    await converted(thisMonth);
+    const convertedCost = await convertedBefore(thisMonth);
     const spoken = (await said(thisMonth)) + (await said(thisMonth));
     await heard(thisMonth, 30);
     const spokenBefore = await said(lastMonth);
@@ -260,28 +269,24 @@ describe("the organization's AI, for the admin", () => {
     if (platformSpend === undefined) {
       throw new Error("The report has no platform spend");
     }
-    const conversion = platformSpend.thisMonth.rows.find(
-      ({ feature }) => feature === "conversion"
-    );
 
     expect({
       thisMonth: {
         period: platformSpend.thisMonth.period,
-        rows: platformSpend.thisMonth.rows
-          .filter(({ feature }) => feature !== "conversion")
-          .toSorted((one, other) =>
-            String(one.feature).localeCompare(String(other.feature))
-          ),
-        conversion: {
-          model: conversion?.model,
-          charged: (conversion?.micros ?? 0) > 0,
-        },
+        rows: platformSpend.thisMonth.rows.toSorted((one, other) =>
+          String(one.feature).localeCompare(String(other.feature))
+        ),
       },
       lastMonth: platformSpend.lastMonth,
     }).toStrictEqual({
       thisMonth: {
         period: thisMonth,
         rows: [
+          {
+            feature: "conversion",
+            model: "openai/gpt-5.4-mini",
+            micros: convertedCost,
+          },
           {
             feature: "speech",
             model: "elevenlabs/eleven_v4",
@@ -293,7 +298,6 @@ describe("the organization's AI, for the admin", () => {
             micros: heardMicros(30),
           },
         ],
-        conversion: { model: "openai/gpt-5.4-mini", charged: true },
       },
       lastMonth: {
         period: lastMonth,
