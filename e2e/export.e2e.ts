@@ -24,20 +24,17 @@ const choose = async (
   await page.getByRole("menuitem", { name: format }).click();
 };
 
-/** Chooses `format` from Download in the open chat's menu, in its header. */
+/** Downloads the open chat as `format`, from its menu. */
 const downloadChat = async (
   page: Page,
   format: "Markdown (.md)" | "PDF"
 ): Promise<void> => {
   await page.getByRole("button", { name: "More for this chat" }).click();
-  // By the keyboard: the submenu also opens as the pointer rests on its
-  // item, so a click there may close it again, and the test would race.
-  await page.getByRole("menuitem", { name: "Download" }).focus();
-  await page.keyboard.press("ArrowRight");
-  const item = page.getByRole("menuitem", { name: format });
-  await item.focus();
-  await expect(item).toBeFocused();
-  await page.keyboard.press("Enter");
+  await page
+    .getByRole("menuitem", {
+      name: format === "PDF" ? "Download as PDF" : "Download as Markdown",
+    })
+    .click();
 };
 
 const textOf = async (download: Download): Promise<string> =>

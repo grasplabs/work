@@ -25,10 +25,13 @@ test("offers the tour on first sign-in, takes it to its end, and starts it again
   const tour = page.getByRole("region", { name: "Tour of Grasp" });
 
   await page.goto("/");
-  await expect(tour).toContainText(
-    "Welcome to Grasp. Shall I show you around?"
-  );
-  await tour.getByRole("button", { name: "Start the tour" }).click();
+  // Offered in Chat start's greeting, over the box.
+  await expect(
+    page.getByRole("heading", {
+      name: /^Welcome to Grasp\. Shall I show you around\?/u,
+    })
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Start the tour" }).click();
   // The button it was on is gone: focus is on his card.
   await expect(tour).toBeFocused();
   await expect(tour).toContainText("Are you ready?");
@@ -58,7 +61,7 @@ test("offers the tour on first sign-in, takes it to its end, and starts it again
 
   // From the person menu on any page, it begins again on Chat.
   await page.goto("/workflows");
-  await page.getByRole("button", { name: "Person", exact: true }).click();
+  await page.getByRole("button", { name: /^Person /u }).click();
   await page.getByRole("menuitem", { name: "Take the tour again" }).click();
   await expect(page).toHaveURL(/\/$/u);
   await expect(tour).toContainText("Are you ready?");

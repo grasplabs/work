@@ -191,7 +191,7 @@ for (const [where, path, landed] of [
     await page.route("**/api/auth/sign-out", async (route) => {
       await route.fulfill({ status: 503, body: "Unavailable" });
     });
-    await page.getByRole("button", { name: "Person", exact: true }).click();
+    await page.getByRole("button", { name: /^Person /u }).click();
     await page.getByRole("menuitem", { name: "Sign out" }).click();
 
     await expect(page.getByText("Signing out didn't work")).toBeVisible();
@@ -199,9 +199,7 @@ for (const [where, path, landed] of [
       page.getByText("You're still signed in. Try again in a moment.")
     ).toBeVisible();
     await expect(page).toHaveURL(new RegExp(`${path}$`, "u"));
-    await expect(
-      page.getByRole("button", { name: "Person", exact: true })
-    ).toBeVisible();
+    await expect(page.getByRole("button", { name: /^Person /u })).toBeVisible();
   });
 }
 
@@ -255,7 +253,7 @@ test("lets an admin rename the workspace and set its time zone, and shows them t
   await name.press("Enter");
   await zone.click();
   await page.getByRole("option", { name: /^Amsterdam/u }).click();
-  await expect(zone).toHaveText(/^Amsterdam/u);
+  await expect(zone).toHaveValue(/^Amsterdam/u);
   await expect(page.getByText("European Union")).toBeVisible();
 
   const other = await newContext();
@@ -265,8 +263,11 @@ test("lets an admin rename the workspace and set its time zone, and shows them t
   await expect(theirs.getByRole("textbox", { name: "Name" })).toHaveValue(
     renamed
   );
-  await expect(theirs.getByRole("textbox", { name: "Name" })).toBeDisabled();
-  await expect(theirs.getByRole("combobox", { name: "Time zone" })).toHaveText(
+  // Theirs to read, not to change.
+  await expect(
+    theirs.getByRole("textbox", { name: "Name" })
+  ).not.toBeEditable();
+  await expect(theirs.getByRole("combobox", { name: "Time zone" })).toHaveValue(
     /^Amsterdam/u
   );
   await other.close();
@@ -277,7 +278,7 @@ test("lets an admin rename the workspace and set its time zone, and shows them t
   // Back to UTC, where every deployment starts.
   await zone.click();
   await page.getByRole("option", { name: "UTC", exact: true }).click();
-  await expect(zone).toHaveText(/^UTC/u);
+  await expect(zone).toHaveValue(/^UTC/u);
 });
 
 test("invites someone with a role, says what each role may do, and withdraws the invitation", async ({
@@ -409,7 +410,9 @@ test("shows the members page only to someone signed in, and never signs them out
   // growing pause, and lets them in.
   failing = 2;
   await page.goto("/settings/members");
-  await expect(page.getByRole("heading", { name: "Members" })).toBeVisible({
+  await expect(
+    page.getByRole("heading", { name: "Members", exact: true })
+  ).toBeVisible({
     timeout: reconnectMs,
   });
   expect(new URL(page.url()).pathname).toBe("/settings/members");
@@ -442,7 +445,9 @@ test("shows the members page only to someone signed in, and never signs them out
   // Once core answers again, trying again lets them in.
   failing = 0;
   await page.getByRole("button", { name: "Try again" }).click();
-  await expect(page.getByRole("heading", { name: "Members" })).toBeVisible({
+  await expect(
+    page.getByRole("heading", { name: "Members", exact: true })
+  ).toBeVisible({
     timeout: reconnectMs,
   });
 });
@@ -461,7 +466,7 @@ test("an admin changes a member's role, and the controls wait for the list to sh
 
   gate.hold();
   await role.click();
-  await page.getByRole("option", { name: "Builder" }).click();
+  await page.getByRole("option", { name: /^Builder /u }).click();
   // The change went through; the list that shows it hasn't come back yet.
   // The controls went off before the change was sent, so they're read
   // right away, then the list is let through, well before the page would
@@ -490,16 +495,15 @@ test("shows the page loading while the members list is slow, then says core can'
   await page.goto("/settings/members");
   // In the frame, as skeletons, while the read is slow.
   await expect(page.getByRole("status", { name: "Loading…" })).toBeVisible();
-  const nav = page.getByRole("navigation", { name: "Main" });
+  // Settings' own sections stand in the sidebar on its pages.
+  const nav = page.getByRole("navigation", { name: "Settings" });
   await expect(nav).toBeVisible();
 
-  // Then the page says it didn't load and why, with a way to ask again,
-  // still in the frame.
-  await expect(
-    page.getByRole("heading", { name: "This page didn't load" })
-  ).toBeVisible({ timeout: 15_000 });
-  await expect(page.getByRole("alert")).toHaveText(
-    "Grasp can't be reached right now. Try again in a moment."
+  // Then the members card says it didn't load and why, with a way to ask
+  // again, still in the frame.
+  await expect(page.getByRole("main").getByRole("alert")).toHaveText(
+    "Grasp can't be reached right now. Try again in a moment.",
+    { timeout: 15_000 }
   );
   await expect(page.getByRole("button", { name: "Try again" })).toBeVisible();
   await expect(nav).toBeVisible();
@@ -614,7 +618,7 @@ test("never sends what it gave up on while core was out of reach, once core is b
       server.send(message);
     });
   });
-  await page.goto("/settings/members");
+  await page.goto("/apps");
   const nav = page.getByRole("navigation", { name: "Main" });
   await expect(nav.getByRole("link", { name: "Brain" })).toBeVisible();
 

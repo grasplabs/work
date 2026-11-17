@@ -196,7 +196,7 @@ test("a person searches, edits a document, meets a newer version instead of over
     const mineText = original.replace("sixteen", "twenty-six");
     await page.getByRole("textbox", { name: "Text" }).fill(mineText);
     await page.getByRole("button", { name: "Save" }).click();
-    await expect(page.getByRole("alert")).toContainText(
+    await expect(page.getByRole("main").getByRole("alert")).toContainText(
       "This document changed since you opened it. Version 3 is below"
     );
     await expect(page.getByText("Added elsewhere.")).toBeVisible();

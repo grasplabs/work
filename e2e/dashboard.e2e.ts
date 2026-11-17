@@ -96,7 +96,9 @@ test("a builder sees their workflows on the board, and opens them in full", asyn
 
   // The run, completed today, which needed nobody.
   const runs = page.getByRole("region", { name: "Runs this week" });
-  await expect(runs).toContainText("100% without a person", pageRead);
+  await expect(
+    runs.getByRole("region", { name: "Without a person, of 1 run" })
+  ).toHaveText(/100%$/u, pageRead);
 
   // In full, the month, with each workflow's runs.
   await runs.getByRole("button", { name: "Open in full" }).click();
@@ -275,7 +277,7 @@ test("a person with nothing waiting finds an empty board, takes a widget off, ad
     .toStrictEqual(["return", "goals", "workflows", "apps", "runs", "signals"]);
   await page.reload();
   await expect(titles).toHaveText(begun);
-  await expect(page.getByRole("alert")).toHaveCount(0);
+  await expect(page.getByRole("main").getByRole("alert")).toHaveCount(0);
 
   // Their inbox: nothing waits, nothing was dealt with, and the audit
   // trail is for admins.
@@ -294,7 +296,7 @@ test("a person with nothing waiting finds an empty board, takes a widget off, ad
   await expect(page.getByRole("tab", { name: "Activity" })).toHaveCount(0);
   await page.getByRole("tab", { name: /^Done/u }).click();
   await expect(page.getByText(/^Nothing dealt with yet\./u)).toBeVisible();
-  await expect(page.getByRole("alert")).toHaveCount(0);
+  await expect(page.getByRole("main").getByRole("alert")).toHaveCount(0);
   core[Symbol.dispose]();
 });
 
@@ -307,12 +309,12 @@ test("an admin sees what the models cost this month, with the way to AI spend in
 
   // Other tests' calls count too, so the amount isn't pinned.
   const spend = page.getByRole("region", { name: "AI spend this month" });
-  await expect(spend).toContainText(
-    "for every model call this month",
-    pageRead
-  );
+  await expect(
+    spend.getByRole("region", { name: "For every model call this month" })
+  ).toHaveText(/\$\d+\.\d+$/u, pageRead);
+  // AI spend is part of Settings' AI and spend.
   await spend.getByRole("link", { name: "AI spend in Settings" }).click();
-  await expect(page).toHaveURL(/\/settings\/spend$/u);
+  await expect(page).toHaveURL(/\/settings\/ai-providers$/u);
 });
 
 test("an admin sees the latest activity, with the way to the audit trail", async ({

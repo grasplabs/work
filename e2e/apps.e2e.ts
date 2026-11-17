@@ -283,7 +283,7 @@ test("the sidebar shows everyone the sections, and Settings each person the sect
     );
     // The person menu, at the sidebar's foot, by their name; their role is
     // said inside it.
-    await page.getByRole("button", { name: "Person", exact: true }).click();
+    await page.getByRole("button", { name: /^Person /u }).click();
     await expect(
       page.getByRole("menu").getByText(roleNames[person.role], { exact: true })
     ).toBeVisible();
