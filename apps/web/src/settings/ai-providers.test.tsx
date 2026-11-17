@@ -758,6 +758,11 @@ describe("Settings › AI providers", () => {
     expect(text()).toContain("GPT-5.4");
     expect(text()).toContain("GPT-5 mini");
     expect(document.querySelectorAll("input, select")).toHaveLength(0);
-    expect(document.querySelectorAll("button")).toHaveLength(0);
+    // A button only to read more of a setting, none to change one.
+    expect(
+      [...document.querySelectorAll("button")].map(
+        (each) => each.getAttribute("aria-label") ?? wordsOf(each)
+      )
+    ).toStrictEqual(["More about this setting"]);
   });
 });
