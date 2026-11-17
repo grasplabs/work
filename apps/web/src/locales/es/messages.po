@@ -10951,6 +10951,15 @@ msgstr "Leyó entidades del Cerebro"
 msgid "Read everyone's calls of unknown outcome"
 msgstr "Leyó las llamadas de resultado desconocido de todos"
 
+#: src/brain/sources-page.tsx
+msgctxt "a source of the Brain"
+msgid "Read from a shared connection"
+msgstr "Leído de una conexión compartida"
+
+#: src/brain/memories-page.tsx
+msgid "Read from a shared connection, version {version}"
+msgstr "Leído de una conexión compartida, versión {version}"
+
 #: src/activity/audit-words.ts
 msgid "Read how knowledge is used"
 msgstr "Leyó cómo se usa el conocimiento"

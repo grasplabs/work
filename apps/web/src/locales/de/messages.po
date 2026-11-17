@@ -10951,6 +10951,15 @@ msgstr "Entitäten aus dem Gehirn gelesen"
 msgid "Read everyone's calls of unknown outcome"
 msgstr "Die Aufrufe mit unbekanntem Ergebnis aller gelesen"
 
+#: src/brain/sources-page.tsx
+msgctxt "a source of the Brain"
+msgid "Read from a shared connection"
+msgstr "Aus einer geteilten Verbindung gelesen"
+
+#: src/brain/memories-page.tsx
+msgid "Read from a shared connection, version {version}"
+msgstr "Aus einer geteilten Verbindung gelesen, Version {version}"
+
 #: src/activity/audit-words.ts
 msgid "Read how knowledge is used"
 msgstr "Gelesen, wie Wissen genutzt wird"
