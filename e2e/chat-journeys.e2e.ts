@@ -23,7 +23,7 @@ const questionOf = (opener: string): string =>
 const askFromStart = async (page: Page, question: string) => {
   await page.goto("/");
   await page.getByRole("button", { name: "Not now" }).click();
-  await page.getByLabel("Your question").fill(question);
+  await page.getByRole("textbox", { name: "Your question" }).fill(question);
   await page.getByRole("button", { name: "Send", exact: true }).click();
   await expect(page).toHaveURL(/\/chats\/[^/]+$/u);
   const messages = page.getByRole("log", { name: "Messages" });
@@ -150,7 +150,7 @@ test("a question core never confirms says it wasn't sent, and keeps it in the bo
   const question = questionOf(modelScripts.answers.opener);
   await page.goto("/");
   await page.getByRole("button", { name: "Not now" }).click();
-  const box = page.getByLabel("Your question");
+  const box = page.getByRole("textbox", { name: "Your question" });
   await box.fill(question);
 
   await page.getByRole("button", { name: "Send", exact: true }).click();
@@ -200,12 +200,25 @@ test("the chat beside a page floats, moves, docks again, goes full screen and ba
   // A draft, then closed and opened again: in the same place, the draft kept.
   const draft = "Half a question";
   await page.getByRole("textbox", { name: "Ask Grasp" }).fill(draft);
-  const placed = await head.boundingBox();
+  // Where it stands once it has finished growing back from full screen.
+  const settled = async () => {
+    let last = await head.boundingBox();
+    await expect
+      .poll(async () => {
+        const now = await head.boundingBox();
+        const same = JSON.stringify(now) === JSON.stringify(last);
+        last = now;
+        return same;
+      })
+      .toBe(true);
+    return last;
+  };
+  const placed = await settled();
   await head.getByRole("button", { name: "Close" }).click();
   await expect(head).toHaveCount(0);
   await page.getByRole("button", { name: /^Open the chat/u }).click();
   await expect(head).toBeVisible();
-  expect(await head.boundingBox()).toStrictEqual(placed);
+  expect(await settled()).toStrictEqual(placed);
   await expect(page.getByRole("textbox", { name: "Ask Grasp" })).toHaveText(
     draft
   );

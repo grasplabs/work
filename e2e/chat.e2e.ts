@@ -464,7 +464,7 @@ test("one control picks the model and how hard it thinks, sends both with the qu
   await page.goto("/");
   const control = page.getByRole("button", { name: /^Model and effort: /u });
   const models = page.getByRole("list", { name: "Model" }).getByRole("button");
-  const effort = page.getByRole("slider", { name: "How hard it thinks" });
+  const effort = page.getByRole("radiogroup", { name: "How hard it thinks" });
 
   // The stack's first model doesn't think: the control names it alone,
   // and its surface says it has one level.
@@ -486,10 +486,10 @@ test("one control picks the model and how hard it thinks, sends both with the qu
   // One that thinks offers its efforts on the same surface, at the
   // model's own default.
   await models.filter({ hasText: "claude-sonnet-4-6" }).click();
-  await expect(effort).toHaveAttribute("aria-valuetext", "Medium");
-  await effort.focus();
-  await page.keyboard.press("End");
-  await expect(effort).toHaveAttribute("aria-valuetext", "Max");
+  await expect(effort.getByRole("radio")).toHaveCount(4);
+  await expect(effort.getByRole("radio", { name: "Medium" })).toBeChecked();
+  await effort.getByRole("radio", { name: "Max" }).check();
+  await expect(effort.getByRole("radio", { name: "Max" })).toBeChecked();
   await page.keyboard.press("Escape");
   await expect(effort).toHaveCount(0);
   await expect(control).toHaveAccessibleName(

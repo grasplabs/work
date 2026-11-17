@@ -86,15 +86,21 @@ test("offers the tour on first sign-in, takes it to its end, and starts it again
     await page.keyboard.press("Tab");
     // oxlint-disable-next-line no-await-in-loop -- see above
     await expect(
-      page.locator('[data-slot="sidebar-wrapper"] :focus')
+      page
+        .getByRole("complementary", { name: "Sidebar" })
+        .or(page.getByRole("main"))
+        .locator(":focus")
     ).toHaveCount(0);
   }
 
   // Nor do the page's own shortcuts, which it listens for on the window:
   // the Brain's arrow keys and Enter, from nowhere in particular or from
   // his card, and the sidebar's Cmd/Ctrl+B.
-  const sidebar = page.locator('[data-slot="sidebar"]:not([data-mobile])');
-  const folded = await sidebar.getAttribute("data-state");
+  // Whether the sidebar is open, as its trigger says.
+  const sidebar = page.getByRole("button", {
+    name: "Show or hide the sidebar",
+  });
+  const folded = await sidebar.getAttribute("aria-expanded");
   await page.evaluate(() => {
     if (document.activeElement instanceof HTMLElement) {
       document.activeElement.blur();
@@ -107,11 +113,11 @@ test("offers the tour on first sign-in, takes it to its end, and starts it again
   await page.keyboard.press("ControlOrMeta+b");
   await expect(page).toHaveURL(stops[0][0]);
   await expect(tour).toContainText(stops[0][1]);
-  await expect(sidebar).toHaveAttribute("data-state", folded ?? "");
+  await expect(sidebar).toHaveAttribute("aria-expanded", folded ?? "");
 
   await page.keyboard.press("Escape");
   await expect(tour).toHaveCount(0);
   // Once it is over, they work again.
   await page.keyboard.press("ControlOrMeta+b");
-  await expect(sidebar).not.toHaveAttribute("data-state", folded ?? "");
+  await expect(sidebar).not.toHaveAttribute("aria-expanded", folded ?? "");
 });

@@ -133,10 +133,10 @@ test("a chat building an App offers its workspace, whose preview changes none of
     // It makes this chat the App's, beside the draft it builds, and the
     // address lets it go.
     await expect(page).toHaveURL(new RegExp(`/apps/${app.id}$`, "u"));
-    // The chat's head names it, on its menu's button.
+    // The chat's head names it, as its title to rename.
     const chatName = page
-      .getByRole("button", { name: "More for this chat" })
-      .filter({ hasText: `Build ${tag}` });
+      .getByRole("region", { name: "Chat" })
+      .getByRole("button", { name: `Build ${tag}`, exact: true });
     await expect(chatName).toBeVisible();
     // There, the draft this chat builds is the preview, not the live App.
     // Shared with nobody yet: Share with your team is on.
@@ -482,7 +482,9 @@ test("a preview whose first page doesn't build shows it once the agent's next wr
       timeout: 30_000,
     });
     await expect(
-      preview.getByText("The draft's code doesn't build.")
+      preview
+        .getByRole("paragraph")
+        .filter({ hasText: "The draft's code doesn't build." })
     ).toBeVisible();
     await expect(
       preview.getByRole("button", { name: "Fix with Grasp" })

@@ -63,11 +63,23 @@ for (const [answer, gone] of Object.entries(answers)) {
       .getByRole("link", { name: "Brain", exact: true })
       .click();
     await reloaded;
+    // The failed page: its heading, why (said once to a screen reader too),
+    // Try again, and whether Grasp can be reached.
     await expect(
-      page.getByText(
-        "Grasp was updated while this page was open. Try again to load the new version."
-      )
+      page.getByRole("heading", { name: "This page didn't load" })
     ).toBeVisible();
+    await expect(
+      page.getByRole("paragraph").filter({
+        hasText:
+          "Grasp was updated while this page was open. Try again to load the new version.",
+      })
+    ).toBeVisible();
+    await expect(
+      page.getByRole("alert").filter({
+        hasText: "Grasp was updated while this page was open.",
+      })
+    ).toHaveCount(1);
+    await expect(page.getByText("Grasp can be reached")).toBeVisible();
     await page.evaluate(() => {
       document.documentElement.dataset.marked = "yes";
     });

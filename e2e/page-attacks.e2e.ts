@@ -449,7 +449,11 @@ test("a page that loads another document in its frame is stopped", async ({
   const page = await pageOf(builder);
   await open(page, pagePath(attacking, "/wandering"));
 
-  await expect(page.getByText(left)).toBeVisible({ timeout: 30_000 });
+  // Said on the page, and once to a screen reader.
+  await expect(
+    page.getByRole("paragraph").filter({ hasText: left })
+  ).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole("alert")).toContainText(left);
   await expect(page.getByRole("button", { name: "Try again" })).toBeVisible();
   // Emptied: whatever the frame went to is no longer on the page.
   await expect(frameOf(page)).not.toHaveAttribute("src");
@@ -461,7 +465,10 @@ test("a page that sends more than its port takes is stopped, and the page says s
   const page = await pageOf(builder);
   await open(page, pagePath(attacking, "/oversized"));
 
-  await expect(page.getByText(disconnected)).toBeVisible({ timeout: 30_000 });
+  await expect(
+    page.getByRole("paragraph").filter({ hasText: disconnected })
+  ).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole("alert")).toContainText(disconnected);
   await expect(page.getByRole("button", { name: "Try again" })).toBeVisible();
   await expect(frameOf(page)).not.toHaveAttribute("src");
 });

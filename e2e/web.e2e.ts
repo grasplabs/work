@@ -418,20 +418,28 @@ test("shows the members page only to someone signed in, and never signs them out
   // once the page has waited its few seconds for a connection.
   failing = Number.POSITIVE_INFINITY;
   await page.goto("/settings/members");
+  // The failed page: its heading, why, and that Grasp hasn't answered.
   await expect(
-    page.getByText("Grasp can't be reached right now. Try again in a moment.")
+    page.getByRole("heading", { name: "This page didn't load" })
   ).toBeVisible({ timeout: reconnectMs });
+  await expect(
+    page.getByRole("paragraph").filter({
+      hasText: "Grasp can't be reached right now. Try again in a moment.",
+    })
+  ).toBeVisible();
+  await expect(page.getByText("No answer from Grasp yet")).toBeVisible();
   expect(new URL(page.url()).pathname).toBe("/settings/members");
   await expect(
     page.getByText("Use your organization’s account to go on.")
   ).toHaveCount(0);
 
   // Trying again shows it's trying, then says so again while core fails.
-  const unreachable = page.getByRole("alert");
+  const unreachable = page.getByRole("main").getByRole("alert");
   await page.getByRole("button", { name: "Try again" }).click();
   // Busy while it tries: a second press waits for the first.
+  // It keeps its name while it works, and says it is busy.
   await expect(
-    page.getByRole("button", { name: "Trying again…" })
+    page.getByRole("main").getByRole("button", { name: "Try again" })
   ).toHaveAttribute("aria-busy", "true");
   await expect(unreachable).toHaveText(
     "Grasp can't be reached right now. Try again in a moment.",
@@ -627,9 +635,9 @@ test("never sends what it gave up on while core was out of reach, once core is b
   // The page's own: the chat beside it says the same at once, as its
   // call drops, while the brain's read still waits for a connection.
   await expect(
-    page
-      .getByRole("main")
-      .getByText("Grasp can't be reached right now. Try again in a moment.")
+    page.getByRole("main").getByRole("paragraph").filter({
+      hasText: "Grasp can't be reached right now. Try again in a moment.",
+    })
   ).toBeVisible({ timeout: reconnectMs });
 
   // Core is back. Trying the page again reads the brain once more: that is

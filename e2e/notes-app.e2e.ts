@@ -651,7 +651,10 @@ test("a file whose page lost the App's data shows the refusal, and isn't read ag
   });
   // The page's own refusal of a revoked release (the page's or the
   // version's, whichever it hears first).
-  const refusal = page.getByText(/^This version of the App was revoked/u);
+  // On the page; a screen reader hears it once too, from an alert.
+  const refusal = page
+    .getByRole("paragraph")
+    .filter({ hasText: /^This version of the App was revoked/u });
   // The upload makes the page ask, but it may have asked already: its
   // live data is refused the same way the moment the release is
   // revoked, and the page then stops the page, its picker with it. So
