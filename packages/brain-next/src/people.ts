@@ -278,6 +278,24 @@ export const applyPerson = (
 ): number => {
   let changed = 0;
   const holding = entitiesHolding(sql, identifiers);
+  // And each card of kind `person` a restore's export gives with one of the
+  // identifiers it closes (`restore_cards`): the store may hold its lines by
+  // name alone yet, a restore not through. Taken by its id; their rows go.
+  const closing = [
+    ...subjects,
+    ...sql
+      .exec<{ entity: string }>(
+        `SELECT DISTINCT entity FROM restore_cards
+        WHERE subject IN (SELECT value FROM json_each(?1))`,
+        JSON.stringify(subjects)
+      )
+      .toArray()
+      .map(({ entity }) => entityClosureOf(entity)),
+  ];
+  sql.exec(
+    "DELETE FROM restore_cards WHERE subject IN (SELECT value FROM json_each(?1))",
+    JSON.stringify(subjects)
+  );
   // And each card the erasure closed by its id (a ledger entry's): in a
   // copy of the store from before her address reached it, it holds none.
   // An id is the store's own UUID, so it names that card and no other.
@@ -286,14 +304,14 @@ export const applyPerson = (
       `SELECT row, id FROM entities
       WHERE id IN (SELECT substr(value, 8) FROM json_each(?1)
         WHERE value LIKE 'entity:%')`,
-      JSON.stringify(subjects)
+      JSON.stringify(closing)
     )
     .toArray()
     .filter(({ row }) => !holding.some((entity) => entity.row === row))
     .map(({ row, id }) => ({ row, id, alone: true }));
   const entities = [...holding, ...byId];
   for (const closed of [
-    ...subjects,
+    ...closing,
     ...entities.flatMap(({ id, alone }) =>
       alone ? [entityClosureOf(id)] : []
     ),
@@ -370,10 +388,12 @@ export const applyPerson = (
  * identifiers each line gives them (`identifiers`, in order). One of kind
  * `person` holding an identifier a person's erasure closed is theirs, by
  * the rule an add leaves it out by (`strippedOf`): closed by its id under
- * that erasure, with what of it the store holds hidden (`applyPerson`), so
- * every line about it or relating to it is passed over (restore.ts
- * `passesOverMemory`), whichever comes first; and `restoring` made stale,
- * as it holds their card. In the caller's transaction.
+ * that erasure, so every line about it or relating to it is passed over
+ * (restore.ts `passesOverMemory`), whichever comes first; and `restoring`
+ * made stale, as it holds their card. The store holds nothing of it to
+ * hide: a restore writes no line before every part is checked, and an
+ * erasure meanwhile took any card the check had recorded
+ * (`restore_cards`, `applyPerson`). In the caller's transaction.
  */
 export const closeCards = (
   sql: SqlStorage,
@@ -404,10 +424,11 @@ export const closeCards = (
           .toArray()
       : [];
     if (by !== undefined) {
-      applyPerson(
-        sql,
-        { key: by.key, subject: by.person },
-        { people: [], identifiers: [], subjects: [entityClosureOf(id)] }
+      sql.exec(
+        `INSERT OR IGNORE INTO person_erasure_subjects (subject, erasure)
+        VALUES (?1, ?2)`,
+        entityClosureOf(id),
+        by.key
       );
       // The export holds her card: stale as any export taken before her
       // erasure (exports.ts `staleSql`), so no file of it is served, it

@@ -1029,6 +1029,8 @@ const settle = (
   // hold (an erasure before or during the restore).
   if (settled.length > 0 && state === "done") {
     retireIfStale(storage, id);
+    // The store holds the cards as their lines gave them now.
+    sql.exec("DELETE FROM restore_cards");
   }
 };
 
@@ -1107,7 +1109,21 @@ const checkPart = async (
     // start): so every line about it is passed over, whichever comes first
     // in the export, and nothing rests on what an earlier start recorded.
     for (const [at, { entities }] of memoryLines.entries()) {
-      closeCards(sql, id, entities, namings[at] ?? []);
+      const subjects = namings[at] ?? [];
+      // Every card of kind `person` it gives, by its identifiers' subjects:
+      // so an erasure before the restore is through takes it by its id.
+      for (const [place, entity] of entities.entries()) {
+        for (const subject of entity.kind === "person"
+          ? (subjects[place] ?? [])
+          : []) {
+          sql.exec(
+            "INSERT OR IGNORE INTO restore_cards (subject, entity) VALUES (?, ?)",
+            subject,
+            entity.id
+          );
+        }
+      }
+      closeCards(sql, id, entities, subjects);
     }
     // A part whose lines don't check, or whose holdings are missing or
     // unreadable (what it holds may not all be on record), is damaged.

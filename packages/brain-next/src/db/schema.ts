@@ -1315,6 +1315,25 @@ export const personErasureSubjects = sqliteTable(
 );
 
 /**
+ * A card of kind `person` the export of a restore gives, with an
+ * identifier of it (restore.ts `checkPart`): its id, and the identifier's
+ * SHA-256 as an erasure closes it (people.ts), never the identifier. So a
+ * person's erasure while the restore is not through (failed, to start
+ * again) takes their card by its id, though the store holds the lines
+ * with their address yet (people.ts `applyPerson`), and it deletes the rows
+ * of their identifiers. Written by the restore's check, again on every
+ * start (the same rows); gone once a restore is done or given up.
+ */
+export const restoreCards = sqliteTable(
+  "restore_cards",
+  {
+    subject: text().notNull(),
+    entity: text().notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.subject, table.entity] })]
+);
+
+/**
  * A memory a person's erasure hides until the tick deletes it (memories.ts
  * `unerasedSql`): every statement that reads, counts, links or exports a
  * memory leaves it out. Gone with the memory.

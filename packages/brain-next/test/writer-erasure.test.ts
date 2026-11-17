@@ -916,6 +916,7 @@ describe("a writer's erasure", () => {
                 "chunk_blocks",
                 "person_erasure_subjects",
                 "person_erasure_memories",
+                "restore_cards",
               ].includes(name)
           )
           .map((table) => {
@@ -1016,6 +1017,7 @@ describe("a writer's erasure", () => {
             !made.includes("chunk_days_day_chunk_idx") &&
             !made.includes("chunk_blocks") &&
             !made.includes("person_erasure_subjects") &&
+            !made.includes("restore_cards") &&
             !made.includes("memories_speaker_idx") &&
             !made.includes("memory_confirmations_person_idx")
         ),

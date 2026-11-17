@@ -15,6 +15,7 @@ import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { beforeAll, describe, expect, it, vi } from "vite-plus/test";
 
+import { identifierSubjectOf } from "../src/people.ts";
 import type { BrainStore } from "../src/store.ts";
 import { exportSettled, tick } from "./export-reads.ts";
 import { copyOf, restore } from "./store-copy.ts";
@@ -381,146 +382,435 @@ const gone = {
   keptExported: [],
 };
 
-describe("a person's erasure and a restore of a company export", () => {
+/**
+ * A company's Brain where her address comes late: her card by name, Bob's
+ * and Carl's relations to her, then enough of a project's memories to fill
+ * a part of an export, then her address on her card and on Greta's.
+ */
+const lateWorld = async () => {
+  const group = unique("g");
+  const reader: Reader = { person: unique("reader-"), groups: [group] };
+  const local = word();
+  const name = `Anna ${word()}`;
+  const gretaName = `Greta ${word()}`;
+  const filler = `Filler ${word()}`;
+  const mark = (): string => `mk${word()}`;
+  const marker = {
+    nameOnly: mark(),
+    bobReports: mark(),
+    carlReports: mark(),
+    address: mark(),
+    gretaDesk: mark(),
+    bobChess: mark(),
+  };
+  const add = async (entities: NewEntity[], memories: NewMemory[]) =>
+    await shared().addMemories({
+      change: crypto.randomUUID(),
+      access: { kind: "audience", group },
+      reader,
+      entities,
+      memories,
+    });
+  const her = await add(
+    [{ key: "a", kind: "person", names: [name] }],
+    [fromApp("a", `${name} is on leave ${marker.nameOnly}`)]
+  );
+  const card = her.entities.a ?? "";
+  const bob = await add(
+    [
+      { key: "b", kind: "person", names: [`Bob ${word()}`] },
+      { key: "a", id: card, kind: "person" },
+    ],
+    [
+      fromApp("b", `Bob plays chess ${marker.bobChess}`),
+      fromApp("b", `Bob reports to ${name} ${marker.bobReports}`, {
+        attribute: "manager",
+        object: "a",
+      }),
+    ]
+  );
+  await add(
+    [
+      { key: "c", kind: "person", names: [`Carl ${word()}`] },
+      { key: "a", id: card, kind: "person" },
+    ],
+    [
+      fromApp("c", `Carl reports to ${name} ${marker.carlReports}`, {
+        attribute: "manager",
+        object: "a",
+      }),
+    ]
+  );
+  const project = await add(
+    [{ key: "f", kind: "project", names: [filler] }],
+    [fromApp("f", `${filler} begins`)]
+  );
+  for (let batch = 0; batch < 6; batch += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- one add after another
+    await add(
+      [{ key: "f", id: project.entities.f ?? "", kind: "project" }],
+      Array.from({ length: 90 }, (_, n) =>
+        fromApp("f", `${filler} step ${batch} ${n}`)
+      )
+    );
+  }
+  await add(
+    [{ key: "a", id: card, kind: "person", identifiers: [email(local)] }],
+    [fromApp("a", `${name} leads finance ${marker.address}`)]
+  );
+  await add(
+    [
+      {
+        key: "g",
+        kind: "person",
+        names: [gretaName],
+        identifiers: [email(local)],
+      },
+    ],
+    [fromApp("g", `${gretaName} owns the desk ${marker.gretaDesk}`)]
+  );
+  return {
+    reader,
+    anna: unique("anna-"),
+    local,
+    name,
+    marker,
+    cards: [card, bob.entities.b ?? "", project.entities.f ?? ""],
+    group,
+  };
+};
+type LateWorld = Awaited<ReturnType<typeof lateWorld>>;
+
+/** How many cards a restore's check recorded by `identifier` the store still keeps (`restore_cards`), or by any when none is named. */
+const cardsKept = async (identifier?: Identifier): Promise<number> => {
+  const subject =
+    identifier === undefined ? null : await identifierSubjectOf(identifier);
+  return await runInDurableObject(
+    shared(),
+    (_instance, state) =>
+      state.storage.sql
+        .exec(
+          "SELECT 1 FROM restore_cards WHERE ?1 IS NULL OR subject = ?1",
+          subject
+        )
+        .toArray().length
+  );
+};
+
+/** What of her any read or raw row of the store shows. */
+const herLeft = async (w: LateWorld): Promise<string[]> => {
+  const store = shared();
+  const { reader } = w;
+  const seen = JSON.stringify(
+    await Promise.all([
+      ...w.cards.flatMap((entity) => [
+        store.readMemories({ entity, reader, history: true }),
+        store.readEntityNames({ entity, reader }),
+        store.readCard({ entity, reader }),
+      ]),
+      store.findEntities({ reader, name: w.name }),
+      store.findEntities({ reader, identifier: email(w.local) }),
+      store.findEntities({ reader, kind: "person" }),
+      store.recall({ question: w.name, reader, budget: { tokens: 4000 } }),
+    ])
+  );
+  const raw = await runInDurableObject(shared(), (_instance, state) =>
+    JSON.stringify([
+      ...state.storage.sql.exec("SELECT * FROM memories").toArray(),
+      ...state.storage.sql.exec("SELECT * FROM entity_names").toArray(),
+    ])
+  );
+  const needles = [
+    w.name,
+    w.local,
+    w.marker.nameOnly,
+    w.marker.bobReports,
+    w.marker.carlReports,
+    w.marker.address,
+    w.marker.gretaDesk,
+  ];
+  return [
+    ...needles
+      .filter((needle) => seen.includes(needle))
+      .map((n) => `read:${n}`),
+    ...needles.filter((needle) => raw.includes(needle)).map((n) => `raw:${n}`),
+  ];
+};
+
+/**
+ * Restores export `id` until its write pass reaches the part holding her
+ * address, which never reads then; its item then gone, the tick settles it
+ * as failed. The parts before are written.
+ */
+const failedAtHerAddress = async (
+  id: string,
+  local: string
+): Promise<string | undefined> => {
+  const bucket = env.BRAIN_OBJECTS;
+  const partReads = new Map<string, number>();
+  Reflect.set(env, "BRAIN_OBJECTS", {
+    head: async (key: string) => await bucket.head(key),
+    list: async (options: R2ListOptions) => await bucket.list(options),
+    put: async (key: string, value: string) => await bucket.put(key, value),
+    delete: async (keys: string | string[]) => {
+      await bucket.delete(keys);
+    },
+    get: async (key: string) => {
+      const object = await bucket.get(key);
+      if (key.includes(`exports/${id}/part-`) && object !== null) {
+        const text = await object.text();
+        const seen = (partReads.get(key) ?? 0) + 1;
+        partReads.set(key, seen);
+        // Its check reads it once; the write pass's read never gets through.
+        if (text.includes(local) && seen >= 2) {
+          throw new Error("held by the test");
+        }
+        return await bucket.get(key);
+      }
+      return object;
+    },
+  });
+  try {
+    await shared().startRestore(id, "test");
+    for (let ticks = 0; ticks < 8; ticks += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one tick after another
+      await tick(shared());
+    }
+    await runInDurableObject(shared(), (_instance, state) => {
+      state.storage.sql.exec(
+        "DELETE FROM work_items WHERE kind = 'brain.restore'"
+      );
+    });
+    await tick(shared());
+    const status = await shared().restoreStatus(id);
+    return status?.state;
+  } finally {
+    Reflect.set(env, "BRAIN_OBJECTS", bucket);
+  }
+};
+
+describe("a person's erasure and restores", () => {
   /** The shared store before any test of this file added to it: empty. */
   let empty: Copy = { tables: [], others: [] };
   beforeAll(async () => {
     empty = await copyOf(shared());
   });
 
-  it("leaves two people out of a restore of an export from before their erasures, which ran on the store emptied by its loss", async () => {
-    const w = await world();
-    const id = await exportNow();
-    await restore(shared(), empty);
-    await erase(w.anna, [email(w.annaLocal)]);
-    await erase(w.dora, [email(w.doraLocal)]);
-    await shared().startRestore(id, "test");
-    const state = await restoreEnded(id);
-    await tick(shared());
+  describe("a person's erasure and a restore of a company export", () => {
+    it("leaves two people out of a restore of an export from before their erasures, which ran on the store emptied by its loss", async () => {
+      const w = await world();
+      const id = await exportNow();
+      await restore(shared(), empty);
+      await erase(w.anna, [email(w.annaLocal)]);
+      await erase(w.dora, [email(w.doraLocal)]);
+      await shared().startRestore(id, "test");
+      const state = await restoreEnded(id);
+      await tick(shared());
 
-    expect({
-      state,
-      served: await servedOf(id),
-      left: await leftOf(w, true),
-    }).toStrictEqual({
-      state: "done",
-      served: refusedForGood,
-      left: gone,
-    });
-  });
-
-  it("serves no file of an export from before her erasure once it is restored after the store's loss, nor restores it again, and a new export holds nothing of her", async () => {
-    const w = await world();
-    const id = await exportNow();
-    await erase(w.anna, [email(w.annaLocal)]);
-    // Lost before any tick: the export's files are still in the bucket.
-    await restore(shared(), empty);
-    await shared().startRestore(id, "test");
-    const state = await restoreEnded(id);
-    await tick(shared());
-
-    expect({
-      state,
-      served: await servedOf(id),
-      left: await leftOf(w, false),
-    }).toStrictEqual({
-      state: "done",
-      served: refusedForGood,
-      left: gone,
-    });
-  });
-
-  it("refuses an erasure a restore starts under while it hashes, and erases her whole once the restore is through", async () => {
-    const w = await world();
-    const id = await exportNow();
-    await restore(shared(), empty);
-    const realDigest = crypto.subtle.digest.bind(crypto.subtle);
-    let started = false;
-    const digest = vi
-      .spyOn(crypto.subtle, "digest")
-      .mockImplementation(async (algorithm, data) => {
-        if (!started) {
-          started = true;
-          await shared().startRestore(id, "test");
-        }
-        return await realDigest(algorithm, data);
+      expect({
+        state,
+        served: await servedOf(id),
+        left: await leftOf(w, true),
+      }).toStrictEqual({
+        state: "done",
+        served: refusedForGood,
+        left: gone,
       });
-    let meanwhile: string;
-    try {
-      meanwhile = await erased(w.anna, [email(w.annaLocal)]);
-    } finally {
-      digest.mockRestore();
-    }
-    const state = await restoreEnded(id);
-    await erase(w.anna, [email(w.annaLocal)]);
-
-    expect({ meanwhile, state, left: await leftOf(w, false) }).toStrictEqual({
-      meanwhile: `Error: ${restoringNow}`,
-      state: "done",
-      left: gone,
     });
-  });
 
-  it("leaves her out of a restore started again after one given up at the part holding her address, her erasure run between", async () => {
-    const w = await world();
-    const id = await exportNow();
-    await restore(shared(), empty);
-    // The part holding her address never gets through.
-    const realDigest = crypto.subtle.digest.bind(crypto.subtle);
-    const decoder = new TextDecoder();
-    const digest = vi
-      .spyOn(crypto.subtle, "digest")
-      .mockImplementation(async (algorithm, data) => {
-        const bytes = ArrayBuffer.isView(data)
-          ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
-          : new Uint8Array(data);
-        if (decoder.decode(bytes).includes(w.marker.address)) {
-          throw new Error("held by the test");
-        }
-        return await realDigest(algorithm, data);
+    it("serves no file of an export from before her erasure once it is restored after the store's loss, nor restores it again, and a new export holds nothing of her", async () => {
+      const w = await world();
+      const id = await exportNow();
+      await erase(w.anna, [email(w.annaLocal)]);
+      // Lost before any tick: the export's files are still in the bucket.
+      await restore(shared(), empty);
+      await shared().startRestore(id, "test");
+      const state = await restoreEnded(id);
+      await tick(shared());
+
+      expect({
+        state,
+        served: await servedOf(id),
+        left: await leftOf(w, false),
+      }).toStrictEqual({
+        state: "done",
+        served: refusedForGood,
+        left: gone,
       });
-    let given: string | undefined;
-    try {
-      given = await failedRestore(id);
-    } finally {
-      digest.mockRestore();
-    }
-    const between = await erased(w.anna, [email(w.annaLocal)]);
-    await shared().startRestore(id, "test");
-    const state = await restoreEnded(id);
+    });
 
-    expect({
-      given,
-      between,
-      state,
-      left: await leftOf(w, false),
-    }).toStrictEqual({
-      given: "failed",
-      between: "erased",
-      state: "done",
-      left: gone,
+    it("refuses an erasure a restore starts under while it hashes, and erases her whole once the restore is through", async () => {
+      const w = await world();
+      const id = await exportNow();
+      await restore(shared(), empty);
+      const realDigest = crypto.subtle.digest.bind(crypto.subtle);
+      let started = false;
+      const digest = vi
+        .spyOn(crypto.subtle, "digest")
+        .mockImplementation(async (algorithm, data) => {
+          if (!started) {
+            started = true;
+            await shared().startRestore(id, "test");
+          }
+          return await realDigest(algorithm, data);
+        });
+      let meanwhile: string;
+      try {
+        meanwhile = await erased(w.anna, [email(w.annaLocal)]);
+      } finally {
+        digest.mockRestore();
+      }
+      const state = await restoreEnded(id);
+      await erase(w.anna, [email(w.annaLocal)]);
+
+      expect({ meanwhile, state, left: await leftOf(w, false) }).toStrictEqual({
+        meanwhile: `Error: ${restoringNow}`,
+        state: "done",
+        left: gone,
+      });
+    });
+
+    it("leaves her out of a restore started again after one given up at the part holding her address, her erasure run between", async () => {
+      const w = await world();
+      const id = await exportNow();
+      await restore(shared(), empty);
+      // The part holding her address never gets through.
+      const realDigest = crypto.subtle.digest.bind(crypto.subtle);
+      const decoder = new TextDecoder();
+      const digest = vi
+        .spyOn(crypto.subtle, "digest")
+        .mockImplementation(async (algorithm, data) => {
+          const bytes = ArrayBuffer.isView(data)
+            ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
+            : new Uint8Array(data);
+          if (decoder.decode(bytes).includes(w.marker.address)) {
+            throw new Error("held by the test");
+          }
+          return await realDigest(algorithm, data);
+        });
+      let given: string | undefined;
+      try {
+        given = await failedRestore(id);
+      } finally {
+        digest.mockRestore();
+      }
+      const between = await erased(w.anna, [email(w.annaLocal)]);
+      await shared().startRestore(id, "test");
+      const state = await restoreEnded(id);
+
+      expect({
+        given,
+        between,
+        state,
+        left: await leftOf(w, false),
+      }).toStrictEqual({
+        given: "failed",
+        between: "erased",
+        state: "done",
+        left: gone,
+      });
+    });
+
+    it("leaves her out of a failed restore's retry, her erasure run while it had failed before her memories came back", async () => {
+      const w = await world();
+      const id = await exportNow();
+      await restore(shared(), empty);
+      const failed = await failedRestore(id);
+      const between = await erased(w.anna, [email(w.annaLocal)]);
+      await shared().startRestore(id, "test");
+      const state = await restoreEnded(id);
+
+      expect({
+        failed,
+        between,
+        state,
+        left: await leftOf(w, false),
+      }).toStrictEqual({
+        failed: "failed",
+        between: "erased",
+        state: "done",
+        left: gone,
+      });
     });
   });
 
-  it("leaves her out of a failed restore's retry, her erasure run while it had failed before her memories came back", async () => {
-    const w = await world();
-    const id = await exportNow();
-    await restore(shared(), empty);
-    const failed = await failedRestore(id);
-    const between = await erased(w.anna, [email(w.annaLocal)]);
-    await shared().startRestore(id, "test");
-    const state = await restoreEnded(id);
+  describe("a person's erasure on a store a restore half filled", () => {
+    it("takes her card the restore wrote by name only, and it stays gone once the store is used", async () => {
+      const w = await lateWorld();
+      const id = await exportNow();
+      await restore(shared(), empty);
+      const failed = await failedAtHerAddress(id, w.local);
+      const before = await herLeft(w);
+      const recorded = await cardsKept(email(w.local));
+      const erasedNow = await erased(w.anna, [email(w.local)]);
+      // The cards recorded by her address (hers and Greta's) go with it.
+      const keptAfter = await cardsKept(email(w.local));
+      await tick(shared());
+      await tick(shared());
+      const after = await herLeft(w);
+      // The store is used: the failed restore can't start again.
+      await shared().addMemories({
+        change: crypto.randomUUID(),
+        access: { kind: "audience", group: w.group },
+        reader: w.reader,
+        entities: [{ key: "x", kind: "project", names: [`New ${word()}`] }],
+        memories: [fromApp("x", `A new project ${word()}`)],
+      });
+      await tick(shared());
+      // Given up for good: no card it recorded is kept.
+      const keptUsed = await cardsKept();
 
-    expect({
-      failed,
-      between,
-      state,
-      left: await leftOf(w, false),
-    }).toStrictEqual({
-      failed: "failed",
-      between: "erased",
-      state: "done",
-      left: gone,
+      expect({
+        failed,
+        before: before.length > 0,
+        recorded: recorded > 0,
+        erasedNow,
+        keptAfter,
+        keptUsed,
+        after,
+        used: await herLeft(w),
+      }).toStrictEqual({
+        failed: "failed",
+        before: true,
+        recorded: true,
+        erasedNow: "erased",
+        keptAfter: 0,
+        keptUsed: 0,
+        after: [],
+        used: [],
+      });
+    });
+
+    it("leaves her out of the failed restore started again after her erasure on the half-filled store", async () => {
+      const w = await lateWorld();
+      const id = await exportNow();
+      await restore(shared(), empty);
+      const failed = await failedAtHerAddress(id, w.local);
+      const erasedNow = await erased(w.anna, [email(w.local)]);
+      await shared().startRestore(id, "test");
+      const state = await restoreEnded(id);
+      // What a reader sees the moment it is through, before any tick.
+      const leftAtDone = await herLeft(w);
+      const atDone = leftAtDone.filter((left) => left.startsWith("read:"));
+      const keptAtDone = await cardsKept();
+      await tick(shared());
+      await tick(shared());
+
+      expect({
+        failed,
+        erasedNow,
+        state,
+        atDone,
+        keptAtDone,
+        left: await herLeft(w),
+      }).toStrictEqual({
+        failed: "failed",
+        erasedNow: "erased",
+        state: "done",
+        atDone: [],
+        keptAtDone: 0,
+        left: [],
+      });
     });
   });
 });

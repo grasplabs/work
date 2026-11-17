@@ -1403,6 +1403,10 @@ const giveUpRestores = (storage: DurableObjectStorage): void => {
       `UPDATE restores SET state = 'abandoned' WHERE ${givenUpSql} RETURNING export`
     )
     .toArray();
+  // Never started again: the cards its export gives are no longer needed.
+  if (given.length > 0) {
+    storage.sql.exec("DELETE FROM restore_cards");
+  }
   for (const restore of given) {
     // Adopted, and its check found a damaged part: what its files hold is
     // not all on record, so they go.

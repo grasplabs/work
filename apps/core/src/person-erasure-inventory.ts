@@ -587,6 +587,11 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "brainStore.person_erasure_subjects": {
     kept: "what a person's erasure closed: their address by SHA-256, closed for good, and their card by its id",
   },
+  // SHA-256 of the identifiers of the person cards a restore's export
+  // gives: a person's erasure deletes the rows of theirs, after taking the
+  // cards by them (people.ts `applyPerson`); the rest go once the restore
+  // is done or given up.
+  "brainStore.restore_cards": { erased: "brain_shared" },
   "brainStore.person_erasure_memories": {
     kept: "the memories a person's erasure hides until the tick deletes them, by row",
   },
@@ -646,6 +651,7 @@ export const reviewedPersonColumns: Readonly<
   "brainStore.memory_confirmations": ["person"],
   "brainStore.memory_extractions": ["subject"],
   "brainStore.person_erasure_subjects": ["subject"],
+  "brainStore.restore_cards": ["subject"],
   "brainStore.reader_set_members": ["principal"],
   "brainStore.removed_sources": ["subject"],
   "brainStore.source_subjects": ["group_subject", "subject"],

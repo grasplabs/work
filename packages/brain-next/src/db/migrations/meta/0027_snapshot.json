@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "f9c80dea-8145-4654-9a3a-6682781952b9",
+  "id": "7ae5456c-8d61-4ee8-8be8-18dd07d0f14f",
   "prevId": "294a4b9a-6999-43c1-92b5-14d688e029f4",
   "tables": {
     "chunk_blocks": {
@@ -2179,6 +2179,38 @@
         }
       },
       "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "restore_cards": {
+      "name": "restore_cards",
+      "columns": {
+        "subject": {
+          "name": "subject",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "entity": {
+          "name": "entity",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "restore_cards_subject_entity_pk": {
+          "columns": [
+            "subject",
+            "entity"
+          ],
+          "name": "restore_cards_subject_entity_pk"
+        }
+      },
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
