@@ -83,7 +83,7 @@ const notesOf = async (person: Person, app: string): Promise<unknown> =>
     kind: "query",
   });
 
-/** A copy has every file of it. */
+/** A copy has every file of it, whatever its name: `AGENTS.md` too. */
 const v1 = withFiles(notesCode, {
   "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@grasp-os/sdk/react";
@@ -96,14 +96,14 @@ function Notes() {
 
 export const Route = createFileRoute("/")({ component: Notes });
 `,
-  "README.md": "# Notes\n",
+  "AGENTS.md": "# Notes\n",
 });
 
 /** A released App of `owner`'s at version 1, with a version 2 after it. */
 const notesApp = async (owner: Person): Promise<string> => {
   const { id } = await owner.api.apps.create({ name: `Notes ${unique()}` });
   await release(owner, id, v1);
-  await commitApp(owner.api, id, { "README.md": "# Notes, v2\n" });
+  await commitApp(owner.api, id, { "AGENTS.md": "# Notes, v2\n" });
   return id;
 };
 

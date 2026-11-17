@@ -99,11 +99,11 @@ import {
 // where it came from (`app_origins`: the blueprint, a marked one's
 // version, the tree it was copied from), which grants nothing. Its first
 // version is the blueprint's code, and it asks for what the blueprint
-// declares, each
-// request waiting for an admin: a built-in's `blueprint.json`, or what the
-// App asked for or was given as the version was marked, of the kinds
-// that name the same thing for whoever creates from it (`declarableOf` in
-// permissions.ts). Its builders ask for the rest themselves. Nothing else
+// declares, each request waiting for an admin: a built-in's
+// `blueprint.json`, or what the App asked for or was given as the version
+// was marked, of the kinds that name the same thing for whoever creates
+// from it (`declarableOf` in permissions.ts). Its builders ask for the
+// rest themselves. Nothing else
 // comes with it: none of the App's data (its storage, its workflows'
 // state, its runs), settings (parameter values), members or error log.
 // A marked blueprint's code is its version's tree, which never changes.

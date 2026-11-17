@@ -639,7 +639,7 @@ export const releaseFunctionsOf = async (
   return functionIdsOf(definition, release.app);
 };
 
-/** A version as it is stored: its tree, the hash of its code, and its definition. */
+/** A version as it is stored: its tree (the hash of its code) and its definition. */
 export interface StoredVersion extends Tree {
   definition: StoredDefinition;
 }
