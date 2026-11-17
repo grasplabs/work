@@ -4170,7 +4170,8 @@ export class Onboarding extends DurableObject<Env> {
 
   /**
    * The company's teams as the hand-over gives the new Brain now: as the
-   * admin last confirmed them, under the key of that change. Null for any
+   * admin last confirmed them, under the key of that change, so confirmed
+   * changes since the last hand-over are one version. Null for any
    * id but the one they were given under, or once the admin erased them.
    */
   rosterToHand(id: string): { change: string; text: string } | null {

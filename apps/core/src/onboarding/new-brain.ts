@@ -35,8 +35,9 @@ import type { OwedErasure } from "./store.ts";
 // - The company's teams (`roster:teams-<n>`, GRA-1748): each confirmed
 //   team taking part, as the admin described it, and its head count, never
 //   what a lead's map says it does nor who is in it (company-teams.ts),
-//   readable by everyone, a new version at each confirmed change. Noted and
-//   read like the kickoff (`rosterOf`). The admin may erase it, every
+//   readable by everyone. Noted and read like the kickoff (`rosterOf`): a
+//   version is what a hand-over reads, so confirmed changes between two
+//   hand-overs are one version, and nothing anyone could read is lost. The admin may erase it, every
 //   version (`eraseOwedRosters`); the next confirmed save gives it afresh
 //   under a new id.
 //
