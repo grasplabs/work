@@ -172,7 +172,6 @@ const TimeZoneField = ({
     <SettingRow
       {...words}
       {...(failure === undefined ? {} : { error: failure })}
-      help={t`For schedules and the times Grasp shows.`}
       label={t`Time zone`}
       onRetry={() => {
         if (tried !== undefined) {

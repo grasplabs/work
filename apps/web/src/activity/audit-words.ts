@@ -207,6 +207,20 @@ const words: readonly { action: string; text: MessageDescriptor }[] = [
     text: msg`Used an App's function as a visitor`,
   },
   { action: "app", text: msg`Changed an App` },
+  { action: "session.ended", text: msg`Signed out a device` },
+  { action: "organization.renamed", text: msg`Renamed the organization` },
+  {
+    action: "organization.logo.updated",
+    text: msg`Changed the organization's logo`,
+  },
+  {
+    action: "organization.logo.removed",
+    text: msg`Removed the organization's logo`,
+  },
+  {
+    action: "organization.time_zone.updated",
+    text: msg`Changed the organization's time zone`,
+  },
   { action: "member.removed", text: msg`Removed a member` },
   {
     action: "member.erasure.requested",

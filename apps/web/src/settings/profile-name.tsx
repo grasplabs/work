@@ -36,7 +36,7 @@ export const ProfileName = ({ name }: { name: string }) => {
       if (done === true) {
         setSaved(next);
         setTried(undefined);
-        // Success is silent for now: the row's "Saved" line under the label was rejected (Ruben, 17 Nov 2026); the library is moving the mark into the control.
+        // Success is silent for now: the row's "Saved" line under the label was rejected (Ruben, 17 Nov 2026); the library shows it beside the control from its main 0ebd48bd, not yet in its registry.
         setState("idle");
       } else {
         setTried(next);
@@ -59,7 +59,6 @@ export const ProfileName = ({ name }: { name: string }) => {
     <SettingRow
       {...(failure === undefined ? {} : { error: failure })}
       failedLabel={t`Could not save. Your name is kept.`}
-      help={t`As your team sees it.`}
       label={t`Name`}
       onRetry={() => {
         if (tried !== undefined) {

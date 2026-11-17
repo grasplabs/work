@@ -287,29 +287,33 @@ test("invites someone with a role, says what each role may do, and withdraws the
   const { admin } = peopleIn("memberInvites");
   await signInTo(context, admin);
   await page.goto("/settings/members");
-  // What each role may do sits behind the Roles row over the members.
-  await page.getByRole("button", { name: "What each role may do" }).focus();
+  // What each role may do opens from Roles in the members' head.
+  await page.getByRole("button", { name: "Roles" }).click();
   await expect(
-    page.getByRole("tooltip").getByText(/^Admin: Manages people/u)
+    page.getByText(/^Manages people, teams and permissions/u)
   ).toBeVisible();
+  await page.keyboard.press("Escape");
 
   await page.getByRole("button", { name: "Invite", exact: true }).click();
-  const dialog = page.getByRole("dialog", { name: "Invite someone" });
-  await dialog
-    .getByRole("textbox", { name: "Email" })
-    .fill("someone@elsewhere.test");
-  await dialog.getByRole("button", { name: "Invite", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Invite people" });
+  const addresses = dialog.getByRole("textbox", { name: "Email addresses" });
+  // An address outside the organization's domains: core refuses it, and it stays marked.
+  await addresses.fill("someone@elsewhere.test");
+  await addresses.press("Enter");
+  await dialog.getByRole("button", { name: "Send invites" }).click();
   await expect(
     dialog.getByText(
       "Use an email address in one of the domains your organization signs in with."
     )
   ).toBeVisible();
+  await addresses.press("Backspace");
 
   const email = `invited-${crypto.randomUUID().slice(0, 8)}@acme.test`;
-  await dialog.getByRole("textbox", { name: "Email" }).fill(email);
+  await addresses.fill(email);
+  await addresses.press("Enter");
   await dialog.getByRole("combobox", { name: "Role" }).click();
-  await page.getByRole("option", { name: "Builder" }).click();
-  await dialog.getByRole("button", { name: "Invite", exact: true }).click();
+  await page.getByRole("option", { name: /^Builder/u }).click();
+  await dialog.getByRole("button", { name: "Send invites" }).click();
   await expect(dialog).toBeHidden();
 
   const members = page.getByRole("region", { name: "Members" });
@@ -317,9 +321,8 @@ test("invites someone with a role, says what each role may do, and withdraws the
   await expect(
     members.getByText(/^Invited as Builder by .+ · hasn’t signed in yet$/u)
   ).toBeVisible();
-  await members
-    .getByRole("button", { name: `Withdraw the invitation of ${email}` })
-    .click();
+  await members.getByRole("button", { name: `Actions for ${email}` }).click();
+  await page.getByRole("menuitem", { name: "Withdraw invitation" }).click();
   await expect(members.getByText(email)).toHaveCount(0);
 });
 

@@ -20,6 +20,8 @@ export interface LogSearch {
   /** Days (`yyyy-mm-dd`), in the viewer's time zone, both included. */
   from?: string;
   to?: string;
+  /** Search the archive, where retention moved older events, not the log. */
+  archive?: true;
 }
 
 const daySchema = z.iso.date();
@@ -67,4 +69,5 @@ export const logSearchOf = (search: Record<string, unknown>): LogSearch => ({
   target: textFilter(search.target),
   from: dayFilter(search.from),
   to: dayFilter(search.to),
+  archive: search.archive === true ? true : undefined,
 });

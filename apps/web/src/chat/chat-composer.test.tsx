@@ -34,31 +34,52 @@ let held: readonly Mentionable[] = [];
 /** What the page heard from the box. */
 const heard: string[] = [];
 
-/** The box, its text and mentions kept as a page keeps them; `props` over a ready box. */
+/** Where the box says Grasp is. */
+const activity = (): string | null =>
+  document.querySelector<HTMLElement>("[data-activity]")?.dataset.activity ??
+  null;
+
+/**
+ * The box, its text and mentions kept as a page keeps them; `props` over a
+ * ready box. Answering, beside it, is the page saying Grasp started or
+ * finished an answer.
+ */
 const Box = ({ props }: { props: Partial<ChatComposerProps> }) => {
   const [text, setText] = useState("");
+  const [running, setRunning] = useState(props.running ?? false);
   const [mentions, setMentions] = useState<readonly Mentionable[]>([]);
   return (
-    <ChatComposer
-      busy={false}
-      mentions={mentions}
-      model="openai/gpt-5"
-      models={["openai/gpt-5"]}
-      onMentions={(next) => {
-        held = next;
-        setMentions(next);
-      }}
-      onSend={() => {
-        heard.push(`send ${text}`);
-      }}
-      onStop={() => {
-        heard.push("stop");
-      }}
-      onText={setText}
-      running={false}
-      text={text}
-      {...props}
-    />
+    <>
+      <button
+        aria-label="Answering"
+        onClick={() => {
+          setRunning((now) => !now);
+        }}
+        type="button"
+      >
+        Answering
+      </button>
+      <ChatComposer
+        busy={false}
+        mentions={mentions}
+        model="openai/gpt-5"
+        models={["openai/gpt-5"]}
+        onMentions={(next) => {
+          held = next;
+          setMentions(next);
+        }}
+        onSend={() => {
+          heard.push(`send ${text}`);
+        }}
+        onStop={() => {
+          heard.push("stop");
+        }}
+        onText={setText}
+        text={text}
+        {...props}
+        running={running}
+      />
+    </>
   );
 };
 
@@ -226,6 +247,20 @@ describe(ChatComposer, () => {
       why: true,
       kept: "What is 2 + 2?",
       tries: 2,
+    });
+  });
+
+  it("says an answer is done once Grasp finishes it, and works again with the next", async () => {
+    await shown({ running: true });
+    const working = activity();
+    await press(button("Answering"));
+    const done = activity();
+    await press(button("Answering"));
+
+    expect({ working, done, again: activity() }).toStrictEqual({
+      working: "working",
+      done: "success",
+      again: "working",
     });
   });
 

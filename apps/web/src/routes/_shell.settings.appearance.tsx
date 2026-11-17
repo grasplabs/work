@@ -16,10 +16,7 @@ import { SettingsError } from "../settings/section.tsx";
 const Theme = () => {
   const { t } = useLingui();
   return (
-    <SectionCard
-      description={t`Yours alone, kept in this browser.`}
-      title={t`Theme`}
-    >
+    <SectionCard title={t`Theme`}>
       <ThemeSwitch
         variant="picker"
         label={t`Mode`}

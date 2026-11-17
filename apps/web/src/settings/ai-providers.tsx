@@ -115,8 +115,8 @@ const keyStarts: Readonly<Record<OrganizationProviderId, string | undefined>> =
 const marks: Readonly<Record<OrganizationProviderId, Brand | undefined>> = {
   anthropic: "claude",
   openai: "chatgpt",
-  mistral: undefined,
-  openrouter: undefined,
+  mistral: "mistral",
+  openrouter: "openrouter",
   "openai-compatible": undefined,
 };
 
@@ -164,9 +164,7 @@ type Change = (session: Session) => Promise<unknown>;
 /**
  * A provider's mark, one size in every row of Settings (the library's
  * answer, 17 Nov 2026): its brand's mark alone at 20px, no tile; a plug
- * for a custom endpoint, which is no brand; and no mark at all where the
- * Brand icons have none yet (Mistral, OpenRouter: asked of the library),
- * never one drawn here.
+ * for a custom endpoint, which is no brand.
  */
 const Mark = ({ provider }: { provider: OrganizationProviderId }) => {
   if (provider === "openai-compatible") {
@@ -724,7 +722,7 @@ const NameModel = ({ onName }: { onName: (model: string) => void }) => {
   };
   return (
     <SettingRow
-      help={t`As your endpoint names it, such as llama-3.3-70b.`}
+      info={t`As your endpoint names it, such as llama-3.3-70b.`}
       label={t`Your endpoint's model`}
     >
       {(field) => (
@@ -872,7 +870,8 @@ const Models = ({
     setLast(next);
     setStatus("saving");
     void (async () => {
-      setStatus((await onChoose(next)) ? "saved" : "failed");
+      // Success is silent for now: the row's "Saved" line under the label was rejected (Ruben, 17 Nov 2026); the library shows it beside the control from its main 0ebd48bd, not yet in its registry.
+      setStatus((await onChoose(next)) ? "idle" : "failed");
     })();
   };
   const chooseFallbacks = (next: string[]): void => {

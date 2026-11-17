@@ -13,16 +13,18 @@ import {
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router";
-import { act } from "react";
+import { act, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
+import { EventInspector } from "./audit-event.tsx";
 import { LogRecords } from "./audit-log.tsx";
 
 // The audit trail's events as an admin pages through them: 25 a page,
 // Newer and Older, Older reading core's next page only once this one needs
-// it; and an event's details, its position, check and hash, in a dialog.
+// it; and an event's details, its position, check and hash, in the panel
+// the page opens beside the table.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -56,6 +58,26 @@ const records = (from: number, to: number): AuditRecord[] =>
 
 let root: Root | undefined;
 
+const directory = { people: new Map(), apps: new Map() };
+
+/** The events, and the details of the one opened, as the audit trail's page holds them. */
+const Events = ({ first }: { first: AuditPage }) => {
+  const [open, setOpen] = useState<AuditRecord>();
+  return (
+    <>
+      <LogRecords
+        directory={directory}
+        first={first}
+        onDetails={setOpen}
+        search={{}}
+      />
+      {open === undefined ? null : (
+        <EventInspector directory={directory} framed record={open} />
+      )}
+    </>
+  );
+};
+
 /** The events, core's first page `first`, and its older pages from `older`. */
 const shown = async (
   first: AuditPage,
@@ -80,13 +102,7 @@ const shown = async (
   };
   const router = createRouter({
     routeTree: createRootRoute({
-      component: () => (
-        <LogRecords
-          directory={{ people: new Map(), apps: new Map() }}
-          first={first}
-          search={{}}
-        />
-      ),
+      component: () => <Events first={first} />,
     }),
     history: createMemoryHistory(),
     context: { core },
@@ -187,19 +203,20 @@ describe(LogRecords, () => {
     });
   });
 
-  it("opens an event's details: what, by whom, its position, check and hash", async () => {
+  it("opens an event's details beside the table: what, its position, check and hash", async () => {
     await shown({ records: records(3, 1), next: null }, () => ({
       records: [],
       next: null,
     }));
     await press("Details of event 2");
-    const dialog = document.querySelector('[role="dialog"]')?.textContent ?? "";
+    const panel =
+      document.querySelector('[aria-label="Event details"]')?.textContent ?? "";
 
     expect({
-      action: dialog.includes("test.done"),
-      position: dialog.includes("Position2"),
-      verified: dialog.includes("Yes: its hash matches"),
-      hash: dialog.includes("hash-of-2"),
+      action: panel.includes("test.done"),
+      position: panel.includes("Position2"),
+      verified: panel.includes("Yes: its hash matches"),
+      hash: panel.includes("hash-of-2"),
     }).toStrictEqual({
       action: true,
       position: true,
