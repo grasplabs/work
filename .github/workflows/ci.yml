@@ -536,6 +536,14 @@ jobs:
       - uses: ./.github/actions/playwright-browser
         with:
           save: true
+      # The model files main keeps (.github/workflows/model-files.yml): the
+      # build puts the files of the model core ships in the stack's state
+      # (scripts/local-model-files.ts), so every part recalls by meaning.
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/grasp-os/model-files
+          key: model-files-${{ github.run_id }}
+          restore-keys: model-files-
       # The parts wait for it: every build at once (e2e/build.ts).
       # Then the parallel parts' tests, listed once for all fourteen
       # (scripts/e2e-parts.ts). The same count as e2e's matrix, below:
