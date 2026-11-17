@@ -53,6 +53,7 @@ import { Textarea } from "@grasp-os/ui/components/textarea";
 import { toast } from "@grasp-os/ui/components/toast";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { createContext, use, useId, useRef, useState } from "react";
+import type { ReactNode } from "react";
 
 import { useHeldCoreRead } from "../apps/use-core-read.ts";
 import { ErrorText } from "../error-text.tsx";
@@ -532,34 +533,49 @@ const audienceOf = (choice: string): BrainShareAudience =>
   choice === "everyone" ? "company" : { team: choice };
 
 /**
- * The attribute and value a share copies, as the dialog shows them: the
- * attribute's label with the value, the label alone, or the value alone
- * (a memory may hold one without an attribute). Nothing for neither.
+ * Which texts of a memory show, the one rule for its line on the page and
+ * for the share dialog, so they never differ: its attribute's label with
+ * the value it holds, the label alone, or the value alone (a memory may
+ * hold one without an attribute); then its statement, unless it is that
+ * value, shown right above. `held` and `statement` as the caller shows
+ * them (the dialog escapes what nobody sees); `held` is the value, or the
+ * entity a relation names.
  */
-const SharedValue = ({
+const MemoryTexts = ({
   label,
   held,
+  statement,
 }: {
   label: string | null;
   held: string | null;
+  statement: string;
 }) => {
-  if (label === null) {
-    return held === null ? null : (
-      <span className="break-words whitespace-pre-wrap">
-        <Trans>Value: {held}</Trans>
-      </span>
-    );
-  }
-  return (
-    <span className="break-words whitespace-pre-wrap">
-      {held === null ? (
-        label
+  let valueLine: ReactNode = null;
+  if (label !== null) {
+    valueLine =
+      held === null ? (
+        <span className="font-medium">{label}</span>
       ) : (
         <Trans>
-          {label}: {held}
+          <span className="font-medium">{label}</span>: {held}
         </Trans>
+      );
+  } else if (held !== null) {
+    valueLine = <Trans>Value: {held}</Trans>;
+  }
+  return (
+    <>
+      {valueLine === null ? null : (
+        <span className="text-sm break-words whitespace-pre-wrap">
+          {valueLine}
+        </span>
       )}
-    </span>
+      {held !== null && statement === held ? null : (
+        <span className="text-sm break-words whitespace-pre-wrap">
+          {statement}
+        </span>
+      )}
+    </>
   );
 };
 
@@ -752,13 +768,9 @@ const ShareDialog = ({
             <span className="font-medium">
               <Trans>About {aboutShown}</Trans>
             </span>
-            {/* Every text a share copies shows, whatever else it has: the
-                value with its attribute or on its own, and the statement
-                unless it is the value shown right above. */}
-            <SharedValue held={held} label={label} />
-            {held !== null && statement === value ? null : (
-              <span className="break-words whitespace-pre-wrap">{said}</span>
-            )}
+            {/* Every text a share copies shows, as the page's line shows it
+                (`MemoryTexts`), escaped. */}
+            <MemoryTexts held={held} label={label} statement={said} />
             {from === null ? null : (
               <span>
                 <Trans>True from {from}</Trans>
@@ -1041,22 +1053,7 @@ const MemoryLine = ({
             button goes. A correction holds its words as value and
             statement alike: they show once. */}
         <span className="flex flex-col gap-1" ref={said} tabIndex={-1}>
-          {label === null ? null : (
-            <span className="text-sm">
-              {held === null ? (
-                <span className="font-medium">{label}</span>
-              ) : (
-                <Trans>
-                  <span className="font-medium">{label}</span>: {held}
-                </Trans>
-              )}
-            </span>
-          )}
-          {memory.statement === held ? null : (
-            <span className="text-sm whitespace-pre-wrap">
-              {memory.statement}
-            </span>
-          )}
+          <MemoryTexts held={held} label={label} statement={memory.statement} />
         </span>
         <MemoryMarks memory={memory} />
         {current ? (
