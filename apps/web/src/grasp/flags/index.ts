@@ -1,4 +1,4 @@
-// The flags of Grasp UI: one entry point for the whole system. Every flag is a drawing from
+// The flags of Damsko: one entry point for the whole system. Every flag is a drawing from
 // country-flag-icons (MIT, 3 by 2), named by its region's code (ISO 3166-1), so a product ships only
 // the flags it imports. Add a region here before using it.
 //

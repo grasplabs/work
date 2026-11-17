@@ -2,7 +2,14 @@ import { useLingui } from "@lingui/react/macro";
 import { Link } from "@tanstack/react-router";
 
 import { Button } from "../grasp/button/index.ts";
-import { Item } from "../grasp/item/index.ts";
+import {
+  Item,
+  ItemMedia,
+  ItemContent,
+  ItemTitle,
+  ItemDescription,
+  ItemActions,
+} from "../grasp/item/index.ts";
 import { kindLabel, kindMark } from "../inbox/inbox-kind.tsx";
 import { inboxItems } from "../inbox/items.ts";
 import type { InboxItem, InboxSource } from "../inbox/items.ts";
@@ -45,8 +52,13 @@ const InboxRow = ({ item }: { item: InboxItem }) => {
   const { t, i18n } = useLingui();
   const { title } = item;
   return (
-    <Item
-      actions={
+    <Item>
+      <ItemMedia icon={kindMark[item.kind]} />
+      <ItemContent>
+        <ItemTitle>{title}</ItemTitle>
+        <ItemDescription>{i18n._(kindLabel[item.kind])}</ItemDescription>
+      </ItemContent>
+      <ItemActions>
         <Button
           render={
             <Link
@@ -59,11 +71,8 @@ const InboxRow = ({ item }: { item: InboxItem }) => {
         >
           {t`Open`}
         </Button>
-      }
-      description={i18n._(kindLabel[item.kind])}
-      icon={kindMark[item.kind]}
-      title={title}
-    />
+      </ItemActions>
+    </Item>
   );
 };
 

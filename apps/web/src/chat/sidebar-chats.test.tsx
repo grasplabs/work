@@ -83,7 +83,7 @@ const shown = async ({
     return (
       <Sidebar
         groups={[{ id: "chats", label: "Chats", rows: recent }]}
-        label="Sidebar"
+        aria-label="Sidebar"
       />
     );
   };

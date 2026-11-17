@@ -43,7 +43,7 @@ const SendOrStop = ({
             variant="ink"
             size="sm"
             icon={Stop}
-            label={stopLabel}
+            aria-label={stopLabel}
             disabled={disabled}
           />
         )}
@@ -63,7 +63,7 @@ const SendOrStop = ({
           variant="ink"
           size="sm"
           icon={ArrowUp}
-          label={sendLabel}
+          aria-label={sendLabel}
           disabled={off}
         />
       )}

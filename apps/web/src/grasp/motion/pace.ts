@@ -1,4 +1,4 @@
-// Pace: how an agent's words are let out, in Grasp UI. Text comes off the network in lumps (three
+// Pace: how an agent's words are let out, in Damsko. Text comes off the network in lumps (three
 // words, a pause, forty words); it is never drawn as it comes. It waits here and is released at a
 // steady pace that follows how much is waiting: as fast as reading while little waits, faster,
 // smoothly, as more does, so it never falls far behind. When the stream ends, what is left drains

@@ -16,6 +16,7 @@
 // Every value is a token (src/tokens). A caller may set layout and width only (the `style` prop).
 "use client";
 
+/* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
 import { useEffect, useId, useRef } from "react";
 import type { ButtonHTMLAttributes, ReactNode, Ref } from "react";
@@ -67,6 +68,8 @@ export interface SectionCardProps {
    * The title's heading level, so the page's outline stays in order.
    * @default 2
    */
+  headingLevel?: 2 | 3 | 4;
+  /** @deprecated Use `headingLevel`. */
   level?: 2 | 3 | 4;
   /**
    * `comfortable` for a part of a page; `compact` for a dense one, a settings card: the head's
@@ -88,9 +91,9 @@ export interface SectionCardProps {
    * the shared focus ring. The header's actions stay pressable and are not part of it.
    */
   handle?: SectionCardHandle;
-  /** Layout only: margins, alignment and width. The look belongs to the card. */
+  /** @deprecated Use `layout`. */
   style?: CardLayoutStyle;
-  /** The same as `style`, by a name a style lint does not take for an inline style attribute. */
+  /** Layout only: margins, alignment and width. The look belongs to the card. */
   layout?: CardLayoutStyle;
 }
 
@@ -246,7 +249,8 @@ export const SectionCard = ({
   children,
   footer,
   flush = false,
-  level = 2,
+  level: levelDeprecated,
+  headingLevel: level = levelDeprecated ?? 2,
   loading = false,
   fill = false,
   density = "comfortable",
@@ -289,7 +293,7 @@ export const SectionCard = ({
             description={description}
             aside={aside}
             actions={actions}
-            level={level}
+            headingLevel={level}
             size={compact ? "sm" : "md"}
             loading={loading}
           />

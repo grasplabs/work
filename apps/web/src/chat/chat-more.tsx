@@ -10,7 +10,7 @@ import type { ExportFormat } from "../export/export-file.tsx";
 import {
   DropdownMenu,
   DropdownMenuItem,
-  DropdownMenuPanel,
+  DropdownMenuContent,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "../grasp/dropdown-menu/index.ts";
@@ -167,11 +167,13 @@ export const ChatTitleMenu = ({
             aria-label={t`More for this chat`}
             chevron
             size="sm"
+            // One line in the chat's head, its full title in the tooltip.
+            truncate
             variant="ghost"
           >
             {chat.title}
           </DropdownMenuTrigger>
-          <DropdownMenuPanel align="start">
+          <DropdownMenuContent align="start">
             {/* It stays open for a moment to say that it is copied. */}
             <DropdownMenuItem
               closeOnSelect={false}
@@ -212,7 +214,7 @@ export const ChatTitleMenu = ({
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem
-              danger
+              variant="danger"
               icon={Trash}
               onSelect={() => {
                 onDeleting(true);
@@ -220,7 +222,7 @@ export const ChatTitleMenu = ({
             >
               {t`Delete`}
             </DropdownMenuItem>
-          </DropdownMenuPanel>
+          </DropdownMenuContent>
         </DropdownMenu>
       )}
       {/* It mounts when it opens, so it starts from the chat as it is now. */}

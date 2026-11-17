@@ -622,6 +622,7 @@
   --grasp-shell-card-shadow:
     0 4px 4px 0 oklch(0 0 0 / 0.02), 0 4px 80px 8px oklch(0 0 0 / 0.02),
     0 0 0 1px light-dark(oklch(0 0 0 / 0.05), oklch(1 0 0 / 0.08));
+  --grasp-shell-card-line: light-dark(oklch(0 0 0 / 0.1), oklch(1 0 0 / 0.1));
   --grasp-shell-peek: light-dark(
     var(--grasp-shell-ground),
     color-mix(in oklch, var(--grasp-shell-card) 94%, var(--grasp-shell-text))
@@ -1459,6 +1460,7 @@
   --grasp-shell-card-shadow:
     0 4px 4px 0 oklch(0 0 0 / 0.02), 0 4px 80px 8px oklch(0 0 0 / 0.02),
     0 0 0 1px light-dark(oklch(0 0 0 / 0.05), oklch(1 0 0 / 0.08));
+  --grasp-shell-card-line: light-dark(oklch(0 0 0 / 0.1), oklch(1 0 0 / 0.1));
   --grasp-shell-peek: light-dark(
     var(--grasp-shell-ground),
     color-mix(in oklch, var(--grasp-shell-card) 94%, var(--grasp-shell-text))
@@ -2293,6 +2295,7 @@
   --grasp-shell-card-shadow:
     0 4px 4px 0 oklch(0 0 0 / 0.02), 0 4px 80px 8px oklch(0 0 0 / 0.02),
     0 0 0 1px light-dark(oklch(0 0 0 / 0.05), oklch(1 0 0 / 0.08));
+  --grasp-shell-card-line: light-dark(oklch(0 0 0 / 0.1), oklch(1 0 0 / 0.1));
   --grasp-shell-peek: light-dark(
     var(--grasp-shell-ground),
     color-mix(in oklch, var(--grasp-shell-card) 94%, var(--grasp-shell-text))

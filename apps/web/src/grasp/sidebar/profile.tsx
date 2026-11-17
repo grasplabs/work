@@ -17,7 +17,7 @@ import {
 import { Fragment, createElement } from "react";
 import type { JSX, KeyboardEvent, ReactElement } from "react";
 
-import { Avatar } from "../avatar";
+import { Avatar, AvatarImage, AvatarFallback } from "../avatar";
 import { DropdownMenu, menuStyles } from "../dropdown-menu";
 import { focus } from "../focus/focus";
 import {
@@ -48,8 +48,8 @@ export interface SidebarChoice {
    */
   icon?: IconData;
   /**
-   * Who or what the choice is, shown as a small avatar before its words: an organisation in a
-   * list of organisations. `true` draws its initials from `label`; a string is its picture (a logo).
+   * Who or what the choice is, as a small avatar before its words: `true` draws the initials of
+   * `label`, a string is its picture (an organisation's logo).
    */
   avatar?: boolean | string;
 }
@@ -141,10 +141,7 @@ const defaultThemes: readonly SidebarChoice[] = [
   { label: "System", value: "system", icon: Computer },
 ];
 
-// How far the menu stands off the button: the frame's inset, as his. A submenu overlaps its menu
-// by the panel's padding, so its first item lines up with the item that opened it.
 const MENU_GAP = 6;
-// A submenu stands a hair beside its row, never over it.
 const SUB_GAP = popup.gap;
 
 const HOVER = media.hover;
@@ -342,8 +339,6 @@ const styles = stylex.create({
     gridAutoColumns: "minmax(0, 1fr)",
   },
   themeSegment: {
-    // A step under the row's height with the track's padding, so the track clears the rows above
-    // and below: a neighbour's hover fill is the track's own colour and would run into it.
     minHeight: { default: grasp.space5, [COARSE]: grasp.tap },
     paddingInline: grasp.space1,
     outline: "none",
@@ -449,16 +444,12 @@ const Choices = ({ entry }: { entry: SidebarMenuChoices }) => {
                 </span>
               )}
               {choice.avatar !== undefined && choice.avatar !== false && (
-                <Avatar
-                  decorative
-                  name={choice.label}
-                  size="xs"
-                  src={
-                    typeof choice.avatar === "string"
-                      ? choice.avatar
-                      : undefined
-                  }
-                />
+                <Avatar decorative name={choice.label} size="xs">
+                  {typeof choice.avatar === "string" && (
+                    <AvatarImage src={choice.avatar} />
+                  )}
+                  <AvatarFallback />
+                </Avatar>
               )}
               <span {...stylex.props(styles.words)}>{choice.label}</span>
               <MenuItemIndicator {...stylex.props(styles.tick)}>
@@ -605,7 +596,10 @@ export const SidebarProfile = ({
   }
   const who = (
     <>
-      <Avatar decorative name={name} src={picture} size="sm" />
+      <Avatar decorative name={name} size="sm">
+        <AvatarImage src={picture} />
+        <AvatarFallback />
+      </Avatar>
       <span {...stylex.props(styles.who)}>
         <span {...stylex.props(styles.name)}>{name}</span>
         {organisation !== undefined && (

@@ -23,7 +23,7 @@ import {
   DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
-  DropdownMenuPanel,
+  DropdownMenuContent,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "../dropdown-menu";
@@ -130,7 +130,7 @@ const DotsItem = ({
   onChoose: (value: string) => void;
 }) => (
   <DropdownMenuItem
-    danger={entry.danger}
+    {...(entry.danger === true ? { variant: "danger" as const } : {})}
     disabled={entry.disabled}
     icon={entry.icon}
     onSelect={() => {
@@ -193,14 +193,14 @@ const Dots = ({
     <span data-row-dots="" {...stylex.props(styles.dots, open && styles.open)}>
       <DropdownMenu onOpenChange={setOpen} open={open}>
         <DropdownMenuTrigger
+          aria-label={label}
           icon={More}
-          label={label}
           size="xs"
           variant="ghost"
         />
-        <DropdownMenuPanel align="start">
+        <DropdownMenuContent align="start">
           <DotsEntries items={items} onChoose={onChoose} />
-        </DropdownMenuPanel>
+        </DropdownMenuContent>
       </DropdownMenu>
     </span>
   );

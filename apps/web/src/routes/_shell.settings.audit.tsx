@@ -12,7 +12,12 @@ import {
 import { logSearchOf } from "../activity/log-search.ts";
 import type { LogSearch } from "../activity/log-search.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
-import { Tabs, TabsList, TabsPanel, TabsTab } from "../grasp/tabs/index.ts";
+import {
+  Tabs,
+  TabsList,
+  TabsContent,
+  TabsTrigger,
+} from "../grasp/tabs/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import { ArchiveSearch, RetentionCard } from "../settings/audit-archive.tsx";
@@ -64,10 +69,10 @@ const AuditTrail = () => {
       value={view ?? "events"}
     >
       <TabsList aria-label={t`Audit trail`}>
-        <TabsTab value="events">{t`Events`}</TabsTab>
-        <TabsTab value="integrity">{t`Integrity`}</TabsTab>
+        <TabsTrigger value="events">{t`Events`}</TabsTrigger>
+        <TabsTrigger value="integrity">{t`Integrity`}</TabsTrigger>
       </TabsList>
-      <TabsPanel value="events">
+      <TabsContent value="events">
         <div {...stylex.props(styles.panel)}>
           <SectionCard
             actions={
@@ -99,13 +104,13 @@ const AuditTrail = () => {
             )}
           </SectionCard>
         </div>
-      </TabsPanel>
-      <TabsPanel value="integrity">
+      </TabsContent>
+      <TabsContent value="integrity">
         <div {...stylex.props(styles.panel)}>
           <AuditChainCheck last={last} />
           <RetentionCard />
         </div>
-      </TabsPanel>
+      </TabsContent>
     </Tabs>
   );
 };

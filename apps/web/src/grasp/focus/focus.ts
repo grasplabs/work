@@ -1,4 +1,4 @@
-// Focus: the one way Grasp UI shows where the keyboard is. Every component and every site block
+// Focus: the one way Damsko shows where the keyboard is. Every component and every site block
 // takes its focus look from here, last in its stylex.props(), and sets no outline of its own.
 //
 //   stylex.props(styles.button, focus.ring)        a control: button, checkbox, tab, segment, chip

@@ -1,4 +1,4 @@
-// The one way a flag is drawn in Grasp UI. The drawings come from country-flag-icons (only from
+// The one way a flag is drawn in Damsko. The drawings come from country-flag-icons (only from
 // there), 3 by 2; this rounds them to our corner and draws the system's edge inside them, so a white
 // flag (Japan, Finland) keeps its rim on a white ground. Import flags from "src/flags", never from
 // country-flag-icons directly.

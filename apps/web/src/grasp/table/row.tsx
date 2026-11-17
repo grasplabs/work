@@ -1,5 +1,6 @@
 // TableRow: one row of a table (table.tsx), with a hairline under it.
 "use client";
+/* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
 import type { ReactNode } from "react";
 
@@ -18,11 +19,13 @@ export interface TableRowProps {
    */
   chosen?: boolean;
   /**
-   * Kept for its widths only: not drawn, not read, not reached, while the columns keep the sizes
-   * it gives them (a Data table keeps its rows so while a search matches none, so the columns do
-   * not jump as you type).
-   * @default false
+   * Shown. `false` keeps it for its widths only: not drawn, not read, not reached, while the
+   * columns keep the sizes it gives them (a Data table keeps its rows so while a search matches
+   * none, so the columns do not jump as you type).
+   * @default true
    */
+  open?: boolean;
+  /** @deprecated Use `open`. */
   collapsed?: boolean;
 }
 
@@ -30,8 +33,11 @@ export interface TableRowProps {
 export const TableRow = ({
   children,
   chosen = false,
-  collapsed = false,
+  open,
+  collapsed: collapsedDeprecated,
 }: TableRowProps) => {
+  // `open={false}` is the new name of `collapsed` (the breaking release's step 1); the new one wins.
+  const collapsed = open === undefined ? collapsedDeprecated === true : !open;
   const section = useSection();
   const range = useRangeLook();
   return (

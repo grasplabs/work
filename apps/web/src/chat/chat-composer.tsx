@@ -201,7 +201,7 @@ export const ChatComposer = ({
           <ComposerAdd
             accept={accepted}
             kinds={mentioning?.kinds}
-            label={t`Add to the question`}
+            aria-label={t`Add to the question`}
             onAttach={(chosen) => {
               onAttach(chosen);
             }}
@@ -221,7 +221,7 @@ export const ChatComposer = ({
         />
       }
       failedLabel={t`Could not send`}
-      label={label ?? t`Your question`}
+      aria-label={label ?? t`Your question`}
       layout={styles.fill}
       note={noteOf(noProvider, fileProblem ?? failure)}
       onAttach={

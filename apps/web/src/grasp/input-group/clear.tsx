@@ -3,6 +3,7 @@
 // and an agent can press it by its name.
 "use client";
 
+/* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
 import { InputClear as ClearPrimitive } from "@ui-sdk/react/input";
 
@@ -15,7 +16,9 @@ import { useGroupSize } from "./context";
 /** Every prop an InputGroupClear takes. */
 export interface InputGroupClearProps {
   /** Its name, for a screen reader, a voice command and an agent: "Clear search". */
-  label: string;
+  "aria-label"?: string;
+  /** @deprecated Use `aria-label`. */
+  label?: string;
 }
 
 const HOVER = media.hover;
@@ -66,7 +69,10 @@ const styles = stylex.create({
 });
 
 /** Empties the input in its group; shown only while there is text. */
-export const InputGroupClear = ({ label }: InputGroupClearProps) => {
+export const InputGroupClear = ({
+  label: labelDeprecated,
+  "aria-label": label = labelDeprecated ?? "",
+}: InputGroupClearProps) => {
   const size = useGroupSize();
   return (
     <ClearPrimitive

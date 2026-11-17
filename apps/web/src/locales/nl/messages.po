@@ -2897,6 +2897,7 @@ msgstr "Een beheerder vragen"
 
 #: src/chat/chat-composer.tsx
 #: src/chat/global-chat.tsx
+#: src/settings/backdrop-settings.tsx
 msgid "Ask anything, or describe a process"
 msgstr "Vraag wat je wilt, of beschrijf een proces"
 
@@ -4546,6 +4547,10 @@ msgstr "Kon geen beheerder maken"
 msgid "Could not remove"
 msgstr "Verwijderen mislukt"
 
+#: src/settings/workspace-name.tsx
+msgid "Could not save. Your change is kept."
+msgstr "Niet opgeslagen. Je wijziging blijft staan."
+
 #: src/settings/profile-name.tsx
 msgid "Could not save. Your name is kept."
 msgstr "Niet opgeslagen. Je naam blijft staan."
@@ -5346,7 +5351,6 @@ msgstr "Een workflow bewerken"
 
 #: src/onboarding/interviews-progress.tsx
 #: src/routes/_shell.settings.profile.tsx
-#: src/routes/_shell.settings.security.tsx
 #: src/settings/invitations.tsx
 #: src/workflows/requests/request-summary.tsx
 msgid "Email"
@@ -6516,10 +6520,6 @@ msgstr "Grasp stuurde deze link naar dat account in {app}. Koppel het alleen als
 #: src/dashboard/outcome-card.tsx
 msgid "Grasp sent this, but its answer was lost: nobody can tell whether it took effect. Check on {connection} before you say."
 msgstr "Grasp heeft dit verstuurd, maar het antwoord ging verloren: niemand weet of het effect had. Controleer het op {connection} voordat je antwoordt."
-
-#: src/settings/sign-in-settings.tsx
-msgid "Grasp sets this up; ask Grasp to change it."
-msgstr "Grasp richt dit in; vraag Grasp om het te wijzigen."
 
 #: src/routes/_shell.settings.workspace.tsx
 #: src/settings/staff-access.tsx
@@ -7849,10 +7849,6 @@ msgstr "Deze pagina verlaten?"
 #: src/workflows/workflow-diagram.tsx
 msgid "Leaves this list"
 msgstr "Verlaat deze lijst"
-
-#: src/routes/_shell.settings.security.tsx
-msgid "Leaving the company stops new sign-ins."
-msgstr "Wie het bedrijf verlaat, kan niet meer opnieuw inloggen."
 
 #: src/workflows/requests/request-needs.tsx
 msgid "Left as it is since {date}"
@@ -9293,8 +9289,8 @@ msgid "Not offered"
 msgstr "Niet aangeboden"
 
 #: src/settings/sign-in-settings.tsx
-msgid "Not offered: its secret isn’t set"
-msgstr "Niet aangeboden: het secret ervan is niet ingesteld"
+msgid "Not on the sign-in page yet"
+msgstr "Nog niet op de inlogpagina"
 
 #: src/onboarding/send-plan-form.tsx
 msgid "Not planned yet"
@@ -9739,10 +9735,6 @@ msgstr "Uit zichzelf"
 msgid "On the schedule {cron}, in {zone}"
 msgstr "Volgens het schema {cron}, in {zone}"
 
-#: src/settings/sign-in-settings.tsx
-msgid "On the sign-in page"
-msgstr "Op de inlogpagina"
-
 #: src/workflows/workflows-table.tsx
 msgid "On the way"
 msgstr "Onderweg"
@@ -9808,14 +9800,6 @@ msgstr "Eén uit een lijst met opties"
 #: src/interview/words.ts
 msgid "One real case"
 msgstr "Eén echt geval"
-
-#: src/settings/sign-in-settings.tsx
-msgid "Only accounts of the Google Workspace {hostedDomain}."
-msgstr "Alleen accounts van de Google Workspace {hostedDomain}."
-
-#: src/settings/sign-in-settings.tsx
-msgid "Only accounts of the tenant {tenantId}."
-msgstr "Alleen accounts van de tenant {tenantId}."
 
 #: src/settings/use-team-change.ts
 msgid "Only admins can change teams."
@@ -9905,6 +9889,14 @@ msgstr "Alleen als het gevraagd wordt"
 #: src/settings/staff-access.tsx
 msgid "Only while a window your organization opened lasts."
 msgstr "Alleen zolang een venster loopt dat je organisatie heeft geopend."
+
+#: src/settings/sign-in-settings.tsx
+msgid "Only work accounts from {organization}’s Google Workspace ({hostedDomain})."
+msgstr "Alleen werkaccounts uit de Google Workspace van {organization} ({hostedDomain})."
+
+#: src/settings/sign-in-settings.tsx
+msgid "Only work accounts from {organization}’s Microsoft 365."
+msgstr "Alleen werkaccounts uit de Microsoft 365 van {organization}."
 
 #: src/brain/sources-page.tsx
 msgctxt "a source nobody else may read"
@@ -11752,6 +11744,7 @@ msgid "Rocket"
 msgstr "Raket"
 
 #: src/apps/app-sharing.tsx
+#: src/routes/_shell.settings.profile.tsx
 #: src/settings/invitations.tsx
 msgid "Role"
 msgstr "Rol"
@@ -12096,6 +12089,7 @@ msgstr "Correctie opslaan"
 
 #: src/interview/composer.tsx
 #: src/settings/profile-name.tsx
+#: src/settings/workspace-name.tsx
 msgid "Saved"
 msgstr "Opgeslagen"
 
@@ -12134,6 +12128,7 @@ msgid "Saved."
 msgstr "Opgeslagen."
 
 #: src/settings/profile-name.tsx
+#: src/settings/workspace-name.tsx
 msgid "Saving"
 msgstr "Bezig met opslaan"
 
@@ -15090,6 +15085,7 @@ msgstr "Proberen"
 #: src/pages/frame-failure.tsx
 #: src/settings/profile-name.tsx
 #: src/settings/section.tsx
+#: src/settings/workspace-name.tsx
 msgid "Try again"
 msgstr "Opnieuw proberen"
 
@@ -17049,6 +17045,10 @@ msgstr "De naam van je bedrijf in Grasp."
 msgid "Your company’s name in Grasp. An admin changes it."
 msgstr "De naam van je bedrijf in Grasp. Een beheerder wijzigt hem."
 
+#: src/routes/_shell.settings.profile.tsx
+msgid "Your details"
+msgstr "Je gegevens"
+
 #: src/settings/ai-providers.tsx
 msgid "Your endpoint's public HTTPS address, such as https://models.example.com/v1."
 msgstr "Het openbare HTTPS-adres van je endpoint, bijvoorbeeld https://models.example.com/v1."
@@ -17089,6 +17089,10 @@ msgstr "Je eigen contract met Anthropic, OpenAI, Mistral of een andere aanbieder
 #: src/settings/ai-providers.tsx
 msgid "Your own keys, for when your AI runs on them. Stored sealed."
 msgstr "Je eigen sleutels, voor als je AI erop draait. Verzegeld bewaard."
+
+#: src/settings/sign-in-settings.tsx
+msgid "Your people sign in with the work accounts your organization already has. Grasp set this up with you; to change it, ask your Grasp contact."
+msgstr "Je mensen loggen in met de werkaccounts die je organisatie al heeft. Grasp heeft dit samen met jullie ingericht; vraag je contactpersoon bij Grasp om het te wijzigen."
 
 #: src/onboarding/about-story.tsx
 msgid "Your people, documents and tools first. Then two weeks of short conversations with your team. At {threshold}%, your team can start."

@@ -9,7 +9,14 @@ import { isFileGone } from "../error-reports.ts";
 import { Alert } from "../grasp/alert/index.ts";
 import { Button } from "../grasp/button/index.ts";
 import { Card } from "../grasp/card/index.ts";
-import { Empty } from "../grasp/empty/index.ts";
+import {
+  Empty,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+  EmptyDescription,
+  EmptyContent,
+} from "../grasp/empty/index.ts";
 import { Retry } from "../grasp/icons/index.ts";
 import { Label } from "../grasp/label/index.ts";
 import { Skeleton } from "../grasp/skeleton/index.ts";
@@ -167,7 +174,7 @@ export const SettingRow = ({
       </div>
       {error === undefined ? null : (
         <div {...stylex.props(styles.across)}>
-          <Alert variant="danger">{error}</Alert>
+          <Alert tone="danger">{error}</Alert>
         </div>
       )}
     </div>
@@ -321,7 +328,7 @@ export const SectionNotLoaded = ({
   const trying = useRouterState({ select: (state) => state.isLoading });
   return (
     <div {...stylex.props(styles.failed)}>
-      <Alert variant="danger">{notLoadedText(page, i18n)}</Alert>
+      <Alert tone="danger">{notLoadedText(page, i18n)}</Alert>
       <Button
         disabled={onRetry === undefined && trying}
         icon={Retry}
@@ -352,8 +359,13 @@ export const SettingsError = ({ error }: ErrorComponentProps) => {
   const reason = useRouteErrorReason(error);
   const reload = isFileGone(error);
   return (
-    <Empty
-      action={
+    <Empty tone="danger">
+      <EmptyHeader>
+        <EmptyMedia />
+        <EmptyTitle headingLevel={2}>{t`This page didn't load`}</EmptyTitle>
+        <EmptyDescription>{reason ?? ""}</EmptyDescription>
+      </EmptyHeader>
+      <EmptyContent>
         <Button
           disabled={trying}
           icon={Retry}
@@ -367,13 +379,7 @@ export const SettingsError = ({ error }: ErrorComponentProps) => {
         >
           {trying ? t`Trying again…` : t`Try again`}
         </Button>
-      }
-      kind="error"
-      // Under the section's own h1 in the Settings layout.
-      titleLevel={2}
-      title={t`This page didn't load`}
-    >
-      {reason ?? ""}
+      </EmptyContent>
     </Empty>
   );
 };

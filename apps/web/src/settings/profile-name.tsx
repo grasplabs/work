@@ -67,7 +67,7 @@ export const ProfileName = ({ name }: { name: string }) => {
       retryLabel={t`Try again`}
       savedLabel={t`Saved`}
       savingLabel={t`Saving`}
-      state={state}
+      status={state}
     >
       {(field) => (
         <Input

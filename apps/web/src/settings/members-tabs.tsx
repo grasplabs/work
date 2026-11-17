@@ -4,7 +4,12 @@ import * as stylex from "@stylexjs/stylex";
 import { useRouteContext } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 
-import { Tabs, TabsList, TabsPanel, TabsTab } from "../grasp/tabs/index.ts";
+import {
+  Tabs,
+  TabsList,
+  TabsContent,
+  TabsTrigger,
+} from "../grasp/tabs/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { TeamsPanel } from "./teams.tsx";
 
@@ -45,21 +50,21 @@ export const MembersTabs = ({
   return (
     <Tabs defaultValue="members">
       <TabsList aria-label={t`Members and roles`}>
-        <TabsTab value="members">{t`Members`}</TabsTab>
-        <TabsTab value="teams">{t`Teams`}</TabsTab>
-        <TabsTab value="roles">{t`Roles`}</TabsTab>
+        <TabsTrigger value="members">{t`Members`}</TabsTrigger>
+        <TabsTrigger value="teams">{t`Teams`}</TabsTrigger>
+        <TabsTrigger value="roles">{t`Roles`}</TabsTrigger>
       </TabsList>
-      <TabsPanel value="members">
+      <TabsContent value="members">
         <div {...stylex.props(styles.stack)}>{children}</div>
-      </TabsPanel>
-      <TabsPanel value="teams">
+      </TabsContent>
+      <TabsContent value="teams">
         <div {...stylex.props(styles.stack)}>
           <TeamsPanel />
         </div>
-      </TabsPanel>
-      <TabsPanel value="roles">
+      </TabsContent>
+      <TabsContent value="roles">
         <div {...stylex.props(styles.stack)}>{roles}</div>
-      </TabsPanel>
+      </TabsContent>
     </Tabs>
   );
 };

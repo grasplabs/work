@@ -1,46 +1,82 @@
+import type { Organization } from "@grasp-os/shared/organization";
 import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { useRouter } from "@tanstack/react-router";
 import { useState } from "react";
 
-import { changeThenRefresh } from "../change-then-refresh.ts";
 import type { Session } from "../core.ts";
 import { organizationRenamed } from "../frame/organization-name.tsx";
 import { Input } from "../grasp/input/index.ts";
+import { SettingRow } from "../grasp/setting-row/index.ts";
+import type { SettingRowState } from "../grasp/setting-row/index.ts";
 import { useCoreAction } from "../use-core-action.ts";
-import { SettingRow } from "./section.tsx";
 
-// Settings › Workspace's own fields: a change to the organization, then
-// the page read again, each field with its own failure; and the name,
-// which tells the sidebar the moment core saved it
-// (frame/organization-name.tsx), so it never shows the name just replaced.
+// Settings › Workspace's own fields: a change to the organization, saved
+// as it is made, the row saying how its save stands (saving, saved, or
+// failed with Try again), and the page read again behind it. A field is
+// held only while its own save runs, never while the page reads again, so
+// it can be changed again at once. The name tells the sidebar the moment
+// core saved it (frame/organization-name.tsx), so it never shows the name
+// just replaced.
 
-type Change = (organization: Session["organization"]) => Promise<unknown>;
+type Change = (
+  organization: Session["organization"]
+) => Promise<Organization | undefined>;
+
+export const controlStyles = stylex.create({
+  // Every control fills the rows' shared control column.
+  fill: { width: "100%" },
+});
 
 /**
- * Makes a change to the organization, then reads the page again: its
- * failure is its own, and `busy` while it runs. `onSaved` runs once core
- * took the change.
+ * Makes a change to the organization: its failure and how its save
+ * stands are its own, and `busy` only while the save runs. `onSaved` hears
+ * the organization as core saved it; the page reads again behind it.
  */
 export const useOrganizationChange = () => {
   const router = useRouter();
   const { busy, failure, run } = useCoreAction();
-  const change = (update: Change, onSaved?: () => void): void => {
+  const [status, setStatus] = useState<SettingRowState>("idle");
+  const change = (
+    update: Change,
+    onSaved?: (organization: Organization) => void
+  ): void => {
+    setStatus("saving");
     void (async () => {
-      const saved = await run(async (session) => {
-        await changeThenRefresh(
-          async () => await update(session.organization),
-          async () => {
-            await router.invalidate({ sync: true });
-          }
-        );
-        return true;
-      });
-      if (saved === true) {
-        onSaved?.();
+      const saved = await run(
+        async (session) => await update(session.organization)
+      );
+      if (saved === undefined) {
+        setStatus("failed");
+        return;
       }
+      setStatus("saved");
+      onSaved?.(saved);
+      // The page reads again behind the field, which stays free meanwhile.
+      void router.invalidate();
     })();
   };
-  return { busy, failure, change };
+  return {
+    busy,
+    failure,
+    status,
+    change,
+    /** A new value typed or picked: the last save's word goes. */
+    idle: () => {
+      setStatus("idle");
+    },
+  };
+};
+
+/** The words a row says of its save, translated. */
+export const useSaveWords = () => {
+  const { t } = useLingui();
+  return {
+    failedLabel: t`Could not save. Your change is kept.`,
+    retryLabel: t`Try again`,
+    savedLabel: t`Saved`,
+    savingLabel: t`Saving`,
+  };
 };
 
 /** The organization's name, as a setting's row: saved when the field is left, or on Enter; Escape puts it back. */
@@ -52,22 +88,37 @@ export const NameField = ({
   canChange: boolean;
 }) => {
   const { t } = useLingui();
-  const { busy, failure, change } = useOrganizationChange();
+  const words = useSaveWords();
+  const { busy, failure, status, change, idle } = useOrganizationChange();
   const [draft, setDraft] = useState<string | null>(null);
+  // What core last took: the page's read catches up behind it.
+  const [saved, setSaved] = useState(name);
+  // The name a failed save tried, kept for Try again.
+  const [tried, setTried] = useState<string>();
+  const send = (next: string): void => {
+    setTried(next);
+    change(
+      async (api) => await api.update({ name: next }),
+      (organization) => {
+        setSaved(organization.name);
+        setTried(undefined);
+        organizationRenamed(organization.name);
+      }
+    );
+  };
   const save = (): void => {
     const next = draft?.trim();
-    setDraft(null);
-    if (next !== undefined && next !== "" && next !== name) {
-      change(
-        async (api) => await api.update({ name: next }),
-        () => {
-          organizationRenamed(next);
-        }
-      );
+    // A failed save keeps what was typed in the field, as the row says.
+    if (status !== "failed") {
+      setDraft(null);
+    }
+    if (next !== undefined && next !== "" && next !== saved) {
+      send(next);
     }
   };
   return (
     <SettingRow
+      {...words}
       {...(failure === undefined ? {} : { error: failure })}
       help={
         canChange
@@ -75,10 +126,17 @@ export const NameField = ({
           : t`Your company’s name in Grasp. An admin changes it.`
       }
       label={t`Name`}
+      onRetry={() => {
+        if (tried !== undefined) {
+          send(tried);
+        }
+      }}
+      status={status}
     >
       {(field) => (
         <Input
           {...field}
+          layout={controlStyles.fill}
           maxLength={80}
           onBlur={save}
           onKeyDown={(event) => {
@@ -87,12 +145,16 @@ export const NameField = ({
             }
             if (event.key === "Escape") {
               setDraft(null);
+              idle();
             }
           }}
-          onValueChange={setDraft}
+          onValueChange={(value) => {
+            setDraft(value);
+            idle();
+          }}
           // Read-only while its save runs, not disabled: a disabled field drops the keyboard's focus.
           readOnly={!canChange || busy}
-          value={draft ?? name}
+          value={draft ?? saved}
         />
       )}
     </SettingRow>

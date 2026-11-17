@@ -19,6 +19,7 @@
 // Every visible word of the switch's own is a prop with an English default. A caller may set layout only.
 "use client";
 
+/* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
 import { useState, useSyncExternalStore } from "react";
 
@@ -113,9 +114,9 @@ export interface LanguageSwitchProps {
    * @default (label, current) => `${label}, ${current}`
    */
   buttonLabel?: (label: string, current: string) => string;
-  /** Layout only: where it sits. */
+  /** @deprecated Use `layout`. */
   style?: LanguageSwitchLayoutStyle;
-  /** The same as `style`, by a name a style lint does not take for an inline style attribute. */
+  /** Layout only: where it sits. */
   layout?: LanguageSwitchLayoutStyle;
 }
 

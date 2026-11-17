@@ -13,7 +13,15 @@ import { changeThenRefresh } from "../change-then-refresh.ts";
 import { formatDateTime } from "../format.ts";
 import { Button } from "../grasp/button/index.ts";
 import { Chat } from "../grasp/icons/index.ts";
-import { Item, ItemGroup } from "../grasp/item/index.ts";
+import {
+  Item,
+  ItemGroup,
+  ItemContent,
+  ItemTitle,
+  ItemDescription,
+  ItemActions,
+  ItemMedia,
+} from "../grasp/item/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
 import { Separator } from "../grasp/separator/index.ts";
 import { Text } from "../grasp/text/index.ts";
@@ -77,8 +85,12 @@ const RefusedLink = ({ reason }: { reason: ChannelLinkRefusal }) => {
   const router = useRouter();
   const text = useRefusalText(reason);
   return (
-    <Item
-      actions={
+    <Item variant="outline">
+      <ItemContent>
+        <ItemTitle>{t`This link can’t be used`}</ItemTitle>
+        <ItemDescription>{text}</ItemDescription>
+      </ItemContent>
+      <ItemActions>
         <Button
           onClick={() => {
             forgetChatLink();
@@ -89,11 +101,8 @@ const RefusedLink = ({ reason }: { reason: ChannelLinkRefusal }) => {
         >
           {t`Dismiss`}
         </Button>
-      }
-      description={text}
-      title={t`This link can’t be used`}
-      variant="outline"
-    />
+      </ItemActions>
+    </Item>
   );
 };
 
@@ -131,8 +140,17 @@ const OpenLink = ({
     });
   };
   return (
-    <Item
-      actions={
+    <Item variant="outline">
+      <ItemMedia icon={Chat} />
+      <ItemContent>
+        <ItemTitle>{t`Link your ${app} account ${account}?`}</ItemTitle>
+        <ItemDescription>
+          <RowNote failure={failure}>
+            {t`Grasp sent this link to that account in ${app}. Link it only if it is yours: Grasp then answers it as you, with what you can see.`}
+          </RowNote>
+        </ItemDescription>
+      </ItemContent>
+      <ItemActions>
         <>
           <Button
             disabled={busy}
@@ -156,16 +174,8 @@ const OpenLink = ({
             {t`Link`}
           </Button>
         </>
-      }
-      description={
-        <RowNote failure={failure}>
-          {t`Grasp sent this link to that account in ${app}. Link it only if it is yours: Grasp then answers it as you, with what you can see.`}
-        </RowNote>
-      }
-      icon={Chat}
-      title={t`Link your ${app} account ${account}?`}
-      variant="outline"
-    />
+      </ItemActions>
+    </Item>
   );
 };
 
@@ -188,8 +198,17 @@ const AccountRow = ({ account }: { account: ChannelAccount }) => {
     });
   };
   return (
-    <Item
-      actions={
+    <Item size="sm">
+      <ItemContent>
+        <ItemTitle>
+          <TitleLine
+            detail={<RowNote failure={failure}>{t`Linked ${time}`}</RowNote>}
+          >
+            {t`${app} · ${shown}`}
+          </TitleLine>
+        </ItemTitle>
+      </ItemContent>
+      <ItemActions>
         <Button
           aria-label={t`Unlink ${app} account ${shown}`}
           disabled={busy}
@@ -201,16 +220,8 @@ const AccountRow = ({ account }: { account: ChannelAccount }) => {
         >
           {t`Unlink`}
         </Button>
-      }
-      size="sm"
-      title={
-        <TitleLine
-          detail={<RowNote failure={failure}>{t`Linked ${time}`}</RowNote>}
-        >
-          {t`${app} · ${shown}`}
-        </TitleLine>
-      }
-    />
+      </ItemActions>
+    </Item>
   );
 };
 

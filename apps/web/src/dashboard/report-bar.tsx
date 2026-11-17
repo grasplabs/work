@@ -51,7 +51,7 @@ export const ReportBar = ({
           other: "Your next report is ready in # days",
         });
   return (
-    <Card ground="soft" padding="md">
+    <Card variant="soft" padding="md">
       <div {...stylex.props(styles.row)}>
         <Icon icon={File} />
         <div {...stylex.props(styles.words)}>

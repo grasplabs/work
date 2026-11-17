@@ -10,6 +10,7 @@
 // Every value is a token (src/tokens).
 "use client";
 
+/* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
 import {
   DatePicker as RootPrimitive,
@@ -63,7 +64,9 @@ export interface DateRangePickerProps extends Omit<
   | "presentation"
 > {
   /** The field's name for a screen reader, a voice command and an agent ("Period"). */
-  label: string;
+  "aria-label"?: string;
+  /** @deprecated Use `aria-label`. */
+  label?: string;
   /** The chosen range, `[start, end]` as ISO dates, or `null`. Pass it with `onValueChange` to hold it yourself. */
   value?: [string, string] | null;
   /** The range it starts with, and goes back to when its form resets. */
@@ -342,8 +345,13 @@ const PresetButton = ({
 );
 
 /** Two dates, typed or chosen on the calendar, with presets beside it. */
+/** The field's name by its new name, else its deprecated old one (the breaking release's step 1). */
+const nameOf = (named: string | undefined, label: string | undefined) =>
+  named ?? label ?? "";
+
 export const DateRangePicker = ({
-  label,
+  label: labelDeprecated,
+  "aria-label": named,
   value,
   defaultValue,
   onValueChange,
@@ -362,6 +370,7 @@ export const DateRangePicker = ({
   today: givenToday,
   ...rest
 }: DateRangePickerProps) => {
+  const label = nameOf(named, labelDeprecated);
   const today = useToday(givenToday, rest.timeZone);
   const offered =
     presets === false

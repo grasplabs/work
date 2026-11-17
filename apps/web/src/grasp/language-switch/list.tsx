@@ -214,7 +214,7 @@ export const LanguageList = ({
               }}
               onKeyDown={onSearchKey}
             />
-            <InputGroupClear label={words.clearSearch} />
+            <InputGroupClear aria-label={words.clearSearch} />
           </InputGroup>
         </div>
       ) : null}

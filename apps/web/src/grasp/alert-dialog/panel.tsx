@@ -19,7 +19,7 @@ import { sureClose } from "../dialog/sure-close";
 type ContentPrimitiveProps = ComponentProps<typeof ContentPrimitive>;
 
 /** Every prop an AlertDialogPanel takes: these, and the rest of UI SDK's AlertDialogContent. */
-export interface AlertDialogPanelProps extends Omit<
+export interface AlertDialogContentProps extends Omit<
   ContentPrimitiveProps,
   "children" | "className" | "style" | "render"
 > {
@@ -31,10 +31,10 @@ export interface AlertDialogPanelProps extends Omit<
  * The panel, with the shade behind it. In the middle of the window; a sheet along the bottom under
  * 640px. Focus starts on the first action, the safe answer.
  */
-export const AlertDialogPanel = ({
+export const AlertDialogContent = ({
   children,
   ...rest
-}: AlertDialogPanelProps) => {
+}: AlertDialogContentProps) => {
   const still = useStill();
   if (still) {
     if (still.phase === "closed") {
@@ -72,3 +72,8 @@ export const AlertDialogPanel = ({
     </>
   );
 };
+
+/** @deprecated Use `AlertDialogContent`. */
+export const AlertDialogPanel = AlertDialogContent;
+/** @deprecated Use `AlertDialogContentProps`. */
+export type AlertDialogPanelProps = AlertDialogContentProps;

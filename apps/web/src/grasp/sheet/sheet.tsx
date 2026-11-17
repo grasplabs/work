@@ -55,11 +55,12 @@ export interface SheetProps extends Omit<
    */
   side?: "start" | "end";
   /**
-   * How wide it is: `md` for a form or details, `wide` for a layout of its own, `full` for a chart
+   * How wide it is: `md` for a form or details, `lg` for a layout of its own (`wide` is its old,
+   * deprecated name), `full` for a chart
    * or a table opened in full. Never closer than its inset to the window's edges.
    * @default "md"
    */
-  size?: "md" | "wide" | "full";
+  size?: "md" | "lg" | "wide" | "full";
   /**
    * Open now. Pass it with `onOpenChange` to open and close the sheet yourself. It may be mounted only
    * while open: focus still goes back to what opened it.
@@ -86,9 +87,11 @@ export interface SheetProps extends Omit<
 export const Sheet = ({
   children,
   side = "end",
-  size = "md",
+  size: sizeGiven = "md",
   ...rest
 }: SheetProps) => {
+  // `lg` is the new name of `wide` (the breaking release's step 1).
+  const size = sizeGiven === "lg" ? "wide" : sizeGiven;
   const still = useStill();
   // Opened by `open` with no trigger: focus goes back to what had it (src/focus/return-focus.ts).
   useReturnFocus(rest.open);

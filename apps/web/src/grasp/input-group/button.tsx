@@ -24,11 +24,13 @@ interface InputGroupButtonOwn {
    * @default "ghost"
    */
   variant?: ButtonVariant;
-  /** The words on the button, a verb first ("Send"). Leave them out for an icon with a `label`. */
+  /** The words on the button, a verb first ("Send"). Leave them out for an icon with an `aria-label`. */
   children?: ButtonWords;
-  /** An icon before the words, or the whole button with `label`. Import it from the icons entry (`@/components/grasp/icons`). */
+  /** An icon before the words, or the whole button with `aria-label`. Import it from the icons entry (`@/components/grasp/icons`). */
   icon?: IconData;
   /** The name of an icon-only button, for a screen reader and an agent ("Copy link"). */
+  "aria-label"?: string;
+  /** @deprecated Use `aria-label`. */
   label?: string;
 }
 

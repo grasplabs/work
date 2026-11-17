@@ -535,7 +535,7 @@ const TableBlock = ({
   };
   return (
     <Table
-      label={context.tableNames.get(node) ?? context.tableLabel}
+      aria-label={context.tableNames.get(node) ?? context.tableLabel}
       arriving={written}
     >
       {head !== undefined && (

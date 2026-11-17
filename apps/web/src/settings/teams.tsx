@@ -9,7 +9,7 @@ import {
   AlertDialogAction,
   AlertDialogDescription,
   AlertDialogFooter,
-  AlertDialogPanel,
+  AlertDialogContent,
   AlertDialogTitle,
 } from "../grasp/alert-dialog/index.ts";
 import { Button } from "../grasp/button/index.ts";
@@ -18,13 +18,13 @@ import {
   DialogAction,
   DialogBody,
   DialogFooter,
-  DialogPanel,
+  DialogContent,
   DialogTitle,
 } from "../grasp/dialog/index.ts";
 import {
   DropdownMenu,
   DropdownMenuItem,
-  DropdownMenuPanel,
+  DropdownMenuContent,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "../grasp/dropdown-menu/index.ts";
@@ -32,7 +32,13 @@ import { Field, FieldError, FieldLabel } from "../grasp/field/index.ts";
 import { Form } from "../grasp/form/index.ts";
 import { Edit, More, Plus, Trash } from "../grasp/icons/index.ts";
 import { Input } from "../grasp/input/index.ts";
-import { Item, ItemGroup } from "../grasp/item/index.ts";
+import {
+  Item,
+  ItemGroup,
+  ItemContent,
+  ItemTitle,
+  ItemActions,
+} from "../grasp/item/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { loadFromCore } from "../load-from-core.tsx";
@@ -141,7 +147,7 @@ const TeamNameDialog = ({
       }}
       open={open}
     >
-      <DialogPanel closeLabel={t`Close`}>
+      <DialogContent closeLabel={t`Close`}>
         <DialogTitle>{title}</DialogTitle>
         <DialogBody>
           <Form
@@ -176,7 +182,7 @@ const TeamNameDialog = ({
             {submit}
           </Button>
         </DialogFooter>
-      </DialogPanel>
+      </DialogContent>
     </Dialog>
   );
 };
@@ -259,8 +265,21 @@ const TeamRow = ({
   };
   return (
     <>
-      <Item
-        actions={
+      <Item size="sm">
+        <ItemContent>
+          <ItemTitle>
+            <TitleLine
+              detail={
+                <RowNote failure={open === "delete" ? undefined : failure}>
+                  {t`${plural(count, { one: "# member", other: "# members" })}`}
+                </RowNote>
+              }
+            >
+              {name}
+            </TitleLine>
+          </ItemTitle>
+        </ItemContent>
+        <ItemActions>
           <>
             <Button
               aria-label={t`Members of ${name}`}
@@ -274,11 +293,11 @@ const TeamRow = ({
             <DropdownMenu>
               <DropdownMenuTrigger
                 icon={More}
-                label={t`Actions for ${name}`}
+                aria-label={t`Actions for ${name}`}
                 size="sm"
                 variant="ghost"
               />
-              <DropdownMenuPanel align="end">
+              <DropdownMenuContent align="end">
                 <DropdownMenuItem
                   disabled={busy}
                   icon={Edit}
@@ -290,7 +309,7 @@ const TeamRow = ({
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
-                  danger
+                  variant="danger"
                   disabled={busy}
                   icon={Trash}
                   onSelect={() => {
@@ -299,23 +318,11 @@ const TeamRow = ({
                 >
                   {t`Delete`}
                 </DropdownMenuItem>
-              </DropdownMenuPanel>
+              </DropdownMenuContent>
             </DropdownMenu>
           </>
-        }
-        size="sm"
-        title={
-          <TitleLine
-            detail={
-              <RowNote failure={open === "delete" ? undefined : failure}>
-                {t`${plural(count, { one: "# member", other: "# members" })}`}
-              </RowNote>
-            }
-          >
-            {name}
-          </TitleLine>
-        }
-      />
+        </ItemActions>
+      </Item>
       <TeamNameDialog
         except={team.id}
         initial={name}
@@ -334,7 +341,7 @@ const TeamRow = ({
         title={t`Rename ${name}`}
       />
       <AlertDialog onOpenChange={close} open={open === "delete"}>
-        <AlertDialogPanel>
+        <AlertDialogContent>
           <AlertDialogTitle>{t`Delete ${name}?`}</AlertDialogTitle>
           <AlertDialogDescription>
             {t`What is shared with this team stops being shared with its members through it, and the workflows it owns no longer have a team. Its members stay in the organization.`}
@@ -350,7 +357,7 @@ const TeamRow = ({
               {t`Delete`}
             </AlertDialogAction>
           </AlertDialogFooter>
-        </AlertDialogPanel>
+        </AlertDialogContent>
       </AlertDialog>
       <TeamMembersDialog
         members={members}

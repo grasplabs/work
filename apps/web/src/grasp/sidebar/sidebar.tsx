@@ -1,5 +1,6 @@
 "use client";
 
+/* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
 import {
   createElement,
@@ -215,6 +216,8 @@ export interface SidebarProps {
    * What the sidebar is, said to a screen reader as a landmark.
    * @default "Sidebar"
    */
+  "aria-label"?: string;
+  /** @deprecated Use `aria-label`. */
   label?: string;
   /**
    * What its rows are, said to a screen reader as a navigation landmark.
@@ -281,9 +284,9 @@ export interface SidebarProps {
   tabsLabel?: string;
   /** One quiet sentence where the rows would be, when the list has none ("Nothing needs you yet"). */
   empty?: string;
-  /** Layout only: where it sits and how tall it is. */
+  /** @deprecated Use `layout`. */
   style?: SidebarLayoutStyle;
-  /** The same as `style`, by a name a style lint does not take for an inline style attribute. */
+  /** Layout only: where it sits and how tall it is. */
   layout?: SidebarLayoutStyle;
 }
 
@@ -1163,6 +1166,10 @@ const HeadMark = ({ head }: { head: ReactNode }) =>
 
 /** Search, at the head's end, with the keys that open it elsewhere in its title. App shell stands
  * the same button in its bar while the sidebar is folded (`brandIn="sidebar"`). */
+/** The landmark's name by its new name, else the deprecated old one (the breaking release's step 1). */
+const nameOf = (named: string | undefined, label: string | undefined) =>
+  named ?? label ?? "Sidebar";
+
 export const SearchButton = ({
   onSearch,
   label,
@@ -1532,7 +1539,8 @@ const SidebarDrawn = ({
   onOpenChange,
   foldLabel = "Show or hide the sidebar",
   foldShortcut,
-  label = "Sidebar",
+  label: labelDeprecated,
+  "aria-label": named,
   navLabel = "Main",
   reopen = true,
   reopenLook = "raised",
@@ -1554,6 +1562,7 @@ const SidebarDrawn = ({
   onPeek,
   beside,
 }: SidebarProps & ShellExtras) => {
+  const label = nameOf(named, labelDeprecated);
   const [own, setOwn] = useState(defaultOpen);
   const open = given ?? own;
   // Whether the person has folded or opened it on this page: only then does the reopen button fade

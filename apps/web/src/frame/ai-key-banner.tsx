@@ -121,7 +121,7 @@ const FailingLine = ({ failing }: { failing: FailingProvider }) => {
   return (
     // Said when its words change, not over whatever the person is doing.
     // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- Alert's own prop, which sets its live role; not an element's role
-    <Alert role="status" title={title} variant="attention">
+    <Alert role="status" title={title} tone="attention">
       {description}
     </Alert>
   );

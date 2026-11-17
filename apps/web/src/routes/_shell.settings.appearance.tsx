@@ -21,7 +21,7 @@ const Theme = () => {
       title={t`Theme`}
     >
       <ThemeSwitch
-        form="picker"
+        variant="picker"
         label={t`Mode`}
         modeWords={{
           light: { name: t`Light`, line: t`Always light` },
