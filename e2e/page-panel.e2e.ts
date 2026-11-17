@@ -19,9 +19,10 @@ test("a new page opens at its top, and what is too wide does not scroll the page
   const { member } = peopleIn("pagePanel");
   const page = await pageOf(member);
   await page.setViewportSize(short);
-  await page.goto("/brain");
+  // A page that scrolls in the frame (the Brain's map fills it whole).
+  await page.goto("/apps");
   const nav = page.getByRole("navigation", { name: "Breadcrumb" });
-  await expect(nav).toContainText("Brain", pageRead);
+  await expect(nav).toContainText("Apps", pageRead);
 
   const panel = page.getByRole("main");
   // Content taller and wider than the panel, in the panel itself so it
