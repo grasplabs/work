@@ -243,7 +243,8 @@ export const recallFor = async (
 
 // Who knows about a topic (GRA-1744; the design note and threat model are
 // on the issue): the people who uploaded the documents about it that the
-// asker may read, each pinned to those documents. For a chat's code alone
+// asker may read, each with the one that answers best, pinned with it.
+// For a chat's code alone
 // (agent-brain.ts `whoKnows`), never an App's or a workflow's, whose data
 // can reach people the asker isn't. How it can fail, and how it fails
 // closed:
@@ -255,16 +256,20 @@ export const recallFor = async (
 //   statement that reads its uploader (`uploadersOf`), as this read's
 //   reader. A document they may not read answers as one nobody holds.
 // - What only one person may read becomes evidence for anyone else: no
-//   person's own store is read (`personal: false`), and an upload its
-//   uploader alone reads is never taken.
-// - An erased or removed person is named: only an uploader who is an
-//   active member now.
-// - Monitoring of individuals: people one at a time, by name, never
-//   ranked, scored or counted, and never two related to each other. What
-//   it rests on is cited; no passage's text is handed over.
+//   person's own store is read (`personal: false`; the shared store holds
+//   nothing one person alone may read either, so this is a second layer),
+//   and an upload its uploader alone reads is never taken.
+// - An erased or removed person is named, or one named for a team's
+//   document they may no longer read themselves: only an uploader who is
+//   an active member now, in that team still.
+// - Monitoring of individuals: people one at a time, in the order of
+//   their names, never ranked, scored or counted (one citation each,
+//   never how many of their documents answer), and never two related to
+//   each other. No passage's text is handed over.
 // - What the answer rests on reaches the chat's history unpinned: every
-//   version cited is kept with the run (`keep`) before the code gets it,
-//   so a later turn withholds it once the reach may no longer read one.
+//   version cited, and every person named, is kept with the run (`keep`)
+//   before the code gets it, so a later turn withholds it once the reach
+//   may no longer read the version, or the person is no longer a member.
 // - Nothing of the question or the answer is in a refusal, a log line or
 //   the audit event, which is kept, answered or refused, before the call
 //   returns.
@@ -275,12 +280,13 @@ export interface UploadVersion {
   version: number;
 }
 
-/** A person who knows about the topic: who they are, and what says so. */
-export interface PersonWhoKnows {
+/**
+ * A person who knows about the topic: who they are, and the one version
+ * they uploaded that the asker may read and that answers best.
+ */
+export interface PersonWhoKnows extends UploadVersion {
   id: string;
   name: string;
-  /** The versions they uploaded that the asker may read, best first. */
-  sources: UploadVersion[];
 }
 
 /**
@@ -297,10 +303,14 @@ export interface WhoKnows {
 /** Who asks, as core resolved them: a chat's code, never an App or a run. */
 export interface WhoKnowsCaller extends Omit<RecallCaller, "keep"> {
   /**
-   * Keeps every version the answer cites with the run, before code gets
-   * it: one that couldn't be kept fails the call, audited as refused.
+   * Keeps every version the answer cites, and every person it names (their
+   * member id), with the run, before code gets it: what couldn't be kept
+   * fails the call, audited as refused.
    */
-  readonly keep: (sources: readonly UploadVersion[]) => Promise<void>;
+  readonly keep: (read: {
+    versions: readonly UploadVersion[];
+    people: readonly string[];
+  }) => Promise<void>;
 }
 
 /** Whether `one` sorts before `other`: by name, then by id, never by count. */
@@ -347,7 +357,9 @@ export const whoKnowsFor = async (
       caller.context
     );
     // As the chat's code recalls: its person's teams and the company in
-    // their own chat (`reach`), the company alone anywhere else.
+    // their own chat (`reach`), the company alone anywhere else. Never
+    // their own store (`personal: false`): a second layer, as the shared
+    // store keeps nothing only one person may read.
     const { passages, teams } = await passagesReadAs(
       env,
       caller.authority.onBehalfOf,
@@ -369,29 +381,32 @@ export const whoKnowsFor = async (
     const uploaders = new Map(
       found.map((uploader) => [uploader.uploadId, uploader])
     );
+    // Each person once, with their first upload in the pack's order: the
+    // one that answers best.
     const people = new Map<string, PersonWhoKnows>();
-    const cited = new Set<string>();
     for (const { id, version } of uploads) {
       const uploader = uploaders.get(id);
-      const place = JSON.stringify([id, version]);
-      if (uploader === undefined || cited.has(place)) {
-        continue;
+      if (uploader !== undefined && !people.has(uploader.userId)) {
+        people.set(uploader.userId, {
+          id: uploader.userId,
+          name: uploader.name,
+          source: { producer: "upload", id },
+          version,
+        });
       }
-      cited.add(place);
-      const person = people.get(uploader.userId) ?? {
-        id: uploader.userId,
-        name: uploader.name,
-        sources: [],
-      };
-      person.sources.push({ source: { producer: "upload", id }, version });
-      people.set(uploader.userId, person);
     }
     const answer: WhoKnows = {
       people: [...people.values()].toSorted(byName),
       notFound: passages.notFound,
       truncated: passages.truncated,
     };
-    await caller.keep(answer.people.flatMap(({ sources }) => sources));
+    await caller.keep({
+      versions: answer.people.map(({ source, version }) => ({
+        source,
+        version,
+      })),
+      people: answer.people.map(({ id }) => id),
+    });
     await audit({ people: answer.people.length, truncated: answer.truncated });
     return answer;
   } catch (error) {

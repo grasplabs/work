@@ -1,5 +1,6 @@
 import type { BrainUploadReaders } from "@grasp-os/shared/brain-sources";
 import { env } from "cloudflare:workers";
+import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
@@ -7,9 +8,14 @@ import { z } from "zod";
 import { withheldResult } from "../src/agent.ts";
 import { organizationId } from "../src/auth/auth.ts";
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
-import { teamMembers, teams } from "../src/db/core/schema.ts";
+import {
+  brainUploads,
+  teamMembers,
+  teams,
+  users,
+} from "../src/db/core/schema.ts";
 import { workspace } from "../src/durable-objects.ts";
-import { chatOf, codeResults, codeStep, says } from "./agent-chat.ts";
+import { chatOf, codeResults, codeStep, model, says } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
@@ -20,20 +26,25 @@ import { signedInApi, unique } from "./sign-in.ts";
 // Who knows about a topic, for a chat's code (GRA-1744; the design note
 // and threat model are on the issue): `env.brain.whoKnows` names the
 // people who uploaded the documents about it that the chat's person may
-// read, each with the versions that say so. How it can fail, and what
-// each test holds it to:
+// read, each with the one version that says so best. How it can fail,
+// and what each test holds it to:
 // 1. A person is named on the strength of a document the asker may not
 //    read: a team's they aren't in, one its uploader alone reads, or one
-//    removed. None names anyone.
+//    removed (its removal still owed by the Brain, too). None names
+//    anyone.
 // 2. What only one person may read becomes evidence: the asker's own
 //    upload for themselves alone names nobody, them included.
-// 3. An erased or removed person is named: never.
-// 4. Monitoring: people by name, never by how much they uploaded.
-// 5. It reads wider than its recall: at the same reach, in Grasp and in
-//    a chat app's direct message alike (their teams and the company).
-// 6. A named person outlives what it rests on in the chat's history:
-//    every version cited is pinned, so a later turn withholds the answer
-//    once the document is gone.
+// 3. An erased or removed person is named, or one named for a team's
+//    document they may no longer read themselves: never.
+// 4. Monitoring: one citation a person, never how much they uploaded,
+//    and people in the order of their names, never ranked.
+// 5. It reads wider than its recall: in Grasp and in a chat app's direct
+//    message, their teams and the company; in a turn nobody started, the
+//    company alone.
+// 6. A named person outlives what it rests on in the chat's history: the
+//    version cited and the person are pinned, so a later turn withholds
+//    the answer once the document is gone, or the person removed or
+//    erased.
 // 7. The audit log names who was named: each answer is audited by who
 //    asked and counts alone. Without the brain permission a chat's code
 //    has no `env.brain` at all; the harness probes the refusals.
@@ -76,6 +87,13 @@ const teamOf = async (...people: Person[]): Promise<string> => {
   return teamId;
 };
 
+/** `person` taken out of the team `teamId`, still a member of the organization. */
+const leftTeam = async (teamId: string, { userId }: Person): Promise<void> => {
+  await drizzle(env.DB)
+    .delete(teamMembers)
+    .where(and(eq(teamMembers.teamId, teamId), eq(teamMembers.userId, userId)));
+};
+
 /** `person` uploads a file saying `text` for `readers`: its upload's id. */
 const uploaded = async (
   person: Person,
@@ -107,15 +125,11 @@ const answerSchema = z.union([
       z.strictObject({
         id: z.string(),
         name: z.string(),
-        sources: z.array(
-          z.strictObject({
-            source: z.strictObject({
-              producer: z.literal("upload"),
-              id: z.string(),
-            }),
-            version: z.number(),
-          })
-        ),
+        source: z.strictObject({
+          producer: z.literal("upload"),
+          id: z.string(),
+        }),
+        version: z.number(),
       })
     ),
     notFound: z.array(z.string()),
@@ -124,47 +138,46 @@ const answerSchema = z.union([
   z.strictObject({ failed: z.string() }),
 ]);
 
+type WhoKnowsAnswer = z.infer<typeof answerSchema>;
+
 /** What the chat's code returned, each step's answer. */
 const answersIn = async (
   stub: Parameters<typeof codeResults>[0],
   chatId: string
-) => {
+): Promise<WhoKnowsAnswer[]> => {
   const results = await codeResults(stub, chatId);
   return results.map(({ text }) =>
     answerSchema.parse(JSON.parse(text.replace(/^Returned:\n/u, "")))
   );
 };
 
-/**
- * Each person `answer` names, by id, with the uploads that say so: read
- * by the people a test made, never as a whole list (recall may find more
- * by meaning).
- */
-const namedIn = (
-  answer: z.infer<typeof answerSchema> | undefined
-): Map<string, string[]> => {
+/** The people `answer` names, in its order: it must be one. */
+const peopleIn = (answer: WhoKnowsAnswer | undefined) => {
   if (answer === undefined || "failed" in answer) {
     throw new Error(`No answer: ${JSON.stringify(answer)}`);
   }
-  return new Map(
-    answer.people.map(({ id, sources }) => [
-      id,
-      sources.map(({ source }) => source.id),
+  return answer.people;
+};
+
+/**
+ * What `answer` says of each of `people`: the upload it cites for them,
+ * or null when it doesn't name them. Read by the people a test made,
+ * never as a whole list (recall may find more by meaning).
+ */
+const of = (
+  answer: WhoKnowsAnswer | undefined,
+  people: Readonly<Record<string, Person>>
+) => {
+  const cited = new Map(
+    peopleIn(answer).map(({ id, source }) => [id, source.id])
+  );
+  return Object.fromEntries(
+    Object.entries(people).map(([key, { userId }]) => [
+      key,
+      cited.get(userId) ?? null,
     ])
   );
 };
-
-/** What `named` says of each of `people`: their uploads, or null when not named. */
-const of = (
-  named: Map<string, string[]>,
-  people: Readonly<Record<string, Person>>
-) =>
-  Object.fromEntries(
-    Object.entries(people).map(([key, { userId }]) => [
-      key,
-      named.get(userId)?.toSorted() ?? null,
-    ])
-  );
 
 /** A chat of `person`'s own in Grasp, whose agent holds the grant to read the Brain. */
 const ownChatOf = async (
@@ -182,12 +195,29 @@ const ownChatOf = async (
   return chat;
 };
 
+/** What `person` asks in their own chat in Grasp: its code's answer. */
+const askedInOwnChat = async (
+  admin: Person,
+  person: Person,
+  question: string
+): Promise<WhoKnowsAnswer | undefined> => {
+  const chat = await ownChatOf(
+    admin,
+    person,
+    askingCode(question),
+    says("Asked.")
+  );
+  await chat.ask(word());
+  const [answer] = await answersIn(chat.stub, chat.chat.id);
+  return answer;
+};
+
 /** What `person` asks in their direct message with a new agent of theirs on Teams. */
 const askedInDirectMessage = async (
   admin: Person,
   person: Person,
   question: string
-) => {
+): Promise<WhoKnowsAnswer | undefined> => {
   const agentId = crypto.randomUUID();
   await requestGranted(idp, admin, {
     subject: { type: "agent", agentId },
@@ -209,37 +239,92 @@ const askedInDirectMessage = async (
   return answer;
 };
 
+/** What a turn nobody started asks in `person`'s own chat: its code's answer. */
+const askedInWokenTurn = async (
+  admin: Person,
+  person: Person,
+  question: string
+): Promise<WhoKnowsAnswer | undefined> => {
+  const chat = await ownChatOf(
+    admin,
+    person,
+    askingCode(question),
+    says("Asked.")
+  );
+  await chat.stub.askUnattended(chat.chat.id, { text: word(), model });
+  const [answer] = await answersIn(chat.stub, chat.chat.id);
+  return answer;
+};
+
+/**
+ * Whether a chat whose code named `named` for `topic` still sends that to
+ * the model in its next turn, once `change` ran: whether it names them
+ * again, and whether the result was withheld.
+ */
+const sentAfter = async (
+  admin: Person,
+  asker: Person,
+  topic: string,
+  named: Person,
+  change: () => Promise<unknown>
+) => {
+  const chat = await ownChatOf(
+    admin,
+    asker,
+    askingCode(topic),
+    says("Asked."),
+    says("And now.")
+  );
+  await chat.ask(word());
+  const [answer] = await answersIn(chat.stub, chat.chat.id);
+  const first = peopleIn(answer).some(({ id }) => id === named.userId);
+  const before = chat.provider.requests.length;
+  await change();
+  await chat.ask(word());
+  const sent = JSON.stringify(chat.provider.requests[before]?.body);
+  return {
+    first,
+    named: sent.includes(named.userId),
+    withheld: sent.includes(withheldResult),
+  };
+};
+
 describe("a chat's code asking who knows about a topic", setUpTime, () => {
-  it("names who uploaded the documents about it that its person may read, by name, each with what says so, and nobody on the strength of anything else", async () => {
+  it("names who uploaded the documents about it that its person may read, one citation each, and nobody on the strength of anything else", async () => {
     const admin = await signedInApi(idp, "admin");
-    const [asker, mate, colleague, stranger, remover, leaver, erased] =
-      await Promise.all([
-        signedInApi(idp, "user"),
-        signedInApi(idp, "user"),
-        signedInApi(idp, "user"),
-        signedInApi(idp, "user"),
-        signedInApi(idp, "user"),
-        signedInApi(idp, "user"),
-        signedInApi(idp, "user"),
-      ]);
+    const [
+      asker,
+      mate,
+      colleague,
+      stranger,
+      remover,
+      owing,
+      leaver,
+      erased,
+      moved,
+    ] = await Promise.all([
+      signedInApi(idp, "user"),
+      signedInApi(idp, "user"),
+      signedInApi(idp, "user"),
+      signedInApi(idp, "user"),
+      signedInApi(idp, "user"),
+      signedInApi(idp, "user"),
+      signedInApi(idp, "user"),
+      signedInApi(idp, "user"),
+      signedInApi(idp, "user"),
+    ]);
     const topic = word();
-    const ownTeam = await teamOf(asker, mate);
+    const ownTeam = await teamOf(asker, mate, moved);
     const otherTeam = await teamOf(stranger);
     const everyone: BrainUploadReaders = { kind: "everyone" };
     const ofTeam = await uploaded(mate, `Pricing ${topic}`, {
       kind: "team",
       teamId: ownTeam,
     });
-    const forEveryone = await uploaded(
-      colleague,
-      `Pricing ${topic} for all`,
-      everyone
-    );
-    const secondForEveryone = await uploaded(
-      colleague,
-      `More on ${topic}`,
-      everyone
-    );
+    const forEveryone = [
+      await uploaded(colleague, `Pricing ${topic} for all`, everyone),
+      await uploaded(colleague, `More on ${topic}`, everyone),
+    ];
     // None of these may name anyone to the asker.
     await uploaded(stranger, `Pricing ${topic}`, {
       kind: "team",
@@ -249,57 +334,94 @@ describe("a chat's code asking who knows about a topic", setUpTime, () => {
     await uploaded(asker, `Pricing ${topic}, my own`, { kind: "me" });
     const removed = await uploaded(remover, `Pricing ${topic} old`, everyone);
     await remover.api.brainSources.deleteUpload(removed);
+    // Removed by its uploader, the Brain's removal still owed: in use in
+    // the Brain until the clock completes it.
+    const owed = await uploaded(owing, `Pricing ${topic} owed`, everyone);
+    await drizzle(env.DB)
+      .update(brainUploads)
+      .set({ removedAt: new Date(), removalOwed: true })
+      .where(eq(brainUploads.id, owed));
     await uploaded(leaver, `Pricing ${topic} by a leaver`, everyone);
     await uploaded(erased, `Pricing ${topic} by the erased`, everyone);
     await admin.api.members.remove(leaver.userId);
     await admin.api.members.remove(erased.userId);
     await admin.api.members.erase(erased.userId, String(erased.person.name));
+    // Shared with the team by someone who left it since, still a member.
+    await uploaded(moved, `Pricing ${topic} by one who moved`, {
+      kind: "team",
+      teamId: ownTeam,
+    });
+    await leftTeam(ownTeam, moved);
 
-    const chat = await ownChatOf(
-      admin,
+    const answer = await askedInOwnChat(admin, asker, topic);
+    const cited = of(answer, {
+      mate,
+      colleague,
+      stranger,
       asker,
-      askingCode(topic),
-      says("Asked.")
-    );
-    await chat.ask(word());
-    const [answer] = await answersIn(chat.stub, chat.chat.id);
-    const named = namedIn(answer);
+      remover,
+      owing,
+      leaver,
+      erased,
+      moved,
+    });
 
-    expect(
-      of(named, {
-        mate,
-        colleague,
-        stranger,
-        asker,
-        remover,
-        leaver,
-        erased,
-      })
-    ).toStrictEqual({
-      mate: [ofTeam],
-      colleague: [forEveryone, secondForEveryone].toSorted(),
+    expect({
+      ...cited,
+      colleague: forEveryone.includes(String(cited.colleague)),
+    }).toStrictEqual({
+      mate: ofTeam,
+      // One of theirs, never the list of all of them.
+      colleague: true,
       stranger: null,
       asker: null,
       remover: null,
+      owing: null,
       leaver: null,
       erased: null,
+      moved: null,
     });
-    // Each by their name as a member, the people in the order of their
-    // names: never by how much they uploaded.
-    const people =
-      answer !== undefined && "people" in answer ? answer.people : [];
-    expect({
-      mate: people.find(({ id }) => id === mate.userId)?.name,
-      inOrder: people.map(({ name }) => name),
-    }).toStrictEqual({
-      mate: String(mate.person.name),
-      inOrder: people
-        .map(({ name }) => name)
-        .toSorted((one, other) => one.localeCompare(other)),
-    });
+    expect(
+      peopleIn(answer).find(({ id }) => id === mate.userId)?.name
+    ).toStrictEqual(String(mate.person.name));
   });
 
-  it("reads at its recall's reach: in a chat app's direct message, the company's documents, its person's teams' too", async () => {
+  it("lists people in the order of their names, never by how well their documents answer", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const [asker, first, last] = await Promise.all([
+      signedInApi(idp, "user"),
+      signedInApi(idp, "user"),
+      signedInApi(idp, "user"),
+    ]);
+    const topic = word();
+    const db = drizzle(env.DB);
+    const prefix = word();
+    await db
+      .update(users)
+      .set({ name: `${prefix} Aaron` })
+      .where(eq(users.id, first.userId));
+    await db
+      .update(users)
+      .set({ name: `${prefix} Zoe` })
+      .where(eq(users.id, last.userId));
+    // Zoe's answers best (the topic alone), Aaron's least (once, in a
+    // long text): ranked, Zoe would come first.
+    await uploaded(last, `${topic} ${topic}`, { kind: "everyone" });
+    await uploaded(
+      first,
+      `A long note on many things, the quarter, the office, the move, the plans for the spring and the summer, and once ${topic}, among the rest of what was said that day.`,
+      { kind: "everyone" }
+    );
+
+    const people = peopleIn(await askedInOwnChat(admin, asker, topic));
+    expect(
+      people.flatMap(({ id }) =>
+        id === first.userId || id === last.userId ? [id] : []
+      )
+    ).toStrictEqual([first.userId, last.userId]);
+  });
+
+  it("reads at its recall's reach: in a chat app's direct message its person's teams' documents too, in a turn nobody started the company's alone", async () => {
     const admin = await signedInApi(idp, "admin");
     const [asker, mate, colleague] = await Promise.all([
       signedInApi(idp, "user"),
@@ -316,44 +438,68 @@ describe("a chat's code asking who knows about a topic", setUpTime, () => {
       kind: "everyone",
     });
 
-    const named = namedIn(await askedInDirectMessage(admin, asker, topic));
-    expect(of(named, { mate, colleague })).toStrictEqual({
-      mate: [ofTeam],
-      colleague: [forEveryone],
+    expect({
+      direct: of(await askedInDirectMessage(admin, asker, topic), {
+        mate,
+        colleague,
+      }),
+      woken: of(await askedInWokenTurn(admin, asker, topic), {
+        mate,
+        colleague,
+      }),
+    }).toStrictEqual({
+      direct: { mate: ofTeam, colleague: forEveryone },
+      woken: { mate: null, colleague: forEveryone },
     });
   });
 
-  it("withholds its answer from a later turn once a document it rests on is erased", async () => {
+  it("withholds its answer from a later turn once the document it cites is erased, or the person it names removed or erased", async () => {
     const admin = await signedInApi(idp, "admin");
-    const [asker, colleague] = await Promise.all([
+    const [asker, uploader, removed, erased] = await Promise.all([
+      signedInApi(idp, "user"),
+      signedInApi(idp, "user"),
       signedInApi(idp, "user"),
       signedInApi(idp, "user"),
     ]);
-    const topic = word();
-    const upload = await uploaded(colleague, `Budget ${topic}`, {
-      kind: "everyone",
-    });
-    const chat = await ownChatOf(
-      admin,
-      asker,
-      askingCode(topic),
-      says("Asked."),
-      says("And now.")
+    const everyone: BrainUploadReaders = { kind: "everyone" };
+    const topics = { document: word(), removed: word(), erased: word() };
+    const upload = await uploaded(
+      uploader,
+      `Budget ${topics.document}`,
+      everyone
     );
-    await chat.ask(word());
-    const [answer] = await answersIn(chat.stub, chat.chat.id);
-    expect(of(namedIn(answer), { colleague })).toStrictEqual({
-      colleague: [upload],
-    });
-    const before = chat.provider.requests.length;
-    // An admin's delete of a shared upload erases it for good.
-    await admin.api.brainSources.deleteUpload(upload);
-    await chat.ask(word());
-    const sent = JSON.stringify(chat.provider.requests[before]?.body);
+    await uploaded(removed, `Budget ${topics.removed}`, everyone);
+    await uploaded(erased, `Budget ${topics.erased}`, everyone);
+    const gone = { first: true, named: false, withheld: true };
+
     expect({
-      named: sent.includes(colleague.userId),
-      withheld: sent.includes(withheldResult),
-    }).toStrictEqual({ named: false, withheld: true });
+      document: await sentAfter(
+        admin,
+        asker,
+        topics.document,
+        uploader,
+        async () => {
+          // An admin's delete of a shared upload erases it for good.
+          await admin.api.brainSources.deleteUpload(upload);
+        }
+      ),
+      removed: await sentAfter(
+        admin,
+        asker,
+        topics.removed,
+        removed,
+        async () => {
+          await admin.api.members.remove(removed.userId);
+        }
+      ),
+      erased: await sentAfter(admin, asker, topics.erased, erased, async () => {
+        await admin.api.members.remove(erased.userId);
+        await admin.api.members.erase(
+          erased.userId,
+          String(erased.person.name)
+        );
+      }),
+    }).toStrictEqual({ document: gone, removed: gone, erased: gone });
   });
 
   it("audits each answer by who asked and counts, never by who was named", async () => {
@@ -381,13 +527,13 @@ describe("a chat's code asking who knows about a topic", setUpTime, () => {
     );
 
     expect({
-      answered: of(namedIn(answered), { colleague }),
+      answered: of(answered, { colleague }),
       events: events.map(({ detail }) => ({
         onBehalfOf: detail?.onBehalfOf,
         keys: Object.keys(detail ?? {}).toSorted(),
       })),
     }).toStrictEqual({
-      answered: { colleague: [upload] },
+      answered: { colleague: upload },
       events: [
         {
           onBehalfOf: asker.userId,

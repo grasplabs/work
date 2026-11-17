@@ -29,6 +29,7 @@ import {
   brainCompanyVersionRead,
   brainGrantRead,
   brainMemoryRead,
+  brainPersonRead,
   brainTeamVersionRead,
 } from "./history-access.ts";
 import { grantedPermissions } from "./permissions.ts";
@@ -276,9 +277,10 @@ export class BrainAgentApi extends WorkerEntrypoint<Env, AgentScope> {
    * Who uploaded the documents that answer `input`'s question, of those
    * the chat's person may read at its recall's reach (`whoKnowsFor`), as
    * the chat's agent, under its permission to read the Brain, after the
-   * run's check. Every version it cites is recorded with the run first,
-   * as recall's are, so a later turn withholds it once its reach may no
-   * longer read one of them.
+   * run's check. Every version it cites, and every person it names, is
+   * recorded with the run first, so a later turn withholds it once its
+   * reach may no longer read one of them, or a person is no longer a
+   * member (history-access.ts).
    */
   async whoKnows(input: unknown): Promise<WhoKnows> {
     const scope = this.ctx.props;
@@ -292,16 +294,15 @@ export class BrainAgentApi extends WorkerEntrypoint<Env, AgentScope> {
         {
           ...caller,
           ...(ownChat ? { reach: "teams" as const } : {}),
-          keep: async (sources) => {
-            await recordRunReads(
-              this.env,
-              scope,
-              sources.map((version) =>
+          keep: async ({ versions, people }) => {
+            await recordRunReads(this.env, scope, [
+              ...versions.map((version) =>
                 ownChat
                   ? brainTeamVersionRead(version)
                   : brainCompanyVersionRead(version)
-              )
-            );
+              ),
+              ...people.map((userId) => brainPersonRead(userId)),
+            ]);
           },
         },
         input
@@ -371,11 +372,12 @@ interface BrainPack {
   truncated: boolean;
 }
 
-/** A person who uploaded documents about the topic that your person may read: their member ID and name, and the versions that say so, best first. */
+/** A person who uploaded documents about the topic that your person may read: their member ID and name, and the one version of theirs that answers best. */
 interface BrainPersonWhoKnows {
   id: string;
   name: string;
-  sources: { source: { producer: "upload"; id: string }; version: number }[];
+  source: { producer: "upload"; id: string };
+  version: number;
 }
 
 /** Who knows about a topic: the people, by name (never a ranking), the parts of the question nothing they may read holds, and whether the budget left a passage out. */
@@ -436,7 +438,7 @@ const brainDeclaration = `/** The company's brain: the organization's own knowle
 brain: {
   /** What your person may read that answers \`question\` (at most 2,000 characters), within \`budget.tokens\` (1 to 32,000), cited by source, version and place: needs the brain permission. \`asOf\`, an ISO 8601 date-time with its offset, reads each source as it was then (for "on a day", that day's last millisecond). Quote the passages you answer from, with their sources. */
   recall(input: { question: string; budget: { tokens: number }; asOf?: string }): Promise<BrainPack>;
-  /** Who knows about \`question\`: the people who uploaded the documents that answer it, of those your person may read as \`recall\` reads them, each with the versions that say so. Only the documents it cites say why: never say more of a person than that. Needs the brain permission. */
+  /** Who knows about \`question\`: the people who uploaded the documents that answer it, of those your person may read as \`recall\` reads them, each with the one version that says so. Only that document says why: never say more of a person than that. Needs the brain permission. */
   whoKnows(input: { question: string; budget: { tokens: number } }): Promise<BrainWhoKnows>;
   /** The entities it remembers things about (people, customers, projects and other things) that match: of a \`kind\`, by a whole \`name\` (case and accents aside), or an exact \`identifier\` (an email, or a reference such as \`crm:ACME-1\`); at least one. \`next\`, while more follow, is the \`after\` of the next page. Needs the brain permission. In your person's own chat (in Grasp, or their direct message on a chat app), what their teams and the whole company may read, never what only they may; in a turn nobody started, what the whole company may read alone. */
   findEntities(input: { kind?: BrainEntityKind; name?: string; identifier?: { type: "email" | "ref"; value: string }; after?: string }): Promise<{ entities: BrainEntity[]; next: string | null }>;

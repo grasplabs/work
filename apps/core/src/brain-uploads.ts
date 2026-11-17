@@ -53,7 +53,7 @@ import {
 import { currentMembership } from "./auth/auth.ts";
 import { memberOf } from "./auth/identity.ts";
 import type { Member } from "./auth/identity.ts";
-import { activeMember } from "./auth/membership-sql.ts";
+import { activeMember, organizationId } from "./auth/membership-sql.ts";
 import { uploadSource } from "./brain-next-origins.ts";
 import {
   addSource,
@@ -64,7 +64,13 @@ import {
   sourceTextProblem,
 } from "./brain-next.ts";
 import type { SourceReaders, SourceVersionRef } from "./brain-next.ts";
-import { brainUploads, members, teams, users } from "./db/core/schema.ts";
+import {
+  brainUploads,
+  members,
+  teamMembers,
+  teams,
+  users,
+} from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
 import { ExtractorUnavailableError, localExtractor } from "./files/extract.ts";
 import { hasText, signatures } from "./files/upload-checks.ts";
@@ -1172,14 +1178,15 @@ export interface Uploader {
 
 /**
  * Of the uploads `uploadIds`, those whose uploader a reader of everyone's
- * and the teams `teamIds`' may be told (brain-who-knows.ts), with who
- * uploaded each: read in the one statement that checks each again, so
- * none is told on the strength of what the reader may not read or of a
- * person no longer here. Only an upload in use (not removed), shared with
- * everyone or with one of `teamIds`, never one its uploader alone reads
- * (what only one person may read is never evidence for anyone else), and
- * only while its uploader is an active member now: an erased or removed
- * person is never named.
+ * and the teams `teamIds`' may be told (brain-recall.ts `whoKnowsFor`),
+ * with who uploaded each: read in the one statement that checks each
+ * again, so none is told on the strength of what the reader may not read
+ * or of a person no longer here. Only an upload in use (not removed, its
+ * removal in the Brain owed or not); shared with everyone, or with one of
+ * `teamIds` while its uploader is in that team themselves (one who left
+ * it is no longer named for what they may not read); never one its
+ * uploader alone reads; and only while its uploader is an active member
+ * now: an erased or removed person is never named.
  */
 export const uploadersOf = async (
   env: Env,
@@ -1201,11 +1208,30 @@ export const uploadersOf = async (
       and(
         inList(brainUploads.id, uploadIds),
         isNull(brainUploads.removedAt),
+        // The reader's access, again: the Brain found these as a reader of
+        // everyone's and `teamIds`' already, and filters inside its own
+        // search, so this second layer only holds the answer to the same
+        // reader should the Brain's answer and these rows ever disagree.
+        // `readers = 'me'` is neither: what only one person may read is
+        // never evidence for anyone else.
         or(
           eq(brainUploads.readers, "everyone"),
           and(
             eq(brainUploads.readers, "team"),
-            inList(brainUploads.teamId, teamIds)
+            inList(brainUploads.teamId, teamIds),
+            exists(
+              drizzle(env.DB)
+                .select({ one: sql`1` })
+                .from(teamMembers)
+                .innerJoin(teams, eq(teams.id, teamMembers.teamId))
+                .where(
+                  and(
+                    eq(teamMembers.teamId, brainUploads.teamId),
+                    eq(teamMembers.userId, brainUploads.uploadedBy),
+                    eq(teams.organizationId, organizationId)
+                  )
+                )
+            )
           )
         ),
         activeMember(brainUploads.uploadedBy)

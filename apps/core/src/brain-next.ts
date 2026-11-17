@@ -1341,7 +1341,7 @@ export const recallAs = async (
  * `recallPassagesAs`, with the teams it read as: those of the reader's
  * groups this read held (none as the company alone), resolved once for
  * both. So what the caller checks again of a passage's source in its own
- * records (who-knows, brain-who-knows.ts) is checked as this read's
+ * records (who-knows, brain-recall.ts `whoKnowsFor`) is checked as this read's
  * reader, never as a second resolution of their teams.
  */
 export const passagesReadAs = async (

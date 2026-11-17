@@ -1,5 +1,7 @@
 import type { Permission } from "@grasp-os/shared/permissions";
 import type { MemberRole } from "@grasp-os/shared/subject-members";
+import { sql } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { connectionGrants } from "./agent-connections.ts";
@@ -7,6 +9,7 @@ import { chatAuthority, chatContext, connectionReadOf } from "./agent-scope.ts";
 import type { AgentScope } from "./agent-scope.ts";
 import { appFor } from "./apps.ts";
 import { memberOf } from "./auth/identity.ts";
+import { activeMember } from "./auth/membership-sql.ts";
 import {
   erasedForGoodAs,
   memoryKeyOf,
@@ -22,6 +25,7 @@ import type {
 } from "./brain-next.ts";
 import { audienceOf } from "./chat-audiences.ts";
 import { connectionOwnersOf } from "./connections.ts";
+import { personErasures } from "./db/core/schema.ts";
 import { grantedPermissions, hasBrainGrant } from "./permissions.ts";
 
 // What a chat's earlier code results may still send to the model (GRA-690).
@@ -432,6 +436,57 @@ const readableBrain = async (
     ? [brainGrantRead]
     : [];
 
+// Who a chat's code was told knows about a topic (`env.brain.whoKnows`,
+// brain-recall.ts `whoKnowsFor`): each person named is pinned by their
+// member id beside the version cited for them, and withheld once they are
+// no longer an active member of the organization, removed or erased, as
+// a document's pin is once it may no longer be read; an erased person's
+// pin is erased for good too (`erasedSources`).
+
+const brainPersonPrefix = "brain-person:";
+
+/** The source a person a run was told of is recorded as. */
+export const brainPersonRead = (userId: string): string =>
+  `${brainPersonPrefix}${userId}`;
+
+/** The person a `brainPersonRead` source names, if it is one. */
+const brainPersonOf = (source: string): string | undefined => {
+  const userId = source.startsWith(brainPersonPrefix)
+    ? source.slice(brainPersonPrefix.length)
+    : "";
+  return userId === "" ? undefined : userId;
+};
+
+/**
+ * Of the people pinned in `sources`, those still active members now (or,
+ * with `erased`, those an erasure of theirs was asked for), in one
+ * statement.
+ */
+const pinnedPeople = async (
+  env: Env,
+  sources: readonly string[],
+  erased = false
+): Promise<string[]> => {
+  const pins = sources.flatMap((source) => {
+    const userId = brainPersonOf(source);
+    return userId === undefined ? [] : [{ source, userId }];
+  });
+  if (pins.length === 0) {
+    return [];
+  }
+  const ids = JSON.stringify(pins.map(({ userId }) => userId));
+  const rows = await drizzle(env.DB).all<{ id: string }>(
+    erased
+      ? sql`SELECT value AS id FROM json_each(${ids})
+          WHERE EXISTS (SELECT 1 FROM ${personErasures} WHERE ${personErasures.userId} = value)`
+      : sql`SELECT value AS id FROM json_each(${ids}) WHERE ${activeMember(sql`value`)}`
+  );
+  const kept = new Set(rows.map(({ id }) => id));
+  return pins.flatMap(({ source, userId }) =>
+    kept.has(userId) ? [source] : []
+  );
+};
+
 /** How a run read an App, each checked as a read made now would be. */
 const appReads = {
   /**
@@ -489,6 +544,7 @@ const appReadNeeds = (
 
 /** Each kind of read a source is, as the withheld event counts them. */
 type WithheldKind =
+  | "people"
   | "memories"
   | "passages"
   | "grants"
@@ -498,6 +554,9 @@ type WithheldKind =
 
 /** The kind of read `source` is: `unknown` for any no check names. */
 const withheldKindOf = (source: string): WithheldKind => {
+  if (source.startsWith(brainPersonPrefix)) {
+    return "people";
+  }
   if (
     source.startsWith(brainMemoryPrefix) ||
     source.startsWith(brainCompanyMemoryPrefix)
@@ -669,7 +728,8 @@ const readableApps = async (
  * agent's `brain` grant, while it holds it; a version of the Brain, while the person may read it (their teams and
  * the company, for what code's recall handed over); a memory of the new
  * Brain, while the person (or, as the company read it, the company) may
- * read it and its writer has not retired it, replaced or expired or not.
+ * read it and its writer has not retired it, replaced or expired or not;
+ * a person a run was told of, while they are an active member.
  * Anything else, an unknown source or a bare connection included, is
  * not. With why the chat's audience cuts what a recall as the company
  * handed over, when it holds any (`audience`). Throws what the reads
@@ -695,6 +755,7 @@ export const readableSources = async (
     companyVersions,
     memories,
     companyMemories,
+    people,
   ] = await Promise.all([
     readableApps(env, scope, sourceIds),
     readableConnections(env, scope, sourceIds),
@@ -704,6 +765,7 @@ export const readableSources = async (
     readableBrainCompanyVersions(env, scope, sourceIds, cut),
     readableBrainMemories(env, scope, sourceIds),
     readableBrainCompanyMemories(env, scope, sourceIds, cut),
+    pinnedPeople(env, sourceIds),
   ]);
   const audience = await cut;
   const readable = new Set([
@@ -715,6 +777,7 @@ export const readableSources = async (
     ...companyVersions,
     ...memories,
     ...companyMemories,
+    ...people,
   ]);
   return audience === undefined ? { readable } : { readable, audience };
 };
@@ -743,7 +806,8 @@ const sourceKey = ({ producer, id }: SourceVersionRef["source"]): string =>
 /**
  * Of the new Brain's pins in `sourceIds`, those whose content an erasure
  * took for good (`erasedForGoodAs`), at whatever reach the read pinned them: a
- * version whose source was erased, a memory an erasure deleted. What a
+ * version whose source was erased, a memory an erasure deleted; and the
+ * people a run was told of whose erasure was asked for. What a
  * chat of `personId`'s shows of a run resting on one is replaced
  * (workspace.ts `#replaceErased`); one only no longer readable (narrowed,
  * retired, the person out of a team) never is, as the person saw it while
@@ -767,8 +831,9 @@ export const erasedSources = async (
       ? []
       : [{ source, pin: { ...pin, basis: pin.basis } }];
   });
+  const people = await pinnedPeople(env, sourceIds, true);
   if (versions.length === 0 && memories.length === 0) {
-    return new Set();
+    return new Set(people);
   }
   const erased = await erasedForGoodAs(env, personId, {
     sources: versions.map(({ pin }) => pin.source),
@@ -783,5 +848,6 @@ export const erasedSources = async (
     ...memories.flatMap(({ source, pin }) =>
       places.has(memoryKeyOf(pin)) ? [source] : []
     ),
+    ...people,
   ]);
 };
