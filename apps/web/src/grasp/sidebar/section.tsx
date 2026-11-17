@@ -157,7 +157,7 @@ const styles = stylex.create({
   tab: {
     flexGrow: 1,
     flexBasis: 0,
-    justifyContent: "flex-start",
+    justifyContent: "center",
     gap: grasp.shellIconGap,
     minWidth: 0,
     minHeight: grasp.shellIconButton,
