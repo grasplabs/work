@@ -7,6 +7,7 @@ import { z } from "zod";
 
 import { withheldResult } from "../src/agent.ts";
 import { organizationId } from "../src/auth/auth.ts";
+import { brainWorkOverview, workBrain } from "../src/brain-next.ts";
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import {
   brainUploads,
@@ -21,6 +22,7 @@ import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { fakeProvider } from "./model-provider.ts";
 import type { ProviderReply } from "./model-provider.ts";
+import { noProducers } from "./no-producers.ts";
 import { signedInApi, unique } from "./sign-in.ts";
 
 // Who knows about a topic, for a chat's code (GRA-1744; the design note
@@ -40,6 +42,9 @@ import { signedInApi, unique } from "./sign-in.ts";
 //    and people in the order of their names, never ranked.
 // 4b. A person is named for a document that matched only the question's
 //    commonest words, which recall says are no answer by themselves.
+// 4c. Someone whose document recall found by meaning alone (one in
+//    another language) goes unnamed: they are named, as recall's pack
+//    holds it, and a hidden better match changes nothing.
 // 5. It reads wider than its recall: in Grasp and in a chat app's direct
 //    message, their teams and the company; in a turn nobody started, the
 //    company alone.
@@ -297,6 +302,28 @@ const sentAfter = async (
   };
 };
 
+/**
+ * Every passage embedded by the Brain's queue, as core's clock does it,
+ * an hour a tick: a bounded wait, failing when it never gets there.
+ */
+const embedEverything = async (): Promise<void> => {
+  let at = Date.now();
+  for (let tick = 0; tick < 50; tick += 1) {
+    at += 60 * 60 * 1000;
+    // oxlint-disable-next-line no-await-in-loop -- one tick at a time, as core's clock
+    await workBrain(env, new Date(at), noProducers);
+    // oxlint-disable-next-line no-await-in-loop -- read after each tick
+    const { embedding } = await brainWorkOverview(env);
+    if (
+      embedding.rebuilt &&
+      embedding.embedded + embedding.unembeddable === embedding.chunks
+    ) {
+      return;
+    }
+  }
+  throw new Error("Not every passage was embedded");
+};
+
 describe("a chat's code asking who knows about a topic", setUpTime, () => {
   it("names who uploaded the documents about it that its person may read, one citation each, and nobody on the strength of anything else", async () => {
     const admin = await signedInApi(idp, "admin");
@@ -440,6 +467,44 @@ describe("a chat's code asking who knows about a topic", setUpTime, () => {
     });
   });
 
+  it("names who uploaded a document found by its meaning alone, in another language, and nothing hidden changes the answer", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const [asker, colleague, stranger] = await Promise.all([
+      signedInApi(idp, "user"),
+      signedInApi(idp, "user"),
+      signedInApi(idp, "user"),
+    ]);
+    const otherTeam = await teamOf(stranger);
+    // In English; the question is in Dutch and shares no word with it.
+    const upload = await uploaded(
+      colleague,
+      "The supplier sends the invoice on the first day of every month. Payment is due thirty days later.",
+      { kind: "everyone" }
+    );
+    const question = "Wanneer moeten wij de leverancier betalen?";
+    await embedEverything();
+    // The question's embedder loaded once, so no answer waits for it.
+    await askedInOwnChat(admin, asker, "Warm-up.");
+    const before = await askedInOwnChat(admin, asker, question);
+    // A better match for a team the asker isn't in.
+    await uploaded(
+      stranger,
+      "We pay the supplier thirty days after the invoice arrives each month.",
+      { kind: "team", teamId: otherTeam }
+    );
+    await embedEverything();
+    const after = await askedInOwnChat(admin, asker, question);
+    const cited = peopleIn(before).find(({ id }) => id === colleague.userId);
+
+    expect({
+      cited: { source: cited?.source.id, found: cited?.found },
+      after,
+    }).toStrictEqual({
+      cited: { source: upload, found: "meaning" },
+      after: before,
+    });
+  });
+
   it("lists people in the order of their names, never by how well their documents answer", async () => {
     const admin = await signedInApi(idp, "admin");
     const [asker, first, last] = await Promise.all([
@@ -561,6 +626,33 @@ describe("a chat's code asking who knows about a topic", setUpTime, () => {
       document: gone,
       removed: { ...withheld, shown: true },
       erased: gone,
+    });
+  });
+
+  it("no longer shows an answer naming someone erased, beside a document of another's that is only out of use", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const [asker, erased, remover] = await Promise.all([
+      signedInApi(idp, "user"),
+      signedInApi(idp, "user"),
+      signedInApi(idp, "user"),
+    ]);
+    const topic = word();
+    await uploaded(erased, `Budget ${topic}`, { kind: "everyone" });
+    const removed = await uploaded(remover, `Budget ${topic} too`, {
+      kind: "everyone",
+    });
+
+    const outcome = await sentAfter(admin, asker, topic, erased, async () => {
+      // Out of use, its history kept: no longer readable, never erased.
+      await remover.api.brainSources.deleteUpload(removed);
+      await admin.api.members.remove(erased.userId);
+      await admin.api.members.erase(erased.userId, String(erased.person.name));
+    });
+    expect(outcome).toStrictEqual({
+      first: true,
+      named: false,
+      withheld: true,
+      shown: false,
     });
   });
 
