@@ -680,6 +680,18 @@ describe("what a team said, put together", { timeout: 120_000 }, () => {
   });
 
   it("never counts someone who took back what they approved while the claims were put together", async () => {
+    // Every team an earlier test of this file left due is given first, so
+    // the one intake below is this team's (they share one store).
+    for (let round = 0; round < 10; round += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one team at a time, as the alarm gives them
+      const { result } = await answeringWith(
+        claimsReply([zendeskClaim]),
+        async () => await onboardingStore(env).intakeNext()
+      );
+      if (result === null) {
+        break;
+      }
+    }
     // Eight tell their own work: Max's taking-back leaves the team seven,
     // so the claim falls by its own backers alone.
     const ids = await eightTeam();

@@ -415,6 +415,25 @@ const interviewAddedFor = async (
     readers,
   }).then(() => "added", String);
 
+/** The staff list of `ids` with the people `movers` in Billing, a team of their own. */
+const movedToBilling =
+  (ids: Ids, movers: readonly string[]) =>
+  (roster: ReturnType<typeof rosterOf>): ReturnType<typeof rosterOf> => ({
+    teams: [
+      ...roster.teams,
+      {
+        id: `${ids.team}-b`,
+        name: "Billing",
+        lead: null,
+        does: "",
+        off: false,
+      },
+    ],
+    people: roster.people.map((person) =>
+      movers.includes(person.id) ? { ...person, team: `${ids.team}-b` } : person
+    ),
+  });
+
 describe("interviews in the new Brain", { timeout: 120_000 }, () => {
   beforeEach(holdAlarm);
 
@@ -2439,6 +2458,68 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
     });
   });
 
+  it("draw a team's work again without someone who moved away, and give its drawing back once it stands without them, nobody agreeing anew", async () => {
+    const { ids, max } = await drawnTeam({ eight: true });
+    await intakeOf(ids, [zendeskClaim]);
+    await handOverNow();
+    const keys: Key[] = [...everyone, "sam", "ada"];
+    // Max moves to Billing, and stays: Ops still has seven who tell.
+    await savedRoster(ids, keys, movedToBilling(ids, [ids.max]));
+    const moved = await workOnPage(ids);
+    // The work is due to be drawn again, without him; then the team's
+    // next intake.
+    for (let round = 0; round < 4; round += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one drawing at a time, as the alarm draws
+      const { result } = await answering(
+        [ticketsReply(ids)],
+        async () => await onboardingStore(env).drawNext()
+      );
+      if (result === null) {
+        break;
+      }
+    }
+    await intakeOf(ids, [zendeskClaim]);
+    await handOverNow();
+    const drawings = await recalled(max, "ticket", "drawing");
+    const [drawn] = await onboardingStore(env).standingDrawings();
+    const restingOnMax = await onboardingStore(env).sentFor(ids.max);
+    expect({
+      moved,
+      drawings: drawings.length,
+      page: await workOnPage(ids),
+      // Drawn from those in Ops now: never Max.
+      fromMax: JSON.stringify(drawn?.drawing ?? {}).includes(ids.max),
+      restsOnMax: restingOnMax.length,
+    }).toStrictEqual({
+      moved: [],
+      drawings: 1,
+      page: [["handling new tickets", 1]],
+      fromMax: false,
+      restsOnMax: 0,
+    });
+  });
+
+  it("give a team's claims and drawing back at its next intake when someone they rest on moves back, nobody agreeing anew", async () => {
+    const { ids, max } = await drawnTeam({ eight: true });
+    await intakeOf(ids, [zendeskClaim]);
+    await handOverNow();
+    const keys: Key[] = [...everyone, "sam", "ada"];
+    await savedRoster(ids, keys, movedToBilling(ids, [ids.max]));
+    await savedRoster(ids, keys, movedToBilling(ids, []));
+    await intakeOf(ids, [zendeskClaim]);
+    await handOverNow();
+    const drawings = await recalled(max, "ticket", "drawing");
+    expect({
+      claims: await recalled(max, "Zendesk", "claim"),
+      drawings: drawings.length,
+      page: await workOnPage(ids),
+    }).toStrictEqual({
+      claims: [zendeskClaim.text],
+      drawings: 1,
+      page: [["handling new tickets", 1]],
+    });
+  });
+
   it("take a drawing out as its team's lead is replaced on the list: its map was the old lead's", async () => {
     const { ids, max } = await drawnTeam({ eight: true });
     await intakeOf(ids, [zendeskClaim]);
@@ -2459,7 +2540,7 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
     });
   });
 
-  it("take a switched-off team's claims and drawings out as the save commits, and note them again at its next intake once it takes part again", async () => {
+  it("take a switched-off team's claims and drawings out as the save commits, and note them again at its next intake once it takes part again, nobody agreeing anew", async () => {
     const { ids, max } = await drawnTeam({ eight: true });
     await intakeOf(ids, [zendeskClaim]);
     await handOverNow();
@@ -2478,20 +2559,9 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
       teams: roster.teams.map((each) => ({ ...each, off: true })),
     }));
     const off = await readNow();
-    // Taking part again, and Sam agreeing to more: the next intake.
+    // Taking part again, confirmed, and nobody agreeing anew: the next
+    // intake.
     await savedRoster(ids, keys, (roster) => roster);
-    await agree(
-      ids.sam,
-      [
-        fact("s1", "step", "Answers the phone."),
-        fact("s2", "step", "Logs the call."),
-      ],
-      1
-    );
-    await answering(
-      [ticketsReply(ids)],
-      async () => await onboardingStore(env).drawNext()
-    );
     await intakeOf(ids, [zendeskClaim]);
     await handOverNow();
     const again = await readNow();

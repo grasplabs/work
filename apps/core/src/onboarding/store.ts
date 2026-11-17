@@ -891,24 +891,56 @@ const doersOf = (stored: string): string[] =>
   doersSchema.safeParse(JSON.parse(stored)).data ?? [];
 
 /**
+ * The teams whose results a save may show again once their next intake
+ * runs (GRA-1748), so they are given again: both teams of everyone who
+ * moved, a move back too, and, once the admin confirms it, each team
+ * switched from off to on. A team that waits for confirmation is given
+ * again when it is confirmed (`#confirmed`).
+ */
+const teamsBack = (
+  before: Roster | null,
+  roster: Roster,
+  { confirmed }: { confirmed: boolean }
+): string[] => {
+  const was = new Map(before?.people.map(({ id, team }) => [id, team]));
+  const moved = roster.people.flatMap(({ id, team }) => {
+    const from = was.get(id);
+    return from === undefined || from === team ? [] : [from, team];
+  });
+  const offBefore = new Set(
+    before?.teams.flatMap(({ id, off }) => (off ? [id] : []))
+  );
+  const switchedOn = confirmed
+    ? roster.teams.flatMap(({ id, off }) =>
+        offBefore.has(id) && !off ? [id] : []
+      )
+    : [];
+  return [...moved, ...switchedOn];
+};
+
+/**
  * Who a piece of work is drawn from, and when each last agreed: who does
- * it and who was asked about it, as far as they agreed to something.
- * `agreedAt` says when someone did; undefined when they didn't, or aren't
- * on the roster.
+ * it and who was asked about it, as far as they agreed to something and
+ * are in its team now (`teamOf`, from the roster): someone who moved to
+ * another team takes their part with them (GRA-1748). `agreedAt` says
+ * when someone did; undefined when they didn't.
  */
 const agreedAbout = (
-  work: string,
+  work: { id: string; team: string },
   doers: readonly string[],
   asked: readonly { person: string; work: string }[],
+  teamOf: ReadonlyMap<string, string>,
   agreedAt: (person: string) => string | undefined
 ): [person: string, at: string][] =>
   [
     ...new Set([
       ...doers,
-      ...asked.filter((each) => each.work === work).map(({ person }) => person),
+      ...asked
+        .filter((each) => each.work === work.id)
+        .map(({ person }) => person),
     ]),
   ].flatMap((person): [string, string][] => {
-    const at = agreedAt(person);
+    const at = teamOf.get(person) === work.team ? agreedAt(person) : undefined;
     return at === undefined ? [] : [[person, at]];
   });
 
@@ -1286,6 +1318,7 @@ export class Onboarding extends DurableObject<Env> {
       const { removed, erased } = this.#writeRoster(roster, fresh, {
         late: false,
       });
+      this.#dueAgain(teamsBack(before, roster, { confirmed }));
       if (confirmed) {
         this.#confirmed(before, roster);
         this.#rosterConfirmed(new Date().toISOString());
@@ -5686,7 +5719,7 @@ export class Onboarding extends DurableObject<Env> {
     const teamsOn = new Map(
       roster.teams.filter(({ off }) => !off).map((team) => [team.id, team])
     );
-    const onRoster = new Set(roster.people.map(({ id }) => id));
+    const teamOf = new Map(roster.people.map(({ id, team }) => [id, team]));
     const due = this.#db
       .select()
       .from(works)
@@ -5697,8 +5730,8 @@ export class Onboarding extends DurableObject<Env> {
           return [];
         }
         const doers = doersOf(row.doers);
-        const told = agreedAbout(row.id, doers, asked, (id) =>
-          onRoster.has(id) ? agreedAt.get(id) : undefined
+        const told = agreedAbout(row, doers, asked, teamOf, (id) =>
+          agreedAt.get(id)
         );
         const tellers = told.map(([id]) => id);
         const agreed = Object.fromEntries(told);
@@ -5709,7 +5742,10 @@ export class Onboarding extends DurableObject<Env> {
           .filter((id) => before[id] !== agreed[id])
           .map((id) => agreed[id] ?? "")
           .toSorted();
-        const [first] = since;
+        // Someone it was drawn from who no longer counts for it (moved to
+        // another team): drawn again without them.
+        const left = Object.keys(before).some((id) => !(id in agreed));
+        const [first = left ? "" : undefined] = since;
         const last = since.at(-1);
         if (
           first === undefined ||
@@ -5881,14 +5917,18 @@ export class Onboarding extends DurableObject<Env> {
     if (roster === null) {
       return [];
     }
-    const onRoster = new Set(roster.people.map(({ id }) => id));
+    const teamOf = new Map(roster.people.map(({ id, team }) => [id, team]));
     const asked = this.#db.select().from(askedAbout).all();
     const found: { work: string; name: string; drawn: DrawnWork }[] = [];
     for (const row of this.#db.select().from(works).all()) {
       const doers = doersOf(row.doers);
       const agreed = Object.fromEntries(
-        agreedAbout(row.id, doers, asked, (id) =>
-          onRoster.has(id) ? (this.#agreedAt(id) ?? undefined) : undefined
+        agreedAbout(
+          row,
+          doers,
+          asked,
+          teamOf,
+          (id) => this.#agreedAt(id) ?? undefined
         )
       );
       // As the alarm does: a lead's overview alone draws only their own work.
@@ -8430,25 +8470,8 @@ export class Onboarding extends DurableObject<Env> {
     // never lowers backing, so it pays no recount, and going from counting
     // to not counting always loses something.
     if (lost) {
-      this.#recountStanding(this.#teamsRestingOn(person.id));
+      this.#recountStanding([this.#teamOfPerson(person.id)]);
     }
-  }
-
-  /**
-   * The teams whose results a change of `person`'s may take down: their
-   * team now, and every team whose claims or drawings rest on them, from
-   * the rows that say whom each rests on (`brain_sent`, under their id or
-   * as someone gone), whichever team they are in now (GRA-1748).
-   */
-  #teamsRestingOn(person: string): string[] {
-    const rested = this.#db
-      .selectDistinct({ team: brainSent.team })
-      .from(brainSent)
-      .where(inList(brainSent.person, [person, `${gonePrefix}${person}`]))
-      .all()
-      .map(({ team }) => team);
-    const now = this.#teamOfPerson(person);
-    return [...new Set([...(now === null ? [] : [now]), ...rested])];
   }
 
   #onRoster(person: string): boolean {
@@ -8471,7 +8494,7 @@ export class Onboarding extends DurableObject<Env> {
     // commits (`#recountStanding`). A roster save, which erases everyone it
     // takes off the list, recounts once for them all at the end of its
     // own transaction (`#writeRoster`).
-    this.#recountStanding(this.#teamsRestingOn(person));
+    this.#recountStanding([this.#teamOfPerson(person)]);
     this.#noted(person, what, now, by);
   }
 
