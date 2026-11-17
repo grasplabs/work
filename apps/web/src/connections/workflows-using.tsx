@@ -17,7 +17,6 @@ import {
   ItemMedia,
   ItemTitle,
 } from "../grasp/item/index.ts";
-import { Link as TextLink } from "../grasp/link/index.ts";
 import {
   Popover,
   PopoverContent,
@@ -46,15 +45,19 @@ const usingOf = (
 ): ConnectionWorkflow[] =>
   workflowsOf(integration, loaded.state === "ready" ? loaded.data : []);
 
-/** A workflow's name, opening its page. */
-const WorkflowLink = ({ workflow }: { workflow: ConnectionWorkflow }) => (
-  <TextLink
+/** A workflow as a row that opens its page. */
+const WorkflowItem = ({ workflow }: { workflow: ConnectionWorkflow }) => (
+  <Item
     render={
       <Link params={{ workflow: workflow.id }} to="/workflows/$workflow" />
     }
+    size="xs"
   >
-    {workflow.name}
-  </TextLink>
+    <ItemMedia icon={Workflow} iconLook="inline" />
+    <ItemContent>
+      <ItemTitle>{workflow.name}</ItemTitle>
+    </ItemContent>
+  </Item>
 );
 
 /** "Used by 2 workflows", as the row's count and its list say it. */
@@ -90,13 +93,7 @@ const UsedByCount = ({
         <PopoverTitle>{label}</PopoverTitle>
         <ItemGroup aria-label={label}>
           {workflows.map((workflow) => (
-            <Item key={workflow.id} size="xs">
-              <ItemContent>
-                <ItemTitle>
-                  <WorkflowLink workflow={workflow} />
-                </ItemTitle>
-              </ItemContent>
-            </Item>
+            <WorkflowItem key={workflow.id} workflow={workflow} />
           ))}
         </ItemGroup>
       </PopoverContent>
@@ -144,14 +141,7 @@ const WorkflowList = ({
   return (
     <ItemGroup aria-label={t`Workflows`} separated>
       {workflows.map((workflow) => (
-        <Item key={workflow.id} size="xs">
-          <ItemMedia icon={Workflow} iconLook="inline" />
-          <ItemContent>
-            <ItemTitle>
-              <WorkflowLink workflow={workflow} />
-            </ItemTitle>
-          </ItemContent>
-        </Item>
+        <WorkflowItem key={workflow.id} workflow={workflow} />
       ))}
     </ItemGroup>
   );

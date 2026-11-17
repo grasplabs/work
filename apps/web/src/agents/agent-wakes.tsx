@@ -2,7 +2,6 @@ import type { Agent, AgentWake } from "@grasp-os/shared/agents";
 import { agentWakeOpeningMax } from "@grasp-os/shared/agents";
 import type { Member } from "@grasp-os/shared/members";
 import { useLingui } from "@lingui/react/macro";
-import * as stylex from "@stylexjs/stylex";
 import { useId, useState } from "react";
 
 import type { Session } from "../core.ts";
@@ -20,7 +19,7 @@ import { Empty } from "../grasp/empty/index.ts";
 import { Field, FieldDescription, FieldLabel } from "../grasp/field/index.ts";
 import { Form, FormRow } from "../grasp/form/index.ts";
 import { Plus, Trash } from "../grasp/icons/index.ts";
-import { inputStyles, sizeStyles } from "../grasp/input/input.tsx";
+import { Input } from "../grasp/input/index.ts";
 import {
   Item,
   ItemActions,
@@ -131,34 +130,6 @@ const useLast = () => {
   };
 };
 
-/**
- * A time of day, `HH:MM`, to the minute: the browser's own time field in
- * Grasp UI's input look (`inputStyles`), as Grasp UI has no time field
- * yet. Its label names it by `id`.
- */
-const TimeInput = ({
-  id,
-  value,
-  disabled,
-  onChange,
-}: {
-  id: string;
-  value: string;
-  disabled: boolean;
-  onChange: (time: string) => void;
-}) => (
-  <input
-    disabled={disabled}
-    id={id}
-    onChange={(event) => {
-      onChange(event.target.value);
-    }}
-    type="time"
-    value={value}
-    {...stylex.props(inputStyles.input, sizeStyles.md)}
-  />
-);
-
 /** Add a time: its button, and the dialog that asks when, for whom and what. */
 const NewWake = ({
   agent,
@@ -173,7 +144,6 @@ const NewWake = ({
 }) => {
   const { t } = useLingui();
   const formId = useId();
-  const timeId = useId();
   const [open, setOpen] = useState(false);
   const [rhythm, setRhythm] = useState<Rhythm>("weekdays");
   const [time, setTime] = useState("09:00");
@@ -245,13 +215,8 @@ const NewWake = ({
                   />
                 </Field>
                 <Field disabled={!can}>
-                  <FieldLabel htmlFor={timeId}>{t`Time`}</FieldLabel>
-                  <TimeInput
-                    disabled={!can}
-                    id={timeId}
-                    onChange={setTime}
-                    value={time}
-                  />
+                  <FieldLabel>{t`Time`}</FieldLabel>
+                  <Input onValueChange={setTime} type="time" value={time} />
                   <FieldDescription>{t`In the company's time zone`}</FieldDescription>
                 </Field>
               </FormRow>
