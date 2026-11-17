@@ -200,6 +200,10 @@ const ProducerBadge = ({ producer }: { producer: BrainSourceProducer }) => {
       message: "What your team said",
       context: "a source of the Brain",
     }),
+    drawing: t({
+      message: "How a team works",
+      context: "a source of the Brain",
+    }),
     kickoff: t({
       message: "The company's vision",
       context: "a source of the Brain",

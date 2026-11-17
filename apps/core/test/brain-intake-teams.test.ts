@@ -471,6 +471,37 @@ describe("what a team said, put together", { timeout: 120_000 }, () => {
     });
   });
 
+  it("notes the team's claims and drawings while someone on the list hasn't agreed to anything", async () => {
+    // Ada is on the list and never agrees: nothing of hers is in the
+    // intake, so she is no one who went while it ran.
+    const ids = await team([
+      "lea",
+      "max",
+      "mia",
+      "mo",
+      "noor",
+      "pim",
+      "rik",
+      "sam",
+      "ada",
+    ]);
+    await mapped(ids);
+    await sevenTold(ids);
+    await drawTickets(ids);
+    await intake(ids);
+    const member = await signedInApi(idp, "user");
+    const { workflows } = await member.api.brain.read();
+    expect({
+      statements: await statementsFor(member.api, ids),
+      drawn: workflows
+        .filter(({ teamId }) => teamId === `team-${ids.team}`)
+        .map(({ name }) => name),
+    }).toStrictEqual({
+      statements: ["Tickets come in through Zendesk."],
+      drawn: ["handling new tickets"],
+    });
+  });
+
   it("shows members and admins the team's claims, and Grasp's staff none", async () => {
     const ids = await drawnTeam();
     await intake(ids);

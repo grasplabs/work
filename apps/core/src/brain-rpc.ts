@@ -14,6 +14,7 @@ import type {
   ThinkingGround,
   Tool,
   Vision,
+  Workflow,
   Workspace,
 } from "@grasp-os/shared/brain";
 import {
@@ -49,6 +50,7 @@ import {
   addBrainRecords,
   datedInOrder,
   readBrainRecords,
+  stepsOf,
 } from "./brain-records.ts";
 import type { HeldRecords, OnboardingHeld } from "./brain-records.ts";
 import {
@@ -66,7 +68,7 @@ import { kickoffSaid, teamNameKey } from "./onboarding/kickoff-company.ts";
 import type { CompanyKickoff } from "./onboarding/kickoff-company.ts";
 import { mondayOf } from "./onboarding/rules.ts";
 import { onboardingStore } from "./onboarding/store.ts";
-import type { StandingClaim } from "./onboarding/store.ts";
+import type { StandingClaim, StandingDrawing } from "./onboarding/store.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
@@ -1032,6 +1034,28 @@ const claimStatements = async (
   );
 
 /**
+ * The drawings standing now (onboarding/store.ts `standingDrawings`) as
+ * the page's workflows, for every member (GRA-1748): each piece of work in
+ * its team with its one drawing, the drawing its baseline, citing the
+ * team's interviews; never who told what. Its id is the one the
+ * onboarding gives the piece of work, so what names it keeps naming it
+ * through every drawing.
+ */
+const drawingWorkflows = (drawings: readonly StandingDrawing[]): Workflow[] =>
+  drawings.map(({ workflow, team, name, local, drawing }) => {
+    const { type: _type, workflowId: _workflow, ...value } = drawing;
+    return {
+      id: workflow,
+      name,
+      ...(local === undefined ? {} : { local }),
+      teamId: intakeIds.team(team),
+      status: "drawn",
+      baseline: { steps: stepsOf(value) },
+      drawings: [value],
+    };
+  });
+
+/**
  * What every read of the brain starts from, as `person` may read it: the
  * onboarding (an admin's alone), the brain's records, and its teams.
  */
@@ -1048,13 +1072,15 @@ const readBrainCore = async (
   person: Pick<Identity, "role">
 ): Promise<BrainCore> => {
   const store = onboardingStore(env);
-  const [facts, kickoff, companyTeams, held, claims] = await Promise.all([
-    onboardingFacts(env, person),
-    store.companyKickoff(),
-    store.companyTeams(),
-    readBrainRecords(env),
-    store.standingClaims(),
-  ]);
+  const [facts, kickoff, companyTeams, held, claims, drawings] =
+    await Promise.all([
+      onboardingFacts(env, person),
+      store.companyKickoff(),
+      store.companyTeams(),
+      readBrainRecords(env),
+      store.standingClaims(),
+      store.standingDrawings(),
+    ]);
   // An admin reads the roster whole: every team, roles counted and its
   // leads' roles. Everyone else reads the teams as the admin confirmed
   // them, which are the company's (GRA-1748, the owner on 17 November).
@@ -1064,6 +1090,7 @@ const readBrainCore = async (
   const records = withSuccessors(roster, kickoffTeams, {
     ...held,
     statements: [...held.statements, ...(await claimStatements(claims))],
+    workflows: [...held.workflows, ...drawingWorkflows(drawings)],
   });
   return {
     facts,

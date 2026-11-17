@@ -372,12 +372,14 @@ describe(
       const companyMarkers = {
         "an upload for everyone": markerWord(),
         "a team's claim from the interviews": markerWord(),
+        "a team's drawing from the interviews": markerWord(),
         "the company's vision from the kickoff": markerWord(),
         "the company's teams from its staff list": markerWord(),
       };
       const {
         "an upload for everyone": everyoneUploadMarker,
         "a team's claim from the interviews": claimMarker,
+        "a team's drawing from the interviews": drawingMarker,
         "the company's vision from the kickoff": kickoffMarker,
         "the company's teams from its staff list": rosterMarker,
       } = companyMarkers;
@@ -655,6 +657,14 @@ describe(
         claimText,
         { kind: "members" },
         { producer: "claim", id: crypto.randomUUID() }
+      );
+      // A drawing of a staff-list team's piece of work, from what five or
+      // more told in their interviews (GRA-1748): read as a claim is.
+      const drawingText = `Team drawing ${sharedWord} ${drawingMarker}`;
+      const drawingId = await add(
+        drawingText,
+        { kind: "members" },
+        { producer: "drawing", id: crypto.randomUUID() }
       );
       // The holder's interview (GRA-1790): what they approved in it, theirs
       // alone, as the onboarding hands it over.
@@ -999,6 +1009,11 @@ describe(
           source: claimId,
           reader: outsider,
         },
+        drawing: {
+          marker: "a team's drawing from the interviews",
+          source: drawingId,
+          reader: outsider,
+        },
         kickoff: {
           marker: "the company's vision from the kickoff",
           source: kickoffSource,
@@ -1057,6 +1072,8 @@ describe(
         noneMarker,
         claimMarker,
         claimText,
+        drawingMarker,
+        drawingText,
         narrowedMarker,
         captureMarker,
         captureId,
@@ -1082,6 +1099,7 @@ describe(
         teamId,
         noneId,
         claimId,
+        drawingId,
         narrowedId,
         ownUpload,
         teamUpload,
@@ -1142,6 +1160,7 @@ describe(
         found,
         handbook,
         claimText,
+        drawingText,
         capped,
         secretTeam,
         teamSkillMarker,
@@ -1198,8 +1217,9 @@ describe(
           ])
         ),
         narrowedToHolder: "refused",
-        // A member, so the team's claim from the interviews too (GRA-1748).
-        outsiderFinds: [handbook, claimText].toSorted(),
+        // A member, so the team's claim and drawing from the interviews
+        // too (GRA-1748).
+        outsiderFinds: [handbook, claimText, drawingText].toSorted(),
         holderFindsCapture: true,
         holderFindsToolkitCapture: true,
         cappedFinds: [{ text: capped, found: "exact" }],
@@ -1305,10 +1325,15 @@ describe(
                 ...asOutsider.markers,
                 world.everyoneUploadMarker,
                 world.claimMarker,
+                world.drawingMarker,
               ],
               hiddenVersions: [
                 ...asOutsider.hiddenVersions,
-                ...everyVersionOf(world.everyoneUpload, world.claimId),
+                ...everyVersionOf(
+                  world.everyoneUpload,
+                  world.claimId,
+                  world.drawingId
+                ),
               ],
               hiddenUploads: [
                 ...(asOutsider.hiddenUploads ?? []),
@@ -1636,6 +1661,7 @@ describe(
             world.teamMarker,
             world.noneMarker,
             world.claimMarker,
+            world.drawingMarker,
             world.narrowedMarker,
             ...holdersOwnProduced(world).markers,
           ],
@@ -1644,6 +1670,7 @@ describe(
             world.teamId,
             world.noneId,
             world.claimId,
+            world.drawingId,
             ...holdersOwnProduced(world).sources
           ),
           hiddenInstructionFiles: [world.agentFile, world.appFile],
@@ -1657,6 +1684,8 @@ describe(
           "a source nobody is known to read": world.noneMarker,
           "a team's claim from the interviews, which code never gets":
             world.claimMarker,
+          "a team's drawing from the interviews, which code never gets":
+            world.drawingMarker,
           "a source narrowed away from the outsider": world.narrowedMarker,
           ...holdersOwnProduced(world).forbidden,
         },
@@ -1704,6 +1733,7 @@ describe(
             world.teamMarker,
             world.noneMarker,
             world.claimMarker,
+            world.drawingMarker,
             world.narrowedMarker,
             ...holdersOwnProduced(world).markers,
           ],
@@ -1712,6 +1742,7 @@ describe(
             world.teamId,
             world.noneId,
             world.claimId,
+            world.drawingId,
             ...holdersOwnProduced(world).sources
           ),
           hiddenInstructionFiles: [world.agentFile, world.appFile],
@@ -1727,6 +1758,8 @@ describe(
           "a source nobody is known to read": world.noneMarker,
           "a team's claim from the interviews, which code never gets":
             world.claimMarker,
+          "a team's drawing from the interviews, which code never gets":
+            world.drawingMarker,
           "a source narrowed away from the outsider": world.narrowedMarker,
           ...holdersOwnProduced(world).forbidden,
         },

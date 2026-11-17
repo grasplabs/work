@@ -32,6 +32,7 @@ import { onboardingStore } from "../src/onboarding/store.ts";
 import { teamMayClaim } from "../src/onboarding/team-claims.ts";
 import { retryErasures } from "../src/person-erasure.ts";
 import { adminCommands } from "./admin-command.ts";
+import { setObjectEnv } from "./agent-chat.ts";
 import { ageOwnErasure } from "./brain-next-own-store.ts";
 import { copyOfStore, restoreStore } from "./brain-next-store-copy.ts";
 import { mockIdp } from "./idp.ts";
@@ -2257,5 +2258,68 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
       moved: true,
       now: { recalled: [], listed: [] },
     });
+  });
+
+  /** Each of the team's pieces of work on the Brain page, as an admin reads it: its name and how many drawings it shows. */
+  const workOnPage = async (ids: { team: string }) => {
+    const admin = await signedInApi(idp, "admin");
+    const { workflows } = await admin.api.brain.read();
+    return workflows
+      .filter(({ teamId }) => teamId === `team-${ids.team}`)
+      .map(({ name, drawings }) => [name, drawings?.length ?? 0]);
+  };
+
+  it("give every member each piece of work's drawing, and take it out as a lead's withdrawal commits, every erasure failing, before core's clock", async () => {
+    const { ids, max } = await drawnTeam({ eight: true });
+    await intakeOf(ids, [zendeskClaim]);
+    await handOverNow();
+    const before = {
+      recalled: await recalled(max, "ticket", "drawing"),
+      page: await workOnPage(ids),
+    };
+    // Lea, whose map the work was drawn on, withdraws, and every erasure
+    // fails, the onboarding's own too: the drawing is out of use in the
+    // Brain, and off the page, before her withdrawal commits (GRA-1748).
+    const restore = await setObjectEnv(onboardingStore(env), {
+      BRAIN_STORE: erasuresFailing().BRAIN_STORE,
+    });
+    let withdrew: boolean;
+    try {
+      const answer = await onLink(
+        { action: "withdraw", ...(await openLink(ids.lea)) },
+        erasuresFailing()
+      );
+      withdrew = answer.ok;
+    } finally {
+      await restore();
+    }
+    const owed = await onboardingStore(env).owedErasures({ claims: true });
+    expect({
+      before: { found: before.recalled.length > 0, page: before.page },
+      withdrew,
+      owed: owed.filter(({ kind }) => kind === "drawing").length,
+      after: {
+        recalled: await recalled(max, "ticket", "drawing"),
+        page: await workOnPage(ids),
+      },
+    }).toStrictEqual({
+      before: { found: true, page: [["handling new tickets", 1]] },
+      withdrew: true,
+      owed: 1,
+      after: { recalled: [], page: [] },
+    });
+  });
+
+  it("take a drawing out as a backer's withdrawal commits, for the Brain and the page alike", async () => {
+    const { ids, max } = await drawnTeam({ eight: true });
+    await intakeOf(ids, [zendeskClaim]);
+    await handOverNow();
+    const before = await recalled(max, "ticket", "drawing");
+    await onLink({ action: "withdraw", ...(await openLink(ids.pim)) });
+    expect({
+      before: before.length > 0,
+      recalled: await recalled(max, "ticket", "drawing"),
+      page: await workOnPage(ids),
+    }).toStrictEqual({ before: true, recalled: [], page: [] });
   });
 });

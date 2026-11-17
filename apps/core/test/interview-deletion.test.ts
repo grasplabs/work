@@ -294,16 +294,13 @@ const ways: {
     way: "from their link",
     remove: async (ids) => await deleteOnLink(ids.max),
     // Never in the audit log: its moment would tell the admin whose it was.
-    audited: ["brain.records.purged"],
+    // What rested on it leaves the Brain with no event either (GRA-1748).
+    audited: [],
   },
   {
     way: "with a new start Grasp's staff give from the admin",
     remove: async (ids) => await adminCommands().newStart(ids.max),
-    audited: [
-      "admin.command",
-      "brain.records.purged",
-      "onboarding.interview.restarted",
-    ],
+    audited: ["admin.command", "onboarding.interview.restarted"],
   },
   {
     way: "by taking them off the staff list (L7)",
@@ -315,11 +312,7 @@ const ways: {
     },
     // The confirmed teams' sizes changed: handed to the new Brain for the
     // company's admins (GRA-1748).
-    audited: [
-      "brain.records.purged",
-      "onboarding.roster.brain_source",
-      "onboarding.roster.saved",
-    ],
+    audited: ["onboarding.roster.brain_source", "onboarding.roster.saved"],
   },
 ];
 
@@ -828,7 +821,7 @@ describe(
   () => {
     beforeEach(holdAlarm);
 
-    it("withdrawing while the brain can't be reached leaves its records to the alarm, which takes them out once it can (T5)", async () => {
+    it("withdrawing while core's records can't be written takes the team's claim and drawing out as it answers, and leaves nothing of theirs for the alarm (T5)", async () => {
       const store = onboardingStore(env);
       const ids = await sevenTeam();
       const said = sentinels();
@@ -854,29 +847,34 @@ describe(
         spy.mockRestore();
       }
       const stuck = await brainOf(ids);
-      // What is still to come out stays on record, resting on someone
-      // gone, for the alarm to take out (`#armDrawing` sets it for that).
+      // Nothing of his waits for the alarm: the claim and the drawing he
+      // was behind are the onboarding's own, and left before the
+      // withdrawal committed (GRA-1946, GRA-1748), whatever becomes of
+      // core's records.
       const waiting = await store.sentFor(`gone:${ids.max}`);
-      // The alarm, once the brain answers again.
+      // The alarm, once core's records can be written again.
       await store.purgeBrain();
       const after = await brainOf(ids);
       expect({
-        // The claim Max was one of the five behind.
-        before: before.statements.includes("Tickets wait for the customer."),
+        // The claim Max was one of the five behind, and his drawing.
+        before: [
+          before.statements.includes("Tickets wait for the customer."),
+          before.drawings,
+        ],
         withdrawn,
-        // A claim is the onboarding's own: it leaves before the withdrawal
-        // commits (GRA-1946, GRA-1748), whatever becomes of the brain's
-        // records.
-        stuck: stuck.statements.includes("Tickets wait for the customer."),
+        stuck: [
+          stuck.statements.includes("Tickets wait for the customer."),
+          stuck.drawings,
+        ],
         waiting: waiting.length > 0,
         after: after.statements.includes("Tickets wait for the customer."),
         restsOn: await store.sentFor(ids.max),
         gone: await store.sentFor(`gone:${ids.max}`),
       }).toStrictEqual({
-        before: true,
+        before: [true, [7]],
         withdrawn: 200,
-        stuck: false,
-        waiting: true,
+        stuck: [false, null],
+        waiting: false,
         after: false,
         restsOn: [],
         gone: [],
@@ -1247,11 +1245,11 @@ describe("the alarm, while something else fails", { timeout: 180_000 }, () => {
   // test looked whether they were still there.
   beforeEach(holdAlarm);
 
-  it("still takes what rests on a withdrawn interview out of the brain first, and sets itself again (T5)", async () => {
+  it("leaves nothing of a withdrawn interview for the alarm, and sets itself again when part of it fails (T5)", async () => {
     const ids = await sevenTeam();
     const said = sentinels();
     await inTheBrain(ids, said);
-    // Max withdraws while the brain can't be written: it waits for the alarm.
+    // Max withdraws while core's records can't be written.
     const batch = env.DB.batch.bind(env.DB);
     const blocked = vi
       .spyOn(env.DB, "batch")
@@ -1266,8 +1264,9 @@ describe("the alarm, while something else fails", { timeout: 180_000 }, () => {
     } finally {
       blocked.mockRestore();
     }
-    // What still rests on him in the brain's records, noted as resting on
-    // someone gone, for the alarm (his claims left as he withdrew).
+    // What still rests on him, noted as resting on someone gone, for the
+    // alarm: nothing, as his team's claims and drawings left as he
+    // withdrew (GRA-1946, GRA-1748).
     const owed = async (): Promise<boolean> => {
       const resting = await onboardingStore(env).sentFor(`gone:${ids.max}`);
       return resting.length > 0;
@@ -1297,6 +1296,6 @@ describe("the alarm, while something else fails", { timeout: 180_000 }, () => {
       failed,
       after: await owed(),
       armed: alarm !== null,
-    }).toStrictEqual({ stuck: true, failed: true, after: false, armed: true });
+    }).toStrictEqual({ stuck: false, failed: true, after: false, armed: true });
   });
 });

@@ -213,8 +213,9 @@ export const recallFor = async (
     });
     // A capture and an interview are one person's own, kept only in their
     // own store (core's addSource refuses them anywhere else), which this
-    // recall never reads; a team's claim from the onboarding's interviews
-    // is read by members as themselves alone (brain-next.ts `membersGroup`),
+    // recall never reads; a team's claim or drawing from the onboarding's
+    // interviews is read by members as themselves alone (brain-next.ts
+    // `membersGroup`),
     // which code never reads as, so no statement of this recall ever ranks
     // or counts one: none can be here. Narrowed for the SDK's type, never
     // thrown over.
@@ -224,7 +225,8 @@ export const recallFor = async (
         const { producer, id } = item.source;
         return producer === "capture" ||
           producer === "interview" ||
-          producer === "claim"
+          producer === "claim" ||
+          producer === "drawing"
           ? []
           : [{ ...item, source: { producer, id } }];
       }),

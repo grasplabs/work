@@ -6056,6 +6056,10 @@ msgstr "Aus einem Upload, Version {version}"
 msgid "From Google Drive. I read only the files you add."
 msgstr "Aus Google Drive. Ich lese nur die Dateien, die Sie hinzufügen."
 
+#: src/brain/memories-page.tsx
+msgid "From how a team works, version {version}"
+msgstr "Aus der Arbeitsweise eines Teams, Version {version}"
+
 #: src/onboarding/place-picker.tsx
 msgid "From SharePoint or OneDrive. I read only the files you add."
 msgstr "Aus SharePoint oder OneDrive. Ich lese nur die Dateien, die Sie hinzufügen."
@@ -6709,6 +6713,11 @@ msgstr "4 Sekunden gedrückt halten"
 #: src/brain/thinking/work-hours.tsx
 msgid "Hours not known yet"
 msgstr "Stunden noch nicht bekannt"
+
+#: src/brain/sources-page.tsx
+msgctxt "a source of the Brain"
+msgid "How a team works"
+msgstr "Wie ein Team arbeitet"
 
 #: src/workflows/requests/request-plan.tsx
 msgid "How far back"

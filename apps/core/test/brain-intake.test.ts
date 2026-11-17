@@ -289,12 +289,11 @@ describe(
         rests: {
           // The claim rests on the five who made it, the drawing on whom it
           // was drawn from.
-          max: ["statement", "workflow", "workflowVersion"],
-          mia: ["statement", "workflow", "workflowVersion"],
-          // The lead named the work, and was the drawing's context; the
-          // work rests on whom it was drawn from too.
-          lea: ["workflow", "workflowVersion"],
-          noor: ["statement", "workflow", "workflowVersion"],
+          max: ["statement", "workflowVersion"],
+          mia: ["statement", "workflowVersion"],
+          // The lead was the drawing's context.
+          lea: ["workflowVersion"],
+          noor: ["statement", "workflowVersion"],
         },
       });
     });
