@@ -6,7 +6,6 @@ import { msg } from "@lingui/core/macro";
 import {
   AppRecord,
   Cable,
-  Checklist,
   Clock,
   Company,
   Contrast,
@@ -14,7 +13,6 @@ import {
   Lock,
   People,
   Person,
-  Question,
 } from "../grasp/icons/index.ts";
 import type { IconData } from "../grasp/icons/index.ts";
 
@@ -29,10 +27,8 @@ export type SettingsHref =
   | "/settings/workspace"
   | "/settings/members"
   | "/settings/ai-providers"
-  | "/settings/onboarding"
   | "/settings/audit"
   | "/settings/webhooks"
-  | "/settings/outcomes"
   | "/settings/billing"
   | "/settings/profile"
   | "/settings/appearance"
@@ -124,14 +120,6 @@ export const settingsSections: readonly SettingsSection[] = [
     audience: "admins",
   },
   {
-    id: "onboarding",
-    label: msg`Onboarding`,
-    href: "/settings/onboarding",
-    group: "workspace",
-    icon: Checklist,
-    audience: "admins",
-  },
-  {
     id: "audit",
     label: msg`Audit trail`,
     href: "/settings/audit",
@@ -147,14 +135,6 @@ export const settingsSections: readonly SettingsSection[] = [
     href: "/settings/webhooks",
     group: "workspace",
     icon: Link,
-    audience: "own-admins",
-  },
-  {
-    id: "outcomes",
-    label: msg`Unknown outcomes`,
-    href: "/settings/outcomes",
-    group: "workspace",
-    icon: Question,
     audience: "own-admins",
   },
   {

@@ -29,10 +29,12 @@ import { focus } from "../focus/focus";
 import { visuallyHidden } from "../hidden/hidden";
 import { ChevronDown, Icon } from "../icons";
 import { Shimmer } from "../shimmer";
-import { seconds, summaryOf } from "./format";
+import { useWords, withGiven } from "../words/words";
+import { seconds } from "./format";
 import { Step } from "./step";
 import { activityStyles as styles } from "./styles";
 import type { ActivityStep, AgentActivityWords } from "./types";
+import { agentActivityWords } from "./words";
 
 /** Every prop an AgentActivity takes. */
 export interface AgentActivityProps {
@@ -73,24 +75,6 @@ export interface AgentActivityProps {
   words?: Partial<AgentActivityWords>;
 }
 
-/** Its words in English: replace any of them through `words`. */
-const englishWords: AgentActivityWords = {
-  states: {
-    waiting: "Waiting",
-    working: "Working",
-    done: "Done",
-    failed: "Failed",
-    skipped: "Skipped",
-  },
-  showMore: "Show more",
-  showLess: "Show less",
-  input: "Input",
-  result: "Result",
-  error: "Why it failed",
-  stepFailed: (title) => `${title} failed`,
-  summarize: summaryOf,
-};
-
 /** The cleanup of an effect that started nothing. */
 const keep = () => {
   // Nothing was started, so nothing stops.
@@ -122,18 +106,23 @@ export const AgentActivity = ({
   defaultOpen = false,
   open,
   onOpenChange,
-  "aria-label": ariaLabel = "Agent activity",
+  "aria-label": ariaLabel,
   working: runningDeprecated,
   loading: running = runningDeprecated ?? false,
-  workingLabel = "Working",
+  workingLabel,
   words: given,
 }: AgentActivityProps) => {
-  const words = { ...englishWords, ...given };
+  // Its words: the product's, by its catalogue, else English; the caller's still win.
+  const words = withGiven(useWords("agentActivity", agentActivityWords), {
+    ...given,
+    name: ariaLabel,
+    working: workingLabel,
+  });
   // Its own name, so the effect that says finished steps follows only this word, not the object.
   const { stepFailed } = words;
   const current = steps.find((step) => step.state === "working");
   const working = current !== undefined || running;
-  const line = lineOf(current, working, workingLabel, summary, steps, words);
+  const line = lineOf(current, working, words.working, summary, steps, words);
 
   // Open and closed: the person's choice wins. A run that finishes without the person having
   // opened it settles back into its one line.
@@ -194,7 +183,7 @@ export const AgentActivity = ({
   return (
     <>
       <section
-        aria-label={ariaLabel}
+        aria-label={words.name}
         aria-busy={working || undefined}
         data-slot="agent-activity"
         {...stylex.props(styles.root)}

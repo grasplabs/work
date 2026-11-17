@@ -50,6 +50,21 @@ export interface SourceTranscriptLine {
   quoted?: boolean;
 }
 
+/**
+ * What one mention of a source cites, where it differs from the source's own: the span the answer
+ * leans on at that place. Given on a Citation; its card shows these, the list the source's.
+ */
+export interface SourceMention {
+  /** The passage this mention cites, in place of the source's `quote`. */
+  quote?: string;
+  /** The words before and after this mention's passage. */
+  context?: { before?: string; after?: string };
+  /** Where in the source this passage sits: "Page 9 of 12". */
+  place?: string;
+  /** For a source of code: the lines this mention cites, marked in its card (counted from 1). */
+  lines?: readonly number[];
+}
+
 /** One source an answer drew on. Its number is its place in the list, from 1. */
 export interface Source {
   /**

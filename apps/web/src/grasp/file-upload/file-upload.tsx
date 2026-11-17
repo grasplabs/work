@@ -39,6 +39,8 @@ import { arrive } from "../motion/arrive";
 import { simply } from "../motion/simply.stylex";
 import { Progress } from "../progress/progress";
 import { grasp, media } from "../tokens/tokens.stylex";
+import { useWords, withGiven } from "../words/words";
+import { fileUploadWords } from "./words";
 
 /** What a caller may style: where it sits and how wide it is. */
 export type FileUploadLayoutStyle = LayoutStyle;
@@ -112,27 +114,6 @@ interface Sending {
 
 const describe = (accept: FileUploadProps["accept"]) =>
   typeof accept === "string" ? accept : accept?.join(", ");
-
-const defaults: FileUploadWords = {
-  drop: "Drop files here, or",
-  choose: "Choose files",
-  uploading: "Uploading",
-  done: "Uploaded",
-  failed: "Could not upload",
-  retry: "Try again",
-  files: "Files",
-  doneLine: (size) => `${size}, uploaded`,
-  sent: (name) => `${name} uploaded.`,
-  notSent: (name) => `Could not upload ${name}.`,
-  remove: (name) => `Remove ${name}`,
-  refused: (name, reason) =>
-    ({
-      "file-type": `${name} is not a kind of file this takes.`,
-      "file-too-large": `${name} is too large.`,
-      "file-too-small": `${name} is empty.`,
-      "too-many-files": `${name} is one file too many.`,
-    })[reason] ?? `${name}: ${reason}`,
-};
 
 const FORCED = media.forced;
 
@@ -354,7 +335,8 @@ export const FileUpload = ({
   style: styleProp,
   layout,
 }: FileUploadProps) => {
-  const words = { ...defaults, ...given };
+  // Its words: the product's, by its catalogue, else English; the caller's `words` still win.
+  const words = withGiven(useWords("fileUpload", fileUploadWords), given ?? {});
   const [sending, setSending] = useState<Map<File, Sending>>(new Map());
   const [refused, setRefused] = useState<string[]>([]);
   // One quiet place for what a screen reader hears: each file sent or not, and each refusal.

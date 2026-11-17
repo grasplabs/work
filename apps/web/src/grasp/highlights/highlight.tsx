@@ -53,6 +53,12 @@ export interface HighlightProps {
    * `onPoint`, the value it shows can follow the point under the pointer.
    */
   chart?: ReactNode;
+  /**
+   * Inside a card that has its own room and ground: no padding, no ground and no rule of its own,
+   * so its title stands on the card's start edge, as its other words do.
+   * @default false
+   */
+  bare?: boolean;
 }
 
 /** One highlight's insides, drawn alone or in a grid's cell, with the id that names it. */
@@ -119,7 +125,10 @@ export const Highlight = (props: HighlightProps) => {
     <section
       aria-labelledby={id}
       aria-busy={props.loading === true ? true : undefined}
-      {...stylex.props(styles.card, styles.alone)}
+      {...stylex.props(
+        styles.card,
+        props.bare === true ? styles.bare : styles.alone
+      )}
     >
       {body}
     </section>

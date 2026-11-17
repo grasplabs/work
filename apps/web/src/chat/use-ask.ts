@@ -7,6 +7,7 @@ import {
 import type { ChatMake, ChatSubject } from "@grasp-os/shared/chat";
 import { failureText } from "@grasp-os/shared/errors";
 import type { ModelEffort, ModelEfforts } from "@grasp-os/shared/models";
+import { useLingui } from "@lingui/react/macro";
 import { useRouteContext } from "@tanstack/react-router";
 import { useRef, useState } from "react";
 
@@ -28,6 +29,12 @@ import type { ModelChoice } from "./model-choice.ts";
 // in a new one named after the question. A question's files are attached to
 // its chat as it is sent, one at a time, then the question names them.
 
+/**
+ * How long a question may go without core confirming it, in ms. Core
+ * confirms one in about 50ms here; this leaves room for a slow network or
+ * a cold start before the box says the question wasn't heard.
+ */
+export const sendDeadlineMs = 10_000;
 /** A new chat's title: the start of its first question. */
 export const titleOf = (question: string): string => {
   const line = question.trim().split("\n")[0] ?? "";
@@ -113,6 +120,7 @@ export const useAsk = (
   { onAsked, subject, make, agentId }: AskOptions = noOptions
 ) => {
   const { identity } = useRouteContext({ from: "/_shell" });
+  const { t } = useLingui();
   const { busy, failure, run } = useCoreAction();
   const [text, setText] = useState("");
   // What the person mentioned in the box (`@`), each once: what the
@@ -121,6 +129,10 @@ export const useAsk = (
   const [files, setFiles] = useState<readonly BoxFile[]>([]);
   // Why a file the person chose stays out of the box.
   const [fileProblem, setFileProblem] = useState<string>();
+  // The last question didn't go: the box says so under it, the words kept.
+  const [sendFailed, setSendFailed] = useState(false);
+  // Core hasn't confirmed the question on its way within the deadline.
+  const [late, setLate] = useState(false);
   // The box's files core already took, by chat: asking again in the same
   // chat names them rather than attaching them twice.
   const attached = useRef(
@@ -183,13 +195,17 @@ export const useAsk = (
     mentioned: readonly Mentionable[] = []
   ): Promise<boolean> => {
     // Already on its way: this press is the same question, not a failure.
+    // Once core is late to confirm it, it stays the one on its way: a
+    // second would ask it twice, as a send carries no key core could tell
+    // a repeat by.
     if (sending.current) {
-      return true;
+      return !late;
     }
     sending.current = true;
+    setLate(false);
     const named = chatMentionsOf(mentioned);
     let created: string | undefined;
-    const sent = await run(async (session) => {
+    const call = run(async (session) => {
       let id = chatId ?? unsentChatFor(unsent.current, question, agentId);
       if (id === undefined) {
         ({ id } = await session.chats.create(titleOf(question), agentId, make));
@@ -223,31 +239,55 @@ export const useAsk = (
       });
       return askedIn;
     });
-    sending.current = false;
-    if (sent === undefined) {
-      // The box keeps the question and says why it wasn't sent; a new chat
-      // made for it waits to be asked in again.
-      if (created !== undefined) {
-        unsent.current = { id: created, question, agentId };
+    const settled = async (): Promise<boolean> => {
+      const sent = await call;
+      sending.current = false;
+      setLate(false);
+      if (sent === undefined) {
+        // The box keeps the question and says why it wasn't sent; a new chat
+        // made for it waits to be asked in again.
+        if (created !== undefined) {
+          unsent.current = { id: created, question, agentId };
+        }
+        return false;
       }
-      return false;
+      unsent.current = null;
+      // Clears the box only of what was sent from it: asking again sends an
+      // earlier question, and a draft the person started stays.
+      setText((now) => (now === question ? "" : now));
+      if (mentioned.length > 0) {
+        setMentions([]);
+      }
+      setFiles((now) => now.filter((each) => !carried.includes(each)));
+      for (const { id } of carried) {
+        attached.current.delete(id);
+      }
+      if (chatId === undefined) {
+        setActiveChat(sent, slot);
+      }
+      onAsked?.(sent);
+      return true;
+    };
+    const outcome = settled();
+    // Core confirms a question in well under a second; past the deadline the
+    // box says it wasn't heard, the words kept. What core says later still
+    // counts: a question it took clears the box as any sent one.
+    const deadline = Promise.withResolvers<"late">();
+    const timer = window.setTimeout(() => {
+      deadline.resolve("late");
+    }, sendDeadlineMs);
+    const first = await Promise.race([outcome, deadline.promise]);
+    window.clearTimeout(timer);
+    if (first !== "late") {
+      return first;
     }
-    unsent.current = null;
-    // Clears the box only of what was sent from it: asking again sends an
-    // earlier question, and a draft the person started stays.
-    setText((now) => (now === question ? "" : now));
-    if (mentioned.length > 0) {
-      setMentions([]);
-    }
-    setFiles((now) => now.filter((each) => !carried.includes(each)));
-    for (const { id } of carried) {
-      attached.current.delete(id);
-    }
-    if (chatId === undefined) {
-      setActiveChat(sent, slot);
-    }
-    onAsked?.(sent);
-    return true;
+    setLate(true);
+    void (async () => {
+      if (await outcome) {
+        setSendFailed(false);
+      }
+    })();
+    return false;
   };
   const stop = async (): Promise<void> => {
     if (chatId !== undefined) {
@@ -273,7 +313,9 @@ export const useAsk = (
       // Not before core has said which models there are: a question
       // would name none, and core refuses it.
       busy: busy || models === undefined,
-      failure,
+      failure: late
+        ? t`Grasp hasn't confirmed your question yet. It's kept here, and goes once Grasp answers.`
+        : failure,
       fileProblem,
       files: files.map(({ id, file }) => ({
         id,
@@ -282,14 +324,14 @@ export const useAsk = (
       })),
       onAttach: attach,
       onRemoveFile: removeFile,
-      // Rejects when the question didn't go: the box says so under it
-      // (`failure`, why), keeps the text, and Send tries again.
+      // When the question didn't go, the box says so under it (`failure`,
+      // why), keeps the text, and Send tries again.
       onSend: async (): Promise<void> => {
         setFileProblem(undefined);
-        if (!(await ask(text, files, mentions))) {
-          throw new Error("The question was not sent");
-        }
+        setSendFailed(!(await ask(text, files, mentions)));
       },
+      sendFailed,
+      onSendFailedChange: setSendFailed,
       onStop: () => {
         void stop();
       },

@@ -32,13 +32,16 @@ import {
 import type { ReactNode, RefObject } from "react";
 
 import { Button } from "../button";
+import { ChatMessageSkeleton } from "../chat-message/skeleton";
 import { focus } from "../focus/focus";
 import { visuallyHidden } from "../hidden/hidden";
 import { ArrowDown, Icon, Spinner } from "../icons";
 import { scroll } from "../scroll/scroll";
+import { useWords, useWordsLocale, withGiven } from "../words/words";
 import { dayWritten, rowsOf } from "./rows";
 import type { ThreadItemBase, ThreadRow } from "./rows";
 import { threadPlaces as places, threadStyles as styles } from "./styles";
+import { threadWords } from "./words";
 
 /** The words the thread writes itself: its lines, its status words and the days. */
 export interface ThreadWords {
@@ -47,6 +50,8 @@ export interface ThreadWords {
   unreadFrom: string;
   /** While older messages load at the top. */
   loadingOlder: string;
+  /** Said once while the whole conversation loads (`loading`). */
+  loading: string;
   /** The way back down when a message has come in since the reader left, from `jumpLabel`. */
   jumpToNew: (jumpLabel: string) => string;
   /** What a screen reader hears for the messages that came in, from their count. */
@@ -103,6 +108,14 @@ export interface ThreadProps<T extends ThreadItemBase> {
   answerTo?: string;
   /** The words it writes itself, any of them replaced: the Unread line, the status words, the days. */
   words?: Partial<ThreadWords>;
+  /**
+   * An old chat is loading: the thread draws the shape of a person's message and the agent's answer,
+   * three pairs at its foot where the latest will stand, says once that it is loading, and is busy.
+   * `items` are not drawn meanwhile. When it turns false the messages stand where the shapes stood,
+   * at the latest, with no fade and no "new messages".
+   * @default false
+   */
+  loading?: boolean;
 }
 
 const DATE_ROW = 44;
@@ -621,16 +634,26 @@ const afterLoading = async (result: unknown, done: () => void) => {
   }
 };
 
-/** Its words in English: replace any of them through `words`. */
-const englishWords: ThreadWords = {
-  unread: "Unread",
-  unreadFrom: "Unread messages from here",
-  loadingOlder: "Loading older messages",
-  jumpToNew: (jumpLabel) => `${jumpLabel}, new messages`,
-  arrived: (count) => (count === 1 ? "1 new message" : `${count} new messages`),
-  today: "Today",
-  yesterday: "Yesterday",
-  day: (day, sameYear) => dayWritten(day, sameYear),
+/**
+ * Its own words: the product's, by its catalogue, else English; the caller's `words` and `jumpLabel`
+ * still win. The days in the catalogue's locale, unless someone gave `day`.
+ */
+const useThreadWords = (
+  given: Partial<ThreadWords> | undefined,
+  jumpLabel: string | undefined
+) => {
+  const text = withGiven(useWords("thread", threadWords), {
+    ...given,
+    jump: jumpLabel,
+  });
+  const locale = useWordsLocale();
+  return text.day === threadWords.day && locale !== undefined
+    ? {
+        ...text,
+        day: (day: Date, sameYear: boolean) =>
+          dayWritten(day, sameYear, locale),
+      }
+    : text;
 };
 
 /** What the status line says for the messages that came in, or nothing for none. */
@@ -704,22 +727,69 @@ const drawLine = (row: LineRow, words: ThreadWords) => {
   );
 };
 
-/** The thread: the messages, the lines between them, and the way back to the latest. */
-export const Thread = <T extends ThreadItemBase>({
+/** How many lines each pair's two shapes stand for while an old chat loads: person, then agent. */
+const LOADING_PAIRS = [
+  { key: "first", person: 1, agent: 3 },
+  { key: "second", person: 2, agent: 2 },
+  { key: "third", person: 1, agent: 4 },
+] as const;
+
+/**
+ * An old chat loading: the pairs at the foot, in the thread's own rows, as the thread opens at its
+ * latest. Its own element, not the live thread's: when the messages come, the live thread is drawn
+ * new, so they are its first rows, open at the end, and are not news.
+ */
+const ThreadLoading = ({
+  label,
+  words,
+}: {
+  label: string;
+  words: ThreadWords;
+}) => (
+  <div data-slot="thread" data-loading="" {...stylex.props(styles.root)}>
+    {/* The top fades as the live thread's does with rows above: the shapes run on past it. */}
+    <div
+      role="log"
+      aria-label={label}
+      aria-busy="true"
+      data-under-start=""
+      {...stylex.props(styles.scroller, styles.opening, styles.still)}
+    >
+      <div
+        {...stylex.props(styles.flow, styles.openingFlow, styles.openingEnd)}
+      >
+        {LOADING_PAIRS.map((pair) => (
+          <div key={pair.key} data-slot="thread-loading-pair">
+            <div {...stylex.props(styles.row)}>
+              <ChatMessageSkeleton from="person" lines={pair.person} />
+            </div>
+            <div {...stylex.props(styles.row)}>
+              <ChatMessageSkeleton from="agent" lines={pair.agent} />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+    <output {...stylex.props(visuallyHidden)}>{words.loading}</output>
+  </div>
+);
+
+/** The live thread: its rows, placed by the virtualiser, and the follower. */
+const ThreadLive = <T extends ThreadItemBase>({
   items,
   renderItem,
   "aria-label": ariaLabel,
   unreadFrom,
   hasOlder = false,
   onLoadOlder,
-  jumpLabel = "Jump to latest",
+  jumpLabel,
   estimate = 96,
   startAt = "end",
   now: nowProp,
   answerTo,
   words: given,
-}: ThreadProps<T>) => {
-  const words = { ...englishWords, ...given };
+}: Omit<ThreadProps<T>, "loading">) => {
+  const words = useThreadWords(given, jumpLabel);
   // The day lines are worked out against `now`, or the day the page was drawn, once, so the server
   // and the browser agree.
   const nowKey = nowProp instanceof Date ? nowProp.getTime() : nowProp;
@@ -1082,11 +1152,24 @@ export const Thread = <T extends ThreadItemBase>({
                 scroller.current?.focus({ preventScroll: true });
               }}
             >
-              {newBelow ? words.jumpToNew(jumpLabel) : jumpLabel}
+              {newBelow ? words.jumpToNew(words.jump) : words.jump}
             </Button>
           </span>
         </div>
       )}
     </div>
+  );
+};
+
+/** The thread: the messages, the lines between them, and the way back to the latest. */
+export const Thread = <T extends ThreadItemBase>({
+  loading = false,
+  ...props
+}: ThreadProps<T>) => {
+  const words = useThreadWords(props.words, props.jumpLabel);
+  return loading ? (
+    <ThreadLoading label={props["aria-label"]} words={words} />
+  ) : (
+    <ThreadLive {...props} />
   );
 };

@@ -25,6 +25,7 @@ import type { WorkflowSummary } from "@grasp-os/shared/workflows";
 import { readRequestNames } from "../activity/pending.tsx";
 import type { CoreConnection } from "../core-connection.ts";
 import type { Session } from "../core.ts";
+import { readOutcomes } from "../inbox/everyones-outcomes.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { listWorkflows, openableApps } from "../workflows/reads.ts";
@@ -136,7 +137,24 @@ export const readWaiting = async (
           )
         : asked;
   }
+  // The onboarding, for the admins Settings, Onboarding was for, Grasp's staff included.
+  const interviews = isAdmin(identity.role)
+    ? await loadFromCore(core, async (session) => {
+        const [view, links, programme] = await Promise.all([
+          session.onboarding.view(),
+          session.onboarding.links(),
+          session.onboarding.programme(),
+        ]);
+        return { view, links, stage: programme?.stage ?? null };
+      })
+    : undefined;
+  // Everyone's, for the organization's own admins, as Settings › Unknown outcomes was.
+  const everyonesOutcomes = decidesRequests(identity)
+    ? await readOutcomes(core)
+    : undefined;
   return {
+    ...(interviews === undefined ? {} : { interviews }),
+    ...(everyonesOutcomes === undefined ? {} : { everyonesOutcomes }),
     held: partOf(feed, "held", (read) =>
       ofKind(read, "heldWrite").map(({ action }) => action)
     ),
@@ -161,6 +179,10 @@ export const readWaiting = async (
       ? {
           bindings: partOf(feed, "bindings", (read) =>
             ofKind(read, "bindingApproval")
+          ),
+          gaps: await loadFromCore(
+            core,
+            async (session) => await session.brain.openGaps()
           ),
         }
       : {}),

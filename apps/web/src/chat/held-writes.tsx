@@ -3,17 +3,22 @@ import type {
   PendingAction,
 } from "@grasp-os/shared/connect";
 import { failureText } from "@grasp-os/shared/errors";
-import { Badge } from "@grasp-os/ui/components/badge";
-import { Button } from "@grasp-os/ui/components/button";
-import { Plural, Trans, useLingui } from "@lingui/react/macro";
+import { plural } from "@lingui/core/macro";
+import { Trans, useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { useRouter } from "@tanstack/react-router";
-import { ClockIcon } from "lucide-react";
 import { useEffect, useId, useState } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
 import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
 import { formatDateTime } from "../format.ts";
+import { ApprovalRequest } from "../grasp/approval-request/index.ts";
+import { Badge } from "../grasp/badge/index.ts";
+import { Button } from "../grasp/button/index.ts";
+import { CodeBlock } from "../grasp/code-block/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
 
@@ -25,8 +30,9 @@ import { useCore } from "../use-core.ts";
 // input's own, never a summary; any other shows its action and its input.
 // Either way the exact input each runs with, which is what confirming
 // names, is one click away, and open from the start whenever the card
-// doesn't show all of it. Confirm waits until everything that will be
-// sent has been shown in full.
+// doesn't show all of it. On Grasp UI's Approval request, Confirm is held,
+// with its reason, until everything that will be sent has been shown in
+// full (`approveHeld`).
 
 /** What the page read of the chat's held writes. */
 type Held =
@@ -56,6 +62,34 @@ const readHeld = async (
     return { state: "refused", message: failureText(error) };
   }
 };
+
+const styles = stylex.create({
+  stack: { display: "grid", gap: grasp.space2 },
+  list: { display: "grid", gap: grasp.space3 },
+  value: {
+    display: "grid",
+    justifyItems: "start",
+    gap: grasp.space1,
+    margin: 0,
+  },
+  // A value exactly as the input holds it: its line breaks kept.
+  words: {
+    whiteSpace: "pre-wrap",
+    overflowWrap: "anywhere",
+    fontSize: grasp.textSm,
+    lineHeight: grasp.textSmLine,
+  },
+  items: { margin: 0, paddingInlineStart: grasp.space4 },
+  fields: { display: "grid", gap: grasp.space2, margin: 0 },
+  field: { display: "grid", gap: grasp.space1 },
+  rejectAll: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: grasp.space2,
+  },
+});
 
 /** The input an action runs with, laid out to read. */
 export const inputOf = (input: string): string => {
@@ -101,8 +135,8 @@ const TextValue = ({
   const count = lines.length;
   const characters = value.length;
   return (
-    <dd className="flex flex-col items-start gap-1">
-      <span className="break-words whitespace-pre-wrap">
+    <dd {...stylex.props(styles.value)}>
+      <span {...stylex.props(styles.words)}>
         {all || !long ? value : `${start}…`}
       </span>
       {long ? (
@@ -115,7 +149,7 @@ const TextValue = ({
             setAll(!all);
           }}
           size="sm"
-          variant="outline"
+          variant="quiet"
         >
           {all
             ? t`Show less`
@@ -137,11 +171,11 @@ const FieldValue = ({
   typeof value === "string" ? (
     <TextValue onShowAll={onShowAll} value={value} />
   ) : (
-    <dd>
-      <ul className="flex flex-col">
+    <dd {...stylex.props(styles.value)}>
+      <ul {...stylex.props(styles.items)}>
         {value.map((item, index) => (
           // By position: the input's own order, and values may repeat.
-          <li className="break-words whitespace-pre-wrap" key={index}>
+          <li key={index} {...stylex.props(styles.words)}>
             {item}
           </li>
         ))}
@@ -160,10 +194,14 @@ export const Described = ({
   description: ActionDescription;
   onShowAll: (input: string) => void;
 }) => (
-  <dl className="flex flex-col gap-2 text-sm">
+  <dl {...stylex.props(styles.fields)}>
     {description.fields.map(({ input, label, value }) => (
-      <div className="flex flex-col" key={input}>
-        <dt className="text-muted-foreground">{label}</dt>
+      <div key={input} {...stylex.props(styles.field)}>
+        <dt>
+          <Text element="span" size="sm" tone="muted">
+            {label}
+          </Text>
+        </dt>
         <FieldValue
           onShowAll={() => {
             onShowAll(input);
@@ -204,7 +242,7 @@ export const ExactInput = ({
       : t`Show exactly what was sent`;
   }
   return (
-    <div className="flex flex-col items-start gap-2">
+    <div {...stylex.props(styles.value)}>
       <Button
         aria-controls={id}
         aria-expanded={open}
@@ -220,12 +258,15 @@ export const ExactInput = ({
         {label}
       </Button>
       {open ? (
-        <pre
-          className="bg-muted w-full overflow-x-auto rounded-md p-3 text-sm"
-          id={id}
-        >
-          <code className="font-mono">{inputOf(input)}</code>
-        </pre>
+        <div id={id}>
+          {/* All of it, never folded: it is what confirming names. */}
+          <CodeBlock
+            code={inputOf(input)}
+            language="json"
+            maxLines={false}
+            wrap
+          />
+        </div>
       ) : null}
     </div>
   );
@@ -293,18 +334,29 @@ export const declineHeld =
     await session.pendingActions.decline(action.id);
   };
 
+/** Why confirming waits, while part of what will be sent is still unseen. */
+const useUnseenWords = (): string => {
+  const { t } = useLingui();
+  return t`Part of what will be sent is cut short above. Show it all, or exactly what will be sent, to confirm.`;
+};
+
 /**
  * Where a held write would act and when it was asked for, and everything
- * it would send: what a person reads before they confirm it.
+ * it would send: what a person reads before they confirm it. `saysUnseen`
+ * says under it when confirming waits for more (off where the card holds
+ * its Confirm with that reason itself).
  */
 export const HeldWriteDetails = ({
   action,
   shown,
+  saysUnseen = true,
 }: {
   action: PendingAction;
   shown: Shown;
+  saysUnseen?: boolean;
 }) => {
   const { t } = useLingui();
+  const unseenWords = useUnseenWords();
   const { description, resource } = action;
   const connection = action.connectionName ?? action.connectionId;
   const tool = action.action;
@@ -318,18 +370,18 @@ export const HeldWriteDetails = ({
     where = t`${connection} (${tool})`;
   }
   return (
-    <div className="flex flex-col gap-2">
-      <p className="text-muted-foreground">
-        <Trans>On {where}</Trans>
-      </p>
-      <p className="text-muted-foreground">
+    <div {...stylex.props(styles.stack)}>
+      <Text size="sm" tone="muted">
+        {t`On ${where}`}
+      </Text>
+      <Text size="sm" tone="muted">
         <Trans>
           Asked for <time dateTime={action.requestedAt}>{asked}</time>
         </Trans>
-      </p>
+      </Text>
       {action.restricted ? (
-        <Badge variant="attention">
-          <Trans>This chat read restricted data: this may send it out</Trans>
+        <Badge tone="attention">
+          {t`This chat read restricted data: this may send it out`}
         </Badge>
       ) : null}
       {description === undefined ? null : (
@@ -341,12 +393,9 @@ export const HeldWriteDetails = ({
         />
       )}
       {description?.complete === false ? (
-        <p role="note">
-          <Trans>
-            More will be sent than is shown above. Read exactly what will be
-            sent before you confirm.
-          </Trans>
-        </p>
+        <Text size="sm">
+          {t`More will be sent than is shown above. Read exactly what will be sent before you confirm.`}
+        </Text>
       ) : null}
       <ExactInput
         input={action.input}
@@ -355,18 +404,19 @@ export const HeldWriteDetails = ({
         }}
         shown={description?.complete === true}
       />
-      {shown.unseen ? (
-        <p className="text-muted-foreground" id={shown.unseenId}>
-          <Trans>
-            Part of what will be sent is cut short above. Show it all, or
-            exactly what will be sent, to confirm.
-          </Trans>
-        </p>
+      {saysUnseen && shown.unseen ? (
+        <Text id={shown.unseenId} size="sm" tone="muted">
+          {unseenWords}
+        </Text>
       ) : null}
     </div>
   );
 };
 
+/**
+ * A held write in the chat, on Grasp UI's Approval request: Confirm and
+ * Reject, Confirm held with its reason until all it sends was shown.
+ */
 export const HeldWrite = ({
   action,
   onDecided,
@@ -374,64 +424,52 @@ export const HeldWrite = ({
   action: PendingAction;
   onDecided: () => void;
 }) => {
-  const { busy, failure, run } = useCoreAction();
+  const { failure, run } = useCoreAction();
   const router = useRouter();
   const { t } = useLingui();
   // Read again however it went: a failed decision may have changed
-  // something too (the action gone already, say).
+  // something too (the action gone already, say). A refusal reaches the
+  // card, which says it could not.
   const decide = async (
     decision: (session: Session) => Promise<unknown>
   ): Promise<void> => {
-    await run(decision);
+    const done = await run(async (session) => {
+      await decision(session);
+      return true;
+    });
     onDecided();
     // Core notes the decision in the chat, which moves it up the chat
     // list: the list is read again so it shows under its new time.
     await router.invalidate();
+    if (done !== true) {
+      throw new Error("The decision was not taken");
+    }
   };
   const shown = useShown(action);
-  const title = action.description?.title ?? action.action;
   const what = useHeldName(action);
   return (
-    <article
-      aria-label={what}
-      className="bg-card flex w-full flex-col gap-4 rounded-xl border p-4 text-sm"
-    >
-      <h3 className="flex items-start gap-2 font-medium">
-        <ClockIcon
-          aria-hidden="true"
-          className="text-status-attention mt-0.5 size-4 flex-none"
-        />
-        <span>
-          <Trans>Waiting for you: {title}</Trans>
-        </span>
-      </h3>
-      <div className="flex flex-col gap-2">
-        <HeldWriteDetails action={action} shown={shown} />
-        <ErrorText>{failure}</ErrorText>
-      </div>
-      <div className="flex flex-wrap gap-2">
-        <Button
-          aria-describedby={shown.unseen ? shown.unseenId : undefined}
-          aria-label={t`Confirm ${what}`}
-          disabled={busy || shown.unseen}
-          onClick={() => {
-            void decide(confirmHeld(action));
-          }}
-        >
-          <Trans>Confirm</Trans>
-        </Button>
-        <Button
-          aria-label={t`Reject ${what}`}
-          disabled={busy}
-          onClick={() => {
-            void decide(declineHeld(action));
-          }}
-          variant="outline"
-        >
-          <Trans>Reject</Trans>
-        </Button>
-      </div>
-    </article>
+    <>
+      <ApprovalRequest
+        approveHeld={
+          shown.unseen
+            ? t`Part of what will be sent is cut short. Open Details and show it all, or exactly what will be sent, to confirm.`
+            : undefined
+        }
+        approveLabel={t`Confirm`}
+        onApprove={async () => {
+          await decide(confirmHeld(action));
+        }}
+        onDecline={async () => {
+          await decide(declineHeld(action));
+        }}
+        title={what}
+        words={{ decline: t`Reject` }}
+      >
+        <HeldWriteDetails action={action} saysUnseen={false} shown={shown} />
+      </ApprovalRequest>
+      {/* Core's own words for a refusal, under the card's "Could not approve". */}
+      <ErrorText>{failure}</ErrorText>
+    </>
   );
 };
 
@@ -446,18 +484,15 @@ const RejectAll = ({
   actions: readonly PendingAction[];
   onDecided: () => void;
 }) => {
+  const { t } = useLingui();
   const { busy, failure, run } = useCoreAction();
   const router = useRouter();
   const count = actions.length;
   return (
-    <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
-      <p className="text-muted-foreground">
-        <Plural
-          one="# change waits for you to confirm or reject it."
-          other="# changes wait for you to confirm or reject them."
-          value={count}
-        />
-      </p>
+    <div {...stylex.props(styles.rejectAll)}>
+      <Text size="sm" tone="muted">
+        {t`${plural(count, { one: "# change waits for you to confirm or reject it.", other: "# changes wait for you to confirm or reject them." })}`}
+      </Text>
       <Button
         disabled={busy}
         onClick={() => {
@@ -484,9 +519,9 @@ const RejectAll = ({
           })();
         }}
         size="sm"
-        variant="outline"
+        variant="quiet"
       >
-        <Trans>Reject all</Trans>
+        {t`Reject all`}
       </Button>
       <ErrorText>{failure}</ErrorText>
     </div>
@@ -532,7 +567,7 @@ export const HeldWrites = ({
   }
   const count = held.actions.length;
   return (
-    <section aria-label={t`Waiting for you`} className="flex flex-col gap-2">
+    <section aria-label={t`Waiting for you`} {...stylex.props(styles.list)}>
       {count > 1 ? (
         <RejectAll
           actions={held.actions}

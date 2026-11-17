@@ -24,13 +24,14 @@ import * as stylex from "@stylexjs/stylex";
 import { useState, useSyncExternalStore } from "react";
 
 import type { LayoutStyle } from "../layout/layout";
+import { useWords, withGiven } from "../words/words";
 import { Compact } from "./compact";
 import { LanguageList } from "./list";
 import { findOption } from "./options";
 import type { LanguageOption } from "./options";
 import { Pair } from "./pair";
 import { styles } from "./styles";
-import { defaultButtonLabel, defaultWords } from "./words";
+import { languageSwitchWords } from "./words";
 import type { LanguageSwitchWords } from "./words";
 
 // False on the server and while hydrating, true after: a store that never changes.
@@ -131,17 +132,37 @@ export const LanguageSwitch = ({
   secondNames = true,
   helpTranslateHref,
   onHelpTranslate,
-  label = defaultWords.label,
-  searchLabel = defaultWords.search,
-  clearSearchLabel = defaultWords.clearSearch,
-  suggestedLabel = defaultWords.suggested,
-  allLabel = defaultWords.all,
-  emptyLabel = defaultWords.empty,
-  helpTranslateLabel = defaultWords.helpTranslate,
-  buttonLabel = defaultButtonLabel,
+  label: labelGiven,
+  searchLabel: searchLabelGiven,
+  clearSearchLabel: clearSearchLabelGiven,
+  suggestedLabel: suggestedLabelGiven,
+  allLabel: allLabelGiven,
+  emptyLabel: emptyLabelGiven,
+  helpTranslateLabel: helpTranslateLabelGiven,
+  buttonLabel: buttonLabelGiven,
   style: styleProp,
   layout,
 }: LanguageSwitchProps) => {
+  // Its words: the product's, by its catalogue, else English; the caller's props still win.
+  const {
+    label,
+    search: searchLabel,
+    clearSearch: clearSearchLabel,
+    suggested: suggestedLabel,
+    all: allLabel,
+    empty: emptyLabel,
+    helpTranslate: helpTranslateLabel,
+    button: buttonLabel,
+  } = withGiven(useWords("languageSwitch", languageSwitchWords), {
+    label: labelGiven,
+    search: searchLabelGiven,
+    clearSearch: clearSearchLabelGiven,
+    suggested: suggestedLabelGiven,
+    all: allLabelGiven,
+    empty: emptyLabelGiven,
+    helpTranslate: helpTranslateLabelGiven,
+    button: buttonLabelGiven,
+  });
   const [own, setOwn] = useState(defaultValue ?? options[0]?.code ?? "");
   const current = value ?? own;
   // The browser's second names differ from the server's (each has its own ICU), so they appear once

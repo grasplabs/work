@@ -416,7 +416,9 @@ test("shows the members page only to someone signed in, and never signs them out
   failing = Number.POSITIVE_INFINITY;
   await page.goto("/settings/members");
   await expect(
-    page.getByText("Grasp can't be reached right now. Try again in a moment.")
+    page.getByText(
+      "Grasp could not reach its servers. Nothing you saved is lost."
+    )
   ).toBeVisible({ timeout: reconnectMs });
   expect(new URL(page.url()).pathname).toBe("/settings/members");
   await expect(
@@ -431,7 +433,7 @@ test("shows the members page only to someone signed in, and never signs them out
     page.getByRole("button", { name: "Trying again…" })
   ).toHaveAttribute("aria-busy", "true");
   await expect(unreachable).toHaveText(
-    "Grasp can't be reached right now. Try again in a moment.",
+    "Grasp could not reach its servers. Nothing you saved is lost.",
     { timeout: reconnectMs }
   );
   expect(new URL(page.url()).pathname).toBe("/settings/members");

@@ -19,7 +19,13 @@ import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 
 import type { Session } from "../core.ts";
-import { appName, personName, readDirectory } from "../directory.ts";
+import {
+  agentName,
+  appName,
+  listedOrNone,
+  personName,
+  readDirectory,
+} from "../directory.ts";
 import type { Directory } from "../directory.ts";
 import { Avatar, AvatarFallback } from "../grasp/avatar/index.ts";
 import { Badge } from "../grasp/badge/index.ts";
@@ -123,13 +129,21 @@ export const readLog = async (
   search: LogSearch
 ): Promise<LogPage> => {
   const filter = auditFilterOf(search);
-  const [page, directory] = await Promise.all([
+  const [page, directory, agents] = await Promise.all([
     search.archive === true
       ? session.audit.searchArchive(filter)
       : session.audit.search(filter),
     readDirectory(session),
+    // Agents by name, for names only: the trail is for admins, who may list them.
+    listedOrNone(session.connections.agents()),
   ]);
-  return { page, directory };
+  return {
+    page,
+    directory: {
+      ...directory,
+      agents: new Map(agents.map(({ id, name }) => [id, name])),
+    },
+  };
 };
 
 /**
@@ -405,15 +419,6 @@ const LogFiltersControl = ({ search }: { search: LogSearch }) => {
                 t({ message: "mm", context: "a date's month, as typed" }),
                 t({ message: "yyyy", context: "a date's year, as typed" }),
               ]}
-              presetLabels={[
-                t`Today`,
-                t`Last 7 days`,
-                t`Last 30 days`,
-                t`This month`,
-              ]}
-              presetsLabel={t`Presets`}
-              previousLabel={t`Previous month`}
-              nextLabel={t`Next month`}
               triggerLabel={t`Choose dates`}
               size="sm"
               value={period}
@@ -546,17 +551,22 @@ export const actorOf = (
   }
   if (actor.type === "agent") {
     const { agentId } = actor;
+    // Its name where the page read it; "Agent <id>" where it didn't.
+    const agent =
+      directory.agents?.has(agentId) === true
+        ? agentName(directory, agentId)
+        : i18n._(msg`Agent ${agentId}`);
     const person = personName(directory, actor.onBehalfOf);
     if (actor.via !== undefined) {
       const app = chatPlatformName(actor.via);
       return {
-        label: i18n._(msg`Agent ${agentId} for ${person}, in ${app}`),
-        id: actor.agentId,
+        label: i18n._(msg`${agent} for ${person}, in ${app}`),
+        id: agentId,
       };
     }
     return {
-      label: i18n._(msg`Agent ${agentId} for ${person}`),
-      id: actor.agentId,
+      label: i18n._(msg`${agent} for ${person}`),
+      id: agentId,
     };
   }
   if (actor.type === "app") {

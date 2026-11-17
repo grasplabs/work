@@ -41,20 +41,23 @@ import {
   TableHeader,
   TableRow,
 } from "../table";
+import { useWords, withGiven } from "../words/words";
 import { NOTHING, readBlocks } from "./blocks";
 import type { Placed } from "./blocks";
 import { parse, safeHref, schemeOf } from "./parse";
-import { openFence, repair } from "./repair";
+import { openFence, repair, tidy } from "./repair";
 import { markdownStyles as styles } from "./styles";
 import type {
   FootnoteDefinition,
   List,
   ListItem,
+  Paragraph,
   PhrasingContent,
   Root,
   RootContent,
   Table as TableNode,
 } from "./types";
+import { markdownWords } from "./words";
 
 /** What a host may draw in a link's place: anything React draws at once (never a promise). */
 export type MarkdownDrawn = Exclude<ReactNode, Promise<unknown>>;
@@ -73,12 +76,22 @@ export interface MarkdownLink {
   kind: "link" | "image" | "autolink";
 }
 
+/** How a single newline inside a paragraph is drawn: a space, a line break, or a break only in a paragraph of short lines. */
+export type MarkdownSoftBreaks = "space" | "line" | "auto";
+
 /** Every prop a Markdown takes. */
 export interface MarkdownProps {
   /** The Markdown: the agent's answer, or as much of it as has arrived. */
   source: string;
   /** The answer is still being written: its words come at a steady pace, and what is half-written is shown whole. */
   streaming?: boolean;
+  /**
+   * The answer was cut off part way (stopped): a link still being written at its end goes, and
+   * bold or code left open is closed, so no raw mark shows. Once `streaming` turns false on an
+   * answer written here this happens by itself; set it for a cut answer drawn from history.
+   * @default false
+   */
+  cut?: boolean;
   /**
    * How fast the words come while it is written: `calm`, `steady` or `quick`.
    * @default "quick"
@@ -91,6 +104,15 @@ export interface MarkdownProps {
    * @default "md"
    */
   size?: "md" | "sm" | "xs";
+  /**
+   * How a single newline inside a paragraph is drawn. `space`: as CommonMark has it, a space, so a
+   * paragraph wrapped by hand reads as one. `line`: a line break, for answers written as short
+   * lines. `auto`: a line break only in a paragraph of short lines (two or more, each under 60
+   * characters or each "Label: value"); any other paragraph runs on. While it is written, a short
+   * line breaks as its newline comes, and nothing drawn apart is drawn back together.
+   * @default "space"
+   */
+  softBreaks?: MarkdownSoftBreaks;
   /**
    * Fenced code past this many lines is folded under Show more, as Code block's `maxLines`.
    * @default 18
@@ -159,6 +181,10 @@ interface Context {
   doneLabel: string;
   notDoneLabel: string;
   tableLabel: string;
+  /** How a single newline is drawn (`softBreaks`). */
+  softBreaks: MarkdownSoftBreaks;
+  /** This paragraph draws its single newlines as line breaks. */
+  lineBreaks: boolean;
   /** The smaller size, for words in a card. */
   small: boolean;
   /** A step smaller again (`size="xs"`). */
@@ -215,6 +241,79 @@ const levelStyles = {
 
 /** A table column's side, from the source's colons. */
 const sides = { left: "start", right: "end", center: "center" } as const;
+
+/** A block's words as they are said: its phrases run together, its parts (a list's items) apart. */
+const spokenOf = (node: Root | RootContent): string => {
+  if ("value" in node) {
+    return node.value;
+  }
+  if (!("children" in node)) {
+    return "";
+  }
+  const parts = node.children.map(spokenOf);
+  return node.type === "paragraph" ||
+    node.type === "heading" ||
+    node.type === "tableCell"
+    ? parts.join("")
+    : parts.join(" ");
+};
+
+/** A text's single newlines as line breaks, its words between them as they are. */
+const withBreaks = (value: string): ReactNode => {
+  if (!value.includes("\n")) {
+    return value;
+  }
+  return value.split("\n").map((line, index) => (
+    <Fragment key={index}>
+      {index > 0 && <br />}
+      {line}
+    </Fragment>
+  ));
+};
+
+const SHORT_LINE = 60;
+// A labelled line: a few words, a colon, then its value ("Owner: Dana", "Due date: Friday").
+const LABELLED = /^[^\s:][^:]{0,30}:\s+\S/u;
+
+// The start of a labelled line still being written: a few words with no colon yet, or the colon.
+const LABEL_COMING = /^[^\s:][^:]{0,30}(?::\s*)?$/u;
+
+/**
+ * Whether a paragraph's lines are short lines, not prose wrapped by hand (`softBreaks="auto"`): two
+ * or more lines, every one under 60 characters or every one "Label: value". While the answer is
+ * written, its last line still coming counts if it still may: so a paragraph breaks from its first
+ * newline and never runs together again, and prose, whose first line passes 60 before its newline,
+ * never breaks at all. Nothing that was drawn on its own line is ever drawn back onto another.
+ */
+const shortLines = (text: string, writing: boolean) => {
+  const lines = text.split("\n").map((line) => line.trim());
+  if (lines.length < 2) {
+    return false;
+  }
+  const done = writing ? lines.slice(0, -1) : lines;
+  const coming = writing ? (lines.at(-1) ?? "") : "";
+  const short =
+    done.every((line) => line.length < SHORT_LINE) &&
+    coming.length < SHORT_LINE;
+  const labelled =
+    done.every((line) => LABELLED.test(line)) &&
+    (!writing || LABELLED.test(coming) || LABEL_COMING.test(coming));
+  return short || labelled;
+};
+
+/** The context for one paragraph: whether its single newlines are line breaks. */
+const inParagraph = (node: Paragraph, context: Context): Context => {
+  const lineBreaks =
+    context.softBreaks === "line" ||
+    (context.softBreaks === "auto" &&
+      shortLines(
+        spokenOf(node),
+        context.streaming && context.writing === node
+      ));
+  return lineBreaks === context.lineBreaks
+    ? context
+    : { ...context, lineBreaks };
+};
 
 const Phrasing = ({
   nodes,
@@ -411,7 +510,7 @@ const Inline = ({
 }): ReactNode => {
   switch (node.type) {
     case "text": {
-      return node.value;
+      return context.lineBreaks ? withBreaks(node.value) : node.value;
     }
     case "strong": {
       return (
@@ -476,7 +575,10 @@ const Item = ({ item, context }: { item: ListItem; context: Context }) => {
         // A tight item's paragraph is its words, not a block of its own.
         child.type === "paragraph" ? (
           <span key={index}>
-            <Phrasing nodes={child.children} context={context} />
+            <Phrasing
+              nodes={child.children}
+              context={inParagraph(child, context)}
+            />
           </span>
         ) : (
           <context.Block key={index} node={child} context={context} />
@@ -612,7 +714,7 @@ const Block = ({
   if (node.type === "paragraph") {
     return (
       <p {...stylex.props(styles.paragraph, context.greedy && styles.greedy)}>
-        <Phrasing nodes={node.children} context={context} />
+        <Phrasing nodes={node.children} context={inParagraph(node, context)} />
       </p>
     );
   }
@@ -707,10 +809,6 @@ const nameTables = (blocks: RootContent[]) => {
   return names;
 };
 
-// The default words for a footnote's links, in English; each is a prop, so a product can translate it.
-const backToReference = (number: number) => `Back to reference ${number}`;
-const footnoteNumber = (number: number) => `Footnote ${number}`;
-
 /** The notes at the foot, each leading back to where it was first used. */
 const Notes = ({
   notes,
@@ -742,36 +840,26 @@ const Notes = ({
 );
 
 /**
- * What to draw of an answer: all of it once it is written; while it is, as much as the pace has let
- * out, made whole.
+ * What to draw of an answer: all of it once it is written, tidied if it may have been cut off;
+ * while it is, as much as the pace has let out, made whole.
  */
 const useAnswer = (
   source: string,
   streaming: boolean,
+  cut: boolean,
   options: PacedOptions
 ) => {
   const paced = usePaced(source, streaming, options);
+  // Written here: once the stream ends, whatever it ended on is tidied.
+  const [streamed, setStreamed] = useState(streaming);
+  if (streaming && !streamed) {
+    setStreamed(true);
+  }
   // Still being written until the last word is out, a moment after the stream has ended.
   if (!streaming && paced.done) {
-    return { shown: source, live: false };
+    return { shown: cut || streamed ? tidy(source) : source, live: false };
   }
   return { shown: repair(paced.text).text, live: true };
-};
-
-/** A block's words as they are said: its phrases run together, its parts (a list's items) apart. */
-const spokenOf = (node: Root | RootContent): string => {
-  if ("value" in node) {
-    return node.value;
-  }
-  if (!("children" in node)) {
-    return "";
-  }
-  const parts = node.children.map(spokenOf);
-  return node.type === "paragraph" ||
-    node.type === "heading" ||
-    node.type === "tableCell"
-    ? parts.join("")
-    : parts.join(" ");
 };
 
 /**
@@ -865,19 +953,30 @@ const useWrittenHere = (live: boolean) => {
 export const Markdown = ({
   source,
   streaming = false,
+  cut = false,
   pace,
   size = "md",
+  softBreaks = "space",
   codeMaxLines = 18,
-  externalLabel = "opens in a new tab",
-  backLabel = backToReference,
-  footnoteLabel = footnoteNumber,
-  doneLabel = "Done",
-  notDoneLabel = "Not done",
-  tableLabel = "Table",
+  externalLabel,
+  backLabel,
+  footnoteLabel,
+  doneLabel,
+  notDoneLabel,
+  tableLabel,
   renderLink,
 }: MarkdownProps) => {
+  // Its words: the product's, by its catalogue, else English; a text prop given still wins.
+  const text = withGiven(useWords("markdown", markdownWords), {
+    external: externalLabel,
+    back: backLabel,
+    footnote: footnoteLabel,
+    done: doneLabel,
+    notDone: notDoneLabel,
+    table: tableLabel,
+  });
   const prefix = useId().replaceAll(":", "");
-  const { shown, live } = useAnswer(source, streaming, { pace });
+  const { shown, live } = useAnswer(source, streaming, cut, { pace });
   const { setRoot, written } = useWrittenHere(live);
   const all = useBlocks(shown, live);
   const { definitions, notes } = gather(all.map(({ node }) => node));
@@ -891,7 +990,7 @@ export const Markdown = ({
   );
   const lastBlock = blocks.at(-1);
   const tableNames = nameTables(blocks);
-  useSaidBlocks(blocks, live, tableNames, tableLabel);
+  useSaidBlocks(blocks, live, tableNames, text.table);
   const context: Context = {
     definitions,
     renderLink,
@@ -899,17 +998,19 @@ export const Markdown = ({
     prefix,
     streaming: live,
     codeMaxLines,
-    externalLabel,
+    externalLabel: text.external,
     writing: live ? lastBlock : undefined,
     openCode:
       live && lastBlock?.type === "code" && openFence(shown)
         ? lastBlock
         : undefined,
     inLink: false,
-    footnoteLabel,
-    doneLabel,
-    notDoneLabel,
-    tableLabel,
+    footnoteLabel: text.footnote,
+    doneLabel: text.done,
+    notDoneLabel: text.notDone,
+    tableLabel: text.table,
+    softBreaks,
+    lineBreaks: false,
     small: size === "sm",
     xsmall: size === "xs",
     greedy: written,
@@ -940,7 +1041,7 @@ export const Markdown = ({
         </Fragment>
       ))}
       {notes.length > 0 && (
-        <Notes notes={notes} context={context} backLabel={backLabel} />
+        <Notes notes={notes} context={context} backLabel={text.back} />
       )}
     </div>
   );

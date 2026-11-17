@@ -15,7 +15,7 @@ import {
 import { issuesOf } from "@grasp-os/shared/errors";
 import { isMemberAdmin, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { and, asc, eq, inArray, isNotNull, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import {
@@ -175,6 +175,52 @@ export const gapsWith = async (
 const readGap = async (env: Env, gap: GapRecord): Promise<Gap> => {
   const [read] = await gapsWith(env, [gap]);
   return read ?? gapWith(gap, undefined, new Map());
+};
+
+/**
+ * The brain's open gaps `person` may answer from their inbox
+ * (`brain.openGaps`): every one for the company's own admins, asked of
+ * someone or not; for anyone else, Grasp's staff too, only those asked of
+ * them (a `gap_asked` notification of theirs), so nobody reads from here
+ * what was asked of someone else. Neither retired nor taken out of the
+ * brain, in the order the brain added them.
+ */
+export const openGaps = async (env: Env, person: Identity): Promise<Gap[]> => {
+  const db = drizzle(env.DB);
+  const askedOfThem = db
+    .select({ gap: notifications.gapId })
+    .from(notifications)
+    .where(
+      and(
+        eq(notifications.personId, person.userId),
+        eq(notifications.type, "gap_asked")
+      )
+    );
+  const rows = await db
+    .select({ body: brainRecords.body })
+    .from(brainRecords)
+    .leftJoin(brainGapStates, eq(brainGapStates.gapId, brainRecords.id))
+    .where(
+      and(
+        eq(brainRecords.type, "gap"),
+        isNull(brainRecords.retiredAt),
+        isNull(brainRecords.forgottenAt),
+        isNull(brainGapStates.closedAt),
+        isMemberAdmin(person)
+          ? undefined
+          : inArray(brainRecords.id, askedOfThem)
+      )
+    )
+    .orderBy(asc(brainRecords.position));
+  const gaps = rows.flatMap(({ body }) => {
+    const record = brainRecordSchema.parse(JSON.parse(body));
+    if (record.type !== "gap") {
+      return [];
+    }
+    const { type: _gap, ...gap } = record;
+    return [gap];
+  });
+  return await gapsWith(env, gaps);
 };
 
 /** Refuses anyone but the company's own admins: never Grasp staff. */

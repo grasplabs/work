@@ -53,6 +53,36 @@ const firstName = (name: string): string => name.split(" ")[0] ?? name;
 /** A date as the page's language writes it, from an ISO day. */
 const formatDay = (day: string): string => formatDate(`${day}T12:00:00Z`);
 
+/**
+ * The team far behind, once the days are well under way: a team of five
+ * or more with a lead, of whom fewer than `quietBelow` of those asked
+ * talked, named with its lead's first name, who can help. The onboarding's
+ * step and the inbox's Interviews item say the same.
+ */
+export const quietTeamOf = (
+  { progress, roster }: Pick<OnboardingView, "progress" | "roster">,
+  listening: Pick<Listening, "progress">
+): { team: TeamProgress; lead: string } | undefined => {
+  if (listening.progress <= quietAfter) {
+    return undefined;
+  }
+  const leadOf = (team: string) => {
+    const lead = roster?.teams.find((each) => each.id === team)?.lead ?? null;
+    return roster?.people.find((person) => person.id === lead) ?? null;
+  };
+  const team = progress?.teams.find(
+    (each) =>
+      !each.off &&
+      leadOf(each.id) !== null &&
+      each.asked !== null &&
+      each.asked > 0 &&
+      (each.talked ?? 0) / each.asked < quietBelow
+  );
+  return team === undefined
+    ? undefined
+    : { team, lead: firstName(leadOf(team.id)?.name ?? "") };
+};
+
 /** A line that turns up: said by Stephen on the onboarding's step, only shown elsewhere. */
 const Line = ({ text, spoken }: { text: string; spoken: boolean }) =>
   spoken ? <Callout text={text} /> : <p>{text}</p>;
@@ -349,7 +379,7 @@ export const InterviewsProgress = ({
   children?: ReactNode;
 }) => {
   const { t } = useLingui();
-  const { plan, progress, roster, agreed, paused } = view;
+  const { plan, progress, agreed, paused } = view;
   const closes = plan === null ? "" : formatDay(closesOn(plan));
   const { days, leadsHeard } = listening;
   const day = Math.max(
@@ -357,23 +387,9 @@ export const InterviewsProgress = ({
     plan !== null && plan.start <= today ? 1 : 0
   );
   const teams = progress?.teams.filter((team) => !team.off) ?? [];
-  const leadOf = (team: string) => {
-    const lead = roster?.teams.find((each) => each.id === team)?.lead ?? null;
-    return roster?.people.find((person) => person.id === lead) ?? null;
-  };
-  // Once the days are well under way, a team of five or more far behind is named, with the lead who can help.
-  const quiet =
-    listening.progress > quietAfter
-      ? teams.find(
-          (team) =>
-            leadOf(team.id) !== null &&
-            team.asked !== null &&
-            team.asked > 0 &&
-            (team.talked ?? 0) / team.asked < quietBelow
-        )
-      : undefined;
-  const quietLead =
-    quiet === undefined ? "" : firstName(leadOf(quiet.id)?.name ?? "");
+  const quietOne = quietTeamOf(view, listening);
+  const quiet = quietOne?.team;
+  const quietLead = quietOne?.lead ?? "";
   const leads = progress?.leads ?? 0;
   const starts = plan === null ? "" : formatDay(plan.start);
   return (

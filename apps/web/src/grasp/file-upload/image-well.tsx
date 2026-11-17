@@ -37,7 +37,9 @@ import { simply } from "../motion/simply.stylex";
 import { Spinner } from "../spinner/spinner";
 import { grasp, media } from "../tokens/tokens.stylex";
 import { Tooltip, TooltipContent } from "../tooltip";
+import { useWords, withGiven } from "../words/words";
 import { wellMarker } from "./markers.stylex";
+import { imageWellWords } from "./words";
 
 /** What a caller may style: where it sits. */
 export type ImageWellLayoutStyle = LayoutStyle;
@@ -92,7 +94,7 @@ export interface ImageWellProps {
    */
   fit?: "cover" | "contain";
   /**
-   * `sm` 48px, at home in a setting row; `lg` 96px, for a page of its own.
+   * `sm` 40px, at home in a setting row (the row stays 56px); `lg` 96px, for a page of its own.
    * @default "sm"
    */
   size?: "sm" | "lg";
@@ -111,23 +113,6 @@ export interface ImageWellProps {
   /** Layout only: where it sits. */
   layout?: ImageWellLayoutStyle;
 }
-
-const defaults: ImageWellWords = {
-  change: "Change picture",
-  add: "Add a picture",
-  remove: "Remove picture",
-  saving: "Saving",
-  saved: "Saved",
-  failed: "Could not save",
-  retry: "Try again",
-  how: "Click or drop a picture.",
-  refused: (name, reason) =>
-    ({
-      "file-type": `${name} is not a kind of picture this takes.`,
-      "file-too-large": `${name} is too large.`,
-      "file-too-small": `${name} is empty.`,
-    })[reason] ?? `${name}: ${reason}`,
-};
 
 const pictures = ["image/png", "image/jpeg", "image/webp", "image/svg+xml"];
 
@@ -158,10 +143,11 @@ const styles = stylex.create({
     cornerShape: grasp.cornerShape,
   },
   // The initials at the size Grasp's Avatar gives them at that size.
+  // sm stands in a setting row's control column without making the row taller: 40px, the row 56.
   sm: {
-    width: grasp.space12,
-    height: grasp.space12,
-    fontSize: grasp.titleMd,
+    width: grasp.space10,
+    height: grasp.space10,
+    fontSize: grasp.titleSm,
     [iconVars.size]: grasp.iconSm,
   },
   lg: {
@@ -675,7 +661,8 @@ export const ImageWell = ({
   layout,
   ...picture
 }: ImageWellProps) => {
-  const words = { ...defaults, ...given };
+  // Its words: the product's, by its catalogue, else English; the caller's `words` still win.
+  const words = withGiven(useWords("imageWell", imageWellWords), given ?? {});
   const { kept, pending, said, setSaid, save, remove } = usePicture(
     picture,
     words

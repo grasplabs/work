@@ -118,7 +118,15 @@ export const StaffAccessSection = ({
         {failure === undefined ? null : (
           <RowAlert variant="danger">{failure}</RowAlert>
         )}
-        <FactRow label={t`Open until ${until}`}>
+        <FactRow
+          info={
+            staff.scope === "onboarding"
+              ? t`Grasp's own team can sign in here to help only while Grasp has opened a window, for at most 7 days, and you can end it at any time. Onboarding only: they reach the onboarding alone, and lose access 7 days after Grasp's go.`
+              : t`Grasp's own team can sign in here to help only while Grasp has opened a window, for at most 7 days, and you can end it at any time. Full access: they can do everything their role allows in the whole workspace, not only the onboarding.`
+          }
+          infoLabel={t`More about Grasp staff access`}
+          label={t`Open until ${until}`}
+        >
           <Badge tone="attention">
             {staff.scope === "onboarding" ? t`Onboarding only` : t`Full access`}
           </Badge>
