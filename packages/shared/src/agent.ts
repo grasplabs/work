@@ -26,6 +26,8 @@ export const agentErrors = defineErrorFamily({
   "agent.unknown": "The company has no such agent.",
   "agent.name_taken": "Another agent already has that name.",
   "agent.too_many_own": `You have ${ownAgentsMax} agents of your own, the most a person keeps. Delete one to make another.`,
+  "agent.not_offered":
+    "This agent isn't offered to the company, or its owner took the offer back.",
   "agent.own_off":
     "Your company has turned off agents of people's own. An admin can turn them back on.",
   "agent.app_unknown": "That isn't an app your company offers.",

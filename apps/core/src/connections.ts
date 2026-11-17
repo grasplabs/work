@@ -60,7 +60,11 @@ import {
   workOutAgentApps,
 } from "./agent-app-access.ts";
 import {
+  adoptAgent,
   changeAgent,
+  declineAgent,
+  listOfferedAgents,
+  offerOwnAgent,
   listAgents,
   listOwnAgents,
   deleteAgent,
@@ -93,7 +97,7 @@ import { providerIds, signInConfig } from "./auth/config.ts";
 import { identify } from "./auth/identity.ts";
 import { eraseCaptures } from "./brain-next-origins.ts";
 import { listAppRequests, requestApp } from "./catalog-requests.ts";
-import { keepsReadsOf, mayHoldCapturesOf } from "./connection-capture-key.ts";
+import { mayHoldCapturesOf } from "./connection-capture-key.ts";
 import {
   accounts,
   hiddenConnectors,
@@ -199,8 +203,8 @@ export const connectionOwnersOf = async (
 /**
  * Erases what the Brain kept through `connectionId` (connection-
  * capture.ts) once `person` disconnected it, in the background
- * (`waitUntil`), when it is their own native connection
- * (`mayHoldCapturesOf`). The disconnect never waits on it: should it
+ * (`waitUntil`), when it is their own connection of a kind capture keeps
+ * reads from (`mayHoldCapturesOf`). The disconnect never waits on it: should it
  * fail, it is logged, and the drain of connect's audit outbox erases them
  * before the disconnect's event leaves it (capture-erasures.ts), which
  * also records the erasure. Until it ran, a read under way may still land
@@ -574,7 +578,7 @@ export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
         connection.connectedBy === null
           ? null
           : (names.get(connection.connectedBy) ?? null),
-      ...(keepsReadsOf(connection, person.userId)
+      ...(mayHoldCapturesOf(connection, person.userId)
         ? { keepsReads: true as const }
         : {}),
     }));
@@ -827,6 +831,31 @@ export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
       this.#check,
       async (identity) => await makeOwnAgent(this.#env, identity, input)
     );
+  }
+
+  async offerOwnAgent(agentId: unknown, offered: unknown): Promise<void> {
+    await withPerson(this.#check, async (identity) => {
+      await offerOwnAgent(this.#env, identity, agentId, offered);
+    });
+  }
+
+  async offeredAgents(): Promise<Agent[]> {
+    return await withPerson(
+      this.#check,
+      async (identity) => await listOfferedAgents(this.#env, identity)
+    );
+  }
+
+  async adoptAgent(agentId: unknown): Promise<void> {
+    await withPerson(this.#check, async (identity) => {
+      await adoptAgent(this.#env, identity, agentId);
+    });
+  }
+
+  async declineAgent(agentId: unknown): Promise<void> {
+    await withPerson(this.#check, async (identity) => {
+      await declineAgent(this.#env, identity, agentId);
+    });
   }
 
   async ownAgentsUsage(): Promise<OwnAgentsUsage[]> {
