@@ -3390,6 +3390,53 @@ export const connectionBrainAudiences = sqliteTable(
 );
 
 /**
+ * Each record kept in the Brain from what agents read through a shared
+ * connection (shared-reads.ts, GRA-1831), by its source's id under the
+ * `shared` kind: written before the Brain is given the key, so every key
+ * the Brain holds of a connection is named here, for its erasure to find.
+ * `generation` is the connection's erasure generation it was kept in
+ * (`connection_brain_erasures`); `read_at` when it was first read.
+ */
+export const connectionBrainReads = sqliteTable(
+  "connection_brain_reads",
+  {
+    sourceId: text("source_id").primaryKey(),
+    connectionId: text("connection_id").notNull(),
+    generation: integer().notNull(),
+    readAt: timestamp("read_at").notNull(),
+  },
+  (table) => [
+    index("connection_brain_reads_connection_idx").on(
+      table.connectionId,
+      table.generation
+    ),
+  ]
+);
+
+/**
+ * The erasures of what the Brain kept from a shared connection
+ * (shared-reads.ts, GRA-1831), one row per connection ever erased: the
+ * generation the keys it keeps from now on are under (every older one is
+ * erased or being erased), whether an erasure is under way (`erasing`,
+ * which the clock completes), the request it serves (an audit event's
+ * id), who asked and when (`actor`, an audit actor as JSON), and how many
+ * records it has erased so far.
+ */
+export const connectionBrainErasures = sqliteTable(
+  "connection_brain_erasures",
+  {
+    connectionId: text("connection_id").primaryKey(),
+    generation: integer().notNull(),
+    erasing: integer({ mode: "boolean" }).notNull(),
+    request: text().notNull(),
+    actor: text().notNull(),
+    requestedAt: timestamp("requested_at").notNull(),
+    erased: integer().notNull(),
+  },
+  (table) => [index("connection_brain_erasures_erasing_idx").on(table.erasing)]
+);
+
+/**
  * The company's agents an admin made or changed (agents.ts): one row per
  * agent, by the ID its permissions, audit events and instruction file name.
  * `face` is the figure it is drawn with; `job` one line on what it is

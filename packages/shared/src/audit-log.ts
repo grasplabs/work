@@ -147,6 +147,10 @@ const typeRules: readonly {
   // a shared connection (core's connection-audiences.ts, GRA-1831): the
   // connection and the audience, by IDs alone.
   { action: "brain.connection_audience", type: "config" },
+  // An admin asking to erase what the Brain kept from a shared connection,
+  // and that erasure, or a disconnect's, ended (core's shared-reads.ts,
+  // GRA-1831): the connection and how many records, by IDs and a count.
+  { action: "brain.shared_reads", type: "action" },
   // An App, a workflow's run or a chat's code recalling from the Brain
   // for a person (core's src/brain-recall.ts): for whom, how many
   // passages and whether the budget cut it short, or why it was refused;

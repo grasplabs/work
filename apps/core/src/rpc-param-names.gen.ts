@@ -193,6 +193,7 @@ export const rpcParamNames: ParamNames = {
     "deleteAgent": ["agentId"],
     "deleteAgentWake": ["wakeId"],
     "disconnect": ["connectionId"],
+    "eraseBrainReads": ["connectionId"],
     "list": [],
     "makeAgent": ["input"],
     "makeAgentWake": ["agentId","input"],

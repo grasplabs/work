@@ -6,12 +6,16 @@ import {
 import type { ConnectionBrainAudienceSetting } from "@grasp-os/shared/connect";
 import { requireAdmin, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
-import { connectionBrainAudiences, teams } from "./db/core/schema.ts";
+import {
+  connectionBrainAudiences,
+  connectionBrainErasures,
+  teams,
+} from "./db/core/schema.ts";
 
 // Who may read in the Brain what agents read through a shared connection
 // (GRA-1831; the threat model and the decisions are on the issue). An
@@ -148,22 +152,36 @@ export const setConnectionAudience = async (
   }
   const teamId = chosen.data.kind === "team" ? chosen.data.teamId : null;
   const changedAt = new Date();
+  // Never while what the Brain kept of it is being erased (shared-reads.ts),
+  // in the statement that writes it: an erasure that starts after takes
+  // the audience away again.
+  const notErasing = sql`NOT EXISTS (SELECT 1 FROM ${connectionBrainErasures} WHERE ${connectionBrainErasures.connectionId} = ${id.data} AND ${connectionBrainErasures.erasing} = 1)`;
   await auditedBatch(env, db, [
     db
       .insert(connectionBrainAudiences)
-      .values({
-        connectionId: id.data,
-        teamId,
-        changedBy: identity.userId,
-        changedAt,
-      })
+      .select(
+        sql`SELECT ${id.data}, ${teamId}, ${identity.userId}, ${changedAt.getTime()} WHERE ${notErasing}`
+      )
       .onConflictDoUpdate({
         target: connectionBrainAudiences.connectionId,
         set: { teamId, changedBy: identity.userId, changedAt },
         // Only another audience is a change: the same one again leaves the
         // row, and so the log, as it was.
-        setWhere: sql`${connectionBrainAudiences.teamId} IS NOT ${teamId}`,
+        setWhere: sql`${connectionBrainAudiences.teamId} IS NOT ${teamId} AND ${notErasing}`,
       }),
     event,
   ]);
+  const erasing = await db
+    .select({ id: connectionBrainErasures.connectionId })
+    .from(connectionBrainErasures)
+    .where(
+      and(
+        eq(connectionBrainErasures.connectionId, id.data),
+        eq(connectionBrainErasures.erasing, true)
+      )
+    )
+    .get();
+  if (erasing !== undefined) {
+    throw connectionErrors.create("connection.brain_erasing");
+  }
 };

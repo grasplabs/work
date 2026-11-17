@@ -742,12 +742,21 @@ export interface ConnectionsApi extends StephenReachApi, AgentsApi {
   /**
    * Chooses who may read in the Brain what agents read through the shared
    * connection `connectionId`: one team, everyone, or nobody. Admins only,
-   * never Grasp staff; audited.
+   * never Grasp staff; audited. Refused (`connection.brain_erasing`) while
+   * what the Brain kept of it is being erased.
    */
   setBrainAudience: (
     connectionId: string,
     audience: ConnectionBrainAudience
   ) => Promise<void>;
+  /**
+   * Erases everything the Brain kept from the shared connection
+   * `connectionId`, for good, and its audience with it (GRA-1831): what
+   * agents read through it afterwards is kept again once an admin chooses
+   * an audience. Admins only, never Grasp staff; audited when asked and
+   * when done. Asking again while it runs changes nothing.
+   */
+  eraseBrainReads: (connectionId: string) => Promise<void>;
 }
 
 // The catalog: everything an admin can connect, in one list. Native
@@ -2188,6 +2197,8 @@ export interface ConnectApi
 /** Why connecting or disconnecting an account didn't work. */
 export const connectionErrors = defineErrorFamily({
   "connection.invalid": "That isn't a valid connection request.",
+  "connection.brain_erasing":
+    "What the Brain kept from this connection is still being erased. Choose who may read it once that is done.",
   "connection.provider_unavailable":
     "Connecting this provider isn't set up for this deployment.",
   "connection.flow_invalid":

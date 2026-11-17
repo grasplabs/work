@@ -117,6 +117,7 @@ import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 import { pointSharedMailbox, readSharedMailboxes } from "./shared-mailboxes.ts";
+import { eraseBrainReads, forgetAudienceOf } from "./shared-reads.ts";
 import { routeMember } from "./staff-audit.ts";
 import {
   readStephenReach,
@@ -227,6 +228,25 @@ const eraseCapturesSoon = async (
     }
   } catch (error) {
     log.warn("connection.captures_not_erased_yet", {
+      connectionId,
+      ...errorFields(error),
+    });
+  }
+};
+
+/**
+ * Takes away the Brain audience of the connection `connectionId`, just
+ * disconnected (shared-reads.ts `forgetAudienceOf`): a failure is logged,
+ * as the erasure that follows from connect's record takes it away too.
+ */
+const forgetAudienceSoon = async (
+  env: Env,
+  connectionId: string
+): Promise<void> => {
+  try {
+    await forgetAudienceOf(env, connectionId);
+  } catch (error) {
+    log.warn("connection.brain_audience_not_forgotten", {
       connectionId,
       ...errorFields(error),
     });
@@ -653,6 +673,10 @@ export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
       connectionId,
     });
     waitUntil(eraseCapturesSoon(this.#env, person, connectionId));
+    // A shared connection's records in the Brain: nobody reads them from
+    // now on, and connect's record of the disconnect erases them
+    // (shared-reads.ts, capture-erasures.ts).
+    waitUntil(forgetAudienceSoon(this.#env, connectionId));
     return disconnected;
   }
 
@@ -790,6 +814,12 @@ export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
   ): Promise<void> {
     await withPerson(this.#check, async (identity) => {
       await setConnectionAudience(this.#env, identity, connectionId, audience);
+    });
+  }
+
+  async eraseBrainReads(connectionId: unknown): Promise<void> {
+    await withPerson(this.#check, async (identity) => {
+      await eraseBrainReads(this.#env, identity, connectionId);
     });
   }
 
