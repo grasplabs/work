@@ -5118,7 +5118,7 @@ export class Onboarding extends DurableObject<Env> {
     try {
       // Erasure first (GRA-329): nothing else that fails holds it up.
       this.#decideInterviews();
-      this.#forgetGone();
+      this.#forgetFallen();
       await this.forgetLinesNow();
       try {
         await this.eraseTakenOutAfterClose();
@@ -6356,22 +6356,8 @@ export class Onboarding extends DurableObject<Env> {
             .onConflictDoNothing()
             .run();
         }
-        // Whose interview went meanwhile no longer stands under its own
-        // name behind any of these, noted before (a drawing noted again)
-        // or now: only as gone.
-        this.#db
-          .delete(brainSent)
-          .where(
-            and(
-              inList(brainSent.record, [
-                ...new Set(rests.map(({ record }) => record)),
-              ]),
-              inList(brainSent.person, [...since])
-            )
-          )
-          .run();
         // Each earlier claim or drawing rests on nobody left, and is
-        // forgotten here (`#forgetGone`).
+        // forgotten here (`#forgetFallen`).
         for (const { record, type } of stale) {
           this.#db
             .update(brainSent)
@@ -6483,7 +6469,7 @@ export class Onboarding extends DurableObject<Env> {
     // or drawing it noted before isn't the team's now: whom it rested on
     // is forgotten at once.
     if (gone) {
-      this.#forgetGone();
+      this.#forgetFallen();
     }
   }
 
@@ -7442,13 +7428,15 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /**
-   * What is to be forgotten of whom the team's claims and drawings rest on
-   * (`brain_sent`): every claim or drawing that stands no more, by the
-   * rules the recount asks (`#claimStands`, `#drawingStands`), and anyone
-   * gone (their agreement no longer counts, `#agreedPeople`), whatever
-   * rested on them.
+   * The claims and drawings whose backing is to be forgotten (`brain_sent`):
+   * every one that stands no more, by the rules the recount asks
+   * (`#claimStands`, `#drawingStands`). Whoever is gone goes with them:
+   * one who withdrew, deleted their interview or took back what they
+   * approved backs nothing that still stands, as a claim rests on exactly
+   * the five whose facts were checked first (team-claims.ts `supported`)
+   * and a drawing on everyone it was drawn from, so each fell as they went.
    */
-  #toForget(): { records: string[]; gone: string[] } {
+  #toForget(): string[] {
     const rows = this.#db
       .select({
         record: brainSent.record,
@@ -7459,7 +7447,7 @@ export class Onboarding extends DurableObject<Env> {
       .from(brainSent)
       .all();
     if (rows.length === 0) {
-      return { records: [], gone: [] };
+      return [];
     }
     const roster = this.#roster();
     const agreed = this.#agreedPeople();
@@ -7473,20 +7461,13 @@ export class Onboarding extends DurableObject<Env> {
       held.people.push(person);
       resting.set(record, held);
     }
-    return {
-      records: [...resting].flatMap(([record, { type, team, people: on }]) => {
-        const stands =
-          type === "statement"
-            ? this.#claimStands(team, on, { roster, agreed, mayClaim })
-            : this.#drawingStands(team, on, { roster, agreed, mayClaim });
-        return stands ? [] : [record];
-      }),
-      gone: [
-        ...new Set(
-          rows.flatMap(({ person }) => (agreed.has(person) ? [] : [person]))
-        ),
-      ],
-    };
+    return [...resting].flatMap(([record, { type, team, people: on }]) => {
+      const stands =
+        type === "statement"
+          ? this.#claimStands(team, on, { roster, agreed, mayClaim })
+          : this.#drawingStands(team, on, { roster, agreed, mayClaim });
+      return stands ? [] : [record];
+    });
   }
 
   /**
@@ -7496,15 +7477,11 @@ export class Onboarding extends DurableObject<Env> {
    * that drops it commits (`#recountStanding`), and owed its erasure until
    * done. After an interview goes, after an intake, and from the alarm.
    */
-  #forgetGone(): void {
-    const { records, gone } = this.#toForget();
-    if (records.length === 0 && gone.length === 0) {
-      return;
-    }
-    this.ctx.storage.transactionSync(() => {
+  #forgetFallen(): void {
+    const records = this.#toForget();
+    if (records.length > 0) {
       this.#db.delete(brainSent).where(inList(brainSent.record, records)).run();
-      this.#db.delete(brainSent).where(inList(brainSent.person, gone)).run();
-    });
+    }
   }
 
   /**
@@ -7804,7 +7781,7 @@ export class Onboarding extends DurableObject<Env> {
     const drawing = this.#dueToDraw(now);
     const drawn = new Set(drawing.map(({ id, work }) => work?.team ?? id));
     // A team still being drawn goes to the brain once it is drawn.
-    const { records, gone } = this.#toForget();
+    const forgettable = this.#toForget().length > 0;
     const afters = [
       ...drawing.map(({ after }) => after),
       ...this.#brainDueAt(now).flatMap(({ team, after }) =>
@@ -7812,8 +7789,7 @@ export class Onboarding extends DurableObject<Env> {
       ),
       // Whom what no longer stands rested on, and the voice's lines of an
       // interview that is gone still in the cache.
-      ...(records.length > 0 ||
-      gone.length > 0 ||
+      ...(forgettable ||
       this.#db
         .select({ key: linesToForget.key })
         .from(linesToForget)
@@ -8815,7 +8791,7 @@ export class Onboarding extends DurableObject<Env> {
   /**
    * What follows someone's interview going, once it's gone here: what is
    * left of the work it was in is drawn again, whom the claims and
-   * drawings it was behind rested on is forgotten (`#forgetGone`), and so
+   * drawings it was behind rested on is forgotten (`#forgetFallen`), and so
    * are the lines said in it that were kept. The lines are tried again by
    * the alarm until done (`#armDrawing`): they wait by their stored keys,
    * hashes, never what was said (`linesToForget`, GRA-329), queued by the
@@ -8827,7 +8803,7 @@ export class Onboarding extends DurableObject<Env> {
     // What the new Brain holds of their interview is decided again: an
     // erasure owed, before anything else (`owedErasures`).
     this.#decideInterviews();
-    this.#forgetGone();
+    this.#forgetFallen();
     await this.forgetLinesNow();
   }
 

@@ -416,6 +416,64 @@ describe("what a team said, put together", { timeout: 120_000 }, () => {
     });
   });
 
+  it("rests a claim six make on the five checked first, so one of them withdrawing takes it down and leaves nothing of them behind", async () => {
+    // Eight tell their own work: Pim leaving leaves the team seven.
+    const ids = await eightTeam();
+    await mapped(ids);
+    await eightTold(ids);
+    const riks = "Our tickets land in Zendesk.";
+    await agree(
+      ids.rik,
+      [
+        fact("r1", "step", "Checks the queue at noon."),
+        fact("r2", "system", riks),
+      ],
+      1
+    );
+    // Everything due drawn, Rik's new line among it.
+    for (let round = 0; round < 5; round += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one drawing at a time, as the alarm draws
+      const { result } = await answering(
+        [ticketsReply(ids)],
+        async () => await onboardingStore(env).drawNext()
+      );
+      if (result === null) {
+        break;
+      }
+    }
+    // Six say it: the five, and Rik, cited last.
+    await intake(ids, [{ ...zendeskClaim, cites: [...zendeskSaid, riks] }]);
+    const member = await signedInApi(idp, "user");
+    const store = onboardingStore(env);
+    const backs = async (person: string) => {
+      const sent = await store.sentFor(person);
+      return sent.flatMap(({ type }) => (type === "statement" ? [type] : []));
+    };
+    const before = {
+      statements: await statementsFor(member.api, ids),
+      pim: await backs(ids.pim),
+      // Checking stops at five: Rik isn't asked.
+      rik: await backs(ids.rik),
+    };
+    await onLink({ action: "withdraw", ...(await openLink(ids.pim)) });
+    expect({
+      before,
+      after: await statementsFor(member.api, ids),
+      // Whom it rested on names Pim no more, nor him as gone.
+      restsOn: await store.sentFor(ids.pim),
+      gone: await store.sentFor(`gone:${ids.pim}`),
+    }).toStrictEqual({
+      before: {
+        statements: [zendeskClaim.text],
+        pim: ["statement"],
+        rik: [],
+      },
+      after: [],
+      restsOn: [],
+      gone: [],
+    });
+  });
+
   it("shows no claim owed its erasure on the page or in a chat's thinking, before core's clock finishes it", async () => {
     // Eight tell: Pim leaving takes the claim under five of its backers,
     // and leaves the team seven.

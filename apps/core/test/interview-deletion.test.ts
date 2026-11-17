@@ -28,6 +28,7 @@ import { onboardingLog } from "./onboarding-log.ts";
 import {
   agree,
   alikeReply,
+  claimsReply,
   fact,
   intakeAlike,
   kept,
@@ -45,7 +46,7 @@ import type { Ids } from "./onboarding-team.ts";
 import { auditedDuring, signedInApi, unique } from "./sign-in.ts";
 import { sayOnLink, stillKept } from "./spoken.ts";
 
-// Deleting an interview (GRA-368, the store's `#forget` and `#forgetGone`):
+// Deleting an interview (GRA-368, the store's `#forget` and `#forgetFallen`):
 // from its link, by Grasp's staff on request, with a new start, or by
 // taking someone off the staff list. Each person here says words nobody
 // else does (a sentinel), and the tests look for them, and for who said
@@ -1193,6 +1194,18 @@ describe(
       await toldWith(ids, said);
       await agree(ids.sam, [fact("s1", "step", "Answers the phone.")]);
       await drawAll(ids);
+      // The model puts a claim together in Max's own words, with the four
+      // who say tickets wait behind it too: five, as a claim needs.
+      const maxsWords = claimsReply([
+        {
+          kind: "blocker",
+          text: `Tickets wait in ${said.max}.`,
+          cites: [
+            `Tickets wait in ${said.max}.`,
+            "Tickets wait for the customer.",
+          ],
+        },
+      ]);
       // Max puts his queue right as the model puts the team's claims
       // together from what he told: once its request holds his words.
       let fixing: Promise<{ status: number }> | undefined;
@@ -1206,7 +1219,7 @@ describe(
           fixing = putRight(ids, said, sentinelOf("inbox"));
           await fixing;
         }
-        return alikeReply(requests);
+        return maxsWords(requests);
       };
       for (let round = 0; round < 5; round += 1) {
         // oxlint-disable-next-line no-await-in-loop -- one team at a time, as the alarm gives them

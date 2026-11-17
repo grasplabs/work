@@ -458,7 +458,7 @@ describe(
       });
     });
 
-    it("shows a member a team's name, its interviews and their weeks only while its results may show: not at six who tell, nor once it is switched off", async () => {
+    it("shows a member a team's name, its interviews and their weeks only while its results may show: not at six who tell, nor once it is switched off or waiting for the admin", async () => {
       const store = onboardingStore(env);
       const ids = await sevenTeam();
       await mapped(ids);
@@ -488,23 +488,36 @@ describe(
       await answering([ticketsReply(ids)], async () => await store.drawNext());
       await intake(ids);
       const seven = await shown();
-      // The admin switches the team off.
+      // The admin switches the team off, then on again in a save not
+      // confirmed, then confirms it.
       const view = await store.view();
       const roster = view.roster ?? { teams: [], people: [] };
+      const by = { type: "system" } as const;
       await store.saveRoster(
         {
           ...roster,
           teams: roster.teams.map((each) => ({ ...each, off: true })),
         },
-        { type: "system" }
+        by
       );
       const off = await shown();
-      expect({ six, seven, off }).toStrictEqual({
+      await store.saveRoster(roster, by, { confirmed: false });
+      const waiting = await shown();
+      await store.saveRoster(roster, by);
+      const confirmed = await shown();
+      await intake(ids);
+      const again = await shown();
+      expect({ six, seven, off, waiting, confirmed, again }).toStrictEqual({
         // The roster's team, as the admin confirmed it, without its
         // interviews.
         six: { team: true, interviews: null, weeks: 0 },
         seven: { team: true, interviews: "8 people", weeks: 8 },
         off: { team: false, interviews: null, weeks: 0 },
+        waiting: { team: false, interviews: null, weeks: 0 },
+        // A member reads the interviews as what its claims cite: back
+        // once its next intake notes them again.
+        confirmed: { team: true, interviews: null, weeks: 8 },
+        again: { team: true, interviews: "8 people", weeks: 8 },
       });
     });
 
