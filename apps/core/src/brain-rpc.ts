@@ -8,6 +8,7 @@ import type {
   Goal,
   Source,
   Stakeholder,
+  Statement,
   Team,
   TeamGroup,
   ThinkingGround,
@@ -65,6 +66,7 @@ import { kickoffSaid, teamNameKey } from "./onboarding/kickoff-company.ts";
 import type { CompanyKickoff } from "./onboarding/kickoff-company.ts";
 import { mondayOf } from "./onboarding/rules.ts";
 import { onboardingStore } from "./onboarding/store.ts";
+import type { StandingClaim } from "./onboarding/store.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
@@ -1009,6 +1011,27 @@ const withoutGoneKickoffTeams = (
 };
 
 /**
+ * The team claims standing now (onboarding/store.ts `standingClaims`) as
+ * the page's statements, for every member (GRA-1748): each in its team,
+ * citing the team's interviews, never who backs it. Its id starts with the
+ * onboarding's prefix, which no record an admin adds may take, and by
+ * which the page knows a team's claim (apps/web `isTeamClaim`).
+ */
+const claimStatements = async (
+  claims: readonly StandingClaim[]
+): Promise<Statement[]> =>
+  await Promise.all(
+    claims.map(async ({ source, team, kind, text }) => ({
+      id: `${onboardingIdPrefix}claim-${source}`,
+      kind,
+      text,
+      sourceId: await intakeIds.interviews(team),
+      teamIds: [intakeIds.team(team)],
+      toolIds: [],
+    }))
+  );
+
+/**
  * What every read of the brain starts from, as `person` may read it: the
  * onboarding (an admin's alone), the brain's records, and its teams.
  */
@@ -1025,11 +1048,12 @@ const readBrainCore = async (
   person: Pick<Identity, "role">
 ): Promise<BrainCore> => {
   const store = onboardingStore(env);
-  const [facts, kickoff, companyTeams, held] = await Promise.all([
+  const [facts, kickoff, companyTeams, held, claims] = await Promise.all([
     onboardingFacts(env, person),
     store.companyKickoff(),
     store.companyTeams(),
     readBrainRecords(env),
+    store.standingClaims(),
   ]);
   // An admin reads the roster whole: every team, roles counted and its
   // leads' roles. Everyone else reads the teams as the admin confirmed
@@ -1037,7 +1061,10 @@ const readBrainCore = async (
   const roster =
     facts === null ? confirmedTeams(companyTeams) : onboardingTeams(facts);
   const kickoffTeams = await kickoffTeamsOf(kickoff);
-  const records = withSuccessors(roster, kickoffTeams, held);
+  const records = withSuccessors(roster, kickoffTeams, {
+    ...held,
+    statements: [...held.statements, ...(await claimStatements(claims))],
+  });
   return {
     facts,
     kickoff,

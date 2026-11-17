@@ -18,6 +18,8 @@ import {
   kept,
   mapped,
   openLink,
+  sevenTeam,
+  sevenTold,
   team,
   ticketsReply,
   told,
@@ -129,9 +131,10 @@ describe(
 
     it("is the team, one source, its statements and the drawn workflow, read by every member, and no record names a person", async () => {
       const store = onboardingStore(env);
-      const ids = await team();
+      // Seven tell their own work, as a team needs to have claims.
+      const ids = await sevenTeam();
       await mapped(ids);
-      await told(ids);
+      await sevenTold(ids);
       await answering([fiveToldReply(ids)], async () => await store.drawNext());
       const { gave } = await intake(ids);
       const member = await signedInApi(idp, "user");
@@ -147,7 +150,7 @@ describe(
         team: "Ops",
         source: {
           title: "Interviews with Ops",
-          how: "7 people",
+          how: "8 people",
           kind: "interview",
           who: null,
         },
@@ -170,7 +173,7 @@ describe(
           // The median of the five's own normal minutes, never one of theirs
           // as a lowest or highest.
           minutes: { quickest: 4, normal: 4, longest: 4, basis: "estimated" },
-          people: 6,
+          people: 7,
           volumes: [
             {
               of: "me",
@@ -208,7 +211,7 @@ describe(
           (sum, { interviews }) => sum + interviews,
           0
         ),
-      }).toStrictEqual({ mondays: true, fiveOrMore: true, counted: 7 });
+      }).toStrictEqual({ mondays: true, fiveOrMore: true, counted: 8 });
     });
 
     it("keeps only a drawing's newest checked version once it is drawn again, and knows whose interview each record rests on", async () => {
@@ -417,9 +420,10 @@ describe(
 
     it("gives its interviews' source no transcript and no statement, for members and admins alike, and nothing to staff or anyone outside", async () => {
       const store = onboardingStore(env);
-      const ids = await team();
+      // Seven tell their own work, as a team needs to have claims.
+      const ids = await sevenTeam();
       await mapped(ids);
-      await told(ids);
+      await sevenTold(ids);
       // Rik also says something he doesn’t approve.
       await agree(
         ids.rik,
@@ -473,7 +477,7 @@ describe(
         };
       };
       const safe = {
-        listed: { how: "7 people" },
+        listed: { how: "8 people" },
         turns: undefined,
         inListing: undefined,
         statements: [],

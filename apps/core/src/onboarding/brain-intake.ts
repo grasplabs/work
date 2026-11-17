@@ -117,9 +117,22 @@ export interface Rest {
   parent?: string;
 }
 
-/** The records a team gives the brain, in the order they may be kept, and who each rests on. */
+/**
+ * A claim of the team, as the onboarding keeps it (`brain_claims`) and
+ * every member reads it, on the Brain page and in the new Brain
+ * (GRA-1748): never a record of the brain's own.
+ */
+export interface IntakeClaim {
+  /** Its id, from its team, kind and words: whom it rests on is noted under it. */
+  record: string;
+  kind: StatementKind;
+  text: string;
+}
+
+/** The records a team gives the brain, in the order they may be kept, its claims, and who each rests on. */
 export interface Intake {
   records: BrainRecord[];
+  claims: IntakeClaim[];
   rests: Rest[];
 }
 
@@ -397,11 +410,13 @@ export const recordOf = (record: BrainRecordInput): BrainRecord[] => {
 };
 
 /**
- * What a team gives the brain: its team record, its claims (`claims`, each
- * resting on five or more people) as statements, and its drawn workflows,
+ * What a team gives the brain: its team record and its drawn workflows,
  * each drawing a version of its own, all naming the one source of its
- * interviews. The same team, claim or drawing is the same id, so giving
- * it again keeps nothing twice; a new drawing is a new version. The team was found in the staff list (`rosterSource`).
+ * interviews; and its claims (`claims`, each resting on five or more
+ * people), which the onboarding keeps itself and the Brain page reads
+ * there (GRA-1748). The same team, claim or drawing is the same id, so
+ * giving it again keeps nothing twice; a new drawing is a new version.
+ * The team was found in the staff list (`rosterSource`).
  */
 export const intakeOf = async (
   intake: TeamIntake,
@@ -418,6 +433,7 @@ export const intakeOf = async (
     sourceId: rosterSource,
   });
   const rests: Rest[] = [];
+  const kept: IntakeClaim[] = [];
   // Only what five or more of its people said, put together
   // (team-claims.ts): never one person's fact as a statement of its own.
   for (const claim of claims) {
@@ -427,7 +443,8 @@ export const intakeOf = async (
     }
     // oxlint-disable-next-line no-await-in-loop -- a hash each, in order
     const id = await intakeIds.statement(intake.team.id, claim.kind, text);
-    const statement = recordOf({
+    // Held to what a statement may say, as the page shows it as one.
+    const valid = recordOf({
       type: "statement",
       id,
       kind: claim.kind,
@@ -436,10 +453,10 @@ export const intakeOf = async (
       teamIds: [teamId],
       toolIds: [],
     });
-    if (statement.length === 0 || records.some((each) => each.id === id)) {
+    if (valid.length === 0 || kept.some(({ record }) => record === id)) {
       continue;
     }
-    records.push(...statement);
+    kept.push({ record: id, kind: claim.kind, text });
     rests.push(
       ...claim.people.map((person) => ({
         record: id,
@@ -494,5 +511,5 @@ export const intakeOf = async (
           })))
     );
   }
-  return { records, rests };
+  return { records, claims: kept, rests };
 };
