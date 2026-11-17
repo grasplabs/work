@@ -8,6 +8,7 @@ import {
   entityAttributes,
   entityIdSchema,
   entityKinds,
+  speakerSchema,
   fitsSourceText,
   isSourceText,
   erasedSource,
@@ -445,6 +446,9 @@ const newSourceSchema = z.strictObject({
 /** The most characters of a question `recallAs` takes, as the Brain's contract says. */
 export { questionMaxLength as recallQuestionMaxLength } from "@grasp-os/brain-next/contract";
 export { removalsMax } from "@grasp-os/brain-next/contract";
+
+/** Whose word a memory is, as the Brain names it: what a chat pins of it (history-access.ts). */
+export { speakerSchema } from "@grasp-os/brain-next/contract";
 
 /** A question as the Brain takes one (`recallRequestSchema`). */
 const questionSchema = wellFormedString().max(questionMaxLength);
@@ -2701,14 +2705,18 @@ export const readableMemoriesAs = async (
 /**
  * What a memory rests on, as a chat pinned it when a recall handed it
  * over: the source it was drawn from, its writer, and when the store
- * learned it (ms). What the erasure ledger names, so an erasure of it is
- * told by them alone (`erasedForGoodAs`), never by whether the store
- * holds the memory now.
+ * learned it (ms); whose word it is, and the entity it is about and the
+ * one it relates to, which a person's erasure takes it by. What the
+ * erasure ledger names, so an erasure of it is told by them alone
+ * (`erasedForGoodAs`), never by whether the store holds the memory now.
  */
 export interface MemoryBasis {
   source: SourceRef | null;
   writer: string | null;
   learnedAt: number;
+  speaker: Speaker;
+  about: string;
+  object: string | null;
 }
 
 /** A memory a chat was handed, with what it rests on (`MemoryBasis`). */
@@ -2724,6 +2732,9 @@ const pinnedMemoriesSchema = z.array(
       source: sourceRefSchema.nullable(),
       writer: z.string().min(1).nullable(),
       learnedAt: z.int().nonnegative(),
+      speaker: speakerSchema,
+      about: entityIdSchema,
+      object: entityIdSchema.nullable(),
     }),
   })
 );
@@ -2807,6 +2818,9 @@ export const erasedForGoodAs = async (
               source: basis.source === null ? null : sourceKeyOf(basis.source),
               writer: basis.writer,
               learnedAt: basis.learnedAt,
+              speaker: basis.speaker,
+              about: basis.about,
+              object: basis.object,
             },
           ]
         : []

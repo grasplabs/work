@@ -2210,17 +2210,29 @@ describe("exports and restores", () => {
       const asked: ErasedRequest = {
         sources: [kept, erased],
         memories: [onKept, onErased, byKept, byErased].flatMap((id) =>
-          memories.flatMap(({ id: held, source, writer, learnedAt }) =>
-            held === id
-              ? [
-                  {
-                    memory: id,
-                    source: source?.source ?? null,
-                    writer,
-                    learnedAt: learnedAt.getTime(),
-                  },
-                ]
-              : []
+          memories.flatMap(
+            ({
+              id: held,
+              source,
+              writer,
+              learnedAt,
+              speaker,
+              about,
+              object,
+            }) =>
+              held === id
+                ? [
+                    {
+                      memory: id,
+                      source: source?.source ?? null,
+                      writer,
+                      learnedAt: learnedAt.getTime(),
+                      speaker,
+                      about,
+                      object,
+                    },
+                  ]
+                : []
           )
         ),
       };

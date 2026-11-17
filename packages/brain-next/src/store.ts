@@ -95,6 +95,7 @@ import type {
   NewMemories,
   ReadableMemoriesRequest,
   Erased,
+  ErasedMemory,
   ErasedRequest,
   RetireRequest,
   RetiredMemory,
@@ -212,6 +213,12 @@ import {
   writerErasedAfterSql,
 } from "./memories.ts";
 import { ownEntityId, readProfile } from "./own-entity.ts";
+import {
+  closedOf,
+  entityClosureOf,
+  isErasedPerson,
+  personSubjectOf,
+} from "./people.ts";
 import { rebuildMissingSets } from "./reader-sets.ts";
 import {
   countingInto,
@@ -1116,7 +1123,8 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
   /**
    * What an erasure took for good of the keys and memories asked
    * (contract.ts), from the erasure ledger alone: what this store has
-   * applied of it (`erasures`), which a lost storage reads again before
+   * applied of it (`erasures`, and what a person's erasure closed:
+   * `person_erasure_subjects`), which a lost storage reads again before
    * it answers (`#ready`). Never from whether it holds a memory: a
    * storage lost or brought back from an older copy lacks memories nobody
    * erased, which a restore puts back by their own ids. A person's own
@@ -1156,13 +1164,25 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     const writers = [
       ...new Set(memories.flatMap(({ writer }) => writer ?? [])),
     ];
-    const [found, subjects] = await Promise.all([
+    const people = [
+      ...new Set(
+        memories.flatMap(({ speaker }) =>
+          speaker.kind === "internal" ? [speaker.person] : []
+        )
+      ),
+    ];
+    const [found, subjects, personSubjects] = await Promise.all([
       Promise.all(
         keys.map(async (key) => ((await this.#keyErased(key)) ? [key] : []))
       ),
       Promise.all(
         writers.map(
           async (writer) => [writer, await writerSubjectOf(writer)] as const
+        )
+      ),
+      Promise.all(
+        people.map(
+          async (person) => [person, await personSubjectOf(person)] as const
         )
       ),
     ]);
@@ -1178,13 +1198,38 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
           at
         )
         .toArray().length > 0;
+    // A person's erasure (people.ts) takes a memory in their word, for
+    // good, whenever it was learned (an add in it is refused after), and
+    // one about or relating to an entity it closed by its id: a UUID never
+    // used again, that nobody may name once its memories are hidden. Both
+    // are the ledger's (`erasures`, `person_erasure_subjects`), never the
+    // rows it hid, which the tick deletes.
+    const erasedPeople = new Set(
+      personSubjects.flatMap(([person, subject]) =>
+        isErasedPerson(sql, subject) ? [person] : []
+      )
+    );
+    const closedCards = closedOf(
+      sql,
+      memories.flatMap(({ about, object }) =>
+        (object === null ? [about] : [about, object]).map((entity) =>
+          entityClosureOf(entity)
+        )
+      )
+    );
+    const takenByPerson = ({ speaker, about, object }: ErasedMemory): boolean =>
+      (speaker.kind === "internal" && erasedPeople.has(speaker.person)) ||
+      closedCards.has(entityClosureOf(about)) ||
+      (object !== null && closedCards.has(entityClosureOf(object)));
     return {
       sources: sources.filter((key) => closed.has(key)),
       memories: memories
         .filter(
-          ({ source, writer, learnedAt }) =>
-            (source !== null && closed.has(source)) ||
-            (writer !== null && writerErased(writer, learnedAt))
+          (memory) =>
+            (memory.source !== null && closed.has(memory.source)) ||
+            (memory.writer !== null &&
+              writerErased(memory.writer, memory.learnedAt)) ||
+            takenByPerson(memory)
         )
         .map(({ memory }) => memory),
     };

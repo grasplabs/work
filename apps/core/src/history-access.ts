@@ -12,6 +12,7 @@ import {
   memoryKeyOf,
   readableMemoriesAs,
   readableVersionsAs,
+  speakerSchema,
   versionRefSchema,
 } from "./brain-next.ts";
 import type {
@@ -265,7 +266,9 @@ const readableBrainCompanyVersions = async (
 
 // A pin carries what its memory rests on as the recall read it
 // (`MemoryBasis`): the source it was drawn from, its writer, and when the
-// store learned it. That is what an erasure of it is told by
+// store learned it; whose word it is, and the entity it is about and the
+// one it relates to, which a person's erasure takes it by (GRA-1981). None
+// of them ever changes for a memory. That is what an erasure of it is told by
 // (`erasedSources`): the erasure ledger names those, and outlives a lost
 // storage, which a memory's row doesn't. A pin of a memory handed over
 // without them (what names an entity a chat's code read rests on) holds
@@ -284,6 +287,9 @@ export const recalledMemoryPin = (memory: RecalledMemory): MemoryPin => ({
     source: memory.source?.source ?? null,
     writer: memory.writer,
     learnedAt: memory.learnedAt.getTime(),
+    speaker: memory.speaker,
+    about: memory.about,
+    object: memory.object,
   },
 });
 
@@ -300,6 +306,9 @@ export const brainMemoryRead = ({ store, memory, basis }: MemoryPin): string =>
             : [basis.source.producer, basis.source.id],
           basis.writer,
           basis.learnedAt,
+          basis.speaker,
+          basis.about,
+          basis.object,
         ],
   ])}`;
 
@@ -320,10 +329,14 @@ const memoryBasisSchema = z
     z.tuple([z.unknown(), z.unknown()]).nullable(),
     z.string().min(1).nullable(),
     z.int().nonnegative(),
+    speakerSchema,
+    z.uuid(),
+    z.uuid().nullable(),
   ])
-  .transform(([source, writer, learnedAt], context) => {
+  .transform(([source, writer, learnedAt, speaker, about, object], context) => {
+    const rest = { writer, learnedAt, speaker, about, object };
     if (source === null) {
-      return { source: null, writer, learnedAt };
+      return { source: null, ...rest };
     }
     const ref = versionRefSchema.shape.source.safeParse({
       producer: source[0],
@@ -333,7 +346,7 @@ const memoryBasisSchema = z
       context.addIssue({ code: "custom", message: "Not a source" });
       return z.NEVER;
     }
-    return { source: ref.data, writer, learnedAt };
+    return { source: ref.data, ...rest };
   });
 
 /** A memory's pin: its place, and what it rests on, or none. */

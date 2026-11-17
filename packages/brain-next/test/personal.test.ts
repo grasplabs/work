@@ -2715,6 +2715,9 @@ describe("what an erasure took for good, asked of a person's own store", () => {
       source: held?.source?.source ?? null,
       writer: held?.writer ?? null,
       learnedAt: held?.learnedAt.getTime() ?? 0,
+      speaker: held?.speaker ?? { kind: "system" },
+      about: entity,
+      object: null,
     };
   };
 
@@ -2755,6 +2758,9 @@ describe("what an erasure took for good, asked of a person's own store", () => {
       source: null,
       writer: null,
       learnedAt: 0,
+      speaker: { kind: "system" },
+      about: crypto.randomUUID(),
+      object: null,
     };
     const asked = {
       sources: [kept.source, erased.source, `${group}/1`, `${group}/2`],

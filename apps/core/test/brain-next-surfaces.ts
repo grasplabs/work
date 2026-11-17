@@ -616,13 +616,24 @@ const storePin = (
   memory: string,
   source: string | null,
   writer: string | null = null
-): ErasedMemory => ({ memory, source, writer, learnedAt: Date.now() });
+): ErasedMemory => ({
+  memory,
+  source,
+  writer,
+  learnedAt: Date.now(),
+  speaker: { kind: "system" },
+  about: crypto.randomUUID(),
+  object: null,
+});
 
 /** What a pinned memory rests on: `source`, and no writer. */
 const pinBasis = (source: SourceRef | null): coreBrain.MemoryBasis => ({
   source,
   writer: null,
   learnedAt: Date.now(),
+  speaker: { kind: "system" },
+  about: crypto.randomUUID(),
+  object: null,
 });
 
 /**
@@ -2312,7 +2323,7 @@ export const coreProbes = {
         stranger()
       ),
       await ask(
-        "a source and a writer named by the markers",
+        "a source, a writer and a speaker named by the markers",
         [{ producer: "upload", id: markers.join(" ") }],
         [
           {
@@ -2322,6 +2333,9 @@ export const coreProbes = {
               source: { producer: "upload", id: markers.join(" ") },
               writer: `app:${markers.join("")}`,
               learnedAt: 0,
+              speaker: { kind: "internal", person: markers.join("") },
+              about: crypto.randomUUID(),
+              object: crypto.randomUUID(),
             },
           },
         ]
@@ -3552,6 +3566,26 @@ export const coreProbes = {
             source: { producer: "gone", id: "probe-upload" },
             version: 1,
           }).success
+        )
+    ),
+  ],
+  // Pure: whose word a memory is, as a chat pins it; the same for everyone.
+  speakerSchema: async () => [
+    await answer(
+      "a member's word",
+      async () =>
+        await Promise.resolve(
+          coreBrain.speakerSchema.safeParse({
+            kind: "internal",
+            person: "probe-person",
+          }).success
+        )
+    ),
+    await answer(
+      "a kind no speaker has",
+      async () =>
+        await Promise.resolve(
+          coreBrain.speakerSchema.safeParse({ kind: "gone" }).success
         )
     ),
   ],
