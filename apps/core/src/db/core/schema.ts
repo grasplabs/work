@@ -3392,7 +3392,7 @@ export const connectionBrainAudiences = sqliteTable(
 /**
  * Each record kept in the Brain from what agents read through a shared
  * connection (shared-reads.ts, GRA-1831), by its source's id under the
- * `shared` kind: written before the Brain is given the key, so every key
+ * `connected` kind: written before the Brain is given the key, so every key
  * the Brain holds of a connection is named here, for its erasure to find.
  * `generation` is the connection's erasure generation it was kept in
  * (`connection_brain_erasures`); `read_at` when it was first read.

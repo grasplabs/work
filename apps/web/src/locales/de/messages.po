@@ -1435,6 +1435,10 @@ msgstr "Eine Änderung"
 msgid "A change applies to runs that start after it: runs already going keep the values they started with. Each change is recorded, without its value."
 msgstr "Eine Änderung gilt für Läufe, die danach starten: laufende Läufe behalten die Werte, mit denen sie gestartet sind. Jede Änderung wird protokolliert, ohne ihren Wert."
 
+#: src/chat/agent-change-card.tsx
+msgid "A change to {name}"
+msgstr "Eine Änderung an {name}"
+
 #: src/apps/app-access-requests.tsx
 #: src/apps/draft-changes.tsx
 msgid "A connection"
@@ -1986,6 +1990,10 @@ msgstr "Quelle hinzufügen"
 msgid "Add the trigger"
 msgstr "Auslöser hinzufügen"
 
+#: src/agents/agent-apps-card.tsx
+msgid "Add this schedule"
+msgstr "Diesen Zeitplan hinzufügen"
+
 #: src/projects/file-item-dialog.tsx
 msgid "Add to {projectName}"
 msgstr "Zu {projectName} hinzufügen"
@@ -2046,6 +2054,10 @@ msgstr "Hinzugefügt am"
 #: src/activity/audit-words.ts
 msgid "Added someone to a team"
 msgstr "Jemanden zu einem Team hinzugefügt"
+
+#: src/chat/agent-change-card.tsx
+msgid "Added to its instructions"
+msgstr "Zu seinen Anweisungen hinzugefügt"
 
 #: src/brain/skills-page.tsx
 msgid "Added to the company's skills, and since taken out of use."
@@ -2263,6 +2275,10 @@ msgstr "Fast geschafft"
 msgid "Already here, in case you mean one of these"
 msgstr "Schon da, falls Sie eine davon meinen"
 
+#: src/agents/agent-apps-card.tsx
+msgid "Already one of its schedules."
+msgstr "Bereits einer seiner Zeitpläne."
+
 #: src/onboarding/about-story.tsx
 msgid "Alright, here’s the plan."
 msgstr "Also, das ist der Plan."
@@ -2279,6 +2295,10 @@ msgstr "Auch seinen Namen freigeben, damit ein neuer Workflow ihn nehmen kann."
 #: src/chat/subject-bar.tsx
 msgid "Also worked on"
 msgstr "Auch bearbeitet"
+
+#: src/chat/agent-change-card.tsx
+msgid "Also works on its own"
+msgstr "Arbeitet auch von selbst"
 
 #: src/workflows/resource-params.tsx
 msgid "Amount"
@@ -2536,6 +2556,10 @@ msgstr "Antwortet nirgends jemandem"
 msgid "Answers the people it is for"
 msgstr "Antwortet den Personen, für die er da ist"
 
+#: src/chat/agent-draft-card.tsx
+msgid "Any app its kinds of work allow"
+msgstr "Jede App, die seine Arten von Arbeit erlauben"
+
 #: src/workflows/binding-approvals.tsx
 msgid "Any event its webhook source sends of the types its contract admits"
 msgstr "Jedes Ereignis, das seine Webhook-Quelle sendet, von den Typen, die sein Vertrag zulässt"
@@ -2771,9 +2795,21 @@ msgstr "Apps und Workflows"
 msgid "Apps and workflows grouped by process, team or goal. Putting something in a project shares it with nobody."
 msgstr "Apps und Workflows, gebündelt nach Prozess, Team oder Ziel. Was in einem Projekt liegt, wird mit niemandem geteilt."
 
+#: src/chat/agent-change-card.tsx
+msgid "Apps it gets"
+msgstr "Apps, die es bekommt"
+
+#: src/chat/agent-draft-card.tsx
+msgid "Apps it uses"
+msgstr "Apps, die es nutzt"
+
 #: src/workflows/files-and-apps.tsx
 msgid "Apps it works in"
 msgstr "Apps, in denen er arbeitet"
+
+#: src/chat/agent-change-card.tsx
+msgid "Apps taken off"
+msgstr "Weggenommene Apps"
 
 #: src/apps/app-settings.tsx
 #: src/apps/app-status.tsx
@@ -2881,6 +2917,10 @@ msgstr "Einen Admin fragen"
 msgid "Ask anything, or describe a process"
 msgstr "Etwas fragen oder einen Prozess beschreiben"
 
+#: src/agents/agent-apps-card.tsx
+msgid "Ask for {app}"
+msgstr "{app} anfragen"
+
 #: src/chat/chat-subject.ts
 msgid "Ask for a change"
 msgstr "Um eine Änderung bitten"
@@ -2893,6 +2933,7 @@ msgstr "Zugriff anfragen"
 msgid "Ask for access for this App"
 msgstr "Zugriff für diese App anfragen"
 
+#: src/agents/agent-apps-card.tsx
 #: src/onboarding/connect-steps.tsx
 msgid "Ask for it"
 msgstr "Anfragen"
@@ -2954,6 +2995,7 @@ msgstr "Angefragt von {requester} am {date}"
 msgid "Asked by a former member"
 msgstr "Angefragt von einem ehemaligen Mitglied"
 
+#: src/agents/agent-apps-card.tsx
 #: src/apps/app-access-requests.tsx
 #: src/onboarding/connect-steps.tsx
 msgid "Asked for"
@@ -3474,6 +3516,7 @@ msgid "Change “{was}” to “{now}”."
 msgstr "Bitte „{was}“ in „{now}“ ändern."
 
 #: src/apps/app-data-model.tsx
+#: src/chat/agent-change-card.tsx
 msgid "Change {name}"
 msgstr "{name} ändern"
 
@@ -3484,6 +3527,10 @@ msgstr "{title} ändern"
 #: src/apps/app-workflows.tsx
 msgid "Change in the draft"
 msgstr "Im Entwurf ändern"
+
+#: src/chat/agent-draft-card.tsx
+msgid "Change it"
+msgstr "Ändern"
 
 #: src/routes/_shell.settings.billing.tsx
 msgid "Change plan"
@@ -5963,6 +6010,10 @@ msgstr "Für Stephens Anfragen, zu „{label}“ ({why}), tu Folgendes: {proposa
 msgid "For the {role}"
 msgstr "Für: {role}"
 
+#: src/agents/agent-apps-card.tsx
+msgid "For the agent {agentName}."
+msgstr "Für den Agenten {agentName}."
+
 #: src/agents/new-agent.tsx
 msgid "For the company"
 msgstr "Für das Unternehmen"
@@ -5971,6 +6022,7 @@ msgstr "Für das Unternehmen"
 msgid "For the team {team}"
 msgstr "Für das Team {team}"
 
+#: src/agents/agent-apps-card.tsx
 #: src/agents/agent-wakes.tsx
 msgid "For whom"
 msgstr "Für wen"
@@ -7496,6 +7548,10 @@ msgstr "Seine Anweisungen"
 #: src/agents/agent-apps-card.tsx
 msgid "Its instructions name apps your company doesn't offer: {missing}."
 msgstr "Seine Anweisungen nennen Apps, die eure Firma nicht anbietet: {missing}."
+
+#: src/agents/agent-apps-card.tsx
+msgid "Its instructions say it works on its own: {cron} · {opening}"
+msgstr "Laut seinen Anweisungen arbeitet es von selbst: {cron} · {opening}"
 
 #: src/settings/ai-providers.tsx
 msgid "Its key is deleted, and calls stop using it at once. Models of this provider are no longer used, even as a fallback."
@@ -9171,6 +9227,10 @@ msgstr "Keine."
 msgid "Not added yet"
 msgstr "Noch nicht hinzugefügt"
 
+#: src/chat/agent-draft-card.tsx
+msgid "Not all of it could be set, so the agent is paused. <0>Finish it on its page</0>."
+msgstr "Nicht alles konnte gesetzt werden, daher ist der Agent pausiert. <0>Auf seiner Seite fertigstellen</0>."
+
 #: src/routes/_shell.integrations.$integration.tsx
 #: src/workflows/workflow-triggers.tsx
 msgid "Not allowed"
@@ -9374,6 +9434,10 @@ msgstr "Notiert: {name}. Wir verbinden sie gemeinsam mit Ihnen. Prüfen Sie bis 
 #: src/onboarding/connect-steps.tsx
 msgid "Noted. We’ll get in touch to put it on the laptops with you."
 msgstr "Notiert. Wir melden uns, um es mit Ihnen auf die Laptops zu bringen."
+
+#: src/chat/agent-change-card.tsx
+msgid "Nothing changes until you say Change it. You can change any of it first."
+msgstr "Nichts ändert sich, bevor du auf Ändern drückst. Du kannst vorher alles anpassen."
 
 #: src/routes/_shell.integrations.index.tsx
 msgid "Nothing connected yet."
@@ -13990,6 +14054,7 @@ msgctxt "a source of the Brain"
 msgid "The company's teams"
 msgstr "Die Teams des Unternehmens"
 
+#: src/chat/agent-change-card.tsx
 #: src/chat/agent-draft-card.tsx
 msgid "the company's time zone"
 msgstr "Zeitzone der Firma"
@@ -16001,6 +16066,7 @@ msgid "What it is bound to has changed since the binding was approved. Bind it a
 msgstr "Woran sie gebunden ist, hat sich seit der Genehmigung der Bindung geändert. Binde sie erneut, sobald du geprüft hast, dass es noch passt."
 
 #: src/agents/agent-form.tsx
+#: src/chat/agent-change-card.tsx
 #: src/chat/agent-draft-card.tsx
 msgid "What it is for"
 msgstr "Wofür er da ist"
@@ -16009,6 +16075,10 @@ msgstr "Wofür er da ist"
 msgctxt "what an app is for, in a sentence"
 msgid "What it is for"
 msgstr "Wofür sie da ist"
+
+#: src/chat/agent-change-card.tsx
+msgid "What it may also do"
+msgstr "Was es zusätzlich tun darf"
 
 #: src/agents/agent-page.tsx
 #: src/chat/agent-draft-card.tsx
@@ -16492,6 +16562,7 @@ msgstr "Für wen er ist"
 msgid "Who leads it?"
 msgstr "Wer leitet es?"
 
+#: src/chat/agent-change-card.tsx
 #: src/chat/agent-draft-card.tsx
 msgid "Who may ask it"
 msgstr "Wer es fragen darf"
