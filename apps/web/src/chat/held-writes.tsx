@@ -1,4 +1,4 @@
-import { heldAppCallsPage } from "@grasp-os/shared/chat";
+import { heldAppCallsPage, shownVisibly } from "@grasp-os/shared/chat";
 import type { HeldAppCall } from "@grasp-os/shared/chat";
 import type {
   ActionDescription,
@@ -94,12 +94,15 @@ const readHeld = async (
   }
 };
 
-/** The input an action runs with, laid out to read. */
+/**
+ * The input an action runs with, laid out to read, every character nobody
+ * sees shown as an escape (`shownVisibly`).
+ */
 export const inputOf = (input: string): string => {
   try {
-    return JSON.stringify(JSON.parse(input), null, 2);
+    return shownVisibly(JSON.stringify(JSON.parse(input), null, 2));
   } catch {
-    return input;
+    return shownVisibly(input);
   }
 };
 
@@ -109,31 +112,42 @@ const shownLines = 12;
 /** Characters of a value shown before the rest waits behind "Show all". */
 const shownCharacters = 1200;
 
-/** How much of `value` a card shows before "Show all": its start, if not all. */
-const startOf = (value: string): string =>
-  value.split("\n").slice(0, shownLines).join("\n").slice(0, shownCharacters);
-
-/** Whether a card starts `value` cut short. */
-const isCutShort = (value: string): boolean =>
-  startOf(value).length < value.length;
+/**
+ * A value as the card shows it, the one place both what is shown and
+ * whether it was all shown are decided: every character nobody sees as an
+ * escape (`shownVisibly`), and, measured on that, its start before "Show
+ * all" and whether that start cuts it short. So an escape that lengthens a
+ * value counts toward what is cut, and Confirm waits for what the start
+ * hides (`useShown`).
+ */
+const shownOf = (held: string) => {
+  const value = shownVisibly(held);
+  const start = value
+    .split("\n")
+    .slice(0, shownLines)
+    .join("\n")
+    .slice(0, shownCharacters);
+  return { value, start, cutShort: start.length < value.length };
+};
 
 /**
  * A text value, exactly as the input holds it, all of it: no scroll box
- * hides a part. A very long one starts cut short, with a control that says
- * how much there is and shows it all (`onShowAll`), so what follows a run
- * of blank lines can't go unseen unnoticed.
+ * hides a part, and every character nobody sees is shown as an escape,
+ * counted as shown (`shownOf`). A very long one starts cut short,
+ * with a control that says how much there is and shows it all
+ * (`onShowAll`), so what follows a run of blank lines can't go unseen
+ * unnoticed.
  */
 const TextValue = ({
-  value,
+  value: held,
   onShowAll,
 }: {
   value: string;
   onShowAll: () => void;
 }) => {
+  const { value, start, cutShort: long } = shownOf(held);
   const [all, setAll] = useState(false);
   const lines = value.split("\n");
-  const start = startOf(value);
-  const long = isCutShort(value);
   const { t } = useLingui();
   const count = lines.length;
   const characters = value.length;
@@ -179,7 +193,7 @@ const FieldValue = ({
         {value.map((item, index) => (
           // By position: the input's own order, and values may repeat.
           <li className="break-words whitespace-pre-wrap" key={index}>
-            {item}
+            {shownVisibly(item)}
           </li>
         ))}
       </ul>
@@ -294,7 +308,9 @@ export const useShown = ({
     !inputSeen &&
     (description?.fields ?? []).some(
       ({ input, value }) =>
-        typeof value === "string" && isCutShort(value) && !seen.includes(input)
+        typeof value === "string" &&
+        shownOf(value).cutShort &&
+        !seen.includes(input)
     );
   const unseenId = useId();
   return {
@@ -526,8 +542,10 @@ const HeldAppCallCard = ({
   const { busy, run } = useCoreAction();
   const router = useRouter();
   const { t } = useLingui();
-  const app = call.appName ?? call.appId;
-  const fn = call.function;
+  // Named by the App's builder and the agent's code: every character nobody
+  // sees shown as an escape, as the request is (`shownVisibly`).
+  const app = shownVisibly(call.appName ?? call.appId);
+  const fn = shownVisibly(call.function);
   const title = t`${fn} in ${app}`;
   const what = title;
   const where = app;
@@ -641,8 +659,8 @@ const RejectAll = ({
       return t`${title} on ${connection}`;
     }),
     ...calls.map((call) => {
-      const fn = call.function;
-      const app = call.appName ?? call.appId;
+      const fn = shownVisibly(call.function);
+      const app = shownVisibly(call.appName ?? call.appId);
       return t`${fn} in ${app}`;
     }),
   ];
