@@ -35,6 +35,12 @@ interface TriggerWithWords {
    * @default false
    */
   chevron?: boolean;
+  /**
+   * Squeezed, the words stay on one line and end in an ellipsis, as Button's `truncate`: for a
+   * narrow head where a long name would wrap.
+   * @default false
+   */
+  truncate?: boolean;
   /** @deprecated Use `aria-label`. */
   label?: never;
   "aria-label"?: string;
@@ -47,6 +53,7 @@ interface TriggerIconOnly {
   children?: never;
   icon: IconData;
   chevron?: never;
+  truncate?: never;
   /** The name of an icon-only trigger, for a screen reader, a voice command and an agent ("Actions for Q3 report"). */
   "aria-label": string;
   /** @deprecated Use `aria-label`. */
@@ -60,6 +67,7 @@ interface TriggerIconOnlyLabel {
   children?: never;
   icon: IconData;
   chevron?: never;
+  truncate?: never;
   /** @deprecated Use `aria-label`. */
   label: string;
   "aria-label"?: string;
@@ -101,6 +109,7 @@ export const DropdownMenuTrigger = ({
   label: labelDeprecated,
   "aria-label": label = labelDeprecated,
   chevron = false,
+  truncate = false,
   children,
   style: styleProp,
   layout,
@@ -117,6 +126,7 @@ export const DropdownMenuTrigger = ({
     layout: layout ?? styleProp,
     children,
     iconEnd: chevron ? ChevronDown : undefined,
+    truncate,
   } as ButtonProps;
   return (
     <WithTip

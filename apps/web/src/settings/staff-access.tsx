@@ -17,9 +17,9 @@ import {
 } from "../grasp/alert-dialog/index.ts";
 import { Badge } from "../grasp/badge/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
+import { FactRow, RowAlert, SettingsRows } from "../grasp/setting-row/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { useCore } from "../use-core.ts";
-import { FactRow, RowAlert, SettingsRows } from "./section.tsx";
 
 // Settings › Workspace › Grasp staff access, for the company's admins:
 // whether Grasp's staff may sign in now, what they reach and until when,
@@ -104,6 +104,7 @@ export const StaffAccessSection = ({
       {...(open && editable
         ? { actions: <EndStaffAccess onFailure={setFailure} /> }
         : {})}
+      density="compact"
       description={t`Only while a window your organization opened lasts.`}
       flush
       title={t`Grasp staff access`}

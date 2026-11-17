@@ -5,25 +5,30 @@ import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import { createFileRoute } from "@tanstack/react-router";
+import { useState } from "react";
 
 import { formatList } from "../format.ts";
 import { Combobox } from "../grasp/combobox/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
+import {
+  FactRow,
+  SettingRow,
+  SettingsRows,
+} from "../grasp/setting-row/index.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import {
-  FactRow,
   SectionNotLoaded,
-  SettingRow,
   SettingsError,
   SettingsLoading,
-  SettingsRows,
 } from "../settings/section.tsx";
 import { SignInSection } from "../settings/sign-in-settings.tsx";
 import { StaffAccessSection } from "../settings/staff-access.tsx";
 import {
+  controlStyles,
   NameField,
   useOrganizationChange,
+  useSaveWords,
 } from "../settings/workspace-name.tsx";
 
 // Settings → Workspace: the organization's name and the time zone it
@@ -116,7 +121,7 @@ const offsetOf = (timeZone: string, locale: string): string =>
     .formatToParts(new Date())
     .find((part) => part.type === "timeZoneName")?.value ?? "";
 
-/** The time zone Grasp works in, saved as it is chosen. */
+/** The time zone Grasp works in, saved as it is chosen, and free to change again at once. */
 const TimeZoneField = ({
   timeZone,
   canChange,
@@ -125,8 +130,23 @@ const TimeZoneField = ({
   canChange: boolean;
 }) => {
   const { t, i18n } = useLingui();
-  const { busy, failure, change } = useOrganizationChange();
-  const known = zones.some((zone) => zone.value === timeZone);
+  const words = useSaveWords();
+  const { busy, failure, status, change, idle } = useOrganizationChange();
+  // What core last took: the page's read catches up behind it.
+  const [saved, setSaved] = useState(timeZone);
+  // The zone a failed save tried, kept for Try again.
+  const [tried, setTried] = useState<string>();
+  const send = (value: string): void => {
+    setTried(value);
+    change(
+      async (api) => await api.update({ timeZone: value }),
+      (organization) => {
+        setSaved(organization.timeZone);
+        setTried(undefined);
+      }
+    );
+  };
+  const known = zones.some((zone) => zone.value === saved);
   const items = [
     ...zones.map((zone) => {
       const offset = offsetOf(zone.value, i18n.locale);
@@ -140,29 +160,38 @@ const TimeZoneField = ({
       };
     }),
     // A zone set some other way is shown as it is named.
-    ...(known ? [] : [{ value: timeZone, label: timeZone, keywords: [] }]),
+    ...(known ? [] : [{ value: saved, label: saved, keywords: [] }]),
   ];
   return (
     <SettingRow
+      {...words}
       {...(failure === undefined ? {} : { error: failure })}
       help={t`For schedules and the times Grasp shows.`}
       label={t`Time zone`}
+      onRetry={() => {
+        if (tried !== undefined) {
+          send(tried);
+        }
+      }}
+      status={status}
     >
       {(field) => (
         <Combobox
           {...field}
           empty={t`No time zone by that name`}
           items={items}
+          layout={controlStyles.fill}
           onValueChange={(value) => {
-            if (value !== null && value !== timeZone) {
-              change(async (api) => await api.update({ timeZone: value }));
+            idle();
+            if (value !== null && value !== saved) {
+              send(value);
             }
           }}
           placeholder={t`Search time zones`}
-          // Read-only while its save runs, not disabled: a disabled field drops the keyboard's focus.
+          // Read-only while its own save runs, not disabled: a disabled field drops the keyboard's focus.
           readOnly={!canChange || busy}
           triggerLabel={t`Show the time zones`}
-          value={timeZone}
+          value={saved}
         />
       )}
     </SettingRow>
@@ -179,7 +208,7 @@ const WorkspaceSettings = ({
   const { t } = useLingui();
   return (
     <>
-      <SectionCard flush title={t`Organization`}>
+      <SectionCard density="compact" flush title={t`Organization`}>
         <SettingsRows>
           <NameField canChange={canChange} name={organization.name} />
           <TimeZoneField
@@ -200,7 +229,7 @@ const WorkspaceSettings = ({
           </FactRow>
         </SettingsRows>
       </SectionCard>
-      <SignInSection />
+      <SignInSection organization={organization.name} />
     </>
   );
 };
@@ -218,7 +247,7 @@ const StaffAccess = ({
     return <StaffAccessSection editable={editable} staff={read.data} />;
   }
   return (
-    <SectionCard title={t`Grasp staff access`}>
+    <SectionCard density="compact" title={t`Grasp staff access`}>
       <SectionNotLoaded page={read} />
     </SectionCard>
   );
@@ -234,7 +263,7 @@ const Workspace = () => {
       {page.state === "ready" ? (
         <WorkspaceSettings canChange={editable} organization={page.data} />
       ) : (
-        <SectionCard title={t`Organization`}>
+        <SectionCard density="compact" title={t`Organization`}>
           <SectionNotLoaded page={page} />
         </SectionCard>
       )}

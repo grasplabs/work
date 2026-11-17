@@ -1526,6 +1526,7 @@
   /* The room above the sidebar's first row. */
   --grasp-shell-head: 16px;
   /* The height of a sidebar row. */
+  --grasp-picker-tile: 8rem;
   --grasp-shell-row: 32px;
   /* The room between two rows. */
   --grasp-shell-row-gap: 2px;

@@ -167,6 +167,8 @@ export const ChatTitleMenu = ({
             aria-label={t`More for this chat`}
             chevron
             size="sm"
+            // One line in the chat's head, its full title in the tooltip.
+            truncate
             variant="ghost"
           >
             {chat.title}

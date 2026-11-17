@@ -2904,6 +2904,7 @@ msgstr "Demander à un administrateur"
 
 #: src/chat/chat-composer.tsx
 #: src/chat/global-chat.tsx
+#: src/settings/backdrop-settings.tsx
 msgid "Ask anything, or describe a process"
 msgstr "Posez une question ou décrivez un processus"
 
@@ -4554,6 +4555,10 @@ msgstr "Impossible de nommer administrateur"
 msgid "Could not remove"
 msgstr "Impossible de retirer"
 
+#: src/settings/workspace-name.tsx
+msgid "Could not save. Your change is kept."
+msgstr "Non enregistré. Votre modification est conservée."
+
 #: src/settings/profile-name.tsx
 msgid "Could not save. Your name is kept."
 msgstr "Non enregistré. Votre nom est conservé."
@@ -5349,7 +5354,6 @@ msgstr "Modification d'un workflow"
 
 #: src/onboarding/interviews-progress.tsx
 #: src/routes/_shell.settings.profile.tsx
-#: src/routes/_shell.settings.security.tsx
 #: src/settings/invitations.tsx
 #: src/workflows/requests/request-summary.tsx
 msgid "Email"
@@ -6523,10 +6527,6 @@ msgstr "Grasp a envoyé ce lien à ce compte dans {app}. Reliez-le seulement s�
 #: src/dashboard/outcome-card.tsx
 msgid "Grasp sent this, but its answer was lost: nobody can tell whether it took effect. Check on {connection} before you say."
 msgstr "Grasp a envoyé ceci, mais sa réponse s'est perdue : personne ne sait s'il a pris effet. Vérifiez sur {connection} avant de répondre."
-
-#: src/settings/sign-in-settings.tsx
-msgid "Grasp sets this up; ask Grasp to change it."
-msgstr "Grasp le configure ; demandez à Grasp de le modifier."
 
 #: src/routes/_shell.settings.workspace.tsx
 #: src/settings/staff-access.tsx
@@ -7860,10 +7860,6 @@ msgstr "Quitter cette page ?"
 #: src/workflows/workflow-diagram.tsx
 msgid "Leaves this list"
 msgstr "Quitte cette liste"
-
-#: src/routes/_shell.settings.security.tsx
-msgid "Leaving the company stops new sign-ins."
-msgstr "Quitter l’entreprise empêche toute nouvelle connexion."
 
 #: src/workflows/requests/request-needs.tsx
 msgid "Left as it is since {date}"
@@ -9306,8 +9302,8 @@ msgid "Not offered"
 msgstr "Non proposée"
 
 #: src/settings/sign-in-settings.tsx
-msgid "Not offered: its secret isn’t set"
-msgstr "Non proposé : son secret n’est pas défini"
+msgid "Not on the sign-in page yet"
+msgstr "Pas encore sur la page de connexion"
 
 #: src/onboarding/send-plan-form.tsx
 msgid "Not planned yet"
@@ -9743,10 +9739,6 @@ msgstr "Activé dans {name}"
 msgid "On the schedule {cron}, in {zone}"
 msgstr "Selon la planification {cron}, en {zone}"
 
-#: src/settings/sign-in-settings.tsx
-msgid "On the sign-in page"
-msgstr "Sur la page de connexion"
-
 #: src/workflows/workflows-table.tsx
 msgid "On the way"
 msgstr "En route"
@@ -9816,14 +9808,6 @@ msgstr "Un choix dans une liste d’options"
 #: src/interview/words.ts
 msgid "One real case"
 msgstr "Un cas réel"
-
-#: src/settings/sign-in-settings.tsx
-msgid "Only accounts of the Google Workspace {hostedDomain}."
-msgstr "Uniquement les comptes du Google Workspace {hostedDomain}."
-
-#: src/settings/sign-in-settings.tsx
-msgid "Only accounts of the tenant {tenantId}."
-msgstr "Uniquement les comptes du locataire {tenantId}."
 
 #: src/settings/use-team-change.ts
 msgid "Only admins can change teams."
@@ -9914,6 +9898,14 @@ msgstr "Seulement sur demande"
 #: src/settings/staff-access.tsx
 msgid "Only while a window your organization opened lasts."
 msgstr "Seulement pendant une période ouverte par votre organisation."
+
+#: src/settings/sign-in-settings.tsx
+msgid "Only work accounts from {organization}’s Google Workspace ({hostedDomain})."
+msgstr "Uniquement les comptes professionnels du Google Workspace de {organization} ({hostedDomain})."
+
+#: src/settings/sign-in-settings.tsx
+msgid "Only work accounts from {organization}’s Microsoft 365."
+msgstr "Uniquement les comptes professionnels du Microsoft 365 de {organization}."
 
 #: src/brain/sources-page.tsx
 msgctxt "a source nobody else may read"
@@ -12113,6 +12105,7 @@ msgstr "Enregistrer la correction"
 
 #: src/interview/composer.tsx
 #: src/settings/profile-name.tsx
+#: src/settings/workspace-name.tsx
 msgid "Saved"
 msgstr "Enregistré"
 
@@ -12151,6 +12144,7 @@ msgid "Saved."
 msgstr "Enregistré."
 
 #: src/settings/profile-name.tsx
+#: src/settings/workspace-name.tsx
 msgid "Saving"
 msgstr "Enregistrement"
 
@@ -15111,6 +15105,7 @@ msgstr "Essayer"
 #: src/pages/frame-failure.tsx
 #: src/settings/profile-name.tsx
 #: src/settings/section.tsx
+#: src/settings/workspace-name.tsx
 msgid "Try again"
 msgstr "Réessayer"
 
@@ -17143,6 +17138,10 @@ msgstr "Votre propre contrat avec Anthropic, OpenAI, Mistral ou un autre fournis
 #: src/settings/ai-providers.tsx
 msgid "Your own keys, for when your AI runs on them. Stored sealed."
 msgstr "Vos propres clés, pour quand votre IA les utilise. Stockées scellées."
+
+#: src/settings/sign-in-settings.tsx
+msgid "Your people sign in with the work accounts your organization already has. Grasp set this up with you; to change it, ask your Grasp contact."
+msgstr "Vos équipes se connectent avec les comptes professionnels que votre organisation a déjà. Grasp l’a configuré avec vous ; pour le modifier, demandez à votre contact chez Grasp."
 
 #: src/onboarding/about-story.tsx
 msgid "Your people, documents and tools first. Then two weeks of short conversations with your team. At {threshold}%, your team can start."
