@@ -57,7 +57,7 @@ import {
 import type { WorkflowCaller } from "./page-workflows.ts";
 import { loadWorkflowBuild } from "./workflow-builds.ts";
 import { historyEntries } from "./workflows/history.ts";
-import { runsWhoseEvidenceHolds } from "./workflows/resource-reads.ts";
+import { runsEvidence } from "./workflows/resource-reads.ts";
 import { detailsRemoved } from "./workflows/retention.ts";
 import { sealedStepOf, sealedStepsOf } from "./workflows/sealed-steps.ts";
 import type { SealedSteps } from "./workflows/sealed-steps.ts";
@@ -1177,14 +1177,14 @@ const decisionDetail = async (
   // can't be checked (GRA-1988), as its decision's page withholds it: the App's code gets
   // none of it, nor a context of its contract's type standing for it. Its
   // person answers it on its own page.
-  const holding = await runsWhoseEvidenceHolds(env, [
+  const states = await runsEvidence(env, [
     {
       runId: row.runId,
       workflowId: row.workflowId,
       principal: row.principalId,
     },
   ]);
-  if (!holding.has(row.runId)) {
+  if (states.get(row.runId) !== "holds") {
     return null;
   }
   // Answerable only where the run's restricted mode is the App's

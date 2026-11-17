@@ -1639,11 +1639,11 @@ msgstr "Een record van een andere tabel"
 msgid "A run of {name} waits for your answer. Nothing more happens in it until someone answers, or until it stops waiting."
 msgstr "Een run van {name} wacht op je antwoord. Er gebeurt niets meer in totdat iemand antwoordt, of totdat hij niet meer wacht."
 
-#: src/routes/decisions.$decision.tsx
+#: src/decision-card.tsx
 msgid "A run of a workflow asked for this answer."
 msgstr "Een run van een workflow vroeg om dit antwoord."
 
-#: src/routes/decisions.$decision.tsx
+#: src/decision-card.tsx
 msgid "A run of a workflow waits for this answer."
 msgstr "Een run van een workflow wacht op dit antwoord."
 
@@ -1760,8 +1760,8 @@ msgctxt "note property: what a note is about"
 msgid "About"
 msgstr "Over"
 
+#: src/decision-card.tsx
 #: src/decision-confirmation.tsx
-#: src/routes/decisions.$decision.tsx
 msgctxt "what a decision is about, as its workflow run passed it"
 msgid "About"
 msgstr "Waarover"
@@ -2669,9 +2669,9 @@ msgstr "Laat hem gelden als het domein van de afzender {domain} is."
 #: src/brain/skills-page.tsx
 #: src/chat/package-requests.tsx
 #: src/dashboard/pile-cards.tsx
+#: src/decision-card.tsx
 #: src/decision-confirmation.tsx
 #: src/inbox/item-detail.tsx
-#: src/routes/decisions.$decision.tsx
 #: src/workflows/binding-approvals.tsx
 msgid "Approve"
 msgstr "Goedkeuren"
@@ -2727,7 +2727,7 @@ msgstr "De code van een pagina goedgekeurd"
 msgid "Approved by {approver} on {at}"
 msgstr "Goedgekeurd door {approver} op {at}"
 
-#: src/routes/decisions.$decision.tsx
+#: src/decision-card.tsx
 msgid "Approved by {name} on {date}."
 msgstr "Goedgekeurd door {name} op {date}."
 
@@ -4038,7 +4038,7 @@ msgctxt "a comment on an answer to a decision"
 msgid "Comment"
 msgstr "Opmerking"
 
-#: src/routes/decisions.$decision.tsx
+#: src/decision-card.tsx
 msgid "Comment (optional)"
 msgstr "Opmerking (optioneel)"
 
@@ -6129,8 +6129,8 @@ msgstr "Frequentie"
 msgid "From"
 msgstr "Uit"
 
+#: src/decision-card.tsx
 #: src/decision-confirmation.tsx
-#: src/routes/decisions.$decision.tsx
 msgctxt "where a decision comes from"
 msgid "From"
 msgstr "Van"
@@ -9146,7 +9146,7 @@ msgstr "Nee: de hash of de koppeling naar de gebeurtenis ervoor klopt niet."
 msgid "Nobody"
 msgstr "Niemand"
 
-#: src/routes/decisions.$decision.tsx
+#: src/decision-card.tsx
 msgid "Nobody answered in time, so this decision has closed."
 msgstr "Niemand heeft op tijd geantwoord, dus deze beslissing is gesloten."
 
@@ -10165,8 +10165,8 @@ msgstr "Run gestart op {started} openen"
 msgid "Open this link again whenever you like, and carry on where you stopped."
 msgstr "Open deze link weer wanneer je wilt, en ga verder waar je gebleven was."
 
+#: src/decision-card.tsx
 #: src/decision-confirmation.tsx
-#: src/routes/decisions.$decision.tsx
 msgctxt "until when a decision can be answered"
 msgid "Open until"
 msgstr "Open tot"
@@ -11221,9 +11221,9 @@ msgstr "Regio"
 
 #: src/chat/held-writes.tsx
 #: src/dashboard/pile-cards.tsx
+#: src/decision-card.tsx
 #: src/decision-confirmation.tsx
 #: src/inbox/item-detail.tsx
-#: src/routes/decisions.$decision.tsx
 msgid "Reject"
 msgstr "Afwijzen"
 
@@ -11254,7 +11254,7 @@ msgstr "Dit verzoek afwijzen?"
 msgid "Rejected"
 msgstr "Afgewezen"
 
-#: src/routes/decisions.$decision.tsx
+#: src/decision-card.tsx
 msgid "Rejected by {name} on {date}."
 msgstr "Afgewezen door {name} op {date}."
 
@@ -11868,8 +11868,8 @@ msgctxt "start a workflow's run by hand"
 msgid "Run"
 msgstr "Uitvoeren"
 
+#: src/decision-card.tsx
 #: src/decision-confirmation.tsx
-#: src/routes/decisions.$decision.tsx
 msgctxt "the run of a workflow a decision is for"
 msgid "Run"
 msgstr "Run"
@@ -14537,7 +14537,7 @@ msgstr "De workflow is verwijderd, maar de naam is niet vrijgegeven: {reason}"
 msgid "The workflow isn't open to him"
 msgstr "De workflow staat niet voor hem open"
 
-#: src/routes/decisions.$decision.tsx
+#: src/decision-card.tsx
 msgid "The workflow run that asked this has ended, so this decision has closed."
 msgstr "De workflowrun die dit vroeg, is afgelopen, dus deze beslissing is gesloten."
 
@@ -14763,7 +14763,7 @@ msgstr "Deze koppeling moet opnieuw worden gemaakt."
 msgid "This couldn't be read when the report was made."
 msgstr "Dit kon niet worden gelezen toen het rapport werd gemaakt."
 
-#: src/routes/decisions.$decision.tsx
+#: src/decision-card.tsx
 msgid "This decision has closed."
 msgstr "Deze beslissing is gesloten."
 
@@ -15224,6 +15224,7 @@ msgstr "Proberen"
 #: src/chat/builds.tsx
 #: src/chat/chat-panel.tsx
 #: src/chat/thread.tsx
+#: src/decision-card.tsx
 #: src/frame/page-states.tsx
 #: src/frame/setting-up.tsx
 #: src/interview/sound-check.tsx
@@ -16322,8 +16323,11 @@ msgid "What they want instead"
 msgstr "Wat ze liever willen"
 
 #: src/decision-confirmation.tsx
-#: src/routes/decisions.$decision.tsx
-msgid "What this decision asks is withheld, so you can only decline it."
+msgid "What this decision asks can't be shown right now, so it can't be answered yet. Try again in a moment."
+msgstr "Wat deze beslissing vraagt, kan nu niet worden getoond. Ze kan daarom nog niet worden beantwoord. Probeer het zo opnieuw."
+
+#: src/decision-confirmation.tsx
+msgid "What this decision asks is withheld, so you can only reject it."
 msgstr "Wat deze beslissing vraagt, wordt achtergehouden. Je kunt haar daarom alleen afwijzen."
 
 #: src/agents/agent-wakes.tsx

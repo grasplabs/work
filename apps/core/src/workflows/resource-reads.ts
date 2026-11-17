@@ -366,56 +366,64 @@ export const runEvidenceHolds = async (
   }
 };
 
-/** Logs that run `runId`'s evidence couldn't be checked: it holds nothing. */
-const unchecked = (runId: string, error: unknown): [] => {
+/**
+ * What checking a run's evidence came to for a reader: it holds; it was
+ * refused (`brain.revoked`: the run may no longer read what it read); or
+ * it couldn't be checked (the check failed otherwise: a database or the
+ * Brain away, a stored row it can't read), which a later check may
+ * settle.
+ */
+export type EvidenceState = "holds" | "refused" | "unchecked";
+
+/** Logs that run `runId`'s evidence couldn't be checked, and says so. */
+const unchecked = (runId: string, error: unknown): EvidenceState => {
   log.error("workflow.run_evidence_unchecked", {
     runId,
     ...errorFields(error),
   });
-  return [];
+  return "unchecked";
 };
 
 /**
- * Of `runs`, the IDs of those that may still read what they read
- * (`requireEndedRunEvidenceReadable`), checked together
- * (`evidenceChecked`), for a reader that shows what each holds only while
- * it holds (what a run's decisions ask: decisions.ts). A run whose check
- * failed otherwise is checked again alone, so another run's failure in
- * the same check never counts against it; one whose own check fails is
- * left out (fails closed), logged, and so is every run when the evidence
+ * How the evidence of each of `runs` stands (`EvidenceState`), by run ID,
+ * checked together (`evidenceChecked`), for a reader that shows what each
+ * holds only while it holds (what a run's decisions ask: decisions.ts). A
+ * run whose check failed otherwise is checked again alone, so another
+ * run's failure in the same check never counts against it; one whose own
+ * check fails is unchecked, logged, and so is every run when the evidence
  * can't be read at all.
  */
-export const runsWhoseEvidenceHolds = async (
+export const runsEvidence = async (
   env: Env,
   runs: readonly EvidenceRun[]
-): Promise<Set<string>> => {
+): Promise<Map<string, EvidenceState>> => {
   const unique = [...new Map(runs.map((run) => [run.runId, run])).values()];
-  /** `runs`' IDs that hold, each failed one checked again alone if `again`. */
-  const holding = async (
+  /** How `some` stand, each failed one checked again alone if `again`. */
+  const states = async (
     some: readonly EvidenceRun[],
     again: boolean
-  ): Promise<string[]> => {
+  ): Promise<[string, EvidenceState][]> => {
     let checked: Checked;
     try {
       checked = await evidenceChecked(env, some);
     } catch (error) {
-      return some.flatMap(({ runId }) => unchecked(runId, error));
+      return some.map(({ runId }) => [runId, unchecked(runId, error)]);
     }
     const each = await Promise.all(
-      some.map(async (run) => {
+      some.map(async (run): Promise<[string, EvidenceState][]> => {
         const failure = checked.failed.get(run.runId);
         if (checked.refused.has(run.runId)) {
-          return [];
+          return [[run.runId, "refused"]];
         }
         if (failure === undefined) {
-          return [run.runId];
+          return [[run.runId, "holds"]];
         }
         return again
-          ? await holding([run], false)
-          : unchecked(run.runId, failure);
+          ? await states([run], false)
+          : [[run.runId, unchecked(run.runId, failure)]];
       })
     );
     return each.flat();
   };
-  return new Set(await holding(unique, unique.length > 1));
+  return new Map(await states(unique, unique.length > 1));
 };

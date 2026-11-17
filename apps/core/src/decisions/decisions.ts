@@ -62,7 +62,8 @@ import {
 } from "../db/core/schema.ts";
 import { inList } from "../db/d1.ts";
 import { takesExactly } from "../workflows/exact-values.ts";
-import { runsWhoseEvidenceHolds } from "../workflows/resource-reads.ts";
+import { runsEvidence } from "../workflows/resource-reads.ts";
+import type { EvidenceState } from "../workflows/resource-reads.ts";
 import { removedText } from "../workflows/retention.ts";
 import { tellDecisionFollowers } from "../workflows/run-changes.ts";
 import { oweWake, sendWake } from "../workflows/wakes.ts";
@@ -117,14 +118,17 @@ import type { ReviewContext } from "./confirmations.ts";
 //   context.
 // - What a run asks rests on what it read (GRA-1988): a passage it
 //   recalled, a card, what the chat that started it had read. Every read
-//   of a decision checks the run's evidence again
-//   (`runsWhoseEvidenceHolds`, as its output and files are checked), and
-//   once it no longer holds, or can't be checked, the decision is shown
-//   withheld (`withheldAskText`, no input), its review context too, so
-//   neither its words nor a fingerprint of them reach anyone. Nobody
-//   approves what they can't read: a withheld decision takes a rejection
-//   alone (`decision.withheld`), which still lets its run go on, to be
-//   refused at its next check (`brain.revoked`).
+//   of a decision checks the run's evidence again (`runsEvidence`, as its
+//   output and files are checked). Once the check refuses it, the
+//   decision is shown withheld (`withheldAskText`, no input), its review
+//   context too, so neither its words nor a fingerprint of them reach
+//   anyone; nobody approves what they can't read, so it takes a rejection
+//   alone (`decision.withheld`), which lets its run go on, to be refused at
+//   its next check (`brain.revoked`). One whose check fails otherwise (a
+//   database or the Brain away) shows nothing of what it asks either
+//   (`uncheckedAskText`), and takes no answer at all
+//   (`decision.unavailable`): an outage is no reason to reject. The next
+//   read whose check succeeds shows it as it is.
 
 type DecisionRow = typeof workflowDecisions.$inferSelect;
 
@@ -821,15 +825,31 @@ export const withheldAskText =
   "What this decision asks is withheld: the run that asked it may no longer read what it read.";
 
 /**
- * Whether `found`'s answer `answer` is an approval of what is withheld
- * from whoever gives it: refused (`decision.withheld`), a rejection alone
- * taken. An answer is an approval or a rejection, whatever the contract's
- * response schema asks besides (`payload`), so every decision has one.
+ * What a decision shows in place of what it asks while its run's
+ * evidence can't be checked (`runsEvidence`): for now.
  */
-const approvesWithheld = (
-  found: Pick<DecisionWithRun, "withheld">,
+export const uncheckedAskText =
+  "What this decision asks can't be shown right now. Try again in a moment.";
+
+/**
+ * Why `found` takes no `answer` for what it asks, if it takes none: any
+ * answer while its run's evidence can't be checked
+ * (`decision.unavailable`), and an approval of what is withheld from
+ * whoever gives it (`decision.withheld`), a rejection alone taken. An
+ * answer is an approval or a rejection, whatever the contract's response
+ * schema asks besides (`payload`), so every decision has a rejection.
+ */
+const askRefusal = (
+  found: Pick<DecisionWithRun, "evidence">,
   answer: DecisionAnswerInput
-): boolean => found.withheld && answer.approved;
+): "decision.unavailable" | "decision.withheld" | undefined => {
+  if (found.evidence === "unchecked") {
+    return "decision.unavailable";
+  }
+  return found.evidence === "refused" && answer.approved
+    ? "decision.withheld"
+    : undefined;
+};
 
 /** A decision with what the people who answer it see of it. */
 interface DecisionWithRun {
@@ -841,10 +861,10 @@ interface DecisionWithRun {
   goesOn: boolean;
   decidedByName: string | null;
   /**
-   * Whether what it asks is withheld: its run may no longer read what it
-   * read (`runEvidenceHolds`), as decided as it was read.
+   * How its run's evidence stands (`runsEvidence`), as decided as it was
+   * read: unless it holds, what it asks is not shown.
    */
-  withheld: boolean;
+  evidence: EvidenceState;
 }
 
 /** A decision's row with its run's, as `decisionWithRun` reads them. */
@@ -902,7 +922,7 @@ const runOfRead = (
 };
 
 /** A decision as `decisionWithRun` reads it, before its run is checked. */
-type DecisionRead = Omit<DecisionWithRun, "withheld"> & { principal: string };
+type DecisionRead = Omit<DecisionWithRun, "evidence"> & { principal: string };
 
 /** Decision `decision` as read, its run unchecked; `decision.not_found` for none. */
 const decisionUnchecked = async (
@@ -927,16 +947,15 @@ const decisionUnchecked = async (
 };
 
 /**
- * `read`, each with whether what it asks is withheld: its run's evidence
- * checked together with the others' (`runsWhoseEvidenceHolds`), each run
- * once however many of them it asked; one that can't be checked is
- * withheld.
+ * `read`, each with how its run's evidence stands: checked together with
+ * the others' (`runsEvidence`), each run once however many of them it
+ * asked.
  */
 const checkedAll = async (
   env: Env,
   read: readonly DecisionRead[]
 ): Promise<DecisionWithRun[]> => {
-  const holding = await runsWhoseEvidenceHolds(
+  const states = await runsEvidence(
     env,
     read.map(({ run, principal }) => ({
       runId: run.runId,
@@ -946,7 +965,7 @@ const checkedAll = async (
   );
   return read.map(({ principal: _principal, ...found }) => ({
     ...found,
-    withheld: !holding.has(found.run.runId),
+    evidence: states.get(found.run.runId) ?? "unchecked",
   }));
 };
 
@@ -1007,27 +1026,6 @@ const allowedDecision = async (
 const databaseNow = sql`CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER)`;
 
 /**
- * The pinned fields of the decision a person reviews before answering:
- * what it asks as it is shown, withheld or not, so its fingerprint holds
- * nothing of what a withheld one asked.
- */
-const contextOf = ({
-  decision,
-  run,
-  withheld,
-}: DecisionWithRun): ReviewContext => ({
-  decision: decision.id,
-  run: run.runId,
-  workflow: run.workflow,
-  version: run.version,
-  step: decision.step,
-  deciders: decision.deciders,
-  description: withheld ? withheldAskText : decision.description,
-  expiresAt: decision.expiresAt,
-  input: withheld ? null : (decision.input ?? null),
-});
-
-/**
  * Where a decision stands as its page shows it: an open decision of a run
  * that has ended, or that someone asked to cancel, takes no answer
  * (`runUnended`), and shows as `closed`.
@@ -1052,24 +1050,49 @@ const sourceOf = ({
 
 /**
  * What a decision asks as it is shown: withheld once its run may no
- * longer read what it read, or gone with its run's details
- * (workflows/retention.ts), which empties it (none is asked with an
- * empty description), each saying so.
+ * longer read what it read, not shown while that can't be checked, or
+ * gone with its run's details (workflows/retention.ts), which empties it
+ * (none is asked with an empty description), each saying so.
  */
 const askedOf = ({
   decision,
-  withheld,
+  evidence,
 }: DecisionWithRun): Pick<
   DecisionView,
   "description" | "input" | "withheld"
 > => {
-  if (withheld) {
-    return { description: withheldAskText, withheld: true };
+  if (evidence === "refused") {
+    return { description: withheldAskText, withheld: "revoked" };
+  }
+  if (evidence === "unchecked") {
+    return { description: uncheckedAskText, withheld: "unchecked" };
   }
   return {
     description:
       decision.description === "" ? removedText : decision.description,
     ...(decision.input === null ? {} : { input: decision.input }),
+  };
+};
+
+/**
+ * The pinned fields of the decision a person reviews before answering:
+ * what it asks as it is shown (`askedOf`), so its fingerprint holds
+ * nothing of what one that isn't shown asks.
+ */
+const contextOf = (found: DecisionWithRun): ReviewContext => {
+  const { decision, run } = found;
+  const asked = askedOf(found);
+  return {
+    decision: decision.id,
+    run: run.runId,
+    workflow: run.workflow,
+    version: run.version,
+    step: decision.step,
+    deciders: decision.deciders,
+    description:
+      asked.withheld === undefined ? decision.description : asked.description,
+    expiresAt: decision.expiresAt,
+    input: asked.withheld === undefined ? (decision.input ?? null) : null,
   };
 };
 
@@ -1257,6 +1280,7 @@ export const waitingDecisions = async (
 type RefusalCode =
   | "decision.closed"
   | "decision.withheld"
+  | "decision.unavailable"
   | "decision.forbidden"
   | "decision.unconfirmed"
   | "decision.conflict";
@@ -1386,8 +1410,9 @@ export const reviewDecision = async (
   if (!takesAnswers(found, new Date())) {
     throw decisionErrors.create("decision.closed");
   }
-  if (approvesWithheld(found, response)) {
-    throw decisionErrors.create("decision.withheld");
+  const refused = askRefusal(found, response);
+  if (refused !== undefined) {
+    throw decisionErrors.create(refused);
   }
   return { state: "review", decision: await toView(env, found), response };
 };
@@ -1424,8 +1449,9 @@ export const confirmDecision = async (
   if (!takesAnswers(found, now)) {
     throw await refuse("decision.closed");
   }
-  if (approvesWithheld(found, response)) {
-    throw await refuse("decision.withheld");
+  const refused = askRefusal(found, response);
+  if (refused !== undefined) {
+    throw await refuse(refused);
   }
   const context = await contextFingerprint(contextOf(found));
   if (revision !== context) {
@@ -1492,8 +1518,9 @@ const refusalOf = async (
   if (!takesAnswers(found, new Date())) {
     return "decision.closed";
   }
-  if (approvesWithheld(found, answer)) {
-    return "decision.withheld";
+  const refused = askRefusal(found, answer);
+  if (refused !== undefined) {
+    return refused;
   }
   if (confirmed === undefined) {
     return "decision.unconfirmed";
@@ -1576,10 +1603,13 @@ export const answerDecision = async (
     return await notTaken();
   }
   const context = await contextFingerprint(contextOf(found));
-  // Never an approval of what is withheld: confirming one is refused
-  // already, and one confirmed before it was withheld was confirmed
-  // against another context.
-  if (matching.context !== context || approvesWithheld(found, response)) {
+  // Never an answer to what isn't shown that it doesn't take: confirming
+  // one is refused already, and one confirmed while it was shown was
+  // confirmed against another context.
+  if (
+    matching.context !== context ||
+    askRefusal(found, response) !== undefined
+  ) {
     return await notTaken(matching);
   }
   const { run } = found;

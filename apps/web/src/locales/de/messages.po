@@ -1639,11 +1639,11 @@ msgstr "Ein Datensatz einer anderen Tabelle"
 msgid "A run of {name} waits for your answer. Nothing more happens in it until someone answers, or until it stops waiting."
 msgstr "Ein Lauf von {name} wartet auf Ihre Antwort. Bis jemand antwortet oder er nicht mehr wartet, geschieht darin nichts weiter."
 
-#: src/routes/decisions.$decision.tsx
+#: src/decision-card.tsx
 msgid "A run of a workflow asked for this answer."
 msgstr "Ein Lauf eines Workflows hat um diese Antwort gebeten."
 
-#: src/routes/decisions.$decision.tsx
+#: src/decision-card.tsx
 msgid "A run of a workflow waits for this answer."
 msgstr "Ein Lauf eines Workflows wartet auf diese Antwort."
 
@@ -1760,8 +1760,8 @@ msgctxt "note property: what a note is about"
 msgid "About"
 msgstr "Thema"
 
+#: src/decision-card.tsx
 #: src/decision-confirmation.tsx
-#: src/routes/decisions.$decision.tsx
 msgctxt "what a decision is about, as its workflow run passed it"
 msgid "About"
 msgstr "Worum es geht"
@@ -2669,9 +2669,9 @@ msgstr "Lassen Sie sie greifen, wenn die Domain des Absenders {domain} ist."
 #: src/brain/skills-page.tsx
 #: src/chat/package-requests.tsx
 #: src/dashboard/pile-cards.tsx
+#: src/decision-card.tsx
 #: src/decision-confirmation.tsx
 #: src/inbox/item-detail.tsx
-#: src/routes/decisions.$decision.tsx
 #: src/workflows/binding-approvals.tsx
 msgid "Approve"
 msgstr "Genehmigen"
@@ -2727,7 +2727,7 @@ msgstr "Den Code einer Seite genehmigt"
 msgid "Approved by {approver} on {at}"
 msgstr "Freigegeben von {approver} am {at}"
 
-#: src/routes/decisions.$decision.tsx
+#: src/decision-card.tsx
 msgid "Approved by {name} on {date}."
 msgstr "Genehmigt von {name} am {date}."
 
@@ -4038,7 +4038,7 @@ msgctxt "a comment on an answer to a decision"
 msgid "Comment"
 msgstr "Kommentar"
 
-#: src/routes/decisions.$decision.tsx
+#: src/decision-card.tsx
 msgid "Comment (optional)"
 msgstr "Kommentar (optional)"
 
@@ -6129,8 +6129,8 @@ msgstr "Häufigkeit"
 msgid "From"
 msgstr "Aus"
 
+#: src/decision-card.tsx
 #: src/decision-confirmation.tsx
-#: src/routes/decisions.$decision.tsx
 msgctxt "where a decision comes from"
 msgid "From"
 msgstr "Von"
@@ -9146,7 +9146,7 @@ msgstr "Nein: Sein Hash oder seine Verknüpfung zum vorherigen Ereignis stimmt n
 msgid "Nobody"
 msgstr "Niemand"
 
-#: src/routes/decisions.$decision.tsx
+#: src/decision-card.tsx
 msgid "Nobody answered in time, so this decision has closed."
 msgstr "Niemand hat rechtzeitig geantwortet, daher ist diese Entscheidung geschlossen."
 
@@ -10165,8 +10165,8 @@ msgstr "Lauf vom {started} öffnen"
 msgid "Open this link again whenever you like, and carry on where you stopped."
 msgstr "Öffnen Sie diesen Link wieder, wann immer Sie möchten, und machen Sie dort weiter, wo Sie aufgehört haben."
 
+#: src/decision-card.tsx
 #: src/decision-confirmation.tsx
-#: src/routes/decisions.$decision.tsx
 msgctxt "until when a decision can be answered"
 msgid "Open until"
 msgstr "Offen bis"
@@ -11221,9 +11221,9 @@ msgstr "Region"
 
 #: src/chat/held-writes.tsx
 #: src/dashboard/pile-cards.tsx
+#: src/decision-card.tsx
 #: src/decision-confirmation.tsx
 #: src/inbox/item-detail.tsx
-#: src/routes/decisions.$decision.tsx
 msgid "Reject"
 msgstr "Ablehnen"
 
@@ -11254,7 +11254,7 @@ msgstr "Diese Anfrage ablehnen?"
 msgid "Rejected"
 msgstr "Abgelehnt"
 
-#: src/routes/decisions.$decision.tsx
+#: src/decision-card.tsx
 msgid "Rejected by {name} on {date}."
 msgstr "Abgelehnt von {name} am {date}."
 
@@ -11868,8 +11868,8 @@ msgctxt "start a workflow's run by hand"
 msgid "Run"
 msgstr "Ausführen"
 
+#: src/decision-card.tsx
 #: src/decision-confirmation.tsx
-#: src/routes/decisions.$decision.tsx
 msgctxt "the run of a workflow a decision is for"
 msgid "Run"
 msgstr "Lauf"
@@ -14537,7 +14537,7 @@ msgstr "Der Workflow ist gelöscht, aber sein Name wurde nicht freigegeben: {rea
 msgid "The workflow isn't open to him"
 msgstr "Der Workflow ist für ihn nicht offen"
 
-#: src/routes/decisions.$decision.tsx
+#: src/decision-card.tsx
 msgid "The workflow run that asked this has ended, so this decision has closed."
 msgstr "Der Workflow-Lauf, der dies gefragt hat, ist beendet, daher ist diese Entscheidung geschlossen."
 
@@ -14763,7 +14763,7 @@ msgstr "Diese Verbindung muss erneut hergestellt werden."
 msgid "This couldn't be read when the report was made."
 msgstr "Das konnte beim Erstellen des Berichts nicht gelesen werden."
 
-#: src/routes/decisions.$decision.tsx
+#: src/decision-card.tsx
 msgid "This decision has closed."
 msgstr "Diese Entscheidung ist geschlossen."
 
@@ -15224,6 +15224,7 @@ msgstr "Versuchen"
 #: src/chat/builds.tsx
 #: src/chat/chat-panel.tsx
 #: src/chat/thread.tsx
+#: src/decision-card.tsx
 #: src/frame/page-states.tsx
 #: src/frame/setting-up.tsx
 #: src/interview/sound-check.tsx
@@ -16322,8 +16323,11 @@ msgid "What they want instead"
 msgstr "Was sie stattdessen wollen"
 
 #: src/decision-confirmation.tsx
-#: src/routes/decisions.$decision.tsx
-msgid "What this decision asks is withheld, so you can only decline it."
+msgid "What this decision asks can't be shown right now, so it can't be answered yet. Try again in a moment."
+msgstr "Was diese Entscheidung fragt, kann gerade nicht angezeigt werden. Sie kann daher noch nicht beantwortet werden. Versuchen Sie es gleich noch einmal."
+
+#: src/decision-confirmation.tsx
+msgid "What this decision asks is withheld, so you can only reject it."
 msgstr "Was diese Entscheidung fragt, wird zurückgehalten. Sie können sie daher nur ablehnen."
 
 #: src/agents/agent-wakes.tsx

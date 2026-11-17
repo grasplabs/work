@@ -404,7 +404,7 @@ const openedIn = async (runId: string): Promise<string> =>
  */
 const goOn = async (by: Member, decision: string): Promise<void> => {
   const { withheld } = await decisionFor(env, by, decision);
-  const answer = { approved: withheld !== true };
+  const answer = { approved: withheld === undefined };
   const review = await reviewDecision(env, by, decision, answer);
   if (review.state === "recorded") {
     return;

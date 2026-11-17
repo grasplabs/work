@@ -15,8 +15,12 @@ import type { Release } from "../src/app-releases.ts";
 import { appKind, appFor, versionFiles } from "../src/apps.ts";
 import type { SourceRef } from "../src/brain-next.ts";
 import {
+  answerDecision,
+  confirmDecision,
   decisionFor,
   decisionOutcome,
+  reviewDecision,
+  uncheckedAskText,
   waitingDecisions,
   withheldAskText,
 } from "../src/decisions/decisions.ts";
@@ -502,11 +506,14 @@ const decisionInbox = async (looped = false) => {
       restricted = false,
       version = 1,
       input = { amount: 5 },
+      principal = starter.userId,
     }: {
       step?: string;
       restricted?: boolean;
       version?: number;
       input?: unknown;
+      /** Whom it acts for: the starter, unless the test says otherwise. */
+      principal?: string;
     } = {}
   ): Promise<{ runId: string; decisionId: string }> => {
     const runId = crypto.randomUUID();
@@ -521,7 +528,7 @@ const decisionInbox = async (looped = false) => {
         workflowId,
         version,
         manifestHash,
-        starter.userId,
+        principal,
         at
       ),
       env.DB.prepare(
@@ -531,7 +538,7 @@ const decisionInbox = async (looped = false) => {
         workflowId,
         version,
         manifestHash,
-        starter.userId,
+        principal,
         restricted ? 1 : 0,
         at
       ),
@@ -995,12 +1002,12 @@ describe(
         page: {
           description: withheldAskText,
           input: undefined,
-          withheld: true,
+          withheld: "revoked",
         },
       });
     });
 
-    it("withhold only the decision whose run can't be checked: the inbox and the day list the rest as they ask", async () => {
+    it("show nothing of only the decision whose run can't be checked: the inbox and the day list the rest as they ask", async () => {
       const { fixture, opened, reviewer, starter, runAsking } =
         await decisionInbox();
       const kept = await runAsking(fixture.app, opened);
@@ -1016,14 +1023,15 @@ describe(
       const today = await workflowsToday(env, reviewer);
       const shownOf = (of: typeof kept) => {
         const view = inbox.find(({ id }) => id === of.decisionId);
-        const asks = today.lanes
+        const waits = today.lanes
           .flatMap(({ runs }) => runs)
-          .find(({ id }) => id === of.runId)?.waits?.asks;
+          .find(({ id }) => id === of.runId)?.waits;
         return {
           description: view?.description,
           input: view?.input,
           withheld: view?.withheld,
-          asks,
+          asks: waits?.asks,
+          todayWithheld: waits?.withheld,
         };
       };
 
@@ -1036,13 +1044,170 @@ describe(
           input: { amount: 5 },
           withheld: undefined,
           asks: "Approve this invoice?",
+          todayWithheld: undefined,
         },
+        // A row that can never be read: it stays so, and its decision
+        // waits for its deadline.
         unchecked: {
-          description: withheldAskText,
+          description: uncheckedAskText,
           input: undefined,
-          withheld: true,
-          asks: withheldAskText,
+          withheld: "unchecked",
+          asks: uncheckedAskText,
+          todayWithheld: "unchecked",
         },
+      });
+    });
+
+    it("take no answer to a decision while its run's evidence can't be checked, the Brain away, and show it as it asks once it is back", async () => {
+      const { fixture, workflowId, opened, reviewer, runAsking } =
+        await decisionInbox();
+      const permissionId = await brainGrantOf(fixture, workflowId, reviewer);
+      const source = await companySource();
+      const asking = await runAsking(fixture.app, opened);
+      await recalledBy(asking.runId, source, permissionId);
+      const { decisionId } = asking;
+      const approval = { approved: true };
+      const rejection = { approved: false };
+      /** What the reviewer is shown of it, everywhere they see it. */
+      const shown = async () => {
+        const page = await decisionFor(env, reviewer, decisionId);
+        const inbox = await waitingDecisions(env, reviewer);
+        const today = await workflowsToday(env, reviewer);
+        const waits = today.lanes
+          .flatMap(({ runs }) => runs)
+          .find(({ id }) => id === asking.runId)?.waits;
+        return {
+          page: {
+            description: page.description,
+            input: page.input,
+            withheld: page.withheld,
+          },
+          inbox: inbox.find(({ id }) => id === decisionId)?.withheld,
+          today: { asks: waits?.asks, withheld: waits?.withheld },
+        };
+      };
+      // The Brain away: every call to it fails.
+      const away = vi
+        .spyOn(env.BRAIN_STORE, "getByName")
+        .mockImplementation(() => {
+          throw new Error("The Brain can't be reached");
+        });
+      let during: unknown;
+      let answers: unknown;
+      try {
+        during = await shown();
+        const { revision } = await decisionFor(env, reviewer, decisionId);
+        answers = {
+          approve: await codeOf(
+            async () =>
+              await reviewDecision(env, reviewer, decisionId, approval)
+          ),
+          reject: await codeOf(
+            async () =>
+              await reviewDecision(env, reviewer, decisionId, rejection)
+          ),
+          confirm: await codeOf(
+            async () =>
+              await confirmDecision(
+                env,
+                reviewer,
+                decisionId,
+                revision,
+                rejection
+              )
+          ),
+          answer: await codeOf(
+            async () =>
+              await answerDecision(env, reviewer, decisionId, rejection, "")
+          ),
+        };
+      } finally {
+        away.mockRestore();
+      }
+      const events = await allEvents();
+      const afterReview = await reviewDecision(
+        env,
+        reviewer,
+        decisionId,
+        approval
+      );
+
+      expect({
+        during,
+        answers,
+        refusalsAudited: events.filter(
+          ({ action, target, detail }) =>
+            action === "workflow.decision.answer_refused" &&
+            target?.id === decisionId &&
+            detail?.errorCode === "decision.unavailable"
+        ).length,
+        after: await shown(),
+        approvable: afterReview.state,
+      }).toStrictEqual({
+        during: {
+          page: {
+            description: uncheckedAskText,
+            input: undefined,
+            withheld: "unchecked",
+          },
+          inbox: "unchecked",
+          today: { asks: uncheckedAskText, withheld: "unchecked" },
+        },
+        // No answer at all: an outage is no reason to reject.
+        answers: {
+          approve: "decision.unavailable",
+          reject: "decision.unavailable",
+          confirm: "decision.unavailable",
+          answer: "decision.unavailable",
+        },
+        refusalsAudited: 2,
+        // Back by itself on the next read that can check it.
+        after: {
+          page: {
+            description: "Approve this invoice?",
+            input: { amount: 5 },
+            withheld: undefined,
+          },
+          inbox: undefined,
+          today: { asks: "Approve this invoice?", withheld: undefined },
+        },
+        approvable: "review",
+      });
+    });
+
+    it("check each run of a batch as its own person: one who left withholds their own run's ask, never another's", async () => {
+      const { fixture, workflowId, opened, reviewer, runAsking } =
+        await decisionInbox();
+      const permissionId = await brainGrantOf(fixture, workflowId, reviewer);
+      const source = await companySource();
+      const leaving = await person("admin");
+      const stays = await runAsking(fixture.app, opened);
+      // The newer, so first in the inbox and in its check.
+      const left = await runAsking(fixture.app, opened + 1000, {
+        principal: leaving.userId,
+      });
+      for (const { runId } of [stays, left]) {
+        // oxlint-disable-next-line no-await-in-loop -- one run at a time
+        await recalledBy(runId, source, permissionId);
+      }
+      // No longer a member: they read nothing of the company's.
+      await env.DB.prepare("DELETE FROM members WHERE user_id = ?")
+        .bind(leaving.userId)
+        .run();
+      const inbox = await waitingDecisions(env, reviewer);
+      const withheldOf = ({ decisionId }: typeof stays) =>
+        inbox.find(({ id }) => id === decisionId)?.withheld ?? "shown";
+
+      expect({
+        order: inbox
+          .map(({ id }) => id)
+          .filter((id) => id === stays.decisionId || id === left.decisionId),
+        stays: withheldOf(stays),
+        left: withheldOf(left),
+      }).toStrictEqual({
+        order: [left.decisionId, stays.decisionId],
+        stays: "shown",
+        left: "revoked",
       });
     });
 

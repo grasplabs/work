@@ -31,11 +31,13 @@ import { inList } from "../db/d1.ts";
 import {
   answerableByNow,
   resourceDecisionPending,
+  uncheckedAskText,
   withheldAskText,
 } from "../decisions/decisions.ts";
 import { startOfCompanyDay } from "../organization.ts";
 import { listWorkflowResources } from "../workflow-resources.ts";
-import { runsWhoseEvidenceHolds } from "./resource-reads.ts";
+import { runsEvidence } from "./resource-reads.ts";
+import type { EvidenceState } from "./resource-reads.ts";
 
 // The company's day at work (GRA-1255), for Runs › Today: every run
 // started since midnight in the organization's time zone, across the
@@ -125,6 +127,24 @@ const withWaits = <T extends { id: string }>(
   return [...rows, ...more.filter(({ id }) => !ids.has(id))];
 };
 
+/**
+ * What a run waiting on the reader asks them (`description`), as its
+ * decision's page shows it (decisions.ts): withheld once the run may no
+ * longer read what it read, not shown while that can't be checked.
+ */
+const askOf = (
+  evidence: EvidenceState,
+  description: string
+): Pick<NonNullable<TodayRun["waits"]>, "asks" | "withheld"> => {
+  if (evidence === "refused") {
+    return { asks: withheldAskText, withheld: "revoked" };
+  }
+  if (evidence === "unchecked") {
+    return { asks: uncheckedAskText, withheld: "unchecked" };
+  }
+  return { asks: description };
+};
+
 /** The runs of the day, in the lanes of `lanes`, with their decisions. */
 const runsOf = async (
   env: Env,
@@ -176,7 +196,7 @@ const runsOf = async (
   // What a run waiting on the reader asks, withheld once it may no longer
   // read what it read, or can't be checked, as its decision's page
   // withholds it (decisions.ts): those runs checked together.
-  const holding = await runsWhoseEvidenceHolds(
+  const states = await runsEvidence(
     env,
     shown.flatMap(({ run, mine }) =>
       mine === undefined
@@ -205,7 +225,7 @@ const runsOf = async (
               decision: mine.id,
               on: waitsOnOf(mine.deciders, teamNames),
               since: mine.openedAt.toISOString(),
-              asks: holding.has(run.id) ? mine.description : withheldAskText,
+              ...askOf(states.get(run.id) ?? "unchecked", mine.description),
             },
       waitsOnOthers: mine === undefined && open.length > 0,
       from: run.from !== null && seen.has(run.from) ? run.from : null,
