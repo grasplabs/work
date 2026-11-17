@@ -1,43 +1,9 @@
 import type { AppDraft } from "@grasp-os/shared/app-drafts";
 import type { App, AppMember, ViewedApp } from "@grasp-os/shared/apps";
 import type { Identity } from "@grasp-os/shared/rpc";
-import {
-  Alert,
-  AlertAction,
-  AlertDescription,
-  AlertTitle,
-} from "@grasp-os/ui/components/alert";
-import { Badge } from "@grasp-os/ui/components/badge";
-import { Button, buttonVariants } from "@grasp-os/ui/components/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@grasp-os/ui/components/dropdown-menu";
-import {
-  Empty,
-  EmptyContent,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle,
-} from "@grasp-os/ui/components/empty";
-import { Spinner } from "@grasp-os/ui/components/spinner";
 import { Trans, useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { Link, useNavigate, useRouter } from "@tanstack/react-router";
-import {
-  ArchiveIcon,
-  LayoutGridIcon,
-  LinkIcon,
-  Maximize2Icon,
-  MoreHorizontalIcon,
-  PanelRightIcon,
-  SparklesIcon,
-  TriangleAlertIcon,
-  UsersIcon,
-  XIcon,
-} from "lucide-react";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
@@ -46,13 +12,35 @@ import { answeredAfterBuild } from "../chat/build-answered.ts";
 import { chatLink } from "../chat/chat-link.ts";
 import { slotOf, useChatSubject } from "../chat/chat-subject.ts";
 import { useGlobalChat } from "../chat/global-chat.tsx";
-import { ErrorText } from "../error-text.tsx";
 import { ItemBar, ItemShell } from "../frame/item-shell.tsx";
 import { LoadingLines } from "../frame/page-states.tsx";
 import { SettingUp, SettingUpBar, Updating } from "../frame/setting-up.tsx";
 import type { SetUp } from "../frame/setting-up.tsx";
 import type { Crumb } from "../frame/site-header.tsx";
+import { AppBuilding } from "../grasp/app-building/index.ts";
+import { Banner } from "../grasp/banner/index.ts";
+import { Button } from "../grasp/button/index.ts";
+import {
+  DropdownMenu,
+  DropdownMenuItem,
+  DropdownMenuPanel,
+  DropdownMenuTrigger,
+} from "../grasp/dropdown-menu/index.ts";
+import { Empty } from "../grasp/empty/index.ts";
+import {
+  AppWindow,
+  Archive,
+  Chat,
+  Expand,
+  Link as LinkIcon,
+  More,
+  People,
+  Sparkles,
+} from "../grasp/icons/index.ts";
+import type { IconData } from "../grasp/icons/index.ts";
+import { Spinner } from "../grasp/spinner/index.ts";
 import { TabsLink, TabsNav } from "../grasp/tabs/nav.tsx";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { PageFrame } from "../pages/page-frame.tsx";
 import type { FrameFix } from "../pages/page-frame.tsx";
 import { useVersionPushes } from "../pages/use-version-pushes.ts";
@@ -129,6 +117,71 @@ const shownKey = (shown: ReadOnlyShown | undefined): string => {
   return "point" in shown ? `point:${shown.point}` : `version:${shown.version}`;
 };
 
+const styles = stylex.create({
+  // A state in place of the preview, on the page's soft ground.
+  place: {
+    display: "flex",
+    flexGrow: 1,
+    minHeight: 0,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: grasp.space6,
+    backgroundColor: grasp.soft,
+  },
+  // The first build, filling the preview's place.
+  building: {
+    display: "flex",
+    flexGrow: 1,
+    minHeight: 0,
+  },
+  column: {
+    display: "flex",
+    flexDirection: "column",
+    flexGrow: 1,
+    minHeight: 0,
+    minWidth: 0,
+  },
+  fill: {
+    display: "flex",
+    flexDirection: "column",
+    height: "100%",
+    minHeight: 0,
+    minWidth: 0,
+  },
+  hidden: { display: "none" },
+  // Over the preview: the first build, or a write that broke it mid-turn.
+  over: {
+    position: "absolute",
+    inset: 0,
+    display: "flex",
+    flexDirection: "column",
+  },
+  stage: {
+    position: "relative",
+    display: "flex",
+    flexDirection: "column",
+    flexGrow: 1,
+    minHeight: 0,
+  },
+  // Running unseen while Grasp sets it up, so it is there to fade in.
+  frame: {
+    display: "flex",
+    flexDirection: "column",
+    flexGrow: 1,
+    minHeight: 0,
+    opacity: 1,
+    transitionProperty: {
+      default: "opacity",
+      "@media (prefers-reduced-motion: reduce)": "none",
+    },
+    transitionDuration: grasp.durationUi,
+    transitionTimingFunction: grasp.ease,
+  },
+  unseen: { opacity: 0 },
+  strip: { flexShrink: 0 },
+  padded: { padding: grasp.space4 },
+});
+
 /** The switch's entries, in order. */
 const views = ["preview", "code", "data", "settings"] as const;
 
@@ -185,68 +238,62 @@ const MoreMenu = ({
   changing: boolean;
 }) => {
   const { t } = useLingui();
+  const navigate = useNavigate();
   const [linking, setLinking] = useState(false);
+  const live = app.currentVersion !== null && !app.archived;
   return (
     <>
       <DropdownMenu>
-        <DropdownMenuTrigger
-          render={
-            <Button aria-label={t`More`} size="icon-sm" variant="ghost" />
-          }
-        >
-          <MoreHorizontalIcon />
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
+        <DropdownMenuTrigger icon={More} label={t`More`} variant="ghost" />
+        <DropdownMenuPanel align="end">
           {app.archived ? null : (
             <DropdownMenuItem
-              onClick={() => {
+              icon={LinkIcon}
+              onSelect={() => {
                 setLinking(true);
               }}
             >
-              <LinkIcon />
-              <Trans>Link</Trans>
+              {t`Link`}
             </DropdownMenuItem>
           )}
-          {app.currentVersion === null || app.archived || !changing ? null : (
+          {live && changing ? (
             <DropdownMenuItem
-              render={
-                <Link
-                  from="/apps/$app"
-                  params={{ app: app.id }}
-                  replace
-                  search={(held) => ({
-                    project: held.project,
-                    env: "live" as const,
-                  })}
-                  to="/apps/$app"
-                />
-              }
+              icon={People}
+              onSelect={() => {
+                void navigate({
+                  from: "/apps/$app",
+                  to: "/apps/$app",
+                  params: { app: app.id },
+                  replace: true,
+                  search: (held) => ({ project: held.project, env: "live" }),
+                });
+              }}
             >
-              <UsersIcon />
-              <Trans>See what your team sees</Trans>
+              {t`See what your team sees`}
             </DropdownMenuItem>
-          )}
-          {app.currentVersion === null || app.archived ? null : (
+          ) : null}
+          {live ? (
             <DropdownMenuItem
-              render={
+              icon={Expand}
+              onSelect={() => {
                 // Outside the shell: a document of its own.
-                <a
-                  aria-label={t`Open full page`}
-                  href={`/apps/${app.id}/full`}
-                />
-              }
+                window.location.assign(`/apps/${app.id}/full`);
+              }}
             >
-              <Maximize2Icon />
-              <Trans>Open full page</Trans>
+              {t`Open full page`}
             </DropdownMenuItem>
-          )}
+          ) : null}
           {chatId === undefined ? null : (
-            <DropdownMenuItem render={<Link {...chatLink(chatId)} />}>
-              <PanelRightIcon />
-              <Trans>Open the chat in Chat</Trans>
+            <DropdownMenuItem
+              icon={Chat}
+              onSelect={() => {
+                void navigate(chatLink(chatId));
+              }}
+            >
+              {t`Open the chat in Chat`}
             </DropdownMenuItem>
           )}
-        </DropdownMenuContent>
+        </DropdownMenuPanel>
       </DropdownMenu>
       <AppLinkDialog app={app} onOpenChange={setLinking} open={linking} />
     </>
@@ -325,20 +372,22 @@ const PreviewState = ({
   title,
   children,
   action,
+  kind = "empty",
 }: {
-  icon: ReactNode;
-  title: ReactNode;
+  icon?: IconData;
+  title: string;
   children: ReactNode;
   action?: ReactNode;
+  kind?: "empty" | "error";
 }) => (
-  <div className="bg-muted flex min-h-0 flex-1 items-center justify-center p-6">
-    <Empty>
-      <EmptyHeader>
-        <EmptyMedia variant="icon">{icon}</EmptyMedia>
-        <EmptyTitle>{title}</EmptyTitle>
-        <EmptyDescription>{children}</EmptyDescription>
-      </EmptyHeader>
-      {action === undefined ? null : <EmptyContent>{action}</EmptyContent>}
+  <div {...stylex.props(styles.place)}>
+    <Empty
+      {...(icon === undefined ? {} : { icon })}
+      {...(action === undefined ? {} : { action })}
+      kind={kind}
+      title={title}
+    >
+      {children}
     </Empty>
   </div>
 );
@@ -348,34 +397,60 @@ const PreviewState = ({
  * doesn't fit the draft's data model: core applies the change to the
  * test data only once it is reset (core's sealed-previews.ts), in Data.
  */
-const StaleTestData = ({ app }: { app: string }) => (
-  <div className="flex-none border-b p-3">
-    <Alert variant="attention">
-      <TriangleAlertIcon />
-      <AlertTitle>
-        <Trans>The example data doesn&apos;t fit the change</Trans>
-      </AlertTitle>
-      <AlertDescription>
-        <Trans>
-          Your change reshapes the App&apos;s data in a way the example records
-          can&apos;t follow. Reset the example data in Data to try it. What your
-          team entered isn&apos;t touched.
-        </Trans>
-      </AlertDescription>
-      <AlertAction>
-        <Link
-          className={buttonVariants({ size: "sm", variant: "outline" })}
-          params={{ app }}
-          replace
-          search={(held) => ({ project: held.project, view: "data" })}
-          to="/apps/$app"
+const StaleTestData = ({ app }: { app: string }) => {
+  const { t } = useLingui();
+  return (
+    <Banner
+      action={
+        <Button
+          render={
+            <Link
+              params={{ app }}
+              replace
+              search={(held) => ({ project: held.project, view: "data" })}
+              to="/apps/$app"
+            />
+          }
+          size="xs"
+          variant="quiet"
         >
-          <Trans>Open Data</Trans>
-        </Link>
-      </AlertAction>
-    </Alert>
-  </div>
-);
+          {t`Open Data`}
+        </Button>
+      }
+      layout={styles.strip}
+      title={t`The example data doesn't fit the change`}
+      tone="attention"
+    >
+      <Trans>
+        Your change reshapes the App&apos;s data in a way the example records
+        can&apos;t follow. Reset the example data in Data to try it. What your
+        team entered isn&apos;t touched.
+      </Trans>
+    </Banner>
+  );
+};
+
+/**
+ * The first build: Grasp's cursors assembling an App in the preview's
+ * place (Grasp UI's App building), until there is something to see.
+ */
+const FirstBuild = () => {
+  const { t } = useLingui();
+  return (
+    <div {...stylex.props(styles.building)}>
+      <AppBuilding
+        aria-label={t`Grasp is building`}
+        cursors={{
+          layout: t({ message: "Layout", context: "who builds an app's look" }),
+          data: t({ message: "Data", context: "who builds an app's data" }),
+          copy: t({ message: "Words", context: "who writes an app's words" }),
+        }}
+        layout={styles.building}
+        step={t`It shows here as soon as there is something to see.`}
+      />
+    </div>
+  );
+};
 
 /** Whether the App has no page to preview yet: nothing written to it and no version. */
 const hasNoPage = (app: App, draft: AppDraft): boolean =>
@@ -385,19 +460,8 @@ const hasNoPage = (app: App, draft: AppDraft): boolean =>
  * An App with no page yet: Grasp building it, or, before anything was
  * asked, what it should do (app-start.tsx).
  */
-const NoPageYet = ({ app, running }: { app: string; running: boolean }) => {
-  const { t } = useLingui();
-  return running ? (
-    <PreviewState
-      icon={<Spinner aria-label={t`Building…`} />}
-      title={<Trans>Grasp is building</Trans>}
-    >
-      <Trans>It shows here as soon as there is something to see.</Trans>
-    </PreviewState>
-  ) : (
-    <AppStart app={app} />
-  );
-};
+const NoPageYet = ({ app, running }: { app: string; running: boolean }) =>
+  running ? <FirstBuild /> : <AppStart app={app} />;
 
 /** The label of the App's version `version`, read to name it. */
 const useVersionLabel = (
@@ -411,21 +475,17 @@ const useVersionLabel = (
 };
 
 /** What the read-only preview shows: an earlier state, or a version by its label. */
-const ShownBadge = ({
-  shown,
-  label,
-}: {
-  shown: ReadOnlyShown;
-  label: string | undefined;
-}) => {
+const useShownTitle = (
+  shown: ReadOnlyShown,
+  label: string | undefined
+): string => {
+  const { t } = useLingui();
   if ("point" in shown) {
-    return <Trans>An earlier state, read-only</Trans>;
+    return t`An earlier state, read-only`;
   }
-  return label === undefined ? (
-    <Trans>This version, read-only</Trans>
-  ) : (
-    <Trans>{label}, read-only</Trans>
-  );
+  return label === undefined
+    ? t`This version, read-only`
+    : t`${label}, read-only`;
 };
 
 /**
@@ -442,12 +502,14 @@ const ReadOnlyBar = ({
   shown: ReadOnlyShown;
   onChanged: () => void;
 }) => {
+  const { t } = useLingui();
   const navigate = useNavigate();
   const [asked, setAsked] = useState<Asked>();
   const label = useVersionLabel(
     draft.app,
     "version" in shown ? shown.version : undefined
   );
+  const title = useShownTitle(shown, label);
   const back = (): void => {
     void navigate({
       to: ".",
@@ -468,27 +530,33 @@ const ReadOnlyBar = ({
     }
   );
   return (
-    <div className="flex flex-none flex-wrap items-center gap-2 border-b px-3 py-1.5">
-      <Badge variant="attention">
-        <ShownBadge label={label} shown={shown} />
-      </Badge>
-      <span className="flex-1" />
-      <ErrorText>{failure}</ErrorText>
-      <Button onClick={back} size="sm" variant="ghost">
-        <Trans>Back to your version</Trans>
-      </Button>
-      {"point" in shown ? (
-        <Button
-          disabled={busy}
-          onClick={() => {
-            setAsked({ kind: "restore", number: shown.point });
-          }}
-          size="sm"
-          variant="outline"
-        >
-          <Trans>Restore</Trans>
-        </Button>
-      ) : null}
+    <>
+      <Banner
+        action={
+          <>
+            {"point" in shown ? (
+              <Button
+                disabled={busy}
+                onClick={() => {
+                  setAsked({ kind: "restore", number: shown.point });
+                }}
+                size="xs"
+                variant="quiet"
+              >
+                {t`Restore`}
+              </Button>
+            ) : null}
+            <Button onClick={back} size="xs" variant="ghost">
+              {t`Back to your version`}
+            </Button>
+          </>
+        }
+        layout={styles.strip}
+        title={title}
+        tone={failure === undefined ? "attention" : "danger"}
+      >
+        {failure}
+      </Banner>
       <ConfirmChange
         asked={asked}
         onCancel={() => {
@@ -499,7 +567,7 @@ const ReadOnlyBar = ({
           void change(confirmed);
         }}
       />
-    </div>
+    </>
   );
 };
 
@@ -507,28 +575,38 @@ const ReadOnlyBar = ({
  * Over the main area while it shows what the team sees (`?env=live`,
  * from "See what your team sees"): what it is, and the way back.
  */
-const TeamViewBar = ({ app }: { app: string }) => (
-  <div className="flex flex-none flex-wrap items-center gap-2 border-b px-3 py-1.5">
-    <Badge variant="passed">
-      <Trans>What your team sees</Trans>
-    </Badge>
-    <span className="flex-1" />
-    <Link
-      className={buttonVariants({ size: "sm", variant: "ghost" })}
-      from="/apps/$app"
-      params={{ app }}
-      replace
-      search={(held) => ({
-        view: held.view,
-        project: held.project,
-        env: undefined,
-      })}
-      to="/apps/$app"
-    >
-      <Trans>Back to your version</Trans>
-    </Link>
-  </div>
-);
+const TeamViewBar = ({ app }: { app: string }) => {
+  const { t } = useLingui();
+  return (
+    <Banner
+      action={
+        <Button
+          render={
+            <Link
+              from="/apps/$app"
+              params={{ app }}
+              replace
+              search={(held) => ({
+                view: held.view,
+                project: held.project,
+                env: undefined,
+              })}
+              to="/apps/$app"
+            />
+          }
+          size="xs"
+          variant="ghost"
+        >
+          {t`Back to your version`}
+        </Button>
+      }
+      icon={People}
+      layout={styles.strip}
+      title={t`What your team sees`}
+      tone="success"
+    />
+  );
+};
 
 /**
  * Over the preview of an App just made (made-tip.ts), until dismissed:
@@ -541,36 +619,31 @@ const MadeTip = ({ app }: { app: string }) => {
     return null;
   }
   return (
-    <div className="flex-none border-b p-3">
-      <Alert>
-        <SparklesIcon />
-        <AlertTitle>
-          <Trans>This is your new App, with example data.</Trans>
-        </AlertTitle>
-        <AlertDescription>
-          <Trans>
-            Try it out: only you see it, and the example data is just for
-            trying. To change anything, tell Grasp in the chat. When it&apos;s
-            right, share it with your team.
-          </Trans>
-        </AlertDescription>
-        <AlertAction>
-          <Button
-            aria-label={t`Dismiss the tip`}
-            onClick={() => {
-              dismissMadeTip(app);
-              setShown(false);
-            }}
-            size="icon-sm"
-            variant="ghost"
-          >
-            <XIcon />
-          </Button>
-        </AlertAction>
-      </Alert>
-    </div>
+    <Banner
+      dismissLabel={t`Dismiss the tip`}
+      icon={Sparkles}
+      layout={styles.strip}
+      onDismiss={() => {
+        dismissMadeTip(app);
+        setShown(false);
+      }}
+      title={t`This is your new App, with example data.`}
+    >
+      <Trans>
+        Try it out: only you see it, and the example data is just for trying. To
+        change anything, tell Grasp in the chat. When it&apos;s right, share it
+        with your team.
+      </Trans>
+    </Banner>
   );
 };
+
+/** In the preview's place while a new App is set up: its first build, or that it isn't ready. */
+const SetUpOver = ({ failed, name }: { failed: boolean; name: string }) => (
+  <div {...stylex.props(styles.over)}>
+    {failed ? <SettingUp failed name={name} /> : <FirstBuild />}
+  </div>
+);
 
 /**
  * The main area's preview of the builders' working version: the App as
@@ -616,8 +689,8 @@ const PreviewArea = ({
   // The draft is read first: the preview follows its revisions.
   if (draft === undefined) {
     return (
-      <div className="bg-muted flex min-h-0 flex-1 items-center justify-center p-6">
-        <Spinner aria-label={t`Loading…`} />
+      <div {...stylex.props(styles.place)}>
+        <Spinner label={t`Loading…`} size="lg" />
       </div>
     );
   }
@@ -643,23 +716,22 @@ const PreviewArea = ({
     );
   };
   return (
-    <div className="relative flex min-h-0 flex-1 flex-col">
+    <div {...stylex.props(styles.stage)}>
       {shown === undefined ? null : (
         <ReadOnlyBar draft={draft} onChanged={onChanged} shown={shown} />
       )}
-      {/* Once Grasp is done: the example data it speaks of is there then. */}
-      {shown === undefined && ready && !running ? (
-        <MadeTip app={app.id} />
-      ) : null}
-      {staleAt === revision && shown === undefined && ready ? (
-        <StaleTestData app={app.id} />
+      {shown === undefined && ready ? (
+        <>
+          {/* Once Grasp is done: the example data it speaks of is there then. */}
+          {running ? null : <MadeTip app={app.id} />}
+          {staleAt === revision ? <StaleTestData app={app.id} /> : null}
+        </>
       ) : null}
       {/* Running unseen while Grasp sets it up, so it is there to fade
         in once its first version runs; nothing of it reached before. */}
       <div
-        className="flex min-h-0 flex-1 flex-col transition-opacity duration-300 data-[ready=false]:opacity-0 motion-reduce:transition-none"
-        data-ready={ready}
         inert={!ready}
+        {...stylex.props(styles.frame, !ready && styles.unseen)}
       >
         <DraftPreview
           app={app.id}
@@ -682,14 +754,10 @@ const PreviewArea = ({
           shown={shown}
         />
       </div>
-      {ready ? null : (
-        <div className="absolute inset-0 flex flex-col">
-          <SettingUp failed={setUp === "failed"} name={name} />
-        </div>
-      )}
+      {ready ? null : <SetUpOver failed={setUp === "failed"} name={name} />}
       {/* Broken mid-turn: never the error while Grasp still works on it. */}
       {ready && running && failedAt === revision ? (
-        <div className="absolute inset-0 flex flex-col">
+        <div {...stylex.props(styles.over)}>
           <Updating name={name} />
         </div>
       ) : null}
@@ -721,10 +789,7 @@ const LivePreview = ({
   }
   if (app.currentVersion === null) {
     return (
-      <PreviewState
-        icon={<LayoutGridIcon />}
-        title={<Trans>Your team has nothing yet</Trans>}
-      >
+      <PreviewState icon={AppWindow} title={t`Your team has nothing yet`}>
         <Trans>They see it once you share it with them.</Trans>
       </PreviewState>
     );
@@ -732,7 +797,7 @@ const LivePreview = ({
   return (
     <section
       aria-label={t`${name}, as your team sees it`}
-      className="bg-background flex min-h-0 flex-1 flex-col overflow-hidden"
+      {...stylex.props(styles.column)}
     >
       <PageFrame
         app={app.id}
@@ -755,7 +820,7 @@ const LivePreview = ({
 const LiveData = ({ app }: { app: string }) => {
   const read = useAppRead(app, readTables);
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div {...stylex.props(styles.column)}>
       <Read read={read}>
         {({ version, tables }) => (
           <AppData
@@ -825,17 +890,15 @@ const MainArea = ({
   /** The draft the Data view changes; none without one. */
   modelDraft?: ModelDraft;
 }) => (
-  <div className="flex h-full min-h-0 min-w-0 flex-col">
-    <div
-      className={view === "preview" ? "flex min-h-0 flex-1 flex-col" : "hidden"}
-    >
+  <div {...stylex.props(styles.fill)}>
+    <div {...stylex.props(view === "preview" ? styles.column : styles.hidden)}>
       {preview}
     </div>
     {view === "code" ? (
-      <div className="flex min-h-0 flex-1 flex-col">
+      <div {...stylex.props(styles.column)}>
         <Suspense
           fallback={
-            <div className="p-4">
+            <div {...stylex.props(styles.padded)}>
               <LoadingLines lines={6} />
             </div>
           }
@@ -845,7 +908,7 @@ const MainArea = ({
       </div>
     ) : null}
     {view === "data" ? (
-      <div className="flex min-h-0 flex-1 flex-col">
+      <div {...stylex.props(styles.column)}>
         <DataArea app={app.id} env={env} modelDraft={modelDraft} />
       </div>
     ) : null}
@@ -1123,6 +1186,7 @@ const Archived = ({
   section: AppSettingsSection | undefined;
   identity: Identity;
 }) => {
+  const { t } = useLingui();
   const { busy, failure, move } = useStatusMove(app.id);
   return (
     <ItemShell
@@ -1144,26 +1208,26 @@ const Archived = ({
         preview={
           <PreviewState
             action={
-              <div className="flex flex-col items-center gap-2">
-                <Button
-                  disabled={busy}
-                  onClick={() => {
-                    move("restore");
-                  }}
-                  variant="outline"
-                >
-                  <Trans>Restore</Trans>
-                </Button>
-                <ErrorText>{failure}</ErrorText>
-              </div>
+              <Button
+                disabled={busy}
+                onClick={() => {
+                  move("restore");
+                }}
+                variant="quiet"
+              >
+                {t`Restore`}
+              </Button>
             }
-            icon={<ArchiveIcon />}
-            title={<Trans>This App is archived</Trans>}
+            icon={Archive}
+            kind={failure === undefined ? "empty" : "error"}
+            title={t`This App is archived`}
           >
-            <Trans>
-              It is kept as it was, and nobody works on it. Restore it to change
-              it again.
-            </Trans>
+            {failure ?? (
+              <Trans>
+                It is kept as it was, and nobody works on it. Restore it to
+                change it again.
+              </Trans>
+            )}
           </PreviewState>
         }
         section={section}

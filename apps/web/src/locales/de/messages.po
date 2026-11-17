@@ -3329,7 +3329,6 @@ msgstr "Bauen"
 msgid "Builder"
 msgstr "Builder"
 
-#: src/apps/app-workspace.tsx
 #: src/chat/subject-bar.tsx
 msgid "Building…"
 msgstr "Wird gebaut…"
@@ -4681,6 +4680,11 @@ msgstr "Daten"
 
 #: src/apps/app-workspace.tsx
 msgctxt "an app's workspace view"
+msgid "Data"
+msgstr "Daten"
+
+#: src/apps/app-workspace.tsx
+msgctxt "who builds an app's data"
 msgid "Data"
 msgstr "Daten"
 
@@ -7821,6 +7825,11 @@ msgstr "Von links nach rechts anordnen"
 #: src/workflows/workflow-flow.tsx
 msgid "Lay it out top to bottom"
 msgstr "Von oben nach unten anordnen"
+
+#: src/apps/app-workspace.tsx
+msgctxt "who builds an app's look"
+msgid "Layout"
+msgstr "Layout"
 
 #: src/onboarding/interviews-progress.tsx
 msgid "Lead not yet"
@@ -16636,6 +16645,11 @@ msgstr "Einen wartenden Lauf geweckt, dessen Weckruf nicht angekommen war"
 #: src/interview/words.ts
 msgid "Word"
 msgstr "Begriff"
+
+#: src/apps/app-workspace.tsx
+msgctxt "who writes an app's words"
+msgid "Words"
+msgstr "Texte"
 
 #: src/apps/field-kinds.tsx
 msgid "Words and sentences"

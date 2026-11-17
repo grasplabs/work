@@ -587,6 +587,22 @@ const typeInPrompt = (box: Element, text: string): void => {
   box.dispatchEvent(new Event("input", { bubbles: true }));
 };
 
+/** Where pressing the open menu's item `name` takes the person. */
+const goesTo = async (
+  router: { state: { location: { href: string } } },
+  name: string
+): Promise<string | undefined> => {
+  const item = [
+    ...document.querySelectorAll<HTMLElement>('[role="menuitem"]'),
+  ].find((each) => each.textContent?.trim() === name);
+  if (item === undefined) {
+    return undefined;
+  }
+  await press(item);
+  await settled();
+  return router.state.location.href;
+};
+
 /** The line under the bar of changes only the builders see, if shown. */
 const changesLine = (): HTMLElement | null =>
   document.querySelector('section[aria-label="Changes only you see"]');
@@ -806,7 +822,9 @@ describe(AppWorkspace, () => {
       async () => await Promise.withResolvers<never>().promise
     );
     const reading = {
-      loading: document.querySelector('[aria-label="Loading…"]') !== null,
+      loading: [...document.querySelectorAll('[role="status"]')].some(
+        (each) => each.textContent === "Loading…"
+      ),
       frame: document.querySelector("iframe"),
     };
 
@@ -894,11 +912,9 @@ describe(AppWorkspace, () => {
     await settled();
     const nothingShared = await moreMenu();
     takenDown();
-    await opened(fakeApps().apps);
+    const { router } = await opened(fakeApps().apps);
     const offered = await moreMenu();
-    const link = [...document.querySelectorAll('[role="menuitem"]')]
-      .find((item) => item.textContent?.trim() === "See what your team sees")
-      ?.getAttribute("href");
+    const link = await goesTo(router, "See what your team sees");
     takenDown();
     await opened(
       fakeApps().apps,
@@ -1121,7 +1137,7 @@ describe(AppWorkspace, () => {
   });
 
   it("makes the chat the person came from, building the App, the App's chat, rather than asking core for one", async () => {
-    const { askedForApp } = await opened(
+    const { askedForApp, router } = await opened(
       fakeApps().apps,
       identityOf(false),
       "chat-built-in"
@@ -1132,9 +1148,7 @@ describe(AppWorkspace, () => {
     expect({
       askedForApp,
       kept: activeChat(deskSlot),
-      openInChat: document
-        .querySelector('[role="menuitem"][href^="/chats/"]')
-        ?.getAttribute("href"),
+      openInChat: await goesTo(router, "Open the chat in Chat"),
     }).toStrictEqual({
       askedForApp: [],
       kept: "chat-built-in",
@@ -1336,7 +1350,7 @@ describe(AppWorkspace, () => {
   });
 
   it("keeps the chat handed over when core won't follow it for now, saying why, rather than opening another", async () => {
-    const { askedForApp } = await opened(
+    const { askedForApp, router } = await opened(
       fakeApps().apps,
       identityOf(false),
       "chat-handed-over",
@@ -1373,9 +1387,7 @@ describe(AppWorkspace, () => {
     expect({
       askedForApp,
       says: said,
-      openInChat: document
-        .querySelector('[role="menuitem"][href^="/chats/"]')
-        ?.getAttribute("href"),
+      openInChat: await goesTo(router, "Open the chat in Chat"),
     }).toStrictEqual({
       askedForApp: [],
       says: true,
@@ -2162,7 +2174,7 @@ describe(AppWorkspace, () => {
     });
   });
 
-  it("sets a new App up calmly while Grasp builds it: its name, Share off, nothing of the App or its tip until it works", async () => {
+  it("sets a new App up calmly while Grasp builds it: its name, Grasp building it in the preview's place, Share off, nothing of the App or its tip until it works", async () => {
     markMade("invoice-desk");
     const core = new PreviewingCore("page.build_failed");
     socketsTo(core);
@@ -2193,8 +2205,9 @@ describe(AppWorkspace, () => {
     const share = button("Share with your team");
 
     expect({
-      setting: says("Setting up Invoices…"),
-      calm: says("Grasp is building it. This takes a minute or two."),
+      building:
+        document.querySelector('[aria-label="Grasp is building"]') !== null,
+      calm: says("It shows here as soon as there is something to see."),
       state: says("Setting up"),
       shareOff: off(share),
       views: document.querySelector('nav[aria-label="Workspace views"]'),
@@ -2208,7 +2221,7 @@ describe(AppWorkspace, () => {
       fix: reachable("Fix with Grasp") !== undefined,
       tip: says("This is your new App, with example data."),
     }).toStrictEqual({
-      setting: true,
+      building: true,
       calm: true,
       state: true,
       shareOff: true,
