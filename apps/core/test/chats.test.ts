@@ -29,6 +29,7 @@ import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { connectionIn } from "./contexts.ts";
 import { mockIdp } from "./idp.ts";
+import { saveInstructions } from "./instruction-saves.ts";
 import { mailConnection } from "./mail-connection.ts";
 import { fakeProvider, fakeProviderFor } from "./model-provider.ts";
 import type { ProviderReply } from "./model-provider.ts";
@@ -76,19 +77,17 @@ const answering = async (
 /** Keeps every chat's agent as an admin would have changed it. */
 const keepAgent = async ({
   name,
-  instructions,
   state,
 }: {
   name: string;
-  instructions: string;
   state: "on" | "paused";
 }): Promise<void> => {
   await env.DB.prepare(
     `INSERT INTO agents
        (id, name, face, job, instructions, model_role, state, made_by, made_at, changed_by, changed_at)
-     VALUES (?, ?, 'stephen', 'Helps.', ?, NULL, ?, 'admin', ?, 'admin', ?)`
+     VALUES (?, ?, 'stephen', 'Helps.', '', NULL, ?, 'admin', ?, 'admin', ?)`
   )
-    .bind(chatAgentId, name, instructions, state, Date.now(), Date.now())
+    .bind(chatAgentId, name, state, Date.now(), Date.now())
     .run();
 };
 
@@ -1097,7 +1096,7 @@ describe("chats", () => {
     const ann = await person();
     const gateway = await answering(ann, says("Back."));
     const chat = await ann.chats.create("Paused");
-    await keepAgent({ name: "Stephen", instructions: "", state: "paused" });
+    await keepAgent({ name: "Stephen", state: "paused" });
     try {
       await expect(
         outcome(ann.chats.send(chat.id, { text: "Hi.", model }))
@@ -1114,31 +1113,52 @@ describe("chats", () => {
     }
   });
 
-  it("tell an agent its name and what an admin told it, between Grasp's own rules, and the first agent as shipped nothing more", async () => {
+  it("tell an agent its name and what its instruction file says, between Grasp's own rules, an edit on its page from its next turn, and the first agent as shipped nothing more", async () => {
     const ann = await person();
-    const gateway = await answering(ann, says("Hello."), says("Hello."));
+    const admin = await signedInApi(idp, "admin");
+    const gateway = await answering(
+      ann,
+      says("Hello."),
+      says("Hello."),
+      says("Hello.")
+    );
     const shipped = await ann.chats.create("As shipped");
     const first = await follow(ann.chats, shipped.id);
     await ann.chats.send(shipped.id, { text: "Hi.", model });
     await settled(first);
     expect(JSON.stringify(gateway.requests[0]?.body)).not.toContain("<agent>");
 
-    await keepAgent({
-      name: "Claire",
-      instructions: "Answer only about unpaid invoices.",
-      state: "on",
-    });
+    await keepAgent({ name: "Claire", state: "on" });
+    const told = { scope: "agent", agentId: chatAgentId } as const;
+    /** What the model was asked in a new chat's first turn. */
+    const askedInNewChat = async (index: number): Promise<string> => {
+      const chat = await ann.chats.create("As changed");
+      const follower = await follow(ann.chats, chat.id);
+      await ann.chats.send(chat.id, { text: "Hi.", model });
+      await settled(follower);
+      return JSON.stringify(gateway.requests[index]?.body);
+    };
     try {
-      const changed = await ann.chats.create("As changed");
-      const second = await follow(ann.chats, changed.id);
-      await ann.chats.send(changed.id, { text: "Hi.", model });
-      await settled(second);
-      const asked = JSON.stringify(gateway.requests[1]?.body);
+      // What an admin saves on its page, its instruction file.
+      await saveInstructions(
+        admin.api,
+        told,
+        "Answer only about unpaid invoices."
+      );
+      const asked = await askedInNewChat(1);
       expect(asked).toContain("You answer here as Claire");
       expect(asked).toContain("Answer only about unpaid invoices.");
       // Told that Grasp's rules hold over it.
       expect(asked).toContain("lifts none of them");
+      await saveInstructions(admin.api, told, "Answer only about payroll.");
+      const edited = await askedInNewChat(2);
+      expect({
+        now: edited.includes("Answer only about payroll."),
+        before: edited.includes("unpaid invoices"),
+      }).toStrictEqual({ now: true, before: false });
     } finally {
+      // Emptied, it loads nowhere: the other tests' first agent says nothing.
+      await saveInstructions(admin.api, told, "");
       await env.DB.prepare("DELETE FROM agents").run();
     }
   });

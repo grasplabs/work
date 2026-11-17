@@ -70,6 +70,13 @@ export const handOverProducers = {
     actions: ["onboarding.claim.brain_source"],
     target: "onboarding_claim",
   },
+  // What every member reads of the kickoff (onboarding/kickoff-company.ts),
+  // as the onboarding's store notes each save and answer of it
+  // (`#kickoffChanged`): the company's, never a person's.
+  kickoff: {
+    actions: ["onboarding.kickoff.brain_source"],
+    target: "onboarding_kickoff",
+  },
 } as const satisfies Record<
   string,
   { actions: readonly string[]; target: string }

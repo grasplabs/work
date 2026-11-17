@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from "vite-plus/test";
 
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
+import { saveInstructions } from "./instruction-saves.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
 
 // A person's own agent offered to the company: its owner offers it, and
@@ -22,7 +23,6 @@ const said = (name: string) => ({
   name,
   face: "pen",
   job: "Drafts weekly client notes.",
-  instructions: "Short sentences, no greetings.",
   modelRole: null,
 });
 
@@ -43,6 +43,8 @@ describe("a person's own agent offered to the company", slow, () => {
     const ben = await signedInApi(idp, "user");
     const admin = await signedInApi(idp, "admin");
     const mine = await ann.api.connections.makeOwnAgent(said("Scribe"));
+    const told = { scope: "agent", agentId: mine.id } as const;
+    await saveInstructions(ann.api, told, "Short sentences, no greetings.");
     const listedBefore = await admin.api.connections.offeredAgents();
 
     const refused = {
@@ -51,6 +53,9 @@ describe("a person's own agent offered to the company", slow, () => {
     };
     await ann.api.connections.offerOwnAgent(mine.id, true);
     const offered = await admin.api.connections.offeredAgents();
+    // When it was offered and last changed, as its owner reads it.
+    const owned = await ann.api.connections.ownAgents();
+    const asOwned = owned.find(({ id }) => id === mine.id);
     const events = await allEvents();
     const recorded = events.filter(({ target }) => target?.id === mine.id);
     const companys = await admin.api.connections.agents();
@@ -58,12 +63,10 @@ describe("a person's own agent offered to the company", slow, () => {
     expect({
       listedBefore,
       refused,
-      offered: offered.map(({ id, name, instructions, ownerId }) => [
-        id,
-        name,
-        instructions,
-        ownerId,
-      ]),
+      // Whole: nothing of what its owner told it among it.
+      offered,
+      // What it is told stays its owner's alone, offered or not.
+      adminReads: await outcome(admin.api.instructions.read(told)),
       byUser: await outcome(ben.api.connections.offeredAgents()),
       // Still its owner's, and still none of the company's.
       companys: companys.some(({ id }) => id === mine.id),
@@ -73,12 +76,25 @@ describe("a person's own agent offered to the company", slow, () => {
       listedBefore: [],
       refused: { ben: "role.forbidden", admin: "agent.unknown" },
       offered: [
-        [mine.id, "Scribe", "Short sentences, no greetings.", ann.userId],
+        {
+          id: mine.id,
+          name: "Scribe",
+          face: "pen",
+          job: "Drafts weekly client notes.",
+          modelRole: null,
+          model: null,
+          state: "on",
+          ownerId: ann.userId,
+          offeredAt: asOwned?.offeredAt,
+          changedBy: ann.userId,
+          changedAt: asOwned?.changedAt,
+        },
       ],
+      adminReads: "agent.unknown",
       byUser: "role.forbidden",
       companys: false,
       recorded: [
-        ["agent.made", { own: "true", instructionsLength: "30" }],
+        ["agent.made", { own: "true" }],
         ["agent.offered", { offered: "true" }],
       ],
       named: false,

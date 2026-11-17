@@ -652,101 +652,6 @@ describe("recall, as an App, a workflow and a chat reach it", setUpTime, () => {
     expect(JSON.stringify(events)).not.toContain(word);
   });
 
-  it("answers an App, a workflow and a chat's code exactly as before any team claim, however many match and however small the budget, while the member reads them", async () => {
-    const { word, admin, ada } = await company();
-    const question = `${word} rota`;
-    // A budget that holds one passage: what the company may read for the
-    // question, recalled with room to spare and counted as the Brain
-    // counts it. Whatever else took a place would show.
-    await embeddedAll();
-    const { items: roomy } = await recallPassagesAs(env, ada.userId, {
-      question,
-      budget: { tokens: 2000 },
-      personal: false,
-      company: true,
-      teams: [],
-    });
-    const [onePassage] = roomy;
-    if (onePassage === undefined) {
-      throw new Error("Nothing the company may read answers the question.");
-    }
-    const request = {
-      question,
-      budget: {
-        tokens: recalledTokens({
-          items: [onePassage],
-          memories: [],
-          contested: [],
-          notFound: [],
-          truncated: false,
-        }),
-      },
-    };
-    const app = await askOf(ada, []);
-    const appGrant = await granted(
-      ada,
-      admin,
-      brainGrant({ type: "app", appId: app.app }),
-      app.release.manifest.resourceVersion
-    );
-    await approveResourceBinding(env, admin, {
-      app: app.app,
-      alias: "brain",
-      target: { kind: "brain", permissionId: appGrant },
-      reviewed: { version: 1 },
-    });
-    const { workflow } = await recallingWorkflow(ada, admin);
-    const { stub, chat, ask, agent } = await chatOf(
-      ada.userId,
-      recallCode(request),
-      says("Done."),
-      recallCode(request),
-      says("Done.")
-    );
-    await granted(ada, admin, brainGrant(agent));
-    const asked = { question: request.question, tokens: request.budget.tokens };
-    const codeRecalls = async () => ({
-      app: await askedOf(app, ada, asked),
-      run: await ranOf(ada, workflow.id, asked),
-    });
-    await embeddedAll();
-    const before = await codeRecalls();
-    await ask("What about leave?");
-    // Claims that match the question better than anything code may read,
-    // shorter, newer and many: each would take the one place, change what
-    // is not found and whether the budget cut something, if code's recall
-    // so much as counted it.
-    const claims = Array.from(
-      { length: 12 },
-      (_, at) => `${word} rota ${at}: five said so.`
-    );
-    for (const text of claims) {
-      // oxlint-disable-next-line no-await-in-loop -- one claim at a time
-      await claimed(text);
-    }
-    // Embedded too, so the search by meaning is asked of them as well.
-    await embeddedAll();
-    const after = await codeRecalls();
-    await ask("And now?");
-    const [chatBefore, chatAfter] = await codeResults(stub, chat.id);
-    const own = await recallAs(env, ada.userId, {
-      question: request.question,
-      budget: { tokens: 2000 },
-      personal: true,
-    });
-    expect({
-      heldBefore: textsOf(before.app).length,
-      after,
-      chat: returnedOf(chatAfter?.text),
-      ownFindsClaims: own.items.some(({ text }) => claims.includes(text)),
-    }).toStrictEqual({
-      heldBefore: 1,
-      after: before,
-      chat: returnedOf(chatBefore?.text),
-      ownFindsClaims: true,
-    });
-  });
-
   it("finds an upload for everyone at an App's recall, and never one for a team or for its uploader alone", async () => {
     const [admin, ada] = await Promise.all([
       person("admin"),
@@ -2245,5 +2150,105 @@ describe("an App whose grant names teams", setUpTime, () => {
         brainGrant({ type: "app", appId: app.app }, [teams.adas, teams.adas])
       )
     ).rejects.toMatchObject({ code: "permission.invalid" });
+  });
+});
+
+// Last in this file: it embeds every chunk of the shared store, so the
+// search by meaning of any test after it would also find what earlier
+// tests added for everyone.
+describe("code's recall beside team claims", setUpTime, () => {
+  it("answers an App, a workflow and a chat's code exactly as before any team claim, however many match and however small the budget, while the member reads them", async () => {
+    const { word, admin, ada } = await company();
+    const question = `${word} rota`;
+    // A budget that holds one passage: what the company may read for the
+    // question, recalled with room to spare and counted as the Brain
+    // counts it. Whatever else took a place would show.
+    await embeddedAll();
+    const { items: roomy } = await recallPassagesAs(env, ada.userId, {
+      question,
+      budget: { tokens: 2000 },
+      personal: false,
+      company: true,
+      teams: [],
+    });
+    const [onePassage] = roomy;
+    if (onePassage === undefined) {
+      throw new Error("Nothing the company may read answers the question.");
+    }
+    const request = {
+      question,
+      budget: {
+        tokens: recalledTokens({
+          items: [onePassage],
+          memories: [],
+          contested: [],
+          notFound: [],
+          truncated: false,
+        }),
+      },
+    };
+    const app = await askOf(ada, []);
+    const appGrant = await granted(
+      ada,
+      admin,
+      brainGrant({ type: "app", appId: app.app }),
+      app.release.manifest.resourceVersion
+    );
+    await approveResourceBinding(env, admin, {
+      app: app.app,
+      alias: "brain",
+      target: { kind: "brain", permissionId: appGrant },
+      reviewed: { version: 1 },
+    });
+    const { workflow } = await recallingWorkflow(ada, admin);
+    const { stub, chat, ask, agent } = await chatOf(
+      ada.userId,
+      recallCode(request),
+      says("Done."),
+      recallCode(request),
+      says("Done.")
+    );
+    await granted(ada, admin, brainGrant(agent));
+    const asked = { question: request.question, tokens: request.budget.tokens };
+    const codeRecalls = async () => ({
+      app: await askedOf(app, ada, asked),
+      run: await ranOf(ada, workflow.id, asked),
+    });
+    await embeddedAll();
+    const before = await codeRecalls();
+    await ask("What about leave?");
+    // Claims that match the question better than anything code may read,
+    // shorter, newer and many: each would take the one place, change what
+    // is not found and whether the budget cut something, if code's recall
+    // so much as counted it.
+    const claims = Array.from(
+      { length: 12 },
+      (_, at) => `${word} rota ${at}: five said so.`
+    );
+    for (const text of claims) {
+      // oxlint-disable-next-line no-await-in-loop -- one claim at a time
+      await claimed(text);
+    }
+    // Embedded too, so the search by meaning is asked of them as well.
+    await embeddedAll();
+    const after = await codeRecalls();
+    await ask("And now?");
+    const [chatBefore, chatAfter] = await codeResults(stub, chat.id);
+    const own = await recallAs(env, ada.userId, {
+      question: request.question,
+      budget: { tokens: 2000 },
+      personal: true,
+    });
+    expect({
+      heldBefore: textsOf(before.app).length,
+      after,
+      chat: returnedOf(chatAfter?.text),
+      ownFindsClaims: own.items.some(({ text }) => claims.includes(text)),
+    }).toStrictEqual({
+      heldBefore: 1,
+      after: before,
+      chat: returnedOf(chatBefore?.text),
+      ownFindsClaims: true,
+    });
   });
 });

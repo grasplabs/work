@@ -8,7 +8,7 @@ import { onboardingStore } from "./store.ts";
 import type { OwedErasure } from "./store.ts";
 import { claimSource } from "./team-claims.ts";
 
-// What the onboarding gives the new Brain (GRA-1790, GRA-1741), and takes
+// What the onboarding gives the new Brain (GRA-1790, GRA-1741, GRA-1748), and takes
 // back. The onboarding's store decides what stands, from its own records:
 //
 // - A person's interview (`interview:<id>`): the facts they approved,
@@ -29,6 +29,13 @@ import { claimSource } from "./team-claims.ts";
 //   (counted by the store, never in the Brain). Noted by an audit event
 //   for the hand-over (brain-hand-overs.ts), which reads it here
 //   (`claimOf`) when it runs: a team's, never a person's.
+// - The kickoff (`kickoff:<id>`, GRA-1748): what every member reads of it
+//   (kickoff-company.ts), readable by everyone, under an id minted for
+//   each kickoff. Noted for the hand-over like a claim, and read here
+//   when it runs (`kickoffOf`): a version is what it reads then, so saves
+//   and answers between two hand-overs are one version, and nothing
+//   anyone could read is lost.
+//   The admin's delete erases it (`eraseOwedKickoffs`), every version.
 //
 // A claim that stops standing is out of use in the shared store before the
 // change that drops it commits (the store's `#claimsFirst`), so no read
@@ -106,6 +113,54 @@ export const claimOf = async (env: Env, id: string): Promise<Handed> => {
       };
 };
 
+/** The kickoff's source, by the store's id for it (`kickoffBrainId`). */
+export const kickoffSource = (id: string): SourceRef => ({
+  producer: "kickoff",
+  id,
+});
+
+/** The kickoff `id` as the onboarding holds it now: what every member reads of it; nothing once it was deleted. */
+export const kickoffOf = async (env: Env, id: string): Promise<Handed> => {
+  const held = await onboardingStore(env).kickoffToHand(id);
+  return held === null
+    ? gone
+    : {
+        kind: "source",
+        change: held.change,
+        text: held.text,
+        whenTooLarge: "The company's vision too large to keep.",
+        readers: { kind: "everyone" },
+      };
+};
+
+/**
+ * Erases from the Brain every kickoff the admin deleted that it may still
+ * hold (`kickoffErasuresOwed`), each then forgotten there: right after the
+ * delete, and on core's clock until none is owed. Each failure is logged
+ * by name alone and left owed. Whether none is owed any more.
+ */
+export const eraseOwedKickoffs = async (env: Env): Promise<boolean> => {
+  const store = onboardingStore(env);
+  for (const id of await store.kickoffErasuresOwed()) {
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- one erasure at a time
+      await eraseSource(env, {
+        source: kickoffSource(id),
+        readers: { kind: "everyone" },
+        reason: "deleted",
+      });
+      // oxlint-disable-next-line no-await-in-loop -- one erasure at a time
+      await store.kickoffErased(id);
+    } catch (error) {
+      log.error("onboarding.brain_erasure_failed", {
+        error: error instanceof Error ? error.name : "unknown",
+      });
+    }
+  }
+  const owed = await store.kickoffErasuresOwed();
+  return owed.length === 0;
+};
+
 /** Erases one owed source from the Brain, with the readers it was added for. */
 const erase = async (env: Env, owed: OwedErasure): Promise<void> => {
   if (owed.kind === "interview") {
@@ -156,10 +211,12 @@ export const eraseOwedOnboardingSources = async (
 
 /**
  * Settles what the onboarding owes the new Brain: every erasure owed
- * first, then every interview to add (`addOwedInterviews`). Core's clock
- * runs it every minute.
+ * first (a deleted kickoff's, then the interviews' and claims'), then
+ * every interview to add (`addOwedInterviews`). Core's clock runs it
+ * every minute.
  */
 export const settleOnboardingBrain = async (env: Env): Promise<void> => {
+  await eraseOwedKickoffs(env);
   await eraseOwedOnboardingSources(env);
   await addOwedInterviews(env);
 };

@@ -32,7 +32,11 @@ import type {
   InterviewWithdrawal,
 } from "@grasp-os/shared/interview-links";
 import type { FactTag } from "@grasp-os/shared/interview-turn";
-import { kickoffErrors, visionFields } from "@grasp-os/shared/kickoff";
+import {
+  isVisionShared,
+  kickoffErrors,
+  visionFields,
+} from "@grasp-os/shared/kickoff";
 import type {
   KickoffReading,
   KickoffView,
@@ -42,7 +46,6 @@ import { errorFields, log } from "@grasp-os/shared/log";
 import {
   agreementsSchema,
   minTeamShown,
-  onboardingErrors,
   planSchema,
   remindAfterWorkingDays,
 } from "@grasp-os/shared/onboarding";
@@ -197,11 +200,8 @@ import type { ClaimRemover } from "./claims-fall.ts";
 import { storedDocumentReadingSchema } from "./document-reading.ts";
 import { checkedSupport } from "./drawing-support.ts";
 import type { Support } from "./drawing-support.ts";
-import {
-  eraseKickoffRecords,
-  keepKickoffRecords,
-  kickoffRecordsHeld,
-} from "./kickoff-records.ts";
+import { companyKickoffOf, companyKickoffText } from "./kickoff-company.ts";
+import type { CompanyKickoff } from "./kickoff-company.ts";
 import {
   contextOf,
   kickoffBrief,
@@ -301,21 +301,25 @@ const purgesKey = "purges";
 const queuedKey = "forget_lines_queued";
 
 /**
- * The brain's records of the kickoff still owed (kickoff-records.ts):
- * `replaced` when a new kickoff's records must also retire the last
- * one's, `answered` when only an answer changed it. Set with the kickoff
- * in one transaction, cleared once the records are kept; the alarm keeps
- * them until then.
+ * How often the kickoff changed (a save or an answer), store-wide: the
+ * key the new Brain is given with its text at each hand-over
+ * (`kickoffToHand`). A version is that text as it stood when the
+ * hand-over ran: changes that land between two hand-overs are one
+ * version, the later text holding all of them, so nothing anyone could
+ * read is lost. A change back to earlier words still counts, so it is a
+ * new version, never a retry of an old one; a retry of a hand-over with
+ * no change since reads the same key and text and adds nothing.
  */
-const kickoffOwedKey = "kickoff_records_owed";
+const kickoffChangesKey = "kickoff_changes";
 
 /**
- * Set when the admin deleted the kickoff and the brain's records it gave
- * are still to be erased (`deleteKickoff`): set with the delete in one
- * transaction, cleared once they are erased. Erased before any kickoff's
- * records are kept, and by the alarm until done.
+ * What starts the key of each kickoff the admin deleted whose source the
+ * new Brain still holds (`deleteKickoff`), the rest being its id there:
+ * set with the delete in one transaction, gone once core's erasure of it
+ * returned (`kickoffErased`). One a deleted kickoff, so a second delete
+ * before the first's erasure leaves both owed.
  */
-const kickoffErasureOwedKey = "kickoff_records_erasure_owed";
+const kickoffErasurePrefix = "kickoff_erasure_owed:";
 
 export const onboardingStore = (
   env: Pick<Env, "ONBOARDING" | "DURABLE_OBJECT_JURISDICTION">
@@ -1073,15 +1077,13 @@ export class Onboarding extends DurableObject<Env> {
     ).length;
   }
 
-  /** Whether the kickoff is kept, or deleted with its records still being erased (`kickoffErasureOwedKey`). */
+  /** Whether the kickoff is kept, or deleted with its source in the new Brain still being erased (`kickoffErasuresOwed`). */
   #kickoffState(): OnboardingView["kickoff"] {
     const [row] = this.#db.select({ id: kickoff.id }).from(kickoff).all();
     if (row !== undefined) {
       return "in";
     }
-    return this.ctx.storage.kv.get(kickoffErasureOwedKey) === undefined
-      ? null
-      : "erasing";
+    return this.kickoffErasuresOwed().length === 0 ? null : "erasing";
   }
 
   /** What the admin's onboarding knows of the company from the kickoff: read without its transcript. */
@@ -4080,65 +4082,64 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /**
-   * Gives the brain the kickoff's records still owed (`kickoffOwedKey`),
-   * under the brain lock it is called in, and clears what it kept. A
-   * failure leaves them owed, for the alarm to keep.
+   * The kickoff's id in the new Brain (`kickoff:<id>`, onboarding/
+   * new-brain.ts): one a kickoff, from how often one was deleted
+   * (`purgeMark`), so a kickoff brought in after a delete is a source of
+   * its own, never under the key that delete's erasure closed.
    */
-  async #keepOwedKickoffRecords(): Promise<void> {
-    // What a deleted kickoff gave goes first: a newer kickoff's records
-    // are kept only once it is gone, so the erasure never takes them.
-    if (!(await this.#eraseOwedKickoffRecords())) {
-      return;
-    }
-    const owed = this.ctx.storage.kv.get(kickoffOwedKey);
-    if (owed !== "replaced" && owed !== "answered") {
-      return;
-    }
-    try {
-      await keepKickoffRecords(this.env, this.kickoff(), {
-        replaced: owed === "replaced",
-      });
-    } catch (error) {
-      log.error("onboarding.kickoff_records_owed", {
-        error: error instanceof Error ? error.name : "unknown",
-      });
-      await this.#alarmBy(Date.now() + purgeRetryMs);
-      return;
-    }
-    // Kept as it was when read: an answer meanwhile owes its own.
-    if (this.ctx.storage.kv.get(kickoffOwedKey) === owed) {
-      this.ctx.storage.kv.delete(kickoffOwedKey);
-    }
+  kickoffBrainId(): string {
+    return `company-${this.purgeMark()}`;
   }
 
-  /** The kickoff's records still owed, kept now: what the alarm runs. */
-  async keepKickoffRecordsNow(): Promise<void> {
-    await this.#withBrain(async () => {
-      await this.#keepOwedKickoffRecords();
-    });
+  /** What every member reads of the kickoff (kickoff-company.ts); null before it is in. */
+  companyKickoff(): CompanyKickoff | null {
+    return companyKickoffOf(this.kickoff());
   }
 
   /**
-   * Erases the brain's records of a kickoff the admin deleted, when owed
-   * (`kickoffErasureOwedKey`), under the brain lock it is called in.
-   * Whether none are owed any more: a failure leaves them owed, for the
-   * alarm, or the admin's delete asked again, to erase.
+   * The kickoff `id` as the hand-over gives the new Brain now: its text
+   * for every member as it stands (kickoff-company.ts), under the count of
+   * changes so far (`kickoffChangesKey`). Changes since the last hand-over
+   * are in this one text, one version. Null when `id` is not the kickoff
+   * kept now (deleted since).
    */
-  async #eraseOwedKickoffRecords(): Promise<boolean> {
-    if (this.ctx.storage.kv.get(kickoffErasureOwedKey) === undefined) {
-      return true;
+  kickoffToHand(id: string): { change: string; text: string } | null {
+    const company = this.companyKickoff();
+    if (company === null || id !== this.kickoffBrainId()) {
+      return null;
     }
-    try {
-      await eraseKickoffRecords(this.env);
-    } catch (error) {
-      log.error("onboarding.kickoff_erasure_owed", {
-        error: error instanceof Error ? error.name : "unknown",
-      });
-      await this.#alarmBy(Date.now() + purgeRetryMs);
-      return false;
-    }
-    this.ctx.storage.kv.delete(kickoffErasureOwedKey);
-    return true;
+    const text = companyKickoffText(company);
+    const changes = this.ctx.storage.kv.get(kickoffChangesKey);
+    return { change: String(typeof changes === "number" ? changes : 0), text };
+  }
+
+  /**
+   * In the transaction of a change of the kickoff (a save or an answer):
+   * counts it (`kickoffChangesKey`) and notes the kickoff for the
+   * hand-over, which reads its text here when it runs (`kickoffToHand`).
+   * A noting replaces one not yet handed over, and a hand-over that ends
+   * removes only its own noting, so a change after its read is handed
+   * over again.
+   */
+  #kickoffChanged(): void {
+    const changes = this.ctx.storage.kv.get(kickoffChangesKey);
+    this.ctx.storage.kv.put(
+      kickoffChangesKey,
+      (typeof changes === "number" ? changes : 0) + 1
+    );
+    this.#noteHandOver("kickoff", this.kickoffBrainId());
+  }
+
+  /** The ids of the deleted kickoffs whose source the new Brain still holds (`kickoffErasurePrefix`). */
+  kickoffErasuresOwed(): string[] {
+    return [...this.ctx.storage.kv.list({ prefix: kickoffErasurePrefix })].map(
+      ([key]) => key.slice(kickoffErasurePrefix.length)
+    );
+  }
+
+  /** Notes that core erased the deleted kickoff `id` from the new Brain: nothing of it is owed. */
+  kickoffErased(id: string): void {
+    this.ctx.storage.kv.delete(`${kickoffErasurePrefix}${id}`);
   }
 
   /** Notes that the kickoff was deleted from what the onboarding holds (`purgesKey`). */
@@ -4158,14 +4159,14 @@ export class Onboarding extends DurableObject<Env> {
   /**
    * Keeps the kickoff's transcript and its reading, replacing any before
    * them; the sponsor's answers stay, for they answer the company, not one
-   * transcript. Then gives the brain what it holds (kickoff-records.ts).
-   * Under the brain lock, as the kickoff's delete is (`deleteKickoff`): a
-   * save whose reading began before the kickoff was deleted (`mark`,
-   * `purgeMark` as it began) is refused,
-   * `kickoff.purged`, so the erased words never come back with it. In the log and the audit log
-   * without its words.
+   * transcript. What every member reads of it goes to the new Brain at the
+   * next hand-over, as a version of the kickoff's source
+   * (`#kickoffChanged`). A save whose
+   * reading began before the kickoff was deleted (`mark`, `purgeMark` as
+   * it began) is refused, `kickoff.purged`, so the erased words never come
+   * back with it. In the log and the audit log without its words.
    */
-  async saveKickoff(
+  saveKickoff(
     kept: {
       transcript: string;
       fileName: string | null;
@@ -4173,136 +4174,107 @@ export class Onboarding extends DurableObject<Env> {
     },
     by: AuditActor,
     mark: number
-  ): Promise<KickoffView> {
-    return await this.#withBrain(async () => {
-      if (this.purgeMark() !== mark) {
-        throw kickoffErrors.create("kickoff.purged");
-      }
-      const at = new Date().toISOString();
-      const values = {
-        at,
-        by: whoIs(by),
-        fileName: kept.fileName,
-        transcript: kept.transcript,
-        reading: JSON.stringify(kept.reading),
-      };
-      this.ctx.storage.transactionSync(() => {
-        this.#db
-          .insert(kickoff)
-          .values({ id: 1, ...values })
-          .onConflictDoUpdate({ target: kickoff.id, set: values })
-          .run();
-        this.#changed(by, "onboarding.kickoff.saved", {
-          characters: kept.transcript.length,
-          said: Object.keys(kept.reading.fields).length,
-        });
-        this.ctx.storage.kv.put(kickoffOwedKey, "replaced");
+  ): KickoffView {
+    if (this.purgeMark() !== mark) {
+      throw kickoffErrors.create("kickoff.purged");
+    }
+    const at = new Date().toISOString();
+    const values = {
+      at,
+      by: whoIs(by),
+      fileName: kept.fileName,
+      transcript: kept.transcript,
+      reading: JSON.stringify(kept.reading),
+    };
+    this.ctx.storage.transactionSync(() => {
+      this.#db
+        .insert(kickoff)
+        .values({ id: 1, ...values })
+        .onConflictDoUpdate({ target: kickoff.id, set: values })
+        .run();
+      this.#changed(by, "onboarding.kickoff.saved", {
+        characters: kept.transcript.length,
+        said: Object.keys(kept.reading.fields).length,
       });
-      this.#deliverAudit();
-      await this.#keepOwedKickoffRecords();
-      return this.kickoff();
+      this.#kickoffChanged();
     });
+    this.#deliverAudit();
+    return this.kickoff();
   }
 
   /**
    * The admin deletes the kickoff for good (GRA-1897): its transcript,
-   * its file's name, its reading and the sponsor's answers, and every
-   * record it gave the brain, retired ones too. Whatever reads it reads
-   * nothing of it from then on: the admin's onboarding, Stephen's setup,
-   * every interview turn's brief and the brain. Under the brain lock, so
-   * no keep of its records lands between; the purge mark moves on first,
-   * so a staff save whose reading began before is refused
-   * (`saveKickoff`). One audit event, with how many records it takes,
-   * never a word of it. The records are erased right after (owed until
-   * they are: the alarm, or this asked again, finishes it); asked again,
-   * with nothing left, it changes nothing and records nothing. Throws
-   * `onboarding.kickoff_unfinished` while they are still owed. Whether there was anything to
-   * delete.
+   * its file's name, its reading and the sponsor's answers. Whatever reads
+   * it reads nothing of it from then on: the admin's onboarding, Stephen's
+   * setup, every interview turn's brief and the Brain page. Its source in
+   * the new Brain is owed an erasure in the same transaction
+   * (`kickoffErasuresOwed`), which core does right after and on its clock
+   * until done (onboarding/new-brain.ts `eraseOwedKickoffs`); the purge
+   * mark moves on, so a staff save whose reading began before is refused
+   * (`saveKickoff`), and a kickoff brought in later is a source of its own
+   * (`kickoffBrainId`). One audit event, never a word of it. Asked again
+   * with nothing left, it changes nothing and records nothing. Whether
+   * there was anything to delete.
    */
   async deleteKickoff(by: AuditActor): Promise<boolean> {
-    const deleted = await this.#withBrain(async () => {
-      const records = await kickoffRecordsHeld(this.env);
-      const [row] = this.#db.select({ id: kickoff.id }).from(kickoff).all();
-      // Gone already, its records owed by an earlier delete: that one's
-      // event stands, and only its erasure is left to finish.
-      const owed = this.ctx.storage.kv.get(kickoffErasureOwedKey) !== undefined;
-      if (row === undefined && (records === 0 || owed)) {
-        return false;
-      }
-      this.ctx.storage.transactionSync(() => {
-        this.#purged();
-        this.#db.delete(kickoff).run();
-        // Nothing is owed of it any more.
-        this.ctx.storage.kv.delete(kickoffOwedKey);
-        this.ctx.storage.kv.put(kickoffErasureOwedKey, true);
-        // What the voice said on the admins' onboarding may have quoted it
-        // (the sponsor, what the company does): all of it goes from the
-        // cache, said anew when asked.
-        this.#queueSpokenBy(like(spokenKeys.who, `${adminWho}%`));
-        this.#changed(by, "onboarding.kickoff.deleted", {
-          kickoff: row === undefined ? 0 : 1,
-          records,
-        });
-      });
-      this.#deliverAudit();
-      return true;
+    const [row] = this.#db.select({ id: kickoff.id }).from(kickoff).all();
+    if (row === undefined) {
+      return false;
+    }
+    this.ctx.storage.transactionSync(() => {
+      this.ctx.storage.kv.put(
+        `${kickoffErasurePrefix}${this.kickoffBrainId()}`,
+        true
+      );
+      this.#purged();
+      this.#db.delete(kickoff).run();
+      // What the voice said on the admins' onboarding may have quoted it
+      // (the sponsor, what the company does): all of it goes from the
+      // cache, said anew when asked.
+      this.#queueSpokenBy(like(spokenKeys.who, `${adminWho}%`));
+      this.#changed(by, "onboarding.kickoff.deleted", {});
     });
+    this.#deliverAudit();
     // Whatever the cache doesn't take now waits for the alarm.
     await this.forgetLinesNow();
-    // Asked again after a failure, with the kickoff gone: what is owed is
-    // erased all the same.
-    const erased = await this.#withBrain(
-      async () => await this.#eraseOwedKickoffRecords()
-    );
-    if (!erased) {
-      throw onboardingErrors.create("onboarding.kickoff_unfinished");
-    }
-    return deleted;
+    return true;
   }
 
   /**
    * Keeps the sponsor's answer to what the kickoff left open about
-   * `field`; an empty one takes it back. Then gives the brain what the
-   * kickoff holds (kickoff-records.ts): an answer about the goals or the
-   * pain is a new vision. Under the brain lock, as the kickoff's delete is
-   * (`deleteKickoff`): after one, there is nothing to answer. False before
-   * the kickoff is in.
+   * `field`; an empty one takes it back. An answer about the vision, what
+   * every member reads of the kickoff, goes to the new Brain at the
+   * next hand-over (`#kickoffChanged`). False before
+   * the kickoff is in, or after its delete: there is nothing to answer.
    */
-  async answerKickoff(
-    field: VisionField,
-    text: string,
-    by: AuditActor
-  ): Promise<boolean> {
-    return await this.#withBrain(async () => {
-      const [row] = this.#db.select().from(kickoff).all();
-      if (row === undefined) {
-        return false;
+  answerKickoff(field: VisionField, text: string, by: AuditActor): boolean {
+    const [row] = this.#db.select().from(kickoff).all();
+    if (row === undefined) {
+      return false;
+    }
+    const trimmed = text.trim();
+    const kept = storedAnswersSchema.parse(JSON.parse(row.answers));
+    const answers: Partial<Record<VisionField, string>> = {};
+    for (const each of visionFields) {
+      const answer = each === field ? trimmed : (kept[each] ?? "");
+      if (answer !== "") {
+        answers[each] = answer;
       }
-      const trimmed = text.trim();
-      const kept = storedAnswersSchema.parse(JSON.parse(row.answers));
-      const answers: Partial<Record<VisionField, string>> = {};
-      for (const each of visionFields) {
-        const answer = each === field ? trimmed : (kept[each] ?? "");
-        if (answer !== "") {
-          answers[each] = answer;
-        }
+    }
+    this.ctx.storage.transactionSync(() => {
+      this.#db
+        .update(kickoff)
+        .set({ answers: JSON.stringify(answers) })
+        .where(eq(kickoff.id, 1))
+        .run();
+      this.#changed(by, "onboarding.kickoff.answered", { field });
+      // Only the vision's answers are what every member reads of it.
+      if (isVisionShared(field)) {
+        this.#kickoffChanged();
       }
-      this.ctx.storage.transactionSync(() => {
-        this.#db
-          .update(kickoff)
-          .set({ answers: JSON.stringify(answers) })
-          .where(eq(kickoff.id, 1))
-          .run();
-        this.#changed(by, "onboarding.kickoff.answered", { field });
-        // A new kickoff's records not kept yet still retire the last one's.
-        if (this.ctx.storage.kv.get(kickoffOwedKey) !== "replaced") {
-          this.ctx.storage.kv.put(kickoffOwedKey, "answered");
-        }
-      });
-      this.#deliverAudit();
-      await this.#keepOwedKickoffRecords();
-      return true;
     });
+    this.#deliverAudit();
+    return true;
   }
 
   /**
@@ -4822,7 +4794,6 @@ export class Onboarding extends DurableObject<Env> {
         });
         await this.#alarmBy(Date.now() + purgeRetryMs);
       }
-      await this.keepKickoffRecordsNow();
       await this.#drainAudit();
       await this.releaseDue();
       // A team's map opens its links.
@@ -6353,11 +6324,22 @@ export class Onboarding extends DurableObject<Env> {
    * the hand-over runs (`claimToHand`), never here.
    */
   #noteClaimSource(source: string): void {
+    this.#noteHandOver("claim", source);
+  }
+
+  /**
+   * Notes `producer`'s source `id` for core's hand-over to the new Brain,
+   * in the transaction of the change that moved it: an event in the
+   * onboarding's log, and its audit event in the outbox, whose drain
+   * notes the hand-over (brain-hand-overs.ts). Names the source by its id
+   * alone; what it holds is read when the hand-over runs.
+   */
+  #noteHandOver(producer: "claim" | "kickoff", id: string): void {
     const at = new Date().toISOString();
     const {
       actions: [action],
       target: targetType,
-    } = handOverProducers.claim;
+    } = handOverProducers[producer];
     this.#db
       .insert(events)
       .values({ at, by: whoIs({ type: "system" }), what: action, about: null })
@@ -6366,7 +6348,7 @@ export class Onboarding extends DurableObject<Env> {
       {
         actor: { type: "system" },
         action,
-        target: { type: targetType, id: source },
+        target: { type: targetType, id },
         detail: {},
       },
       "core"
@@ -7280,8 +7262,7 @@ export class Onboarding extends DurableObject<Env> {
         .select({ key: linesToForget.key })
         .from(linesToForget)
         .limit(1)
-        .all().length > 0 ||
-      this.ctx.storage.kv.get(kickoffOwedKey) !== undefined
+        .all().length > 0
         ? [now + purgeRetryMs]
         : []),
     ];
