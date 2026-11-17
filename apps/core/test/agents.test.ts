@@ -59,6 +59,7 @@ describe("the company's agents", () => {
       state: "paused",
       // One of the company's: nobody's own.
       ownerId: null,
+      offeredAt: null,
       changedBy: "admin-2",
       changedAt: "2026-11-02T00:00:00.000Z",
     });
