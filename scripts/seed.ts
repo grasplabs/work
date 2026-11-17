@@ -49,7 +49,6 @@ import {
 import type { Session } from "./seed/local.ts";
 import { boardCsv, boards } from "./seed/pages.ts";
 import type { Board } from "./seed/pages.ts";
-import { projects } from "./seed/projects.ts";
 import { seedRuns } from "./seed/runs.ts";
 
 const dayMs = 24 * 60 * 60 * 1000;
@@ -729,60 +728,6 @@ const seedChats = async (
   return created;
 };
 
-/**
- * The demo projects (scripts/seed/projects.ts), made by an admin, with
- * their Apps and people; a project already there is left as it is.
- * Returns how many it made.
- */
-const seedProjects = async (
-  sessions: ReadonlyMap<PersonKey, Session>,
-  teams: ReadonlyMap<TeamName, string>,
-  appIds: ReadonlyMap<string, string>
-): Promise<number> => {
-  const adminSession = sessionFor(sessions, admin.key);
-  const listed = await adminSession.api.projects.list();
-  const existing = new Set(listed.map(({ name }) => name));
-  const missing = projects.filter(({ name }) => !existing.has(name));
-  for (const seed of missing) {
-    // oxlint-disable-next-line no-await-in-loop -- one project at a time
-    const { id } = await adminSession.api.projects.create({
-      name: seed.name,
-      description: seed.description,
-      icon: seed.icon,
-    });
-    const members = [
-      ...seed.people.map(({ person, role }) => ({
-        type: "person" as const,
-        id: sessionFor(sessions, person).userId,
-        role,
-      })),
-      ...seed.teams.map(({ team, role }) => {
-        const teamId = teams.get(team);
-        if (teamId === undefined) {
-          throw new Error(`No team ${team}`);
-        }
-        return { type: "team" as const, id: teamId, role };
-      }),
-    ];
-    for (const member of members) {
-      // oxlint-disable-next-line no-await-in-loop -- one member at a time
-      await adminSession.api.projects.addMember(id, member);
-    }
-    for (const { app, share } of seed.apps) {
-      const appId = appIds.get(app);
-      if (appId === undefined) {
-        throw new Error(`No App ${app}`);
-      }
-      // oxlint-disable-next-line no-await-in-loop -- one item at a time
-      await adminSession.api.projects.file(id, {
-        item: { type: "app", id: appId },
-        share,
-      });
-    }
-  }
-  return missing.length;
-};
-
 const main = async (): Promise<void> => {
   console.info("Signing the demo company in…");
   const { sessions, teams } = await seedPeople();
@@ -825,9 +770,6 @@ const main = async (): Promise<void> => {
       console.info(`App ${seed.name}: ${ran}`);
     }
     await seedPermissions(sessions, appIds, collectionIds);
-
-    const made = await seedProjects(sessions, teams, appIds);
-    console.info(`${made} new projects`);
 
     const created = await seedChats(sessions);
     console.info(`${created} new chats`);
