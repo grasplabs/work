@@ -13552,6 +13552,7 @@ msgstr "ID del objetivo"
 msgid "tasks"
 msgstr "tareas"
 
+#: src/apps/publish.tsx
 #: src/brain/brain-source-contents.tsx
 #: src/brain/brain.ts
 #: src/onboarding/interviews-progress.tsx

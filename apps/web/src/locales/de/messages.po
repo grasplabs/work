@@ -13552,6 +13552,7 @@ msgstr "Ziel-ID"
 msgid "tasks"
 msgstr "aufgaben"
 
+#: src/apps/publish.tsx
 #: src/brain/brain-source-contents.tsx
 #: src/brain/brain.ts
 #: src/onboarding/interviews-progress.tsx

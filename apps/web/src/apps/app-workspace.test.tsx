@@ -528,7 +528,7 @@ const callerGrant = (workflow: string, path: string): Permission => {
 
 /** The sheet Share with your team opens, once open. */
 const sheet = (): HTMLElement | null =>
-  document.querySelector('[data-slot="sheet-content"]');
+  document.querySelector('[data-slot="drawer-content"]');
 
 /** The button in the sheet called `name`. */
 const sheetButton = (name: string): HTMLButtonElement => {
@@ -543,19 +543,23 @@ const sheetButton = (name: string): HTMLButtonElement => {
 
 /** Ticks `name` among who gets it, in the sheet. */
 const tick = async (name: string): Promise<void> => {
-  const row = [...(sheet()?.querySelectorAll("li") ?? [])].find(
-    (each) => each.textContent?.trim() === name
-  );
-  const box = row?.querySelector<HTMLElement>('[role="checkbox"]');
-  if (box === undefined || box === null) {
+  const box = [
+    ...(sheet()?.querySelectorAll<HTMLElement>('[role="checkbox"]') ?? []),
+  ].find((each) => {
+    const label = each.getAttribute("aria-labelledby");
+    const named = label === null ? null : document.querySelector(`#${label}`);
+    // The label's own words, not the mark it keeps hidden from a reader.
+    return named?.firstChild?.textContent?.trim() === name;
+  });
+  if (box === undefined) {
     throw new Error(`No ${name} to tick`);
   }
   await press(box);
 };
 
-/** Whether `element` is the page's lime action. */
+/** Whether `element` is the page's main action. */
 const lime = (element: HTMLElement): boolean =>
-  element.className.includes("bg-highlight");
+  element.dataset.variant === "ink";
 
 /** Share with your team, in the bar. */
 const shareButton = (): HTMLButtonElement => button("Share with your team");
@@ -1470,10 +1474,11 @@ describe(AppWorkspace, () => {
 
     await press(shareButton());
     const shown = {
-      title: sheet()?.querySelector('[data-slot="sheet-title"]')?.textContent,
-      who: [...(sheet()?.querySelectorAll("li") ?? [])].map((each) =>
-        each.textContent?.trim()
-      ),
+      title: sheet()?.querySelector("h2")?.textContent,
+      who: [
+        ...(sheet()?.querySelectorAll('[aria-label="Who gets it"] label') ??
+          []),
+      ].map((each) => each.firstChild?.textContent?.trim()),
       sees: says("They'll find it under Apps, and see it as it is now."),
       // Nobody ticked yet: nothing to share with.
       off: off(sheetButton("Share")),
@@ -1569,7 +1574,7 @@ describe(AppWorkspace, () => {
     // shares the changes, and whom else to give it to.
     const main = lime(button("Share changes"));
     await press(button("Share changes"));
-    const hasIt = sheet()?.textContent.includes("Bohas it");
+    const hasIt = sheet()?.textContent.includes("has it");
     await tick("Finance team");
     await press(sheetButton("Share"));
     const shared = { toasts: toasts(), status: status() };

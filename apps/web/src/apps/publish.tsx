@@ -10,44 +10,40 @@ import type {
   AppMemberRef,
   ShareCandidates,
 } from "@grasp-os/shared/apps";
-import { Button } from "@grasp-os/ui/components/button";
-import { Checkbox } from "@grasp-os/ui/components/checkbox";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@grasp-os/ui/components/collapsible";
-import { Field, FieldLabel } from "@grasp-os/ui/components/field";
-import {
-  Sheet,
-  SheetClose,
-  SheetContent,
-  SheetDescription,
-  SheetFooter,
-  SheetHeader,
-  SheetTitle,
-  SheetTrigger,
-} from "@grasp-os/ui/components/sheet";
-import { Spinner } from "@grasp-os/ui/components/spinner";
 import { toast } from "@grasp-os/ui/components/toast";
 import { i18n as pageI18n } from "@lingui/core";
 import type { I18n } from "@lingui/core";
 import { msg, plural } from "@lingui/core/macro";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { useRouter } from "@tanstack/react-router";
-import {
-  ChevronRightIcon,
-  DatabaseIcon,
-  KeyRoundIcon,
-  SparklesIcon,
-  UsersIcon,
-} from "lucide-react";
-import { useEffect, useId, useState } from "react";
-import type { ReactNode } from "react";
+import { useEffect, useState } from "react";
 
 import { useGlobalChat } from "../chat/global-chat.tsx";
-import { ErrorText } from "../error-text.tsx";
 import { formatList } from "../format.ts";
+import { Alert } from "../grasp/alert/index.ts";
+import { Button } from "../grasp/button/index.ts";
+import { Checkbox } from "../grasp/checkbox/index.ts";
+import { Collapsible } from "../grasp/collapsible/index.ts";
+import {
+  Field,
+  FieldContent,
+  FieldDescription,
+  FieldLabel,
+} from "../grasp/field/index.ts";
+import { Database, Key, People, Sparkles } from "../grasp/icons/index.ts";
+import {
+  Sheet,
+  SheetBody,
+  SheetContent,
+  SheetDescription,
+  SheetFooter,
+  SheetTitle,
+  SheetTrigger,
+} from "../grasp/sheet/index.ts";
+import { Spinner } from "../grasp/spinner/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { usePeopleApart } from "../people/people-apart.ts";
 import { useCore } from "../use-core.ts";
 import { ConfirmChange, useDraftChange } from "./app-history.tsx";
@@ -192,6 +188,22 @@ export const changeSummaries = (changes: AppDraftChanges): string[] =>
   });
 
 /** The problems that stop it from being shared, a few, and Fix with Grasp. */
+const styles = stylex.create({
+  stack: { display: "grid", gap: grasp.space3, minWidth: 0 },
+  tight: {
+    display: "grid",
+    gap: grasp.space1,
+    margin: 0,
+    padding: 0,
+    listStyle: "none",
+  },
+  problem: { display: "grid", minWidth: 0 },
+  where: { fontFamily: grasp.fontMono },
+  working: { display: "flex", alignItems: "center", gap: grasp.space2 },
+  strip: { flexShrink: 0 },
+});
+
+/** What stops the changes being shared, the first few, and Fix with Grasp. */
 const Problems = ({
   problems,
   onFix,
@@ -204,61 +216,50 @@ const Problems = ({
   const count = problems.length;
   const more = count - shown.length;
   return (
-    <div className="flex flex-col gap-2">
-      <p className="text-destructive">
-        <Plural
-          one="It can't be shared yet: # problem"
-          other="It can't be shared yet: # problems"
-          value={count}
-        />
-      </p>
-      <ul aria-label={t`Problems`} className="flex flex-col gap-1 text-xs">
+    <Alert
+      title={t`${plural(count, {
+        one: "It can't be shared yet: # problem",
+        other: "It can't be shared yet: # problems",
+      })}`}
+      tone="danger"
+    >
+      <ul aria-label={t`Problems`} {...stylex.props(styles.tight)}>
         {shown.map(({ at, line, message }, index) => (
           // A problem has no ID, and the same message may come twice.
-          <li className="flex flex-col" key={index}>
+          <li key={index} {...stylex.props(styles.problem)}>
             {at === null ? null : (
-              <span className="text-muted-foreground font-mono">
-                {line === null ? at : `${at}:${line}`}
-              </span>
+              <Text element="span" size="xs" tone="muted">
+                <span {...stylex.props(styles.where)}>
+                  {line === null ? at : `${at}:${line}`}
+                </span>
+              </Text>
             )}
-            <span>{message}</span>
+            <Text element="span" size="xs">
+              {message}
+            </Text>
           </li>
         ))}
         {more > 0 ? (
-          <li className="text-muted-foreground">
-            <Plural one="and # more" other="and # more" value={more} />
+          <li>
+            <Text element="span" size="xs" tone="muted">
+              <Plural one="and # more" other="and # more" value={more} />
+            </Text>
           </li>
         ) : null}
       </ul>
-      <div>
-        <Button onClick={onFix} size="sm" variant="outline">
-          <SparklesIcon data-icon="inline-start" />
-          <Trans>Fix with Grasp</Trans>
-        </Button>
-      </div>
-    </div>
+      <Button icon={Sparkles} onClick={onFix} size="xs" variant="quiet">
+        {t`Fix with Grasp`}
+      </Button>
+    </Alert>
   );
 };
 
-/** One line the sheet says only when it applies, with its icon. */
-const Line = ({ icon, children }: { icon: ReactNode; children: ReactNode }) => (
-  <p className="text-muted-foreground flex items-start gap-2">
-    <span aria-hidden className="mt-0.5 flex-none">
-      {icon}
-    </span>
-    <span>{children}</span>
-  </p>
-);
-
 /** Everything the changes hold, folded away. */
-const Summary = ({ changes }: { changes: AppDraftChanges }) => (
-  <Collapsible>
-    <CollapsibleTrigger render={<Button size="sm" variant="ghost" />}>
-      <ChevronRightIcon data-icon="inline-start" />
-      <Trans>What changes</Trans>
-    </CollapsibleTrigger>
-    <CollapsibleContent>
-      <div className="flex flex-col gap-4">
+const Summary = ({ changes }: { changes: AppDraftChanges }) => {
+  const { t } = useLingui();
+  return (
+    <Collapsible title={t`What changes`}>
+      <div {...stylex.props(styles.stack)}>
         <FileChanges files={changes.files} />
         <ChangesSection title={<Trans>Data</Trans>}>
           <DataChanges changes={changes} />
@@ -267,9 +268,9 @@ const Summary = ({ changes }: { changes: AppDraftChanges }) => (
           <AccessChanges changes={changes} />
         </ChangesSection>
       </div>
-    </CollapsibleContent>
-  </Collapsible>
-);
+    </Collapsible>
+  );
+};
 
 /** What applies to the changes being shared: their data, an admin's approval, problems. */
 const ChangesNotes = ({
@@ -279,34 +280,32 @@ const ChangesNotes = ({
   changes: AppDraftChanges;
   onFix: (problems: readonly AppDraftProblem[]) => void;
 }) => {
-  const { i18n } = useLingui();
+  const { t, i18n } = useLingui();
   const asksAgain = [...changes.grants, ...changes.callers].some(
     ({ askedAgain }) => askedAgain
   );
   const waiting = changes.permissions.length;
   return (
-    <div className="flex flex-col gap-3">
+    <div {...stylex.props(styles.stack)}>
       {changes.files.length === 0 ? null : <Summary changes={changes} />}
       {changesData(changes, i18n) ? (
-        <Line icon={<DatabaseIcon className="size-4" />}>
-          <Trans>It changes the App&apos;s data: see What changes.</Trans>
-        </Line>
+        <Alert icon={Database} quiet>
+          {t`It changes the App's data: see What changes.`}
+        </Alert>
       ) : null}
       {waiting > 0 ? (
-        <Line icon={<KeyRoundIcon className="size-4" />}>
+        <Alert icon={Key} quiet>
           <Plural
             one="It uses # new kind of access. An admin approves that once."
             other="It uses # new kinds of access. An admin approves those once."
             value={waiting}
           />
-        </Line>
+        </Alert>
       ) : null}
       {asksAgain ? (
-        <Line icon={<KeyRoundIcon className="size-4" />}>
-          <Trans>
-            An admin approves its access again before it works for your team.
-          </Trans>
-        </Line>
+        <Alert icon={Key} quiet>
+          {t`An admin approves its access again before it works for your team.`}
+        </Alert>
       ) : null}
       {changes.check.passed ? null : (
         <Problems
@@ -649,7 +648,6 @@ const WhoGetsIt = ({
   onChosen: (chosen: string[]) => void;
 }) => {
   const { t } = useLingui();
-  const ids = useId();
   // Everyone offered or shared with, so a person is told apart from a
   // namesake by the end of their ID.
   const apart = usePeopleApart(
@@ -663,41 +661,39 @@ const WhoGetsIt = ({
   const shared = new Set(members.map((member) => keyOf(member)));
   if (offered.length === 0) {
     return (
-      <p className="text-muted-foreground">
-        <Trans>Nobody else to share with.</Trans>
-      </p>
+      <Text size="sm" tone="muted">
+        {t`Nobody else to share with.`}
+      </Text>
     );
   }
   return (
-    <ul aria-label={t`Who gets it`} className="flex flex-col gap-2">
+    <ul aria-label={t`Who gets it`} {...stylex.props(styles.tight)}>
       {offered.map((recipient) => {
         const key = keyOf(recipient);
         const has = shared.has(key);
+        const named =
+          recipient.type === "person"
+            ? apart.named(recipient)
+            : (recipient.name ?? "");
+        const team = recipient.type === "team" ? t`Team` : undefined;
+        const note = has ? t`has it` : team;
         return (
           <li key={key}>
             <Field orientation="horizontal">
               <Checkbox
                 checked={has || chosen.includes(key)}
                 disabled={has || disabled}
-                id={`${ids}-${key}`}
                 onCheckedChange={(checked) => {
                   const rest = chosen.filter((one) => one !== key);
-                  onChosen(checked ? [...rest, key] : rest);
+                  onChosen(checked === true ? [...rest, key] : rest);
                 }}
               />
-              <FieldLabel htmlFor={`${ids}-${key}`}>
-                {recipient.type === "team" ? (
-                  <UsersIcon aria-hidden className="size-4" />
-                ) : null}
-                {recipient.type === "person"
-                  ? apart.named(recipient)
-                  : recipient.name}
-                {has ? (
-                  <span className="text-muted-foreground">
-                    <Trans>has it</Trans>
-                  </span>
-                ) : null}
-              </FieldLabel>
+              <FieldContent>
+                <FieldLabel>{named}</FieldLabel>
+                {note === undefined ? null : (
+                  <FieldDescription>{note}</FieldDescription>
+                )}
+              </FieldContent>
             </Field>
           </li>
         );
@@ -779,66 +775,62 @@ export const ShareWithTeam = ({
       open={open}
     >
       <SheetTrigger
-        render={
-          <Button
-            disabled={draft === undefined}
-            size="sm"
-            variant="highlight"
-          />
-        }
+        disabled={draft === undefined}
+        icon={People}
+        size="sm"
+        variant="ink"
       >
-        <UsersIcon data-icon="inline-start" />
-        {pending ? (
-          <Trans>Share changes</Trans>
-        ) : (
-          <Trans>Share with your team</Trans>
-        )}
+        {pending ? t`Share changes` : t`Share with your team`}
       </SheetTrigger>
-      <SheetContent closeLabel={t`Close`} side="right">
-        <SheetHeader>
-          <SheetTitle>
-            <Trans>Share {name}</Trans>
-          </SheetTitle>
-          <SheetDescription>
-            <Trans>
-              They&apos;ll find it under Apps, and see it as it is now.
-            </Trans>
-          </SheetDescription>
-        </SheetHeader>
-        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4">
-          <WhoGetsIt
-            chosen={chosen}
-            disabled={busy}
-            members={members}
-            offered={offered}
-            onChosen={setChosen}
-          />
-          {running ||
-          (shareable.changing && shareable.changes === undefined) ? (
-            <p className="text-muted-foreground flex items-center gap-2">
-              <Spinner aria-hidden />
-              {running ? (
-                <Trans>Grasp is still working on it…</Trans>
-              ) : (
-                <Trans>Checking it…</Trans>
-              )}
-            </p>
-          ) : null}
-          {shareable.read?.state === "failed" ? (
-            <ErrorText>{shareable.read.text}</ErrorText>
-          ) : null}
-          {shareable.changes === undefined ? null : (
-            <ChangesNotes
-              changes={shareable.changes}
-              onFix={(problems) => {
-                setOpen(false);
-                shareable.fix(problems);
-              }}
+      <SheetContent closeLabel={t`Close`}>
+        <SheetTitle>{t`Share ${name}`}</SheetTitle>
+        <SheetDescription>
+          {t`They'll find it under Apps, and see it as it is now.`}
+        </SheetDescription>
+        <SheetBody>
+          <div {...stylex.props(styles.stack)}>
+            <WhoGetsIt
+              chosen={chosen}
+              disabled={busy}
+              members={members}
+              offered={offered}
+              onChosen={setChosen}
             />
-          )}
-          <ErrorText>{failure}</ErrorText>
-        </div>
+            {running ||
+            (shareable.changing && shareable.changes === undefined) ? (
+              <div {...stylex.props(styles.working)}>
+                <Spinner />
+                <Text element="span" size="sm" tone="muted">
+                  {running ? t`Grasp is still working on it…` : t`Checking it…`}
+                </Text>
+              </div>
+            ) : null}
+            {shareable.read?.state === "failed" ? (
+              <Alert tone="danger">{shareable.read.text}</Alert>
+            ) : null}
+            {shareable.changes === undefined ? null : (
+              <ChangesNotes
+                changes={shareable.changes}
+                onFix={(problems) => {
+                  setOpen(false);
+                  shareable.fix(problems);
+                }}
+              />
+            )}
+            {failure === undefined ? null : (
+              <Alert tone="danger">{failure}</Alert>
+            )}
+          </div>
+        </SheetBody>
         <SheetFooter>
+          <Button
+            onClick={() => {
+              setOpen(false);
+            }}
+            variant="ghost"
+          >
+            {t`Not yet`}
+          </Button>
           <Button
             disabled={!canShare}
             onClick={() => {
@@ -849,13 +841,10 @@ export const ShareWithTeam = ({
                 }
               })();
             }}
+            variant="ink"
           >
-            {busy ? <Spinner data-icon="inline-start" /> : null}
-            <Trans>Share</Trans>
+            {t`Share`}
           </Button>
-          <SheetClose render={<Button variant="outline" />}>
-            <Trans>Not yet</Trans>
-          </SheetClose>
         </SheetFooter>
       </SheetContent>
     </Sheet>
@@ -903,48 +892,49 @@ export const ChangesLine = ({
   return (
     <section
       aria-label={t`Changes only you see`}
-      className="bg-muted flex flex-none flex-wrap items-center gap-x-3 gap-y-1 border-b px-3 py-1.5"
+      {...stylex.props(styles.strip)}
     >
-      <p className="font-medium">
-        <Plural
-          one="# change only you see"
-          other="# changes only you see"
-          value={changed}
-        />
-      </p>
-      {/* The workspace shows them while there are some (app-workspace.tsx). */}
-      <p className="text-muted-foreground">
-        <Trans>You’re seeing your version.</Trans>
-      </p>
-      {summaries.length === 0 ? null : (
-        <p className="text-muted-foreground truncate">
-          {formatList(summaries)}
-        </p>
-      )}
-      <span className="flex-1" />
-      <ErrorText>{undo.failure}</ErrorText>
-      {problems.length > 0 ? (
-        <Button
-          onClick={() => {
-            shareable.fix(problems);
-          }}
-          size="sm"
-          variant="outline"
-        >
-          <SparklesIcon data-icon="inline-start" />
-          <Trans>Fix with Grasp</Trans>
-        </Button>
-      ) : null}
-      <Button
-        disabled={undo.busy || running}
-        onClick={() => {
-          setAsked({ kind: "discard" });
-        }}
-        size="sm"
-        variant="outline"
+      <Alert
+        action={
+          <>
+            {problems.length > 0 ? (
+              <Button
+                icon={Sparkles}
+                onClick={() => {
+                  shareable.fix(problems);
+                }}
+                size="xs"
+                variant="quiet"
+              >
+                {t`Fix with Grasp`}
+              </Button>
+            ) : null}
+            <Button
+              disabled={undo.busy || running}
+              onClick={() => {
+                setAsked({ kind: "discard" });
+              }}
+              size="xs"
+              variant="quiet"
+            >
+              {t`Undo`}
+            </Button>
+          </>
+        }
+        title={t`${plural(changed, {
+          one: "# change only you see",
+          other: "# changes only you see",
+        })}`}
+        tone={undo.failure === undefined ? "neutral" : "danger"}
+        variant="banner"
       >
-        <Trans>Undo</Trans>
-      </Button>
+        {undo.failure ?? (
+          <>
+            {t`You’re seeing your version.`}
+            {summaries.length === 0 ? null : ` ${formatList(summaries)}`}
+          </>
+        )}
+      </Alert>
       <ConfirmChange
         asked={asked}
         onCancel={() => {

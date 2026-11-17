@@ -13552,6 +13552,7 @@ msgstr "Doel-ID"
 msgid "tasks"
 msgstr "taken"
 
+#: src/apps/publish.tsx
 #: src/brain/brain-source-contents.tsx
 #: src/brain/brain.ts
 #: src/onboarding/interviews-progress.tsx
