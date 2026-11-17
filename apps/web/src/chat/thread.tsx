@@ -1035,6 +1035,9 @@ const AnswerRow = ({
           : failureMessage(last?.failure, i18n)
       }
       from="agent"
+      // Not drawn over every answer, but still its name for a screen reader.
+      name="Grasp"
+      nameHidden
       onRetry={ending.providerMissing ? undefined : retry}
       retryLabel={t`Try again`}
       status={ending.providerMissing ? "done" : status}

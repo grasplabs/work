@@ -710,6 +710,31 @@ describe(ChatThread, () => {
     ]);
   });
 
+  it("names each message for a screen reader, the answer Grasp without drawing it over the answer", async () => {
+    await thread([
+      asked,
+      {
+        id: 2,
+        role: "assistant",
+        text: "Four.",
+        citations: [],
+        code: [],
+        tools: [],
+        end: "done",
+        at: "2026-10-27T09:00:05.000Z",
+      },
+    ]);
+
+    expect({
+      named: [...document.querySelectorAll("article")].map((message) =>
+        message.getAttribute("aria-label")
+      ),
+      drawn: [...document.querySelectorAll("article h3")].map(
+        (heading) => heading.textContent
+      ),
+    }).toStrictEqual({ named: ["You", "Grasp"], drawn: [] });
+  });
+
   it("lets an answer's words out at a pace while it is written, and shows a kept answer whole", async () => {
     const text = "It adds up. Four, as two and two, which is what you asked.";
     await thread([asked], {
