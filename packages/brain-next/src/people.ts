@@ -274,9 +274,7 @@ export interface PersonFound {
 export const applyPerson = (
   sql: SqlStorage,
   { key, subject }: { key: string; subject: string },
-  { people, identifiers, subjects }: PersonFound,
-  /** An export being restored, which holds it by design: never made stale. */
-  restoring: string | null = null
+  { people, identifiers, subjects }: PersonFound
 ): number => {
   let changed = 0;
   const holding = entitiesHolding(sql, identifiers);
@@ -359,9 +357,8 @@ export const applyPerson = (
   if (changed > 0) {
     sql.exec(
       `INSERT OR IGNORE INTO export_sources (export, subject, version, written)
-      SELECT id, ?1, 0, 1 FROM exports WHERE id IS NOT ?2`,
-      subject,
-      restoring
+      SELECT id, ?1, 0, 1 FROM exports`,
+      subject
     );
   }
   return changed;
@@ -375,7 +372,8 @@ export const applyPerson = (
  * the rule an add leaves it out by (`strippedOf`): closed by its id under
  * that erasure, with what of it the store holds hidden (`applyPerson`), so
  * every line about it or relating to it is passed over (restore.ts
- * `passesOverMemory`), whichever comes first. In the caller's transaction.
+ * `passesOverMemory`), whichever comes first; and `restoring` made stale,
+ * as it holds their card. In the caller's transaction.
  */
 export const closeCards = (
   sql: SqlStorage,
@@ -409,8 +407,17 @@ export const closeCards = (
       applyPerson(
         sql,
         { key: by.key, subject: by.person },
-        { people: [], identifiers: [], subjects: [entityClosureOf(id)] },
-        restoring
+        { people: [], identifiers: [], subjects: [entityClosureOf(id)] }
+      );
+      // The export holds her card: stale as any export taken before her
+      // erasure (exports.ts `staleSql`), so no file of it is served, it
+      // lists none, and it is retired once its restore is through. Set
+      // here, as the store may not have known it when she was erased.
+      sql.exec(
+        `INSERT OR IGNORE INTO export_sources (export, subject, version, written)
+        VALUES (?1, ?2, 0, 1)`,
+        restoring,
+        by.person
       );
     }
   }

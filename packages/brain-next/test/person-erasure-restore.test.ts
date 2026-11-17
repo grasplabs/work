@@ -264,6 +264,14 @@ const failedRestore = async (id: string): Promise<string | undefined> => {
   return status?.state;
 };
 
+/** What the export `id` serves once a restore of it is through: its state, the files it lists, and a file. */
+const servedOf = async (id: string) => {
+  const status = await shared().exportStatus({ id });
+  const manifest = await shared().exportFile({ id, file: "manifest.json" });
+  return { state: status?.state, files: status?.files.length, manifest };
+};
+const refusedForGood = { state: "erased", files: 0, manifest: null };
+
 /** Every read a teammate makes of the world, as text. */
 const reads = async (w: World): Promise<string> => {
   const store = shared();
@@ -388,9 +396,36 @@ describe("a person's erasure and a restore of a company export", () => {
     await erase(w.dora, [email(w.doraLocal)]);
     await shared().startRestore(id, "test");
     const state = await restoreEnded(id);
+    await tick(shared());
 
-    expect({ state, left: await leftOf(w, true) }).toStrictEqual({
+    expect({
+      state,
+      served: await servedOf(id),
+      left: await leftOf(w, true),
+    }).toStrictEqual({
       state: "done",
+      served: refusedForGood,
+      left: gone,
+    });
+  });
+
+  it("serves no file of an export from before her erasure once it is restored after the store's loss, nor restores it again, and a new export holds nothing of her", async () => {
+    const w = await world();
+    const id = await exportNow();
+    await erase(w.anna, [email(w.annaLocal)]);
+    // Lost before any tick: the export's files are still in the bucket.
+    await restore(shared(), empty);
+    await shared().startRestore(id, "test");
+    const state = await restoreEnded(id);
+    await tick(shared());
+
+    expect({
+      state,
+      served: await servedOf(id),
+      left: await leftOf(w, false),
+    }).toStrictEqual({
+      state: "done",
+      served: refusedForGood,
       left: gone,
     });
   });

@@ -5,7 +5,7 @@
 import { brainOf, recallBudgetMax } from "@grasp-os/brain-next/contract";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -176,6 +176,25 @@ const erased = async (
   return await admin.api.members.erasure(who.userId);
 };
 
+/** How many failed tries each of `areas` of `userId`'s erasure counted, by area. */
+const attemptsOf = async (
+  userId: string,
+  areas: readonly ("brain_shared" | "identity")[]
+): Promise<Record<string, number>> => {
+  const rows = await drizzle(env.DB)
+    .select({
+      area: personErasureAreas.area,
+      attempts: personErasureAreas.attempts,
+    })
+    .from(personErasureAreas)
+    .where(eq(personErasureAreas.userId, userId));
+  return Object.fromEntries(
+    rows
+      .filter(({ area }) => areas.some((wanted) => wanted === area))
+      .map(({ area, attempts }) => [area, attempts])
+  );
+};
+
 describe(
   "erasing a member, in what others may read in the Brain",
   { timeout: 180_000 },
@@ -281,6 +300,7 @@ describe(
         });
       };
       await holding(true);
+      let failedOnce: Record<string, number> = {};
       let meanwhile:
         | Awaited<ReturnType<typeof at.admin.api.members.erasure>>
         | undefined;
@@ -291,6 +311,10 @@ describe(
           String(at.anna.person.name)
         );
         meanwhile = await at.admin.api.members.erasure(at.anna.userId);
+        failedOnce = await attemptsOf(at.anna.userId, [
+          "brain_shared",
+          "identity",
+        ]);
       } finally {
         await holding(false);
       }
@@ -300,6 +324,7 @@ describe(
       const bob = await seenBy(at.bob.userId, question);
 
       expect({
+        failedOnce,
         meanwhile: meanwhile?.erasure?.areas.filter(({ area }) =>
           ["brain_shared", "identity"].includes(area)
         ),
@@ -309,6 +334,7 @@ describe(
           statement.includes(at.name)
         ),
       }).toStrictEqual({
+        failedOnce: { brain_shared: 1, identity: 0 },
         meanwhile: [
           { area: "brain_shared", state: "pending" },
           { area: "identity", state: "pending" },
@@ -342,7 +368,7 @@ describe(
       let meanwhile:
         | Awaited<ReturnType<typeof at.admin.api.members.erasure>>
         | undefined;
-      let waited: { attempts: number } | undefined;
+      let waited: Record<string, number> = {};
       try {
         await at.admin.api.members.remove(at.anna.userId);
         await at.admin.api.members.erase(
@@ -352,15 +378,7 @@ describe(
         meanwhile = await at.admin.api.members.erasure(at.anna.userId);
         // The clock asks again while the restore runs: a wait, no failure.
         await runMinuteTasks();
-        [waited] = await drizzle(env.DB)
-          .select({ attempts: personErasureAreas.attempts })
-          .from(personErasureAreas)
-          .where(
-            and(
-              eq(personErasureAreas.userId, at.anna.userId),
-              eq(personErasureAreas.area, "brain_shared")
-            )
-          );
+        waited = await attemptsOf(at.anna.userId, ["brain_shared", "identity"]);
       } finally {
         await restoring(false);
       }
@@ -378,13 +396,13 @@ describe(
         herMemories: bob.memories.filter((statement) =>
           statement.includes(at.name)
         ),
-        waited: waited?.attempts,
+        waited,
       }).toStrictEqual({
         meanwhile: [
           { area: "brain_shared", state: "pending" },
           { area: "identity", state: "pending" },
         ],
-        waited: 0,
+        waited: { brain_shared: 0, identity: 0 },
         done: true,
         herEntity: false,
         herMemories: [],

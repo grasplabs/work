@@ -134,6 +134,8 @@ interface ErasureStep {
    * that fails marks nothing.
    */
   readonly erase: (env: Env, userId: string) => Promise<void>;
+  /** An area it runs only once complete: one still pending holds it, as a wait, nothing failed. */
+  readonly after?: ErasureAreaName;
 }
 
 /** Where one area of a person's erasure stands, as its schema stores it. */
@@ -192,24 +194,12 @@ const erasedEmail = (userId: string): string =>
  */
 const identity: ErasureStep = {
   area: "identity",
+  // Their address is what the Brain's erasure of what it derived about
+  // them goes by (`brainShared`): it stays until that is done, so a try of
+  // it again never runs without it.
+  after: "brain_shared",
   erase: async (env, userId) => {
     const db = drizzle(env.DB);
-    // Their address is what the Brain's erasure of what it derived about
-    // them goes by (`brainShared`): it stays until that is done, so a try
-    // of it again never runs without it.
-    const [waiting] = await db
-      .select({ state: personErasureAreas.state })
-      .from(personErasureAreas)
-      .where(
-        and(
-          eq(personErasureAreas.userId, userId),
-          eq(personErasureAreas.area, "brain_shared"),
-          eq(personErasureAreas.state, "pending")
-        )
-      );
-    if (waiting !== undefined) {
-      throw new Error("Their address waits for the Brain's erasure by it");
-    }
     const held = await db
       .select({
         id: accounts.id,
@@ -913,15 +903,22 @@ const runErasure = async (env: Env, userId: string): Promise<void> => {
   // In the order the areas run (`steps`): their address goes last of what
   // needs it (`brainShared`, then `identity`).
   const due = new Set(pending.map(({ area }) => area));
+  // Pending still once this run tried them: what waits for one is held.
+  const unfinished = new Set<ErasureAreaName>();
   for (const step of steps) {
     if (!due.has(step.area)) {
       continue;
     }
     const { area } = step;
+    if (step.after !== undefined && unfinished.has(step.after)) {
+      unfinished.add(area);
+      continue;
+    }
     try {
       // oxlint-disable-next-line no-await-in-loop -- one area at a time
       await step.erase(env, userId);
     } catch (error) {
+      unfinished.add(area);
       // The Brain restores an export: its part waits for it, as it should
       // (brain-next.ts `erasePersonShared`), and the clock asks again.
       if (isBrainRestoring(error)) {
