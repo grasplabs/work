@@ -128,6 +128,8 @@ const styles = stylex.create({
     gap: grasp.space3,
   },
   stack: { display: "grid", gap: grasp.space6 },
+  // The `hidden` attribute alone loses to the stack's own display.
+  hidden: { display: "none" },
 });
 
 /** A date and time as people read it here. */
@@ -690,81 +692,89 @@ export const AgentPage = ({
         }
       />
       <AgentFailure>{failure}</AgentFailure>
-      {tab === "overview" ? (
-        <div {...stylex.props(styles.stack)}>
-          <Facts
-            agent={agent}
-            first={first}
-            settings={settings}
-            teams={teams}
-            usage={usage}
-            wakes={wakes}
+      {/* Every tab stays mounted, the others hidden: what is typed and
+          not yet saved on one stays while another is looked at. */}
+      <div
+        hidden={tab !== "overview"}
+        {...stylex.props(styles.stack, tab !== "overview" && styles.hidden)}
+      >
+        <Facts
+          agent={agent}
+          first={first}
+          settings={settings}
+          teams={teams}
+          usage={usage}
+          wakes={wakes}
+        />
+        <RecentActivity usage={usage} wakes={wakes} />
+        {first ? null : <DeleteAgent can={can} name={name} remove={remove} />}
+      </div>
+      <div
+        hidden={tab !== "instructions"}
+        {...stylex.props(styles.stack, tab !== "instructions" && styles.hidden)}
+      >
+        <SectionCard
+          actions={
+            <Button
+              disabled={!can}
+              form={instructionsId}
+              size="sm"
+              type="submit"
+              variant="ink"
+            >
+              {t`Save`}
+            </Button>
+          }
+          title={t`Instructions`}
+        >
+          <AgentForm
+            can={can}
+            id={instructionsId}
+            initial={typed}
+            key={`${agent.id}:${agent.instructions}`}
+            onSave={async (said) => {
+              await save(said);
+            }}
+            parts={["instructions"]}
           />
-          <RecentActivity usage={usage} wakes={wakes} />
-          {first ? null : <DeleteAgent can={can} name={name} remove={remove} />}
-        </div>
-      ) : null}
-      {tab === "instructions" ? (
-        <div {...stylex.props(styles.stack)}>
-          <SectionCard
-            actions={
-              <Button
-                disabled={!can}
-                form={instructionsId}
-                size="sm"
-                type="submit"
-                variant="ink"
-              >
-                {t`Save`}
-              </Button>
-            }
-            title={t`Instructions`}
-          >
-            <AgentForm
-              can={can}
-              id={instructionsId}
-              initial={typed}
-              key={`${agent.id}:${agent.instructions}`}
-              onSave={async (said) => {
-                await save(said);
-              }}
-              parts={["instructions"]}
-            />
-          </SectionCard>
-          <AgentDocuments
+        </SectionCard>
+        <AgentDocuments
+          agent={agent}
+          can={can}
+          change={change}
+          documents={documents}
+          editable={editable}
+        />
+      </div>
+      <div
+        hidden={tab !== "access"}
+        {...stylex.props(styles.stack, tab !== "access" && styles.hidden)}
+      >
+        {firstAccess === undefined ? (
+          <Access
             agent={agent}
             can={can}
             change={change}
-            documents={documents}
-            editable={editable}
+            settings={settings}
+            teams={teams}
           />
-        </div>
-      ) : null}
-      {tab === "access" ? (
-        <div {...stylex.props(styles.stack)}>
-          {firstAccess === undefined ? (
-            <Access
-              agent={agent}
-              can={can}
-              change={change}
-              settings={settings}
-              teams={teams}
-            />
-          ) : (
-            // The first agent's reach is the company's own, with a place
-            // for each chat app and a row for each app: its settings
-            // whole, as Settings › Stephen had them.
-            <StephenSettings
-              classes={firstAccess.classes}
-              editable={editable}
-              reach={firstAccess.reach}
-              week={firstAccess.week}
-              workflows={firstAccess.workflows}
-            />
-          )}
-        </div>
-      ) : null}
-      {tab === "schedule" ? (
+        ) : (
+          // The first agent's reach is the company's own, with a place
+          // for each chat app and a row for each app: its settings
+          // whole, as Settings › Stephen had them.
+          <StephenSettings
+            classes={firstAccess.classes}
+            editable={editable}
+            reach={firstAccess.reach}
+            week={firstAccess.week}
+            workflows={firstAccess.workflows}
+          />
+        )}
+      </div>
+      <div
+        hidden={tab !== "schedule"}
+        {...stylex.props(styles.stack, tab !== "schedule" && styles.hidden)}
+      >
         <AgentWakes
           agent={agent}
           can={can}
@@ -773,7 +783,7 @@ export const AgentPage = ({
           people={people}
           wakes={wakes}
         />
-      ) : null}
+      </div>
     </Page>
   );
 };

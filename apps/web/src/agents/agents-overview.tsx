@@ -9,8 +9,7 @@ import type { StephenReach } from "@grasp-os/shared/stephen-reach";
 import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { Link, useRouter } from "@tanstack/react-router";
-import type { MouseEvent, ReactNode } from "react";
+import { Link } from "@tanstack/react-router";
 import { useState } from "react";
 
 import { Page, PageHeading } from "../frame/page.tsx";
@@ -24,6 +23,7 @@ import {
   InputGroupText,
 } from "../grasp/input-group/index.ts";
 import { Item, ItemGroup } from "../grasp/item/index.ts";
+import { Link as TextLink } from "../grasp/link/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { Toggle, ToggleGroup } from "../grasp/toggle/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
@@ -37,7 +37,7 @@ import { NewAgentButton } from "./new-agent.tsx";
 // Chat, which starts a chat with it. The company's admins see every
 // agent (`connections.agents`), each row with whom it answers, how much
 // it may do, whether it works on its own and what it cost this month;
-// the row opens the agent's page (agent-page.tsx). New agent asks for
+// its name opens the agent's page (agent-page.tsx). New agent asks for
 // one in a dialog (new-agent.tsx).
 
 /** What an admin's read adds to the agents: every agent, and what core keeps of each. */
@@ -157,43 +157,17 @@ const shownOf = (
   }));
 };
 
-/**
- * Rows whose `href` the router follows. Grasp UI's Item draws a linked
- * row as a plain `<a href>`, with no way to hand it the router's link,
- * so a plain press on one is taken here and followed in the page, as a
- * router link would; a press with a key held (a new tab) is the
- * browser's.
- */
-const RouterRows = ({ children }: { children: ReactNode }) => {
-  const router = useRouter();
-  const follow = (event: MouseEvent<HTMLDivElement>) => {
-    const { target } = event;
-    const anchor = target instanceof Element ? target.closest("a[href]") : null;
-    const plainPress =
-      event.button === 0 &&
-      !event.metaKey &&
-      !event.ctrlKey &&
-      !event.shiftKey &&
-      !event.altKey;
-    if (!(anchor instanceof HTMLAnchorElement && plainPress)) {
-      return;
-    }
-    const href = anchor.getAttribute("href") ?? "";
-    if (href.startsWith("/")) {
-      event.preventDefault();
-      void router.navigate({ href });
-    }
-  };
-  // A press on a link inside: the links themselves take the keys.
-  // oxlint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- only follows its links' own presses
-  return <div onClick={follow}>{children}</div>;
-};
-
 /** Which agents an admin's list shows. */
 const filters = ["all", "on", "paused"] as const;
 type Filter = (typeof filters)[number];
 
-/** One agent's row: an admin's opens its page; anyone else's has Chat. */
+/**
+ * One agent's row: its name leads an admin to its page, and Chat, where
+ * it answers the person and is on, starts a chat with it. Grasp UI's
+ * Item links a whole row only by a plain `href`, which the router
+ * wouldn't follow and which takes no Chat beside it, so the name is the
+ * link.
+ */
 const AgentRow = ({
   shown,
   facts,
@@ -204,44 +178,45 @@ const AgentRow = ({
   const { t } = useLingui();
   const { managed } = shown;
   const job = shown.job === "" ? t`No job written yet` : shown.job;
-  const description =
-    facts.length === 0 ? (
-      job
-    ) : (
-      <span {...stylex.props(styles.lines)}>
-        <span>{job}</span>
-        <Text element="span" size="xs" tone="quiet">
-          {facts.join(" · ")}
-        </Text>
-      </span>
-    );
-  const media = <AgentAvatar face={shown.face} size="sm" />;
-  const detail = managed?.state === "paused" ? t`Paused` : undefined;
-  if (managed !== undefined) {
-    return (
-      <Item
-        description={description}
-        detail={detail}
-        href={`/agents/${encodeURIComponent(shown.id)}`}
-        media={media}
-        title={shown.name}
-      />
-    );
-  }
+  const answers = managed === undefined || managed.state === "on";
   return (
     <Item
       actions={
-        <Button
-          icon={Conversation}
-          render={<Link search={{ agent: shown.id }} to="/" />}
-          size="sm"
-        >
-          {t`Chat`}
-        </Button>
+        shown.usable && answers ? (
+          <Button
+            icon={Conversation}
+            render={<Link search={{ agent: shown.id }} to="/" />}
+            size="sm"
+          >
+            {t`Chat`}
+          </Button>
+        ) : undefined
       }
-      description={description}
-      media={media}
-      title={shown.name}
+      description={
+        facts.length === 0 ? (
+          job
+        ) : (
+          <span {...stylex.props(styles.lines)}>
+            <span>{job}</span>
+            <Text element="span" size="xs" tone="quiet">
+              {facts.join(" · ")}
+            </Text>
+          </span>
+        )
+      }
+      detail={managed?.state === "paused" ? t`Paused` : undefined}
+      media={<AgentAvatar face={shown.face} size="sm" />}
+      title={
+        managed === undefined ? (
+          shown.name
+        ) : (
+          <TextLink
+            render={<Link params={{ agent: shown.id }} to="/agents/$agent" />}
+          >
+            {shown.name}
+          </TextLink>
+        )
+      }
     />
   );
 };
@@ -334,19 +309,17 @@ export const AgentsOverview = ({
                 : t`No agent matches “${asked}”`}
             </Empty>
           ) : (
-            <RouterRows>
-              <ItemGroup aria-label={t`Agents`} separated>
-                {shown.map((agent) => (
-                  <AgentRow
-                    facts={
-                      agent.managed === undefined ? [] : factsOf(agent.managed)
-                    }
-                    key={agent.id}
-                    shown={agent}
-                  />
-                ))}
-              </ItemGroup>
-            </RouterRows>
+            <ItemGroup aria-label={t`Agents`} separated>
+              {shown.map((agent) => (
+                <AgentRow
+                  facts={
+                    agent.managed === undefined ? [] : factsOf(agent.managed)
+                  }
+                  key={agent.id}
+                  shown={agent}
+                />
+              ))}
+            </ItemGroup>
           )}
         </>
       )}

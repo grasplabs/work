@@ -20,15 +20,18 @@ import { I18nProvider } from "@lingui/react";
 import {
   createMemoryHistory,
   createRootRoute,
+  createRoute,
+  Outlet,
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router";
 import { act } from "react";
+import type { ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
-import { AgentPage } from "./agent-page.tsx";
+import { AgentPage, agentTabOf } from "./agent-page.tsx";
 import type { AgentTab, FirstAgentAccess } from "./agent-page.tsx";
 import { NewAgent } from "./new-agent.tsx";
 
@@ -352,16 +355,49 @@ const shown = async (connections: Connections, open: Open, editable = true) => {
     };
   };
   const rootRoute = createRootRoute({
-    loader: load,
-    component: () => (
-      <Page data={rootRoute.useLoaderData()} editable={editable} open={open} />
-    ),
-    // Where the new agent's page leads: an address this router has no page for.
+    component: Outlet,
+    // Where the new agent's page leads, when this router has no page for it.
     notFoundComponent: () => <p>Elsewhere</p>,
   });
+  // The new agent's page, at the start.
+  const start = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/",
+    loader: load,
+    component: () => (
+      <Page data={start.useLoaderData()} editable={editable} open={open} />
+    ),
+  });
+  // An agent's own address, its tab in the search, as its tab links lead.
+  const agentRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/agents/$agent",
+    loader: load,
+    validateSearch: (search: Record<string, unknown>) => ({
+      tab: agentTabOf(search.tab),
+    }),
+    component: (): ReactNode => {
+      const data: Shown = agentRoute.useLoaderData();
+      const { agent } = agentRoute.useParams();
+      const { tab } = agentRoute.useSearch();
+      const name = data.agents.find(({ id }) => id === agent)?.name ?? "";
+      return (
+        <Page data={data} editable={editable} open={{ agent: name, tab }} />
+      );
+    },
+  });
+  const agents = await connections.agents();
+  const agentId =
+    open === "new"
+      ? undefined
+      : agents.find(({ name }) => name === open.agent)?.id;
+  const address =
+    open === "new" || agentId === undefined
+      ? "/"
+      : `/agents/${agentId}${open.tab === undefined ? "" : `?tab=${open.tab}`}`;
   const router = createRouter({
-    routeTree: rootRoute,
-    history: createMemoryHistory(),
+    routeTree: rootRoute.addChildren([start, agentRoute]),
+    history: createMemoryHistory({ initialEntries: [address] }),
     context: { core },
   });
   const host = document.createElement("div");
@@ -399,7 +435,7 @@ const press = async (element: HTMLElement) => {
 
 /** Whether `element` is on the open tab, or outside the tabs. */
 const inView = (element: Element): boolean =>
-  element.closest("[role='tabpanel'][hidden]") === null;
+  element.closest("[hidden]") === null;
 
 /** The button in view named `name`, or one whose words start with it. */
 const button = (name: string): HTMLButtonElement => {
@@ -415,9 +451,31 @@ const button = (name: string): HTMLButtonElement => {
   return found;
 };
 
-/** Opens the tab named `name`. */
+/** The button in view whose words are `name`, exactly. */
+const exactButton = (name: string): HTMLButtonElement => {
+  const found = [...document.querySelectorAll("button")].find(
+    (each) => inView(each) && each.textContent?.trim() === name
+  );
+  if (!(found instanceof HTMLButtonElement)) {
+    throw new TypeError(`No button ${name}`);
+  }
+  return found;
+};
+
+/** The button in the open dialog whose words are `name`. */
+const dialogButton = (name: string): HTMLButtonElement => {
+  const found = [...document.querySelectorAll("[role='dialog'] button")].find(
+    (each) => each.textContent?.trim() === name
+  );
+  if (!(found instanceof HTMLButtonElement)) {
+    throw new TypeError(`No button ${name} in a dialog`);
+  }
+  return found;
+};
+
+/** Opens the tab named `name`: a link in the page's heading. */
 const openTab = async (name: string) => {
-  const tab = [...document.querySelectorAll("[role='tab']")].find((each) =>
+  const tab = [...document.querySelectorAll("nav a")].find((each) =>
     each.textContent?.trim().startsWith(name)
   );
   if (!(tab instanceof HTMLElement)) {
@@ -426,12 +484,15 @@ const openTab = async (name: string) => {
   await press(tab);
 };
 
-/** The field labelled `label`, on whichever tab it is. */
+/** The field labelled `label`, on whichever tab or dialog it is. */
 const field = (label: string): HTMLInputElement | HTMLTextAreaElement => {
-  const named = [...document.querySelectorAll("label")].find(
-    (each) => each.textContent?.trim() === label
+  const named = [...document.querySelectorAll("label")].find((each) =>
+    each.textContent?.trim().startsWith(label)
   );
-  const found = document.querySelector(`#${CSS.escape(named?.htmlFor ?? "")}`);
+  const found =
+    named?.htmlFor === undefined || named.htmlFor === ""
+      ? named?.parentElement?.querySelector("input, textarea")
+      : document.querySelector(`#${CSS.escape(named.htmlFor)}`);
   if (
     !(found instanceof HTMLInputElement || found instanceof HTMLTextAreaElement)
   ) {
@@ -464,18 +525,20 @@ const choice = (label: string): HTMLSelectElement | null => {
   return found instanceof HTMLSelectElement ? found : null;
 };
 
-/** The switch labelled `name`. */
-const toggle = (name: string): HTMLElement => {
-  const found = document.querySelector(`[role="switch"][aria-label="${name}"]`);
+/** The switch on the row that says `words`. */
+const rowSwitch = (words: string): HTMLElement => {
+  const found = [...document.querySelectorAll("li")]
+    .find((row) => row.textContent?.includes(words))
+    ?.querySelector("[role='switch']");
   if (!(found instanceof HTMLElement)) {
-    throw new TypeError(`No switch ${name}`);
+    throw new TypeError(`No switch on ${words}`);
   }
   return found;
 };
 
 /** The switch in the page's heading, which turns the agent off and on. */
 const onSwitch = (): HTMLElement => {
-  const found = document.querySelector("label [role='switch']");
+  const found = document.querySelector("header [role='switch']");
   if (!(found instanceof HTMLElement)) {
     throw new TypeError("No on switch");
   }
@@ -565,8 +628,9 @@ describe("an agent's page", () => {
   it("saves a new name with the rest of the agent as it was", async () => {
     const { connections, asked } = await withClaire();
     await shown(connections, { agent: "Claire" });
+    await press(button("Edit"));
     await set(field("Name"), "Clara", "input");
-    await press(button("Save"));
+    await press(dialogButton("Save"));
     expect(asked).toStrictEqual([
       ["change", "agent-1", { ...claire, name: "Clara" }],
     ]);
@@ -577,25 +641,22 @@ describe("an agent's page", () => {
     await shown(connections, { agent: "Claire" });
     await press(onSwitch());
     expect(asked).toStrictEqual([["paused", "agent-1", true]]);
-    expect(document.querySelector("h1")?.parentElement?.textContent).toContain(
-      "Paused"
-    );
-    expect(document.body.textContent).toContain("Claire is paused");
+    expect(document.querySelector("header")?.textContent).toContain("Paused");
   });
 
   it("offers someone who isn't the company's admin nothing to change", async () => {
     const { connections, asked } = await withClaire();
     await shown(connections, { agent: "Claire" }, false);
     expect({
-      name: field("Name").disabled,
-      save: button("Save").disabled,
+      edit: button("Edit").disabled,
       on:
         Object.hasOwn(onSwitch().dataset, "disabled") ||
-        onSwitch().getAttribute("aria-disabled") === "true",
-    }).toStrictEqual({ name: true, save: true, on: true });
+        onSwitch().getAttribute("aria-disabled") === "true" ||
+        onSwitch().hasAttribute("disabled"),
+    }).toStrictEqual({ edit: true, on: true });
     await openTab("Schedule");
     expect(document.body.textContent).toContain(
-      "Claire never works on its own."
+      "Claire only works when asked."
     );
     expect(document.body.textContent).not.toContain("Add a time");
     expect(asked).toStrictEqual([]);
@@ -628,7 +689,7 @@ describe("an agent's page", () => {
       "A draft, not saved.",
     ]);
     // And it is the draft that is saved.
-    await press(button("Save"));
+    await press(exactButton("Save"));
     expect(asked.at(-1)).toStrictEqual([
       "change",
       "agent-1",
@@ -639,48 +700,49 @@ describe("an agent's page", () => {
   it("adds a time an agent works on its own, as a schedule core keeps, and pauses and removes it", async () => {
     const { connections, asked } = fakeConnections();
     await shown(connections, { agent: "Stephen", tab: "schedule" });
-    await set(field("At, in the company's time zone"), "07:30", "input");
+    await press(button("Add a time"));
     await set(
       field("What to ask it each time"),
       " Look for invoices that are overdue. ",
       "input"
     );
-    await press(button("Add a time"));
+    await press(exactButton("Add"));
     expect(asked).toStrictEqual([
       [
         "wake",
         "organization",
         {
-          cron: "30 7 * * 1-5",
+          cron: "0 9 * * 1-5",
           personId: "user-anna",
           opening: "Look for invoices that are overdue.",
         },
       ],
     ]);
     // Shown in words, for whom and with what it is asked.
-    expect(document.body.textContent).toContain("Every weekday at 07:30");
+    expect(document.body.textContent).toContain("Every weekday at 09:00");
     expect(document.body.textContent).toContain(
       "For Anna de Vries: Look for invoices that are overdue."
     );
 
-    await press(toggle("Every weekday at 07:30, for Anna de Vries, is on"));
-    await press(button("Remove Every weekday at 07:30, for Anna de Vries"));
+    await press(rowSwitch("Every weekday at 09:00"));
+    await press(button("Remove Every weekday at 09:00, for Anna de Vries"));
     expect(asked.slice(1)).toStrictEqual([
       ["wake paused", "wake-1", true],
       ["wake deleted", "wake-1"],
     ]);
-    expect(document.body.textContent).not.toContain("Every weekday at 07:30");
+    expect(document.body.textContent).not.toContain("Every weekday at 09:00");
   });
 
   it("keeps what is typed of a new time while another change saves, and when core refuses it", async () => {
     const { connections, asked } = fakeConnections();
     await shown(connections, { agent: "Stephen", tab: "schedule" });
+    await press(button("Add a time"));
     await set(field("What to ask it each time"), "refuse this", "input");
     // Another change on the page saves and the page is read again.
     await press(onSwitch());
     expect(field("What to ask it each time").value).toBe("refuse this");
     // Core refuses it: still there to be corrected, and said why.
-    await press(button("Add a time"));
+    await press(exactButton("Add"));
     expect(asked.at(-1)?.[0]).toBe("wake");
     expect(field("What to ask it each time").value).toBe("refuse this");
     expect(document.body.textContent).toContain("That isn't a wake-up.");
@@ -689,51 +751,36 @@ describe("an agent's page", () => {
   it("shows the time zone a wake-up was made in", async () => {
     const { connections } = fakeConnections();
     await shown(connections, { agent: "Stephen", tab: "schedule" });
-    await set(field("What to ask it each time"), "Check the inbox.", "input");
     await press(button("Add a time"));
-    expect(document.body.textContent).toContain(
-      "Every weekday at 09:00 · Europe/Amsterdam"
+    await set(field("What to ask it each time"), "Check the inbox.", "input");
+    await press(exactButton("Add"));
+    const row = [...document.querySelectorAll("li")].find((each) =>
+      each.textContent?.includes("Every weekday at 09:00")
     );
+    expect(row?.textContent).toContain("Europe/Amsterdam");
   });
 
   it("saves each card's own fields over the agent as core has it now, never undoing what another card saved", async () => {
     const { connections, asked } = await withClaire();
-    await shown(connections, { agent: "Claire" });
-    const pen = document.querySelector("input[aria-label='Pen']");
-    const model = document.querySelector("select");
-    if (!(pen instanceof HTMLElement) || model === null) {
-      throw new TypeError("Expected the picture and the model to choose");
-    }
-    await press(pen);
-    await press(button("Save"));
-    // The model's card was shown before the picture was saved.
-    await set(model, "anthropic/claude-sonnet-4-5", "change");
-    const [, saveModel] = [...document.querySelectorAll("button")].filter(
-      (each) => each.textContent?.trim() === "Save"
-    );
-    if (saveModel === undefined) {
-      throw new TypeError("Expected the model's Save");
-    }
-    await press(saveModel);
-    // And the name's card before the model was.
+    await shown(connections, { agent: "Claire", tab: "instructions" });
+    // The instructions were shown before the picture was saved.
+    await set(field("Instructions"), "Only invoices over 30 days.", "input");
+    await press(button("Edit"));
+    await press(button("Pen"));
+    await press(dialogButton("Save"));
+    await press(exactButton("Save"));
+    // And the name is asked for after both.
+    await press(button("Edit"));
     await set(field("Name"), "Clara", "input");
-    await press(button("Save"));
+    await press(dialogButton("Save"));
+    const said = "Only invoices over 30 days.";
     expect(asked).toStrictEqual([
       ["change", "agent-1", { ...claire, face: "pen" }],
+      ["change", "agent-1", { ...claire, face: "pen", instructions: said }],
       [
         "change",
         "agent-1",
-        { ...claire, face: "pen", model: "anthropic/claude-sonnet-4-5" },
-      ],
-      [
-        "change",
-        "agent-1",
-        {
-          ...claire,
-          name: "Clara",
-          face: "pen",
-          model: "anthropic/claude-sonnet-4-5",
-        },
+        { ...claire, name: "Clara", face: "pen", instructions: said },
       ],
     ]);
   });
@@ -758,9 +805,7 @@ describe("an agent's page", () => {
         document.body.textContent.includes("Terms.txt"),
       ],
       // Who may learn what a document says, said where one is added.
-      warned: listed.includes(
-        "Anyone who may ask Claire can learn what these say."
-      ),
+      warned: listed.includes("Anyone who may ask it can learn what they say."),
     }).toStrictEqual({
       asked: [
         [
