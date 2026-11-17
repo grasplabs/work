@@ -19,7 +19,7 @@ import {
   sourceIdSchema,
   storeBytesMax,
 } from "./contract.ts";
-import type { RestoreStatus } from "./contract.ts";
+import type { Access, RestoreStatus } from "./contract.ts";
 import { enqueueEmbedding } from "./embedding.ts";
 import { keepNames } from "./entities.ts";
 import {
@@ -107,7 +107,7 @@ import type { WorkContext } from "./work.ts";
 //    restore, and nothing of the export is written. The sources each part
 //    holds are recorded for the export as it is checked (exports.ts).
 //    A memory's line is checked by the add's own rules (contract.ts
-//    `newMemoriesSchema` and its plan in remember.ts), as one group's.
+//    `newMemoriesSchema` and its plan in remember.ts), as groups'.
 // 2. Writing: every version as it was (its number, when it was added, its
 //    readers, its change keys, whether it was current, indexed as it was);
 //    then, in the order they were written, every memory (its id, the
@@ -323,6 +323,13 @@ const manifestOf = async (
 };
 
 /**
+ * Whether `access` is read by groups alone, one or several: all a company
+ * export holds, never what one person alone may read or nobody may.
+ */
+const readByGroups = ({ kind }: Access): boolean =>
+  kind === "audience" || kind === "readers";
+
+/**
  * A version's line: by the contract's own rules for what an add takes, the
  * rule of the add that takes its key (`addInstructions` for what is kept
  * whole, whose text may be emptied; `addSource` otherwise), and by what a
@@ -343,7 +350,7 @@ const versionLineSchema = exportLineSchema.superRefine((line, context) => {
     !asAdd.success ||
     !sourceIdSchema.safeParse(line.source).success ||
     !z.array(changeKeySchema).safeParse(line.changes).success ||
-    line.access.kind !== "audience" ||
+    !readByGroups(line.access) ||
     line.source.startsWith(shippedSkillsPrefix) ||
     isWholeKey(line.source) === line.indexed
   ) {
@@ -395,14 +402,14 @@ const addOf = (line: MemoryLine): unknown => ({
 });
 
 /**
- * Whether `line` is a memory an add would take as one group's (the add's
+ * Whether `line` is a memory an add would take as groups' (the add's
  * own rules: contract.ts `newMemoriesSchema` and its plan), resting on a
  * version or a writer, never both; drawn by extraction from a version
  * alone.
  */
 const isMemoryToRestore = (line: MemoryLine): boolean => {
   if (
-    line.access.kind !== "audience" ||
+    !readByGroups(line.access) ||
     (line.writer === null) === (line.source === null) ||
     (line.source === null) !== (line.version === null) ||
     (line.source === null && (line.extractor ?? null) !== null)
@@ -436,7 +443,7 @@ const partLineSchema = z.union([
   ),
   extractionLineSchema.refine(
     ({ source, access }) =>
-      sourceIdSchema.safeParse(source).success && access.kind === "audience",
+      sourceIdSchema.safeParse(source).success && readByGroups(access),
     { message: "Not an extraction mark to restore" }
   ),
   changeLineSchema,

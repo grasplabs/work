@@ -17,6 +17,7 @@ import type {
   CurrentRequest,
   NewSource,
   ReadableRequest,
+  ReadersChange,
   SourceVersion,
   SourceVersionRef,
   VersionRequest,
@@ -762,4 +763,99 @@ export const readCurrent = async (
     .filter(({ source, version }) =>
       now.has(JSON.stringify([source, version]))
     );
+};
+
+/** What a change of readers answers when the text it would keep is gone. */
+const textLost =
+  "The Brain lost the text of the version whose readers it would change";
+
+/**
+ * The version of `source` the change `change` made, if any, else its
+ * current one: its number, file and readers' key.
+ */
+const versionToKeep = (
+  db: DrizzleSqliteDODatabase,
+  source: string,
+  change: string
+):
+  | { made: boolean; version: number; file: string; readers: string }
+  | undefined => {
+  const made = db
+    .select(versionFields)
+    .from(sourceChanges)
+    .innerJoin(sourceVersions, eq(sourceVersions.row, sourceChanges.versionRow))
+    .innerJoin(readerSets, eq(readerSets.id, sourceVersions.readerSet))
+    .where(
+      and(eq(sourceChanges.source, source), eq(sourceChanges.change, change))
+    )
+    .get();
+  if (made !== undefined) {
+    return { made: true, ...made };
+  }
+  const current = db
+    .select(versionFields)
+    .from(currentVersions)
+    .innerJoin(
+      sourceVersions,
+      eq(sourceVersions.row, currentVersions.versionRow)
+    )
+    .innerJoin(readerSets, eq(readerSets.id, sourceVersions.readerSet))
+    .where(eq(currentVersions.source, source))
+    .get();
+  return current === undefined ? undefined : { made: false, ...current };
+};
+
+/**
+ * Gives `source` other readers (contract.ts `changeReaders`): a new
+ * version with the text of the version its change made, if it made one
+ * (a repeat, which `addVersion` answers with that version), else of the
+ * current one, over that version (`after`), so an add that lands while
+ * the text is read is never undone: the change is then made again over
+ * it. Readers the current version already has answer with it, nothing
+ * written: decided without an await, so it holds as answered.
+ */
+export const changeReaders = async (
+  store: SourcesStore,
+  { source, change, access, readAt }: ReadersChange
+): Promise<AddedVersion | null> => {
+  for (;;) {
+    const kept = versionToKeep(store.db, source, change);
+    if (kept === undefined) {
+      return null;
+    }
+    if (!kept.made && kept.readers === readerSetKeyOf(access)) {
+      return { source, version: kept.version };
+    }
+    // oxlint-disable-next-line no-await-in-loop -- again only after another add
+    const text = await textOf(store.bucket, kept.file);
+    if (text === null) {
+      throw new Error(textLost);
+    }
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- again only after another add
+      return await addVersion(
+        store,
+        {
+          source,
+          change,
+          text,
+          access,
+          ...(isThread(store.storage.sql, source) === true
+            ? { thread: true }
+            : {}),
+          ...(readAt === undefined ? {} : { readAt }),
+          ...(kept.made ? {} : { after: kept.version }),
+        },
+        { indexed: true }
+      );
+    } catch (error) {
+      if (
+        kept.made ||
+        !(error instanceof Error) ||
+        error.message !== staleVersion
+      ) {
+        throw error;
+      }
+    }
+  }
 };

@@ -25,12 +25,12 @@ import { signedInApi } from "./sign-in.ts";
  */
 
 /**
- * A word nothing else holds: 64 random bits. Short, as a pass asks every
+ * A word nothing else holds: 48 random bits. Short, as a pass asks every
  * marker it may not read at once, in a question and in a name of the
  * memory probes' fixture (brain-next-surfaces.ts), each with its limit.
  */
 export const markerWord = (): string =>
-  `m${crypto.randomUUID().replaceAll("-", "").slice(0, 16)}`;
+  `m${crypto.randomUUID().replaceAll("-", "").slice(0, 12)}`;
 
 /** Something a pass found that it may not. */
 export interface Finding {

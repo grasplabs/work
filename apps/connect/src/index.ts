@@ -29,6 +29,7 @@ import type {
   ConnectApi,
   ConnectCall,
   ConnectionOwner,
+  PersonalAccount,
   ConnectionPerson,
   ConnectionSummary,
   OrganizationConnection,
@@ -103,7 +104,7 @@ import {
   changeToolkitTools,
   startToolkitConnection,
 } from "./composio-connections.ts";
-import { connectionOwners } from "./connections.ts";
+import { connectionOwners, personalAccounts } from "./connections.ts";
 import {
   actionShape,
   connectorContract,
@@ -405,6 +406,10 @@ export default class Connect
     connectionIds: readonly string[]
   ): Promise<ConnectionOwner[]> {
     return await connectionOwners(this.env.DB, connectionIds);
+  }
+
+  async personalAccounts(userId: unknown): Promise<PersonalAccount[]> {
+    return await personalAccounts(this.env.DB, userId);
   }
 
   async requireClassRights(

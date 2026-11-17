@@ -7,10 +7,12 @@ import {
 } from "@grasp-os/shared/connect";
 import type {
   ConnectionOwner,
+  PersonalAccount,
   ToolClass,
   ToolReach,
 } from "@grasp-os/shared/connect";
-import { eq, inArray } from "drizzle-orm";
+import { sourceReaderProviders } from "@grasp-os/shared/source-readers";
+import { and, eq, inArray, isNotNull, ne } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -311,4 +313,48 @@ export const connectionOwners = async (
       toolClasses: offeredToolClasses({ provider: row.provider, tools }),
     }),
   }));
+};
+
+/** The person `personalAccounts` is asked about: core's user ID. */
+const accountsOwnerSchema = z.string().min(1);
+
+/**
+ * The suite accounts the person `request` names connected as their own
+ * and hasn't disconnected (`ConnectApi.personalAccounts`): connections
+ * connect made itself (`native`), pinned to the company's tenant, whose
+ * account it took from the provider's verified ID token at connecting
+ * (oauth.ts). One a token renewal lost (`needs_reauth`) is still theirs.
+ */
+export const personalAccounts = async (
+  db: D1Database,
+  request: unknown
+): Promise<PersonalAccount[]> => {
+  const userId = connectErrors.parse(
+    "connect.invalid",
+    accountsOwnerSchema,
+    request
+  );
+  const rows = await drizzle(db)
+    .select({
+      provider: connections.provider,
+      tenant: connections.tenant,
+      accountId: connections.accountId,
+    })
+    .from(connections)
+    .where(
+      and(
+        eq(connections.ownerUserId, userId),
+        eq(connections.scope, "personal"),
+        eq(connections.serverKind, "native"),
+        ne(connections.status, "disconnected"),
+        inArray(connections.provider, [...sourceReaderProviders]),
+        isNotNull(connections.tenant),
+        isNotNull(connections.accountId)
+      )
+    );
+  return rows.flatMap(({ provider, tenant, accountId }) =>
+    tenant === null || accountId === null
+      ? []
+      : [{ provider, tenant, accountId }]
+  );
 };

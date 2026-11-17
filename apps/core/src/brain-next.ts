@@ -138,6 +138,7 @@ import { modelErrors } from "@grasp-os/shared/models";
 import type { ModelErrorCode } from "@grasp-os/shared/models";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import { skillErrors } from "@grasp-os/shared/skills";
+import { sourceReaderSchema } from "@grasp-os/shared/source-readers";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -169,6 +170,12 @@ import { skillCards, skillCardsKept } from "./skill-cards.ts";
 import type { SkillCardText } from "./skill-cards.ts";
 import { skillNeedsOf } from "./skill-needs.ts";
 import type { SkillNeeds } from "./skill-needs.ts";
+import {
+  heldPrincipalsOf,
+  principalOfReader,
+  signInAccountsOf,
+  signInAccountsRead,
+} from "./source-readers.ts";
 
 // The Brain, as core reaches it (@grasp-os/brain-next). The Brain knows no
 // people or teams: core names them as principals, a person by their user
@@ -243,8 +250,11 @@ const connectionPrefix = "connection:";
 /** A shared connection's ID, as its group names it (`connectionGroup`). */
 const connectionIdSchema = brainConnectionIdSchema;
 
-/** What reading as a member needs: core's records. */
-type ReaderEnv = Pick<Env, "DB">;
+/**
+ * What reading as a member needs: core's records, and, for the accounts
+ * they proved are theirs, the sign-in config and connect.
+ */
+type ReaderEnv = Pick<Env, "DB" | "SIGN_IN" | "CONNECT">;
 
 /** A person's or a team's ID, as core passes it: never empty. */
 const idSchema = wellFormedString()
@@ -262,6 +272,19 @@ const sourceReadersSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("connection"),
     connectionId: connectionIdSchema,
+  }),
+  // Those the system an item lives in lists as its readers (GRA-1761),
+  // each named as a group no other reader's name can be
+  // (source-readers.ts), short enough for one.
+  z.strictObject({
+    kind: z.literal("readers"),
+    readers: z.array(
+      sourceReaderSchema.refine(
+        (reader) =>
+          (principalOfReader(reader)?.length ?? 0) <= principalMaxLength,
+        { message: "Too long a reader's ID" }
+      )
+    ),
   }),
 ]);
 
@@ -797,6 +820,17 @@ const accessOf = (readers: SourceReaders): Access => {
     case "connection": {
       return { kind: "audience", group: connectionGroup(readers.connectionId) };
     }
+    case "readers": {
+      // Each once; a link, or nothing at all, is nobody.
+      const groups = [
+        ...new Set(
+          readers.readers.flatMap((reader) => principalOfReader(reader) ?? [])
+        ),
+      ];
+      return groups.length === 0
+        ? { kind: "none" }
+        : { kind: "readers", groups };
+    }
     default: {
       throw new Error("Unknown readers");
     }
@@ -818,22 +852,37 @@ export type Reach = "person" | "teams" | "company";
  * now, the company, and the members reading as themselves
  * (`membersGroup`), with the shared connections' Brain audiences as core
  * keeps them now. Refused once they have no current membership.
+ *
+ * With `asThemselves`, also the groups of the accounts they proved are
+ * theirs (`accountGroups`, source-readers.ts): those they sign in with,
+ * read in the same batch, and the suite accounts they connected as their
+ * own, as connect has them now. Only for a person reading as themselves:
+ * an account is the person, and code acting for them reads no more of
+ * what an item's own list gives them than their own store.
  */
 const memberGroupsOf = async (
   env: ReaderEnv,
-  personId: string
+  personId: string,
+  asThemselves = false
 ): Promise<{
   person: string;
   groups: string[];
   audiences: readonly ConnectionAudience[];
+  accountGroups: string[];
 }> => {
   const id = checked(idSchema, personId);
-  // One snapshot: their teams and the audiences, as one batch reads them.
+  // One snapshot: their teams, the audiences and their sign-in accounts,
+  // as one batch reads them.
   const db = drizzle(env.DB);
-  const [membership, memberTeams, audiences] = await db.batch([
-    ...memberReads(db, id),
-    audiencesRead(db),
-  ]);
+  const [[membership, memberTeams, audiences, signIns], connected] =
+    await Promise.all([
+      db.batch([
+        ...memberReads(db, id),
+        audiencesRead(db),
+        signInAccountsRead(db, id),
+      ]),
+      asThemselves ? env.CONNECT.personalAccounts(id) : [],
+    ]);
   const member = memberFrom(id, membership, memberTeams);
   if (member === undefined) {
     throw permissionErrors.create("permission.person_inactive");
@@ -846,6 +895,13 @@ const memberGroupsOf = async (
       membersGroup,
     ],
     audiences,
+    accountGroups: asThemselves
+      ? [
+          ...new Set(
+            heldPrincipalsOf([...signInAccountsOf(env, signIns), ...connected])
+          ),
+        ]
+      : [],
   };
 };
 
@@ -890,8 +946,15 @@ const personReaderOf = async (
   env: ReaderEnv,
   personId: string
 ): Promise<PersonReader> => {
-  const { person, groups, audiences } = await memberGroupsOf(env, personId);
-  return { person, groups: withConnections(groups, audiences) };
+  const { person, groups, audiences, accountGroups } = await memberGroupsOf(
+    env,
+    personId,
+    true
+  );
+  return {
+    person,
+    groups: [...withConnections(groups, audiences), ...accountGroups],
+  };
 };
 
 /**
@@ -922,10 +985,17 @@ const readerOf = async (
   reach: Reach,
   teams: readonly string[] = []
 ): Promise<Reader> => {
-  const { person, groups, audiences } = await memberGroupsOf(env, personId);
+  const { person, groups, audiences, accountGroups } = await memberGroupsOf(
+    env,
+    personId,
+    reach === "person"
+  );
   switch (reach) {
     case "person": {
-      return { person, groups: withConnections(groups, audiences) };
+      return {
+        person,
+        groups: [...withConnections(groups, audiences), ...accountGroups],
+      };
     }
     case "teams": {
       // Never what members read as themselves alone (`membersGroup`).
@@ -974,6 +1044,29 @@ const refuseOtherConnectionReaders = (
       "Refused: only what agents read through a shared connection is for its audience, keyed under it"
     );
   }
+};
+
+/**
+ * `error`, one of the Brain's own refusals of an add by its whole message
+ * (@grasp-os/brain-next/contract), as the code producers can test: what an
+ * erasure closed (a source's key, or a person's own store erased whole),
+ * a change added before with other text or readers, a removed source.
+ * Anything else as it was.
+ */
+const sourceRefusalOf = (error: unknown): unknown => {
+  if (!(error instanceof Error)) {
+    return error;
+  }
+  if (error.message === erasedSource || error.message === storeErased) {
+    return brainSourceErrors.create("brain.source_erased");
+  }
+  if (error.message === changeTaken) {
+    return brainSourceErrors.create("brain.source_change_taken");
+  }
+  if (error.message === removedSource) {
+    return brainSourceErrors.create("brain.source_removed");
+  }
+  return error;
 };
 
 /**
@@ -1104,24 +1197,73 @@ export const addSource = async (
         )
     ));
   } catch (error) {
-    // The Brain's own refusals of what an erasure closed, by their whole
-    // message (@grasp-os/brain-next/contract): a source's key, or a
-    // person's own store erased whole. A code producers can test.
-    if (
-      error instanceof Error &&
-      (error.message === erasedSource || error.message === storeErased)
-    ) {
-      throw brainSourceErrors.create("brain.source_erased");
-    }
-    if (error instanceof Error && error.message === changeTaken) {
-      throw brainSourceErrors.create("brain.source_change_taken");
-    }
-    if (error instanceof Error && error.message === removedSource) {
-      throw brainSourceErrors.create("brain.source_removed");
-    }
-    throw error;
+    throw sourceRefusalOf(error);
   }
   return { source, version, ...(newer === true ? { newer } : {}) };
+};
+
+const readersChangeSchema = z.strictObject({
+  source: sourceRefSchema,
+  change: changeSchema,
+  readers: sourceReadersSchema,
+  readAt: z.date().optional(),
+});
+
+/**
+ * Gives `source` other readers (`readers`) as the change `change`: a new
+ * version with the text of its current one, so the producer never reads
+ * back what it may be taking away (the Brain's `changeReaders`). Every
+ * narrowing and every "gone" of a source in the shared store goes through
+ * it: in one transaction everything the Brain answers follows the new
+ * readers, its history and what was drawn from it included. A repeat of
+ * `change` answers with the version it made; readers the current version
+ * already has answer with it. Null for a source the Brain doesn't hold.
+ * `readAt`, as an add's: a change read before the current version was
+ * writes nothing (`newer`).
+ *
+ * For producers on the server only, as `addSource`, with its codes. A
+ * person's own source (`owner`) never changes readers: what one person
+ * alone may read stays in their store until erased.
+ */
+export const changeSourceReaders = async (
+  env: BrainEnv,
+  changed: {
+    source: SourceRef;
+    change: string;
+    readers: SourceReaders;
+    readAt?: Date;
+  }
+): Promise<(SourceVersionRef & { newer?: true }) | null> => {
+  const { source, change, readers, readAt } = checked(
+    readersChangeSchema,
+    changed
+  );
+  if (readers.kind === "owner") {
+    throw new Error(
+      "Refused: what one person alone may read is never given other readers"
+    );
+  }
+  refuseOtherConnectionReaders(source, readers);
+  try {
+    const made = await whileNotRestoring(
+      async () =>
+        await brain(env).changeReaders({
+          source: sourceKeyOf(source),
+          change,
+          access: accessOf(readers),
+          ...(readAt === undefined ? {} : { readAt: readAt.getTime() }),
+        })
+    );
+    return made === null
+      ? null
+      : {
+          source,
+          version: made.version,
+          ...(made.newer === true ? { newer: made.newer } : {}),
+        };
+  } catch (error) {
+    throw sourceRefusalOf(error);
+  }
 };
 
 /** Whether `vector` is one the Brain takes: finite numbers, not all zero. */

@@ -1,0 +1,57 @@
+import { z } from "zod";
+
+// Who may read an item where it lives, as the system it lives in lists
+// them (GRA-1761): what a sync hands core for each item, and core turns
+// into the Brain's readers (core's brain-next.ts `principalOfReader`).
+// Never names or addresses: each reader is the provider's stable ID in the
+// company's own tenant, which core matches only against accounts a person
+// proved are theirs, by signing in with them or connecting them.
+
+/** The systems whose sharing is copied: connect's provider IDs for them. */
+export const sourceReaderProviders = ["google", "microsoft"] as const;
+
+/** One part of a reader's ID: never empty, never ":", which joins the parts. */
+const partSchema = z
+  .string()
+  .min(1)
+  .refine((part) => part.isWellFormed() && !part.includes(":"), {
+    message: "Not one part of a reader's ID",
+  });
+
+/**
+ * Where a reader is: the system, and the company's tenant in it, as
+ * connect's connections name it (an Entra tenant ID, a Google Workspace's
+ * primary domain).
+ */
+const placeShape = {
+  provider: z.enum(sourceReaderProviders),
+  tenant: partSchema,
+};
+
+/**
+ * One reader of an item:
+ *
+ * - `account`: one account, by the provider's stable subject (an Entra
+ *   object ID, a Google account's `sub`);
+ * - `group`: a group in the tenant's directory, by its ID; nobody reads by
+ *   it until core knows its members;
+ * - `tenant`: everyone in the tenant, only where they can open the item
+ *   without a link;
+ * - `link`: whoever has a link ("anyone with the link", or everyone in the
+ *   organization with it): nobody, as a link alone gives no one access.
+ */
+export const sourceReaderSchema = z.discriminatedUnion("kind", [
+  z.strictObject({
+    kind: z.literal("account"),
+    ...placeShape,
+    account: partSchema,
+  }),
+  z.strictObject({
+    kind: z.literal("group"),
+    ...placeShape,
+    group: partSchema,
+  }),
+  z.strictObject({ kind: z.literal("tenant"), ...placeShape }),
+  z.strictObject({ kind: z.literal("link") }),
+]);
+export type SourceReader = z.infer<typeof sourceReaderSchema>;
