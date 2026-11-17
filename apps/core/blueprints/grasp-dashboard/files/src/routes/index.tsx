@@ -1,6 +1,5 @@
 import type { Id } from "@grasp-os/sdk";
 import { useAction, useForm, useMutation, useQuery } from "@grasp-os/sdk/react";
-import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
 import {
   Card,
@@ -31,10 +30,9 @@ import { api } from "@server/_generated/api";
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 
-// The company's dashboard as an App: a set of cards. Two are drawn from
-// what an App reads of the platform today; each other card of Grasp's own
-// dashboard is here as what it waits for, a read the platform doesn't
-// share with Apps yet. A company changes this page by asking Grasp.
+// The company's dashboard as an App: a set of cards, drawn from what an
+// App reads of the platform today (`grasp.statistics.read`). A company
+// changes this page by asking Grasp.
 
 interface Group {
   name: string;
@@ -46,16 +44,6 @@ interface Figures {
   signals: Group[];
   leftOut: string[];
 }
-
-/** The cards of Grasp's dashboard an App can't draw yet, and the read each waits for. */
-const waiting = [
-  { card: "Goals", read: "the Brain's goals" },
-  { card: "Next report", read: "the weekly report" },
-  { card: "Workflows", read: "the list of workflows" },
-  { card: "Apps", read: "the list of Apps" },
-  { card: "What waits on you", read: "a count of the inbox" },
-  { card: "Return a month", read: "hours saved, which Grasp doesn't keep yet" },
-] as const;
 
 /** What the signals' kinds are called. */
 const kindNames: Record<string, string> = {
@@ -212,7 +200,7 @@ const Dashboard = () => {
           {failure}
         </p>
       )}
-      <Grid columns={3}>
+      <Grid columns={2}>
         <Counts
           groups={figures?.runs}
           none="No runs in the last 30 days."
@@ -223,24 +211,6 @@ const Dashboard = () => {
           none="Nothing to improve found."
           title="Where workflows lose time"
         />
-        <Card size="sm">
-          <CardHeader>
-            <CardDescription>Waits for the platform</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <ul className="flex flex-col gap-2 text-sm">
-              {waiting.map(({ card, read: needs }) => (
-                <li className="flex flex-col" key={card}>
-                  <span className="flex items-center gap-2">
-                    {card}
-                    <Badge variant="outline">Not yet</Badge>
-                  </span>
-                  <span className="text-muted-foreground">{needs}</span>
-                </li>
-              ))}
-            </ul>
-          </CardContent>
-        </Card>
       </Grid>
       {figures !== undefined && figures.leftOut.length > 0 ? (
         <p className="text-muted-foreground text-sm">
