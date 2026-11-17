@@ -5,11 +5,10 @@ import {
   RestartSyncError,
   cursorPart,
   defineSync,
+  fetchInRoom,
   fillPage,
   fromCursorPart,
-  isLate,
   mayRequest,
-  requestSignal,
   syncRoom,
   takeContent,
 } from "@grasp-os/connector-kit/sync";
@@ -175,7 +174,12 @@ const getJson = async <Schema extends z.ZodType>(
   url: URL,
   schema: Schema
 ): Promise<z.output<Schema>> => {
-  const response = await fetch(url, { signal: requestSignal(room) });
+  const response = await fetchInRoom(room, url);
+  if (response === "late") {
+    throw new ToolError("Google didn't answer in time", {
+      code: "unavailable",
+    });
+  }
   if (response.status === 404 || response.status === 410) {
     await response.body?.cancel();
     throw new RestartSyncError();
@@ -240,21 +244,6 @@ const howToRead = (
 /** What a content read found: content, none to read, the file gone, or no room. */
 type Read = { content: SyncContent | null } | { gone: true } | { full: true };
 
-/** Fetches a file's content, given up at the page's deadline. */
-const fetchContent = async (
-  room: SyncRoom,
-  url: URL
-): Promise<Response | "late"> => {
-  try {
-    return await fetch(url, { signal: requestSignal(room) });
-  } catch (error) {
-    if (isLate(error)) {
-      return "late";
-    }
-    throw error;
-  }
-};
-
 /** The content an answer holds, as the file is read. */
 const contentFrom = (
   file: DriveFile,
@@ -297,7 +286,7 @@ const contentOf = async (room: SyncRoom, file: DriveFile): Promise<Read> => {
     return room.empty ? { content: null } : { full: true };
   }
   const path = `${files}/${segment(file.id)}`;
-  const response = await fetchContent(
+  const response = await fetchInRoom(
     room,
     "export" in how
       ? googleUrl(apisHost, `${path}/export`, { mimeType: how.export })
