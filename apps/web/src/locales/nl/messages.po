@@ -3062,7 +3062,7 @@ msgstr "Aan het werk"
 
 #: src/agents/agent-wakes.tsx
 msgid "At, in the company's time zone"
-msgstr ""
+msgstr "Om, in de tijdzone van het bedrijf"
 
 #. A time zone, by its city
 #: src/routes/_shell.settings.workspace.tsx

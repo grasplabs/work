@@ -3062,7 +3062,7 @@ msgstr "À l’œuvre"
 
 #: src/agents/agent-wakes.tsx
 msgid "At, in the company's time zone"
-msgstr ""
+msgstr "À, dans le fuseau horaire de l’entreprise"
 
 #. A time zone, by its city
 #: src/routes/_shell.settings.workspace.tsx
