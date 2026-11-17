@@ -1867,8 +1867,15 @@
     {
       "idx": 266,
       "version": "6",
-      "when": 1794954903629,
-      "tag": "0266_brain_sync",
+      "when": 1794955170180,
+      "tag": "0266_account_verified_email",
+      "breakpoints": true
+    },
+    {
+      "idx": 267,
+      "version": "6",
+      "when": 1794956517284,
+      "tag": "0267_brain_sync",
       "breakpoints": true
     }
   ]

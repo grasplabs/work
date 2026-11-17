@@ -566,11 +566,15 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   // anything, so a restore brings nothing back; so a person's own store
   // needs no entry here. The word indexes (migrations, not in the schema)
   // hold the words of these passages and memories, and go with them.
+  // A set copied from where a document lives names each reader's account
+  // (source-readers.ts, GRA-1761): an Entra object ID, or a Google
+  // address. Kept with the document, as its text is; taking an erased
+  // person's accounts out of these sets is still to be built (GRA-1761).
   "brainStore.reader_sets": {
-    none: "sets of groups: the shared store refuses a set of one person",
+    company: "who a document is shared with, by account, where it lives",
   },
   "brainStore.reader_set_members": {
-    none: "groups: the shared store refuses a set of one person",
+    company: "who a document is shared with, by account, where it lives",
   },
   "brainStore.files": noPerson,
   "brainStore.source_versions": {
@@ -688,7 +692,7 @@ export const reviewedPersonColumns: Readonly<
   "brainStore.removed_sources": ["subject"],
   "brainStore.source_subjects": ["group_subject", "subject"],
   "core.access_revocations": ["user_ids"],
-  "core.accounts": ["user_id"],
+  "core.accounts": ["user_id", "verified_email"],
   "core.action_invocations": ["person_id"],
   "core.agent_held_starts": ["person_id"],
   "core.agents": ["changed_by", "made_by", "owner_id"],

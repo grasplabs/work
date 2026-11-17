@@ -2,9 +2,9 @@ import { z } from "zod";
 
 // Who may read an item where it lives, as the system it lives in lists
 // them (GRA-1761): what a sync hands core for each item, and core turns
-// into the Brain's readers (core's brain-next.ts `principalOfReader`).
-// Never names or addresses: each reader is the provider's stable ID in the
-// company's own tenant, which core matches only against accounts a person
+// into the Brain's readers (core's source-readers.ts `principalOfReader`).
+// Each reader is named in the company's own tenant by what that provider's
+// ID tokens vouch for, which core matches only against accounts a person
 // proved are theirs, by signing in with them or connecting them.
 
 /** The systems whose sharing is copied: connect's provider IDs for them. */
@@ -31,8 +31,8 @@ const placeShape = {
 /**
  * One reader of an item:
  *
- * - `account`: one account, by the provider's stable subject (an Entra
- *   object ID, a Google account's `sub`);
+ * - `account`: one account, by what the provider's ID tokens vouch for:
+ *   an Entra object ID for Microsoft, the address for Google;
  * - `group`: a group in the tenant's directory, by its ID; nobody reads by
  *   it until core knows its members;
  * - `tenant`: everyone in the tenant, only where they can open the item

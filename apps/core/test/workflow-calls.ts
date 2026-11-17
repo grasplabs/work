@@ -313,6 +313,7 @@ export const mailingWorkflow = async (
   {
     before = [],
     to = { $expr: "args.who" },
+    subject = { $expr: "params.token" },
     plan = [],
     sharing,
     plain = false,
@@ -322,6 +323,8 @@ export const mailingWorkflow = async (
   }: {
     before?: unknown[];
     to?: unknown;
+    /** Its mail's subject: its sensitive parameter's value by default. */
+    subject?: unknown;
     plan?: Parameters<typeof mailConnection>[0];
     /** Another alias, sorted first, approved for the same permission. */
     sharing?: string;
@@ -345,7 +348,7 @@ export const mailingWorkflow = async (
     action: "mail.send",
     args: {
       to,
-      subject: { $expr: "params.token" },
+      subject,
       ...(attachments === undefined ? {} : { attachments }),
     },
   };

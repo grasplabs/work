@@ -101,6 +101,13 @@ export const accounts = sqliteTable(
      * so staff sessions can be checked against the current staff list.
      */
     oid: text(),
+    /**
+     * The address the ID token of the latest sign-in gave and marked
+     * verified (`email_verified`, Google's): what an item's reader list
+     * may name this account by (source-readers.ts). Null for Entra, whose
+     * `email` claim is not verified.
+     */
+    verifiedEmail: text("verified_email"),
     createdAt: timestamp("created_at").notNull(),
     updatedAt: timestamp("updated_at").notNull(),
   },

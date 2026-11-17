@@ -1,5 +1,10 @@
 import { recallBudgetMax } from "@grasp-os/brain-next/contract";
+import { routerSecretHeader } from "@grasp-os/shared/router";
 import type { SourceReader } from "@grasp-os/shared/source-readers";
+import {
+  createExecutionContext,
+  waitOnExecutionContext,
+} from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -10,10 +15,14 @@ import {
   recallAs,
 } from "../src/brain-next.ts";
 import type { SourceReaders, SourceRef } from "../src/brain-next.ts";
+import worker from "../src/index.ts";
+import { consentCode } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import { acmeTenant, otherTenant } from "./sign-in-config.ts";
 import {
+  coreOrigin,
   googlePerson,
+  openRpc,
   outcome,
   signedIn,
   signedInApi,
@@ -21,8 +30,8 @@ import {
   unique,
   uniqueWord,
   whoami,
+  withSignIn,
 } from "./sign-in.ts";
-import { connectDb } from "./test-env.ts";
 
 // Readers copied from where an item lives (GRA-1761; the threat model is
 // on the issue): who may read it is the list the system gives, and core
@@ -38,39 +47,94 @@ const setUpTime = { timeout: 120_000 };
 
 /** A member signed in with Microsoft, and the account the reader list names them by. */
 const microsoftMember = async () => {
-  const { userId, person } = await signedInWithRole(idp, "user");
+  const { userId, person, session } = await signedInWithRole(idp, "user");
   const account: SourceReader = {
     kind: "account",
     provider: "microsoft",
     tenant: acmeTenant,
     account: String(person.oid),
   };
-  return { userId, account, oid: String(person.oid) };
+  return {
+    userId,
+    session,
+    account,
+    oid: String(person.oid),
+    email: String(person.email),
+  };
 };
 
-/** A Google account `owner` connected as their own, in connect's registry. */
-const connectedGoogle = async (
-  owner: string,
-  status: "active" | "disconnected" = "active"
-): Promise<{ id: string; account: SourceReader }> => {
-  const id = `connection-google-${unique()}`;
-  const sub = `google-sub-${unique()}`;
-  const now = Date.now();
-  await connectDb()
-    .prepare(
-      "INSERT INTO connections (id, provider, scope, owner_user_id, status, server_kind, server, tenant, account_id, created_at, updated_at) VALUES (?, 'google', 'personal', ?, ?, 'native', 'google-workspace', 'acme.test', ?, ?, ?)"
-    )
-    .bind(id, owner, status, sub, now, now)
-    .run();
+/** The provider's redirect back to core, with `session`, run to its end. */
+const backFromProvider = async (
+  session: string,
+  query: Record<string, string>
+): Promise<void> => {
+  const headers = new Headers({ cookie: session });
+  headers.set(routerSecretHeader, env.ROUTER_SECRET);
+  const ctx = createExecutionContext();
+  const response = await worker.fetch(
+    new Request(
+      `${coreOrigin}/api/connections/callback?${new URLSearchParams(query).toString()}`,
+      { redirect: "manual", headers }
+    ),
+    env,
+    ctx
+  );
+  await waitOnExecutionContext(ctx);
+  if (response.headers.get("location")?.includes("connectionError") === true) {
+    throw new Error(`Not connected: ${response.headers.get("location")}`);
+  }
+};
+
+/**
+ * `who` connects their own Google account, as the Integrations page and
+ * Google's consent do: Google's verified address for it is theirs. The
+ * reader its file lists name it by, and its connection's ID.
+ */
+const connectedGoogle = async (who: {
+  session: string;
+  email: string;
+}): Promise<{ id: string; account: SourceReader }> => {
+  const { core } = await openRpc(who.session);
+  const api = core.authenticate();
+  const { url } = await api.connections.start({
+    provider: "google",
+    scope: "personal",
+    returnTo: "/integrations",
+  });
+  const flow = new URL(url);
+  const [local = ""] = who.email.split("@");
+  await backFromProvider(who.session, {
+    code: consentCode(
+      flow,
+      "acme.test",
+      local,
+      flow.searchParams.get("scope") ?? ""
+    ),
+    state: flow.searchParams.get("state") ?? "",
+  });
+  const connections = await api.connections.list();
+  const connection = connections.find(({ provider }) => provider === "google");
+  if (connection === undefined) {
+    throw new Error("No Google connection");
+  }
   return {
-    id,
+    id: connection.id,
     account: {
       kind: "account",
       provider: "google",
       tenant: "acme.test",
-      account: sub,
+      account: who.email,
     },
   };
+};
+
+/** `who` disconnects their own connection `connectionId`. */
+const disconnect = async (
+  who: { session: string },
+  connectionId: string
+): Promise<void> => {
+  const { core } = await openRpc(who.session);
+  await core.authenticate().connections.disconnect(connectionId);
 };
 
 /** An item kept with `marker` for `readers`. */
@@ -121,16 +185,13 @@ describe("readers copied from the source", () => {
       // The eleventh signs in with Microsoft and is listed by a Google
       // account they connected as their own.
       const connector = await microsoftMember();
-      const { account: connectorsGoogle } = await connectedGoogle(
-        connector.userId
-      );
+      const { account: connectorsGoogle } = await connectedGoogle(connector);
       const notListed = await microsoftMember();
       // Listed by a Google account they connected and then disconnected.
       const disconnected = await microsoftMember();
-      const { account: disconnectedGoogle } = await connectedGoogle(
-        disconnected.userId,
-        "disconnected"
-      );
+      const { id: disconnectedId, account: disconnectedGoogle } =
+        await connectedGoogle(disconnected);
+      await disconnect(disconnected, disconnectedId);
       // Signed in with Google, and not listed.
       const { userId: googleMember } = await whoami(
         await signedIn(idp, "google", googlePerson())
@@ -148,7 +209,7 @@ describe("readers copied from the source", () => {
             kind: "account",
             provider: "google",
             tenant: "acme.test",
-            account: `google-sub-${unique()}`,
+            account: `nobody-${unique()}@acme.test`,
           },
           { kind: "link" }
         )
@@ -262,7 +323,7 @@ describe("readers copied from the source", () => {
         microsoftMember(),
       ]);
       const { id: connectionId, account: connectorsGoogle } =
-        await connectedGoogle(connector.userId);
+        await connectedGoogle(connector);
       const marker = uniqueWord();
       const source = await sharedItem(
         marker,
@@ -273,10 +334,7 @@ describe("readers copied from the source", () => {
         connector: await finds(connector.userId, source, marker),
       };
       await admin.api.members.remove(leaver.userId);
-      await connectDb()
-        .prepare("UPDATE connections SET status = 'disconnected' WHERE id = ?")
-        .bind(connectionId)
-        .run();
+      await disconnect(connector, connectionId);
 
       expect({
         before,
@@ -352,6 +410,69 @@ describe("readers copied from the source", () => {
         asTheirTeams: false,
         elsewhere: false,
       });
+    }
+  );
+
+  it(
+    "names a Google account by its verified address in any case or Unicode form, never by an unverified one or one outside the company's domains",
+    setUpTime,
+    async () => {
+      // Signed in with Google as "zoë", decomposed: "e" and a combining
+      // diaeresis, as some systems write it.
+      const local = `zoe\u0308-${unique()}`;
+      const zoe = await whoami(
+        await signedIn(
+          idp,
+          "google",
+          googlePerson({ email: `${local}@acme.test` })
+        )
+      );
+      // Signed in with Microsoft: Entra's address is never verified.
+      const entra = await microsoftMember();
+      const marker = uniqueWord();
+      const source = await sharedItem(
+        marker,
+        readersOf(
+          // As a list may write it: composed, in capitals.
+          {
+            kind: "account",
+            provider: "google",
+            tenant: "ACME.TEST",
+            account: `${local.normalize("NFC").toUpperCase()}@ACME.TEST`,
+          },
+          {
+            kind: "account",
+            provider: "microsoft",
+            tenant: acmeTenant,
+            account: entra.email,
+          },
+          {
+            kind: "account",
+            provider: "google",
+            tenant: "acme.test",
+            account: entra.email,
+          }
+        )
+      );
+      const findsWith = async (coreEnv: Env, userId: string) => {
+        const { items } = await recallAs(coreEnv, userId, {
+          personal: true,
+          question: marker,
+          budget: { tokens: recallBudgetMax },
+        });
+        return items.some(({ source: found }) => found.id === source.id);
+      };
+
+      expect({
+        zoe: await findsWith(env, zoe.userId),
+        entra: await findsWith(env, entra.userId),
+        // The same address once the company's sign-in no longer has its
+        // domain: it counts for nothing.
+        zoeOutsideDomains: await findsWith(
+          withSignIn({ domains: ["elsewhere.test"] }),
+          zoe.userId
+        ),
+      }).toStrictEqual({ zoe: true, entra: false, zoeOutsideDomains: false });
     }
   );
 

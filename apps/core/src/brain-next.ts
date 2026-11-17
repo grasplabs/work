@@ -173,7 +173,7 @@ import type { SkillNeeds } from "./skill-needs.ts";
 import {
   heldPrincipalsOf,
   principalOfReader,
-  signInAccountsOf,
+  provenAccountsOf,
   signInAccountsRead,
 } from "./source-readers.ts";
 
@@ -906,7 +906,7 @@ const memberGroupsOf = async (
     accountGroups: asThemselves
       ? [
           ...new Set(
-            heldPrincipalsOf([...signInAccountsOf(env, signIns), ...connected])
+            heldPrincipalsOf(provenAccountsOf(env, signIns, connected))
           ),
         ]
       : [],
