@@ -108,6 +108,7 @@ export const meaningSurfaces = new Set([
   "core recalledTokens",
   "sources search",
   "recall recallFor",
+  "recall whoKnowsFor",
 ]);
 
 /** Whether `value` is an object with keys. */
@@ -285,6 +286,7 @@ export const readingSurfaces = new Set([
   "store readableVersions",
   "store changeVersion",
   "core recallPassagesAs",
+  "recall whoKnowsFor",
   "core readableVersionsAs",
   "core readableMemoriesAs",
 ]);
@@ -300,6 +302,7 @@ export const recallSurfaces = new Set([
   "store recall",
   "store findPassages",
   "recall recallFor",
+  "recall whoKnowsFor",
 ]);
 
 /** Most times a pass that compares answers by meaning asks one surface. */

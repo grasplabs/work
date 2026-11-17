@@ -889,14 +889,19 @@ export const modelTroubles = [
 export type ModelTrouble = (typeof modelTroubles)[number];
 
 /**
- * What the host's model answered: its text; that it refused the call as it
- * is (`refused`: the request itself) or that the call ran out of its time
+ * What the host's model answered: its text, and the model that answered
+ * (the host's name for it, as its gateway reports it, which an extracted
+ * memory records); that it refused the call as it is (`refused`: the request itself) or that the call ran out of its time
  * (`timed_out`), which fail the item; or that the queue must pause, why,
  * and for how many seconds where the provider said, with no item's attempt
  * spent. A call that throws instead is taken for the host out of reach.
  */
 export const modelReplySchema = z.discriminatedUnion("kind", [
-  z.strictObject({ kind: z.literal("answer"), text: z.string() }),
+  z.strictObject({
+    kind: z.literal("answer"),
+    text: z.string(),
+    model: z.string().min(1),
+  }),
   z.strictObject({ kind: z.literal("refused") }),
   z.strictObject({ kind: z.literal("timed_out") }),
   z.strictObject({

@@ -21,8 +21,9 @@ import { defineErrorFamily } from "./errors.ts";
  * fetched through a connection (`capture`), the person's own interview,
  * a claim five or more of their team made in theirs, a drawing of a
  * team's piece of work from what five or more of its people told, the
- * company's vision from the onboarding's kickoff, or the company's teams
- * from its staff list.
+ * company's vision from the onboarding's kickoff, the company's teams
+ * from its staff list, or what agents read through a shared connection
+ * (`connected`).
  */
 export type BrainSourceProducer =
   | "upload"
@@ -33,7 +34,8 @@ export type BrainSourceProducer =
   | "claim"
   | "drawing"
   | "kickoff"
-  | "roster";
+  | "roster"
+  | "connected";
 
 /** A source, as its producer names it. */
 export interface BrainSourceRef {

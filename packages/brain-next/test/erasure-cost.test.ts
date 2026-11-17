@@ -110,7 +110,7 @@ const refusing: Embedders = {
 /** A model that answers nothing: no work here asks one. */
 const quietAsk: AskModel = async () => {
   await Promise.resolve();
-  return { kind: "answer", text: "" };
+  return { kind: "answer", text: "", model: "test/model" };
 };
 
 /** No side of hand-overs: a person's own store queues none. */

@@ -947,7 +947,7 @@ const noHandOvers: HandOvers = {
 
 const quietModel = async () => {
   await Promise.resolve();
-  return { kind: "answer" as const, text: "" };
+  return { kind: "answer" as const, text: "", model: "test/model" };
 };
 
 /** The embed package's int8 test model, run in the test's isolate, as the host's embedders. */

@@ -1403,7 +1403,7 @@ describe("a person's own store", () => {
 /** A model that answers nothing: no work here asks one. */
 const quietAsk: AskModel = async () => {
   await Promise.resolve();
-  return { kind: "answer", text: "" };
+  return { kind: "answer", text: "", model: "test/model" };
 };
 
 /** The host's embedders while no model ships. */

@@ -140,6 +140,7 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "core.tool_class_settings": { company: "settings an admin changed" },
   "core.app_pointers": { company: "settings an admin changed" },
   "core.shared_mailbox_pointers": { company: "settings an admin changed" },
+  "core.connection_brain_audiences": { company: "settings an admin changed" },
   "core.stephen_reach": { company: "settings an admin changed" },
   "core.stephen_places": { company: "settings an admin changed" },
   "core.app_tool_classes": { company: "settings an admin changed" },
@@ -630,6 +631,8 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "brainStore.memory_extractions": {
     company: "marks of the versions fully drawn from",
   },
+  // Which prompt versions (hashes) and models drew memories: no content.
+  "brainStore.extractors": noPerson,
   "brainStore.memory_changes": {
     kept: "SHA-256 of change keys and ids, so an erased add is never made again",
   },
@@ -710,6 +713,7 @@ export const reviewedPersonColumns: Readonly<
   "core.channel_links": ["platform_user_id", "used_by"],
   "core.chat_audiences": ["members"],
   "core.chat_workflow_offers": ["user_id"],
+  "core.connection_brain_audiences": ["changed_by"],
   "core.dependency_admission_refusals": ["subject_id", "subject_type"],
   "core.dependency_approvers": [
     "granted_by",

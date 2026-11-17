@@ -2022,6 +2022,10 @@ msgstr "Bron toevoegen"
 msgid "Add the trigger"
 msgstr "Trigger toevoegen"
 
+#: src/agents/agent-apps-card.tsx
+msgid "Add this schedule"
+msgstr "Dit schema toevoegen"
+
 #: src/projects/file-item-dialog.tsx
 msgid "Add to {projectName}"
 msgstr "Toevoegen aan {projectName}"
@@ -2302,6 +2306,10 @@ msgstr "Bijna klaar"
 #: src/connections/request-app-dialog.tsx
 msgid "Already here, in case you mean one of these"
 msgstr "Staat er al, voor het geval je een van deze bedoelt"
+
+#: src/agents/agent-apps-card.tsx
+msgid "Already one of its schedules."
+msgstr "Al een van zijn schema's."
 
 #: src/onboarding/about-story.tsx
 msgid "Alright, here’s the plan."
@@ -2941,6 +2949,10 @@ msgstr "Een beheerder vragen"
 msgid "Ask anything, or describe a process"
 msgstr "Vraag wat je wilt, of beschrijf een proces"
 
+#: src/agents/agent-apps-card.tsx
+msgid "Ask for {app}"
+msgstr "{app} aanvragen"
+
 #: src/chat/chat-subject.ts
 msgid "Ask for a change"
 msgstr "Vraag om een wijziging"
@@ -2953,6 +2965,7 @@ msgstr "Toegang vragen"
 msgid "Ask for access for this App"
 msgstr "Toegang vragen voor deze app"
 
+#: src/agents/agent-apps-card.tsx
 #: src/onboarding/connect-steps.tsx
 msgid "Ask for it"
 msgstr "Doorgeven"
@@ -3014,6 +3027,7 @@ msgstr "Gevraagd door {requester} op {date}"
 msgid "Asked by a former member"
 msgstr "Aangevraagd door een voormalig lid"
 
+#: src/agents/agent-apps-card.tsx
 #: src/apps/app-access-requests.tsx
 #: src/onboarding/connect-steps.tsx
 msgid "Asked for"
@@ -3038,6 +3052,10 @@ msgstr "Vroegen hem iets, of hij werkt volgens schema voor hen"
 #: src/activity/audit-words.ts
 msgid "Asked the agent to fix a run"
 msgstr "De agent gevraagd een run te herstellen"
+
+#: src/activity/audit-words.ts
+msgid "Asked the Brain who knows about something"
+msgstr "Het Brein gevraagd wie ergens iets van weet"
 
 #: src/chat/thread.tsx
 msgid "Asked to connect {binding}"
@@ -3561,6 +3579,14 @@ msgstr "Project wijzigen"
 #: src/chat/agent-draft-card.tsx
 msgid "Change something"
 msgstr "Iets wijzigen"
+
+#: src/chat/chat-panel.tsx
+msgid "Change something about the agent"
+msgstr "Iets aan de agent wijzigen"
+
+#: src/chat/chat-panel.tsx
+msgid "Change something about the change"
+msgstr "Iets aan de wijziging aanpassen"
 
 #: src/chat/chat-panel.tsx
 msgid "Change something about the plan"
@@ -6032,6 +6058,10 @@ msgstr "Voor Stephens verzoeken, over “{label}” ({why}), doe dit: {proposal}
 msgid "For the {role}"
 msgstr "Voor de {role}"
 
+#: src/agents/agent-apps-card.tsx
+msgid "For the agent {agentName}."
+msgstr "Voor de agent {agentName}."
+
 #: src/agents/new-agent.tsx
 msgid "For the company"
 msgstr "Voor het bedrijf"
@@ -6040,6 +6070,7 @@ msgstr "Voor het bedrijf"
 msgid "For the team {team}"
 msgstr "Voor het team {team}"
 
+#: src/agents/agent-apps-card.tsx
 #: src/agents/agent-wakes.tsx
 msgid "For whom"
 msgstr "Voor wie"
@@ -7565,6 +7596,10 @@ msgstr "Zijn instructies"
 #: src/agents/agent-apps-card.tsx
 msgid "Its instructions name apps your company doesn't offer: {missing}."
 msgstr "Zijn instructies noemen apps die jullie bedrijf niet aanbiedt: {missing}."
+
+#: src/agents/agent-apps-card.tsx
+msgid "Its instructions say it works on its own: {cron} · {opening}"
+msgstr "Volgens zijn instructies werkt het zelfstandig: {cron} · {opening}"
 
 #: src/settings/ai-providers.tsx
 msgid "Its key is deleted, and calls stop using it at once. Models of this provider are no longer used, even as a fallback."
@@ -10972,6 +11007,15 @@ msgstr "Entiteiten uit het Brein gelezen"
 #: src/activity/audit-words.ts
 msgid "Read everyone's calls of unknown outcome"
 msgstr "De aanroepen met onbekende uitkomst van iedereen gelezen"
+
+#: src/brain/sources-page.tsx
+msgctxt "a source of the Brain"
+msgid "Read from a shared connection"
+msgstr "Gelezen uit een gedeelde verbinding"
+
+#: src/brain/memories-page.tsx
+msgid "Read from a shared connection, version {version}"
+msgstr "Gelezen uit een gedeelde verbinding, versie {version}"
 
 #: src/activity/audit-words.ts
 msgid "Read how knowledge is used"
