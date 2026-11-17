@@ -4401,7 +4401,7 @@ export const ownEntityIdAs = async (
   env: BrainEnv & ReaderEnv,
   personId: string
 ): Promise<EntityId | null> => {
-  const reader = await personReaderOf(env, personId, { interviews: false });
+  const reader = await personReaderOf(env, personId);
   return await ownBrain(env, reader.person).ownEntity({ reader });
 };
 

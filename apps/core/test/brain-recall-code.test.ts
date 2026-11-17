@@ -154,12 +154,17 @@ const added = async (
 
 /**
  * A source everyone in the company may read, added to the shared store
- * as an upload shared with everyone is (brain-uploads.ts).
+ * as an upload shared with everyone is (brain-uploads.ts), or, as
+ * `claim`, as a team's claim from the onboarding's interviews is
+ * (onboarding/new-brain.ts).
  */
-const forEveryone = async (text: string): Promise<SourceRef> => {
-  const source: SourceRef = { producer: "upload", id: crypto.randomUUID() };
+const forEveryone = async (
+  text: string,
+  producer: "upload" | "claim" = "upload"
+): Promise<SourceRef> => {
+  const source: SourceRef = { producer, id: crypto.randomUUID() };
   await brainOf(inJurisdiction(env, env.BRAIN_STORE)).addSource({
-    source: `upload:${source.id}`,
+    source: `${producer}:${source.id}`,
     change: crypto.randomUUID(),
     text,
     access: { kind: "audience", group: "company" },
@@ -491,6 +496,11 @@ const recallEvents = async (
 describe("recall, as an App, a workflow and a chat reach it", setUpTime, () => {
   it("answers an App and a workflow the same pack, of what everyone in the company may read, and a chat's code what its person's teams may", async () => {
     const { word, admin, ada } = await company();
+    // A team's claim from the interviews: every member reads it, as Ada
+    // does in her own chat, but code is never handed one, which it could
+    // keep past the claim's fall (GRA-1946).
+    const claimNote = `Five of a team said ${word} is planned after the review.`;
+    await forEveryone(claimNote, "claim");
     const request = requestOf(word);
     // The App.
     const app = await askOf(ada, []);
@@ -548,11 +558,14 @@ describe("recall, as an App, a workflow and a chat reach it", setUpTime, () => {
       // Her chat's code: her team's note and the note for everyone, never
       // her own.
       chat: [teamNote, forEveryoneNote].toSorted(),
-      // Her own search: hers too, and never a team's she isn't in.
+      // Her own search, as her chat's turn recalls before her question:
+      // hers too, the team's claim from the interviews, and never a
+      // team's she isn't in.
       own: [
         `Ada's own note: ask your lead about ${word}.`,
         teamNote,
         forEveryoneNote,
+        claimNote,
       ].toSorted(),
     });
     // Each audited for her, with what it found counted, never said.

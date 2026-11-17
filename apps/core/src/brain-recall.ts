@@ -214,14 +214,18 @@ export const recallFor = async (
     // A capture and an interview are one person's own, kept only in their
     // own store (core's addSource refuses them anywhere else), which this
     // recall never reads: none can be here. A team's claim from the
-    // onboarding's interviews is everyone's (five or more back it in a
-    // team of seven), as any member reads it. Narrowed for the SDK's
-    // type, never thrown over.
+    // onboarding's interviews is read by every member (GRA-1748), but never
+    // handed to code, which could keep a copy past its fall (App data, a
+    // run's journal, a code result): dropped here until the owner decides
+    // whether code may copy claims. Narrowed for the SDK's type, never
+    // thrown over.
     const pack: BrainPack = {
       ...recalled,
       items: recalled.items.flatMap((item) => {
         const { producer, id } = item.source;
-        return producer === "capture" || producer === "interview"
+        return producer === "capture" ||
+          producer === "interview" ||
+          producer === "claim"
           ? []
           : [{ ...item, source: { producer, id } }];
       }),

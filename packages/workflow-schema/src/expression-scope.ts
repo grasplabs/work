@@ -227,7 +227,7 @@ const brainMemoryType =
 /** What each action on the Brain answers (the SDK's `BrainActions`). */
 const brainTypes: Readonly<Record<BrainAction, string>> = {
   recall:
-    '{ readonly items: readonly { readonly source: { readonly producer: "upload" | "chat" | "run" | "claim"; readonly id: string }; readonly version: number; readonly position: number; readonly text: string; readonly whole: boolean; readonly found: "exact" | "words" | "stop words" | "meaning" }[]; readonly notFound: readonly string[]; readonly truncated: boolean }',
+    '{ readonly items: readonly { readonly source: { readonly producer: "upload" | "chat" | "run"; readonly id: string }; readonly version: number; readonly position: number; readonly text: string; readonly whole: boolean; readonly found: "exact" | "words" | "stop words" | "meaning" }[]; readonly notFound: readonly string[]; readonly truncated: boolean }',
   "skills.select":
     '{ readonly skills: readonly { readonly scope: "grasp" | "company"; readonly name: string; readonly version: number; readonly description: string }[] }',
   "skills.read":

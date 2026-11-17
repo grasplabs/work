@@ -302,9 +302,9 @@ export class BrainAgentApi extends WorkerEntrypoint<Env, AgentScope> {
 }
 
 /** The types `env.brain` returns, as the model reads them. */
-const brainTypes = `/** A passage a recall found: the part of it that best answers the question, or all of it (\`whole\`), cited by its source (an upload, a chat, a run or a team's claim from the onboarding's interviews, and its ID), the source's version and the passage's place in it. */
+const brainTypes = `/** A passage a recall found: the part of it that best answers the question, or all of it (\`whole\`), cited by its source (an upload, a chat or a run, and its ID), the source's version and the passage's place in it. */
 interface BrainPackItem {
-  source: { producer: "upload" | "chat" | "run" | "claim"; id: string };
+  source: { producer: "upload" | "chat" | "run"; id: string };
   version: number;
   position: number;
   text: string;

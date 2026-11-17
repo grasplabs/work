@@ -6659,16 +6659,13 @@ export class Onboarding extends DurableObject<Env> {
       people: readonly string[];
     }[]
   ): void {
-    // A team too small to have claims shown has none (`teamMayClaim`); a
-    // claim is noted only while five or more of its team's people now
-    // back it (`#currentBackers`, the recount's own rule): one moved away
-    // while the claims were put together doesn't count.
-    const shown = teamMayClaim(this.#tellers(team).length)
-      ? claims.filter(
-          ({ people: backing }) =>
-            this.#currentBackers(team, backing).length >= minTeamShown
-        )
-      : [];
+    // Noted only while it stands, by the recount's own rule
+    // (`#claimStands`): one moved away while the claims were put together
+    // doesn't count.
+    const read = { roster: this.#roster(), mayClaim: new Map() };
+    const shown = claims.filter(({ people: backing }) =>
+      this.#claimStands(team, backing, read)
+    );
     const current = new Set(shown.map(({ record }) => record));
     const held = this.#db
       .select({ source: brainClaims.source, record: brainClaims.record })
@@ -6740,24 +6737,48 @@ export class Onboarding extends DurableObject<Env> {
     );
     const mayClaim = new Map<string, boolean>();
     const falling = standing.filter(({ record, team }) => {
-      const may =
-        mayClaim.get(team) ?? teamMayClaim(this.#tellers(team, roster).length);
-      mayClaim.set(team, may);
-      if (!may) {
-        return true;
-      }
       const resting = this.#db
         .select({ person: brainSent.person })
         .from(brainSent)
         .where(eq(brainSent.record, record))
         .all()
         .map(({ person }) => person);
-      return this.#currentBackers(team, resting, agreed).length < minTeamShown;
+      return !this.#claimStands(team, resting, { roster, agreed, mayClaim });
     });
     const out = [...owed, ...falling];
     if (out.length > 0) {
       throw new ClaimsFallError(out.map(({ source }) => source));
     }
+  }
+
+  /**
+   * The one rule for whether a claim of `team` resting on `backers` stands
+   * now (GRA-1741): its team may have claims shown (`teamMayClaim`), and
+   * five or more of `backers` back it now (`#currentBackers`). Both noting
+   * a claim (`#noteClaims`) and the recount (`#recountClaims`) ask it, so
+   * neither keeps what the other drops. A recount over many claims passes
+   * the list and the agreed people read once, and a map of what each team
+   * may (`mayClaim`), filled as it goes.
+   */
+  #claimStands(
+    team: string,
+    backers: readonly string[],
+    {
+      roster = this.#roster(),
+      agreed,
+      mayClaim = new Map<string, boolean>(),
+    }: {
+      roster?: Roster | null;
+      agreed?: ReadonlySet<string>;
+      mayClaim?: Map<string, boolean>;
+    } = {}
+  ): boolean {
+    const may =
+      mayClaim.get(team) ?? teamMayClaim(this.#tellers(team, roster).length);
+    mayClaim.set(team, may);
+    return (
+      may && this.#currentBackers(team, backers, agreed).length >= minTeamShown
+    );
   }
 
   /**
