@@ -231,10 +231,18 @@ export const quoteOf = (
 
 /** `found` as an item of the pack, given `text`. */
 const itemOf = (
-  { source, version, position, found: how }: Found,
+  { source, version, position, found: how, readAt }: Found,
   text: string,
   whole: boolean
-): PackItem => ({ source, version, position, text, whole, found: how });
+): PackItem => ({
+  source,
+  version,
+  position,
+  text,
+  whole,
+  found: how,
+  ...(readAt === undefined ? {} : { readAt }),
+});
 
 /** `memory` as a memory of the pack, its statement alone. */
 const memoryItemOf = (

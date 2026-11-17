@@ -562,6 +562,13 @@ export interface PackItem extends SourceVersionRef {
   text: string;
   whole: boolean;
   found: FoundBy;
+  /**
+   * When the version this is of was last read where it lives, in
+   * milliseconds since the epoch: the latest of its producer's read times
+   * (`NewSource.readAt`). Only for a source whose producer said when it
+   * read it, such as what an agent read through a connection.
+   */
+  readAt?: number;
 }
 
 /**
@@ -593,6 +600,13 @@ export interface FoundPassage extends SourceVersionRef {
   row: number;
   position: number;
   text: string;
+  /**
+   * When the version this is of was last read where it lives, in
+   * milliseconds since the epoch: the latest of its producer's read times
+   * (`NewSource.readAt`). Only for a source whose producer said when it
+   * read it, such as what an agent read through a connection.
+   */
+  readAt?: number;
 }
 
 /**
@@ -785,6 +799,12 @@ export interface ListedSource {
   opening: string;
   personal: boolean;
   versions: number;
+  /**
+   * When its current version was last read where it lives: the latest of
+   * its producer's read times (`NewSource.readAt`), for a source whose
+   * producer said.
+   */
+  readAt?: Date;
 }
 
 /** A page of sources, and whether more follow it. */

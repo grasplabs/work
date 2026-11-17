@@ -8,6 +8,7 @@ import type {
   VectorsToPut,
 } from "./contract.ts";
 import { byNearness } from "./order.ts";
+import { readAtOf } from "./read-at.ts";
 import { readableSql } from "./reader-sets.ts";
 
 // The vector way: an exact 1-bit scan, no index structure, with the
@@ -846,6 +847,8 @@ export interface NearChunk extends ChunkRef {
   text: string;
   score: number;
   addedAt: number;
+  /** When its version was last read where it lives (`FoundPassage.readAt`). */
+  readAt?: number;
 }
 
 /**
@@ -871,19 +874,31 @@ export const nearChunks = (
   }
   const texts = new Map(
     sql
-      .exec<{ row: number; text: string }>(
-        "SELECT row, text FROM chunks WHERE row IN (SELECT value FROM json_each(?))",
+      .exec<{ row: number; text: string; read_at: number | null }>(
+        `SELECT row, text, ${readAtOf("chunks.version_row")} AS read_at
+        FROM chunks WHERE row IN (SELECT value FROM json_each(?))`,
         JSON.stringify(closest.map(({ chunk }) => chunk))
       )
       .toArray()
-      .map(({ row, text }) => [row, text])
+      .map(({ row, text, read_at: readAt }) => [row, { text, readAt }])
   );
   return closest.flatMap(
     ({ chunk, addedAt, found: { source, version, position, score } }) => {
-      const text = texts.get(chunk);
-      return text === undefined
+      const held = texts.get(chunk);
+      return held === undefined
         ? []
-        : [{ row: chunk, source, version, position, text, score, addedAt }];
+        : [
+            {
+              row: chunk,
+              source,
+              version,
+              position,
+              text: held.text,
+              score,
+              addedAt,
+              ...(held.readAt === null ? {} : { readAt: held.readAt }),
+            },
+          ];
     }
   );
 };
