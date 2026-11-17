@@ -53,6 +53,7 @@ const LanguageRow = () => {
       <LanguageSwitch
         label={label}
         layout={styles.control}
+        size="sm"
         onValueChange={(code) => {
           if (isLocale(code)) {
             void chooseLocale(code);
@@ -69,7 +70,8 @@ const Profile = () => {
   const { t } = useLingui();
   const { identity } = Route.useRouteContext();
   return (
-    <SectionCard density="compact" flush title={t`Your details`}>
+    // One topic: the page's title names it, so the card has none of its own.
+    <SectionCard aria-label={t`Profile`} density="compact" flush>
       <SettingsRows>
         {/* Grasp's staff sign in for a while, as Grasp names them. */}
         {identity.staff ? (
@@ -77,12 +79,16 @@ const Profile = () => {
         ) : (
           <ProfileName name={identity.name} />
         )}
-        <SettingRow label={t`Email`}>
+        <SettingRow
+          help={t`Your sign-in; your admin changes it.`}
+          label={t`Email`}
+        >
           {(field) => (
             <Input
               {...field}
               layout={styles.control}
               readOnly
+              size="sm"
               type="email"
               value={identity.email}
             />
