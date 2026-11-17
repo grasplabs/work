@@ -4,6 +4,7 @@ import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { createFileRoute, useRouter } from "@tanstack/react-router";
+import { useState } from "react";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
 import type { CoreConnection } from "../core-connection.ts";
@@ -28,7 +29,10 @@ import { FactRow, SettingsRows } from "../grasp/setting-row/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
-import { ChatAccountsSection } from "../settings/chat-accounts.tsx";
+import {
+  LinkedChatAccounts,
+  PendingChatLink,
+} from "../settings/chat-accounts.tsx";
 import type { ChatAccounts } from "../settings/chat-accounts.tsx";
 import { pendingChatLink } from "../settings/chat-link.ts";
 import {
@@ -47,11 +51,12 @@ import { useCoreAction } from "../use-core-action.ts";
 // device but this one can be signed out here; this one signs out from the
 // person menu. Core names no place a session signed in from.
 //
-// The chat apps where Grasp knows the person (settings/chat-accounts.tsx)
-// are not listed here any more. A link a chat app sent still lands here
-// (routes/chat-link.tsx), so while one waits in this tab the chat apps card
-// shows, to confirm or turn it down; never for Grasp staff, who aren't the
-// company's people.
+// The chat accounts linked to the person stand as quiet rows in the
+// Sign-in card, only when there are any (settings/chat-accounts.tsx). A
+// link a chat app sent lands here (routes/chat-link.tsx), so while one
+// waits in this tab a card offers to confirm or turn it down; once linked,
+// the account stands among the rows. Never for Grasp staff, who aren't the
+// company's people. Devices show the newest ten, and all on a press.
 
 const styles = stylex.create({
   // The provider's mark beside the organization's name.
@@ -166,9 +171,13 @@ const DeviceRow = ({ session }: { session: OwnSession }) => {
   );
 };
 
+/** How many devices show before "Show all": the newest. */
+const shownAtFirst = 10;
+
 /** The devices the person is signed in on, latest active first, this one marked. */
 const Devices = ({ sessions }: { sessions: Loaded<OwnSession[]> }) => {
   const { t } = useLingui();
+  const [showAll, setShowAll] = useState(false);
   if (sessions.state !== "ready") {
     return (
       <SectionCard density="compact" title={t`Devices`}>
@@ -177,6 +186,16 @@ const Devices = ({ sessions }: { sessions: Loaded<OwnSession[]> }) => {
     );
   }
   const devices = sessions.data.length;
+  const newest = sessions.data.slice(0, shownAtFirst);
+  const here = sessions.data.find(({ current }) => current);
+  // This device stands in the list whenever it is signed in, however old.
+  const shown =
+    showAll || devices <= shownAtFirst
+      ? sessions.data
+      : [
+          ...newest,
+          ...(here === undefined || newest.includes(here) ? [] : [here]),
+        ];
   return (
     <SectionCard
       density="compact"
@@ -185,10 +204,23 @@ const Devices = ({ sessions }: { sessions: Loaded<OwnSession[]> }) => {
         other: "Signed in on # devices. Sign out any you do not recognise.",
       })}`}
       flush
+      footer={
+        shown.length < devices ? (
+          <Button
+            onClick={() => {
+              setShowAll(true);
+            }}
+            size="sm"
+            variant="ghost"
+          >
+            {t`Show all ${devices}`}
+          </Button>
+        ) : undefined
+      }
       title={t`Devices`}
     >
       <ItemGroup aria-label={t`Devices`} separated>
-        {sessions.data.map((session) => (
+        {shown.map((session) => (
           <DeviceRow key={session.id} session={session} />
         ))}
       </ItemGroup>
@@ -199,7 +231,8 @@ const Devices = ({ sessions }: { sessions: Loaded<OwnSession[]> }) => {
 const Security = () => {
   const { t } = useLingui();
   const { identity } = Route.useRouteContext();
-  const { options, organization, sessions, chat } = Route.useLoaderData();
+  const { options, organization, sessions, chat, waiting } =
+    Route.useLoaderData();
   return (
     <>
       <SectionCard density="compact" flush title={t`Sign-in`}>
@@ -215,9 +248,12 @@ const Security = () => {
             />
           </FactRow>
         </SettingsRows>
+        {chat?.state === "ready" ? (
+          <LinkedChatAccounts accounts={chat.data.accounts} />
+        ) : null}
       </SectionCard>
+      {chat === undefined || !waiting ? null : <PendingChatLink chat={chat} />}
       <Devices sessions={sessions} />
-      {chat === undefined ? null : <ChatAccountsSection chat={chat} />}
     </>
   );
 };
@@ -247,18 +283,24 @@ const organizationName = async (
   return name === "" ? undefined : name;
 };
 
-/** The person's linked chat accounts and the link a chat app sent them, while one waits in this tab. */
+/** The person's linked chat accounts, and the link a chat app sent them while one waits in this tab. */
 const chatAccounts = async (
   core: Pick<CoreConnection, "withSession">,
-  secret: string
+  secret: string | undefined
 ): Promise<Loaded<ChatAccounts>> =>
   await loadFromCore(core, async (session) => {
-    const [reach, accounts, preview] = await Promise.all([
-      session.channelAccounts.reach(),
+    const [accounts, preview] = await Promise.all([
       session.channelAccounts.list(),
-      session.channelAccounts.preview(secret),
+      secret === undefined
+        ? undefined
+        : session.channelAccounts.preview(secret),
     ]);
-    return { reach, accounts, pending: { secret, preview } };
+    return {
+      accounts,
+      ...(secret === undefined || preview === undefined
+        ? {}
+        : { pending: { secret, preview } }),
+    };
   });
 
 export const Route = createFileRoute("/_shell/settings/security")({
@@ -271,10 +313,14 @@ export const Route = createFileRoute("/_shell/settings/security")({
       signInOptions(core),
       organizationName(core),
       loadFromCore(core, async (session) => await session.sessions.list()),
-      identity.staff || secret === undefined
-        ? undefined
-        : chatAccounts(core, secret),
+      identity.staff ? undefined : chatAccounts(core, secret),
     ]);
-    return { options, organization, sessions, chat };
+    return {
+      options,
+      organization,
+      sessions,
+      chat,
+      waiting: secret !== undefined,
+    };
   },
 });

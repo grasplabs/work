@@ -31,6 +31,7 @@ const fakeOrganization = (first: string, refuses = false) => {
     timeZone: "UTC",
     dataRegion: "eu",
     signInDomains: [],
+    logo: null,
   };
   const asked: string[] = [];
   const organization = {

@@ -105,9 +105,14 @@ const panelStyles = stylex.create({
     flexGrow: 1,
     minHeight: 0,
   },
+  // The room under the head's line, as the page's words have under the
+  // bar. App shell draws the line but not this room yet (asked of Grasp
+  // UI: the panel's head part will own it; remove this then).
   column: {
+    boxSizing: "border-box",
     width: "100%",
     marginInline: "auto",
+    paddingBlockStart: grasp.space7,
   },
   notice: {
     display: "flex",

@@ -1,14 +1,26 @@
+import { failureText } from "@grasp-os/shared/errors";
+import {
+  organizationErrors,
+  organizationLogoMaxBytes,
+  organizationLogoTypes,
+} from "@grasp-os/shared/organization";
 import type { Organization } from "@grasp-os/shared/organization";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useRouter } from "@tanstack/react-router";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import type { Session } from "../core.ts";
-import { organizationRenamed } from "../frame/organization-name.tsx";
+import {
+  organizationLogoChanged,
+  organizationRenamed,
+} from "../frame/organization-name.tsx";
+import { Avatar, AvatarFallback, AvatarImage } from "../grasp/avatar/index.ts";
+import { Button } from "../grasp/button/index.ts";
 import { Input } from "../grasp/input/index.ts";
 import { SettingRow } from "../grasp/setting-row/index.ts";
 import type { SettingRowState } from "../grasp/setting-row/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { useCoreAction } from "../use-core-action.ts";
 
 // Settings › Workspace's own fields: a change to the organization, saved
@@ -26,6 +38,15 @@ type Change = (
 export const controlStyles = stylex.create({
   // Every control fills the rows' shared control column.
   fill: { width: "100%" },
+  // The logo, then its buttons, in the control column.
+  logo: {
+    display: "flex",
+    alignItems: "center",
+    gap: grasp.space2,
+    width: "100%",
+  },
+  // The file picker the Change button opens: never seen.
+  picker: { display: "none" },
 });
 
 /**
@@ -157,6 +178,120 @@ export const NameField = ({
           value={draft ?? saved}
         />
       )}
+    </SettingRow>
+  );
+};
+
+/**
+ * The organization's logo, as a setting's row: the logo, or its initials
+ * while it has none; Change picks an image (PNG, JPEG or WebP, at most
+ * 512 KB, which core checks again by its bytes), Remove takes it away.
+ * The sidebar shows the new one at once.
+ */
+export const LogoField = ({
+  name,
+  logo,
+  canChange,
+}: {
+  name: string;
+  logo: string | null;
+  canChange: boolean;
+}) => {
+  const { t } = useLingui();
+  const words = useSaveWords();
+  const { busy, failure, status, change } = useOrganizationChange();
+  const picker = useRef<HTMLInputElement>(null);
+  // What core last took: the page's read catches up behind it.
+  const [saved, setSaved] = useState(logo);
+  // An image refused before it was sent: too large for core to take.
+  const [problem, setProblem] = useState<string>();
+  // The last change asked for, kept for Try again.
+  const [tried, setTried] = useState<Uint8Array | null>();
+  const send = (image: Uint8Array | null): void => {
+    setTried(image);
+    change(
+      async (api) =>
+        image === null ? await api.removeLogo() : await api.setLogo(image),
+      (organization) => {
+        setSaved(organization.logo);
+        setTried(undefined);
+        organizationLogoChanged(organization.logo);
+      }
+    );
+  };
+  const choose = (file: File | undefined): void => {
+    setProblem(undefined);
+    if (file === undefined) {
+      return;
+    }
+    if (file.size > organizationLogoMaxBytes) {
+      setProblem(
+        failureText(organizationErrors.create("organization.logo_too_large"))
+      );
+      return;
+    }
+    void (async () => {
+      send(new Uint8Array(await file.arrayBuffer()));
+    })();
+  };
+  const reason = problem ?? failure;
+  return (
+    <SettingRow
+      {...words}
+      {...(reason === undefined ? {} : { error: reason })}
+      help={t`Shown beside your company’s name in Grasp.`}
+      label={t`Logo`}
+      onRetry={() => {
+        if (tried !== undefined) {
+          send(tried);
+        }
+      }}
+      status={status}
+    >
+      <span {...stylex.props(controlStyles.logo)}>
+        <Avatar name={name} size="sm">
+          {saved === null ? null : <AvatarImage src={saved} />}
+          <AvatarFallback />
+        </Avatar>
+        {canChange ? (
+          <>
+            <input
+              accept={organizationLogoTypes.join(",")}
+              aria-hidden
+              onChange={(event) => {
+                choose(event.currentTarget.files?.[0]);
+                // The same file chosen again is a change again.
+                event.currentTarget.value = "";
+              }}
+              ref={picker}
+              tabIndex={-1}
+              type="file"
+              {...stylex.props(controlStyles.picker)}
+            />
+            <Button
+              disabled={busy}
+              onClick={() => {
+                picker.current?.click();
+              }}
+              size="sm"
+            >
+              {saved === null ? t`Add a logo` : t`Change`}
+            </Button>
+            {saved === null ? null : (
+              <Button
+                disabled={busy}
+                onClick={() => {
+                  send(null);
+                }}
+                size="sm"
+                variant="ghost"
+              >
+                {t`Remove`}
+              </Button>
+            )}
+          </>
+        ) : null}
+      </span>
     </SettingRow>
   );
 };

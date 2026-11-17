@@ -25,7 +25,8 @@ test("an admin removes someone, erases them by typing their name, follows it to 
     .getByRole("alertdialog", { name: "Remove Person?" })
     .getByRole("button", { name: "Remove" })
     .click();
-  const removed = page.getByRole("region", { name: "Removed people" });
+  // The removed stand at the foot of the members list, quiet.
+  const removed = page.getByRole("region", { name: "Members" });
   const erase = removed.getByRole("button", { name: `Erase ${who}` });
   await expect(erase).toBeVisible();
 

@@ -76,6 +76,7 @@ import { speechResponse } from "./onboarding/speech.ts";
 import { interviewStoryResponse } from "./onboarding/story.ts";
 import { onboardingSummaryResponse } from "./onboarding/summary.ts";
 import { transcriptionResponse } from "./onboarding/transcription.ts";
+import { logoPathPattern, logoResponse } from "./organization-logo.ts";
 import { pageCallRoute } from "./page-calls.ts";
 import { pageFrameResponse, pageModuleResponse } from "./page-frame.ts";
 import {
@@ -398,6 +399,26 @@ const webhookResponse = async (
     : await sourceEventResponse(request, env, token, requestId);
 };
 
+/**
+ * A file served to signed-in members: an upload's original, or the
+ * organization's logo; undefined for any other path.
+ */
+const memberFileResponse = async (
+  pathname: string,
+  request: Request,
+  env: Env,
+  requestId: string
+): Promise<Response | undefined> => {
+  const original = originalPath.exec(pathname)?.groups?.id;
+  if (original !== undefined) {
+    return await originalResponse(request, env, original, requestId);
+  }
+  const logo = logoPathPattern.exec(pathname)?.groups?.hash;
+  return logo === undefined
+    ? undefined
+    : await logoResponse(request, env, logo, requestId);
+};
+
 /** Routes a request that has passed the router-secret check. */
 const route = async (
   request: Request,
@@ -468,9 +489,9 @@ const route = async (
   if (appCall !== undefined) {
     return appCall;
   }
-  const original = originalPath.exec(pathname)?.groups?.id;
-  if (original !== undefined) {
-    return await originalResponse(request, env, original, requestId);
+  const file = await memberFileResponse(pathname, request, env, requestId);
+  if (file !== undefined) {
+    return file;
   }
   if (isUnder(pathname, "/api")) {
     return errorResponse(

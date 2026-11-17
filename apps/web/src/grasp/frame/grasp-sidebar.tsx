@@ -12,7 +12,7 @@ import { useRecentChats } from "../../chat/sidebar-chats.tsx";
 import type { CoreConnection } from "../../core-connection.ts";
 import {
   organizationOf,
-  useShownName,
+  useShownOrganization,
 } from "../../frame/organization-name.tsx";
 import { useSignOut } from "../../frame/person-menu.tsx";
 import { usePersonTheme } from "../../frame/person-theme.tsx";
@@ -275,7 +275,9 @@ const useProfile = (
   identity: Identity
 ): SidebarProfileProps => {
   const { t } = useLingui();
-  const organization = useShownName(organizationOf(core));
+  const { name: organization, logo } = useShownOrganization(
+    organizationOf(core)
+  );
   const signOut = useSignOut(core);
   // The same choice the Theme switch in Settings › Appearance changes.
   const { mode: theme } = usePersonTheme(identity.userId);
@@ -305,9 +307,13 @@ const useProfile = (
     {
       label: t`Switch organization`,
       icon: Swap,
-      // Its logo once the workspace has one (Settings); its initials until then.
+      // Its logo once the workspace has one (Settings › Workspace); its initials until then.
       choices: [
-        { label: organization ?? "Grasp", value: "current", avatar: true },
+        {
+          label: organization ?? "Grasp",
+          value: "current",
+          avatar: logo ?? true,
+        },
       ],
       value: "current",
     },
