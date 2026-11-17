@@ -1,5 +1,6 @@
 import type { AuditEntry } from "@grasp-os/shared/audit";
 import { log } from "@grasp-os/shared/log";
+import { redact } from "@grasp-os/shared/redact";
 import { and, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
@@ -60,7 +61,10 @@ import { evidenceOf } from "./workflows/run-evidence.ts";
 // note it in brain-hand-overs.ts:
 //
 // - An independent workflow run that ended (`run:<id>`): once, change
-//   `end`, how it ended and what it returned (or its failure's code), for
+//   `end`, how it ended and what it returned (or its failure's code), as
+//   one text with its credentials redacted (`redact`, once, over exactly
+//   that text: a result is often a copy of what a connection answered;
+//   not yet behind an escaped newline in a JSON string, GRA-1880), for
 //   the person it acted for alone; nothing from a run started in
 //   restricted mode, or whose details are past their retention. A run
 //   reads only what its person may read, so its person never reads more
@@ -180,10 +184,15 @@ const runOfId = async (env: Env, id: string): Promise<Handed> => {
   return {
     kind: "source",
     change: "end",
-    text: [
-      ...ending,
-      ...(returned === undefined ? [] : [JSON.stringify(returned)]),
-    ].join("\n\n"),
+    // Credentials redacted once, over exactly the text kept: what a run
+    // returns may copy an outside system's answer (GRA-2002). The run
+    // itself still shows what it returned.
+    text: redact(
+      [
+        ...ending,
+        ...(returned === undefined ? [] : [JSON.stringify(returned)]),
+      ].join("\n\n")
+    ),
     // Never a cut part of a result, which would read as half a document.
     whenTooLarge: [...ending, "Its result was too large to keep."].join("\n\n"),
     readers,
