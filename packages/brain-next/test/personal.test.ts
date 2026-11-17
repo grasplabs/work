@@ -1653,6 +1653,7 @@ const leavingNone = [
   "readEntityNames",
   "readMemories",
   "readVersion",
+  "readVersionChange",
   // One statement each of which memories and versions the reader may
   // still read.
   "readableMemories",

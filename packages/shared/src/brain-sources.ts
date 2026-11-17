@@ -9,6 +9,11 @@
 
 import { z } from "zod";
 
+import type {
+  BrainEntityListed,
+  BrainMemoryShown,
+  BrainStoreCursor,
+} from "./brain-memories.ts";
 import { defineErrorFamily } from "./errors.ts";
 
 /**
@@ -237,6 +242,33 @@ export interface BrainSharedUploadPage {
   next: BrainSharedUploadsAfter | null;
 }
 
+/**
+ * A memory of what a version changed: one it added (current, or history
+ * since), an earlier one a memory of it replaced (`ended`), or, for the
+ * current version, an earlier one no longer in its text (`out`); one it
+ * added that another memory they may read contradicts comes with those
+ * (the first few, and whether more follow).
+ */
+export interface BrainLearnedMemory {
+  part: "added" | "ended" | "out";
+  memory: BrainMemoryShown;
+  rivals: BrainMemoryShown[];
+  moreRivals: boolean;
+}
+
+/**
+ * A page of what the Brain learned from a version of a source, as they
+ * may read it: what it added, then what it ended, each by when the Brain
+ * learned it; the entities those name, each marked when this version is
+ * where they first saw it; and where the next page goes on: null at the
+ * last.
+ */
+export interface BrainLearned {
+  memories: BrainLearnedMemory[];
+  entities: (BrainEntityListed & { firstSeen: boolean })[];
+  next: BrainStoreCursor | null;
+}
+
 /** The Brain's sources, for the person signed in. */
 export interface BrainSourcesApi {
   /** A page of the sources they may read, newest first, after `after`. */
@@ -251,6 +283,15 @@ export interface BrainSourcesApi {
     source: BrainSourceRef,
     version: number
   ) => Promise<BrainSourceText | null>;
+  /**
+   * A page of what the Brain learned from a version of a source, after
+   * `next`: null when there is none or they may not read it, alike.
+   */
+  learned: (
+    source: BrainSourceRef,
+    version: number,
+    next?: BrainStoreCursor | null
+  ) => Promise<BrainLearned | null>;
   /** Recall for `question` as them, within `brainSearchBudget` tokens. */
   search: (question: string) => Promise<BrainSearchPack>;
   /**

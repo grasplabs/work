@@ -2328,6 +2328,91 @@ export interface ContestedFact {
   more: boolean;
 }
 
+// What a version of a source changed (`readVersionChange`,
+// version-change.ts): its change set, read from what the store keeps of
+// it. Every add drawn from a source names the version it rests on
+// (`SourceVersionRef`), so what a version added is the memories that rest
+// on it; what it replaced is the earlier memories of its source's lineage
+// that the first thing to end them, as the reader sees it, was a memory of
+// it or its `extracted` mark; and what it made contested is what it added
+// that stands contested. A memory that left only because a version's text
+// no longer holds its quote is credited to no version: while a version is
+// its source's current one, such memories are listed with it as no longer
+// in the source (`out`), and with no other. All as of one moment, as
+// `readMemories` reads with `history`, and only from what the reader may
+// read: what they may not changes nothing in it.
+
+/** The parts of a version's change, in the order a page gives them. */
+export const versionChangeParts = ["added", "ended", "out"] as const;
+export type VersionChangePart = (typeof versionChangeParts)[number];
+
+/**
+ * Where a page of `readVersionChange` ended: the moment the first page was
+ * read (`at`), at which every later page is read too; and its last
+ * memory's place (its part, when it was learned, its id).
+ */
+export const versionChangeCursorSchema = z.strictObject({
+  at: z.date(),
+  part: z.enum(versionChangeParts),
+  learnedAt: z.date(),
+  memory: memoryIdSchema,
+});
+export type VersionChangeCursor = z.infer<typeof versionChangeCursorSchema>;
+
+/**
+ * A version of a source whose change to read, for a reader: a page of at
+ * most `limit` memories (a page size, at most `memoriesReadMax`), after
+ * `after`.
+ */
+export const versionChangeRequestSchema = z.strictObject({
+  source: sourceIdSchema,
+  version: versionSchema,
+  reader: readerSchema,
+  after: versionChangeCursorSchema.optional(),
+  limit: z.int().min(1).max(memoriesReadMax).default(memoriesReadMax),
+});
+export type VersionChangeRequest = z.input<typeof versionChangeRequestSchema>;
+
+/**
+ * A memory a version's change holds: one it added (current or, since,
+ * history, as `readMemories` with `history` gives it), one it replaced
+ * (`ended`), or, for the current version, one no longer in its text
+ * (`out`).
+ * One it added that stands contested comes with its current rivals the
+ * reader may read: the first `factSidesShown`, and whether more follow.
+ */
+export interface ChangedMemory {
+  part: VersionChangePart;
+  memory: Memory;
+  rivals: Memory[];
+  moreRivals: boolean;
+}
+
+/**
+ * An entity a page's memories name (about, or related to), as the reader
+ * sees it; `firstSeen` when the first memory they may read that mentions
+ * it (by when it was learned, then its id) is one the version added: an
+ * entity the version made seen, not only linked to.
+ */
+export interface ChangedEntity extends Entity {
+  firstSeen: boolean;
+}
+
+/**
+ * A page of a version's change (above): what it added, then what it
+ * replaced, then what is no longer in it, each by when it was learned,
+ * then by id; the entities those
+ * memories and their rivals name; the moment it was read at; whether
+ * more follow, and where to go on from.
+ */
+export interface VersionChange {
+  memories: ChangedMemory[];
+  entities: ChangedEntity[];
+  at: Date;
+  more: boolean;
+  next?: VersionChangeCursor;
+}
+
 /**
  * Memories to check a reader may still read, by id, and who reads them:
  * what a host checks before it sends again a memory it once recalled (a
@@ -3262,6 +3347,20 @@ export interface Brain {
    * Dedupe pages by id. Nothing the reader may not read is ever returned.
    */
   listContested: (request: ContestedRequest) => Promise<ContestedPage>;
+  /**
+   * A page of what a version of a source changed, as the reader sees it
+   * (`VersionChange`); null alike when the version doesn't exist, when
+   * they may not read it or its source's current version, and when an
+   * erasure hides it, as `readVersion` answers.
+   *
+   * Pages of one read are read at one moment, as `readMemories`' are: a
+   * memory write after the first page is on none of its later pages,
+   * while who may read the sources is unchanged. Dedupe pages by id.
+   * Nothing the reader may not read is ever returned.
+   */
+  readVersionChange: (
+    request: VersionChangeRequest
+  ) => Promise<VersionChange | null>;
   /**
    * Of the memories asked for, by id, those the reader may read now (as
    * `readMemories` decides who may read one) and their writer has not
