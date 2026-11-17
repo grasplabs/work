@@ -663,10 +663,6 @@ msgstr "{label}, solo lectura"
 msgid "{label}:"
 msgstr "{label}:"
 
-#: src/brain/memories-page.tsx
-msgid "{label}: {held}"
-msgstr "{label}: {held}"
-
 #: src/onboarding/setup-steps.tsx
 msgid "{leads, plural, one {Thank you. I’ll start with this lead.} other {Thank you. I’ll start with these # leads.}}"
 msgstr "{leads, plural, one {Gracias. Empiezo con este responsable.} other {Gracias. Empiezo con estos # responsables.}}"

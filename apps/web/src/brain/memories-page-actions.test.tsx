@@ -1497,4 +1497,40 @@ describe("the Memories page's paged lists, read again", () => {
     }
     expect(missing).toStrictEqual([]);
   });
+
+  it("shows every text of a memory on its line, in every combination of attribute, value and statement, as the share dialog does", async () => {
+    const statementText = "Initech renews in March";
+    const valueText = "Renewing soon";
+    const values = [null, valueText, statementText] as const;
+    const attributes = [null, "status"] as const;
+    const missing: string[] = [];
+    for (const attribute of attributes) {
+      for (const value of values) {
+        // oxlint-disable-next-line no-await-in-loop -- one page at a time
+        await initechOpen([
+          ownFact("m-own", { attribute, value, statement: statementText }),
+        ]);
+        const panel = document.querySelector("h3")?.closest("section");
+        const line = panel?.querySelector("li")?.textContent ?? "";
+        const expected = [
+          ["statement", statementText],
+          ...(value === null ? [] : [["value", value]]),
+          ...(attribute === null ? [] : [["attribute", "Status"]]),
+        ];
+        for (const [field, text] of expected) {
+          if (!line.includes(text ?? "")) {
+            missing.push(`${field} of ${JSON.stringify({ attribute, value })}`);
+          }
+        }
+        // Each text once: the statement isn't repeated beside the value.
+        if (line.split(statementText).length - 1 !== 1) {
+          missing.push(
+            `statement not once: ${JSON.stringify({ attribute, value })}`
+          );
+        }
+        closePage();
+      }
+    }
+    expect(missing).toStrictEqual([]);
+  });
 });
