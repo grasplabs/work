@@ -1,4 +1,8 @@
 import { brainQuestionMaxLength } from "@grasp-os/shared/brain-sources";
+import {
+  instructionsMaxLength,
+  isOverInstructionsLimit,
+} from "@grasp-os/shared/instruction-files";
 import { z } from "zod";
 
 import type { BrainStore } from "./store.ts";
@@ -119,13 +123,6 @@ export const recallBudgetMax = 32_000;
 
 /** Most characters of a source's identity, and of a change's key. */
 export const sourceIdMaxLength = 256;
-
-/**
- * Most UTF-16 units (`.length`) of an instruction file's text: about 2000
- * tokens, so the few files a chat starts with leave it room for the
- * conversation.
- */
-export const instructionsMaxLength = 8000;
 
 /** Most sources one read of current versions names. */
 export const currentReadMax = 10;
@@ -319,10 +316,6 @@ export const newSourceSchema = z.strictObject({
   readAt: z.int().nonnegative().optional(),
 });
 export type NewSource = z.infer<typeof newSourceSchema>;
-
-/** Whether `text` is over `instructionsMaxLength` UTF-16 units. */
-export const isOverInstructionsLimit = (text: string): boolean =>
-  text.length > instructionsMaxLength;
 
 /**
  * An instruction file's text: at most `instructionsMaxLength` UTF-16
@@ -2545,6 +2538,28 @@ export type MemoryChangeOutcome = "done" | "nothing";
 // Kept while the store is (erasing its memories leaves it), and gone with
 // the store erased whole. The shared store holds none, and refuses `own`.
 
+/**
+ * The reader's profile to read (store.ts `readProfile`), in their own
+ * store, within `budget.tokens` (`packMemoryTokens` each).
+ */
+export const profileRequestSchema = z.strictObject({
+  reader: personReaderSchema,
+  budget: z.strictObject({ tokens: z.int().min(1).max(recallBudgetMax) }),
+});
+export type ProfileRequest = z.input<typeof profileRequestSchema>;
+
+/**
+ * What a chat starts with about its reader (the plan's profile): the
+ * current memories about their own entity in their own word (an
+ * `internal` speaker who is the reader), newest first (by when each was
+ * learned, then by id), each whole, as many as fit the budget, stopping at
+ * the first that doesn't. Built when asked, from what the reader may read,
+ * never stored, so a changed or retired memory changes the next one.
+ */
+export interface Profile {
+  memories: Memory[];
+}
+
 /** The reader's own entity to read, in their own store. */
 export const ownEntityRequestSchema = z.strictObject({
   reader: personReaderSchema,
@@ -3169,6 +3184,12 @@ export interface Brain {
    * whole. Only for that store's person; the shared store refuses.
    */
   ownEntity: (request: OwnEntityRequest) => Promise<EntityId | null>;
+  /**
+   * The reader's profile (`Profile`), in their own store, built now: empty
+   * while they have no own entity, and once the store is erased whole.
+   * Only for that store's person; the shared store refuses.
+   */
+  readProfile: (request: ProfileRequest) => Promise<Profile>;
   /**
    * An entity's card as the reader sees it (`Card`), built now from the
    * memories they may read: null when they may see no such entity, alike

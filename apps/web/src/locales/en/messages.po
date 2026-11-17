@@ -9354,10 +9354,6 @@ msgstr "Noted: {name}. We’ll connect it with you. Meanwhile, check who leads w
 msgid "Noted. We’ll get in touch to put it on the laptops with you."
 msgstr "Noted. We’ll get in touch to put it on the laptops with you."
 
-#: src/agents/agent-share.tsx
-msgid "Nothing beyond Grasp's own rules."
-msgstr "Nothing beyond Grasp's own rules."
-
 #: src/routes/_shell.integrations.index.tsx
 msgid "Nothing connected yet."
 msgstr "Nothing connected yet."
@@ -9602,8 +9598,8 @@ msgid "Offer to the company"
 msgstr "Offer to the company"
 
 #: src/agents/agent-share.tsx
-msgid "Offered on {since}. Your company's admins can now read what {name} is told, and may take it on."
-msgstr "Offered on {since}. Your company's admins can now read what {name} is told, and may take it on."
+msgid "Offered on {since}. Your company's admins may take {name} on. What you told it doesn't go with it, and once they take it on, you can no longer open it."
+msgstr "Offered on {since}. Your company's admins may take {name} on. What you told it doesn't go with it, and once they take it on, you can no longer open it."
 
 #: src/agents/agent-share.tsx
 msgid "Offered to the company"
@@ -15918,10 +15914,6 @@ msgctxt "what an app is for, in a sentence"
 msgid "What it is for"
 msgstr "What it is for"
 
-#: src/agents/agent-share.tsx
-msgid "What it is told"
-msgstr "What it is told"
-
 #: src/agents/agent-page.tsx
 #: src/chat/agent-draft-card.tsx
 msgid "What it may do"
@@ -15932,6 +15924,7 @@ msgid "What it returned"
 msgstr "What it returned"
 
 #: src/agents/agent-form.tsx
+#: src/agents/agent-page.tsx
 msgid "What it should know and how it should work. Grasp's own rules always hold over these."
 msgstr "What it should know and how it should work. Grasp's own rules always hold over these."
 
@@ -16816,6 +16809,11 @@ msgstr "Yes: its hash matches, and it links to the event before it."
 #: src/workflows/run-detail.tsx
 #: src/workflows/runs.tsx
 #: src/workflows/traces.tsx
+msgid "You"
+msgstr "You"
+
+#: src/brain/memories-page.tsx
+msgctxt "the person themselves, as the Brain names them"
 msgid "You"
 msgstr "You"
 

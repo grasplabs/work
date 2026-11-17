@@ -7,6 +7,7 @@ import type {
 } from "@grasp-os/shared/agents";
 import type { ChatAgent } from "@grasp-os/shared/chat";
 import { companyToolClasses } from "@grasp-os/shared/connect";
+import type { InstructionFileRef } from "@grasp-os/shared/instruction-files";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
 import {
@@ -45,7 +46,6 @@ const agentOf = (id: string, name: string, change: Partial<Agent>): Agent => ({
   name,
   face: "stephen",
   job: `${name}'s job.`,
-  instructions: `${name}'s instructions.`,
   ownerId: null,
   offeredAt: null,
   modelRole: null,
@@ -170,6 +170,18 @@ const mounted = async (shown: ReactNode): Promise<Asked> => {
       asked.push(["declined", id]);
     },
   };
+  const instructions = {
+    save: async (saved: {
+      file: InstructionFileRef;
+      change: string;
+      text: string;
+      after: number;
+    }) => {
+      await Promise.resolve();
+      asked.push(["told", saved.file, saved.text, saved.after]);
+      return { version: saved.after + 1 };
+    },
+  };
   const orgSettings = {
     updateOwnAgents: async (settings: { on: boolean }) => {
       await Promise.resolve();
@@ -181,9 +193,10 @@ const mounted = async (shown: ReactNode): Promise<Asked> => {
     withSession: async <T,>(
       action: (session: {
         connections: typeof connections;
+        instructions: typeof instructions;
         orgSettings: typeof orgSettings;
       }) => Promise<T>
-    ): Promise<T> => await action({ connections, orgSettings }),
+    ): Promise<T> => await action({ connections, instructions, orgSettings }),
   };
   const rootRoute = createRootRoute({ component: () => <main>{shown}</main> });
   const router = createRouter({
@@ -263,6 +276,7 @@ const page = (agent: Agent, tab: AgentTab, usable = true) => (
     editable
     first={agent.id === stephen.id}
     firstAccess={agent.id === stephen.id ? firstAccess : undefined}
+    instructions={{ version: 3, text: `${agent.name}'s instructions.` }}
     models={["anthropic/claude-sonnet-4-5", "anthropic/claude-opus-4-6"]}
     onTab={() => {}}
     people={[]}
@@ -493,12 +507,11 @@ describe("the company's agents, on pages of their own", () => {
       }).toStrictEqual({ disabled: true, asked: [] });
     });
 
-    it("shows an admin the agents people offered the company, who from and what they are told, and takes one on or declines it", async () => {
+    it("shows an admin the agents people offered the company and who from, and takes one on or declines it", async () => {
       const offered = [
         agentOf("agent-scribe", "Scribe", {
           ownerId: "user-anna",
           offeredAt: "2026-11-13T09:00:00.000Z",
-          instructions: "Short sentences.",
         }),
         agentOf("agent-idle", "Idle", {
           ownerId: "user-gone",
@@ -535,12 +548,10 @@ describe("the company's agents, on pages of their own", () => {
       expect({
         from: text.includes("From Anna de Vries"),
         gone: text.includes("From Someone no longer in the company"),
-        told: text.includes("Short sentences."),
         asked,
       }).toStrictEqual({
         from: true,
         gone: true,
-        told: true,
         asked: [
           ["adopted", "agent-scribe"],
           ["declined", "agent-idle"],
@@ -671,7 +682,7 @@ describe("the company's agents, on pages of their own", () => {
       }).toStrictEqual({ places: true, grasp: true, link: false });
     });
 
-    it("saves new instructions with the agent's name and job as they were", async () => {
+    it("saves new instructions as the agent's instruction file, after the version it showed", async () => {
       const asked = await mounted(page(claire, "instructions"));
       const box = document.querySelector("textarea");
       if (box === null) {
@@ -689,16 +700,10 @@ describe("the company's agents, on pages of their own", () => {
       await press(buttonNamed("Save"));
       expect(asked).toStrictEqual([
         [
-          "change",
-          "agent-claire",
-          {
-            name: "Claire",
-            job: "Chases invoices.",
-            instructions: "Chase after 30 days.",
-            face: "stephen",
-            model: null,
-            modelRole: null,
-          },
+          "told",
+          { scope: "agent", agentId: "agent-claire" },
+          "Chase after 30 days.",
+          3,
         ],
       ]);
     });
@@ -723,7 +728,6 @@ describe("the company's agents, on pages of their own", () => {
       const whole = {
         name: "Claire",
         job: "Chases invoices.",
-        instructions: "Claire's instructions.",
         modelRole: null,
       };
       expect(asked).toStrictEqual([
@@ -807,6 +811,7 @@ describe("the company's agents, on pages of their own", () => {
           documents={[]}
           editable={false}
           first={false}
+          instructions={undefined}
           models={[]}
           onTab={() => {}}
           people={[]}

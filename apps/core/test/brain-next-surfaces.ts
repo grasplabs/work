@@ -32,7 +32,6 @@ import {
   brainOf,
   currentReadMax,
   handOversMax,
-  instructionsMaxLength,
   listPageMax,
   listPrefixesMax,
   modelNameMaxLength,
@@ -73,6 +72,7 @@ import {
   permissionIdSchema,
   workspaceIdSchema,
 } from "@grasp-os/shared/ids";
+import { instructionsMaxLength } from "@grasp-os/shared/instruction-files";
 import type { Authority } from "@grasp-os/shared/permissions";
 import { authoritySchema } from "@grasp-os/shared/permissions";
 import type { Identity } from "@grasp-os/shared/rpc";
@@ -81,6 +81,7 @@ import { DurableObject, env } from "cloudflare:workers";
 import { z } from "zod";
 
 import { embedInProcess } from "../../../packages/embed/test/test-models.ts";
+import * as agentAppAccess from "../src/agent-app-access.ts";
 import { addMember, removeMember } from "../src/app-members.ts";
 import { organizationId } from "../src/auth/auth.ts";
 import { memberOf } from "../src/auth/identity.ts";
@@ -151,6 +152,13 @@ export interface Probing {
    * Each must answer exactly as a file never written.
    */
   hiddenInstructionFiles: readonly InstructionFile[];
+  /**
+   * Agents of someone else's own (core's agents.ts), each with a file
+   * holding every marker, kept in its owner's store: none may be read,
+   * changed or worked out by the reader, nor tell them anything an agent
+   * no one made wouldn't. None when absent.
+   */
+  hiddenOwnAgents?: readonly { agentId: string; ownerId: string }[];
   /**
    * Two Apps the reader uses and doesn't build (core's own records), one
    * whose file holds every marker and one with none: each asked of must
@@ -956,15 +964,17 @@ const hiddenAppsOf = ({
 
 /** The hidden files of `probing` of `scope`: their ids. */
 const hiddenIdsOf = (
-  { hiddenInstructionFiles }: Probing,
+  { hiddenInstructionFiles, hiddenOwnAgents = [] }: Probing,
   scope: "agent" | "person"
-): string[] =>
-  hiddenInstructionFiles.flatMap((file) => {
+): string[] => [
+  ...hiddenInstructionFiles.flatMap((file) => {
     if (scope === "agent") {
       return file.scope === "agent" ? [file.agentId] : [];
     }
     return file.scope === "person" ? [file.personId] : [];
-  });
+  }),
+  ...(scope === "agent" ? hiddenOwnAgents.map(({ agentId }) => agentId) : []),
+];
 
 /** The kinds of conversation a context names. */
 /** Every kind of chat an agent works in, as its instruction files see it. */
@@ -1167,6 +1177,7 @@ type CorePersonMember =
   | "memoryChoices"
   | "ownEntityAs"
   | "ownEntityIdAs"
+  | "profileAs"
   | "entitiesAs"
   | "memoriesAs"
   | "contestedAs"
@@ -2470,7 +2481,11 @@ export const coreProbes = {
   // (instruction-files.ts); which agent's file is the caller's to pick
   // too. So it is held here to what that reader may read: never another
   // person's file, nor an App's it wasn't told they build.
-  readInstructionFilesAs: async ({ personId, hiddenInstructionFiles }) => {
+  readInstructionFilesAs: async ({
+    personId,
+    hiddenInstructionFiles,
+    hiddenOwnAgents = [],
+  }) => {
     const read = async (
       name: string,
       files: InstructionFile[],
@@ -2482,9 +2497,18 @@ export const coreProbes = {
           await coreBrain.readInstructionFilesAs(env, personId, files),
         about
       );
-    const hidden = hiddenInstructionFiles.filter(
-      ({ scope }) => scope === "person" || scope === "app"
-    );
+    const hidden: InstructionFile[] = [
+      ...hiddenInstructionFiles.filter(
+        ({ scope }) => scope === "person" || scope === "app"
+      ),
+      // Someone else's own agent's, placed with its owner as core places
+      // it from its records: in their store, never the reader's.
+      ...hiddenOwnAgents.map(({ agentId, ownerId }) => ({
+        scope: "agent" as const,
+        agentId,
+        ownerId,
+      })),
+    ];
     const asked: Answer[] = [
       await read("a file never written", [unwrittenFile()], "nothing"),
     ];
@@ -3881,6 +3905,38 @@ export const instructionProbes = {
           personal: true,
         })
       );
+    }
+    // Someone else's own agent acting for them: told nothing its owner
+    // wrote, as an agent no one made is told nothing.
+    for (const { agentId } of probing.hiddenOwnAgents ?? []) {
+      const like = "as someone else's own agent";
+      const actingAs = (id: string) =>
+        authoritySchema.parse({
+          subject: { type: "agent", agentId: id },
+          onBehalfOf: personId,
+          mode: "interactive",
+        });
+      for (const [kind, context] of conversations) {
+        asked.push(
+          // oxlint-disable-next-line no-await-in-loop -- one at a time
+          await answer(
+            `${like}, ${kind}, nothing`,
+            async () =>
+              await filesOutcome(
+                loadAs(actingAs(`agent-${crypto.randomUUID()}`), context)
+              ),
+            "nothing",
+            `${like}, ${kind}`
+          ),
+          // oxlint-disable-next-line no-await-in-loop -- one at a time
+          await answer(
+            `${like}, ${kind}, hidden`,
+            async () => await filesOutcome(loadAs(actingAs(agentId), context)),
+            "hidden",
+            `${like}, ${kind}`
+          )
+        );
+      }
     }
     const inWorkflow = authoritySchema.parse({ ...agent, mode: "workflow" });
     asked.push(
@@ -6379,14 +6435,43 @@ const corePersonMemories = {
       await read("an id of the markers", markers.join("")),
     ];
   },
-  // The reader's own entity (GRA-1836): theirs alone, whatever someone
+  // The reader's profile (GRA-1745): theirs alone, whatever someone
   // else's holds; refused for someone who isn't a member.
-  ownEntityIdAs: async ({ personId, markers }) => {
+  profileAs: async ({ personId, markers }) => {
     await othersOwnEntity(markers);
+    const budget = { tokens: recallBudgetMax };
     return [
       await answer(
         "the reader's own",
-        async () => await coreBrain.ownEntityIdAs(env, personId)
+        async () => await coreBrain.profileAs(env, personId, budget)
+      ),
+      await answer(
+        "as someone who isn't a member",
+        async () => await coreBrain.profileAs(env, stranger(), budget)
+      ),
+      await answer(
+        "as a person named by the markers",
+        async () => await coreBrain.profileAs(env, markers.join(""), budget)
+      ),
+    ];
+  },
+  // The reader's own entity (GRA-1836): theirs alone, whatever someone
+  // else's holds; refused for someone who isn't a member.
+  ownEntityIdAs: async ({ personId, markers }) => {
+    // As the RPC's probe: the reader's own, before and after someone
+    // else's own entity holds marked memories, the same both times.
+    const before = await answer(
+      "the reader's own, before anyone else's holds marked memories",
+      async () => await coreBrain.ownEntityIdAs(env, personId),
+      "nothing"
+    );
+    await othersOwnEntity(markers);
+    return [
+      before,
+      await answer(
+        "the reader's own, once someone else's holds marked memories",
+        async () => await coreBrain.ownEntityIdAs(env, personId),
+        "hidden"
       ),
       await answer(
         "as someone who isn't a member",
@@ -7132,6 +7217,45 @@ const linkingProbes = {
       ),
       await read("the shared store", store()),
       await read("the reader's own store", personalStore(reader.person)),
+    ];
+  },
+  // Someone else's profile, their own entity holding marked memories,
+  // answers the reader as a store never written does (GRA-1745).
+  readProfile: async ({ markers, reader }) => {
+    const budget = { tokens: recallBudgetMax };
+    // The profile it answers, or the refusal's words alone (the object's
+    // id a refusal carries is no answer), so its markers are checked.
+    const read = async (name: string, brain: Brain, about?: Answer["about"]) =>
+      await answer(
+        name,
+        async () => {
+          try {
+            return await brain.readProfile({ reader, budget });
+          } catch (error) {
+            return {
+              refused: error instanceof Error ? error.message : "not an error",
+            };
+          }
+        },
+        about
+      );
+    return [
+      await read(
+        "someone else's own store, holding marked memories about their own entity",
+        personalStore(await othersOwnEntity(markers)),
+        "hidden"
+      ),
+      await read(
+        "someone else's own store, never written",
+        personalStore(stranger()),
+        "nothing"
+      ),
+      await read("the shared store", store()),
+      await answer(
+        "the reader's own store",
+        async () =>
+          await personalStore(reader.person).readProfile({ reader, budget })
+      ),
     ];
   },
   readCard: async (probing) => {
@@ -10012,6 +10136,31 @@ export const memoriesRpcProbes = {
       await forget("not an id", { memory: markers }),
     ];
   },
+  // Which entity is the person themselves: theirs alone, whatever someone
+  // else's own entity holds; refused for someone who isn't a member.
+  // The reader's own, asked before and after someone else's own entity
+  // holds marked memories: the same answer both times (theirs, or the same
+  // refusal), so any id handed to the wrong person is a finding.
+  ownEntity: async ({ personId, markers }) => {
+    const before = await answer(
+      "the reader's own, before anyone else's holds marked memories",
+      async () => await memoriesAs(personId).ownEntity(),
+      "nothing"
+    );
+    await othersOwnEntity(markers);
+    return [
+      before,
+      await answer(
+        "the reader's own, once someone else's holds marked memories",
+        async () => await memoriesAs(personId).ownEntity(),
+        "hidden"
+      ),
+      await answer(
+        "as someone who isn't a member",
+        async () => await memoriesAs(stranger()).ownEntity()
+      ),
+    ];
+  },
   ...showingPage(
     memoryPageProbes({
       entities: async (personId, kind, from) =>
@@ -10035,9 +10184,101 @@ export const memoriesRpcProbes = {
     })
   ),
 } satisfies Record<
-  "forget" | "entities" | "memories" | "contested" | "confirm" | "correct",
+  | "forget"
+  | "ownEntity"
+  | "entities"
+  | "memories"
+  | "contested"
+  | "confirm"
+  | "correct",
   Probe
 >;
+
+/**
+ * `call` on each agent of `probing` the reader may not change, as they
+ * are and as an admin of the company with their id, held to `call` on an
+ * agent no one made: refused alike. What it sends a model holds no
+ * marker (the harness scans it).
+ */
+const agentAppAnswers = async (
+  probing: Probing,
+  call: (identity: Identity, agentId: string) => Promise<unknown>
+): Promise<Answer[]> => {
+  const asked: Answer[] = [];
+  const session = sessionOf(probing.personId);
+  const asWho = [
+    ["as themselves", session],
+    ["as an admin", { ...session, role: "admin" }],
+  ] as const;
+  for (const [who, identity] of asWho) {
+    for (const agentId of hiddenIdsOf(probing, "agent")) {
+      const like = `${who}, an agent not theirs ${agentId}`;
+      asked.push(
+        // oxlint-disable-next-line no-await-in-loop -- one at a time
+        await answer(
+          `${like}, nothing`,
+          async () =>
+            await refusalOf(
+              async () => await call(identity, `agent-${crypto.randomUUID()}`)
+            ),
+          "nothing",
+          like
+        ),
+        // oxlint-disable-next-line no-await-in-loop -- one at a time
+        await answer(
+          `${like}, hidden`,
+          async () =>
+            await refusalOf(async () => await call(identity, agentId)),
+          "hidden",
+          like
+        )
+      );
+    }
+  }
+  asked.push(
+    await answer(
+      "an agent no one made",
+      async () =>
+        await refusalOf(
+          async () => await call(session, `agent-${crypto.randomUUID()}`)
+        )
+    ),
+    await answer(
+      "an agent named by the markers",
+      async () => await call(session, probing.markers.join(""))
+    )
+  );
+  return asked;
+};
+
+/** One probe per export of core's agent-app-access.ts. */
+export const agentAppProbes = {
+  listAgentApps: async (probing) =>
+    await agentAppAnswers(
+      probing,
+      async (identity, agentId) =>
+        await agentAppAccess.listAgentApps(env, identity, agentId)
+    ),
+  setAgentApp: async (probing) =>
+    await agentAppAnswers(probing, async (identity, agentId) => {
+      await agentAppAccess.setAgentApp(
+        env,
+        identity,
+        agentId,
+        `composio:${probing.markers.join("")}`,
+        true
+      );
+    }),
+  // Sends the agent's instruction file to a model, for whoever may change
+  // the agent: never one of someone else's own, whose file holds the
+  // markers.
+  workOutAgentApps: async (probing) =>
+    await agentAppAnswers(
+      probing,
+      async (identity, agentId) =>
+        await agentAppAccess.workOutAgentApps(env, identity, agentId)
+    ),
+} satisfies Record<keyof typeof agentAppAccess, Probe>;
 
 /** One way into the Brain: a module, or the store's class, and its probes. */
 interface Surface {
@@ -10063,6 +10304,7 @@ export const brainSurfaces = [
     },
   },
   { name: "instructions", module: instructionFiles, probes: instructionProbes },
+  { name: "agentApps", module: agentAppAccess, probes: agentAppProbes },
   { name: "skills", module: brainSkills, probes: skillProbes },
   { name: "recall", module: codeRecall, probes: recallProbes },
   { name: "store", module: BrainStore, probes: storeProbes },

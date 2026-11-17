@@ -55,6 +55,20 @@ const later: BrainEntityListed = {
   name: null,
   unreadable: false,
 };
+/** The person themselves, in their own store: no name of its own. */
+const me: BrainEntityListed = {
+  entity: { store: "own", id: "e-me" },
+  kind: "person",
+  name: null,
+  unreadable: false,
+};
+/** Another person of their own store, with no name either. */
+const someone: BrainEntityListed = {
+  entity: { store: "own", id: "e-someone" },
+  kind: "person",
+  name: null,
+  unreadable: false,
+};
 /** One a correction made, whose shared entity they may no longer read. */
 const lost: BrainEntityListed = {
   entity: { store: "own", id: "e-lost" },
@@ -145,14 +159,17 @@ const shown = async (refusal?: string, failedSaves = 0) => {
       kind: BrainEntityKind,
       next?: BrainMemoryPageNext | null
     ) =>
-      await answer(`entities ${kind}${next ? ` ${next.store}` : ""}`, () =>
-        next
+      await answer(`entities ${kind}${next ? ` ${next.store}` : ""}`, () => {
+        if (kind === "person") {
+          return { entities: [me, someone], next: null };
+        }
+        return next
           ? { entities: [later, lost], next: null }
           : {
               entities: [mine, acme],
               next: { store: "shared" as const, after: { entity: "e-acme" } },
-            }
-      ),
+            };
+      }),
     memories: async (entity: BrainEntityRef, next?: BrainStoreCursor | null) =>
       await answer(`memories ${entity.id}${next ? " next" : ""}`, () =>
         next
@@ -174,6 +191,16 @@ const shown = async (refusal?: string, failedSaves = 0) => {
                   source: null,
                   yours: true,
                 }),
+                // Their own word: they are Acme's contact themselves.
+                memory("m-contact", "", {
+                  store: "own",
+                  attribute: "contact",
+                  object: { id: me.entity.id, name: null },
+                  value: null,
+                  statement: "I am Acme's contact",
+                  source: null,
+                  yours: true,
+                }),
                 // Drawn from what an agent fetched from a connection.
                 memory("m-fetched", "Expanding", {
                   attribute: "industry",
@@ -186,6 +213,12 @@ const shown = async (refusal?: string, failedSaves = 0) => {
               next: { memory: "m-mine" },
             }
       ),
+    // Which entity is the person themselves: read with every read of the
+    // page, kept out of `calls`, which the other tests list.
+    ownEntity: async () => {
+      await Promise.resolve();
+      return me.entity.id;
+    },
     confirm: async (ref: BrainMemoryRef) =>
       await answer(`confirm ${ref.store} ${ref.memory}`, () => {
         confirmed = true;
@@ -340,6 +373,7 @@ describe(MemoriesPage, () => {
       ].map((text) => listed.includes(text)),
       opened: [
         "Status: Paying",
+        "Contact: You",
         "Your own word",
         "Fetched from a connection, version 3",
         "Status: Prospect",
@@ -348,7 +382,7 @@ describe(MemoriesPage, () => {
       calls: calls.slice(1),
     }).toStrictEqual({
       listed: [true, true, true, true, true],
-      opened: [true, true, true, true, true],
+      opened: [true, true, true, true, true, true],
       calls: [
         "entities customer",
         "entities customer shared",
@@ -356,6 +390,26 @@ describe(MemoriesPage, () => {
         "memories e-acme next",
       ],
     });
+  });
+
+  it("names the person's own entity as them, and another without a name as such", async () => {
+    await shown();
+    const kind = document.querySelector("select");
+    if (!kind) {
+      throw new TypeError("No kind to pick");
+    }
+    await act(async () => {
+      kind.value = "person";
+      kind.dispatchEvent(new Event("change", { bubbles: true }));
+      await Promise.resolve();
+    });
+    await settle();
+    const listed = section("What the Brain remembers");
+
+    expect({
+      you: listed.includes("You"),
+      withoutName: listed.split("Without a name").length - 1,
+    }).toStrictEqual({ you: true, withoutName: 1 });
   });
 
   it("saves a correction as core takes it, its id minted once, and reads the page again", async () => {

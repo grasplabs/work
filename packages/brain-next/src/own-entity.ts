@@ -1,4 +1,12 @@
-import type { EntityId } from "./contract.ts";
+import { memoriesReadMax, packMemoryTokens } from "./contract.ts";
+import type {
+  EntityId,
+  MemoriesCursor,
+  Memory,
+  Profile,
+  Reader,
+} from "./contract.ts";
+import { readMemories } from "./memories.ts";
 
 // The store's own entity (contract.ts "The store's own entity"): the
 // entity a person's own store's person is, one row at most, made fresh by
@@ -41,4 +49,84 @@ export const ownEntityRow = (sql: SqlStorage): number => {
     .one();
   sql.exec("INSERT INTO own_entity (id, entity) VALUES (1, ?)", row);
   return row;
+};
+
+/** The tokens `memory` takes of a pack's budget (`packMemoryTokens`). */
+const tokensOfMemory = (memory: Memory): number =>
+  packMemoryTokens({
+    ...memory,
+    memory: memory.id,
+    context: null,
+    confirmed: memory.confirmed !== null,
+    found: "entities",
+  });
+
+/**
+ * Newest first: by when it was learned, then by id, so the order is the
+ * same at every read while the memories are.
+ */
+const newestFirst = (a: Memory, b: Memory): number =>
+  b.learnedAt.getTime() - a.learnedAt.getTime() || b.id.localeCompare(a.id);
+
+/**
+ * The profile of `reader` (contract.ts `readProfile`): the current memories
+ * about their own entity in their own word, read at one moment, newest
+ * first (`newestFirst`), each whole, as many as fit `tokens` in that
+ * order (`packMemoryTokens`), stopping at the first that doesn't fit.
+ * Nothing while the store has no own entity. One synchronous read: a
+ * snapshot.
+ */
+export const readProfile = (
+  sql: SqlStorage,
+  {
+    reader,
+    tokens,
+    ...moments
+  }: {
+    reader: Reader & { person: string };
+    tokens: number;
+    at: number;
+    cursorAt: number;
+    learned: number;
+  }
+): Profile => {
+  const entity = ownEntityId(sql);
+  const theirs: Memory[] = [];
+  if (entity === null) {
+    return { memories: theirs };
+  }
+  let after: MemoriesCursor | undefined;
+  for (;;) {
+    const page = readMemories(sql, {
+      entity,
+      reader,
+      ...moments,
+      history: false,
+      ...(after === undefined ? {} : { after }),
+      limit: memoriesReadMax,
+    });
+    // Their own word alone: never an outside party's, an agent's or a
+    // system's, whatever is filed under them.
+    theirs.push(
+      ...page.memories.filter(
+        ({ speaker }) =>
+          speaker.kind === "internal" && speaker.person === reader.person
+      )
+    );
+    if (!page.more || page.next === undefined) {
+      break;
+    }
+    after = page.next;
+  }
+  const memories: Memory[] = [];
+  let left = tokens;
+  for (const memory of theirs.toSorted(newestFirst)) {
+    const cost = tokensOfMemory(memory);
+    if (cost > left) {
+      break;
+    }
+    left -= cost;
+    memories.push(memory);
+  }
+  return { memories };
 };

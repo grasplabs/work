@@ -19,7 +19,12 @@ import type {
 
 import { confirmFor, correctFor, forgetFor } from "./brain-memories.ts";
 import type { MemoryCaller } from "./brain-memories.ts";
-import { contestedAs, entitiesAs, memoriesAs } from "./brain-next.ts";
+import {
+  contestedAs,
+  entitiesAs,
+  memoriesAs,
+  ownEntityIdAs,
+} from "./brain-next.ts";
 import type { StoredEntity, StoredMemory, StorePlace } from "./brain-next.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
@@ -224,6 +229,13 @@ export class BrainMemoriesRpc
   async confirm(memory: BrainMemoryPlace): Promise<BrainMemoryOutcome> {
     return await this.#asCaller(
       async (caller) => await confirmFor(this.#env, caller, memory)
+    );
+  }
+
+  async ownEntity(): Promise<string | null> {
+    return await withPerson(
+      this.#check,
+      async (person) => await ownEntityIdAs(this.#env, person.userId)
     );
   }
 

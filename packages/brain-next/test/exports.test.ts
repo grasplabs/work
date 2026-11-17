@@ -15,6 +15,7 @@ import type {
   PersonReader,
   Reader,
 } from "@grasp-os/brain-next/contract";
+import { instructionsMaxLength } from "@grasp-os/shared/instruction-files";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { beforeAll, describe, expect, it } from "vite-plus/test";
@@ -23,7 +24,6 @@ import { z } from "zod";
 import { catchUpDue } from "../src/catch-up.ts";
 import {
   exportFileNameSchema,
-  instructionsMaxLength,
   removedSource,
   restoringNow,
 } from "../src/contract.ts";
