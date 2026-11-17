@@ -184,8 +184,8 @@ const requireModelChosen = async (
  */
 const ownDetail: Record<string, string> = { own: "true" };
 
-/** Where an agent was made, when not on the Agents page: a chat's draft. */
-interface MadeFrom {
+/** Where an agent was made or changed, when not on its page: a chat's card. */
+export interface MadeFrom {
   from?: "chat";
 }
 
@@ -405,7 +405,8 @@ export const changeAgent = async (
   env: Env,
   identity: Identity,
   agentId: unknown,
-  input: unknown
+  input: unknown,
+  { from }: MadeFrom = {}
 ): Promise<void> => {
   const agent = await changeableAgent(env, identity, agentId);
   const changed = inputOf(input);
@@ -475,7 +476,10 @@ export const changeAgent = async (
           actor: actorOf(identity),
           action: "agent.changed",
           target: { type: "agent", id: agent.id },
-          detail: ownerId === null ? detailOf(changed) : ownDetail,
+          detail: {
+            ...(ownerId === null ? detailOf(changed) : ownDetail),
+            ...(from === undefined ? {} : { from }),
+          },
         }),
       ])
   );
@@ -709,7 +713,8 @@ export const setAgentReach = async (
   identity: Identity,
   agentId: unknown,
   on: unknown,
-  audience: unknown
+  audience: unknown,
+  { from }: MadeFrom = {}
 ): Promise<void> => {
   requireCompanyAdmin(identity);
   const parsed = toolClassAudienceSchema.safeParse(audience);
@@ -741,7 +746,12 @@ export const setAgentReach = async (
       actor: actorOf(identity),
       action: "agent.reach.changed",
       target: { type: "agent", id },
-      detail: { on: String(on), who: stored.who, ...teamsDetail(stored.teams) },
+      detail: {
+        on: String(on),
+        who: stored.who,
+        ...teamsDetail(stored.teams),
+        ...(from === undefined ? {} : { from }),
+      },
     }),
   ]);
 };
@@ -756,7 +766,8 @@ export const setAgentToolClass = async (
   identity: Identity,
   agentId: unknown,
   toolClass: unknown,
-  audience: unknown
+  audience: unknown,
+  { from }: MadeFrom = {}
 ): Promise<void> => {
   requireCompanyAdmin(identity);
   const parsedClass = companyToolClassSchema.safeParse(toolClass);
@@ -800,6 +811,7 @@ export const setAgentToolClass = async (
         toolClass: parsedClass.data,
         who,
         ...teamsDetail(stored.teams),
+        ...(from === undefined ? {} : { from }),
       },
     }),
   ]);
