@@ -4,11 +4,15 @@ import { env, exports } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import type { AgentScope } from "../src/agent-scope.ts";
+import { drainAuditOutboxes } from "../src/audit-drains.ts";
 import { memberOf } from "../src/auth/identity.ts";
+import { readSourceVersionAs, workBrain } from "../src/brain-next.ts";
+import { producersOf, relayHandOvers } from "../src/brain-sources.ts";
 import { confirmHeldStart, sweepHeldStartInputs } from "../src/held-starts.ts";
 import { brainGrantRead } from "../src/history-access.ts";
 import { shareWorkflowResource } from "../src/workflow-members.ts";
 import { createWorkflowResource } from "../src/workflow-resources.ts";
+import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { openTestRun, personalChatsOf } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
@@ -637,6 +641,60 @@ describe("a chat's agent asking to start a workflow", setUpTime, () => {
       // its input may have carried, never leaves it.
       revoked: { status: "failed", code: "brain.revoked" },
       pinned: [{ source: brainGrantRead, chat: chatId }],
+    });
+  });
+
+  it("hands only how a confirmed start's run ended to its person's Brain, never what it returned, once its chat had read something", async () => {
+    const person = await signedInApi(idp, "user");
+    const { workflow, builder } = await workflowFor(person.userId);
+    const chats = await personalChatsOf(person.userId);
+    await grantStart(builder, chats.agent.agentId, workflow.id);
+    const { chatId, workflows } = await chatOf(chats, person);
+    await requestGranted(idp, builder, {
+      subject: { type: "agent", agentId: chats.agent.agentId },
+      object: { type: "platform" },
+      actions: ["brain"],
+      binding: `BRAIN_${unique().toUpperCase().replaceAll("-", "_")}`,
+    });
+    // What the chat had read before its agent asked: the Brain, under that
+    // grant, which its start pins onto the run (workflow-starts.ts).
+    await runInDurableObject(chats.stub, (_object, state) => {
+      state.storage.sql.exec(
+        "INSERT INTO chat_run_sources (chat_id, run_id, source_id, withheld_at) VALUES (?, 'run-1', ?, NULL)",
+        chatId,
+        brainGrantRead
+      );
+    });
+    const held = await workflows.start(workflow.id, { who: "Ada" }, "kept");
+    const listed = await person.api.heldStarts.list();
+    const shown = listed.find(({ id }) => id === held.held);
+    const confirmed = await person.api.heldStarts.confirm(
+      held.held,
+      shown?.argsHash ?? ""
+    );
+    const runId = confirmed.run ?? confirmed.start;
+    const ending = await endOf(runId);
+    const by = await memberOf(env.DB, person.userId);
+    if (by === undefined) {
+      throw new Error("Expected the person to be a member");
+    }
+    const run = await resourceRunFor(env, by, workflow.id, runId);
+    await drainAuditOutboxes(env);
+    await relayHandOvers(env);
+    await workBrain(env, new Date(Date.now() + 60_000), producersOf(env));
+    const kept = await readSourceVersionAs(env, person.userId, {
+      source: { producer: "run", id: runId },
+      version: 1,
+    });
+
+    expect({
+      ending,
+      returned: run.result !== undefined,
+      kept: kept?.text,
+    }).toStrictEqual({
+      ending: { status: "completed", code: null },
+      returned: true,
+      kept: "Workflow run completed.",
     });
   });
 
