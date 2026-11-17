@@ -178,6 +178,7 @@ export const strippedOf = <
  * one is the erased person's card, left out with every memory about it or
  * relating to it; an entity no memory left names is left out too. So
  * nothing drawn again from a source that stays makes or feeds their card.
+ * With it, the keys of the cards it left out (`erased`).
  */
 export const leavingOutCards = <
   Entity extends {
@@ -193,7 +194,7 @@ export const leavingOutCards = <
     memories,
   }: { entities: readonly Entity[]; memories: readonly Memory[] },
   identifiers: readonly string[][]
-): { entities: Entity[]; memories: Memory[] } => {
+): { entities: Entity[]; memories: Memory[]; erased: Set<string> } => {
   const stripped = strippedOf(sql, entities, identifiers);
   const kept = memories.filter(
     ({ about, object }) =>
@@ -210,6 +211,7 @@ export const leavingOutCards = <
   return {
     entities: stripped.entities.filter(({ key }) => named.has(key)),
     memories: kept,
+    erased: stripped.erased,
   };
 };
 
@@ -365,6 +367,39 @@ export const applyPerson = (
 };
 
 /**
+ * Closes each card of `cards` (its id, and the subjects of the identifiers
+ * it was given) under the erasure that closed one of those identifiers, as
+ * that erasure takes a card of theirs (`applyPerson`): what of it the store
+ * holds hidden, and its id closed, so what names it later is left out. For
+ * a restore, where a card may come back only after the erasure (restore.ts).
+ * In the caller's transaction.
+ */
+export const closeCards = (
+  sql: SqlStorage,
+  cards: readonly { id: string; subjects: readonly string[] }[]
+): void => {
+  for (const { id, subjects } of cards) {
+    const [by] = sql
+      .exec<{ key: string; person: string }>(
+        `SELECT closed.erasure AS key, erasures.subject AS person
+        FROM person_erasure_subjects AS closed
+        JOIN erasures ON erasures.key = closed.erasure
+        WHERE closed.subject IN (SELECT value FROM json_each(?1))
+        LIMIT 1`,
+        JSON.stringify(subjects)
+      )
+      .toArray();
+    if (by !== undefined) {
+      applyPerson(
+        sql,
+        { key: by.key, subject: by.person },
+        { people: [], identifiers: [], subjects: [entityClosureOf(id)] }
+      );
+    }
+  }
+};
+
+/**
  * Most hashes one step of a replay makes for its person entries
  * (`foundForReplay`), where the clock can't bound it: it moves only on
  * I/O. A step holds every call while it runs, so its hashing is kept to
@@ -376,13 +411,17 @@ export const applyPerson = (
 export const replayHashesPerStep = 50_000;
 
 /**
- * How a replay hashes for `foundForReplay`: each text's SHA-256 made so
- * far in this replay, kept for its next steps (`hashed`), and `due`,
- * which counts each new one and throws once the step made its share.
+ * What a replay keeps for `foundForReplay` until it is through: each
+ * text's SHA-256 made so far (`hashed`), and the candidates, read once
+ * (`candidates`): a replay takes no call meanwhile, so they stay what they
+ * were, and an entry it applies only hides or rewrites what they name.
  */
-export interface ReplayHashing {
+export interface ReplayMemo {
   hashed: Map<string, string>;
-  due: () => void;
+  candidates?: {
+    people: string[];
+    identifiers: { type: "email" | "ref"; folded: string }[];
+  };
 }
 
 /**
@@ -392,48 +431,52 @@ export interface ReplayHashing {
  * person a memory is in the word of or a confirmation names, each
  * identifier a name holds), as the entry keeps no plain value. Run while
  * the store takes nothing else (a replay), so nothing lands in between.
- * Each hash is made once in a replay (`hashed`); before each new one
- * `due` may stop the step (`replayHashesPerStep`), and the next step goes
- * on from what it made.
+ * The candidates are read once in a replay and each hash made once
+ * (`memo`); before each new hash `due` may stop the step
+ * (`replayHashesPerStep`), and the next step goes on from what it made.
  */
 export const foundForReplay = async (
   sql: SqlStorage,
   subject: string,
   subjects: readonly string[],
-  { hashed, due }: ReplayHashing
+  memo: ReplayMemo,
+  due: () => void
 ): Promise<PersonFound> => {
   const hashOfText = async (text: string): Promise<string> => {
-    const known = hashed.get(text);
+    const known = memo.hashed.get(text);
     if (known !== undefined) {
       return known;
     }
     due();
     const made = await subjectOfText(text);
-    hashed.set(text, made);
+    memo.hashed.set(text, made);
     return made;
   };
+  memo.candidates ??= {
+    people: sql
+      .exec<{ person: string }>(
+        `SELECT DISTINCT speaker ->> 'person' AS person FROM memories
+        WHERE speaker ->> 'kind' = 'internal'
+        UNION SELECT DISTINCT person FROM memory_confirmations`
+      )
+      .toArray()
+      .map(({ person }) => person),
+    identifiers: sql
+      .exec<{ type: "email" | "ref"; folded: string }>(
+        "SELECT DISTINCT type, folded FROM entity_names WHERE type <> 'name'"
+      )
+      .toArray(),
+  };
   const closed = new Set(subjects);
-  const candidates = sql
-    .exec<{ person: string }>(
-      `SELECT DISTINCT speaker ->> 'person' AS person FROM memories
-      WHERE speaker ->> 'kind' = 'internal'
-      UNION SELECT DISTINCT person FROM memory_confirmations`
-    )
-    .toArray();
   const people: string[] = [];
-  for (const { person } of candidates) {
+  for (const person of memo.candidates.people) {
     // oxlint-disable-next-line no-await-in-loop -- one hash at a time
     if ((await hashOfText(person)) === subject) {
       people.push(person);
     }
   }
-  const named = sql
-    .exec<{ type: "email" | "ref"; folded: string }>(
-      "SELECT DISTINCT type, folded FROM entity_names WHERE type <> 'name'"
-    )
-    .toArray();
   const identifiers: HeldIdentifier[] = [];
-  for (const { type, folded } of named) {
+  for (const { type, folded } of memo.candidates.identifiers) {
     const text = identifierTextOf({ type, value: folded });
     // oxlint-disable-next-line no-await-in-loop -- one hash at a time
     if (closed.has(await hashOfText(text))) {

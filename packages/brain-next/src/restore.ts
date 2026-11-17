@@ -73,12 +73,13 @@ import {
   writerErasedAfterSql,
 } from "./memories.ts";
 import {
+  closeCards,
   closedOf,
   entityClosureOf,
   isErasedPerson,
+  leavingOutCards,
   namingOf,
   personSubjectOf,
-  strippedOf,
 } from "./people.ts";
 import type { Naming } from "./people.ts";
 import { readerSetKeyOf, readerSetOf } from "./reader-sets.ts";
@@ -768,6 +769,36 @@ const restoreMemory = async (
     if (passesOverMemory(sql, line, subject, writerSubject, naming)) {
       return;
     }
+    // A card a person's erasure closed an identifier of is left out with
+    // what is about it or relates to it, as an add leaves it (people.ts
+    // `leavingOutCards`); and closed by its id, with what of it this
+    // restore wrote before the erasure landed, so no later line brings it
+    // back by its name alone.
+    const entities = line.entities.map((entity) => ({
+      ...entity,
+      key: entity.id,
+    }));
+    const left = leavingOutCards(
+      sql,
+      {
+        entities,
+        memories: [{ about: line.about, object: line.object ?? undefined }],
+      },
+      naming.identifiers
+    );
+    if (left.erased.size > 0) {
+      closeCards(
+        sql,
+        entities.flatMap(({ id }, index) =>
+          left.erased.has(id)
+            ? [{ id, subjects: naming.identifiers[index] ?? [] }]
+            : []
+        )
+      );
+    }
+    if (left.memories.length === 0) {
+      return;
+    }
     const rows = entityRowsOf(sql, line);
     const about = rows?.get(line.about);
     const kind = line.entities.find(({ id }) => id === line.about)?.kind;
@@ -817,12 +848,7 @@ const restoreMemory = async (
       .one();
     indexMemoryWords(sql, row, line.statement, new Map());
     // Without an identifier a person's erasure closed, as an add keeps it.
-    const kept = strippedOf(
-      sql,
-      line.entities.map((entity) => ({ ...entity, key: entity.id })),
-      naming.identifiers
-    ).entities;
-    for (const { id, names, identifiers } of kept) {
+    for (const { id, names, identifiers } of left.entities) {
       const entity = rows.get(id);
       if (entity !== undefined) {
         keepNames(sql, entity, row, names, identifiers);

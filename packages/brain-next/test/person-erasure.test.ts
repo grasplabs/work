@@ -14,7 +14,7 @@ import type {
 } from "@grasp-os/brain-next/contract";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { beforeAll, describe, expect, it } from "vite-plus/test";
+import { beforeAll, describe, expect, it, vi } from "vite-plus/test";
 
 import { replayHashesPerStep } from "../src/people.ts";
 import type { BrainStore } from "../src/store.ts";
@@ -800,6 +800,8 @@ describe("a person's erasure in the shared store", () => {
   it("stops a replay's step at its share of hashes, and the next steps go on to the same end as one never stopped", async () => {
     const at = await annaAndBob();
     const before = await copyOf(shared());
+    // Two person entries: the step's share is theirs together.
+    await erase(unique("nobody-"), [email(word())]);
     await erase(at.anna, [email(at.local)]);
     await tick(shared());
     const after = await copyOf(shared());
@@ -1390,6 +1392,131 @@ describe("a person's erasure in the shared store", () => {
       byAddress: 0,
     });
   });
+
+  // It restores the store from empty, as the last test does.
+  it.each([
+    ["her name first, her address later", "name"],
+    ["her address in her card's first line", "address"],
+  ] as const)(
+    "leaves her card out of a restore her erasure lands in before the line holding her address (%s), with what was restored of it and what relates to it",
+    async (_case, first) => {
+      const group = unique("g");
+      const bob = unique("bob-");
+      const anna = unique("anna-");
+      const reader: Reader = { person: bob, groups: [group] };
+      const local = word();
+      const name = `Anna ${word()}`;
+      const project = `Audit ${word()}`;
+      // Her card by name, and her address in another memory of it, in
+      // either order; Bob reports to her; and a project nobody erases.
+      const byName = async (card?: string) =>
+        await shared().addMemories({
+          change: crypto.randomUUID(),
+          access: { kind: "audience", group },
+          reader,
+          entities: [
+            card === undefined
+              ? { key: "a", kind: "person", names: [name] }
+              : { key: "a", id: card, kind: "person" },
+          ],
+          memories: [fromApp("a", `${name} is on leave in March`)],
+        });
+      const byAddress = async (card?: string) =>
+        await shared().addMemories({
+          change: crypto.randomUUID(),
+          access: { kind: "audience", group },
+          reader,
+          entities: [
+            card === undefined
+              ? {
+                  key: "a",
+                  kind: "person",
+                  names: [name],
+                  identifiers: [email(local)],
+                }
+              : {
+                  key: "a",
+                  id: card,
+                  kind: "person",
+                  identifiers: [email(local)],
+                },
+            { key: "b", kind: "person", names: [`Bob ${word()}`] },
+            { key: "p", kind: "project", names: [project] },
+          ],
+          memories: [
+            fromApp("a", `${name} leads finance`),
+            {
+              ...fromApp("b", `Bob reports to ${name}`),
+              attribute: "manager",
+              object: "a",
+            },
+            fromApp("p", `${project} starts in June`),
+          ],
+        });
+      const made = await (first === "name" ? byName() : byAddress());
+      const card = made.entities.a ?? "";
+      await (first === "name" ? byAddress(card) : byName(card));
+      const { id } = await shared().startExport("test");
+      await expect(exportSettled(shared, id)).resolves.toBe("done");
+
+      // Her erasure lands as the restore hashes her address for its line.
+      const herAddress = new TextEncoder().encode(
+        `identifier:email:${local}@acme.test`
+      );
+      const realDigest = crypto.subtle.digest.bind(crypto.subtle);
+      let landed = false;
+      const digest = vi
+        .spyOn(crypto.subtle, "digest")
+        .mockImplementation(async (algorithm, data) => {
+          const bytes = new Uint8Array(
+            ArrayBuffer.isView(data) ? data.buffer : data
+          );
+          if (
+            !landed &&
+            bytes.length === herAddress.length &&
+            bytes.every((byte, at) => byte === herAddress[at])
+          ) {
+            landed = true;
+            await erase(anna, [email(local)]);
+          }
+          return await realDigest(algorithm, data);
+        });
+      let state: string | undefined;
+      try {
+        state = await restoredAfterLoss(shared, id, empty);
+      } finally {
+        digest.mockRestore();
+      }
+      await tick(shared());
+      const seen = await everything(reader, [card], [name], [email(local)]);
+      const projects = await shared().findEntities({ reader, name: project });
+      const { id: newer } = await shared().startExport("test");
+      await expect(exportSettled(shared, newer)).resolves.toBe("done");
+      const status = await shared().exportStatus({ id: newer });
+      const files = await Promise.all(
+        (status?.files ?? []).map(
+          async (named) =>
+            (await shared().exportFile({ id: newer, file: named })) ?? ""
+        )
+      );
+
+      expect({
+        landed,
+        state,
+        seen: [name, "on leave", "leads finance", "reports to"].filter(
+          (needle) => seen.includes(needle)
+        ),
+        project: projects.entities.length,
+        exported: files.join("\n").includes(name),
+      }).toStrictEqual({
+        landed: true,
+        state: "done",
+        seen: [],
+        project: 1,
+        exported: false,
+      });
+    }
+  );
 
   // Last: it restores the store from empty.
   it("makes stale every export started before it; one from before restored into a store that lost its record writes nothing of them; one after holds nothing of them", async () => {

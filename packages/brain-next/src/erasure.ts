@@ -28,7 +28,7 @@ import {
   identifierSubjectOf,
   personSubjectOf,
 } from "./people.ts";
-import type { HeldIdentifier, PersonFound } from "./people.ts";
+import type { HeldIdentifier, PersonFound, ReplayMemo } from "./people.ts";
 import { removeVectorsOf, repackBlocks } from "./vectors.ts";
 
 // Erasure: what goes for good, apart from ordinary removal. A new version
@@ -268,11 +268,11 @@ class OutOfTimeError extends Error {
 }
 
 /**
- * The hashes a replay of person entries made so far, by the store's
- * storage, until it is through (people.ts `foundForReplay`): a step out of
- * time leaves them to the next, so a long one goes on, never starts over.
+ * What a replay of person entries read and hashed so far, by the store's
+ * storage, until it is through (people.ts `ReplayMemo`): a step out of
+ * time leaves it to the next, so a long one goes on, never starts over.
  */
-const replayHashes = new WeakMap<DurableObjectStorage, Map<string, string>>();
+const replayMemos = new WeakMap<DurableObjectStorage, ReplayMemo>();
 
 /** A step's end: once the replay is through, its hashes go. */
 const stepEnded = (
@@ -281,7 +281,7 @@ const stepEnded = (
   more: boolean
 ): Replayed => {
   if (!more) {
-    replayHashes.delete(storage);
+    replayMemos.delete(storage);
   }
   return { stopped, more };
 };
@@ -1685,23 +1685,26 @@ const readEntry = async (
   }
   if (entry.kind === "person") {
     const body = await readPersonBody(bucket, key, stopAt);
-    const hashed = replayHashes.get(storage) ?? new Map<string, string>();
-    replayHashes.set(storage, hashed);
+    const memo = replayMemos.get(storage) ?? { hashed: new Map() };
+    replayMemos.set(storage, memo);
     return {
       person: {
         found:
           "subjects" in body
-            ? await foundForReplay(storage.sql, entry.subject, body.subjects, {
-                hashed,
+            ? await foundForReplay(
+                storage.sql,
+                entry.subject,
+                body.subjects,
+                memo,
                 // Bounded by the hashes the step made, not the clock: it
                 // moves only on I/O, never while it hashes.
-                due: () => {
+                () => {
                   if (step.hashes >= replayHashesPerStep) {
                     throw new OutOfTimeError();
                   }
                   step.hashes += 1;
-                },
-              })
+                }
+              )
             : undefined,
       },
     };
