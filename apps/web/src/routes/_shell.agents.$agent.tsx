@@ -38,7 +38,6 @@ const AgentRoutePage = () => {
   const { tab } = Route.useSearch();
   const { agent: agentId } = Route.useParams();
   const { identity } = Route.useRouteContext();
-  const navigate = Route.useNavigate();
   const crumbs = [{ label: t`Agents`, to: "/agents" as const }];
   if (page.state !== "ready") {
     return (
@@ -72,12 +71,6 @@ const AgentRoutePage = () => {
         first={agent.id === managed.agents.at(0)?.id}
         key={agent.id}
         models={models}
-        onTab={(next) => {
-          void navigate({
-            search: next === "overview" ? {} : { tab: next },
-            replace: true,
-          });
-        }}
         people={people}
         settings={managed.settings[agent.id]}
         tab={agentTabOf(tab)}

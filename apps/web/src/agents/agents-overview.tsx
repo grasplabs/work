@@ -6,56 +6,39 @@ import type {
 } from "@grasp-os/shared/agents";
 import type { ChatAgent } from "@grasp-os/shared/chat";
 import type { StephenReach } from "@grasp-os/shared/stephen-reach";
-import { buttonVariants } from "@grasp-os/ui/components/button";
-import {
-  Empty,
-  EmptyContent,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle,
-} from "@grasp-os/ui/components/empty";
-import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupInput,
-} from "@grasp-os/ui/components/input-group";
-import {
-  ToggleGroup,
-  ToggleGroupItem,
-} from "@grasp-os/ui/components/toggle-group";
-import { Plural, Trans, useLingui } from "@lingui/react/macro";
-import { Link } from "@tanstack/react-router";
-import {
-  BotIcon,
-  CalendarClockIcon,
-  CoinsIcon,
-  MessageCircleIcon,
-  PlusIcon,
-  SearchIcon,
-  UsersRoundIcon,
-  WrenchIcon,
-} from "lucide-react";
+import { plural } from "@lingui/core/macro";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
+import { Link, useRouter } from "@tanstack/react-router";
+import type { MouseEvent, ReactNode } from "react";
 import { useState } from "react";
-import type { ReactNode } from "react";
 
 import { Page, PageHeading } from "../frame/page.tsx";
+import { Button } from "../grasp/button/index.ts";
+import { Empty } from "../grasp/empty/index.ts";
+import { AgentPerson, Conversation, Search } from "../grasp/icons/index.ts";
+import {
+  InputGroup,
+  InputGroupClear,
+  InputGroupInput,
+  InputGroupText,
+} from "../grasp/input-group/index.ts";
+import { Item, ItemGroup } from "../grasp/item/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { Toggle, ToggleGroup } from "../grasp/toggle/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { dollars } from "../settings/money.ts";
 import { AgentAvatar } from "./agent-avatar.tsx";
-import {
-  AgentStateBadge,
-  classesOn,
-  useAudienceLine,
-  wakesOn,
-} from "./agent-facts.tsx";
+import { classesOn, useAudienceLine, wakesOn } from "./agent-facts.tsx";
+import { NewAgentButton } from "./new-agent.tsx";
 
-// The Agents page: the company's agents, being moved onto Damsko's parts
-// (apps/web/src/grasp) as a list of rows. Everyone sees the agents
-// they may talk to (`chats.agents`), each with the way into a chat with
-// it. The company's admins see every agent (`connections.agents`), with
-// whether it is on, whom it answers, how much it may do and whether it
-// works on its own; a card opens the agent's page (agent-page.tsx), and
-// New agent starts one (new-agent.tsx).
+// The Agents page: the company's agents, a row each, on Grasp UI's Item.
+// Everyone sees the agents they may talk to (`chats.agents`), each with
+// Chat, which starts a chat with it. The company's admins see every
+// agent (`connections.agents`), each row with whom it answers, how much
+// it may do, whether it works on its own and what it cost this month;
+// the row opens the agent's page (agent-page.tsx). New agent asks for
+// one in a dialog (new-agent.tsx).
 
 /** What an admin's read adds to the agents: every agent, and what core keeps of each. */
 export interface ManagedAgents {
@@ -70,43 +53,18 @@ export interface ManagedAgents {
   teams: StephenReach["teams"];
 }
 
-/** New agent: the page's one action. */
-const NewAgentLink = () => (
-  <Link className={buttonVariants()} to="/agents/new">
-    <PlusIcon data-icon="inline-start" />
-    <Trans>New agent</Trans>
-  </Link>
-);
+const styles = stylex.create({
+  tools: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: grasp.space3,
+  },
+  search: { width: "100%", maxWidth: "18rem" },
+  lines: { display: "grid", gap: grasp.space1 },
+});
 
-/** One fact of an agent on its card: an icon and a few words. */
-const Fact = ({ icon, children }: { icon: ReactNode; children: ReactNode }) => (
-  <span className="flex min-w-0 items-center gap-1.5 [&_svg]:size-3.5 [&_svg]:flex-none">
-    {icon}
-    <span className="truncate">{children}</span>
-  </span>
-);
-
-/** Into a new chat with an agent; above the card's own link. */
-const ChatLink = ({ agentId, name }: { agentId: string; name: string }) => {
-  const { t } = useLingui();
-  return (
-    <Link
-      aria-label={t`Chat with ${name}`}
-      className={buttonVariants({
-        size: "sm",
-        variant: "outline",
-        className: "relative z-10",
-      })}
-      search={{ agent: agentId }}
-      to="/"
-    >
-      <MessageCircleIcon data-icon="inline-start" />
-      <Trans>Chat</Trans>
-    </Link>
-  );
-};
-
-/** What a card shows of one agent. */
+/** What a row shows of one agent. */
 interface Shown {
   id: string;
   name: string;
@@ -128,135 +86,46 @@ interface Shown {
 }
 
 /**
- * Whom an agent answers, on its card: the first agent everyone with
- * Grasp; another its own audience (`line`), or that it isn't shown where
- * core didn't say, never passed off as everyone.
+ * What an admin's row says of an agent under its job, a few words each:
+ * whom it answers (the first agent everyone with Grasp; another its own
+ * audience, or that it isn't shown where core didn't say, never passed
+ * off as everyone), how much it may do, whether it works on its own and,
+ * once it was asked this month, what that cost.
  */
-const AudienceFact = ({
-  first,
-  line,
-}: {
-  first: boolean;
-  line: string | undefined;
-}) => {
-  if (first) {
-    return <Trans>Everyone with Grasp</Trans>;
-  }
-  return line ?? <Trans>Access not shown</Trans>;
-};
-
-/** What an admin's card says of an agent under its job. */
-const ManagedFacts = ({
-  managed,
-  teams,
-}: {
-  managed: NonNullable<Shown["managed"]>;
-  teams: StephenReach["teams"];
-}) => {
+const useFacts = (teams: StephenReach["teams"]) => {
+  const { t } = useLingui();
   const audienceLine = useAudienceLine(teams);
-  const { settings, first, usage } = managed;
-  const spent = usage === undefined ? undefined : dollars(usage.spent);
-  const scheduled = wakesOn(managed.wakes).length;
-  const classes = settings === undefined ? undefined : classesOn(settings);
-  return (
-    <div className="text-muted-foreground flex flex-col gap-1.5 text-xs">
-      <Fact icon={<UsersRoundIcon />}>
-        <AudienceFact
-          first={first}
-          line={
-            settings === undefined ? undefined : audienceLine(settings.audience)
-          }
-        />
-      </Fact>
-      {classes === undefined ? null : (
-        <Fact icon={<WrenchIcon />}>
-          {classes.on === 0 ? (
-            <Trans>May do nothing yet</Trans>
-          ) : (
-            <Trans>
-              {classes.on} of {classes.of} kinds of work
-            </Trans>
-          )}
-        </Fact>
-      )}
-      <Fact icon={<CalendarClockIcon />}>
-        {scheduled === 0 ? (
-          <Trans>Only when asked</Trans>
-        ) : (
-          <Plural
-            one="Works on its own, # schedule"
-            other="Works on its own, # schedules"
-            value={scheduled}
-          />
-        )}
-      </Fact>
-      {/* Only once it was asked this month: a new agent has cost nothing to say. */}
-      {usage === undefined || usage.requests === 0 ? null : (
-        <Fact icon={<CoinsIcon />}>
-          <Trans>{spent} this month</Trans>
-        </Fact>
-      )}
-    </div>
-  );
+  return (managed: NonNullable<Shown["managed"]>): string[] => {
+    const { settings, first, usage } = managed;
+    const facts: string[] = [];
+    if (first) {
+      facts.push(t`Everyone with Grasp`);
+    } else if (settings === undefined) {
+      facts.push(t`Access not shown`);
+    } else {
+      const classes = classesOn(settings);
+      facts.push(
+        audienceLine(settings.audience),
+        classes.on === 0
+          ? t`May do nothing yet`
+          : t`${classes.on} of ${classes.of} kinds of work`
+      );
+    }
+    const scheduled = wakesOn(managed.wakes).length;
+    if (scheduled > 0) {
+      facts.push(
+        plural(scheduled, { one: "# schedule", other: "# schedules" })
+      );
+    }
+    if (usage !== undefined && usage.requests > 0) {
+      const spent = dollars(usage.spent);
+      facts.push(t`${spent} this month`);
+    }
+    return facts;
+  };
 };
 
-/** One agent: its card. An admin's opens its page; anyone else's, a chat with it. */
-const AgentCard = ({
-  shown,
-  teams,
-}: {
-  shown: Shown;
-  teams: StephenReach["teams"];
-}) => {
-  const { managed } = shown;
-  const nameClass =
-    "truncate font-medium outline-none after:absolute after:inset-0 after:rounded-xl focus-visible:underline";
-  const answers = managed === undefined || managed.state === "on";
-  return (
-    <li className="bg-card hover:border-ring/40 relative flex min-w-0 flex-col gap-4 rounded-xl border p-4 transition-colors">
-      <div className="flex items-start gap-3">
-        <AgentAvatar face={shown.face} />
-        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-          {managed === undefined ? (
-            <Link className={nameClass} search={{ agent: shown.id }} to="/">
-              {shown.name}
-            </Link>
-          ) : (
-            <Link
-              className={nameClass}
-              params={{ agent: shown.id }}
-              to="/agents/$agent"
-            >
-              {shown.name}
-            </Link>
-          )}
-          <p className="text-muted-foreground line-clamp-2 text-sm">
-            {shown.job === "" ? <Trans>No job written yet</Trans> : shown.job}
-          </p>
-        </div>
-      </div>
-      {managed === undefined ? null : (
-        <ManagedFacts managed={managed} teams={teams} />
-      )}
-      <div className="mt-auto flex min-h-8 items-center justify-between gap-2">
-        {managed === undefined ? (
-          <span />
-        ) : (
-          <AgentStateBadge state={managed.state} />
-        )}
-        {shown.usable && answers ? (
-          <ChatLink agentId={shown.id} name={shown.name} />
-        ) : null}
-      </div>
-    </li>
-  );
-};
-
-/** Which agents an admin's list shows. */
-const filters = ["all", "on", "paused"] as const;
-type Filter = (typeof filters)[number];
-
-/** The cards: every agent for an admin, else the ones the person may talk to. */
+/** The rows: every agent for an admin, else the ones the person may talk to. */
 const shownOf = (
   usable: readonly ChatAgent[],
   managed: ManagedAgents | undefined
@@ -288,18 +157,111 @@ const shownOf = (
   }));
 };
 
+/**
+ * Rows whose `href` the router follows. Grasp UI's Item draws a linked
+ * row as a plain `<a href>`, with no way to hand it the router's link,
+ * so a plain press on one is taken here and followed in the page, as a
+ * router link would; a press with a key held (a new tab) is the
+ * browser's.
+ */
+const RouterRows = ({ children }: { children: ReactNode }) => {
+  const router = useRouter();
+  const follow = (event: MouseEvent<HTMLDivElement>) => {
+    const { target } = event;
+    const anchor = target instanceof Element ? target.closest("a[href]") : null;
+    const plainPress =
+      event.button === 0 &&
+      !event.metaKey &&
+      !event.ctrlKey &&
+      !event.shiftKey &&
+      !event.altKey;
+    if (!(anchor instanceof HTMLAnchorElement && plainPress)) {
+      return;
+    }
+    const href = anchor.getAttribute("href") ?? "";
+    if (href.startsWith("/")) {
+      event.preventDefault();
+      void router.navigate({ href });
+    }
+  };
+  // A press on a link inside: the links themselves take the keys.
+  // oxlint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- only follows its links' own presses
+  return <div onClick={follow}>{children}</div>;
+};
+
+/** Which agents an admin's list shows. */
+const filters = ["all", "on", "paused"] as const;
+type Filter = (typeof filters)[number];
+
+/** One agent's row: an admin's opens its page; anyone else's has Chat. */
+const AgentRow = ({
+  shown,
+  facts,
+}: {
+  shown: Shown;
+  facts: readonly string[];
+}) => {
+  const { t } = useLingui();
+  const { managed } = shown;
+  const job = shown.job === "" ? t`No job written yet` : shown.job;
+  const description =
+    facts.length === 0 ? (
+      job
+    ) : (
+      <span {...stylex.props(styles.lines)}>
+        <span>{job}</span>
+        <Text element="span" size="xs" tone="quiet">
+          {facts.join(" · ")}
+        </Text>
+      </span>
+    );
+  const media = <AgentAvatar face={shown.face} size="sm" />;
+  const detail = managed?.state === "paused" ? t`Paused` : undefined;
+  if (managed !== undefined) {
+    return (
+      <Item
+        description={description}
+        detail={detail}
+        href={`/agents/${encodeURIComponent(shown.id)}`}
+        media={media}
+        title={shown.name}
+      />
+    );
+  }
+  return (
+    <Item
+      actions={
+        <Button
+          icon={Conversation}
+          render={<Link search={{ agent: shown.id }} to="/" />}
+          size="sm"
+        >
+          {t`Chat`}
+        </Button>
+      }
+      description={description}
+      media={media}
+      title={shown.name}
+    />
+  );
+};
+
 /** The Agents page's body: the agents the person may `usable`, and what an admin `managed`. */
 export const AgentsOverview = ({
   usable,
   managed,
   makes,
+  models,
 }: {
   usable: readonly ChatAgent[];
   managed: ManagedAgents | undefined;
   /** Whether the person may make an agent: the company's own admins. */
   makes: boolean;
+  /** The models a new agent can be given. */
+  models: readonly string[];
 }) => {
   const { t } = useLingui();
+  const factsOf = useFacts(managed?.teams ?? []);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
   const agents = shownOf(usable, managed);
@@ -315,120 +277,76 @@ export const AgentsOverview = ({
   const paused = agents.filter(
     (agent) => agent.managed?.state === "paused"
   ).length;
+  const newAgent = makes ? <NewAgentButton models={models} /> : undefined;
   return (
-    <Page wide>
-      <PageHeading
-        action={makes ? <NewAgentLink /> : undefined}
-        description={
-          managed === undefined ? (
-            <Trans>
-              The agents you can ask. Each has its own job and knows its own
-              part of the company.
-            </Trans>
-          ) : (
-            <Trans>
-              Each agent has its own name and job, answers only the people you
-              choose, and does only what you let it.
-            </Trans>
-          )
-        }
-        title={<Trans>Agents</Trans>}
-      />
+    <Page>
+      <PageHeading action={newAgent} title={t`Agents`} />
       {agents.length === 0 ? (
-        <Empty>
-          <EmptyHeader>
-            <EmptyMedia variant="icon">
-              <BotIcon />
-            </EmptyMedia>
-            <EmptyTitle>
-              <Trans>No agents yet</Trans>
-            </EmptyTitle>
-            <EmptyDescription>
-              {managed === undefined ? (
-                <Trans>
-                  The agents your company sets up for you show here.
-                </Trans>
-              ) : (
-                <Trans>
-                  Make one for a job, such as chasing unpaid invoices, and say
-                  who may ask it.
-                </Trans>
-              )}
-            </EmptyDescription>
-          </EmptyHeader>
-          {makes ? (
-            <EmptyContent>
-              <NewAgentLink />
-            </EmptyContent>
-          ) : null}
+        <Empty
+          action={newAgent}
+          icon={AgentPerson}
+          size="page"
+          title={t`No agents yet`}
+        >
+          {managed === undefined
+            ? t`The agents your company sets up for you show here.`
+            : t`Make one for a job, such as chasing unpaid invoices.`}
         </Empty>
       ) : (
         <>
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="w-full sm:w-72">
-              <InputGroup>
+          {/* Search only once there are enough to look for one. */}
+          {agents.length < 6 && paused === 0 ? null : (
+            <div {...stylex.props(styles.tools)}>
+              <InputGroup layout={styles.search}>
+                <InputGroupText icon={Search} />
                 <InputGroupInput
                   aria-label={t`Search the agents`}
-                  onChange={(event) => {
-                    setQuery(event.target.value);
-                  }}
+                  onValueChange={setQuery}
                   placeholder={t`Search`}
+                  type="search"
                   value={query}
                 />
-                <InputGroupAddon>
-                  <SearchIcon />
-                </InputGroupAddon>
+                <InputGroupClear label={t`Clear search`} />
               </InputGroup>
+              {/* Only where some are paused: with all on there is nothing to tell apart. */}
+              {managed === undefined || paused === 0 ? null : (
+                <ToggleGroup
+                  aria-label={t`Which agents to show`}
+                  onValueChange={(next: unknown[]) => {
+                    setFilter(
+                      filters.find((each) => each === next.at(0)) ?? "all"
+                    );
+                  }}
+                  size="sm"
+                  value={[filter]}
+                >
+                  <Toggle value="all">{t`All`}</Toggle>
+                  <Toggle value="on">{t`On`}</Toggle>
+                  <Toggle value="paused">{t`Paused`}</Toggle>
+                </ToggleGroup>
+              )}
             </div>
-            {/* Only where some are paused: with all on there is nothing to tell apart. */}
-            {managed === undefined || paused === 0 ? null : (
-              <ToggleGroup
-                aria-label={t`Which agents to show`}
-                onValueChange={(next: unknown[]) => {
-                  const picked = filters.find((each) => each === next.at(0));
-                  setFilter(picked ?? "all");
-                }}
-                size="sm"
-                value={[filter]}
-                variant="outline"
-              >
-                <ToggleGroupItem value="all">
-                  <Trans>All</Trans>
-                </ToggleGroupItem>
-                <ToggleGroupItem value="on">
-                  <Trans>On</Trans>
-                </ToggleGroupItem>
-                <ToggleGroupItem value="paused">
-                  <Trans>Paused</Trans>
-                </ToggleGroupItem>
-              </ToggleGroup>
-            )}
-          </div>
+          )}
           {shown.length === 0 ? (
-            <Empty>
-              <EmptyHeader>
-                <EmptyTitle>
-                  {asked === "" ? (
-                    <Trans>No agent to show here</Trans>
-                  ) : (
-                    <Trans>No agent matches “{asked}”</Trans>
-                  )}
-                </EmptyTitle>
-              </EmptyHeader>
+            <Empty size="section">
+              {asked === ""
+                ? t`No agent to show here`
+                : t`No agent matches “${asked}”`}
             </Empty>
           ) : (
-            <ul
-              aria-label={t`Agents`}
-              className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
-            >
-              {shown.map((agent) => (
-                <AgentCard
-                  key={agent.id}
-                  shown={agent}
-                  teams={managed?.teams ?? []}
-                />
-              ))}
-            </ul>
+            <RouterRows>
+              <ItemGroup aria-label={t`Agents`} separated>
+                {shown.map((agent) => (
+                  <AgentRow
+                    facts={
+                      agent.managed === undefined ? [] : factsOf(agent.managed)
+                    }
+                    key={agent.id}
+                    shown={agent}
+                  />
+                ))}
+              </ItemGroup>
+            </RouterRows>
           )}
         </>
       )}

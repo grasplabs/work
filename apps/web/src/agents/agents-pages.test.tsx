@@ -235,7 +235,6 @@ const page = (agent: Agent, tab: AgentTab, usable = true) => (
     first={agent.id === stephen.id}
     firstAccess={agent.id === stephen.id ? firstAccess : undefined}
     models={["anthropic/claude-sonnet-4-5", "anthropic/claude-opus-4-6"]}
-    onTab={() => {}}
     people={[]}
     settings={managed.settings[agent.id]}
     tab={tab}
@@ -259,6 +258,7 @@ describe("the company's agents, on pages of their own", () => {
     it("shows someone who isn't an admin only their agents, each opening a chat with it and nothing to change", async () => {
       await mounted(
         <AgentsOverview
+          models={[]}
           makes={false}
           managed={undefined}
           usable={[chatAgent(stephen), chatAgent(claire)]}
@@ -287,6 +287,7 @@ describe("the company's agents, on pages of their own", () => {
     it("shows an admin every agent, and offers a chat only with one that is on and answers them", async () => {
       await mounted(
         <AgentsOverview
+          models={[]}
           makes
           managed={managed}
           // The admin isn't in Claire's teams; Milan is paused.
@@ -331,7 +332,12 @@ describe("the company's agents, on pages of their own", () => {
 
     it("narrows an admin's list to the paused ones", async () => {
       await mounted(
-        <AgentsOverview makes managed={managed} usable={[chatAgent(stephen)]} />
+        <AgentsOverview
+          models={[]}
+          makes
+          managed={managed}
+          usable={[chatAgent(stephen)]}
+        />
       );
       await press(buttonNamed("Paused"));
       expect(cards().map(({ name }) => name)).toStrictEqual(["Milan"]);
@@ -485,6 +491,7 @@ describe("the company's agents, on pages of their own", () => {
       const unread: ManagedAgents = { ...managed, settings: {} };
       await mounted(
         <AgentsOverview
+          models={[]}
           makes={false}
           managed={unread}
           usable={[chatAgent(stephen)]}
@@ -507,7 +514,6 @@ describe("the company's agents, on pages of their own", () => {
           editable={false}
           first={false}
           models={[]}
-          onTab={() => {}}
           people={[]}
           settings={undefined}
           tab="access"

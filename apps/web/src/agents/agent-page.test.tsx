@@ -23,7 +23,7 @@ import {
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router";
-import { act, useState } from "react";
+import { act } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
@@ -288,9 +288,7 @@ const Page = ({
   editable: boolean;
   open: Open;
 }) => {
-  const [tab, setTab] = useState<AgentTab>(
-    open === "new" ? "overview" : (open.tab ?? "overview")
-  );
+  const tab: AgentTab = open === "new" ? "overview" : (open.tab ?? "overview");
   if (open === "new") {
     return <NewAgent models={models} />;
   }
@@ -306,7 +304,6 @@ const Page = ({
       first={agent.id === data.agents.at(0)?.id}
       firstAccess={agent.id === data.agents.at(0)?.id ? firstAccess : undefined}
       models={models}
-      onTab={setTab}
       people={people}
       settings={data.settings[agent.id]}
       tab={tab}
