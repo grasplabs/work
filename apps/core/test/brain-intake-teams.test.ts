@@ -405,9 +405,8 @@ describe("what a team said, put together", { timeout: 120_000 }, () => {
     await intake(ids, [zendeskClaim]);
     const member = await signedInApi(idp, "user");
     const before = await statementsFor(member.api, ids);
-    // Pim withdraws: the alarm takes it out at once, with no model.
+    // Pim withdraws: it drops as the withdrawal commits, with no model.
     await onLink({ action: "withdraw", ...(await openLink(ids.pim)) });
-    await onboardingStore(env).purgeBrain();
     expect({
       before,
       after: await statementsFor(member.api, ids),
@@ -526,7 +525,6 @@ describe("what a team said, put together", { timeout: 120_000 }, () => {
     const member = await signedInApi(idp, "user");
     const before = await statementsFor(member.api, ids);
     await onLink({ action: "withdraw", ...(await openLink(ids.pim)) });
-    await onboardingStore(env).purgeBrain();
     expect({
       before,
       after: await statementsFor(member.api, ids),
@@ -568,115 +566,6 @@ describe("what a team said, put together", { timeout: 120_000 }, () => {
       reworded: ["Zendesk is the ticket inbox."],
       none: [],
     });
-  });
-
-  it("takes an earlier claim out by the alarm when taking it out fails as the claims are put together anew", async () => {
-    const ids = await drawnTeam();
-    await intake(ids);
-    await agree(
-      ids.rik,
-      [
-        fact("r1", "step", "Checks the queue at noon."),
-        fact("r2", "step", "Closes the ticket once answered."),
-      ],
-      1
-    );
-    await drawTickets(ids);
-    // The brain can't take records out while the claims are put together
-    // anew: every try of this intake fails to.
-    // The brain's records deleted, known by what was prepared: drizzle
-    // binds a statement before the batch, so the bound copy is marked too.
-    const prepare = env.DB.prepare.bind(env.DB);
-    const batch = env.DB.batch.bind(env.DB);
-    const deletes = new WeakSet<D1PreparedStatement>();
-    const prepared = vi.spyOn(env.DB, "prepare").mockImplementation((query) => {
-      const statement = prepare(query);
-      if (query.startsWith('delete from "brain_records"')) {
-        deletes.add(statement);
-        const bind = statement.bind.bind(statement);
-        statement.bind = (...values) => {
-          const bound = bind(...values);
-          deletes.add(bound);
-          return bound;
-        };
-      }
-      return statement;
-    });
-    const spy = vi
-      .spyOn(env.DB, "batch")
-      .mockImplementation(async (statements) => {
-        if (statements.some((statement) => deletes.has(statement))) {
-          throw new Error("The brain can't be reached.");
-        }
-        return await batch(statements);
-      });
-    let given: string | null;
-    try {
-      ({ gave: given } = await intake(ids, [
-        { ...zendeskClaim, text: "Zendesk is the ticket inbox." },
-      ]));
-    } finally {
-      spy.mockRestore();
-      prepared.mockRestore();
-    }
-    // The alarm, now or already, once the brain answers again.
-    await onboardingStore(env).purgeBrain();
-    const member = await signedInApi(idp, "user");
-    expect({
-      given,
-      statements: await statementsFor(member.api, ids),
-    }).toStrictEqual({
-      given: `brain:${ids.team}`,
-      statements: ["Zendesk is the ticket inbox."],
-    });
-  });
-
-  it("never holds a claim without whom it rests on: none while the intake fails just after writing the brain's records", async () => {
-    const ids = await drawnTeam();
-    // The brain keeps the team's records, and the intake fails right
-    // after: the batch that writes them lands, and its answer is lost.
-    const prepare = env.DB.prepare.bind(env.DB);
-    const batch = env.DB.batch.bind(env.DB);
-    // The brain's records written, known by what was prepared: drizzle
-    // binds a statement before the batch, so the bound copy is marked too.
-    const writes = new WeakSet<D1PreparedStatement>();
-    let failed = 0;
-    const prepared = vi.spyOn(env.DB, "prepare").mockImplementation((query) => {
-      const statement = prepare(query);
-      if (query.startsWith('insert into "brain_records"')) {
-        writes.add(statement);
-        const bind = statement.bind.bind(statement);
-        statement.bind = (...values) => {
-          const bound = bind(...values);
-          writes.add(bound);
-          return bound;
-        };
-      }
-      return statement;
-    });
-    const spy = vi
-      .spyOn(env.DB, "batch")
-      .mockImplementation(async (statements) => {
-        const results = await batch(statements);
-        if (statements.some((statement) => writes.has(statement))) {
-          failed += 1;
-          throw new Error("Lost on the way back.");
-        }
-        return results;
-      });
-    try {
-      await intake(ids);
-    } finally {
-      spy.mockRestore();
-      prepared.mockRestore();
-    }
-    const member = await signedInApi(idp, "user");
-    // The claim is noted with whom it rests on, in one transaction, only
-    // once the intake gets that far (GRA-1748).
-    expect({
-      failed: failed > 0,
-      held: await statementsFor(member.api, ids),
-    }).toStrictEqual({ failed: true, held: [] });
   });
 
   it("never counts someone who took back what they approved while the claims were put together", async () => {
@@ -734,8 +623,7 @@ describe("what a team said, put together", { timeout: 120_000 }, () => {
       },
       async () => await onboardingStore(env).intakeNext()
     );
-    // The alarm, now or already: four are behind it.
-    await onboardingStore(env).purgeBrain();
+    // Four are behind it now.
     const member = await signedInApi(idp, "user");
     expect({
       // This team's intake, never another's picked first.
@@ -794,7 +682,6 @@ describe("what a team said, put together", { timeout: 120_000 }, () => {
     } finally {
       vi.useRealTimers();
     }
-    await onboardingStore(env).purgeBrain();
     const member = await signedInApi(idp, "user");
     // Four still stand behind it: it goes.
     await expect(statementsFor(member.api, ids)).resolves.toStrictEqual([]);
@@ -841,14 +728,12 @@ describe("what a team said, put together", { timeout: 120_000 }, () => {
         addedAt: 0,
       },
     });
-    await onboardingStore(env).purgeBrain();
     const gone = await drawings();
     // He puts it back as it was, and approves it again: the same drawing,
     // the same day, from the same people, so the same record.
     await agree(ids.max, maxFacts, 2);
     await drawTickets(ids);
     await intake(ids);
-    await onboardingStore(env).purgeBrain();
     const back = await drawings();
     // Mia agrees again to what she had: drawn again, given again.
     await agree(
@@ -865,7 +750,6 @@ describe("what a team said, put together", { timeout: 120_000 }, () => {
     );
     await drawTickets(ids);
     await intake(ids);
-    await onboardingStore(env).purgeBrain();
     const again = await drawings();
     expect({ gone, back, again }).toStrictEqual({
       gone: [],
@@ -879,7 +763,7 @@ describe("what a team said, put together", { timeout: 120_000 }, () => {
     const ids = await drawnTeam();
     await intake(ids);
     // As the migrations leave a finished onboarding: the team due again,
-    // its statements gone, and no alarm.
+    // and no alarm.
     await runInDurableObject(onboardingStore(env), async (_instance, state) => {
       state.storage.sql.exec(
         "UPDATE brain_teams SET due_at = ? WHERE team = ?",
@@ -888,9 +772,6 @@ describe("what a team said, put together", { timeout: 120_000 }, () => {
       );
       await state.storage.deleteAlarm();
     });
-    await env.DB.prepare(
-      "DELETE FROM brain_records WHERE type = 'statement' AND id LIKE 'onb-st-%'"
-    ).run();
     // The store starts again, as it does after a deploy.
     await runInDurableObject(onboardingStore(env), (_instance, state) => {
       try {
@@ -903,7 +784,7 @@ describe("what a team said, put together", { timeout: 120_000 }, () => {
       onboardingStore(env),
       async (_instance, state) => await state.storage.getAlarm()
     );
-    // The alarm gives the team to the brain again.
+    // The alarm takes the team in again.
     await intake(ids);
     const member = await signedInApi(idp, "user");
     expect({
@@ -971,7 +852,6 @@ describe("what a team said, put together", { timeout: 120_000 }, () => {
       },
       { type: "system" }
     );
-    await onboardingStore(env).purgeBrain();
     expect({
       before,
       after: await statementsFor(member.api, ids),

@@ -17,27 +17,12 @@ describe(forgetEffect, () => {
     const preview = {
       source: "src-compliance",
       statements: ["st-allowed", "st-complaints"],
-      workflows: [],
     };
 
     expect(forgetEffect(workspace, brain, target, preview)).toStrictEqual({
       statements: 2,
       notes: [],
-      workflows: [],
     });
-  });
-
-  it("names the workflows whose numbers lose their source", () => {
-    const preview = {
-      source: "src-service",
-      statements: [],
-      workflows: ["email-triage"],
-    };
-
-    expect(
-      forgetEffect(workspace, brain, { source: "src-service" }, preview)
-        .workflows
-    ).toStrictEqual(["Email triage"]);
   });
 });
 
@@ -62,7 +47,6 @@ describe(withoutPreviewed, () => {
     const after = withoutPreviewed(workspace, {
       source: "src-compliance",
       statements: ["st-allowed", "st-complaints"],
-      workflows: [],
     });
 
     expect({
