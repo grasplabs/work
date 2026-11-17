@@ -32,8 +32,7 @@ import type {
 } from "./contract.ts";
 import { bucketCallMs } from "./embedding.ts";
 import { fileKeyOf, hashOf } from "./files.ts";
-import { isErasedPerson, leavingOutCards, namingOf } from "./people.ts";
-import type { Naming } from "./people.ts";
+import { isErasedPerson, namingOf } from "./people.ts";
 import { accessOfKey } from "./reader-sets.ts";
 import { hashesOf, writeAdd } from "./remember.ts";
 import type { Adding } from "./remember.ts";
@@ -953,37 +952,6 @@ const pieceTokensOf = (contextTokens: number | null): number | null => {
  * add without `said`), so none sends a version that asks followed by one
  * that doesn't.
  */
-/** What `adding`'s entities and memories name, hashed (people.ts), in its order. */
-const pieceNamingOf = async (adding: Candidates): Promise<Naming> =>
-  await namingOf(
-    adding.entities,
-    adding.memories.map(({ speaker }) => speaker)
-  );
-
-/**
- * `adding` as a person's erasure leaves it (people.ts `leavingOutCards`):
- * an entity of kind `person` holding a closed identifier is their card,
- * left out with the memories about it or relating to it; so are the
- * memories in their word; every other entity only loses a closed
- * identifier. Their sources stay, so nothing drawn from them again makes
- * or feeds their card, and nothing else of them is lost.
- */
-const leavingOutClosed = (
-  sql: SqlStorage,
-  adding: Candidates,
-  naming: Naming
-): Candidates =>
-  leavingOutCards(
-    sql,
-    {
-      entities: adding.entities,
-      memories: adding.memories.filter(
-        (_memory, index) => !isErasedPerson(sql, naming.speakers[index])
-      ),
-    },
-    naming.identifiers
-  );
-
 const writePiece = async (
   { storage, owner }: WorkContext,
   {
@@ -1010,17 +978,30 @@ const writePiece = async (
     memories: kept.memories,
     ...(last ? { extracted: { source, version } } : {}),
   });
-  // What a person's erasure closed is left out (`leavingOutClosed`), as
-  // the store holds it now, and again in the write's transaction: one that
-  // landed in between fails the attempt, and the queue tries it again.
-  // An add of this change made before answers as it was made.
-  const naming = await pieceNamingOf(adding);
-  const kept = leavingOutClosed(sql, adding, naming);
+  // What is in the word of a person an erasure took is left out here
+  // (people.ts). `writeAdd` is the line of defence inside the write's
+  // transaction: it refuses their word, so an erasure that landed in
+  // between fails the attempt and the queue tries it again; and it leaves
+  // out the rest of what an erasure closed (their card, their address),
+  // so the change's hash is of what this piece kept here, whatever
+  // erasure lands later.
+  const { speakers } = await namingOf(
+    [],
+    adding.memories.map(({ speaker }) => speaker)
+  );
+  const kept = keeping(
+    adding.entities,
+    adding.memories.filter(
+      (_memory, index) => !isErasedPerson(sql, speakers[index])
+    )
+  );
   const whole = addOf(adding);
   const full = addOf(kept);
   const wholeHashes = await hashesOf(whole);
-  const leftOut = JSON.stringify(kept) !== JSON.stringify(adding);
-  const hashes = leftOut ? await hashesOf(full) : wholeHashes;
+  const hashes =
+    JSON.stringify(kept) === JSON.stringify(adding)
+      ? wholeHashes
+      : await hashesOf(full);
   const store = {
     storage,
     db: drizzle(storage),
@@ -1032,22 +1013,21 @@ const writePiece = async (
       if (currentOf(sql, source, version) === undefined) {
         return "superseded";
       }
-      const madeBefore =
-        sql
-          .exec("SELECT 1 FROM memory_changes WHERE key = ?", wholeHashes.key)
-          .toArray().length > 0;
-      if (madeBefore) {
-        writeAdd(store, whole, wholeHashes);
+      // Written before, its item not settled (the store stopped between):
+      // it answers as it was written, with what the piece kept then, the
+      // whole of it or without an erased person's word.
+      const [before] = sql
+        .exec<{ hash: string }>(
+          "SELECT hash FROM memory_changes WHERE key = ?",
+          hashes.key
+        )
+        .toArray();
+      if (before !== undefined) {
+        const now = before.hash === hashes.hash;
+        writeAdd(store, now ? full : whole, now ? hashes : wholeHashes);
         return "written";
       }
-      const now = leavingOutClosed(sql, adding, naming);
-      if (JSON.stringify(now) !== JSON.stringify(kept)) {
-        throw new WorkError("failed");
-      }
-      // Nothing left to write: no add, unless it marks the version.
-      if (full.memories.length > 0 || full.extracted !== undefined) {
-        writeAdd(store, full, hashes);
-      }
+      writeAdd(store, full, hashes);
       return "written";
     });
   } catch (error) {

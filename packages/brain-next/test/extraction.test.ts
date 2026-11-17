@@ -611,6 +611,109 @@ describe("extracting memories", () => {
     });
   });
 
+  // The store stops after a piece's write landed and before its item
+  // settled (a deploy, an eviction): the piece's next run answers as it
+  // was written, also when a person's erasure left her card, or the
+  // speaker's word, out of it.
+  it.each([
+    ["no one erased", "none"],
+    ["her erased first", "her"],
+    ["the speaker erased first", "speaker"],
+  ] as const)(
+    "settles a piece written just before the store stopped, %s",
+    async (_case, erased) => {
+      const group = unique("g");
+      const token = unique("t");
+      const name = `${unique("Anna")} Smit`;
+      const address = `${unique("a")}@acme.test`;
+      const project = unique("Atlas");
+      const bob = unique("bob");
+      if (erased === "speaker") {
+        await shared().erasePersonShared({
+          person: bob,
+          identifiers: [],
+          reason: "person_erased",
+        });
+      }
+      if (erased === "her") {
+        await shared().erasePersonShared({
+          person: unique("anna"),
+          identifiers: [{ type: "email", value: address }],
+          reason: "person_erased",
+        });
+      }
+      answers.set(
+        token,
+        answering({
+          entities: [
+            { key: "a", kind: "person", names: [name], emails: [address] },
+            { key: "p", kind: "project", names: [project] },
+          ],
+          memories: [
+            {
+              about: "a",
+              attribute: "role",
+              value: "finance lead",
+              type: "fact",
+              statement: `${name} leads finance.`,
+              quote: `${name} (${address}) leads finance.`,
+            },
+            {
+              about: "p",
+              type: "fact",
+              statement: `${project} ships in May.`,
+              quote: `${project} ships in May.`,
+            },
+          ],
+        })
+      );
+      // The first write's transaction lands, then the store "stops": the
+      // attempt fails after it, as if the item never heard.
+      await runInDurableObject(shared(), (_instance, state) => {
+        const { storage } = state;
+        const real = storage.transactionSync.bind(storage);
+        Reflect.set(storage, "transactionSync", <T>(write: () => T): T => {
+          const result = real(write);
+          if (result === "written") {
+            Reflect.set(storage, "transactionSync", real);
+            throw new Error("the store stopped");
+          }
+          return result;
+        });
+      });
+      const { source } = await added(
+        `${token}: ${name} (${address}) leads finance. ${project} ships in May.`,
+        audience(group),
+        {
+          extract: fromOutside({
+            speaker: { kind: "internal", person: bob },
+          }),
+        }
+      );
+      await tick();
+      await tick(10);
+      await tick(60);
+      const items = await runInDurableObject(shared(), (_instance, state) =>
+        state.storage.sql
+          .exec("SELECT 1 FROM work_items WHERE key = ?", source)
+          .toArray()
+      );
+      const reader = { person: unique("p"), groups: [group] };
+      const her = await readAs(reader, name);
+      const projects = await readAs(reader, project);
+
+      expect({
+        items: items.length,
+        her: her.map(({ statement }) => statement),
+        project: projects.map(({ statement }) => statement),
+      }).toStrictEqual({
+        items: 0,
+        her: erased === "none" ? [`${name} leads finance.`] : [],
+        project: erased === "speaker" ? [] : [`${project} ships in May.`],
+      });
+    }
+  );
+
   it("drops a memory whose quote is not in the text, and one the check doesn't support", async () => {
     const token = unique("t");
     const name = unique("Globex");
@@ -2686,6 +2789,66 @@ describe("extracting memories", () => {
         });
       }
     );
+
+    it("writes nothing in the word of a person whose erasure lands there, and settles the piece on its next run", async () => {
+      const token = unique("t");
+      const name = unique("Spoken");
+      const group = unique("g");
+      const source = unique("doc");
+      const bob = unique("bob");
+      answers.set(
+        token,
+        answering({
+          entities: [{ key: "c", kind: "customer", names: [name] }],
+          memories: [
+            customerFact(
+              `${name} is active.`,
+              `${name} is active`,
+              "status",
+              "active"
+            ),
+          ],
+        })
+      );
+      const change = `extract:${await sha256(JSON.stringify([source, 1, 0]))}`;
+      const spy = landingAtWrite(change, async () => {
+        await shared().erasePersonShared({
+          person: bob,
+          identifiers: [],
+          reason: "person_erased",
+        });
+      });
+      try {
+        await added(`${token}: ${name} is active.`, audience(group), {
+          extract: fromOutside({ speaker: { kind: "internal", person: bob } }),
+          source,
+        });
+        await tick();
+      } finally {
+        spy.mockRestore();
+      }
+      const [tried] = await runInDurableObject(shared(), (_instance, state) =>
+        state.storage.sql
+          .exec<{ last_error: string | null }>(
+            "SELECT last_error FROM work_items WHERE key = ?",
+            source
+          )
+          .toArray()
+      );
+      await tick(10);
+      const items = await runInDurableObject(shared(), (_instance, state) =>
+        state.storage.sql
+          .exec("SELECT 1 FROM work_items WHERE key = ?", source)
+          .toArray()
+      );
+      const read = await readAs({ person: unique("p"), groups: [group] }, name);
+
+      expect({
+        tried: tried?.last_error,
+        items: items.length,
+        read,
+      }).toStrictEqual({ tried: "failed", items: 0, read: [] });
+    });
 
     it("leaves nothing of a chat turn whose group's erasure is asked for as its piece is checked", async () => {
       const token = unique("t");

@@ -8,6 +8,7 @@ import { erasedConfirmer } from "@grasp-os/brain-next/contract";
 import type {
   Identifier,
   NewEntity,
+  NewMemories,
   NewMemory,
   Reader,
 } from "@grasp-os/brain-next/contract";
@@ -911,6 +912,83 @@ describe("a person's erasure in the shared store", () => {
       memories: 1,
       project: [`${project} starts in June`],
       seen: [],
+    });
+  });
+
+  it("answers a write resting on a document tried again with the same change as it was made, whether her erasure came before it or in between", async () => {
+    /** Her card and a project's fact, written on a note; then tried again. */
+    const triedAgain = async (erasedBetween: boolean) => {
+      const group = unique("g");
+      const bob = unique("bob-");
+      const reader: Reader = { person: bob, groups: [group] };
+      const local = word();
+      const name = `Anna ${word()}`;
+      const project = `Audit ${word()}`;
+      if (!erasedBetween) {
+        await erase(unique("anna-"), [email(local)]);
+      }
+      const note = await document(
+        group,
+        `${name} (${local}@acme.test) leads the audit. ${project} starts in June.`
+      );
+      const asked: NewMemories = {
+        change: crypto.randomUUID(),
+        access: { kind: "audience", group },
+        entities: [
+          {
+            key: "a",
+            kind: "person",
+            names: [name],
+            identifiers: [email(local)],
+          },
+          { key: "p", kind: "project", names: [project] },
+        ],
+        memories: [
+          said(
+            "a",
+            `${name} leads the audit`,
+            bob,
+            on(note, "leads the audit")
+          ),
+          said(
+            "p",
+            `${project} starts in June`,
+            bob,
+            on(note, "starts in June")
+          ),
+        ],
+      };
+      const first = await shared().addMemories(asked);
+      if (erasedBetween) {
+        await erase(unique("anna-"), [email(local)]);
+      }
+      const again = await shared().addMemories(asked);
+      const seen = await everything(reader, [], [name], [email(local)]);
+      return {
+        same: JSON.stringify(again) === JSON.stringify(first),
+        her: [name, `${local}@acme.test`, "leads the audit"].filter((needle) =>
+          seen.includes(needle)
+        ),
+        project: await statementsOf(again.entities.p ?? "", reader),
+        projectLine: `${project} starts in June`,
+      };
+    };
+    const before = await triedAgain(false);
+    const between = await triedAgain(true);
+
+    expect({ before, between }).toStrictEqual({
+      before: {
+        same: true,
+        her: [],
+        project: [before.projectLine],
+        projectLine: before.projectLine,
+      },
+      between: {
+        same: true,
+        her: [],
+        project: [between.projectLine],
+        projectLine: between.projectLine,
+      },
     });
   });
 
