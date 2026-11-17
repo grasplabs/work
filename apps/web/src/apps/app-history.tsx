@@ -65,6 +65,14 @@ import { readPeople } from "../directory.ts";
 import { ErrorText } from "../error-text.tsx";
 import { formatList, formatSince } from "../format.ts";
 import { LoadingLines } from "../frame/page-states.tsx";
+import {
+  AlertDialog as GraspAlertDialog,
+  AlertDialogAction as GraspAlertDialogAction,
+  AlertDialogContent as GraspAlertDialogContent,
+  AlertDialogDescription as GraspAlertDialogDescription,
+  AlertDialogFooter as GraspAlertDialogFooter,
+  AlertDialogTitle as GraspAlertDialogTitle,
+} from "../grasp/alert-dialog/index.ts";
 import { loadFromCore, NotLoaded } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
@@ -162,60 +170,47 @@ export const ConfirmChange = ({
   asked: Asked | undefined;
   onConfirm: (asked: Asked) => void;
   onCancel: () => void;
-}) => (
-  <AlertDialog
-    onOpenChange={(open) => {
-      if (!open) {
-        onCancel();
-      }
-    }}
-    open={asked !== undefined}
-  >
-    <AlertDialogContent>
-      <AlertDialogHeader>
-        <AlertDialogTitle>
-          {asked?.kind === "discard" ? (
-            <Trans>Undo the changes only you see?</Trans>
-          ) : (
-            <Trans>Restore this earlier state?</Trans>
-          )}
-        </AlertDialogTitle>
-        <AlertDialogDescription>
-          {asked?.kind === "discard" ? (
-            <Trans>
-              They go, for everyone who builds this App. Its history in Settings
-              keeps them, so you can bring them back.
-            </Trans>
-          ) : (
-            <Trans>
-              Your changes go back to how they were then, for everyone who
-              builds this App. What came after stays in its history.
-            </Trans>
-          )}
-        </AlertDialogDescription>
-      </AlertDialogHeader>
-      <AlertDialogFooter>
-        <AlertDialogCancel>
-          <Trans>Cancel</Trans>
-        </AlertDialogCancel>
-        <AlertDialogAction
-          onClick={() => {
-            if (asked !== undefined) {
-              onConfirm(asked);
-            }
-          }}
-          variant={asked?.kind === "discard" ? "destructive" : "default"}
-        >
-          {asked?.kind === "discard" ? (
-            <Trans>Undo changes</Trans>
-          ) : (
-            <Trans>Restore</Trans>
-          )}
-        </AlertDialogAction>
-      </AlertDialogFooter>
-    </AlertDialogContent>
-  </AlertDialog>
-);
+}) => {
+  const { t } = useLingui();
+  const discards = asked?.kind === "discard";
+  return (
+    <GraspAlertDialog
+      onOpenChange={(open) => {
+        if (!open) {
+          onCancel();
+        }
+      }}
+      open={asked !== undefined}
+    >
+      <GraspAlertDialogContent>
+        <GraspAlertDialogTitle>
+          {discards
+            ? t`Undo the changes only you see?`
+            : t`Restore this earlier state?`}
+        </GraspAlertDialogTitle>
+        <GraspAlertDialogDescription>
+          {discards
+            ? t`They go, for everyone who builds this App. Its history in Settings keeps them, so you can bring them back.`
+            : t`Your changes go back to how they were then, for everyone who builds this App. What came after stays in its history.`}
+        </GraspAlertDialogDescription>
+        <GraspAlertDialogFooter>
+          <GraspAlertDialogAction>{t`Cancel`}</GraspAlertDialogAction>
+          <GraspAlertDialogAction
+            action={() => {
+              if (asked !== undefined) {
+                onConfirm(asked);
+              }
+            }}
+            failedLabel={t`Could not finish`}
+            variant={discards ? "danger" : "ink"}
+          >
+            {discards ? t`Undo changes` : t`Restore`}
+          </GraspAlertDialogAction>
+        </GraspAlertDialogFooter>
+      </GraspAlertDialogContent>
+    </GraspAlertDialog>
+  );
+};
 
 /** Who made an undo point, and how, as its line says it. */
 const PointTitle = ({

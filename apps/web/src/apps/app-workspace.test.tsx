@@ -536,7 +536,7 @@ const callerGrant = (workflow: string, path: string): Permission => {
 
 /** The sheet Share with your team opens, once open. */
 const sheet = (): HTMLElement | null =>
-  document.querySelector('[data-slot="sheet-content"]');
+  document.querySelector('[data-slot="drawer-content"]');
 
 /** The button in the sheet called `name`. */
 const sheetButton = (name: string): HTMLButtonElement => {
@@ -551,19 +551,34 @@ const sheetButton = (name: string): HTMLButtonElement => {
 
 /** Ticks `name` among who gets it, in the sheet. */
 const tick = async (name: string): Promise<void> => {
-  const row = [...(sheet()?.querySelectorAll("li") ?? [])].find(
-    (each) => each.textContent?.trim() === name
-  );
-  const box = row?.querySelector<HTMLElement>('[role="checkbox"]');
-  if (box === undefined || box === null) {
+  const box = [
+    ...(sheet()?.querySelectorAll<HTMLElement>('[role="checkbox"]') ?? []),
+  ].find((each) => {
+    const label = each.getAttribute("aria-labelledby");
+    const named = label === null ? null : document.querySelector(`#${label}`);
+    // The label's own words, not the mark it keeps hidden from a reader.
+    return named?.firstChild?.textContent?.trim() === name;
+  });
+  if (box === undefined) {
     throw new Error(`No ${name} to tick`);
   }
   await press(box);
 };
 
-/** Whether `element` is the page's lime action. */
+/** The asking dialog's confirming action: its last, after Cancel. */
+const confirmation = (): HTMLElement => {
+  const found = [
+    ...document.querySelectorAll<HTMLElement>('[role="alertdialog"] button'),
+  ].at(-1);
+  if (found === undefined) {
+    throw new Error("No dialog asking");
+  }
+  return found;
+};
+
+/** Whether `element` is the page's main action. */
 const lime = (element: HTMLElement): boolean =>
-  element.className.includes("bg-highlight");
+  element.dataset.variant === "ink";
 
 /** Share with your team, in the bar. */
 const shareButton = (): HTMLButtonElement => button("Share with your team");
@@ -593,6 +608,22 @@ const typeInPrompt = (box: Element, text: string): void => {
     "value"
   )?.set?.call(box, text);
   box.dispatchEvent(new Event("input", { bubbles: true }));
+};
+
+/** Where pressing the open menu's item `name` takes the person. */
+const goesTo = async (
+  router: { state: { location: { href: string } } },
+  name: string
+): Promise<string | undefined> => {
+  const item = [
+    ...document.querySelectorAll<HTMLElement>('[role="menuitem"]'),
+  ].find((each) => each.textContent?.trim() === name);
+  if (item === undefined) {
+    return undefined;
+  }
+  await press(item);
+  await settled();
+  return router.state.location.href;
 };
 
 /** The line under the bar of changes only the builders see, if shown. */
@@ -814,7 +845,9 @@ describe(AppWorkspace, () => {
       async () => await Promise.withResolvers<never>().promise
     );
     const reading = {
-      loading: document.querySelector('[aria-label="Loading…"]') !== null,
+      loading: [...document.querySelectorAll('[role="status"]')].some(
+        (each) => each.textContent === "Loading…"
+      ),
       frame: document.querySelector("iframe"),
     };
 
@@ -902,11 +935,9 @@ describe(AppWorkspace, () => {
     await settled();
     const nothingShared = await moreMenu();
     takenDown();
-    await opened(fakeApps().apps);
+    const { router } = await opened(fakeApps().apps);
     const offered = await moreMenu();
-    const link = [...document.querySelectorAll('[role="menuitem"]')]
-      .find((item) => item.textContent?.trim() === "See what your team sees")
-      ?.getAttribute("href");
+    const link = await goesTo(router, "See what your team sees");
     takenDown();
     await opened(
       fakeApps().apps,
@@ -1129,7 +1160,7 @@ describe(AppWorkspace, () => {
   });
 
   it("makes the chat the person came from, building the App, the App's chat, rather than asking core for one", async () => {
-    const { askedForApp } = await opened(
+    const { askedForApp, router } = await opened(
       fakeApps().apps,
       identityOf(false),
       "chat-built-in"
@@ -1140,9 +1171,7 @@ describe(AppWorkspace, () => {
     expect({
       askedForApp,
       kept: activeChat(deskSlot),
-      openInChat: document
-        .querySelector('[role="menuitem"][href^="/chats/"]')
-        ?.getAttribute("href"),
+      openInChat: await goesTo(router, "Open the chat in Chat"),
     }).toStrictEqual({
       askedForApp: [],
       kept: "chat-built-in",
@@ -1344,7 +1373,7 @@ describe(AppWorkspace, () => {
   });
 
   it("keeps the chat handed over when core won't follow it for now, saying why, rather than opening another", async () => {
-    const { askedForApp } = await opened(
+    const { askedForApp, router } = await opened(
       fakeApps().apps,
       identityOf(false),
       "chat-handed-over",
@@ -1381,9 +1410,7 @@ describe(AppWorkspace, () => {
     expect({
       askedForApp,
       says: said,
-      openInChat: document
-        .querySelector('[role="menuitem"][href^="/chats/"]')
-        ?.getAttribute("href"),
+      openInChat: await goesTo(router, "Open the chat in Chat"),
     }).toStrictEqual({
       askedForApp: [],
       says: true,
@@ -1466,10 +1493,11 @@ describe(AppWorkspace, () => {
 
     await press(shareButton());
     const shown = {
-      title: sheet()?.querySelector('[data-slot="sheet-title"]')?.textContent,
-      who: [...(sheet()?.querySelectorAll("li") ?? [])].map((each) =>
-        each.textContent?.trim()
-      ),
+      title: sheet()?.querySelector("h2")?.textContent,
+      who: [
+        ...(sheet()?.querySelectorAll('[aria-label="Who gets it"] label') ??
+          []),
+      ].map((each) => each.firstChild?.textContent?.trim()),
       sees: says("They'll find it under Apps, and see it as it is now."),
       // Nobody ticked yet: nothing to share with.
       off: off(sheetButton("Share")),
@@ -1565,7 +1593,7 @@ describe(AppWorkspace, () => {
     // shares the changes, and whom else to give it to.
     const main = lime(button("Share changes"));
     await press(button("Share changes"));
-    const hasIt = sheet()?.textContent.includes("Bohas it");
+    const hasIt = sheet()?.textContent.includes("has it");
     await tick("Finance team");
     await press(sheetButton("Share"));
     const shared = { toasts: toasts(), status: status() };
@@ -2161,7 +2189,7 @@ describe(AppWorkspace, () => {
     await press(button("Undo"));
     const asked = says("Undo the changes only you see?");
     const before = [...fake.calls];
-    await press(button("Undo changes"));
+    await press(confirmation());
 
     expect({ asked, before, calls: fake.calls }).toStrictEqual({
       asked: true,
@@ -2170,7 +2198,7 @@ describe(AppWorkspace, () => {
     });
   });
 
-  it("sets a new App up calmly while Grasp builds it: its name, Share off, nothing of the App or its tip until it works", async () => {
+  it("sets a new App up calmly while Grasp builds it: its name, Grasp building it in the preview's place, Share off, nothing of the App or its tip until it works", async () => {
     markMade("invoice-desk");
     const core = new PreviewingCore("page.build_failed");
     socketsTo(core);
@@ -2201,8 +2229,9 @@ describe(AppWorkspace, () => {
     const share = button("Share with your team");
 
     expect({
-      setting: says("Setting up Invoices…"),
-      calm: says("Grasp is building it. This takes a minute or two."),
+      building:
+        document.querySelector('[aria-label="Grasp is building"]') !== null,
+      calm: says("It shows here as soon as there is something to see."),
       state: says("Setting up"),
       shareOff: off(share),
       views: document.querySelector('nav[aria-label="Workspace views"]'),
@@ -2216,7 +2245,7 @@ describe(AppWorkspace, () => {
       fix: reachable("Fix with Grasp") !== undefined,
       tip: says("This is your new App, with example data."),
     }).toStrictEqual({
-      setting: true,
+      building: true,
       calm: true,
       state: true,
       shareOff: true,

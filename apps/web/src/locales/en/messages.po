@@ -3075,6 +3075,7 @@ msgid "Archive and take offline"
 msgstr "Archive and take offline"
 
 #: src/apps/app-status.tsx
+#: src/apps/apps-overview.tsx
 msgctxt "an App put away"
 msgid "Archived"
 msgstr "Archived"
@@ -3625,7 +3626,6 @@ msgstr "Build it"
 msgid "Builder"
 msgstr "Builder"
 
-#: src/apps/app-workspace.tsx
 #: src/chat/subject-bar.tsx
 msgid "Building…"
 msgstr "Building…"
@@ -4999,6 +4999,7 @@ msgstr "Could not delete"
 msgid "Could not end access"
 msgstr "Could not end access"
 
+#: src/apps/app-history.tsx
 #: src/frame/app-frame.tsx
 #: src/frame/part-words.tsx
 msgid "Could not finish"
@@ -5015,6 +5016,10 @@ msgstr "Could not make admin"
 #: src/routes/_shell.settings.members.tsx
 msgid "Could not remove"
 msgstr "Could not remove"
+
+#: src/apps/reset-test-data.tsx
+msgid "Could not reset"
+msgstr "Could not reset"
 
 #: src/frame/part-words.tsx
 #: src/settings/ai-providers.tsx
@@ -5199,6 +5204,11 @@ msgstr "Data"
 
 #: src/apps/app-workspace.tsx
 msgctxt "an app's workspace view"
+msgid "Data"
+msgstr "Data"
+
+#: src/apps/app-workspace.tsx
+msgctxt "who builds an app's data"
 msgid "Data"
 msgstr "Data"
 
@@ -8535,6 +8545,11 @@ msgstr "Lay it out left to right"
 msgid "Lay it out top to bottom"
 msgstr "Lay it out top to bottom"
 
+#: src/apps/app-workspace.tsx
+msgctxt "who builds an app's look"
+msgid "Layout"
+msgstr "Layout"
+
 #: src/inbox/interviews-item.tsx
 #: src/onboarding/interviews-progress.tsx
 msgid "Lead not yet"
@@ -8875,10 +8890,6 @@ msgstr "Lower-case letters and digits, with single dashes between them; not the 
 msgid "Lowest"
 msgstr "Lowest"
 
-#: src/apps/apps-overview.tsx
-msgid "Made {made}"
-msgstr "Made {made}"
-
 #: src/activity/audit-words.ts
 msgid "Made a webhook source a new secret"
 msgstr "Made a webhook source a new secret"
@@ -9182,6 +9193,7 @@ msgid "Monthly budget for AI"
 msgstr "Monthly budget for AI"
 
 #: src/apps/app-workspace.tsx
+#: src/apps/apps-overview.tsx
 msgid "More"
 msgstr "More"
 
@@ -10791,6 +10803,7 @@ msgid "Only you see it while you try it. You share it when it's right."
 msgstr "Only you see it while you try it. You share it when it's right."
 
 #: src/apps/app-status.tsx
+#: src/apps/apps-overview.tsx
 #: src/workflows/workflow-status.tsx
 msgid "Only you see this"
 msgstr "Only you see this"
@@ -12453,6 +12466,10 @@ msgstr "Reset what it keeps"
 msgid "Reset what it keeps?"
 msgstr "Reset what it keeps?"
 
+#: src/apps/reset-test-data.tsx
+msgid "Resetting"
+msgstr "Resetting"
+
 #: src/frame/app-frame.tsx
 msgid "Resize the chat"
 msgstr "Resize the chat"
@@ -13541,6 +13558,7 @@ msgid "Setting up {name}…"
 msgstr "Setting up {name}…"
 
 #: src/apps/app-page.tsx
+#: src/apps/apps-overview.tsx
 #: src/grasp/frame/grasp-sidebar.tsx
 #: src/routes/_shell.apps.$app_.settings.tsx
 #: src/routes/_shell.settings.tsx
@@ -14642,6 +14660,7 @@ msgstr "Target design agreed"
 msgid "tasks"
 msgstr "tasks"
 
+#: src/apps/publish.tsx
 #: src/brain/brain-source-contents.tsx
 #: src/brain/brain.ts
 #: src/inbox/interviews-item.tsx
@@ -15478,6 +15497,10 @@ msgstr "The team in {field}"
 #: src/knowledge/purge.tsx
 msgid "The terms also go from everyone's memory records, interviews and answers. How many of those hold them isn't counted or shown."
 msgstr "The terms also go from everyone's memory records, interviews and answers. How many of those hold them isn't counted or shown."
+
+#: src/apps/reset-test-data.tsx
+msgid "The test data wasn't reset. Try again."
+msgstr "The test data wasn't reset. Try again."
 
 #: src/pages/page-files.ts
 msgid "The upload was cancelled."
@@ -17784,6 +17807,11 @@ msgstr "Woke a waiting run whose wake hadn't got through"
 msgid "Word"
 msgstr "Word"
 
+#: src/apps/app-workspace.tsx
+msgctxt "who writes an app's words"
+msgid "Words"
+msgstr "Words"
+
 #: src/apps/field-kinds.tsx
 msgid "Words and sentences"
 msgstr "Words and sentences"
@@ -18398,6 +18426,7 @@ msgid "Your team has this one"
 msgstr "Your team has this one"
 
 #: src/apps/app-status.tsx
+#: src/apps/apps-overview.tsx
 msgid "Your team uses it"
 msgstr "Your team uses it"
 

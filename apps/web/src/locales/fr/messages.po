@@ -3075,6 +3075,7 @@ msgid "Archive and take offline"
 msgstr "Archiver et mettre hors ligne"
 
 #: src/apps/app-status.tsx
+#: src/apps/apps-overview.tsx
 msgctxt "an App put away"
 msgid "Archived"
 msgstr "Archivée"
@@ -3625,7 +3626,6 @@ msgstr "Construire"
 msgid "Builder"
 msgstr "Concepteur"
 
-#: src/apps/app-workspace.tsx
 #: src/chat/subject-bar.tsx
 msgid "Building…"
 msgstr "Construction…"
@@ -4999,6 +4999,7 @@ msgstr "Impossible de supprimer"
 msgid "Could not end access"
 msgstr "Impossible de mettre fin à l'accès"
 
+#: src/apps/app-history.tsx
 #: src/frame/app-frame.tsx
 #: src/frame/part-words.tsx
 msgid "Could not finish"
@@ -5015,6 +5016,10 @@ msgstr "Impossible de nommer administrateur"
 #: src/routes/_shell.settings.members.tsx
 msgid "Could not remove"
 msgstr "Impossible de retirer"
+
+#: src/apps/reset-test-data.tsx
+msgid "Could not reset"
+msgstr "Réinitialisation impossible"
 
 #: src/frame/part-words.tsx
 #: src/settings/ai-providers.tsx
@@ -5199,6 +5204,11 @@ msgstr "Données"
 
 #: src/apps/app-workspace.tsx
 msgctxt "an app's workspace view"
+msgid "Data"
+msgstr "Données"
+
+#: src/apps/app-workspace.tsx
+msgctxt "who builds an app's data"
 msgid "Data"
 msgstr "Données"
 
@@ -8535,6 +8545,11 @@ msgstr "Disposer de gauche à droite"
 msgid "Lay it out top to bottom"
 msgstr "Disposer de haut en bas"
 
+#: src/apps/app-workspace.tsx
+msgctxt "who builds an app's look"
+msgid "Layout"
+msgstr "Mise en page"
+
 #: src/inbox/interviews-item.tsx
 #: src/onboarding/interviews-progress.tsx
 msgid "Lead not yet"
@@ -8875,10 +8890,6 @@ msgstr "Lettres minuscules et chiffres, séparés par de simples tirets ; pas le
 msgid "Lowest"
 msgstr "Minimum"
 
-#: src/apps/apps-overview.tsx
-msgid "Made {made}"
-msgstr "Créée le {made}"
-
 #: src/activity/audit-words.ts
 msgid "Made a webhook source a new secret"
 msgstr "A généré un nouveau secret pour une source de webhook"
@@ -9182,6 +9193,7 @@ msgid "Monthly budget for AI"
 msgstr "Budget mensuel pour l’IA"
 
 #: src/apps/app-workspace.tsx
+#: src/apps/apps-overview.tsx
 msgid "More"
 msgstr "Plus"
 
@@ -10791,6 +10803,7 @@ msgid "Only you see it while you try it. You share it when it's right."
 msgstr "Vous seul le voyez pendant que vous l’essayez. Vous le partagez quand il est prêt."
 
 #: src/apps/app-status.tsx
+#: src/apps/apps-overview.tsx
 #: src/workflows/workflow-status.tsx
 msgid "Only you see this"
 msgstr "Vous seul voyez ceci"
@@ -12453,6 +12466,10 @@ msgstr "Réinitialiser ce qu'il conserve"
 msgid "Reset what it keeps?"
 msgstr "Réinitialiser ce qu'il conserve ?"
 
+#: src/apps/reset-test-data.tsx
+msgid "Resetting"
+msgstr "Réinitialisation…"
+
 #: src/frame/app-frame.tsx
 msgid "Resize the chat"
 msgstr "Redimensionner le chat"
@@ -13541,6 +13558,7 @@ msgid "Setting up {name}…"
 msgstr "Préparation de {name}…"
 
 #: src/apps/app-page.tsx
+#: src/apps/apps-overview.tsx
 #: src/grasp/frame/grasp-sidebar.tsx
 #: src/routes/_shell.apps.$app_.settings.tsx
 #: src/routes/_shell.settings.tsx
@@ -14642,6 +14660,7 @@ msgstr "Conception cible validée"
 msgid "tasks"
 msgstr "taches"
 
+#: src/apps/publish.tsx
 #: src/brain/brain-source-contents.tsx
 #: src/brain/brain.ts
 #: src/inbox/interviews-item.tsx
@@ -15478,6 +15497,10 @@ msgstr "L’équipe dans {field}"
 #: src/knowledge/purge.tsx
 msgid "The terms also go from everyone's memory records, interviews and answers. How many of those hold them isn't counted or shown."
 msgstr "Les termes disparaissent aussi des souvenirs, entretiens et réponses de chacun. Combien en contiennent n'est ni compté ni affiché."
+
+#: src/apps/reset-test-data.tsx
+msgid "The test data wasn't reset. Try again."
+msgstr "Les données de test n’ont pas été réinitialisées. Réessayez."
 
 #: src/pages/page-files.ts
 msgid "The upload was cancelled."
@@ -17784,6 +17807,11 @@ msgstr "A réveillé une exécution en attente dont le réveil n’était pas pa
 msgid "Word"
 msgstr "Mot"
 
+#: src/apps/app-workspace.tsx
+msgctxt "who writes an app's words"
+msgid "Words"
+msgstr "Textes"
+
 #: src/apps/field-kinds.tsx
 msgid "Words and sentences"
 msgstr "Mots et phrases"
@@ -18398,6 +18426,7 @@ msgid "Your team has this one"
 msgstr "Votre équipe a celle-ci"
 
 #: src/apps/app-status.tsx
+#: src/apps/apps-overview.tsx
 msgid "Your team uses it"
 msgstr "Votre équipe l’utilise"
 

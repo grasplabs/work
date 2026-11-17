@@ -2,17 +2,10 @@ import type { FileDiff } from "@grasp-os/shared/apps";
 import { registerCustomCSSVariableTheme } from "@pierre/diffs";
 import { File, MultiFileDiff, Virtualizer } from "@pierre/diffs/react";
 import type { FileDiffOptions, FileOptions } from "@pierre/diffs/react";
-import {
-  FileBracesIcon,
-  FileCodeIcon,
-  FileIcon,
-  FileImageIcon,
-  FileTextIcon,
-  FileTypeIcon,
-} from "lucide-react";
-import type { LucideIcon } from "lucide-react";
-import { createElement } from "react";
 import type { ReactNode } from "react";
+
+import { Code, Doc, File as FileIcon, Image } from "../grasp/icons/index.ts";
+import type { IconData } from "../grasp/icons/index.ts";
 
 // How the Code view (app-code.tsx) shows code, and Publish
 // (publish.tsx) a file's change: @pierre/diffs draws a file, and a
@@ -126,37 +119,28 @@ export const CodeFile = ({ path, text }: { path: string; text: string }) => (
 );
 
 /** The icon of a file's type, by its extension. */
-const iconsByExtension: Readonly<Record<string, LucideIcon>> = {
-  ts: FileCodeIcon,
-  tsx: FileCodeIcon,
-  mts: FileCodeIcon,
-  js: FileCodeIcon,
-  jsx: FileCodeIcon,
-  mjs: FileCodeIcon,
-  sql: FileCodeIcon,
-  html: FileCodeIcon,
-  json: FileBracesIcon,
-  yaml: FileBracesIcon,
-  yml: FileBracesIcon,
-  md: FileTextIcon,
-  txt: FileTextIcon,
-  css: FileTypeIcon,
-  svg: FileImageIcon,
+const iconsByExtension: Readonly<Record<string, IconData>> = {
+  ts: Code,
+  tsx: Code,
+  mts: Code,
+  js: Code,
+  jsx: Code,
+  mjs: Code,
+  sql: Code,
+  html: Code,
+  json: Code,
+  yaml: Code,
+  yml: Code,
+  css: Code,
+  md: Doc,
+  txt: Doc,
+  svg: Image,
 };
 
 /** The icon of the file at `path`, a plain file's for a type it doesn't know. */
-const fileIconOf = (path: string): LucideIcon => {
+export const fileIconOf = (path: string): IconData => {
   const dot = path.lastIndexOf(".");
   return (
     (dot === -1 ? undefined : iconsByExtension[path.slice(dot + 1)]) ?? FileIcon
   );
 };
-
-/** The icon of the file at `path`'s type, for the eye alone. */
-export const PathIcon = ({
-  path,
-  className,
-}: {
-  path: string;
-  className?: string;
-}) => createElement(fileIconOf(path), { "aria-hidden": true, className });

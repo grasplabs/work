@@ -77,10 +77,14 @@ const shown = async (listed: AppOverview[], builds = true): Promise<void> => {
 
 /** Each card's name, where it leads and the status it shows. */
 const cards = () =>
-  [...document.querySelectorAll('ul[aria-label="Apps"] > li')].map((card) => ({
+  [
+    ...document.querySelectorAll(
+      'section[aria-label="Apps"] [data-slot="app-card"]'
+    ),
+  ].map((card) => ({
     name: card.querySelector("a")?.textContent,
     href: card.querySelector("a")?.getAttribute("href"),
-    status: card.querySelector('[data-slot="badge"]')?.textContent,
+    status: card.querySelector('[data-slot="app-card-meta"]')?.textContent,
   }));
 
 /** Types `value` into the search, as React hears a person type. */
