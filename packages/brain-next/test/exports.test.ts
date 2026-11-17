@@ -422,6 +422,56 @@ const stoppingBucket = async (
   return { reached: () => flags.reached };
 };
 
+/**
+ * `store`'s bucket swapped for one whose deletes of keys under `prefix`
+ * fail, as R2 erring would: `heal` puts the bucket back.
+ */
+const failingDeletes = async (
+  store: Store,
+  prefix: string
+): Promise<{ heal: () => Promise<void> }> => {
+  const bucket = env.BRAIN_OBJECTS;
+  const swap = async (to: unknown): Promise<void> => {
+    await runInDurableObject(store, (instance) => {
+      const objectEnv: unknown = Reflect.get(instance, "env");
+      if (typeof objectEnv !== "object" || objectEnv === null) {
+        throw new TypeError("The store has no env");
+      }
+      Reflect.set(instance, "env", { ...objectEnv, BRAIN_OBJECTS: to });
+    });
+  };
+  await swap(
+    Object.fromEntries(
+      r2Calls.map((name) => [
+        name,
+        async (...args: unknown[]) => {
+          const [keys] = args;
+          const named = Array.isArray(keys) ? keys : [keys];
+          if (
+            name === "delete" &&
+            named.some(
+              (key) => typeof key === "string" && key.startsWith(prefix)
+            )
+          ) {
+            throw new Error("R2 failed for the test");
+          }
+          const method: unknown = Reflect.get(bucket, name);
+          if (typeof method !== "function") {
+            throw new TypeError(`R2 has no ${name}`);
+          }
+          const result: unknown = await Reflect.apply(method, bucket, args);
+          return result;
+        },
+      ])
+    )
+  );
+  return {
+    heal: async () => {
+      await swap(bucket);
+    },
+  };
+};
+
 /** Stops `store`, as a crash or a deploy would. */
 const stop = async (store: Store): Promise<void> => {
   try {
@@ -2021,6 +2071,82 @@ describe("exports and restores", () => {
           `exports/${id}/part-0000.jsonl`,
         ],
         holding: [],
+      });
+    });
+
+    it("keeps the files of an export whose deletion was queued before a restore adopted it, once its check stopped, when that deletion is tried again (threats 6, 9)", async () => {
+      await putBack(shared(), emptyShared);
+      const group = `team:${unique()}`;
+      const reader = readerOf(`person:${unique()}`, [group]);
+      const erased = `test:${unique()}`;
+      const kept = `test:${unique()}`;
+      await add(shared(), erased, `erased ${unique()}`, team(group));
+      await add(shared(), kept, "words", team(group));
+      const { id } = await shared().startExport("test");
+      await settled(shared(), id);
+      const files = await keysUnder(`exports/${id}/`);
+      // The storage lost, the source erased: the sweep puts the deletion
+      // of the export's files on the queue, and R2 fails it.
+      await putBack(shared(), emptyShared);
+      const failing = await failingDeletes(shared(), `exports/${id}/`);
+      await shared().eraseSource({ source: erased, reason: "deleted" });
+      for (let ticks = 0; ticks < 3; ticks += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- a tick at a time
+        await tick(shared());
+      }
+      const queued = await runInDurableObject(
+        shared(),
+        (_instance, state) =>
+          state.storage.sql
+            .exec(
+              "SELECT 1 FROM work_items WHERE kind = 'brain.export' AND key = ?",
+              `export:${id}`
+            )
+            .toArray().length
+      );
+      // A restore adopts it, and its check stops: handed back, still failed.
+      await startedAndStopped(id);
+      const stopped = await shared().restoreStatus(id);
+      // R2 heals; the deletion is tried again, past its backoff.
+      await failing.heal();
+      for (let ticks = 1; ticks <= 3; ticks += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- a tick at a time
+        await shared().work({
+          ask: quietAsk,
+          at: new Date(Date.now() + ticks * 3_600_000),
+          embedders: noEmbedders,
+          handOvers: noHandOvers,
+          contextTokens: null,
+        });
+      }
+      const left = await keysUnder(`exports/${id}/`);
+      const again = await called(shared().startRestore(id, "test")).then(
+        ({ state }) => state,
+        (error: unknown) => (error instanceof Error ? error.message : "")
+      );
+      const done = await restoreSettled(id);
+      const sources = await Promise.all(
+        [erased, kept].map(
+          async (source) =>
+            (await shared().readVersion({ source, version: 1, reader })) !==
+            null
+        )
+      );
+
+      expect({
+        queued,
+        stopped: stopped?.state,
+        kept: left,
+        again,
+        done: done?.state,
+        sources,
+      }).toStrictEqual({
+        queued: 1,
+        stopped: "failed",
+        kept: files,
+        again: "running",
+        done: "done",
+        sources: [false, true],
       });
     });
 

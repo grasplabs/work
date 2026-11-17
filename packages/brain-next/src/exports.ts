@@ -493,6 +493,10 @@ export const namesAnySql = `SELECT 1 FROM json_each(?1) AS pair
 WHERE ${namedSql("pair.value ->> 0", "pair.value ->> 1")}
 LIMIT 1`;
 
+/** `?1` an export's id: a restore of it runs, or failed and may start again. */
+const restoreHoldsSql = `SELECT 1 FROM restores
+WHERE restores.export = ?1 AND restores.state IN ('running', 'failed')`;
+
 /** Of a row of `exports`: whether a restore of it runs, or failed and may start again. */
 const heldSql = `exports.id IN (
   SELECT export FROM restores WHERE state IN ('running', 'failed')
@@ -1034,14 +1038,17 @@ export const exportFile = async (
 /**
  * Whether export `id`'s files may be deleted now, as a deletion of them
  * runs: never while it is written or done (a drop queued before a restore
- * recorded it, say), nor while a restore of it runs or failed.
+ * recorded it, say), nor while a restore of it runs or failed, asked of
+ * the restore itself: one whose stopped check handed the export back keeps
+ * no row of it (`handBackStopped`), and a drop queued before it began may
+ * run after.
  */
 const droppable = (sql: SqlStorage, id: string): boolean =>
   sql
     .exec(
       `SELECT 1 FROM exports
-      WHERE exports.id = ?
-        AND (exports.state IN ('writing', 'done') OR ${heldSql})`,
+      WHERE exports.id = ?1 AND exports.state IN ('writing', 'done')
+      UNION ALL ${restoreHoldsSql}`,
       id
     )
     .toArray().length === 0;
@@ -1263,12 +1270,7 @@ const orphanFileDrops = async (
  */
 const unrecorded = (sql: SqlStorage, id: string): boolean =>
   rowOf(sql, id) === undefined &&
-  sql
-    .exec(
-      "SELECT 1 FROM restores WHERE export = ? AND state IN ('running', 'failed')",
-      id
-    )
-    .toArray().length === 0;
+  sql.exec(restoreHoldsSql, id).toArray().length === 0;
 
 /**
  * The sweep's place saved at `key`, in one transaction with the deletion
