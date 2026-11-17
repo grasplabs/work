@@ -15,7 +15,10 @@ import { ownAgentsOn } from "./own-agents-switch.ts";
 // chats-rpc.ts): admins grant to it, audit events name it, and its
 // instruction file is kept under it. That agent is the first record here,
 // under the same ID, so every grant, chat and file made before agents
-// were records still names it.
+// were records still names it. What an agent is told is its instruction
+// file in the Brain (instruction-files.ts), never its row: the row's
+// `instructions` column is no longer read or written, and goes in a later
+// release (expand, then contract).
 //
 // Core keeps a row only for an agent an admin made or changed, as its
 // other settings do. The first agent has none until then and reads as
@@ -38,7 +41,6 @@ const firstAgent: Agent = {
   name: "Stephen",
   face: "stephen",
   job: "Answers from what the company told Grasp, and helps people in their own apps.",
-  instructions: "",
   modelRole: null,
   model: null,
   state: "on",
@@ -59,7 +61,6 @@ export const agentOfRow = (
         name: row.name,
         face: row.face,
         job: row.job,
-        instructions: row.instructions,
         modelRole: row.modelRole,
         model: row.model,
         state: row.state,
@@ -138,14 +139,33 @@ export const turnAgent = async (
 // company doesn't have. Every read and change of an agent by a person
 // goes through one of the three below, so none forgets the other kind.
 
+/**
+ * The instruction file of `agent`, as the Brain places it: one of a
+ * person's own with that person (`ownerId`), so it is kept in their own
+ * store, readable by them alone; one of the company's, or an ID nobody
+ * made, under the company (core's brain-next.ts).
+ */
+export const agentInstructionFile = ({
+  id,
+  ownerId,
+}: Pick<Agent, "id" | "ownerId">):
+  | { scope: "agent"; agentId: string }
+  | { scope: "agent"; agentId: string; ownerId: string } =>
+  ownerId === null
+    ? { scope: "agent", agentId: id }
+    : { scope: "agent", agentId: id, ownerId };
+
+/** Who reads or changes an agent: a signed-in person, or a member as core's records have them. */
+type Person = Pick<Identity, "userId" | "role" | "staff">;
+
 /** Whether `agent` is `identity`'s own. Never Grasp staff's: they are no one of the company. */
-export const isOwnAgent = (agent: Agent, identity: Identity): boolean =>
+export const isOwnAgent = (agent: Agent, identity: Person): boolean =>
   agent.ownerId !== null &&
   agent.ownerId === identity.userId &&
   !identity.staff;
 
 /** Refuses anyone but the company's own admin. */
-const requireCompanysAdmin = (identity: Identity): void => {
+const requireCompanysAdmin = (identity: Person): void => {
   requireAdmin(identity);
   if (identity.staff) {
     throw roleErrors.create("role.forbidden");
@@ -178,7 +198,7 @@ export const companyAgent = async (
  */
 export const changeableAgent = async (
   env: Env,
-  identity: Identity,
+  identity: Person,
   agentId: unknown
 ): Promise<Agent> => {
   const agent =
@@ -200,7 +220,7 @@ export const changeableAgent = async (
  */
 export const readableAgent = async (
   env: Env,
-  identity: Identity,
+  identity: Person,
   agentId: unknown
 ): Promise<Agent> => {
   const agent =

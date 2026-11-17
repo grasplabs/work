@@ -1,5 +1,5 @@
 import { agentErrors } from "@grasp-os/shared/agent";
-import type { HeldAppCall } from "@grasp-os/shared/chat";
+import type { ChatChannel, HeldAppCall } from "@grasp-os/shared/chat";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { appIdSchema, chatIdSchema } from "@grasp-os/shared/ids";
@@ -190,11 +190,17 @@ const shownOf = async (env: Env, row: HeldAppCallRow): Promise<HeldAppCall> => {
   };
 };
 
-/** The App writes held for `person` in their chat `chatId`, oldest first, a page after `after` (`Workspace.heldAppCalls`). */
+/**
+ * The App writes held for `person` in their chat `chatId`, oldest first, a
+ * page after `after` (`Workspace.heldAppCalls`): only where they are shown
+ * and decided, the channel the chat came through (`via`: Grasp's own app,
+ * or a chat app's card, held.ts).
+ */
 export const heldAppCallsOf = async (
   env: Env,
   person: Pick<Identity, "userId">,
   chatId: string,
+  via: ChatChannel,
   after?: unknown
 ): Promise<HeldAppCall[]> => {
   const rows = await workspace(
@@ -203,6 +209,7 @@ export const heldAppCallsOf = async (
   ).heldAppCalls(
     chatId,
     person.userId,
+    via,
     Date.now(),
     typeof after === "string" ? after : undefined
   );
@@ -274,16 +281,16 @@ const runConfirmed = async (
 };
 
 /**
- * Confirms held App call `id` of `identity`'s chat `chatId` for exactly
- * the request whose SHA-256 is `requestHash`, and runs it, once. Throws
- * `agent.held_call_not_found` for one that doesn't wait for them so, and
- * the call's refusal or failure as it came; the chat's agent is told how
- * it ended.
+ * Confirms held App call `id` of `identity`'s chat `chatId`, through the
+ * channel it came through (`via`), for exactly the request whose SHA-256
+ * is `requestHash`, and runs it, once. Throws `agent.held_call_not_found`
+ * for one that doesn't wait for them so, and the call's refusal or failure
+ * as it came; the chat's agent is told how it ended.
  */
 export const confirmHeldAppCall = async (
   env: Env,
   identity: Pick<Identity, "userId">,
-  chatId: string,
+  { chatId, via }: { chatId: string; via: ChatChannel },
   id: string,
   requestHash: string
 ): Promise<void> => {
@@ -292,6 +299,7 @@ export const confirmHeldAppCall = async (
   const row = await chats.decideHeldAppCall(
     chatId,
     person.userId,
+    via,
     id,
     { confirm: true, requestHash },
     Date.now()
@@ -324,20 +332,21 @@ export const confirmHeldAppCall = async (
 };
 
 /**
- * Declines held App call `id` of `identity`'s chat `chatId`: it never
- * runs. Throws `agent.held_call_not_found` for one that doesn't wait for
- * them.
+ * Declines held App call `id` of `identity`'s chat `chatId`, through the
+ * channel it came through (`via`): it never runs. Throws
+ * `agent.held_call_not_found` for one that doesn't wait for them.
  */
 export const declineHeldAppCall = async (
   env: Env,
   identity: Pick<Identity, "userId">,
-  chatId: string,
+  { chatId, via }: { chatId: string; via: ChatChannel },
   id: string
 ): Promise<void> => {
   const chats = workspace(env, personalWorkspaceId(identity.userId));
   const row = await chats.decideHeldAppCall(
     chatId,
     identity.userId,
+    via,
     id,
     { confirm: false },
     Date.now()

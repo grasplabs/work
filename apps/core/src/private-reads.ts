@@ -50,8 +50,9 @@ import { workspace } from "./durable-objects.ts";
 // would write for others. Which writes those are, from the code:
 // - A write to an App (`env.apps.call`, a mutation or an action): its
 //   data is read by the App's members. Held in the chat for its person
-//   (held-app-calls.ts) while the chat is marked; refused in a chat app's
-//   conversation, which can't show the hold yet (GRA-1929).
+//   (held-app-calls.ts) while the chat is marked, in Grasp's own chat or
+//   on the card of the person's direct message in a chat app
+//   (channels/held.ts); refused in a chat app's thread others share.
 // - A request for a shared connection (`env.connections.request`): its
 //   reason is read by admins, and nothing holds it, so it is refused
 //   while the chat is marked (chat-connections.ts).

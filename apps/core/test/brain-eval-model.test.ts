@@ -32,6 +32,7 @@ import { answeringProvider } from "./model-provider.ts";
 import { spentMicros } from "./model-usage.ts";
 import { realProviderTakes, unreachableModel } from "./real-providers.ts";
 import { testBinding } from "./test-env.ts";
+import { withoutEmbedder } from "./without-embedder.ts";
 
 // The Brain evaluation against a real model (GRA-1813), on request only:
 // scripts/brain-eval-model.ts says how to run it and scores what it
@@ -142,11 +143,17 @@ describe("the Brain evaluation against a real model", () => {
       if (spent + most > budget) {
         return false;
       }
-      const recalled = await recallAs(env, idIn(people, asker), {
-        question: question.question,
-        budget: { tokens: packTokens },
-        personal: true,
-      });
+      // By words and exact parts, as the pack arm is defined and its
+      // earlier runs were made: never by the test model's meaning.
+      const recalled = await recallAs(
+        withoutEmbedder(env),
+        idIn(people, asker),
+        {
+          question: question.question,
+          budget: { tokens: packTokens },
+          personal: true,
+        }
+      );
       const pack = recalled.items
         .map(({ source, text }) => sourceBlock(source.id, text))
         .join("");

@@ -14,6 +14,7 @@ import { useRouter } from "@tanstack/react-router";
 import { useId, useState } from "react";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
+import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 
@@ -24,17 +25,57 @@ import { useCoreAction } from "../use-core-action.ts";
 // see; the one before stays as its history. Emptied, it loads nowhere. Core decides who may read and save each file; a
 // page shows one only to those core lets read it.
 
+/** What was typed and couldn't be saved before an editor opened. */
+interface Unsaved {
+  text: string;
+  change: string;
+  failure: string;
+}
+
+/** An editor's draft: what was typed, and the version it started from. */
+interface Draft {
+  text: string;
+  from: number;
+}
+
+/** A save tried: the change that names it, its text and the version it started from. */
+interface Tried {
+  change: string;
+  text: string;
+  after: number;
+}
+
+/** The draft an editor opens with: what was handed over, typed over no version. */
+const draftOf = (unsaved: Unsaved | undefined): Draft | undefined =>
+  unsaved === undefined ? undefined : { text: unsaved.text, from: 0 };
+
+/** The save an editor opens having tried: the one handed over, under its change. */
+const triedOf = (unsaved: Unsaved | undefined): Tried | undefined =>
+  unsaved === undefined
+    ? undefined
+    : { change: unsaved.change, text: unsaved.text, after: 0 };
+
 export const InstructionFileEditor = ({
   file,
   saved,
   label,
   description,
+  onSaved,
+  unsaved,
 }: {
   file: InstructionFileRef;
   /** The file as it is now; null while it was never written. */
   saved: InstructionFileText | null;
   label: string;
   description: string;
+  /** What else a save asks of core, once it landed and before the page is read again. */
+  onSaved?: (session: Session) => Promise<void>;
+  /**
+   * What was typed and couldn't be saved before this editor opened: its
+   * unsaved draft, from no version, its save to be tried again under the
+   * same change, and why it failed, shown until the next save.
+   */
+  unsaved?: Unsaved | undefined;
 }) => {
   const { t } = useLingui();
   const changedSince = t`Someone saved this file since you started. Put your changes aside to see their version, then make yours again.`;
@@ -43,17 +84,15 @@ export const InstructionFileEditor = ({
   const { busy, failure, run } = useCoreAction();
   // What they typed, and the version they started from: saved only after
   // that version, so a save never overwrites one they didn't see.
-  const [draft, setDraft] = useState<{ text: string; from: number }>();
+  const [draft, setDraft] = useState(draftOf(unsaved));
+  // Why the text handed over wasn't saved, until a save is tried here.
+  const [handedFailure, setHandedFailure] = useState(unsaved?.failure);
   // The last save tried, by the change that names it, its text and the
   // version it started from: the same text from the same version again
   // (one whose answer was lost) names the same change, so core saves it
   // once; any other text, a save from another version, or any save after
   // one went through, is a change of its own.
-  const [tried, setTried] = useState<{
-    change: string;
-    text: string;
-    after: number;
-  }>();
+  const [tried, setTried] = useState(triedOf(unsaved));
   const savedText = saved?.text ?? "";
   // A save the page now shows landed (its text, past the version it
   // started from) is done: its change is never sent again.
@@ -84,6 +123,7 @@ export const InstructionFileEditor = ({
         ? tried.change
         : crypto.randomUUID();
     setTried({ change, text: sent, after: draft.from });
+    setHandedFailure(undefined);
     void run(async (session) => {
       await changeThenRefresh(
         async () => {
@@ -95,6 +135,7 @@ export const InstructionFileEditor = ({
           });
           setDraft(undefined);
           setTried(undefined);
+          await onSaved?.(session);
         },
         async () => {
           await router.invalidate({ sync: true });
@@ -121,7 +162,7 @@ export const InstructionFileEditor = ({
       {stale ? (
         <ErrorText>{changedSince}</ErrorText>
       ) : (
-        <ErrorText>{failure}</ErrorText>
+        <ErrorText>{failure ?? handedFailure}</ErrorText>
       )}
       <div className="flex justify-end gap-2">
         {stale ? (
