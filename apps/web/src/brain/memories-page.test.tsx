@@ -191,6 +191,16 @@ const shown = async (refusal?: string, failedSaves = 0) => {
                   source: null,
                   yours: true,
                 }),
+                // Their own word: they are Acme's contact themselves.
+                memory("m-contact", "", {
+                  store: "own",
+                  attribute: "contact",
+                  object: { id: me.entity.id, name: null },
+                  value: null,
+                  statement: "I am Acme's contact",
+                  source: null,
+                  yours: true,
+                }),
                 // Drawn from what an agent fetched from a connection.
                 memory("m-fetched", "Expanding", {
                   attribute: "industry",
@@ -363,6 +373,7 @@ describe(MemoriesPage, () => {
       ].map((text) => listed.includes(text)),
       opened: [
         "Status: Paying",
+        "Contact: You",
         "Your own word",
         "Fetched from a connection, version 3",
         "Status: Prospect",
@@ -371,7 +382,7 @@ describe(MemoriesPage, () => {
       calls: calls.slice(1),
     }).toStrictEqual({
       listed: [true, true, true, true, true],
-      opened: [true, true, true, true, true],
+      opened: [true, true, true, true, true, true],
       calls: [
         "entities customer",
         "entities customer shared",

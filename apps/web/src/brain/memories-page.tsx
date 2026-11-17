@@ -64,6 +64,13 @@ import { useAsk, usePaged } from "./memories-asks.ts";
 // may read alone; what is theirs alone is marked so, as on the Sources
 // page. Texts are shown as text, never markup.
 
+/**
+ * The id of the entity that is the person themselves, in their own store
+ * (`brainMemories.ownEntity`), for the names the page shows: null while
+ * unknown.
+ */
+const OwnEntity = createContext<string | null>(null);
+
 /** A memory's key, for React and for `usePaged`. */
 const memoryKeyOf = ({ store, id }: BrainMemoryShown): string =>
   `${store}:${id}`;
@@ -594,10 +601,18 @@ const MemoryLine = ({
   const attributeLabel = useAttributeLabel();
   const { attribute, object, value, endedAt, confirmed } = memory;
   const label = attribute === null ? null : attributeLabel(attribute);
-  // What it holds: its value, or the entity a relation names.
+  const own = use(OwnEntity);
+  // What it holds: its value, or the entity a relation names (the person
+  // themselves, for their own entity in their own store).
   let held: string | null = value;
   if (object !== null) {
-    held = object.name ?? t`something without a name`;
+    held =
+      memory.store === "own" && object.id === own
+        ? t({
+            context: "the person themselves, as the Brain names them",
+            message: "You",
+          })
+        : (object.name ?? t`something without a name`);
   }
   const current = endedAt === null;
   // Offered on a side that disagrees with another until the person said
@@ -668,12 +683,6 @@ const MemoryLine = ({
     </Item>
   );
 };
-
-/**
- * The id of the entity that is the person themselves, in their own store
- * (`brainMemories.ownEntity`), for `EntityName`: null while unknown.
- */
-const OwnEntity = createContext<string | null>(null);
 
 /**
  * An entity's name, or a word for one without: the person themselves,
