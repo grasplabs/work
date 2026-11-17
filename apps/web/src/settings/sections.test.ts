@@ -35,8 +35,7 @@ describe("Settings sections", () => {
     expect({
       members: own.includes("members"),
       webhooks: own.includes("webhooks"),
-      outcomes: own.includes("outcomes"),
-    }).toStrictEqual({ members: true, webhooks: true, outcomes: true });
+    }).toStrictEqual({ members: true, webhooks: true });
   });
 
   it("keeps the company's members and outside callers from Grasp staff", () => {
@@ -44,12 +43,10 @@ describe("Settings sections", () => {
     expect({
       members: staff.includes("members"),
       webhooks: staff.includes("webhooks"),
-      outcomes: staff.includes("outcomes"),
       workspace: staff.includes("workspace"),
     }).toStrictEqual({
       members: false,
       webhooks: false,
-      outcomes: false,
       workspace: true,
     });
   });

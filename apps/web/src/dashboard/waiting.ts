@@ -1,6 +1,12 @@
+import type { Gap } from "@grasp-os/shared/brain";
 import type { PendingAction, UnknownOutcome } from "@grasp-os/shared/connect";
 import type { DecisionView } from "@grasp-os/shared/decisions";
 import type { HeldStart } from "@grasp-os/shared/held-starts";
+import type {
+  LinkToSend,
+  OnboardingView,
+  Programme,
+} from "@grasp-os/shared/onboarding";
 import { isMemberAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import type {
@@ -10,6 +16,7 @@ import type {
 } from "@grasp-os/shared/waiting";
 
 import type { PendingRequests } from "../activity/pending.tsx";
+import type { Outcomes } from "../inbox/everyones-outcomes.ts";
 import type { Loaded } from "../load-from-core.tsx";
 import type { NotificationsPage } from "./notifications-page.ts";
 
@@ -39,6 +46,20 @@ export interface Waiting {
   heldStarts: Loaded<HeldStart[]>;
   /** Versions of workflows whose bindings no admin approved, so their starts are refused. Admins only. */
   bindings?: Loaded<BindingApprovalItem[]>;
+  /** Every question the Brain still has open, asked of someone or not. Admins only. */
+  gaps?: Loaded<Gap[]>;
+  /** Where the onboarding's interviews stand, and the links to send. Admins, Grasp's staff included. */
+  interviews?: Loaded<Interviews>;
+  /** Everyone's open calls of unknown outcome, to follow up. The organization's own admins only. */
+  everyonesOutcomes?: Loaded<Outcomes>;
+}
+
+/** The onboarding as the inbox's Interviews item reads it, as Settings, Onboarding did. */
+export interface Interviews {
+  view: OnboardingView;
+  links: LinkToSend[];
+  /** Where the onboarding stands: the item goes once Grasp opens it. */
+  stage: Programme["stage"];
 }
 
 /** Who counts what waits: what they may act on follows from their role. */

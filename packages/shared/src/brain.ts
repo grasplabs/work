@@ -479,6 +479,13 @@ export interface BrainApi {
    */
   answerGap: (gapId: string, answer: string) => Promise<Gap>;
   /**
+   * The open gaps the person may answer from their inbox: every one the
+   * brain still has for the company's own admins, asked of someone or
+   * not; for anyone else only those asked of them. In the order the
+   * brain added them.
+   */
+  openGaps: () => Promise<Gap[]>;
+  /**
    * What taking a source or statements out of the brain takes with it,
    * nothing taken yet: for the company's admins.
    */

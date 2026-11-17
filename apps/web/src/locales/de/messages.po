@@ -346,6 +346,10 @@ msgstr "{count, plural, one {# Interview in Kalenderwoche {week}} other {# Inter
 msgid "{count, plural, one {# invited team not interviewed yet: {teams}.} other {# invited teams not interviewed yet: {teams}.}}"
 msgstr "{count, plural, one {# eingeladenes Team noch nicht interviewt: {teams}.} other {# eingeladene Teams noch nicht interviewt: {teams}.}}"
 
+#: src/inbox/inbox-page.tsx
+msgid "{count, plural, one {# item} other {# items}}"
+msgstr "{count, plural, one {# Eintrag} other {# Einträge}}"
+
 #: src/chat/subject-bar.tsx
 msgid "{count, plural, one {# more App this chat worked on} other {# more Apps this chat worked on}}"
 msgstr "{count, plural, one {# weitere App, an der dieser Chat gearbeitet hat} other {# weitere Apps, an denen dieser Chat gearbeitet hat}}"
@@ -538,6 +542,7 @@ msgid "{days, plural, one {The last # day} other {The last # days}}"
 msgstr "{days, plural, one {Der letzte Tag} other {Die letzten # Tage}}"
 
 #: src/chat/approval-words.ts
+#: src/inbox/item-detail.tsx
 msgid "{decided} by {by}"
 msgstr "{decided} von {by}"
 
@@ -605,6 +610,10 @@ msgstr "{failed, plural, one {# fehlgeschlagen in den letzten {days} Tagen} othe
 msgid "{failed, plural, one {# failed run} other {# failed runs}} of {name}"
 msgstr "{failed, plural, one {# fehlgeschlagener Lauf} other {# fehlgeschlagene Läufe}} von {name}"
 
+#: src/inbox/items.ts
+msgid "{failed, plural, one {An email didn’t reach someone} other {# emails didn’t reach their people}}"
+msgstr "{failed, plural, one {Eine E-Mail hat jemanden nicht erreicht} other {# E-Mails haben ihre Empfänger nicht erreicht}}"
+
 #: src/apps/data-model-changes.tsx
 msgid "{field} in {table} needs a change in code before this can be published."
 msgstr "{field} in {table} braucht eine Änderung im Code, bevor dies veröffentlicht werden kann."
@@ -631,6 +640,10 @@ msgstr "{found} wurde als Schadsoftware gemeldet, daher hat Grasp die damit gene
 msgid "{found}, approved for {name}, has an advisory it didn't have when it was approved. The approval stands: decide whether to update or remove the package."
 msgstr "Für {found}, genehmigt für {name}, gibt es einen Sicherheitshinweis, den es bei der Genehmigung noch nicht gab. Die Genehmigung bleibt bestehen: Entscheiden Sie, ob Sie das Paket aktualisieren oder entfernen."
 
+#: src/inbox/items.ts
+msgid "{fresh, plural, one {# new link to send} other {# new links to send}}"
+msgstr "{fresh, plural, one {# neuer Link zum Versenden} other {# neue Links zum Versenden}}"
+
 #: src/onboarding/interviews-progress.tsx
 msgid "{fresh, plural, one {One new link is ready to send, under “Links to send”.} other {# new links are ready to send, under “Links to send”.}}"
 msgstr "{fresh, plural, one {Ein neuer Link ist bereit zum Versenden, unter „Links zum Versenden“.} other {# neue Links sind bereit zum Versenden, unter „Links zum Versenden“.}}"
@@ -638,6 +651,10 @@ msgstr "{fresh, plural, one {Ein neuer Link ist bereit zum Versenden, unter „L
 #: src/onboarding/interviews-progress.tsx
 msgid "{freshCount, plural, one {# new link to send} other {# new links to send}}"
 msgstr "{freshCount, plural, one {# neuer Link zum Versenden} other {# neue Links zum Versenden}}"
+
+#: src/inbox/interviews-item.tsx
+msgid "{freshCount, plural, one {# new, as a list} other {# new, as a list}}"
+msgstr "{freshCount, plural, one {# neuer, als Liste} other {# neue, als Liste}}"
 
 #: src/onboarding/interviews-progress.tsx
 msgid "{freshCount, plural, one {The new link, as a list} other {The # new links, as a list}}"
@@ -756,6 +773,7 @@ msgstr "{label}:"
 msgid "{leads, plural, one {Thank you. I’ll start with this lead.} other {Thank you. I’ll start with these # leads.}}"
 msgstr "{leads, plural, one {Danke. Ich beginne mit dieser Teamleitung.} other {Danke. Ich beginne mit diesen # Teamleitungen.}}"
 
+#: src/inbox/interviews-item.tsx
 #: src/onboarding/interviews-progress.tsx
 msgid "{leadsHeard} of {leads}"
 msgstr "{leadsHeard} von {leads}"
@@ -1062,6 +1080,10 @@ msgstr "{openCount, plural, =0 {Nichts wartet auf Sie} =1 {Nur eine Sache für S
 msgid "{originals, plural, one {# uploaded original deleted} other {# uploaded originals deleted}}"
 msgstr "{originals, plural, one {# hochgeladenes Original gelöscht} other {# hochgeladene Originale gelöscht}}"
 
+#: src/inbox/interviews-item.tsx
+msgid "{outCount, plural, one {# out, as a list} other {# out, as a list}}"
+msgstr "{outCount, plural, one {# verschickt, als Liste} other {# verschickt, als Liste}}"
+
 #: src/onboarding/interviews-progress.tsx
 msgid "{outCount, plural, one {The link that is out, as a list} other {The # links that are out, as a list}}"
 msgstr "{outCount, plural, one {Der verfügbare Link als Liste} other {Die # verfügbaren Links als Liste}}"
@@ -1086,6 +1108,10 @@ msgstr "{people, plural, one {Auch der # Person in {projectName} Zugriff geben?}
 #: src/onboarding/about-story.tsx
 msgid "{percent}% known now"
 msgstr "{percent} % bekannt, jetzt"
+
+#: src/inbox/items.ts
+msgid "{person} · {connection}"
+msgstr "{person} · {connection}"
 
 #: src/workflows/activity-bar.tsx
 msgid "{person} approved {alias} for version {version}"
@@ -1127,6 +1153,14 @@ msgstr "{query} liest den Index {index}, den diese Tabelle nicht hat."
 #: src/apps/indexes-view.tsx
 msgid "{query} searches this table, which has no search."
 msgstr "{query} durchsucht diese Tabelle, die keine Suche hat."
+
+#: src/inbox/items.ts
+msgid "{quiet} is quiet"
+msgstr "{quiet} ist still"
+
+#: src/inbox/interviews-item.tsx
+msgid "{quietTeam} is quiet. A word from {quietLead}, their lead, usually helps."
+msgstr "{quietTeam} ist still. Ein Wort von {quietLead}, der Leitung, hilft meist."
 
 #: src/interview/closed.tsx
 msgid "{rating} of 5"
@@ -1280,10 +1314,6 @@ msgstr "{still, plural, one {Eine Suche findet einen Begriff noch an # Stelle.} 
 msgid "{subject} gets this permission from now on."
 msgstr "{subject} erhält diese Berechtigung ab jetzt."
 
-#: src/inbox/items.ts
-msgid "{subject} gets this permission once it is granted."
-msgstr "{subject} erhält diese Berechtigung, sobald sie erteilt ist."
-
 #: src/dashboard/pile-cards.tsx
 #: src/inbox/items.ts
 msgid "{subject}: {actions} on {object}"
@@ -1305,18 +1335,25 @@ msgstr "{table} braucht eine Änderung im Code, bevor dies veröffentlicht werde
 msgid "{talked, plural, one {I talked with # person.} other {I talked with # people.}}"
 msgstr "{talked, plural, one {Ich habe mit # Person gesprochen.} other {Ich habe mit # Personen gesprochen.}}"
 
+#: src/inbox/interviews-item.tsx
+msgid "{talked} of {asked}"
+msgstr "{talked} von {asked}"
+
 #: src/onboarding/interviews-progress.tsx
 msgid "{talked} of {of}"
 msgstr "{talked} von {of}"
 
+#: src/inbox/interviews-item.tsx
 #: src/onboarding/interviews-progress.tsx
 msgid "{team} · new"
 msgstr "{team} · neu"
 
+#: src/inbox/interviews-item.tsx
 #: src/onboarding/interviews-progress.tsx
 msgid "{team} · not out yet"
 msgstr "{team} · noch nicht verfügbar"
 
+#: src/inbox/interviews-item.tsx
 #: src/onboarding/interviews-progress.tsx
 msgid "{team} · our email didn’t reach them"
 msgstr "{team} · unsere E-Mail hat sie nicht erreicht"
@@ -1480,7 +1517,6 @@ msgid "{when}, for {person}, is on"
 msgstr "{when}, für {person}, ist an"
 
 #: src/dashboard/pile-cards.tsx
-#: src/inbox/item-detail.tsx
 msgid "{who} can't be granted later: it has to ask again."
 msgstr "{who} kann später nicht mehr erteilt werden: es muss erneut angefragt werden."
 
@@ -2425,6 +2461,11 @@ msgctxt "filter: nothing narrowed"
 msgid "All"
 msgstr "Alle"
 
+#: src/inbox/inbox-page.tsx
+msgctxt "inbox filter, short"
+msgid "All"
+msgstr "Alle"
+
 #: src/routes/_shell.workflows.index.tsx
 msgctxt "tab listing every workflow"
 msgid "All"
@@ -2433,6 +2474,10 @@ msgstr "Alle"
 #: src/grasp/frame/grasp-sidebar.tsx
 msgid "All chats"
 msgstr "Alle Chats"
+
+#: src/inbox/item-detail.tsx
+msgid "All items"
+msgstr "Alle Einträge"
 
 #: src/frame/part-words.tsx
 msgid "All languages"
@@ -2662,6 +2707,7 @@ msgstr "Seit diese Liste geladen wurde, ist eine andere Version dieser App verö
 
 #: src/brain/brain.ts
 #: src/chat/brain-questions.tsx
+#: src/inbox/item-detail.tsx
 msgid "Answer"
 msgstr "Antwort"
 
@@ -2676,10 +2722,6 @@ msgstr "Antworten bis"
 #: src/make/examples.ts
 msgid "Answer client questions"
 msgstr "Kundenfragen beantworten"
-
-#: src/inbox/item-detail.tsx
-msgid "Answer in the brain"
-msgstr "Im Gehirn beantworten"
 
 #: src/frame/part-words.tsx
 msgid "Answer ready"
@@ -2707,6 +2749,7 @@ msgid "Answered on {date}."
 msgstr "Beantwortet am {date}."
 
 #: src/brain/brain.ts
+#: src/inbox/item-detail.tsx
 msgid "Answered: {question}"
 msgstr "Beantwortet: {question}"
 
@@ -2842,10 +2885,12 @@ msgid "Approve it on the workflow's page"
 msgstr "Auf der Seite des Workflows freigeben"
 
 #: src/chat/approval-words.ts
+#: src/inbox/item-detail.tsx
 msgid "Approve it?"
 msgstr "Genehmigen?"
 
 #: src/chat/approval-words.ts
+#: src/inbox/item-detail.tsx
 msgid "Approve it? This cannot be undone."
 msgstr "Genehmigen? Das lässt sich nicht rückgängig machen."
 
@@ -2871,6 +2916,7 @@ msgstr "Freigeben, dann läuft es für das Team"
 
 #: src/apps/app-webhooks.tsx
 #: src/dashboard/runs-widget.tsx
+#: src/inbox/item-detail.tsx
 msgid "Approved"
 msgstr "Genehmigt"
 
@@ -2911,6 +2957,10 @@ msgstr "Freigegeben: {alias}."
 msgid "Approved: {approved}"
 msgstr "Genehmigt: {approved}"
 
+#: src/inbox/item-detail.tsx
+msgid "Approved: {title}"
+msgstr "Freigegeben: {title}"
+
 #: src/dashboard/pile-cards.tsx
 #: src/inbox/item-detail.tsx
 msgid "Approved: {who}."
@@ -2921,6 +2971,7 @@ msgid "Approver for new tools named"
 msgstr "Freigabe für neue Tools benannt"
 
 #: src/chat/approval-words.ts
+#: src/inbox/item-detail.tsx
 msgid "Approving"
 msgstr "Wird genehmigt"
 
@@ -2936,11 +2987,15 @@ msgstr "Wird genehmigt"
 msgid "Apps"
 msgstr "Apps"
 
+#: src/inbox/inbox-page.tsx
+msgctxt "inbox filter, short"
+msgid "Apps"
+msgstr "Apps"
+
 #: src/connections/connection-list.tsx
 msgid "Apps and agents with a permission"
 msgstr "Apps und Agenten mit einer Berechtigung"
 
-#: src/inbox/inbox-page.tsx
 #: src/inbox/sidebar-inbox.tsx
 msgctxt "inbox filter"
 msgid "Apps and connections"
@@ -3083,6 +3138,7 @@ msgid "Ask for access for this App"
 msgstr "Zugriff für diese App anfragen"
 
 #: src/chat/approval-words.ts
+#: src/inbox/item-detail.tsx
 msgid "Ask for changes"
 msgstr "Änderungen anfragen"
 
@@ -3103,6 +3159,10 @@ msgstr "Grasp um ein Widget bitten"
 #: src/brain/work-knowledge.tsx
 msgid "Ask more people"
 msgstr "Mehr Menschen fragen"
+
+#: src/inbox/item-detail.tsx
+msgid "Ask the {owner}"
+msgstr "{owner} fragen"
 
 #: src/brain/brain.ts
 #: src/settings/stephen-card.tsx
@@ -3181,9 +3241,32 @@ msgstr "vom Agenten angefragt, in dessen Chat"
 msgid "Asked it, or it works for them on a schedule"
 msgstr "Haben ihn gefragt, oder er arbeitet nach Zeitplan für sie"
 
+#: src/inbox/item-detail.tsx
+msgid "Asked of the {owner}"
+msgstr "An {owner} gestellt"
+
+#: src/inbox/inbox-page.tsx
+#: src/inbox/sidebar-inbox.tsx
+msgctxt "inbox filter"
+msgid "Asked of you"
+msgstr "An dich gestellt"
+
+#: src/inbox/inbox-kind.tsx
+msgctxt "inbox item kind"
+msgid "Asked of you"
+msgstr "An dich gestellt"
+
+#: src/inbox/item-detail.tsx
+msgid "Asked of you as the {owner}"
+msgstr "An dich gestellt als {owner}"
+
 #: src/workflows/go-lives-waiting.tsx
 msgid "Asked on"
 msgstr "Beantragt am"
+
+#: src/inbox/item-detail.tsx
+msgid "Asked the {owner}: {question}"
+msgstr "{owner} gefragt: {question}"
 
 #: src/activity/audit-words.ts
 msgid "Asked the agent to fix a run"
@@ -3289,6 +3372,7 @@ msgstr "Verfügbar, über Composio"
 #: src/chat/asked-questions.tsx
 #: src/frame/part-words.tsx
 #: src/grasp/frame/grasp-sidebar.tsx
+#: src/inbox/item-detail.tsx
 #: src/onboarding/setup-frame.tsx
 #: src/tour/tour-layer.tsx
 #: src/workflows/requests/request-detail.tsx
@@ -3314,10 +3398,6 @@ msgstr "Zurück zu Verweis {number}"
 #: src/knowledge/document.tsx
 msgid "Back to the current version"
 msgstr "Zurück zur aktuellen Version"
-
-#: src/inbox/item-detail.tsx
-msgid "Back to the list"
-msgstr "Zurück zur Liste"
 
 #: src/apps/app-workspace.tsx
 msgid "Back to your version"
@@ -3431,6 +3511,12 @@ msgstr "Hindernis"
 msgid "Blockers"
 msgstr "Hindernisse"
 
+#: src/inbox/inbox-page.tsx
+#: src/inbox/item-detail.tsx
+msgctxt "inbox: something waits on this item"
+msgid "Blocks work"
+msgstr "Hält Arbeit auf"
+
 #: src/brain/brain-atlas.ts
 msgid "Board"
 msgstr "Vorstand"
@@ -3463,10 +3549,14 @@ msgid "Brain"
 msgstr "Gehirn"
 
 #: src/inbox/inbox-page.tsx
-#: src/inbox/sidebar-inbox.tsx
-msgctxt "inbox filter"
+msgctxt "inbox filter, short"
 msgid "Brain"
-msgstr "Gehirn"
+msgstr "Brain"
+
+#: src/inbox/inbox-kind.tsx
+msgctxt "inbox item kind"
+msgid "Brain question"
+msgstr "Frage im Brain"
 
 #: src/frame/part-words.tsx
 #: src/frame/site-header.tsx
@@ -3560,6 +3650,7 @@ msgstr "Über die Bedeutung"
 msgid "By relevance"
 msgstr "Nach Relevanz"
 
+#: src/inbox/interviews-item.tsx
 #: src/onboarding/interviews-progress.tsx
 msgid "By team"
 msgstr "Nach Team"
@@ -3691,6 +3782,7 @@ msgid "Candidate"
 msgstr "Kandidat"
 
 #: src/chat/approval-words.ts
+#: src/inbox/item-detail.tsx
 msgid "cannot be undone"
 msgstr "lässt sich nicht rückgängig machen"
 
@@ -3707,7 +3799,6 @@ msgid "Carry on there. Lost that device? Ask whoever sent you the link for a new
 msgstr "Machen Sie dort weiter. Haben Sie das Gerät nicht mehr? Bitten Sie die Person, die Ihnen den Link geschickt hat, um einen Neustart."
 
 #: src/projects/project-view.tsx
-#: src/settings/unknown-outcomes.tsx
 msgid "Change"
 msgstr "Änderung"
 
@@ -3909,12 +4000,9 @@ msgid "Changes"
 msgstr "Ändert"
 
 #: src/chat/approval-words.ts
+#: src/inbox/item-detail.tsx
 msgid "Changes asked"
 msgstr "Änderungen angefragt"
-
-#: src/settings/unknown-outcomes.tsx
-msgid "Changes Grasp sent for someone whose answer was lost, so nobody can tell whether they took effect. Only that person can say what happened, on their dashboard; follow up with them."
-msgstr "Änderungen, die Grasp für jemanden gesendet hat und deren Antwort verloren ging, sodass niemand sagen kann, ob sie wirksam wurden. Nur diese Person kann auf ihrem Dashboard sagen, was geschehen ist; fragen Sie bei ihr nach."
 
 #: src/apps/app-history.tsx
 #: src/apps/publish.tsx
@@ -4288,6 +4376,7 @@ msgstr "Fast an der Grenze von {limit} Zeichen"
 msgid "Close without an answer"
 msgstr "Ohne Antwort schließen"
 
+#: src/inbox/interviews-item.tsx
 #: src/onboarding/interviews-progress.tsx
 msgid "Closes {closes}"
 msgstr "Endet am {closes}"
@@ -4312,6 +4401,10 @@ msgstr "Münzen"
 #: src/onboarding/interviews-progress.tsx
 msgid "colleagues talked"
 msgstr "Kolleginnen und Kollegen gesprochen"
+
+#: src/inbox/interviews-item.tsx
+msgid "Colleagues talked"
+msgstr "Kollegen gesprochen"
 
 #: src/apps/app-access-requests.tsx
 #: src/knowledge/document.tsx
@@ -4580,9 +4673,9 @@ msgstr "Ihr Microsoft 365 wird verbunden"
 
 #: src/apps/app-access-requests.tsx
 #: src/apps/resource-bindings.tsx
+#: src/inbox/item-detail.tsx
 #: src/inbox/items.ts
 #: src/settings/ai-providers.tsx
-#: src/settings/unknown-outcomes.tsx
 #: src/workflows/workflow-triggers.tsx
 msgid "Connection"
 msgstr "Verbindung"
@@ -4658,11 +4751,6 @@ msgstr "Inhalt"
 msgctxt "lesson evidence"
 msgid "Contested"
 msgstr "Umstritten"
-
-#: src/inbox/item-detail.tsx
-msgctxt "inbox item section"
-msgid "Context"
-msgstr "Kontext"
 
 #: src/interview/before.tsx
 #: src/onboarding/about-story.tsx
@@ -4764,6 +4852,7 @@ msgstr "Details kopieren"
 msgid "Copy the example"
 msgstr "Beispiel kopieren"
 
+#: src/inbox/interviews-item.tsx
 #: src/onboarding/interviews-progress.tsx
 msgid "Copy the link for {name}"
 msgstr "Link für {name} kopieren"
@@ -4811,6 +4900,7 @@ msgid "Could not answer"
 msgstr "Konnte nicht antworten"
 
 #: src/chat/approval-words.ts
+#: src/inbox/item-detail.tsx
 msgid "Could not approve"
 msgstr "Konnte nicht genehmigen"
 
@@ -4834,6 +4924,7 @@ msgid "Could not copy"
 msgstr "Konnte nicht kopiert werden"
 
 #: src/chat/approval-words.ts
+#: src/inbox/item-detail.tsx
 msgid "Could not decline"
 msgstr "Konnte nicht ablehnen"
 
@@ -4886,6 +4977,7 @@ msgstr "Nicht gespeichert. Ihr Name bleibt stehen."
 #: src/chat/approval-words.ts
 #: src/chat/asked-questions.tsx
 #: src/chat/chat-composer.tsx
+#: src/inbox/item-detail.tsx
 #: src/settings/composer-settings.tsx
 #: src/settings/invitations.tsx
 msgid "Could not send"
@@ -5060,6 +5152,8 @@ msgctxt "a calendar's grid of one day"
 msgid "Day"
 msgstr "Tag"
 
+#: src/inbox/interviews-item.tsx
+#: src/inbox/items.ts
 #: src/onboarding/interviews-progress.tsx
 msgid "Day {day} of {days}"
 msgstr "Tag {day} von {days}"
@@ -5115,8 +5209,8 @@ msgid "Decline"
 msgstr "Ablehnen"
 
 #: src/inbox/item-detail.tsx
-msgid "Decline starting {name}"
-msgstr "Start von {name} ablehnen"
+msgid "Declined"
+msgstr "Abgelehnt"
 
 #: src/chat/approval-words.ts
 msgctxt "an agent's request"
@@ -5124,10 +5218,11 @@ msgid "Declined"
 msgstr "Abgelehnt"
 
 #: src/inbox/item-detail.tsx
-msgid "Declined: {name}."
-msgstr "Abgelehnt: {name}."
+msgid "Declined: {title}"
+msgstr "Abgelehnt: {title}"
 
 #: src/chat/approval-words.ts
+#: src/inbox/item-detail.tsx
 msgid "Declining"
 msgstr "Wird abgelehnt"
 
@@ -5303,6 +5398,7 @@ msgstr "Neu gestaltet"
 #: src/activity/audit-event.tsx
 #: src/activity/audit-log.tsx
 #: src/chat/approval-words.ts
+#: src/inbox/item-detail.tsx
 #: src/knowledge/document.tsx
 #: src/routes/_shell.brain.$noteId.tsx
 #: src/settings/event-sources.tsx
@@ -5443,10 +5539,6 @@ msgstr "Dither"
 msgid "Do it"
 msgstr "Erledigen"
 
-#: src/routes/_shell.settings.onboarding.tsx
-msgid "Do it now"
-msgstr "Jetzt erledigen"
-
 #: src/onboarding/setup-steps.tsx
 msgid "Do this later"
 msgstr "Später erledigen"
@@ -5542,11 +5634,6 @@ msgstr "Erledigt"
 msgctxt "an answer is done"
 msgid "Done"
 msgstr "Fertig"
-
-#: src/inbox/inbox-page.tsx
-msgctxt "inbox tab: what someone dealt with"
-msgid "Done"
-msgstr "Erledigt"
 
 #: src/tour/tour-layer.tsx
 msgctxt "tour"
@@ -5712,6 +5799,10 @@ msgstr "Jedes Ereignis dieses Typs aus der Quelle startet einen Lauf, mit seinen
 msgid "Each kind of work as the company has it, or for fewer people. Never for more."
 msgstr "Jede Art von Arbeit so, wie das Unternehmen sie hat, oder für weniger Personen. Nie für mehr."
 
+#: src/inbox/interviews-item.tsx
+msgid "Each link is its owner's own: send it only to them."
+msgstr "Jeder Link gehört einer Person: Schick ihn nur ihr."
+
 #: src/workflows/workflow-settings.tsx
 msgid "Each of the workflow's model tasks is taken to reach every call the workflow makes."
 msgstr "Von jeder Modellaufgabe des Workflows wird angenommen, dass sie jeden Aufruf des Workflows erreicht."
@@ -5758,6 +5849,7 @@ msgstr "{path} wird bearbeitet"
 msgid "Editing a workflow"
 msgstr "Ein Workflow wird bearbeitet"
 
+#: src/inbox/interviews-item.tsx
 #: src/onboarding/interviews-progress.tsx
 #: src/routes/_shell.settings.profile.tsx
 #: src/workflows/requests/request-summary.tsx
@@ -6026,6 +6118,10 @@ msgstr "Alle in einem Projekt, in dem Sie nicht sind"
 msgid "Everyone in it · {shownRole}"
 msgstr "Alle darin · {shownRole}"
 
+#: src/inbox/items.ts
+msgid "Everyone in the company reads your answer, with your name."
+msgstr "Alle im Unternehmen lesen deine Antwort, mit deinem Namen."
+
 #: src/knowledge/new-collection.tsx
 msgid "Everyone in the organization, and their agents."
 msgstr "Alle in der Organisation und ihre Agenten."
@@ -6052,11 +6148,6 @@ msgstr "Alle mit Grasp"
 #: src/people/people-teams-picker.tsx
 msgid "Everyone with the {name} role"
 msgstr "Alle mit der Rolle {name}"
-
-#: src/inbox/inbox-page.tsx
-msgctxt "inbox filter"
-msgid "Everything"
-msgstr "Alles"
 
 #: src/workflows/business-process.tsx
 msgid "Everything around employees, from hiring to leaving."
@@ -6132,6 +6223,10 @@ msgstr "zusätzlich erwartet, aus Entwürfen und Tests"
 #: src/dashboard/standard-widgets.tsx
 msgid "Expected return"
 msgstr "Erwarteter Ertrag"
+
+#: src/inbox/item-detail.tsx
+msgid "Expired"
+msgstr "Abgelaufen"
 
 #: src/chat/approval-words.ts
 msgctxt "an agent's request"
@@ -6231,6 +6326,10 @@ msgstr "Fehlgeschlagen: {failed}"
 msgid "Fallbacks"
 msgstr "Ausweichmodelle"
 
+#: src/inbox/interviews-item.tsx
+msgid "Fewer than {least} of {asked}"
+msgstr "Weniger als {least} von {asked}"
+
 #: src/onboarding/interviews-progress.tsx
 msgid "Fewer than {least} of {of}"
 msgstr "Weniger als {least} von {of}"
@@ -6326,11 +6425,6 @@ msgstr "Zu sendende Dateien"
 #: src/workflows/start-run.tsx
 msgid "Fill this in."
 msgstr "Bitte ausfüllen."
-
-#: src/inbox/inbox-page.tsx
-msgctxt "inbox: filter button"
-msgid "Filter"
-msgstr "Filter"
 
 #: src/brain/brain-transcript.tsx
 msgctxt "open the filters"
@@ -6486,6 +6580,8 @@ msgid "Footnote {number}"
 msgstr "Fußnote {number}"
 
 #: src/activity/audit-event.tsx
+#: src/inbox/item-detail.tsx
+#: src/inbox/items.ts
 msgid "For"
 msgstr "Für"
 
@@ -6499,10 +6595,6 @@ msgstr "Für {0}"
 msgid "For {0}, who was asked"
 msgstr "Für {0}, die oder der gefragt wurde"
 
-#: src/inbox/item-detail.tsx
-msgid "For {person}"
-msgstr "Für {person}"
-
 #: src/agents/agent-wakes.tsx
 msgid "For {person}: {opening}"
 msgstr "Für {person}: {opening}"
@@ -6514,10 +6606,6 @@ msgstr "Für {person}: {opening} · {last}"
 #: src/settings/erasures.tsx
 msgid "For an address your company gave to someone else. Anyone signing in with it then gets in, {name} too if your sign-in provider still has it for them."
 msgstr "Für eine Adresse, die Ihr Unternehmen jemand anderem gegeben hat. Wer sich damit anmeldet, kommt dann hinein, auch {name}, wenn Ihr Anmeldedienst sie noch für diese Person führt."
-
-#: src/inbox/item-detail.tsx
-msgid "For an admin"
-msgstr "Für Admins"
 
 #: src/agents/agent-page.tsx
 msgid "For each app, under Access"
@@ -6557,8 +6645,8 @@ msgid "For Stephen's requests, about “{label}” ({why}), do this: {proposal}"
 msgstr "Für Stephens Anfragen, zu „{label}“ ({why}), tu Folgendes: {proposal}"
 
 #: src/inbox/item-detail.tsx
-msgid "For the {role}"
-msgstr "Für: {role}"
+msgid "For the {owner}"
+msgstr "Für {owner}"
 
 #: src/agents/agent-wakes.tsx
 msgid "For whom"
@@ -6786,6 +6874,10 @@ msgstr "Erlauben"
 msgid "Grant {who}?"
 msgstr "{who} erteilen?"
 
+#: src/inbox/item-detail.tsx
+msgid "Grant it"
+msgstr "Erteilen"
+
 #: src/activity/audit-words.ts
 msgid "Granted a permission"
 msgstr "Eine Berechtigung erteilt"
@@ -6895,6 +6987,10 @@ msgstr "Grasp erstellt es …"
 #: src/dashboard/widget-progress.tsx
 msgid "Grasp is starting on the widget…"
 msgstr "Grasp beginnt mit dem Widget …"
+
+#: src/inbox/interviews-item.tsx
+msgid "Grasp is still putting the agreements in place. The links go out once that is done."
+msgstr "Grasp schließt noch die Vereinbarungen ab. Die Links gehen raus, sobald das erledigt ist."
 
 #: src/onboarding/interviews-progress.tsx
 msgid "Grasp is still putting the agreements in place. Your people’s links go out once that is done."
@@ -7632,6 +7728,13 @@ msgstr "Interviewt: {role}"
 
 #: src/brain/brain-log.tsx
 #: src/brain/brain.ts
+#: src/inbox/interviews-item.tsx
+#: src/inbox/items.ts
+msgid "Interviews"
+msgstr "Interviews"
+
+#: src/inbox/inbox-kind.tsx
+msgctxt "inbox item kind"
 msgid "Interviews"
 msgstr "Interviews"
 
@@ -7733,6 +7836,10 @@ msgstr "Er deklariert keine Aufgaben."
 msgid "It didn't answer."
 msgstr "Er hat nicht geantwortet."
 
+#: src/inbox/item-detail.tsx
+msgid "It didn't go through"
+msgstr "Das hat nicht geklappt"
+
 #: src/dashboard/outcome-card.tsx
 #: src/inbox/item-detail.tsx
 msgid "It didn't happen"
@@ -7742,6 +7849,10 @@ msgstr "Es ist nicht geschehen"
 #: src/inbox/item-detail.tsx
 msgid "It didn't happen: {who}"
 msgstr "Es ist nicht geschehen: {who}"
+
+#: src/inbox/inbox-page.tsx
+msgid "It didn't load"
+msgstr "Nicht geladen"
 
 #: src/apps/publish-errors.ts
 msgid "It doesn't pass its checks. Fix the problems, then share."
@@ -8004,6 +8115,10 @@ msgstr "Der Zugriff ist abgelaufen. Melden Sie sich mit demselben Konto erneut a
 #: src/settings/ai-providers.tsx
 msgid "Its account is out of credit."
 msgstr "Das Guthaben des Kontos ist aufgebraucht."
+
+#: src/inbox/item-detail.tsx
+msgid "Its answer was lost: nobody can tell whether it took effect."
+msgstr "Die Antwort ging verloren: Niemand weiß, ob es gewirkt hat."
 
 #: src/projects/project-view.tsx
 msgid "Its apps and workflows aren’t deleted, and nothing in it is shared with the project, so nobody loses access."
@@ -8347,6 +8462,7 @@ msgstr "Von links nach rechts anordnen"
 msgid "Lay it out top to bottom"
 msgstr "Von oben nach unten anordnen"
 
+#: src/inbox/interviews-item.tsx
 #: src/onboarding/interviews-progress.tsx
 msgid "Lead not yet"
 msgstr "Teamleitung noch nicht"
@@ -8355,6 +8471,7 @@ msgstr "Teamleitung noch nicht"
 msgid "Lead of {name}"
 msgstr "Teamleitung von {name}"
 
+#: src/inbox/interviews-item.tsx
 #: src/onboarding/interviews-progress.tsx
 msgid "Lead talked"
 msgstr "Teamleitung hat gesprochen"
@@ -8429,6 +8546,10 @@ msgstr "Loslassen, um sie hinzuzufügen"
 msgid "Let Grasp’s mail through"
 msgstr "Lassen Sie die E-Mails von Grasp durch"
 
+#: src/inbox/item-detail.tsx
+msgid "Let it go live"
+msgstr "Live schalten"
+
 #: src/settings/erasures.tsx
 msgid "Let it in"
 msgstr "Zulassen"
@@ -8448,10 +8569,6 @@ msgstr "Jemandem erlaubt, eine App zu besuchen"
 #: src/inbox/items.ts
 msgid "Let version {version} of {name} go live?"
 msgstr "Version {version} von {name} live schalten?"
-
-#: src/inbox/item-detail.tsx
-msgid "Let version {version} of {who} go live"
-msgstr "Version {version} von {who} live schalten"
 
 #: src/workflows/workflow-status.tsx
 msgid "Let version {version} of {who} run for the team"
@@ -8515,6 +8632,7 @@ msgstr "Linien"
 #: src/apps/app-own-link.tsx
 #: src/apps/app-settings.tsx
 #: src/apps/app-workspace.tsx
+#: src/inbox/interviews-item.tsx
 #: src/onboarding/interviews-progress.tsx
 #: src/settings/chat-accounts.tsx
 msgid "Link"
@@ -8556,6 +8674,7 @@ msgstr "Links können hier nicht geöffnet werden."
 msgid "Links to"
 msgstr "Verweist auf"
 
+#: src/inbox/interviews-item.tsx
 #: src/onboarding/interviews-progress.tsx
 msgid "Links to send"
 msgstr "Links zum Versenden"
@@ -8592,10 +8711,6 @@ msgstr "Live"
 #: src/brain/brain.ts
 msgid "Live, being measured"
 msgstr "Live, wird gemessen"
-
-#: src/inbox/item-detail.tsx
-msgid "Live: {who}, version {version}."
-msgstr "Live: {who}, Version {version}."
 
 #: src/frame/page-failed.tsx
 msgid "Loaded"
@@ -9158,6 +9273,7 @@ msgstr "Meine Version der App ist nicht gestartet. Finde heraus, warum, und behe
 #: src/apps/app-settings.tsx
 #: src/apps/field-editor.tsx
 #: src/connections/http-connections.tsx
+#: src/inbox/interviews-item.tsx
 #: src/knowledge/new-collection.tsx
 #: src/knowledge/new-document.tsx
 #: src/onboarding/interviews-progress.tsx
@@ -9352,11 +9468,6 @@ msgstr "Neu: „{label}“"
 msgid "Newer"
 msgstr "Neuer"
 
-#: src/inbox/inbox-page.tsx
-msgctxt "inbox sort"
-msgid "Newest first"
-msgstr "Neueste zuerst"
-
 #: src/workflows/item-test.tsx
 msgid "Newest item first. Nothing was sent or changed: every call was answered from what you gave."
 msgstr "Neuestes Element zuerst. Nichts wurde gesendet oder geändert: Jeder Aufruf wurde mit Ihren Angaben beantwortet."
@@ -9386,11 +9497,6 @@ msgstr "Nächste Person"
 #: src/workflows/workflow-triggers.tsx
 msgid "Next run: {next}"
 msgstr "Nächster Lauf: {next}"
-
-#: src/inbox/item-detail.tsx
-msgctxt "inbox: the action that settles an item"
-msgid "Next step"
-msgstr "Nächster Schritt"
 
 #: src/onboarding/send-plan-form.tsx
 msgid "Next week"
@@ -9473,10 +9579,6 @@ msgstr "Noch keine Apps. Apps entstehen im Chat."
 #: src/workflows/business-process.tsx
 msgid "No business process"
 msgstr "Kein Geschäftsprozess"
-
-#: src/settings/unknown-outcomes.tsx
-msgid "No call of unknown outcome is open."
-msgstr "Kein Aufruf mit unbekanntem Ergebnis ist offen."
 
 #: src/apps/app-data.tsx
 msgid "No changes are kept for this record."
@@ -10038,6 +10140,7 @@ msgstr "Funktioniert nicht"
 #: src/agents/agent-page.tsx
 #: src/apps/publish.tsx
 #: src/chat/approval-words.ts
+#: src/inbox/item-detail.tsx
 msgid "Not yet"
 msgstr "Noch nicht"
 
@@ -10083,10 +10186,6 @@ msgstr "Notiert. Wir melden uns, um es mit Ihnen auf die Laptops zu bringen."
 #: src/routes/_shell.integrations.index.tsx
 msgid "Nothing connected yet."
 msgstr "Noch nichts verbunden."
-
-#: src/inbox/inbox-page.tsx
-msgid "Nothing dealt with yet. What you decide here shows up in this list, and in the audit trail."
-msgstr "Noch nichts erledigt. Was Sie hier entscheiden, erscheint in dieser Liste und im Prüfprotokoll."
 
 #: src/chat/chat-composer.tsx
 #: src/onboarding/place-picker.tsx
@@ -10228,7 +10327,6 @@ msgstr "Nichts wartet auf Sie."
 msgid "Nothing waits on you"
 msgstr "Nichts wartet auf Sie"
 
-#: src/inbox/inbox-page.tsx
 #: src/workflows/requests/request-table.tsx
 msgid "Nothing waits on you."
 msgstr "Nichts wartet auf Sie."
@@ -10335,18 +10433,13 @@ msgstr "Älter"
 msgid "Older changes"
 msgstr "Ältere Änderungen"
 
+#: src/inbox/inbox-page.tsx
+msgid "Older failed workflows are on the <0>dashboard</0>."
+msgstr "Ältere fehlgeschlagene Workflows stehen auf dem <0>Dashboard</0>."
+
 #: src/brain/sources-page.tsx
 msgid "Older versions"
 msgstr "Ältere Versionen"
-
-#: src/inbox/inbox-page.tsx
-msgid "Older workflows that failed are on the <0>dashboard</0>."
-msgstr "Ältere fehlgeschlagene Workflows finden Sie im <0>Dashboard</0>."
-
-#: src/inbox/inbox-page.tsx
-msgctxt "inbox sort"
-msgid "Oldest first"
-msgstr "Älteste zuerst"
 
 #: src/agents/agent-facts.tsx
 #: src/agents/agent-page.tsx
@@ -10427,11 +10520,6 @@ msgstr "Neue Mitarbeitende einarbeiten"
 msgid "Onboard a new hire: laptop, accounts and a first-week plan."
 msgstr "Neue Mitarbeitende einarbeiten: Laptop, Konten und ein Plan für die erste Woche."
 
-#: src/routes/_shell.settings.onboarding.tsx
-#: src/settings/sections.ts
-msgid "Onboarding"
-msgstr "Onboarding"
-
 #: src/settings/erasures.tsx
 msgid "Onboarding interview"
 msgstr "Onboarding-Interview"
@@ -10475,6 +10563,10 @@ msgstr "Ein echter Fall"
 #: src/chat/connection-requests.tsx
 msgid "Only"
 msgstr "Nur"
+
+#: src/inbox/item-detail.tsx
+msgid "Only {person} can say whether it happened."
+msgstr "Nur {person} kann sagen, ob es passiert ist."
 
 #: src/settings/use-team-change.ts
 msgid "Only admins can change teams."
@@ -10685,6 +10777,11 @@ msgstr "Als ganze Seite öffnen"
 msgid "Open in full"
 msgstr "Vollständig öffnen"
 
+#: src/inbox/sidebar-inbox.tsx
+msgctxt "inbox filter"
+msgid "Open in the Brain"
+msgstr "Offen im Brain"
+
 #: src/dashboard/in-inbox.tsx
 msgid "Open in the inbox: {title}"
 msgstr "Im Posteingang öffnen: {title}"
@@ -10696,11 +10793,6 @@ msgstr "Link öffnen"
 #: src/dashboard/runs-widget.tsx
 msgid "Open now"
 msgstr "Jetzt offen"
-
-#: src/inbox/inbox-kind.tsx
-msgctxt "inbox item kind"
-msgid "Open question"
-msgstr "Offene Frage"
 
 #: src/chat/brain-questions.tsx
 #: src/routes/_shell.brain.$noteId.tsx
@@ -10761,11 +10853,7 @@ msgstr "Offen bis"
 msgid "Open until {until}"
 msgstr "Offen bis {until}"
 
-#: src/inbox/item-detail.tsx
-msgid "Open where it lives"
-msgstr "Dort öffnen, wo es liegt"
-
-#: src/routes/_shell.settings.onboarding.tsx
+#: src/inbox/interviews-item.tsx
 msgid "Open your onboarding"
 msgstr "Ihr Onboarding öffnen"
 
@@ -10895,6 +10983,10 @@ msgstr "Sonst"
 #: src/onboarding/failed-mail.tsx
 msgid "Our email didn’t reach {names}. Send them their link yourself from Links to send, or ask Grasp to check their address."
 msgstr "Unsere E-Mail hat {names} nicht erreicht. Senden Sie den Link selbst über „Links zum Versenden“, oder bitten Sie Grasp, die Adresse zu prüfen."
+
+#: src/inbox/interviews-item.tsx
+msgid "Our email didn’t reach {unreached}. Copy their link below and send it yourself."
+msgstr "Unsere E-Mail hat {unreached} nicht erreicht. Kopiere den Link unten und schick ihn selbst."
 
 #: src/onboarding/about-story.tsx
 msgid "Our first conversation gave me the big picture. Now I need the details."
@@ -11121,6 +11213,10 @@ msgstr "Pausiert"
 msgid "Paused outside Grasp"
 msgstr "Außerhalb von Grasp pausiert"
 
+#: src/inbox/interviews-item.tsx
+msgid "Paused: no link opens and none goes out."
+msgstr "Pausiert: Kein Link öffnet sich und keiner geht raus."
+
 #: src/onboarding/interviews-progress.tsx
 msgid "Paused: no link opens and none goes out. The links that are due go out once they run again."
 msgstr "Pausiert: Kein Link öffnet sich, und keiner geht raus. Die fälligen Links gehen raus, sobald sie wieder laufen."
@@ -11249,7 +11345,6 @@ msgid "Permission to invite guests"
 msgstr "Berechtigung, Gäste einzuladen"
 
 #: src/activity/audit-event.tsx
-#: src/settings/unknown-outcomes.tsx
 msgid "Person"
 msgstr "Person"
 
@@ -11330,6 +11425,10 @@ msgstr "Orte"
 #: src/routes/_shell.settings.billing.tsx
 msgid "Plan"
 msgstr "Tarif"
+
+#: src/inbox/items.ts
+msgid "Plan the interviews and send the links"
+msgstr "Interviews planen und Links versenden"
 
 #: src/brain/brain-atlas.ts
 msgid "Plans and goals"
@@ -11559,6 +11658,10 @@ msgstr "Abfragen von {app}"
 #: src/activity/pending.tsx
 msgid "Queries, mutations and actions of {app}"
 msgstr "Abfragen, Mutationen und Aktionen von {app}"
+
+#: src/inbox/item-detail.tsx
+msgid "Question"
+msgstr "Frage"
 
 #: src/chat/suggestions.tsx
 msgid "Questions to start with"
@@ -11809,7 +11912,7 @@ msgstr "Bereit zum Senden"
 msgid "Real run"
 msgstr "Echter Lauf"
 
-#: src/settings/unknown-outcomes.tsx
+#: src/inbox/item-detail.tsx
 msgid "Receipt"
 msgstr "Beleg"
 
@@ -11916,7 +12019,6 @@ msgid "Reject all"
 msgstr "Alle ablehnen"
 
 #: src/dashboard/pile-cards.tsx
-#: src/inbox/item-detail.tsx
 msgid "Reject this request?"
 msgstr "Diese Anfrage ablehnen?"
 
@@ -12169,6 +12271,7 @@ msgid "Replaced an AI provider's key"
 msgstr "Den Schlüssel eines KI-Anbieters ersetzt"
 
 #: src/chat/approval-words.ts
+#: src/inbox/item-detail.tsx
 msgid "Replaced by a newer request"
 msgstr "Durch eine neuere Anfrage ersetzt"
 
@@ -13200,6 +13303,7 @@ msgid "Self-approved: nobody else could approve it"
 msgstr "Selbst freigegeben: Niemand sonst konnte sie freigeben"
 
 #: src/chat/asked-questions.tsx
+#: src/inbox/item-detail.tsx
 #: src/interview/composer.tsx
 msgid "Send"
 msgstr "Senden"
@@ -13213,7 +13317,6 @@ msgstr "Senden"
 msgid "Send answer"
 msgstr "Antwort senden"
 
-#: src/inbox/item-detail.tsx
 #: src/workflows/workflow-status.tsx
 msgid "Send back"
 msgstr "Zurücksenden"
@@ -13238,11 +13341,8 @@ msgstr "Anfrage senden"
 msgid "Send to the agent"
 msgstr "An den Agenten senden"
 
-#: src/inbox/item-detail.tsx
-msgid "Send version {version} of {who} back"
-msgstr "Version {version} von {who} zurücksenden"
-
 #: src/chat/approval-words.ts
+#: src/inbox/item-detail.tsx
 #: src/settings/invitations.tsx
 msgid "Sending"
 msgstr "Wird gesendet"
@@ -13258,8 +13358,8 @@ msgid "Sensitive"
 msgstr "Sensibel"
 
 #: src/chat/chat-files.tsx
+#: src/inbox/item-detail.tsx
 #: src/inbox/items.ts
-#: src/settings/unknown-outcomes.tsx
 msgid "Sent"
 msgstr "Gesendet"
 
@@ -13270,10 +13370,6 @@ msgstr "Gesendet <0>{sent}</0>"
 #: src/activity/audit-words.ts
 msgid "Sent an App's event to a webhook"
 msgstr "Hat ein Ereignis einer App an einen Webhook gesendet"
-
-#: src/inbox/item-detail.tsx
-msgid "Sent back: {who}, version {version}."
-msgstr "Zurückgesendet: {who}, Version {version}."
 
 #: src/decision-confirmation.tsx
 msgctxt "what an App's page sends with an answer to a decision"
@@ -13473,6 +13569,7 @@ msgstr "Teilen rückgängig gemacht"
 
 #: src/apps/app-data-model.tsx
 #: src/brain/atlas-overlays.tsx
+#: src/inbox/inbox-page.tsx
 msgid "Show"
 msgstr "Anzeigen"
 
@@ -13816,6 +13913,7 @@ msgstr "Weich"
 msgid "Some files weren’t added. I can read PDF, Word, Excel, PowerPoint and text."
 msgstr "Nicht alles wurde hinzugefügt. Ich kann PDF, Word, Excel, PowerPoint und Text lesen."
 
+#: src/inbox/item-detail.tsx
 #: src/workflows/requests/request-parts.tsx
 msgid "Someone"
 msgstr "Jemand"
@@ -13895,11 +13993,6 @@ msgstr "Beim Öffnen ist etwas schiefgegangen."
 #: src/route-error.tsx
 msgid "Something went wrong."
 msgstr "Etwas ist schiefgelaufen."
-
-#: src/inbox/inbox-page.tsx
-msgctxt "inbox: sort button"
-msgid "Sort"
-msgstr "Sortieren"
 
 #: src/frame/part-words.tsx
 msgid "Sort by this next"
@@ -13989,18 +14082,10 @@ msgstr "Stakeholder benannt: {role}"
 msgid "Starry night"
 msgstr "Sternennacht"
 
-#: src/inbox/item-detail.tsx
-msgid "Start"
-msgstr "Starten"
-
 #: src/interview/sound-check.tsx
 msgctxt "begin the interview"
 msgid "Start"
 msgstr "Anfangen"
-
-#: src/inbox/item-detail.tsx
-msgid "Start {name}"
-msgstr "{name} starten"
 
 #: src/inbox/items.ts
 msgid "Start {name}?"
@@ -14017,6 +14102,10 @@ msgstr "Neu beginnen ab Version {newerVersion}"
 #: src/interview/sound-check.tsx
 msgid "Start by typing"
 msgstr "Mit Tippen beginnen"
+
+#: src/inbox/item-detail.tsx
+msgid "Start it"
+msgstr "Starten"
 
 #: src/workflows/start-run.tsx
 msgid "Start the run"
@@ -14061,10 +14150,6 @@ msgstr "Verspätet begonnen, einer Verbindung zu folgen: Änderungen davor wurde
 msgid "Started following what changes at a connection"
 msgstr "Begonnen zu verfolgen, was sich bei einer Verbindung ändert"
 
-#: src/inbox/item-detail.tsx
-msgid "Started: {name}."
-msgstr "Gestartet: {name}."
-
 #: src/workflows/run-status.ts
 msgctxt "status of a workflow run"
 msgid "Starting"
@@ -14080,6 +14165,8 @@ msgctxt "where a workflow starts"
 msgid "Starts"
 msgstr "Startet"
 
+#: src/inbox/interviews-item.tsx
+#: src/inbox/items.ts
 #: src/onboarding/interviews-progress.tsx
 msgid "Starts {starts}"
 msgstr "Beginnt am {starts}"
@@ -14175,7 +14262,7 @@ msgstr "Stephen kann sie in Microsoft Teams schicken, sobald Sie dort mit ihm ge
 msgid "Stephen outside Grasp"
 msgstr "Stephen außerhalb von Grasp"
 
-#: src/routes/_shell.settings.onboarding.tsx
+#: src/inbox/interviews-item.tsx
 msgid "Stephen talks to nobody until you pick the day the interviews start."
 msgstr "Stephen spricht mit niemandem, bis Sie den Tag wählen, an dem die Interviews beginnen."
 
@@ -14441,6 +14528,7 @@ msgstr "aufgaben"
 
 #: src/brain/brain-source-contents.tsx
 #: src/brain/brain.ts
+#: src/inbox/interviews-item.tsx
 #: src/onboarding/interviews-progress.tsx
 msgid "Team"
 msgstr "Team"
@@ -14462,6 +14550,10 @@ msgstr "Team"
 
 #: src/onboarding/interviews-progress.tsx
 msgid "team leads talked"
+msgstr "Teamleitungen gesprochen"
+
+#: src/inbox/interviews-item.tsx
+msgid "Team leads talked"
 msgstr "Teamleitungen gesprochen"
 
 #: src/dashboard/report.ts
@@ -14507,6 +14599,10 @@ msgstr "Teams für {label}"
 #: src/onboarding/interviews-progress.tsx
 msgid "Teams under five people show only whether their lead talked, so nobody can be singled out."
 msgstr "Teams unter fünf Personen zeigen nur, ob ihre Teamleitung gesprochen hat, damit niemand herausgegriffen werden kann."
+
+#: src/inbox/interviews-item.tsx
+msgid "Teams under five show only their lead."
+msgstr "Teams unter fünf zeigen nur ihre Leitung."
 
 #: src/pages/frame-failure.tsx
 msgid "Technical details"
@@ -14664,6 +14760,14 @@ msgstr "Das war der Rundgang. Fragen Sie mich gern, auf jeder Seite. Sie finden 
 #: src/frame/part-words.tsx
 msgid "The {many} did not load"
 msgstr "Die {many} wurden nicht geladen"
+
+#: src/inbox/items.ts
+msgid "The {owner}"
+msgstr "{owner}"
+
+#: src/inbox/item-detail.tsx
+msgid "The {role}"
+msgstr "{role}"
 
 #: src/activity/audit-event.tsx
 msgid "the action"
@@ -14999,6 +15103,10 @@ msgstr "Der Verlauf Ihrer Änderungen konnte nicht gelesen werden. Versuchen Sie
 msgid "The hour the other teams get their links"
 msgstr "Die Uhrzeit, zu der die anderen Teams ihre Links erhalten"
 
+#: src/inbox/inbox-page.tsx
+msgid "The inbox didn't load"
+msgstr "Der Posteingang wurde nicht geladen"
+
 #: src/workflows/workflow-triggers.tsx
 msgid "The input each run starts with, as JSON"
 msgstr "Die Eingabe, mit der jeder Lauf startet, als JSON"
@@ -15019,10 +15127,6 @@ msgstr "Die Integrationen, Verbindungen und Ressourcen, die die App nutzt, und d
 #: src/interview/page.tsx
 msgid "The interviews are over."
 msgstr "Die Gespräche sind vorbei."
-
-#: src/routes/_shell.settings.onboarding.tsx
-msgid "The interviews aren’t planned yet. You plan them at the end of your onboarding."
-msgstr "Die Interviews sind noch nicht geplant. Sie planen sie am Ende Ihres Onboardings."
 
 #: src/workflows/resource-runs.tsx
 #: src/workflows/traces.tsx
@@ -15861,10 +15965,6 @@ msgctxt "inbox tab: what waits on you"
 msgid "To do"
 msgstr "Zu erledigen"
 
-#: src/routes/_shell.settings.onboarding.tsx
-msgid "To do: let your team know, and send the interview links"
-msgstr "Zu erledigen: Ihr Team informieren und die Interview-Links verschicken"
-
 #: src/onboarding/setup-steps.tsx
 msgid "To everyone"
 msgstr "An alle"
@@ -16131,6 +16231,7 @@ msgstr "Im Gange"
 #: src/chat/approval-words.ts
 #: src/chat/saved-memory.tsx
 #: src/frame/part-words.tsx
+#: src/inbox/item-detail.tsx
 #: src/settings/workspace-name.tsx
 msgid "Undo"
 msgstr "Rückgängig"
@@ -16163,6 +16264,7 @@ msgid "Undone changes"
 msgstr "Rückgängig gemachte Änderungen"
 
 #: src/chat/approval-words.ts
+#: src/inbox/item-detail.tsx
 msgid "Undone, waiting again"
 msgstr "Rückgängig gemacht, wartet wieder"
 
@@ -16192,10 +16294,16 @@ msgstr "Unbekannt"
 msgid "Unknown device"
 msgstr "Unbekanntes Gerät"
 
-#: src/settings/sections.ts
-#: src/settings/unknown-outcomes.tsx
+#: src/inbox/inbox-kind.tsx
+msgctxt "inbox item kind"
+msgid "Unknown outcome"
+msgstr "Unbekannter Ausgang"
+
+#: src/inbox/inbox-page.tsx
+#: src/inbox/sidebar-inbox.tsx
+msgctxt "inbox filter"
 msgid "Unknown outcomes"
-msgstr "Unbekannte Ergebnisse"
+msgstr "Unbekannte Ausgänge"
 
 #: src/brain/brain.ts
 msgid "Unknown source"
@@ -16455,6 +16563,7 @@ msgstr "Version {number}, aktuell"
 #: src/apps/app-workflows.tsx
 #: src/brain/brain.ts
 #: src/brain/sources-page.tsx
+#: src/inbox/item-detail.tsx
 #: src/routes/_shell.workflows.$workflow.tsx
 #: src/workflows/version-source.tsx
 #: src/workflows/workflow-triggers.tsx
@@ -16834,11 +16943,6 @@ msgstr "Was {name} wissen und wie er arbeiten soll, zusätzlich zu Grasps eigene
 msgid "What <0/> changed"
 msgstr "Was <0/> geändert hat"
 
-#: src/inbox/inbox-page.tsx
-msgctxt "inbox sort"
-msgid "What blocks first, then newest"
-msgstr "Was blockiert zuerst, dann neueste"
-
 #: src/brain/brain-atlas.ts
 msgctxt "the brainstem: every conversation, document and connection"
 msgid "What came in"
@@ -16877,8 +16981,8 @@ msgid "What gets in the way"
 msgstr "Was im Weg steht"
 
 #: src/inbox/inbox-page.tsx
-msgid "What Grasp and its agents do by themselves is under Activity."
-msgstr "Was Grasp und seine Agenten selbst tun, steht unter Aktivität."
+msgid "What Grasp asks you, and what waits for your yes, comes here."
+msgstr "Was Grasp dich fragt und was auf dein Ja wartet, landet hier."
 
 #: src/chat/thread.tsx
 msgid "What Grasp did"
@@ -16892,11 +16996,6 @@ msgstr "Was Grasp noch nicht weiß, und wer es beantworten kann."
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "What Grasp may do"
 msgstr "Was Grasp tun darf"
-
-#: src/inbox/item-detail.tsx
-msgctxt "inbox item section"
-msgid "What happened"
-msgstr "Was passiert ist"
 
 #: src/onboarding/setup-steps.tsx
 msgid "What happens next"
@@ -17038,6 +17137,7 @@ msgid "What ran, the decisions it asked for, every workflow and what could be be
 msgstr "Was lief, die Entscheidungen, um die es bat, jeder Workflow und was besser sein könnte. Behalten Sie ihn als Markdown oder speichern Sie ihn im Druckfenster als PDF."
 
 #: src/chat/approval-words.ts
+#: src/inbox/item-detail.tsx
 msgid "What should change"
 msgstr "Was soll sich ändern"
 
@@ -17374,12 +17474,7 @@ msgstr "Welche Tools nutzen die Leute tatsächlich?"
 msgid "Which workflows failed most this month?"
 msgstr "Welche Workflows sind diesen Monat am häufigsten fehlgeschlagen?"
 
-#: src/routes/_shell.settings.onboarding.tsx
-msgid "While Stephen talks to your team: how far the interviews are, team by team, and everyone’s own link to send."
-msgstr "Während Stephen mit Ihrem Team spricht: wie weit die Interviews sind, Team für Team, und der eigene Link jeder Person zum Versenden."
-
 #: src/activity/audit-event.tsx
-#: src/inbox/item-detail.tsx
 msgid "Who"
 msgstr "Wer"
 
@@ -17463,6 +17558,10 @@ msgstr "Wer ihn in {name} erreicht"
 #: src/apps/draft-changes.tsx
 msgid "Who sees which rows"
 msgstr "Wer welche Zeilen sieht"
+
+#: src/inbox/interviews-item.tsx
+msgid "Who talked"
+msgstr "Wer gesprochen hat"
 
 #: src/connections/connect-dialog.tsx
 msgid "Who uses it"
@@ -17830,6 +17929,7 @@ msgid "Wrote {file}"
 msgstr "{file} geschrieben"
 
 #: src/apps/field-editor.tsx
+#: src/inbox/item-detail.tsx
 msgid "Yes"
 msgstr "Ja"
 
@@ -17871,6 +17971,10 @@ msgstr "Ja: Es ist unverändert und mit dem vorherigen Ereignis verknüpft."
 #: src/frame/part-words.tsx
 msgid "Yesterday"
 msgstr "Gestern"
+
+#: src/inbox/item-detail.tsx
+msgid "you"
+msgstr "dir"
 
 #: src/chat/approval-words.ts
 msgctxt "who answered an agent's request"
@@ -17973,10 +18077,6 @@ msgstr "Sie melden sich bei <0>{host}</0> an"
 msgid "You sign in on {app}’s own page."
 msgstr "Sie melden sich auf der Seite von {app} an."
 
-#: src/inbox/items.ts
-msgid "You were asked this as the {owner}. Answer it in the brain: everyone in the company reads the answer, with your name."
-msgstr "Sie wurden dies als {owner} gefragt. Beantworten Sie es im Gehirn: Alle im Unternehmen lesen die Antwort, mit Ihrem Namen."
-
 #: src/interview/page.tsx
 msgid "You withdrew. Nothing you said is used from now on."
 msgstr "Sie haben sich zurückgezogen. Nichts von dem, was Sie gesagt haben, wird ab jetzt verwendet."
@@ -18031,6 +18131,10 @@ msgstr "Ihre Antwort"
 msgctxt "the answer a person gives a decision"
 msgid "Your answer"
 msgstr "Ihre Antwort"
+
+#: src/inbox/item-detail.tsx
+msgid "Your answer wasn't saved. Try again."
+msgstr "Deine Antwort wurde nicht gespeichert. Versuch es noch einmal."
 
 #: src/interview/sound-check.tsx
 msgid "Your browser is not letting me use the microphone. Allow it next to the address, and try again."
