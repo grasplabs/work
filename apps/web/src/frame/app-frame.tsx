@@ -105,6 +105,7 @@ export const AppFrame = ({
   failing,
   bar = "page",
   dock,
+  dockShown = true,
   panels,
   floating,
   children,
@@ -117,6 +118,8 @@ export const AppFrame = ({
   bar?: "page" | "none";
   /** Over the page, centred at its foot: the chat's idle bar. */
   dock?: ReactNode;
+  /** Whether the dock stands at the foot now; off, the page keeps no room or fade for it. */
+  dockShown?: boolean;
   /** Beside the page, or over it full screen: Grasp's chat. */
   panels?: ChatPanels;
   /** Over the frame, where it was put: the chat floating. */
@@ -173,6 +176,8 @@ export const AppFrame = ({
               }
               bar={bar}
               dock={chatPage ? undefined : dock}
+              dockShown={dockShown}
+              {...(dockShown ? {} : { roomBelow: "page" as const })}
               maxPanelWidth={panels?.maxWidth}
               menuCloseLabel={t`Close the menu`}
               menuLabel={t`Menu`}
