@@ -933,6 +933,10 @@ msgstr "{name} : {started} lancées, {completed} terminées, {failed} en échec"
 msgid "{name}: agents search it live when you ask. The Brain keeps nothing from it."
 msgstr "{name} : les agents y cherchent en direct quand vous demandez. Le cerveau n'en garde rien."
 
+#: src/settings/ai-spend.tsx
+msgid "{name}: share of this month"
+msgstr "{name} : part de ce mois-ci"
+
 #: src/apps/app-status.tsx
 msgid "{names} use it"
 msgstr "{names} l’utilisent"
@@ -1985,7 +1989,6 @@ msgstr "Activité : tout voir dans Traces"
 #: src/apps/indexes-view.tsx
 #: src/onboarding/connect-steps.tsx
 #: src/settings/ai-providers.tsx
-#: src/settings/team-members-dialog.tsx
 msgid "Add"
 msgstr "Ajouter"
 
@@ -2358,14 +2361,6 @@ msgstr "Libérer aussi son nom, pour qu’un nouveau workflow puisse le prendre.
 #: src/chat/subject-bar.tsx
 msgid "Also worked on"
 msgstr "A aussi travaillé sur"
-
-#: src/routes/_shell.settings.appearance.tsx
-msgid "Always dark"
-msgstr "Toujours sombre"
-
-#: src/routes/_shell.settings.appearance.tsx
-msgid "Always light"
-msgstr "Toujours clair"
 
 #: src/workflows/resource-params.tsx
 msgid "Amount"
@@ -2885,10 +2880,6 @@ msgstr "Comme le code de l’App le définit"
 msgid "As the company has it"
 msgstr "Comme dans l’entreprise"
 
-#: src/routes/_shell.settings.appearance.tsx
-msgid "As your device"
-msgstr "Comme votre appareil"
-
 #: src/onboarding/ai-step.tsx
 #: src/settings/ai-providers.tsx
 msgid "As your endpoint names it, such as llama-3.3-70b."
@@ -2919,10 +2910,6 @@ msgstr "Reposer la question"
 msgid "Ask an admin"
 msgstr "Demander à un administrateur"
 
-#: src/settings/composer-settings.tsx
-msgid "Ask anything"
-msgstr "Demandez ce que vous voulez"
-
 #: src/chat/chat-composer.tsx
 #: src/chat/global-chat.tsx
 #: src/settings/backdrop-settings.tsx
@@ -2947,6 +2934,7 @@ msgstr "Demander"
 
 #: src/chat/global-chat.tsx
 #: src/dashboard/widget-ask.tsx
+#: src/settings/composer-settings.tsx
 msgid "Ask Grasp"
 msgstr "Demander à Grasp"
 
@@ -3509,6 +3497,7 @@ msgstr "Impossible de proposer Exécuter : {unread}"
 #: src/settings/staff-access.tsx
 #: src/settings/stephen-card.tsx
 #: src/settings/teams.tsx
+#: src/settings/workspace-name.tsx
 #: src/workflows/delete-workflow.tsx
 #: src/workflows/kept-state.tsx
 #: src/workflows/workflow-triggers.tsx
@@ -3982,8 +3971,8 @@ msgid "Clear the search"
 msgstr "Effacer la recherche"
 
 #: src/settings/workspace-name.tsx
-msgid "Click or drop an image: PNG, JPEG or WebP, up to 512 KB."
-msgstr "Cliquez ou déposez une image : PNG, JPEG ou WebP, jusqu’à 512 Ko."
+msgid "Click or drop an image, up to 512 KB."
+msgstr "Cliquez ou déposez une image, jusqu’à 512 Ko."
 
 #: src/settings/backdrop-settings.tsx
 msgid "Cliffs"
@@ -4596,6 +4585,10 @@ msgstr "Impossible de nommer administrateur"
 #: src/routes/_shell.settings.members.tsx
 msgid "Could not remove"
 msgstr "Impossible de retirer"
+
+#: src/settings/workspace-name.tsx
+msgid "Could not remove it"
+msgstr "Impossible de le retirer"
 
 #: src/settings/ai-providers.tsx
 msgid "Could not save"
@@ -5545,6 +5538,7 @@ msgid "Error"
 msgstr "Erreur"
 
 #: src/routes/_shell.settings.workspace.tsx
+#: src/settings/ai-providers.tsx
 msgid "European Union"
 msgstr "Union européenne"
 
@@ -6418,10 +6412,6 @@ msgstr "Accès de Grasp"
 #: src/chat/thread.tsx
 msgid "Grasp added a widget to your dashboard."
 msgstr "Grasp a ajouté un widget à votre tableau de bord."
-
-#: src/routes/_shell.settings.appearance.tsx
-msgid "Grasp as it is"
-msgstr "Grasp tel qu'il est"
 
 #: src/chat/asked-questions.tsx
 msgid "Grasp asks"
@@ -8136,8 +8126,7 @@ msgstr "Chargement des messages plus anciens"
 #: src/activity/audit-log.tsx
 #: src/apps/app-workspace.tsx
 #: src/apps/publish.tsx
-#: src/chat/chat-body.tsx
-#: src/chat/thread.tsx
+#: src/chat/thread-loading.tsx
 #: src/frame/page-states.tsx
 #: src/knowledge/nav.tsx
 #: src/settings/erasures.tsx
@@ -8845,10 +8834,6 @@ msgstr "La semaine prochaine"
 #: src/agents/agent-page.tsx
 msgid "Next: {0}"
 msgstr "Prochaine fois : {0}"
-
-#: src/routes/_shell.settings.appearance.tsx
-msgid "Night in the forest"
-msgstr "Nuit dans la forêt"
 
 #: src/apps/field-editor.tsx
 msgid "No"
@@ -9965,12 +9950,8 @@ msgid "Only when asked"
 msgstr "Seulement sur demande"
 
 #: src/settings/sign-in-settings.tsx
-msgid "Only work accounts from {organization}’s Google Workspace ({hostedDomain})."
-msgstr "Uniquement les comptes professionnels du Google Workspace de {organization} ({hostedDomain})."
-
-#: src/settings/sign-in-settings.tsx
-msgid "Only work accounts from {organization}’s Microsoft 365."
-msgstr "Uniquement les comptes professionnels du Microsoft 365 de {organization}."
+msgid "Only work accounts at {hostedDomain}."
+msgstr "Uniquement les comptes professionnels de {hostedDomain}."
 
 #: src/brain/sources-page.tsx
 msgctxt "a source nobody else may read"
@@ -9994,6 +9975,10 @@ msgstr "Vous seul le voyez pendant que vous l’essayez. Vous le partagez quand 
 #: src/workflows/workflow-status.tsx
 msgid "Only you see this"
 msgstr "Vous seul voyez ceci"
+
+#: src/settings/sign-in-settings.tsx
+msgid "Only your organization’s work accounts."
+msgstr "Uniquement les comptes professionnels de votre organisation."
 
 #: src/chat/sidebar-chats.tsx
 #: src/connections/request-app-dialog.tsx
@@ -11389,6 +11374,10 @@ msgstr "Supprimer la table"
 msgid "Remove the index {indexName}"
 msgstr "Supprimer l’index {indexName}"
 
+#: src/settings/workspace-name.tsx
+msgid "Remove the logo?"
+msgstr "Retirer le logo ?"
+
 #: src/apps/indexes-view.tsx
 msgid "Remove the search"
 msgstr "Supprimer la recherche"
@@ -12681,10 +12670,6 @@ msgstr "Le partager"
 msgid "Share of {name} who asked"
 msgstr "Part de {name} qui a demandé"
 
-#: src/settings/ai-spend.tsx
-msgid "Share of this month"
-msgstr "Part de ce mois-ci"
-
 #: src/frame/setting-up.tsx
 msgid "Share once it's ready"
 msgstr "Partagez-le une fois prêt"
@@ -13524,8 +13509,15 @@ msgstr "Planification arrêtée"
 msgid "Stopped someone visiting an App"
 msgstr "A retiré à quelqu’un l’accès visiteur à une application"
 
-#: src/chat/chat-markdown.ts
 #: src/chat/thread.tsx
+msgid "Stopped while working"
+msgstr "Arrêté pendant le travail"
+
+#: src/chat/thread.tsx
+msgid "Stopped while writing"
+msgstr "Arrêté pendant l'écriture"
+
+#: src/chat/chat-markdown.ts
 msgid "Stopped."
 msgstr "Arrêté."
 
@@ -15365,6 +15357,10 @@ msgstr "Modifications annulées"
 msgid "Unfinished runs (stopped) and decision confirmations"
 msgstr "Exécutions inachevées (arrêtées) et confirmations de décisions"
 
+#: src/settings/ai-providers.tsx
+msgid "United States"
+msgstr "États-Unis"
+
 #: src/activity/pending.tsx
 msgid "Unknown"
 msgstr "Inconnue"
@@ -15866,10 +15862,6 @@ msgstr "Attend jusqu'au"
 #: src/settings/backdrop-settings.tsx
 msgid "Wanderer"
 msgstr "Voyageur"
-
-#: src/routes/_shell.settings.appearance.tsx
-msgid "Warm and quiet"
-msgstr "Chaud et calme"
 
 #. A time zone, by its city
 #: src/routes/_shell.settings.workspace.tsx
@@ -16493,6 +16485,10 @@ msgstr "Où vous êtes dans le cerveau"
 #: src/onboarding/connect-steps.tsx
 msgid "Where, for example Dropbox"
 msgstr "Où, par exemple Dropbox"
+
+#: src/settings/ai-providers.tsx
+msgid "Wherever your endpoint runs"
+msgstr "Là où s’exécute votre endpoint"
 
 #: src/agents/agents-overview.tsx
 msgid "Which agents to show"

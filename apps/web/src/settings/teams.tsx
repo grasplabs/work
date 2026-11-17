@@ -206,7 +206,8 @@ const NewTeamButton = ({
           setOpen(true);
         }}
         size="sm"
-        variant="ink"
+        // Quiet: Invite is the page's one main action.
+        variant="quiet"
       >
         {t`New team`}
       </Button>
@@ -287,6 +288,7 @@ const TeamRow = ({
                 setOpen("members");
               }}
               size="sm"
+              variant="ghost"
             >
               {t`Members`}
             </Button>

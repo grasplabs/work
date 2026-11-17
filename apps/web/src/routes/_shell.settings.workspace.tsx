@@ -195,6 +195,7 @@ const TimeZoneField = ({
           placeholder={t`Search time zones`}
           // Read-only while its own save runs, not disabled: a disabled field drops the keyboard's focus.
           readOnly={!canChange || busy}
+          size="sm"
           triggerLabel={t`Show the time zones`}
           value={saved}
         />
@@ -247,7 +248,7 @@ const WorkspaceSettings = ({
           </SettingRow>
         </SettingsRows>
       </SectionCard>
-      <SignInSection organization={organization.name} />
+      <SignInSection />
     </>
   );
 };

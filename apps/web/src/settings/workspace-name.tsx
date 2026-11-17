@@ -15,6 +15,14 @@ import {
   organizationLogoChanged,
   organizationRenamed,
 } from "../frame/organization-name.tsx";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogContent,
+  AlertDialogFooter,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "../grasp/alert-dialog/index.ts";
 import { Button } from "../grasp/button/index.ts";
 import { focus } from "../grasp/focus/focus.ts";
 import { Input } from "../grasp/input/index.ts";
@@ -165,6 +173,7 @@ export const NameField = ({
           }}
           // Read-only while its save runs, not disabled: a disabled field drops the keyboard's focus.
           readOnly={!canChange || busy}
+          size="sm"
           value={draft ?? saved}
         />
       )}
@@ -341,22 +350,33 @@ export const LogoField = ({
             {t`Logo`}
           </Text>
           {canChange && saved !== null ? (
-            <Button
-              disabled={busy}
-              onClick={() => {
-                send(null);
-              }}
-              size="xs"
-              variant="ghost"
-            >
-              {t`Remove`}
-            </Button>
+            // Removing it asks first, as every remove does.
+            <AlertDialog>
+              <AlertDialogTrigger disabled={busy} size="xs" variant="ghost">
+                {t`Remove`}
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogTitle>{t`Remove the logo?`}</AlertDialogTitle>
+                <AlertDialogFooter>
+                  <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
+                  <AlertDialogAction
+                    action={() => {
+                      send(null);
+                    }}
+                    failedLabel={t`Could not remove it`}
+                    variant="danger"
+                  >
+                    {t`Remove`}
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
           ) : null}
         </span>
         {reason === undefined ? (
           <Text size="xs" tone="muted">
             {canChange
-              ? t`Click or drop an image: PNG, JPEG or WebP, up to 512 KB.`
+              ? t`Click or drop an image, up to 512 KB.`
               : t`An admin changes it.`}
           </Text>
         ) : (

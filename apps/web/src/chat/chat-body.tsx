@@ -6,7 +6,6 @@ import { Alert } from "../grasp/alert/index.ts";
 import { Button } from "../grasp/button/index.ts";
 import { Empty, EmptyHeader, EmptyDescription } from "../grasp/empty/index.ts";
 import { Retry } from "../grasp/icons/index.ts";
-import { Spinner } from "../grasp/spinner/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { NotLoaded } from "../load-from-core.tsx";
@@ -24,6 +23,7 @@ import { HeldWrites } from "./held-writes.tsx";
 import { PackageRequests } from "./package-requests.tsx";
 import { ChatSources } from "./sources.tsx";
 import { SubjectBarContent, subjectBarOf } from "./subject-bar.tsx";
+import { ThreadLoading } from "./thread-loading.tsx";
 
 // One chat's conversation and the box to ask in under it, as the dock
 // (chat-panel.tsx) and a chat's own page (chat-page.tsx) both show it: the
@@ -101,14 +101,11 @@ const Welcome = ({ text }: { text: string }) => (
 );
 
 /** The chat loading, in the thread's place. */
-const Loading = () => {
-  const { t } = useLingui();
-  return (
-    <div {...stylex.props(styles.centre)}>
-      <Spinner aria-label={t`Loading…`} />
-    </div>
-  );
-};
+const Loading = () => (
+  <div {...stylex.props(styles.grow)}>
+    <ThreadLoading />
+  </div>
+);
 
 /** The conversation, or what to ask before there is one; `focusBox` takes the person to the box. */
 export const ChatConversation = ({

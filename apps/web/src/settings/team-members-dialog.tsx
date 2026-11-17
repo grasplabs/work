@@ -4,6 +4,7 @@ import * as stylex from "@stylexjs/stylex";
 import { useState } from "react";
 
 import { Alert } from "../grasp/alert/index.ts";
+import { Avatar, AvatarFallback } from "../grasp/avatar/index.ts";
 import { Button } from "../grasp/button/index.ts";
 import { Combobox } from "../grasp/combobox/index.ts";
 import {
@@ -14,7 +15,6 @@ import {
   DialogTitle,
 } from "../grasp/dialog/index.ts";
 import { Field, FieldError, FieldLabel } from "../grasp/field/index.ts";
-import { Form, FormActions } from "../grasp/form/index.ts";
 import { Minus } from "../grasp/icons/index.ts";
 import {
   Item,
@@ -23,6 +23,7 @@ import {
   ItemTitle,
   ItemDescription,
   ItemActions,
+  ItemMedia,
 } from "../grasp/item/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
@@ -127,35 +128,26 @@ export const TeamMembersDialog = ({
                 {t`Everyone in the organization is in this team.`}
               </Text>
             ) : (
-              <Form
-                aria-label={t`Add a member`}
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  if (picked !== null) {
-                    void add(picked);
-                  }
-                }}
-              >
-                <Field invalid={adding.failure !== undefined}>
-                  <FieldLabel>{t`Add a member`}</FieldLabel>
-                  <Combobox
-                    empty={t`Nobody by that name`}
-                    items={others}
-                    onValueChange={setChosen}
-                    placeholder={t`Choose someone`}
-                    triggerLabel={t`Show the members`}
-                    value={picked}
-                  />
-                  {adding.failure === undefined ? null : (
-                    <FieldError match>{adding.failure}</FieldError>
-                  )}
-                </Field>
-                <FormActions align="start">
-                  <Button disabled={busy || picked === null} type="submit">
-                    {t`Add`}
-                  </Button>
-                </FormActions>
-              </Form>
+              // Choosing someone adds them: no second press.
+              <Field invalid={adding.failure !== undefined}>
+                <FieldLabel>{t`Add a member`}</FieldLabel>
+                <Combobox
+                  empty={t`Nobody by that name`}
+                  items={others}
+                  onValueChange={(userId) => {
+                    setChosen(userId);
+                    if (userId !== null && !busy) {
+                      void add(userId);
+                    }
+                  }}
+                  placeholder={t`Choose someone`}
+                  triggerLabel={t`Show the members`}
+                  value={picked}
+                />
+                {adding.failure === undefined ? null : (
+                  <FieldError match>{adding.failure}</FieldError>
+                )}
+              </Field>
             )}
             {takingOff.failure === undefined ? null : (
               <Alert tone="danger">{takingOff.failure}</Alert>
@@ -168,6 +160,11 @@ export const TeamMembersDialog = ({
                   const who = person.name;
                   return (
                     <Item key={person.userId} size="sm">
+                      <ItemMedia align="center">
+                        <Avatar decorative name={person.name} size="xs">
+                          <AvatarFallback />
+                        </Avatar>
+                      </ItemMedia>
                       <ItemContent>
                         <ItemTitle>{person.name}</ItemTitle>
                         <ItemDescription>{person.email}</ItemDescription>

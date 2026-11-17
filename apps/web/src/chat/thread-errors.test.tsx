@@ -172,7 +172,7 @@ const shownFor = async (
   const said = alerts.map((alert) => alert.textContent ?? "");
   // The ways out the failed answers offer.
   const links = [
-    ...document.querySelectorAll('article[aria-label="Grasp"] a'),
+    ...document.querySelectorAll('article[data-from="agent"] a'),
   ].map(
     (link) =>
       `${link.textContent?.trim() ?? ""} → ${link.getAttribute("href") ?? ""}`
