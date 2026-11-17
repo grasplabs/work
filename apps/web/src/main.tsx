@@ -35,7 +35,7 @@ const router = createRouter({
   context: { core },
   // The page's card scrolls on its own (frame/app-frame.tsx), so a new
   // page starts at the top of it, not only of the window.
-  scrollToTopSelectors: ['[data-slot="app-shell-content"]'],
+  scrollToTopSelectors: ['[data-slot="app-shell-page"]'],
   defaultErrorComponent: RouteError,
   defaultNotFoundComponent: () => <NotFound />,
 });
