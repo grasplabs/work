@@ -19,13 +19,16 @@ import { z } from "zod";
 import { callAppFunction } from "../src/app-functions.ts";
 import type { Release } from "../src/app-releases.ts";
 import { appFor, appKind } from "../src/apps.ts";
+import { drainAuditOutboxes } from "../src/audit-drains.ts";
 import { teamsOf } from "../src/auth/identity.ts";
 import {
   erasePersonShared,
   eraseSource,
+  readSourceVersionAs,
   workBrain,
 } from "../src/brain-next.ts";
 import type { SourceRef } from "../src/brain-next.ts";
+import { producersOf, relayHandOvers } from "../src/brain-sources.ts";
 import { builtins, fingerprintOf, thisRelease } from "../src/builtins.ts";
 import {
   answerDecision,
@@ -2187,6 +2190,74 @@ describe(
         after: { inbox: 1, today: 1, input: false, shows: [] },
         answered: declinedOnly,
         ending: { status: "failed", error: "brain.revoked" },
+      });
+    });
+  }
+);
+
+/** Hands over what changed, as core's clock does: drain, relay, a tick. */
+const handedOver = async (): Promise<void> => {
+  await drainAuditOutboxes(env);
+  await relayHandOvers(env);
+  await workBrain(env, new Date(Date.now() + 60_000), producersOf(env));
+};
+
+/** What the Brain keeps in `by`'s own store of run `runId`: its text. */
+const keptOf = async (by: Member, runId: string) => {
+  const kept = await readSourceVersionAs(env, by.userId, {
+    source: { producer: "run", id: runId },
+    version: 1,
+  });
+  return kept?.text;
+};
+
+describe(
+  "what the Brain keeps of a run that read what may be withheld later",
+  setUpTime,
+  () => {
+    it("keeps only how it ended, never the card it returned, when the card rests on memories alone, so nothing of it outlives a person's erasure", async () => {
+      const admin = await person("admin");
+      const ada = await person("builder");
+      const workflow = await entitiesWorkflow(ada, admin);
+      // A card in its writer's own word, drawn from no document: the run
+      // keeps the memories it rests on, and no version.
+      const name = `Anna ${unique()}`;
+      const card = await store().addMemories({
+        change: crypto.randomUUID(),
+        access: { kind: "audience", group: "company" },
+        entities: [{ key: "a", kind: "person", names: [name] }],
+        memories: [
+          {
+            about: "a",
+            type: "fact",
+            statement: `${name} leads finance`,
+            speaker: { kind: "system" },
+            basis: { kind: "writer", writer: "app:directory" },
+          },
+        ],
+      });
+      const runId = await endedRun(ada, workflow.id, {
+        entity: card.entities.a ?? "",
+        name: unique(),
+      });
+      const versions = await env.DB.prepare(
+        "SELECT count(*) AS n FROM run_brain_versions WHERE run_id = ?"
+      )
+        .bind(runId)
+        .first<number>("n");
+      const returned = await recordOf(ada, workflow.id, runId);
+      await handedOver();
+
+      expect({
+        versions,
+        memories: (await memoriesKeptBy(runId)) > 0,
+        returnedTheCard: JSON.stringify(returned.result).includes(name),
+        kept: await keptOf(ada, runId),
+      }).toStrictEqual({
+        versions: 0,
+        memories: true,
+        returnedTheCard: true,
+        kept: "Workflow run completed.",
       });
     });
   }
