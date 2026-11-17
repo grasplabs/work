@@ -441,10 +441,20 @@ describe(ChatThread, () => {
     const closed = thoughtLine();
     await press(thoughtButton());
 
-    expect([closed, thoughtLine()]).toStrictEqual([
-      { line: "Thinking", open: false, shows: undefined },
-      { line: "Thinking", open: true, shows: "Add two to two." },
-    ]);
+    expect(closed).toStrictEqual({
+      line: "Thinking",
+      open: false,
+      shows: undefined,
+    });
+    // The thinking's words come out at a pace while it streams, as an
+    // answer's do: all of them, once they have.
+    await vi.waitFor(() => {
+      expect(thoughtLine()).toStrictEqual({
+        line: "Thinking",
+        open: true,
+        shows: "Add two to two.",
+      });
+    });
   });
 
   it("says it checks the App while its turn checks the drafts it wrote, past its answer", async () => {

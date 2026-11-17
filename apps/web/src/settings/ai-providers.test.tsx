@@ -358,16 +358,33 @@ const confirmation = async (): Promise<HTMLElement> =>
     return yes;
   });
 
-/** Deletes `label`'s key from its key dialog: a click on the hold asks, and its yes deletes. */
+/** Opens `label`'s Manage dialog, where it is tested, its key replaced or deleted. */
+const manage = async (label: string): Promise<void> => {
+  await press(button(`Manage ${label}`));
+};
+
+/** Closes the open dialog, as a person does with its Close. */
+const closeDialog = async (): Promise<void> => {
+  await press(button("Close"));
+};
+
+/** Tests `label` from its Manage dialog, then closes it. */
+const testProvider = async (label: string): Promise<void> => {
+  await manage(label);
+  await press(dialogButton("Test"));
+  await closeDialog();
+};
+
+/** Deletes `label`'s key from its Manage dialog: a click on the hold asks, and its yes deletes. */
 const deleteKey = async (label: string): Promise<void> => {
-  await press(button(`${label} key`));
+  await manage(label);
   await press(dialogButton("Delete key"));
   await press(await confirmation());
 };
 
-/** Replaces `label`'s key in its key dialog. */
+/** Replaces `label`'s key in its Manage dialog. */
 const replaceKey = async (label: string, key: string): Promise<void> => {
-  await press(button(`${label} key`));
+  await manage(label);
   await enter(textField("New key"), key);
   await press(dialogButton("Replace key"));
 };
@@ -406,7 +423,7 @@ describe("Settings › AI providers", () => {
     expect({
       asked,
       listed: row.includes("OpenAI"),
-      masked: row.includes("Key •••• a3f2"),
+      masked: row.includes("•••• a3f2"),
     }).toStrictEqual({
       asked: [["add", { provider: "openai", key: pastedKey }]],
       listed: true,
@@ -451,10 +468,11 @@ describe("Settings › AI providers", () => {
   it("tests a provider with one call, says Works on the button, or Failed and why", async () => {
     const working = fakeAiProviders({ connected: [{ provider: "openai" }] });
     await shown(working.api);
-    await press(button("Test OpenAI"));
+    await manage("OpenAI");
+    await press(dialogButton("Test"));
     expect(working.asked).toStrictEqual([["test", "openai", undefined]]);
     await vi.waitFor(() => {
-      expect(text()).toContain("Works");
+      expect(dialogButton("Works")).toBeDefined();
     });
 
     act(() => {
@@ -466,7 +484,7 @@ describe("Settings › AI providers", () => {
       tested: { ok: false, model: "openai/gpt-5-mini", code: "model.failed" },
     });
     await shown(failing.api);
-    await press(button("Test OpenAI"));
+    await testProvider("OpenAI");
     await vi.waitFor(() => {
       expect(text()).toContain(
         "Test failed: The model couldn't answer. Try again."
@@ -564,10 +582,10 @@ describe("Settings › AI providers", () => {
     await shown(api);
 
     await replaceKey("OpenAI", pastedKey);
-    expect(text()).toContain("Key •••• a3f2");
+    expect(text()).toContain("•••• a3f2");
     expect(document.body.innerHTML).not.toContain(pastedKey);
 
-    await press(button("OpenAI key"));
+    await manage("OpenAI");
     await press(dialogButton("Delete key"));
     expect(asked.filter(([what]) => what === "remove")).toStrictEqual([]);
     await press(await confirmation());
@@ -641,7 +659,7 @@ describe("Settings › AI providers", () => {
       fallbacks: [],
     });
     // Any change here reads the providers again.
-    await press(button("Test OpenAI-compatible endpoint"));
+    await testProvider("OpenAI-compatible endpoint");
 
     const picked = choice("Default model");
     const shownNow = shownIn(picked);
@@ -661,7 +679,7 @@ describe("Settings › AI providers", () => {
       tested: { ok: false, model: "openai/gpt-5-mini", code: "model.failed" },
     });
     await shown(api);
-    await press(button("Test OpenAI"));
+    await testProvider("OpenAI");
     await vi.waitFor(() => {
       expect(text()).toContain("Test failed");
     });
@@ -735,7 +753,7 @@ describe("Settings › AI providers", () => {
     });
     await shown(api, false);
 
-    expect(text()).toContain("Key •••• 0000");
+    expect(text()).toContain("•••• 0000");
     expect(text()).toContain("GPT-5.4");
     expect(text()).toContain("GPT-5 mini");
     expect(document.querySelectorAll("input, select")).toHaveLength(0);
