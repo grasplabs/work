@@ -126,10 +126,6 @@ msgstr "{app} is connected again"
 msgid "{app} is off"
 msgstr "{app} is off"
 
-#: src/routes/_shell.integrations.$integration.tsx
-msgid "{app} isn't connected yet."
-msgstr "{app} isn't connected yet."
-
 #: src/dashboard/to-do.tsx
 msgid "{app} needs someone to sign in again"
 msgstr "{app} needs someone to sign in again"
@@ -4374,6 +4370,7 @@ msgstr "Connection trigger"
 
 #: src/brain/brain-log.tsx
 #: src/brain/brain.ts
+#: src/routes/_shell.integrations.$integration.tsx
 msgid "Connections"
 msgstr "Connections"
 
@@ -4611,6 +4608,10 @@ msgstr "Couldn't refresh. This may be out of date."
 #: src/connections/http-connections.tsx
 msgid "Couldn't revoke"
 msgstr "Couldn't revoke"
+
+#: src/connections/offer-switch.tsx
+msgid "Couldn't save"
+msgstr "Couldn't save"
 
 #: src/settings/audit-archive.tsx
 msgid "Counted from when each event was recorded; then deleted."
@@ -7319,8 +7320,8 @@ msgid "It is published"
 msgstr "It is published"
 
 #: src/routes/_shell.integrations.$integration.tsx
-msgid "It isn't offered to your organization: offer it on its Overview before connecting it."
-msgstr "It isn't offered to your organization: offer it on its Overview before connecting it."
+msgid "It isn't offered to your organization: offer it below before connecting it."
+msgstr "It isn't offered to your organization: offer it below before connecting it."
 
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "It isn't offered to your organization."
@@ -9628,8 +9629,8 @@ msgid "Off, nobody can connect it, admins included. Connections already made go 
 msgstr "Off, nobody can connect it, admins included. Connections already made go on."
 
 #: src/connections/offer-switch.tsx
-msgid "Offer {name}"
-msgstr "Offer {name}"
+msgid "Offered"
+msgstr "Offered"
 
 #: src/connections/offer-switch.tsx
 msgid "Offered to your organization"
@@ -10224,7 +10225,6 @@ msgstr "Over the next two weeks you’ll get a short personal link to talk with 
 
 #: src/agents/agent-page.tsx
 #: src/agents/agent-section.tsx
-#: src/routes/_shell.integrations.$integration.tsx
 msgid "Overview"
 msgstr "Overview"
 

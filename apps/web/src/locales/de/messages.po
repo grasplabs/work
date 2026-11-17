@@ -126,10 +126,6 @@ msgstr "{app} ist wieder verbunden"
 msgid "{app} is off"
 msgstr "{app} ist aus"
 
-#: src/routes/_shell.integrations.$integration.tsx
-msgid "{app} isn't connected yet."
-msgstr "{app} ist noch nicht verbunden."
-
 #: src/dashboard/to-do.tsx
 msgid "{app} needs someone to sign in again"
 msgstr "Bei {app} muss sich jemand erneut anmelden"
@@ -4374,6 +4370,7 @@ msgstr "Verbindungsauslöser"
 
 #: src/brain/brain-log.tsx
 #: src/brain/brain.ts
+#: src/routes/_shell.integrations.$integration.tsx
 msgid "Connections"
 msgstr "Verbindungen"
 
@@ -4611,6 +4608,10 @@ msgstr "Konnte nicht aktualisiert werden. Das ist vielleicht nicht mehr aktuell.
 #: src/connections/http-connections.tsx
 msgid "Couldn't revoke"
 msgstr "Widerruf fehlgeschlagen"
+
+#: src/connections/offer-switch.tsx
+msgid "Couldn't save"
+msgstr "Speichern fehlgeschlagen"
 
 #: src/settings/audit-archive.tsx
 msgid "Counted from when each event was recorded; then deleted."
@@ -7319,8 +7320,8 @@ msgid "It is published"
 msgstr "Sie veröffentlicht wird"
 
 #: src/routes/_shell.integrations.$integration.tsx
-msgid "It isn't offered to your organization: offer it on its Overview before connecting it."
-msgstr "Es wird Ihrer Organisation nicht angeboten: Bieten Sie es in der Übersicht an, bevor Sie es verbinden."
+msgid "It isn't offered to your organization: offer it below before connecting it."
+msgstr "Es wird deiner Organisation nicht angeboten: Biete es unten an, bevor du es verbindest."
 
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "It isn't offered to your organization."
@@ -9628,8 +9629,8 @@ msgid "Off, nobody can connect it, admins included. Connections already made go 
 msgstr "Aus: Niemand kann es verbinden, auch Admins nicht. Bestehende Verbindungen laufen weiter."
 
 #: src/connections/offer-switch.tsx
-msgid "Offer {name}"
-msgstr "{name} anbieten"
+msgid "Offered"
+msgstr "Angeboten"
 
 #: src/connections/offer-switch.tsx
 msgid "Offered to your organization"
@@ -10224,7 +10225,6 @@ msgstr "In den nächsten zwei Wochen erhalten Sie einen kurzen persönlichen Lin
 
 #: src/agents/agent-page.tsx
 #: src/agents/agent-section.tsx
-#: src/routes/_shell.integrations.$integration.tsx
 msgid "Overview"
 msgstr "Übersicht"
 

@@ -126,10 +126,6 @@ msgstr "{app} vuelve a estar conectado"
 msgid "{app} is off"
 msgstr "{app} está desactivado"
 
-#: src/routes/_shell.integrations.$integration.tsx
-msgid "{app} isn't connected yet."
-msgstr "{app} aún no está conectado."
-
 #: src/dashboard/to-do.tsx
 msgid "{app} needs someone to sign in again"
 msgstr "{app} necesita que alguien vuelva a iniciar sesión"
@@ -4374,6 +4370,7 @@ msgstr "Disparador de conexión"
 
 #: src/brain/brain-log.tsx
 #: src/brain/brain.ts
+#: src/routes/_shell.integrations.$integration.tsx
 msgid "Connections"
 msgstr "Conexiones"
 
@@ -4611,6 +4608,10 @@ msgstr "No se pudo actualizar. Puede que no esté al día."
 #: src/connections/http-connections.tsx
 msgid "Couldn't revoke"
 msgstr "No se pudo revocar"
+
+#: src/connections/offer-switch.tsx
+msgid "Couldn't save"
+msgstr "No se pudo guardar"
 
 #: src/settings/audit-archive.tsx
 msgid "Counted from when each event was recorded; then deleted."
@@ -7319,8 +7320,8 @@ msgid "It is published"
 msgstr "Se publica"
 
 #: src/routes/_shell.integrations.$integration.tsx
-msgid "It isn't offered to your organization: offer it on its Overview before connecting it."
-msgstr "No se ofrece a tu organización: ofrécelo en su Resumen antes de conectarlo."
+msgid "It isn't offered to your organization: offer it below before connecting it."
+msgstr "No se ofrece a tu organización: ofrécelo abajo antes de conectarlo."
 
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "It isn't offered to your organization."
@@ -9628,8 +9629,8 @@ msgid "Off, nobody can connect it, admins included. Connections already made go 
 msgstr "Desactivado, nadie puede conectarlo, tampoco los administradores. Las conexiones ya hechas siguen."
 
 #: src/connections/offer-switch.tsx
-msgid "Offer {name}"
-msgstr "Ofrecer {name}"
+msgid "Offered"
+msgstr "Ofrecido"
 
 #: src/connections/offer-switch.tsx
 msgid "Offered to your organization"
@@ -10224,7 +10225,6 @@ msgstr "En las próximas dos semanas recibirás un enlace personal breve para ha
 
 #: src/agents/agent-page.tsx
 #: src/agents/agent-section.tsx
-#: src/routes/_shell.integrations.$integration.tsx
 msgid "Overview"
 msgstr "Resumen"
 
