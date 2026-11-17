@@ -347,15 +347,46 @@ export const declineHeld =
   };
 
 /**
+ * Why a held write shows nothing of what it would send (core's
+ * `withheld`): its run may no longer read what it read, or that can't be
+ * checked now. Either way it can only be rejected.
+ */
+const WithheldInput = ({
+  withheld,
+  id,
+}: {
+  withheld: NonNullable<PendingAction["withheld"]>;
+  id?: string;
+}) => (
+  <p id={id} role="note">
+    {withheld === "revoked" ? (
+      <Trans>
+        What this would send is withheld: the run that asked for it may no
+        longer read what it read, so you can only reject it.
+      </Trans>
+    ) : (
+      <Trans>
+        What this would send can&apos;t be shown right now, so you can only
+        reject it for now. Try again in a moment.
+      </Trans>
+    )}
+  </p>
+);
+
+/**
  * Where a held write would act and when it was asked for, and everything
- * it would send: what a person reads before they confirm it.
+ * it would send: what a person reads before they confirm it. Nothing of
+ * it while withheld (`WithheldInput`).
  */
 export const HeldWriteDetails = ({
   action,
   shown,
+  withheldId,
 }: {
   action: PendingAction;
   shown: Shown;
+  /** The id of the line that says why it is withheld, if it is. */
+  withheldId?: string;
 }) => {
   const { t } = useLingui();
   const { description, resource } = action;
@@ -385,29 +416,35 @@ export const HeldWriteDetails = ({
           <Trans>This chat read restricted data: this may send it out</Trans>
         </Badge>
       ) : null}
-      {description === undefined ? null : (
-        <Described
-          description={description}
-          onShowAll={(input) => {
-            shown.onShowAll(input);
-          }}
-        />
+      {action.withheld === undefined ? (
+        <>
+          {description === undefined ? null : (
+            <Described
+              description={description}
+              onShowAll={(input) => {
+                shown.onShowAll(input);
+              }}
+            />
+          )}
+          {description?.complete === false ? (
+            <p role="note">
+              <Trans>
+                More will be sent than is shown above. Read exactly what will be
+                sent before you confirm.
+              </Trans>
+            </p>
+          ) : null}
+          <ExactInput
+            input={action.input}
+            onOpen={() => {
+              shown.onInputOpen();
+            }}
+            shown={description?.complete === true}
+          />
+        </>
+      ) : (
+        <WithheldInput id={withheldId} withheld={action.withheld} />
       )}
-      {description?.complete === false ? (
-        <p role="note">
-          <Trans>
-            More will be sent than is shown above. Read exactly what will be
-            sent before you confirm.
-          </Trans>
-        </p>
-      ) : null}
-      <ExactInput
-        input={action.input}
-        onOpen={() => {
-          shown.onInputOpen();
-        }}
-        shown={description?.complete === true}
-      />
       {shown.unseen ? (
         <p className="text-muted-foreground" id={shown.unseenId}>
           <Trans>
