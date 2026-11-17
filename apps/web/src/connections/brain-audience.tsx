@@ -294,8 +294,8 @@ export const BrainAudience = ({
       </Field>
       <p className="text-muted-foreground">
         <Trans>
-          Who may read it is decided inside Grasp, not by {label}&apos;s own
-          permissions: choose a team if not everyone should see it.
+          Who may read it is decided inside Grasp, not by the permissions in{" "}
+          {label}: choose a team if not everyone should see it.
         </Trans>
       </p>
       <ErrorText>{failure}</ErrorText>

@@ -16644,8 +16644,8 @@ msgid "Who may read it"
 msgstr "Wie het mag lezen"
 
 #: src/connections/brain-audience.tsx
-msgid "Who may read it is decided inside Grasp, not by {label}'s own permissions: choose a team if not everyone should see it."
-msgstr "Wie het mag lezen, wordt in Grasp bepaald, niet door de rechten in {label} zelf: kies een team als niet iedereen het mag zien."
+msgid "Who may read it is decided inside Grasp, not by the permissions in {label}: choose a team if not everyone should see it."
+msgstr "Wie het mag lezen, wordt in Grasp bepaald, niet door de rechten in {label}: kies een team als niet iedereen het mag zien."
 
 #: src/agents/agent-page.tsx
 msgid "Who may use {name}"
