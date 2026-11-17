@@ -47,6 +47,12 @@ const styles = stylex.create({
   },
   chart: { width: "100%" },
   share: { width: "100%", minWidth: "6rem" },
+  // The bar, then its percentage, on one line.
+  shareCell: {
+    display: "flex",
+    alignItems: "center",
+    gap: grasp.space3,
+  },
 });
 
 /** Dollars short enough for the chart's value axis: cents under a dollar, then compact. */
@@ -56,9 +62,18 @@ const axisDollars = (value: string | number): string => {
     style: "currency",
     currency: "USD",
     notation: amount < 1 ? "standard" : "compact",
+    // Two decimals at most: the axis has room for about four characters
+    // (Grasp UI's ChartAxis), so a quarter step under a dollar rounds.
     maximumFractionDigits: amount < 1 ? 2 : 1,
   }).format(amount);
 };
+
+/** A share as a percentage in the page's language: "84%". */
+const percent = (share: number): string =>
+  new Intl.NumberFormat(undefined, {
+    style: "percent",
+    maximumFractionDigits: 0,
+  }).format(share);
 
 /** A workflow's name, with its App's for an App's workflow. */
 const workflowName = (of: SpendingWorkflow, i18n: I18n): string => {
@@ -212,18 +227,25 @@ export const SpendCard = ({
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {rows.map((row) => (
-                  <TableRow key={row.name}>
-                    <TableCell lead>{row.name}</TableCell>
+                {rows.map(({ name, spend: amount }) => (
+                  <TableRow key={name}>
+                    <TableCell lead>{name}</TableCell>
                     <TableCell>
-                      <Progress
-                        label={t`Share of this month`}
-                        layout={styles.share}
-                        size="sm"
-                        value={Math.round((row.spend / month.total) * 100)}
-                      />
+                      <span {...stylex.props(styles.shareCell)}>
+                        {/* The column's head names it: the bar says only its row, to a screen reader. */}
+                        <Progress
+                          label={t`${name}: share of this month`}
+                          layout={styles.share}
+                          showLabel={false}
+                          size="sm"
+                          value={Math.round((amount / month.total) * 100)}
+                        />
+                        <Text element="span" size="sm" tone="muted">
+                          {percent(amount / month.total)}
+                        </Text>
+                      </span>
                     </TableCell>
-                    <TableCell align="end">{dollars(row.spend)}</TableCell>
+                    <TableCell align="end">{dollars(amount)}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>

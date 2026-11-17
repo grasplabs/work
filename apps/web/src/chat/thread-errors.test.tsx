@@ -170,9 +170,10 @@ const shownFor = async (
   const alerts = [...document.querySelectorAll('[role="alert"]')];
   // What each alert says went wrong, apart from the way to ask again beside it.
   const said = alerts.map((alert) => alert.textContent ?? "");
-  // The ways out the failed answers offer: the thread's only links here,
-  // since the question asked holds none.
-  const links = [...document.querySelectorAll("article a")].map(
+  // The ways out the failed answers offer.
+  const links = [
+    ...document.querySelectorAll('article[data-from="agent"] a'),
+  ].map(
     (link) =>
       `${link.textContent?.trim() ?? ""} → ${link.getAttribute("href") ?? ""}`
   );

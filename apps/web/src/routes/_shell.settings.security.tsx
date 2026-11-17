@@ -71,6 +71,14 @@ const styles = stylex.create({
     alignItems: "center",
     gap: grasp.space2,
     minWidth: 0,
+    maxWidth: "100%",
+  },
+  // The organization's name on one line, cut short where it is long.
+  name: {
+    minWidth: 0,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
   },
 });
 
@@ -113,7 +121,7 @@ const SignedInWith = ({
           tile={false}
         />
       ) : null}
-      {name}
+      <span {...stylex.props(styles.name)}>{name}</span>
     </span>
   );
 };
@@ -238,6 +246,11 @@ const Devices = ({ sessions }: { sessions: Loaded<OwnSession[]> }) => {
           ...newest,
           ...(here === undefined || newest.includes(here) ? [] : [here]),
         ];
+  // This device first: it is the one a person looks for, and can't sign out.
+  const ordered =
+    here === undefined
+      ? shown
+      : [here, ...shown.filter((session) => session !== here)];
   return (
     <SectionCard
       density="compact"
@@ -258,7 +271,7 @@ const Devices = ({ sessions }: { sessions: Loaded<OwnSession[]> }) => {
       title={t`Devices`}
     >
       <ItemGroup aria-label={t`Devices`} separated>
-        {shown.map((session) => (
+        {ordered.map((session) => (
           <DeviceRow key={session.id} session={session} />
         ))}
       </ItemGroup>

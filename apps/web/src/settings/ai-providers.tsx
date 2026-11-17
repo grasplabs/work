@@ -1,4 +1,5 @@
 import {
+  aiProviders,
   compatibleModelNamePattern,
   featuredModels,
 } from "@grasp-os/shared/ai-providers";
@@ -45,6 +46,7 @@ import {
   FieldError,
   FieldLabel,
 } from "../grasp/field/index.ts";
+import { EU, Flag, US } from "../grasp/flags/index.ts";
 import { Form } from "../grasp/form/index.ts";
 import {
   Cable,
@@ -137,6 +139,12 @@ const testFailures: Readonly<Record<string, MessageDescriptor>> = {
 };
 
 const styles = stylex.create({
+  // A flag, then the place it stands for.
+  place: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: grasp.space2,
+  },
   // Every control fills the rows' shared control column.
   control: { width: "100%" },
   ends: { display: "flex", alignItems: "center", gap: grasp.space2 },
@@ -334,6 +342,11 @@ const KeyDialog = ({
     { working: t`Deleting`, done: t`Deleted`, failed: t`Could not delete` }
   );
   const failed = save.error ?? remove.error;
+  // Why it can't be tested, or why its test failed: nothing while all is well.
+  const testHelp =
+    testModel === null
+      ? t`Name a model it serves, under Models, to test it.`
+      : testFailure;
   return (
     <Dialog
       onOpenChange={(next) => {
@@ -350,20 +363,18 @@ const KeyDialog = ({
           </span>
         </DialogTitle>
         <DialogBody>
-          <SettingsRows>
-            <SettingRow
-              help={
-                testModel === null
-                  ? t`Name a model it serves, under Models, to test it.`
-                  : testFailure
-              }
-              label={t`Connection`}
-            >
-              <Button disabled={testModel === null} size="sm" {...test.props}>
-                {t`Test`}
-              </Button>
-            </SettingRow>
-          </SettingsRows>
+          {/* Whether the key works, then a new one: a dialog's fields, not a card's rows. */}
+          <Field orientation="horizontal">
+            <FieldContent>
+              <FieldLabel>{t`Connection`}</FieldLabel>
+              {testHelp === undefined ? null : (
+                <FieldDescription>{testHelp}</FieldDescription>
+              )}
+            </FieldContent>
+            <Button disabled={testModel === null} size="sm" {...test.props}>
+              {t`Test`}
+            </Button>
+          </Field>
           <Form
             aria-label={t`Replace the key for ${label}`}
             id={formId}
@@ -502,6 +513,24 @@ const ProviderChoice = ({
   </span>
 );
 
+/**
+ * Where a provider runs, as the page's language says it, with its flag: the
+ * name is on the line above, so this says only the place.
+ */
+const WhereItRuns = ({ provider }: { provider: OrganizationProviderId }) => {
+  const { t } = useLingui();
+  const { region } = aiProviders[provider];
+  if (region === "custom") {
+    return t`Wherever your endpoint runs`;
+  }
+  return (
+    <span {...stylex.props(styles.place)}>
+      <Flag flag={region === "eu" ? EU : US} />
+      {region === "eu" ? t`European Union` : t`United States`}
+    </span>
+  );
+};
+
 /** Adding a provider, in a dialog: which one, by its mark; a custom endpoint's address; its key. */
 const AddProviderDialog = ({
   offered,
@@ -594,7 +623,9 @@ const AddProviderDialog = ({
                           provider={each.provider}
                         />
                       </FieldLabel>
-                      <FieldDescription>{each.whereItRuns}</FieldDescription>
+                      <FieldDescription>
+                        <WhereItRuns provider={each.provider} />
+                      </FieldDescription>
                     </FieldContent>
                   </Field>
                 ))}
@@ -870,8 +901,7 @@ const Models = ({
     setLast(next);
     setStatus("saving");
     void (async () => {
-      // Success is silent for now: the row's "Saved" line under the label was rejected (Ruben, 17 Nov 2026); the library shows it beside the control from its main 0ebd48bd, not yet in its registry.
-      setStatus((await onChoose(next)) ? "idle" : "failed");
+      setStatus((await onChoose(next)) ? "saved" : "failed");
     })();
   };
   const chooseFallbacks = (next: string[]): void => {

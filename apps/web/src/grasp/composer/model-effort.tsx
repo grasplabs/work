@@ -32,6 +32,7 @@ import { stopEscape } from "./escape";
 import type { ComposerModelMaker, ComposerModelOption } from "./model";
 import { LitEdge, Scale } from "./reasoning";
 import type { ComposerReasoningOption } from "./reasoning";
+import { tabOutTarget } from "./tab-out";
 
 /** One model, with the levels of effort it offers. */
 export interface ComposerModelEffortOption extends ComposerModelOption {
@@ -408,6 +409,17 @@ export const ComposerModelEffort = ({
   // One Escape does one thing: with the list open it goes back to the effort; otherwise it closes
   // the surface. Either way no listener of the host's hears it.
   const keys = (event: KeyboardEvent<HTMLElement>) => {
+    // Tab from the surface's last stop: on to the next stop after the chip, the surface closed.
+    const out =
+      event.key === "Tab"
+        ? tabOutTarget(event.currentTarget, event.target, event.shiftKey)
+        : undefined;
+    if (out !== undefined) {
+      event.preventDefault();
+      setOpen(false);
+      out.focus();
+      return;
+    }
     if (event.key === "Escape") {
       event.preventDefault();
       if (listing) {

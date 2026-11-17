@@ -355,6 +355,8 @@ const settled = async <T,>(
 
 const COARSE = media.coarse;
 const FORCED = media.forced;
+// The keyboard brought focus to the message field (src/focus/focus.ts tells a press apart).
+const KEY_IN_TEXT = ":has(textarea:focus-visible:not([data-focus-pointer]))";
 
 const styles = stylex.create({
   root: {
@@ -400,23 +402,34 @@ const styles = stylex.create({
     "--grasp-composer-first": grasp.corner,
     "--grasp-composer-last": grasp.corner,
     backgroundColor: { default: grasp.raised, ":disabled": grasp.soft },
-    // Medium lift at rest, as Palermo's; while the text has focus, a soft halo round it says so.
+    // Medium lift at rest, as Palermo's; while the text has focus from a press, a soft halo round
+    // it says so. The keyboard's focus shows the system's ring instead (C1, PROOF-2026-11-17.md):
+    // the halo gives way to rest, as on every field (src/focus/focus.ts).
     boxShadow: {
       default: grasp.liftMedium,
       ":has(textarea:focus-visible)": grasp.fieldFocus,
       ":has(textarea[aria-invalid=true]:focus-visible)":
         grasp.fieldFocusInvalid,
+      [KEY_IN_TEXT]: grasp.liftMedium,
     },
     color: grasp.ink,
     cursor: { default: "text", ":disabled": "not-allowed" },
+    // The ring stands just inside the card's edge, over the card's own fill, so it holds 3:1 on any
+    // ground round the card: paper, a scene, a dither. Never after a press (data-focus-pointer).
+    // In forced colours a press keeps a thin line and the keyboard the thick Highlight ring.
     outline: {
       default: "none",
+      [KEY_IN_TEXT]: `${grasp.ringWidth} solid ${grasp.ring}`,
       [FORCED]: {
         default: "none",
         ":has(textarea:focus-visible)": `${grasp.ringWidth} solid`,
+        [KEY_IN_TEXT]: `calc(2 * ${grasp.ringWidth}) solid Highlight`,
       },
     },
-    outlineOffset: grasp.ringOffset,
+    outlineOffset: {
+      default: `calc(-1 * ${grasp.ringWidth})`,
+      [FORCED]: `calc(-2 * ${grasp.ringWidth})`,
+    },
     transitionProperty: "box-shadow, background-color",
     transitionDuration: grasp.durationHover,
     transitionTimingFunction: grasp.ease,

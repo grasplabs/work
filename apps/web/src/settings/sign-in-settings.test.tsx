@@ -86,7 +86,7 @@ const shown = async (
   const page = createRoute({
     getParentRoute: () => shell,
     path: "/",
-    component: () => <SignInSection organization="Noordkade Finance" />,
+    component: () => <SignInSection />,
   });
   const router = createRouter({
     routeTree: rootRoute.addChildren([shell.addChildren([page])]),
@@ -128,19 +128,19 @@ describe("Settings › Workspace › Sign-in", () => {
     const { session } = fakeOrgSettings(both);
     await shown(session);
 
-    // Each way to sign in is a row of the section's list; only the one
-    // the sign-in page doesn't offer says so.
-    const rows = [
-      ...(document.querySelector('[role="list"][aria-label="Sign-in"]')
-        ?.children ?? []),
-    ].map((row) => row.textContent ?? "");
-    expect(rows).toStrictEqual([
-      "Microsoft 365Only work accounts from Noordkade Finance’s Microsoft 365.",
-      "Google WorkspaceOnly work accounts from Noordkade Finance’s Google Workspace (acme.test).Not on the sign-in page yet",
-    ]);
-    expect(
-      text().includes("client-ms") || text().includes("client-google")
-    ).toBeFalsy();
+    expect({
+      microsoft: text().includes("Only your organization’s work accounts."),
+      google: text().includes("Only work accounts at acme.test."),
+      // The one whose secret isn't set says so; the other says nothing.
+      notOffered: text().split("Not on the sign-in page yet").length - 1,
+      noSecret:
+        text().includes("client-ms") || text().includes("client-google"),
+    }).toStrictEqual({
+      microsoft: true,
+      google: true,
+      notOffered: 1,
+      noSecret: false,
+    });
   });
 
   it("says when sign-in isn't set up yet", async () => {
