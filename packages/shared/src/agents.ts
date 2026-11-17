@@ -164,6 +164,12 @@ export interface AgentAppsWorkedOut {
   turnedOn: CompanyToolClass[];
   /** Apps its instructions name that the company doesn't offer. */
   missing: string[];
+  /**
+   * When its instructions say it works on its own, for one of the
+   * company's agents: a wake-up proposed, never made by this, for an
+   * admin to make (`makeAgentWake`) with the opening line it is asked.
+   */
+  schedule?: { cron: string; opening: string };
 }
 
 /** Most characters a wake-up's opening line holds. */
@@ -360,6 +366,17 @@ export interface AgentsApi {
 /** Most apps a drafted agent names. */
 export const agentDraftAppsMax = 20;
 
+/** Apps a draft names, each as `env.connections.available` lists it. */
+const draftAppsSchema = z
+  .array(
+    z.strictObject({
+      source: z.enum(["native", "composio"]),
+      provider: z.string().trim().min(1).max(100),
+      name: z.string().trim().min(1).max(100),
+    })
+  )
+  .max(agentDraftAppsMax);
+
 /**
  * An agent Grasp's chat drafted for the person (`draftAgent`), shown as a
  * card: nothing is made until they press Make it on it
@@ -399,16 +416,7 @@ export const agentDraftSchema = z
      * by the name the person knows it by; none, and it uses any app its
      * kinds of work allow. Only apps the company offers are made.
      */
-    apps: z
-      .array(
-        z.strictObject({
-          source: z.enum(["native", "composio"]),
-          provider: z.string().trim().min(1).max(100),
-          name: z.string().trim().min(1).max(100),
-        })
-      )
-      .max(agentDraftAppsMax)
-      .optional(),
+    apps: draftAppsSchema.optional(),
   })
   .refine(
     ({ whose, audience, classes = [], schedule }) =>
@@ -448,4 +456,76 @@ export interface AgentDraftMade {
    * do, when it wakes) couldn't all be set: its page says what it has.
    */
   unfinished?: true;
+}
+
+/**
+ * A change to one of the person's agents that Grasp's chat drafted
+ * (`draftAgentChange`), shown as a card with what it is and what it
+ * becomes: nothing changes until they press Change it
+ * (`ChatsApi.changeDraftedAgent`), and then only what the card shows, by
+ * the agent page's own checks. The agent is named as the person knows it
+ * (`agent`), one of the company's (an admin's to change) or their own.
+ * Only one of the company's changes whom it reaches (`audience`), what it
+ * may do (`turnOn`, each kind of work as the company has it) and when it
+ * wakes (`schedule`, a wake-up more, for the person).
+ */
+export const agentChangeDraftSchema = z
+  .strictObject({
+    agent: agentInputSchema.shape.name,
+    whose: z.enum(["company", "own"]),
+    job: agentInputSchema.shape.job.optional(),
+    /**
+     * What its instructions gain, added after what they say now: never a
+     * rewrite of instructions the chat can't read, which would drop them.
+     */
+    addInstructions: z
+      .string()
+      .trim()
+      .min(1)
+      .max(instructionsMaxLength)
+      .optional(),
+    addApps: draftAppsSchema.optional(),
+    removeApps: draftAppsSchema.optional(),
+    audience: toolClassAudienceSchema.optional(),
+    turnOn: z
+      .array(z.enum(companyToolClasses))
+      .max(companyToolClasses.length)
+      .optional(),
+    schedule: agentWakeInputSchema
+      .pick({ cron: true, timeZone: true, opening: true })
+      .optional(),
+  })
+  .refine(
+    ({ whose, audience, turnOn = [], schedule }) =>
+      whose === "company" ||
+      (audience === undefined && turnOn.length === 0 && schedule === undefined),
+    {
+      message:
+        "An agent of the person's own has no audience, kinds of work or schedule to change.",
+    }
+  )
+  .refine(
+    ({
+      job,
+      addInstructions,
+      addApps = [],
+      removeApps = [],
+      audience,
+      turnOn = [],
+      schedule,
+    }) =>
+      job !== undefined ||
+      addInstructions !== undefined ||
+      addApps.length > 0 ||
+      removeApps.length > 0 ||
+      audience !== undefined ||
+      turnOn.length > 0 ||
+      schedule !== undefined,
+    { message: "A change changes something." }
+  );
+export type AgentChangeDraft = z.infer<typeof agentChangeDraftSchema>;
+
+/** A drafted change as the thread shows it, by the call that drafted it. */
+export interface AgentChangeDrafted extends AgentChangeDraft {
+  callId: string;
 }
