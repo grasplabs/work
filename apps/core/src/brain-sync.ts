@@ -524,8 +524,9 @@ const changeReaders = async (
     readers: { kind: "readers", readers: plan.readers },
     readAt,
   });
-  // Not held yet (an add under way): the page's add gives it its readers.
-  if (made === null || made.version === row.version) {
+  // Not held yet, or an add of it under way (`change` null, its record
+  // lost with a stopped run): the page's add records and counts it.
+  if (made === null || row.change === null || made.version === row.version) {
     return row;
   }
   spend(budget, 1);
