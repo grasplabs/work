@@ -267,12 +267,13 @@ const TeamRow = ({
   const [deleting, setDeleting] = useState(false);
   const { busy, failure, run } = useTeamChange(onChanged);
   const { name } = team;
-  const counted = useCounted(team.memberIds.length);
+  // Only the organization's members count: someone removed is no longer in it.
   const byId = new Map(members.map((member) => [member.userId, member]));
   const people = team.memberIds.flatMap((userId) => {
     const member = byId.get(userId);
     return member === undefined ? [] : [{ name: member.name }];
   });
+  const counted = useCounted(people.length);
   const remove = async (): Promise<void> => {
     const refused = await run(
       async () => {

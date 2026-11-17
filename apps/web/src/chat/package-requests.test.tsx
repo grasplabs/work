@@ -124,9 +124,15 @@ const shown = async (refuse = false) => {
   return { decided, carriedOn: () => carriedOn };
 };
 
+/** Presses the card's button named `label`, by its words or its name. */
 const press = async (label: string): Promise<void> => {
-  const button = document.querySelector(`button[aria-label="${label}"]`);
-  if (!(button instanceof HTMLButtonElement)) {
+  const button = [...document.querySelectorAll("button")].find(
+    (each) =>
+      // A press's words, then what it says once pressed, hidden till then.
+      each.textContent.trim().startsWith(label) ||
+      each.getAttribute("aria-label") === label
+  );
+  if (button === undefined) {
     throw new TypeError(`No button ${label}`);
   }
   await act(async () => {
@@ -148,7 +154,7 @@ describe("the chat's package requests", () => {
   it("carries the work on once the packages are approved", async () => {
     const { decided, carriedOn } = await shown();
 
-    await press("Approve the packages for Invoice Manager");
+    await press("Approve the packages");
 
     expect({ decided, carriedOn: carriedOn() }).toStrictEqual({
       decided: [{ approved: true }],
@@ -158,14 +164,14 @@ describe("the chat's package requests", () => {
 
   it("carries nothing on when the packages are denied, or the approval is refused", async () => {
     const denied = await shown();
-    await press("Deny the packages for Invoice Manager");
+    await press("Deny");
     const deniedOn = denied.carriedOn();
     act(() => {
       root?.unmount();
     });
     document.body.replaceChildren();
     const refused = await shown(true);
-    await press("Approve the packages for Invoice Manager");
+    await press("Approve the packages");
 
     expect({
       denied: denied.decided,

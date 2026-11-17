@@ -203,7 +203,10 @@ const useStatus = () => {
       lastOkAt !== null &&
       (lastFailedAt === null || lastOkAt >= lastFailedAt)
     ) {
-      return { word: t`Working`, tone: "success" };
+      return {
+        word: t({ message: "Working", context: "a provider's key works" }),
+        tone: "success",
+      };
     }
     if (lastFailedAt === null) {
       return unused;
@@ -956,6 +959,7 @@ const Models = ({
                   }
                 }}
                 placeholder={t`Search models`}
+                triggerLabel={t`Show the models`}
                 size="sm"
                 value={defaultModel}
               />
@@ -993,6 +997,7 @@ const Models = ({
                   }
                 }}
                 placeholder={t`Search models`}
+                triggerLabel={t`Show the models`}
                 size="sm"
                 value={null}
               />

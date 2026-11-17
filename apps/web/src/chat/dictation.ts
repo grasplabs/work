@@ -95,14 +95,19 @@ const coreSource = (locale: Locale): DictationSource => {
               window.clearTimeout(waiting);
               began = line.begin(new Int16Array(0));
               listener.ready();
-            } else if (!live && began) {
-              // The line went down mid-way: what came is kept in the box.
+            } else if (!live) {
+              // The line went down, before it listened or mid-way: what
+              // came is kept in the box.
+              window.clearTimeout(waiting);
               listener.problem("failed");
             }
           },
         });
         waiting = window.setTimeout(() => {
           if (!began) {
+            // Core never listened: the line stops trying, and the box says so.
+            line?.drop();
+            stop();
             listener.problem("failed");
           }
         }, lineReadyMs);

@@ -513,6 +513,10 @@ msgstr "{days, plural, one {heute gestartete Läufe} other {in den letzten # Tag
 msgid "{days, plural, one {The last # day} other {The last # days}}"
 msgstr "{days, plural, one {Der letzte Tag} other {Die letzten # Tage}}"
 
+#: src/chat/approval-words.ts
+msgid "{decided} by {by}"
+msgstr "{decided} von {by}"
+
 #: src/dashboard/signals.tsx
 msgid "{doc} in {where} is {late, plural, one {# day} other {# days}} past its review date."
 msgstr "Die Prüfung von {doc} in {where} ist seit {late, plural, one {# Tag} other {# Tagen}} überfällig."
@@ -877,6 +881,10 @@ msgstr "{name} ist an"
 #: src/agents/agent-page.tsx
 msgid "{name} is paused"
 msgstr "{name} ist pausiert"
+
+#: src/routes/_shell.settings.members.tsx
+msgid "{name} is removed."
+msgstr "{name} wurde entfernt."
 
 #: src/routes/_shell.settings.members.tsx
 msgid "{name} is removed. {count, plural, one {# personal connection was disconnected.} other {# personal connections were disconnected.}}"
@@ -1483,6 +1491,10 @@ msgstr "{workflow} in {app}"
 #: src/projects/project-counts.tsx
 msgid "{workflows, plural, one {# workflow} other {# workflows}}"
 msgstr "{workflows, plural, one {# Workflow} other {# Workflows}}"
+
+#: src/chat/approval-words.ts
+msgid "{yes}: {approve}"
+msgstr "{yes}: {approve}"
 
 #. Who answered, in an exported chat.
 #: src/chat/chat-markdown.ts
@@ -2099,6 +2111,10 @@ msgstr "HTTP-Verbindung hinzufügen"
 msgid "Add index"
 msgstr "Index hinzufügen"
 
+#: src/chat/package-requests.tsx
+msgid "Add npm packages to {subject}"
+msgstr "npm-Pakete zu {subject} hinzufügen"
+
 #: src/apps/field-editor.tsx
 msgid "Add option"
 msgstr "Option hinzufügen"
@@ -2425,6 +2441,10 @@ msgstr "Ein Admin ändert das."
 msgid "An admin connects this for everyone."
 msgstr "Ein Admin verbindet dies für alle."
 
+#: src/chat/connection-requests.tsx
+msgid "An admin decides. It holds in this chat only."
+msgstr "Ein Admin entscheidet. Es gilt nur in diesem Chat."
+
 #: src/routes/_shell.knowledge.index.tsx
 msgid "An admin hasn't set up company memory yet."
 msgstr "Ein Admin hat das Unternehmensgedächtnis noch nicht eingerichtet."
@@ -2708,7 +2728,6 @@ msgid "Approval"
 msgstr "Genehmigung"
 
 #: src/apps/app-webhooks.tsx
-#: src/chat/package-requests.tsx
 #: src/dashboard/pile-cards.tsx
 #: src/decision-confirmation.tsx
 #: src/inbox/item-detail.tsx
@@ -2743,6 +2762,14 @@ msgstr "Große Rechnungen freigeben"
 msgid "Approve it on the workflow's page"
 msgstr "Auf der Seite des Workflows freigeben"
 
+#: src/chat/approval-words.ts
+msgid "Approve it?"
+msgstr "Genehmigen?"
+
+#: src/chat/approval-words.ts
+msgid "Approve it? This cannot be undone."
+msgstr "Genehmigen? Das lässt sich nicht rückgängig machen."
+
 #: src/make/examples.ts
 msgid "Approve supplier invoices over €10,000 before they're paid."
 msgstr "Lieferantenrechnungen über 10.000 € freigeben, bevor sie bezahlt werden."
@@ -2752,8 +2779,8 @@ msgid "Approve the change"
 msgstr "Änderung genehmigen"
 
 #: src/chat/package-requests.tsx
-msgid "Approve the packages for {subject}"
-msgstr "Pakete für {subject} genehmigen"
+msgid "Approve the packages"
+msgstr "Pakete genehmigen"
 
 #: src/inbox/items.ts
 msgid "Approve what {name} reaches"
@@ -2765,6 +2792,11 @@ msgstr "Freigeben, dann läuft es für das Team"
 
 #: src/apps/app-webhooks.tsx
 #: src/dashboard/runs-widget.tsx
+msgid "Approved"
+msgstr "Genehmigt"
+
+#: src/chat/approval-words.ts
+msgctxt "an agent's request"
 msgid "Approved"
 msgstr "Genehmigt"
 
@@ -2808,6 +2840,10 @@ msgstr "Genehmigt: {who}."
 #: src/brain/brain.ts
 msgid "Approver for new tools named"
 msgstr "Freigabe für neue Tools benannt"
+
+#: src/chat/approval-words.ts
+msgid "Approving"
+msgstr "Wird genehmigt"
 
 #: src/apps/apps-overview.tsx
 #: src/chat/mentions.tsx
@@ -2887,6 +2923,10 @@ msgstr "Pfeiltasten verschieben es, Umschalt für einen größeren Schritt, Ende
 msgid "Article"
 msgstr "Artikel"
 
+#: src/chat/connection-requests.tsx
+msgid "As"
+msgstr "Als"
+
 #: src/dashboard/pile-cards.tsx
 msgid "as {binding}"
 msgstr "als {binding}"
@@ -2962,6 +3002,10 @@ msgstr "Zugriff anfragen"
 #: src/apps/app-access-requests.tsx
 msgid "Ask for access for this App"
 msgstr "Zugriff für diese App anfragen"
+
+#: src/chat/approval-words.ts
+msgid "Ask for changes"
+msgstr "Änderungen anfragen"
 
 #: src/onboarding/connect-steps.tsx
 msgid "Ask for it"
@@ -3162,6 +3206,7 @@ msgstr "Verfügbar, über Composio"
 
 #: src/brain/atlas-overlays.tsx
 #: src/brain/back-button.tsx
+#: src/chat/approval-words.ts
 #: src/chat/asked-questions.tsx
 #: src/frame/part-words.tsx
 #: src/grasp/frame/grasp-sidebar.tsx
@@ -3565,6 +3610,10 @@ msgctxt "lesson state"
 msgid "Candidate"
 msgstr "Kandidat"
 
+#: src/chat/approval-words.ts
+msgid "cannot be undone"
+msgstr "lässt sich nicht rückgängig machen"
+
 #: src/apps/app-access-requests.tsx
 msgid "Capital letters, digits and underscores, starting with a letter, such as CRM."
 msgstr "Großbuchstaben, Ziffern und Unterstriche, beginnend mit einem Buchstaben, etwa CRM."
@@ -3766,6 +3815,10 @@ msgstr "Geändert, welche Integrationen angeboten werden"
 #: src/connections/tool-permissions.tsx
 msgid "Changes"
 msgstr "Ändert"
+
+#: src/chat/approval-words.ts
+msgid "Changes asked"
+msgstr "Änderungen angefragt"
 
 #: src/settings/unknown-outcomes.tsx
 msgid "Changes Grasp sent for someone whose answer was lost, so nobody can tell whether they took effect. Only that person can say what happened, on their dashboard; follow up with them."
@@ -4416,6 +4469,10 @@ msgstr "Verbindung {connectionId}"
 msgid "Connection {connectionId}, {resource}"
 msgstr "Verbindung {connectionId}, {resource}"
 
+#: src/chat/connection-requests.tsx
+msgid "Connection requests"
+msgstr "Verbindungsanfragen"
+
 #: src/workflows/trigger-description.ts
 msgid "Connection trigger"
 msgstr "Verbindungsauslöser"
@@ -4602,6 +4659,10 @@ msgstr "Kosten"
 msgid "Could be better"
 msgstr "Könnte besser sein"
 
+#: src/chat/approval-words.ts
+msgid "Could not approve"
+msgstr "Konnte nicht genehmigen"
+
 #: src/chat/answer-words.tsx
 msgid "could not be opened"
 msgstr "konnte nicht geöffnet werden"
@@ -4620,6 +4681,10 @@ msgstr "Konnte nicht löschen"
 #: src/frame/part-words.tsx
 msgid "Could not copy"
 msgstr "Konnte nicht kopiert werden"
+
+#: src/chat/approval-words.ts
+msgid "Could not decline"
+msgstr "Konnte nicht ablehnen"
 
 #: src/settings/ai-providers.tsx
 #: src/settings/teams.tsx
@@ -4666,6 +4731,7 @@ msgstr "Konnte nicht speichern. Ihre Auswahl bleibt erhalten."
 msgid "Could not save. Your name is kept."
 msgstr "Nicht gespeichert. Dein Name bleibt stehen."
 
+#: src/chat/approval-words.ts
 #: src/chat/asked-questions.tsx
 #: src/chat/chat-composer.tsx
 #: src/settings/composer-settings.tsx
@@ -4880,13 +4946,27 @@ msgstr "Entscheidungen, nach ihrem Ausgang"
 msgid "Decline"
 msgstr "Ablehnen"
 
+#: src/chat/approval-words.ts
+msgctxt "an agent's request"
+msgid "Decline"
+msgstr "Ablehnen"
+
 #: src/inbox/item-detail.tsx
 msgid "Decline starting {name}"
 msgstr "Start von {name} ablehnen"
 
+#: src/chat/approval-words.ts
+msgctxt "an agent's request"
+msgid "Declined"
+msgstr "Abgelehnt"
+
 #: src/inbox/item-detail.tsx
 msgid "Declined: {name}."
 msgstr "Abgelehnt: {name}."
+
+#: src/chat/approval-words.ts
+msgid "Declining"
+msgstr "Wird abgelehnt"
 
 #: src/settings/backdrop-settings.tsx
 msgid "Deep"
@@ -5034,13 +5114,10 @@ msgstr "Wird gelöscht"
 msgid "Denied packages"
 msgstr "Pakete abgelehnt"
 
+#: src/chat/connection-requests.tsx
 #: src/chat/package-requests.tsx
 msgid "Deny"
 msgstr "Ablehnen"
-
-#: src/chat/package-requests.tsx
-msgid "Deny the packages for {subject}"
-msgstr "Pakete für {subject} ablehnen"
 
 #: src/apps/app-start.tsx
 msgid "Describe the App"
@@ -5058,6 +5135,7 @@ msgstr "Neu gestaltet"
 
 #: src/activity/audit-event.tsx
 #: src/activity/audit-log.tsx
+#: src/chat/approval-words.ts
 #: src/knowledge/document.tsx
 #: src/routes/_shell.brain.$noteId.tsx
 #: src/settings/event-sources.tsx
@@ -5874,6 +5952,11 @@ msgstr "zusätzlich erwartet, aus Entwürfen und Tests"
 msgid "Expected return"
 msgstr "Erwarteter Ertrag"
 
+#: src/chat/approval-words.ts
+msgctxt "an agent's request"
+msgid "Expired"
+msgstr "Abgelaufen"
+
 #: src/activity/audit-log.tsx
 #: src/export/export-menu.tsx
 msgid "Export"
@@ -6494,6 +6577,10 @@ msgstr "Gut. Sagen Sie jetzt etwas, damit ich Sie auch hören kann."
 #: src/onboarding/setup-steps.tsx
 msgid "Got it."
 msgstr "Verstanden."
+
+#: src/chat/connection-requests.tsx
+msgid "Grant"
+msgstr "Erlauben"
 
 #: src/inbox/items.ts
 msgid "Grant {who}?"
@@ -7225,6 +7312,10 @@ msgstr "Im Protokoll"
 msgid "In the Netherlands the works council may need to agree before you turn this on."
 msgstr "In den Niederlanden muss eventuell der Betriebsrat zustimmen, bevor Sie das einschalten."
 
+#: src/chat/connection-requests.tsx
+msgid "In this chat only, until you delete it. Anything it sends or changes still waits for you to confirm."
+msgstr "Nur in diesem Chat, bis Sie ihn löschen. Was er sendet oder ändert, wartet weiterhin auf Ihre Bestätigung."
+
 #: src/routes/_shell.brain.$noteId.tsx
 msgid "In this conversation"
 msgstr "In diesem Gespräch"
@@ -7508,6 +7599,10 @@ msgstr "Sie weiß, wer welches Team leitet, damit ich zuerst mit den Teamleitung
 #: src/brain/gap-actions.tsx
 msgid "It leaves the open questions, with no answer, and nobody is asked about it any more. It can't be opened again."
 msgstr "Sie verlässt die offenen Fragen, ohne Antwort, und niemand wird mehr danach gefragt. Sie lässt sich nicht wieder öffnen."
+
+#: src/chat/connection-requests.tsx
+msgid "It may"
+msgstr "Es darf"
 
 #: src/frame/page-states.tsx
 msgid "It may have been renamed or removed."
@@ -8834,6 +8929,10 @@ msgstr "Name Ihrer HR-Plattform"
 msgid "Name, job and picture"
 msgstr "Name, Aufgabe und Bild"
 
+#: src/settings/invitations.tsx
+msgid "name@company.com"
+msgstr "name@firma.de"
+
 #: src/brain/brain.ts
 msgid "Named by"
 msgstr "Genannt von"
@@ -9644,6 +9743,7 @@ msgstr "Funktioniert nicht"
 
 #: src/agents/agent-page.tsx
 #: src/apps/publish.tsx
+#: src/chat/approval-words.ts
 msgid "Not yet"
 msgstr "Noch nicht"
 
@@ -10077,6 +10177,10 @@ msgstr "Eine aus einer Liste von Optionen"
 #: src/interview/words.ts
 msgid "One real case"
 msgstr "Ein echter Fall"
+
+#: src/chat/connection-requests.tsx
+msgid "Only"
+msgstr "Nur"
 
 #: src/settings/use-team-change.ts
 msgid "Only admins can change teams."
@@ -10577,10 +10681,6 @@ msgstr "Paket"
 #: src/chat/package-requests.tsx
 msgid "Package requests"
 msgstr "Paketanfragen"
-
-#: src/chat/package-requests.tsx
-msgid "Packages"
-msgstr "Pakete"
 
 #: src/inbox/inbox-kind.tsx
 msgctxt "inbox item kind: what a scan found of approved packages"
@@ -11748,6 +11848,10 @@ msgstr "Version {newerVersion} durch meine ersetzen"
 msgid "Replaced a request for packages"
 msgstr "Eine Paketanfrage ersetzt"
 
+#: src/chat/approval-words.ts
+msgid "Replaced by a newer request"
+msgstr "Durch eine neuere Anfrage ersetzt"
+
 #: src/dashboard/report-dialog.tsx
 msgid "Report"
 msgstr "Bericht"
@@ -12790,10 +12894,15 @@ msgstr "Ein Event senden"
 msgid "Send request"
 msgstr "Anfrage senden"
 
+#: src/chat/approval-words.ts
+msgid "Send to the agent"
+msgstr "An den Agenten senden"
+
 #: src/inbox/item-detail.tsx
 msgid "Send version {version} of {who} back"
 msgstr "Version {version} von {who} zurücksenden"
 
+#: src/chat/approval-words.ts
 #: src/settings/invitations.tsx
 msgid "Sending"
 msgstr "Wird gesendet"
@@ -12929,10 +13038,14 @@ msgstr "Mehrere für eine Frage"
 
 #: src/apps/app-sharing.tsx
 #: src/apps/publish.tsx
-#: src/settings/ai-spend.tsx
 #: src/workflows/share-workflow.tsx
 msgid "Share"
 msgstr "Teilen"
+
+#: src/settings/ai-spend.tsx
+msgctxt "a part of the whole month's spend, as a percentage"
+msgid "Share"
+msgstr "Anteil"
 
 #: src/workflows/share-workflow.tsx
 msgctxt "share a workflow with someone"
@@ -13118,6 +13231,10 @@ msgstr "Seitenleiste ein- oder ausblenden"
 #: src/workflows/requests/request-who.tsx
 msgid "Show people one by one"
 msgstr "Personen einzeln zeigen"
+
+#: src/settings/ai-providers.tsx
+msgid "Show the models"
+msgstr "Modelle anzeigen"
 
 #: src/workflows/requests/request-detail.tsx
 msgid "Show the page for {title}"
@@ -13927,7 +14044,7 @@ msgid "Take theirs"
 msgstr "Die andere übernehmen"
 
 #: src/chat/package-requests.tsx
-msgid "Takes out"
+msgid "Taken out"
 msgstr "Entfernt"
 
 #: src/knowledge/purge.tsx
@@ -14196,9 +14313,13 @@ msgstr "Mit der Adresse kann man sich wieder anmelden."
 msgid "The address may be wrong, or the page was moved or removed."
 msgstr "Die Adresse ist vielleicht falsch, oder die Seite wurde verschoben oder entfernt."
 
-#: src/chat/package-requests.tsx
-msgid "The agent asks for npm packages for {subject}"
-msgstr "Der Agent bittet um npm-Pakete für {subject}"
+#: src/chat/approval-words.ts
+msgid "The agent"
+msgstr "Der Agent"
+
+#: src/chat/connection-requests.tsx
+msgid "The agent asked an admin for {name}"
+msgstr "Der Agent hat einen Admin um {name} gebeten"
 
 #: src/activity/audit-words.ts
 msgid "The agent looked something up"
@@ -15623,6 +15744,7 @@ msgstr "Im Gange"
 
 #: src/apps/publish.tsx
 #: src/brain/region-edit.tsx
+#: src/chat/approval-words.ts
 #: src/chat/saved-memory.tsx
 msgid "Undo"
 msgstr "Rückgängig"
@@ -15653,6 +15775,10 @@ msgstr "Die Änderungen, die nur Sie sehen, rückgängig machen?"
 #: src/apps/app-history.tsx
 msgid "Undone changes"
 msgstr "Rückgängig gemachte Änderungen"
+
+#: src/chat/approval-words.ts
+msgid "Undone, waiting again"
+msgstr "Rückgängig gemacht, wartet wieder"
 
 #: src/settings/erasures.tsx
 msgid "Unfinished runs (stopped) and decision confirmations"
@@ -15765,6 +15891,10 @@ msgstr "Wird hochgeladen"
 #: src/knowledge/uploads.tsx
 msgid "Uploading…"
 msgstr "Wird hochgeladen…"
+
+#: src/chat/connection-requests.tsx
+msgid "Use {name} in this chat"
+msgstr "{name} in diesem Chat verwenden"
 
 #: src/onboarding/ai-step.tsx
 msgid "Use a different model"
@@ -16501,6 +16631,10 @@ msgstr "Was lief"
 msgid "What ran, the decisions it asked for, every workflow and what could be better. Keep it as Markdown, or save it as a PDF from the print window."
 msgstr "Was lief, die Entscheidungen, um die es bat, jeder Workflow und was besser sein könnte. Behalten Sie ihn als Markdown oder speichern Sie ihn im Druckfenster als PDF."
 
+#: src/chat/approval-words.ts
+msgid "What should change"
+msgstr "Was soll sich ändern"
+
 #: src/dashboard/widget-ask.tsx
 msgid "What should change?"
 msgstr "Was soll sich ändern?"
@@ -16989,6 +17123,14 @@ msgstr "Mit dem Vorstand"
 msgid "With what they bring"
 msgstr "Mit allem, was sie mitbringen"
 
+#: src/chat/connection-requests.tsx
+msgid "Withdraw"
+msgstr "Zurückziehen"
+
+#: src/chat/connection-requests.tsx
+msgid "Withdraw {name}"
+msgstr "{name} zurückziehen"
+
 #: src/interview/closed.tsx
 msgid "Withdraw instead"
 msgstr "Stattdessen zurückziehen"
@@ -17157,9 +17299,13 @@ msgstr "Workflows, die die App startet"
 
 #: src/chat/thread.tsx
 #: src/frame/part-words.tsx
-#: src/settings/ai-providers.tsx
 msgid "Working"
 msgstr "In Arbeit"
+
+#: src/settings/ai-providers.tsx
+msgctxt "a provider's key works"
+msgid "Working"
+msgstr "Funktioniert"
 
 #: src/chat/thread.tsx
 #: src/workflows/requests/request-needs.tsx
@@ -17272,6 +17418,11 @@ msgctxt "a team was interviewed"
 msgid "Yes"
 msgstr "Ja"
 
+#: src/chat/approval-words.ts
+msgctxt "before the approve words"
+msgid "Yes"
+msgstr "Ja"
+
 #: src/apps/field-kinds.tsx
 msgctxt "a kind of field"
 msgid "Yes or no"
@@ -17301,6 +17452,11 @@ msgstr "Ja: Es ist unverändert und mit dem vorherigen Ereignis verknüpft."
 msgctxt "a date line in a chat"
 msgid "Yesterday"
 msgstr "Gestern"
+
+#: src/chat/approval-words.ts
+msgctxt "who answered an agent's request"
+msgid "you"
+msgstr "Ihnen"
 
 #: src/apps/app-history.tsx
 #: src/chat/thread.tsx

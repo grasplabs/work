@@ -3,6 +3,7 @@ import type {
   ModelSettings,
   SpendingWorkflow,
 } from "@grasp-os/shared/models";
+import { i18n as active } from "@lingui/core";
 import type { I18n } from "@lingui/core";
 import { msg, ph } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
@@ -58,7 +59,7 @@ const styles = stylex.create({
 /** Dollars short enough for the chart's value axis: cents under a dollar, then compact. */
 const axisDollars = (value: string | number): string => {
   const amount = Number(value);
-  return new Intl.NumberFormat(undefined, {
+  return new Intl.NumberFormat(active.locale, {
     style: "currency",
     currency: "USD",
     notation: amount < 1 ? "standard" : "compact",
@@ -70,7 +71,7 @@ const axisDollars = (value: string | number): string => {
 
 /** A share as a percentage in the page's language: "84%". */
 const percent = (share: number): string =>
-  new Intl.NumberFormat(undefined, {
+  new Intl.NumberFormat(active.locale, {
     style: "percent",
     maximumFractionDigits: 0,
   }).format(share);
@@ -222,7 +223,13 @@ export const SpendCard = ({
               <TableHeader>
                 <TableRow>
                   <TableHead>{t`Where it went`}</TableHead>
-                  <TableHead>{t`Share`}</TableHead>
+                  <TableHead>
+                    {t({
+                      message: "Share",
+                      context:
+                        "a part of the whole month's spend, as a percentage",
+                    })}
+                  </TableHead>
                   <TableHead align="end">{t`This month`}</TableHead>
                 </TableRow>
               </TableHeader>

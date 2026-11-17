@@ -513,6 +513,10 @@ msgstr "{days, plural, one {runs started today} other {runs started in the last 
 msgid "{days, plural, one {The last # day} other {The last # days}}"
 msgstr "{days, plural, one {The last # day} other {The last # days}}"
 
+#: src/chat/approval-words.ts
+msgid "{decided} by {by}"
+msgstr "{decided} by {by}"
+
 #: src/dashboard/signals.tsx
 msgid "{doc} in {where} is {late, plural, one {# day} other {# days}} past its review date."
 msgstr "{doc} in {where} is {late, plural, one {# day} other {# days}} past its review date."
@@ -877,6 +881,10 @@ msgstr "{name} is on"
 #: src/agents/agent-page.tsx
 msgid "{name} is paused"
 msgstr "{name} is paused"
+
+#: src/routes/_shell.settings.members.tsx
+msgid "{name} is removed."
+msgstr "{name} is removed."
 
 #: src/routes/_shell.settings.members.tsx
 msgid "{name} is removed. {count, plural, one {# personal connection was disconnected.} other {# personal connections were disconnected.}}"
@@ -1483,6 +1491,10 @@ msgstr "{workflow} in {app}"
 #: src/projects/project-counts.tsx
 msgid "{workflows, plural, one {# workflow} other {# workflows}}"
 msgstr "{workflows, plural, one {# workflow} other {# workflows}}"
+
+#: src/chat/approval-words.ts
+msgid "{yes}: {approve}"
+msgstr "{yes}: {approve}"
 
 #. Who answered, in an exported chat.
 #: src/chat/chat-markdown.ts
@@ -2099,6 +2111,10 @@ msgstr "Add HTTP connection"
 msgid "Add index"
 msgstr "Add index"
 
+#: src/chat/package-requests.tsx
+msgid "Add npm packages to {subject}"
+msgstr "Add npm packages to {subject}"
+
 #: src/apps/field-editor.tsx
 msgid "Add option"
 msgstr "Add option"
@@ -2425,6 +2441,10 @@ msgstr "An admin changes it."
 msgid "An admin connects this for everyone."
 msgstr "An admin connects this for everyone."
 
+#: src/chat/connection-requests.tsx
+msgid "An admin decides. It holds in this chat only."
+msgstr "An admin decides. It holds in this chat only."
+
 #: src/routes/_shell.knowledge.index.tsx
 msgid "An admin hasn't set up company memory yet."
 msgstr "An admin hasn't set up company memory yet."
@@ -2708,7 +2728,6 @@ msgid "Approval"
 msgstr "Approval"
 
 #: src/apps/app-webhooks.tsx
-#: src/chat/package-requests.tsx
 #: src/dashboard/pile-cards.tsx
 #: src/decision-confirmation.tsx
 #: src/inbox/item-detail.tsx
@@ -2743,6 +2762,14 @@ msgstr "Approve big invoices"
 msgid "Approve it on the workflow's page"
 msgstr "Approve it on the workflow's page"
 
+#: src/chat/approval-words.ts
+msgid "Approve it?"
+msgstr "Approve it?"
+
+#: src/chat/approval-words.ts
+msgid "Approve it? This cannot be undone."
+msgstr "Approve it? This cannot be undone."
+
 #: src/make/examples.ts
 msgid "Approve supplier invoices over €10,000 before they're paid."
 msgstr "Approve supplier invoices over €10,000 before they're paid."
@@ -2752,8 +2779,8 @@ msgid "Approve the change"
 msgstr "Approve the change"
 
 #: src/chat/package-requests.tsx
-msgid "Approve the packages for {subject}"
-msgstr "Approve the packages for {subject}"
+msgid "Approve the packages"
+msgstr "Approve the packages"
 
 #: src/inbox/items.ts
 msgid "Approve what {name} reaches"
@@ -2765,6 +2792,11 @@ msgstr "Approve, and it runs for the team"
 
 #: src/apps/app-webhooks.tsx
 #: src/dashboard/runs-widget.tsx
+msgid "Approved"
+msgstr "Approved"
+
+#: src/chat/approval-words.ts
+msgctxt "an agent's request"
 msgid "Approved"
 msgstr "Approved"
 
@@ -2808,6 +2840,10 @@ msgstr "Approved: {who}."
 #: src/brain/brain.ts
 msgid "Approver for new tools named"
 msgstr "Approver for new tools named"
+
+#: src/chat/approval-words.ts
+msgid "Approving"
+msgstr "Approving"
 
 #: src/apps/apps-overview.tsx
 #: src/chat/mentions.tsx
@@ -2887,6 +2923,10 @@ msgstr "Arrow keys move it, Shift for a longer step, End docks it beside the pag
 msgid "Article"
 msgstr "Article"
 
+#: src/chat/connection-requests.tsx
+msgid "As"
+msgstr "As"
+
 #: src/dashboard/pile-cards.tsx
 msgid "as {binding}"
 msgstr "as {binding}"
@@ -2962,6 +3002,10 @@ msgstr "Ask for access"
 #: src/apps/app-access-requests.tsx
 msgid "Ask for access for this App"
 msgstr "Ask for access for this App"
+
+#: src/chat/approval-words.ts
+msgid "Ask for changes"
+msgstr "Ask for changes"
 
 #: src/onboarding/connect-steps.tsx
 msgid "Ask for it"
@@ -3162,6 +3206,7 @@ msgstr "Available, via Composio"
 
 #: src/brain/atlas-overlays.tsx
 #: src/brain/back-button.tsx
+#: src/chat/approval-words.ts
 #: src/chat/asked-questions.tsx
 #: src/frame/part-words.tsx
 #: src/grasp/frame/grasp-sidebar.tsx
@@ -3565,6 +3610,10 @@ msgctxt "lesson state"
 msgid "Candidate"
 msgstr "Candidate"
 
+#: src/chat/approval-words.ts
+msgid "cannot be undone"
+msgstr "cannot be undone"
+
 #: src/apps/app-access-requests.tsx
 msgid "Capital letters, digits and underscores, starting with a letter, such as CRM."
 msgstr "Capital letters, digits and underscores, starting with a letter, such as CRM."
@@ -3766,6 +3815,10 @@ msgstr "Changed which integrations are offered"
 #: src/connections/tool-permissions.tsx
 msgid "Changes"
 msgstr "Changes"
+
+#: src/chat/approval-words.ts
+msgid "Changes asked"
+msgstr "Changes asked"
 
 #: src/settings/unknown-outcomes.tsx
 msgid "Changes Grasp sent for someone whose answer was lost, so nobody can tell whether they took effect. Only that person can say what happened, on their dashboard; follow up with them."
@@ -4416,6 +4469,10 @@ msgstr "Connection {connectionId}"
 msgid "Connection {connectionId}, {resource}"
 msgstr "Connection {connectionId}, {resource}"
 
+#: src/chat/connection-requests.tsx
+msgid "Connection requests"
+msgstr "Connection requests"
+
 #: src/workflows/trigger-description.ts
 msgid "Connection trigger"
 msgstr "Connection trigger"
@@ -4602,6 +4659,10 @@ msgstr "Cost"
 msgid "Could be better"
 msgstr "Could be better"
 
+#: src/chat/approval-words.ts
+msgid "Could not approve"
+msgstr "Could not approve"
+
 #: src/chat/answer-words.tsx
 msgid "could not be opened"
 msgstr "could not be opened"
@@ -4620,6 +4681,10 @@ msgstr "Could not clear"
 #: src/frame/part-words.tsx
 msgid "Could not copy"
 msgstr "Could not copy"
+
+#: src/chat/approval-words.ts
+msgid "Could not decline"
+msgstr "Could not decline"
 
 #: src/settings/ai-providers.tsx
 #: src/settings/teams.tsx
@@ -4666,6 +4731,7 @@ msgstr "Could not save. Your choice is kept."
 msgid "Could not save. Your name is kept."
 msgstr "Could not save. Your name is kept."
 
+#: src/chat/approval-words.ts
 #: src/chat/asked-questions.tsx
 #: src/chat/chat-composer.tsx
 #: src/settings/composer-settings.tsx
@@ -4880,13 +4946,27 @@ msgstr "Decisions, by how they ended"
 msgid "Decline"
 msgstr "Decline"
 
+#: src/chat/approval-words.ts
+msgctxt "an agent's request"
+msgid "Decline"
+msgstr "Decline"
+
 #: src/inbox/item-detail.tsx
 msgid "Decline starting {name}"
 msgstr "Decline starting {name}"
 
+#: src/chat/approval-words.ts
+msgctxt "an agent's request"
+msgid "Declined"
+msgstr "Declined"
+
 #: src/inbox/item-detail.tsx
 msgid "Declined: {name}."
 msgstr "Declined: {name}."
+
+#: src/chat/approval-words.ts
+msgid "Declining"
+msgstr "Declining"
 
 #: src/settings/backdrop-settings.tsx
 msgid "Deep"
@@ -5034,13 +5114,10 @@ msgstr "Deleting"
 msgid "Denied packages"
 msgstr "Denied packages"
 
+#: src/chat/connection-requests.tsx
 #: src/chat/package-requests.tsx
 msgid "Deny"
 msgstr "Deny"
-
-#: src/chat/package-requests.tsx
-msgid "Deny the packages for {subject}"
-msgstr "Deny the packages for {subject}"
 
 #: src/apps/app-start.tsx
 msgid "Describe the App"
@@ -5058,6 +5135,7 @@ msgstr "Designed"
 
 #: src/activity/audit-event.tsx
 #: src/activity/audit-log.tsx
+#: src/chat/approval-words.ts
 #: src/knowledge/document.tsx
 #: src/routes/_shell.brain.$noteId.tsx
 #: src/settings/event-sources.tsx
@@ -5874,6 +5952,11 @@ msgstr "expected on top, from designs and tests"
 msgid "Expected return"
 msgstr "Expected return"
 
+#: src/chat/approval-words.ts
+msgctxt "an agent's request"
+msgid "Expired"
+msgstr "Expired"
+
 #: src/activity/audit-log.tsx
 #: src/export/export-menu.tsx
 msgid "Export"
@@ -6494,6 +6577,10 @@ msgstr "Good. Now say something, so I can hear you too."
 #: src/onboarding/setup-steps.tsx
 msgid "Got it."
 msgstr "Got it."
+
+#: src/chat/connection-requests.tsx
+msgid "Grant"
+msgstr "Grant"
 
 #: src/inbox/items.ts
 msgid "Grant {who}?"
@@ -7225,6 +7312,10 @@ msgstr "In the log"
 msgid "In the Netherlands the works council may need to agree before you turn this on."
 msgstr "In the Netherlands the works council may need to agree before you turn this on."
 
+#: src/chat/connection-requests.tsx
+msgid "In this chat only, until you delete it. Anything it sends or changes still waits for you to confirm."
+msgstr "In this chat only, until you delete it. Anything it sends or changes still waits for you to confirm."
+
 #: src/routes/_shell.brain.$noteId.tsx
 msgid "In this conversation"
 msgstr "In this conversation"
@@ -7508,6 +7599,10 @@ msgstr "It knows who leads which team, so I can talk to the leads first. We conn
 #: src/brain/gap-actions.tsx
 msgid "It leaves the open questions, with no answer, and nobody is asked about it any more. It can't be opened again."
 msgstr "It leaves the open questions, with no answer, and nobody is asked about it any more. It can't be opened again."
+
+#: src/chat/connection-requests.tsx
+msgid "It may"
+msgstr "It may"
 
 #: src/frame/page-states.tsx
 msgid "It may have been renamed or removed."
@@ -8834,6 +8929,10 @@ msgstr "Name of your HR platform"
 msgid "Name, job and picture"
 msgstr "Name, job and picture"
 
+#: src/settings/invitations.tsx
+msgid "name@company.com"
+msgstr "name@company.com"
+
 #: src/brain/brain.ts
 msgid "Named by"
 msgstr "Named by"
@@ -9644,6 +9743,7 @@ msgstr "Not working"
 
 #: src/agents/agent-page.tsx
 #: src/apps/publish.tsx
+#: src/chat/approval-words.ts
 msgid "Not yet"
 msgstr "Not yet"
 
@@ -10077,6 +10177,10 @@ msgstr "One of a list of options"
 #: src/interview/words.ts
 msgid "One real case"
 msgstr "One real case"
+
+#: src/chat/connection-requests.tsx
+msgid "Only"
+msgstr "Only"
 
 #: src/settings/use-team-change.ts
 msgid "Only admins can change teams."
@@ -10577,10 +10681,6 @@ msgstr "Package"
 #: src/chat/package-requests.tsx
 msgid "Package requests"
 msgstr "Package requests"
-
-#: src/chat/package-requests.tsx
-msgid "Packages"
-msgstr "Packages"
 
 #: src/inbox/inbox-kind.tsx
 msgctxt "inbox item kind: what a scan found of approved packages"
@@ -11748,6 +11848,10 @@ msgstr "Replace version {newerVersion} with mine"
 msgid "Replaced a request for packages"
 msgstr "Replaced a request for packages"
 
+#: src/chat/approval-words.ts
+msgid "Replaced by a newer request"
+msgstr "Replaced by a newer request"
+
 #: src/dashboard/report-dialog.tsx
 msgid "Report"
 msgstr "Report"
@@ -12790,10 +12894,15 @@ msgstr "Send one event"
 msgid "Send request"
 msgstr "Send request"
 
+#: src/chat/approval-words.ts
+msgid "Send to the agent"
+msgstr "Send to the agent"
+
 #: src/inbox/item-detail.tsx
 msgid "Send version {version} of {who} back"
 msgstr "Send version {version} of {who} back"
 
+#: src/chat/approval-words.ts
 #: src/settings/invitations.tsx
 msgid "Sending"
 msgstr "Sending"
@@ -12929,8 +13038,12 @@ msgstr "Several for one question"
 
 #: src/apps/app-sharing.tsx
 #: src/apps/publish.tsx
-#: src/settings/ai-spend.tsx
 #: src/workflows/share-workflow.tsx
+msgid "Share"
+msgstr "Share"
+
+#: src/settings/ai-spend.tsx
+msgctxt "a part of the whole month's spend, as a percentage"
 msgid "Share"
 msgstr "Share"
 
@@ -13118,6 +13231,10 @@ msgstr "Show or hide the sidebar"
 #: src/workflows/requests/request-who.tsx
 msgid "Show people one by one"
 msgstr "Show people one by one"
+
+#: src/settings/ai-providers.tsx
+msgid "Show the models"
+msgstr "Show the models"
 
 #: src/workflows/requests/request-detail.tsx
 msgid "Show the page for {title}"
@@ -13927,8 +14044,8 @@ msgid "Take theirs"
 msgstr "Take theirs"
 
 #: src/chat/package-requests.tsx
-msgid "Takes out"
-msgstr "Takes out"
+msgid "Taken out"
+msgstr "Taken out"
 
 #: src/knowledge/purge.tsx
 msgid "Takes terms out of every version of the collection's documents, for good. You see what it would remove first."
@@ -14196,9 +14313,13 @@ msgstr "The address can sign in again."
 msgid "The address may be wrong, or the page was moved or removed."
 msgstr "The address may be wrong, or the page was moved or removed."
 
-#: src/chat/package-requests.tsx
-msgid "The agent asks for npm packages for {subject}"
-msgstr "The agent asks for npm packages for {subject}"
+#: src/chat/approval-words.ts
+msgid "The agent"
+msgstr "The agent"
+
+#: src/chat/connection-requests.tsx
+msgid "The agent asked an admin for {name}"
+msgstr "The agent asked an admin for {name}"
 
 #: src/activity/audit-words.ts
 msgid "The agent looked something up"
@@ -15623,6 +15744,7 @@ msgstr "Under way"
 
 #: src/apps/publish.tsx
 #: src/brain/region-edit.tsx
+#: src/chat/approval-words.ts
 #: src/chat/saved-memory.tsx
 msgid "Undo"
 msgstr "Undo"
@@ -15653,6 +15775,10 @@ msgstr "Undo the changes only you see?"
 #: src/apps/app-history.tsx
 msgid "Undone changes"
 msgstr "Undone changes"
+
+#: src/chat/approval-words.ts
+msgid "Undone, waiting again"
+msgstr "Undone, waiting again"
 
 #: src/settings/erasures.tsx
 msgid "Unfinished runs (stopped) and decision confirmations"
@@ -15765,6 +15891,10 @@ msgstr "Uploading"
 #: src/knowledge/uploads.tsx
 msgid "Uploading…"
 msgstr "Uploading…"
+
+#: src/chat/connection-requests.tsx
+msgid "Use {name} in this chat"
+msgstr "Use {name} in this chat"
 
 #: src/onboarding/ai-step.tsx
 msgid "Use a different model"
@@ -16501,6 +16631,10 @@ msgstr "What ran"
 msgid "What ran, the decisions it asked for, every workflow and what could be better. Keep it as Markdown, or save it as a PDF from the print window."
 msgstr "What ran, the decisions it asked for, every workflow and what could be better. Keep it as Markdown, or save it as a PDF from the print window."
 
+#: src/chat/approval-words.ts
+msgid "What should change"
+msgstr "What should change"
+
 #: src/dashboard/widget-ask.tsx
 msgid "What should change?"
 msgstr "What should change?"
@@ -16989,6 +17123,14 @@ msgstr "With the board"
 msgid "With what they bring"
 msgstr "With what they bring"
 
+#: src/chat/connection-requests.tsx
+msgid "Withdraw"
+msgstr "Withdraw"
+
+#: src/chat/connection-requests.tsx
+msgid "Withdraw {name}"
+msgstr "Withdraw {name}"
+
 #: src/interview/closed.tsx
 msgid "Withdraw instead"
 msgstr "Withdraw instead"
@@ -17157,7 +17299,11 @@ msgstr "Workflows the App starts"
 
 #: src/chat/thread.tsx
 #: src/frame/part-words.tsx
+msgid "Working"
+msgstr "Working"
+
 #: src/settings/ai-providers.tsx
+msgctxt "a provider's key works"
 msgid "Working"
 msgstr "Working"
 
@@ -17272,6 +17418,11 @@ msgctxt "a team was interviewed"
 msgid "Yes"
 msgstr "Yes"
 
+#: src/chat/approval-words.ts
+msgctxt "before the approve words"
+msgid "Yes"
+msgstr "Yes"
+
 #: src/apps/field-kinds.tsx
 msgctxt "a kind of field"
 msgid "Yes or no"
@@ -17301,6 +17452,11 @@ msgstr "Yes: it is unchanged and links to the event before it."
 msgctxt "a date line in a chat"
 msgid "Yesterday"
 msgstr "Yesterday"
+
+#: src/chat/approval-words.ts
+msgctxt "who answered an agent's request"
+msgid "you"
+msgstr "you"
 
 #: src/apps/app-history.tsx
 #: src/chat/thread.tsx

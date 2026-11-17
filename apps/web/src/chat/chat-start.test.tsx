@@ -81,11 +81,20 @@ const agent = (id: string, name: string): ChatAgent => ({
 const shown = async (
   make?: ChatMake,
   ideas?: MakeIdeas,
-  { agents = [], named }: { agents?: ChatAgent[]; named?: string } = {}
+  {
+    agents = [],
+    named,
+    models = Promise.resolve(["openai/gpt-5"]),
+  }: {
+    agents?: ChatAgent[];
+    named?: string;
+    /** What core answers asking for the models, once it does. */
+    models?: Promise<string[]>;
+  } = {}
 ) => {
   const asked: string[] = [];
   const chats = {
-    models: async () => await Promise.resolve(["openai/gpt-5"]),
+    models: async () => await models,
     efforts: async () => await Promise.resolve({}),
     list: async () => await Promise.resolve([]),
     agents: async () => await Promise.resolve(agents),
@@ -274,6 +283,41 @@ describe("Chat's page from Make something", () => {
 
     expect({ ideas: ideas(), asked }).toStrictEqual({
       ideas: [],
+      asked: [
+        "create What waits on me today? null",
+        "send chat-1 What waits on me today?",
+      ],
+    });
+  });
+
+  it("asks nothing before core has said which models there are, and the question waits in the box", async () => {
+    const models = Promise.withResolvers<string[]>();
+    const { asked } = await shown(undefined, undefined, {
+      models: models.promise,
+    });
+    const ask = async (): Promise<void> => {
+      await act(async () => {
+        box().closest("form")?.requestSubmit();
+        await Promise.resolve();
+      });
+      await settled();
+    };
+    await act(async () => {
+      typeIn(box(), "What waits on me today?");
+      await Promise.resolve();
+    });
+
+    await ask();
+    const early = { asked: [...asked], kept: box().value };
+    await act(async () => {
+      models.resolve(["openai/gpt-5"]);
+      await Promise.resolve();
+    });
+    await settled();
+    await ask();
+
+    expect({ early, asked }).toStrictEqual({
+      early: { asked: [], kept: "What waits on me today?" },
       asked: [
         "create What waits on me today? null",
         "send chat-1 What waits on me today?",
