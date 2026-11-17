@@ -1177,6 +1177,7 @@ type CorePersonMember =
   | "memoryChoices"
   | "ownEntityAs"
   | "ownEntityIdAs"
+  | "profileAs"
   | "entitiesAs"
   | "memoriesAs"
   | "contestedAs"
@@ -6434,6 +6435,26 @@ const corePersonMemories = {
       await read("an id of the markers", markers.join("")),
     ];
   },
+  // The reader's profile (GRA-1745): theirs alone, whatever someone
+  // else's holds; refused for someone who isn't a member.
+  profileAs: async ({ personId, markers }) => {
+    await othersOwnEntity(markers);
+    const budget = { tokens: recallBudgetMax };
+    return [
+      await answer(
+        "the reader's own",
+        async () => await coreBrain.profileAs(env, personId, budget)
+      ),
+      await answer(
+        "as someone who isn't a member",
+        async () => await coreBrain.profileAs(env, stranger(), budget)
+      ),
+      await answer(
+        "as a person named by the markers",
+        async () => await coreBrain.profileAs(env, markers.join(""), budget)
+      ),
+    ];
+  },
   // The reader's own entity (GRA-1836): theirs alone, whatever someone
   // else's holds; refused for someone who isn't a member.
   ownEntityIdAs: async ({ personId, markers }) => {
@@ -7196,6 +7217,45 @@ const linkingProbes = {
       ),
       await read("the shared store", store()),
       await read("the reader's own store", personalStore(reader.person)),
+    ];
+  },
+  // Someone else's profile, their own entity holding marked memories,
+  // answers the reader as a store never written does (GRA-1745).
+  readProfile: async ({ markers, reader }) => {
+    const budget = { tokens: recallBudgetMax };
+    // The profile it answers, or the refusal's words alone (the object's
+    // id a refusal carries is no answer), so its markers are checked.
+    const read = async (name: string, brain: Brain, about?: Answer["about"]) =>
+      await answer(
+        name,
+        async () => {
+          try {
+            return await brain.readProfile({ reader, budget });
+          } catch (error) {
+            return {
+              refused: error instanceof Error ? error.message : "not an error",
+            };
+          }
+        },
+        about
+      );
+    return [
+      await read(
+        "someone else's own store, holding marked memories about their own entity",
+        personalStore(await othersOwnEntity(markers)),
+        "hidden"
+      ),
+      await read(
+        "someone else's own store, never written",
+        personalStore(stranger()),
+        "nothing"
+      ),
+      await read("the shared store", store()),
+      await answer(
+        "the reader's own store",
+        async () =>
+          await personalStore(reader.person).readProfile({ reader, budget })
+      ),
     ];
   },
   readCard: async (probing) => {
