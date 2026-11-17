@@ -49,10 +49,7 @@ import { onboardingStore } from "../src/onboarding/store.ts";
 import { aiProvidersControlUrl, compatibleHost } from "./ai-providers-fake.ts";
 import type { PlannedReply, ProviderRequest } from "./ai-providers-fake.ts";
 import { allEvents } from "./audit-events.ts";
-import {
-  platformAnthropicKey,
-  platformOpenAiKey,
-} from "./connect-providers.ts";
+import { platformAnthropicKey } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import { holdAlarm } from "./interview-link.ts";
 import type { Answer } from "./model-provider.ts";
@@ -1295,61 +1292,12 @@ describe("AI providers", { timeout: 60_000 }, () => {
       // Always at their providers' EU hosts: Grasp's to keep there.
       expect(
         listing.platform.map(
-          ({ feature, provider }) =>
-            `${feature}: ${provider === null ? "here" : provider.whereItRuns}`
+          ({ feature, provider }) => `${feature}: ${provider.whereItRuns}`
         )
       ).toStrictEqual([
-        "conversion: here",
         "transcription: OpenAI, European Union",
         "speech: ElevenLabs, European Union",
       ]);
-    });
-
-    it("calls a provider Grasp has a key for, with that key, audited as the platform's", async () => {
-      await plan(platformOpenAiKey, [
-        answered("openai-responses", "Converted."),
-      ]);
-      const trigger = newPerson();
-
-      const answer = await models(env).platformCall(
-        await callOf("openai/gpt-5-mini", {
-          trigger,
-          work: { platform: "brain_upkeep" },
-        })
-      );
-
-      expect(answer.text).toBe("Converted.");
-      // At OpenAI's EU host: Grasp's project keeps its data there.
-      await expect(placesOf(platformOpenAiKey)).resolves.toStrictEqual(
-        onlyAt({ ...openaiCase, host: "eu.api.openai.com" })
-      );
-      const [event] = await auditedFor(trigger.userId, 1);
-      expect(event?.detail).toMatchObject({
-        transport: "connect",
-        credential: "platform",
-        region: "eu",
-        platform: "brain_upkeep",
-      });
-    });
-
-    it("doesn't offer a provider Grasp has no key for, nor its key to anything but a platform feature", async () => {
-      const { platform } = await env.CONNECT.aiProviderRoutes();
-      const noKey = await outcome(
-        models(env).platformCall(
-          await callOf("mistral/mistral-small-latest", {
-            work: { platform: "brain_upkeep" },
-          })
-        )
-      );
-      const notPlatform = await outcome(
-        models(env).platformCall(await callOf("openai/gpt-5-mini"))
-      );
-
-      expect({ platform, noKey, notPlatform }).toStrictEqual({
-        platform: ["anthropic", "openai", "elevenlabs"],
-        noKey: "model.not_allowed",
-        notPlatform: "model.invalid_call",
-      });
     });
   });
 

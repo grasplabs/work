@@ -17,12 +17,13 @@ export type SyncItemKind = z.infer<typeof syncItemKindSchema>;
 const sourceIdSchema = z.string().min(1).max(1024);
 
 /**
- * Who may open an item, as the source lists it: one account, by the ID the
- * provider's sign-in vouches for; a group; everyone in the source's
- * organisation or domain; or whoever has a link to it ("anyone with the
- * link", or everyone in the organisation with it), which counts for
- * nobody: a link alone gives nobody access. The connection's provider and
- * tenant say whose (core makes the principals).
+ * Who may open an item, as the source lists it: one account, by its
+ * verified email address, which the provider's sign-in vouches for; a
+ * group; everyone in the source's organisation or domain, as the source
+ * would show it to them in their own search; or whoever has a link to it.
+ * The connection's provider and tenant say whose (core makes the
+ * principals). A link counts for nobody: having it is no reason to find
+ * the item in the Brain.
  */
 export const syncReaderSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("account"), id: sourceIdSchema }),

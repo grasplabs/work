@@ -79,11 +79,12 @@ const shared: SyncItem = {
   title: "Price list",
   content: { type: "text", text: "Coffee 3.20" },
   readers: [
-    { kind: "account", id: "oid-owner" },
-    { kind: "group", id: "group-sales" },
+    { kind: "account", id: "owner@acme.test" },
+    { kind: "group", id: "sales@acme.test" },
     { kind: "tenant", id: "acme.test" },
+    { kind: "link" },
   ],
-  changedBy: "oid-owner",
+  changedBy: "owner@acme.test",
   partOf: null,
 };
 
