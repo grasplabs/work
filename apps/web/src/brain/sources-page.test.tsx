@@ -70,7 +70,11 @@ const listed = (
   versions,
 });
 
+/** A record agents read through a shared connection an admin opened to the person. */
+const deal: BrainSourceRef = { producer: "connected", id: "conn-1/0/abc" };
+
 const texts: Record<string, string> = {
+  "conn-1/0/abc@1": "Deal Rotterdam warehouse",
   "u-1@2": "Handbook\nInvoices are paid on Fridays.",
   "u-1@1": "Handbook draft\nInvoices are paid monthly.",
   "c-1@1": "Board minutes",
@@ -185,6 +189,8 @@ interface Faked {
   deleteAnswerLost?: boolean;
   /** Refuses the first new version with this, as a lost answer would. */
   firstVersionRefused?: string;
+  /** A shared connection keeps records the person may read, and search finds one. */
+  kept?: boolean;
 }
 
 /** A question nothing the person may read holds: its pack is empty. */
@@ -207,6 +213,7 @@ const shown = async (
     handbookDeletes = "erase",
     deleteAnswerLost = false,
     firstVersionRefused,
+    kept = false,
   }: Faked = {}
 ) => {
   const calls: string[] = [];
@@ -272,7 +279,37 @@ const shown = async (
           truncated: false,
         };
       }
+      if (kept) {
+        return {
+          ...pack,
+          memories: [],
+          items: [
+            {
+              source: deal,
+              version: 1,
+              position: 0,
+              text: "Deal Rotterdam warehouse",
+              whole: true,
+              found: "words" as const,
+            },
+          ],
+        };
+      }
       return question === remembered ? { ...pack, items: [] } : pack;
+    },
+    connections: async () => {
+      await Promise.resolve();
+      return kept
+        ? [
+            {
+              connectionId: "conn-1",
+              name: "HubSpot",
+              account: "sales@acme.test",
+              records: 3,
+              lastReadAt: "2026-11-12T10:00:00.000Z",
+            },
+          ]
+        : [];
     },
     upload: async (
       file: { name: string; bytes: Uint8Array },
@@ -746,6 +783,34 @@ describe(SourcesPage, () => {
         "Microsoft 365Searched live, nothing kept." +
         "HubSpotSearched live, nothing kept.",
       none: "How your connections feed the BrainYou have no connections yet.",
+    });
+  });
+
+  it("shows each shared connection the person may read once, with its count and last read, and a record from one with when it was read", async () => {
+    await shown([], { kept: true });
+    const kept = section("What agents read through shared connections");
+    await search("rotterdam");
+    await press("Deal Rotterdam warehouse");
+    const opened = panel();
+    act(() => {
+      root?.unmount();
+    });
+    document.body.replaceChildren();
+    await shown([]);
+
+    expect({
+      kept: ["HubSpot (sales@acme.test)", "3 records kept", "Last read"].map(
+        (text) => kept.includes(text)
+      ),
+      opened: ["Deal Rotterdam warehouse", "Read from HubSpot on"].map((text) =>
+        opened.includes(text)
+      ),
+      // None the person may read: no section at all.
+      none: section("What agents read through shared connections"),
+    }).toStrictEqual({
+      kept: [true, true, true],
+      opened: [true, true],
+      none: "",
     });
   });
 

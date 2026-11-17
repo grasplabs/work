@@ -27,6 +27,7 @@ import { holderName } from "../activity/pending.tsx";
 import { ErrorText } from "../error-text.tsx";
 import { formatDate, formatList } from "../format.ts";
 import type { Loaded } from "../load-from-core.tsx";
+import { BrainAudience } from "./brain-audience.tsx";
 import { canReconnect, ConnectDialog } from "./connect-dialog.tsx";
 import type { Integration } from "./integrations.ts";
 import { useChange } from "./use-change.ts";
@@ -343,6 +344,21 @@ const Disconnect = ({
 };
 
 /**
+ * Whether `identity` chooses who may read in the Brain what agents read
+ * through `connection` (brain-audience.tsx): one of the company's own
+ * admins, never Grasp staff, on a shared connection still connected.
+ * Core checks it again.
+ */
+const choosesBrainAudience = (
+  connection: ListedConnection,
+  identity: Identity
+): boolean =>
+  isAdmin(identity.role) &&
+  !identity.staff &&
+  connection.scope === "shared" &&
+  connection.status !== "disconnected";
+
+/**
  * One connection to the integration, as the prototype's Account section
  * shows it: its account, where it stands, who connected it and when, and
  * what can be done with it.
@@ -432,6 +448,9 @@ const ConnectionItem = ({
       ) : null}
       {connection.source === "composio" ? (
         <ConsentRecord connection={connection} />
+      ) : null}
+      {choosesBrainAudience(connection, identity) ? (
+        <BrainAudience connection={connection} label={label} />
       ) : null}
       {held === undefined ? null : (
         <Holders

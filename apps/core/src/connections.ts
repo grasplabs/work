@@ -117,7 +117,11 @@ import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 import { pointSharedMailbox, readSharedMailboxes } from "./shared-mailboxes.ts";
-import { eraseBrainReads, forgetAudienceOf } from "./shared-reads.ts";
+import {
+  eraseBrainReads,
+  forgetAudienceOf,
+  mayHoldReadsOf,
+} from "./shared-reads.ts";
 import { routeMember } from "./staff-audit.ts";
 import {
   readStephenReach,
@@ -598,13 +602,23 @@ export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
             .from(users)
             .where(inList(users.id, ids));
     const names = new Map(people.map(({ id, name }) => [id, name]));
+    // A shared connection the Brain may hold reads of (shared-reads.ts):
+    // its disconnect erases them, so the page says so, as for a person's
+    // own (`mayHoldCapturesOf`).
+    const holdingShared = await mayHoldReadsOf(
+      this.#env,
+      listed.flatMap(({ id, ownerUserId }) =>
+        ownerUserId === null ? [id] : []
+      )
+    );
     return listed.map((connection) => ({
       ...connection,
       connectedByName:
         connection.connectedBy === null
           ? null
           : (names.get(connection.connectedBy) ?? null),
-      ...(mayHoldCapturesOf(connection, person.userId)
+      ...(mayHoldCapturesOf(connection, person.userId) ||
+      holdingShared.has(connection.id)
         ? { keepsReads: true as const }
         : {}),
     }));

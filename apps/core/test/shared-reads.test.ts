@@ -327,6 +327,55 @@ describe("what the Brain kept from a shared connection", setUpTime, () => {
     });
   });
 
+  it("is listed on the Sources page, per connection with its count, to its audience alone, and its disconnect warns of the erasure", async () => {
+    const [admin, member, outsider] = await Promise.all([
+      signedInApi(idp, "admin"),
+      signedInApi(idp, "user"),
+      signedInApi(idp, "user"),
+    ]);
+    const connectionId = await connection();
+    await admin.api.connections.setBrainAudience(connectionId, {
+      kind: "team",
+      teamId: await newTeam(member.userId),
+    });
+    await kept(connectionId, "deal 1", `Deal one ${uniqueWord()}`);
+    await kept(connectionId, "deal 2", `Deal two ${uniqueWord()}`);
+    const listedFor = async (api: Admin["api"]) => {
+      const rows = await api.brainSources.connections();
+      return rows.filter((each) => each.connectionId === connectionId);
+    };
+    const memberRows = await listedFor(member.api);
+    const listed = await admin.api.connections.list();
+
+    expect({
+      member: memberRows.map(({ lastReadAt, ...row }) => ({
+        ...row,
+        lastReadAt: Number.isNaN(Date.parse(lastReadAt))
+          ? "not a time"
+          : "a time",
+      })),
+      // Outside its audience: nothing named, nothing counted. The admin
+      // too, who isn't in the team.
+      outsider: await listedFor(outsider.api),
+      admin: await listedFor(admin.api),
+      keepsReads: listed.find(({ id }) => id === connectionId)?.keepsReads,
+    }).toStrictEqual({
+      member: [
+        {
+          connectionId,
+          // Its system's name, as the catalog has it.
+          name: "HubSpot",
+          account: null,
+          records: 2,
+          lastReadAt: "a time",
+        },
+      ],
+      outsider: [],
+      admin: [],
+      keepsReads: true,
+    });
+  });
+
   it("is closed to everyone the moment its connection is disconnected", async () => {
     const { admin, member, connectionId } = await sharedWithTeam();
     const marker = uniqueWord();

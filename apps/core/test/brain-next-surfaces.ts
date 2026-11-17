@@ -2034,6 +2034,15 @@ export const coreProbes = {
     );
     return asked;
   },
+  // The shared connections whose kept reads the reader may read
+  // (GRA-1831): a connection outside their audience is never named, and
+  // its ID may hold a marker.
+  readableConnectionsOf: async ({ personId }) => [
+    await answer(
+      "the shared connections they may read",
+      async () => await coreBrain.readableConnectionsOf(env, personId)
+    ),
+  ],
   readSourceVersionAs: async ({ personId, hiddenVersions, markers }) => {
     const read = async (
       name: string,

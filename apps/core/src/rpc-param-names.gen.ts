@@ -125,6 +125,7 @@ export const rpcParamNames: ParamNames = {
     "work": ["id"],
   },
   "BrainSourcesRpc": {
+    "connections": [],
     "deleteUpload": ["uploadId"],
     "list": ["after"],
     "read": ["source","version"],

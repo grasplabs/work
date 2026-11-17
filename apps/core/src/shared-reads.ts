@@ -30,6 +30,7 @@ import {
   connectionBrainErasures,
   connectionBrainReads,
 } from "./db/core/schema.ts";
+import { inList } from "./db/d1.ts";
 
 // The records the Brain kept from what agents read through a shared
 // connection (GRA-1831; the threat model and the decisions are on the
@@ -105,6 +106,75 @@ export const claimSharedRead = async (
   return named === undefined
     ? undefined
     : { producer: "connected", id: named.sourceId };
+};
+
+/** What the Brain keeps of one shared connection now: how many records, and when the last was read. */
+export interface KeptOf {
+  connectionId: string;
+  records: number;
+  lastReadAt: Date;
+}
+
+/**
+ * What the Brain keeps of each of the shared connections `connectionIds`
+ * now: its records of the connection's current generation (an older one
+ * is being erased, and nobody reads it), how many and when the last was
+ * read. A connection with none is left out.
+ */
+export const keptOf = async (
+  env: Pick<Env, "DB">,
+  connectionIds: readonly string[]
+): Promise<KeptOf[]> => {
+  if (connectionIds.length === 0) {
+    return [];
+  }
+  const rows = await drizzle(env.DB)
+    .select({
+      connectionId: connectionBrainReads.connectionId,
+      records: sql<number>`count(*)`,
+      lastReadAt: sql<number>`max(${connectionBrainReads.readAt})`,
+    })
+    .from(connectionBrainReads)
+    .where(
+      and(
+        inList(connectionBrainReads.connectionId, connectionIds),
+        sql`${connectionBrainReads.generation} = COALESCE((SELECT ${connectionBrainErasures.generation} FROM ${connectionBrainErasures} WHERE ${connectionBrainErasures.connectionId} = ${connectionBrainReads.connectionId}), 0)`
+      )
+    )
+    .groupBy(connectionBrainReads.connectionId)
+    .orderBy(asc(connectionBrainReads.connectionId));
+  return rows.map(({ connectionId, records, lastReadAt }) => ({
+    connectionId,
+    records,
+    lastReadAt: new Date(lastReadAt),
+  }));
+};
+
+/**
+ * Which of the shared connections `connectionIds` the Brain may hold
+ * something of: an audience chosen for it, or a record kept. What the
+ * disconnect dialog says it erases by.
+ */
+export const mayHoldReadsOf = async (
+  env: Pick<Env, "DB">,
+  connectionIds: readonly string[]
+): Promise<Set<string>> => {
+  if (connectionIds.length === 0) {
+    return new Set();
+  }
+  const db = drizzle(env.DB);
+  const ids = [...connectionIds];
+  const [audiences, reads] = await db.batch([
+    db
+      .select({ id: connectionBrainAudiences.connectionId })
+      .from(connectionBrainAudiences)
+      .where(inList(connectionBrainAudiences.connectionId, ids)),
+    db
+      .selectDistinct({ id: connectionBrainReads.connectionId })
+      .from(connectionBrainReads)
+      .where(inList(connectionBrainReads.connectionId, ids)),
+  ]);
+  return new Set([...audiences, ...reads].map(({ id }) => id));
 };
 
 /** Who asked for an erasure, and as which request: an audit event's id. */
