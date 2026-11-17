@@ -1098,16 +1098,16 @@ describe("what a chat writes for others once it used something only its person m
   );
 
   it(
-    "is marked by an App's answer when what the App may read can't be placed (a kind of source no longer served), and an already marked chat still holds its write after reading an App",
+    "is marked by an App's answer when what the App may read can't be placed (a connection connect doesn't know), and an already marked chat still holds its write after reading an App",
     slow,
     async () => {
       const builder = await signedInApi(idp, "builder");
       const unplaced = await liveNotes(builder);
-      // A Knowledge collection grant left from before: unresolved.
+      // A grant on a connection connect doesn't know: unresolved.
       await env.DB.prepare(
         `INSERT INTO permissions (id, subject_type, subject_id, object_type, object_id,
           actions, binding, status, requested_by, requested_at, granted_by, granted_at)
-         VALUES (?, 'app', ?, 'collection', ?, '["read"]', ?, 'active', 'test', 0, 'test', 0)`
+         VALUES (?, 'app', ?, 'connection', ?, '["read"]', ?, 'active', 'test', 0, 'test', 0)`
       )
         .bind(
           crypto.randomUUID(),
