@@ -36,8 +36,11 @@ export interface Listener {
   ready: () => void;
   /** What it has heard so far, all of it. */
   heard: (words: Heard) => void;
-  /** What stops it, or (`unheard`) what it missed while it goes on. */
-  problem: (problem: ComposerVoiceProblem) => void;
+  /**
+   * What stops it, or (`unheard`) what it missed while it goes on;
+   * `unavailable` when this deployment has no live transcription at all.
+   */
+  problem: (problem: ComposerVoiceProblem, unavailable?: boolean) => void;
 }
 
 /** Where a dictation's words come from. */
@@ -89,6 +92,16 @@ const coreSource = (locale: Locale): DictationSource => {
           onPartial: (text) => {
             partial = text;
             listener.heard({ settled: "", interim: text });
+          },
+          // Core won't listen: no use trying again. Its daily limit says so
+          // as such; anything else as words that couldn't be written down.
+          onRefused: (code) => {
+            line?.drop();
+            stop();
+            listener.problem(
+              code === "transcription.limited" ? "limited" : "failed",
+              code === "transcription.unavailable"
+            );
           },
           onLive: (live) => {
             if (live && !began && line !== undefined) {
@@ -214,14 +227,27 @@ const browserSource = (
   // What earlier runs settled: the browser starts each run's results anew.
   let kept = "";
   let listening = false;
+  let started = false;
+  let waiting = 0;
   let ended: (() => void) | undefined;
   return {
     outside: true,
     start: (listener) => {
       listening = true;
       recognition.addEventListener("start", () => {
+        started = true;
+        window.clearTimeout(waiting);
         listener.ready();
       });
+      // A browser whose recognition never starts nor says why (it can't
+      // reach its maker's service): it failed.
+      waiting = window.setTimeout(() => {
+        if (!started) {
+          listening = false;
+          recognition.abort();
+          listener.problem("failed");
+        }
+      }, lineReadyMs);
       recognition.addEventListener("result", (event) => {
         let settled = "";
         let interim = "";
@@ -268,6 +294,7 @@ const browserSource = (
     },
     cancel: () => {
       listening = false;
+      window.clearTimeout(waiting);
       recognition.abort();
     },
     mute: (muted) => {

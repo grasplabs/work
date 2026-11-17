@@ -17,7 +17,7 @@ import {
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
-import { afterEach, describe, expect, it } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import type { Loaded } from "../load-from-core.tsx";
 import { examplesFor } from "../make/examples.ts";
@@ -25,6 +25,7 @@ import { activeChat } from "./active-chat.ts";
 import { ChatStart } from "./chat-start.tsx";
 import type { MakeIdeas } from "./chat-start.tsx";
 import { GlobalChatProvider } from "./global-chat.tsx";
+import { sendDeadlineMs } from "./use-ask.ts";
 
 // Chat's own page from Make something: ideas to start from in place of the
 // questions (an App's blueprints, a workflow's starting sentences), each
@@ -85,11 +86,14 @@ const shown = async (
     agents = [],
     named,
     models = Promise.resolve(["openai/gpt-5"]),
+    confirmed = Promise.resolve(true),
   }: {
     agents?: ChatAgent[];
     named?: string;
     /** What core answers asking for the models, once it does. */
     models?: Promise<string[]>;
+    /** When core confirms a question sent. */
+    confirmed?: Promise<unknown>;
   } = {}
 ) => {
   const asked: string[] = [];
@@ -105,7 +109,7 @@ const shown = async (
     },
     send: async (chatId: string, question: ChatQuestion) => {
       asked.push(`send ${chatId} ${question.text}`);
-      await Promise.resolve();
+      await confirmed;
     },
     watch: async () => await Promise.withResolvers<never>().promise,
     summary: async () => await Promise.withResolvers<never>().promise,
@@ -154,7 +158,7 @@ const shown = async (
     await router.load();
   });
   await settled();
-  return { asked };
+  return { asked, router };
 };
 
 const box = (): HTMLTextAreaElement => {
@@ -323,6 +327,64 @@ describe("Chat's page from Make something", () => {
         "send chat-1 What waits on me today?",
       ],
     });
+  });
+
+  it("says a question core doesn't confirm in time wasn't sent, keeps it, sends it once, and goes on when core confirms late", async () => {
+    const confirmed = Promise.withResolvers<boolean>();
+    const { asked, router } = await shown(undefined, undefined, {
+      confirmed: confirmed.promise,
+    });
+    const send = async (): Promise<void> => {
+      await act(async () => {
+        box().closest("form")?.requestSubmit();
+        await Promise.resolve();
+      });
+    };
+    await act(async () => {
+      typeIn(box(), "What waits on me today?");
+      await Promise.resolve();
+    });
+    vi.useFakeTimers();
+    try {
+      await send();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(sendDeadlineMs);
+      });
+      const late = {
+        said: document.body.textContent.includes(
+          "Grasp hasn't confirmed your question yet."
+        ),
+        failed: document.body.textContent.includes("Could not send"),
+        kept: box().value,
+      };
+      // Send again while core is late: still the one question.
+      await send();
+      const sentOnce = [...asked];
+      await act(async () => {
+        confirmed.resolve(true);
+        await vi.advanceTimersByTimeAsync(0);
+      });
+
+      expect({
+        late,
+        sentOnce,
+        // Confirmed late, it is asked: the person is on the chat's page.
+        at: router.state.location.pathname,
+      }).toStrictEqual({
+        late: {
+          said: true,
+          failed: true,
+          kept: "What waits on me today?",
+        },
+        sentOnce: [
+          "create What waits on me today? null",
+          "send chat-1 What waits on me today?",
+        ],
+        at: "/chats/chat-1",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("starts the chat with the agent the address names, among those the person may talk to", async () => {

@@ -826,7 +826,6 @@ const AnswerEnding = ({
           {t`Try again`}
         </Button>
       ) : null}
-      {ending.keyFailedForAdmin ? <KeyFailed /> : null}
     </>
   );
 };
@@ -977,58 +976,62 @@ const AnswerRow = ({
   const copyText = words.join("\n\n");
   const retry = context.onRetry;
   return (
-    <Message
-      // An answer with no words (its turn asked the person instead) has
-      // nothing to act on.
-      actions={
-        retry === undefined || failed || copyText === "" ? undefined : (
-          <ChatMessageAction
-            icon={Retry}
-            aria-label={t`Ask again`}
-            onClick={() => {
-              retry();
-            }}
+    <>
+      <Message
+        // An answer with no words (its turn asked the person instead) has
+        // nothing to act on.
+        actions={
+          retry === undefined || failed || copyText === "" ? undefined : (
+            <ChatMessageAction
+              icon={Retry}
+              aria-label={t`Ask again`}
+              onClick={() => {
+                retry();
+              }}
+            />
+          )
+        }
+        actionsLabel={t`Answer actions`}
+        copyLabels={{
+          copy: t`Copy the answer`,
+          copied: t`Copied`,
+          failed: t`Could not copy`,
+        }}
+        copyText={live || copyText === "" ? undefined : copyText}
+        failedLabel={
+          ending.keyFailedForAdmin
+            ? t`Your AI provider is refusing your key.`
+            : failureMessage(last?.failure, i18n)
+        }
+        from="agent"
+        name="Grasp"
+        nameHidden
+        onRetry={ending.providerMissing ? undefined : retry}
+        status={ending.providerMissing ? "done" : status}
+        thinkingLabel={context.workingLabel}
+        thoughts={
+          thought.thoughts === undefined ? undefined : (
+            <Markdown
+              size="sm"
+              source={thought.thoughts}
+              streaming={status === "thinking"}
+            />
+          )
+        }
+        thoughtSeconds={thought.seconds}
+      >
+        {status === "thinking" ? undefined : (
+          <AnswerBody
+            context={context}
+            ending={ending}
+            steps={steps}
+            turn={turn}
           />
-        )
-      }
-      actionsLabel={t`Answer actions`}
-      copyLabels={{
-        copy: t`Copy the answer`,
-        copied: t`Copied`,
-        failed: t`Could not copy`,
-      }}
-      copyText={live || copyText === "" ? undefined : copyText}
-      failedLabel={
-        ending.keyFailedForAdmin
-          ? t`Your AI provider is refusing your key.`
-          : failureMessage(last?.failure, i18n)
-      }
-      from="agent"
-      name="Grasp"
-      nameHidden
-      onRetry={ending.providerMissing ? undefined : retry}
-      status={ending.providerMissing ? "done" : status}
-      thinkingLabel={context.workingLabel}
-      thoughts={
-        thought.thoughts === undefined ? undefined : (
-          <Markdown
-            size="sm"
-            source={thought.thoughts}
-            streaming={status === "thinking"}
-          />
-        )
-      }
-      thoughtSeconds={thought.seconds}
-    >
-      {status === "thinking" ? undefined : (
-        <AnswerBody
-          context={context}
-          ending={ending}
-          steps={steps}
-          turn={turn}
-        />
-      )}
-    </Message>
+        )}
+      </Message>
+      {/* Under the failure it fixes: the way to check or replace the key. */}
+      {ending.keyFailedForAdmin ? <KeyFailed /> : null}
+    </>
   );
 };
 

@@ -5195,6 +5195,10 @@ msgstr "Diagramm"
 msgid "Dictate"
 msgstr "Diktieren"
 
+#: src/chat/use-dictation.ts
+msgid "Dictation isn't set up here yet. What you typed is kept."
+msgstr "Diktieren ist hier noch nicht eingerichtet. Was Sie getippt haben, bleibt erhalten."
+
 #: src/inbox/inbox-kind.tsx
 msgctxt "inbox item kind: a change whose answer was lost"
 msgid "Did it happen?"
@@ -6697,6 +6701,10 @@ msgstr "Grasp weiß nicht, woher dies kam, daher kann es hier nicht geklärt wer
 #: src/onboarding/no-sender.tsx
 msgid "Grasp has no sender for its mail yet"
 msgstr "Grasp hat noch keinen Absender für seine E-Mails"
+
+#: src/chat/use-ask.ts
+msgid "Grasp hasn't confirmed your question yet. It's kept here, and goes once Grasp answers."
+msgstr "Grasp hat Ihre Frage noch nicht bestätigt. Sie bleibt hier und geht, sobald Grasp antwortet."
 
 #: src/chat/chat-composer.tsx
 msgid "Grasp is answering"

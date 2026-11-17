@@ -5195,6 +5195,10 @@ msgstr "Diagrama"
 msgid "Dictate"
 msgstr "Dictar"
 
+#: src/chat/use-dictation.ts
+msgid "Dictation isn't set up here yet. What you typed is kept."
+msgstr "El dictado aún no está configurado aquí. Lo que escribiste se conserva."
+
 #: src/inbox/inbox-kind.tsx
 msgctxt "inbox item kind: a change whose answer was lost"
 msgid "Did it happen?"
@@ -6697,6 +6701,10 @@ msgstr "Grasp no sabe de dónde vino esto, así que no se puede resolver aquí."
 #: src/onboarding/no-sender.tsx
 msgid "Grasp has no sender for its mail yet"
 msgstr "Grasp aún no tiene remitente para su correo"
+
+#: src/chat/use-ask.ts
+msgid "Grasp hasn't confirmed your question yet. It's kept here, and goes once Grasp answers."
+msgstr "Grasp aún no ha confirmado tu pregunta. Se queda aquí y se envía en cuanto Grasp responda."
 
 #: src/chat/chat-composer.tsx
 msgid "Grasp is answering"

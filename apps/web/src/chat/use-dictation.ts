@@ -32,6 +32,8 @@ interface Run {
   problem?: ComposerVoiceProblem;
   /** Says, while it asks, that the sound goes to the browser's maker. */
   telling: boolean;
+  /** This deployment has no live transcription: said in place of a failure. */
+  unavailable?: boolean;
 }
 
 /** How long the first-time sentence stands before listening starts, in ms. */
@@ -57,7 +59,10 @@ const keepTold = (userId: string): void => {
 };
 
 /** What the dictation says, in the page's language. */
-const useWords = (telling: boolean): Partial<ComposerVoiceWords> => {
+const useWords = (
+  telling: boolean,
+  unavailable: boolean
+): Partial<ComposerVoiceWords> => {
   const { t } = useLingui();
   return {
     asking: telling
@@ -78,7 +83,9 @@ const useWords = (telling: boolean): Partial<ComposerVoiceWords> => {
       missing: t`No microphone was found.`,
       unsupported: t`This browser can't dictate.`,
       unheard: t`A part couldn't be made out. What came before is kept.`,
-      failed: t`The words couldn't be written down. What you typed is kept.`,
+      failed: unavailable
+        ? t`Dictation isn't set up here yet. What you typed is kept.`
+        : t`The words couldn't be written down. What you typed is kept.`,
       limited: t`That's as long as one dictation can be.`,
     },
   };
@@ -101,7 +108,7 @@ export const useDictation = (
   const [run, setRun] = useState<Run>();
   const [now, setNow] = useState(0);
   const source = useRef<DictationSource | null>(null);
-  const words = useWords(run?.telling ?? false);
+  const words = useWords(run?.telling ?? false, run?.unavailable === true);
   // The time it has listened, a second at a time.
   const running = run !== undefined && run.phase === "listening";
   useEffect(() => {
@@ -150,6 +157,8 @@ export const useDictation = (
     const begin = (): void => {
       if (telling) {
         keepTold(identity.userId);
+        // Told: now it asks for the microphone, as it says.
+        setRun((was) => (was === undefined ? was : { ...was, telling: false }));
       }
       void microphone.start();
       chosen.start({
@@ -170,14 +179,14 @@ export const useDictation = (
             was === undefined ? was : { ...was, settled, interim }
           );
         },
-        problem: (problem) => {
+        problem: (problem, unavailable = false) => {
           setRun((was) => {
             if (was === undefined) {
               return was;
             }
             return problem === "unheard"
               ? { ...was, problem }
-              : { ...was, phase: "problem", problem };
+              : { ...was, phase: "problem", problem, unavailable };
           });
         },
       });
