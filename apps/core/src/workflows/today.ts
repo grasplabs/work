@@ -31,9 +31,11 @@ import { inList } from "../db/d1.ts";
 import {
   answerableByNow,
   resourceDecisionPending,
+  withheldAskText,
 } from "../decisions/decisions.ts";
 import { startOfCompanyDay } from "../organization.ts";
 import { listWorkflowResources } from "../workflow-resources.ts";
+import { runEvidenceHolds } from "./resource-reads.ts";
 
 // The company's day at work (GRA-1255), for Runs › Today: every run
 // started since midnight in the organization's time zone, across the
@@ -49,6 +51,9 @@ import { listWorkflowResources } from "../workflow-resources.ts";
 //   the reader says on whom (their role, their team, or them) and since
 //   when, as their inbox does (`answerableByNow`, the one rule of who
 //   answers); one waiting on anyone else only says that it waits.
+// - Showing what a run asks once it may no longer read what it read
+//   (GRA-1988): its ask is withheld (`withheldAskText`), as its decision's
+//   page shows it (decisions.ts).
 // - Pointing at a run the reader may not see. The run a run came from is
 //   named only when it is one of the day's runs the reader sees.
 // - Load. One day of runs, at most `maxRuns`, their
@@ -92,6 +97,8 @@ interface DayRun {
   endedAt: Date | null;
   status: TodayRun["status"];
   from: string | null;
+  /** The person it acts for. */
+  principal: string;
 }
 
 /** Whether `by` may answer an open decision of the run now. */
@@ -117,6 +124,24 @@ const withWaits = <T extends { id: string }>(
   const ids = new Set(rows.map(({ id }) => id));
   return [...rows, ...more.filter(({ id }) => !ids.has(id))];
 };
+
+/**
+ * What `run`, waiting on the reader, asks them (`description`): withheld
+ * once it may no longer read what it read, as its decision's page
+ * withholds it (decisions.ts).
+ */
+const askOf = async (
+  env: Env,
+  run: DayRun,
+  description: string
+): Promise<string> =>
+  (await runEvidenceHolds(env, {
+    runId: run.id,
+    workflowId: run.workflow,
+    principal: run.principal,
+  }))
+    ? description
+    : withheldAskText;
 
 /** The runs of the day, in the lanes of `lanes`, with their decisions. */
 const runsOf = async (
@@ -155,32 +180,33 @@ const runsOf = async (
           .where(inList(teams.id, [...new Set(teamIds)]));
   const teamNames = new Map(named.map(({ id, name }) => [id, name]));
   const seen = new Set(ids);
-  const result = new Map<string, TodayRun>();
-  for (const run of runs) {
-    const own = decisions.filter(({ runId }) => runId === run.id);
-    const goesOn = run.endedAt === null;
-    const open = goesOn ? own.filter(({ open: isOpen }) => isOpen === 1) : [];
-    const mine = open.find(({ mine: answerable }) => answerable === 1);
-    result.set(run.id, {
-      id: run.id,
-      startedAt: run.createdAt.toISOString(),
-      endedAt: ended(run.endedAt),
-      status: run.status,
-      went: own.length > 0 ? "people" : "alone",
-      waits:
-        mine === undefined
-          ? null
-          : {
-              decision: mine.id,
-              on: waitsOnOf(mine.deciders, teamNames),
-              since: mine.openedAt.toISOString(),
-              asks: mine.description,
-            },
-      waitsOnOthers: mine === undefined && open.length > 0,
-      from: run.from !== null && seen.has(run.from) ? run.from : null,
-    });
-  }
-  return result;
+  const told = await Promise.all(
+    runs.map(async (run): Promise<TodayRun> => {
+      const own = decisions.filter(({ runId }) => runId === run.id);
+      const goesOn = run.endedAt === null;
+      const open = goesOn ? own.filter(({ open: isOpen }) => isOpen === 1) : [];
+      const mine = open.find(({ mine: answerable }) => answerable === 1);
+      return {
+        id: run.id,
+        startedAt: run.createdAt.toISOString(),
+        endedAt: ended(run.endedAt),
+        status: run.status,
+        went: own.length > 0 ? "people" : "alone",
+        waits:
+          mine === undefined
+            ? null
+            : {
+                decision: mine.id,
+                on: waitsOnOf(mine.deciders, teamNames),
+                since: mine.openedAt.toISOString(),
+                asks: await askOf(env, run, mine.description),
+              },
+        waitsOnOthers: mine === undefined && open.length > 0,
+        from: run.from !== null && seen.has(run.from) ? run.from : null,
+      };
+    })
+  );
+  return new Map(told.map((run) => [run.id, run]));
 };
 
 /**
@@ -220,6 +246,7 @@ export const workflowsToday = async (
     status: workflowResourceRuns.status,
     createdAt: workflowResourceRuns.createdAt,
     endedAt: workflowResourceRuns.endedAt,
+    principalId: workflowResourceRuns.principalId,
     invokerType: workflowStartReceipts.invokerType,
     invokerId: workflowStartReceipts.invokerId,
   };
@@ -278,6 +305,7 @@ export const workflowsToday = async (
       endedAt: run.endedAt,
       status: run.status,
       from: null,
+      principal: run.principalId,
     }))
     .toSorted(
       (one, other) => one.createdAt.getTime() - other.createdAt.getTime()

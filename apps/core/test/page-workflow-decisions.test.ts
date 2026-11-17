@@ -12,7 +12,11 @@ import { z } from "zod";
 import { callAppFunction, callPageFunction } from "../src/app-functions.ts";
 import type { Release } from "../src/app-releases.ts";
 import { appKind, appFor, versionFiles } from "../src/apps.ts";
-import { decisionOutcome } from "../src/decisions/decisions.ts";
+import {
+  decisionFor,
+  decisionOutcome,
+  withheldAskText,
+} from "../src/decisions/decisions.ts";
 import { withDraftReferences } from "../src/draft-references.ts";
 import { appHost } from "../src/durable-objects.ts";
 import { withPageReferences } from "../src/page-references.ts";
@@ -807,6 +811,46 @@ describe(
         prompt: "Approve this invoice?",
         context: null,
         canRespond: true,
+      });
+    });
+
+    it("give nothing of what a decision asks once its run may no longer read what it read, as its own page withholds it", async () => {
+      const { fixture, opened, reviewer, starter, runAsking, ask } =
+        await decisionInbox();
+      const kept = await runAsking(fixture.app, opened);
+      const withheld = await runAsking(fixture.app, opened + 1000);
+      // It was started from a chat that had read a source its agent may no
+      // longer read (workflow-starts.ts): what it read no longer holds.
+      await env.DB.prepare(
+        "INSERT INTO run_chat_sources (run_id, source_id, workspace_id, chat_id, agent_id, person_id) VALUES (?, ?, ?, ?, ?, ?)"
+      )
+        .bind(
+          withheld.runId,
+          crypto.randomUUID(),
+          crypto.randomUUID(),
+          crypto.randomUUID(),
+          crypto.randomUUID(),
+          starter.userId
+        )
+        .run();
+      const detail = async (of: typeof kept) =>
+        await ask(reviewer, "decision", {
+          runId: of.runId,
+          decisionId: of.decisionId,
+        });
+      const page = await decisionFor(env, reviewer, withheld.decisionId);
+      const shown = z
+        .object({ prompt: z.string(), context: z.unknown() })
+        .parse(await detail(kept));
+
+      expect({
+        kept: { prompt: shown.prompt, context: shown.context },
+        withheld: await detail(withheld),
+        page: { description: page.description, input: page.input },
+      }).toStrictEqual({
+        kept: { prompt: "Approve this invoice?", context: { amount: 5 } },
+        withheld: null,
+        page: { description: withheldAskText, input: undefined },
       });
     });
 

@@ -62,6 +62,7 @@ import {
 } from "../db/core/schema.ts";
 import { inList } from "../db/d1.ts";
 import { takesExactly } from "../workflows/exact-values.ts";
+import { runEvidenceHolds } from "../workflows/resource-reads.ts";
 import { removedText } from "../workflows/retention.ts";
 import { tellDecisionFollowers } from "../workflows/run-changes.ts";
 import { oweWake, sendWake } from "../workflows/wakes.ts";
@@ -114,6 +115,14 @@ import type { ReviewContext } from "./confirmations.ts";
 //   while it hasn't ended and no cancel or termination of it was
 //   admitted. What the decision is about (`input`) is part of the review
 //   context.
+// - What a run asks rests on what it read (GRA-1988): a passage it
+//   recalled, a card, what the chat that started it had read. Every read
+//   of a decision checks the run's evidence again (`runEvidenceHolds`, as
+//   its output and files are checked), and once it no longer holds, the
+//   decision is shown withheld (`withheldAskText`, no input), its review
+//   context too, so neither its words nor a fingerprint of them reach
+//   anyone. It still takes an answer, but its run never goes on with one:
+//   the run's next check refuses it (`brain.revoked`).
 
 type DecisionRow = typeof workflowDecisions.$inferSelect;
 
@@ -802,6 +811,13 @@ export const decisionOutcome = async (
 
 // Person side: the `decisions` RPC (rpc.ts).
 
+/**
+ * What a decision shows in place of what it asks once its run may no
+ * longer read what it read (`runEvidenceHolds`).
+ */
+export const withheldAskText =
+  "What this decision asks is withheld: the run that asked it may no longer read what it read.";
+
 /** A decision with what the people who answer it see of it. */
 interface DecisionWithRun {
   decision: DecisionRow;
@@ -811,6 +827,11 @@ interface DecisionWithRun {
   /** Whether its run goes on (`runUnended`): an open one takes answers. */
   goesOn: boolean;
   decidedByName: string | null;
+  /**
+   * Whether what it asks is withheld: its run may no longer read what it
+   * read (`runEvidenceHolds`), as decided as it was read.
+   */
+  withheld: boolean;
 }
 
 /** A decision's row with its run's, as `decisionWithRun` reads them. */
@@ -821,6 +842,7 @@ const decisionRead = async (db: DrizzleD1Database, id: string) =>
       resourceId: workflowResourceRuns.workflowResourceId,
       resourceName: workflowResources.name,
       resourceVersion: workflowResourceRuns.version,
+      principalId: workflowResourceRuns.principalId,
       goesOn: sql<number>`${runUnended()}`,
       decidedByName: users.name,
     })
@@ -837,15 +859,21 @@ const decisionRead = async (db: DrizzleD1Database, id: string) =>
     .where(eq(workflowDecisions.id, id))
     .get();
 
-/** The run `found` names, with its workflow's name, if it has one. */
+/**
+ * The run `found` names, with its workflow's name and its person, if it
+ * has one.
+ */
 const runOfRead = (
   found: NonNullable<Awaited<ReturnType<typeof decisionRead>>>
-): Pick<DecisionWithRun, "run" | "name"> | undefined => {
+):
+  | (Pick<DecisionWithRun, "run" | "name"> & { principal: string })
+  | undefined => {
   const { decision: row } = found;
   if (
     row.resourceRunId !== null &&
     found.resourceId !== null &&
-    found.resourceVersion !== null
+    found.resourceVersion !== null &&
+    found.principalId !== null
   ) {
     return {
       run: {
@@ -854,6 +882,7 @@ const runOfRead = (
         version: found.resourceVersion,
       },
       name: found.resourceName ?? "",
+      principal: found.principalId,
     };
   }
   return undefined;
@@ -872,11 +901,18 @@ const decisionWithRun = async (
   if (found === undefined || ran === undefined) {
     throw notFound();
   }
+  const { run, name, principal } = ran;
   return {
-    ...ran,
+    run,
+    name,
     decision: found.decision,
     goesOn: found.goesOn === 1,
     decidedByName: found.decidedByName,
+    withheld: !(await runEvidenceHolds(env, {
+      runId: run.runId,
+      workflowId: run.workflow,
+      principal,
+    })),
   };
 };
 
@@ -923,17 +959,25 @@ const allowedDecision = async (
  */
 const databaseNow = sql`CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER)`;
 
-/** The pinned fields of the decision a person reviews before answering. */
-const contextOf = ({ decision, run }: DecisionWithRun): ReviewContext => ({
+/**
+ * The pinned fields of the decision a person reviews before answering:
+ * what it asks as it is shown, withheld or not, so its fingerprint holds
+ * nothing of what a withheld one asked.
+ */
+const contextOf = ({
+  decision,
+  run,
+  withheld,
+}: DecisionWithRun): ReviewContext => ({
   decision: decision.id,
   run: run.runId,
   workflow: run.workflow,
   version: run.version,
   step: decision.step,
   deciders: decision.deciders,
-  description: decision.description,
+  description: withheld ? withheldAskText : decision.description,
   expiresAt: decision.expiresAt,
-  input: decision.input ?? null,
+  input: withheld ? null : (decision.input ?? null),
 });
 
 /**
@@ -959,6 +1003,26 @@ const sourceOf = ({
   workflow: workflowIdSchema.parse(name),
 });
 
+/**
+ * What a decision asks as it is shown: withheld once its run may no
+ * longer read what it read, or gone with its run's details
+ * (workflows/retention.ts), which empties it (none is asked with an
+ * empty description), each saying so.
+ */
+const askedOf = ({
+  decision,
+  withheld,
+}: DecisionWithRun): Pick<DecisionView, "description" | "input"> => {
+  if (withheld) {
+    return { description: withheldAskText };
+  }
+  return {
+    description:
+      decision.description === "" ? removedText : decision.description,
+    ...(decision.input === null ? {} : { input: decision.input }),
+  };
+};
+
 const toView = async (
   env: Env,
   found: DecisionWithRun
@@ -968,11 +1032,7 @@ const toView = async (
     id: decision.id,
     ...sourceOf(found),
     run: runIdSchema.parse(run.runId),
-    // None is asked with an empty description: one that is empty went with
-    // its run's details (workflows/retention.ts), and says so.
-    description:
-      decision.description === "" ? removedText : decision.description,
-    ...(decision.input === null ? {} : { input: decision.input }),
+    ...askedOf(found),
     status: statusOf(found),
     expiresAt: decision.expiresAt.toISOString(),
     revision: await contextFingerprint(contextOf(found)),

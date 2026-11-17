@@ -158,7 +158,8 @@ const requireOwnEvidenceReadable = async (
  * nothing, so has nothing to check. Asked before a model, connection,
  * App or files-write call, a decision, its output, and before a step's
  * state is written (sealed-run.ts `stepRecording`); its files are listed
- * and downloaded only while it holds (run-file-downloads.ts).
+ * and downloaded only while it holds (run-file-downloads.ts), and what its
+ * decisions ask is shown only while it holds (decisions.ts, GRA-1988).
  *
  * What a running run shows needs no check: its details (`resourceRunFor`)
  * hold its output or failure only once it ended, which this checks first,
