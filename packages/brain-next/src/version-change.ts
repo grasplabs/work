@@ -77,8 +77,10 @@ const sinceSql = `since AS MATERIALIZED (
 -- The first row of the source's memories since then: every one of them is
 -- at or after it, so a seek of a lineage's memories starts there.
 since_row AS MATERIALIZED (
-  SELECT coalesce(min(row), 0) AS row FROM memories
-  WHERE source = ?1 AND version >= (SELECT version FROM since)
+  SELECT CASE WHEN (SELECT version FROM since) = 0 THEN 0 ELSE (
+    SELECT coalesce(min(row), 0) FROM memories
+    WHERE source = ?1 AND version >= (SELECT version FROM since)
+  ) END AS row
 )`;
 
 /**
@@ -122,16 +124,28 @@ SELECT row FROM (
       SELECT 1 FROM memory_extractions WHERE source = ?1 AND version = ?6
     )
   UNION
-  SELECT gone.row FROM memories AS gone
+  -- With a cutoff, the memories since it, each asked whether it is out;
+  -- without one, the source's out rows alone, never its other memories.
+  -- Either way from the pointer, so a version that isn't current reads
+  -- none of them. Its own compound, as a statement holds few terms.
+  SELECT row FROM (
+  SELECT gone.row AS row FROM current_versions AS pointer
+  CROSS JOIN source_versions AS current ON current.row = pointer.version_row
+  CROSS JOIN memories AS gone ON gone.source = pointer.source
   CROSS JOIN memory_outs AS out ON out.memory = gone.row
-  WHERE gone.source = ?1 AND gone.version < ?6
+  WHERE pointer.source = ?1 AND pointer.judged_row = pointer.version_row
+    AND current.version = ?6 AND gone.version < ?6
     AND gone.version >= (SELECT version FROM since)
-    AND EXISTS (
-      SELECT 1 FROM current_versions AS pointer
-      CROSS JOIN source_versions AS current ON current.row = pointer.version_row
-      WHERE pointer.source = ?1 AND pointer.judged_row = pointer.version_row
-        AND current.version = ?6
-    )
+    AND (SELECT version FROM since) > 0
+  UNION ALL
+  SELECT gone.row FROM current_versions AS pointer
+  CROSS JOIN source_versions AS current ON current.row = pointer.version_row
+  CROSS JOIN memory_outs AS out ON out.source = pointer.source
+  CROSS JOIN memories AS gone ON gone.row = out.memory
+  WHERE pointer.source = ?1 AND pointer.judged_row = pointer.version_row
+    AND current.version = ?6 AND gone.version < ?6
+    AND (SELECT version FROM since) = 0
+  )
 )
 WHERE ${versionVisibleSql("?1", "?6")}`;
 
