@@ -427,6 +427,13 @@ export const told = async (ids: Ids) => {
 export const sevenTeam = async () =>
   await team(["lea", "max", "mia", "mo", "noor", "pim", "rik", "sam"]);
 
+/**
+ * As `sevenTeam`, Ada in it too: eight who tell their own work, so one of
+ * them leaving still leaves seven, and what the rest told still shows.
+ */
+export const eightTeam = async () =>
+  await team(["lea", "max", "mia", "mo", "noor", "pim", "rik", "sam", "ada"]);
+
 /** What the six tell (`told`), and Sam a step of his own. */
 export const sevenTold = async (ids: Ids) => {
   await told(ids);
