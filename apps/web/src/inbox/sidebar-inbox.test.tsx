@@ -178,7 +178,7 @@ describe("the sidebar's inbox", () => {
       expect(counted()).toBe("2");
     });
     expect(rows().map(({ href }) => href)).toStrictEqual([
-      // The inbox's groups in its order: Asked of you, then Apps and connections.
+      // The inbox's groups in its order: Asked of you, then Approvals.
       "/inbox?item=asked%3Anote-1",
       "/inbox?item=held%3Awrite-1",
       "/inbox",
@@ -187,7 +187,7 @@ describe("the sidebar's inbox", () => {
       (label) => label.textContent
     );
     expect(labels.join(" ")).toMatch(/Asked of you/u);
-    expect(labels.join(" ")).toMatch(/Apps and connections/u);
+    expect(labels.join(" ")).toMatch(/Approvals/u);
   });
 
   it("marks no notification read by listing it", async () => {

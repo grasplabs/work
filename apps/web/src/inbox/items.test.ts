@@ -680,16 +680,13 @@ describe(listed, () => {
   });
 
   it("shows one group of kinds when asked", () => {
+    // Workflows' and Apps' asks are one group, Approvals: all but the question asked of the reader.
     expect(
-      listed(items, "workflows", "urgent").map(({ kind }) => kind)
-    ).toStrictEqual([
-      "decision",
-      "bindingApproval",
-      "stoppedEvents",
-      "heldStart",
-      "goLive",
-      "stoppedSchedule",
-    ]);
+      listed(items, "approvals", "urgent").some(
+        ({ kind }) => kind === "openQuestion"
+      )
+    ).toBeFalsy();
+    expect(listed(items, "approvals", "urgent")).toHaveLength(items.length - 1);
     const quotes = items.find(({ id }) => id === workflowGoLive.id);
     expect({
       title: quotes?.title,
@@ -724,7 +721,6 @@ describe(listed, () => {
         section: "triggers",
       },
     });
-    expect(listed(items, "apps", "urgent")).toHaveLength(items.length - 7);
   });
 });
 

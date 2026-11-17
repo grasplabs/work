@@ -2840,10 +2840,15 @@ msgstr "Lassen Sie sie greifen, wenn die Domain des Absenders {domain} ist."
 msgid "Approval"
 msgstr "Genehmigung"
 
+#: src/inbox/inbox-page.tsx
+#: src/inbox/sidebar-inbox.tsx
+msgctxt "inbox filter"
+msgid "Approvals"
+msgstr "Freigaben"
+
 #: src/apps/app-webhooks.tsx
 #: src/dashboard/pile-cards.tsx
 #: src/decision-confirmation.tsx
-#: src/inbox/item-detail.tsx
 #: src/routes/decisions.$decision.tsx
 #: src/workflows/binding-approvals.tsx
 msgid "Approve"
@@ -2868,7 +2873,6 @@ msgid "Approve {name}?"
 msgstr "{name} genehmigen?"
 
 #: src/dashboard/pile-cards.tsx
-#: src/inbox/item-detail.tsx
 msgid "Approve {who}"
 msgstr "{who} genehmigen"
 
@@ -2958,7 +2962,6 @@ msgid "Approved: {title}"
 msgstr "Freigegeben: {title}"
 
 #: src/dashboard/pile-cards.tsx
-#: src/inbox/item-detail.tsx
 msgid "Approved: {who}."
 msgstr "Genehmigt: {who}."
 
@@ -2983,19 +2986,9 @@ msgstr "Wird genehmigt"
 msgid "Apps"
 msgstr "Apps"
 
-#: src/inbox/inbox-page.tsx
-msgctxt "inbox filter, short"
-msgid "Apps"
-msgstr "Apps"
-
 #: src/connections/connection-list.tsx
 msgid "Apps and agents with a permission"
 msgstr "Apps und Agenten mit einer Berechtigung"
-
-#: src/inbox/sidebar-inbox.tsx
-msgctxt "inbox filter"
-msgid "Apps and connections"
-msgstr "Apps und Verbindungen"
 
 #: src/projects/project-view.tsx
 msgid "Apps and workflows"
@@ -4009,6 +4002,12 @@ msgstr "Änderungen, die nur Sie sehen"
 msgid "Changes since {when}"
 msgstr "Änderungen seit {when}"
 
+#: src/inbox/inbox-page.tsx
+#: src/inbox/sidebar-inbox.tsx
+msgctxt "inbox filter"
+msgid "Changes we couldn’t confirm"
+msgstr "Änderungen, die wir nicht bestätigen konnten"
+
 #: src/apps/data-model-changes.tsx
 msgid "Changes who can see and change the records of {table}."
 msgstr "Ändert, wer die Datensätze von {table} sehen und ändern kann."
@@ -4528,6 +4527,7 @@ msgstr "Konfiguration"
 
 #: src/chat/held-writes.tsx
 #: src/frame/part-words.tsx
+#: src/inbox/item-detail.tsx
 msgid "Confirm"
 msgstr "Bestätigen"
 
@@ -11090,6 +11090,7 @@ msgid "Part of what will be sent is cut short above. Show it all, or exactly wha
 msgstr "Ein Teil dessen, was gesendet wird, ist oben gekürzt. Zeigen Sie alles an oder genau das Gesendete, um zu bestätigen."
 
 #: src/chat/held-writes.tsx
+#: src/inbox/item-detail.tsx
 msgid "Part of what will be sent is cut short. Open Details and show it all, or exactly what will be sent, to confirm."
 msgstr "Ein Teil dessen, was gesendet wird, ist gekürzt. Öffnen Sie Details und zeigen Sie alles oder genau das, was gesendet wird, um zu bestätigen."
 
@@ -11955,7 +11956,6 @@ msgstr "Referenz für den Support"
 #: src/chat/held-writes.tsx
 #: src/dashboard/pile-cards.tsx
 #: src/decision-confirmation.tsx
-#: src/inbox/item-detail.tsx
 #: src/routes/decisions.$decision.tsx
 msgid "Reject"
 msgstr "Ablehnen"
@@ -11966,7 +11966,6 @@ msgid "Reject"
 msgstr "Ablehnen"
 
 #: src/dashboard/pile-cards.tsx
-#: src/inbox/item-detail.tsx
 msgid "Reject {who}"
 msgstr "{who} ablehnen"
 
@@ -11995,7 +11994,6 @@ msgid "Rejected: {rejected}"
 msgstr "Abgelehnt: {rejected}"
 
 #: src/dashboard/pile-cards.tsx
-#: src/inbox/item-detail.tsx
 msgid "Rejected: {who}."
 msgstr "Abgelehnt: {who}."
 
@@ -16248,12 +16246,6 @@ msgctxt "inbox item kind"
 msgid "Unknown outcome"
 msgstr "Unbekannter Ausgang"
 
-#: src/inbox/inbox-page.tsx
-#: src/inbox/sidebar-inbox.tsx
-msgctxt "inbox filter"
-msgid "Unknown outcomes"
-msgstr "Unbekannte Ausgänge"
-
 #: src/brain/brain.ts
 msgid "Unknown source"
 msgstr "Unbekannte Quelle"
@@ -17709,12 +17701,6 @@ msgstr "Workflows"
 
 #: src/brain/brain.ts
 msgctxt "a group of notes in the brain: work worth turning into workflows"
-msgid "Workflows"
-msgstr "Workflows"
-
-#: src/inbox/inbox-page.tsx
-#: src/inbox/sidebar-inbox.tsx
-msgctxt "inbox filter"
 msgid "Workflows"
 msgstr "Workflows"
 

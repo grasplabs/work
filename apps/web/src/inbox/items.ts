@@ -135,38 +135,32 @@ export interface InboxItem {
 }
 
 /** The kinds, grouped as the filter offers them. */
-export type Group =
-  | "all"
-  | "asked"
-  | "workflows"
-  | "brain"
-  | "outcomes"
-  | "apps";
+export type Group = "all" | "asked" | "brain" | "approvals" | "outcomes";
 
 export const groupOf: Record<InboxKind, Exclude<Group, "all">> = {
-  checkDrawing: "workflows",
-  checkProposal: "workflows",
-  goLive: "workflows",
-  approveChange: "workflows",
-  confirmResult: "workflows",
+  checkDrawing: "approvals",
+  checkProposal: "approvals",
+  goLive: "approvals",
+  approveChange: "approvals",
+  confirmResult: "approvals",
   conflict: "brain",
   openQuestion: "asked",
   brainQuestion: "brain",
   interviews: "brain",
   everyonesOutcome: "outcomes",
-  unknownAiTool: "apps",
-  signInAgain: "apps",
-  externalDomain: "apps",
-  heldWrite: "apps",
-  heldStart: "workflows",
-  unknownOutcome: "apps",
-  permissionRequest: "apps",
-  stoppedSchedule: "workflows",
-  packageNotice: "apps",
-  stoppedEvents: "workflows",
-  appMessage: "apps",
-  bindingApproval: "workflows",
-  decision: "workflows",
+  unknownAiTool: "approvals",
+  signInAgain: "approvals",
+  externalDomain: "approvals",
+  heldWrite: "approvals",
+  heldStart: "approvals",
+  unknownOutcome: "approvals",
+  permissionRequest: "approvals",
+  stoppedSchedule: "approvals",
+  packageNotice: "approvals",
+  stoppedEvents: "approvals",
+  appMessage: "approvals",
+  bindingApproval: "approvals",
+  decision: "approvals",
 };
 
 export type Sort = "urgent" | "newest" | "oldest";

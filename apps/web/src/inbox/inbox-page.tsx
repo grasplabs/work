@@ -118,14 +118,16 @@ const styles = stylex.create({
 /** The groups, short enough that the filter fits beside the list. */
 const groupLabel: Record<Group, MessageDescriptor> = {
   all: msg({ message: "All", context: "inbox filter, short" }),
-  workflows: msg({ message: "Workflows", context: "inbox filter" }),
   asked: msg({ message: "Asked of you", context: "inbox filter" }),
   brain: msg({ message: "Brain", context: "inbox filter, short" }),
-  outcomes: msg({ message: "Unknown outcomes", context: "inbox filter" }),
-  apps: msg({ message: "Apps", context: "inbox filter, short" }),
+  outcomes: msg({
+    message: "Changes we couldn’t confirm",
+    context: "inbox filter",
+  }),
+  approvals: msg({ message: "Approvals", context: "inbox filter" }),
 };
 
-const groupOrder = ["asked", "brain", "outcomes", "workflows", "apps"] as const;
+const groupOrder = ["asked", "brain", "approvals", "outcomes"] as const;
 
 const isGroup = (value: string | null): value is Group =>
   value === "all" || groupOrder.some((each) => each === value);

@@ -2840,10 +2840,15 @@ msgstr "Apply it if the sender’s domain is {domain}."
 msgid "Approval"
 msgstr "Approval"
 
+#: src/inbox/inbox-page.tsx
+#: src/inbox/sidebar-inbox.tsx
+msgctxt "inbox filter"
+msgid "Approvals"
+msgstr "Approvals"
+
 #: src/apps/app-webhooks.tsx
 #: src/dashboard/pile-cards.tsx
 #: src/decision-confirmation.tsx
-#: src/inbox/item-detail.tsx
 #: src/routes/decisions.$decision.tsx
 #: src/workflows/binding-approvals.tsx
 msgid "Approve"
@@ -2868,7 +2873,6 @@ msgid "Approve {name}?"
 msgstr "Approve {name}?"
 
 #: src/dashboard/pile-cards.tsx
-#: src/inbox/item-detail.tsx
 msgid "Approve {who}"
 msgstr "Approve {who}"
 
@@ -2958,7 +2962,6 @@ msgid "Approved: {title}"
 msgstr "Approved: {title}"
 
 #: src/dashboard/pile-cards.tsx
-#: src/inbox/item-detail.tsx
 msgid "Approved: {who}."
 msgstr "Approved: {who}."
 
@@ -2983,19 +2986,9 @@ msgstr "Approving"
 msgid "Apps"
 msgstr "Apps"
 
-#: src/inbox/inbox-page.tsx
-msgctxt "inbox filter, short"
-msgid "Apps"
-msgstr "Apps"
-
 #: src/connections/connection-list.tsx
 msgid "Apps and agents with a permission"
 msgstr "Apps and agents with a permission"
-
-#: src/inbox/sidebar-inbox.tsx
-msgctxt "inbox filter"
-msgid "Apps and connections"
-msgstr "Apps and connections"
 
 #: src/projects/project-view.tsx
 msgid "Apps and workflows"
@@ -4009,6 +4002,12 @@ msgstr "Changes only you see"
 msgid "Changes since {when}"
 msgstr "Changes since {when}"
 
+#: src/inbox/inbox-page.tsx
+#: src/inbox/sidebar-inbox.tsx
+msgctxt "inbox filter"
+msgid "Changes we couldn’t confirm"
+msgstr "Changes we couldn’t confirm"
+
 #: src/apps/data-model-changes.tsx
 msgid "Changes who can see and change the records of {table}."
 msgstr "Changes who can see and change the records of {table}."
@@ -4528,6 +4527,7 @@ msgstr "Configuration"
 
 #: src/chat/held-writes.tsx
 #: src/frame/part-words.tsx
+#: src/inbox/item-detail.tsx
 msgid "Confirm"
 msgstr "Confirm"
 
@@ -11090,6 +11090,7 @@ msgid "Part of what will be sent is cut short above. Show it all, or exactly wha
 msgstr "Part of what will be sent is cut short above. Show it all, or exactly what will be sent, to confirm."
 
 #: src/chat/held-writes.tsx
+#: src/inbox/item-detail.tsx
 msgid "Part of what will be sent is cut short. Open Details and show it all, or exactly what will be sent, to confirm."
 msgstr "Part of what will be sent is cut short. Open Details and show it all, or exactly what will be sent, to confirm."
 
@@ -11955,7 +11956,6 @@ msgstr "Reference for support"
 #: src/chat/held-writes.tsx
 #: src/dashboard/pile-cards.tsx
 #: src/decision-confirmation.tsx
-#: src/inbox/item-detail.tsx
 #: src/routes/decisions.$decision.tsx
 msgid "Reject"
 msgstr "Reject"
@@ -11966,7 +11966,6 @@ msgid "Reject"
 msgstr "Reject"
 
 #: src/dashboard/pile-cards.tsx
-#: src/inbox/item-detail.tsx
 msgid "Reject {who}"
 msgstr "Reject {who}"
 
@@ -11995,7 +11994,6 @@ msgid "Rejected: {rejected}"
 msgstr "Rejected: {rejected}"
 
 #: src/dashboard/pile-cards.tsx
-#: src/inbox/item-detail.tsx
 msgid "Rejected: {who}."
 msgstr "Rejected: {who}."
 
@@ -16248,12 +16246,6 @@ msgctxt "inbox item kind"
 msgid "Unknown outcome"
 msgstr "Unknown outcome"
 
-#: src/inbox/inbox-page.tsx
-#: src/inbox/sidebar-inbox.tsx
-msgctxt "inbox filter"
-msgid "Unknown outcomes"
-msgstr "Unknown outcomes"
-
 #: src/brain/brain.ts
 msgid "Unknown source"
 msgstr "Unknown source"
@@ -17709,12 +17701,6 @@ msgstr "Workflows"
 
 #: src/brain/brain.ts
 msgctxt "a group of notes in the brain: work worth turning into workflows"
-msgid "Workflows"
-msgstr "Workflows"
-
-#: src/inbox/inbox-page.tsx
-#: src/inbox/sidebar-inbox.tsx
-msgctxt "inbox filter"
 msgid "Workflows"
 msgstr "Workflows"
 

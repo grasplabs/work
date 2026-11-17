@@ -42,7 +42,7 @@ export const Route = createFileRoute("/_shell/inbox")({
   // `group`: the group in view first, as Settings › Unknown outcomes leads here.
   validateSearch: z.object({
     item: z.string().optional(),
-    group: z.enum(["asked", "brain", "outcomes"]).optional(),
+    group: z.enum(["asked", "brain", "approvals", "outcomes"]).optional(),
   }),
   pendingComponent: PageLoading,
   loader: async ({ context: { core, identity } }) => {
