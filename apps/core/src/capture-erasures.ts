@@ -10,6 +10,7 @@ import { auditLog } from "./audit-log.ts";
 import { uuidFromHash } from "./audit-outbox.ts";
 import type { Held } from "./audit-outbox.ts";
 import { eraseCaptures } from "./brain-next-origins.ts";
+import { closeSyncOfDisconnect } from "./brain-sync.ts";
 import { mayHoldCapturesOf } from "./connection-capture-key.ts";
 import { eraseSharedReadsOfDisconnect } from "./shared-reads.ts";
 
@@ -113,6 +114,31 @@ const eraseEach = async (
       });
     })
   );
+  // What native sync copied through a person's own connection
+  // (brain-sync.ts, GRA-1758): their own store's copies erased, the
+  // connection closed for the sync, and the shared store's copies owed,
+  // before the disconnect leaves the outbox.
+  const synced = stopped.flatMap(({ disconnect, connectionId }) => {
+    const owner = owners.get(connectionId);
+    const personId = owner?.ownerUserId;
+    return owner?.source !== "native" ||
+      personId === null ||
+      personId === undefined ||
+      unkeyable(connectionId)
+      ? []
+      : [{ disconnect, connectionId, personId }];
+  });
+  const syncSettled = await Promise.allSettled(
+    synced.map(async ({ disconnect, connectionId, personId }) => {
+      await closeSyncOfDisconnect(env, {
+        connectionId,
+        personId,
+        request: disconnect.id,
+        actor: disconnect.actor,
+        at: new Date(disconnect.at),
+      });
+    })
+  );
   const due = stopped.flatMap(({ disconnect, connectionId }) => {
     const owner = owners.get(connectionId);
     const personId = owner?.ownerUserId;
@@ -164,10 +190,13 @@ const eraseEach = async (
         ...shared.flatMap(({ disconnect }, index) =>
           sharedSettled[index]?.status === "rejected" ? [disconnect.id] : []
         ),
+        ...synced.flatMap(({ disconnect }, index) =>
+          syncSettled[index]?.status === "rejected" ? [disconnect.id] : []
+        ),
       ],
       errors: [
         ...new Set(
-          [...settled, ...sharedSettled].flatMap((each) =>
+          [...settled, ...sharedSettled, ...syncSettled].flatMap((each) =>
             each.status === "rejected" ? [errorName(each.reason)] : []
           )
         ),

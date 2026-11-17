@@ -151,6 +151,11 @@ const typeRules: readonly {
   // and that erasure, or a disconnect's, ended (core's shared-reads.ts,
   // GRA-1831): the connection and how many records, by IDs and a count.
   { action: "brain.shared_reads", type: "action" },
+  // Native sync making a page of a connected system's changes into Brain
+  // sources, and erasing what it copied once its connection was
+  // disconnected (core's brain-sync.ts, GRA-1758): the connection, its
+  // sync and counts, never an item.
+  { action: "brain.sync", type: "action" },
   // An App, a workflow's run or a chat's code recalling from the Brain
   // for a person (core's src/brain-recall.ts): for whom, how many
   // passages and whether the budget cut it short, or why it was refused;

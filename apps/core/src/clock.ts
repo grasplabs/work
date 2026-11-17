@@ -15,6 +15,7 @@ import { auditLog } from "./audit-log.ts";
 import { workBrain } from "./brain-next.ts";
 import { removeLostRunSources } from "./brain-run-sources.ts";
 import { producersOf, relayHandOvers } from "./brain-sources.ts";
+import { runSync } from "./brain-sync.ts";
 import { completeOwedRemovals } from "./brain-uploads.ts";
 import { sweepChannelLinks } from "./channels/accounts.ts";
 import { sweepChannelSignals } from "./channels/signals.ts";
@@ -115,6 +116,16 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     period: "minute",
     run: async (env) => {
       await completeOwedErasures(env);
+    },
+  },
+  // Native sync (src/brain-sync.ts, GRA-1758): what disconnects owe the
+  // shared store erased, then pages of each connected system's changes
+  // made into Brain sources, out of a stated share of the run's calls.
+  {
+    name: "brain.sync",
+    period: "minute",
+    run: async (env) => {
+      await runSync(env);
     },
   },
   // Decisions on the company's skills whose outcome the Brain hasn't given

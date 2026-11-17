@@ -360,6 +360,10 @@ const kindsWithoutColon = <const K extends string>(
 // `connected`: what agents read through a shared connection, readable by
 // whoever its Brain audience holds now (`connection` readers, GRA-1831),
 // keyed under the connection's ID; in the shared store alone.
+// `sync`: an item native sync copied from where it lives (brain-sync.ts,
+// GRA-1758), keyed under its connection: its owner's alone in their own
+// store, in the connection's group, or read by the item's own readers in
+// the shared store.
 const producerKinds = kindsWithoutColon([
   "upload",
   "chat",
@@ -371,6 +375,7 @@ const producerKinds = kindsWithoutColon([
   "kickoff",
   "roster",
   "connected",
+  "sync",
 ]);
 
 /**
@@ -503,6 +508,8 @@ const newSourceSchema = z.strictObject({
 /** The most characters of a question `recallAs` takes, as the Brain's contract says. */
 export { questionMaxLength as recallQuestionMaxLength } from "@grasp-os/brain-next/contract";
 export { removalsMax } from "@grasp-os/brain-next/contract";
+/** The longest group name the Brain takes: a reader whose name is longer is nobody. */
+export { principalMaxLength } from "@grasp-os/brain-next/contract";
 
 /** Whose word a memory is, as the Brain names it: what a chat pins of it (history-access.ts). */
 export { speakerSchema } from "@grasp-os/brain-next/contract";

@@ -3319,6 +3319,10 @@ msgstr "Breadcrumb"
 msgid "Briefcase"
 msgstr "Briefcase"
 
+#: src/activity/audit-words.ts
+msgid "Brought changes from a connected system into the Brain"
+msgstr "Brought changes from a connected system into the Brain"
+
 #. A time zone, by its city
 #: src/routes/_shell.settings.workspace.tsx
 msgid "Brussels"
@@ -4410,6 +4414,15 @@ msgstr "Copenhagen"
 msgid "Copied"
 msgstr "Copied"
 
+#: src/brain/sources-page.tsx
+msgctxt "a source of the Brain"
+msgid "Copied from a connected system"
+msgstr "Copied from a connected system"
+
+#: src/brain/memories-page.tsx
+msgid "Copied from a connected system, version {version}"
+msgstr "Copied from a connected system, version {version}"
+
 #: src/apps/app-settings.tsx
 msgid "Copies"
 msgstr "Copies"
@@ -5397,6 +5410,10 @@ msgstr "Erased a removed member"
 #: src/activity/audit-words.ts
 msgid "Erased an upload from the Brain for good"
 msgstr "Erased an upload from the Brain for good"
+
+#: src/activity/audit-words.ts
+msgid "Erased what the Brain copied from a connection, as it was disconnected"
+msgstr "Erased what the Brain copied from a connection, as it was disconnected"
 
 #: src/activity/audit-words.ts
 msgid "Erased what the Brain kept from a connection, as it was disconnected"

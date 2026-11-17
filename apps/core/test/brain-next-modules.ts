@@ -53,6 +53,11 @@ export const brainModules = {
   // and who uploaded what, from core's own records, read only by recall's
   // `whoKnowsFor`, whose probe holds what it hands on.
   "apps/core/src/brain-uploads.ts": "sources",
+  // Native sync's run (GRA-1758): adds what a connected system holds with
+  // core's addSource, changes its readers with changeSourceReaders and
+  // erases it with eraseSource and eraseOwnGroup, on the clock and the
+  // disconnect drain, and hands nothing of the Brain on.
+  "apps/core/src/brain-sync.ts": "core",
   // Adds what a chat's agent read through a connection with core's
   // addSource, for the chat's person alone, and hands nothing on.
   "apps/core/src/connection-capture.ts": "core",

@@ -1,20 +1,29 @@
 import { syncMethod } from "@grasp-os/connector-kit/manifest";
 import { syncResultSchema } from "@grasp-os/connector-kit/sync";
-import { connectErrors, connectionErrors } from "@grasp-os/shared/connect";
+import {
+  connectErrors,
+  connectionErrors,
+  connectionOwnersMax,
+} from "@grasp-os/shared/connect";
 import {
   ownPlace,
   syncErrors,
   syncPageRequestSchema,
+  syncSourcesRequestSchema,
 } from "@grasp-os/shared/sync";
-import type { SyncPage } from "@grasp-os/shared/sync";
-import { and, eq, not } from "drizzle-orm";
+import type {
+  SyncPage,
+  SyncSource,
+  SyncSourcePage,
+} from "@grasp-os/shared/sync";
+import { and, asc, eq, gt, not, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { nativeConnector } from "./bundled-connectors.ts";
 import type { Connection } from "./connections.ts";
 import { syncServer } from "./connectors.ts";
 import { connections } from "./db/schema.ts";
-import { ownerErased } from "./erased-people.ts";
+import { erasureBegan, ownerErased } from "./erased-people.ts";
 import { McpError } from "./mcp.ts";
 
 // Native sync's read (GRA-1758): one page of one source's changes, for
@@ -157,4 +166,66 @@ export const readSyncPage = async (
     throw error;
   }
   return pageOf(result);
+};
+
+/**
+ * A page of the sources core's sync run reads (GRA-1758), by connection
+ * ID after `after`: each sync of each person's own native connection that
+ * is active, of someone whose erasure hasn't begun, whose connector is
+ * for the connection's provider, in its own account (`own`). A shared
+ * connection syncs only places picked on it: none yet (`mayRead`). A page
+ * holds at most `connectionOwnersMax` connections, as connect's other
+ * pages of connections for core.
+ */
+export const listSyncSources = async (
+  env: Env,
+  request: unknown
+): Promise<SyncSourcePage> => {
+  const { after } = syncErrors.parse(
+    "sync.invalid",
+    syncSourcesRequestSchema,
+    request
+  );
+  const rows = await drizzle(env.DB)
+    .select({
+      id: connections.id,
+      ownerUserId: connections.ownerUserId,
+      provider: connections.provider,
+      server: connections.server,
+      tenant: connections.tenant,
+      accountEmail: connections.accountEmail,
+    })
+    .from(connections)
+    .where(
+      and(
+        eq(connections.scope, "personal"),
+        eq(connections.serverKind, "native"),
+        eq(connections.status, "active"),
+        not(erasureBegan(sql`${connections.ownerUserId}`)),
+        after === null ? undefined : gt(connections.id, after)
+      )
+    )
+    .orderBy(asc(connections.id))
+    .limit(connectionOwnersMax);
+  const sources = rows.flatMap(
+    ({ id, ownerUserId, provider, server, tenant, accountEmail }) => {
+      const manifest = nativeConnector(server)?.manifest;
+      if (ownerUserId === null || manifest?.provider !== provider) {
+        return [];
+      }
+      return Object.keys(manifest.syncs ?? {}).map((feed): SyncSource => ({
+        connectionId: id,
+        ownerUserId,
+        provider,
+        tenant,
+        accountEmail,
+        feed,
+        place: ownPlace,
+      }));
+    }
+  );
+  return {
+    sources,
+    next: rows.length < connectionOwnersMax ? null : (rows.at(-1)?.id ?? null),
+  };
 };

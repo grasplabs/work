@@ -134,3 +134,32 @@ export const syncErrors = defineErrorFamily({
   "sync.throttled": "The provider is throttling reads: try again later.",
   "sync.provider_failed": "The provider didn't answer the read.",
 });
+
+/**
+ * One source core's sync run reads (GRA-1758): a connection whose
+ * connector has a sync, that sync (`feed`), and the place in it. With
+ * what core needs to name the item's readers: the connection's person,
+ * provider and tenant, and the account's own email address as the
+ * provider's verified sign-in gave it (null when it didn't).
+ */
+export interface SyncSource {
+  connectionId: string;
+  ownerUserId: string;
+  provider: string;
+  tenant: string | null;
+  accountEmail: string | null;
+  feed: string;
+  place: string;
+}
+
+/** A page of the sources there are to sync, and where the next page starts. */
+export interface SyncSourcePage {
+  sources: SyncSource[];
+  /** The connection the next page starts after; null on the last page. */
+  next: string | null;
+}
+
+/** What core asks for: the page of sync sources after `after`'s connection. */
+export const syncSourcesRequestSchema = z.strictObject({
+  after: z.string().min(1).max(128).nullable(),
+});

@@ -152,6 +152,14 @@ const words: readonly { action: string; text: MessageDescriptor }[] = [
     text: msg`Erased what the Brain kept from a connection, as it was disconnected`,
   },
   {
+    action: "brain.sync.applied",
+    text: msg`Brought changes from a connected system into the Brain`,
+  },
+  {
+    action: "brain.sync.erased",
+    text: msg`Erased what the Brain copied from a connection, as it was disconnected`,
+  },
+  {
     action: "brain.run_sources.removed",
     text: msg`Stopped the Brain using someone's workflow results, as they lost the workflow`,
   },

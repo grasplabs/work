@@ -3467,6 +3467,99 @@ export const connectionBrainErasures = sqliteTable(
 );
 
 /**
+ * The sources native sync reads into the Brain (brain-sync.ts, GRA-1758),
+ * one row per connection, sync (`feed`) and place: whose connection it is
+ * and how to name its items' readers (`provider`, `tenant`,
+ * `accountEmail`, as connect last listed them), where its next page reads
+ * on from (`cursor`, null to list it from the start), the number of its
+ * latest listing (`listing`; an item a listing named carries it) and
+ * whether that listing is under way (`listingOpen`: from a null cursor
+ * until its first page with nothing more), when it is next due, the run
+ * that holds it (`leaseId` until `leaseUntil`), when a page last applied
+ * and the code of the latest failure, and what the page under way did so
+ * far in the Brain (`added`, `changed`, `removed`), counted once each,
+ * whichever run did it, for the page's one audit event.
+ */
+export const brainSyncSources = sqliteTable(
+  "brain_sync_sources",
+  {
+    connectionId: text("connection_id").notNull(),
+    feed: text().notNull(),
+    place: text().notNull(),
+    personId: text("person_id").notNull(),
+    provider: text().notNull(),
+    tenant: text(),
+    accountEmail: text("account_email"),
+    cursor: text(),
+    listing: integer().notNull(),
+    listingOpen: integer("listing_open", { mode: "boolean" }).notNull(),
+    dueAt: timestamp("due_at").notNull(),
+    leaseId: text("lease_id"),
+    leaseUntil: timestamp("lease_until"),
+    lastSuccessAt: timestamp("last_success_at"),
+    lastError: text("last_error"),
+    added: integer().notNull(),
+    changed: integer().notNull(),
+    removed: integer().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.connectionId, table.feed, table.place] }),
+    index("brain_sync_sources_due_idx").on(table.dueAt),
+  ]
+);
+
+/**
+ * Each item native sync handed the Brain (brain-sync.ts), by connection,
+ * sync and the provider's ID of it: its source's key under `sync:`
+ * (`key`, its `generation` the key's middle part, one up each time the
+ * item leaves the Brain, so a key erased is never added to again), the
+ * store it is in now (`own`, `shared`, or null when it is in neither),
+ * the change last added (null while an add is under way), its readers as
+ * the shared store has them (a JSON list of the Brain's groups), and the
+ * listing that last named it. Core names a key here before the Brain is
+ * given it, so a disconnect's erasure finds every key it gave.
+ */
+export const brainSyncItems = sqliteTable(
+  "brain_sync_items",
+  {
+    connectionId: text("connection_id").notNull(),
+    feed: text().notNull(),
+    itemId: text("item_id").notNull(),
+    key: text().notNull(),
+    generation: integer().notNull(),
+    store: text({ enum: ["own", "shared"] }),
+    change: text(),
+    readers: text(),
+    listing: integer().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.connectionId, table.feed, table.itemId] }),
+    index("brain_sync_items_store_idx").on(table.connectionId, table.store),
+  ]
+);
+
+/**
+ * The connections a disconnect closed for native sync (brain-sync.ts),
+ * one row each, kept for good: nothing is synced or named under one again.
+ * The disconnect it serves (connect's event's id), who disconnected and
+ * when (`actor`, an audit actor as JSON), whether erasing what it synced
+ * into the shared store is under way (`erasing`, which the clock
+ * completes), and how many sources it erased.
+ */
+export const brainSyncDisconnects = sqliteTable(
+  "brain_sync_disconnects",
+  {
+    connectionId: text("connection_id").primaryKey(),
+    request: text().notNull(),
+    actor: text().notNull(),
+    requestedAt: timestamp("requested_at").notNull(),
+    erasing: integer({ mode: "boolean" }).notNull(),
+    erased: integer().notNull(),
+  },
+  (table) => [index("brain_sync_disconnects_erasing_idx").on(table.erasing)]
+);
+
+/**
  * The company's agents an admin made or changed (agents.ts): one row per
  * agent, by the ID its permissions, audit events and instruction file name.
  * `face` is the figure it is drawn with; `job` one line on what it is

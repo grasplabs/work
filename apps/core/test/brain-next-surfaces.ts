@@ -4204,6 +4204,13 @@ export const coreProbes = {
       async () => await Promise.resolve(coreBrain.recallQuestionMaxLength)
     ),
   ],
+  // A number, the longest group name the Brain takes: the same for everyone.
+  principalMaxLength: async () => [
+    await answer(
+      "the longest group name",
+      async () => await Promise.resolve(coreBrain.principalMaxLength)
+    ),
+  ],
   // A number, the most sources one removal takes: the same for everyone.
   removalsMax: async () => [
     await answer(

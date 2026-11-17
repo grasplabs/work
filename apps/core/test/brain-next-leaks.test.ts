@@ -384,6 +384,10 @@ describe(
           markerWord(),
         "a file the source shared with the outsider, then with the holder alone":
           markerWord(),
+        "a file native sync copied from the holder's drive for them alone":
+          markerWord(),
+        "a file native sync copied for the outsider too, then erased as gone at the source":
+          markerWord(),
         "the holder's run": markerWord(),
         "a question in the holder's chat": markerWord(),
         "an answer in the holder's chat": markerWord(),
@@ -430,6 +434,10 @@ describe(
           readersMarker,
         "a file the source shared with the outsider, then with the holder alone":
           staleReadersMarker,
+        "a file native sync copied from the holder's drive for them alone":
+          syncMarker,
+        "a file native sync copied for the outsider too, then erased as gone at the source":
+          goneSyncMarker,
         "the holder's run": runMarker,
         "a question in the holder's chat": askedMarker,
         "an answer in the holder's chat": answerMarker,
@@ -727,6 +735,37 @@ describe(
         source: staleReadersId,
         change: crypto.randomUUID(),
         readers: { kind: "readers", readers: [accountOf(holderApi.person)] },
+      });
+      // A file native sync copied from the holder's own drive (GRA-1758),
+      // only theirs to read at the source: in their own store, in their
+      // connection's group (brain-sync.ts). Its twin: copied while the
+      // source shared it with the outsider too, then erased when it went
+      // away there, as the sync takes out everything that did.
+      const syncConnection = `connection-${syncMarker}`;
+      const syncId: SourceRef = {
+        producer: "sync",
+        id: `${syncConnection}/1/${unique()}`,
+      };
+      await addSource(env, {
+        source: syncId,
+        change: crypto.randomUUID(),
+        text: `Supplier contract ${sharedWord} ${syncMarker}`,
+        readers: { kind: "owner", personId: holder },
+        group: { producer: "sync", id: syncConnection },
+      });
+      ownerIds.push(syncId);
+      const goneSyncId = await add(
+        `Supplier offer ${sharedWord} ${goneSyncMarker}`,
+        {
+          kind: "readers",
+          readers: [accountOf(outsiderPerson), accountOf(holderApi.person)],
+        },
+        { producer: "sync", id: `${syncConnection}/1/${unique()}` }
+      );
+      await eraseSource(env, {
+        source: goneSyncId,
+        readers: { kind: "none" },
+        reason: "deleted",
       });
       const teamSource = `Board minutes ${sharedWord} ${teamMarker}`;
       const teamId = await add(teamSource, {
@@ -1061,6 +1100,8 @@ describe(
           sharedReadMarker,
           readersMarker,
           staleReadersMarker,
+          syncMarker,
+          goneSyncMarker,
           toHolderMarker,
           ...instructionMarkers,
           ownUploadMarker,
@@ -1084,6 +1125,7 @@ describe(
           sharedReadId,
           readersId,
           staleReadersId,
+          goneSyncId,
           runSource,
           turnSource
         ),
@@ -1139,6 +1181,12 @@ describe(
           marker:
             "what an agent read through a shared connection for a team the outsider isn't in",
           source: sharedReadId,
+          reader: holder,
+        },
+        sync: {
+          marker:
+            "a file native sync copied from the holder's drive for them alone",
+          source: syncId,
           reader: holder,
         },
         run: { marker: "the holder's run", source: runSource, reader: holder },
