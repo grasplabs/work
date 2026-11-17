@@ -143,6 +143,10 @@ const typeRules: readonly {
   // erased once it was disconnected (`brain.capture.erased`, core's
   // capture-erasures.ts).
   { action: "brain.capture", type: "action" },
+  // An admin choosing who may read in the Brain what agents read through
+  // a shared connection (core's connection-audiences.ts, GRA-1831): the
+  // connection and the audience, by IDs alone.
+  { action: "brain.connection_audience", type: "config" },
   // An App, a workflow's run or a chat's code recalling from the Brain
   // for a person (core's src/brain-recall.ts): for whom, how many
   // passages and whether the budget cut it short, or why it was refused;

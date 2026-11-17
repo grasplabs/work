@@ -1435,6 +1435,10 @@ msgstr "Een wijziging"
 msgid "A change applies to runs that start after it: runs already going keep the values they started with. Each change is recorded, without its value."
 msgstr "Een wijziging geldt voor runs die daarna starten: runs die al bezig zijn houden de waarden waarmee ze begonnen. Elke wijziging wordt vastgelegd, zonder de waarde."
 
+#: src/chat/agent-change-card.tsx
+msgid "A change to {name}"
+msgstr "Een wijziging aan {name}"
+
 #: src/apps/app-access-requests.tsx
 #: src/apps/draft-changes.tsx
 msgid "A connection"
@@ -1986,6 +1990,10 @@ msgstr "Bron toevoegen"
 msgid "Add the trigger"
 msgstr "Trigger toevoegen"
 
+#: src/agents/agent-apps-card.tsx
+msgid "Add this schedule"
+msgstr "Dit schema toevoegen"
+
 #: src/projects/file-item-dialog.tsx
 msgid "Add to {projectName}"
 msgstr "Toevoegen aan {projectName}"
@@ -2046,6 +2054,10 @@ msgstr "Toegevoegd op"
 #: src/activity/audit-words.ts
 msgid "Added someone to a team"
 msgstr "Iemand aan een team toegevoegd"
+
+#: src/chat/agent-change-card.tsx
+msgid "Added to its instructions"
+msgstr "Toegevoegd aan zijn instructies"
 
 #: src/brain/skills-page.tsx
 msgid "Added to the company's skills, and since taken out of use."
@@ -2263,6 +2275,10 @@ msgstr "Bijna klaar"
 msgid "Already here, in case you mean one of these"
 msgstr "Staat er al, voor het geval je een van deze bedoelt"
 
+#: src/agents/agent-apps-card.tsx
+msgid "Already one of its schedules."
+msgstr "Al een van zijn schema's."
+
 #: src/onboarding/about-story.tsx
 msgid "Alright, here’s the plan."
 msgstr "Oké, dit is het plan."
@@ -2279,6 +2295,10 @@ msgstr "Ook de naam vrijgeven, zodat een nieuwe workflow hem kan gebruiken."
 #: src/chat/subject-bar.tsx
 msgid "Also worked on"
 msgstr "Ook aan gewerkt"
+
+#: src/chat/agent-change-card.tsx
+msgid "Also works on its own"
+msgstr "Werkt ook zelfstandig"
 
 #: src/workflows/resource-params.tsx
 msgid "Amount"
@@ -2775,6 +2795,10 @@ msgstr "Apps en workflows"
 msgid "Apps and workflows grouped by process, team or goal. Putting something in a project shares it with nobody."
 msgstr "Apps en workflows, gegroepeerd per proces, team of doel. Iets in een project zetten deelt het met niemand."
 
+#: src/chat/agent-change-card.tsx
+msgid "Apps it gets"
+msgstr "Apps die het krijgt"
+
 #: src/chat/agent-draft-card.tsx
 msgid "Apps it uses"
 msgstr "Apps die het gebruikt"
@@ -2782,6 +2806,10 @@ msgstr "Apps die het gebruikt"
 #: src/workflows/files-and-apps.tsx
 msgid "Apps it works in"
 msgstr "Apps waarin hij werkt"
+
+#: src/chat/agent-change-card.tsx
+msgid "Apps taken off"
+msgstr "Weggehaalde apps"
 
 #: src/apps/app-settings.tsx
 #: src/apps/app-status.tsx
@@ -2889,6 +2917,10 @@ msgstr "Een beheerder vragen"
 msgid "Ask anything, or describe a process"
 msgstr "Vraag wat je wilt, of beschrijf een proces"
 
+#: src/agents/agent-apps-card.tsx
+msgid "Ask for {app}"
+msgstr "{app} aanvragen"
+
 #: src/chat/chat-subject.ts
 msgid "Ask for a change"
 msgstr "Vraag om een wijziging"
@@ -2901,6 +2933,7 @@ msgstr "Toegang vragen"
 msgid "Ask for access for this App"
 msgstr "Toegang vragen voor deze app"
 
+#: src/agents/agent-apps-card.tsx
 #: src/onboarding/connect-steps.tsx
 msgid "Ask for it"
 msgstr "Doorgeven"
@@ -2962,6 +2995,7 @@ msgstr "Gevraagd door {requester} op {date}"
 msgid "Asked by a former member"
 msgstr "Aangevraagd door een voormalig lid"
 
+#: src/agents/agent-apps-card.tsx
 #: src/apps/app-access-requests.tsx
 #: src/onboarding/connect-steps.tsx
 msgid "Asked for"
@@ -3486,6 +3520,7 @@ msgid "Change “{was}” to “{now}”."
 msgstr "Verander „{was}” in „{now}”."
 
 #: src/apps/app-data-model.tsx
+#: src/chat/agent-change-card.tsx
 msgid "Change {name}"
 msgstr "{name} wijzigen"
 
@@ -3496,6 +3531,10 @@ msgstr "{title} wijzigen"
 #: src/apps/app-workflows.tsx
 msgid "Change in the draft"
 msgstr "Wijzigen in het concept"
+
+#: src/chat/agent-draft-card.tsx
+msgid "Change it"
+msgstr "Wijzigen"
 
 #: src/routes/_shell.settings.billing.tsx
 msgid "Change plan"
@@ -5975,6 +6014,10 @@ msgstr "Voor Stephens verzoeken, over “{label}” ({why}), doe dit: {proposal}
 msgid "For the {role}"
 msgstr "Voor de {role}"
 
+#: src/agents/agent-apps-card.tsx
+msgid "For the agent {agentName}."
+msgstr "Voor de agent {agentName}."
+
 #: src/agents/new-agent.tsx
 msgid "For the company"
 msgstr "Voor het bedrijf"
@@ -5983,6 +6026,7 @@ msgstr "Voor het bedrijf"
 msgid "For the team {team}"
 msgstr "Voor het team {team}"
 
+#: src/agents/agent-apps-card.tsx
 #: src/agents/agent-wakes.tsx
 msgid "For whom"
 msgstr "Voor wie"
@@ -7508,6 +7552,10 @@ msgstr "Zijn instructies"
 #: src/agents/agent-apps-card.tsx
 msgid "Its instructions name apps your company doesn't offer: {missing}."
 msgstr "Zijn instructies noemen apps die jullie bedrijf niet aanbiedt: {missing}."
+
+#: src/agents/agent-apps-card.tsx
+msgid "Its instructions say it works on its own: {cron} · {opening}"
+msgstr "Volgens zijn instructies werkt het zelfstandig: {cron} · {opening}"
 
 #: src/settings/ai-providers.tsx
 msgid "Its key is deleted, and calls stop using it at once. Models of this provider are no longer used, even as a fallback."
@@ -9183,6 +9231,10 @@ msgstr "Geen."
 msgid "Not added yet"
 msgstr "Nog niet toegevoegd"
 
+#: src/chat/agent-draft-card.tsx
+msgid "Not all of it could be set, so the agent is paused. <0>Finish it on its page</0>."
+msgstr "Niet alles kon worden ingesteld, dus de agent is gepauzeerd. <0>Maak het af op zijn pagina</0>."
+
 #: src/routes/_shell.integrations.$integration.tsx
 #: src/workflows/workflow-triggers.tsx
 msgid "Not allowed"
@@ -9386,6 +9438,10 @@ msgstr "Genoteerd: {name}. We koppelen het samen met jou. Controleer intussen wi
 #: src/onboarding/connect-steps.tsx
 msgid "Noted. We’ll get in touch to put it on the laptops with you."
 msgstr "Genoteerd. We nemen contact op om het samen met je op de laptops te zetten."
+
+#: src/chat/agent-change-card.tsx
+msgid "Nothing changes until you say Change it. You can change any of it first."
+msgstr "Er verandert niets tot je op Wijzigen drukt. Je kunt eerst alles aanpassen."
 
 #: src/routes/_shell.integrations.index.tsx
 msgid "Nothing connected yet."
@@ -10898,6 +10954,15 @@ msgstr "Entiteiten uit het Brein gelezen"
 #: src/activity/audit-words.ts
 msgid "Read everyone's calls of unknown outcome"
 msgstr "De aanroepen met onbekende uitkomst van iedereen gelezen"
+
+#: src/brain/sources-page.tsx
+msgctxt "a source of the Brain"
+msgid "Read from a shared connection"
+msgstr "Gelezen uit een gedeelde verbinding"
+
+#: src/brain/memories-page.tsx
+msgid "Read from a shared connection, version {version}"
+msgstr "Gelezen uit een gedeelde verbinding, versie {version}"
 
 #: src/activity/audit-words.ts
 msgid "Read how knowledge is used"
@@ -13993,6 +14058,7 @@ msgctxt "a source of the Brain"
 msgid "The company's teams"
 msgstr "De teams van het bedrijf"
 
+#: src/chat/agent-change-card.tsx
 #: src/chat/agent-draft-card.tsx
 msgid "the company's time zone"
 msgstr "tijdzone van het bedrijf"
@@ -16004,6 +16070,7 @@ msgid "What it is bound to has changed since the binding was approved. Bind it a
 msgstr "Waaraan hij gekoppeld is, is veranderd sinds de koppeling is goedgekeurd. Koppel hem opnieuw zodra je hebt gecontroleerd dat het nog past."
 
 #: src/agents/agent-form.tsx
+#: src/chat/agent-change-card.tsx
 #: src/chat/agent-draft-card.tsx
 msgid "What it is for"
 msgstr "Waar hij voor is"
@@ -16012,6 +16079,10 @@ msgstr "Waar hij voor is"
 msgctxt "what an app is for, in a sentence"
 msgid "What it is for"
 msgstr "Waarvoor hij is"
+
+#: src/chat/agent-change-card.tsx
+msgid "What it may also do"
+msgstr "Wat het ook mag doen"
 
 #: src/agents/agent-page.tsx
 #: src/chat/agent-draft-card.tsx
@@ -16495,6 +16566,7 @@ msgstr "Voor wie hij is"
 msgid "Who leads it?"
 msgstr "Wie leidt het?"
 
+#: src/chat/agent-change-card.tsx
 #: src/chat/agent-draft-card.tsx
 msgid "Who may ask it"
 msgstr "Wie het mag vragen"

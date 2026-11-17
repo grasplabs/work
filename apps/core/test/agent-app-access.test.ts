@@ -240,6 +240,8 @@ describe("an agent's apps", slow, () => {
       apps: ["native:google"],
       kinds: ["read-own", "change-own"],
       missing: [],
+      // Never proposed for an agent of one's own, which never wakes.
+      schedule: { cron: "0 8 * * 1", opening: "Sum up the week." },
     });
     // An admin can't have it worked out, as for an agent no one made.
     const byAdmin = await outcome(
@@ -264,6 +266,37 @@ describe("an agent's apps", slow, () => {
       suggested: [],
       turnedOn: [],
       missing: [],
+    });
+  });
+
+  it("proposes when a company agent works on its own, as a wake-up takes it, and makes none", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const weekly = await admin.api.connections.makeAgent(said("Weekly"));
+    const often = await admin.api.connections.makeAgent(said("Often"));
+    await answering({
+      apps: [],
+      kinds: [],
+      missing: [],
+      schedule: { cron: "0 8 * * 1", opening: "Sum up HR's new mail." },
+    });
+    const proposed = await admin.api.connections.workOutAgentApps(weekly.id);
+    await answering({
+      apps: [],
+      kinds: [],
+      missing: [],
+      schedule: { cron: "* * * * *", opening: "Check again." },
+    });
+    const tooOften = await admin.api.connections.workOutAgentApps(often.id);
+    const wakes = await admin.api.connections.agentWakes(weekly.id);
+
+    expect({
+      proposed: proposed.schedule,
+      tooOften: tooOften.schedule,
+      wakes,
+    }).toStrictEqual({
+      proposed: { cron: "0 8 * * 1", opening: "Sum up HR's new mail." },
+      tooOften: undefined,
+      wakes: [],
     });
   });
 });
