@@ -1291,11 +1291,13 @@ describe("the alarm, while something else fails", { timeout: 180_000 }, () => {
         return { failed: threw, alarm: await state.storage.getAlarm() };
       }
     );
+    // The claim he was one of the five behind is gone from the page.
+    const { statements } = await brainOf(ids);
     expect({
       stuck,
       failed,
-      after: await owed(),
+      claim: statements.includes("Tickets wait for the customer."),
       armed: alarm !== null,
-    }).toStrictEqual({ stuck: false, failed: true, after: false, armed: true });
+    }).toStrictEqual({ stuck: false, failed: true, claim: false, armed: true });
   });
 });

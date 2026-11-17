@@ -97,10 +97,15 @@ const share = async (
 };
 
 /** The people of a team, by key. */
-type Key = "lea" | "max" | "mia" | "mo" | "noor" | "pim";
+type Key = "lea" | "max" | "mia" | "mo" | "noor" | "pim" | "rik" | "sam";
 
-/** A team called Ops, led by Lea, with Max, Mia, Mo, Noor and Pim, in an onboarding that started yesterday: five who tell their own work, as many as reach the brain. */
-const team = async () => {
+/**
+ * A team called Ops, led by Lea, with Max, Mia, Mo, Noor and Pim, in an
+ * onboarding that started yesterday: five who tell their own work, as many
+ * as reach the brain. With `seven`, Rik and Sam too: seven who tell, as a
+ * team needs before any of its results are shown (`teamMayClaim`).
+ */
+const team = async ({ seven = false } = {}) => {
   const store = onboardingStore(env);
   const id = unique();
   const ids = {
@@ -111,6 +116,8 @@ const team = async () => {
     mo: `mo-${id}`,
     noor: `noor-${id}`,
     pim: `pim-${id}`,
+    rik: `rik-${id}`,
+    sam: `sam-${id}`,
   };
   const names: Record<Key, [string, string]> = {
     lea: ["Lea Lind", "Team lead"],
@@ -119,8 +126,18 @@ const team = async () => {
     mo: ["Mo Mertens", "Agent"],
     noor: ["Noor Nijs", "Agent"],
     pim: ["Pim Peeters", "Agent"],
+    rik: ["Rik Ras", "Agent"],
+    sam: ["Sam Sol", "Agent"],
   };
-  const keys: Key[] = ["lea", "max", "mia", "mo", "noor", "pim"];
+  const keys: Key[] = [
+    "lea",
+    "max",
+    "mia",
+    "mo",
+    "noor",
+    "pim",
+    ...(seven ? (["rik", "sam"] as const) : []),
+  ];
   const roster: Roster = {
     teams: [{ id: ids.team, name: "Ops", lead: ids.lea, does: "", off: false }],
     people: keys.map((key) => ({
@@ -280,6 +297,13 @@ const toldAll = async (ids: Ids, maxSays = "Tickets arrive in Zendesk.") => {
   ]);
   await agree(ids.noor, [fact("n1", "step", "Reads the ticket first.")]);
   await agree(ids.pim, [fact("p1", "step", "Tags the ticket.")]);
+};
+
+/** What everyone of a team of seven (`team({ seven: true })`) tells: `toldAll`, and Rik and Sam a step each. */
+const sevenTold = async (ids: Ids) => {
+  await toldAll(ids);
+  await agree(ids.rik, [fact("r1", "step", "Checks the queue at noon.")]);
+  await agree(ids.sam, [fact("s1", "step", "Answers the phone.")]);
 };
 
 /** What `run` returns while the provider answers each request with what `respond` makes. */
@@ -510,6 +534,35 @@ describe(
         await intaking;
       }
       expect(state).toStrictEqual({ holding: true, deleted: true });
+    });
+
+    it("takes a drawing made since the document was shared off the page and out of the new Brain as its removal answers", async () => {
+      const { api: admin } = await signedInApi(idp, "admin");
+      const word = sentinelOf();
+      const id = await share(admin, `removed-${unique()}.docx`, word);
+      const ids = await team({ seven: true });
+      await sevenTold(ids);
+      await drawAll(ids, word, word);
+      await intakeAlike();
+      const standing = async (): Promise<number> => {
+        const drawings = await onboardingStore(env).standingDrawings();
+        return drawings.filter(({ team: of }) => of === ids.team).length;
+      };
+      const work = async (): Promise<string[]> => {
+        const { workflows } = await admin.brain.read();
+        return workflows
+          .filter(({ teamId }) => teamId === `team-${ids.team}`)
+          .map(({ name }) => name);
+      };
+      const before = { standing: await standing(), page: await work() };
+      await admin.onboarding.removeDocument(id);
+      expect({
+        before,
+        after: { standing: await standing(), page: await work() },
+      }).toStrictEqual({
+        before: { standing: 1, page: ["handling new tickets"] },
+        after: { standing: 0, page: [] },
+      });
     });
 
     it("throws away a drawing under way as its document goes, and draws it again", async () => {

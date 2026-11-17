@@ -7161,7 +7161,7 @@ export class Onboarding extends DurableObject<Env> {
         .map(({ person }) => person);
       return producer === "claim"
         ? !this.#claimStands(team, resting, { roster, agreed, mayClaim })
-        : !this.#drawingStands(team, resting, { roster, agreed });
+        : !this.#drawingStands(team, resting, { roster, agreed, mayClaim });
     });
     const out = [...owed, ...falling];
     if (out.length > 0) {
@@ -7173,10 +7173,11 @@ export class Onboarding extends DurableObject<Env> {
 
   /**
    * The one rule for whether a drawing of `team` resting on `resting`
-   * stands now (GRA-1084, GRA-1748): its team is on the list with five or
-   * more who tell their own work, everyone it rests on still counts (none
-   * gone, none who took back what they approved), and its team's map
-   * stands on what its lead's facts are now (`#mapBacked`, GRA-329). The
+   * stands now (GRA-1084, GRA-1748): its team may have its results shown
+   * (`#teamShowsResults`, as for a claim), everyone it rests on still
+   * counts (none gone, none who took back what they approved), and its
+   * team's map stands on what its lead's facts are now (`#mapBacked`,
+   * GRA-329). The
    * recount (`#recountStanding`), noting a drawing (`#noteDrawings`) and
    * the old records' purge (`#toPurge`) ask it, so none keeps what another
    * drops.
@@ -7187,12 +7188,15 @@ export class Onboarding extends DurableObject<Env> {
     {
       roster = this.#roster(),
       agreed,
-    }: { roster?: Roster | null; agreed: ReadonlySet<string> }
+      mayClaim = new Map<string, boolean>(),
+    }: {
+      roster?: Roster | null;
+      agreed: ReadonlySet<string>;
+      mayClaim?: Map<string, boolean>;
+    }
   ): boolean {
-    const onRoster = roster?.teams.some(({ id }) => id === team) === true;
     return (
-      onRoster &&
-      this.#tellers(team, roster).length >= minTeamShown &&
+      this.#teamShowsResults(team, { roster, mayClaim }) &&
       resting.length > 0 &&
       resting.every((person) => agreed.has(person)) &&
       this.#mapBacked(team)
@@ -7200,9 +7204,38 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /**
+   * The one rule for whether `team` may have its results (its claims and
+   * the drawings of its work) read at all (GRA-1748): it is on the list,
+   * it takes part (an admin may switch a team off: then nothing of it is
+   * shown to members, #2344), and seven or more of its people tell their
+   * own work (`teamMayClaim`: five backers in a team of seven, the
+   * owner's decision of 16 November). Both `#claimStands` and
+   * `#drawingStands` ask it. A read of many passes the list read once, and
+   * a map of each team's answer (`mayClaim`), filled as it goes.
+   */
+  #teamShowsResults(
+    team: string,
+    {
+      roster = this.#roster(),
+      mayClaim = new Map<string, boolean>(),
+    }: { roster?: Roster | null; mayClaim?: Map<string, boolean> }
+  ): boolean {
+    const known = mayClaim.get(team);
+    if (known !== undefined) {
+      return known;
+    }
+    const takesPart =
+      roster?.teams.some(({ id, off }) => id === team && !off) === true;
+    const may = takesPart && teamMayClaim(this.#tellers(team, roster).length);
+    mayClaim.set(team, may);
+    return may;
+  }
+
+  /**
    * The one rule for whether a claim of `team` resting on `backers` stands
-   * now (GRA-1741): its team may have claims shown (`teamMayClaim`), and
-   * five or more of `backers` back it now (`#currentBackers`). Both noting
+   * now (GRA-1741): its team may have its results shown
+   * (`#teamShowsResults`), and five or more of `backers` back it now
+   * (`#currentBackers`). Both noting
    * a claim (`#noteClaims`) and the recount (`#recountStanding`) ask it, so
    * neither keeps what the other drops. A recount over many claims passes
    * the list and the agreed people read once, and a map of what each team
@@ -7221,11 +7254,9 @@ export class Onboarding extends DurableObject<Env> {
       mayClaim?: Map<string, boolean>;
     } = {}
   ): boolean {
-    const may =
-      mayClaim.get(team) ?? teamMayClaim(this.#tellers(team, roster).length);
-    mayClaim.set(team, may);
     return (
-      may && this.#currentBackers(team, backers, agreed).length >= minTeamShown
+      this.#teamShowsResults(team, { roster, mayClaim }) &&
+      this.#currentBackers(team, backers, agreed).length >= minTeamShown
     );
   }
 
