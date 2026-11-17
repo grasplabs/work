@@ -8,11 +8,16 @@ import type { ConnectionBrainAudienceSetting } from "@grasp-os/shared/connect";
 import { requireAdmin, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { and, eq, sql } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 
 import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
-import { connectionBrainAudiences, teams } from "./db/core/schema.ts";
+import {
+  connectionBrainAudiences,
+  connectionBrainErasures,
+  teams,
+} from "./db/core/schema.ts";
 
 // Who may read in the Brain what agents read through a shared connection
 // (GRA-1831; the threat model and the decisions are on the issue). An
@@ -57,7 +62,13 @@ export const audiencesRead = (db: DrizzleD1Database) =>
       connectionId: connectionBrainAudiences.connectionId,
       teamId: connectionBrainAudiences.teamId,
     })
-    .from(connectionBrainAudiences);
+    .from(connectionBrainAudiences)
+    // Never one of a connection being erased or closed by a disconnect:
+    // none has an audience (shared-reads.ts), and a read never trusts one
+    // that would.
+    .where(
+      sql`NOT EXISTS (SELECT 1 FROM ${connectionBrainErasures} WHERE ${connectionBrainErasures.connectionId} = ${connectionBrainAudiences.connectionId} AND (${connectionBrainErasures.erasing} = 1 OR ${connectionBrainErasures.closed} = 1))`
+    );
 
 /** Every shared connection's Brain audience, as an admin last chose it. */
 export const readConnectionAudiences = async (
@@ -96,6 +107,37 @@ const audienceDetail = (
   return held === null
     ? { [who]: "everyone" }
     : { [who]: "team", [team]: held };
+};
+
+/**
+ * That `connectionId` may be opened to an audience, as SQL: no erasure of
+ * what the Brain kept of it is under way, and no disconnect closed it
+ * (shared-reads.ts).
+ */
+const openable = (connectionId: string): SQL =>
+  sql`NOT EXISTS (SELECT 1 FROM ${connectionBrainErasures} WHERE ${connectionBrainErasures.connectionId} = ${connectionId} AND (${connectionBrainErasures.erasing} = 1 OR ${connectionBrainErasures.closed} = 1))`;
+
+/**
+ * Why `connectionId` may not be opened to an audience now, if it may
+ * not: a disconnect closed it, or what the Brain kept of it is being
+ * erased.
+ */
+const unopenableNow = async (
+  db: DrizzleD1Database,
+  connectionId: string
+): Promise<"closed" | "erasing" | undefined> => {
+  const row = await db
+    .select({
+      erasing: connectionBrainErasures.erasing,
+      closed: connectionBrainErasures.closed,
+    })
+    .from(connectionBrainErasures)
+    .where(eq(connectionBrainErasures.connectionId, connectionId))
+    .get();
+  if (row?.closed === true) {
+    return "closed";
+  }
+  return row?.erasing === true ? "erasing" : undefined;
 };
 
 /** The audience `connectionId` holds now. */
@@ -182,9 +224,22 @@ export const setConnectionAudience = async (
   // landed in between, until it holds what was chosen.
   for (;;) {
     // oxlint-disable-next-line no-await-in-loop -- again only after another change
-    const held = await heldBy(db, id.data);
+    const [held, unopenable] = await Promise.all([
+      heldBy(db, id.data),
+      unopenableNow(db, id.data),
+    ]);
     if (held === wanted) {
       return;
+    }
+    // Never opened while what the Brain kept of it is being erased, nor
+    // once a disconnect closed it, though connect said it was connected a
+    // moment ago (shared-reads.ts): checked again in the statement that
+    // writes it.
+    if (wanted !== undefined && unopenable === "closed") {
+      throw connectionErrors.create("connection.invalid");
+    }
+    if (wanted !== undefined && unopenable === "erasing") {
+      throw connectionErrors.create("connection.brain_erasing");
     }
     const event = outboxedIfChanged(db, {
       actor: actorOf(identity),
@@ -207,18 +262,15 @@ export const setConnectionAudience = async (
     } else if (held === undefined) {
       write = db
         .insert(connectionBrainAudiences)
-        .values({
-          connectionId: id.data,
-          teamId: wanted,
-          changedBy: identity.userId,
-          changedAt,
-        })
+        .select(
+          sql`SELECT ${id.data}, ${wanted}, ${identity.userId}, ${changedAt.getTime()} WHERE ${openable(id.data)}`
+        )
         .onConflictDoNothing();
     } else {
       write = db
         .update(connectionBrainAudiences)
         .set({ teamId: wanted, changedBy: identity.userId, changedAt })
-        .where(asRead);
+        .where(and(asRead, openable(id.data)));
     }
     // oxlint-disable-next-line no-await-in-loop -- again only after another change
     await auditedBatch(env, db, [write, event]);

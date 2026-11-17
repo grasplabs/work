@@ -117,6 +117,7 @@ import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 import { pointSharedMailbox, readSharedMailboxes } from "./shared-mailboxes.ts";
+import { closeOnDisconnect, eraseBrainReads } from "./shared-reads.ts";
 import { routeMember } from "./staff-audit.ts";
 import {
   readStephenReach,
@@ -227,6 +228,27 @@ const eraseCapturesSoon = async (
     }
   } catch (error) {
     log.warn("connection.captures_not_erased_yet", {
+      connectionId,
+      ...errorFields(error),
+    });
+  }
+};
+
+/**
+ * Closes the shared connection `connectionId`, just disconnected by
+ * `userId`, in the Brain (shared-reads.ts `closeOnDisconnect`): a failure
+ * is logged, never the disconnect's, as the erasure that follows from
+ * connect's record closes it too.
+ */
+const closeNow = async (
+  env: Env,
+  connectionId: string,
+  userId: string
+): Promise<void> => {
+  try {
+    await closeOnDisconnect(env, connectionId, { type: "person", userId });
+  } catch (error) {
+    log.warn("connection.brain_close_failed", {
       connectionId,
       ...errorFields(error),
     });
@@ -645,6 +667,8 @@ export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
 
   async disconnect(connectionId: string): Promise<{ revoked: boolean }> {
     const person = await this.#person();
+    // Whose it is, read before connect stops it (it keeps its owner).
+    const [owner] = await connectionOwnersOf(this.#env, [connectionId]);
     // A revocation never waits on the Brain: connect stops it first, and
     // what the Brain kept through it goes in the background
     // (`eraseCapturesSoon`), so a slow store never holds the answer up.
@@ -653,6 +677,13 @@ export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
       connectionId,
     });
     waitUntil(eraseCapturesSoon(this.#env, person, connectionId));
+    // A shared connection's records in the Brain: closed before this
+    // answers, so nobody reads them from then on and no audience is
+    // opened on it again; connect's record of the disconnect erases them
+    // (shared-reads.ts, capture-erasures.ts).
+    if (owner?.id === connectionId && owner.ownerUserId === null) {
+      await closeNow(this.#env, connectionId, person.userId);
+    }
     return disconnected;
   }
 
@@ -790,6 +821,12 @@ export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
   ): Promise<void> {
     await withPerson(this.#check, async (identity) => {
       await setConnectionAudience(this.#env, identity, connectionId, audience);
+    });
+  }
+
+  async eraseBrainReads(connectionId: unknown): Promise<void> {
+    await withPerson(this.#check, async (identity) => {
+      await eraseBrainReads(this.#env, identity, connectionId);
     });
   }
 

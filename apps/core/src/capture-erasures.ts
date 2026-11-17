@@ -7,11 +7,11 @@ import { sha256Hex } from "@grasp-os/shared/encoding";
 import { errorName, log } from "@grasp-os/shared/log";
 
 import { auditLog } from "./audit-log.ts";
-import type { AuditLogEnv } from "./audit-log.ts";
 import { uuidFromHash } from "./audit-outbox.ts";
 import type { Held } from "./audit-outbox.ts";
 import { eraseCaptures } from "./brain-next-origins.ts";
 import { mayHoldCapturesOf } from "./connection-capture-key.ts";
+import { eraseSharedReadsOfDisconnect } from "./shared-reads.ts";
 
 // A disconnected connection's captures (GRA-1827; the threat model and
 // the decisions are on the issue). Connect records each disconnect that
@@ -83,7 +83,7 @@ const unkeyable = (connectionId: string): boolean =>
  * connect couldn't say whose the connections are.
  */
 const eraseEach = async (
-  env: Pick<Env, "CONNECT" | "BRAIN_STORE" | "DURABLE_OBJECT_JURISDICTION">,
+  env: Env,
   events: readonly AuditEvent[]
 ): Promise<{ erased: CapturesErased[]; failed: Held }> => {
   const stopped = events.flatMap((disconnect) => {
@@ -97,6 +97,22 @@ const eraseEach = async (
     ...new Set(stopped.map(({ connectionId }) => connectionId)),
   ]);
   const owners = new Map(listed.map((owner) => [owner.id, owner]));
+  // A shared connection's records in the shared Brain (shared-reads.ts,
+  // GRA-1831): their erasure started, owed from then on, before the
+  // disconnect leaves the outbox.
+  const shared = stopped.filter(
+    ({ connectionId }) => owners.get(connectionId)?.ownerUserId === null
+  );
+  const sharedSettled = await Promise.allSettled(
+    shared.map(async ({ disconnect, connectionId }) => {
+      await eraseSharedReadsOfDisconnect(env, {
+        connectionId,
+        request: disconnect.id,
+        actor: disconnect.actor,
+        at: new Date(disconnect.at),
+      });
+    })
+  );
   const due = stopped.flatMap(({ disconnect, connectionId }) => {
     const owner = owners.get(connectionId);
     const personId = owner?.ownerUserId;
@@ -141,12 +157,17 @@ const eraseEach = async (
         : []
     ),
     failed: {
-      ids: due.flatMap(({ disconnect }, index) =>
-        settled[index]?.status === "rejected" ? [disconnect.id] : []
-      ),
+      ids: [
+        ...due.flatMap(({ disconnect }, index) =>
+          settled[index]?.status === "rejected" ? [disconnect.id] : []
+        ),
+        ...shared.flatMap(({ disconnect }, index) =>
+          sharedSettled[index]?.status === "rejected" ? [disconnect.id] : []
+        ),
+      ],
       errors: [
         ...new Set(
-          settled.flatMap((each) =>
+          [...settled, ...sharedSettled].flatMap((each) =>
             each.status === "rejected" ? [errorName(each.reason)] : []
           )
         ),
@@ -204,8 +225,7 @@ const erasedEvent = async ({
  * that stopped them, which the drain logs once.
  */
 export const eraseCapturesOfDisconnects = async (
-  env: AuditLogEnv &
-    Pick<Env, "CONNECT" | "BRAIN_STORE" | "DURABLE_OBJECT_JURISDICTION">,
+  env: Env,
   events: readonly AuditEvent[]
 ): Promise<Held> => {
   const { erased, failed } = await eraseEach(env, events);

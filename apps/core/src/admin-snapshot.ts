@@ -120,6 +120,7 @@ const interviewOf = (facts: AdminInterviewFacts): AdminInterview => {
     facts: facts.facts,
     out: facts.out,
     confirmed: facts.confirmed,
+    shared: facts.shared,
     rating: facts.rating,
     typed: facts.typed,
     interviewer: facts.interviewer,

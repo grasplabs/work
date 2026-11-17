@@ -3462,6 +3462,7 @@ msgstr "Can't offer Run: {unread}"
 #: src/drafts/draft-history.tsx
 #: src/drafts/sharing.tsx
 #: src/inbox/item-detail.tsx
+#: src/interview/destination.tsx
 #: src/interview/transcript.tsx
 #: src/link-confirmation.tsx
 #: src/onboarding/document-drop.tsx
@@ -3907,6 +3908,10 @@ msgstr "Choose one"
 msgid "Choose someone"
 msgstr "Choose someone"
 
+#: src/interview/destination.tsx
+msgid "Choose where each line goes. A line you move counts again once you save."
+msgstr "Choose where each line goes. A line you move counts again once you save."
+
 #: src/interview/before.tsx
 msgid "Choose who you want to be interviewed by."
 msgstr "Choose who you want to be interviewed by."
@@ -3962,6 +3967,7 @@ msgstr "Clear filters"
 #: src/dashboard/widget-block.tsx
 #: src/drafts/draft-history.tsx
 #: src/drafts/share-with-team.tsx
+#: src/interview/destination.tsx
 #: src/onboarding/place-picker.tsx
 #: src/settings/erasures.tsx
 #: src/settings/stephen-settings.tsx
@@ -6903,6 +6909,10 @@ msgstr "How will the company see that it is met?"
 msgid "How you appear in Grasp: on workflows you own, and in the audit trail."
 msgstr "How you appear in Grasp: on workflows you own, and in the audit trail."
 
+#: src/interview/words.ts
+msgid "How you do the work is shared in your company as how your team works, never as what you said. What you think of it is only counted anonymously: it shows once five or more people across the company say the same, never with your name or your team."
+msgstr "How you do the work is shared in your company as how your team works, never as what you said. What you think of it is only counted anonymously: it shows once five or more people across the company say the same, never with your name or your team."
+
 #: src/routes/_shell.settings.security.tsx
 msgid "How you get into Grasp. Passwords and two-step sign-in live with your organization’s account."
 msgstr "How you get into Grasp. Passwords and two-step sign-in live with your organization’s account."
@@ -9409,6 +9419,14 @@ msgstr "Not run yet"
 msgid "Not saved yet. Trying again."
 msgstr "Not saved yet. Trying again."
 
+#: src/interview/destination.tsx
+msgid "Not saved yet. Until it is, the lines you moved count nowhere."
+msgstr "Not saved yet. Until it is, the lines you moved count nowhere."
+
+#: src/interview/destination.tsx
+msgid "Not saved yet. Until it is, your lines still go where they went before."
+msgstr "Not saved yet. Until it is, your lines still go where they went before."
+
 #: src/apps/resource-bindings.tsx
 msgid "Not served"
 msgstr "Not served"
@@ -9912,6 +9930,10 @@ msgstr "Only admins can change teams."
 msgid "Only an admin resets an App’s data: every record goes for good, and its current version runs again with no records."
 msgstr "Only an admin resets an App’s data: every record goes for good, and its current version runs again with no records."
 
+#: src/interview/destination.tsx
+msgid "Only counted anonymously"
+msgstr "Only counted anonymously"
+
 #: src/workflows/workflow-diagram.tsx
 msgid "Only if its condition holds"
 msgstr "Only if its condition holds"
@@ -9972,6 +9994,10 @@ msgstr "Only the second way"
 #: src/workflows/resource-params.tsx
 msgid "Only the workflow's builders can change these."
 msgstr "Only the workflow's builders can change these."
+
+#: src/interview/destination.tsx
+msgid "Only used to know whom to ask"
+msgstr "Only used to know whom to ask"
 
 #: src/agents/agent-page.tsx
 #: src/agents/agents-overview.tsx
@@ -10750,8 +10776,8 @@ msgid "Preference"
 msgstr "Preference"
 
 #: src/interview/read-back.tsx
-msgid "Press a line to change it, take out what is wrong, or type what is missing. What you leave in is what counts."
-msgstr "Press a line to change it, take out what is wrong, or type what is missing. What you leave in is what counts."
+msgid "Press a line to change it, take out what is wrong, or type what is missing. Choose where each line goes. What you leave in is what counts."
+msgstr "Press a line to change it, take out what is wrong, or type what is missing. Choose where each line goes. What you leave in is what counts."
 
 #: src/pages/page-frame.tsx
 msgid "Preview: changes nothing, reads no real data"
@@ -12116,7 +12142,12 @@ msgstr "Save link"
 msgid "Save the correction"
 msgstr "Save the correction"
 
+#: src/interview/destination.tsx
+msgid "Save where they go"
+msgstr "Save where they go"
+
 #: src/interview/composer.tsx
+#: src/interview/destination.tsx
 msgid "Saved"
 msgstr "Saved"
 
@@ -12155,6 +12186,7 @@ msgid "Saving to your memory"
 msgstr "Saving to your memory"
 
 #: src/interview/composer.tsx
+#: src/interview/destination.tsx
 msgid "Saving…"
 msgstr "Saving…"
 
@@ -12608,6 +12640,10 @@ msgstr "Share…"
 #: src/brain/memories-page.tsx
 msgid "Shared {when}"
 msgstr "Shared {when}"
+
+#: src/interview/destination.tsx
+msgid "Shared as how your team works"
+msgstr "Shared as how your team works"
 
 #: src/settings/stephen-settings.tsx
 msgid "Shared mailboxes, colleagues' calendars and the company's files."
@@ -15227,6 +15263,7 @@ msgstr "Try"
 #: src/decision-card.tsx
 #: src/frame/page-states.tsx
 #: src/frame/setting-up.tsx
+#: src/interview/destination.tsx
 #: src/interview/sound-check.tsx
 #: src/pages/frame-failure.tsx
 msgid "Try again"
@@ -16532,6 +16569,10 @@ msgstr "Where you are in the brain"
 msgid "Where your data lives, and the time Grasp uses."
 msgstr "Where your data lives, and the time Grasp uses."
 
+#: src/interview/destination.tsx
+msgid "Where your lines go"
+msgstr "Where your lines go"
+
 #: src/onboarding/connect-steps.tsx
 msgid "Where, for example Dropbox"
 msgstr "Where, for example Dropbox"
@@ -17268,10 +17309,6 @@ msgstr "Your choice"
 #: src/routes/_shell.settings.security.tsx
 msgid "Your company account. Leaving the company stops new sign-ins; an admin can end a session sooner in Members and roles."
 msgstr "Your company account. Leaving the company stops new sign-ins; an admin can end a session sooner in Members and roles."
-
-#: src/interview/words.ts
-msgid "Your company never sees what one person said, or their name: only what five or more people told about the same work, put together by team."
-msgstr "Your company never sees what one person said, or their name: only what five or more people told about the same work, put together by team."
 
 #: src/interview/before.tsx
 msgid "Your company wants to know how the work really goes. First I ask how you work with AI today. Then I ask about one piece of your work. You tell me how you do it. That takes 12 to 15 minutes. Talking is the fastest. You can also type."

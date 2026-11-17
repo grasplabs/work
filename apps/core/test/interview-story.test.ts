@@ -74,7 +74,14 @@ const fact = (
   id: string,
   record: string,
   more: Partial<InterviewFact> = {}
-): InterviewFact => ({ id, tag: "step", text: record, record, ...more });
+): InterviewFact => ({
+  id,
+  tag: "step",
+  text: record,
+  record,
+  share: "team",
+  ...more,
+});
 
 /** Where their interview is: talking, or agreed to (`completed`). */
 const progressOf = (

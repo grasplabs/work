@@ -17,6 +17,7 @@ import {
   approveAgreed,
   onLink,
   openLinkAs,
+  participate,
   signedInAs,
 } from "./interview-link.ts";
 import type { Device } from "./interview-link.ts";
@@ -141,6 +142,7 @@ const agree = async (
     text: record,
     record,
     agreed: true,
+    ...(tag === "who" ? {} : { share: "team" as const }),
   }));
   const progress: InterviewProgress = {
     person: "completed",
@@ -155,6 +157,8 @@ const agree = async (
     adding: false,
     addedAt: 0,
   };
+  // They take part before anything they say is kept, as their page has them.
+  await participate(device);
   const saved = await onLink({ action: "save", ...device, version, progress });
   const { version: savedVersion }: InterviewSaved = await saved.json();
   await approveAgreed(device, agreed);

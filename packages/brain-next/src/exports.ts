@@ -493,6 +493,10 @@ export const namesAnySql = `SELECT 1 FROM json_each(?1) AS pair
 WHERE ${namedSql("pair.value ->> 0", "pair.value ->> 1")}
 LIMIT 1`;
 
+/** `?1` an export's id: a restore of it runs, or failed and may start again. */
+const restoreHoldsSql = `SELECT 1 FROM restores
+WHERE restores.export = ?1 AND restores.state IN ('running', 'failed')`;
+
 /** Of a row of `exports`: whether a restore of it runs, or failed and may start again. */
 const heldSql = `exports.id IN (
   SELECT export FROM restores WHERE state IN ('running', 'failed')
@@ -1034,14 +1038,17 @@ export const exportFile = async (
 /**
  * Whether export `id`'s files may be deleted now, as a deletion of them
  * runs: never while it is written or done (a drop queued before a restore
- * recorded it, say), nor while a restore of it runs or failed.
+ * recorded it, say), nor while a restore of it runs or failed, asked of
+ * the restore itself: one whose stopped check handed the export back keeps
+ * no row of it (`handBackStopped`), and a drop queued before it began may
+ * run after.
  */
 const droppable = (sql: SqlStorage, id: string): boolean =>
   sql
     .exec(
       `SELECT 1 FROM exports
-      WHERE exports.id = ?
-        AND (exports.state IN ('writing', 'done') OR ${heldSql})`,
+      WHERE exports.id = ?1 AND exports.state IN ('writing', 'done')
+      UNION ALL ${restoreHoldsSql}`,
       id
     )
     .toArray().length === 0;
@@ -1257,9 +1264,18 @@ const orphanFileDrops = async (
 };
 
 /**
+ * Whether the store has no record of export `id`: no row of it, and no
+ * restore of it that runs or failed and may start again, which an export
+ * its stopped check handed back is kept for (`handBackStopped`).
+ */
+const unrecorded = (sql: SqlStorage, id: string): boolean =>
+  rowOf(sql, id) === undefined &&
+  sql.exec(restoreHoldsSql, id).toArray().length === 0;
+
+/**
  * The sweep's place saved at `key`, in one transaction with the deletion
  * of export `id`'s files put on the queue when `drop` says so and the store
- * still has no row of it (a restore may have recorded it meanwhile).
+ * still has no record of it (a restore may have recorded it meanwhile).
  */
 const sweptKey = (
   storage: DurableObjectStorage,
@@ -1268,7 +1284,7 @@ const sweptKey = (
   drop: boolean
 ): void => {
   storage.transactionSync(() => {
-    if (drop && rowOf(storage.sql, id) === undefined) {
+    if (drop && unrecorded(storage.sql, id)) {
       enqueueExport(storage, id);
     }
     storage.sql.exec("UPDATE export_sweep SET cursor = ? WHERE id = 1", key);
@@ -1311,7 +1327,7 @@ const sweepWork = defineWork({
         return;
       }
       const [id = "", file = ""] = key.slice(exportsPrefix.length).split("/");
-      const unknown = id !== "" && file !== "" && rowOf(sql, id) === undefined;
+      const unknown = id !== "" && file !== "" && unrecorded(sql, id);
       let judged = { drop: false, reads: 0 };
       if (unknown) {
         // oxlint-disable-next-line no-await-in-loop -- a file at a time, a run's few reads
@@ -1354,10 +1370,12 @@ const settleStuck = (storage: DurableObjectStorage): void => {
  * adopted (`handedBackSql`) or checked whole, once the store took
  * something since it failed (a version past `held_to`, but Grasp's own
  * skills, or a write of memories past `held_stamp`): to give up. Not for
- * an erasure the ledger names in its export: a failed restore's export is
- * served to no one, and started again it leaves out what the ledger
- * erased (restore.ts), so the company keeps its backup; it is retired as
- * erased once the restore is done (restore.ts `settle`).
+ * an erasure, whatever it names in its export (a writer's moves
+ * `held_stamp` along with the stamp, restoring.ts
+ * `erasureKeepsFailedSql`): a failed restore's export is served to no one,
+ * and started again it leaves out what the ledger erased (restore.ts), so
+ * the company keeps its backup; it is retired as erased once the restore
+ * is done (restore.ts `settle`).
  */
 const givenUpSql = `restores.state = 'failed' AND (
   (
@@ -1390,10 +1408,11 @@ const handedBackSql = `restores.state = 'failed' AND restores.damaged = 0
 
 /**
  * Every adopted export whose check stopped (`handedBackSql`) handed back
- * to the sweep, as one the store has no record of: its rows deleted, its
- * files kept, and the sweep's pass marked as covering no erasure, so the
- * next pass judges them by the ledger (`orphanFileDrops`), as soon as one
- * is recorded. Its restore stays failed, to start again. In the caller's
+ * to the sweep: its rows deleted, its files kept. Its restore stays
+ * failed, to start again, and the sweep leaves its files be meanwhile
+ * (`unrecorded`), whatever the ledger names: started again, the restore
+ * leaves that out. Once that restore is given up (`giveUpRestores`), the
+ * sweep judges them by the ledger (`orphanFileDrops`). In the caller's
  * transaction.
  */
 const handBackStopped = (storage: DurableObjectStorage): void => {
@@ -1408,15 +1427,14 @@ const handBackStopped = (storage: DurableObjectStorage): void => {
     sql.exec("DELETE FROM export_parts WHERE export = ?", id);
     sql.exec("DELETE FROM exports WHERE id = ?", id);
   }
-  if (handed.length > 0) {
-    sql.exec("UPDATE export_sweep SET through = 0 WHERE id = 1");
-  }
 };
 
 /**
  * Every failed restore to give up (`givenUpSql`) settled as abandoned, its
  * export no longer held: retired at once when the ledger names a version
- * it holds. In the caller's transaction.
+ * it holds; or, handed back (`handBackStopped`), judged by the next pass of
+ * the sweep, its pass marked as covering no erasure, as the passes since
+ * left its files be. In the caller's transaction.
  */
 const giveUpRestores = (storage: DurableObjectStorage): void => {
   const given = storage.sql
@@ -1443,6 +1461,11 @@ const giveUpRestores = (storage: DurableObjectStorage): void => {
     );
     retireIfStale(storage, restore.export);
   }
+  if (
+    given.some((restore) => rowOf(storage.sql, restore.export) === undefined)
+  ) {
+    storage.sql.exec("UPDATE export_sweep SET through = 0 WHERE id = 1");
+  }
 };
 
 /**
@@ -1454,8 +1477,8 @@ const giveUpRestores = (storage: DurableObjectStorage): void => {
  * started: from the first key when an erasure was recorded past the one
  * the last pass started for (`through`), or from its saved place when a
  * pass's item went before it ended. A pass is never restarted, but from
- * the first key once an export is handed back, which its saved place may
- * be past. Its rule is
+ * the first key once the restore of an export handed back is given up,
+ * whose files its saved place may be past. Its rule is
  * `exportsDue`. Between erasures nothing can make an export stale: a part
  * and a restore done are asked as they land (`writePart`, `retireIfStale`).
  */
