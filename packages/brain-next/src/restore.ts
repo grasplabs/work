@@ -138,11 +138,14 @@ import type { WorkContext } from "./work.ts";
 // restore can be started again from the same export while the store holds
 // nothing but what it wrote, also once a source's or a person's erasure
 // names what the export holds (started again, it leaves that out, and its
-// export is served to no one meanwhile): once anything is added (a
-// version, or any write of memories, which moves the write stamp; a
-// writer's erasure, as an App's data reset, moves it too), or its check
-// found a part damaged, the restore is given up (`abandoned`), and its
-// export's files are no longer held (exports.ts `exportsStep`). It fails rather than
+// export is served to no one meanwhile); a writer's erasure, as an App's
+// data reset, likewise: it takes what the restore wrote of the writer, and
+// moves the record of the write stamp the restore failed at along with the
+// stamp (restoring.ts `erasureKeepsFailedSql`). Once something is added (a
+// version, or a write of memories: an add, a confirmation, a retire, an
+// extraction mark, which moves the write stamp), or its check found a part
+// damaged, and by nothing else, the restore is given up (`abandoned`), and
+// its export's files are no longer held (exports.ts `exportsStep`). It fails rather than
 // fill the store past its quota (contract.ts `storeBytesMax`). Its export
 // is recorded as one the store has (exports.ts `recordRestoredExport`), so
 // an erasure of what it holds deletes its files once the restore is done.

@@ -29,7 +29,7 @@ import {
   personSubjectOf,
 } from "./people.ts";
 import type { HeldIdentifier, PersonFound, ReplayMemo } from "./people.ts";
-import { isRestoring } from "./restoring.ts";
+import { erasureKeepsFailedSql, isRestoring } from "./restoring.ts";
 import { removeVectorsOf, repackBlocks } from "./vectors.ts";
 
 // Erasure: what goes for good, apart from ordinary removal. A new version
@@ -661,8 +661,10 @@ const applyPersonEntry = (
  * its entry says on a replay; else counted now: those learned before it
  * that no earlier erasure of the writer had); and the store's stamp raised
  * to its time, so whatever is learned after it, also in an older copy it
- * is replayed into, is stamped later and kept. Costs a count of the
- * writer's memories when it counts; nothing is written per memory.
+ * is replayed into, is stamped later and kept, which moves along a failed
+ * restore's record of it (restoring.ts `erasureKeepsFailedSql`): no write,
+ * it gives no restore up. Costs a count of the writer's memories when it
+ * counts; nothing is written per memory.
  */
 const applyWriter = (
   sql: SqlStorage,
@@ -696,6 +698,7 @@ const applyWriter = (
     count,
     change
   );
+  sql.exec(erasureKeepsFailedSql, entry.at);
   raiseStamp(sql, entry.at);
 };
 

@@ -39,7 +39,7 @@ import type { Checks } from "./team-claims.ts";
 // every line before any model sees it. An opinion whose words still hold
 // one is dropped, never rewritten; so is one that is word for word a line
 // as the model saw it or a candidate, or that holds a figure or a
-// capitalised name fewer than five of its backers gave
+// capitalised word (its first included) fewer than five of its backers gave
 // (`saysOnlyWhatFiveSaid`): no team, no person and no quote of anyone
 // reaches it. What can't be checked mechanically: a nickname or a client's
 // name not on the list, part of a team's name, and an opinion about work
@@ -356,19 +356,18 @@ const capitalised = /^\p{Lu}/u;
 
 /**
  * The words of `text` that can point at one person: each that holds a
- * figure ("340"), and each but the first that starts with a capital (a
- * product's, a place's or a day's name: "Exact", "Monday"), in the same
- * words as compared (`sameWords`).
+ * figure ("340"), and each written with a capital (a product's, a place's
+ * or a day's name: "Exact", "Monday"), in the same words as compared
+ * (`sameWords`). The first word is one too: a sentence's capital can't
+ * tell a name ("Exact makes ...") from any other word, so it must be
+ * among the backers' words like the rest, which an opinion beginning with
+ * an ordinary word they all used meets.
  */
 const tellingWords = (text: string): string[] =>
   text
     .split(/[^\p{L}\p{N}]+/u)
-    .filter((word) => word !== "")
-    .flatMap((word, at) =>
-      figure.test(word) || (at > 0 && capitalised.test(word))
-        ? [sameWords(word)]
-        : []
-    );
+    .filter((word) => figure.test(word) || capitalised.test(word))
+    .map(sameWords);
 
 /**
  * A hash of exactly what the company's merge would be given: the

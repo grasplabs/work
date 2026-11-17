@@ -2634,6 +2634,34 @@ export const runBrainVersions = sqliteTable(
 );
 
 /**
+ * Every memory of the Brain's shared store a run's entity reads rested on
+ * (workflows/run-evidence.ts, GRA-1985): the memories of a card or a page
+ * of entities, the ones that named them and made them seen, by id, with
+ * the permission to read the Brain it came through: identifiers only, no
+ * person's. An id is never used again, so a row means the same memory for
+ * as long as it is kept. It only grows while the run lives, and before
+ * the run's next model, connection or App call, decision or output, the
+ * host checks the company may still read them all and their writers
+ * haven't retired them: one a person's erasure took, retired or taken
+ * back, or whose source was erased or narrowed, refuses the run from then
+ * on. Goes with the run's details.
+ */
+export const runBrainMemories = sqliteTable(
+  "run_brain_memories",
+  {
+    runId: text("run_id").notNull(),
+    memoryId: text("memory_id").notNull(),
+    permissionId: text("permission_id").notNull(),
+    recordedAt: timestamp("recorded_at").notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.runId, table.memoryId, table.permissionId],
+    }),
+  ]
+);
+
+/**
  * Nothing writes or reads it. Kept until GRA-1589 drops it, so a core
  * still serving during a rollout keeps working (expand, then contract).
  */
@@ -3387,6 +3415,55 @@ export const connectionBrainAudiences = sqliteTable(
     changedBy: text("changed_by").notNull(),
     changedAt: timestamp("changed_at").notNull(),
   }
+);
+
+/**
+ * Each record kept in the Brain from what agents read through a shared
+ * connection (shared-reads.ts, GRA-1831), by its source's id under the
+ * `connected` kind: written before the Brain is given the key, so every key
+ * the Brain holds of a connection is named here, for its erasure to find.
+ * `generation` is the connection's erasure generation it was kept in
+ * (`connection_brain_erasures`); `read_at` when it was first read.
+ */
+export const connectionBrainReads = sqliteTable(
+  "connection_brain_reads",
+  {
+    sourceId: text("source_id").primaryKey(),
+    connectionId: text("connection_id").notNull(),
+    generation: integer().notNull(),
+    readAt: timestamp("read_at").notNull(),
+  },
+  (table) => [
+    index("connection_brain_reads_connection_idx").on(
+      table.connectionId,
+      table.generation
+    ),
+  ]
+);
+
+/**
+ * The erasures of what the Brain kept from a shared connection
+ * (shared-reads.ts, GRA-1831), one row per connection ever erased: the
+ * generation the keys it keeps from now on are under (every older one is
+ * erased or being erased), whether an erasure is under way (`erasing`,
+ * which the clock completes), the request it serves (an audit event's
+ * id), who asked and when (`actor`, an audit actor as JSON), how many
+ * records it has erased so far, and whether a disconnect closed the
+ * connection for good (`closed`: no audience is opened on it again).
+ */
+export const connectionBrainErasures = sqliteTable(
+  "connection_brain_erasures",
+  {
+    connectionId: text("connection_id").primaryKey(),
+    generation: integer().notNull(),
+    erasing: integer({ mode: "boolean" }).notNull(),
+    request: text().notNull(),
+    actor: text().notNull(),
+    requestedAt: timestamp("requested_at").notNull(),
+    erased: integer().notNull(),
+    closed: integer({ mode: "boolean" }).notNull().default(false),
+  },
+  (table) => [index("connection_brain_erasures_erasing_idx").on(table.erasing)]
 );
 
 /**

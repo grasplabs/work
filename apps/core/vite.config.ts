@@ -457,6 +457,9 @@ export default {
       // The Brain evaluation against a real model, which costs money, on
       // request only: vite.brain-eval-model.config.ts.
       "test/brain-eval-model.test.ts",
+      // The evaluation of extraction against a real model, which costs
+      // money, on request only: vite.brain-eval-extraction.config.ts.
+      "test/brain-eval-extraction.test.ts",
       // Recall by meaning through core, with a test model as if it shipped:
       // vite.brain-meaning.config.ts.
       "test/brain-next-meaning.test.ts",

@@ -126,6 +126,7 @@ export const rpcParamNames: ParamNames = {
   },
   "BrainSourcesRpc": {
     "deleteUpload": ["uploadId"],
+    "learned": ["source","version","next"],
     "list": ["after"],
     "read": ["source","version"],
     "search": ["question"],
@@ -194,6 +195,7 @@ export const rpcParamNames: ParamNames = {
     "deleteAgent": ["agentId"],
     "deleteAgentWake": ["wakeId"],
     "disconnect": ["connectionId"],
+    "eraseBrainReads": ["connectionId"],
     "list": [],
     "makeAgent": ["input"],
     "makeAgentWake": ["agentId","input"],

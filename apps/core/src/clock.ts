@@ -35,6 +35,7 @@ import { sweepBuilds } from "./pages.ts";
 import { retryErasures } from "./person-erasure.ts";
 import { recordPlatformUpdate } from "./platform-updates.ts";
 import { sweepReleases } from "./release-retention.ts";
+import { completeOwedErasures } from "./shared-reads.ts";
 import { reconcileSkills } from "./skill-shares.ts";
 import { sweepSpokenLines } from "./speech-cache.ts";
 import { sendStephenSummaries } from "./stephen-summary.ts";
@@ -106,6 +107,15 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     name: "brain.upload_removals",
     period: "minute",
     run: completeOwedRemovals,
+  },
+  // Erasures of what the Brain kept from a shared connection, each a step
+  // on until it ends (src/shared-reads.ts, GRA-1831).
+  {
+    name: "brain.shared_read_erasures",
+    period: "minute",
+    run: async (env) => {
+      await completeOwedErasures(env);
+    },
   },
   // Decisions on the company's skills whose outcome the Brain hasn't given
   // yet (src/skill-shares.ts `reconcileSkills`).

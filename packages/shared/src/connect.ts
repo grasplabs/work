@@ -742,12 +742,21 @@ export interface ConnectionsApi extends StephenReachApi, AgentsApi {
   /**
    * Chooses who may read in the Brain what agents read through the shared
    * connection `connectionId`: one team, everyone, or nobody. Admins only,
-   * never Grasp staff; audited.
+   * never Grasp staff; audited. Refused (`connection.brain_erasing`) while
+   * what the Brain kept of it is being erased.
    */
   setBrainAudience: (
     connectionId: string,
     audience: ConnectionBrainAudience
   ) => Promise<void>;
+  /**
+   * Erases everything the Brain kept from the shared connection
+   * `connectionId`, for good, and its audience with it (GRA-1831): what
+   * agents read through it afterwards is kept again once an admin chooses
+   * an audience. Admins only, never Grasp staff; audited when asked and
+   * when done. Asking again while it runs changes nothing.
+   */
+  eraseBrainReads: (connectionId: string) => Promise<void>;
 }
 
 // The catalog: everything an admin can connect, in one list. Native
@@ -1135,13 +1144,16 @@ export interface ConnectionBrainAudienceSetting {
 
 /**
  * A shared connection's ID, as the Brain's groups and keys take it
- * (GRA-1831): well-formed, never "/" nor ":", and at most 245 characters,
- * so its group (`connection:` and it) fits a Brain principal (256).
+ * (GRA-1831): well-formed, never "/" nor ":", and at most 170 characters,
+ * so every key of what is kept of it fits a Brain source's id: the kind
+ * `connected:` (10) and `<id>/<generation>/<SHA-256 in hex>` within 256,
+ * a generation of up to 10 digits. Its group (`connection:` and it) fits
+ * a Brain principal (256) too. Connect's IDs are far shorter.
  */
 export const brainConnectionIdSchema = z
   .string()
   .min(1)
-  .max(245)
+  .max(170)
   .refine(
     (id) => id.isWellFormed() && !(id.includes("/") || id.includes(":")),
     { message: "Not a connection's ID" }
@@ -2202,6 +2214,8 @@ export interface ConnectApi
 /** Why connecting or disconnecting an account didn't work. */
 export const connectionErrors = defineErrorFamily({
   "connection.invalid": "That isn't a valid connection request.",
+  "connection.brain_erasing":
+    "What the Brain kept from this connection is still being erased. Choose who may read it once that is done.",
   "connection.provider_unavailable":
     "Connecting this provider isn't set up for this deployment.",
   "connection.flow_invalid":

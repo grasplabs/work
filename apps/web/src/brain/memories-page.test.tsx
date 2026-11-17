@@ -20,6 +20,7 @@ import {
   RouterProvider,
 } from "@tanstack/react-router";
 import { act } from "react";
+import type { ComponentProps } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
@@ -123,7 +124,11 @@ const settle = async (): Promise<void> => {
  * Shows the page on a faked core; `refusal` refuses every call with it,
  * and the first `failedSaves` corrections fail after core took them in.
  */
-const shown = async (refusal?: string, failedSaves = 0) => {
+const shown = async (
+  refusal?: string,
+  failedSaves = 0,
+  open?: ComponentProps<typeof MemoriesPage>["open"]
+) => {
   let failing = failedSaves;
   const calls: string[] = [];
   const corrections: BrainCorrection[] = [];
@@ -253,7 +258,9 @@ const shown = async (refusal?: string, failedSaves = 0) => {
   const page = createRoute({
     getParentRoute: () => rootRoute,
     path: "/",
-    component: () => <MemoriesPage teams={[]} />,
+    component: () => (
+      <MemoriesPage teams={[]} {...(open === undefined ? {} : { open })} />
+    ),
   });
   const router = createRouter({
     routeTree: rootRoute.addChildren([page]),
@@ -327,6 +334,18 @@ describe(MemoriesPage, () => {
     });
     root = undefined;
     document.body.replaceChildren();
+  });
+
+  it("opens the entity a link names first, of its kind", async () => {
+    const { calls } = await shown(undefined, 0, {
+      entity: { store: "shared", id: "e-acme" },
+      kind: "customer",
+    });
+
+    expect({
+      opened: section("What the Brain remembers").includes("Status: Paying"),
+      read: calls.includes("memories e-acme"),
+    }).toStrictEqual({ opened: true, read: true });
   });
 
   it("shows a fact sources disagree on with both sides and where each came from, and confirms one", async () => {

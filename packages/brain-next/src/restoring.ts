@@ -25,9 +25,24 @@ export const restoreFailedSql = `state = 'failed', finished_at = ?1,
 /**
  * Of a row of `restores`, failed: whether a write of memories (an add, a
  * confirmation, a retire, an extraction mark) moved the store's write
- * stamp past the one it recorded as it failed. One an older release
- * failed recorded none: read as 0, any write of memories at all gives it
- * up, never the other way.
+ * stamp past the one it recorded as it failed. A writer's erasure moves
+ * the stamp too, but is no write: it moves that record along with it
+ * (`erasureKeepsFailedSql`). One an older release failed recorded none:
+ * read as 0, any write of memories at all gives it up, never the other
+ * way.
  */
 export const memoriesWrittenSinceSql = `(SELECT coalesce(max(latest), 0) FROM memory_stamps)
   > coalesce(restores.held_stamp, 0)`;
+
+/**
+ * `?1` the time a writer's erasure (an App's data reset) raises the
+ * store's write stamp to (erasure.ts `applyWriter`), asked in its
+ * transaction before it raises it: every failed restore nothing was
+ * written of memories since (`memoriesWrittenSinceSql`) keeps that so. An
+ * erasure is no use of the store: started again, the restore leaves out
+ * what it covers, and what the restore wrote before is covered by it, so
+ * the restore and its export stay to start again (restore.ts).
+ */
+export const erasureKeepsFailedSql = `UPDATE restores SET held_stamp = max(held_stamp, ?1)
+  WHERE state = 'failed'
+    AND held_stamp >= (SELECT coalesce(max(latest), 0) FROM memory_stamps)`;

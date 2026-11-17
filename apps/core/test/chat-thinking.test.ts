@@ -13,7 +13,7 @@ import { onboardingStore } from "../src/onboarding/store.ts";
 import { personalChatsOf, says, transcript } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
-import { answering, holdAlarm, onLink } from "./interview-link.ts";
+import { aloneInTheStore, answering, onLink } from "./interview-link.ts";
 import type { Answer } from "./model-provider.ts";
 import {
   intake,
@@ -271,7 +271,7 @@ describe("a step of thinking, checked", () => {
 });
 
 describe("show_thinking in a chat", slow, () => {
-  beforeEach(holdAlarm);
+  beforeEach(aloneInTheStore);
 
   it("is never offered in a chat others share: a shared thread's turn names no claim of the brain", async () => {
     const ids = await teamInTheBrain();

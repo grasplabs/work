@@ -177,7 +177,7 @@ export const eraseCaptures = async (
 type ErasureReason = Parameters<typeof eraseSource>[1]["reason"];
 
 /** How many erasures one caller has under way at once. */
-const erasingAtOnce = 8;
+export const erasingAtOnce = 8;
 
 /**
  * Erases `sources` for `reason`, each with the readers its producer adds

@@ -21,9 +21,10 @@ import {
   accountOf,
   answeringWith,
   approveAgreed,
-  holdAlarm,
+  aloneInTheStore,
   onLink,
   openLinkAs,
+  participate,
 } from "./interview-link.ts";
 import type { ProviderReply, SentRequest } from "./model-provider.ts";
 import {
@@ -491,7 +492,7 @@ describe(
   "the company's opinions from the interviews",
   { timeout: 120_000 },
   () => {
-    beforeEach(holdAlarm);
+    beforeEach(aloneInTheStore);
 
     it("stand at five backers across three teams of three, for every member reading as themselves and on the Brain page, naming no team and counting nobody", async () => {
       const { everyone } = await threeTeamsTold();
@@ -835,7 +836,7 @@ describe(
         await agree(person, [
           index === 0
             ? anonymous(fact("v1", "wish", distinctive))
-            : said("v1", index < 5 ? "invoice" : "meeting"),
+            : said("v1", index < 6 ? "invoice" : "meeting"),
         ]);
       }
       await formOpinions(
@@ -866,6 +867,12 @@ describe(
             },
             // A candidate word for word.
             { kind: "timeSink", text: invoiceView, cites: [invoiceView] },
+            // A product one person named, as its first word.
+            {
+              kind: "tool",
+              text: "Exact makes typing invoices by hand slow.",
+              cites: [invoiceView],
+            },
           ],
         })
       );
@@ -1012,6 +1019,8 @@ describe(
           await onboardingStore(env).newStart(person, by);
           const device = await openLink(person);
           await openLinkAs(device.secret, device.cookie);
+          // They take part again before anything they say is kept.
+          await participate(device);
           const line = [said("v1", "invoice")];
           const saved = await saveAgreed(person, line, 2);
           if (!saved.ok) {
@@ -1093,6 +1102,37 @@ describe(
         sources: before,
         page: [invoices.text],
       });
+    });
+
+    it("never take a line that names the work someone does instead of what they were asked about, though it is only counted anonymously", async () => {
+      const ids = await company([3, 3, 3]);
+      const everyone = ids.flat();
+      // Five say what they do instead is re-typing invoices: in their own
+      // interview (no team here has a lead), only used to know whom to ask.
+      for (const [index, person] of everyone.entries()) {
+        // oxlint-disable-next-line no-await-in-loop -- one interview at a time
+        await agree(person, [
+          said("v1", "meeting"),
+          ...(index < 5
+            ? [
+                anonymous(
+                  fact("w1", "work", "Re-typing every invoice by hand instead.")
+                ),
+              ]
+            : []),
+        ]);
+      }
+      const { requests } = await formOpinions(invoicesModel);
+      const sent = requests
+        .map((request) => JSON.stringify(dataOf(request, "lines") ?? null))
+        .join(",");
+      expect({
+        asked: requests.some(
+          (request) => dataOf(request, "lines") !== undefined
+        ),
+        invoiceInPrompt: sent.includes("invoice"),
+        page: await pageOpinions(),
+      }).toStrictEqual({ asked: true, invoiceInPrompt: false, page: [] });
     });
   }
 );
