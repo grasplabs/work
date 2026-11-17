@@ -81,10 +81,12 @@ export const deleteMemories = (
     )
     .toArray();
   // A card a restore given up recorded goes with what it recorded of it.
-  sql.exec(
-    "DELETE FROM restore_cards WHERE entity IN (SELECT value FROM json_each(?))",
-    JSON.stringify(gone.map(({ id }) => id))
-  );
+  if (gone.length > 0) {
+    sql.exec(
+      "DELETE FROM restore_cards WHERE entity IN (SELECT value FROM json_each(?))",
+      JSON.stringify(gone.map(({ id }) => id))
+    );
+  }
   return setsOf(
     sql,
     touched.map(({ readers }) => readers)

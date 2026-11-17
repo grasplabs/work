@@ -1573,8 +1573,11 @@ export interface RestoreStatus {
   export: string;
   /**
    * Failed restores start again while the store holds nothing but what they
-   * wrote, also once an erasure names what the export holds (started
-   * again, they leave it out); abandoned once the store took anything.
+   * wrote, also once a source's or a person's erasure names what the export
+   * holds (started again, they leave it out). Abandoned once the store took
+   * anything since (a version, or a write of memories; a writer's erasure,
+   * as an App's data reset, counts as one, as it moves the store's write
+   * stamp), or once its check found a part of the export damaged.
    */
   state: "running" | "done" | "failed" | "abandoned";
   restored: number;
