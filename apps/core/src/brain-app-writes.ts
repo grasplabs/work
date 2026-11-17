@@ -18,7 +18,7 @@ import { memberOf } from "./auth/identity.ts";
 import { audited, inHostBrainWords, landed } from "./brain-audited.ts";
 import type { MemoryCaller } from "./brain-audited.ts";
 import {
-  credentialIdentifierIssues,
+  credentialIssues,
   forgetForAppAs,
   isCodeWriteRequest,
   rememberForAppAs,
@@ -337,7 +337,8 @@ const writeFor = async (
  * (above): refused as `permission.invalid_args` for input that isn't a
  * request (an id the App's code may not see among them, as one nobody
  * holds), `brain.request_invalid` with `details.issues` saying why for
- * an identifier that is a credential (`credentialIdentifierIssues`),
+ * an identifier that is a credential, or a name that is on an entity
+ * found by its names (`credentialIssues`),
  * `permission.denied` without the grant to read the Brain, one of
  * the `permission.brain_write_*` codes when its code may not write now,
  * and `permission.unavailable` once the person is no longer a member.
@@ -361,11 +362,11 @@ export const appWriteFor = async (
   const change = `app:${caller.app}/${await sha256Hex(
     JSON.stringify([person, caller.key])
   )}`;
-  // An identifier that is a credential, refused saying which and why, so
+  // An identifier that is a credential, or a credential in a name an
+  // entity is found by, refused saying which and why, so
   // its builder can act on it (GRA-2003): its value never in it.
-  const issues =
-    operation === "remember" ? credentialIdentifierIssues(input) : [];
-  const credentialIdentifier =
+  const issues = operation === "remember" ? credentialIssues(input) : [];
+  const heldCredential =
     issues.length > 0
       ? brainSourceErrors.create("brain.request_invalid", { issues })
       : undefined;
@@ -375,8 +376,8 @@ export const appWriteFor = async (
     if (!isCodeWriteRequest(operation, input)) {
       throw functionErrors.create("permission.invalid_args");
     }
-    if (credentialIdentifier !== undefined) {
-      throw credentialIdentifier;
+    if (heldCredential !== undefined) {
+      throw heldCredential;
     }
     await authorize(
       env,
@@ -392,8 +393,7 @@ export const appWriteFor = async (
     }
   } catch (error) {
     // Refused before anything was tried: one event.
-    const refused =
-      error === credentialIdentifier ? error : inHostBrainWords(error);
+    const refused = error === heldCredential ? error : inHostBrainWords(error);
     await appendAuditEvent(env, {
       actor: audit.actor,
       action,

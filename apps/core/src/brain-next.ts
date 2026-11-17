@@ -6055,24 +6055,43 @@ const credentialShaped = ({ type, value }: Identifier): boolean => {
 
 /**
  * Why code may not remember `request` (a valid `codeRememberSchema`
- * request) as it is, as `details.issues` say it (GRA-2003): each
- * identifier that is a credential by its own shape (`credentialShaped`),
- * by its path, never its value. An identifier finds an entity, so it is
- * never redacted, which would move the memory: refused instead, so a
- * credential is never kept as one. None when it may.
+ * request) as it is, as `details.issues` say it (GRA-2003), each by its
+ * path, never its value; none when it may:
+ * - each identifier that is a credential by its own shape
+ *   (`credentialShaped`): an identifier finds an entity, so it is never
+ *   redacted, which would move the memory; refused instead, so a
+ *   credential is never kept as one;
+ * - each name `redact` changes, on an entity given no `id` and no
+ *   identifier: such an entity is found by its names (linking.ts
+ *   `linkedByName`), and two names redacted alike (`Token: ETH`, `Token:
+ *   BTC`) would be one entity. Refused, so two things are never merged;
+ *   given an `id` or an identifier, the name is kept redacted.
  */
-export const credentialIdentifierIssues = (request: unknown): string[] => {
+export const credentialIssues = (request: unknown): string[] => {
   const parsed = codeRememberSchema.safeParse(request);
   if (!parsed.success) {
     return [];
   }
-  return parsed.data.about.identifiers.flatMap((identifier, index) =>
-    credentialShaped(identifier)
-      ? [
-          `about.identifiers.${index}: looks like a password, key, token or signed link, which the Brain never keeps as an identifier. Leave it out, or identify the entity another way.`,
-        ]
-      : []
-  );
+  const { id, names, identifiers } = parsed.data.about;
+  const matchedByName = id === undefined && identifiers.length === 0;
+  return [
+    ...identifiers.flatMap((identifier, index) =>
+      credentialShaped(identifier)
+        ? [
+            `about.identifiers.${index}: looks like a password, key, token or signed link, which the Brain never keeps as an identifier. Leave it out, or identify the entity another way.`,
+          ]
+        : []
+    ),
+    ...(matchedByName
+      ? names.flatMap((name, index) =>
+          redact(name) === name
+            ? []
+            : [
+                `about.names.${index}: holds what looks like a password, key or token, and an entity with no id or identifier is found by its names. Leave it out of the name, or give the entity its id or an identifier.`,
+              ]
+        )
+      : []),
+  ];
 };
 
 /** One of its own memories App code forgets (`forgetForAppAs`). */
@@ -6122,7 +6141,7 @@ export const rememberForAppAs = async (
     codeRememberSchema,
     request
   );
-  const issues = credentialIdentifierIssues(request);
+  const issues = credentialIssues(request);
   if (issues.length > 0) {
     throw brainSourceErrors.create("brain.request_invalid", { issues });
   }

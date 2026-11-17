@@ -2026,8 +2026,9 @@ const providerFailure = (error: unknown, requestId: string): Error => {
       )
     );
   }
-  // A memory the Brain refused for what its code asked (an identifier that
-  // is a credential, brain-app-writes.ts), saying why: the only detail
+  // A memory the Brain refused for what its code asked (a credential in an
+  // identifier, or in a name an entity is found by: brain-app-writes.ts),
+  // saying why: the only detail
   // passed on, each issue naming a field, never its value. Any other
   // request it refuses comes as `permission.invalid_args`
   // (`inHostBrainWords`), or, saying no why, as unexpected (below).

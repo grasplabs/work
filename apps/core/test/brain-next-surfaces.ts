@@ -1214,7 +1214,7 @@ type CoreAppMember =
   | "rememberForAppAs"
   | "forgetForAppAs"
   | "isCodeWriteRequest"
-  | "credentialIdentifierIssues";
+  | "credentialIssues";
 
 // Exports (GRA-1755). A company's export holds what the company holds,
 // markers among them, by design: it is for an admin, and core's route
@@ -8016,11 +8016,11 @@ const coreAppWrites = {
   },
   // Pure: why a request's identifiers are refused, naming each by its
   // place, never what it holds.
-  credentialIdentifierIssues: async ({ markers }) => {
+  credentialIssues: async ({ markers }) => {
     const issues = async (name: string, value: string) =>
       await answer(name, async () => {
         await Promise.resolve();
-        return coreBrain.credentialIdentifierIssues({
+        return coreBrain.credentialIssues({
           about: {
             kind: "customer",
             identifiers: [{ type: "ref", value }],

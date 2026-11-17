@@ -80,6 +80,10 @@ const setUpTime = { timeout: 180_000 };
 /** The shared store's object, as core reaches it. */
 const shared = () => inJurisdiction(env, env.BRAIN_STORE).getByName("brain");
 
+/** The entity a remember answered, or none. */
+const entityOf = (written: unknown): string =>
+  rememberedSchema.safeParse(written).data?.entity ?? "";
+
 describe("an App's code remembers and forgets for its users", setUpTime, () => {
   it("remembers for the App's users, read back through its own code; nothing else finds it; forgets only its own; and a call made again is one memory and one event", async () => {
     const admin = await person("admin");
@@ -330,6 +334,103 @@ describe("an App's code remembers and forgets for its users", setUpTime, () => {
       },
       read: [redact(remembered.statement)],
       shown: false,
+    });
+  });
+
+  it("never merges two things whose names redact alike: found by its names, such an entity is refused; given identifiers, each is its own; a plain name still finds its entity", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const app = await appOf(ada, admin);
+    /**
+     * What remembering `statement` about `about` answers the App's code,
+     * under an attribute of many values, so a card shows each fact.
+     */
+    const remembering = async (
+      about: {
+        kind: "product" | "customer";
+        names: string[];
+        identifiers?: { type: "ref"; value: string }[];
+      },
+      statement: string
+    ) => {
+      const attribute = about.kind === "product" ? "feature" : "requirement";
+      const { result } = await callPageFunction(
+        env,
+        ada,
+        app.app,
+        requestOf("remember", {
+          about,
+          attribute,
+          value: statement,
+          statement,
+        }),
+        Date.now() + 60_000
+      );
+      return result.ok
+        ? rememberedSchema.parse(result.value)
+        : { code: result.error.code, details: result.error.details };
+    };
+    const tag = unique();
+    // Both redact to `Token: [redacted]`.
+    const [eth, btc] = [`Token: ETH ${tag}`, `Token: BTC ${tag}`];
+    const byName = [
+      await remembering({ kind: "product", names: [eth] }, "ETH settles fast"),
+      await remembering({ kind: "product", names: [btc] }, "BTC settles slow"),
+    ];
+    const identified = [
+      await remembering(
+        {
+          kind: "product",
+          names: [eth],
+          identifiers: [{ type: "ref", value: `coin:eth-${tag}` }],
+        },
+        "ETH settles fast"
+      ),
+      await remembering(
+        {
+          kind: "product",
+          names: [btc],
+          identifiers: [{ type: "ref", value: `coin:btc-${tag}` }],
+        },
+        "BTC settles slow"
+      ),
+    ];
+    const plain = `Acme Holdings ${tag}`;
+    const plainly = [
+      await remembering({ kind: "customer", names: [plain] }, "Acme pays"),
+      await remembering({ kind: "customer", names: [plain] }, "Acme grows"),
+    ];
+    const factsOf = async (written: unknown) =>
+      statementsOf(
+        await onPage(app, ada, "get", { entity: entityOf(written) })
+      ).toSorted();
+
+    expect({
+      byName,
+      identified: {
+        apart: entityOf(identified[0]) !== entityOf(identified[1]),
+        eth: await factsOf(identified[0]),
+        btc: await factsOf(identified[1]),
+      },
+      plain: {
+        same: entityOf(plainly[0]) === entityOf(plainly[1]),
+        facts: await factsOf(plainly[0]),
+      },
+    }).toStrictEqual({
+      byName: byName.map(() => ({
+        code: "brain.request_invalid",
+        details: {
+          issues: [
+            "about.names.0: holds what looks like a password, key or token, and an entity with no id or identifier is found by its names. Leave it out of the name, or give the entity its id or an identifier.",
+          ],
+        },
+      })),
+      identified: {
+        apart: true,
+        eth: ["ETH settles fast"],
+        btc: ["BTC settles slow"],
+      },
+      plain: { same: true, facts: ["Acme grows", "Acme pays"] },
     });
   });
 
