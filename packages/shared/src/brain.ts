@@ -112,8 +112,8 @@ export interface Team {
 }
 
 /**
- * One of the company's groups of teams, as Grasp arranged it or an admin
- * changed it: a region of the brain.
+ * One of the company's groups of teams, as its admin confirmed it or Grasp
+ * proposed it: a region of the brain.
  */
 export interface TeamGroup {
   id: string;
@@ -121,10 +121,7 @@ export interface TeamGroup {
   name: string;
   /** Its teams, by the brain's team ids, in the company's order. */
   teamIds: string[];
-  /**
-   * Always so: every group counts, as Grasp arranged it or an admin
-   * changed it. Kept for the release before; removed in a later one.
-   */
+  /** An admin confirmed it; until then it is only Grasp's proposal. */
   confirmed: boolean;
 }
 
@@ -379,8 +376,8 @@ export interface Workspace {
   teams: Team[];
   /**
    * The company's groups of teams, in its order: the brain's regions. A
-   * team in none waits for Grasp to arrange it, after the next save of the
-   * staff list; the map shows it under "Other teams".
+   * team in none has no group yet; Grasp proposes one when an admin asks
+   * (`brain.proposeTeamGroups`).
    */
   teamGroups: TeamGroup[];
   /** The interviews the brain learned from, week by week, oldest first. */
@@ -493,6 +490,13 @@ export interface BrainApi {
    * took.
    */
   forget: (target: BrainForgetTarget) => Promise<BrainForgetPreview>;
+  /**
+   * Has Grasp propose, through the model gateway, a group for every team
+   * in none that an admin confirmed: kept as proposals until an admin
+   * confirms them (`saveTeamGroups`), replacing earlier proposals. For the
+   * company's admins. Returns the groups as they are now.
+   */
+  proposeTeamGroups: () => Promise<TeamGroup[]>;
   /**
    * Confirms the company's groups of teams as given, in its order, all of
    * them: what isn't given is no longer a group. For the company's

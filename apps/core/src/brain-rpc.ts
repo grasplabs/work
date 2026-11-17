@@ -52,7 +52,11 @@ import {
   readBrainRecords,
 } from "./brain-records.ts";
 import type { HeldRecords, OnboardingHeld } from "./brain-records.ts";
-import { saveTeamGroups, teamGroupsOf } from "./brain-team-groups.ts";
+import {
+  proposeTeamGroups,
+  saveTeamGroups,
+  teamGroupsOf,
+} from "./brain-team-groups.ts";
 import {
   brainTranscript,
   knowledgeTranscriptSources,
@@ -1212,6 +1216,18 @@ export class BrainRpc extends CoreRpcTarget implements BrainApi {
   async #teams(person: Identity): Promise<Team[]> {
     const { teams } = await readBrain(this.#env, person);
     return teams;
+  }
+
+  async proposeTeamGroups(): Promise<TeamGroup[]> {
+    return await withPerson(
+      this.#check,
+      async (person) =>
+        await proposeTeamGroups(
+          this.#env,
+          person,
+          async () => await this.#teams(person)
+        )
+    );
   }
 
   async saveTeamGroups(groups: unknown): Promise<TeamGroup[]> {
