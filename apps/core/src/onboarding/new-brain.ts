@@ -6,6 +6,7 @@ import { addSource, eraseSource } from "../brain-next.ts";
 import type { Handed, SourceReaders, SourceRef } from "../brain-next.ts";
 import { onboardingStore } from "./store.ts";
 import type { OwedErasure } from "./store.ts";
+import { claimSource } from "./team-claims.ts";
 
 // What the onboarding gives the new Brain (GRA-1790, GRA-1741, GRA-1748), and takes
 // back. The onboarding's store decides what stands, from its own records:
@@ -20,8 +21,11 @@ import type { OwedErasure } from "./store.ts";
 //   of anyone's interview may reach that log, not even that it is in their
 //   Brain. Only the onboarding's own log, which staff read, notes it.
 // - A team's claim (`claim:<id>`): its sentence alone (no names, no
-//   quotes), readable by the people of that staff-list team, only while
-//   five or more back it and seven or more of the team were interviewed
+//   quotes), readable by every member of the company reading as themselves
+//   (GRA-1748, decided on 16 November; `members`: never code, an App or a
+//   workflow, which could keep a copy past its fall, until the owner says
+//   whether code may copy claims), only while five or more back it and
+//   seven or more of the team were interviewed
 //   (counted by the store, never in the Brain). Noted by an audit event
 //   for the hand-over (brain-hand-overs.ts), which reads it here
 //   (`claimOf`) when it runs: a team's, never a person's.
@@ -41,6 +45,10 @@ import type { OwedErasure } from "./store.ts";
 //   version (`eraseOwedRosters`); the next confirmed save gives it afresh
 //   under a new id.
 //
+// A claim that stops standing is out of use in the shared store before the
+// change that drops it commits (the store's `#claimsFirst`), so no read
+// after that change finds it (GRA-1946); its erasure follows.
+//
 // What no longer stands is erased with `eraseSource`, directly: at once
 // after anything that takes an interview out (links.ts, admin-command.ts,
 // person-erasure.ts), and on core's clock until done
@@ -50,12 +58,6 @@ import type { OwedErasure } from "./store.ts";
 /** An interview's source, by the store's id for it. */
 export const interviewSource = (id: string): SourceRef => ({
   producer: "interview",
-  id,
-});
-
-/** A team claim's source, by the store's id for it. */
-export const claimSource = (id: string): SourceRef => ({
-  producer: "claim",
   id,
 });
 
@@ -115,7 +117,7 @@ export const claimOf = async (env: Env, id: string): Promise<Handed> => {
         change: id,
         text: held.text,
         whenTooLarge: "A claim of the team's too large to keep.",
-        readers: { kind: "interviews", teamId: held.team },
+        readers: { kind: "members" },
       };
 };
 
@@ -231,7 +233,7 @@ const erase = async (env: Env, owed: OwedErasure): Promise<void> => {
   }
   await eraseSource(env, {
     source: claimSource(owed.source),
-    readers: { kind: "interviews", teamId: owed.team },
+    readers: { kind: "members" },
     reason: "deleted",
   });
 };

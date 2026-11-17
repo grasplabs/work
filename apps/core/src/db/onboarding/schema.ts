@@ -723,9 +723,11 @@ export const brainInterviews = sqliteTable(
  * the team's people back, as the intake counts them here (`brain_sent`,
  * record `record`), given to the Brain as a source of its own
  * (`claim:<source>`) under an id minted here each time it stands. Who
- * backs it is counted here alone, never in the Brain. Once the recount
- * drops it below five it is erased (`erase`), and the row goes once the
- * Brain's erasure returned; a claim backed again later is a new source.
+ * backs it is counted here alone, never in the Brain. Once a change drops
+ * it (below five, its team below seven, or no longer made), it is marked
+ * to be erased (`erase`), then taken out of use and erased in the Brain,
+ * all before that change commits; the row goes once the Brain's erasure
+ * returned. A claim backed again later is a new source.
  */
 export const brainClaims = sqliteTable(
   "brain_claims",

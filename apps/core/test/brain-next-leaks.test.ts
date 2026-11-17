@@ -41,7 +41,6 @@ import {
 import { captureRead } from "../src/connection-capture.ts";
 import { inJurisdiction, workspace } from "../src/durable-objects.ts";
 import { instructionFilesFor } from "../src/instruction-files.ts";
-import { onboardingStore } from "../src/onboarding/store.ts";
 import { codeStep, says, toolStep } from "./agent-chat.ts";
 import { published } from "./apps.ts";
 import {
@@ -70,12 +69,6 @@ import type { Probing } from "./brain-next-surfaces.ts";
 import { chatIdsOf, codeStepTrace } from "./code-step-trace.ts";
 import { mockIdp } from "./idp.ts";
 import { saveInstructions } from "./instruction-saves.ts";
-import {
-  approveAgreed,
-  onLink,
-  openLinkAs,
-  signedInAs,
-} from "./interview-link.ts";
 import { answeringProvider, testModel } from "./model-provider.ts";
 import { noProducers } from "./no-producers.ts";
 import { carrying } from "./platform-providers.ts";
@@ -225,94 +218,6 @@ const promptedWith = async (
 };
 
 /** Adds `text` as a version of `source` (a new one by default). */
-/**
- * A staff-list team of seven who each told their own work and agreed to
- * it, the first of them signed in as `cookie` at `address`: so core counts
- * them in the team's group, which a team claim is read by (GRA-1741), as
- * the onboarding says at each read. No model is asked anything. Its id.
- */
-const interviewedTeam = async (
-  address: string,
-  cookie: string
-): Promise<string> => {
-  const store = onboardingStore(env);
-  const team = `roster-${unique()}`;
-  const people = Array.from({ length: 7 }, (_, at) => ({
-    id: `teller-${at}-${unique()}`,
-    email: at === 0 ? address : `teller-${unique()}@acme.test`,
-  }));
-  const by = { type: "system" } as const;
-  await store.setPaused(false, by);
-  await store.saveRoster(
-    {
-      teams: [{ id: team, name: "Desk", lead: null, does: "", off: false }],
-      people: people.map(({ id, email }) => ({
-        id,
-        name: "Teller",
-        team,
-        email,
-        title: "",
-        away: false,
-      })),
-    },
-    by
-  );
-  await store.savePlan(
-    {
-      start: new Date(Date.now() - 86_400_000).toISOString().slice(0, 10),
-      days: 14,
-    },
-    by
-  );
-  await store.setAgreements(
-    { processing: true, assessment: true, council: "none" },
-    by
-  );
-  await store.releaseDue();
-  const cookies = await Promise.all(
-    people.map(async ({ email }, at) =>
-      at === 0 ? cookie : await signedInAs(email)
-    )
-  );
-  for (const [at, { id }] of people.entries()) {
-    // oxlint-disable-next-line no-await-in-loop -- one interview at a time
-    const secret = ((await store.linkOf(id)) ?? "").split("#")[1] ?? "";
-    // oxlint-disable-next-line no-await-in-loop -- one interview at a time
-    const { link } = await openLinkAs(secret, cookies[at] ?? "");
-    const facts = [
-      {
-        id: "t1",
-        tag: "step" as const,
-        text: "You answer the phone.",
-        record: "Answers the phone.",
-        agreed: true as const,
-      },
-    ];
-    // oxlint-disable-next-line no-await-in-loop -- one interview at a time
-    await onLink({
-      action: "save",
-      ...link,
-      version: 0,
-      progress: {
-        person: "completed",
-        told: true,
-        mode: "type",
-        lines: [{ from: "stephen", text: "What do you do first?" }],
-        facts,
-        phase: "readback",
-        wants: "end",
-        startedAt: Date.now(),
-        confirmed: facts.length,
-        adding: false,
-        addedAt: 0,
-      },
-    });
-    // oxlint-disable-next-line no-await-in-loop -- one interview at a time
-    await approveAgreed(link, facts);
-  }
-  return team;
-};
-
 /** What the holder's producers planted in the reader passes' world. */
 interface HoldersProduced {
   ownUploadMarker: string;
@@ -445,7 +350,6 @@ describe(
         "the holder's own source": markerWord(),
         "a team's source the outsider isn't in": markerWord(),
         "a source nobody is known to read": markerWord(),
-        "a staff-list team's claim": markerWord(),
         "the holder's interview": markerWord(),
         "a source narrowed away from the outsider": markerWord(),
         "a source narrowed to the holder alone": markerWord(),
@@ -467,11 +371,13 @@ describe(
       // What every member may read, and nobody outside the company.
       const companyMarkers = {
         "an upload for everyone": markerWord(),
+        "a team's claim from the interviews": markerWord(),
         "the company's vision from the kickoff": markerWord(),
         "the company's teams from its staff list": markerWord(),
       };
       const {
         "an upload for everyone": everyoneUploadMarker,
+        "a team's claim from the interviews": claimMarker,
         "the company's vision from the kickoff": kickoffMarker,
         "the company's teams from its staff list": rosterMarker,
       } = companyMarkers;
@@ -479,7 +385,6 @@ describe(
         "the holder's own source": ownerMarker,
         "a team's source the outsider isn't in": teamMarker,
         "a source nobody is known to read": noneMarker,
-        "a staff-list team's claim": claimMarker,
         "the holder's interview": interviewMarker,
         "a source narrowed away from the outsider": narrowedMarker,
         "a source narrowed to the holder alone": toHolderMarker,
@@ -743,15 +648,12 @@ describe(
         kind: "none",
       });
       // A claim five or more of a staff-list team made in their interviews
-      // (GRA-1741), readable by that team's group alone: the holder told
-      // their work in it, and no one else probing is in it.
-      const rosterTeam = await interviewedTeam(
-        String(holderApi.person.email),
-        holderApi.session
-      );
+      // (GRA-1741): every member reads it as themselves (GRA-1748), nobody
+      // outside the company, and never code (GRA-1946).
+      const claimText = `Team claim ${sharedWord} ${claimMarker}`;
       const claimId = await add(
-        `Team claim ${sharedWord} ${claimMarker}`,
-        { kind: "interviews", teamId: rosterTeam },
+        claimText,
+        { kind: "members" },
         { producer: "claim", id: crypto.randomUUID() }
       );
       // The holder's interview (GRA-1790): what they approved in it, theirs
@@ -1008,7 +910,6 @@ describe(
           interviewMarker,
           teamMarker,
           noneMarker,
-          claimMarker,
           narrowedMarker,
           captureMarker,
           toolkitCaptureMarker,
@@ -1026,7 +927,6 @@ describe(
           ...ownerIds,
           teamId,
           noneId,
-          claimId,
           narrowedId,
           ownUpload,
           teamUpload,
@@ -1095,9 +995,9 @@ describe(
           reader: holder,
         },
         claim: {
-          marker: "a staff-list team's claim",
+          marker: "a team's claim from the interviews",
           source: claimId,
-          reader: holder,
+          reader: outsider,
         },
         kickoff: {
           marker: "the company's vision from the kickoff",
@@ -1156,6 +1056,7 @@ describe(
         teamMarker,
         noneMarker,
         claimMarker,
+        claimText,
         narrowedMarker,
         captureMarker,
         captureId,
@@ -1196,7 +1097,7 @@ describe(
         // outsider finds of their own, past them.
         found: {
           narrowedToHolder,
-          outsiderFinds,
+          outsiderFinds: outsiderFinds.toSorted(),
           holderFindsCapture,
           holderFindsToolkitCapture,
           cappedFinds,
@@ -1240,6 +1141,7 @@ describe(
       const {
         found,
         handbook,
+        claimText,
         capped,
         secretTeam,
         teamSkillMarker,
@@ -1296,7 +1198,8 @@ describe(
           ])
         ),
         narrowedToHolder: "refused",
-        outsiderFinds: [handbook],
+        // A member, so the team's claim from the interviews too (GRA-1748).
+        outsiderFinds: [handbook, claimText].toSorted(),
         holderFindsCapture: true,
         holderFindsToolkitCapture: true,
         cappedFinds: [{ text: capped, found: "exact" }],
@@ -1395,10 +1298,17 @@ describe(
               ...asOutsider,
               personId,
               reader: { person: personId, groups: [] },
-              markers: [...asOutsider.markers, world.everyoneUploadMarker],
+              // A non-member holds no group, those instruction files are
+              // written for (the company's) included.
+              instructionGroups: [],
+              markers: [
+                ...asOutsider.markers,
+                world.everyoneUploadMarker,
+                world.claimMarker,
+              ],
               hiddenVersions: [
                 ...asOutsider.hiddenVersions,
-                ...everyVersionOf(world.everyoneUpload),
+                ...everyVersionOf(world.everyoneUpload, world.claimId),
               ],
               hiddenUploads: [
                 ...(asOutsider.hiddenUploads ?? []),
@@ -1549,7 +1459,6 @@ describe(
             world.ownerMarker,
             world.interviewMarker,
             world.noneMarker,
-            world.claimMarker,
             world.narrowedMarker,
             world.captureMarker,
             world.toolkitCaptureMarker,
@@ -1563,7 +1472,6 @@ describe(
           hiddenVersions: everyVersionOf(
             ...world.ownerIds,
             world.noneId,
-            world.claimId,
             world.narrowedId,
             world.ownUpload,
             world.captureId,
@@ -1747,7 +1655,8 @@ describe(
           "the holder's interview": world.interviewMarker,
           "a team's source, though the holder is in the team": world.teamMarker,
           "a source nobody is known to read": world.noneMarker,
-          "a staff-list team's claim": world.claimMarker,
+          "a team's claim from the interviews, which code never gets":
+            world.claimMarker,
           "a source narrowed away from the outsider": world.narrowedMarker,
           ...holdersOwnProduced(world).forbidden,
         },
@@ -1816,7 +1725,8 @@ describe(
           "a team's source the grant doesn't name, though the holder is in the team":
             world.teamMarker,
           "a source nobody is known to read": world.noneMarker,
-          "a staff-list team's claim": world.claimMarker,
+          "a team's claim from the interviews, which code never gets":
+            world.claimMarker,
           "a source narrowed away from the outsider": world.narrowedMarker,
           ...holdersOwnProduced(world).forbidden,
         },
@@ -2013,7 +1923,6 @@ describe(
             world.ownerMarker,
             world.interviewMarker,
             world.noneMarker,
-            world.claimMarker,
             world.narrowedMarker,
             world.toHolderMarker,
             ...world.instructionMarkers,
@@ -2022,7 +1931,6 @@ describe(
           hiddenVersions: everyVersionOf(
             ...world.ownerIds,
             world.noneId,
-            world.claimId,
             world.narrowedId,
             ...holdersOwnProduced(world).sources
           ),
@@ -2073,7 +1981,6 @@ describe(
             world.interviewMarker,
             world.teamMarker,
             world.noneMarker,
-            world.claimMarker,
             world.narrowedMarker,
             world.toHolderMarker,
             ...world.instructionMarkers,
@@ -2084,7 +1991,6 @@ describe(
             ...world.ownerIds,
             world.teamId,
             world.noneId,
-            world.claimId,
             world.narrowedId,
             ...holdersOwnProduced(world).sources,
             world.teamUpload

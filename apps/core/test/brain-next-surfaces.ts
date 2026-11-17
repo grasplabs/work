@@ -3761,6 +3761,50 @@ export const coreProbes = {
       }),
     ];
   },
+  // A removal of sources the shared store holds, as `removeSource` (above):
+  // no reader, alike whether there was anything to remove, and no marker.
+  removeSharedSources: async ({ markers }) => {
+    const remove = async (
+      name: string,
+      removed: unknown,
+      about?: Answer["about"]
+    ) =>
+      await answer(
+        name,
+        async () => {
+          await coreBrain.removeSharedSources(env, unchecked(removed));
+        },
+        about
+      );
+    const marked = missingSource();
+    await coreBrain.addSource(env, {
+      source: marked,
+      change: crypto.randomUUID(),
+      text: markedText(markers),
+      readers: { kind: "everyone" },
+    });
+    return [
+      await remove(
+        "sources no one added",
+        [missingSource(), missingSource()],
+        "nothing"
+      ),
+      await remove(
+        "a marked source, beside one no one added",
+        [marked, missingSource()],
+        "hidden"
+      ),
+      await remove("the same removal again", [marked], "hidden"),
+      await remove("no sources", []),
+      await remove(
+        "more sources than one call of the store takes",
+        Array.from({ length: coreBrain.removalsMax + 1 }, () => missingSource())
+      ),
+      await remove("a source named by the markers", [
+        { producer: markers.join(" "), id: "x" },
+      ]),
+    ];
+  },
   // The host of a store's own alarm: refused for any name but a person's
   // own store's; for the reader's own, its report kept and summed into
   // staff's totals, which hold numbers alone.
