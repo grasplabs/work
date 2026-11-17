@@ -343,26 +343,22 @@ test("an admin makes a team, puts someone in it and takes them off, renames it a
   await expect(create).toBeHidden();
   await expect(teams.getByText(name, { exact: true })).toBeVisible();
 
-  await teams.getByRole("button", { name: `Members of ${name}` }).click();
-  const team = page.getByRole("dialog", { name: `Members of ${name}` });
-  await team.getByRole("combobox", { name: "Add a member" }).click();
-  await page
-    .getByRole("option", { name: `Person (${member.email})`, exact: true })
-    .click();
-  await team.getByRole("button", { name: "Add", exact: true }).click();
-  const inTeam = team.getByRole("list", { name: `Members of ${name}` });
-  await expect(inTeam.getByText(member.email)).toBeVisible();
-  await team.getByRole("button", { name: `Take Person off ${name}` }).click();
-  await expect(team.getByText("Nobody is in this team yet.")).toBeVisible();
-  await page.keyboard.press("Escape");
+  // The team's name opens its dialog: tick someone in, save.
+  await teams.getByRole("button", { name, exact: true }).click();
+  const team = page.getByRole("dialog", { name });
+  await team.getByRole("searchbox", { name: "Find people" }).fill(member.email);
+  await team.getByRole("checkbox", { name: "Person" }).check();
+  await team.getByRole("button", { name: "Save changes" }).click();
   await expect(team).toBeHidden();
+  await expect(teams.getByText("1 person")).toBeVisible();
 
+  // Untick them and rename it, in one save.
   const renamed = `${name} and legal`;
-  await teams.getByRole("button", { name: `Actions for ${name}` }).click();
-  await page.getByRole("menuitem", { name: "Rename" }).click();
-  const rename = page.getByRole("dialog", { name: `Rename ${name}` });
-  await rename.getByRole("textbox", { name: "Name" }).fill(renamed);
-  await rename.getByRole("button", { name: "Rename" }).click();
+  await teams.getByRole("button", { name, exact: true }).click();
+  await team.getByRole("checkbox", { name: "Person" }).uncheck();
+  await team.getByRole("textbox", { name: "Name" }).fill(renamed);
+  await team.getByRole("button", { name: "Save changes" }).click();
+  await expect(team).toBeHidden();
   await expect(teams.getByText(renamed, { exact: true })).toBeVisible();
 
   await teams.getByRole("button", { name: `Actions for ${renamed}` }).click();

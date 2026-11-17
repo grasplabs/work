@@ -1035,6 +1035,8 @@ const AnswerRow = ({
           : failureMessage(last?.failure, i18n)
       }
       from="agent"
+      name="Grasp"
+      nameHidden
       onRetry={ending.providerMissing ? undefined : retry}
       retryLabel={t`Try again`}
       status={ending.providerMissing ? "done" : status}

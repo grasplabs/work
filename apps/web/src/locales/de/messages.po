@@ -326,10 +326,6 @@ msgstr "{count, plural, one {# Interview in Kalenderwoche {week}} other {# Inter
 msgid "{count, plural, one {# invited team not interviewed yet: {teams}.} other {# invited teams not interviewed yet: {teams}.}}"
 msgstr "{count, plural, one {# eingeladenes Team noch nicht interviewt: {teams}.} other {# eingeladene Teams noch nicht interviewt: {teams}.}}"
 
-#: src/settings/teams.tsx
-msgid "{count, plural, one {# member} other {# members}}"
-msgstr "{count, plural, one {# Mitglied} other {# Mitglieder}}"
-
 #: src/chat/subject-bar.tsx
 msgid "{count, plural, one {# more App this chat worked on} other {# more Apps this chat worked on}}"
 msgstr "{count, plural, one {# weitere App, an der dieser Chat gearbeitet hat} other {# weitere Apps, an denen dieser Chat gearbeitet hat}}"
@@ -359,7 +355,12 @@ msgstr "{count, plural, one {# Teil bisher} other {# Teile bisher}}"
 msgid "{count, plural, one {# part that works behind the pages} other {# parts that work behind the pages}}"
 msgstr "{count, plural, one {# Teil, der hinter den Seiten arbeitet} other {# Teile, die hinter den Seiten arbeiten}}"
 
+#: src/settings/team-members-dialog.tsx
+msgid "{count, plural, one {# person in the team} other {# people in the team}}"
+msgstr "{count, plural, one {# Person im Team} other {# Personen im Team}}"
+
 #: src/onboarding/setup-steps.tsx
+#: src/settings/teams.tsx
 msgid "{count, plural, one {# person} other {# people}}"
 msgstr "{count, plural, one {# Person} other {# Personen}}"
 
@@ -576,6 +577,14 @@ msgstr "{failed, plural, one {# fehlgeschlagener Lauf} other {# fehlgeschlagene 
 msgid "{field} in {table} needs a change in code before this can be published."
 msgstr "{field} in {table} braucht eine Änderung im Code, bevor dies veröffentlicht werden kann."
 
+#: src/settings/workspace-name.tsx
+msgid "{file} is not a kind of picture this takes."
+msgstr "{file} ist keine Bildart, die hier passt."
+
+#: src/settings/workspace-name.tsx
+msgid "{file} is too large."
+msgstr "{file} ist zu groß."
+
 #: src/onboarding/document-drop.tsx
 msgid "{file} removed"
 msgstr "{file} entfernt"
@@ -727,6 +736,10 @@ msgstr "{left, plural, one {# Team hier ist noch nicht interviewt.} other {# Tea
 msgid "{lines, plural, one {# line} other {# lines}}"
 msgstr "{lines, plural, one {# Zeile} other {# Zeilen}}"
 
+#: src/settings/teams.tsx
+msgid "{listed} and {rest, plural, one {# other} other {# others}}"
+msgstr "{listed} und {rest, plural, one {# weitere Person} other {# weitere Personen}}"
+
 #: src/dashboard/standard-widgets.tsx
 msgid "{live} of {count}"
 msgstr "{live} von {count}"
@@ -812,10 +825,6 @@ msgstr "{name} antwortet. Agent ändern"
 #: src/settings/teams.tsx
 msgid "{name} couldn't be deleted. Try again."
 msgstr "{name} konnte nicht gelöscht werden. Versuchen Sie es erneut."
-
-#: src/settings/teams.tsx
-msgid "{name} couldn't be renamed. Try again."
-msgstr "{name} konnte nicht umbenannt werden. Versuchen Sie es erneut."
 
 #: src/onboarding/hr-leads.tsx
 msgid "{name} didn’t take this service user. Check its ID and token, and that it may read people’s work details."
@@ -1398,10 +1407,6 @@ msgstr "{who} kann später nicht mehr erteilt werden: es muss erneut angefragt w
 #: src/connections/connection-list.tsx
 msgid "{who} consented to this before connecting it:"
 msgstr "{who} hat vor dem Verbinden hier zugestimmt:"
-
-#: src/settings/team-members-dialog.tsx
-msgid "{who} couldn't be taken off {name}. Try again."
-msgstr "{who} konnte nicht aus {name} entfernt werden. Versuchen Sie es erneut."
 
 #: src/interview/before.tsx
 #: src/interview/voice-bar.tsx
@@ -2008,10 +2013,6 @@ msgstr "Ziel hinzufügen"
 #: src/settings/workspace-name.tsx
 msgid "Add a logo"
 msgstr "Logo hinzufügen"
-
-#: src/settings/team-members-dialog.tsx
-msgid "Add a member"
-msgstr "Mitglied hinzufügen"
 
 #: src/settings/stephen-settings.tsx
 msgid "Add a place"
@@ -3496,8 +3497,8 @@ msgstr "Ausführen nicht möglich: {unread}"
 #: src/settings/invitations.tsx
 #: src/settings/staff-access.tsx
 #: src/settings/stephen-card.tsx
+#: src/settings/team-members-dialog.tsx
 #: src/settings/teams.tsx
-#: src/settings/workspace-name.tsx
 #: src/workflows/delete-workflow.tsx
 #: src/workflows/kept-state.tsx
 #: src/workflows/workflow-triggers.tsx
@@ -3756,7 +3757,6 @@ msgid "Chart"
 msgstr "Diagramm"
 
 #: src/agents/agents-overview.tsx
-#: src/chat/chat-panel.tsx
 #: src/grasp/frame/grasp-sidebar.tsx
 #: src/settings/ai-spend.tsx
 msgid "Chat"
@@ -3788,7 +3788,6 @@ msgstr "Chat-Hintergrund"
 msgid "Chat box"
 msgstr "Chatfeld"
 
-#: src/chat/chat-more.tsx
 #: src/chat/chat-window.tsx
 msgid "Chat name"
 msgstr "Name des Chats"
@@ -3869,6 +3868,10 @@ msgstr "Wird geprüft…"
 msgid "Checking the App…"
 msgstr "Die App wird geprüft…"
 
+#: src/frame/page-failed.tsx
+msgid "Checking whether Grasp can be reached"
+msgstr ""
+
 #: src/workflows/definition-editor.tsx
 #: src/workflows/workflow-flow.tsx
 msgid "Checking…"
@@ -3914,10 +3917,6 @@ msgstr "Aus SharePoint oder OneDrive auswählen"
 #: src/apps/app-access-requests.tsx
 msgid "Choose one"
 msgstr "Eine auswählen"
-
-#: src/settings/team-members-dialog.tsx
-msgid "Choose someone"
-msgstr "Person auswählen"
 
 #: src/interview/before.tsx
 msgid "Choose who you want to be interviewed by."
@@ -3971,8 +3970,8 @@ msgid "Clear the search"
 msgstr "Suche löschen"
 
 #: src/settings/workspace-name.tsx
-msgid "Click or drop an image, up to 512 KB."
-msgstr "Klicken oder ein Bild hierher ziehen, bis 512 KB."
+msgid "Click or drop a picture."
+msgstr "Klicken oder ein Bild hierher ziehen."
 
 #: src/settings/backdrop-settings.tsx
 msgid "Cliffs"
@@ -4449,6 +4448,7 @@ msgstr "Kopenhagen"
 #: src/apps/app-code.tsx
 #: src/chat/chat-more.tsx
 #: src/chat/thread.tsx
+#: src/frame/page-failed.tsx
 #: src/onboarding/review-parts.tsx
 #: src/onboarding/setup-steps.tsx
 #: src/routes/_shell.settings.members.tsx
@@ -4562,6 +4562,7 @@ msgstr "Konnte nicht löschen"
 
 #: src/activity/audit-event.tsx
 #: src/chat/thread.tsx
+#: src/frame/page-failed.tsx
 msgid "Could not copy"
 msgstr "Konnte nicht kopiert werden"
 
@@ -4578,6 +4579,10 @@ msgstr "Zugriff konnte nicht beendet werden"
 msgid "Could not finish"
 msgstr "Konnte nicht abgeschlossen werden"
 
+#: src/frame/page-failed.tsx
+msgid "Could not load"
+msgstr ""
+
 #: src/routes/_shell.settings.members.tsx
 msgid "Could not make admin"
 msgstr "Konnte nicht zum Admin gemacht werden"
@@ -4586,11 +4591,9 @@ msgstr "Konnte nicht zum Admin gemacht werden"
 msgid "Could not remove"
 msgstr "Entfernen fehlgeschlagen"
 
-#: src/settings/workspace-name.tsx
-msgid "Could not remove it"
-msgstr "Entfernen fehlgeschlagen"
-
 #: src/settings/ai-providers.tsx
+#: src/settings/team-members-dialog.tsx
+#: src/settings/workspace-name.tsx
 msgid "Could not save"
 msgstr "Konnte nicht speichern"
 
@@ -5279,10 +5282,6 @@ msgstr "Entwurf"
 msgid "Drafts, events and files of their own, after they press a card."
 msgstr "Eigene Entwürfe, Termine und Dateien, nachdem die Person eine Karte bestätigt."
 
-#: src/chat/chat-panel.tsx
-msgid "Drag to move, or double-click to dock"
-msgstr "Ziehen zum Verschieben, Doppelklick zum Andocken"
-
 #: src/chat/suggestions.tsx
 msgid "Draw how supplier invoices are handled"
 msgstr "Zeichne, wie Lieferantenrechnungen bearbeitet werden"
@@ -5671,10 +5670,6 @@ msgstr "Alle in einem Projekt, in dem Sie nicht sind"
 msgid "Everyone in it · {shownRole}"
 msgstr "Alle darin · {shownRole}"
 
-#: src/settings/team-members-dialog.tsx
-msgid "Everyone in the organization is in this team."
-msgstr "Alle in der Organisation sind in diesem Team."
-
 #: src/knowledge/new-collection.tsx
 msgid "Everyone in the organization, and their agents."
 msgstr "Alle in der Organisation und ihre Agenten."
@@ -5987,6 +5982,10 @@ msgstr "Finanzen und Buchhaltung"
 msgid "Find a record by its ID"
 msgstr "Datensatz nach ID suchen"
 
+#: src/settings/team-members-dialog.tsx
+msgid "Find people"
+msgstr "Personen finden"
+
 #: src/activity/audit-event.tsx
 msgid "Find similar"
 msgstr "Ähnliche finden"
@@ -6059,10 +6058,6 @@ msgstr "Behoben: „{label}“, seitdem {times}-mal gefragt"
 #: src/pages/page-frame.tsx
 msgid "Fixing a problem…"
 msgstr "Ein Problem wird behoben…"
-
-#: src/chat/chat-panel.tsx
-msgid "Float over the page"
-msgstr "Über der Seite schweben lassen"
 
 #: src/agents/agent-form.tsx
 msgid "Flow"
@@ -6317,6 +6312,10 @@ msgstr "Geben Sie ihr einen Namen mit höchstens {longest} Zeichen."
 msgid "Give it to your team"
 msgstr "Ihrem Team geben"
 
+#: src/settings/team-members-dialog.tsx
+msgid "Give the team a name."
+msgstr "Geben Sie dem Team einen Namen."
+
 #: src/settings/event-sources.tsx
 msgid "Give this to the sender"
 msgstr "Geben Sie dies dem Absender"
@@ -6416,6 +6415,14 @@ msgstr "Grasp hat Ihrem Dashboard ein Widget hinzugefügt."
 #: src/chat/asked-questions.tsx
 msgid "Grasp asks"
 msgstr "Grasp fragt"
+
+#: src/frame/page-failed.tsx
+msgid "Grasp can be reached"
+msgstr ""
+
+#: src/frame/page-failed.tsx
+msgid "Grasp can't be reached right now"
+msgstr ""
 
 #: src/chat/cited-note.tsx
 #: src/chat/global-chat.tsx
@@ -7216,6 +7223,10 @@ msgstr "Einladen"
 #: src/settings/invitations.tsx
 msgid "Invite people"
 msgstr "Personen einladen"
+
+#: src/settings/team-members-dialog.tsx
+msgid "Invite them from the people list first."
+msgstr "Laden Sie sie zuerst über die Personenliste ein."
 
 #: src/settings/invitations.tsx
 msgid "Invited"
@@ -8115,6 +8126,10 @@ msgstr "Live, wird gemessen"
 msgid "Live: {who}, version {version}."
 msgstr "Live: {who}, Version {version}."
 
+#: src/frame/page-failed.tsx
+msgid "Loaded"
+msgstr ""
+
 #: src/onboarding/place-picker.tsx
 msgid "Loading"
 msgstr "Wird geladen"
@@ -8339,18 +8354,12 @@ msgid "Medium"
 msgstr "Mittel"
 
 #: src/routes/_shell.settings.members.tsx
-#: src/settings/teams.tsx
 msgid "Members"
 msgstr "Mitglieder"
 
 #: src/settings/sections.ts
 msgid "Members and roles"
 msgstr "Mitglieder und Rollen"
-
-#: src/settings/team-members-dialog.tsx
-#: src/settings/teams.tsx
-msgid "Members of {name}"
-msgstr "Mitglieder von {name}"
 
 #: src/apps/draft-changes.tsx
 msgid "members of the team in {field}"
@@ -8617,6 +8626,7 @@ msgstr "Meine Version der App ist nicht gestartet. Finde heraus, warum, und behe
 #: src/routes/_shell.settings.profile.tsx
 #: src/settings/event-sources.tsx
 #: src/settings/profile-name.tsx
+#: src/settings/team-members-dialog.tsx
 #: src/settings/teams.tsx
 #: src/settings/workspace-name.tsx
 #: src/workflows/files-and-apps.tsx
@@ -8992,6 +9002,14 @@ msgstr "Kein Modell hat diesen Namen"
 msgid "No model is set up for this deployment yet."
 msgstr "Für diese Instanz ist noch kein Modell eingerichtet."
 
+#: src/settings/team-members-dialog.tsx
+msgid "No one by that name"
+msgstr "Niemand mit diesem Namen"
+
+#: src/settings/teams.tsx
+msgid "No one yet: open it to add people"
+msgstr "Noch niemand: Öffnen Sie es, um Personen hinzuzufügen"
+
 #: src/people/person-picker.tsx
 msgid "No owner yet"
 msgstr "Noch niemand verantwortlich"
@@ -9139,7 +9157,6 @@ msgstr "Niemand hat rechtzeitig geantwortet, daher ist diese Entscheidung geschl
 msgid "Nobody asked him anything yet."
 msgstr "Noch hat ihn niemand etwas gefragt."
 
-#: src/settings/team-members-dialog.tsx
 #: src/workflows/requests/request-who.tsx
 msgid "Nobody by that name"
 msgstr "Niemand mit diesem Namen"
@@ -9173,10 +9190,6 @@ msgstr "Noch hat ihn niemand bearbeitet: Er beginnt mit einer Definition, die di
 #: src/apps/app-settings.tsx
 msgid "Nobody in particular"
 msgstr "Niemand Bestimmtes"
-
-#: src/settings/team-members-dialog.tsx
-msgid "Nobody is in this team yet."
-msgstr "In diesem Team ist noch niemand."
 
 #: src/brain/brain-atlas.ts
 msgid "Nobody is named yet to approve a new tool."
@@ -10519,6 +10532,7 @@ msgstr "Ausstehend"
 #: src/people/share-picker.tsx
 #: src/projects/project-dialog.tsx
 #: src/projects/project-view.tsx
+#: src/settings/team-members-dialog.tsx
 #: src/workflows/share-workflow.tsx
 msgid "People"
 msgstr "Personen"
@@ -10554,6 +10568,10 @@ msgstr "„{name}“ wird auf zwei Arten gemacht"
 #: src/dashboard/report.ts
 msgid "People heard"
 msgstr "Gehörte Personen"
+
+#: src/settings/teams.tsx
+msgid "People in {name}"
+msgstr "Personen in {name}"
 
 #: src/agents/agent-page.tsx
 msgid "People it worked for"
@@ -10698,6 +10716,10 @@ msgstr "Abspielen"
 #: src/interview/sound-check.tsx
 msgid "Play it again"
 msgstr "Noch einmal abspielen"
+
+#: src/settings/workspace-name.tsx
+msgid "PNG, JPEG or WebP, up to {most}."
+msgstr "PNG, JPEG oder WebP, bis {most}."
 
 #: src/onboarding/setup-steps.tsx
 msgid "Policies, procedures, work instructions. Share whatever you have. Drafts are fine too."
@@ -11216,6 +11238,10 @@ msgstr "Neugestaltung"
 msgid "Redesigned or testing"
 msgstr "Neu gestaltet oder im Test"
 
+#: src/frame/page-failed.tsx
+msgid "Reference for support"
+msgstr ""
+
 #: src/chat/held-writes.tsx
 #: src/dashboard/pile-cards.tsx
 #: src/decision-confirmation.tsx
@@ -11296,7 +11322,6 @@ msgstr "Etwas merken"
 #: src/chat/chat-files.tsx
 #: src/connections/tool-permissions.tsx
 #: src/routes/_shell.settings.members.tsx
-#: src/settings/workspace-name.tsx
 msgid "Remove"
 msgstr "Entfernen"
 
@@ -11375,8 +11400,8 @@ msgid "Remove the index {indexName}"
 msgstr "Index {indexName} entfernen"
 
 #: src/settings/workspace-name.tsx
-msgid "Remove the logo?"
-msgstr "Logo entfernen?"
+msgid "Remove the logo"
+msgstr "Logo entfernen"
 
 #: src/apps/indexes-view.tsx
 msgid "Remove the search"
@@ -11437,10 +11462,6 @@ msgstr "Wird entfernt"
 #: src/settings/teams.tsx
 msgid "Rename"
 msgstr "Umbenennen"
-
-#: src/settings/teams.tsx
-msgid "Rename {name}"
-msgstr "{name} umbenennen"
 
 #: src/brain/region-edit.tsx
 msgid "Rename {region}"
@@ -12165,6 +12186,10 @@ msgstr "Als Blueprint speichern"
 msgid "Save as PDF"
 msgstr "Als PDF speichern"
 
+#: src/settings/team-members-dialog.tsx
+msgid "Save changes"
+msgstr "Änderungen speichern"
+
 #: src/pages/page-frame.tsx
 msgid "Save first"
 msgstr "Zuerst speichern"
@@ -12220,6 +12245,7 @@ msgstr "Gespeichert."
 
 #: src/settings/ai-providers.tsx
 #: src/settings/profile-name.tsx
+#: src/settings/team-members-dialog.tsx
 #: src/settings/workspace-name.tsx
 msgid "Saving"
 msgstr "Wird gespeichert"
@@ -12821,10 +12847,6 @@ msgstr "Seitenleiste ein- oder ausblenden"
 #: src/workflows/requests/request-who.tsx
 msgid "Show people one by one"
 msgstr "Personen einzeln zeigen"
-
-#: src/settings/team-members-dialog.tsx
-msgid "Show the members"
-msgstr "Mitglieder anzeigen"
 
 #: src/workflows/requests/request-detail.tsx
 msgid "Show the page for {title}"
@@ -13601,10 +13623,6 @@ msgstr "{name} aus {projectName} nehmen?"
 #: src/projects/project-people.tsx
 msgid "Take {name} out of the project"
 msgstr "{name} aus dem Projekt nehmen"
-
-#: src/settings/team-members-dialog.tsx
-msgid "Take {who} off {name}"
-msgstr "{who} aus {name} entfernen"
 
 #: src/dashboard/widget-board.tsx
 msgid "Take off the dashboard"
@@ -14599,6 +14617,7 @@ msgstr "Es gibt noch keine Sammlungen, die Sie lesen können."
 msgid "There are no workflows to link yet."
 msgstr "Es gibt noch keine Workflows zum Verknüpfen."
 
+#: src/settings/team-members-dialog.tsx
 #: src/settings/teams.tsx
 msgid "There is a team with this name already."
 msgstr "Es gibt schon ein Team mit diesem Namen."
@@ -14630,10 +14649,6 @@ msgstr "Diese Notizen stützen sich auf nichts anderes und gehen mit: {named}."
 #: src/routes/_shell.settings.members.tsx
 msgid "They are signed out everywhere, their personal connections are disconnected, and they cannot sign in again."
 msgstr "Die Person wird überall abgemeldet, ihre persönlichen Verbindungen werden getrennt, und sie kann sich nicht mehr anmelden."
-
-#: src/settings/team-members-dialog.tsx
-msgid "They couldn't be added to {name}. Try again."
-msgstr "Die Person konnte nicht zu {name} hinzugefügt werden. Versuchen Sie es erneut."
 
 #: src/apps/app-history.tsx
 msgid "They go, for everyone who builds this App. Its history in Settings keeps them, so you can bring them back."
@@ -15203,6 +15218,7 @@ msgstr "Versuchen"
 #: src/chat/chat-files.tsx
 #: src/chat/thread.tsx
 #: src/chat/use-dictation.ts
+#: src/frame/page-failed.tsx
 #: src/frame/page-states.tsx
 #: src/frame/setting-up.tsx
 #: src/interview/sound-check.tsx
@@ -15221,6 +15237,10 @@ msgstr "Versuche noch einmal, {name} einzurichten."
 #: src/apps/app-workspace.tsx
 msgid "Try it out: only you see it, and the example data is just for trying. To change anything, tell Grasp in the chat. When it's right, share it with your team."
 msgstr "Probier sie aus: Nur du siehst sie, und die Beispieldaten sind nur zum Ausprobieren. Um etwas zu ändern, sag es Grasp im Chat. Wenn alles passt, teile sie mit deinem Team."
+
+#: src/frame/page-failed.tsx
+msgid "Trying again"
+msgstr ""
 
 #: src/chat/builds.tsx
 #: src/frame/page-states.tsx
@@ -16086,10 +16106,6 @@ msgstr "Wofür ist es?"
 msgid "What is marked is what I wrote down. You check it at the end."
 msgstr "Was markiert ist, habe ich notiert. Sie prüfen es am Ende."
 
-#: src/settings/team-members-dialog.tsx
-msgid "What is shared with {name} is shared with each of them."
-msgstr "Was mit {name} geteilt ist, ist mit jedem von ihnen geteilt."
-
 #: src/settings/teams.tsx
 msgid "What is shared with this team stops being shared with its members through it, and the workflows it owns no longer have a team. Its members stay in the organization."
 msgstr "Was mit diesem Team geteilt ist, ist über das Team nicht mehr mit seinen Mitgliedern geteilt, und die Workflows, die ihm gehören, haben kein Team mehr. Die Mitglieder bleiben in der Organisation."
@@ -16574,10 +16590,6 @@ msgstr "Wer kann Datensätze in {name} sehen?"
 #: src/settings/stephen-card.tsx
 msgid "Who can talk to him"
 msgstr "Wer mit ihm sprechen kann"
-
-#: src/routes/_shell.settings.audit.tsx
-msgid "Who did what in Grasp, and when."
-msgstr "Wer was in Grasp getan hat, und wann."
 
 #: src/interview/words.ts
 msgid "Who does it"

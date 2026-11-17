@@ -8,7 +8,7 @@ import {
 import type { ErrorComponentProps } from "@tanstack/react-router";
 
 import { ChatBar } from "../chat/chat-bar.tsx";
-import { ChatPanel, useChatPanels } from "../chat/chat-panel.tsx";
+import { useChatPanels } from "../chat/chat-panel.tsx";
 import { ChatSwitcherProvider } from "../chat/chat-switcher.tsx";
 import { GlobalChatProvider, useGlobalChat } from "../chat/global-chat.tsx";
 import { readWithin, shellStatus } from "../core-connection.ts";
@@ -29,8 +29,8 @@ import { signInErrorSearch } from "../sign-in-errors.ts";
 
 /**
  * The frame, with Grasp's one chat (chat/global-chat.tsx): its idle bar over
- * the page, and the chat itself, docked beside the page, full screen over
- * it, or floating.
+ * the page, and the chat itself, docked beside the page, floating over it,
+ * or full screen.
  */
 const ShellFrame = () => {
   const { core, identity } = Route.useRouteContext();
@@ -50,7 +50,6 @@ const ShellFrame = () => {
       dockShown={stage.bar}
       failing={failing}
       identity={identity}
-      floating={<ChatPanel />}
       panels={panels}
     >
       <Outlet />

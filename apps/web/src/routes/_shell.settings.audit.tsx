@@ -157,7 +157,6 @@ const AuditTrail = () => {
             </IntegrityDialog>
           }
           density="compact"
-          description={t`Who did what in Grasp, and when.`}
           flush
           title={filters.archive === true ? t`Archived events` : t`Events`}
         >
