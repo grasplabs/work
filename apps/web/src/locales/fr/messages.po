@@ -16437,6 +16437,14 @@ msgstr "Ce que demande cette décision ne peut pas être affiché pour le moment
 msgid "What this decision asks is withheld, so you can only reject it."
 msgstr "Ce que demande cette décision est retenu : vous ne pouvez donc que la rejeter."
 
+#: src/chat/held-writes.tsx
+msgid "What this would send can't be shown right now, so you can only reject it for now. Try again in a moment."
+msgstr "Ce que ceci enverrait ne peut pas être affiché pour l'instant : vous ne pouvez donc que le rejeter pour le moment. Réessayez dans un instant."
+
+#: src/chat/held-writes.tsx
+msgid "What this would send is withheld: the run that asked for it may no longer read what it read, so you can only reject it."
+msgstr "Ce que ceci enverrait est retenu : l'exécution qui l'a demandé ne peut plus lire ce qu'elle a lu, vous ne pouvez donc que le rejeter."
+
 #: src/agents/agent-wakes.tsx
 msgid "What to ask it each time"
 msgstr "Ce qu’on lui demande à chaque fois"
@@ -16479,8 +16487,16 @@ msgid "What was said is on the work it was about"
 msgstr "Ce qui a été dit figure sur le travail concerné"
 
 #: src/dashboard/outcome-card.tsx
+msgid "What was sent can't be shown right now. Try again in a moment."
+msgstr "Ce qui a été envoyé ne peut pas être affiché pour l'instant. Réessayez dans un instant."
+
+#: src/dashboard/outcome-card.tsx
 msgid "What was sent is no longer kept."
 msgstr "Ce qui a été envoyé n'est plus conservé."
+
+#: src/dashboard/outcome-card.tsx
+msgid "What was sent is withheld: the run that sent it may no longer read what it read."
+msgstr "Ce qui a été envoyé est retenu : l'exécution qui l'a envoyé ne peut plus lire ce qu'elle a lu."
 
 #: src/interview/before.tsx
 msgid "What we do"
